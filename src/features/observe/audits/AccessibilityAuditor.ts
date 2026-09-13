@@ -1,9 +1,11 @@
+import path from "path";
 import { logger } from "../../../utils/logger";
 import { serverConfig } from "../../../utils/ServerConfig";
 import { pathExists } from "../../../utils/filesystem/DefaultFileSystem";
 import { statAsync } from "../../../utils/io";
 import { getTempDir, TEMP_SUBDIRS } from "../../../utils/tempDir";
 import { ScreenshotCache } from "../../../utils/screenshot/ScreenshotCache";
+import { screenshotFileBelongsToDevice } from "../../../utils/screenshot/screenshotFormats";
 import { WcagAudit } from "../../accessibility/WcagAudit";
 import { DefaultElementParser } from "../../utility/ElementParser";
 import type { BootedDevice, ObserveResult } from "../../../models";
@@ -23,11 +25,23 @@ export interface AccessibilityAuditorOptions {
  * Fallback used when the per-device screenshot state has no cached path —
  * scans the screenshots tempdir for the most recent screenshot by mtime
  * (.png/.jpg/.jpeg/.webp — the Android CtrlProxy path writes .jpg).
+ *
+ * Every device (and every agent process sharing the temp dir) writes into the
+ * same flat directory, so the scan MUST be filtered by `deviceId` whenever the
+ * caller knows which device it is auditing: otherwise device B's audit can
+ * compare device A's newer frame against B's hierarchy and report WCAG
+ * violations for pixels that were never on B's screen (#6599).
  */
-export async function findLatestScreenshotPath(): Promise<string | undefined> {
+export async function findLatestScreenshotPath(deviceId?: string): Promise<string | undefined> {
   try {
     const cacheDir = getTempDir(TEMP_SUBDIRS.SCREENSHOTS);
-    const imageFiles = await ScreenshotCache.getScreenshotFiles(cacheDir);
+    const allFiles = await ScreenshotCache.getScreenshotFiles(cacheDir);
+    const imageFiles =
+      deviceId === undefined
+        ? allFiles
+        : allFiles.filter((filePath) =>
+            screenshotFileBelongsToDevice(path.basename(filePath), deviceId),
+          );
     if (imageFiles.length === 0) {
       return undefined;
     }
@@ -55,6 +69,7 @@ export async function findLatestScreenshotPath(): Promise<string | undefined> {
  */
 export async function resolveLatestScreenshotPath(
   getCachedPath?: () => string | null | undefined,
+  deviceId?: string,
 ): Promise<string | undefined> {
   try {
     const cachedPath = getCachedPath?.();
@@ -67,7 +82,7 @@ export async function resolveLatestScreenshotPath(
   } catch (error) {
     logger.warn(`[AccessibilityAudit] Failed to check cached screenshot: ${error}`);
   }
-  return findLatestScreenshotPath();
+  return findLatestScreenshotPath(deviceId);
 }
 
 /**

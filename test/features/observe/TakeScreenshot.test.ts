@@ -10,6 +10,7 @@ import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
+import { FakeScreenshotFileWriter } from "../../fakes/FakeScreenshotFileWriter";
 
 describe("TakeScreenshot", function () {
   describe("Unit Tests for Extracted Methods", function () {
@@ -99,9 +100,22 @@ describe("TakeScreenshot", function () {
       const first = screenshot.generateScreenshotPath(sameTime, { format: "png" });
       const second = screenshot.generateScreenshotPath(sameTime, { format: "png" });
 
-      expect(first).toMatch(/screenshot_1234567890123_capture-1\.png$/);
-      expect(second).toMatch(/screenshot_1234567890123_capture-2\.png$/);
+      expect(first).toMatch(/screenshot_1234567890123_test-device-id_capture-1\.png$/);
+      expect(second).toMatch(/screenshot_1234567890123_test-device-id_capture-2\.png$/);
       expect(first).not.toBe(second);
+    });
+
+    test("names captures after the device so a shared cache dir stays attributable", function () {
+      const screenshot = new TakeScreenshot(
+        { name: "remote", platform: "android", deviceId: "127.0.0.1:5555", source: "local" },
+        new FakeAdbClientFactory(fakeAdb),
+        new FakeTimer(),
+        new CountingIdGenerator("capture"),
+      );
+
+      const generated = screenshot.generateScreenshotPath(1234567890123, { format: "png" });
+
+      expect(generated).toMatch(/screenshot_1234567890123_127-0-0-1-5555_capture-1\.png$/);
     });
 
     test("persists native Android CtrlProxy JPEG as jpg with metadata", async () => {
@@ -230,6 +244,45 @@ describe("TakeScreenshot", function () {
         expect(outcome).toEqual({ success: false, error: OPERATION_CANCELLED_MESSAGE });
         finishScreenshot?.();
         await resultPromise;
+      } finally {
+        AndroidCtrlProxyClient.getInstance = originalGetInstance;
+      }
+    });
+
+    test("discards a capture written after the caller cancelled", async function () {
+      const androidDevice: BootedDevice = {
+        name: "test-device",
+        platform: "android",
+        deviceId: "android-late-cancel",
+        source: "local",
+      };
+      const controller = new AbortController();
+      const originalGetInstance = AndroidCtrlProxyClient.getInstance;
+      AndroidCtrlProxyClient.getInstance = (() => ({
+        requestScreenshot: async () => ({
+          success: true,
+          data: Buffer.from([0xff, 0xd8, 0xff, 0xe0]).toString("base64"),
+          format: "jpeg" as const,
+        }),
+      })) as typeof AndroidCtrlProxyClient.getInstance;
+
+      const writer = new FakeScreenshotFileWriter(() => controller.abort());
+      try {
+        const screenshot = new TakeScreenshot(
+          androidDevice,
+          new FakeAdbClientFactory(new FakeAdbExecutor()),
+          new FakeTimer(),
+          new CountingIdGenerator("capture"),
+          writer,
+        );
+
+        const result = await screenshot.execute({}, controller.signal);
+
+        expect(result).toEqual({ success: false, error: OPERATION_CANCELLED_MESSAGE });
+        expect(writer.written.length).toBe(1);
+        // The frame the cancelled request produced must not survive on disk,
+        // where the latest-screenshot fallback would pick it up.
+        expect(writer.removed).toEqual(writer.written);
       } finally {
         AndroidCtrlProxyClient.getInstance = originalGetInstance;
       }

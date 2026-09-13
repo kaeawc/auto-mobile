@@ -142,4 +142,24 @@ describe("findLatestScreenshotPath", () => {
 
     expect(await findLatestScreenshotPath()).toBe(newest);
   });
+
+  test("ignores another device's newer capture when resolving for a known device", async () => {
+    await seed("screenshot_1_device-a_aaa.jpg", 1_000);
+    const ownCapture = await seed("screenshot_2_device-b_bbb.jpg", 2_000);
+    await seed("screenshot_3_device-a_ccc.jpg", 3_000);
+
+    expect(await findLatestScreenshotPath("device-b")).toBe(ownCapture);
+  });
+
+  test("returns nothing when the requested device has no capture on disk", async () => {
+    await seed("screenshot_3_device-a_ccc.jpg", 3_000);
+
+    expect(await findLatestScreenshotPath("device-b")).toBeUndefined();
+  });
+
+  test("matches captures whose device id needed sanitizing for the filename", async () => {
+    const own = await seed("screenshot_4_127-0-0-1-5555_ddd.png", 4_000);
+
+    expect(await findLatestScreenshotPath("127.0.0.1:5555")).toBe(own);
+  });
 });

@@ -28,3 +28,48 @@ export function isScreenshotFile(fileName: string): boolean {
   const lower = fileName.toLowerCase();
   return SCREENSHOT_FILE_EXTENSIONS.some((extension) => lower.endsWith(`.${extension}`));
 }
+
+/**
+ * Filename segment identifying the device a capture belongs to.
+ *
+ * Screenshot files from every device (and, in production, from every agent
+ * process sharing the temp dir) land in one flat directory, so the name is the
+ * only device identity a disk scan can see. Device ids can carry characters
+ * that are awkward in filenames (`127.0.0.1:5555`), so they are reduced to
+ * `[A-Za-z0-9-]`.
+ */
+export function screenshotDeviceToken(deviceId: string): string {
+  const token = deviceId.replace(/[^A-Za-z0-9-]/g, "-");
+  return token.length > 0 ? token : "unknown";
+}
+
+/**
+ * Canonical screenshot file name: `screenshot_<timestamp>_<device>_<unique>.<ext>`.
+ * `uniqueId` comes from the injected `IdGenerator`, so it never contains `_`.
+ */
+export function screenshotFileName(
+  timestamp: number,
+  deviceId: string,
+  uniqueId: string,
+  extension: string,
+): string {
+  return `screenshot_${timestamp}_${screenshotDeviceToken(deviceId)}_${uniqueId}.${extension}`;
+}
+
+/**
+ * Device token carried by a screenshot file name, or undefined when the name
+ * does not follow the canonical shape (a capture from an older build, say).
+ */
+export function screenshotFileDeviceToken(fileName: string): string | undefined {
+  const withoutExtension = fileName.replace(/\.[^.]*$/, "");
+  const parts = withoutExtension.split("_");
+  if (parts.length !== 4 || parts[0] !== "screenshot") {
+    return undefined;
+  }
+  return parts[2];
+}
+
+/** True when a screenshot file name identifies a capture from `deviceId`. */
+export function screenshotFileBelongsToDevice(fileName: string, deviceId: string): boolean {
+  return screenshotFileDeviceToken(fileName) === screenshotDeviceToken(deviceId);
+}

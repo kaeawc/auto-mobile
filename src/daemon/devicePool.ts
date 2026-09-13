@@ -6665,6 +6665,12 @@ export class DevicePool {
           .track(() => this.installedAppsRepository.clearDeviceSession(deviceId))
           .then(() => undefined),
       );
+      // The device has left the pool for good, so forget its per-device
+      // cache-coherence bookkeeping now that the final invalidation above has
+      // drained — otherwise the coordinator retains a generation entry for every
+      // device id the daemon ever saw (#6704). releaseDevice is generation-safe:
+      // a rebuild that predates it cannot commit, and a reused serial starts clean.
+      await getInstalledAppsCacheWriteCoordinator().releaseDevice(deviceId);
       logger.info(`[DevicePool] Cleared installed apps cache for device ${deviceId}`);
     } catch (error) {
       logger.warn(`Failed to clear device session cache for ${deviceId}: ${error}`);

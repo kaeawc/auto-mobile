@@ -21,6 +21,7 @@ import { getAbortSignal, runWithAbortSignal } from "../../src/utils/AbortContext
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 import { IOSCtrlProxyManager } from "../../src/utils/IOSCtrlProxyManager";
 import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
+import { getInstalledAppsCacheWriteCoordinator } from "../../src/db/installedAppsCacheWriteCoordinator";
 import { executionTracker } from "../../src/server/executionTracker";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
@@ -546,6 +547,7 @@ describe("killDevice handler", () => {
   });
 
   test("a successful explicit shutdown does not reboot the emulator", async () => {
+    const coordinator = getInstalledAppsCacheWriteCoordinator();
     const timer = new FakeTimer();
     const deviceSessionRepository = new FakeDeviceSessionRepository();
     const successfulManager = new SuccessfulKillDeviceManager();
@@ -553,10 +555,12 @@ describe("killDevice handler", () => {
     setDeviceToolsDependencies({
       deviceManagerFactory: () => successfulManager,
       notifyResourcesChanged: async () => {
+        await coordinator.invalidate("emulator-5554", async () => undefined);
         throw new Error("resource notification failed");
       },
       ensureCtrlProxyReady: async () => {},
       clearInstalledAppsForDevice: async () => {
+        await coordinator.invalidate("emulator-5554", async () => undefined);
         throw new Error("cache cleanup failed");
       },
     });
@@ -597,6 +601,7 @@ describe("killDevice handler", () => {
     await new Promise((resolve) => setImmediate(resolve));
 
     expect(successfulManager.getCallCount("startDevice")).toBe(1);
+    expect(coordinator.isDirty("emulator-5554")).toBe(true);
     expect(pool.getDevice("emulator-5554")).toBeNull();
     expect(sessionManager.getTerminalReleaseSnapshot("session-1")).toMatchObject({
       sessionId: "session-1",

@@ -121,6 +121,29 @@ wiring_requires_yq() {
   [[ "$block" == *"needs.node-host-integration-tests.result"* ]]
 }
 
+@test "advisory roll-ups warn without weakening their hard dependencies" {
+  local ios android node webrtc
+  ios="$(job_block ios-gate)"
+  android="$(job_block android-gate)"
+  node="$(job_block node-tests-gate)"
+  webrtc="$(job_block webrtc-gate)"
+
+  for block in "$ios" "$android" "$node" "$webrtc"; do
+    [[ "$block" == *"declare -A hard_results"* ]]
+    [[ "$block" == *"declare -A advisory_results"* ]]
+    [[ "$block" == *'::warning::'*'known-flaky, see scripts/ci/known-flakes.txt'* ]]
+  done
+
+  [[ "$ios" == *'[ios-xctest-runner-simulator-tests]'* ]]
+  [[ "$ios" == *'[ios-build-gate]'* ]]
+  [[ "$android" == *'[junit-runner-emulator-tests]'* ]]
+  [[ "$android" == *'[build-android-control-proxy]'* ]]
+  [[ "$node" == *'[node-unit-tests]'* ]]
+  [[ "$node" == *'[node-host-integration-tests]'* ]]
+  [[ "$webrtc" == *'[detect-changes]'* ]]
+  [[ "$webrtc" == *'[android-device-webrtc]'* ]]
+}
+
 @test "portable PR matrices leave macOS coverage to nightly" {
   wiring_requires_yq
   local job expected

@@ -9,6 +9,8 @@ setup() {
   CACHE_DIR="$BATS_TEST_TMPDIR/cache"
   ASSERT_ARGS="$BATS_TEST_TMPDIR/assert-args"
   COUNTER="$BATS_TEST_TMPDIR/mktemp-count"
+  LOG_FILE="$REPO_ROOT/ci-logs/pinned-runtime-graph.log"
+  rm -f "$LOG_FILE"
   mkdir -p "$FAKE_BIN"
 
   printf '%s\n' \
@@ -59,4 +61,5 @@ setup() {
   [ ! -e "$REPO_ROOT/automobile-cleanroom-fixture.tgz" ]
   [ ! -e "$CONSUMER_DIR" ]
   [ ! -e "$CACHE_DIR" ]
+  grep -Fq 'Packed artifact: automobile-cleanroom-fixture.tgz' "$LOG_FILE"
 }

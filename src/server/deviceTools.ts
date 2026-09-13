@@ -2501,7 +2501,11 @@ function resolveKillDeviceStableTarget(
  *     label stops standing for the runtime: the serial may have been taken over
  *     by a different AVD that simply cannot name itself either. Returning the
  *     cached label there is what let a teardown of the NEW AVD miss the booted
- *     runtime and fall through to the stopped-image inventory path;
+ *     runtime and fall through to the stopped-image inventory path. The one
+ *     caller that must still SEE a quarantined entry is the destructive
+ *     identity check, which reads it through
+ *     {@link getPooledAndroidEntryForIdentityCheck} and turns it into a
+ *     `quarantined` capture whose runtime confirmation is mandatory;
  *  4. that entry must carry an `avdName`, which the pool writes only from the
  *     AVD it itself started (`recordSourceAndroidAvd`), never from discovery.
  *
@@ -2518,15 +2522,37 @@ function getValidatedPooledAndroidEntry(
   device: BootedDevice,
   devicePool: DevicePool | undefined,
 ): PooledDevice | undefined {
+  if (devicePool?.isPooledIdentityUnresolved(device.deviceId)) {
+    return undefined;
+  }
+  return getPooledAndroidEntryForIdentityCheck(device, devicePool);
+}
+
+/**
+ * The same lookup WITHOUT rule 3, for the one caller that must still see a
+ * QUARANTINED entry: the destructive identity check.
+ *
+ * Every other consumer reads a quarantined entry as "no label" and stops there,
+ * which is right for routing, publishing and matching. A kill cannot stop
+ * there: dropping the entry also dropped the CONFIRMATION the label exists to
+ * trigger, so the quarantined emulator fell back to the same unchecked path as
+ * a runtime that named itself and a sessionless `killDevice` carrying
+ * `Unknown (<serial>)` reached `AndroidEmulatorClient.killDevice` on nothing
+ * but that placeholder. Quarantine is the state in which the runtime MUST be
+ * made to name itself, so the check takes the entry and
+ * {@link capturePooledAvdIdentity} marks the capture `quarantined`
+ * ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
+ */
+function getPooledAndroidEntryForIdentityCheck(
+  device: BootedDevice,
+  devicePool: DevicePool | undefined,
+): PooledDevice | undefined {
   if (device.platform !== "android" || !isUnknownAndroidRuntimeName(device)) {
     return undefined;
   }
   if (!isAndroidEmulatorSerial(device.deviceId)) {
     // A handset's name is `ro.product.model`, not an AVD; there is nothing to
     // substitute and nothing that would make a pooled label trustworthy.
-    return undefined;
-  }
-  if (devicePool?.isPooledIdentityUnresolved(device.deviceId)) {
     return undefined;
   }
   return devicePool?.getDevice(device.deviceId) ?? undefined;
@@ -2558,12 +2584,33 @@ type PooledAvdNameRefusal =
 interface PooledAvdCapture {
   avdName: string;
   incarnation: number;
+  /**
+   * The pooled entry was QUARANTINED at capture time
+   * (`DevicePool.isPooledIdentityUnresolved`), so the label is not the pool's
+   * statement about the runtime -- it is only the last name this daemon saw on
+   * the serial. The confirmation is therefore mandatory rather than merely
+   * corroborating: without a name from the runtime there is no identity at all.
+   */
+  quarantined?: true;
 }
 
 type PooledAvdCaptureResult =
   | { kind: "none" }
   | { kind: "capture"; capture: PooledAvdCapture }
+  | { kind: "quarantined"; capture: PooledAvdCapture }
   | { kind: "refusal"; refusal: PooledAvdNameRefusal };
+
+/**
+ * The capture a destructive action must carry into
+ * {@link confirmPooledAvdIdentity}, for the two kinds that require the runtime
+ * to name itself before the platform kill. `none` -- a runtime that named
+ * itself, and every physical handset -- carries nothing.
+ */
+function pooledAvdCaptureRequiringConfirmation(
+  result: PooledAvdCaptureResult,
+): PooledAvdCapture | undefined {
+  return result.kind === "capture" || result.kind === "quarantined" ? result.capture : undefined;
+}
 
 /**
  * An identity refusal raised from inside the shutdown path. It is an
@@ -2601,7 +2648,7 @@ function capturePooledAvdIdentity(
   devicePool: DevicePool | undefined,
   budget: PooledAvdNameProbeBudget,
 ): PooledAvdCaptureResult {
-  const pooled = getValidatedPooledAndroidEntry(device, devicePool);
+  const pooled = getPooledAndroidEntryForIdentityCheck(device, devicePool);
   const avdName = pooled?.avdName;
   if (!pooled || !avdName) {
     return { kind: "none" };
@@ -2609,13 +2656,21 @@ function capturePooledAvdIdentity(
   if (budget.deadlineMs - budget.timer.now() <= 0) {
     return { kind: "refusal", refusal: { reason: "unresolved", pooledAvdName: avdName } };
   }
-  return { kind: "capture", capture: { avdName, incarnation: pooled.incarnation } };
+  const quarantined = devicePool?.isPooledIdentityUnresolved(device.deviceId) === true;
+  return quarantined
+    ? {
+        kind: "quarantined",
+        capture: { avdName, incarnation: pooled.incarnation, quarantined: true },
+      }
+    : { kind: "capture", capture: { avdName, incarnation: pooled.incarnation } };
 }
 
 /**
  * KILL-TIME half of the identity check, run immediately before the platform
  * kill on an emulator whose discovered name is `Unknown (<serial>)` and whose
- * AVD name therefore comes from the pool.
+ * AVD name therefore comes from the pool -- including a pool entry that is
+ * QUARANTINED, where the label is not the pool's statement about the runtime
+ * and this probe is the only identity evidence there is.
  *
  * Two things must still hold:
  *  - the pool must still hold the CAPTURED incarnation under that label. A new
@@ -2658,6 +2713,15 @@ async function confirmPooledAvdIdentity(
         `${device.deviceId} under AVD '${pooledAvdName}'; refusing the destructive action.`,
     );
     return { refusal: { reason: "moved", pooledAvdName } };
+  }
+  if (capture.quarantined) {
+    // Not an extra check, a louder one: for a quarantined entry the probe is the
+    // ONLY identity evidence there is, and a refusal here is the fail-closed
+    // outcome rather than a surprising one (#6863 review).
+    logger.warn(
+      `[DeviceTools] The pooled identity of ${device.deviceId} is quarantined; the runtime must ` +
+        `name itself before this action may act on '${pooledAvdName}'.`,
+    );
   }
   const remainingMs = budget.deadlineMs - budget.timer.now();
   if (remainingMs <= 0) {
@@ -3296,9 +3360,10 @@ async function resolveTeardownTarget(context: TeardownContext): Promise<Teardown
     };
   }
   if (bootedTarget.target) {
+    const captureRequiringConfirmation = pooledAvdCaptureRequiringConfirmation(pooledAvdCapture);
     const resolvedTarget: TeardownResolvedTarget =
-      bootedTarget.target.wasBooted && pooledAvdCapture.kind === "capture"
-        ? { ...bootedTarget.target, pooledAvdCapture: pooledAvdCapture.capture }
+      bootedTarget.target.wasBooted && captureRequiringConfirmation
+        ? { ...bootedTarget.target, pooledAvdCapture: captureRequiringConfirmation }
         : bootedTarget.target;
     return await finalizeIosNameResolvedTeardownTarget(context, resolvedTarget);
   }
@@ -7406,7 +7471,7 @@ export function registerDeviceTools() {
         false,
         DEVICE_SHUTDOWN_TIMEOUT_MS,
         retainLifecycleUntil,
-        pooledAvdCapture.kind === "capture" ? pooledAvdCapture.capture : undefined,
+        pooledAvdCaptureRequiringConfirmation(pooledAvdCapture),
       );
       return createKillDeviceResponse(args, result.timing, result.alreadyStoppedMessage);
     } finally {

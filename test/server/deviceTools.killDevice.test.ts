@@ -673,6 +673,61 @@ describe("killDevice handler", () => {
       expect(manager.killedDeviceTargets.map((device) => device.name)).toEqual(["Pixel_8_Old"]);
     });
 
+    // A QUARANTINED pooled entry is the state in which confirmation matters
+    // most: the pool has observed the placeholder on this serial and can no
+    // longer say which AVD answers there. It used to produce no capture at all
+    // (`getValidatedPooledAndroidEntry` returns undefined), which skipped the
+    // runtime confirmation entirely and let a sessionless kill carrying
+    // `Unknown (<serial>)` run against whatever holds the serial now
+    // ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
+    async function quarantinePooledIdentity(): Promise<void> {
+      const pool = DaemonState.getInstance().getDevicePool();
+      await pool.refreshDevices();
+      expect(pool.isPooledIdentityUnresolved("emulator-5554")).toBe(true);
+    }
+
+    test("refuses a kill on a quarantined entry when the runtime cannot answer", async () => {
+      manager = new SuccessfulKillDeviceManager();
+      setDeviceToolsDependencies({ deviceManagerFactory: () => manager });
+      await poolWithUnknownRuntime(unknownEmulator, "Pixel_8_Old");
+      await quarantinePooledIdentity();
+
+      await expect(killTool().handler({ device: unknownEmulator })).rejects.toThrow(
+        /emulator-5554[\s\S]*did not answer/,
+      );
+      expect(runtimeAvdNameProbes).toEqual(["emulator-5554"]);
+      expect(manager.killedDeviceIds).toEqual([]);
+    });
+
+    test("kills a quarantined entry under the name the runtime confirms", async () => {
+      manager = new SuccessfulKillDeviceManager();
+      setDeviceToolsDependencies({ deviceManagerFactory: () => manager });
+      await poolWithUnknownRuntime(unknownEmulator, "Pixel_8_Old");
+      await quarantinePooledIdentity();
+      runtimeAvdNames.set("emulator-5554", "Pixel_8_Old");
+
+      await expect(killTool().handler({ device: unknownEmulator })).resolves.toBeDefined();
+
+      expect(runtimeAvdNameProbes).toEqual(["emulator-5554"]);
+      expect(manager.killedDeviceTargets.map((device) => device.name)).toEqual(["Pixel_8_Old"]);
+    });
+
+    // The quarantine is not proof of a replacement either: a runtime that names
+    // a DIFFERENT AVD than the pooled label is, and the kill is refused rather
+    // than retargeted.
+    test("refuses a quarantined entry whose runtime names a different AVD", async () => {
+      manager = new SuccessfulKillDeviceManager();
+      setDeviceToolsDependencies({ deviceManagerFactory: () => manager });
+      await poolWithUnknownRuntime(unknownEmulator, "Pixel_8_Old");
+      await quarantinePooledIdentity();
+      runtimeAvdNames.set("emulator-5554", "Pixel_9_New");
+
+      await expect(killTool().handler({ device: unknownEmulator })).rejects.toThrow(
+        /Pixel_8_Old[\s\S]*Pixel_9_New/,
+      );
+      expect(manager.killedDeviceIds).toEqual([]);
+    });
+
     // The shutdown reservation protects the CAPTURED pool entry from eviction,
     // but it cannot stop the emulator behind the serial from going away and
     // being replaced. Re-read the epoch at the confirm and refuse when a

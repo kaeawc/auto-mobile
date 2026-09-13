@@ -2258,6 +2258,25 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       );
     }
 
+    // Two unknowns are not an equality. `Unknown (<serial>)` on either side is
+    // the absence of a name, so a request carrying the placeholder that meets a
+    // discovery carrying the placeholder has matched on nothing -- and the
+    // emulator answering on the serial now may be a replacement of the one the
+    // caller resolved. Callers that legitimately target an emulator whose
+    // console is mute resolve its AVD name first and put THAT in the target
+    // (`deviceTools.confirmPooledAvdIdentity`), so reaching here with two
+    // placeholders means no identity was ever established (#6863 review).
+    if (
+      this.isUnknownEmulatorName(device.name, device.deviceId) &&
+      this.isUnknownEmulatorName(emulator.name, emulator.deviceId)
+    ) {
+      throw new ActionableError(
+        `Refusing to kill '${device.deviceId}': the emulator could not name itself, so this ` +
+          "daemon cannot tell it apart from a replacement that took the serial. Resolve its AVD " +
+          `name and retry, or stop it by hand with \`adb -s ${device.deviceId} emu kill\`.`,
+      );
+    }
+
     // Terminate through the emulator console `emu kill`. Only the console
     // shutdown lets the emulator write its quick-boot snapshot on exit; a guest
     // `shell reboot -p` halts the OS without it, so the next quick-boot of the

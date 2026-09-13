@@ -2815,10 +2815,15 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       );
     }
     if (!packageManager.stdout.includes("package:")) {
+      // With no listing on stdout there is nothing benign for stderr to be noise
+      // about, and the boot-time shape carries the reason there — e.g.
+      // `cmd: Can't find service: package` while the package service is still
+      // coming up. Prefer it over the vacuous `observed=""` (#6818).
+      const stderr = packageManager.stderr.trim();
       return this.unmetReadinessDiagnostic(
         "package-manager",
         "pm list packages returned no 'package:' entries",
-        packageManager.stdout.trim(),
+        stderr.length > 0 ? stderr : packageManager.stdout.trim(),
         deviceId,
       );
     }

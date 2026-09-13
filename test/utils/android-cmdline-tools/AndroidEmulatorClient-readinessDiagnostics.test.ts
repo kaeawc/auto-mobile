@@ -355,6 +355,16 @@ describe("Android emulator readiness diagnostics", () => {
       observed: 'observed="Failure [DEVICE_NOT_RESPONDING]"',
     },
     {
+      // Boot-time shape: the package service is not up yet, so `pm list packages`
+      // exits with nothing on stdout and the reason on stderr. `observed=""`
+      // would discard the one actionable detail the readiness timeout carries.
+      name: "package listing missing the package service",
+      phase: "package-manager",
+      command: "shell pm list packages",
+      response: result("", "cmd: Can't find service: package"),
+      observed: 'observed="cmd: Can\'t find service: package"',
+    },
+    {
       name: "system boot completion",
       phase: "system-boot-complete",
       command: "shell getprop sys.boot_completed",

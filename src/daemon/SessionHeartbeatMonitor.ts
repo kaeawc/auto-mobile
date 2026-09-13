@@ -16,7 +16,17 @@ export interface HeartbeatSessionSource {
   cleanupExpiredSessions(): void;
 }
 
-type SessionHeartbeatReleaseReason = "missing-first-heartbeat" | "heartbeat-timeout";
+type SessionHeartbeatReleaseReason =
+  | "missing-first-heartbeat"
+  | "heartbeat-timeout"
+  | "cli-idle-timeout";
+
+/** Log prose for each release reason, so the sweep loop carries no branching. */
+const STALE_REASON_DESCRIPTION: Record<SessionHeartbeatReleaseReason, string> = {
+  "missing-first-heartbeat": "never received first heartbeat",
+  "heartbeat-timeout": "heartbeat timeout",
+  "cli-idle-timeout": "idle past the CLI idle timeout",
+};
 
 export interface SessionHeartbeatMonitorConfig {
   /** How often to scan for stale sessions. Default: 10s. */
@@ -132,32 +142,46 @@ export class SessionHeartbeatMonitor {
       if (this.hasActiveExecutions(session.sessionId)) {
         continue;
       }
-      const timeoutMs = session.heartbeatTimeoutMs ?? this.defaultHeartbeatTimeoutMs;
-      if (!session.hasReceivedHeartbeat) {
-        const lastHeartbeat = session.lastHeartbeat ?? session.lastUsedAt;
-        if (session.heartbeatTimeoutSource === "default") {
-          if (now - lastHeartbeat > this.preFirstHeartbeatGraceMs) {
-            const reason = "missing-first-heartbeat";
-            logger.warn(
-              `Session ${session.sessionId} never received first heartbeat, cancelling (reason=${reason})`,
-            );
-            await this.reap(session.sessionId, reason);
-          }
-          continue;
-        }
-        const ageMs = now - session.createdAt;
-        if (ageMs < this.graceMs) {
-          continue;
-        }
-      }
-      const lastHeartbeat = session.lastHeartbeat ?? session.lastUsedAt;
-      if (now - lastHeartbeat > timeoutMs) {
-        const reason = "heartbeat-timeout";
+      const reason = this.staleReason(session, now);
+      if (reason) {
         logger.warn(
-          `Session ${session.sessionId} heartbeat timeout, cancelling (reason=${reason})`,
+          `Session ${session.sessionId} ${STALE_REASON_DESCRIPTION[reason]}, cancelling (reason=${reason})`,
         );
         await this.reap(session.sessionId, reason);
       }
     }
+  }
+
+  /**
+   * Why this session should be released now, or undefined to leave it alone.
+   *
+   * Split out of {@link tickOnce} so the per-session policy reads as one
+   * decision rather than a nest of early-continues inside the sweep loop.
+   */
+  private staleReason(session: Session, now: number): SessionHeartbeatReleaseReason | undefined {
+    const timeoutMs = session.heartbeatTimeoutMs ?? this.defaultHeartbeatTimeoutMs;
+    const lastHeartbeat = session.lastHeartbeat ?? session.lastUsedAt;
+
+    // A CLI-owned session (issue #6870) is judged on wall-clock idleness, not on
+    // the 10 s heartbeat contract: the `--cli` process that owns it exits between
+    // calls, so nobody is left to heartbeat and a missing first heartbeat says
+    // nothing about abandonment. Its `heartbeatTimeoutMs` was widened to the CLI
+    // idle timeout when it adopted the policy.
+    if (session.livenessPolicy === "cli-idle") {
+      return now - lastHeartbeat > timeoutMs ? "cli-idle-timeout" : undefined;
+    }
+
+    if (!session.hasReceivedHeartbeat) {
+      if (session.heartbeatTimeoutSource === "default") {
+        return now - lastHeartbeat > this.preFirstHeartbeatGraceMs
+          ? "missing-first-heartbeat"
+          : undefined;
+      }
+      if (now - session.createdAt < this.graceMs) {
+        return undefined;
+      }
+    }
+
+    return now - lastHeartbeat > timeoutMs ? "heartbeat-timeout" : undefined;
   }
 }

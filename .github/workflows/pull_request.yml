@@ -730,7 +730,7 @@ jobs:
             exit 1
           fi
           if [[ "$formatter_result" == "failure" || "$formatter_result" == "cancelled" ]]; then
-            echo "Formatter gate concluded $formatter_result"
+            echo "Formatter gate concluded $formatter_result — run 'bun run format' and push again"
             exit 1
           fi
 
@@ -1650,8 +1650,10 @@ jobs:
     # self-hosted regardless. The real gate is the repo's all_external_contributors
     # fork-PR approval policy, which holds untrusted PRs until manually approved.
     runs-on: ${{ github.event.pull_request.user.login == 'kaeawc' && fromJSON('["self-hosted", "automobile-mac"]') || 'macos-26' }}
-    needs: detect-changes
-    if: needs.detect-changes.outputs.ios_should_run == 'true'
+    # Do not spend a macOS slot when the inexpensive Ubuntu validation has
+    # already proved this revision cannot merge.
+    needs: [detect-changes, fast-validation]
+    if: needs.detect-changes.outputs.ios_should_run == 'true' && needs.fast-validation.result == 'success'
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
@@ -1684,8 +1686,9 @@ jobs:
     # repo-wide iOS 6.3 migration), which the Swift 5.10 toolchain on macos-14 /
     # Xcode 15.4 cannot even parse. Mirrors the other Swift-6.3 jobs' toolchain.
     runs-on: macos-26
-    needs: detect-changes
-    if: needs.detect-changes.outputs.ios_should_run == 'true'
+    # Keep costly hosted macOS work behind the inexpensive Fast Validation gate.
+    needs: [detect-changes, fast-validation]
+    if: needs.detect-changes.outputs.ios_should_run == 'true' && needs.fast-validation.result == 'success'
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
@@ -1734,8 +1737,9 @@ jobs:
     # Pull-request YAML is untrusted, including for repository members, so the
     # package matrix always uses the GitHub-hosted runner from its configuration.
     runs-on: ${{ matrix.config.runner }}
-    needs: detect-changes
-    if: needs.detect-changes.outputs.ios_should_run == 'true'
+    # Keep costly hosted macOS work behind the inexpensive Fast Validation gate.
+    needs: [detect-changes, fast-validation]
+    if: needs.detect-changes.outputs.ios_should_run == 'true' && needs.fast-validation.result == 'success'
     # Fail fast on a hung/evicted macOS runner instead of sitting until GHA
     # infra-cancels the job (a cancelled terminal run blocks the required
     # "iOS Build" gate). Generous backstop, not a tight bound.
@@ -1820,8 +1824,9 @@ jobs:
   ios-xcode-build:
     name: "Build Xcode Projects (${{ matrix.config.name }}, ${{ matrix.project }})"
     runs-on: ${{ matrix.config.runner }}
-    needs: detect-changes
-    if: needs.detect-changes.outputs.ios_should_run == 'true'
+    # Keep costly hosted macOS work behind the inexpensive Fast Validation gate.
+    needs: [detect-changes, fast-validation]
+    if: needs.detect-changes.outputs.ios_should_run == 'true' && needs.fast-validation.result == 'success'
     # Fail fast on a hung/evicted macOS runner instead of sitting until GHA
     # infra-cancels the job (a cancelled terminal run blocks the required
     # "iOS Build" gate). Generous backstop, not a tight bound.
@@ -1913,8 +1918,8 @@ jobs:
   ios-playground-tests:
     name: "iOS Playground Tests (${{ matrix.config.name }})"
     runs-on: ${{ matrix.config.runner }}
-    needs: detect-changes
-    if: needs.detect-changes.outputs.ios_should_run == 'true' && needs.detect-changes.outputs.ios_changed != 'true'
+    needs: [detect-changes, fast-validation]
+    if: needs.detect-changes.outputs.ios_should_run == 'true' && needs.detect-changes.outputs.ios_changed != 'true' && needs.fast-validation.result == 'success'
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -1976,11 +1981,13 @@ jobs:
   ios-xctest-runner-simulator-tests:
     name: "XCTestRunner Simulator Tests"
     runs-on: macos-26
-    needs: detect-changes
+    # The advisory simulator lane should not consume a scarce macOS runner for
+    # a revision already rejected by inexpensive Ubuntu validation.
+    needs: [detect-changes, fast-validation]
     # Wired to native_integration (src/** device surface + ios/**), NOT ios_should_run,
     # so this TS<->runner integration test still runs on the TypeScript PRs that can
     # break it while the pure-Swift build jobs skip on src-only changes.
-    if: needs.detect-changes.outputs.ios_integration_should_run == 'true'
+    if: needs.detect-changes.outputs.ios_integration_should_run == 'true' && needs.fast-validation.result == 'success'
     timeout-minutes: 45
     # CI's XCUITest cold-start routinely exceeds the defaults; give the daemon a
     # generous health-poll window (240 × 500ms = 120s) so it doesn't give up (and
@@ -2256,8 +2263,8 @@ jobs:
     # Pull-request YAML must remain off self-hosted runners. The root manifest
     # needs the Swift 6.3 toolchain from Xcode 26.5.
     runs-on: macos-26
-    needs: detect-changes
-    if: needs.detect-changes.outputs.ios_should_run == 'true'
+    needs: [detect-changes, fast-validation]
+    if: needs.detect-changes.outputs.ios_should_run == 'true' && needs.fast-validation.result == 'success'
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
@@ -2299,6 +2306,33 @@ jobs:
   # =============================================================================
   # Android Build and Test Jobs (Android-related changes only)
   # =============================================================================
+
+  # A compile failure is deterministic and must stop the emulator lanes before
+  # they spend their 15-minute budget booting a device. Detekt intentionally is
+  # not part of this gate: its full-tree result remains non-blocking by policy.
+  android-emulator-compile-smoke:
+    timeout-minutes: 10
+    name: "Android Emulator Compile Smoke"
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.android_should_run == 'true'
+    steps:
+      - name: "Git Checkout"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+
+      - uses: ./.github/actions/gradle-task-run
+        with:
+          gradle-tasks: ":control-proxy:compileDebugKotlin :junit-runner:compileKotlin :junit-runner:compileTestKotlin :playground:app:compileDebugKotlin :playground:app:compileDebugUnitTestKotlin"
+          gradle-project-directory: "android"
+          gradle-home-directory: "~/.gradle/${{ github.job }}"
+          reuse-configuration-cache: true
+          gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+          release-keystore-base64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+          release-keystore-password: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+          release-key-alias: ${{ secrets.RELEASE_KEY_ALIAS }}
+          release-key-password: ${{ secrets.RELEASE_KEY_PASSWORD }}
 
   junit-runner-unit-tests:
     timeout-minutes: 20
@@ -2374,7 +2408,7 @@ jobs:
     name: "Run JUnit Runner Emulator Tests"
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: [detect-changes, build-android-control-proxy]
+    needs: [detect-changes, build-android-control-proxy, android-emulator-compile-smoke]
     if: needs.detect-changes.outputs.android_should_run == 'true'
     steps:
       - name: "Git Checkout"
@@ -2505,7 +2539,7 @@ jobs:
     name: "Run Playground Automobile Emulator Tests"
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: [detect-changes, build-android-control-proxy]
+    needs: [detect-changes, build-android-control-proxy, android-emulator-compile-smoke]
     if: needs.detect-changes.outputs.android_should_run == 'true'
     steps:
       - name: "Git Checkout"
@@ -3311,8 +3345,8 @@ jobs:
 
   ios-device-webrtc:
     name: "iOS Device Capture to WHEP"
-    needs: detect-changes
-    if: needs.detect-changes.outputs.webrtc_should_run == 'true'
+    needs: [detect-changes, fast-validation]
+    if: needs.detect-changes.outputs.webrtc_should_run == 'true' && needs.fast-validation.result == 'success'
     runs-on: macos-26
     timeout-minutes: 35
     steps:
@@ -3469,7 +3503,6 @@ jobs:
     needs:
       - detect-changes
       - ios-build-gate
-      - ios-xctest-runner-simulator-tests
       - ios-playground-tests
       - ios-spm-root-package-build
     runs-on: ubuntu-latest
@@ -3479,7 +3512,6 @@ jobs:
           results=( \
             "${{ needs.detect-changes.result }}" \
             "${{ needs.ios-build-gate.result }}" \
-            "${{ needs.ios-xctest-runner-simulator-tests.result }}" \
             "${{ needs.ios-playground-tests.result }}" \
             "${{ needs.ios-spm-root-package-build.result }}" \
           )
@@ -3502,6 +3534,7 @@ jobs:
       - sdk-debug-inspector-consumer
       - junit-runner-kotlin-consumer-compatibility
       - junit-runner-unit-tests
+      - android-emulator-compile-smoke
       - junit-runner-emulator-tests
       - junit-runner-emulator-wtf-tests
       - playground-automobile-emulator-tests
@@ -3510,6 +3543,7 @@ jobs:
     steps:
       - name: "Check results"
         run: |
+          # Compile-smoke failure is checked directly; downstream emulator skips only propagate that failure.
           results=( \
             "${{ needs.detect-changes.result }}" \
             "${{ needs.build-android-control-proxy.result }}" \
@@ -3518,6 +3552,7 @@ jobs:
             "${{ needs.sdk-debug-inspector-consumer.result }}" \
             "${{ needs.junit-runner-kotlin-consumer-compatibility.result }}" \
             "${{ needs.junit-runner-unit-tests.result }}" \
+            "${{ needs.android-emulator-compile-smoke.result }}" \
             "${{ needs.junit-runner-emulator-tests.result }}" \
             "${{ needs.junit-runner-emulator-wtf-tests.result }}" \
             "${{ needs.playground-automobile-emulator-tests.result }}" \

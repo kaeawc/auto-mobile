@@ -19,6 +19,7 @@ import {
 import { NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import { updatedAtToMillis } from "../observeTimestamp";
+import { captureFidelityTruncationReasons } from "../truncationReasons";
 import { hasAccessibilityAction, isTruthyFlag } from "../../../utils/elementProperties";
 import type { ElementParser } from "../../../utils/interfaces/ElementParser";
 import { DefaultElementParser } from "../../utility/ElementParser";
@@ -316,8 +317,15 @@ const RELIABILITY_CHECKS: readonly ReliabilityCheck[] = [
   // point inert against an incomplete obstacle map risks tapping a real
   // control whose node was simply never emitted (issue #6167 follow-up).
   (_windowBounds, result) => {
-    const truncationReasons = result.viewHierarchy?.truncationReasons;
-    return truncationReasons && truncationReasons.length > 0
+    // Only CAPTURE-fidelity reasons count here. A host-side `max_children[...]`
+    // output cap (#6601) trims the rendered payload while the uncapped tree
+    // stays attached as the raw carrier that `collectInteractiveObstacles`
+    // walks, so the obstacle map is complete and rejecting the capture would
+    // silently drop touch-latency from every wide-list screen (#6601 review).
+    const truncationReasons = captureFidelityTruncationReasons(
+      result.viewHierarchy?.truncationReasons,
+    );
+    return truncationReasons.length > 0
       ? `view hierarchy is truncated (${truncationReasons.join(", ")}) - the obstacle map may be incomplete`
       : null;
   },
@@ -372,7 +380,9 @@ function unreliableHierarchyReason(
  * Single gate for every known way a capture can be too unreliable to trust
  * for a synthetic touch-latency tap: absent/malformed app window bounds, a
  * stale cached tree (`fresh: false`), an incomplete CtrlProxy capture
- * (`ctrlProxyIncomplete`), a truncated hierarchy (`truncationReasons`), a
+ * (`ctrlProxyIncomplete`), a truncated CAPTURE (the device-side subset of
+ * `truncationReasons` — host-side output caps are filtered out by
+ * `captureFidelityTruncationReasons`), a
  * SystemUI overlay owning focus (`activeWindow.appId ===
  * "com.android.systemui"`, which can pass through a real but occluded app
  * window as if it belonged to the overlay), or a notification-permission

@@ -20,8 +20,13 @@ Node TypeScript MCP server providing Android Debug Bridge (ADB) capabilities thr
   reviewers (e.g. Codex) must NOT flag bare `#NNNN` references that appear in
   source-code comments or Markdown files; treat those as compliant.
 - After implementation changes, run relevant validation commands
+- Before pushing shell/scripts changes, run `scripts/prepush-shell.sh` and `bun run format` (the formatter catches Fast Validation fan-out); if `bun.lock` and/or `package.json` changed in the diff, run `bun scripts/release/pin-runtime-deps.ts --write` and commit `package.json`, `bun.lock`, and `scripts/release/runtime-graph.json`; otherwise rebase onto current main and do not hand-edit pins to mask a stale base; never run two `bats test/bats/` sweeps concurrently on one machine; when an Actions API job log is empty, read the `fast-validation-logs` workflow artifact's per-check `.status`/`.log` files under `scratch/fast-validate-*/`.
 - Write terminal output to `scratch/` when not visible
 - Local validation scripts live under `scripts/` and should almost always be written in bash with shellcheck validation
+- Run `scripts/prepush-android.sh` from the repository root before pushing changes under `android/`; its scoped Detekt pass is a smoke check, not a substitute for the full-tree CI Detekt job.
+- For Playground/JUnit-runner emulator CI red, inspect `.github/actions/android-emulator` boot diagnostics first: no runner-health means an infra/runner-health question, while booted tests that fail are a regression.
+- Copy `android/local.properties` from a working checkout into each new Android worktree; it is gitignored and required for Gradle SDK resolution.
+- Ktfmt normalizes `runCatching{}.getOrNull()` to `runCatching {}.getOrNull()` once; write the spaced form and do not mistake that first rewrite for a non-idempotent formatter.
 - Before adding a helper, parser, or dependency, search `src/`, `scripts/lib/`, `package.json`, and the runtime standard library. Prefer the standard library, then an existing direct dependency, then an existing repository helper, then a small tested helper. Do not parse JSON, YAML, XML, or TypeScript with line regexes when a structured parser or typed module contract exists. For new packages, state which built-in and installed alternatives were checked. Preserve injected interfaces/FakeTimer seams where tests need deterministic control.
 - Always use interfaces & fakes & FakeTimer to decouple implementations and keep tests extremely fast and non-flaky
 - Unit tests should pass in 100ms or less. Do not assume that a failing test can be allowed to fail. CI enforces this per test from the JUnit reporter's time (which excludes `beforeAll`); a test over budget is re-run in isolation and only its MEDIAN is failed, so a genuine breach must be fixed in the test, never by raising `BUN_TEST_MAX_MS`.
@@ -307,3 +312,17 @@ plain `git` stays fine for read-only queries (`git log`, `git diff`, `gh`).
   Validation) rejects violations.
 - Do not create `git worktree`s of a jj checkout. For parallel work use
   `jj workspace add ../<name>` instead.
+
+## iOS/Swift CI
+
+- Before pushing a Swift change, run `scripts/prepush-ios.sh` (pinned
+  SwiftFormat 0.54.6, SwiftLint error rules, XCTestRunner build, and pure unit
+  tests).
+- `XCTestRunner Simulator Tests` is advisory, not required. Read the exact job
+  log and classify before rerunning. Known 2026-09-07–13 signatures: five-minute
+  CtrlProxy UI-test timeout, CtrlProxy surviving forced teardown, `simctl list`
+  timing out during video recording, and a hierarchy UI test exceeding 90s.
+- A simulator UDID belongs to exactly one CI job and is used serially there;
+  never share a simulator between parallel runners or jobs.
+- Re-run CI on the latest main base before merge; stale-base runs can mask a
+  temporary main-red window.

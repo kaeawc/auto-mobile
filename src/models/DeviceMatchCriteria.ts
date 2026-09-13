@@ -19,6 +19,7 @@ export interface StartDeviceResult {
   deviceId: string;
   name: string;
   platform: Platform;
+  apiLevel?: number;
   osVersion?: string;
   formFactor?: FormFactor;
   screenSize?: { width: number; height: number };

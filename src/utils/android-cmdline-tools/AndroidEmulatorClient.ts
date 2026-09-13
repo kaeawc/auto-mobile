@@ -153,6 +153,12 @@ export interface AndroidEmulatorLaunchRequest {
   signal?: AbortSignal;
 }
 
+/** Optional readiness behavior for callers recovering an existing guest state. */
+export interface AndroidEmulatorReadinessOptions {
+  /** Preserve the guest's restored display and keyguard state instead of waking it. */
+  skipWakeAndUnlock?: boolean;
+}
+
 export interface AndroidEmulatorLaunchHandle {
   readonly avdName: string;
   readonly process: ChildProcess | null;
@@ -237,6 +243,7 @@ export interface AndroidEmulator {
     childProcess?: ChildProcess | null,
     targetDeviceId?: string,
     signal?: AbortSignal,
+    options?: AndroidEmulatorReadinessOptions,
   ): Promise<BootedDevice>;
 }
 
@@ -793,6 +800,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
           }
           return {
             ...device,
+            apiLevel: config.apiLevel ?? device.apiLevel,
             osVersion: config.osVersion ?? device.osVersion,
             screenWidth: config.screenWidth ?? device.screenWidth,
             screenHeight: config.screenHeight ?? device.screenHeight,
@@ -3248,6 +3256,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     childProcess?: ChildProcess | null,
     targetDeviceId?: string,
     signal?: AbortSignal,
+    options?: AndroidEmulatorReadinessOptions,
   ): Promise<BootedDevice> {
     const startTime = this.timer.now();
     const perf = createGlobalPerformanceTracker();
@@ -3601,9 +3610,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
           platform: "android",
           deviceId: foundDeviceId,
         } as BootedDevice;
-        perf.startOperation("wakeAndUnlock");
-        await this.wakeAndUnlock(bootedDevice, signal);
-        perf.endOperation("wakeAndUnlock");
+        await this.wakeAndUnlockAfterReadiness(bootedDevice, signal, options, perf);
         return bootedDevice;
       }
 
@@ -3626,9 +3633,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
         platform: "android",
         deviceId: foundDeviceId,
       } as BootedDevice;
-      perf.startOperation("wakeAndUnlock");
-      await this.wakeAndUnlock(bootedDevice, signal);
-      perf.endOperation("wakeAndUnlock");
+      await this.wakeAndUnlockAfterReadiness(bootedDevice, signal, options, perf);
       return bootedDevice;
     }
 
@@ -3642,6 +3647,20 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       lastDiagnostic,
       target,
     );
+  }
+
+  private async wakeAndUnlockAfterReadiness(
+    device: BootedDevice,
+    signal: AbortSignal | undefined,
+    options: AndroidEmulatorReadinessOptions | undefined,
+    perf: ReturnType<typeof createGlobalPerformanceTracker>,
+  ): Promise<void> {
+    if (options?.skipWakeAndUnlock) {
+      return;
+    }
+    perf.startOperation("wakeAndUnlock");
+    await this.wakeAndUnlock(device, signal);
+    perf.endOperation("wakeAndUnlock");
   }
 
   /**

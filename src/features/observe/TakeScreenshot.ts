@@ -34,23 +34,14 @@ import {
   IOS_CTRLPROXY_SCREENSHOT_METADATA,
   metadataForScreenshotFormat,
 } from "./ScreenshotMetadata";
-
-/** Secure file mode: owner read/write only */
-const SECURE_FILE_MODE = 0o600;
-
-/**
- * Write buffer to file atomically with secure permissions.
- * Uses "wx" flag to fail if file exists (prevents TOCTOU race) and
- * mode 0o600 for owner-only read/write access.
- */
-async function writeFileSecure(filePath: string, data: Buffer): Promise<void> {
-  const handle = await fsPromises.open(filePath, "wx", SECURE_FILE_MODE);
-  try {
-    await handle.write(data);
-  } finally {
-    await handle.close();
-  }
-}
+import {
+  screenshotExtensionForFormat,
+  screenshotFileName,
+} from "../../utils/screenshot/screenshotFormats";
+import {
+  defaultScreenshotFileWriter,
+  type ScreenshotFileWriter,
+} from "./screenshot/ScreenshotFileWriter";
 
 function replaceScreenshotExtension(filePath: string, extension: string): string {
   return filePath.replace(/\.[^.]+$/, `.${extension}`);
@@ -69,6 +60,7 @@ export class TakeScreenshot implements ScreenshotService {
   private window: Window;
   private timer: Timer;
   private idGenerator: IdGenerator;
+  private fileWriter: ScreenshotFileWriter;
   private static cacheDir: string | null = null;
   private static readonly MAX_CACHE_SIZE_BYTES = 128 * 1024 * 1024; // 128MB
 
@@ -93,6 +85,7 @@ export class TakeScreenshot implements ScreenshotService {
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
     timer: Timer = defaultTimer,
     idGenerator: IdGenerator = defaultIdGenerator,
+    fileWriter: ScreenshotFileWriter = defaultScreenshotFileWriter,
   ) {
     this.device = device;
     this.adbFactory = adbFactory;
@@ -100,6 +93,7 @@ export class TakeScreenshot implements ScreenshotService {
     this.window = new Window(device, this.adbFactory);
     this.timer = timer;
     this.idGenerator = idGenerator;
+    this.fileWriter = fileWriter;
 
     // Manage cache size (getCacheDir ensures directory exists with secure permissions)
     this.cleanupCache();
@@ -147,11 +141,12 @@ export class TakeScreenshot implements ScreenshotService {
    * @returns Full file path for screenshot
    */
   generateScreenshotPath(timestamp: number, options: ScreenshotOptions): string {
-    const fileExtension =
-      options.format === "webp" ? "webp" : options.format === "jpeg" ? "jpg" : "png";
+    const fileExtension = screenshotExtensionForFormat(options.format ?? "png");
     return path.join(
       TakeScreenshot.getCacheDir(),
-      `screenshot_${timestamp}_${this.idGenerator.next()}.${fileExtension}`,
+      // The device id is part of the name so a disk scan of the shared cache
+      // dir can tell whose capture a file is (#6599).
+      screenshotFileName(timestamp, this.device.deviceId, this.idGenerator.next(), fileExtension),
     );
   }
 
@@ -285,13 +280,45 @@ export class TakeScreenshot implements ScreenshotService {
     }
   }
 
+  /**
+   * Run the CtrlProxy screenshot request under the caller's cancellation.
+   *
+   * @returns the capture, or null when the caller cancelled instead.
+   */
+  private async requestCtrlProxyCapture(
+    signal?: AbortSignal,
+  ): Promise<CtrlProxyScreenshotResult | null> {
+    const client = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
+    try {
+      // The client's own 10s timeout is unaware of the signal, so race it
+      // against the abort the way the iOS path does - otherwise a cancelled
+      // capture still blocks the caller for the full request timeout. The signal
+      // also goes INTO the client: winning the outer race only unblocks this
+      // caller, while the request itself would still be dispatched once the
+      // (re)connection completes, burning the shared screenshot rate limit and
+      // pushing a late observation-stream frame (#6605).
+      const result = await awaitWhileRequestIsLive(
+        client.requestScreenshot(10000, undefined, false, signal),
+        signal,
+      );
+      return signal?.aborted ? null : result;
+    } catch (error) {
+      // An abort is the caller's own cancellation, not a capture failure: report
+      // it as cancelled instead of falling back to the slower ADB path.
+      if (signal?.aborted) {
+        logger.debug(`[SCREENSHOT] Android CtrlProxy capture cancelled: ${errorMessage(error)}`);
+        return null;
+      }
+      throw error;
+    }
+  }
+
   private async captureScreenshotViaCtrlProxy(
     finalPath: string,
     signal?: AbortSignal,
   ): Promise<ScreenshotResult> {
-    const client = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
-    const result = await client.requestScreenshot(10000);
-    if (signal?.aborted) {
+    const result = await this.requestCtrlProxyCapture(signal);
+    if (!result) {
       return { success: false, error: OPERATION_CANCELLED_MESSAGE };
     }
     if (!result.success || !result.data) {
@@ -302,9 +329,16 @@ export class TakeScreenshot implements ScreenshotService {
     const imageBuffer = Buffer.from(result.data, "base64");
     const screenshotPath = replaceScreenshotExtension(
       finalPath,
-      format === "jpeg" ? "jpg" : format,
+      screenshotExtensionForFormat(format),
     );
-    await writeFileSecure(screenshotPath, imageBuffer);
+    await this.fileWriter.write(screenshotPath, imageBuffer);
+    if (signal?.aborted) {
+      // Cancellation can land while the write is in flight: the request is over,
+      // so drop the frame instead of leaving it for the latest-screenshot disk
+      // fallback to serve as the device's current screen (#6605).
+      await this.fileWriter.remove(screenshotPath);
+      return { success: false, error: OPERATION_CANCELLED_MESSAGE };
+    }
     return {
       success: true,
       path: screenshotPath,
@@ -367,7 +401,7 @@ export class TakeScreenshot implements ScreenshotService {
 
     // Decode base64 and save to file securely
     const imageBuffer = Buffer.from(result.data, "base64");
-    await writeFileSecure(finalPath, imageBuffer);
+    await this.fileWriter.write(finalPath, imageBuffer);
     if (signal?.aborted) {
       return { success: false, error: OPERATION_CANCELLED_MESSAGE };
     }
@@ -465,7 +499,7 @@ export class TakeScreenshot implements ScreenshotService {
     if (options.format !== "webp") {
       // For PNG, save directly
       const saveStartTime = this.timer.now();
-      await writeFileSecure(finalPath, imageBuffer);
+      await this.fileWriter.write(finalPath, imageBuffer);
       const saveDuration = this.timer.now() - saveStartTime;
       logger.info(`[SCREENSHOT] PNG file save took ${saveDuration}ms`);
     } else {
@@ -482,7 +516,7 @@ export class TakeScreenshot implements ScreenshotService {
 
       // Save the webp file securely
       const saveStartTime = this.timer.now();
-      await writeFileSecure(finalPath, convertedImage);
+      await this.fileWriter.write(finalPath, convertedImage);
       const saveDuration = this.timer.now() - saveStartTime;
       logger.info(`[SCREENSHOT] WebP file save took ${saveDuration}ms`);
     }
@@ -582,7 +616,7 @@ export class TakeScreenshot implements ScreenshotService {
 
         // Save the webp file securely and remove temp file
         const saveStartTime = this.timer.now();
-        await writeFileSecure(finalPath, convertedImage);
+        await this.fileWriter.write(finalPath, convertedImage);
         await fsPromises.rm(tempLocalFile, { recursive: true, force: true });
         const saveDuration = this.timer.now() - saveStartTime;
         logger.info(`[SCREENSHOT] WebP file save took ${saveDuration}ms`);

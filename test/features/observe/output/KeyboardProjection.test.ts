@@ -462,3 +462,86 @@ describe("IME-owned affordances fold with the keys (#6871)", () => {
     expect(ids).toContain("android:id/input_method_nav_back");
   });
 });
+
+/**
+ * The legacy capture path (no `automobile:imePackage` extra) where the IME's own
+ * keys hang off an actionable IME-owned container. The container's provenance
+ * interval STARTS BEFORE and ENDS AFTER the keycap markers that identified the
+ * window, so a membership rule that only admits nodes inside the marker span
+ * leaves `keyboard_container | tap` beside `<ime>` — two rows for one keyboard
+ * (issue #6871).
+ */
+function enclosingImeContainerObservation(): ObserveResult {
+  const key = (index: number): ViewHierarchyNode => ({
+    $: {
+      "resource-id": `com.ime:id/key_pos_0_${index}`,
+      text: String.fromCharCode(113 + index),
+      clickable: true,
+      bounds: { left: index * 10, top: 620, right: index * 10 + 10, bottom: 660 },
+    },
+  });
+  const viewHierarchy = {
+    hierarchy: {
+      node: {
+        $: {},
+        node: [
+          {
+            $: {
+              "resource-id": "com.app:id/save",
+              text: "Save",
+              clickable: true,
+              bounds: { left: 0, top: 100, right: 100, bottom: 150 },
+            },
+          },
+          {
+            $: {
+              "resource-id": "com.ime:id/keyboard_container",
+              clickable: true,
+              bounds: { left: 0, top: 600, right: 100, bottom: 800 },
+            },
+            node: [
+              // An anonymous key BEFORE the first marker: inside the container's
+              // subtree, outside the marker span.
+              {
+                $: {
+                  text: "?123",
+                  clickable: true,
+                  bounds: { left: 0, top: 600, right: 20, bottom: 620 },
+                },
+              },
+              key(0),
+              key(1),
+            ],
+          },
+        ],
+      },
+    },
+  };
+  return {
+    updatedAt: 1,
+    screenSize: { width: 100, height: 800 },
+    systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+    viewHierarchy,
+    elements: new DefaultObserveElementCollector().collect(viewHierarchy, "android"),
+  };
+}
+
+describe("enclosing IME container folds with its keys (#6871)", () => {
+  test("an IME-owned container enclosing the marker span is not a second row", () => {
+    const result = sanitizeObserveResult(enclosingImeContainerObservation(), {
+      dropElements: true,
+      project: "skeleton",
+    });
+    const ids = result.skeleton!.map((entry) => entry.elementId);
+    expect(ids).toEqual(["com.app:id/save", "<ime>"]);
+    expect(result.skeleton!.find((entry) => entry.elementId === "<ime>")).toEqual({
+      elementId: "<ime>",
+      label: "Keyboard (com.ime)",
+      // The whole keyboard subtree, including the anonymous key that precedes
+      // the first marker.
+      bounds: [0, 600, 100, 800],
+      affordances: ["input"],
+    });
+    expect(result.keyboard).toEqual({ visible: true, package: "com.ime" });
+  });
+});

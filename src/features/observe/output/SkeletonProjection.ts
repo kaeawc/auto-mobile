@@ -685,9 +685,11 @@ function idPackage(el: Element): string | undefined {
 
 /**
  * The detected input-method window: its package, plus the provenance group and
- * pre-order span of the nodes that identified it. The span lets an anonymous
- * node between two keycaps (a key with no resource-id) collapse too, without
- * relaxing membership to anything outside that one window's subtree.
+ * pre-order span of the keyboard subtree — the nodes that identified it, widened
+ * to the outermost node the IME owns around them (see
+ * {@link widenToEnclosingImeSubtree}). The span lets an anonymous node between
+ * two keycaps (a key with no resource-id) collapse too, without relaxing
+ * membership to anything outside that one window's subtree.
  */
 interface ImeWindow {
   package: string;
@@ -780,7 +782,44 @@ function detectImeWindow(elements: ObserveElements): ImeWindow | undefined {
       ime.spanExit = Math.max(ime.spanExit, provenance.exit);
     }
   }
+  widenToEnclosingImeSubtree(elements, ime);
   return ime;
+}
+
+/**
+ * Grow the detected span from the marker nodes to the whole keyboard subtree
+ * they sit in (issue #6871).
+ *
+ * The markers are only the nodes carrying the `key_pos_*` id family, so on the
+ * fallback path the span is a keycap-only interval that STARTS AFTER and ENDS
+ * BEFORE the IME's own container (`com.ime:id/keyboard_container`, which is
+ * itself clickable). Membership measured against that narrow interval left the
+ * container — and any anonymous key outside it — as extra rows beside `<ime>`,
+ * breaking the one-row collapse this projection exists to guarantee.
+ *
+ * Only a node the IME itself OWNS by `package:id/name` can widen the span, so
+ * the framework window root (or the app's own decor node) can never drag the
+ * whole screen into the keyboard. Candidates enclosing the marker span are
+ * nested in one another by construction — they are ancestors of the same nodes
+ * — so taking the widest is well defined, and measuring every candidate against
+ * the ORIGINAL marker span keeps it independent of collection order.
+ */
+function widenToEnclosingImeSubtree(elements: ObserveElements, ime: ImeWindow): void {
+  if (ime.group === undefined) {
+    return;
+  }
+  const markerEnter = ime.spanEnter;
+  const markerExit = ime.spanExit;
+  for (const el of allElements(elements)) {
+    const provenance = getElementProvenance(el);
+    if (!provenance || provenance.group !== ime.group || idPackage(el) !== ime.package) {
+      continue;
+    }
+    if (provenance.enter <= markerEnter && provenance.exit >= markerExit) {
+      ime.spanEnter = Math.min(ime.spanEnter, provenance.enter);
+      ime.spanExit = Math.max(ime.spanExit, provenance.exit);
+    }
+  }
 }
 
 /**

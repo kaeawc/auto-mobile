@@ -1,7 +1,9 @@
 import { expect, test } from "bun:test";
 import type { ChildProcess } from "node:child_process";
-import { DevicePool } from "../../src/daemon/devicePool";
-import { SessionManager } from "../../src/daemon/sessionManager";
+import { Daemon } from "../../src/daemon/daemon";
+import { DaemonState } from "../../src/daemon/daemonState";
+import { DevicePool, type PooledDevice } from "../../src/daemon/devicePool";
+import { SessionManager, type Session } from "../../src/daemon/sessionManager";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
@@ -34,10 +36,20 @@ class LaggingShutdownManager extends FakeDeviceManager {
     return this.bootedDevices[0];
   }
 }
-async function setup() {
+class BlockingRecoveryReadyManager extends LaggingShutdownManager {
+  readonly readinessStarted = Promise.withResolvers<void>();
+  readonly releaseReadiness = Promise.withResolvers<void>();
+
+  override async waitForDeviceReady(): Promise<BootedDevice> {
+    this.readinessStarted.resolve();
+    await this.releaseReadiness.promise;
+    return await super.waitForDeviceReady();
+  }
+}
+
+async function setup(manager: LaggingShutdownManager = new LaggingShutdownManager()) {
   const timer = new FakeTimer();
   const sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
-  const manager = new LaggingShutdownManager();
   const pool = new DevicePool(
     sessions,
     "daemon",
@@ -65,6 +77,24 @@ async function setup() {
   const captured = pool.getDevice(original.deviceId)!;
   return { timer, sessions, manager, pool, captured };
 }
+
+interface DaemonDisconnectInternals {
+  devicePool: DevicePool;
+  sessionManager: SessionManager;
+  recordAndTryRecoverCapturedDisconnect(
+    deviceId: string,
+    pooledDevice: PooledDevice | null,
+    assignmentCount: number,
+    sessionId: string | null | undefined,
+    session: Session | null,
+    forceGeneration: number | undefined,
+  ): Promise<{ incidentId: string | undefined; handled: boolean }>;
+}
+
+interface DevicePoolRecoveryInternals {
+  recoveringAndroidImages: Map<string, DeviceInfo>;
+}
+
 async function flush(): Promise<void> {
   for (let i = 0; i < 40; i++) {
     await Promise.resolve();
@@ -258,6 +288,51 @@ test("ordinary session recovery retries after its deferred shutdown cooldown", a
   }
 });
 
+test("disconnect recovery retries through the daemon after its deferred shutdown cooldown", async () => {
+  const { timer, sessions, manager, pool, captured } = await setup();
+  const daemon = new Daemon({}, new FakeInstalledAppsRepository(), timer);
+  const internals = daemon as unknown as DaemonDisconnectInternals;
+  internals.devicePool = pool;
+  internals.sessionManager = sessions;
+  pool.isCurrentDisconnectedDevice = async () => "current";
+  try {
+    const firstPass = internals.recordAndTryRecoverCapturedDisconnect(
+      original.deviceId,
+      captured,
+      captured.assignmentCount,
+      "session",
+      sessions.getSession("session"),
+      undefined,
+    );
+    await manager.killAccepted.promise;
+    await flush();
+    timer.advanceTime(30_000);
+    expect(await firstPass).toMatchObject({ handled: true });
+    expect(pool.isSessionRecoveryInFlight("session")).toBe(true);
+
+    manager.bootedDevices = [];
+    timer.advanceTime(30_000);
+    expect(pool.isSessionRecoveryInFlight("session")).toBe(false);
+    const secondPass = await internals.recordAndTryRecoverCapturedDisconnect(
+      original.deviceId,
+      captured,
+      captured.assignmentCount,
+      "session",
+      sessions.getSession("session"),
+      undefined,
+    );
+
+    expect(secondPass).toMatchObject({ handled: true });
+    expect(manager.startedDevices).toHaveLength(1);
+    expect(pool.isSessionRecoveryInFlight("session")).toBe(false);
+  } finally {
+    if (DaemonState.getInstance().isInitialized()) {
+      DaemonState.getInstance().reset();
+    }
+    sessions.stopCleanupTimer();
+  }
+});
+
 test("ordinary session recovery releases after its retry also has unconfirmed shutdown", async () => {
   const { timer, sessions, manager, pool, captured } = await setup();
   try {
@@ -287,10 +362,34 @@ test("ordinary session recovery releases after its retry also has unconfirmed sh
   }
 });
 
-test("deferred ordinary recovery keeps its AVD unavailable to a new startup lease", async () => {
+test("releasing a deferred ADB-reset session clears its retained AVD startup reservation", async () => {
   const { timer, sessions, manager, pool, captured } = await setup();
   try {
-    const recovery = pool.recoverSessionBoundAndroidDeviceAfterLoss(
+    const recovery = pool.recoverSessionBoundAndroidDeviceAfterAdbServerReset(
+      original.deviceId,
+      captured,
+    );
+    await manager.killAccepted.promise;
+    await flush();
+    timer.advanceTime(30_000);
+    expect(await recovery).toBe(false);
+    expect(
+      (pool as unknown as DevicePoolRecoveryInternals).recoveringAndroidImages.has(original.name),
+    ).toBe(true);
+
+    await sessions.releaseSession("session", "explicit-release");
+    const releaseLease = await pool.reserveAndroidStartupLease(original.name, true);
+    await releaseLease();
+  } finally {
+    sessions.stopCleanupTimer();
+  }
+});
+
+test("matching startup lease wakes when a deferred recovery settles", async () => {
+  const manager = new BlockingRecoveryReadyManager();
+  const { timer, sessions, pool, captured } = await setup(manager);
+  try {
+    const firstRecovery = pool.recoverSessionBoundAndroidDeviceAfterLoss(
       original.deviceId,
       undefined,
       captured,
@@ -298,7 +397,7 @@ test("deferred ordinary recovery keeps its AVD unavailable to a new startup leas
     await manager.killAccepted.promise;
     await flush();
     timer.advanceTime(30_000);
-    expect(await recovery).toBe("deferred");
+    expect(await firstRecovery).toBe("deferred");
 
     let releaseLease: (() => Promise<void>) | undefined;
     const lease = pool.reserveAndroidStartupLease(original.name, true).then((release) => {
@@ -309,16 +408,67 @@ test("deferred ordinary recovery keeps its AVD unavailable to a new startup leas
 
     manager.bootedDevices = [];
     timer.advanceTime(30_000);
-    expect(
-      await pool.recoverSessionBoundAndroidDeviceAfterLoss(original.deviceId, undefined, captured),
-    ).toBe("recovered");
-    expect(releaseLease).toBeUndefined();
-
-    timer.advanceTime(30_000);
+    const retry = pool.recoverSessionBoundAndroidDeviceAfterLoss(
+      original.deviceId,
+      undefined,
+      captured,
+    );
+    await manager.readinessStarted.promise;
+    await flush();
+    manager.releaseReadiness.resolve();
+    expect(await retry).toBe("recovered");
     await lease;
     expect(releaseLease).toBeDefined();
+    expect(timer.now()).toBe(60_000);
     await releaseLease?.();
   } finally {
+    manager.releaseReadiness.resolve();
+    sessions.stopCleanupTimer();
+  }
+});
+
+test("startup lease beats a shorter timeout when matching recovery settles", async () => {
+  const manager = new BlockingRecoveryReadyManager();
+  const { timer, sessions, pool, captured } = await setup(manager);
+  try {
+    const firstRecovery = pool.recoverSessionBoundAndroidDeviceAfterLoss(
+      original.deviceId,
+      undefined,
+      captured,
+    );
+    await manager.killAccepted.promise;
+    await flush();
+    timer.advanceTime(30_000);
+    expect(await firstRecovery).toBe("deferred");
+
+    manager.bootedDevices = [];
+    timer.advanceTime(30_000);
+    const retry = pool.recoverSessionBoundAndroidDeviceAfterLoss(
+      original.deviceId,
+      undefined,
+      captured,
+    );
+    await manager.readinessStarted.promise;
+
+    const abort = new AbortController();
+    const timeout = timer.setTimeout(() => abort.abort(new Error("startup timed out")), 10_000);
+    let releaseLease: (() => Promise<void>) | undefined;
+    const lease = pool
+      .reserveAndroidStartupLease(original.name, true, abort.signal)
+      .then((release) => {
+        releaseLease = release;
+      });
+    await flush();
+
+    manager.releaseReadiness.resolve();
+    expect(await retry).toBe("recovered");
+    await lease;
+    expect(releaseLease).toBeDefined();
+    expect(timer.now()).toBe(60_000);
+    timer.clearTimeout(timeout);
+    await releaseLease?.();
+  } finally {
+    manager.releaseReadiness.resolve();
     sessions.stopCleanupTimer();
   }
 });

@@ -618,7 +618,6 @@ describe("settleEmbeddedObservation stale-state clearing (#6866)", () => {
     // ...while genuinely action-authored metadata still has to survive.
     (captured as any).gfxMetrics = { totalFrames: 12 };
     (captured as any).selectedElements = [{ text: "Airplane mode" }];
-    (captured as any).accessibilityAudit = { issues: [] };
 
     const outcome = await settleEmbeddedObservation({
       actionClass: "navigation",
@@ -635,6 +634,86 @@ describe("settleEmbeddedObservation stale-state clearing (#6866)", () => {
     expect("recompositionSummary" in outcome.observation).toBe(false);
     expect((outcome.observation as any).gfxMetrics).toEqual({ totalFrames: 12 });
     expect((outcome.observation as any).selectedElements).toEqual([{ text: "Airplane mode" }]);
-    expect((outcome.observation as any).accessibilityAudit).toEqual({ issues: [] });
+  });
+});
+
+describe("settleEmbeddedObservation accessibility audit (#6890)", () => {
+  /** The shape `AccessibilityAuditor.run` attaches, trimmed to what matters here. */
+  const auditOfTheHalfInflatedTree = {
+    screenId: "com.android.settings/.SubSettings#half",
+    violations: [{ ruleId: "touch-target-size", elementId: "2f0e3dad" }],
+    summary: { passed: false, bySeverity: { error: 1, warning: 0 } },
+  };
+
+  test("an adopted settled capture never carries the audit of the capture it replaced", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const fake = new FakeObserveScreen();
+    // The settle poll always passes `skipAccessibilityAudit: true`, so no poll
+    // result ever carries an audit of its own.
+    fake.setObserveSequence([
+      obs(AIRPLANE_ROW_INFLATED, 20),
+      obs(AIRPLANE_ROW_INFLATED, 30),
+      obs(AIRPLANE_ROW_INFLATED, 40),
+    ]);
+
+    const captured = obs(AIRPLANE_ROW_HALF_INFLATED, 10);
+    (captured as any).accessibilityAudit = auditOfTheHalfInflatedTree;
+
+    const outcome = await settleEmbeddedObservation({
+      actionClass: "navigation",
+      observation: captured,
+      settleObserve: settleFor(fake, timer),
+    });
+
+    expect(outcome.settled).toBe(true);
+    // Its elements, violations, fingerprint and screen id all describe the
+    // half-inflated tree that is no longer being returned.
+    expect("accessibilityAudit" in outcome.observation).toBe(false);
+    // ...and its absence is explained rather than silent: an audit the caller
+    // explicitly asked for must not simply evaporate.
+    expect(outcome.observation.accessibilityAuditSkipped).toBe("settled_capture_adopted");
+  });
+
+  test("an audit survives when the settled capture is NOT adopted", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const fake = new FakeObserveScreen();
+    // Every poll serves a pre-action cache entry, so nothing is adoptable and
+    // the action's own capture — the one the audit describes — is handed back.
+    fake.setObserveResult(obs(AIRPLANE_ROW_HALF_INFLATED, 5));
+
+    const captured = obs(AIRPLANE_ROW_INFLATED, 100);
+    (captured as any).accessibilityAudit = auditOfTheHalfInflatedTree;
+
+    const outcome = await settleEmbeddedObservation({
+      actionClass: "navigation",
+      observation: captured,
+      settleObserve: settleFor(fake, timer),
+    });
+
+    expect(outcome.observation).toBe(captured);
+    expect(outcome.observation.accessibilityAudit).toEqual(auditOfTheHalfInflatedTree as any);
+    expect(outcome.observation.accessibilityAuditSkipped).toBeUndefined();
+  });
+
+  test("no marker is added when no audit was requested", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const fake = new FakeObserveScreen();
+    fake.setObserveSequence([
+      obs(AIRPLANE_ROW_INFLATED, 20),
+      obs(AIRPLANE_ROW_INFLATED, 30),
+      obs(AIRPLANE_ROW_INFLATED, 40),
+    ]);
+
+    const outcome = await settleEmbeddedObservation({
+      actionClass: "navigation",
+      observation: obs(AIRPLANE_ROW_HALF_INFLATED, 10),
+      settleObserve: settleFor(fake, timer),
+    });
+
+    expect(outcome.settled).toBe(true);
+    expect("accessibilityAuditSkipped" in outcome.observation).toBe(false);
   });
 });

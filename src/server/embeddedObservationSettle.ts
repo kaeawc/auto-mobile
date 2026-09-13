@@ -121,10 +121,10 @@ export async function settleEmbeddedObservation(
  * pipeline writes `gfxMetrics`/`perfTiming` (`BaseVisualChange`),
  * `selectedElements` (`TapOnElement`) and `displayedTimeMetrics` (`LaunchApp`)
  * onto the observation AFTER the observe, and a handler that ran its own
- * `waitFor` attaches the wait's own record. Audits are here because the settle
- * poll deliberately skips them (`skipAccessibilityAudit: true`): an explicitly
- * requested audit must not be silently voided by a gate the caller did not ask
- * for.
+ * `waitFor` attaches the wait's own record. `performanceAudit` is here because
+ * it measures the DEVICE across the action window (fps, jank, touch latency),
+ * not the tree; `accessibilityAudit` deliberately is NOT — see
+ * {@link dropStaleAccessibilityAudit}.
  *
  * Anything NOT listed here — `rawViewHierarchy`, `observeScope`,
  * `recompositionSummary`, `freshness`, `screenIdentity`, … — is capture-derived
@@ -137,7 +137,6 @@ const ACTION_AUTHORED_OBSERVATION_METADATA = [
   "perfSnapshot",
   "selectedElements",
   "displayedTimeMetrics",
-  "accessibilityAudit",
   "performanceAudit",
   // A handler-run `waitFor`'s own record of what it waited for and found
   // (`openLink`'s integrated wait, #3490 §5). It describes the wait, not the
@@ -181,7 +180,43 @@ function mergeActionMetadata(
       Object.assign(merged, { [field]: actionObservation[field] });
     }
   }
+  dropStaleAccessibilityAudit(actionObservation, merged);
   return merged;
+}
+
+/**
+ * An accessibility audit belongs to the hierarchy it was run against, so it
+ * cannot cross over with the rest of the action's metadata.
+ *
+ * `AccessibilityAuditor.run` derives the audit's elements, violations,
+ * contrast fingerprints and screen id from the observation's OWN
+ * `viewHierarchy` (plus the screenshot cached alongside it). The settle poll
+ * passes `skipAccessibilityAudit: true`, so an adopted capture never brings an
+ * audit of its own — and carrying the original's across would pair a settled
+ * tree with violations counted on a half-inflated or cross-screen one: element
+ * ids that no longer resolve, and "passed"/"failed" verdicts about a screen the
+ * client is not looking at. A false audit is worse than no audit.
+ *
+ * Re-running it here is not an option worth the hot path: the auditor needs a
+ * screenshot of the ADOPTED frame to judge contrast, and the settle poll takes
+ * none — re-capturing one would charge every navigation action a screenshot it
+ * did not ask for. So the audit is dropped, and its absence is recorded rather
+ * than silent: `accessibilityAuditSkipped` tells a caller who explicitly
+ * enabled auditing that this observation has no audit BECAUSE the gate replaced
+ * the capture, and that a standalone `observe` will produce one for the settled
+ * screen.
+ */
+function dropStaleAccessibilityAudit(
+  actionObservation: ObserveResult,
+  merged: ObserveResult,
+): void {
+  if (merged.accessibilityAudit !== undefined) {
+    return;
+  }
+  if (actionObservation.accessibilityAudit === undefined) {
+    return;
+  }
+  merged.accessibilityAuditSkipped = "settled_capture_adopted";
 }
 
 function hasUsableHierarchy(observation: ObserveResult): boolean {

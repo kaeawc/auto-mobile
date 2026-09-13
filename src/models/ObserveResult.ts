@@ -360,6 +360,21 @@ export interface ObserveResult {
   accessibilityAudit?: AccessibilityAuditResult;
 
   /**
+   * Why a REQUESTED accessibility audit is absent from this observation.
+   *
+   * Present only when an audit was run and then deliberately dropped, so a
+   * client can tell "auditing was off" from "auditing was on and its result no
+   * longer describes this capture". The one producer today is the
+   * embedded-observation settle gate (#6866): when it adopts a settled capture
+   * in place of the action's own, the audit attached to the original — whose
+   * elements, violations, fingerprint and screen id were all derived from that
+   * original hierarchy, while settle polls skip auditing entirely — describes a
+   * tree that is no longer being returned, so it is dropped rather than
+   * mismatched onto the adopted one.
+   */
+  accessibilityAuditSkipped?: "settled_capture_adopted";
+
+  /**
    * Freshness metadata for the observation
    * Helps agents understand if the data reflects a recent interaction
    */

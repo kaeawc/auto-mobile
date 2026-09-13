@@ -1065,8 +1065,10 @@ export function registerAppTools() {
 
   ToolRegistry.registerDeviceAware(
     "listApps",
-    "List installed apps on a device, each with its display label and whether it can be " +
-      "launched. Filters by type (default: launchable — every app with a launcher entry point, " +
+    "List installed apps on a device, with optional display label and launchable fields when " +
+      "reported by the platform or transport. The label is typically omitted on Android when " +
+      "the installed CtrlProxy APK lacks label support; launchable is typically omitted for " +
+      "physical iOS/devicectl records. Filters by type (default: launchable — every app with a launcher entry point, " +
       "preinstalled ones included), search (package name or label), and profile.",
     listAppsSchema,
     listAppsHandler,

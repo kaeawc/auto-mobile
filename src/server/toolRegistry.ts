@@ -1743,6 +1743,16 @@ export class ToolRegistryClass {
           properties: {
             ...properties,
             toolName: { ...properties.toolName, enum: configurableToolNames },
+            // #6869 — the batch spelling carries the same vocabulary, so a
+            // client declaring a whole toolset in one call reads the choices
+            // from the field it is actually filling in.
+            toolNames: {
+              ...properties.toolNames,
+              items: {
+                ...(properties.toolNames?.items as Record<string, unknown> | undefined),
+                enum: configurableToolNames,
+              },
+            },
           },
         };
       }

@@ -67,6 +67,109 @@ function failCancelledAcquisition(acquiredSessionUuid: string): never {
   throw new ActionableError("MCP request was cancelled during acquisition.");
 }
 
+/**
+ * The `enableTools` a device-acquisition call declared (#6869). The three
+ * acquisition tools advertise the field (`enableToolsSchemaField` in
+ * `src/server/toolSelectionTools.ts`); their handlers ignore it, because the
+ * grant is applied here — against the session the handler MINTS, which only the
+ * result carries.
+ */
+function resolveRequestedEnableTools(toolName: string, parsedParams: unknown): string[] {
+  if (
+    !isDeviceSessionAcquisitionTool(toolName) ||
+    !parsedParams ||
+    typeof parsedParams !== "object"
+  ) {
+    return [];
+  }
+  const requested = (parsedParams as { enableTools?: unknown }).enableTools;
+  if (!Array.isArray(requested) || requested.length === 0) {
+    return [];
+  }
+  const names = requested.filter((name): name is string => typeof name === "string");
+  // Reject an unknown or non-configurable name BEFORE the device work starts. A
+  // caller that misspelled one capability should not pay for a boot and a
+  // session mint to find out.
+  assertUserConfigurableToolNames(names);
+  return names;
+}
+
+/**
+ * Grant the declared capabilities against the session an acquisition handler
+ * MINTED (only its result carries that UUID), and refresh discovery.
+ */
+async function applyAcquisitionToolSelection(
+  service: McpServerOptions["sessionToolSelectionService"],
+  sessionUuid: string,
+  enableTools: readonly string[],
+): Promise<void> {
+  if (enableTools.length === 0) {
+    return;
+  }
+  await applyToolSelection(service, sessionUuid, enableTools, true);
+  ToolRegistry.notifyToolListChanged();
+}
+
+/**
+ * provisionDevice mints a session too, so it accepts `enableTools` and reports
+ * the resulting `enabledTools` (#6869). It deliberately does NOT reuse the
+ * getAndroid/getApple discovery path: that one also computes `gatedTools` and
+ * fails a cancelled acquisition, neither of which is part of provisionDevice's
+ * existing contract. The device is provisioned and the session minted by the
+ * time this runs, so a failed capability report must not discard either.
+ */
+async function enrichProvisionDeviceResult<
+  T extends { content: Array<{ type: string; text?: string }>; isError?: boolean },
+>(
+  toolName: string,
+  result: T,
+  sessionUuid: string | undefined,
+  service: McpServerOptions["sessionToolSelectionService"],
+  enableTools: readonly string[],
+): Promise<T> {
+  if (toolName !== "provisionDevice" || result?.isError || !sessionUuid) {
+    return result;
+  }
+  try {
+    await applyAcquisitionToolSelection(service, sessionUuid, enableTools);
+    return enrichAcquisitionResult(result, {
+      enabledTools: await listEnabledToolNames(service, sessionUuid),
+    });
+  } catch (error) {
+    logger.warn("[MCP] Could not enrich provisionDevice with enabled tools", { error });
+    return result;
+  }
+}
+
+/**
+ * Merge server-computed session fields (`gatedTools`, `enabledTools`) into an
+ * acquisition result, in both the text envelope and `structuredContent`.
+ */
+function enrichAcquisitionResult<T extends { content: Array<{ type: string; text?: string }> }>(
+  result: T,
+  fields: Record<string, unknown>,
+): T {
+  let enriched = false;
+  return {
+    ...result,
+    content: result.content.map((item: { type: string; text?: string }) => {
+      if (enriched || item.type !== "text" || typeof item.text !== "string") {
+        return item;
+      }
+      enriched = true;
+      return { ...item, text: stringifyToolResponse({ ...JSON.parse(item.text), ...fields }) };
+    }),
+    ...((result as { structuredContent?: Record<string, unknown> }).structuredContent
+      ? {
+          structuredContent: {
+            ...(result as { structuredContent?: Record<string, unknown> }).structuredContent,
+            ...fields,
+          },
+        }
+      : {}),
+  };
+}
+
 async function awaitWithCancellation<T>(
   promise: Promise<T>,
   signal: AbortSignal | undefined,
@@ -120,7 +223,13 @@ import { registerFormTools } from "./formTools";
 import { registerAccessibilityTools } from "./accessibilityTools";
 import { registerAccessibilityFocusTools } from "./accessibilityFocusTools";
 import { registerNetworkTools } from "./networkTools";
-import { registerToolSelectionTools, SET_TOOL_ENABLED_TOOL_NAME } from "./toolSelectionTools";
+import {
+  applyToolSelection,
+  assertUserConfigurableToolNames,
+  listEnabledToolNames,
+  registerToolSelectionTools,
+  SET_TOOL_ENABLED_TOOL_NAME,
+} from "./toolSelectionTools";
 import {
   DEVICE_SESSION_RECOVERY_PROMPT,
   DEVICE_SESSION_RECOVERY_TOOLS,
@@ -822,6 +931,9 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       );
     }
 
+    // #6869: the capabilities this acquisition declares, validated up front.
+    const requestedEnableTools = resolveRequestedEnableTools(name, parsedParams);
+
     const executionSessionUuid =
       derivedLabelSessionUuid ?? providedSessionUuid ?? routingSessionUuid;
     const handlerRoutingSessionUuid =
@@ -1017,34 +1129,28 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       ) {
         let acquisitionEnrichmentCancelled = false;
         try {
+          // #6869: the caller's `enableTools` declaration lands BEFORE discovery,
+          // so the gatedTools/enabledTools pair below reports the session as the
+          // caller's next call will find it. A failure here is logged and the
+          // response still reports the tool as gated rather than stranding the
+          // session the handler just minted.
+          await applyAcquisitionToolSelection(
+            options.sessionToolSelectionService,
+            acquiredSessionUuid,
+            requestedEnableTools,
+          );
           const listed = new Set(
             (
               await awaitWithCancellation(listSessionTools(acquiredSessionUuid), requestSignal)
             ).tools.map((tool) => tool.name),
           );
-          const gatedTools = ToolRegistry.getAllTools()
-            .filter(
-              (tool) => ToolRegistry.isUserConfigurableTool(tool.name) && !listed.has(tool.name),
-            )
+          const configurable = ToolRegistry.getAllTools()
+            .filter((tool) => ToolRegistry.isUserConfigurableTool(tool.name))
             .map((tool) => tool.name)
             .sort();
-          let enriched = false;
-          result = {
-            ...result,
-            content: result.content.map((item: { type: string; text?: string }) => {
-              if (enriched || item.type !== "text" || typeof item.text !== "string") {
-                return item;
-              }
-              enriched = true;
-              return {
-                ...item,
-                text: stringifyToolResponse({ ...JSON.parse(item.text), gatedTools }),
-              };
-            }),
-            ...(result.structuredContent
-              ? { structuredContent: { ...result.structuredContent, gatedTools } }
-              : {}),
-          };
+          const gatedTools = configurable.filter((toolName) => !listed.has(toolName));
+          const enabledTools = configurable.filter((toolName) => listed.has(toolName));
+          result = enrichAcquisitionResult(result, { gatedTools, enabledTools });
         } catch (error) {
           acquisitionEnrichmentCancelled ||= Boolean(requestSignal?.aborted);
           // Acquisition already succeeded. Preserve its session handle so the
@@ -1061,6 +1167,14 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
           failCancelledAcquisition(acquiredSessionUuid);
         }
       }
+      // #6869 — a no-op for every tool but provisionDevice (guard inside).
+      result = await enrichProvisionDeviceResult(
+        name,
+        result,
+        acquiredSessionUuid,
+        options.sessionToolSelectionService,
+        requestedEnableTools,
+      );
       if (
         name === "setActiveDevice" &&
         !result?.isError &&

@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod/v4";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import { ToolRegistry, ProgressCallback } from "./toolRegistry";
+import { enableToolsSchemaField } from "./toolSelectionTools";
 import { deviceResourceConfigurationSchema } from "./deviceResourceSchemas";
 import { registerDeviceResourceTools } from "./deviceResourceTools";
 import {
@@ -285,6 +286,11 @@ export const getAndroidSchema = devicePreparationTimeoutSchema
       .describe(
         "Booted device serial, e.g. emulator-5554 (the `deviceId` field of automobile:devices/booted/android), or a defined AVD image name, which is cold-booted by name. Prefer avdName to boot or coordinate a named AVD.",
       ),
+    // #6869 — declare the session's capabilities in the SAME call that acquires
+    // the device, instead of one setToolEnabled round-trip per gated tool. The
+    // grant is applied in src/server/index.ts against the session this call
+    // mints; this handler ignores the field.
+    enableTools: enableToolsSchemaField,
   })
   .superRefine(validateDevicePreparationTimeout)
   .superRefine((value, ctx) => {
@@ -322,6 +328,8 @@ export const getAppleSchema = devicePreparationTimeoutSchema
       .describe(
         "Booted device identifier (the `deviceId` field of automobile:devices/booted/ios); alias for udid",
       ),
+    // See getAndroidSchema.enableTools (#6869).
+    enableTools: enableToolsSchemaField,
   })
   .superRefine(validateDevicePreparationTimeout)
   .superRefine((value, ctx) => {
@@ -451,6 +459,8 @@ export const provisionDeviceSchema = withJsonSchemaOverride(
         .max(MAX_PROVISION_DEVICE_TIMEOUT_MS)
         .optional()
         .describe("Total provision, boot, resource configuration, and readiness timeout in ms"),
+      // See getAndroidSchema.enableTools (#6869).
+      enableTools: enableToolsSchemaField,
     })
     .strict()
     .refine((args) => !args.resources || args.boot !== false, {

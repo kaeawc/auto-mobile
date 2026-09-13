@@ -13,6 +13,43 @@ case-sensitive names. `setToolEnabled` is always available:
 Set `enabled` to `false` to disable a tool. An optional `sessionUuid` scopes
 the choice to a routing session. The choice persists across daemon restarts.
 
+## Enabling several tools at once
+
+Pass `toolNames` instead of `toolName` to declare a whole task's toolset in one
+round-trip. The batch is all-or-nothing: an unknown or non-configurable name
+rejects the request before anything is written.
+
+```json
+{
+  "name": "setToolEnabled",
+  "arguments": { "toolNames": ["inputText", "clearText", "imeAction"] }
+}
+```
+
+Either spelling returns `enabledTools` — the user-configurable tools that are
+enabled for the session after the call — so the resulting capability set is
+visible without a second `tools/list`.
+
+## Declaring capabilities at device acquisition
+
+`getAndroid`, `getApple`, and `provisionDevice` accept `enableTools`, applied
+while the session is minted, so acquisition and capability declaration are one
+call:
+
+```json
+{
+  "name": "getAndroid",
+  "arguments": {
+    "avdName": "Pixel_9",
+    "enableTools": ["inputText", "clearText", "imeAction"]
+  }
+}
+```
+
+An unknown name rejects the call before any device work starts. `getAndroid`
+and `getApple` report both `gatedTools` (still disabled) and `enabledTools`
+(the complement) in their response; `provisionDevice` reports `enabledTools`.
+
 ## Startup defaults
 
 Use repeatable CLI flags or comma-separated environment variables:

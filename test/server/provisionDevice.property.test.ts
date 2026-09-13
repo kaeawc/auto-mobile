@@ -3,6 +3,7 @@ import fc from "fast-check";
 import {
   provisionDeviceDeadlineMs,
   provisionDeviceFingerprint,
+  provisionDeviceSchema,
   type ProvisionDeviceArgs,
 } from "../../src/server/deviceTools";
 import {
@@ -232,6 +233,72 @@ describe("provisionDeviceDeadlineMs (property-based)", () => {
           const result = provisionDeviceDeadlineMs(args, { now: () => now }, true);
           return result === expected && result <= mcpDeadlineMs - RESERVED_ROLLBACK_MS;
         },
+      ),
+      RUN_OPTIONS,
+    );
+  });
+});
+
+// #6869 — provisionDevice mints a session, so it declares capabilities at
+// acquisition with the same `enableTools` field getAndroid/getApple carry.
+describe("provisionDeviceSchema enableTools (property-based)", () => {
+  const base = {
+    operationId: "op-1",
+    device: {
+      platform: "android" as const,
+      name: "Pixel_A",
+      spec: { runtime: "system-images;android-35;google_apis;x86_64", deviceType: "pixel_6" },
+    },
+  };
+
+  test("accepts a non-empty array of non-empty names and rejects anything else", () => {
+    fc.assert(
+      fc.property(
+        fc.array(fc.string({ maxLength: 8 }), { minLength: 0, maxLength: 4 }),
+        (enableTools) => {
+          const expected = enableTools.length > 0 && enableTools.every((n) => n.length > 0);
+          return provisionDeviceSchema.safeParse({ ...base, enableTools }).success === expected;
+        },
+      ),
+      RUN_OPTIONS,
+    );
+  });
+
+  // `enableTools` declares SESSION capabilities, not device identity, so it must
+  // not change the idempotency fingerprint — two otherwise-identical calls that
+  // ask for different capabilities still name the same provisioned device.
+  test("does not enter the idempotency fingerprint", () => {
+    fc.assert(
+      fc.property(
+        fc.array(fc.string({ minLength: 1, maxLength: 8 }), { minLength: 1, maxLength: 4 }),
+        (enableTools) => {
+          const args = provisionDeviceSchema.parse({ ...base, enableTools }) as ProvisionDeviceArgs;
+          const without = provisionDeviceSchema.parse(base) as ProvisionDeviceArgs;
+          return provisionDeviceFingerprint(args) === provisionDeviceFingerprint(without);
+        },
+      ),
+      RUN_OPTIONS,
+    );
+  });
+
+  test("stays strict about every other unknown key", () => {
+    fc.assert(
+      fc.property(
+        fc
+          .string({ minLength: 1, maxLength: 12 })
+          .filter(
+            (key) =>
+              ![
+                "operationId",
+                "device",
+                "resources",
+                "boot",
+                "readiness",
+                "timeoutMs",
+                "enableTools",
+              ].includes(key),
+          ),
+        (key) => !provisionDeviceSchema.safeParse({ ...base, [key]: "value" }).success,
       ),
       RUN_OPTIONS,
     );

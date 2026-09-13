@@ -140,6 +140,9 @@ describe("per-session exact-tool selection", () => {
       expect(JSON.parse(response.content[0].text)).toEqual({
         sessionUuid: "new-session",
         gatedTools: ["inputText"],
+        // #6869 — the complement of gatedTools, so a client confirms the
+        // resulting capability set without a second listTools.
+        enabledTools: [acquisition],
       });
     });
 
@@ -200,14 +203,22 @@ describe("per-session exact-tool selection", () => {
       const first = acquire("session-a");
       try {
         await lookupStarted.promise;
-        expect(await acquire("session-b")).toEqual({ sessionUuid: "session-b", gatedTools: [] });
+        expect(await acquire("session-b")).toEqual({
+          sessionUuid: "session-b",
+          gatedTools: [],
+          enabledTools: [acquisition, "inputText", "inspectRouting"].sort(),
+        });
         expect((await fixture.client.listTools()).tools.map((tool) => tool.name)).toContain(
           "inputText",
         );
       } finally {
         releaseLookup.resolve();
       }
-      expect(await first).toEqual({ sessionUuid: "session-a", gatedTools: ["inputText"] });
+      expect(await first).toEqual({
+        sessionUuid: "session-a",
+        gatedTools: ["inputText"],
+        enabledTools: [acquisition, "inspectRouting"].sort(),
+      });
       expect((await fixture.client.listTools()).tools.map((tool) => tool.name)).not.toContain(
         "inputText",
       );

@@ -235,11 +235,11 @@ The `deviceId` fields exist so the value that `listDevices` and the
 
 ## Accessibility & session tools
 
-| Tool                               | What it does                                                                        |
-| ---------------------------------- | ----------------------------------------------------------------------------------- |
-| ♿ <code>accessibility</code>      | Reads or controls Android TalkBack and iOS VoiceOver, returning fresh device state. |
-| 🎯 <code>accessibilityFocus</code> | Sets or clears Android TalkBack focus by resource ID, text, or content description. |
-| 🔀 <code>setToolEnabled</code>     | Enables or disables one exact AutoMobile tool for the current MCP session.          |
+| Tool                               | What it does                                                                                                                  |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| ♿ <code>accessibility</code>      | Reads or controls Android TalkBack and iOS VoiceOver, returning fresh device state.                                           |
+| 🎯 <code>accessibilityFocus</code> | Sets or clears Android TalkBack focus by resource ID, text, or content description.                                           |
+| 🔀 <code>setToolEnabled</code>     | Enables or disables AutoMobile tools for the current MCP session — one exact name via `toolName`, or a batch via `toolNames`. |
 
 On Android, compact observations fold captured soft-keyboard keys into a single
 `keyboard: { visible: true, package: "…" }` summary. Use `sendKeys` for text input

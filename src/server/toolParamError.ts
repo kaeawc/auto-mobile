@@ -98,6 +98,12 @@ interface UnrecognizedGroup {
   // Rejected by at least one branch, first-seen order. When `intersection` is
   // empty these are valid keys that belong to mutually exclusive branches.
   reported: string[];
+  // Known keys that no single branch accepts together, first-seen order, or
+  // empty when some branch accepts them all. Non-empty ALONGSIDE a non-empty
+  // `intersection` when the caller sent both an unknown key and keys from two
+  // arms: naming only the unknown one would leave the request invalid after the
+  // caller fixed it (PR #6882 review).
+  exclusive: string[];
 }
 
 type UnrecognizedKeysIssue = Extract<ZodIssue, { code: "unrecognized_keys" }>;
@@ -130,23 +136,62 @@ interface KeyReport {
 // resolved one level deeper) are intersected. Reports that carry no further union
 // context are merged with a set union — they come from one object schema, which
 // emits at most one `unrecognized_keys` issue.
-function rejectedByEveryArm(reports: readonly KeyReport[], level: number): Set<string> {
+// The arms of the union at `level`, when every report belongs to it. `undefined`
+// means the reports do not share one union at this level, so there is nothing to
+// intersect: they came from a single object schema.
+function armsAtLevel(
+  reports: readonly KeyReport[],
+  level: number,
+): { context: UnionContext; byArm: Map<number, KeyReport[]> } | undefined {
   const context = reports[0]?.chain[level];
   const sameUnion = (report: KeyReport): boolean =>
     report.chain[level]?.unionId === context?.unionId;
   if (!context || !reports.every(sameUnion)) {
-    return new Set(reports.flatMap((report) => report.keys));
+    return undefined;
   }
   const byArm = new Map<number, KeyReport[]>();
   for (const report of reports) {
     const arm = report.chain[level].branchIndex;
     byArm.set(arm, [...(byArm.get(arm) ?? []), report]);
   }
-  if (byArm.size !== context.branchCount) {
+  return { context, byArm };
+}
+
+function rejectedByEveryArm(reports: readonly KeyReport[], level: number): Set<string> {
+  const arms = armsAtLevel(reports, level);
+  if (!arms) {
+    return new Set(reports.flatMap((report) => report.keys));
+  }
+  if (arms.byArm.size !== arms.context.branchCount) {
     return new Set<string>();
   }
-  const [first, ...rest] = [...byArm.values()].map((arm) => rejectedByEveryArm(arm, level + 1));
+  const [first, ...rest] = [...arms.byArm.values()].map((arm) =>
+    rejectedByEveryArm(arm, level + 1),
+  );
   return new Set([...first].filter((name) => rest.every((arm) => arm.has(name))));
+}
+
+// The keys that make the arms mutually exclusive, ignoring the keys `unknown` to
+// every arm (those are reported as unrecognized, not as a choice). There is a
+// conflict only when NO arm accepts the whole supplied set: every arm rejected
+// at least one known key. An arm that rejected none accepts them all, so a valid
+// key beside an unknown one is never mistaken for a conflict.
+function mutuallyExclusiveKeys(
+  reports: readonly KeyReport[],
+  unknown: ReadonlySet<string>,
+  level = 0,
+): Set<string> {
+  const arms = armsAtLevel(reports, level);
+  if (!arms || arms.byArm.size !== arms.context.branchCount) {
+    return new Set<string>();
+  }
+  const perArm = [...arms.byArm.values()].map((arm) =>
+    [...rejectedByEveryArm(arm, level + 1)].filter((name) => !unknown.has(name)),
+  );
+  if (perArm.some((keys) => keys.length === 0)) {
+    return new Set<string>();
+  }
+  return new Set(perArm.flat());
 }
 
 function groupUnrecognizedKeys(flattenedIssues: FlattenedIssue[]): Map<string, UnrecognizedGroup> {
@@ -165,7 +210,12 @@ function groupUnrecognizedKeys(flattenedIssues: FlattenedIssue[]): Map<string, U
   for (const [key, reports] of byGroup) {
     const reported = [...new Set(reports.flatMap((report) => report.keys))];
     const rejected = rejectedByEveryArm(reports, 0);
-    merged.set(key, { intersection: reported.filter((name) => rejected.has(name)), reported });
+    const exclusive = mutuallyExclusiveKeys(reports, rejected);
+    merged.set(key, {
+      intersection: reported.filter((name) => rejected.has(name)),
+      reported,
+      exclusive: reported.filter((name) => exclusive.has(name)),
+    });
   }
   return merged;
 }
@@ -462,40 +512,72 @@ export function formatToolParamError(
   // (a bad `duration` beside a conflicting `selector`) leaves the conflict
   // unexplained, and dropping it there hid a still-invalid selector until the
   // caller retried (#6867, PR review).
-  const conflicts: Array<{ issue: UnrecognizedKeysIssue; keys: string[]; unionId: number }> = [];
-  const explainedUnions = new Set<number>();
-  const render = (entry: FlattenedIssue): string | undefined => {
+  interface HeldConflict {
+    issue: UnrecognizedKeysIssue;
+    keys: string[];
+    unionId: number;
+    path: string;
+  }
+  const conflicts: HeldConflict[] = [];
+  // Where each rendered union issue spoke, so a conflict is only held back by a
+  // line about the conflicting object itself. A nested union's conflict and an
+  // unrelated sibling error carry the SAME outer union id (`waitFor.container`
+  // and `waitFor.timeout`), so suppressing by union id alone dropped a conflict
+  // the sibling says nothing about (PR #6882 review).
+  const explanations: Array<{ unionId: number; path: string }> = [];
+  const pathOf = (path: ReadonlyArray<PropertyKey>): string => path.map(String).join(".");
+  const explains = (conflict: HeldConflict): boolean =>
+    explanations.some(
+      ({ unionId, path }) =>
+        unionId === conflict.unionId &&
+        (conflict.path === "" || path === conflict.path || path.startsWith(`${conflict.path}.`)),
+    );
+  const conflictLine = (issue: UnrecognizedKeysIssue, keys: string[]): string =>
+    renderer(withMergedKeys(issue, keys, mutuallyExclusiveMessage(keys)), keys);
+  const render = (entry: FlattenedIssue): string[] => {
     const { issue } = entry;
     if (!entry.union || !isUnrecognizedKeys(issue)) {
       if (entry.union) {
-        explainedUnions.add(entry.union.unionId);
+        explanations.push({ unionId: entry.union.unionId, path: pathOf(issue.path) });
       }
-      return renderer(issue);
+      return [renderer(issue)];
     }
     const group = unrecognizedGroups.get(coverageKey(entry.union.unionId, issue.path));
     if (!group) {
-      return renderer(issue);
+      return [renderer(issue)];
     }
     if (group.intersection.length === 0) {
-      conflicts.push({ issue, keys: group.reported, unionId: entry.union.unionId });
-      return undefined;
+      conflicts.push({
+        issue,
+        keys: group.reported,
+        unionId: entry.union.unionId,
+        path: pathOf(issue.path),
+      });
+      return [];
     }
-    explainedUnions.add(entry.union.unionId);
-    const keys = group.intersection;
-    return renderer(withMergedKeys(issue, keys, unrecognizedKeysMessage(keys)), keys);
+    explanations.push({ unionId: entry.union.unionId, path: pathOf(issue.path) });
+    // The unknown key need not be the only thing wrong: keys from two arms are
+    // still mutually exclusive, and naming only the unknown one would cost the
+    // caller another round-trip to learn that. Both sentences ride one issue so
+    // the tool's "Accepted: …" list is appended once.
+    const keys = [...group.intersection, ...group.exclusive];
+    const message =
+      group.exclusive.length > 0
+        ? `${unrecognizedKeysMessage(group.intersection)}. ${mutuallyExclusiveMessage(group.exclusive)}`
+        : unrecognizedKeysMessage(group.intersection);
+    return [renderer(withMergedKeys(issue, keys, message), keys)];
   };
 
   // Dedupe formatted messages: union expansion repeats the same real issue once
   // per branch that carries the field.
-  const rendered = selectedIssues.map(render).filter((line) => line !== undefined);
-  // A union is "explained" only once one of its own issues rendered a line, so
-  // when nothing rendered at all every conflict is unexplained and still emitted
-  // — the pre-existing fallback, now reached by the same rule.
+  const rendered = selectedIssues.flatMap(render);
+  // A conflict is "explained" only once one of its union's own issues rendered a
+  // line about the conflicting object or something inside it, so when nothing
+  // rendered at all every conflict is still emitted — the pre-existing fallback,
+  // now reached by the same rule.
   const fallback = conflicts
-    .filter(({ unionId }) => !explainedUnions.has(unionId))
-    .map(({ issue, keys }) =>
-      renderer(withMergedKeys(issue, keys, mutuallyExclusiveMessage(keys)), keys),
-    );
+    .filter((conflict) => !explains(conflict))
+    .map(({ issue, keys }) => conflictLine(issue, keys));
   const issues = [...new Set([...rendered, ...fallback])];
 
   const hints: string[] = [];

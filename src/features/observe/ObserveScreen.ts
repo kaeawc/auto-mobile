@@ -604,8 +604,9 @@ export class RealObserveScreen implements ObserveScreen {
         device,
         // Prefer the recorder-backed cached path before falling back to disk scan.
         screenshotPathResolver: () =>
-          resolveLatestScreenshotPath(() =>
-            getScreenshotStateStore().getPath(this.device.deviceId),
+          resolveLatestScreenshotPath(
+            () => getScreenshotStateStore().getPath(this.device.deviceId),
+            this.device.deviceId,
           ),
       });
     this.accessibilityStateDetector =

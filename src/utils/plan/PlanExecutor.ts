@@ -43,9 +43,14 @@ function formatToolError(error: unknown): string {
 // must read identically instead of leaking the raw zod issue dump (#5854 §3).
 // Non-Zod errors fall through unchanged; the `instanceof ZodError` shape is left
 // intact for callers that branch on it (e.g. optional-step handling below).
-function formatStepError(toolName: string, error: unknown, rawInput?: unknown): string {
+function formatStepError(
+  toolName: string,
+  error: unknown,
+  rawInput?: unknown,
+  schema?: unknown,
+): string {
   if (error instanceof ZodError) {
-    return `Invalid parameters for tool ${toolName}: ${formatToolParamError(toolName, error, rawInput)}`;
+    return `Invalid parameters for tool ${toolName}: ${formatToolParamError(toolName, error, rawInput, schema)}`;
   }
   return `${error}`;
 }
@@ -324,7 +329,9 @@ export class DefaultPlanExecutor implements PlanExecutor {
       return {
         capturedAtMs: Date.now(),
         observeError:
-          error instanceof ZodError ? formatStepError("observe", error) : errorMessage(error),
+          error instanceof ZodError
+            ? formatStepError("observe", error, undefined, observeTool.schema)
+            : errorMessage(error),
       };
     }
   }
@@ -571,7 +578,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
       if (isDeviceLostError(error)) {
         throw error;
       }
-      const errorMsg = formatStepError(step.tool, error, step.params);
+      const errorMsg = formatStepError(step.tool, error, step.params, tool.schema);
       if (step.optional && !context.signal?.aborted && !(error instanceof ZodError)) {
         this.logger.warn(
           `${context.logPrefix} optional step ${step.tool} threw; returning skipped status`,

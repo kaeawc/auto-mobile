@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
+import path from "node:path";
 import { TakeScreenshot } from "../../../src/features/observe/TakeScreenshot";
 import { BootedDevice } from "../../../src/models/DeviceInfo";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
@@ -10,6 +11,11 @@ import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
+import { FakeScreenshotFileWriter } from "../../fakes/FakeScreenshotFileWriter";
+import {
+  screenshotDeviceToken,
+  screenshotFileName,
+} from "../../../src/utils/screenshot/screenshotFormats";
 
 describe("TakeScreenshot", function () {
   describe("Unit Tests for Extracted Methods", function () {
@@ -99,9 +105,28 @@ describe("TakeScreenshot", function () {
       const first = screenshot.generateScreenshotPath(sameTime, { format: "png" });
       const second = screenshot.generateScreenshotPath(sameTime, { format: "png" });
 
-      expect(first).toMatch(/screenshot_1234567890123_capture-1\.png$/);
-      expect(second).toMatch(/screenshot_1234567890123_capture-2\.png$/);
+      const deviceToken = screenshotDeviceToken("test-device-id");
+      expect(first.endsWith(`screenshot_1234567890123_${deviceToken}_capture-1.png`)).toBe(true);
+      expect(second.endsWith(`screenshot_1234567890123_${deviceToken}_capture-2.png`)).toBe(true);
       expect(first).not.toBe(second);
+    });
+
+    test("names captures after the device so a shared cache dir stays attributable", function () {
+      const screenshot = new TakeScreenshot(
+        { name: "remote", platform: "android", deviceId: "127.0.0.1:5555", source: "local" },
+        new FakeAdbClientFactory(fakeAdb),
+        new FakeTimer(),
+        new CountingIdGenerator("capture"),
+      );
+
+      const generated = screenshot.generateScreenshotPath(1234567890123, { format: "png" });
+
+      expect(
+        generated.endsWith(screenshotFileName(1234567890123, "127.0.0.1:5555", "capture-1", "png")),
+      ).toBe(true);
+      expect(path.basename(generated)).toMatch(
+        /^screenshot_1234567890123_127-0-0-1-5555-[0-9a-f]+_capture-1\.png$/,
+      );
     });
 
     test("persists native Android CtrlProxy JPEG as jpg with metadata", async () => {
@@ -182,6 +207,96 @@ describe("TakeScreenshot", function () {
       expect(calledCommand).toContain("rm"); // Should cleanup temp file in same command
 
       expect(result.success).toBe(true);
+    });
+  });
+
+  describe("Android cancellation", function () {
+    test("abandons an in-flight CtrlProxy screenshot as soon as the signal aborts", async function () {
+      const androidDevice: BootedDevice = {
+        name: "test-device",
+        platform: "android",
+        deviceId: "android-cancel-device",
+        source: "local",
+      };
+      const controller = new AbortController();
+      const originalGetInstance = AndroidCtrlProxyClient.getInstance;
+      let finishScreenshot: (() => void) | undefined;
+      let requestScreenshotCalls = 0;
+      AndroidCtrlProxyClient.getInstance = (() => ({
+        requestScreenshot: () =>
+          new Promise((resolve) => {
+            requestScreenshotCalls++;
+            // Stands in for the client's own 10s timeout: it never settles
+            // within the test, so only the abort can end the wait.
+            finishScreenshot = () => resolve({ success: false, error: "too late" });
+          }),
+      })) as typeof AndroidCtrlProxyClient.getInstance;
+
+      try {
+        const screenshot = new TakeScreenshot(
+          androidDevice,
+          new FakeAdbClientFactory(new FakeAdbExecutor()),
+        );
+        // No format => the default CtrlProxy path.
+        const resultPromise = screenshot.execute({}, controller.signal);
+        await Promise.resolve();
+        controller.abort();
+
+        const stillPending = (async () => {
+          for (let i = 0; i < 50; i++) {
+            await Promise.resolve();
+          }
+          return "still-pending" as const;
+        })();
+
+        const outcome = await Promise.race([resultPromise, stillPending]);
+
+        expect(requestScreenshotCalls).toBe(1);
+        expect(outcome).toEqual({ success: false, error: OPERATION_CANCELLED_MESSAGE });
+        finishScreenshot?.();
+        await resultPromise;
+      } finally {
+        AndroidCtrlProxyClient.getInstance = originalGetInstance;
+      }
+    });
+
+    test("discards a capture written after the caller cancelled", async function () {
+      const androidDevice: BootedDevice = {
+        name: "test-device",
+        platform: "android",
+        deviceId: "android-late-cancel",
+        source: "local",
+      };
+      const controller = new AbortController();
+      const originalGetInstance = AndroidCtrlProxyClient.getInstance;
+      AndroidCtrlProxyClient.getInstance = (() => ({
+        requestScreenshot: async () => ({
+          success: true,
+          data: Buffer.from([0xff, 0xd8, 0xff, 0xe0]).toString("base64"),
+          format: "jpeg" as const,
+        }),
+      })) as typeof AndroidCtrlProxyClient.getInstance;
+
+      const writer = new FakeScreenshotFileWriter(() => controller.abort());
+      try {
+        const screenshot = new TakeScreenshot(
+          androidDevice,
+          new FakeAdbClientFactory(new FakeAdbExecutor()),
+          new FakeTimer(),
+          new CountingIdGenerator("capture"),
+          writer,
+        );
+
+        const result = await screenshot.execute({}, controller.signal);
+
+        expect(result).toEqual({ success: false, error: OPERATION_CANCELLED_MESSAGE });
+        expect(writer.written.length).toBe(1);
+        // The frame the cancelled request produced must not survive on disk,
+        // where the latest-screenshot fallback would pick it up.
+        expect(writer.removed).toEqual(writer.written);
+      } finally {
+        AndroidCtrlProxyClient.getInstance = originalGetInstance;
+      }
     });
   });
 

@@ -2781,6 +2781,82 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     );
   }
 
+  /**
+   * Returns the first readiness predicate the probed device fails, or undefined when
+   * every required Android readiness signal is satisfied.
+   */
+  private unmetReadinessPredicate(
+    deviceId: string,
+    stateOutput: string,
+    packageManager: ExecResult,
+    sysBootCompleted: string,
+    bootAnimationState: string,
+  ): ReadinessDiagnostic | undefined {
+    if (!stateOutput.includes("device")) {
+      return this.unmetReadinessDiagnostic(
+        "device-state",
+        "adb get-state did not report 'device'",
+        stateOutput,
+        deviceId,
+      );
+    }
+    if (!packageManager.stdout.includes("package:")) {
+      return this.unmetReadinessDiagnostic(
+        "package-manager",
+        "pm list packages returned no 'package:' entries",
+        packageManager.stdout.trim(),
+        deviceId,
+      );
+    }
+    // Only an explicit package-manager "Failure" blocks readiness. A non-empty stderr
+    // on its own is routinely benign (linker and ART warnings on a healthy device) and
+    // used to keep a fully booted emulator not-ready forever. See #6818.
+    if (packageManager.stderr.includes("Failure")) {
+      return this.unmetReadinessDiagnostic(
+        "package-manager",
+        "pm list packages reported a failure",
+        packageManager.stderr.trim(),
+        deviceId,
+      );
+    }
+    if (sysBootCompleted !== "1") {
+      return this.unmetReadinessDiagnostic(
+        "system-boot-complete",
+        "sys.boot_completed is not 1",
+        sysBootCompleted,
+        deviceId,
+      );
+    }
+    if (bootAnimationState && bootAnimationState !== "stopped") {
+      return this.unmetReadinessDiagnostic(
+        "boot-animation",
+        "init.svc.bootanim has not stopped",
+        bootAnimationState,
+        deviceId,
+      );
+    }
+    return undefined;
+  }
+
+  /**
+   * Records an unmet readiness predicate with the value actually observed, so the
+   * readiness timeout error names the exact check that never passed (#6818).
+   */
+  private unmetReadinessDiagnostic(
+    phase: ReadinessDiagnosticPhase,
+    check: string,
+    observed: string,
+    deviceId: string,
+  ): ReadinessDiagnostic {
+    const diagnostic = this.readinessDiagnostic(
+      phase,
+      `${check}; observed="${observed}"`,
+      deviceId,
+    );
+    logger.debug(`[PARALLEL] ❌ ${deviceId} not ready: ${diagnostic.summary}`);
+    return diagnostic;
+  }
+
   private rejectedReadinessDiagnostic(
     checks: Array<[ReadinessDiagnosticPhase, PromiseSettledResult<ExecResult>]>,
   ): ReadinessDiagnostic | undefined {
@@ -3005,7 +3081,8 @@ export class AndroidEmulatorClient implements AndroidEmulator {
             { bypassDeviceListCache: true },
             signal,
           );
-          lastDiagnostic = this.relevantScanDiagnostic(scan, correlatedTargetDeviceId);
+          const scanDiagnostic = this.relevantScanDiagnostic(scan, correlatedTargetDeviceId);
+          lastDiagnostic = scanDiagnostic;
           const runningEmulators = scan.devices;
           logger.debug(`Device scan complete - found ${runningEmulators.length} running emulators`);
           const readinessTimeoutMs = Math.max(0, timeoutMs - (this.timer.now() - startTime));
@@ -3116,32 +3193,17 @@ export class AndroidEmulatorClient implements AndroidEmulator {
                   logger.debug(
                     `[PARALLEL] Package manager command completed for ${emulator.deviceId} - output: ${packageManagerResult.value.stdout.length} bytes`,
                   );
-                  if (!stateOutput.includes("device")) {
-                    logger.debug(
-                      `[PARALLEL] ❌ Device state check failed for ${emulator.deviceId}: state="${stateOutput}"`,
-                    );
-                  } else if (
-                    !packageManagerResult.value.stdout ||
-                    !packageManagerResult.value.stdout.includes("package:")
-                  ) {
-                    logger.debug(
-                      `[PARALLEL] ❌ Package manager returned no packages for ${emulator.deviceId} (${packageManagerResult.value.stdout.length} bytes output)`,
-                    );
-                  } else if (
-                    packageManagerResult.value.stderr ||
-                    packageManagerResult.value.stderr.includes("Failure")
-                  ) {
-                    logger.debug(
-                      `[PARALLEL] ❌ Package manager returned failure for ${emulator.deviceId}: ${packageManagerResult.value.stderr}`,
-                    );
-                  } else if (sysBootCompleted !== "1") {
-                    logger.debug(
-                      `[PARALLEL] ❌ sys.boot_completed is not set for ${emulator.deviceId}: "${sysBootCompleted}"`,
-                    );
-                  } else if (bootAnimationState && bootAnimationState !== "stopped") {
-                    logger.debug(
-                      `[PARALLEL] ❌ boot animation is still active for ${emulator.deviceId}: "${bootAnimationState}"`,
-                    );
+                  const unmetPredicate = this.unmetReadinessPredicate(
+                    emulator.deviceId,
+                    stateOutput,
+                    packageManagerResult.value,
+                    sysBootCompleted,
+                    bootAnimationState,
+                  );
+                  if (unmetPredicate) {
+                    // An upstream scan failure (discovery, AVD-name resolution) is the
+                    // root cause when it is present, so it outranks the probe verdict.
+                    lastDiagnostic = scanDiagnostic ?? unmetPredicate;
                   } else {
                     logger.debug(
                       `[PARALLEL] ✅ Device state check passed for ${emulator.deviceId}`,

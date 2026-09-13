@@ -301,4 +301,80 @@ describe("Android emulator readiness diagnostics", () => {
       ).rejects.toThrow(`target=emulator-5554; state=${row.name}`);
     });
   }
+
+  test("becomes ready when every predicate passes despite benign package-manager warnings", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const adb = new ReadinessAdbExecutor();
+    configureReadyDevice(adb);
+    adb.setCommandResponse(
+      "shell pm list packages",
+      result("package:android\n", "WARNING: linker: /system/bin/app_process32 unused DT entry\n"),
+    );
+
+    const device = await clientWith(adb, timer).waitForEmulatorReady(
+      "Pixel_9_Pro",
+      5_000,
+      null,
+      "emulator-5554",
+    );
+
+    expect(device.deviceId).toBe("emulator-5554");
+  });
+
+  for (const row of [
+    {
+      name: "device state",
+      phase: "device-state",
+      command: "get-state",
+      response: result("offline\n"),
+      observed: 'observed="offline"',
+    },
+    {
+      name: "package listing",
+      phase: "package-manager",
+      command: "shell pm list packages",
+      response: result(""),
+      observed: 'observed=""',
+    },
+    {
+      name: "package-manager failure",
+      phase: "package-manager",
+      command: "shell pm list packages",
+      response: result("package:android\n", "Failure [DEVICE_NOT_RESPONDING]"),
+      observed: 'observed="Failure [DEVICE_NOT_RESPONDING]"',
+    },
+    {
+      name: "system boot completion",
+      phase: "system-boot-complete",
+      command: "shell getprop sys.boot_completed",
+      response: result("0\n"),
+      observed: 'observed="0"',
+    },
+    {
+      name: "boot animation",
+      phase: "boot-animation",
+      command: "shell getprop init.svc.bootanim",
+      response: result("running\n"),
+      observed: 'observed="running"',
+    },
+  ]) {
+    test(`names the unmet ${row.name} predicate and its observed value`, async () => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const adb = new ReadinessAdbExecutor();
+      configureReadyDevice(adb);
+      adb.setCommandResponse(row.command, row.response);
+
+      const readiness = clientWith(adb, timer).waitForEmulatorReady(
+        "Pixel_9_Pro",
+        100,
+        null,
+        "emulator-5554",
+      );
+
+      await expect(readiness).rejects.toThrow(`phase=${row.phase}`);
+      await expect(readiness).rejects.toThrow(row.observed);
+    });
+  }
 });

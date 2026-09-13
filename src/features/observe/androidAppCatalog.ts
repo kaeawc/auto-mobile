@@ -64,7 +64,7 @@ export function parseLauncherPackages(stdout: string): Set<string> {
   return packages;
 }
 
-function normalizeLabel(label: string | undefined): string | undefined {
+function normalizeLabel(label: string | null | undefined): string | undefined {
   const trimmed = label?.trim();
   return trimmed ? trimmed : undefined;
 }

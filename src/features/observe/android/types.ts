@@ -302,10 +302,10 @@ export interface InstalledPackageRecord {
   versionCode?: number;
   /**
    * Launcher label from `PackageManager.getApplicationLabel` (#6798). Optional
-   * because an on-device SDK older than the field simply omits it — callers
-   * must not read an absent label as "this app has no name".
+   * because an on-device SDK older than the field simply omits it; `undefined`
+   * or `null` means "not reported", not "this app has no name".
    */
-  label?: string;
+  label?: string | null;
   /**
    * Whether the package has a launchable entry point
    * (`PackageManager.getLaunchIntentForPackage` resolved). Optional for the

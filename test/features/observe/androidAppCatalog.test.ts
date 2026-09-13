@@ -82,6 +82,15 @@ describe("androidAppCatalog (#6798)", () => {
     expect(needsLauncherProbe(catalog, ["com.example.app"])).toBe(true);
   });
 
+  test("an explicit null label is treated as not reported", () => {
+    const catalog = catalogFromPackageRecords([
+      { packageName: "com.example.app", isSystem: false, label: null },
+    ]);
+
+    expect(catalog.get("com.example.app")?.label).toBeUndefined();
+    expect(catalog.get("com.example.app")).toEqual({});
+  });
+
   test("a package the CtrlProxy pass did not mention still needs the probe", () => {
     // CtrlProxy answers for its own user only, so a work-profile package set can
     // be entirely uncovered by a catalog that carries booleans for another user.

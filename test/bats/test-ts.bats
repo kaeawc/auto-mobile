@@ -7,6 +7,8 @@ setup() {
   STUB_BIN="$(mktemp -d)"
   BUN_ARGS_FILE="$(mktemp)"
   export BUN_ARGS_FILE
+  STUB_RECHECK_INDEX="$(mktemp)"
+  export STUB_RECHECK_INDEX
   cat > "$STUB_BIN/nproc" <<'EOF'
 #!/usr/bin/env bash
 printf '8\n'
@@ -24,24 +26,43 @@ EOF
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$BUN_ARGS_FILE"
 report=""
+target=""
 while [[ "$#" -gt 0 ]]; do
   if [[ "$1" == "--reporter-outfile" ]]; then
     report="$2"
     shift 2
     continue
   fi
+  case "$1" in
+    test/*) target="$1" ;;
+  esac
   shift
 done
-if [[ -n "$report" ]]; then
-  printf '<testsuites><testcase name="fast" classname="fixture" time="0.001" /></testsuites>\n' > "$report"
+if [[ -z "$report" ]]; then
+  exit 0
 fi
+if [[ -n "${STUB_RECHECK_TIMES:-}" ]]; then
+  # Each re-run of an offending file reports the next time in the sequence, so
+  # a test can pin how the gate combines repeated samples.
+  index=0
+  if [[ -f "$STUB_RECHECK_INDEX" ]]; then
+    index="$(cat "$STUB_RECHECK_INDEX")"
+  fi
+  read -r -a stub_times <<< "$STUB_RECHECK_TIMES"
+  seconds="${stub_times[$index]:-0.001}"
+  printf '%s\n' "$((index + 1))" > "$STUB_RECHECK_INDEX"
+  printf '<testsuite file="%s"><testcase name="slow" classname="suite" time="%s" /></testsuite>\n' \
+    "${target:-test/example.test.ts}" "$seconds" > "$report"
+  exit 0
+fi
+printf '<testsuites><testcase name="fast" classname="fixture" time="0.001" /></testsuites>\n' > "$report"
 EOF
   chmod +x "$STUB_BIN/git" "$STUB_BIN/bun"
 }
 
 teardown() {
   rm -rf "$STUB_BIN"
-  rm -f "$BUN_ARGS_FILE"
+  rm -f "$BUN_ARGS_FILE" "$STUB_RECHECK_INDEX"
 }
 
 run_lane() {
@@ -361,10 +382,86 @@ run_lane() {
   [ ! -s "$BUN_ARGS_FILE" ]
 }
 
-@test "timing gate retains isolated reports after rechecking a unit-lane outlier" {
+OFFENDER_FILE="test/scripts/testLaneClassification.test.ts"
+
+# Seed a unit-lane report whose only testcase is over the budget, so the gate
+# reaches its recheck path.
+seed_outlier_report() {
   report_dir="$BATS_TEST_TMPDIR/unit-timing-reports"
   mkdir -p "$report_dir"
-  printf '<testsuite file="test/example.test.ts"><testcase name="slow" time="0.200" /></testsuite>\n' \
+  printf '<testsuite file="%s"><testcase name="slow" classname="suite" time="0.200" /></testsuite>\n' \
+    "$OFFENDER_FILE" > "$report_dir/shard-0.xml"
+}
+
+run_timing_gate_with_recheck_times() {
+  run env \
+    PATH="$STUB_BIN:$PATH" \
+    BUN_TEST_TIMING_BASE_REF=origin/main \
+    BUN_TEST_TIMING_REPORT_DIR="$report_dir" \
+    TIMING_CHANGED_FILES='src/example.ts\n' \
+    STUB_RECHECK_TIMES="$1" \
+    bash "$TIMING_SCRIPT" "$BATS_TEST_TMPDIR/timings.xml"
+}
+
+@test "timing gate clears an outlier whose median recheck is within budget" {
+  seed_outlier_report
+  run_timing_gate_with_recheck_times "0.010 0.012 0.011"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Rechecking 1 file(s)"* ]]
+  [[ "$output" == *"Recheck cleared suite.slow"* ]]
+  [[ "$output" == *"median 11.00ms over 3 isolated runs"* ]]
+}
+
+@test "timing gate enforces the median rather than the worst recheck sample" {
+  seed_outlier_report
+  run_timing_gate_with_recheck_times "0.150 0.010 0.011"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Recheck cleared suite.slow"* ]]
+}
+
+@test "timing gate fails when the median recheck still breaches the budget" {
+  seed_outlier_report
+  run_timing_gate_with_recheck_times "0.010 0.150 0.160"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Test exceeded 100ms: suite.slow (median 150.00ms of 3 isolated runs)"* ]]
+}
+
+@test "timing gate rechecks the whole offending file, not a single test name" {
+  seed_outlier_report
+  run_timing_gate_with_recheck_times "0.010 0.010 0.010"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c -- "$OFFENDER_FILE" "$BUN_ARGS_FILE")" -eq 3 ]
+  ! grep -q -- "--test-name-pattern" "$BUN_ARGS_FILE"
+}
+
+@test "timing gate honours a configured recheck run count" {
+  seed_outlier_report
+  run env \
+    PATH="$STUB_BIN:$PATH" \
+    BUN_TEST_TIMING_BASE_REF=origin/main \
+    BUN_TEST_TIMING_REPORT_DIR="$report_dir" \
+    BUN_TEST_TIMING_RECHECK_RUNS=5 \
+    TIMING_CHANGED_FILES='src/example.ts\n' \
+    STUB_RECHECK_TIMES="0.150 0.150 0.010 0.010 0.010" \
+    bash "$TIMING_SCRIPT" "$BATS_TEST_TMPDIR/timings.xml"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c -- "$OFFENDER_FILE" "$BUN_ARGS_FILE")" -eq 5 ]
+  [[ "$output" == *"median 10.00ms over 5 isolated runs"* ]]
+}
+
+@test "timing gate leaves the measured unit-lane reports untouched" {
+  seed_outlier_report
+  run_timing_gate_with_recheck_times "0.010 0.010 0.010"
+  [ "$status" -eq 0 ]
+  [ -s "$report_dir/shard-0.xml" ]
+  [ -s "$BATS_TEST_TMPDIR/timings.recheck.d/recheck-0.xml" ]
+}
+
+@test "timing gate fails an unrecheckable outlier on its first sample" {
+  report_dir="$BATS_TEST_TMPDIR/unit-timing-reports"
+  mkdir -p "$report_dir"
+  # No file attribute: there is nothing to re-run, so the one sample stands.
+  printf '<testsuites><testcase name="slow" classname="suite" time="0.200" /></testsuites>\n' \
     > "$report_dir/shard-0.xml"
 
   run env \
@@ -373,9 +470,28 @@ run_lane() {
     BUN_TEST_TIMING_REPORT_DIR="$report_dir" \
     TIMING_CHANGED_FILES='src/example.ts\n' \
     bash "$TIMING_SCRIPT" "$BATS_TEST_TMPDIR/timings.xml"
-  [ "$status" -eq 0 ]
-  [ ! -e "$report_dir/shard-0.xml" ]
-  [ -s "$report_dir/isolation-0.xml" ]
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Test exceeded 100ms: suite.slow (200.00ms)"* ]]
+}
+
+@test "timing gate skips the recheck when too many files breach the budget" {
+  report_dir="$BATS_TEST_TMPDIR/unit-timing-reports"
+  mkdir -p "$report_dir"
+  printf '<testsuite file="%s"><testcase name="slow" classname="suite" time="0.200" /></testsuite>\n' \
+    "$OFFENDER_FILE" > "$report_dir/shard-0.xml"
+
+  run env \
+    PATH="$STUB_BIN:$PATH" \
+    BUN_TEST_TIMING_BASE_REF=origin/main \
+    BUN_TEST_TIMING_REPORT_DIR="$report_dir" \
+    BUN_TEST_TIMING_RECHECK_MAX_FILES=0 \
+    TIMING_CHANGED_FILES='src/example.ts\n' \
+    STUB_RECHECK_TIMES="0.010" \
+    bash "$TIMING_SCRIPT" "$BATS_TEST_TMPDIR/timings.xml"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Skipping the median recheck"* ]]
+  [[ "$output" == *"Test exceeded 100ms: suite.slow (200.00ms)"* ]]
+  [ ! -s "$BUN_ARGS_FILE" ]
 }
 
 @test "timing gate selects Bun-affected unit tests for shared test support changes" {

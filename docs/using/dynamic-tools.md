@@ -48,7 +48,9 @@ call:
 
 An unknown name rejects the call before any device work starts. `getAndroid`
 and `getApple` report both `gatedTools` (still disabled) and `enabledTools`
-(the complement) in their response; `provisionDevice` reports `enabledTools`.
+(the complement) in their response; `provisionDevice` reports `enabledTools`
+and requires `boot: true`, since a no-boot provision mints no session to
+declare capabilities against.
 Both reports resolve a tool the same way `tools/list` does — the union of the
 connection profile and the routing session — so every tool they list is one the
 next call can actually make.

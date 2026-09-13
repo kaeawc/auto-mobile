@@ -7476,7 +7476,7 @@
           "maximum": 830000
         },
         "enableTools": {
-          "description": "Exact case-sensitive AutoMobile tool names to enable for the session this call mints, applied before the response is built so the returned enabledTools/gatedTools reflect them. An unknown or non-configurable name rejects the call before any device work starts.",
+          "description": "Exact case-sensitive AutoMobile tool names to enable for the session this call mints, applied before the response is built so the returned enabledTools/gatedTools reflect them. An unknown or non-configurable name rejects the call before any device work starts. Requires boot=true.",
           "minItems": 1,
           "type": "array",
           "items": {
@@ -7488,7 +7488,14 @@
       "required": ["operationId", "device"],
       "additionalProperties": false,
       "if": {
-        "required": ["resources"]
+        "anyOf": [
+          {
+            "required": ["resources"]
+          },
+          {
+            "required": ["enableTools"]
+          }
+        ]
       },
       "then": {
         "properties": {

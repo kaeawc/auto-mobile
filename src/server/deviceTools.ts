@@ -460,16 +460,32 @@ export const provisionDeviceSchema = withJsonSchemaOverride(
         .max(MAX_PROVISION_DEVICE_TIMEOUT_MS)
         .optional()
         .describe("Total provision, boot, resource configuration, and readiness timeout in ms"),
-      // See getAndroidSchema.enableTools (#6869).
-      enableTools: enableToolsSchemaField,
+      // See getAndroidSchema.enableTools (#6869). Requires boot=true: the
+      // no-boot branch returns before a session exists (#6886 review).
+      enableTools: enableToolsSchemaField.describe(
+        `${enableToolsSchemaField.description} Requires boot=true.`,
+      ),
     })
     .strict()
     .refine((args) => !args.resources || args.boot !== false, {
       path: ["resources"],
       message: "Resource configuration requires boot=true.",
+    })
+    // A boot=false provision returns before any session is minted, so there is
+    // nothing to grant the declared capabilities against — accepting the
+    // request would discard it silently (#6886 review). Reject it up front,
+    // like the resources constraint above.
+    .refine((args) => !args.enableTools || args.boot !== false, {
+      path: ["enableTools"],
+      message: "Capability declaration requires boot=true; boot=false mints no session.",
     }),
   (jsonSchema) => {
-    jsonSchema.if = { required: ["resources"] };
+    // Both fields carry the same consequent, so they share one conditional.
+    // The combinator stays nested inside `if` — a top-level `allOf` is not
+    // publishable (#5870).
+    jsonSchema.if = {
+      anyOf: ["resources", "enableTools"].map((field) => ({ required: [field] })),
+    };
     jsonSchema.then = { properties: { boot: { const: true } } };
   },
 );

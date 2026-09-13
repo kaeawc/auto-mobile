@@ -276,6 +276,26 @@ export interface PooledDevice {
    *    instead of serving it into that routing black hole.
    */
   identityUnresolved?: boolean;
+
+  /**
+   * The `BootedDevice.observedAt` of the newest observation that ENTERED or
+   * re-confirmed {@link identityUnresolved}, when that observation carried one.
+   *
+   * Discovery calls run concurrently and finish out of order, so the observation
+   * a funnel folds in is not necessarily the newest one. Without this stamp an
+   * older listing that read the AVD name before it became unreadable could land
+   * after the placeholder and read as proof of continuity, lifting a quarantine
+   * the newest evidence still calls for — re-admitting tool execution and stream
+   * routing on a serial the pool cannot tie to a runtime. The pool already orders
+   * mutable-name updates this way (`nameObservedAt`); identity transitions are
+   * ordered the same way
+   * ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
+   *
+   * Absent when the entering observation carried no stamp (start-path snapshots,
+   * legacy callers, test fakes): two unorderable observations are not evidence of
+   * order, so the lift proceeds rather than wedging the entry in quarantine.
+   */
+  identityUnresolvedAt?: number;
 }
 
 interface RollbackAssignment {
@@ -5856,7 +5876,7 @@ export class DevicePool {
    */
   private async reconcileObservedPooledIdentity(
     pooled: PooledDevice,
-    device: Pick<BootedDevice, "deviceId" | "name" | "platform">,
+    device: Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">,
   ): Promise<void> {
     if (this.matchesRuntimeIdentity(pooled, device)) {
       await this.reconcilePooledIdentityResolution(pooled, device);
@@ -6024,7 +6044,7 @@ export class DevicePool {
    */
   private async reconcilePooledIdentityResolution(
     pooled: PooledDevice,
-    discovered: Pick<BootedDevice, "deviceId" | "name" | "platform">,
+    discovered: Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">,
   ): Promise<void> {
     if (!this.hasReusableSerial(pooled)) {
       return;
@@ -6034,17 +6054,48 @@ export class DevicePool {
         pooled,
         "discovery could not read the AVD name, so the pooled identity " +
           `'${pooled.avdName ?? pooled.name}' can no longer be tied to the runtime`,
+        discovered.observedAt,
       );
       return;
     }
     if (pooled.identityUnresolved !== true) {
       return;
     }
+    if (this.isStaleIdentityObservation(pooled, discovered)) {
+      return;
+    }
     delete pooled.identityUnresolved;
+    delete pooled.identityUnresolvedAt;
     logger.info(
       `[DevicePool] Lifting the identity quarantine on ${pooled.id}: discovery read ` +
         `'${discovered.name}'`,
     );
+  }
+
+  /**
+   * Whether `discovered` is OLDER than the observation that put this entry in
+   * quarantine — the out-of-order straggler described on
+   * {@link PooledDevice.identityUnresolvedAt}. Only a comparison of two stamped
+   * observations decides it; an unstamped observation on either side is
+   * unorderable and is not treated as stale.
+   */
+  private isStaleIdentityObservation(
+    pooled: PooledDevice,
+    discovered: Pick<BootedDevice, "name" | "observedAt">,
+  ): boolean {
+    if (
+      pooled.identityUnresolvedAt === undefined ||
+      discovered.observedAt === undefined ||
+      discovered.observedAt >= pooled.identityUnresolvedAt
+    ) {
+      return false;
+    }
+    logger.debug(
+      `[DevicePool] Ignoring '${discovered.name}' for ${pooled.id}: observation ` +
+        `${discovered.observedAt} is older than the ${pooled.identityUnresolvedAt} observation ` +
+        "that left its identity unresolved",
+    );
+    return true;
   }
 
   /**
@@ -6070,7 +6121,7 @@ export class DevicePool {
    */
   private async quarantineDisagreeingPooledIdentity(
     pooled: PooledDevice,
-    discovered: Pick<BootedDevice, "deviceId" | "name" | "platform">,
+    discovered: Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">,
     because: string,
   ): Promise<void> {
     if (!this.hasReusableSerial(pooled)) {
@@ -6080,6 +6131,7 @@ export class DevicePool {
       pooled,
       `discovery reports '${discovered.name}' on this serial while the pooled identity is ` +
         `'${pooled.avdName ?? pooled.name}', ${because}`,
+      discovered.observedAt,
     );
   }
 
@@ -6096,7 +6148,18 @@ export class DevicePool {
    * naming the serial ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863)
    * review).
    */
-  private async enterPooledIdentityQuarantine(pooled: PooledDevice, reason: string): Promise<void> {
+  private async enterPooledIdentityQuarantine(
+    pooled: PooledDevice,
+    reason: string,
+    observedAt?: number,
+  ): Promise<void> {
+    // Re-observing the same unresolved runtime advances the evidence a later
+    // lift is ordered against, so a straggler newer than the FIRST placeholder
+    // but older than the latest one cannot lift the quarantine
+    // ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
+    if (observedAt !== undefined && observedAt > (pooled.identityUnresolvedAt ?? -Infinity)) {
+      pooled.identityUnresolvedAt = observedAt;
+    }
     if (pooled.identityUnresolved === true) {
       return;
     }

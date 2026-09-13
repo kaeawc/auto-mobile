@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod/v4";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import { ToolRegistry, ProgressCallback } from "./toolRegistry";
+import { enableToolsSchemaField } from "./toolSelectionTools";
 import { deviceResourceConfigurationSchema } from "./deviceResourceSchemas";
 import { registerDeviceResourceTools } from "./deviceResourceTools";
 import {
@@ -287,6 +288,11 @@ export const getAndroidSchema = devicePreparationTimeoutSchema
       .describe(
         "Booted device serial, e.g. emulator-5554 (the `deviceId` field of automobile:devices/booted/android), or a defined AVD image name, which is cold-booted by name. Prefer avdName to boot or coordinate a named AVD.",
       ),
+    // #6869 — declare the session's capabilities in the SAME call that acquires
+    // the device, instead of one setToolEnabled round-trip per gated tool. The
+    // grant is applied in src/server/index.ts against the session this call
+    // mints; this handler ignores the field.
+    enableTools: enableToolsSchemaField,
   })
   .superRefine(validateDevicePreparationTimeout)
   .superRefine((value, ctx) => {
@@ -324,6 +330,8 @@ export const getAppleSchema = devicePreparationTimeoutSchema
       .describe(
         "Booted device identifier (the `deviceId` field of automobile:devices/booted/ios); alias for udid",
       ),
+    // See getAndroidSchema.enableTools (#6869).
+    enableTools: enableToolsSchemaField,
   })
   .superRefine(validateDevicePreparationTimeout)
   .superRefine((value, ctx) => {
@@ -453,14 +461,32 @@ export const provisionDeviceSchema = withJsonSchemaOverride(
         .max(MAX_PROVISION_DEVICE_TIMEOUT_MS)
         .optional()
         .describe("Total provision, boot, resource configuration, and readiness timeout in ms"),
+      // See getAndroidSchema.enableTools (#6869). Requires boot=true: the
+      // no-boot branch returns before a session exists (#6886 review).
+      enableTools: enableToolsSchemaField.describe(
+        `${enableToolsSchemaField.description} Requires boot=true.`,
+      ),
     })
     .strict()
     .refine((args) => !args.resources || args.boot !== false, {
       path: ["resources"],
       message: "Resource configuration requires boot=true.",
+    })
+    // A boot=false provision returns before any session is minted, so there is
+    // nothing to grant the declared capabilities against — accepting the
+    // request would discard it silently (#6886 review). Reject it up front,
+    // like the resources constraint above.
+    .refine((args) => !args.enableTools || args.boot !== false, {
+      path: ["enableTools"],
+      message: "Capability declaration requires boot=true; boot=false mints no session.",
     }),
   (jsonSchema) => {
-    jsonSchema.if = { required: ["resources"] };
+    // Both fields carry the same consequent, so they share one conditional.
+    // The combinator stays nested inside `if` — a top-level `allOf` is not
+    // publishable (#5870).
+    jsonSchema.if = {
+      anyOf: ["resources", "enableTools"].map((field) => ({ required: [field] })),
+    };
     jsonSchema.then = { properties: { boot: { const: true } } };
   },
 );

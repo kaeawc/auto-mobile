@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
+import * as path from "path";
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
 import {
+  AVD_SNAPSHOTS_DIRNAME,
   FileAvdConfigReader,
   type AvdDirectoryResolver,
 } from "../../../src/utils/android-cmdline-tools/AvdConfigReader";
@@ -12,7 +14,28 @@ import {
 } from "../../../src/utils/android-cmdline-tools/vmSnapshot";
 import type { BootedDevice, ExecResult } from "../../../src/models";
 
-const AVD_HOME = "/home/tester/.android/avd";
+// Every path here is built with `path.join`, exactly as the production code
+// does. Hard-coding POSIX separators made this suite a false negative on the
+// `windows-latest` leg of the node-unit-tests matrix: production joined with
+// backslashes while the fake was keyed on slashes, so `measureVmSnapshotBytes`
+// looked up a key that could never match and quietly returned null (#6490
+// review).
+const AVD_HOME = path.join("/home", "tester", ".android", "avd");
+
+/** `<avdHome>/<avd>.avd` — the conventional AVD directory the resolver returns. */
+function avdDirectory(avdName: string): string {
+  return path.join(AVD_HOME, `${avdName}.avd`);
+}
+
+/** `<avd>.avd/snapshots` — the root AvdSnapshotService measures under. */
+function avdSnapshotsRoot(avdName: string): string {
+  return path.join(avdDirectory(avdName), AVD_SNAPSHOTS_DIRNAME);
+}
+
+/** `<avd>.avd/snapshots/<name>` — the in-AVD payload directory of one snapshot. */
+function avdSnapshotPath(avdName: string, snapshotName: string): string {
+  return path.join(avdSnapshotsRoot(avdName), snapshotName);
+}
 
 class FakeDirectories {
   constructor(
@@ -42,7 +65,7 @@ class FakeAvdDirectories implements AvdDirectoryResolver {
   }
 
   async resolveAvdDirectory(avdName: string): Promise<string | null> {
-    return this.known.has(avdName) ? `${AVD_HOME}/${avdName}.avd` : null;
+    return this.known.has(avdName) ? avdDirectory(avdName) : null;
   }
 }
 
@@ -114,9 +137,7 @@ describe("AvdSnapshotService (#6490)", () => {
     );
 
   test("measures <avd>.avd/snapshots/<name>, and reports null for an unknown AVD", async () => {
-    const sut = service({ [`${AVD_HOME}/am-api36.avd/snapshots/snap`]: 2_100_829_021 }, {}, [
-      "am-api36",
-    ]);
+    const sut = service({ [avdSnapshotPath("am-api36", "snap")]: 2_100_829_021 }, {}, ["am-api36"]);
 
     expect(await sut.measureVmSnapshotBytes("am-api36", "snap")).toBe(2_100_829_021);
     expect(await sut.measureVmSnapshotBytes("am-api36", "absent")).toBeNull();
@@ -126,10 +147,10 @@ describe("AvdSnapshotService (#6490)", () => {
   test("lists in-AVD snapshot directories exactly as they are on disk", async () => {
     const sut = service(
       {
-        [`${AVD_HOME}/am-api34.avd/snapshots/default_boot`]: 10,
-        [`${AVD_HOME}/am-api34.avd/snapshots/sweepSnap`]: 20,
+        [avdSnapshotPath("am-api34", "default_boot")]: 10,
+        [avdSnapshotPath("am-api34", "sweepSnap")]: 20,
       },
-      { [`${AVD_HOME}/am-api34.avd/snapshots`]: ["default_boot", "sweepSnap"] },
+      { [avdSnapshotsRoot("am-api34")]: ["default_boot", "sweepSnap"] },
       ["am-api34"],
     );
 
@@ -215,17 +236,17 @@ describe("FileAvdConfigReader.resolveAvdDirectory (#6490)", () => {
     );
 
   test("resolves the conventional <avdHome>/<name>.avd directory", async () => {
-    const sut = reader({}, [`${AVD_HOME}/am-api36.avd`]);
+    const sut = reader({}, [avdDirectory("am-api36")]);
 
-    expect(await sut.resolveAvdDirectory("am-api36")).toBe(`${AVD_HOME}/am-api36.avd`);
+    expect(await sut.resolveAvdDirectory("am-api36")).toBe(avdDirectory("am-api36"));
     expect(await sut.resolveAvdDirectory("absent")).toBeNull();
     expect(sut.getAvdHome()).toBe(AVD_HOME);
   });
 
   test("follows an <avd>.ini registry redirect to a relocated AVD", async () => {
-    const relocated = "/Volumes/big-disk/avds/am-api34.avd";
-    const sut = reader({ [`${AVD_HOME}/am-api34.ini`]: `path=${relocated}\n` }, [
-      `${AVD_HOME}/am-api34.ini`,
+    const relocated = path.join("/Volumes", "big-disk", "avds", "am-api34.avd");
+    const sut = reader({ [path.join(AVD_HOME, "am-api34.ini")]: `path=${relocated}\n` }, [
+      path.join(AVD_HOME, "am-api34.ini"),
       relocated,
     ]);
 
@@ -233,14 +254,14 @@ describe("FileAvdConfigReader.resolveAvdDirectory (#6490)", () => {
   });
 
   test("a redirect whose config.ini is still readable keeps working for readConfig", async () => {
-    const relocated = "/Volumes/big-disk/avds/am-api34.avd";
+    const relocated = path.join("/Volumes", "big-disk", "avds", "am-api34.avd");
     const sut = reader(
       {
-        [`${AVD_HOME}/am-api34.ini`]: `path=${relocated}\n`,
-        [`${relocated}/config.ini`]:
+        [path.join(AVD_HOME, "am-api34.ini")]: `path=${relocated}\n`,
+        [path.join(relocated, "config.ini")]:
           "image.sysdir.1=system-images/android-34/google_apis/arm64-v8a/\n",
       },
-      [`${AVD_HOME}/am-api34.ini`, relocated, `${relocated}/config.ini`],
+      [path.join(AVD_HOME, "am-api34.ini"), relocated, path.join(relocated, "config.ini")],
     );
 
     expect((await sut.readConfig("am-api34"))?.apiLevel).toBe(34);

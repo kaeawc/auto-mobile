@@ -242,11 +242,17 @@ The `deviceId` fields exist so the value that `listDevices` and the
 | 🔀 <code>setToolEnabled</code>     | Enables or disables one exact AutoMobile tool for the current MCP session.          |
 
 On Android, compact observations fold soft-keyboard keys into a single
-`keyboard: { visible: true, package: "…" }` summary plus exactly one skeleton row:
+`keyboard: { visible: true, package: "…" }` summary plus at most one skeleton row:
 
 ```
 <ime> | Keyboard (com.google.android.inputmethod.latin) | input
 ```
+
+That row appears only when the IME exposed at least one bounded accessible
+descendant. A keyboard whose window carries no accessible keys — some IMEs
+expose none — is still announced by the `keyboard` summary, with no `<ime>` row,
+because a synthetic row must never claim a box it cannot measure. Treat the
+summary as the presence signal and the row as optional.
 
 `<ime>` is a marker, not a selector — use `sendKeys` for text input and semantic
 keys, or `keyboard` to open or close it. Everything the IME itself owns folds

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import type { ObserveResult } from "../../../../src/models/ObserveResult";
 import type { ViewHierarchyNode } from "../../../../src/models/ViewHierarchyResult";
 import { DefaultObserveElementCollector } from "../../../../src/features/observe/ObserveElementCollector";
@@ -543,5 +544,35 @@ describe("enclosing IME container folds with its keys (#6871)", () => {
       affordances: ["input"],
     });
     expect(result.keyboard).toEqual({ visible: true, package: "com.ime" });
+  });
+});
+
+/**
+ * The `<ime>` row is conditional: a visible IME that exposes no bounded
+ * accessible descendant is announced by the `keyboard` summary alone, because a
+ * synthetic row must never claim a box it cannot measure (issue #6871). The
+ * user-facing documentation has to say so — a docs-driven consumer that reads
+ * the summary as a guarantee of an accompanying row would dereference a row
+ * that is legitimately absent.
+ */
+describe("documented IME row shape matches the projection (#6871)", () => {
+  test("docs/tools.md conditions the <ime> row on a bounded IME node", () => {
+    // Prose wraps, so compare on a single-spaced flattening of the file.
+    const doc = readFileSync("docs/tools.md", "utf8").replace(/\s+/g, " ");
+    expect(doc).toContain("at most one skeleton row");
+    expect(doc).not.toContain("plus exactly one skeleton row");
+    expect(doc).toContain("at least one bounded accessible descendant");
+  });
+
+  test("a captured keyboard with no accessible keys emits the summary and no row", () => {
+    const source = observation();
+    source.viewHierarchy!.hierarchy.node!.node![1].node = [];
+    source.elements = new DefaultObserveElementCollector().collect(
+      source.viewHierarchy!,
+      "android",
+    );
+    const result = sanitizeObserveResult(source, { dropElements: true, project: "skeleton" });
+    expect(result.keyboard).toEqual({ visible: true, package: "example.keyboard" });
+    expect(result.skeleton!.map((entry) => entry.elementId)).not.toContain("<ime>");
   });
 });

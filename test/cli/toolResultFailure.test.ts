@@ -32,6 +32,7 @@ describe("isCliToolFailure (issue #6017)", () => {
           detail: "auto-start is disabled",
         });
       },
+      adoptCliSessionLiveness: async (): Promise<string | undefined> => undefined,
       close: async () => {},
     }));
     await runCliCommand(["listDevices"]);
@@ -98,6 +99,7 @@ describe("isCliToolFailure (issue #6017)", () => {
         content: [{ type: "text", text: "MCP error -32001: Request timed out" }],
         isError: true,
       }),
+      adoptCliSessionLiveness: async (): Promise<string | undefined> => undefined,
       close: async (): Promise<void> => {
         // no-op fake
       },
@@ -139,6 +141,7 @@ describe("handleToolResult null/non-object payload guard (issue #6086)", () => {
     }) as typeof console.log;
     setDaemonProxyFactoryForTesting((): any => ({
       callTool: async () => envelope,
+      adoptCliSessionLiveness: async (): Promise<string | undefined> => undefined,
       close: async (): Promise<void> => {
         // no-op fake
       },

@@ -29,6 +29,7 @@ describe("CLI --session-uuid with device-session acquisition tools", () => {
         calls.push({ toolName, params });
         return { success: true };
       },
+      adoptCliSessionLiveness: async (): Promise<string | undefined> => undefined,
       close: async (): Promise<void> => {
         // no-op fake
       },

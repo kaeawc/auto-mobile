@@ -171,11 +171,28 @@ function rejectedByEveryArm(reports: readonly KeyReport[], level: number): Set<s
   return new Set([...first].filter((name) => rest.every((arm) => arm.has(name))));
 }
 
+// The known keys one arm cannot accept together: the ones it rejects outright,
+// plus the ones a union NESTED inside it makes mutually exclusive. An arm whose
+// set is empty accepts the whole supplied set, so the level it belongs to has no
+// conflict at all.
+function unsatisfiedKeys(
+  reports: readonly KeyReport[],
+  unknown: ReadonlySet<string>,
+  level: number,
+): Set<string> {
+  const rejected = [...rejectedByEveryArm(reports, level)].filter((name) => !unknown.has(name));
+  return new Set([...rejected, ...mutuallyExclusiveKeys(reports, unknown, level)]);
+}
+
 // The keys that make the arms mutually exclusive, ignoring the keys `unknown` to
 // every arm (those are reported as unrecognized, not as a choice). There is a
 // conflict only when NO arm accepts the whole supplied set: every arm rejected
-// at least one known key. An arm that rejected none accepts them all, so a valid
-// key beside an unknown one is never mistaken for a conflict.
+// at least one known key, or could not combine the keys of a union nested inside
+// it. An arm that accepts them all means there is no conflict, so a valid key
+// beside an unknown one is never mistaken for one. The nested case matters
+// because an inner union's arms individually accept both conflicting keys, so
+// the inner level reduces to the shared unknown key and the conflict is only
+// visible at the level where it occurs (PR #6882 review).
 function mutuallyExclusiveKeys(
   reports: readonly KeyReport[],
   unknown: ReadonlySet<string>,
@@ -185,13 +202,11 @@ function mutuallyExclusiveKeys(
   if (!arms || arms.byArm.size !== arms.context.branchCount) {
     return new Set<string>();
   }
-  const perArm = [...arms.byArm.values()].map((arm) =>
-    [...rejectedByEveryArm(arm, level + 1)].filter((name) => !unknown.has(name)),
-  );
-  if (perArm.some((keys) => keys.length === 0)) {
+  const perArm = [...arms.byArm.values()].map((arm) => unsatisfiedKeys(arm, unknown, level + 1));
+  if (perArm.some((keys) => keys.size === 0)) {
     return new Set<string>();
   }
-  return new Set(perArm.flat());
+  return new Set(perArm.flatMap((keys) => [...keys]));
 }
 
 function groupUnrecognizedKeys(flattenedIssues: FlattenedIssue[]): Map<string, UnrecognizedGroup> {
@@ -520,20 +535,26 @@ export function formatToolParamError(
   }
   const conflicts: HeldConflict[] = [];
   // Where each rendered union issue spoke, so a conflict is only held back by a
-  // line about the conflicting object itself. A nested union's conflict and an
+  // line about the conflicting object ITSELF. A nested union's conflict and an
   // unrelated sibling error carry the SAME outer union id (`waitFor.container`
   // and `waitFor.timeout`), so suppressing by union id alone dropped a conflict
-  // the sibling says nothing about (PR #6882 review).
+  // the sibling says nothing about. A line about something INSIDE the object
+  // (`waitFor.container.elementId` must be a string) does not explain why two of
+  // its keys cannot coexist either, so it does not hold the conflict back
+  // (PR #6882 review).
   const explanations: Array<{ unionId: number; path: string }> = [];
   const pathOf = (path: ReadonlyArray<PropertyKey>): string => path.map(String).join(".");
   const explains = (conflict: HeldConflict): boolean =>
     explanations.some(
       ({ unionId, path }) =>
-        unionId === conflict.unionId &&
-        (conflict.path === "" || path === conflict.path || path.startsWith(`${conflict.path}.`)),
+        unionId === conflict.unionId && (conflict.path === "" || path === conflict.path),
     );
+  // Conflicting keys are RECOGNIZED keys of the object that reported them, so
+  // none of them is a misplaced top-level parameter: promoting `selector.text`
+  // to `inputText`'s own `text` parameter names a different thing the caller
+  // already supplied. Only unrecognized keys are promotable (PR #6882 review).
   const conflictLine = (issue: UnrecognizedKeysIssue, keys: string[]): string =>
-    renderer(withMergedKeys(issue, keys, mutuallyExclusiveMessage(keys)), keys);
+    renderer(withMergedKeys(issue, keys, mutuallyExclusiveMessage(keys)));
   const render = (entry: FlattenedIssue): string[] => {
     const { issue } = entry;
     if (!entry.union || !isUnrecognizedKeys(issue)) {
@@ -565,7 +586,7 @@ export function formatToolParamError(
       group.exclusive.length > 0
         ? `${unrecognizedKeysMessage(group.intersection)}. ${mutuallyExclusiveMessage(group.exclusive)}`
         : unrecognizedKeysMessage(group.intersection);
-    return [renderer(withMergedKeys(issue, keys, message), keys)];
+    return [renderer(withMergedKeys(issue, keys, message), group.intersection)];
   };
 
   // Dedupe formatted messages: union expansion repeats the same real issue once

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { systemTraySchema, tapOnSchema } from "../../src/server/interactionTools";
+import { inputTextSchema, systemTraySchema, tapOnSchema } from "../../src/server/interactionTools";
 import { observeSchema } from "../../src/server/observeTools";
 import { formatToolParamError } from "../../src/server/toolParamError";
 
@@ -196,5 +196,55 @@ describe("nested union conflicts (#6867)", () => {
     expect(formatToolParamError("observe", result.error, input, observeSchema)).toContain(
       "waitFor.container Mutually exclusive keys",
     );
+  });
+
+  // PR #6882 review: the inner container union reduces every outer arm's
+  // rejected set to the shared unknown key, so filtering it left no arm with a
+  // conflicting key and the exclusivity of `elementId`/`text` went unreported.
+  test("reports a nested conflict alongside a key unknown to every arm", () => {
+    const input = {
+      platform: "android",
+      waitFor: { text: "ready", container: { elementId: "scope", text: "other", bogus: 1 } },
+    };
+    const result = observeSchema.safeParse(input);
+    if (result.success) {
+      throw new Error("expected invalid waitFor");
+    }
+    const message = formatToolParamError("observe", result.error, input, observeSchema);
+    expect(message).toContain('Unrecognized key: "bogus"');
+    expect(message).toContain("Mutually exclusive keys");
+    expect(message).toContain('"elementId"');
+    expect(message).toContain('"text"');
+  });
+
+  // PR #6882 review: a type error inside one of the conflicting keys does not
+  // explain why both keys cannot coexist, so correcting it only exposed the
+  // conflict on the next retry.
+  test("a value error inside a conflicting key does not hide the conflict", () => {
+    const input = {
+      platform: "android",
+      waitFor: { text: "ready", container: { elementId: 123, text: "scope" } },
+    };
+    const result = observeSchema.safeParse(input);
+    if (result.success) {
+      throw new Error("expected invalid waitFor");
+    }
+    const message = formatToolParamError("observe", result.error, input, observeSchema);
+    expect(message).toContain("waitFor.container.elementId expected string, received number");
+    expect(message).toContain("waitFor.container Mutually exclusive keys");
+  });
+
+  // PR #6882 review: `selector.text` is a recognized selector key, so naming the
+  // tool's own `text` parameter (already supplied, different meaning) as what
+  // the caller "meant" is wrong — only unrecognized keys are promotable.
+  test("does not offer a top-level hint for recognized conflicting keys", () => {
+    const input = { text: "payload", selector: { text: "field", elementId: "id" } };
+    const result = inputTextSchema.safeParse(input);
+    if (result.success) {
+      throw new Error("expected invalid selector");
+    }
+    const message = formatToolParamError("inputText", result.error, input, inputTextSchema);
+    expect(message).toContain("Mutually exclusive keys");
+    expect(message).not.toContain("did you mean");
   });
 });

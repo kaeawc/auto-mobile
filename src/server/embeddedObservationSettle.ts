@@ -287,8 +287,7 @@ export async function settleEmbeddedObservationInResponse(
   // `settled` does the same). That verdict describes the capture the handler is
   // returning, and it is strictly better evidence than this gate's default
   // `false` for an action class the gate does not recognise. Honour it rather
-  // than stamping a contradiction into the same response — but only while the
-  // observation it describes is still the one being handed back (see below).
+  // than stamping a contradiction into the same response.
   const handlerSettled = view.payload.settled === true;
   if (view.payload.success === false) {
     // The action failed; re-observing would buy the client nothing and would
@@ -299,6 +298,24 @@ export async function settleEmbeddedObservationInResponse(
     writeToolEnvelopePayload(view, {
       ...view.payload,
       observation: { ...observation, settled: handlerSettled },
+    });
+    return;
+  }
+
+  if (handlerSettled) {
+    // The handler's own gate already proved THIS capture stable, so there is
+    // nothing left for this one to establish. Running it anyway would spend a
+    // second settle budget on a screen that is done moving, and on a screen
+    // that never reaches structural stability (a ticking clock) it would time
+    // out, adopt a later frame, and stamp `observation.settled: false`
+    // underneath the payload-level `settled: true` the handler published —
+    // one response carrying two contradictory verdicts, with wait metadata
+    // describing a capture that is no longer there. A handler verdict is never
+    // downgraded (#6890 review), and the coherent way to honour that is to
+    // leave the capture it describes in place.
+    writeToolEnvelopePayload(view, {
+      ...view.payload,
+      observation: { ...observation, settled: true },
     });
     return;
   }
@@ -322,13 +339,8 @@ export async function settleEmbeddedObservationInResponse(
       })
     : { observation, settled: false };
 
-  // The handler's verdict is about the capture the HANDLER took. Once the gate
-  // has adopted a later capture in its place, that verdict no longer describes
-  // the observation being returned, so only the gate's own answer is honest.
-  const settled = outcome.settled || (handlerSettled && outcome.observation === observation);
-
   writeToolEnvelopePayload(view, {
     ...view.payload,
-    observation: { ...outcome.observation, settled },
+    observation: { ...outcome.observation, settled: outcome.settled },
   });
 }

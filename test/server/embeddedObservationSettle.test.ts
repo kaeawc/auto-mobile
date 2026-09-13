@@ -396,16 +396,19 @@ describe("settleEmbeddedObservationInResponse (#6866)", () => {
     expect((response.structuredContent as Record<string, any>).observation.settled).toBe(false);
   });
 
-  test("a handler verdict does not survive the gate ADOPTING a different capture", async () => {
-    // `openLink`'s waitFor can report `settled: true` about the capture IT took.
-    // Once the navigation gate replaces that capture with a later one, the
-    // verdict no longer describes the observation being handed back, so the
-    // gate's own answer is the only honest one.
+  test("a handler's own settled:true skips the navigation gate entirely", async () => {
+    // `openLink`'s integrated `waitFor`/`settled` gate ALREADY proved this
+    // capture stable. Running the navigation gate on top of it would spend a
+    // second settle budget on a screen that is done moving and -- on a screen
+    // that never reaches structural stability -- would time out, adopt a later
+    // frame, and stamp `observation.settled: false` underneath the payload-level
+    // `settled: true` the handler published. One response, two contradictory
+    // verdicts. So the gate does not run at all.
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const fake = new FakeObserveScreen();
-    // A ticking clock: never two structurally-equal reads, so the gate times
-    // out unsettled while still adopting the newest trustworthy frame.
+    // A ticking clock: if the gate DID run it would never see two structurally
+    // equal reads, time out, and adopt the newest frame.
     fake.setObserveResult((index) =>
       obs(
         {
@@ -417,10 +420,11 @@ describe("settleEmbeddedObservationInResponse (#6866)", () => {
       ),
     );
 
+    const handlerObservation = obs(AIRPLANE_ROW_HALF_INFLATED, 10);
     const response = createStructuredToolResponse({
       success: true,
       settled: true,
-      observation: obs(AIRPLANE_ROW_HALF_INFLATED, 10),
+      observation: handlerObservation,
     });
     await settleEmbeddedObservationInResponse(response, {
       name: "openLink",
@@ -430,10 +434,14 @@ describe("settleEmbeddedObservationInResponse (#6866)", () => {
     });
 
     const structured = response.structuredContent as Record<string, any>;
-    expect(structured.observation.settled).toBe(false);
+    expect(fake.getExecuteCallCount()).toBe(0);
+    expect(structured.settled).toBe(true);
+    expect(structured.observation.settled).toBe(true);
+    // The handler's own capture is what is handed back, untouched.
     expect(structured.observation.viewHierarchy.hierarchy.node["resource-id"]).toBe(
-      "android:id/clock",
+      "android:id/list_container",
     );
+    expect(JSON.parse(response.content[0].text).observation.settled).toBe(true);
   });
 
   test("no embedded observation is a no-op", async () => {

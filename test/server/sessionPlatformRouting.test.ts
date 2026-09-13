@@ -41,6 +41,15 @@ describe("connection device selectors", () => {
     ).toBe("android-a");
   });
 
+  test("lets an explicit unacquired device fall through to ordinary discovery", () => {
+    const binding = new SessionToolBinding();
+    binding.bind(undefined, "android-a");
+
+    expect(
+      binding.resolveDeviceSessionUuid(undefined, { deviceId: "emulator-5556" }, lookup),
+    ).toBeUndefined();
+  });
+
   test("does not route to another platform or another connection's session", () => {
     const binding = new SessionToolBinding();
     binding.bind("one", "ios-a");

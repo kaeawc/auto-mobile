@@ -63,8 +63,9 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
       reason: "PlatformDeviceManager — declares and implements the discovery API.",
     },
     "src/utils/android-cmdline-tools/AndroidEmulatorClient.ts": {
-      calls: 8,
-      reason: "Android emulator discovery producer; runs below the pool.",
+      calls: 9,
+      reason:
+        "Android emulator discovery producer; runs below the pool. The 9th call (adoptsExistingAvdLaunch, line 1678) is #6906's in-flight-launch guard — a local adopt-vs-spawn decision, never joined to pooled identity.",
     },
     "src/utils/android-cmdline-tools/AdbClient.ts": {
       calls: 2,

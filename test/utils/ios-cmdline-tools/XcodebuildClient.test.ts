@@ -3,6 +3,7 @@ import { XcodebuildClient } from "../../../src/utils/ios-cmdline-tools/Xcodebuil
 import type { ExecResult } from "../../../src/models";
 import { createExecResult } from "../../../src/utils/execResult";
 import { DEFAULT_RUNNER_READINESS_TIMEOUT_MS } from "../../../src/utils/runnerReadinessConfig";
+import { runWithAbortSignal } from "../../../src/utils/AbortContext";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeChildProcess } from "../../fakes/FakeChildProcess";
 
@@ -243,5 +244,258 @@ describe("XcodebuildClient streaming runner", () => {
     await expect(
       timer.resolvePromise(client.startStreaming(["test-without-building"])),
     ).rejects.toThrow("xcodebuild failed to start: Error: posix_spawn: executable missing");
+  });
+
+  test("does not hand the ambient request signal to the resident spawn (issue #6410)", async () => {
+    // A resident runner started inside runWithAbortSignal(requestSignal, ...) must
+    // NOT bind spawn's `signal` option to that ambient request signal — a later
+    // cancellation of the STARTING request would otherwise SIGTERM the shared,
+    // long-lived runner. The startup availability probe may still inherit the
+    // ambient signal (bounding how long the probe waits); only the spawn wiring
+    // must not.
+    const child = new FakeChildProcess();
+    let capturedSpawnOptions: import("node:child_process").SpawnOptions | undefined;
+    const client = new XcodebuildClient(
+      async () => createExecResult("Xcode 26.5", ""),
+      new FakeTimer(),
+      (_command, _args, options) => {
+        capturedSpawnOptions = options;
+        child.simulateSpawn();
+        return child as never;
+      },
+    );
+
+    const requestController = new AbortController();
+    const result = await runWithAbortSignal(requestController.signal, () =>
+      client.startStreaming(["test-without-building"], {
+        detached: true,
+        stdio: ["ignore", "pipe", "pipe"],
+      }),
+    );
+
+    expect(result).toBe(child);
+    expect(capturedSpawnOptions?.signal).toBeUndefined();
+  });
+
+  test("kills a child if startup cancellation wins while spawn settles", async () => {
+    const timer = new FakeTimer();
+    const child = new FakeChildProcess(timer);
+    const startup = new AbortController();
+    const reason = new Error("startup canceled while spawning");
+    const groupKills: number[] = [];
+    const client = new XcodebuildClient(
+      async () => createExecResult("Xcode 26.5", ""),
+      timer,
+      () => {
+        startup.abort(reason);
+        child.simulateSpawn();
+        return child as never;
+      },
+      (pid) => {
+        groupKills.push(pid);
+        return true;
+      },
+    );
+    await expect(
+      timer.resolvePromise(client.startStreaming([], { startupSignal: startup.signal })),
+    ).rejects.toBe(reason);
+    expect(child.killed).toBe(true);
+    expect(groupKills).toEqual([]);
+  });
+
+  test("kills a cancelled detached runner group and awaits exit before rejecting", async () => {
+    const timer = new FakeTimer();
+    const child = new FakeChildProcess(timer);
+    const startup = new AbortController();
+    const reason = new Error("startup cancelled after descendants spawned");
+    const groupKills: Array<{ pid: number; signal?: NodeJS.Signals | number }> = [];
+    const client = new XcodebuildClient(
+      async () => createExecResult("Xcode 26.5", ""),
+      timer,
+      () => {
+        startup.abort(reason);
+        child.simulateSpawn();
+        return child as never;
+      },
+      (pid, signal) => {
+        groupKills.push({ pid, signal });
+        return true;
+      },
+    );
+    let settled = false;
+    const outcome = client
+      .startStreaming([], { detached: true, startupSignal: startup.signal })
+      .then(
+        () => "resolved" as const,
+        (error: unknown) => error,
+      );
+    void outcome.then(() => {
+      settled = true;
+    });
+
+    for (let turn = 0; turn < 5 && groupKills.length === 0; turn++) {
+      timer.advanceTime(0);
+      await Promise.resolve();
+    }
+    const settledBeforeExit = settled;
+    child.simulateExit(0, "SIGKILL");
+    timer.advanceTime(0);
+
+    expect(await outcome).toBe(reason);
+    expect(groupKills).toEqual([{ pid: -child.pid!, signal: "SIGKILL" }]);
+    expect(settledBeforeExit).toBe(false);
+    expect(child.killed).toBe(false);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("preserves cancellation after the bounded detached-runner exit wait", async () => {
+    const timer = new FakeTimer();
+    const child = new FakeChildProcess(timer);
+    const directKillSignals: Array<NodeJS.Signals | number | undefined> = [];
+    child.kill = (signal?: NodeJS.Signals | number) => {
+      directKillSignals.push(signal);
+      return true;
+    };
+    const startup = new AbortController();
+    const reason = new Error("startup cancellation remains authoritative");
+    const groupKills: Array<{ pid: number; signal?: NodeJS.Signals | number }> = [];
+    const client = new XcodebuildClient(
+      async () => createExecResult("Xcode 26.5", ""),
+      timer,
+      () => {
+        startup.abort(reason);
+        child.simulateSpawn();
+        return child as never;
+      },
+      (pid, signal) => {
+        groupKills.push({ pid, signal });
+        return true;
+      },
+    );
+    const outcome = client.startStreaming([], {
+      detached: true,
+      startupSignal: startup.signal,
+    });
+
+    for (let turn = 0; turn < 5 && groupKills.length === 0; turn++) {
+      timer.advanceTime(0);
+      await Promise.resolve();
+    }
+    timer.advanceTime(5000);
+    for (let turn = 0; turn < 5 && directKillSignals.length === 0; turn++) {
+      await Promise.resolve();
+    }
+    timer.advanceTime(5000);
+
+    await expect(outcome).rejects.toBe(reason);
+    expect(groupKills).toEqual([{ pid: -child.pid!, signal: "SIGKILL" }]);
+    expect(directKillSignals).toEqual(["SIGKILL"]);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("forwards an explicitly supplied process signal to the resident spawn", async () => {
+    // A caller that explicitly opts in to a process-lifecycle signal (rather than
+    // relying on the ambient request signal) must still have it reach spawn.
+    const child = new FakeChildProcess();
+    let capturedSpawnOptions: import("node:child_process").SpawnOptions | undefined;
+    const client = new XcodebuildClient(
+      async () => createExecResult("Xcode 26.5", ""),
+      new FakeTimer(),
+      (_command, _args, options) => {
+        capturedSpawnOptions = options;
+        child.simulateSpawn();
+        return child as never;
+      },
+    );
+
+    const ownedController = new AbortController();
+    await client.startStreaming(["test-without-building"], {
+      detached: true,
+      stdio: ["ignore", "pipe", "pipe"],
+      signal: ownedController.signal,
+    });
+
+    expect(capturedSpawnOptions?.signal).toBe(ownedController.signal);
+  });
+
+  test("aborting the ambient request signal after startStreaming resolves does not kill the child", async () => {
+    const child = new FakeChildProcess();
+    const client = new XcodebuildClient(
+      async () => createExecResult("Xcode 26.5", ""),
+      new FakeTimer(),
+      (_command, _args, options) => {
+        options.signal?.addEventListener("abort", () => child.kill());
+        child.simulateSpawn();
+        return child as never;
+      },
+    );
+
+    const requestController = new AbortController();
+    let killed = false;
+    (child as unknown as { kill: () => void }).kill = () => {
+      killed = true;
+    };
+
+    await runWithAbortSignal(requestController.signal, () =>
+      client.startStreaming(["test-without-building"], {
+        detached: true,
+        stdio: ["ignore", "pipe", "pipe"],
+      }),
+    );
+
+    requestController.abort();
+
+    expect(killed).toBe(false);
+  });
+  test("startup cancellation rejects a pending probe without spawning the resident", async () => {
+    const timer = new FakeTimer();
+    const startup = new AbortController();
+    const owner = new AbortController();
+    let release!: (result: ExecResult) => void;
+    let spawns = 0;
+    const client = new XcodebuildClient(
+      async () =>
+        new Promise<ExecResult>((resolve) => {
+          release = resolve;
+        }),
+      timer,
+      () => {
+        spawns++;
+        throw new Error("must not spawn");
+      },
+    );
+    const reason = new Error("startup cancelled");
+    const outcome = client
+      .startStreaming([], { signal: owner.signal, startupSignal: startup.signal })
+      .catch((error: unknown) => error);
+    startup.abort(reason);
+    expect(await outcome).toBe(reason);
+    release(createExecResult("Xcode 26.5", ""));
+    await Promise.resolve();
+    expect(spawns).toBe(0);
+    expect(owner.signal.aborted).toBe(false);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("cancellation at probe completion prevents spawn", async () => {
+    const startup = new AbortController();
+    const owner = new AbortController();
+    let spawns = 0;
+    const reason = new Error("cancelled at probe completion");
+    const client = new XcodebuildClient(
+      async () => {
+        startup.abort(reason);
+        return createExecResult("Xcode 26.5", "");
+      },
+      new FakeTimer(),
+      () => {
+        spawns++;
+        throw new Error("must not spawn");
+      },
+    );
+    await expect(
+      client.startStreaming([], { signal: owner.signal, startupSignal: startup.signal }),
+    ).rejects.toBe(reason);
+    expect(spawns).toBe(0);
   });
 });

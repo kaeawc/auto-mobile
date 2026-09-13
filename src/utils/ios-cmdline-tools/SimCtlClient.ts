@@ -2266,21 +2266,27 @@ export class SimCtlClient implements SimCtl {
     bundleId: string,
     payloadJson: string,
   ): Promise<{ success: boolean; error?: string }> {
-    const dir = await fsPromises.mkdtemp(join(tmpdir(), "automobile-apns-"));
+    const dir = await this.fileSystem.mkdtemp(join(tmpdir(), "automobile-apns-"));
     const file = join(dir, "payload.apns");
     try {
-      await fsPromises.writeFile(file, payloadJson, "utf-8");
+      await this.fileSystem.writeFile(file, payloadJson, "utf8");
       // `xcrun simctl push <udid> <bundleId> <file>`; bundleId may be omitted when the
       // payload carries "Simulator Target Bundle", but passing it explicitly is harmless.
       const result = await this.executeCommandArgs(["push", deviceId, bundleId, file]);
+      // `simctl push` can exit 0 (delivered) while still writing advisory or
+      // diagnostic text to stderr, depending on the Xcode/simctl version.
+      // Success is driven by the exit code alone — executeCommandArgs already
+      // throws on a non-zero exit, which the catch below converts into
+      // { success: false, error } (issue #6517). Log stderr for diagnostics
+      // only; it must not flip a delivered push into a reported failure.
       if ((result.stderr || "").trim().length > 0) {
-        return { success: false, error: result.stderr.trim() };
+        logger.debug(`[iOS] simctl push wrote to stderr despite exit 0: ${result.stderr.trim()}`);
       }
       return { success: true };
     } catch (error) {
       return { success: false, error: errorMessage(error) };
     } finally {
-      await fsPromises.rm(dir, { recursive: true, force: true }).catch(() => {});
+      await this.fileSystem.rm(dir, { recursive: true, force: true }).catch(() => {});
     }
   }
 

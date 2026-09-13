@@ -26,10 +26,25 @@
 // active context. The TTL tier and the orphan-build-key sweep never touch it, and
 // the size cap never evicts its newest observation(s). Because in-flight writes
 // land on the current build key (newest `last_seen_at`), this protects whatever is
-// being observed right now without a separate liveness signal. The whole pass runs
-// in one transaction (atomic, no torn graph); observations are deleted before
-// their orphaned build keys (FK-safe order), and file unlinks run AFTER commit as
-// side effects (never inside the txn).
+// being observed right now without a separate liveness signal.
+//
+// Connection-hold bound (#6650): the pass does NOT run in one transaction that
+// spans its whole duration -- on a large graph that would hold the daemon's
+// single SQLite connection exclusively for the entire pass, parking every other
+// query with no timeout (bunSqliteDialect's transaction lease is a JS-level
+// mutex, not a SQLite lock, so `busy_timeout` never applies to it). Instead each
+// tier, and each eviction batch WITHIN `evictOldest`, runs in its own short
+// transaction, so the connection is released between them and other queries can
+// interleave. Batched tiers keep one protected-build snapshot so they do not
+// repeat a whole-database grouped-MAX scan for every chunk, then revalidate the
+// apps represented by a selected batch inside its short transaction before
+// mutating. Global oldest-first eviction is the exception: it revalidates every
+// app before each delete, because a protection change in an app outside the
+// selected batch can expose an even older row. This preserves atomic active-data
+// safety without making large multi-app databases quadratic. FK-safe ordering
+// across tiers still holds: the TTL/cap tiers' transactions commit before the
+// orphan-build-key sweep's transaction begins. File unlinks run AFTER every
+// commit as a side effect (never inside a txn).
 //
 // SQLite scale safety: every statement in this module keeps its bound-parameter
 // count and expression-tree depth bounded regardless of DB size. Row-count id
@@ -43,6 +58,17 @@
 import type { Kysely } from "kysely";
 import type { Database } from "./types";
 import { logger as defaultLogger, type Logger } from "../utils/logger";
+
+/**
+ * Gives timers, sockets, and newly-arrived daemon requests a turn between
+ * committed retention batches. Kept injectable so tests never need real time.
+ */
+export type RetentionBatchYield = () => Promise<void>;
+
+const yieldToIo: RetentionBatchYield = () => new Promise((resolve) => setImmediate(resolve));
+
+/** Injectable protected-set query used to make concurrency and query scope observable in tests. */
+export type ProtectedBuildKeyResolver = typeof computeProtectedBuildKeyIds;
 
 /** Tunable retention thresholds. All durations are milliseconds. */
 export interface NavigationRetentionConfig {
@@ -211,13 +237,16 @@ interface BuildKeyRow {
 interface EvictionCandidate {
   isNode: boolean;
   id: number;
+  buildKeyId: number;
   lastSeenAt: number;
 }
 
 /**
- * Prunes the persisted nav data in one atomic pass. Stateless and recency-based:
- * inject the clock `now` and (optionally) a file remover so the whole thing is
- * deterministic under FakeTimer + an in-memory DB.
+ * Prunes the persisted nav data in a chunked pass: each tier, and each eviction
+ * batch within a tier, is its own short atomic transaction rather than the whole
+ * pass sharing one (#6650) — see the connection-hold-bound note above. Stateless
+ * and recency-based: inject the clock `now` and (optionally) a file remover so
+ * the whole thing is deterministic under FakeTimer + an in-memory DB.
  *
  * The two observation tables are handled by explicit node/edge branches rather
  * than a table-name variable: their relevant columns are identical, but keeping
@@ -231,33 +260,34 @@ export class NavigationRetention {
     config: Partial<NavigationRetentionConfig> = {},
     private readonly removeScreenshotFile?: ScreenshotFileRemover,
     private readonly logger: Logger = defaultLogger,
+    private readonly yieldBetweenBatches: RetentionBatchYield = yieldToIo,
+    private readonly resolveProtectedBuildKeyIds: ProtectedBuildKeyResolver = computeProtectedBuildKeyIds,
   ) {
     this.config = resolveNavigationRetentionConfig(config);
   }
 
   /**
-   * Run every tier once against `now` (ms). Returns a per-pass summary. All DB
-   * work is a single transaction; screenshot files are unlinked AFTER commit so
-   * a slow/failed unlink can never hold the daemon's one connection.
+   * Run every tier once against `now` (ms). Returns a per-pass summary. Each
+   * tier (and each eviction batch inside it) runs in its own short transaction
+   * (#6650) rather than the whole pass sharing one, so the daemon's single
+   * connection is released between them; screenshot files are unlinked AFTER
+   * every commit so a slow/failed unlink can never hold that connection either.
    */
   async prune(now: number): Promise<NavigationRetentionSummary> {
     const summary = emptySummary(now);
-    let filesToRemove: string[] = [];
 
-    await this.db.transaction().execute(async (trx) => {
-      // Read the build keys + protected set INSIDE the txn: it holds the single
-      // connection exclusively, so no concurrent write can shift which build is
-      // newest between the read and the deletes.
-      const buildKeys = await loadBuildKeys(trx);
-      const protectedIds = await computeProtectedBuildKeyIds(trx, buildKeys);
+    // pruneScreenshots unlinks each batch's files right after that batch's own
+    // transaction commits (#6650) — NOT deferred to the end of the pass. Deferring
+    // reintroduced a partial-failure leak the single-transaction version could not
+    // have: a screenshot_path is committed as null in the SHORT tier, but if a
+    // later tier (TTL/cap/orphan) then threw, the trailing unlink was never
+    // reached and the file was stranded on disk with no DB pointer left to
+    // rediscover it. Pairing each clear-commit with its unlink closes that window.
+    await this.pruneScreenshots(now, summary);
+    await this.pruneObservationsByTtl(now, summary);
+    await this.enforceCaps(summary);
+    await this.pruneOrphanBuildKeys(summary);
 
-      filesToRemove = await this.pruneScreenshots(trx, now, protectedIds, summary);
-      await this.pruneObservationsByTtl(trx, now, protectedIds, summary);
-      await this.enforceCaps(trx, buildKeys, protectedIds, summary);
-      await this.pruneOrphanBuildKeys(trx, protectedIds, summary);
-    });
-
-    await this.removeFiles(filesToRemove);
     return summary;
   }
 
@@ -278,97 +308,270 @@ export class NavigationRetention {
 
   /**
    * SHORT tier: clear `screenshot_path` on nodes last seen before the cutoff,
-   * unless the node is still observed under the active (protected) build. Returns
-   * the file paths whose pointers were cleared, for post-commit unlinking.
+   * unless the node is still observed under the active (protected) build.
    *
    * Batched: node cardinality is NOT bounded by the observation caps, so a large
    * stale set is cleared in chunks of `evictionChunkSize` — each UPDATE binds at
    * most that many ids. Clearing the pointer removes rows from the next batch's
-   * predicate, so the loop terminates.
+   * predicate, so the loop terminates. Each batch is its own short transaction
+   * (#6650): the selected batch's apps are revalidated inside it, so a build key
+   * that becomes active between batches is honored by every later mutation.
+   * Each batch's files are unlinked right after that batch commits (outside the
+   * txn) — pairing the clear-commit with its unlink so a failure in this loop or
+   * a later tier can never strand a file whose DB pointer is already gone.
    */
-  private async pruneScreenshots(
-    trx: Kysely<Database>,
-    now: number,
-    protectedIds: number[],
-    summary: NavigationRetentionSummary,
-  ): Promise<string[]> {
+  private async pruneScreenshots(now: number, summary: NavigationRetentionSummary): Promise<void> {
     const cutoff = now - this.config.screenshotTtlMs;
     const chunk = this.config.evictionChunkSize;
-    const paths: string[] = [];
+    // A full protected-build scan is expensive on an accumulated database. Keep a
+    // snapshot for ordinary batches, then revalidate only each selected batch's
+    // apps under its transaction before clearing pointers.
+    let protectedIds = await this.resolveProtectedBuildKeyIds(this.db);
 
     for (;;) {
-      let query = trx
-        .selectFrom("navigation_nodes")
-        .select(["id", "screenshot_path"])
-        .where("screenshot_path", "is not", null)
-        .where("last_seen_at", "<", cutoff);
+      const batchResult = await this.db.transaction().execute(async (trx) => {
+        let query = trx
+          .selectFrom("navigation_nodes")
+          .select(["id", "app_id", "screenshot_path"])
+          .where("screenshot_path", "is not", null)
+          .where("last_seen_at", "<", cutoff);
 
-      if (protectedIds.length > 0) {
-        // Keep the screenshot if the node has any observation under a protected
-        // build key (i.e. it is part of the active context).
-        query = query.where("id", "not in", (eb) =>
-          eb
-            .selectFrom("navigation_node_observations")
-            .select("node_id")
-            .where("build_key_id", "in", protectedIds),
-        );
-      }
-
-      const batch = await query.limit(chunk).execute();
-      if (batch.length === 0) {
-        break;
-      }
-
-      const ids = batch.map((row) => row.id);
-      await trx
-        .updateTable("navigation_nodes")
-        .set({ screenshot_path: null })
-        .where("id", "in", ids)
-        .execute();
-
-      summary.screenshotsCleared += ids.length;
-      for (const row of batch) {
-        if (row.screenshot_path !== null) {
-          paths.push(row.screenshot_path);
+        if (protectedIds.length > 0) {
+          // Keep the screenshot if the node has any observation under a
+          // protected build key (i.e. it is part of the active context).
+          query = query.where("id", "not in", (eb) =>
+            eb
+              .selectFrom("navigation_node_observations")
+              .select("node_id")
+              .where("build_key_id", "in", protectedIds),
+          );
         }
-      }
 
-      if (batch.length < chunk) {
+        const batch = await query.limit(chunk).execute();
+        if (batch.length === 0) {
+          return null;
+        }
+
+        const batchAppIds = Array.from(new Set(batch.map((row) => row.app_id)));
+        const currentProtectedIds = await this.resolveProtectedBuildKeyIds(
+          trx,
+          undefined,
+          batchAppIds,
+        );
+        const protectedNodeRows = await loadProtectedNodeRows(
+          trx,
+          batch.map((row) => row.id),
+          currentProtectedIds,
+        );
+        const protectedNodeIds = new Set(protectedNodeRows);
+        const eligible = batch.filter((row) => !protectedNodeIds.has(row.id));
+        const activeBuildChanged = currentProtectedIds.some((id) => !protectedIds.includes(id));
+        if (eligible.length === 0) {
+          return {
+            clearedCount: 0,
+            clearedPaths: [],
+            isFullBatch: batch.length === chunk,
+            activeBuildChanged,
+          };
+        }
+
+        const ids = eligible.map((row) => row.id);
+        await trx
+          .updateTable("navigation_nodes")
+          .set({ screenshot_path: null })
+          .where("id", "in", ids)
+          .execute();
+
+        const clearedPaths: string[] = [];
+        for (const row of eligible) {
+          if (row.screenshot_path !== null) {
+            clearedPaths.push(row.screenshot_path);
+          }
+        }
+        return {
+          clearedCount: ids.length,
+          clearedPaths,
+          isFullBatch: batch.length === chunk,
+          activeBuildChanged,
+        };
+      });
+
+      if (batchResult === null) {
         break;
       }
-    }
 
-    return paths;
+      summary.screenshotsCleared += batchResult.clearedCount;
+      // Unlink this batch's files now that its clear-transaction has committed,
+      // before the next batch or any later tier runs (#6650).
+      await this.removeFiles(batchResult.clearedPaths);
+
+      if (batchResult.activeBuildChanged) {
+        protectedIds = await this.resolveProtectedBuildKeyIds(this.db);
+      }
+
+      // A changed active build can make every row in the selected snapshot
+      // ineligible while exposing rows hidden by the prior snapshot. Re-select
+      // once against the refreshed protection set before deciding the tier is done.
+      if (batchResult.clearedCount === 0 && batchResult.activeBuildChanged) {
+        await this.yieldBetweenBatches();
+        continue;
+      }
+      if (!batchResult.isFullBatch || batchResult.clearedCount === 0) {
+        break;
+      }
+      await this.yieldBetweenBatches();
+    }
   }
 
   /**
    * LONG tier: delete observation rows last seen before the cutoff, except those
-   * on a protected (active) build key. A single DELETE by predicate — it binds
-   * only the (per-app-bounded) protected id list, never one param per matched row.
+   * on a protected (active) build key. Each bounded delete batch runs in its
+   * own transaction, so an overdue retention pass cannot monopolize the single
+   * daemon connection in one predicate-wide SQLite delete. Each table takes one
+   * full protected-set snapshot, then transactionally revalidates only the apps
+   * represented by its selected rows before deleting them.
    */
   private async pruneObservationsByTtl(
-    trx: Kysely<Database>,
     now: number,
-    protectedIds: number[],
     summary: NavigationRetentionSummary,
   ): Promise<void> {
     const cutoff = now - this.config.structureTtlMs;
 
-    {
-      let query = trx.deleteFrom("navigation_node_observations").where("last_seen_at", "<", cutoff);
-      if (protectedIds.length > 0) {
-        query = query.where("build_key_id", "not in", protectedIds);
+    summary.nodeObservationsDeleted += await this.pruneNodeObservationsByTtl(cutoff);
+    summary.edgeObservationsDeleted += await this.pruneEdgeObservationsByTtl(cutoff);
+  }
+
+  private async pruneNodeObservationsByTtl(cutoff: number): Promise<number> {
+    let deletedTotal = 0;
+    let protectedIds = await this.resolveProtectedBuildKeyIds(this.db);
+    for (;;) {
+      const batchResult = await this.db.transaction().execute(async (trx) => {
+        let query = trx
+          .selectFrom("navigation_node_observations as observation")
+          .innerJoin("navigation_build_keys as buildKey", "buildKey.id", "observation.build_key_id")
+          .select(["observation.id", "observation.build_key_id", "buildKey.app_id"])
+          .where("observation.last_seen_at", "<", cutoff);
+        if (protectedIds.length > 0) {
+          query = query.where("observation.build_key_id", "not in", protectedIds);
+        }
+        const rows = await query.limit(this.config.evictionChunkSize).execute();
+        if (rows.length === 0) {
+          return null;
+        }
+
+        const batchAppIds = Array.from(new Set(rows.map((row) => row.app_id)));
+        const currentProtectedIds = await this.resolveProtectedBuildKeyIds(
+          trx,
+          undefined,
+          batchAppIds,
+        );
+        const currentProtected = new Set(currentProtectedIds);
+        const eligibleIds = rows
+          .filter((row) => !currentProtected.has(row.build_key_id))
+          .map((row) => row.id);
+        const protectionChanged = currentProtectedIds.some((id) => !protectedIds.includes(id));
+        if (eligibleIds.length === 0) {
+          return {
+            deletedCount: 0,
+            isFullBatch: rows.length === this.config.evictionChunkSize,
+            protectionChanged,
+          };
+        }
+        const result = await trx
+          .deleteFrom("navigation_node_observations")
+          .where("id", "in", eligibleIds)
+          .executeTakeFirst();
+        return {
+          deletedCount: Number(result.numDeletedRows ?? 0),
+          isFullBatch: rows.length === this.config.evictionChunkSize,
+          protectionChanged,
+        };
+      });
+      if (batchResult === null) {
+        return deletedTotal;
       }
-      const result = await query.executeTakeFirst();
-      summary.nodeObservationsDeleted += Number(result.numDeletedRows ?? 0);
+      deletedTotal += batchResult.deletedCount;
+      if (batchResult.protectionChanged) {
+        protectedIds = await this.resolveProtectedBuildKeyIds(this.db);
+        if (batchResult.deletedCount === 0) {
+          await this.yieldBetweenBatches();
+          continue;
+        }
+      }
+      if (
+        (!batchResult.isFullBatch && !batchResult.protectionChanged) ||
+        batchResult.deletedCount === 0
+      ) {
+        return deletedTotal;
+      }
+      await this.yieldBetweenBatches();
     }
-    {
-      let query = trx.deleteFrom("navigation_edge_observations").where("last_seen_at", "<", cutoff);
-      if (protectedIds.length > 0) {
-        query = query.where("build_key_id", "not in", protectedIds);
+  }
+
+  private async pruneEdgeObservationsByTtl(cutoff: number): Promise<number> {
+    let deletedTotal = 0;
+    let protectedIds = await this.resolveProtectedBuildKeyIds(this.db);
+    for (;;) {
+      const batchResult = await this.db.transaction().execute(async (trx) => {
+        let query = trx
+          .selectFrom("navigation_edge_observations as observation")
+          .innerJoin("navigation_build_keys as buildKey", "buildKey.id", "observation.build_key_id")
+          .select(["observation.id", "observation.build_key_id", "buildKey.app_id"])
+          .where("observation.last_seen_at", "<", cutoff);
+        if (protectedIds.length > 0) {
+          query = query.where("observation.build_key_id", "not in", protectedIds);
+        }
+        const rows = await query.limit(this.config.evictionChunkSize).execute();
+        if (rows.length === 0) {
+          return null;
+        }
+
+        const batchAppIds = Array.from(new Set(rows.map((row) => row.app_id)));
+        const currentProtectedIds = await this.resolveProtectedBuildKeyIds(
+          trx,
+          undefined,
+          batchAppIds,
+        );
+        const currentProtected = new Set(currentProtectedIds);
+        const eligibleIds = rows
+          .filter((row) => !currentProtected.has(row.build_key_id))
+          .map((row) => row.id);
+        const protectionChanged = currentProtectedIds.some((id) => !protectedIds.includes(id));
+        if (eligibleIds.length === 0) {
+          return {
+            deletedCount: 0,
+            isFullBatch: rows.length === this.config.evictionChunkSize,
+            protectionChanged,
+          };
+        }
+        const result = await trx
+          .deleteFrom("navigation_edge_observations")
+          .where("id", "in", eligibleIds)
+          .executeTakeFirst();
+        return {
+          deletedCount: Number(result.numDeletedRows ?? 0),
+          isFullBatch: rows.length === this.config.evictionChunkSize,
+          protectionChanged,
+        };
+      });
+      if (batchResult === null) {
+        return deletedTotal;
       }
-      const result = await query.executeTakeFirst();
-      summary.edgeObservationsDeleted += Number(result.numDeletedRows ?? 0);
+      deletedTotal += batchResult.deletedCount;
+      if (batchResult.protectionChanged) {
+        protectedIds = await this.resolveProtectedBuildKeyIds(this.db);
+        if (batchResult.deletedCount === 0) {
+          await this.yieldBetweenBatches();
+          continue;
+        }
+      }
+      if (
+        (!batchResult.isFullBatch && !batchResult.protectionChanged) ||
+        batchResult.deletedCount === 0
+      ) {
+        return deletedTotal;
+      }
+      await this.yieldBetweenBatches();
     }
   }
 
@@ -381,26 +584,32 @@ export class NavigationRetention {
    * Per-app scope is expressed as a join on `app_id` (binds one param, the app id)
    * rather than an id list of the app's build keys, so it stays bounded no matter
    * how many builds an app accumulates.
+   *
+   * The app-id enumeration and the overflow counts below are plain (untransacted)
+   * reads, not part of any atomic unit: `evictOldest` (#6650) re-derives its own
+   * victim set and protected set fresh inside each batch's own short
+   * transaction, so a stale/approximate count here only changes how many batches
+   * run, never which rows are safe to delete (self-correcting, same as the
+   * existing `collectOldestEvictable` re-query per batch).
    */
-  private async enforceCaps(
-    trx: Kysely<Database>,
-    buildKeys: BuildKeyRow[],
-    protectedIds: number[],
-    summary: NavigationRetentionSummary,
-  ): Promise<void> {
+  private async enforceCaps(summary: NavigationRetentionSummary): Promise<void> {
+    const buildKeys = await loadBuildKeys(this.db);
     const appIds = Array.from(new Set(buildKeys.map((bk) => bk.appId)));
     for (const appId of appIds) {
-      const count = await countObservations(trx, appId);
+      const count = await countObservations(this.db, appId);
       const overflow = count - this.config.perAppMaxObservations;
       if (overflow > 0) {
-        await this.evictOldest(trx, appId, protectedIds, overflow, summary);
+        await this.evictOldest(appId, overflow, summary);
       }
+      // Counting an under-cap app and a one-batch eviction are both entirely
+      // synchronous SQLite work. Give arrivals a turn before scanning the next app.
+      await this.yieldBetweenBatches();
     }
 
-    const globalCount = await countObservations(trx, null);
+    const globalCount = await countObservations(this.db, null);
     const globalOverflow = globalCount - this.config.globalMaxObservations;
     if (globalOverflow > 0) {
-      await this.evictOldest(trx, null, protectedIds, globalOverflow, summary);
+      await this.evictOldest(null, globalOverflow, summary);
     }
   }
 
@@ -411,6 +620,12 @@ export class NavigationRetention {
    * evictable rows remain (active rows are excluded relationally, so a scope can
    * be irreducible below its active set).
    *
+   * Each batch is its own short transaction (#6650), releasing the connection
+   * between batches. A per-app pass snapshots and revalidates only that app. A
+   * global pass snapshots and revalidates the full protected set before every
+   * delete so a newly exposed older row in any app forces re-selection. Empty
+   * selections are also revalidated before the loop decides it is irreducible.
+   *
    * Perf note: each batch reads the oldest rows `ORDER BY last_seen_at, id`
    * across build keys. The `(last_seen_at, id)` index from
    * 2026_08_22_002_navigation_observation_eviction_index.ts (issue #5309) serves
@@ -418,67 +633,137 @@ export class NavigationRetention {
    * scan + temp-B-tree sort.
    */
   private async evictOldest(
-    trx: Kysely<Database>,
     appId: string | null,
-    protectedIds: number[],
     count: number,
     summary: NavigationRetentionSummary,
   ): Promise<void> {
     let remaining = count;
+    // Per-app enforcement never needs another app's grouped-MAX scan. Global
+    // oldest-first enforcement must snapshot and revalidate every app.
+    const protectedScope = appId === null ? undefined : [appId];
+    let protectedIds = await this.resolveProtectedBuildKeyIds(this.db, undefined, protectedScope);
     while (remaining > 0) {
       const batch = Math.min(remaining, this.config.evictionChunkSize);
-      const victims = await collectOldestEvictable(trx, appId, protectedIds, batch);
-      if (victims.length === 0) {
+      const batchResult = await this.db.transaction().execute(async (trx) => {
+        const victims = await collectOldestEvictable(trx, appId, protectedIds, batch);
+        if (victims.length === 0) {
+          const currentProtectedIds = await this.resolveProtectedBuildKeyIds(
+            trx,
+            undefined,
+            protectedScope,
+          );
+          return {
+            evictedCount: 0,
+            protectionChanged: !containSameIds(currentProtectedIds, protectedIds),
+          };
+        }
+
+        const currentProtectedIds = await this.resolveProtectedBuildKeyIds(
+          trx,
+          undefined,
+          protectedScope,
+        );
+        if (!containSameIds(currentProtectedIds, protectedIds)) {
+          return { evictedCount: 0, protectionChanged: true };
+        }
+
+        const maxSeen = await loadMaxSeenByBuildKeyIds(
+          trx,
+          victims.map((victim) => victim.buildKeyId),
+        );
+        const currentProtected = new Set(currentProtectedIds);
+        const eligibleVictims = victims.filter(
+          (victim) =>
+            !currentProtected.has(victim.buildKeyId) ||
+            victim.lastSeenAt < (maxSeen.get(victim.buildKeyId) ?? Number.NEGATIVE_INFINITY),
+        );
+        if (eligibleVictims.length === 0) {
+          return { evictedCount: 0, protectionChanged: false };
+        }
+
+        const nodeIds = eligibleVictims.filter((v) => v.isNode).map((v) => v.id);
+        const edgeIds = eligibleVictims.filter((v) => !v.isNode).map((v) => v.id);
+        if (nodeIds.length > 0) {
+          const deleted = await trx
+            .deleteFrom("navigation_node_observations")
+            .where("id", "in", nodeIds)
+            .executeTakeFirst();
+          summary.nodeObservationsDeleted += Number(deleted.numDeletedRows ?? 0);
+        }
+        if (edgeIds.length > 0) {
+          const deleted = await trx
+            .deleteFrom("navigation_edge_observations")
+            .where("id", "in", edgeIds)
+            .executeTakeFirst();
+          summary.edgeObservationsDeleted += Number(deleted.numDeletedRows ?? 0);
+        }
+        return { evictedCount: eligibleVictims.length, protectionChanged: false };
+      });
+
+      if (batchResult.evictedCount === 0) {
+        if (batchResult.protectionChanged) {
+          protectedIds = await this.resolveProtectedBuildKeyIds(this.db, undefined, protectedScope);
+          await this.yieldBetweenBatches();
+          continue;
+        }
         return;
       }
-
-      const nodeIds = victims.filter((v) => v.isNode).map((v) => v.id);
-      const edgeIds = victims.filter((v) => !v.isNode).map((v) => v.id);
-      if (nodeIds.length > 0) {
-        const deleted = await trx
-          .deleteFrom("navigation_node_observations")
-          .where("id", "in", nodeIds)
-          .executeTakeFirst();
-        summary.nodeObservationsDeleted += Number(deleted.numDeletedRows ?? 0);
+      remaining -= batchResult.evictedCount;
+      if (remaining > 0) {
+        await this.yieldBetweenBatches();
       }
-      if (edgeIds.length > 0) {
-        const deleted = await trx
-          .deleteFrom("navigation_edge_observations")
-          .where("id", "in", edgeIds)
-          .executeTakeFirst();
-        summary.edgeObservationsDeleted += Number(deleted.numDeletedRows ?? 0);
-      }
-      remaining -= victims.length;
     }
   }
 
   /**
    * Sweep build keys left with no observations (except protected ones). Runs
-   * after observation deletes so the FK-safe order holds even with foreign_keys
-   * ON (deleting a still-referenced build key would cascade-wipe its rows). The
-   * "no observations" test is a correlated subquery (binds O(1)); only the
-   * per-app-bounded protected id list is bound directly.
+   * after the observation-deleting tiers' transactions have already committed,
+   * so the FK-safe order holds even with foreign_keys ON (deleting a
+   * still-referenced build key would cascade-wipe its rows). The "no
+   * observations" test is a correlated subquery (binds O(1)); only the
+   * per-app-bounded protected id list is bound directly. Runs in its own short
+   * transaction (#6650) with the protected set read fresh inside it.
    */
-  private async pruneOrphanBuildKeys(
-    trx: Kysely<Database>,
-    protectedIds: number[],
-    summary: NavigationRetentionSummary,
-  ): Promise<void> {
-    let query = trx
-      .deleteFrom("navigation_build_keys")
-      .where("id", "not in", (eb) =>
-        eb.selectFrom("navigation_node_observations").select("build_key_id"),
-      )
-      .where("id", "not in", (eb) =>
-        eb.selectFrom("navigation_edge_observations").select("build_key_id"),
-      );
+  private async pruneOrphanBuildKeys(summary: NavigationRetentionSummary): Promise<void> {
+    const chunk = this.config.evictionChunkSize;
+    for (;;) {
+      const deleted = await this.db.transaction().execute(async (trx) => {
+        const protectedIds = await this.resolveProtectedBuildKeyIds(trx);
 
-    if (protectedIds.length > 0) {
-      query = query.where("id", "not in", protectedIds);
+        let query = trx
+          .selectFrom("navigation_build_keys")
+          .select("id")
+          .where("id", "not in", (eb) =>
+            eb.selectFrom("navigation_node_observations").select("build_key_id"),
+          )
+          .where("id", "not in", (eb) =>
+            eb.selectFrom("navigation_edge_observations").select("build_key_id"),
+          );
+
+        if (protectedIds.length > 0) {
+          query = query.where("id", "not in", protectedIds);
+        }
+
+        const rows = await query.limit(chunk).execute();
+        if (rows.length === 0) {
+          return 0;
+        }
+        const result = await trx
+          .deleteFrom("navigation_build_keys")
+          .where(
+            "id",
+            "in",
+            rows.map((row) => row.id),
+          )
+          .executeTakeFirst();
+        return Number(result.numDeletedRows ?? 0);
+      });
+      summary.buildKeysDeleted += deleted;
+      if (deleted < chunk) {
+        return;
+      }
+      await this.yieldBetweenBatches();
     }
-
-    const deleted = await query.executeTakeFirst();
-    summary.buildKeysDeleted += Number(deleted.numDeletedRows ?? 0);
   }
 }
 
@@ -486,8 +771,15 @@ export class NavigationRetention {
 // Free helpers (kept small so the class methods stay under the complexity gate).
 // ---------------------------------------------------------------------------
 
-async function loadBuildKeys(db: Kysely<Database>): Promise<BuildKeyRow[]> {
-  const rows = await db.selectFrom("navigation_build_keys").select(["id", "app_id"]).execute();
+async function loadBuildKeys(
+  db: Kysely<Database>,
+  appIds?: readonly string[],
+): Promise<BuildKeyRow[]> {
+  let query = db.selectFrom("navigation_build_keys").select(["id", "app_id"]);
+  if (appIds && appIds.length > 0) {
+    query = query.where("app_id", "in", appIds);
+  }
+  const rows = await query.execute();
   return rows.map((row) => ({ id: row.id, appId: row.app_id }));
 }
 
@@ -499,12 +791,13 @@ async function loadBuildKeys(db: Kysely<Database>): Promise<BuildKeyRow[]> {
 export async function computeProtectedBuildKeyIds(
   db: Kysely<Database>,
   buildKeys?: BuildKeyRow[],
+  appIds?: readonly string[],
 ): Promise<number[]> {
-  const keys = buildKeys ?? (await loadBuildKeys(db));
+  const keys = buildKeys ?? (await loadBuildKeys(db, appIds));
   if (keys.length === 0) {
     return [];
   }
-  const maxSeen = await loadMaxSeenByBuildKey(db);
+  const maxSeen = await loadMaxSeenByBuildKey(db, appIds);
 
   // Per app, pick the build key with the greatest (lastSeen, id).
   const best = new Map<string, { id: number; seen: number }>();
@@ -529,18 +822,39 @@ function isNewerBuild(
   return seen > current.seen || (seen === current.seen && id > current.id);
 }
 
+function containSameIds(left: readonly number[], right: readonly number[]): boolean {
+  if (left.length !== right.length) {
+    return false;
+  }
+  const rightIds = new Set(right);
+  return left.every((id) => rightIds.has(id));
+}
+
 /** Greatest `last_seen_at` per build key across both observation tables. */
-async function loadMaxSeenByBuildKey(db: Kysely<Database>): Promise<Map<number, number>> {
-  const nodeMax = await db
-    .selectFrom("navigation_node_observations")
-    .select((eb) => ["build_key_id", eb.fn.max("last_seen_at").as("max_seen")])
-    .groupBy("build_key_id")
-    .execute();
-  const edgeMax = await db
-    .selectFrom("navigation_edge_observations")
-    .select((eb) => ["build_key_id", eb.fn.max("last_seen_at").as("max_seen")])
-    .groupBy("build_key_id")
-    .execute();
+async function loadMaxSeenByBuildKey(
+  db: Kysely<Database>,
+  appIds?: readonly string[],
+): Promise<Map<number, number>> {
+  let nodeQuery = db
+    .selectFrom("navigation_node_observations as observation")
+    .innerJoin("navigation_build_keys as buildKey", "buildKey.id", "observation.build_key_id")
+    .select((eb) => [
+      "observation.build_key_id",
+      eb.fn.max("observation.last_seen_at").as("max_seen"),
+    ]);
+  let edgeQuery = db
+    .selectFrom("navigation_edge_observations as observation")
+    .innerJoin("navigation_build_keys as buildKey", "buildKey.id", "observation.build_key_id")
+    .select((eb) => [
+      "observation.build_key_id",
+      eb.fn.max("observation.last_seen_at").as("max_seen"),
+    ]);
+  if (appIds && appIds.length > 0) {
+    nodeQuery = nodeQuery.where("buildKey.app_id", "in", appIds);
+    edgeQuery = edgeQuery.where("buildKey.app_id", "in", appIds);
+  }
+  const nodeMax = await nodeQuery.groupBy("observation.build_key_id").execute();
+  const edgeMax = await edgeQuery.groupBy("observation.build_key_id").execute();
 
   const maxSeen = new Map<number, number>();
   for (const row of [...nodeMax, ...edgeMax]) {
@@ -551,6 +865,61 @@ async function loadMaxSeenByBuildKey(db: Kysely<Database>): Promise<Map<number, 
     }
   }
   return maxSeen;
+}
+
+async function loadMaxSeenByBuildKeyIds(
+  db: Kysely<Database>,
+  ids: readonly number[],
+): Promise<Map<number, number>> {
+  if (ids.length === 0) {
+    return new Map();
+  }
+  const uniqueIds = Array.from(new Set(ids));
+  return loadMaxSeenByBuildKeyForIds(db, uniqueIds);
+}
+
+async function loadMaxSeenByBuildKeyForIds(
+  db: Kysely<Database>,
+  ids: number[],
+): Promise<Map<number, number>> {
+  const nodeMax = await db
+    .selectFrom("navigation_node_observations")
+    .select((eb) => ["build_key_id", eb.fn.max("last_seen_at").as("max_seen")])
+    .where("build_key_id", "in", ids)
+    .groupBy("build_key_id")
+    .execute();
+  const edgeMax = await db
+    .selectFrom("navigation_edge_observations")
+    .select((eb) => ["build_key_id", eb.fn.max("last_seen_at").as("max_seen")])
+    .where("build_key_id", "in", ids)
+    .groupBy("build_key_id")
+    .execute();
+  const maxSeen = new Map<number, number>();
+  for (const row of [...nodeMax, ...edgeMax]) {
+    const seen = Number(row.max_seen ?? 0);
+    const previous = maxSeen.get(row.build_key_id);
+    if (previous === undefined || seen > previous) {
+      maxSeen.set(row.build_key_id, seen);
+    }
+  }
+  return maxSeen;
+}
+
+async function loadProtectedNodeRows(
+  db: Kysely<Database>,
+  nodeIds: readonly number[],
+  protectedIds: readonly number[],
+): Promise<number[]> {
+  if (nodeIds.length === 0 || protectedIds.length === 0) {
+    return [];
+  }
+  const rows = await db
+    .selectFrom("navigation_node_observations")
+    .select("node_id")
+    .where("node_id", "in", nodeIds)
+    .where("build_key_id", "in", protectedIds)
+    .execute();
+  return rows.map((row) => row.node_id);
 }
 
 /**
@@ -602,8 +971,18 @@ async function collectOldestEvictable(
   const edgeRows = await buildOldestEdgeEvictableQuery(trx, appId, protectedIds, limit).execute();
 
   const candidates: EvictionCandidate[] = [
-    ...nodeRows.map((row) => ({ isNode: true, id: row.id, lastSeenAt: row.last_seen_at })),
-    ...edgeRows.map((row) => ({ isNode: false, id: row.id, lastSeenAt: row.last_seen_at })),
+    ...nodeRows.map((row) => ({
+      isNode: true,
+      id: row.id,
+      buildKeyId: row.build_key_id,
+      lastSeenAt: row.last_seen_at,
+    })),
+    ...edgeRows.map((row) => ({
+      isNode: false,
+      id: row.id,
+      buildKeyId: row.build_key_id,
+      lastSeenAt: row.last_seen_at,
+    })),
   ];
   // Oldest first; break ties by table (nodes before edges) then id for determinism.
   candidates.sort(
@@ -633,7 +1012,9 @@ export function buildOldestNodeEvictableQuery(
   protectedIds: number[],
   limit: number,
 ) {
-  let query = db.selectFrom("navigation_node_observations").select(["id", "last_seen_at"]);
+  let query = db
+    .selectFrom("navigation_node_observations")
+    .select(["id", "build_key_id", "last_seen_at"]);
   if (appId !== null) {
     query = query.where("build_key_id", "in", (eb) =>
       eb.selectFrom("navigation_build_keys").select("id").where("app_id", "=", appId),
@@ -664,7 +1045,9 @@ export function buildOldestEdgeEvictableQuery(
   protectedIds: number[],
   limit: number,
 ) {
-  let query = db.selectFrom("navigation_edge_observations").select(["id", "last_seen_at"]);
+  let query = db
+    .selectFrom("navigation_edge_observations")
+    .select(["id", "build_key_id", "last_seen_at"]);
   if (appId !== null) {
     query = query.where("build_key_id", "in", (eb) =>
       eb.selectFrom("navigation_build_keys").select("id").where("app_id", "=", appId),

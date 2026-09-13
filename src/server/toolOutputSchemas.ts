@@ -527,6 +527,17 @@ export const viewHierarchyResultSchema = z
     "accessibility-focused-element": viewHierarchyNodeSchema.optional(),
     systemInsets: systemInsetsSchema.optional(),
     insets: observationInsetsSchema.optional(),
+    truncationReasons: z
+      .array(z.string())
+      .optional()
+      .describe(
+        "Why the captured hierarchy is incomplete (issue #6601). Present only " +
+          "when rows were dropped — a device-side stop (max_nodes, max_depth) or " +
+          "the per-node child cap (max_children[<node> kept N of M]). This is the " +
+          "nested location `sanitizeObserveResult` leaves the warning under " +
+          '`project:"full"` or `raw:true`; the skeleton projection instead lifts ' +
+          "the same information to the top-level `truncationReasons` field.",
+      ),
   })
   .passthrough();
 

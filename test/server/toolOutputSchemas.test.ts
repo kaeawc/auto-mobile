@@ -9,6 +9,7 @@ import {
   observeResultSchema,
   tapOnResultSchema,
   toolOutputArtifactMetadataSchema,
+  viewHierarchyResultSchema,
 } from "../../src/server/toolOutputSchemas";
 
 /**
@@ -318,6 +319,21 @@ describe("observationSummarySchema: truncation reasons (#6601)", () => {
     expect(parsed.truncationReasons).toEqual(full.truncationReasons);
 
     const json = toJSONSchema(observationSummarySchema) as Record<string, any>;
+    expect(json.properties.truncationReasons).toBeDefined();
+    expect(json.required ?? []).not.toContain("truncationReasons");
+  });
+});
+
+describe("viewHierarchyResultSchema: nested truncation reasons (#6601)", () => {
+  test("declares and preserves truncation reasons on a full/raw hierarchy", () => {
+    const viewHierarchy = {
+      truncationReasons: ["max_children[root] kept 10 of 12"],
+    };
+
+    const parsed = viewHierarchyResultSchema.parse(viewHierarchy);
+    expect(parsed.truncationReasons).toEqual(viewHierarchy.truncationReasons);
+
+    const json = toJSONSchema(viewHierarchyResultSchema) as Record<string, any>;
     expect(json.properties.truncationReasons).toBeDefined();
     expect(json.required ?? []).not.toContain("truncationReasons");
   });

@@ -76,6 +76,38 @@ SHIM
   done
 }
 
+@test "runs the pinned runtime graph audit when a runtime graph input is deleted" {
+  local runtime_input base_ref fake_bin
+  runtime_input="scripts/release/runtime-graph.json"
+  BACKUP_DIR="$BATS_TEST_TMPDIR/runtime-input-delete-backup"
+  mkdir -p "$BACKUP_DIR"
+  cp "$runtime_input" "$BACKUP_DIR/${runtime_input//\//_}"
+  MODIFIED_FILES+=("$runtime_input")
+
+  fake_bin="$BATS_TEST_TMPDIR/runtime-graph-delete-bin"
+  mkdir -p "$fake_bin"
+  cat > "$fake_bin/bash" <<'SHIM'
+#!/bin/bash
+if [[ "$1" == scripts/ci/verify-pinned-runtime-graph.sh ]]; then
+  exit 0
+fi
+exec /bin/bash "$@"
+SHIM
+  cat > "$fake_bin/bun" <<'SHIM'
+#!/bin/bash
+exit 0
+SHIM
+  chmod +x "$fake_bin/bash" "$fake_bin/bun"
+
+  base_ref="$(git -C "$ROOT" rev-parse HEAD)"
+  rm "$runtime_input"
+
+  run env PATH="$fake_bin:$PATH" AUTOMOBILE_INTEGRATION_TEST_BASE_REF="$base_ref" /bin/bash "$SCRIPT"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Pinned runtime graph: running"* ]]
+}
+
 @test "fails when the integration base ref cannot be resolved" {
   run env AUTOMOBILE_INTEGRATION_TEST_BASE_REF=definitely-no-such-ref bash "$SCRIPT"
 

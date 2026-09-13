@@ -18,20 +18,37 @@ JSON
   cat > "$FAKE_BIN/gh" <<'SHIM'
 #!/usr/bin/env bash
 set -euo pipefail
+annotation_response() {
+  local page="$1"
+  if [[ "$gh_args" == *"--paginate"* ]]; then
+    printf '[%s]\n' "$page"
+  else
+    printf '%s\n' "$page"
+  fi
+}
+gh_args="$*"
 case "$1 $2" in
   'run view') cat "$CLASSIFY_FIXTURE" ;;
   api\ *)
     case "$*" in
-      */check-runs/1/annotations) printf '[]\n' ;;
+      */check-runs/1/annotations*) annotation_response '[]' ;;
       */actions/jobs/1/logs) printf 'Test exceeded 100ms: timing budget fixture\n' ;;
-      */check-runs/3/annotations) printf '[{"message":"sharp: Could not load the sharp module"}]\n' ;;
-      */check-runs/4/annotations) printf '[{"message":"expect(received).toBe(expected) ... deviceDiscoveryReconcileFunnel assertion failed"}]\n' ;;
-      */check-runs/5/annotations) printf '[{"message":"XCTAssertEqual failed: (\\"foo\\") is not equal to (\\"bar\\")"}]\n' ;;
-      */check-runs/9/annotations) printf '[{"message":"expect(received).toBe(expected) ... some product assertion failed"}]\n' ;;
-      */check-runs/10/annotations) printf '[{"message":"oxlint: no-unused-vars lint failure"}]\n' ;;
-      */check-runs/12/annotations|*/check-runs/13/annotations|*/check-runs/14/annotations) printf '[]\n' ;;
-      */check-runs/15/annotations|*/check-runs/16/annotations|*/check-runs/17/annotations) printf '[]\n' ;;
+      */check-runs/3/annotations*) annotation_response '[{"message":"sharp: Could not load the sharp module"}]' ;;
+      */check-runs/4/annotations*) annotation_response '[{"message":"expect(received).toBe(expected) ... deviceDiscoveryReconcileFunnel assertion failed"}]' ;;
+      */check-runs/5/annotations*) annotation_response '[{"message":"XCTAssertEqual failed: (\"foo\") is not equal to (\"bar\")"}]' ;;
+      */check-runs/9/annotations*) annotation_response '[{"message":"expect(received).toBe(expected) ... some product assertion failed"}]' ;;
+      */check-runs/10/annotations*) annotation_response '[{"message":"oxlint: no-unused-vars lint failure"}]' ;;
+      */check-runs/30/annotations*)
+        if [[ "$gh_args" == *"--paginate"* ]]; then
+          printf '%s\n' '[[],[{"message":"sys.boot_completed is not 1"}]]'
+        else
+          printf '[]\n'
+        fi
+        ;;
+      */check-runs/12/annotations*|*/check-runs/13/annotations*|*/check-runs/14/annotations*) annotation_response '[]' ;;
+      */check-runs/15/annotations*|*/check-runs/16/annotations*|*/check-runs/17/annotations*) annotation_response '[]' ;;
       */actions/jobs/6/logs) printf 'readiness phase exceeded the remaining deadline\n' ;;
+      */actions/jobs/31/logs) printf 'sys.boot_completed is not 1\nFirst emulator attempt failed; captured diagnostics follow:\nexpect(received).toBe(expected) ... someRealRegression assertion failed\n' ;;
       */actions/jobs/18/logs) printf 'Test exceeded 100ms: some/test.ts > some test (median 142.31ms of 3 isolated runs)\n' ;;
       */actions/jobs/22/logs) printf 'Test exceeded 100ms: foo.bar (150.00ms; recheck produced 2 of 5 isolated samples)\n' ;;
       */actions/jobs/19/logs|*/actions/jobs/20/logs|*/actions/jobs/21/logs) : ;;
@@ -210,6 +227,92 @@ JSON
   run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" bash "$SCRIPT" 654
   [ "$status" -eq 0 ]
   [[ "$output" == *"Run JUnit Runner Emulator Tests → Run AutoMobile tests that require emulator → none → RERUN-DONT-FIX"* ]]
+}
+
+@test "classifies the terminal Android emulator retry instead of attempt one's flake" {
+  fixture="$BATS_TEST_TMPDIR/junit-emulator-terminal-regression-run.json"
+  cat > "$fixture" <<'JSON'
+{
+  "headBranch": "work/android-terminal-regression",
+  "jobs": [
+    {"databaseId": 31, "name": "Run JUnit Runner Emulator Tests", "conclusion": "failure", "steps": [{"name": "Boot and test Emulator (Retry)", "conclusion": "failure"}]}
+  ]
+}
+JSON
+
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" bash "$SCRIPT" 655
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Run JUnit Runner Emulator Tests → Boot and test Emulator (Retry) → none → UNKNOWN"* ]]
+  [[ "$output" != *"RERUN-DONT-FIX"* ]]
+}
+
+@test "uses a known flake annotation from the second page" {
+  fixture="$BATS_TEST_TMPDIR/paginated-annotations-run.json"
+  cat > "$fixture" <<'JSON'
+{
+  "headBranch": "work/paginated-annotations",
+  "jobs": [
+    {"databaseId": 30, "name": "Run JUnit Runner Emulator Tests", "conclusion": "failure", "steps": [{"name": "Run AutoMobile tests that require emulator", "conclusion": "failure"}]}
+  ]
+}
+JSON
+
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" bash "$SCRIPT" 656
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"sys.boot_completed is not 1 → RERUN-DONT-FIX"* ]]
+}
+
+@test "classifies timed out jobs and failed timed out steps" {
+  fixture="$BATS_TEST_TMPDIR/timed-out-job-run.json"
+  cat > "$fixture" <<'JSON'
+{
+  "headBranch": "work/timed-out-job",
+  "jobs": [
+    {"databaseId": 40, "name": "Unexpected Timeout Job", "conclusion": "timed_out", "steps": [{"name": "Wait for service", "conclusion": "timed_out"}]}
+  ]
+}
+JSON
+
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" bash "$SCRIPT" 657
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Unexpected Timeout Job → Wait for service → none → UNKNOWN"* ]]
+  [[ "$output" != *"No failed or cancelled jobs"* ]]
+}
+
+@test "classifies startup failure jobs" {
+  fixture="$BATS_TEST_TMPDIR/startup-failure-job-run.json"
+  cat > "$fixture" <<'JSON'
+{
+  "headBranch": "work/startup-failure-job",
+  "jobs": [
+    {"databaseId": 41, "name": "Unexpected Startup Failure", "conclusion": "startup_failure", "steps": []}
+  ]
+}
+JSON
+
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" bash "$SCRIPT" 658
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Unexpected Startup Failure → none → none → UNKNOWN"* ]]
+  [[ "$output" != *"No failed or cancelled jobs"* ]]
+}
+
+@test "does not mark Node Tests advisory-only when a matrix host integration job also fails" {
+  fixture="$BATS_TEST_TMPDIR/node-matrix-hard-and-advisory-run.json"
+  cat > "$fixture" <<'JSON'
+{
+  "headBranch": "work/node-matrix-hard-and-advisory",
+  "jobs": [
+    {"databaseId": 1, "name": "Node Unit Timing Budget", "conclusion": "failure", "steps": [{"name": "Enforce 100ms budget for changed unit tests", "conclusion": "failure"}]},
+    {"databaseId": 42, "name": "Node Host Integration Tests (ubuntu-latest)", "conclusion": "failure", "steps": [{"name": "Run host integration", "conclusion": "failure"}]},
+    {"databaseId": 2, "name": "Node Tests", "conclusion": "failure", "steps": [{"name": "Check results", "conclusion": "failure"}]}
+  ]
+}
+JSON
+
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" bash "$SCRIPT" 659
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Node Tests → Check results → none → UNKNOWN — no signature match, investigate"* ]]
+  [[ "$output" != *"Node Tests → Check results → none → CHECK-UPSTREAM-FIRST"* ]]
 }
 
 @test "does not classify a JUnit assertion in Playground Emulator Tests as an advisory flake" {

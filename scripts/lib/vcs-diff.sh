@@ -74,6 +74,17 @@ vcs_touched_files() {
   } | sort | uniq
 }
 
+vcs_touched_files_including_deleted() {
+  if vcs_uses_jj; then
+    jj diff --from @- --to @ --name-only -- "$@"
+    return
+  fi
+  {
+    git diff --cached --name-only --diff-filter=ACMRD
+    git diff --name-only --diff-filter=ACMRD
+  } | sort | uniq
+}
+
 vcs_list_files() {
   local revision="${1:-@}"
   if vcs_uses_jj; then

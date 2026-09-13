@@ -281,3 +281,71 @@ describe("IME identity precedence (#6871)", () => {
     expect(result.keyboard).toEqual({ visible: true, package: "com.real.ime" });
   });
 });
+/**
+ * The active app and the IME share a package (a keyboard app showing its own
+ * settings screen while its IME is up). Group 0 carries the app's own Save
+ * button; the IME lives in its own window root. Package-only membership must
+ * not reach across the window boundary (issue #6871).
+ */
+function sharedPackageObservation(): ObserveResult {
+  const viewHierarchy = {
+    hierarchy: {
+      node: {
+        $: {},
+        node: [
+          {
+            $: {
+              "resource-id": "com.keyboard:id/save",
+              text: "Save",
+              clickable: true,
+              bounds: { left: 0, top: 100, right: 100, bottom: 150 },
+            },
+          },
+        ],
+      },
+    },
+    windows: [
+      {
+        windowLayer: 5,
+        hierarchy: {
+          node: {
+            $: { extras: { "automobile:imePackage": "com.keyboard" } },
+            node: [
+              {
+                $: {
+                  "resource-id": "com.keyboard:id/key_pos_0_0",
+                  text: "q",
+                  clickable: true,
+                  bounds: { left: 0, top: 600, right: 10, bottom: 640 },
+                },
+              },
+            ],
+          },
+        },
+      },
+    ],
+  };
+  return {
+    updatedAt: 1,
+    screenSize: { width: 100, height: 800 },
+    systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+    viewHierarchy: viewHierarchy as never,
+    elements: new DefaultObserveElementCollector().collect(viewHierarchy as never, "android"),
+  };
+}
+
+describe("IME window membership (#6871)", () => {
+  test("a same-package app control in another window is not folded into the IME", () => {
+    const result = sanitizeObserveResult(sharedPackageObservation(), {
+      dropElements: true,
+      project: "skeleton",
+    });
+    const ids = result.skeleton!.map((entry) => entry.elementId);
+    expect(ids).toContain("com.keyboard:id/save");
+    expect(ids).not.toContain("com.keyboard:id/key_pos_0_0");
+    // The synthetic row spans the IME window only, never the app's own row.
+    expect(result.skeleton!.find((entry) => entry.elementId === "<ime>")?.bounds).toEqual([
+      0, 600, 10, 640,
+    ]);
+  });
+});

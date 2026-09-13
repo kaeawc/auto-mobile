@@ -736,15 +736,26 @@ function detectImeWindow(elements: ObserveElements): ImeWindow | undefined {
   return ime;
 }
 
-/** Whether `el` sits inside the detected IME window (by provenance or by id package). */
+/**
+ * Whether `el` sits inside the detected IME window (issue #6871).
+ *
+ * Inherited `keyboardPackage` provenance is authoritative on its own — the
+ * collector only sets it on the IME root's own subtree. Everything else is
+ * decided by the detected group/span, so an app control in ANOTHER window that
+ * merely shares the keyboard's package (a keyboard app showing its own settings
+ * screen while its IME is up) is not folded away and does not stretch the
+ * synthetic row's bounds across two windows. The package-only match is reserved
+ * for provenance-less input, where group/span ancestry does not exist.
+ */
 function isImeMember(el: Element, ime: ImeWindow): boolean {
   const provenance = getElementProvenance(el);
-  if (provenance?.keyboardPackage === ime.package || idPackage(el) === ime.package) {
+  if (provenance?.keyboardPackage === ime.package) {
     return true;
   }
+  if (provenance === undefined || ime.group === undefined) {
+    return idPackage(el) === ime.package;
+  }
   return (
-    provenance !== undefined &&
-    ime.group !== undefined &&
     provenance.group === ime.group &&
     provenance.enter >= ime.spanEnter &&
     provenance.exit <= ime.spanExit

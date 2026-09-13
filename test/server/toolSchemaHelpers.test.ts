@@ -575,3 +575,32 @@ describe("inputTextSchema", () => {
     expect(result.success).toBe(false);
   });
 });
+
+/**
+ * The `<ime>` row the skeleton projection emits for a visible keyboard (issue
+ * #6871) is deliberately NOT a selector — the supported way to drive an IME is
+ * `inputText` / `sendKeys`. The `project` description promises every skeleton
+ * `elementId`/`label` is directly usable with `tapOn`, so it must name that one
+ * exception; otherwise a client following the MCP schema issues a
+ * guaranteed-failing `tapOn({ elementId: "<ime>" })`.
+ */
+describe("skeleton selector contract documents the <ime> exception (#6871)", () => {
+  test("every generated project description that promises tapOn usability names <ime>", () => {
+    const raw = readFileSync("schemas/tool-definitions.json", "utf8");
+    const schemas = JSON.parse(raw) as Array<{
+      name: string;
+      inputSchema?: { properties?: Record<string, { description?: string }> };
+    }>;
+    const promising = schemas.filter((schema) =>
+      schema.inputSchema?.properties?.project?.description?.includes("tapOn selector"),
+    );
+    expect(promising.length).toBeGreaterThan(0);
+    expect(
+      promising
+        .filter(
+          (schema) => !schema.inputSchema!.properties!.project!.description!.includes("`<ime>`"),
+        )
+        .map((schema) => schema.name),
+    ).toEqual([]);
+  });
+});

@@ -320,3 +320,42 @@ describe("RealSettleObserve", () => {
     ).rejects.toThrow("Operation cancelled");
   });
 });
+
+describe("RealSettleObserve performance-audit opt-out (#6890 review)", () => {
+  function stableSequence(fake: FakeObserveScreen): void {
+    fake.setObserveSequence([
+      obs({ "resource-id": "a", text: "done" }, { updatedAt: 10 }),
+      obs({ "resource-id": "a", text: "done" }, { updatedAt: 20 }),
+    ]);
+  }
+
+  test("forwards skipPerformanceAudit to every poll when asked", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const fake = new FakeObserveScreen();
+    stableSequence(fake);
+
+    await new RealSettleObserve(fake, timer).execute({
+      timeoutMs: 1000,
+      pollMs: 150,
+      skipPerformanceAudit: true,
+    });
+
+    const options = fake.getExecuteOptions();
+    expect(options.length).toBeGreaterThan(0);
+    expect(options.every((option) => option.skipPerformanceAudit === true)).toBe(true);
+  });
+
+  test("leaves the audit alone by default, so the standalone waitFor path is unchanged", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const fake = new FakeObserveScreen();
+    stableSequence(fake);
+
+    await new RealSettleObserve(fake, timer).execute({ timeoutMs: 1000, pollMs: 150 });
+
+    const options = fake.getExecuteOptions();
+    expect(options.length).toBeGreaterThan(0);
+    expect(options.every((option) => option.skipPerformanceAudit === undefined)).toBe(true);
+  });
+});

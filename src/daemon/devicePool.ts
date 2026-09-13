@@ -2667,7 +2667,7 @@ export class DevicePool {
       } catch (releaseError) {
         this.failedTerminalRecoveryReleases.add(sessionId);
         await this.completeEmulatorLossRecovery(incidentId, "exhausted");
-        finalized = true;
+        this.settleEmulatorLossIncident(incidentId);
         logger.warn(
           `[DevicePool] Failed to release session ${sessionId} after recovery error: ${releaseError}`,
           releaseError,

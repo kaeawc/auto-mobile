@@ -2593,7 +2593,27 @@ export class Daemon {
             if (!disconnectSettled) {
               logger.warn("Device disconnect monitor did not settle before daemon shutdown");
             }
-            await Promise.allSettled(this.deferredSessionRecoverySweeps);
+            let timeoutHandle: NodeJS.Timeout | undefined;
+            try {
+              const sweepsSettled = await Promise.race([
+                Promise.allSettled(this.deferredSessionRecoverySweeps).then(() => true),
+                new Promise<boolean>((resolve) => {
+                  timeoutHandle = this.timer.setTimeout(
+                    () => resolve(false),
+                    DEVICE_LOSS_EXECUTION_DRAIN_TIMEOUT_MS,
+                  );
+                }),
+              ]);
+              if (!sweepsSettled) {
+                logger.warn(
+                  `Timed out after ${DEVICE_LOSS_EXECUTION_DRAIN_TIMEOUT_MS}ms draining deferred session recovery sweeps; continuing daemon shutdown`,
+                );
+              }
+            } finally {
+              if (timeoutHandle !== undefined) {
+                this.timer.clearTimeout(timeoutHandle);
+              }
+            }
           },
         },
         {

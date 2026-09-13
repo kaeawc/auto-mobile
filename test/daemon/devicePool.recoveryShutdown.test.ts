@@ -97,6 +97,7 @@ interface DaemonDeferredRecoverySweepInternals {
 }
 
 interface DevicePoolRecoveryInternals {
+  adbServerResetQuarantinedSessions: Set<string>;
   recoveringAndroidImages: Map<string, DeviceInfo>;
   recoveringSessionLosses: Map<string, unknown>;
   completeEmulatorLossRecovery(
@@ -368,6 +369,75 @@ test("release during shutdown confirmation finalizes session recovery instead of
     const releaseLease = await pool.reserveAndroidStartupLease(original.name, true);
     await releaseLease();
   } finally {
+    sessions.stopCleanupTimer();
+  }
+});
+
+test("terminal recovery release failure retains the recovery fence until a later release", async () => {
+  const { timer, sessions, manager, pool, captured } = await setup();
+  const internals = pool as unknown as DevicePoolRecoveryInternals;
+  const incidentId = await pool.recordEmulatorLossIncident(
+    original.deviceId,
+    "device-discovery-miss",
+    undefined,
+    "absent",
+  );
+  if (!incidentId) {
+    throw new Error("Expected emulator-loss incident to be recorded");
+  }
+  const originalReleaseSession = sessions.releaseSession.bind(sessions);
+  sessions.releaseSession = async () => {
+    throw new Error("release persistence failed");
+  };
+  try {
+    const firstRecovery = pool.recoverSessionBoundAndroidDeviceAfterLoss(
+      original.deviceId,
+      incidentId,
+      captured,
+    );
+    await manager.killAccepted.promise;
+    await flush();
+    timer.advanceTime(30_000);
+    expect(await firstRecovery).toBe("deferred");
+
+    timer.advanceTime(30_000);
+    const terminalRecovery = pool.recoverSessionBoundAndroidDeviceAfterLoss(
+      original.deviceId,
+      incidentId,
+      captured,
+    );
+    await flush();
+    timer.advanceTime(30_000);
+    await flush();
+    timer.advanceTime(1_000);
+    await flush();
+    timer.advanceTime(1_000);
+    await expect(terminalRecovery).rejects.toThrow("release persistence failed");
+
+    expect(internals.adbServerResetQuarantinedSessions.has("session")).toBe(true);
+    expect(internals.recoveringSessionLosses.has("session")).toBe(true);
+    expect(internals.recoveringAndroidImages.has(original.name)).toBe(true);
+    expect((await pool.waitForEmulatorLossIncident(incidentId, 0))?.recovery.outcome).toBe(
+      "exhausted",
+    );
+
+    sessions.releaseSession = originalReleaseSession;
+    const lease = pool.reserveAndroidStartupLease(original.name, true);
+    let releaseLease: (() => Promise<void>) | undefined;
+    const leaseReady = lease.then((release) => {
+      releaseLease = release;
+    });
+    await flush();
+    expect(releaseLease).toBeUndefined();
+
+    await originalReleaseSession("session", "explicit-release");
+    await leaseReady;
+    expect(internals.adbServerResetQuarantinedSessions.has("session")).toBe(false);
+    expect(internals.recoveringSessionLosses.has("session")).toBe(false);
+    expect(internals.recoveringAndroidImages.has(original.name)).toBe(false);
+    await releaseLease?.();
+  } finally {
+    sessions.releaseSession = originalReleaseSession;
     sessions.stopCleanupTimer();
   }
 });

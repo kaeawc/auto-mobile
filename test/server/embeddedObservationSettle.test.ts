@@ -581,4 +581,52 @@ describe("settleEmbeddedObservation stale-state clearing (#6866)", () => {
     expect("errors" in outcome.observation).toBe(false);
     expect((outcome.observation as any).gfxMetrics).toEqual({ totalFrames: 12 });
   });
+
+  test("no capture-derived field outside the action whitelist survives adoption", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const fake = new FakeObserveScreen();
+    // An iOS destination with no identity signals: ObserveScreen assigns
+    // `screenIdentity` the value `undefined` rather than omitting it, and the
+    // settle poll always passes `skipAccessibilityAudit: true`, so neither of
+    // these is defined on the settled capture.
+    const settledFrame = {
+      ...obs(AIRPLANE_ROW_INFLATED, 20),
+      screenIdentity: undefined,
+    } as ObserveResult;
+    fake.setObserveSequence([settledFrame, { ...settledFrame, updatedAt: 30 } as ObserveResult]);
+
+    const captured = obs(AIRPLANE_ROW_HALF_INFLATED, 10);
+    (captured as any).screenIdentity = {
+      platform: "ios",
+      source: "heuristic",
+      confidence: "high",
+      key: "origin-screen",
+      components: {},
+    };
+    (captured as any).rawViewHierarchy = { xcuitest: "{}", source: "xcuitest" };
+    (captured as any).observeScope = { mode: "scoped" };
+    (captured as any).recompositionSummary = { total: 3 };
+    // ...while genuinely action-authored metadata still has to survive.
+    (captured as any).gfxMetrics = { totalFrames: 12 };
+    (captured as any).selectedElements = [{ text: "Airplane mode" }];
+    (captured as any).accessibilityAudit = { issues: [] };
+
+    const outcome = await settleEmbeddedObservation({
+      actionClass: "navigation",
+      observation: captured,
+      settleObserve: settleFor(fake, timer),
+    });
+
+    expect(outcome.settled).toBe(true);
+    // A stale `screenIdentity` would let diff mode read a cross-screen
+    // transition as same-screen.
+    expect("screenIdentity" in outcome.observation).toBe(false);
+    expect("rawViewHierarchy" in outcome.observation).toBe(false);
+    expect("observeScope" in outcome.observation).toBe(false);
+    expect("recompositionSummary" in outcome.observation).toBe(false);
+    expect((outcome.observation as any).gfxMetrics).toEqual({ totalFrames: 12 });
+    expect((outcome.observation as any).selectedElements).toEqual([{ text: "Airplane mode" }]);
+    expect((outcome.observation as any).accessibilityAudit).toEqual({ issues: [] });
+  });
 });

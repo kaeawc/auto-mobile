@@ -100,48 +100,85 @@ export async function settleEmbeddedObservation(
 }
 
 /**
- * Screen state `ObserveScreen` re-derives from EVERY hierarchy capture, and
- * legitimately leaves UNSET when the screen no longer has it: there is no
- * focused node, no chooser dialog, no capture error. Because it is absent rather
- * than `undefined`-valued on the settled capture, a plain spread would carry the
- * PREVIOUS screen's value through — an `inputText` submit returning the settled
- * destination hierarchy together with the origin screen's `focusedElement`. Each
- * of these is owned by the capture, never by the action, so the settled capture
- * gets the only vote.
+ * The ONLY fields the action's own capture may contribute to the merged
+ * observation when the settle loop's capture is adopted.
+ *
+ * This list is deliberately a whitelist rather than the deletion list it
+ * replaces. A deletion list has to enumerate every field `ObserveScreen`
+ * derives from a hierarchy, and it grew once per review round as another one
+ * was found: first the screen state it leaves UNSET on a destination that no
+ * longer has it (`focusedElement`, `intentChooserDetected`, capture `error`s),
+ * then `screenIdentity`, which an iOS destination without identity signals is
+ * assigned as an explicit `undefined`, and which a stale value would let diff
+ * mode read a cross-screen transition as same-screen. Every future
+ * capture-derived field would join it, and the failure mode of forgetting one
+ * is silent and wrong.
+ *
+ * Inverting it ends the series: the settled capture describes the screen and
+ * therefore owns every capture-derived field by construction, including the
+ * ones nobody has enumerated. What the settled capture cannot know is what the
+ * ACTION did, and that set is small, closed, and greppable — the action
+ * pipeline writes `gfxMetrics`/`perfTiming` (`BaseVisualChange`),
+ * `selectedElements` (`TapOnElement`) and `displayedTimeMetrics` (`LaunchApp`)
+ * onto the observation AFTER the observe, and a handler that ran its own
+ * `waitFor` attaches the wait's own record. Audits are here because the settle
+ * poll deliberately skips them (`skipAccessibilityAudit: true`): an explicitly
+ * requested audit must not be silently voided by a gate the caller did not ask
+ * for.
+ *
+ * Anything NOT listed here — `rawViewHierarchy`, `observeScope`,
+ * `recompositionSummary`, `freshness`, `screenIdentity`, … — is capture-derived
+ * and comes from the settled capture or not at all.
  */
-const HIERARCHY_DERIVED_OBSERVATION_STATE = [
-  "focusedElement",
-  "accessibilityFocusedElement",
-  "intentChooserDetected",
-  "notificationPermissionDetected",
-  "error",
-  "errors",
+const ACTION_AUTHORED_OBSERVATION_METADATA = [
+  "gfxMetrics",
+  "perfTiming",
+  "perfTimingTruncated",
+  "perfSnapshot",
+  "selectedElements",
+  "displayedTimeMetrics",
+  "accessibilityAudit",
+  "performanceAudit",
+  // A handler-run `waitFor`'s own record of what it waited for and found
+  // (`openLink`'s integrated wait, #3490 §5). It describes the wait, not the
+  // screen, so the settled capture has no opinion about it.
+  "awaitedElement",
+  "awaitDuration",
+  "awaitTimeout",
+  "matched",
+  "timedOut",
+  "polls",
+  "waitMs",
+  "matchedElement",
+  "candidates",
 ] as const;
 
 /**
- * Fold the settled capture over the action's own, so the fresh hierarchy wins
- * while metadata only the ACTION could attach survives.
+ * Fold the action's own metadata onto the settled capture, so the fresh
+ * hierarchy and everything derived from it wins while metadata only the ACTION
+ * could attach survives.
  *
- * The settle loop re-reads the screen through `ObserveScreen`, which knows
- * nothing about the action that ran: `gfxMetrics` (UI-stability tracking),
- * `perfTiming`, `selectedElements` and the rest are written onto the capture by
- * the action pipeline AFTER the observe. Replacing the observation wholesale
- * would silently drop them. Every key the settled capture actually defines wins,
- * plus {@link HIERARCHY_DERIVED_OBSERVATION_STATE} is cleared when the settled
- * capture does not report it, so no screen state from the half-inflated read
- * outlives the tree it described.
+ * Built FROM the settled capture, not from the action's: the settle loop
+ * re-reads the screen through `ObserveScreen`, which knows nothing about the
+ * action that ran, so only {@link ACTION_AUTHORED_OBSERVATION_METADATA} may be
+ * carried across — and only into a slot the settled capture left empty.
+ *
+ * Keys the settled capture carries with an explicit `undefined` value are
+ * dropped rather than copied: `ObserveScreen` assigns `undefined` where a
+ * screen simply does not have something (no focused node, no identity
+ * signals), and the contract downstream is absence, not a present-but-undefined
+ * key.
  */
 function mergeActionMetadata(
   actionObservation: ObserveResult,
   settledObservation: ObserveResult,
 ): ObserveResult {
-  const defined = Object.fromEntries(
+  const merged = Object.fromEntries(
     Object.entries(settledObservation).filter(([, value]) => value !== undefined),
-  );
-  const merged: ObserveResult = { ...actionObservation, ...defined };
-  for (const field of HIERARCHY_DERIVED_OBSERVATION_STATE) {
-    if (defined[field] === undefined) {
-      delete merged[field];
+  ) as ObserveResult;
+  for (const field of ACTION_AUTHORED_OBSERVATION_METADATA) {
+    if (merged[field] === undefined && actionObservation[field] !== undefined) {
+      Object.assign(merged, { [field]: actionObservation[field] });
     }
   }
   return merged;

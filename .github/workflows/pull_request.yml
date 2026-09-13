@@ -730,7 +730,7 @@ jobs:
             exit 1
           fi
           if [[ "$formatter_result" == "failure" || "$formatter_result" == "cancelled" ]]; then
-            echo "Formatter gate concluded $formatter_result"
+            echo "Formatter gate concluded $formatter_result — run 'bun run format' and push again"
             exit 1
           fi
 

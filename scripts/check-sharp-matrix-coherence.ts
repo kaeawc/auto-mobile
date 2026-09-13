@@ -11,10 +11,10 @@ import { join } from "node:path";
  * packages currently eligible for an update — the installed matrix is
  * incoherent and sharp can fail to load at runtime.
  *
- * `.github/dependabot.yml` groups these so they *tend* to bump together, but a
- * `groups` rule does not enforce completeness. This check is the actual gate:
- * it rejects any partial bump so the invariant holds regardless of how the
- * update arrived.
+ * `.github/dependabot.yml` ignores `sharp` and `@img/*` outright (a `groups`
+ * rule only made a split less likely, never impossible — see #6820), so the
+ * matrix only ever moves by hand. This check is the actual gate: it rejects any
+ * partial bump so the invariant holds regardless of how the update arrived.
  */
 
 interface PackageJson {

@@ -717,6 +717,7 @@ export class DeviceBootService {
 export function enrichBootedDevice(device: BootedDevice, image: DeviceInfo): BootedDevice {
   return {
     ...device,
+    apiLevel: device.apiLevel ?? image.apiLevel,
     osVersion: device.osVersion ?? image.osVersion,
     formFactor: device.formFactor ?? image.formFactor,
     screenWidth: device.screenWidth ?? image.screenWidth,

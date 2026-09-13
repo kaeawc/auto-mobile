@@ -762,13 +762,7 @@ function deviceIdentityPayload(
   sourceImage?: DeviceInfo,
 ): Record<string, unknown> {
   if (device.platform === "android") {
-    const portMatch = /^emulator-(\d+)$/.exec(device.deviceId);
-    return {
-      platform: "android",
-      avdName: sourceImage?.platform === "android" ? sourceImage.name : device.name,
-      adbSerial: device.deviceId,
-      emulatorConsolePort: portMatch ? Number(portMatch[1]) : null,
-    };
+    return androidDeviceIdentityPayload(device, sourceImage);
   }
 
   return {
@@ -776,6 +770,69 @@ function deviceIdentityPayload(
     simulatorUdid: device.deviceId,
     simulatorName: device.name,
   };
+}
+
+function androidDeviceIdentityPayload(
+  device: BootedDevice,
+  sourceImage: DeviceInfo | undefined,
+): Record<string, unknown> {
+  const portMatch = /^emulator-(\d+)$/.exec(device.deviceId);
+  const androidImage = sourceImage?.platform === "android" ? sourceImage : undefined;
+  const apiLevel = device.apiLevel ?? androidImage?.apiLevel;
+  const osVersion = device.osVersion ?? androidImage?.osVersion;
+  return {
+    platform: "android",
+    avdName: androidImage?.name ?? device.name,
+    adbSerial: device.deviceId,
+    emulatorConsolePort: portMatch ? Number(portMatch[1]) : null,
+    ...(apiLevel !== undefined ? { apiLevel } : {}),
+    ...(osVersion ? { osVersion } : {}),
+  };
+}
+
+function androidSourceImageWithBootedMetadata(
+  device: BootedDevice,
+  sourceImage: DeviceInfo | undefined,
+): DeviceInfo | undefined {
+  if (device.platform !== "android") {
+    return sourceImage;
+  }
+  return {
+    ...sourceImage,
+    name: sourceImage?.name ?? device.name,
+    platform: "android",
+    isRunning: true,
+    apiLevel: device.apiLevel ?? sourceImage?.apiLevel,
+    osVersion: device.osVersion ?? sourceImage?.osVersion,
+  };
+}
+
+function listDevicePayloads(booted: BootedDevice[], devicePool: DevicePool | undefined) {
+  return booted.map((device) => {
+    const androidImage =
+      device.platform === "android"
+        ? devicePool?.getDevice(device.deviceId)?.androidImage
+        : undefined;
+    const osVersion =
+      device.platform === "android"
+        ? androidImage?.osVersion
+        : (device.osVersion ?? device.iosVersion);
+    return {
+      deviceId: device.deviceId,
+      name: device.name,
+      platform: device.platform,
+      ...(device.platform === "android" && androidImage?.apiLevel !== undefined
+        ? { apiLevel: androidImage.apiLevel }
+        : {}),
+      ...(osVersion ? { osVersion } : {}),
+      ...(device.formFactor ? { formFactor: device.formFactor } : {}),
+    };
+  });
+}
+
+function initializedDevicePool(): DevicePool | undefined {
+  const daemonState = DaemonState.getInstance();
+  return daemonState.isInitialized() ? daemonState.getDevicePool() : undefined;
 }
 
 export interface ListDeviceImagesArgs {
@@ -5224,13 +5281,7 @@ export function registerDeviceTools() {
         : {}),
     };
 
-    const devices = booted.map((device) => ({
-      deviceId: device.deviceId,
-      name: device.name,
-      platform: device.platform,
-      osVersion: device.osVersion ?? device.iosVersion,
-      formFactor: device.formFactor,
-    }));
+    const devices = listDevicePayloads(booted, initializedDevicePool());
     const platformFilter = args.platform ? ` (${args.platform} only)` : "";
 
     return createJSONToolResponse({
@@ -6985,6 +7036,7 @@ export function registerDeviceTools() {
             source: "local" as const,
           }
         : undefined);
+    sourceImage = androidSourceImageWithBootedMetadata(state.boot.device, sourceImage);
     const daemonState = DaemonState.getInstance();
     await reserveInitialDeviceForReadiness(
       daemonState,
@@ -7050,6 +7102,7 @@ export function registerDeviceTools() {
           deviceReadinessLockKey(state.boot.device.platform, state.boot.device.deviceId),
         );
         sourceImage = state.boot.sourceImage ?? sourceImage;
+        sourceImage = androidSourceImageWithBootedMetadata(state.boot.device, sourceImage);
         // Re-check under the later binding lock because pool identity can change
         // while runner setup is in flight.
         validatePooledDeviceMapping(state.boot.device, requestedIdentity);
@@ -7497,6 +7550,7 @@ export function registerDeviceTools() {
       deviceId: device.deviceId,
       name: device.name,
       platform: device.platform,
+      apiLevel: device.apiLevel,
       osVersion: device.osVersion ?? device.iosVersion,
       formFactor: device.formFactor,
       screenSize:

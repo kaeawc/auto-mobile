@@ -174,6 +174,28 @@ describe("platform device preparation tools", () => {
     });
   });
 
+  test("getAndroid reports Android API and release metadata from its selected AVD image", async () => {
+    const emulator: BootedDevice = {
+      platform: "android",
+      name: "Pixel_9_API_36",
+      deviceId: "emulator-5562",
+    };
+    const image = {
+      platform: "android" as const,
+      name: emulator.name,
+      isRunning: true,
+      apiLevel: 36,
+      osVersion: "16",
+    };
+    deviceUtils.setDeviceImages("android", [image]);
+    deviceUtils.setBootedDevices("android", [emulator]);
+    matcher.setBootedResult(emulator);
+
+    const result = await callTool("getAndroid", { avdName: emulator.name });
+
+    expect(result.deviceIdentity).toMatchObject({ apiLevel: 36, osVersion: "16" });
+  });
+
   test("getApple accepts only a simulator UDID and returns its simulator identity", async () => {
     const simulator: DeviceInfo = {
       platform: "ios",

@@ -173,6 +173,12 @@ export const observationSummarySchema = z
     accessibilityFocusedElement: elementSchema.optional(),
     activeWindow: activeWindowSchema.optional(),
     screenIdentity: screenIdentitySchema.optional(),
+    settled: z
+      .boolean()
+      .optional()
+      .describe(
+        "Whether this observation passed the hierarchy-stability gate (issue #6866): two consecutive structurally-equal captures. `false` means the bound expired, the action was not navigation-class, or the action failed — in every case the capture was never confirmed stable. Stamped on every embedded action observation.",
+      ),
   })
   .passthrough();
 
@@ -736,6 +742,15 @@ export const observeDiffSchema = z
           "device-side stop (max_nodes, max_depth) or the per-node child cap " +
           "(max_children[<node> kept N of M]). When present, `skeleton`/`context` " +
           "are a subset of the screen.",
+      ),
+    settled: z
+      .boolean()
+      .optional()
+      .describe(
+        "Same name/meaning as a full observation's `settled` (issue #6866): whether " +
+          "the observation this diff was computed from passed the hierarchy-stability " +
+          "gate. Populated from the post-action observation, not by `diffObserveResult` " +
+          "itself, so a diff-mode client has the same accessor as a full-mode one.",
       ),
     added: z.array(observeDiffNodeSchema),
     removed: z.array(observeDiffNodeSchema),

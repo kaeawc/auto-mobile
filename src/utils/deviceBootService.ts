@@ -7,6 +7,7 @@ import type {
   MatchingStrategy,
 } from "../models/DeviceMatchCriteria";
 import type { DeviceCreationGate } from "./deviceCreationGate";
+import { isAndroidEmulatorSerial } from "./androidSerial";
 import {
   DEFAULT_DEVICE_READY_TIMEOUT_MS,
   type PlatformDeviceManager,
@@ -734,9 +735,12 @@ export function enrichBootedDevicesFromImages(
   );
   const imagesByName = new Map(images.map((image) => [image.name, image]));
   return booted.map((device) => {
+    const canMatchAndroidByName =
+      device.platform !== "android" ||
+      (device.deviceId !== undefined && isAndroidEmulatorSerial(device.deviceId));
     const image =
       (device.deviceId ? imagesById.get(device.deviceId) : undefined) ??
-      imagesByName.get(device.name);
+      (canMatchAndroidByName ? imagesByName.get(device.name) : undefined);
     return image ? enrichBootedDevice(device, image) : device;
   });
 }

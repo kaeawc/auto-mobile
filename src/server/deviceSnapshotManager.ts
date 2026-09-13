@@ -1159,6 +1159,60 @@ export async function sweepPendingVmSnapshotReclaims(device: BootedDevice): Prom
   return reclaimed;
 }
 
+/**
+ * Reclaim the in-AVD payload of a pending-reclaim row that a capture of the same
+ * name on a DIFFERENT AVD is about to overwrite.
+ *
+ * `snapshot_name` is globally unique in the archive, but an in-AVD payload is
+ * identified by (AVD, name). So capturing `foo` on AVD B overwrites the row
+ * holding AVD A's pending reclaim for `foo` — the only reference to those bytes
+ * — and clears its flag. The pre-capture sweep cannot help: it deliberately
+ * looks only at the AVD the capturing device is running (#6490 review).
+ *
+ * A's emulator may well be live now even though it was not when eviction gave
+ * up, so try the console delete first. If it still cannot be reclaimed, say so
+ * loudly: the bytes stay on disk, and from here on the orphan report — keyed on
+ * (AVD, name) — is the only thing that can surface them.
+ */
+async function reclaimSupersededPendingVmSnapshot(
+  snapshotName: string,
+  capturingAvdName: string | undefined,
+  vmSnapshotTimeoutMs: number,
+): Promise<void> {
+  const { snapshotRepository, avdSnapshots } = await getDeviceSnapshotDependencies();
+  const existing = await snapshotRepository.getSnapshot(snapshotName);
+  if (
+    !existing?.pendingReclaim ||
+    !isVmSnapshotRecord(existing) ||
+    existing.deviceName === capturingAvdName
+  ) {
+    return;
+  }
+
+  const serial = await avdSnapshots.findLiveEmulatorSerial(existing.deviceName);
+  const outcome = serial
+    ? await avdSnapshots.deleteVmSnapshot(serial, snapshotName, vmSnapshotTimeoutMs)
+    : {
+        reclaimed: false,
+        reason: `emulator for AVD '${existing.deviceName}' is not running`,
+      };
+
+  if (outcome.reclaimed) {
+    logger.info(
+      `[DeviceSnapshot] Reclaimed the pending in-AVD payload of '${snapshotName}' on AVD ` +
+        `'${existing.deviceName}' before reusing that name on AVD '${capturingAvdName}'`,
+    );
+    return;
+  }
+
+  logger.warn(
+    `[DeviceSnapshot] Capturing '${snapshotName}' on AVD '${capturingAvdName}' overwrites the ` +
+      `only record of a pending reclaim for AVD '${existing.deviceName}' (${outcome.reason}). ` +
+      "Its in-AVD payload stays on disk and is reported as an orphan until it is removed " +
+      "manually (see docs/using/test-prep-tools.md).",
+  );
+}
+
 export async function getDeviceSnapshotConfig(): Promise<DeviceSnapshotConfig> {
   const { configRepository } = await getDeviceSnapshotDependencies();
   const stored = await configRepository.getConfig();
@@ -1236,6 +1290,13 @@ export async function captureDeviceSnapshot(
   // the on-disk data atomically (clean replace, prior data restored on failure);
   // the repository upsert replaces the record rather than duplicating it (#5713).
   return withCaptureLock(snapshotName, async () => {
+    // Held under the capture lock, before anything writes: the upsert below is
+    // what destroys another AVD's pending-reclaim reference (#6490 review).
+    await reclaimSupersededPendingVmSnapshot(
+      snapshotName,
+      device.name,
+      mergedConfig.vmSnapshotTimeoutMs,
+    );
     const captureProvider = createCaptureProvider(device, timer, snapshotStore);
 
     const result = await snapshotStore.replaceSnapshotData(snapshotName, pathOptions, async () => {

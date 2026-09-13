@@ -220,6 +220,66 @@ describe("deviceSnapshotManager VM snapshot sizing and reclaim (#6490)", () => {
     expect(avdSnapshots.hasVmSnapshot(AVD_NAME, "vm-pending")).toBe(false);
   });
 
+  describe("a pending reclaim on another AVD survives name reuse (#6490 review)", () => {
+    const OTHER_AVD = "am-api34-ga-arm64";
+    const OTHER_SERIAL = "emulator-5554";
+
+    async function seedPendingOnOtherAvd(): Promise<void> {
+      const timestamp = new Date(1000).toISOString();
+      avdSnapshots.setVmSnapshot(OTHER_AVD, "shared", 2 * 1024 * MB);
+      await repository.insertSnapshot({
+        snapshotName: "shared",
+        deviceId: OTHER_SERIAL,
+        deviceName: OTHER_AVD,
+        platform: "android",
+        snapshotType: "vm",
+        includeAppData: true,
+        includeSettings: false,
+        createdAt: timestamp,
+        lastAccessedAt: timestamp,
+        sizeBytes: 2 * 1024 * MB,
+        pendingReclaim: true,
+        pendingReclaimReason: "emulator offline",
+        manifest: {
+          snapshotName: "shared",
+          timestamp,
+          deviceId: OTHER_SERIAL,
+          deviceName: OTHER_AVD,
+          platform: "android",
+          snapshotType: "vm",
+          includeAppData: true,
+          includeSettings: false,
+        },
+      });
+    }
+
+    test("the other AVD's payload is reclaimed before the row is overwritten", async () => {
+      await seedPendingOnOtherAvd();
+      avdSnapshots.setLiveEmulator(OTHER_AVD, OTHER_SERIAL);
+
+      await captureDeviceSnapshot(EMULATOR, { snapshotName: "shared" });
+
+      expect(avdSnapshots.getDeleteCalls()).toEqual([
+        { deviceId: OTHER_SERIAL, snapshotName: "shared", timeoutMs: 12000 },
+      ]);
+      expect(avdSnapshots.hasVmSnapshot(OTHER_AVD, "shared")).toBe(false);
+      expect((await repository.getSnapshot("shared"))?.deviceName).toBe(AVD_NAME);
+    });
+
+    test("an unreclaimable payload stays visible as an orphan instead of vanishing", async () => {
+      await seedPendingOnOtherAvd();
+      avdSnapshots.setLiveEmulator(OTHER_AVD, null);
+
+      await captureDeviceSnapshot(EMULATOR, { snapshotName: "shared" });
+
+      expect(avdSnapshots.hasVmSnapshot(OTHER_AVD, "shared")).toBe(true);
+      const listed = await listDeviceSnapshots();
+      expect(listed.orphanedAvdSnapshots.entries).toEqual([
+        { avdName: OTHER_AVD, snapshotName: "shared", sizeBytes: 2 * 1024 * MB },
+      ]);
+    });
+  });
+
   test("in-AVD snapshot directories with no row are reported as orphans, never deleted", async () => {
     avdSnapshots.setVmSnapshot(AVD_NAME, "default_boot", 1024 * MB);
     avdSnapshots.setVmSnapshot(AVD_NAME, "emulator-5554_2026-08-11_23-05-15-803Z", 3 * 1024 * MB);

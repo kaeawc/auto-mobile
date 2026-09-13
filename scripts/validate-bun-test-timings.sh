@@ -13,6 +13,14 @@
 # single test matters — a one-test process charges all of Bun's module and JIT
 # warm-up to that test, which is how #6837 measured 101.76ms for a property
 # that costs ~3ms once the runtime is warm.
+#
+# The recheck is bounded by capping how MANY files are re-run, worst first, not
+# by abandoning the recheck when many files are over. Co-tenant load lands on
+# dozens of unrelated suites at once, so "many offenders" is the noise signature
+# rather than a regression signal; a real regression still shows up among the
+# worst offenders and is failed on its isolated median. Files past the cap are
+# reported as unverified: this gate never fails a re-runnable test it has no
+# isolated evidence against.
 set -euo pipefail
 
 report_path="${1:-scratch/bun-test-report.xml}"
@@ -20,13 +28,26 @@ report_dir="${report_path%.xml}.d"
 recheck_dir="${report_path%.xml}.recheck.d"
 max_ms="${BUN_TEST_MAX_MS:-100}"
 recheck_runs="${BUN_TEST_TIMING_RECHECK_RUNS:-3}"
-# Beyond a handful of offending files the signal is a real regression rather
-# than runner noise, and re-running them all would only burn CI minutes.
+# Wall-time ceiling on the recheck: at most this many distinct files are re-run,
+# worst offender first. Offenders past it are reported, never failed.
 recheck_max_files="${BUN_TEST_TIMING_RECHECK_MAX_FILES:-8}"
+
+if [[ ! "$recheck_max_files" =~ ^[0-9]+$ ]] || [[ "$recheck_max_files" -lt 1 ]]; then
+  echo "BUN_TEST_TIMING_RECHECK_MAX_FILES must be a positive integer (got '${recheck_max_files}')." >&2
+  exit 2
+fi
 
 mkdir -p "$(dirname "$report_path")"
 
-# One TSV row per measured testcase: file, classname, name, milliseconds.
+# Rows are separated by US (0x1f) rather than tab: a parameterized test title can
+# contain a literal tab, and a tab-delimited row would shift the duration out of
+# its field and read as zero, silently clearing an over-budget test.
+field_sep=$'\037'
+
+# One row per measured testcase: file, classname, name, milliseconds, the
+# occurrence ordinal of that name within the report, and the report it came from.
+# The ordinal keeps same-named tests in one file apart; the report id makes a
+# recheck sample count independent runs rather than rows.
 # shellcheck disable=SC2016 # awk program text: $0/$1 are awk fields, not shell.
 testcase_rows_awk='
 function attr(rec, key,    pattern, start, len) {
@@ -46,27 +67,40 @@ function decode_xml(value) {
   gsub(/&amp;/, sprintf("%c", 38), value)
   return value
 }
+function sanitize(value) {
+  # Only the delimiter itself and record-splitting control characters are
+  # rewritten; a tab in a test title survives into its own field intact.
+  gsub(/\037/, " ", value)
+  gsub(/\r/, " ", value)
+  return value
+}
 FNR == 1 {
   current_file = ""
+  split("", occurrences)
 }
 /<testsuite/ {
   candidate = attr($0, "file")
   if (candidate != "") {
-    current_file = candidate
+    current_file = sanitize(candidate)
   }
 }
 /<testcase/ {
-  name = decode_xml(attr($0, "name"))
+  name = sanitize(decode_xml(attr($0, "name")))
   time_str = attr($0, "time")
   if (name == "" || time_str == "") {
     next
   }
-  printf "%s\t%s\t%s\t%.6f\n", current_file, decode_xml(attr($0, "classname")), name, time_str * 1000.0
+  classname = sanitize(decode_xml(attr($0, "classname")))
+  key = current_file SUBSEP classname SUBSEP name
+  occurrences[key] += 1
+  printf "%s%s%s%s%s%s%.6f%s%d%s%s\n", \
+    current_file, sep, classname, sep, name, sep, time_str * 1000.0, \
+    sep, occurrences[key], sep, FILENAME
 }
 '
 
 testcase_rows() {
-  awk "$testcase_rows_awk" "$@"
+  awk -v sep="$field_sep" "$testcase_rows_awk" "$@"
 }
 
 if [[ -n "${BUN_TEST_TIMING_BASE_REF:-}" ]]; then
@@ -166,6 +200,8 @@ mkdir -p "$recheck_dir"
 measured_rows="$recheck_dir/measured.tsv"
 offender_rows="$recheck_dir/offenders.tsv"
 recheck_rows="$recheck_dir/recheck.tsv"
+rechecked_list="$recheck_dir/rechecked-files.txt"
+deferred_list="$recheck_dir/deferred-files.txt"
 
 testcase_rows "$@" > "$measured_rows"
 if [[ ! -s "$measured_rows" ]]; then
@@ -173,34 +209,60 @@ if [[ ! -s "$measured_rows" ]]; then
   exit 1
 fi
 
-awk -F'\t' -v limit_ms="$max_ms" '
-$4 + 0 > limit_ms && !seen[$1 FS $2 FS $3]++ {
-  print $1 "\t" $2 "\t" $3 "\t" $4
-}
+awk -F"$field_sep" -v limit_ms="$max_ms" '
+$4 + 0 > limit_ms && !seen[$1 FS $2 FS $3 FS $5]++
 ' "$measured_rows" | sort > "$offender_rows"
 
 if [[ ! -s "$offender_rows" ]]; then
   exit 0
 fi
 
-# Distinct files owning a provisional offender. A report without a `file`
-# attribute cannot be re-run, so there the first sample stands.
+# Distinct files owning a provisional offender, worst sample first. A report
+# without a `file` attribute cannot be re-run, so there the first sample stands.
 offender_files=()
 while IFS= read -r file; do
   offender_files+=("$file")
-done < <(cut -f1 "$offender_rows" | grep -v '^$' | sort -u)
+done < <(
+  awk -F"$field_sep" -v sep="$field_sep" '
+    $1 == "" { next }
+    !($1 in worst) || $4 + 0 > worst[$1] { worst[$1] = $4 + 0 }
+    END {
+      for (file in worst) {
+        printf "%015.6f%s%s\n", worst[file], sep, file
+      }
+    }
+  ' "$offender_rows" | sort -r | cut -d"$field_sep" -f2-
+)
 
 : > "$recheck_rows"
-offender_file_count="${#offender_files[@]}"
-if [[ "$offender_file_count" -gt "$recheck_max_files" ]]; then
-  echo "Skipping the median recheck: ${offender_file_count} files exceed the ${max_ms}ms budget, which is a regression rather than runner noise."
-elif [[ "$offender_file_count" -gt 0 ]]; then
-  echo "Rechecking ${offender_file_count} file(s) over the ${max_ms}ms budget: ${recheck_runs} isolated run(s) each, median enforced."
+: > "$rechecked_list"
+: > "$deferred_list"
+recheck_files=()
+deferred_count=0
+for file in ${offender_files[@]+"${offender_files[@]}"}; do
+  if [[ ! -f "$file" ]]; then
+    # Nothing to re-run; the first sample stands for this file's offenders.
+    continue
+  fi
+  if [[ "${#recheck_files[@]}" -lt "$recheck_max_files" ]]; then
+    recheck_files+=("$file")
+    printf '%s\n' "$file" >> "$rechecked_list"
+  else
+    deferred_count=$((deferred_count + 1))
+    printf '%s\n' "$file" >> "$deferred_list"
+  fi
+done
+
+if [[ "${#recheck_files[@]}" -gt 0 ]]; then
+  echo "Rechecking ${#recheck_files[@]} file(s) over the ${max_ms}ms budget: ${recheck_runs} isolated run(s) each, median enforced."
+fi
+if [[ "$deferred_count" -gt 0 ]]; then
+  echo "${deferred_count} file(s) over the ${max_ms}ms budget were not rechecked (recheck capped at ${recheck_max_files} file(s), worst first); reporting them as unverified rather than failing them without isolated evidence."
+fi
+
+if [[ "${#recheck_files[@]}" -gt 0 ]]; then
   recheck_index=0
-  for file in ${offender_files[@]+"${offender_files[@]}"}; do
-    if [[ ! -f "$file" ]]; then
-      continue
-    fi
+  for file in "${recheck_files[@]}"; do
     for ((run = 0; run < recheck_runs; run += 1)); do
       recheck_report="$recheck_dir/recheck-${recheck_index}.xml"
       recheck_index=$((recheck_index + 1))
@@ -223,7 +285,12 @@ elif [[ "$offender_file_count" -gt 0 ]]; then
   done
 fi
 
-awk -F'\t' -v limit_ms="$max_ms" -v recheck_file="$recheck_rows" -v recheck_runs="$recheck_runs" '
+awk -F"$field_sep" \
+  -v limit_ms="$max_ms" \
+  -v recheck_file="$recheck_rows" \
+  -v rechecked_file="$rechecked_list" \
+  -v deferred_file="$deferred_list" \
+  -v recheck_runs="$recheck_runs" '
 function median(key,    values, count, outer, inner, swap) {
   count = split(samples[key], values, ",")
   for (outer = 1; outer <= count; outer += 1) {
@@ -240,15 +307,25 @@ function median(key,    values, count, outer, inner, swap) {
   }
   return (values[count / 2] + values[count / 2 + 1]) / 2.0
 }
+FILENAME == rechecked_file { rechecked[$0] = 1; next }
+FILENAME == deferred_file { deferred[$0] = 1; next }
 FILENAME == recheck_file {
-  key = $1 SUBSEP $2 SUBSEP $3
-  samples[key] = (key in samples) ? samples[key] "," $4 : $4
-  runs[key] += 1
+  key = $1 SUBSEP $2 SUBSEP $3 SUBSEP $5
+  # One sample per recheck PROCESS. Counting rows would let two same-named
+  # tests in one file look like two independent runs of one test.
+  if (!(key SUBSEP $6 in seen_run)) {
+    seen_run[key SUBSEP $6] = 1
+    samples[key] = (key in samples) ? samples[key] "," $4 : $4
+    runs[key] += 1
+  }
   next
 }
 {
-  key = $1 SUBSEP $2 SUBSEP $3
+  key = $1 SUBSEP $2 SUBSEP $3 SUBSEP $5
   label = ($2 != "" && $3 != "") ? $2 "." $3 : $3
+  if ($5 + 0 > 1) {
+    label = label " #" $5
+  }
   if (key in samples) {
     # A recheck run can die before the reporter writes this testcase, and a
     # median over the survivors is not the evidence the gate asked for: one fast
@@ -268,10 +345,21 @@ FILENAME == recheck_file {
     }
     next
   }
+  if ($1 in rechecked) {
+    printf "Test exceeded %dms: %s (%.2fms; recheck produced 0 of %d isolated samples)\n", limit_ms, label, $4, recheck_runs > "/dev/stderr"
+    fail = 1
+    next
+  }
+  if ($1 in deferred) {
+    # Bounded recheck, worst first: without an isolated median this sample is
+    # not evidence of a regression, so report it instead of failing on it.
+    printf "Budget not verified for %s (first sample %.2fms): the recheck was capped before reaching its file.\n", label, $4
+    next
+  }
   printf "Test exceeded %dms: %s (%.2fms)\n", limit_ms, label, $4 > "/dev/stderr"
   fail = 1
 }
 END {
   exit fail
 }
-' "$recheck_rows" "$offender_rows"
+' "$rechecked_list" "$deferred_list" "$recheck_rows" "$offender_rows"

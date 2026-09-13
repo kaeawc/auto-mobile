@@ -4,7 +4,7 @@ import { existsSync } from "node:fs";
 import { promisify } from "util";
 import { logger } from "../logger";
 import { BootedDevice, DeviceInfo, ExecResult, ActionableError } from "../../models";
-import { AdbClientFactory, defaultAdbClientFactory } from "./AdbClientFactory";
+import { AdbClientFactory, unadmittedAdbClientFactory } from "./AdbClientFactory";
 import { arch } from "os";
 import { detectAndroidCommandLineTools, getBestAndroidToolsLocation } from "./detection";
 import { defaultTimer, Timer } from "../SystemTimer";
@@ -574,7 +574,11 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       | null = null,
     spawnFn: typeof spawn | null = null,
     timer: Timer = defaultTimer,
-    adbFactory: AdbClientFactory = defaultAdbClientFactory,
+    // Below the admission gate, not behind it: discovery reading the AVD name on
+    // a quarantined serial is the only event that can LIFT the quarantine, and
+    // `emu kill` on one is how the pool settles a serial it can no longer
+    // identify ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
+    adbFactory: AdbClientFactory = unadmittedAdbClientFactory,
     avdConfigReader?: AvdConfigReader,
     platform: NodeJS.Platform = process.platform,
     hostArchitecture: string = arch(),

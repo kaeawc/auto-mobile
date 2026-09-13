@@ -84,6 +84,16 @@ function iosSucceededSources(outcome: {
 export interface BootedDeviceDiscoveryOptions {
   /** Bypass Android's short device-list cache to verify ADB transport identity. */
   bypassAndroidDeviceListCache?: boolean;
+  /**
+   * List what Android has attached and ask it nothing else: no `emu avd name`,
+   * no getprop fallback. See `AndroidEmulatorClient`'s `skipNameEnrichment` --
+   * enrichment is sequential and budgets 2s per attached device, so a caller
+   * that has already committed to ignoring the names must not pay for them
+   * ([#6874](https://github.com/kaeawc/auto-mobile/pull/6874) review). Every
+   * emulator comes back under `Unknown (<serial>)`, so nothing that still
+   * compares names may set this.
+   */
+  skipAndroidNameEnrichment?: boolean;
 }
 
 export interface DeviceImageDiscovery {
@@ -101,6 +111,12 @@ export interface DeviceImageDiscoveryOptions {
 export interface DeviceShutdownOptions {
   timeoutMs?: number;
   signal?: AbortSignal;
+  /**
+   * Act on whatever occupies the target's serial rather than comparing the
+   * requested AVD name against a fresh discovery (#6864). Android emulators
+   * only; iOS shutdown has no equivalent identity comparison to drop.
+   */
+  force?: boolean;
 }
 
 /** Bounds and cancels a platform representation deletion. */
@@ -604,7 +620,10 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
       return {
         devices: await this.emulator.getBootedDevicesChecked(
           false,
-          { bypassDeviceListCache: options.bypassAndroidDeviceListCache },
+          {
+            bypassDeviceListCache: options.bypassAndroidDeviceListCache,
+            skipNameEnrichment: options.skipAndroidNameEnrichment,
+          },
           getAbortSignal(),
         ),
       };

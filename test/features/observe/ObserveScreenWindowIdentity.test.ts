@@ -327,7 +327,7 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
       async getMostRecent(): Promise<any> {
         return undefined;
       },
-      getRecentInMemory: () => undefined,
+      getRecentInMemoryEntry: () => undefined,
       getRecentInMemoryForDevice: () => undefined,
       clear: () => undefined,
       currentGeneration: () => 0,

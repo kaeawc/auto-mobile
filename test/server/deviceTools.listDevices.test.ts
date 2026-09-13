@@ -360,4 +360,42 @@ describe("listDevices tool (#5870)", () => {
       sessionManager.stopCleanupTimer();
     }
   });
+
+  test("withholds stale Android metadata after discovery quarantines a reused serial", async () => {
+    const timer = new FakeTimer();
+    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      fakeDeviceUtils,
+      new DefaultRetryExecutor(timer),
+    );
+    const admittedImage = {
+      platform: "android" as const,
+      name: android.name,
+      isRunning: true,
+      apiLevel: 36,
+      osVersion: "16",
+    };
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    await pool.addDevice(android, admittedImage);
+    const replacement = { ...android, name: "Pixel_9_API_35" };
+    fakeDeviceUtils.setBootedDevices("android", [replacement]);
+
+    try {
+      const payload = await callListDevices({ platform: "android" });
+      const device = payload.devices.find(
+        (entry: { deviceId: string }) => entry.deviceId === replacement.deviceId,
+      );
+
+      expect(pool.isPooledIdentityUnresolved(android.deviceId)).toBe(true);
+      expect(device).not.toHaveProperty("apiLevel");
+      expect(device).not.toHaveProperty("osVersion");
+    } finally {
+      DaemonState.getInstance().reset();
+      sessionManager.stopCleanupTimer();
+    }
+  });
 });

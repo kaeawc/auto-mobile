@@ -793,6 +793,7 @@ function androidDeviceIdentityPayload(
 function androidSourceImageWithBootedMetadata(
   device: BootedDevice,
   sourceImage: DeviceInfo | undefined,
+  admittedAndroidImage: DeviceInfo | undefined,
 ): DeviceInfo | undefined {
   if (device.platform !== "android") {
     return sourceImage;
@@ -802,17 +803,20 @@ function androidSourceImageWithBootedMetadata(
     name: sourceImage?.name ?? device.name,
     platform: "android",
     isRunning: true,
-    apiLevel: device.apiLevel ?? sourceImage?.apiLevel,
-    osVersion: device.osVersion ?? sourceImage?.osVersion,
+    apiLevel: [device.apiLevel, sourceImage?.apiLevel, admittedAndroidImage?.apiLevel].find(
+      (value) => value !== undefined,
+    ),
+    osVersion: [device.osVersion, sourceImage?.osVersion, admittedAndroidImage?.osVersion].find(
+      (value) => value !== undefined,
+    ),
   };
 }
 
 function listDevicePayloads(booted: BootedDevice[], devicePool: DevicePool | undefined) {
   return booted.map((device) => {
-    const androidImage =
-      device.platform === "android"
-        ? devicePool?.getDevice(device.deviceId)?.androidImage
-        : undefined;
+    const androidImage = devicePool?.describesPooledRuntime(device)
+      ? devicePool.getDevice(device.deviceId)?.androidImage
+      : undefined;
     const osVersion =
       device.platform === "android"
         ? androidImage?.osVersion
@@ -7036,7 +7040,11 @@ export function registerDeviceTools() {
             source: "local" as const,
           }
         : undefined);
-    sourceImage = androidSourceImageWithBootedMetadata(state.boot.device, sourceImage);
+    sourceImage = androidSourceImageWithBootedMetadata(
+      state.boot.device,
+      sourceImage,
+      initializedDevicePool()?.getDevice(state.boot.device.deviceId)?.androidImage,
+    );
     const daemonState = DaemonState.getInstance();
     await reserveInitialDeviceForReadiness(
       daemonState,
@@ -7102,7 +7110,11 @@ export function registerDeviceTools() {
           deviceReadinessLockKey(state.boot.device.platform, state.boot.device.deviceId),
         );
         sourceImage = state.boot.sourceImage ?? sourceImage;
-        sourceImage = androidSourceImageWithBootedMetadata(state.boot.device, sourceImage);
+        sourceImage = androidSourceImageWithBootedMetadata(
+          state.boot.device,
+          sourceImage,
+          initializedDevicePool()?.getDevice(state.boot.device.deviceId)?.androidImage,
+        );
         // Re-check under the later binding lock because pool identity can change
         // while runner setup is in flight.
         validatePooledDeviceMapping(state.boot.device, requestedIdentity);

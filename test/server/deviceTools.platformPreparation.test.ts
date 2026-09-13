@@ -504,6 +504,40 @@ describe("platform device preparation tools", () => {
     });
   });
 
+  test("preserves admitted Android metadata for a serial-targeted warm acquisition", async () => {
+    const emulator: BootedDevice = {
+      platform: "android",
+      name: "Pixel_9_API_36",
+      deviceId: "emulator-5562",
+    };
+    const admittedImage: DeviceInfo = {
+      platform: "android",
+      name: emulator.name,
+      isRunning: true,
+      apiLevel: 36,
+      osVersion: "16",
+    };
+    sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      deviceUtils,
+      new DefaultRetryExecutor(timer),
+    );
+    await pool.addDevice(emulator, admittedImage);
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    deviceUtils.setBootedDevices("android", [emulator]);
+
+    await callTool("getAndroid", { deviceId: emulator.deviceId });
+
+    expect(pool.getDevice(emulator.deviceId)?.androidImage).toMatchObject({
+      apiLevel: 36,
+      osVersion: "16",
+    });
+  });
+
   test("still returns the bound session when post-boot resource notification fails", async () => {
     const image: DeviceInfo = {
       platform: "android",

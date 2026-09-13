@@ -359,12 +359,42 @@ function wasVmSnapshotSaveDispatched(error: unknown): boolean {
   );
 }
 
+async function deleteUnrecordedVmSnapshot(
+  device: BootedDevice,
+  snapshotName: string,
+  avdSnapshots: AvdSnapshotOperations,
+  vmSnapshotTimeoutMs: number,
+  context: string,
+): Promise<void> {
+  try {
+    const outcome = await avdSnapshots.deleteVmSnapshot(
+      device.deviceId,
+      snapshotName,
+      vmSnapshotTimeoutMs,
+    );
+    if (!outcome.reclaimed) {
+      logger.warn(
+        `[DeviceSnapshot] Could not clean up ${context} VM snapshot '${snapshotName}' on AVD ` +
+          `'${device.name}': ${outcome.reason ?? "unknown reason"}`,
+      );
+    }
+  } catch (deleteError) {
+    // Safe to swallow: this is best-effort cleanup after the capture or database path failed.
+    logger.warn(
+      `[DeviceSnapshot] Failed to clean up ${context} VM snapshot '${snapshotName}' on AVD ` +
+        `'${device.name}': ${errorMessage(deleteError)}`,
+      deleteError,
+    );
+  }
+}
+
 async function recordFailedVmSnapshotReclaim(
   device: BootedDevice,
   snapshotName: string,
   includeSettings: boolean,
   snapshotRepository: DeviceSnapshotRepository,
   avdSnapshots: AvdSnapshotOperations,
+  vmSnapshotTimeoutMs: number,
   now: () => Date,
   error: unknown,
 ): Promise<boolean> {
@@ -382,6 +412,23 @@ async function recordFailedVmSnapshotReclaim(
 
   const timestamp = now().toISOString();
   try {
+    const existing = await snapshotRepository.getSnapshot(snapshotName);
+    if (existing && existing.deviceId !== device.deviceId) {
+      logger.warn(
+        `[DeviceSnapshot] Same-named capture '${snapshotName}' failed on AVD '${device.name}' ` +
+          `(${device.deviceId}); preserving the existing row for AVD '${existing.deviceName}' ` +
+          `(${existing.deviceId}) untouched: ${reason}`,
+      );
+      await deleteUnrecordedVmSnapshot(
+        device,
+        snapshotName,
+        avdSnapshots,
+        vmSnapshotTimeoutMs,
+        "failed same-named",
+      );
+      return false;
+    }
+
     await snapshotRepository.insertSnapshot({
       snapshotName,
       deviceId: device.deviceId,
@@ -416,6 +463,13 @@ async function recordFailedVmSnapshotReclaim(
       `[DeviceSnapshot] Failed to record pending reclaim for orphaned VM snapshot '${snapshotName}' ` +
         `on AVD '${device.name}': ${errorMessage(recordError)}`,
       recordError,
+    );
+    await deleteUnrecordedVmSnapshot(
+      device,
+      snapshotName,
+      avdSnapshots,
+      vmSnapshotTimeoutMs,
+      "unrecordable",
     );
     return false;
   }
@@ -1466,6 +1520,7 @@ export async function captureDeviceSnapshot(
     const captureProvider = createCaptureProvider(device, timer, snapshotStore);
 
     let captureResult: CaptureSnapshotResult;
+    let vmSnapshotWasCaptured = false;
     try {
       captureResult = await snapshotStore.replaceSnapshotData(
         snapshotName,
@@ -1480,6 +1535,7 @@ export async function captureDeviceSnapshot(
             vmSnapshotTimeoutMs: mergedConfig.vmSnapshotTimeoutMs,
             appBundleIds: args.appBundleIds,
           });
+          vmSnapshotWasCaptured = captured.manifest.snapshotType === "vm";
 
           const sizeBytes = await resolveSnapshotSizeBytes(
             snapshotName,
@@ -1511,7 +1567,7 @@ export async function captureDeviceSnapshot(
       if (
         device.platform === "android" &&
         device.deviceId.startsWith("emulator-") &&
-        wasVmSnapshotSaveDispatched(error)
+        (wasVmSnapshotSaveDispatched(error) || vmSnapshotWasCaptured)
       ) {
         const recordedPendingReclaim = await recordFailedVmSnapshotReclaim(
           device,
@@ -1519,6 +1575,7 @@ export async function captureDeviceSnapshot(
           mergedConfig.includeSettings,
           snapshotRepository,
           avdSnapshots,
+          mergedConfig.vmSnapshotTimeoutMs,
           now,
           error,
         );

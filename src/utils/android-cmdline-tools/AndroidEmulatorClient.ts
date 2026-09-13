@@ -1479,6 +1479,8 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     const deadlineMs = this.timer.now() + infoTimeoutMs;
     let diagnostic: ReadinessDiagnostic | undefined;
     let consoleBusyDuringProbe: boolean | undefined;
+    const busyBeforeDispatch = this.consoleBusyRegistry.isBusy(deviceId);
+    const generationBeforeDispatch = this.consoleBusyRegistry.getGeneration(deviceId);
     try {
       const result = await adbWithDevice.executeCommand(
         "emu avd name",
@@ -1496,7 +1498,10 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       }
     } catch (error) {
       this.throwIfReadinessAborted(signal);
-      consoleBusyDuringProbe = this.consoleBusyRegistry.isBusy(deviceId);
+      consoleBusyDuringProbe =
+        busyBeforeDispatch ||
+        this.consoleBusyRegistry.isBusy(deviceId) ||
+        generationBeforeDispatch !== this.consoleBusyRegistry.getGeneration(deviceId);
       diagnostic = this.readinessDiagnostic("avd-name-resolution", error, deviceId);
       logger.debug(`Failed to get AVD name for ${deviceId}: ${error}`);
     }

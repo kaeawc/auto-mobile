@@ -191,6 +191,44 @@ describe("PlanExecutionOrchestrator", () => {
     expect(result.debug).toEqual({ executionTimeMs: 100, steps: [] });
   });
 
+  // A best-effort epilogue warning (a keyboard that would not dismiss) must
+  // reach the caller of an ORDINARY plan, not only one that opted into the
+  // unrelated captureObserveSteps debug trace (#6887 review).
+  test("execute() forwards plan warnings without captureObserveSteps", async () => {
+    executePlanMock.mockImplementationOnce(() =>
+      Promise.resolve({
+        success: true,
+        executedSteps: 2,
+        totalSteps: 2,
+        debug: { executionTimeMs: 100, steps: [] },
+        warnings: [
+          { stepIndex: 0, tool: "inputText", warnings: ["keyboard dismissal not confirmed"] },
+        ],
+      }),
+    );
+    const orchestrator = new PlanExecutionOrchestrator(
+      { device: iosDevice, request: baseRequest },
+      baseDeps(),
+    );
+    const result = await orchestrator.execute();
+
+    expect(result.success).toBe(true);
+    expect(result.debug).toBeUndefined();
+    expect(result.warnings).toEqual([
+      { stepIndex: 0, tool: "inputText", warnings: ["keyboard dismissal not confirmed"] },
+    ]);
+  });
+
+  test("execute() omits warnings for a clean plan", async () => {
+    const orchestrator = new PlanExecutionOrchestrator(
+      { device: iosDevice, request: baseRequest },
+      baseDeps(),
+    );
+    const result = await orchestrator.execute();
+
+    expect(result.warnings).toBeUndefined();
+  });
+
   test("execute() rejects invalid YAML with a schema validation error", async () => {
     const orchestrator = new PlanExecutionOrchestrator(
       {

@@ -16,7 +16,7 @@ import { deleteAvd } from "./android-cmdline-tools/avdmanager";
 import { logger } from "./logger";
 import { isAndroidEmulatorSerial } from "./androidSerial";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "./deviceTimeouts";
-import { getAbortSignal, runWithAbortSignal } from "./AbortContext";
+import { combineWithAmbientAbort, getAbortSignal, runWithAbortSignal } from "./AbortContext";
 import { defaultTimer, type Timer } from "./SystemTimer";
 import {
   getVirtualDeviceLifecycleCoordinator,
@@ -84,6 +84,8 @@ function iosSucceededSources(outcome: {
 export interface BootedDeviceDiscoveryOptions {
   /** Bypass Android's short device-list cache to verify ADB transport identity. */
   bypassAndroidDeviceListCache?: boolean;
+  /** Cancels short-lived platform discovery work. */
+  signal?: AbortSignal;
   /**
    * List what Android has attached and ask it nothing else: no `emu avd name`,
    * no getprop fallback. See `AndroidEmulatorClient`'s `skipNameEnrichment` --
@@ -624,7 +626,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
             bypassDeviceListCache: options.bypassAndroidDeviceListCache,
             skipNameEnrichment: options.skipAndroidNameEnrichment,
           },
-          getAbortSignal(),
+          combineWithAmbientAbort(options.signal),
         ),
       };
     } catch (error) {

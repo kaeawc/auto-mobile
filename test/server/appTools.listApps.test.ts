@@ -2,6 +2,7 @@ import Ajv2020 from "ajv/dist/2020";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   crashAppResultSchema,
+  describeListAppsResult,
   registerAppTools,
   resetCrashAppToolDependencies,
   resetListAppsToolDependencies,
@@ -28,6 +29,7 @@ function fakeAppsContent(
     query: { deviceId: "emulator-5554", type: "user" },
     observationComplete: true,
     totalCount: 0,
+    installedCount: 0,
     deviceCount: 1,
     lastUpdated: new Date(0).toISOString(),
     devices: [],
@@ -63,6 +65,7 @@ describe("listApps tool", () => {
     expect(() => tool!.schema.parse({})).not.toThrow();
     expect(() => tool!.schema.parse({ deviceId: "device-123" })).not.toThrow();
     expect(() => tool!.schema.parse({ type: "system", search: "clock", profile: 0 })).not.toThrow();
+    expect(() => tool!.schema.parse({ type: "launchable" })).not.toThrow();
     expect(() => tool!.schema.parse({ type: "bogus" })).toThrow();
   });
 
@@ -161,6 +164,48 @@ describe("listApps tool", () => {
     await expect(tool!.deviceAwareHandler!(device, {})).rejects.toThrow(
       `Failed to list apps for device ${device.deviceId}`,
     );
+  });
+
+  test("the message names the applied filter and what it hid, so a client is not left guessing (#6798)", async () => {
+    const tool = ToolRegistry.getTool("listApps");
+    const fakeToolUtils = new FakeToolUtils();
+    setListAppsToolDependencies({
+      toolResponseFormatter: fakeToolUtils,
+      queryInstalledApps: async () =>
+        fakeAppsContent({
+          query: { deviceId: device.deviceId, type: "launchable" },
+          totalCount: 3,
+          installedCount: 180,
+        }),
+    });
+
+    await tool!.deviceAwareHandler!(device, {});
+
+    const message = fakeToolUtils.getLastJSONResponse().message as string;
+    expect(message).toContain("Found 3 app(s)");
+    expect(message).toContain("type=launchable");
+    expect(message).toContain("177");
+    expect(message).toContain('type:"all"');
+  });
+
+  test("says nothing about hidden apps when the filter hid nothing (#6798)", async () => {
+    const tool = ToolRegistry.getTool("listApps");
+    const fakeToolUtils = new FakeToolUtils();
+    setListAppsToolDependencies({
+      toolResponseFormatter: fakeToolUtils,
+      queryInstalledApps: async () =>
+        fakeAppsContent({
+          query: { deviceId: device.deviceId, type: "all" },
+          totalCount: 180,
+          installedCount: 180,
+        }),
+    });
+
+    await tool!.deviceAwareHandler!(device, {});
+
+    const message = fakeToolUtils.getLastJSONResponse().message as string;
+    expect(message).toContain("Found 180 app(s)");
+    expect(message).not.toContain("hidden");
   });
 
   test("keeps foreground resource invalidation separate from package cache dirtying", () => {
@@ -543,5 +588,68 @@ describe("app permission tools", () => {
     expect(setAppPermissions!.description).toContain("userId grant/revoke");
     expect(setAppPermissions.description).toContain("device-wide reset ['all']");
     expect(setAppPermissions.description).toContain("no POST_NOTIFICATIONS");
+  });
+});
+
+describe("describeListAppsResult attributes hidden apps to the active filters (#6798 review)", () => {
+  const deviceId = "emulator-5554";
+
+  test('a search that narrowed the result is named, and type:"all" is not recommended', () => {
+    const message = describeListAppsResult(deviceId, {
+      query: { deviceId, type: "all", search: "contacts" },
+      totalCount: 2,
+      installedCount: 180,
+    });
+
+    expect(message).toContain("Found 2 app(s)");
+    expect(message).toContain('search="contacts"');
+    expect(message).toContain("178");
+    // type=all cannot restore anything, so advising it would be nonsense.
+    expect(message).not.toContain('type:"all"');
+  });
+
+  test('type alone still earns the type:"all" advice', () => {
+    const message = describeListAppsResult(deviceId, {
+      query: { deviceId, type: "launchable" },
+      totalCount: 3,
+      installedCount: 180,
+    });
+
+    expect(message).toContain("type=launchable");
+    expect(message).toContain('type:"all"');
+  });
+
+  test("a profile filter is named and suppresses the type advice", () => {
+    const message = describeListAppsResult(deviceId, {
+      query: { deviceId, type: "launchable", profile: 10 },
+      totalCount: 1,
+      installedCount: 180,
+    });
+
+    expect(message).toContain("type=launchable");
+    expect(message).toContain("profile=10");
+    expect(message).not.toContain('type:"all"');
+  });
+
+  test("profiles with unknown launchability are called out rather than silently dropped", () => {
+    const message = describeListAppsResult(deviceId, {
+      query: { deviceId, type: "launchable" },
+      totalCount: 3,
+      installedCount: 180,
+      launchabilityUnknownProfiles: [10],
+    });
+
+    expect(message).toContain("launchability is unknown for profile(s) 10");
+  });
+
+  test("hidden apps under no narrowing filter are reported without blaming a filter", () => {
+    const message = describeListAppsResult(deviceId, {
+      query: { deviceId, type: "all" },
+      totalCount: 179,
+      installedCount: 180,
+    });
+
+    expect(message).toContain("1 of 180");
+    expect(message).not.toContain("type=");
   });
 });

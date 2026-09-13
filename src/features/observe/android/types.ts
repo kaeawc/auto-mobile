@@ -300,6 +300,18 @@ export interface InstalledPackageRecord {
   isSystem: boolean;
   versionName?: string;
   versionCode?: number;
+  /**
+   * Launcher label from `PackageManager.getApplicationLabel` (#6798). Optional
+   * because an on-device SDK older than the field simply omits it; `undefined`
+   * or `null` means "not reported", not "this app has no name".
+   */
+  label?: string | null;
+  /**
+   * Whether the package has a launchable entry point
+   * (`PackageManager.getLaunchIntentForPackage` resolved). Optional for the
+   * same reason as `label`; `undefined` or `null` means "not reported", not "no".
+   */
+  launchable?: boolean | null;
 }
 
 export interface A11yInstalledPackagesResult extends BaseResult {

@@ -33,6 +33,7 @@ import {
   invalidateInstalledAppResourceCache,
   notifyInstalledAppResourceUpdated,
   queryInstalledApps,
+  type AppsQueryResourceContent,
   type AppsQueryType,
 } from "./appResources";
 import { logger } from "../utils/logger";
@@ -584,21 +585,27 @@ export const listAppsSchema = addDeviceTargetingToSchema(
   z
     .object({
       type: z
-        .enum(["user", "system", "all"])
+        .enum(["launchable", "user", "system", "all"])
         .optional()
         .describe(
-          "Filter by app type. Defaults to 'user', EXCEPT on a physical iOS device where " +
-            "user/system classification is unavailable (devicectl reports no such signal there): " +
-            "on such a device an omitted type returns every app (reported as 'all'), and an " +
+          "Filter by app type. Defaults to 'launchable': every app with a launcher entry point, " +
+            "user-installed or preinstalled, so the apps a human names (Contacts, Clock, Settings) " +
+            "are visible while content providers and RRO overlays are not. 'user' and 'system' " +
+            "keep their meaning and must be asked for explicitly; 'all' returns every installed " +
+            "package. The default degrades to 'user' when the device reports no launchability " +
+            "signal, and an explicit 'launchable' is then rejected rather than silently empty. " +
+            "On a physical iOS device, where user/system classification is unavailable (devicectl " +
+            "reports no such signal), an omitted type returns every app (reported as 'all') and an " +
             "explicit 'user' or 'system' filter is rejected rather than silently honored.",
         ),
       search: z
         .string()
         .optional()
         .describe(
-          "Filter by a case-insensitive substring of the package name/bundle id. Also matches " +
-            "the app's display name where the platform reports one (iOS only today — Android's " +
-            "listing does not include app labels).",
+          "Filter by a case-insensitive substring of the package name/bundle id or of the app's " +
+            "display label ('contacts' matches both com.android.contacts and an app labelled " +
+            "Contacts). Android labels require the installed CtrlProxy APK; without it only the " +
+            "package name is matched.",
         ),
       profile: z
         .number()
@@ -698,6 +705,59 @@ export const setAppPermissionsHandler = async (
   return wholeOperationFailed ? { ...response, isError: true as const } : response;
 };
 
+/**
+ * Says which filters were applied and how many apps they hid. The previous
+ * message reported only the surviving count, so a default-filtered listing
+ * looked like the device's whole inventory and a client had to guess that `type`
+ * had other values (#6798). `search` and `profile` narrow the result too, so the
+ * hidden count is attributed to every active filter and the `type:"all"` advice
+ * is offered only when `type` is the one that actually hid something — advising
+ * it after `type:"all", search:"contacts"` would name an already-active filter
+ * that cannot restore anything (#6798 review).
+ */
+export function describeListAppsResult(
+  deviceId: string,
+  content: Pick<
+    AppsQueryResourceContent,
+    "totalCount" | "installedCount" | "query" | "launchabilityUnknownProfiles"
+  >,
+): string {
+  const found = `Found ${content.totalCount} app(s) on ${deviceId}`;
+  const unknownProfiles = content.launchabilityUnknownProfiles ?? [];
+  const unknownNote =
+    unknownProfiles.length > 0
+      ? ` (launchability is unknown for profile(s) ${unknownProfiles.join(", ")}, so the ` +
+        "launchable filter could not judge their apps)"
+      : "";
+  const hidden = content.installedCount - content.totalCount;
+  if (hidden <= 0) {
+    return `${found}${unknownNote}`;
+  }
+
+  const effectiveType = content.query.type ?? "launchable";
+  const typeNarrowed = effectiveType !== "all";
+  const activeFilters: string[] = [];
+  if (typeNarrowed) {
+    activeFilters.push(`type=${effectiveType}`);
+  }
+  if (content.query.search) {
+    activeFilters.push(`search="${content.query.search}"`);
+  }
+  if (content.query.profile !== undefined) {
+    activeFilters.push(`profile=${content.query.profile}`);
+  }
+
+  const filterClause = activeFilters.length > 0 ? `${activeFilters.join(", ")}; ` : "";
+  // Only actionable when type is the sole narrowing filter: otherwise the
+  // remaining filters would still hide those packages.
+  const advice =
+    typeNarrowed && activeFilters.length === 1 ? ' — pass type:"all" to include them' : "";
+  return (
+    `${found} (${filterClause}${hidden} of ${content.installedCount} installed package(s) hidden ` +
+    `by the active filter(s)${advice})${unknownNote}`
+  );
+}
+
 // Register tools
 export function registerAppTools() {
   const listAppsHandler = async (device: BootedDevice, args: ListAppsArgs) => {
@@ -712,7 +772,7 @@ export function registerAppTools() {
       });
 
       return toolResponseFormatter.createJSONToolResponse({
-        message: `Found ${content.totalCount} app(s) on ${device.deviceId}`,
+        message: describeListAppsResult(device.deviceId, content),
         ...content,
       });
     } catch (error) {
@@ -1005,7 +1065,11 @@ export function registerAppTools() {
 
   ToolRegistry.registerDeviceAware(
     "listApps",
-    "List installed apps on a device. Filters by type (default: user), search, and profile.",
+    "List installed apps on a device, with optional display label and launchable fields when " +
+      "reported by the platform or transport. The label is typically omitted on Android when " +
+      "the installed CtrlProxy APK lacks label support; launchable is typically omitted for " +
+      "physical iOS/devicectl records. Filters by type (default: launchable — every app with a launcher entry point, " +
+      "preinstalled ones included), search (package name or label), and profile.",
     listAppsSchema,
     listAppsHandler,
     {

@@ -3,6 +3,7 @@ import { describe, expect, it } from "bun:test";
 import {
   DeviceBootService,
   DeviceBootTimeoutError,
+  enrichBootedDevicesFromImages,
   type DeviceBootProgress,
 } from "../../src/utils/deviceBootService";
 import { FakeDeviceMatcher } from "../fakes/FakeDeviceMatcher";
@@ -46,6 +47,36 @@ function service(
 }
 
 describe("DeviceBootService", () => {
+  it("only enriches Android devices by name when their serial is an emulator serial", () => {
+    const image: DeviceInfo = {
+      name: "Pixel_9_API_35",
+      platform: "android",
+      isRunning: false,
+      apiLevel: "35",
+      osVersion: "35",
+    };
+    const handset: BootedDevice = {
+      name: image.name,
+      platform: "android",
+      deviceId: "R58M12ABCDE",
+    };
+    const emulator: BootedDevice = {
+      name: image.name,
+      platform: "android",
+      deviceId: "emulator-5554",
+    };
+
+    const [enrichedHandset, enrichedEmulator] = enrichBootedDevicesFromImages(
+      [handset, emulator],
+      [image],
+    );
+
+    expect(enrichedHandset.apiLevel).toBeUndefined();
+    expect(enrichedHandset.osVersion).toBeUndefined();
+    expect(enrichedEmulator.apiLevel).toBe("35");
+    expect(enrichedEmulator.osVersion).toBe("35");
+  });
+
   it.each([90_000, 180_000])(
     "preserves the provision budget through a %ims cold boot",
     async (bootMs) => {

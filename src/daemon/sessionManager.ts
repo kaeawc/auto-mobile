@@ -2648,6 +2648,18 @@ export class SessionManager {
   }
 
   /**
+   * Drop a restored guest's automation proof without using the monotonic setter.
+   * The next device-aware request must rerun runner/accessibility readiness.
+   */
+  resetDeviceReadinessForDevice(deviceId: string): void {
+    const sessionId = this.getSessionForDevice(deviceId);
+    if (!sessionId) {
+      return;
+    }
+    this.updateSessionCache(sessionId, { deviceReadiness: "booted" });
+  }
+
+  /**
    * Preserve the pre-session iOS Simulator enrollment state. This setter is
    * intentionally write-once per session: every later enrollment change must
    * restore the same state the session first observed.

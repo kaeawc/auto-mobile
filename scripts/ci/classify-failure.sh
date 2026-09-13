@@ -65,14 +65,14 @@ advisory_only_gate() {
   ' <<< "$run_json")"
   case "$gate" in
     iOS)
-      [[ -n "$failures" ]] \
-        && grep -Fqx 'XCTestRunner Simulator Tests' <<< "$failures" \
-        && ! grep -Eq '^(iOS Build|iOS Playground Tests( \(.*\))?|Build Root SPM Package)$' <<< "$failures"
+      # No advisory lane is inside the iOS gate as of #6943; an iOS aggregator
+      # failure can therefore only be caused by a hard dependency.
+      return 1
       ;;
     Android)
       [[ -n "$failures" ]] \
         && grep -Eq '^Run (JUnit Runner Emulator|Playground Automobile Emulator)' <<< "$failures" \
-        && ! grep -Eq '^(Detect Documentation-Only or SHA256-Only Changes|Build CtrlProxy APK|Build JUnitRunner Library|Build Playground App|SDK Debug Inspector Consumer|JUnit Runner Kotlin Consumer Compatibility|Run JUnit Runner Unit Tests|Run CtrlProxy Unit Tests)$' <<< "$failures"
+        && ! grep -Eq '^(Detect Documentation-Only or SHA256-Only Changes|Build CtrlProxy APK|Build JUnitRunner Library|Build Playground App|SDK Debug Inspector Consumer|JUnit Runner Kotlin Consumer Compatibility|Run JUnit Runner Unit Tests|Run CtrlProxy Unit Tests|Android Emulator Compile Smoke)$' <<< "$failures"
       ;;
     'Node Tests')
       [[ -n "$failures" ]] \

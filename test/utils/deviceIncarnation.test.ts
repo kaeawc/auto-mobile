@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import {
+  advanceDeviceIncarnation,
   deviceIncarnationToken,
+  type DeviceIncarnationListener,
+  registerDeviceIncarnationListener,
+  setDeviceIncarnationBumper,
   setDeviceIncarnationResolver,
 } from "../../src/utils/deviceIncarnation";
 import { DaemonState } from "../../src/daemon/daemonState";
@@ -19,6 +23,7 @@ describe("deviceIncarnationToken", () => {
   // later file would observe it. `reset` clears the resolver too.
   afterEach(() => {
     DaemonState.getInstance().reset();
+    setDeviceIncarnationBumper(undefined);
   });
 
   test("is undefined with no resolver registered", () => {
@@ -107,5 +112,20 @@ describe("deviceIncarnationToken", () => {
     expect(deviceIncarnationToken(device.deviceId)).toBeUndefined();
     await pool.refreshDevices();
     expect(deviceIncarnationToken(device.deviceId)).not.toBe(first);
+  });
+
+  test("advances a direct-mode local incarnation and delivers registered listeners", async () => {
+    const calls: string[] = [];
+    const listener: DeviceIncarnationListener = {
+      name: "test-listener",
+      onDeviceIncarnationChanged: (deviceId) => calls.push(deviceId),
+    };
+    const unregister = registerDeviceIncarnationListener(listener);
+    setDeviceIncarnationResolver(undefined);
+
+    expect(advanceDeviceIncarnation("emulator-5554")).toBe("1");
+    await listener.onDeviceIncarnationChanged("emulator-5554");
+    expect(calls).toEqual(["emulator-5554"]);
+    unregister();
   });
 });

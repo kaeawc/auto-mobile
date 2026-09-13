@@ -1,7 +1,11 @@
 import { SessionManager } from "./sessionManager";
 import { DevicePool } from "./devicePool";
 import { DeviceSessionRegistry } from "./deviceSessionRegistry";
-import { setDeviceIncarnationResolver } from "../utils/deviceIncarnation";
+import {
+  registerDeviceIncarnationListener,
+  setDeviceIncarnationBumper,
+  setDeviceIncarnationResolver,
+} from "../utils/deviceIncarnation";
 
 export interface DaemonStateLike {
   isInitialized(): boolean;
@@ -21,6 +25,7 @@ export class DaemonState implements DaemonStateLike {
   private sessionManager: SessionManager | null = null;
   private devicePool: DevicePool | null = null;
   private deviceSessionRegistry: DeviceSessionRegistry | null = null;
+  private unregisterSessionReadinessListener: (() => void) | null = null;
 
   private constructor() {}
 
@@ -56,6 +61,13 @@ export class DaemonState implements DaemonStateLike {
     // read it without importing the daemon. Publish it here, where the live
     // pool is known.
     setDeviceIncarnationResolver((deviceId) => devicePool.getDeviceIncarnation(deviceId));
+    this.unregisterSessionReadinessListener?.();
+    this.unregisterSessionReadinessListener = registerDeviceIncarnationListener({
+      name: "session-readiness",
+      onDeviceIncarnationChanged: (deviceId) =>
+        sessionManager.resetDeviceReadinessForDevice(deviceId),
+    });
+    setDeviceIncarnationBumper((deviceId) => devicePool.bumpDeviceIncarnation(deviceId));
   }
 
   /**
@@ -106,11 +118,14 @@ export class DaemonState implements DaemonStateLike {
     this.sessionManager = null;
     this.devicePool = null;
     this.deviceSessionRegistry = null;
+    this.unregisterSessionReadinessListener?.();
+    this.unregisterSessionReadinessListener = null;
     // The resolver {@link initialize} installed closes over the pool being
     // retired here. Leaving it registered would keep that pool alive and keep
     // answering direct-mode feature code with its epochs, so a per-device cache
     // could hold state across the reset. Clearing it restores the no-daemon
     // answer ("no epoch information") until the next initialize.
     setDeviceIncarnationResolver(undefined);
+    setDeviceIncarnationBumper(undefined);
   }
 }

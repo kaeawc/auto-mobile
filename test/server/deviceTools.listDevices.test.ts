@@ -7,7 +7,13 @@ import {
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import type { BootedDevice } from "../../src/models";
+import { DaemonState } from "../../src/daemon/daemonState";
+import { DevicePool } from "../../src/daemon/devicePool";
+import { SessionManager } from "../../src/daemon/sessionManager";
+import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
+import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 const resolveWithFakeTimer = async <T>(
@@ -309,5 +315,87 @@ describe("listDevices tool (#5870)", () => {
     expect(payload.devices).toEqual([
       expect.objectContaining({ platform: "android", deviceId: "emulator-5554" }),
     ]);
+  });
+
+  test("omits Android version metadata when no admitted image has it", async () => {
+    const payload = await callListDevices({ platform: "android" });
+
+    expect(payload.devices[0]).not.toHaveProperty("apiLevel");
+    expect(payload.devices[0]).not.toHaveProperty("osVersion");
+  });
+
+  test("reports Android API and release metadata retained at device admission", async () => {
+    const timer = new FakeTimer();
+    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      fakeDeviceUtils,
+      new DefaultRetryExecutor(timer),
+    );
+    const image = {
+      platform: "android" as const,
+      name: android.name,
+      isRunning: true,
+      apiLevel: 36,
+      osVersion: "16",
+    };
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    await pool.addDevice(android, image);
+
+    try {
+      const payload = await callListDevices({ platform: "android" });
+      expect(payload.devices).toEqual([
+        expect.objectContaining({
+          platform: "android",
+          deviceId: android.deviceId,
+          apiLevel: 36,
+          osVersion: "16",
+        }),
+      ]);
+    } finally {
+      DaemonState.getInstance().reset();
+      sessionManager.stopCleanupTimer();
+    }
+  });
+
+  test("withholds stale Android metadata after discovery quarantines a reused serial", async () => {
+    const timer = new FakeTimer();
+    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      fakeDeviceUtils,
+      new DefaultRetryExecutor(timer),
+    );
+    const admittedImage = {
+      platform: "android" as const,
+      name: android.name,
+      isRunning: true,
+      apiLevel: 36,
+      osVersion: "16",
+    };
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    await pool.addDevice(android, admittedImage);
+    const replacement = { ...android, name: "Pixel_9_API_35" };
+    fakeDeviceUtils.setBootedDevices("android", [replacement]);
+
+    try {
+      const payload = await callListDevices({ platform: "android" });
+      const device = payload.devices.find(
+        (entry: { deviceId: string }) => entry.deviceId === replacement.deviceId,
+      );
+
+      expect(pool.isPooledIdentityUnresolved(android.deviceId)).toBe(true);
+      expect(device).not.toHaveProperty("apiLevel");
+      expect(device).not.toHaveProperty("osVersion");
+    } finally {
+      DaemonState.getInstance().reset();
+      sessionManager.stopCleanupTimer();
+    }
   });
 });

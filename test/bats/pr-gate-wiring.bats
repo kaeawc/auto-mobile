@@ -113,6 +113,13 @@ wiring_requires_yq() {
   [[ "$block" == *"needs.bats-integration-tests.result"* ]]
 }
 
+@test "Android emulator compile smoke includes test-source compilation" {
+  block="$(job_block android-emulator-compile-smoke)"
+  [[ -n "$block" ]]
+  [[ "$block" == *":junit-runner:compileTestKotlin"* ]]
+  [[ "$block" == *":playground:app:compileDebugUnitTestKotlin"* ]]
+}
+
 @test "node-tests-gate rolls up complete unit, timing-budget, and host integration lanes" {
   block="$(job_block node-tests-gate)"
   [[ "$block" == *"- node-unit-tests"* ]]
@@ -142,7 +149,7 @@ wiring_requires_yq() {
   ios_advisory_results="${ios_advisory_results%%$'\n          )'*}"
   [[ "$ios_hard_results" == *'[ios-build-gate]'* ]]
   [[ "$ios_hard_results" == *'[ios-playground-tests]'* ]]
-  [[ "$ios_advisory_results" == *'[ios-xctest-runner-simulator-tests]'* ]]
+  [[ "$ios_advisory_results" != *'[ios-xctest-runner-simulator-tests]'* ]]
   [[ "$ios_advisory_results" != *'[ios-build-gate]'* ]]
   [[ "$ios_advisory_results" != *'[ios-playground-tests]'* ]]
   [[ "$ios_hard_results" != *'[ios-xctest-runner-simulator-tests]'* ]]
@@ -151,8 +158,10 @@ wiring_requires_yq() {
   android_advisory_results="${android#*declare -A advisory_results=(}"
   android_advisory_results="${android_advisory_results%%$'\n          )'*}"
   [[ "$android_hard_results" == *'[build-android-control-proxy]'* ]]
+  [[ "$android_hard_results" == *'[android-emulator-compile-smoke]'* ]]
   [[ "$android_advisory_results" == *'[junit-runner-emulator-tests]'* ]]
   [[ "$android_advisory_results" != *'[build-android-control-proxy]'* ]]
+  [[ "$android_advisory_results" != *'[android-emulator-compile-smoke]'* ]]
   [[ "$android_hard_results" != *'[junit-runner-emulator-tests]'* ]]
   node_hard_results="${node#*declare -A hard_results=(}"
   node_hard_results="${node_hard_results%%$'\n          )'*}"
@@ -274,8 +283,8 @@ wiring_requires_yq() {
   [[ "$block" == *"if: needs.detect-changes.outputs.webrtc_should_run == 'true'"* ]]
 
   block="$(job_block ios-device-webrtc)"
-  [[ "$block" == *"needs: detect-changes"* ]]
-  [[ "$block" == *"if: needs.detect-changes.outputs.webrtc_should_run == 'true'"* ]]
+  [[ "$block" == *"needs: [detect-changes, fast-validation]"* ]]
+  [[ "$block" == *"if: needs.detect-changes.outputs.webrtc_should_run == 'true' && needs.fast-validation.result == 'success'"* ]]
 }
 
 @test "WebRTC change detection covers publisher and device inputs" {

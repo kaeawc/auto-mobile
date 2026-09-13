@@ -795,13 +795,7 @@ function deviceIdentityPayload(
   sourceImage?: DeviceInfo,
 ): Record<string, unknown> {
   if (device.platform === "android") {
-    const portMatch = /^emulator-(\d+)$/.exec(device.deviceId);
-    return {
-      platform: "android",
-      avdName: sourceImage?.platform === "android" ? sourceImage.name : device.name,
-      adbSerial: device.deviceId,
-      emulatorConsolePort: portMatch ? Number(portMatch[1]) : null,
-    };
+    return androidDeviceIdentityPayload(device, sourceImage);
   }
 
   return {
@@ -809,6 +803,86 @@ function deviceIdentityPayload(
     simulatorUdid: device.deviceId,
     simulatorName: device.name,
   };
+}
+
+function androidDeviceIdentityPayload(
+  device: BootedDevice,
+  sourceImage: DeviceInfo | undefined,
+): Record<string, unknown> {
+  const portMatch = /^emulator-(\d+)$/.exec(device.deviceId);
+  const androidImage = sourceImage?.platform === "android" ? sourceImage : undefined;
+  const { apiLevel, osVersion } = androidBootedMetadata(device, sourceImage);
+  return {
+    platform: "android",
+    avdName: androidImage?.name ?? device.name,
+    adbSerial: device.deviceId,
+    emulatorConsolePort: portMatch ? Number(portMatch[1]) : null,
+    ...(apiLevel !== undefined ? { apiLevel } : {}),
+    ...(osVersion ? { osVersion } : {}),
+  };
+}
+
+function androidBootedMetadata(
+  device: BootedDevice,
+  sourceImage: DeviceInfo | undefined,
+): Pick<DeviceInfo, "apiLevel" | "osVersion"> {
+  const androidImage = sourceImage?.platform === "android" ? sourceImage : undefined;
+  return {
+    apiLevel: device.apiLevel ?? androidImage?.apiLevel,
+    osVersion: device.osVersion ?? androidImage?.osVersion,
+  };
+}
+
+function androidSourceImageWithBootedMetadata(
+  device: BootedDevice,
+  sourceImage: DeviceInfo | undefined,
+  admittedAndroidImage: DeviceInfo | undefined,
+): DeviceInfo | undefined {
+  if (device.platform !== "android") {
+    return sourceImage;
+  }
+  if (!sourceImage && !admittedAndroidImage) {
+    return undefined;
+  }
+  return {
+    ...(sourceImage ?? admittedAndroidImage),
+    name: sourceImage?.name ?? device.name,
+    platform: "android",
+    isRunning: true,
+    apiLevel: [device.apiLevel, sourceImage?.apiLevel, admittedAndroidImage?.apiLevel].find(
+      (value) => value !== undefined,
+    ),
+    osVersion: [device.osVersion, sourceImage?.osVersion, admittedAndroidImage?.osVersion].find(
+      (value) => value !== undefined,
+    ),
+  };
+}
+
+function listDevicePayloads(booted: BootedDevice[], devicePool: DevicePool | undefined) {
+  return booted.map((device) => {
+    const androidImage = devicePool?.describesPooledRuntime(device)
+      ? devicePool.getDevice(device.deviceId)?.androidImage
+      : undefined;
+    const osVersion =
+      device.platform === "android"
+        ? androidImage?.osVersion
+        : (device.osVersion ?? device.iosVersion);
+    return {
+      deviceId: device.deviceId,
+      name: device.name,
+      platform: device.platform,
+      ...(device.platform === "android" && androidImage?.apiLevel !== undefined
+        ? { apiLevel: androidImage.apiLevel }
+        : {}),
+      ...(osVersion ? { osVersion } : {}),
+      ...(device.formFactor ? { formFactor: device.formFactor } : {}),
+    };
+  });
+}
+
+function initializedDevicePool(): DevicePool | undefined {
+  const daemonState = DaemonState.getInstance();
+  return daemonState.isInitialized() ? daemonState.getDevicePool() : undefined;
 }
 
 export interface ListDeviceImagesArgs {
@@ -1487,6 +1561,7 @@ async function runWithinShutdownDeadline<T>(
   operation: (signal: AbortSignal, timeoutMs: number) => Promise<T>,
   timeoutMs?: number,
   phase?: string,
+  onOrphan?: (pending: Promise<unknown>) => void,
 ): Promise<T> {
   const remainingMs = deadlineMs - timer.now();
   // The wait is always `remainingMs`; `timeoutMs` only names the caller's own
@@ -1510,8 +1585,14 @@ async function runWithinShutdownDeadline<T>(
     }, remainingMs);
   });
   const requestAbort = abortPromise(requestAbortSignal);
-  const operationPromise = runWithAbortSignal(signal, () => operation(signal, remainingMs)).catch(
+  let operationSettled = false;
+  const operationPromise = runWithAbortSignal(signal, () => operation(signal, remainingMs)).then(
+    (result) => {
+      operationSettled = true;
+      return result;
+    },
     (error) => {
+      operationSettled = true;
       if (timedOut) {
         throw shutdownTimeoutError(device, detail, reportedTimeoutMs, phase);
       }
@@ -1528,6 +1609,11 @@ async function runWithinShutdownDeadline<T>(
       timeoutPromise,
       ...(requestAbort.promise ? [requestAbort.promise] : []),
     ]);
+  } catch (error) {
+    if (!operationSettled) {
+      onOrphan?.(operationPromise);
+    }
+    throw error;
   } finally {
     if (timeout) {
       timer.clearTimeout(timeout);
@@ -4399,6 +4485,10 @@ function validateBootIdentity(
 async function validateRequestedAndroidSerialBeforeBoot(
   pair: { avdName: string; deviceId: string } | undefined,
   deviceUtils: PlatformDeviceManager,
+  bootDeadlineMs: number,
+  timer: Timer,
+  signal: AbortSignal | undefined,
+  collectPendingSettlement?: ColdBootSettlementCollector,
 ): Promise<void> {
   if (!pair) {
     return;
@@ -4407,12 +4497,42 @@ async function validateRequestedAndroidSerialBeforeBoot(
   if (!avdName || !isAndroidEmulatorSerial(deviceId) || avdName === deviceId) {
     return;
   }
-  const discovery = await deviceUtils.getBootedDevicesDetailed("android", {
-    bypassAndroidDeviceListCache: true,
-  });
-  // FUNNEL 1: the post-boot recheck this defers to decides with pool/incarnation
-  // context, so the pool must have seen this observation (#6863 review).
-  await reconcileDiscoveryObservation(discovery.devices, "pre-boot-serial-validation");
+  const discovery = await runWithinShutdownDeadline(
+    { name: avdName, platform: "android", deviceId },
+    timer,
+    bootDeadlineMs,
+    "Android pre-boot serial validation did not complete",
+    signal,
+    async (signal) => {
+      const discovery = await deviceUtils.getBootedDevicesDetailed("android", {
+        bypassAndroidDeviceListCache: true,
+        signal,
+      });
+      if (signal.aborted) {
+        // The deadline/abort already settled prepareDevice and released its
+        // lifecycle lease. Dropping this stale snapshot is safe: the post-boot
+        // recheck for the next acquisition will observe with current context.
+        logger.debug(
+          `[DeviceTools] Dropping stale pre-boot serial validation discovery after deadline/abort for avdName=${avdName}`,
+        );
+        return discovery;
+      }
+      // FUNNEL 1: the post-boot recheck this defers to decides with pool/incarnation
+      // context, so the pool must have seen this observation (#6863 review).
+      await reconcileDiscoveryObservation(discovery.devices, "pre-boot-serial-validation");
+      return discovery;
+    },
+    undefined,
+    "pre-boot serial validation",
+    (pending) => {
+      collectPendingSettlement?.(
+        pending.then(
+          () => undefined,
+          () => undefined,
+        ),
+      );
+    },
+  );
   if (!discovery.succeededPlatforms.has("android")) {
     // Discovery was unavailable this sweep; a pair we cannot yet contradict is
     // deferred to the post-boot recheck rather than rejected on missing data.
@@ -5492,13 +5612,7 @@ export function registerDeviceTools() {
         : {}),
     };
 
-    const devices = booted.map((device) => ({
-      deviceId: device.deviceId,
-      name: device.name,
-      platform: device.platform,
-      osVersion: device.osVersion ?? device.iosVersion,
-      formFactor: device.formFactor,
-    }));
+    const devices = listDevicePayloads(booted, initializedDevicePool());
     const platformFilter = args.platform ? ` (${args.platform} only)` : "";
 
     return createJSONToolResponse({
@@ -7253,6 +7367,11 @@ export function registerDeviceTools() {
             source: "local" as const,
           }
         : undefined);
+    sourceImage = androidSourceImageWithBootedMetadata(
+      state.boot.device,
+      sourceImage,
+      initializedDevicePool()?.getDevice(state.boot.device.deviceId)?.androidImage,
+    );
     const daemonState = DaemonState.getInstance();
     await reserveInitialDeviceForReadiness(
       daemonState,
@@ -7318,6 +7437,11 @@ export function registerDeviceTools() {
           deviceReadinessLockKey(state.boot.device.platform, state.boot.device.deviceId),
         );
         sourceImage = state.boot.sourceImage ?? sourceImage;
+        sourceImage = androidSourceImageWithBootedMetadata(
+          state.boot.device,
+          sourceImage,
+          initializedDevicePool()?.getDevice(state.boot.device.deviceId)?.androidImage,
+        );
         // Re-check under the later binding lock because pool identity can change
         // while runner setup is in flight.
         validatePooledDeviceMapping(state.boot.device, requestedIdentity);
@@ -7422,7 +7546,8 @@ export function registerDeviceTools() {
     const state: {
       boot: DeviceBootResult | undefined;
       ownershipTransferred: boolean;
-      // Every unowned cold boot this request cancelled, recovery included. The
+      // Every unowned cold boot this request cancelled, recovery included, plus
+      // a pre-boot reconcile still in flight when its deadline fired. The
       // lifecycle lease is released only once all of them have settled.
       coldBootSettlements: Promise<void>[];
     } = {
@@ -7435,12 +7560,6 @@ export function registerDeviceTools() {
       | Awaited<ReturnType<typeof reserveStartDeviceLifecycleReservations>>
       | undefined;
     try {
-      // Reject a contradictory getAndroid avdName + serial pair before booting,
-      // so a stopped AVD is not cold-booted and killed just to report it.
-      await validateRequestedAndroidSerialBeforeBoot(
-        budgets.requestedAndroidIdentifierPair,
-        deviceUtils,
-      );
       lifecycleReservations = await reserveStartDeviceLifecycleReservations(
         args,
         budgets,
@@ -7457,6 +7576,22 @@ export function registerDeviceTools() {
         coordinatedSignals.length === 1
           ? coordinatedSignals[0]
           : AbortSignal.any(coordinatedSignals);
+      // Reject a contradictory getAndroid avdName + serial pair before booting,
+      // so a stopped AVD is not cold-booted and killed just to report it. Run
+      // after its lifecycle lease, however, so a serial not yet visible during
+      // reset recovery gets a chance to appear before discovery decides.
+      await validateRequestedAndroidSerialBeforeBoot(
+        budgets.requestedAndroidIdentifierPair,
+        deviceUtils,
+        bootDeadlineMs,
+        deps.timer,
+        coordinatedSignal,
+        (settlement) => {
+          if (settlement) {
+            state.coldBootSettlements.push(settlement);
+          }
+        },
+      );
       return await bootAndPrepareDevice(
         args,
         budgets,
@@ -7760,12 +7895,15 @@ export function registerDeviceTools() {
   ) {
     perf.end();
     const timing = perf.getTimings();
+    const androidMetadata =
+      device.platform === "android" ? androidBootedMetadata(device, sourceImage) : undefined;
 
     const result: StartDeviceResult = {
       deviceId: device.deviceId,
       name: device.name,
       platform: device.platform,
-      osVersion: device.osVersion ?? device.iosVersion,
+      apiLevel: androidMetadata?.apiLevel ?? device.apiLevel,
+      osVersion: androidMetadata?.osVersion ?? device.osVersion ?? device.iosVersion,
       formFactor: device.formFactor,
       screenSize:
         device.screenWidth && device.screenHeight

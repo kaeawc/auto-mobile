@@ -19,6 +19,10 @@ Bun TypeScript MCP server providing Android & iOS device automation capabilities
 - After implementation changes, run relevant validation commands
 - Write terminal output to `scratch/` when not visible
 - Local validation scripts live under `scripts/` and should almost always be written in bash with shellcheck validation
+- Run `scripts/prepush-android.sh` from the repository root before pushing changes under `android/`; its scoped Detekt pass is a smoke check, not a substitute for the full-tree CI Detekt job.
+- For Playground/JUnit-runner emulator CI red, inspect `.github/actions/android-emulator` boot diagnostics first: no runner-health means an infra/runner-health question, while booted tests that fail are a regression.
+- Copy `android/local.properties` from a working checkout into each new Android worktree; it is gitignored and required for Gradle SDK resolution.
+- Ktfmt normalizes `runCatching{}.getOrNull()` to `runCatching {}.getOrNull()` once; write the spaced form and do not mistake that first rewrite for a non-idempotent formatter.
 - Before adding a helper, parser, or dependency, search `src/`, `scripts/lib/`, `package.json`, and the runtime standard library. Prefer the standard library, then an existing direct dependency, then an existing repository helper, then a small tested helper. Do not parse JSON, YAML, XML, or TypeScript with line regexes when a structured parser or typed module contract exists. For new packages, state which built-in and installed alternatives were checked. Preserve injected interfaces/FakeTimer seams where tests need deterministic control.
 - Always use interfaces & fakes & FakeTimer to decouple implementations and keep tests extremely fast and non-flaky
 - Unit tests should pass in 100ms or less. Do not assume that a failing test can be allowed to fail. CI enforces this per test from the JUnit reporter's time (which excludes `beforeAll`); a test over budget is re-run in isolation and only its MEDIAN is failed, so a genuine breach must be fixed in the test, never by raising `BUN_TEST_MAX_MS`.
@@ -193,6 +197,7 @@ plain `git` stays fine for read-only queries (`git log`, `git diff`, `gh`).
 - github-cli: Use `gh` for PRs, issues, checks, and repo metadata. Path: `skills/github-cli/SKILL.md`.
 - android-gradlew: Run Android tasks via `android/gradlew`. Path: `skills/android-gradlew/SKILL.md`.
 - bun-tasks: Use `package.json` scripts with Bun. Path: `skills/bun-tasks/SKILL.md`.
+- prepush-android: Run the Android pre-push smoke check and triage emulator boot diagnostics. Path: `skills/prepush-android/SKILL.md`.
 
 ### Workflow Skills
 
@@ -212,4 +217,20 @@ plain `git` stays fine for read-only queries (`git log`, `git diff`, `gh`).
 - auto-mobile-code-review: AutoMobile-specific code review of a PR or current diff — check the PR's real CI, merge and base state first, then run diff-sized review lenses (two fixed, one generated) over runtime behavior and delivery/enforcement, grounding findings in file:line. Never posts to GitHub. Path: `skills/auto-mobile-code-review/SKILL.md`.
 - manual-test: Run one manual-test iteration from a start point (commit, milestone, or date) — rebuild all components, restart the daemon with the right flags, and verify closed issues / merged PRs actually fix bugs or deliver specced features on current HEAD by exercising tool calls on an Android emulator and iOS simulator. Path: `skills/manual-test/SKILL.md`.
 - device-session-lifecycle: Hunt, fix, and prevent device session lifecycle bugs — startDevice/killDevice, session UUIDs, boot readiness, daemon start/stop/restart, session expiry/release, pool state races, and flaky lifecycle tests. Path: `skills/device-session-lifecycle/SKILL.md`.
+- ios-swift-ci: Triage iOS/Swift CI failures with evidence, distinguish advisory simulator flakes from required checks, and run the local pre-push validation. Path: `skills/ios-swift-ci/SKILL.md`.
 - node-prepush: Run the Node pre-push gate before pushing Node/TypeScript changes, and rerun verified Node CI flakes rather than speculatively changing tests. Path: `skills/node-prepush/SKILL.md`.
+
+## iOS/Swift CI
+
+- Run `scripts/prepush-ios.sh` before pushing any Swift change. It enforces the
+  pinned SwiftFormat 0.54.6, SwiftLint's error-severity rules, and the
+  simulator-free XCTestRunner package subset.
+- `XCTestRunner Simulator Tests` is advisory, not required. Classify it from
+  the exact job log before rerunning or changing code. The 2026-09-07–13
+  signatures were: CtrlProxy UI-test action timed out after five minutes;
+  CtrlProxy still running after forced teardown; video recording's `simctl list`
+  state probe timed out at 250ms; and the hierarchy UI test exceeded 90 seconds.
+- A simulator instance is owned by one CI job. Keep its explicit UDID serially
+  within that job; never share it between parallel runners or jobs.
+- Before merging, refresh CI after updating to the current main head. A stale
+  base can reproduce a main-red window even when the PR's earlier head was green.

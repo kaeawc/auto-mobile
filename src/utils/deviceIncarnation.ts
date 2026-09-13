@@ -16,8 +16,24 @@
  * "no epoch information", never as an epoch of its own.
  */
 export type DeviceIncarnationResolver = (deviceId: string) => number | undefined;
+export type DeviceIncarnationBumper = (deviceId: string) => boolean;
+
+/** One owner of state keyed by a device serial. */
+export interface DeviceIncarnationListener {
+  readonly name: string;
+  /**
+   * Quiesce host state while the current guest is still alive. VM snapshot
+   * loading rewinds guest processes, so owners such as screen recording must
+   * stop them before the console load command rather than after it completes.
+   */
+  prepareForIncarnationChange?(deviceId: string): Promise<void> | void;
+  onDeviceIncarnationChanged(deviceId: string): Promise<void> | void;
+}
 
 let resolver: DeviceIncarnationResolver | undefined;
+let bumper: DeviceIncarnationBumper | undefined;
+const directModeIncarnations = new Map<string, number>();
+const listeners = new Map<string, DeviceIncarnationListener>();
 
 /**
  * Register (or, with `undefined`, clear) the process-wide resolver. The daemon
@@ -26,6 +42,42 @@ let resolver: DeviceIncarnationResolver | undefined;
  */
 export function setDeviceIncarnationResolver(next: DeviceIncarnationResolver | undefined): void {
   resolver = next;
+  if (next === undefined) {
+    directModeIncarnations.clear();
+  }
+}
+
+/** Register the daemon's pooled-device bump primitive, or clear it at shutdown. */
+export function setDeviceIncarnationBumper(next: DeviceIncarnationBumper | undefined): void {
+  bumper = next;
+}
+
+/**
+ * Advance a serial's incarnation. Pooled devices use DevicePool's counter;
+ * direct mode retains a process-local counter so restore still fences caches.
+ */
+export function advanceDeviceIncarnation(deviceId: string): string {
+  if (bumper?.(deviceId)) {
+    return deviceIncarnationToken(deviceId) ?? "unknown";
+  }
+  const next = (directModeIncarnations.get(deviceId) ?? 0) + 1;
+  directModeIncarnations.set(deviceId, next);
+  return String(next);
+}
+
+/** Register a per-serial cache owner. Re-registering a name replaces its owner. */
+export function registerDeviceIncarnationListener(listener: DeviceIncarnationListener): () => void {
+  listeners.set(listener.name, listener);
+  return () => {
+    if (listeners.get(listener.name) === listener) {
+      listeners.delete(listener.name);
+    }
+  };
+}
+
+/** Snapshot the module-init listener inventory for the restore invalidation funnel. */
+export function getDeviceIncarnationListeners(): readonly DeviceIncarnationListener[] {
+  return [...listeners.values()];
 }
 
 /**
@@ -34,6 +86,6 @@ export function setDeviceIncarnationResolver(next: DeviceIncarnationResolver | u
  * can compare and log it without caring that it is a counter.
  */
 export function deviceIncarnationToken(deviceId: string): string | undefined {
-  const incarnation = resolver?.(deviceId);
+  const incarnation = resolver?.(deviceId) ?? directModeIncarnations.get(deviceId);
   return incarnation === undefined ? undefined : String(incarnation);
 }

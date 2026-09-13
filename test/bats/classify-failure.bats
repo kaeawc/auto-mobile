@@ -265,6 +265,25 @@ JSON
   [[ "$output" != *"Android → Check results → none → CHECK-UPSTREAM-FIRST"* ]]
 }
 
+@test "does not mark Android advisory-only when Android Emulator Compile Smoke also fails" {
+  fixture="$BATS_TEST_TMPDIR/android-compile-smoke-hard-and-advisory-run.json"
+  cat > "$fixture" <<'JSON'
+{
+  "headBranch": "work/android-compile-smoke-hard",
+  "jobs": [
+    {"databaseId": 7, "name": "Run Playground Automobile Emulator Tests", "conclusion": "failure", "steps": [{"name": "Run AutoMobile tests that require emulator", "conclusion": "failure"}]},
+    {"databaseId": 12, "name": "Android Emulator Compile Smoke", "conclusion": "failure", "steps": [{"name": "Compile test sources", "conclusion": "failure"}]},
+    {"databaseId": 8, "name": "Android", "conclusion": "failure", "steps": [{"name": "Check results", "conclusion": "failure"}]}
+  ]
+}
+JSON
+
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" bash "$SCRIPT" 323
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Android → Check results → none → UNKNOWN — no signature match, investigate"* ]]
+  [[ "$output" != *"Android → Check results → none → CHECK-UPSTREAM-FIRST"* ]]
+}
+
 @test "does not mark iOS advisory-only when matrix Playground Tests also fails" {
   fixture="$BATS_TEST_TMPDIR/ios-hard-and-advisory-run.json"
   cat > "$fixture" <<'JSON'
@@ -279,6 +298,24 @@ JSON
 JSON
 
   run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" bash "$SCRIPT" 323
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"iOS → Check results → none → UNKNOWN — no signature match, investigate"* ]]
+  [[ "$output" != *"iOS → Check results → none → CHECK-UPSTREAM-FIRST"* ]]
+}
+
+@test "does not mark iOS advisory-only even when it is the only failure (no advisory lane left in the gate)" {
+  fixture="$BATS_TEST_TMPDIR/ios-simulator-only-run.json"
+  cat > "$fixture" <<'JSON'
+{
+  "headBranch": "work/ios-simulator-only-failure",
+  "jobs": [
+    {"databaseId": 20, "name": "XCTestRunner Simulator Tests", "conclusion": "failure", "steps": [{"name": "Run XCTestRunner integration tests", "conclusion": "failure"}]},
+    {"databaseId": 21, "name": "iOS", "conclusion": "failure", "steps": [{"name": "Check results", "conclusion": "failure"}]}
+  ]
+}
+JSON
+
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" bash "$SCRIPT" 324
   [ "$status" -eq 0 ]
   [[ "$output" == *"iOS → Check results → none → UNKNOWN — no signature match, investigate"* ]]
   [[ "$output" != *"iOS → Check results → none → CHECK-UPSTREAM-FIRST"* ]]

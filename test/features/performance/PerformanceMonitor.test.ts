@@ -132,6 +132,45 @@ describe("PerformanceMonitor", () => {
     );
   }
 
+  it("fences an in-flight device generation and clears retained restore state", () => {
+    const buffer = new PerfWindowBuffer();
+    const frames = new SdkFrameMetricsStore();
+    monitor = new PerformanceMonitor(
+      fakeTimer,
+      fakeAdbFactory,
+      serverGetter,
+      undefined,
+      undefined,
+      undefined,
+      buffer,
+      frames,
+    );
+    monitor.startMonitoring("emulator-5554", "com.example.app");
+    buffer.record("emulator-5554", {
+      t: 100,
+      fps: 60,
+      frameTimeMs: 16,
+      jankFrames: 0,
+      touchLatencyMs: null,
+      cpuUsagePercent: 10,
+      memoryUsageMb: 20,
+      frameTimePercentilesMs: null,
+      memoryBreakdownMb: null,
+    });
+    frames.ingest("emulator-5554", "com.example.app", {
+      fps: 60,
+      frameTimeMs: 16,
+      jankFrames: 0,
+      receivedAt: 100,
+    });
+
+    monitor.resetDeviceState("emulator-5554");
+
+    expect(buffer.snapshot("emulator-5554", 100, 1000).sampleCount).toBe(0);
+    expect(frames.getFresh("emulator-5554", "com.example.app", 100, 1000)).toBeNull();
+    expect(monitor.isMonitoring("emulator-5554")).toBe(true);
+  });
+
   describe("start() and stop()", () => {
     it("should start the monitoring interval", () => {
       monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter);

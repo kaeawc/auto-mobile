@@ -278,24 +278,29 @@ export interface PooledDevice {
   identityUnresolved?: boolean;
 
   /**
-   * The `BootedDevice.observedAt` of the newest observation that ENTERED or
-   * re-confirmed {@link identityUnresolved}, when that observation carried one.
+   * The `BootedDevice.observedAt` of the newest identity observation folded into
+   * this entry, when that observation carried one — in EITHER direction: the
+   * placeholder or disagreement that entered {@link identityUnresolved}, and the
+   * resolved name that confirmed or lifted it.
    *
    * Discovery calls run concurrently and finish out of order, so the observation
-   * a funnel folds in is not necessarily the newest one. Without this stamp an
-   * older listing that read the AVD name before it became unreadable could land
-   * after the placeholder and read as proof of continuity, lifting a quarantine
-   * the newest evidence still calls for — re-admitting tool execution and stream
-   * routing on a serial the pool cannot tie to a runtime. The pool already orders
-   * mutable-name updates this way (`nameObservedAt`); identity transitions are
-   * ordered the same way
+   * a funnel folds in is not necessarily the newest one. Recording it on the
+   * quarantine transitions alone made the ordering rule one-sided: an older
+   * listing that read the AVD name before it became unreadable could not lift a
+   * newer quarantine, but a delayed placeholder or disagreement could still
+   * quarantine an entry a NEWER observation had just resolved — cancelling the
+   * bound session's in-flight executions and blocking routing on evidence the
+   * pool already knew was superseded. Both directions are now ordered against
+   * this one stamp, which is how the pool already orders mutable-name updates
+   * (`nameObservedAt`)
    * ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
    *
-   * Absent when the entering observation carried no stamp (start-path snapshots,
-   * legacy callers, test fakes): two unorderable observations are not evidence of
-   * order, so the lift proceeds rather than wedging the entry in quarantine.
+   * Absent when no identity observation has carried a stamp (start-path
+   * snapshots, legacy callers, test fakes): two unorderable observations are not
+   * evidence of order, so the transition proceeds rather than wedging the entry
+   * in whichever state it is in.
    */
-  identityUnresolvedAt?: number;
+  identityObservedAt?: number;
 }
 
 interface RollbackAssignment {
@@ -5836,7 +5841,8 @@ export class DevicePool {
    * in the meantime.
    *
    * Idempotent and cheap: an observation that already {@link describesPooledRuntime}
-   * changes nothing and returns without touching the entry, and serials with no
+   * transitions nothing and only advances the entry's identity-ordering stamp
+   * ({@link PooledDevice.identityObservedAt}), and serials with no
    * pool entry, non-Android platforms and handsets (whose serial is never
    * reassigned) are skipped for the same reason. It takes no lock, because it
    * changes no membership — only the quarantine flag and the in-flight executions
@@ -5851,11 +5857,22 @@ export class DevicePool {
     source: string,
   ): Promise<void> {
     for (const device of devices) {
-      if (device.platform !== "android" || this.describesPooledRuntime(device)) {
+      if (device.platform !== "android") {
         continue;
       }
       const pooled = this.devices.get(device.deviceId);
       if (!pooled) {
+        continue;
+      }
+      if (this.describesPooledRuntime(device)) {
+        // Nothing to transition — the observation agrees, carries a resolved name
+        // and the entry is live — but it is still the newest identity evidence
+        // for this entry, and a straggler that lands after it must be ordered
+        // against it rather than quarantining what this observation just proved
+        // ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
+        if (this.hasReusableSerial(pooled)) {
+          this.recordIdentityObservation(pooled, device.observedAt);
+        }
         continue;
       }
       logger.debug(`[DevicePool] Reconciling '${device.name}' on ${device.deviceId} (${source})`);
@@ -6055,7 +6072,7 @@ export class DevicePool {
     pooled: PooledDevice,
     discovered: Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">,
   ): Promise<void> {
-    if (!this.hasReusableSerial(pooled)) {
+    if (!this.hasReusableSerial(pooled) || this.isStaleIdentityObservation(pooled, discovered)) {
       return;
     }
     if (this.hasUnresolvedEmulatorName(discovered)) {
@@ -6067,14 +6084,14 @@ export class DevicePool {
       );
       return;
     }
+    // The resolved name is the newest identity evidence for this entry whether or
+    // not it is quarantined; recording it on the LIVE path too is what lets a
+    // later straggler be recognised as stale before it quarantines anything.
+    this.recordIdentityObservation(pooled, discovered.observedAt);
     if (pooled.identityUnresolved !== true) {
       return;
     }
-    if (this.isStaleIdentityObservation(pooled, discovered)) {
-      return;
-    }
     delete pooled.identityUnresolved;
-    delete pooled.identityUnresolvedAt;
     logger.info(
       `[DevicePool] Lifting the identity quarantine on ${pooled.id}: discovery read ` +
         `'${discovered.name}'`,
@@ -6082,29 +6099,43 @@ export class DevicePool {
   }
 
   /**
-   * Whether `discovered` is OLDER than the observation that put this entry in
-   * quarantine — the out-of-order straggler described on
-   * {@link PooledDevice.identityUnresolvedAt}. Only a comparison of two stamped
+   * Whether `discovered` is OLDER than the newest identity observation already
+   * folded into this entry — the out-of-order straggler described on
+   * {@link PooledDevice.identityObservedAt}. Only a comparison of two stamped
    * observations decides it; an unstamped observation on either side is
    * unorderable and is not treated as stale.
+   *
+   * Asked before BOTH identity transitions, so a straggler can neither lift a
+   * newer quarantine nor quarantine a newer resolution.
    */
   private isStaleIdentityObservation(
     pooled: PooledDevice,
     discovered: Pick<BootedDevice, "name" | "observedAt">,
   ): boolean {
     if (
-      pooled.identityUnresolvedAt === undefined ||
+      pooled.identityObservedAt === undefined ||
       discovered.observedAt === undefined ||
-      discovered.observedAt >= pooled.identityUnresolvedAt
+      discovered.observedAt >= pooled.identityObservedAt
     ) {
       return false;
     }
     logger.debug(
       `[DevicePool] Ignoring '${discovered.name}' for ${pooled.id}: observation ` +
-        `${discovered.observedAt} is older than the ${pooled.identityUnresolvedAt} observation ` +
-        "that left its identity unresolved",
+        `${discovered.observedAt} is older than the ${pooled.identityObservedAt} identity ` +
+        "observation already folded in",
     );
     return true;
+  }
+
+  /**
+   * Advance {@link PooledDevice.identityObservedAt} to the newest stamp seen.
+   * Monotonic: an unstamped or older observation leaves it where it is, so the
+   * entry's ordering evidence can only move forward.
+   */
+  private recordIdentityObservation(pooled: PooledDevice, observedAt?: number): void {
+    if (observedAt !== undefined && observedAt > (pooled.identityObservedAt ?? -Infinity)) {
+      pooled.identityObservedAt = observedAt;
+    }
   }
 
   /**
@@ -6133,7 +6164,7 @@ export class DevicePool {
     discovered: Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">,
     because: string,
   ): Promise<void> {
-    if (!this.hasReusableSerial(pooled)) {
+    if (!this.hasReusableSerial(pooled) || this.isStaleIdentityObservation(pooled, discovered)) {
       return;
     }
     await this.enterPooledIdentityQuarantine(
@@ -6166,9 +6197,7 @@ export class DevicePool {
     // lift is ordered against, so a straggler newer than the FIRST placeholder
     // but older than the latest one cannot lift the quarantine
     // ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
-    if (observedAt !== undefined && observedAt > (pooled.identityUnresolvedAt ?? -Infinity)) {
-      pooled.identityUnresolvedAt = observedAt;
-    }
+    this.recordIdentityObservation(pooled, observedAt);
     if (pooled.identityUnresolved === true) {
       return;
     }

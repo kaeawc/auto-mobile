@@ -39,6 +39,13 @@ export interface SendTextResult extends BaseActionResult {
    */
   charsSent?: number;
   /**
+   * Android `dismissKeyboard` only: whether the post-input keyboard dismissal was
+   * confirmed. `false` pairs with a `warnings` entry naming why it could not be —
+   * the text itself still landed, so a caller must NOT retry the input (issue
+   * #6868). Omitted when dismissal was not requested.
+   */
+  keyboardDismissed?: boolean;
+  /**
    * For the Android `append` mode only: who produced this failure. See
    * {@link AppendTextFailureSource}; omitted on success and by non-append modes.
    */

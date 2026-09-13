@@ -1145,6 +1145,56 @@ export async function pinchOnHandler(
   return result.success ? response : { ...response, isError: true };
 }
 
+// Injection seam for the inputText handler (mirrors the swipeOn/pinchOn factory
+// seams in this file). Lets a unit test exercise the registered handler wiring
+// with a fake InputText, so the #6868 warning-vs-error contract is covered at
+// the tool boundary and not only inside the feature.
+export type InputTextLike = Pick<InputText, "execute">;
+
+let inputTextFactory: (device: BootedDevice) => InputTextLike = (device) => new InputText(device);
+
+export function setInputTextFactory(factory: (device: BootedDevice) => InputTextLike): void {
+  inputTextFactory = factory;
+}
+
+export function resetInputTextFactory(): void {
+  inputTextFactory = (device) => new InputText(device);
+}
+
+/**
+ * Run inputText and report its outcome.
+ *
+ * `isError` is reserved for a failed TEXT WRITE. A best-effort epilogue that
+ * failed (keyboard dismissal) rides along as `keyboardDismissed: false` plus a
+ * `warnings` entry on a SUCCESSFUL response, so a client no longer has to parse
+ * English prose to learn that the text it asked for actually landed (#6868).
+ */
+export async function inputTextHandler(
+  device: BootedDevice,
+  args: InputTextArgs,
+  _progress?: ProgressCallback,
+  signal?: AbortSignal,
+) {
+  RecompositionTracker.getInstance().recordInteraction();
+  const dismissKeyboard = args.dismissKeyboard ?? serverConfig.isDismissKeyboardAfterInputEnabled();
+  const mode = device.platform === "android" ? args.mode : undefined;
+  const inputText = inputTextFactory(device);
+  const result = await inputText.execute(
+    args.text,
+    args.imeAction,
+    dismissKeyboard,
+    mode,
+    signal,
+    args.selector,
+  );
+  const response = createJSONToolResponse({
+    message: buildInputTextResultMessage(result),
+    observation: result.observation,
+    ...result,
+  });
+  return result.success ? response : { ...response, isError: true };
+}
+
 export function buildInputTextResultMessage(
   result: Pick<SendTextResult, "success" | "error" | "matchedId" | "matchedText">,
 ): string {
@@ -1910,33 +1960,8 @@ export function registerInteractionTools() {
   // pinchOn handler is defined at module scope (with an injectable PinchOn
   // factory) so a unit test can exercise the registered handler wiring (#6056).
 
-  // Input text handler
-  const inputTextHandler = async (
-    device: BootedDevice,
-    args: InputTextArgs,
-    _progress?: ProgressCallback,
-    signal?: AbortSignal,
-  ) => {
-    RecompositionTracker.getInstance().recordInteraction();
-    const dismissKeyboard =
-      args.dismissKeyboard ?? serverConfig.isDismissKeyboardAfterInputEnabled();
-    const mode = device.platform === "android" ? args.mode : undefined;
-    const inputText = new InputText(device);
-    const result = await inputText.execute(
-      args.text,
-      args.imeAction,
-      dismissKeyboard,
-      mode,
-      signal,
-      args.selector,
-    );
-    const response = createJSONToolResponse({
-      message: buildInputTextResultMessage(result),
-      observation: result.observation,
-      ...result,
-    });
-    return result.success ? response : { ...response, isError: true };
-  };
+  // inputText handler is defined at module scope (with an injectable InputText
+  // factory) so a unit test can exercise the registered handler wiring (#6868).
 
   const sendKeysHandler = async (
     device: BootedDevice,
@@ -2149,7 +2174,7 @@ export function registerInteractionTools() {
 
   ToolRegistry.registerDeviceAware(
     "inputText",
-    "Input text. The optional mode field is Android-only and ignored on iOS.",
+    "Input text. The optional mode field is Android-only and ignored on iOS. If the text lands but the optional keyboard dismissal fails, the response stays a success with keyboardDismissed:false and a warnings entry.",
     inputTextSchema,
     inputTextHandler,
     { defaultEnabled: !sendKeysReleased },

@@ -11,4 +11,13 @@ export interface BaseActionResult {
   success: boolean;
   observation?: ObserveResult;
   error?: string;
+  /**
+   * Advisory notes about a SUCCESSFUL action: a best-effort post-action epilogue
+   * (keyboard dismissal, cleanup) that failed without preventing the primary
+   * effect (issue #6868). `error` stays reserved for "the thing you asked for did
+   * not happen" — the two are never set together. Populate through
+   * `withEpilogueWarning` (`src/utils/bestEffortEpilogue.ts`) so the shape stays
+   * uniform, and omit the field entirely when there is nothing to warn about.
+   */
+  warnings?: string[];
 }

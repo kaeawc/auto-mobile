@@ -476,11 +476,68 @@ final class XCTestRunnerTests: XCTestCase {
     /// `ensureDevicePoolReady()` preflight (issue #6627) — dead since its call site was dropped —
     /// was removed rather than rewired: its once-per-process fail-fast on any non-idle booted device
     /// would break the concurrent workers and multi-device plans the pool is built to queue behind.
+    ///
+    /// Enforced by watching for the entry markers of the two I/O boundaries rather than by
+    /// `XCTAssertNoThrow` alone: `SimulatorDetection.hasBootedSimulator()` converts a failed
+    /// `xcrun simctl` into `false` and `DaemonManager.ensureDaemonRunning()` returns a `Bool` a
+    /// caller can ignore, so either could run the forbidden I/O and still leave a
+    /// throw-only assertion green. Both log unconditionally on entry, so their absence from the
+    /// setup transcript proves they were never called.
     func testSetUpWithErrorDoesNotContactDaemonOrSimulator() throws {
         let testCase = DevicePoolPreflightProbeTestCase()
 
-        XCTAssertNoThrow(try testCase.setUpWithError())
-        XCTAssertNoThrow(try testCase.tearDownWithError())
+        let transcript = try captureStandardError {
+            XCTAssertNoThrow(try testCase.setUpWithError())
+            XCTAssertNoThrow(try testCase.tearDownWithError())
+        }
+
+        // Anchor the transcript so an empty capture cannot pass the absence assertions vacuously.
+        XCTAssertTrue(transcript.contains("setUpWithError START"), transcript)
+        XCTAssertTrue(transcript.contains("setUpWithError END"), transcript)
+        for forbiddenMarker in ["hasBootedSimulator", "ensureDaemonRunning", "isDaemonRunning"] {
+            XCTAssertFalse(
+                transcript.contains(forbiddenMarker),
+                "setUpWithError performed \(forbiddenMarker) I/O:\n\(transcript)"
+            )
+        }
+    }
+
+    /// Guards the guard: proves `captureStandardError` actually observes a `PerfTimer` marker, so a
+    /// silently broken capture cannot turn the assertions above into no-ops.
+    func testCaptureStandardErrorObservesPerfTimerMarkers() throws {
+        let transcript = try captureStandardError {
+            PerfTimer.log("hasBootedSimulator: capture sentinel")
+        }
+
+        XCTAssertTrue(transcript.contains("hasBootedSimulator: capture sentinel"), transcript)
+    }
+
+    /// Runs `body` with the process's stderr redirected to a temporary file and returns what was
+    /// written. Backed by a file rather than a pipe so a large transcript cannot deadlock on a full
+    /// pipe buffer. `swift test` runs a class's tests serially, so the global redirect is safe here.
+    private func captureStandardError(_ body: () throws -> Void) throws -> String {
+        let path = NSTemporaryDirectory().appending("automobile-stderr-\(UUID().uuidString).log")
+        XCTAssertTrue(FileManager.default.createFile(atPath: path, contents: nil))
+        defer { try? FileManager.default.removeItem(atPath: path) }
+
+        let captureHandle = try XCTUnwrap(FileHandle(forWritingAtPath: path))
+        let savedStandardError = dup(STDERR_FILENO)
+        XCTAssertGreaterThanOrEqual(savedStandardError, 0)
+        fflush(stderr)
+        XCTAssertGreaterThanOrEqual(dup2(captureHandle.fileDescriptor, STDERR_FILENO), 0)
+        // Restore on every exit path, including a throw out of `body`, so a failure here cannot
+        // leave the whole test process writing its output into a deleted temporary file.
+        defer {
+            fflush(stderr)
+            dup2(savedStandardError, STDERR_FILENO)
+            close(savedStandardError)
+            try? captureHandle.close()
+        }
+
+        try body()
+        fflush(stderr)
+
+        return try String(contentsOfFile: path, encoding: .utf8)
     }
 }
 

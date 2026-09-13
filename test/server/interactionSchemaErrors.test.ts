@@ -271,4 +271,24 @@ describe("nested union conflicts (#6867)", () => {
     expect(message).toContain("Mutually exclusive keys");
     expect(message).not.toContain("did you mean");
   });
+  // PR #6882 review (PRRT_kwDOP-GF5M6h4zd7): property names are caller-
+  // controlled, and JSON allows a quote or a newline inside one. Interpolating
+  // such a name between bare quotes produced a malformed (`"bad"key"`) or
+  // multi-line diagnostic, the latter splitting one error across two log lines.
+  test.each([
+    { name: 'bad"key', expected: '"bad\\"key"' },
+    { name: "bad\nforged", expected: '"bad\\nforged"' },
+    { name: "bad\\slash", expected: '"bad\\\\slash"' },
+  ])("escapes the unrecognized property name $name", ({ name, expected }) => {
+    const input = { selector: { text: "ready", [name]: 1 } };
+    const result = tapOnSchema.safeParse(input);
+    if (result.success) {
+      throw new Error("expected unrecognized key");
+    }
+    const message = formatToolParamError("tapOn", result.error, input, tapOnSchema);
+    expect(message).toContain(`Unrecognized key: ${expected}`);
+    // One diagnostic stays one line: a forged newline must not fabricate a
+    // second output/log record.
+    expect(message.split("\n")).toHaveLength(1);
+  });
 });

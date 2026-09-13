@@ -239,8 +239,12 @@ function groupUnrecognizedKeys(flattenedIssues: FlattenedIssue[]): Map<string, U
   return merged;
 }
 
+// Property names are caller-controlled and JSON permits a quote, a backslash or
+// a newline inside one. `JSON.stringify` is the quoting rule that survives all
+// three, so a forged name can neither close its own quotes (`"bad"key"`) nor
+// break one diagnostic across two output/log lines (PR #6882 review).
 function quoteKeys(keys: ReadonlyArray<string>): string {
-  return keys.map((name) => `"${name}"`).join(", ");
+  return keys.map((name) => JSON.stringify(name)).join(", ");
 }
 
 // Mirrors zod's own phrasing so a single-key message is byte-identical to what

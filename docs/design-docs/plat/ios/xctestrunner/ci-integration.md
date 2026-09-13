@@ -277,7 +277,7 @@ DerivedData for that changed input is never saved — every later run keeps rest
 build. Each key therefore hashes, scoped to that job's project directory (and any local Swift
 package directories it depends on): `*.swift`, `*.m`, `*.mm`, `*.h`, `*.c`, `*.cpp`, `*.xcconfig`,
 `*.plist`, `*.entitlements`, `*.storyboard`, `*.xib`, `*.xcassets/**`, `*.strings`, `*.ttf`,
-`*.otf`, `*.pbxproj`, `*.xcscheme`, `project.yml`, `Package.swift`, and `Package.resolved` —
+`*.otf`, `*.xcprivacy`, `*.pbxproj`, `*.xcscheme`, `project.yml`, `Package.swift`, and `Package.resolved` —
 excluding `.build/`, `DerivedData/`, and `SourcePackages/` (already excluded by scoping to source
 directories, matching the SPM cache-path exclusions above).
 

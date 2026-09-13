@@ -15,7 +15,29 @@ type JobStep = { jobId: string; step: WorkflowStep };
  * PRRT_kwDOP-GF5M6h7WCL).
  */
 
-const REQUIRED_EXTENSIONS = [".m", ".h", ".xcconfig", ".plist"];
+const REQUIRED_EXTENSIONS = [
+  ".swift",
+  ".m",
+  ".mm",
+  ".h",
+  ".c",
+  ".cpp",
+  ".xcconfig",
+  ".plist",
+  ".entitlements",
+  ".storyboard",
+  ".xib",
+  ".xcassets",
+  ".strings",
+  ".ttf",
+  ".otf",
+  ".xcprivacy",
+  ".pbxproj",
+  ".xcscheme",
+  "project.yml",
+  "Package.swift",
+  "Package.resolved",
+];
 // At least one project-descriptor pattern must be present; xcodegen projects
 // use project.yml, hand-maintained ones use .pbxproj directly.
 const REQUIRED_PROJECT_DESCRIPTOR_EXTENSIONS = [".pbxproj", "project.yml"];
@@ -67,9 +89,15 @@ describe("DerivedData cache keys hash every build input", () => {
         ).toBeGreaterThan(0);
 
         for (const extension of REQUIRED_EXTENSIONS) {
+          const expectedSuffix =
+            extension === ".xcassets"
+              ? ".xcassets/**"
+              : extension.startsWith(".")
+                ? `*${extension}`
+                : extension;
           expect(
-            patterns.some((pattern) => pattern.endsWith(`*${extension}`)),
-            `${workflow}/${jobId}: DerivedData cache key does not hash '*${extension}' inputs: ${patterns.join(", ")}`,
+            patterns.some((pattern) => pattern.endsWith(expectedSuffix)),
+            `${workflow}/${jobId}: DerivedData cache key does not hash '${expectedSuffix}' inputs: ${patterns.join(", ")}`,
           ).toBe(true);
         }
 

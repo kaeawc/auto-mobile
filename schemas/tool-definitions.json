@@ -9143,24 +9143,17 @@
         }
       },
       "additionalProperties": false,
-      "allOf": [
-        {
-          "oneOf": [
-            {
-              "required": ["resources"],
-              "not": {
-                "required": ["restore"]
-              }
-            },
-            {
-              "required": ["restore"],
-              "not": {
-                "required": ["resources"]
-              }
-            }
-          ]
+      "if": {
+        "required": ["resources"]
+      },
+      "then": {
+        "not": {
+          "required": ["restore"]
         }
-      ]
+      },
+      "else": {
+        "required": ["restore"]
+      }
     }
   },
   {

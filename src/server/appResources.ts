@@ -75,6 +75,11 @@ export interface AppsQueryAppInfo {
    */
   label?: string;
   /**
+   * iOS-only legacy alias for client compatibility; `label` is canonical
+   * going forward (#6798).
+   */
+  displayName?: string;
+  /**
    * Whether the app has a launchable entry point. For a deduplicated Android
    * system app this summarizes "launches for at least one of `userIds`".
    * `undefined` means "not reported", never "no" (#6798).
@@ -411,7 +416,7 @@ export function toQueryIosApp(app: IosInstalledAppInfo): AppsQueryAppInfo {
     userProfile: "personal",
     foreground: false,
     recent: false,
-    ...(app.displayName ? { label: app.displayName } : {}),
+    ...(app.displayName ? { displayName: app.displayName, label: app.displayName } : {}),
     ...(app.launchable === undefined ? {} : { launchable: app.launchable }),
   };
 }

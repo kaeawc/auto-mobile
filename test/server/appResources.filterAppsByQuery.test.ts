@@ -198,6 +198,19 @@ describe("toQueryIosApp always populates userIds (#6216 review)", () => {
   });
 });
 
+describe("toQueryIosApp preserves the legacy displayName alias (#6798)", () => {
+  test("emits both displayName and label from the iOS display name", () => {
+    const queryApp = toQueryIosApp({
+      bundleId: "com.example.myapp",
+      type: "user",
+      displayName: "Example App",
+    });
+
+    expect(queryApp.displayName).toBe("Example App");
+    expect(queryApp.label).toBe("Example App");
+  });
+});
+
 describe("profile filtering preserves iOS system apps (#6216 review)", () => {
   // Matches the shape toQueryIosApp actually emits: iOS has a single (profile 0)
   // user, so every app — user or system — carries userIds: [0].

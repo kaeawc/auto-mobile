@@ -469,6 +469,57 @@ test("matching startup lease wakes when a deferred recovery settles", async () =
   }
 });
 
+test("startup lease does not cool down when matching recovery clears before settlement lookup", async () => {
+  const manager = new BlockingRecoveryReadyManager();
+  const { timer, sessions, pool, captured } = await setup(manager);
+  try {
+    const firstRecovery = pool.recoverSessionBoundAndroidDeviceAfterLoss(
+      original.deviceId,
+      undefined,
+      captured,
+    );
+    await manager.killAccepted.promise;
+    await flush();
+    timer.advanceTime(30_000);
+    expect(await firstRecovery).toBe("deferred");
+
+    manager.bootedDevices = [];
+    timer.advanceTime(30_000);
+    const retry = pool.recoverSessionBoundAndroidDeviceAfterLoss(
+      original.deviceId,
+      undefined,
+      captured,
+    );
+    await manager.readinessStarted.promise;
+
+    let releaseLease: (() => Promise<void>) | undefined;
+    const internals = pool as unknown as {
+      afterAndroidStartupRecoverySnapshot?: () => void;
+      clearRecoveringAndroidImage(avdName: string): void;
+    };
+    internals.afterAndroidStartupRecoverySnapshot = () => {
+      manager.releaseReadiness.resolve();
+      internals.clearRecoveringAndroidImage(original.name);
+    };
+    const recoverySettledAt = timer.now();
+    const lease = pool.reserveAndroidStartupLease(original.name, true).then((release) => {
+      releaseLease = release;
+    });
+    await flush();
+    if (!releaseLease) {
+      timer.advanceTime(30_000);
+    }
+    await lease;
+    expect(await retry).toBe("recovered");
+    expect(releaseLease).toBeDefined();
+    expect(timer.now() - recoverySettledAt).toBeLessThan(30_000);
+    await releaseLease?.();
+  } finally {
+    manager.releaseReadiness.resolve();
+    sessions.stopCleanupTimer();
+  }
+});
+
 test("unnamed startup lease ignores a different AVD's deferred recovery", async () => {
   const { timer, sessions, manager, pool, captured } = await setup();
   manager.deviceImages = [

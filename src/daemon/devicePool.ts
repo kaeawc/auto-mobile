@@ -97,6 +97,7 @@ export type DeviceStatus = "idle" | "busy" | "error";
 type AndroidRediscoveryVerification = "rediscovered" | "not-rediscovered" | "unknown";
 export type CurrentDisconnectStatus = "current" | "recovered" | "unknown";
 const UNCONFIRMED_RECOVERY_SHUTDOWN_COOLDOWN_MS = 30_000;
+const RECOVERING_IMAGE_SETTLEMENT_MISSING_RETRY_MS = 250;
 const MAX_DEFERRED_RECOVERY_SHUTDOWNS = 1;
 class UnconfirmedRecoveryShutdownError extends ActionableError {
   constructor(avdName: string, cause: unknown) {
@@ -551,6 +552,7 @@ export class DevicePool {
     string,
     RecoveringAndroidImageSettlement
   > = new Map();
+  private afterAndroidStartupRecoverySnapshot?: () => void;
   /**
    * A reset cohort is reserved before its first member is restarted. This keeps
    * a concurrent named getAndroid call from booting a later cohort member while
@@ -3189,6 +3191,7 @@ export class DevicePool {
           this.androidStartupLeases.set(owner, request);
         }
       });
+      this.afterAndroidStartupRecoverySnapshot?.();
       if (matchingReservations.length === 0 && matchingRecoveryAvdNames.length === 0) {
         break;
       }
@@ -3354,7 +3357,14 @@ export class DevicePool {
       return settlement ? [settlement.settled] : [];
     });
     if (settlements.length === 0) {
-      await this.waitForDeferredAndroidRecoveryCooldown(signal);
+      if (!avdNames.some((avdName) => this.recoveringAndroidImages.has(avdName))) {
+        return;
+      }
+      // The maps should be updated together; a short retry safely handles any transient inconsistency.
+      logger.debug(
+        `[DevicePool] Recovering Android AVD image was observed without a tracked settlement; retrying`,
+      );
+      await this.waitForAndroidRecoveryDelay(RECOVERING_IMAGE_SETTLEMENT_MISSING_RETRY_MS, signal);
       return;
     }
     await this.waitForRecoverySettlements(settlements, signal);
@@ -3387,9 +3397,9 @@ export class DevicePool {
     }
   }
 
-  private async waitForDeferredAndroidRecoveryCooldown(signal?: AbortSignal): Promise<void> {
+  private async waitForAndroidRecoveryDelay(delayMs: number, signal?: AbortSignal): Promise<void> {
     if (!signal) {
-      await this.timer.sleep(UNCONFIRMED_RECOVERY_SHUTDOWN_COOLDOWN_MS);
+      await this.timer.sleep(delayMs);
       return;
     }
     let abortListener: (() => void) | undefined;
@@ -3402,10 +3412,7 @@ export class DevicePool {
       signal.addEventListener("abort", abortListener, { once: true });
     });
     try {
-      await Promise.race([
-        this.timer.sleep(UNCONFIRMED_RECOVERY_SHUTDOWN_COOLDOWN_MS),
-        cancellation,
-      ]);
+      await Promise.race([this.timer.sleep(delayMs), cancellation]);
     } finally {
       if (abortListener) {
         signal.removeEventListener("abort", abortListener);

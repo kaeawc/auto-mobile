@@ -42,3 +42,17 @@ MOCK
   [ "$status" -eq 0 ]
   [ "$output" = "emulator-5554" ]
 }
+
+@test "waits for progress-mode boot output before parsing device JSON" {
+  cat > "${MOCK_BIN}/bun" <<'MOCK'
+#!/usr/bin/env bash
+sleep 0.2
+printf '%s\n' '{"deviceId":"emulator-5554"}'
+MOCK
+  chmod +x "${MOCK_BIN}/bun"
+
+  run env AUTOMOBILE_BOOT_PROGRESS=true bash -c 'cd /tmp && "$1" --avd-name pixel_ci' _ "$(pwd)/$SCRIPT"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"emulator-5554"* ]]
+}

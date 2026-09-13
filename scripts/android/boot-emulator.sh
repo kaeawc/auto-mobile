@@ -28,14 +28,18 @@ progress() {
 mkdir -p "${diagnostics_dir}"
 progress "Starting AutoMobile Android boot for AVD '${avd_name}' (deadline ${timeout_ms}ms)."
 set +e
+tail_pid=""
 if [[ "${AUTOMOBILE_BOOT_PROGRESS:-false}" == "true" ]]; then
-  (cd "${repo_root}" && bun run src/index.ts --boot-device --platform android --name "${avd_name}" --timeout-ms "${timeout_ms}") \
-    > >(tee "${boot_stdout_log}") 2> >(tee "${boot_stderr_log}" >&2)
-  boot_status="$?"
-else
-  (cd "${repo_root}" && bun run src/index.ts --boot-device --platform android --name "${avd_name}" --timeout-ms "${timeout_ms}") \
-    > "${boot_stdout_log}" 2> "${boot_stderr_log}"
-  boot_status="$?"
+  : > "${boot_stdout_log}"
+  tail -f "${boot_stdout_log}" &
+  tail_pid="$!"
+fi
+(cd "${repo_root}" && bun run src/index.ts --boot-device --platform android --name "${avd_name}" --timeout-ms "${timeout_ms}") \
+  > "${boot_stdout_log}" 2> "${boot_stderr_log}"
+boot_status="$?"
+if [[ -n "${tail_pid}" ]]; then
+  kill "${tail_pid}" 2>/dev/null || true
+  wait "${tail_pid}" 2>/dev/null || true
 fi
 set -e
 

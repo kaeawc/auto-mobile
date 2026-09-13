@@ -135,11 +135,16 @@ test_tasks=()
 for module_path in "${modules[@]+"${modules[@]}"}"; do
   module_dir="android/${module_path#:}"
   module_dir="${module_dir//:/\/}"
-  detekt_tasks+=("${module_path}:detekt")
-  if rg -q 'alias\(libs\.plugins\.android\.(application|library)\)' "${module_dir}/build.gradle.kts"; then
-    compile_tasks+=("${module_path}:compileDebugKotlin")
-  else
+  if [[ "${module_path}" == ":build-logic" ]]; then
+    # build-logic is a kotlin-dsl-only build with no detekt plugin applied.
     compile_tasks+=("${module_path}:compileKotlin")
+  else
+    detekt_tasks+=("${module_path}:detekt")
+    if rg -q 'alias\(libs\.plugins\.android\.(application|library)\)' "${module_dir}/build.gradle.kts"; then
+      compile_tasks+=("${module_path}:compileDebugKotlin")
+    else
+      compile_tasks+=("${module_path}:compileKotlin")
+    fi
   fi
   if [[ -d "${module_dir}/src/test" ]]; then
     test_tasks+=("${module_path}:test")

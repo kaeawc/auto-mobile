@@ -20,6 +20,8 @@ import { serverConfig } from "../utils/ServerConfig";
 import { getStructuredPayload, stringifyToolResponse } from "../utils/toolUtils";
 import { isSubmitImeAction } from "../models/ImeActionResult";
 import { boundStructuredField, truncateBodyText } from "../utils/truncateBodyText";
+import { logger } from "../utils/logger";
+import { errorMessage } from "../utils/describeUnknownError";
 
 /**
  * Read/write access to the per-session diff baseline — the "last observation
@@ -619,7 +621,7 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
     !ctx.internal &&
     hasArtifactableObservation &&
     sanitizedPayload &&
-    shouldArtifactObservationPayload(ctx, sanitizedPayload)
+    shouldArtifactObservationPayload(ctx, sanitizedPayload, hasStructured)
   ) {
     if (isObserveTool) {
       // Keep compact wait status inline: without it, an artifacted `observe`
@@ -648,8 +650,22 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
   // residue is still oversized and keep only the headline fields inline, so the
   // client always gets complete, parseable JSON plus a pointer to the rest.
   const boundedCandidate = sanitizedPayload ?? payload;
-  if (ctx.artifactWriter && !ctx.internal && exceedsInlineLimit(boundedCandidate)) {
-    sanitizedPayload = spillOversizedPayload(ctx, boundedCandidate);
+  if (ctx.artifactWriter && !ctx.internal && exceedsInlineLimit(boundedCandidate, hasStructured)) {
+    try {
+      sanitizedPayload = spillOversizedPayload(ctx, boundedCandidate, hasStructured);
+    } catch (error) {
+      // The operation itself already succeeded; only the spill failed (a full or
+      // read-only tool-output directory). Throwing here would return NO result
+      // for work the device has already done, which for a side-effecting tool
+      // invites a duplicate retry. Fall back to the pre-#6870 behaviour — serve
+      // the payload un-spilled — and leave a trace, since the response then
+      // exceeds the ceiling. The `--cli` renderer still refuses to cut JSON
+      // mid-string and emits its own truncation notice instead.
+      logger.warn(
+        `finalizeToolResponse: could not spill the oversized ${ctx.name} response: ${errorMessage(error)}`,
+        error,
+      );
+    }
   }
 
   if (!sanitizedPayload) {
@@ -722,13 +738,21 @@ function pickInlineResidue(payload: Record<string, unknown>): Record<string, unk
 function spillOversizedPayload(
   ctx: FinalizeToolResponseContext,
   payload: Record<string, unknown>,
+  hasStructured: boolean,
 ): Record<string, unknown> {
-  const artifact = writeJsonArtifact(ctx, "ToolResponse", payload);
+  // This artifact is advertised as the COMPLETE response, so it is written from
+  // this call site's own rendering: the writer's default serializer strips every
+  // `extras` property, and an extras-heavy payload now reaches this spill (it is
+  // measured unstripped), so re-serializing there would drop the very bytes that
+  // triggered the spill and leave them nowhere at all.
+  const artifact = writeJsonArtifact(ctx, "ToolResponse", payload, JSON.stringify(payload));
   const spilled = { ...pickInlineResidue(payload), ...artifact };
   // The per-field cap is counted in UTF-16 code units, so multi-byte text can
   // still serialize past the ceiling across every retained field. Fall back to
   // markers-only, whose size does not depend on the input at all.
-  return exceedsInlineLimit(spilled) ? { ...markerResidue(payload), ...artifact } : spilled;
+  return exceedsInlineLimit(spilled, hasStructured)
+    ? { ...markerResidue(payload), ...artifact }
+    : spilled;
 }
 
 /**
@@ -764,16 +788,47 @@ function artifactMode(ctx: FinalizeToolResponseContext): ObservationArtifactMode
   return ctx.artifactMode ?? "always";
 }
 
-/** Whether the serialized payload is over the inline ceiling. */
-function exceedsInlineLimit(payload: Record<string, unknown>): boolean {
-  return (
-    Buffer.byteLength(stringifyToolResponse(payload), "utf8") > DEFAULT_OBSERVATION_INLINE_MAX_BYTES
-  );
+/** Whether the payload, as the client will actually receive it, is over the ceiling. */
+function exceedsInlineLimit(payload: Record<string, unknown>, hasStructured: boolean): boolean {
+  return emittedByteLength(payload, hasStructured) > DEFAULT_OBSERVATION_INLINE_MAX_BYTES;
+}
+
+/**
+ * Bytes this payload will actually put on the wire (#6870 review).
+ *
+ * The text part is rendered with `stringifyToolResponse`, whose replacer drops
+ * every property named `extras`. But `structuredContent` is assigned the
+ * UNSTRIPPED payload object and is serialized by the transport with a plain
+ * `JSON.stringify`, extras included. Measuring only the stripped rendering let a
+ * result whose bulk is accessibility `extras` measure as a handful of bytes and
+ * sail straight past the hard ceiling while 70 KB of structured content went to
+ * the client. Measure the larger of the two renderings, so the gate bounds
+ * whichever representation is actually emitted.
+ */
+function emittedByteLength(payload: Record<string, unknown>, hasStructured: boolean): number {
+  const strippedBytes = Buffer.byteLength(stringifyToolResponse(payload), "utf8");
+  if (!hasStructured) {
+    return strippedBytes;
+  }
+  return Math.max(strippedBytes, structuredByteLength(payload, strippedBytes));
+}
+
+function structuredByteLength(payload: Record<string, unknown>, fallback: number): number {
+  try {
+    return Buffer.byteLength(JSON.stringify(payload), "utf8");
+  } catch (error) {
+    // A payload the transport itself cannot serialize (a cycle, a BigInt) has no
+    // structured byte count to compare against; the stripped rendering is the
+    // only measurement available. Safe to swallow: this is sizing, not delivery.
+    logger.debug(`finalizeToolResponse: structured payload is not measurable: ${error}`);
+    return fallback;
+  }
 }
 
 function shouldArtifactObservationPayload(
   ctx: FinalizeToolResponseContext,
   payload: Record<string, unknown>,
+  hasStructured: boolean,
 ): boolean {
   if (artifactMode(ctx) === "always") {
     return true;
@@ -781,7 +836,7 @@ function shouldArtifactObservationPayload(
 
   // Measures the whole served payload — `observationDiff` and every other
   // top-level field included — not just the observation subtree.
-  return exceedsInlineLimit(payload);
+  return exceedsInlineLimit(payload, hasStructured);
 }
 
 function writeObservationArtifact(
@@ -810,11 +865,13 @@ function writeJsonArtifact(
   ctx: FinalizeToolResponseContext,
   payload: ObservationArtifactPayload,
   data: unknown,
+  serialized?: string,
 ): ObservationArtifactMetadata {
   return ctx.artifactWriter!.writeJsonArtifact({
     tool: ctx.name,
     payload,
     data,
+    serialized,
   });
 }
 

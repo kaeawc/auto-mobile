@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   DEFAULT_OBSERVATION_INLINE_MAX_BYTES,
   finalizeToolResponse,
@@ -12,6 +12,7 @@ import { serverConfig } from "../../src/utils/ServerConfig";
 import { GFXINFO_DUMP_MARKER } from "../../src/features/observe/output/ObserveResultOutput";
 import type { ObserveResult } from "../../src/models/ObserveResult";
 import { setElementProvenance } from "../../src/features/observe/output/elementProvenance";
+import { logger } from "../../src/utils/logger";
 
 /**
  * Build a minimal ObserveResult whose hierarchy carries trimmable attributes:
@@ -74,10 +75,15 @@ function makeObserveResultWithBounds(): ObserveResult {
 }
 
 class FakeObservationArtifactWriter {
-  writes: Array<{ tool: string; payload: string; data: unknown }> = [];
+  writes: Array<{ tool: string; payload: string; data: unknown; serialized?: string }> = [];
   throwOnWrite: Error | undefined;
 
-  writeJsonArtifact(input: { tool: string; payload: string; data: unknown }): unknown {
+  writeJsonArtifact(input: {
+    tool: string;
+    payload: string;
+    data: unknown;
+    serialized?: string;
+  }): unknown {
     if (this.throwOnWrite) {
       throw this.throwOnWrite;
     }
@@ -2258,6 +2264,83 @@ describe("finalizeToolResponse", () => {
 
         expect(finalized.structuredContent).toEqual({ success: true, rows: "q".repeat(10) });
         expect(writer.writes).toHaveLength(0);
+      });
+
+      /**
+       * The gate measured with `stringifyToolResponse`, whose replacer deletes
+       * every `extras` property. `structuredContent` is assigned the UNSTRIPPED
+       * payload object and serialized by the transport with a plain
+       * `JSON.stringify`, so a result whose bulk is accessibility `extras`
+       * measured as a few bytes here and was handed to the client at full size —
+       * exactly the overflow the ceiling exists to stop (#6870 review).
+       */
+      test("measures the unstripped structured payload, not the extras-stripped rendering", () => {
+        const writer = new FakeObservationArtifactWriter();
+        const finalized = finalizeToolResponse(
+          createStructuredToolResponse({
+            success: true,
+            detail: { extras: { accessibility: "x".repeat(70_000) } },
+          }),
+          oversizedCtx(writer),
+        );
+
+        const structured = finalized.structuredContent as any;
+        expect(writer.writes).toHaveLength(1);
+        expect(Buffer.byteLength(JSON.stringify(structured), "utf8")).toBeLessThanOrEqual(
+          DEFAULT_OBSERVATION_INLINE_MAX_BYTES,
+        );
+        expect(structured.detail).toBeUndefined();
+        expect(structured.artifact).toMatchObject({ format: "json", tool: "tapOn" });
+      });
+
+      // The artifact is advertised as the COMPLETE result, so it must round-trip
+      // what would have been served — including the `extras` the writer's default
+      // serializer drops (#6870 review).
+      test("spills the extras-bearing payload verbatim into the artifact", () => {
+        const writer = new FakeObservationArtifactWriter();
+        finalizeToolResponse(
+          createStructuredToolResponse({
+            success: true,
+            detail: { extras: { accessibility: "x".repeat(70_000) } },
+          }),
+          oversizedCtx(writer),
+        );
+
+        expect(writer.writes).toHaveLength(1);
+        expect(writer.writes[0].serialized).toBeDefined();
+        expect(JSON.parse(writer.writes[0].serialized as string).detail.extras).toEqual({
+          accessibility: "x".repeat(70_000),
+        });
+      });
+
+      /**
+       * A full or read-only tool-output directory must not turn an
+       * already-completed tool call into a thrown finalization: the caller gets
+       * no result at all and, for a side-effecting tool, may retry an action that
+       * already happened. Fall back to the pre-#6870 behaviour — the payload is
+       * served un-spilled — and warn (#6870 review).
+       */
+      test("falls back to the un-spilled payload when the artifact write fails", () => {
+        const writer = new FakeObservationArtifactWriter();
+        writer.throwOnWrite = new Error("artifact disk is full");
+        const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+
+        try {
+          const finalized = finalizeToolResponse(
+            createStructuredToolResponse({ success: true, rows: "q".repeat(90_000) }),
+            oversizedCtx(writer),
+          );
+
+          const structured = finalized.structuredContent as any;
+          expect(structured.success).toBe(true);
+          expect(structured.rows).toBe("q".repeat(90_000));
+          expect(structured.artifact).toBeUndefined();
+          expect(
+            warnSpy.mock.calls.some((call) => String(call[0]).includes("artifact disk is full")),
+          ).toBe(true);
+        } finally {
+          warnSpy.mockRestore();
+        }
       });
     });
   });

@@ -115,6 +115,13 @@ fi
 wait_for_npm_propagation() {
   local attempt=1
   local delay="$npm_propagation_delay"
+  # Clamp before the first sleep, not only after doubling: an override whose
+  # initial delay exceeds the maximum (say 300s initial against a 2s cap) would
+  # otherwise sleep the uncapped value once and can eat the workflow timeout on
+  # the very first retry.
+  if [[ "$delay" -gt "$npm_propagation_max_delay" ]]; then
+    delay="$npm_propagation_max_delay"
+  fi
 
   while ! curl -fsS "$VERSION_DOC_URL" -o /dev/null; do
     if [[ "$attempt" -ge "$npm_propagation_attempts" ]]; then

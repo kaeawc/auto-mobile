@@ -191,6 +191,22 @@ FAKE_CURL
   PATH="${TEST_ROOT}/fakebin:${PATH}"
 }
 
+# Shadow `sleep` through the same fake-bin PATH the fake curl uses, recording
+# one line per requested delay instead of actually waiting. The backoff tests
+# assert the delay *schedule*, which is exactly what the log holds; sleeping for
+# real would make a unit test spend seconds proving arithmetic.
+use_fake_sleep() {
+  SLEEP_LOG="${TEST_ROOT}/sleeps"
+  : > "$SLEEP_LOG"
+  cat > "${TEST_ROOT}/fakebin/sleep" <<'FAKE_SLEEP'
+#!/usr/bin/env bash
+printf '%s\n' "$1" >> "${SLEEP_LOG}"
+exit 0
+FAKE_SLEEP
+  chmod +x "${TEST_ROOT}/fakebin/sleep"
+  PATH="${TEST_ROOT}/fakebin:${PATH}"
+}
+
 @test "checks the npm version document before fetching the tarball" {
   cd "$TEST_ROOT"
   use_propagating_curl
@@ -246,8 +262,10 @@ FAKE_CURL
 @test "exponential backoff doubles the announced delay up to the cap" {
   cd "$TEST_ROOT"
   use_propagating_curl
+  use_fake_sleep
   run env TAG=v0.0.26 REPO=kaeawc/auto-mobile RENDER_ONLY=1 \
     CURL_URL_LOG="${TEST_ROOT}/curl-urls" NPM_DOC_STATE="${TEST_ROOT}/npm-doc" \
+    SLEEP_LOG="${SLEEP_LOG}" \
     FAKE_NPM_404S=4 BREW_NPM_PROPAGATION_ATTEMPTS=6 \
     BREW_NPM_PROPAGATION_DELAY_SECONDS=1 \
     BREW_NPM_PROPAGATION_MAX_DELAY_SECONDS=2 \
@@ -257,6 +275,28 @@ FAKE_CURL
   [[ "$output" == *"retrying in 2s"* ]]
   # Capped: never announces 4s.
   [[ "$output" != *"retrying in 4s"* ]]
+  # The announced delay is what is actually slept: 1, then 2, then the cap.
+  [ "$(tr '\n' ' ' < "$SLEEP_LOG")" = "1 2 2 2 " ]
+}
+
+@test "clamps an initial propagation delay that exceeds the cap" {
+  cd "$TEST_ROOT"
+  use_propagating_curl
+  use_fake_sleep
+  # An override whose initial delay is larger than the maximum must not sleep
+  # the uncapped value once before the clamp applies: a 300s first sleep can
+  # eat the whole workflow timeout.
+  run env TAG=v0.0.26 REPO=kaeawc/auto-mobile RENDER_ONLY=1 \
+    CURL_URL_LOG="${TEST_ROOT}/curl-urls" NPM_DOC_STATE="${TEST_ROOT}/npm-doc" \
+    SLEEP_LOG="${SLEEP_LOG}" \
+    FAKE_NPM_404S=2 BREW_NPM_PROPAGATION_ATTEMPTS=5 \
+    BREW_NPM_PROPAGATION_DELAY_SECONDS=300 \
+    BREW_NPM_PROPAGATION_MAX_DELAY_SECONDS=2 \
+    bash scripts/release/update-brew-formula.sh
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"retrying in 300s"* ]]
+  [[ "$output" == *"retrying in 2s"* ]]
+  [ "$(tr '\n' ' ' < "$SLEEP_LOG")" = "2 2 " ]
 }
 
 @test "an exhausted propagation wait warns but still tries the tarball" {

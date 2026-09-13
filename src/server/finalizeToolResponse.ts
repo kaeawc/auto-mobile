@@ -58,12 +58,14 @@ export interface ObservationArtifactWriteInput {
   payload: ObservationArtifactPayload;
   data: unknown;
   /**
-   * Exact bytes to persist, when the caller has already serialized `data` and
-   * the default serializer would not round-trip it. `stringifyToolResponse`
-   * drops every property named `extras` — a wire-size saving for the inline
-   * observation payload — so a caller advertising its artifact as the COMPLETE
-   * result (the CLI spill, #6870) supplies its own rendering here. `data` stays
-   * the source of truth for callers that do not.
+   * Exact bytes to persist, for a caller that has already rendered `data` and
+   * must store precisely what it rendered — the CLI, whose pretty-printed
+   * output is the thing it measured and whose reported byte count has to match
+   * the file on disk (#6870).
+   *
+   * NOT a serialization strategy hook: the writer already persists `data`
+   * completely (see `serializeArtifactContent`), so a caller that just wants the
+   * whole payload written should omit this and pass `data` alone.
    */
   serialized?: string;
 }
@@ -661,12 +663,10 @@ function spillOversizedPayload(
   payload: Record<string, unknown>,
   hasStructured: boolean,
 ): Record<string, unknown> {
-  // This artifact is advertised as the COMPLETE response, so it is written from
-  // this call site's own rendering: the writer's default serializer strips every
-  // `extras` property, and an extras-heavy payload now reaches this spill (it is
-  // measured unstripped), so re-serializing there would drop the very bytes that
-  // triggered the spill and leave them nowhere at all.
-  const artifact = writeJsonArtifact(ctx, "ToolResponse", payload, JSON.stringify(payload));
+  // No `serialized` override: the writer persists `data` complete (extras
+  // included), so every spill path — this one and the observation-only one above
+  // — produces the same complete artifact without per-call-site plumbing.
+  const artifact = writeJsonArtifact(ctx, "ToolResponse", payload);
   const spilled = { ...pickInlineResidue(payload), ...artifact };
   // The per-field cap is counted in UTF-16 code units, so multi-byte text can
   // still serialize past the ceiling across every retained field. Fall back to
@@ -786,13 +786,11 @@ function writeJsonArtifact(
   ctx: FinalizeToolResponseContext,
   payload: ObservationArtifactPayload,
   data: unknown,
-  serialized?: string,
 ): ObservationArtifactMetadata {
   return ctx.artifactWriter!.writeJsonArtifact({
     tool: ctx.name,
     payload,
     data,
-    serialized,
   });
 }
 

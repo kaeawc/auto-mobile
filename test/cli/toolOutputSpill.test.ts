@@ -3,6 +3,8 @@ import {
   CLI_OUTPUT_INLINE_MAX_BYTES,
   CLI_TOOL_RESULT_ARTIFACT_PAYLOAD,
   renderCliToolOutput,
+  writeAllSync,
+  type BlockingByteWriter,
 } from "../../src/cli/toolOutput";
 import {
   resetCliOutputSinksForTesting,
@@ -247,5 +249,97 @@ describe("spilled CLI artifacts carry the exact result (#6870)", () => {
 
     const parsed = JSON.parse(rendered);
     expect(parsed.artifact.bytes).toBe(Buffer.byteLength(fileSystem.writes[0].content, "utf8"));
+  });
+});
+
+/**
+ * The blocking write itself (#6870 review, PRRT_kwDOP-GF5M6h5Dje).
+ *
+ * The end-to-end regression above swaps the stdout sink for an array, so it
+ * never runs a single line of {@link writeAllSync} — the code that exists to
+ * stop `process.exit()` cutting the result mid-string. `fs.writeSync` is free to
+ * accept a PREFIX of the buffer and a non-blocking pipe is free to reject the
+ * write outright with `EAGAIN`, so the loop, its offset arithmetic and its
+ * errno handling are the fix; a suite that never executes them would stay green
+ * if the output reverted to `console.log`. Driven here through the narrow
+ * syscall seam {@link BlockingByteWriter} instead of process-level plumbing.
+ */
+describe("writeAllSync delivers every byte (#6870)", () => {
+  class FakeSyscalls implements BlockingByteWriter {
+    /** Bytes each successive writeSync call accepts; exhausted means "all of it". */
+    readonly accepts: number[];
+    /** Errors to raise before the corresponding accept, index-aligned. */
+    readonly errors: Array<NodeJS.ErrnoException | undefined>;
+    calls = 0;
+    sleeps: number[] = [];
+    received = "";
+
+    constructor(accepts: number[], errors: Array<NodeJS.ErrnoException | undefined> = []) {
+      this.accepts = accepts;
+      this.errors = errors;
+    }
+
+    writeSync(_fd: number, buffer: Uint8Array, offset: number, length: number): number {
+      const error = this.errors[this.calls];
+      const accept = this.accepts[this.calls] ?? length;
+      this.calls += 1;
+      if (error) {
+        throw error;
+      }
+      const written = Math.min(accept, length);
+      this.received += Buffer.from(buffer)
+        .subarray(offset, offset + written)
+        .toString("utf8");
+      return written;
+    }
+
+    sleepSync(ms: number): void {
+      this.sleeps.push(ms);
+    }
+  }
+
+  const errno = (code: string): NodeJS.ErrnoException => Object.assign(new Error(code), { code });
+
+  test("keeps writing until a partially-accepting fd has taken every byte", () => {
+    const text = JSON.stringify({ success: true, rows: "r".repeat(4096) });
+    const syscalls = new FakeSyscalls([10, 100, 1000]);
+
+    writeAllSync(1, text, syscalls);
+
+    expect(syscalls.received).toBe(text);
+    expect(syscalls.calls).toBeGreaterThan(3);
+  });
+
+  test("retries after EAGAIN instead of dropping the remainder", () => {
+    const text = '{"success":true}';
+    const syscalls = new FakeSyscalls([4, 0, 0], [undefined, errno("EAGAIN"), errno("EAGAIN")]);
+
+    writeAllSync(1, text, syscalls);
+
+    expect(syscalls.received).toBe(text);
+    expect(syscalls.sleeps).toEqual([1, 1]);
+  });
+
+  test("advances the offset by multi-byte characters, not code units", () => {
+    const text = "漢".repeat(8);
+    const syscalls = new FakeSyscalls([3, 3]);
+
+    writeAllSync(1, text, syscalls);
+
+    expect(syscalls.received).toBe(text);
+    expect(Buffer.byteLength(syscalls.received, "utf8")).toBe(24);
+  });
+
+  test("stops without throwing when the reader closes (EPIPE)", () => {
+    const syscalls = new FakeSyscalls([2], [undefined, errno("EPIPE")]);
+
+    expect(() => writeAllSync(1, '{"a":1}', syscalls)).not.toThrow();
+    expect(syscalls.received).toBe('{"');
+  });
+
+  test("propagates an unexpected errno rather than silently losing output", () => {
+    const syscalls = new FakeSyscalls([0], [errno("EBADF")]);
+
+    expect(() => writeAllSync(1, '{"a":1}', syscalls)).toThrow("EBADF");
   });
 });

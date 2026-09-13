@@ -144,25 +144,56 @@ export const cliStdout: CliByteSink = { write: (text) => writeAllSync(1, text) }
 export const cliStderr: CliByteSink = { write: (text) => writeAllSync(2, text) };
 
 /**
+ * The two blocking syscalls {@link writeAllSync} needs, as a seam.
+ *
+ * A partially-accepting fd and a momentarily-full non-blocking pipe are exactly
+ * the conditions the loop below exists to survive, and neither can be produced
+ * by swapping out a {@link CliByteSink} — that swap skips the loop entirely.
+ * Injecting the syscalls keeps the production call sites unchanged (the default
+ * is the real one) while letting a test drive partial writes and `EAGAIN`
+ * deterministically, with no process-level plumbing (#6870).
+ */
+export interface BlockingByteWriter {
+  /**
+   * Write up to `length` bytes of `buffer` starting at `offset`, returning the
+   * number the fd actually accepted — which may be fewer, or none.
+   */
+  writeSync(fd: number, buffer: Uint8Array, offset: number, length: number): number;
+  /** Block this thread for `ms` before the caller retries. */
+  sleepSync(ms: number): void;
+}
+
+export const nodeBlockingByteWriter: BlockingByteWriter = {
+  writeSync: (fd, buffer, offset, length) => fs.writeSync(fd, buffer, offset, length),
+  sleepSync: (ms) => {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+  },
+};
+
+/**
  * Write every byte to `fd` before returning.
  *
  * The CLI calls `process.exit()` as soon as a command completes, which discards
  * whatever the runtime has buffered — the mechanism that cut a `tapOn` result
  * mid-string (#6870). A blocking write removes the race entirely.
  */
-export function writeAllSync(fd: number, text: string): void {
+export function writeAllSync(
+  fd: number,
+  text: string,
+  syscalls: BlockingByteWriter = nodeBlockingByteWriter,
+): void {
   const buffer = Buffer.from(text, "utf8");
   let offset = 0;
   while (offset < buffer.length) {
     try {
-      offset += fs.writeSync(fd, buffer, offset, buffer.length - offset);
+      offset += syscalls.writeSync(fd, buffer, offset, buffer.length - offset);
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
       if (code === "EAGAIN") {
         // A non-blocking pipe whose buffer is momentarily full. The reader will
         // drain it; wait rather than drop bytes, since this is the only path the
         // result takes.
-        sleepSync(1);
+        syscalls.sleepSync(1);
         continue;
       }
       if (code === "EPIPE") {
@@ -174,8 +205,4 @@ export function writeAllSync(fd: number, text: string): void {
       throw error;
     }
   }
-}
-
-function sleepSync(ms: number): void {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }

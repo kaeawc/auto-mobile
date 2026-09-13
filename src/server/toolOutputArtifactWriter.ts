@@ -5,7 +5,6 @@ import { constants as fsConstants } from "node:fs";
 import { toActionableError } from "../models/ActionableError";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
-import { stringifyToolResponse } from "../utils/toolUtils";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
 import { logger } from "../utils/logger";
 import { buildToolOutputResourceUri } from "./toolOutputResources";
@@ -111,7 +110,7 @@ export class JsonToolOutputArtifactWriter implements ObservationArtifactWriter {
       this.fileSystem.assertWritableDirectory(this.outputDirectory);
       this.pruneOldArtifacts();
 
-      const content = input.serialized ?? stringifyToolResponse(input.data);
+      const content = serializeArtifactContent(input);
       const filename = `${Math.trunc(this.timer.now())}-${safeFilenameSegment(input.tool)}-${safeFilenameSegment(this.idGenerator.next())}.json`;
       const artifactPath = path.join(this.outputDirectory, filename);
       this.fileSystem.writeFileExclusive(artifactPath, content, 0o600);
@@ -170,6 +169,27 @@ export class JsonToolOutputArtifactWriter implements ObservationArtifactWriter {
       logger.warn(`Failed to prune old tool output artifacts: ${error}`, error);
     }
   }
+}
+
+/**
+ * The bytes an artifact is persisted as.
+ *
+ * An artifact is advertised as the COMPLETE payload — a client that follows
+ * `artifact.path`/`resourceUri` must find everything the inline response left
+ * out. So the writer serializes with a plain `JSON.stringify`, deliberately NOT
+ * with `stringifyToolResponse`: that serializer drops every property named
+ * `extras`, which is a token saving for the daemon's INLINE observation
+ * rendering and nothing more. Making it the writer's default made the artifact's
+ * completeness depend on which call site happened to spill, and an extras-heavy
+ * payload spilled with the very bytes that triggered the spill missing (#6870).
+ *
+ * `input.serialized` remains an override for a caller that has already rendered
+ * the exact bytes it measured and must persist those (the CLI's pretty-printed
+ * output, whose reported `bytes` has to match the file) — never a way to opt
+ * back into stripping.
+ */
+function serializeArtifactContent(input: ObservationArtifactWriteInput): string {
+  return input.serialized ?? JSON.stringify(input.data);
 }
 
 function safeFilenameSegment(value: string): string {

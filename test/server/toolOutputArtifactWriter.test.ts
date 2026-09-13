@@ -47,6 +47,51 @@ class FakeArtifactFileSystem implements ToolOutputArtifactFileSystem {
 }
 
 describe("JsonToolOutputArtifactWriter", () => {
+  /**
+   * A spill artifact is advertised as the COMPLETE payload, so the writer — not
+   * each call site — is the single place that decides how it is serialized. The
+   * `extras`-stripping serializer is the daemon's INLINE observation rendering
+   * only; if the writer ever adopts it as its default, an extras-heavy payload
+   * spills to a file with the very bytes that triggered the spill missing, and
+   * they then exist nowhere at all (#6870 review, PRRT_kwDOP-GF5M6h5Djd).
+   */
+  test("round-trips `extras` for every caller, whatever the spill path", () => {
+    const cases: Array<{ name: string; input: Record<string, unknown> }> = [
+      {
+        name: "observation-only spill (no `serialized`)",
+        input: {
+          tool: "observe",
+          payload: "ObserveResult",
+          data: { elements: [{ text: "Submit", extras: { role: "button" } }] },
+        },
+      },
+      {
+        name: "whole-response spill (no `serialized`)",
+        input: {
+          tool: "tapOn",
+          payload: "ToolResponse",
+          data: { success: true, detail: { extras: { accessibility: "x" } } },
+        },
+      },
+    ];
+
+    for (const { name, input } of cases) {
+      const fileSystem = new FakeArtifactFileSystem();
+      const timer = new FakeTimer();
+      timer.setCurrentTime(1234);
+      const writer = new JsonToolOutputArtifactWriter({
+        outputDirectory: path.resolve("/tmp/auto-mobile artifacts"),
+        fileSystem,
+        idGenerator: new FakeIdGenerator(["id-1"]),
+        timer,
+      });
+
+      writer.writeJsonArtifact(input as never);
+
+      expect(JSON.parse(fileSystem.writes[0].content), name).toEqual(input.data as never);
+    }
+  });
+
   test("writes JSON artifacts with deterministic metadata and validates per call", () => {
     const fileSystem = new FakeArtifactFileSystem();
     const idGenerator = new FakeIdGenerator(["id/1", "id/2"]);

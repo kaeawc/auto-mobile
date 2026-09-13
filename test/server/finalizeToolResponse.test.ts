@@ -2169,6 +2169,63 @@ describe("finalizeToolResponse", () => {
         expect(structured.artifact).toMatchObject({ format: "json", tool: "tapOn" });
       });
 
+      /**
+       * `createStructuredToolResponse` hoists `success`/`error` onto the ENVELOPE
+       * beside `content`/`structuredContent` — a third representation of the same
+       * payload. Bounding only the structured payload left a 70,000-character
+       * `error` sitting at the top level, so the finalized envelope was still
+       * ~79 KiB and the two representations disagreed about the same field
+       * (#6870 review, PRRT_kwDOP-GF5M6h5Djc).
+       */
+      test("bounds the hoisted top-level error alongside the spilled payload", () => {
+        const writer = new FakeObservationArtifactWriter();
+        const finalized = finalizeToolResponse(
+          createStructuredToolResponse({
+            success: false,
+            error: "e".repeat(70_000),
+          }),
+          oversizedCtx(writer),
+        );
+
+        const structured = finalized.structuredContent as any;
+        expect(finalized.error).toBe(structured.error);
+        expect(finalized.success).toBe(false);
+        expect(Buffer.byteLength(JSON.stringify(finalized), "utf8")).toBeLessThanOrEqual(
+          2 * DEFAULT_OBSERVATION_INLINE_MAX_BYTES,
+        );
+      });
+
+      // When even the bounded residue overflows, `error` becomes the
+      // `{ _truncated, bytes }` marker — a shape the hoisted string field cannot
+      // represent. Dropping the hoist keeps the two representations from
+      // disagreeing; `success: false` still carries the failure signal.
+      test("drops the hoisted error when the residue replaces it with a marker", () => {
+        const writer = new FakeObservationArtifactWriter();
+        const huge = "\u6f22".repeat(70_000);
+        const finalized = finalizeToolResponse(
+          createStructuredToolResponse({
+            success: false,
+            error: huge,
+            awaitedElement: huge,
+            awaitDuration: huge,
+            awaitTimeout: huge,
+            matched: huge,
+            settled: huge,
+            timedOut: huge,
+            polls: huge,
+            waitMs: huge,
+            matchedElement: huge,
+            candidates: [huge],
+          }),
+          oversizedCtx(writer),
+        );
+
+        const structured = finalized.structuredContent as any;
+        expect(structured.error).toEqual({ _truncated: true, bytes: expect.any(Number) });
+        expect("error" in finalized).toBe(false);
+        expect(finalized.success).toBe(false);
+      });
+
       test("bounds an oversized observe-wait candidates array kept inline", () => {
         const writer = new FakeObservationArtifactWriter();
         const finalized = finalizeToolResponse(
@@ -2302,9 +2359,11 @@ describe("finalizeToolResponse", () => {
       });
 
       // The artifact is advertised as the COMPLETE result, so it must round-trip
-      // what would have been served — including the `extras` the writer's default
-      // serializer drops (#6870 review).
-      test("spills the extras-bearing payload verbatim into the artifact", () => {
+      // what would have been served — `extras` included. The spill hands the
+      // writer the unstripped payload and nothing else; persisting it whole is
+      // the WRITER's contract (see toolOutputArtifactWriter.test.ts), so no call
+      // site re-serializes on its own (#6870 review).
+      test("hands the artifact writer the extras-bearing payload itself", () => {
         const writer = new FakeObservationArtifactWriter();
         finalizeToolResponse(
           createStructuredToolResponse({
@@ -2315,8 +2374,8 @@ describe("finalizeToolResponse", () => {
         );
 
         expect(writer.writes).toHaveLength(1);
-        expect(writer.writes[0].serialized).toBeDefined();
-        expect(JSON.parse(writer.writes[0].serialized as string).detail.extras).toEqual({
+        expect(writer.writes[0].serialized).toBeUndefined();
+        expect((writer.writes[0].data as any).detail.extras).toEqual({
           accessibility: "x".repeat(70_000),
         });
       });

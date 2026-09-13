@@ -1454,6 +1454,7 @@ async function runWithinShutdownDeadline<T>(
   operation: (signal: AbortSignal, timeoutMs: number) => Promise<T>,
   timeoutMs?: number,
   phase?: string,
+  onOrphan?: (pending: Promise<unknown>) => void,
 ): Promise<T> {
   const remainingMs = deadlineMs - timer.now();
   // The wait is always `remainingMs`; `timeoutMs` only names the caller's own
@@ -1477,8 +1478,14 @@ async function runWithinShutdownDeadline<T>(
     }, remainingMs);
   });
   const requestAbort = abortPromise(requestAbortSignal);
-  const operationPromise = runWithAbortSignal(signal, () => operation(signal, remainingMs)).catch(
+  let operationSettled = false;
+  const operationPromise = runWithAbortSignal(signal, () => operation(signal, remainingMs)).then(
+    (result) => {
+      operationSettled = true;
+      return result;
+    },
     (error) => {
+      operationSettled = true;
       if (timedOut) {
         throw shutdownTimeoutError(device, detail, reportedTimeoutMs, phase);
       }
@@ -1495,6 +1502,11 @@ async function runWithinShutdownDeadline<T>(
       timeoutPromise,
       ...(requestAbort.promise ? [requestAbort.promise] : []),
     ]);
+  } catch (error) {
+    if (!operationSettled) {
+      onOrphan?.(operationPromise);
+    }
+    throw error;
   } finally {
     if (timeout) {
       timer.clearTimeout(timeout);
@@ -4134,6 +4146,7 @@ async function validateRequestedAndroidSerialBeforeBoot(
   bootDeadlineMs: number,
   timer: Timer,
   signal: AbortSignal | undefined,
+  collectPendingSettlement?: ColdBootSettlementCollector,
 ): Promise<void> {
   if (!pair) {
     return;
@@ -4168,6 +4181,14 @@ async function validateRequestedAndroidSerialBeforeBoot(
     },
     undefined,
     "pre-boot serial validation",
+    (pending) => {
+      collectPendingSettlement?.(
+        pending.then(
+          () => undefined,
+          () => undefined,
+        ),
+      );
+    },
   );
   if (!discovery.succeededPlatforms.has("android")) {
     // Discovery was unavailable this sweep; a pair we cannot yet contradict is
@@ -7178,7 +7199,8 @@ export function registerDeviceTools() {
     const state: {
       boot: DeviceBootResult | undefined;
       ownershipTransferred: boolean;
-      // Every unowned cold boot this request cancelled, recovery included. The
+      // Every unowned cold boot this request cancelled, recovery included, plus
+      // a pre-boot reconcile still in flight when its deadline fired. The
       // lifecycle lease is released only once all of them have settled.
       coldBootSettlements: Promise<void>[];
     } = {
@@ -7217,6 +7239,11 @@ export function registerDeviceTools() {
         bootDeadlineMs,
         deps.timer,
         coordinatedSignal,
+        (settlement) => {
+          if (settlement) {
+            state.coldBootSettlements.push(settlement);
+          }
+        },
       );
       return await bootAndPrepareDevice(
         args,

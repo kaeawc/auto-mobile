@@ -872,6 +872,92 @@ describe("platform device preparation tools", () => {
     expect(releases).toBe(1);
   });
 
+  test("keeps the lifecycle lease held while a pre-boot reconcile is still draining when the boot deadline fires", async () => {
+    const bootTimeoutMs = 1_000;
+    const emulatorA: BootedDevice = {
+      platform: "android",
+      name: "Pixel_9_API_36",
+      deviceId: "emulator-5554",
+    };
+    const emulatorB: BootedDevice = {
+      platform: "android",
+      name: "Pixel_9_API_36_2",
+      deviceId: "emulator-5556",
+    };
+    deviceUtils.setBootedDevices("android", [emulatorA, emulatorB]);
+    sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      deviceUtils,
+      new DefaultRetryExecutor(timer),
+    );
+    await pool.initializeWithDevices([emulatorA, emulatorB]);
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    const initialDeviceB = pool.getDevice(emulatorB.deviceId);
+    let resolveGate: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      resolveGate = resolve;
+    });
+    const observations: string[] = [];
+    const reconcile = pool.reconcileDiscoveryObservation.bind(pool);
+    let reconcileSettled = false;
+    pool.reconcileDiscoveryObservation = async (devices, source, options) => {
+      observations.push(source);
+      timer.advanceTime(bootTimeoutMs + 1);
+      await gate;
+      await reconcile(devices, source, options);
+      reconcileSettled = true;
+    };
+    let releases = 0;
+    let deviceBAtRelease: ReturnType<typeof pool.getDevice> | undefined;
+    const lease: VirtualDeviceLifecycleLease = {
+      signal: new AbortController().signal,
+      identity: { kind: "selector", platform: "android", selector: emulatorA.name },
+      bindCanonicalIdentity: async () => {},
+      transitionToTeardown: () => {},
+      release: () => {
+        releases++;
+        deviceBAtRelease = pool.getDevice(emulatorB.deviceId);
+      },
+    };
+    const lifecycleCoordinator: VirtualDeviceLifecycleCoordinator = {
+      reserve: async () => lease,
+    };
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => deviceUtils,
+      lifecycleCoordinator,
+    });
+
+    const failure = await callTool("getAndroid", {
+      avdName: emulatorA.name,
+      deviceId: emulatorA.deviceId,
+      bootTimeoutMs,
+    }).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(ActionableError);
+    expect((failure as ActionableError).message).toContain(
+      "pre-boot serial validation did not complete",
+    );
+    expect(releases).toBe(0);
+    expect(reconcileSettled).toBe(false);
+    expect(observations).toEqual(["pre-boot-serial-validation"]);
+    expect(initialDeviceB).toBeDefined();
+
+    resolveGate!();
+    for (let attempt = 0; attempt < 50; attempt++) {
+      await Promise.resolve();
+    }
+
+    expect(reconcileSettled).toBe(true);
+    expect(releases).toBe(1);
+    expect(observations).toEqual(["pre-boot-serial-validation"]);
+    expect(deviceBAtRelease).toBe(initialDeviceB);
+    expect(pool.getDevice(emulatorB.deviceId)).toBe(deviceBAtRelease);
+  });
+
   test("waits for fuzzy legacy Android names that match a reserved AVD", async () => {
     const stale: BootedDevice = {
       platform: "android",

@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import type { ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { homedir } from "node:os";
@@ -12,6 +12,14 @@ import { FakeAvdConfigReader } from "../../fakes/FakeAvdConfigReader";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
 const avdName = "Pixel_9_Pro";
+
+// Launch reservations are process-wide and outlive a test whose child never
+// emits `exit`, and a live reservation is now evidence that this process is
+// already launching that AVD (#6407). Reset between tests, as every other
+// launch suite in this directory does.
+afterEach(() => {
+  AndroidEmulatorClient.resetLaunchReservationsForTesting();
+});
 
 function execResult(stdout = "", stderr = ""): ExecResult {
   return {

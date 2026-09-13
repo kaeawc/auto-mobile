@@ -48,7 +48,8 @@ if [[ -z "${AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS:-}" && "$runner_os" != "Windows
   case "$mode" in
     unit | changed) export AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=180 ;;
     integration) export AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=900 ;;
-    stress | coverage) export AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=300 ;;
+    stress) export AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=300 ;;
+    coverage) export AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=480 ;;
   esac
 fi
 
@@ -81,8 +82,21 @@ run_test_command() {
   if [[ -n "${AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS:-}" ]]; then
     # shellcheck source=scripts/ios/run_with_timeout.sh disable=SC1091
     source "$ROOT/scripts/ios/run_with_timeout.sh"
+    local start_seconds
+    local elapsed_seconds
+    local status
+    start_seconds="$(date +%s)"
+    # run_with_timeout's 124 status is expected here when the deadline fires.
+    set +e
     run_with_timeout "$AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS" "$@"
-    return
+    status=$?
+    set -e
+    elapsed_seconds=$(($(date +%s) - start_seconds))
+    if [[ "$status" -eq 124 && ( "$mode" == "stress" || "$mode" == "coverage" ) ]]; then
+      printf '%s test run exceeded its %ss wall-clock budget (ran ~%ss); see #6969 for the ongoing margin investigation.\n' \
+        "${mode^}" "$AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS" "$elapsed_seconds" >&2
+    fi
+    return "$status"
   fi
 
   "$@"

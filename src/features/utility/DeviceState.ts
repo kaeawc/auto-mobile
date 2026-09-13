@@ -325,17 +325,30 @@ export const DEVICE_STATE_READABLE_FIELDS = [
 export type DeviceStateField = (typeof DEVICE_STATE_READABLE_FIELDS)[number];
 
 /**
+ * Presence table for the writable fields, keyed by {@link SetDeviceStateInput}
+ * itself. Typing it as a total `Record` over `keyof SetDeviceStateInput` is what
+ * makes the list below EXHAUSTIVE at build time: a new writable field is a type
+ * error here until it is listed, and a key that is not a writable field is an
+ * excess-property error.
+ */
+const DEVICE_STATE_WRITABLE_FIELD_PRESENCE: Record<keyof SetDeviceStateInput, true> = {
+  doNotDisturb: true,
+  biometrics: true,
+  networkCondition: true,
+};
+
+/**
  * Every field `setState` can write. The invariant of issue #6872 — anything
  * `setDeviceState` can write, `getDeviceState` should read back — is that this
- * list is a SUBSET of {@link DEVICE_STATE_READABLE_FIELDS}; a unit test pins it,
- * so adding a writable field without its read is a build-time failure, not a
- * client-visible gap.
+ * list is a SUBSET of {@link DEVICE_STATE_READABLE_FIELDS}. Both halves are
+ * enforced by the compiler rather than by a hand-maintained list: the keys come
+ * from {@link SetDeviceStateInput}, and declaring them as `DeviceStateField`
+ * fails the build if one of them has no readable counterpart. A unit test pins
+ * the third side of the triangle — the advertised `setDeviceState` schema.
  */
-export const DEVICE_STATE_WRITABLE_FIELDS = [
-  "doNotDisturb",
-  "biometrics",
-  "networkCondition",
-] as const;
+export const DEVICE_STATE_WRITABLE_FIELDS: readonly DeviceStateField[] = Object.freeze(
+  Object.keys(DEVICE_STATE_WRITABLE_FIELD_PRESENCE) as (keyof SetDeviceStateInput)[],
+);
 
 /** What `getState()` reads when the caller names no fields. */
 export const DEFAULT_DEVICE_STATE_FIELDS: readonly DeviceStateField[] = Object.freeze([

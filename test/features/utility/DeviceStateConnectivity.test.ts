@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { z } from "zod/v4";
 import type { BootedDevice } from "../../../src/models";
 import {
   ANDROID_CONNECTIVITY_READ_COMMAND,
@@ -6,6 +7,8 @@ import {
   DEVICE_STATE_READABLE_FIELDS,
   DEVICE_STATE_WRITABLE_FIELDS,
 } from "../../../src/features/utility/DeviceState";
+import { setDeviceStateSchema } from "../../../src/server/utilityTools";
+import { addDeviceTargetingToSchema } from "../../../src/server/toolSchemaHelpers";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
 
@@ -320,5 +323,22 @@ describe("DeviceState connectivity toggles (issue #6872)", () => {
     for (const field of DEVICE_STATE_WRITABLE_FIELDS) {
       expect(DEVICE_STATE_READABLE_FIELDS).toContain(field);
     }
+  });
+
+  test("the writable-field list is exactly what the setDeviceState schema advertises", () => {
+    // Derived from the real setter contract rather than restated: the keys the
+    // compiler ties to `SetDeviceStateInput` are worth nothing if the advertised
+    // schema grows a field the interface never gained, so compare against the
+    // schema's own shape, minus the device-targeting fields every tool carries.
+    const deviceTargetingFields = new Set(
+      Object.keys(addDeviceTargetingToSchema(z.object({})).shape),
+    );
+    const advertisedWritableFields = Object.keys(setDeviceStateSchema.shape).filter(
+      (field) => !deviceTargetingFields.has(field),
+    );
+
+    expect(advertisedWritableFields.toSorted()).toEqual(
+      [...DEVICE_STATE_WRITABLE_FIELDS].toSorted(),
+    );
   });
 });

@@ -49,6 +49,14 @@ other package's record matches the same text — ambiguity is reported as
 unknown, never resolved by preference. Rows attributed this way carry
 `ownership: "dumpsys"`; header-attributed rows carry `ownership: "header"`.
 
+Only text the posting app supplied is correlated: the labels SystemUI renders
+itself — action buttons, expand/dismiss/snooze controls, the post timestamp and
+a running chronometer — are reported in `texts` but never used as ownership
+evidence. A record whose extras carry no readable text at all (a custom
+`RemoteViews` notification, or a redacted dump) could have posted any
+header-less row, so it keeps every such row ambiguous rather than letting a
+different package's matching extras claim it.
+
 The dump is only read when the shade actually contains a header-less row. A
 redacted dump (`--noredact` unsupported or refused) prints value lengths rather
 than values, so it yields no correlation evidence: such rows stay unattributed

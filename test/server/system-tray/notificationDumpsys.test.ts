@@ -179,4 +179,60 @@ describe("dumpsys notification records", () => {
       ),
     ).toBeNull();
   });
+
+  test("reads a CharSequence extra that spans physical lines", () => {
+    // `NotificationRecord.dump` prints an embedded newline verbatim, so the
+    // closing delimiter lands on a later physical line (#6875).
+    expect(
+      parseDumpsysNotificationRecords(
+        dump(
+          "    NotificationRecord(0x1: pkg=com.example.app user=UserHandle{0} id=0 tag=null key=0|com.example.app|0|null|10100)",
+          "      extras={",
+          "        android.title=String (Backup)",
+          "        android.bigText=String (Line one",
+          "Line two)",
+          "      }",
+        ),
+      ),
+    ).toEqual([{ pkg: "com.example.app", titles: ["Backup"], bodies: ["Line one\nLine two"] }]);
+  });
+
+  test("does not run a multiline value past the end of its record", () => {
+    expect(
+      parseDumpsysNotificationRecords(
+        dump(
+          "    NotificationRecord(0x1: pkg=com.example.app user=UserHandle{0} id=0 tag=null key=0|com.example.app|0|null|10100)",
+          "      extras={",
+          "        android.text=String (unterminated",
+          "      }",
+          "    NotificationRecord(0x2: pkg=com.example.other user=UserHandle{0} id=0 tag=null key=0|com.example.other|0|null|10101)",
+          "      extras={",
+          "        android.title=String (Other)",
+          "      }",
+        ),
+      ),
+    ).toEqual([
+      { pkg: "com.example.app", titles: [], bodies: [] },
+      { pkg: "com.example.other", titles: ["Other"], bodies: [] },
+    ]);
+  });
+
+  test("keeps a row ambiguous when a record carrying no extras could own it", () => {
+    // A header-less custom `RemoteViews` row renders text none of the supported
+    // extras carry, so its own record is opaque. Attributing the row to the one
+    // package whose extras happen to equal that text names the wrong app.
+    const records = parseDumpsysNotificationRecords(
+      dump(
+        "    NotificationRecord(0x1: pkg=com.actual.custom user=UserHandle{0} id=0 tag=null key=0|com.actual.custom|0|null|10100)",
+        "      extras={",
+        "        android.template=String (android.app.Notification$DecoratedCustomViewStyle)",
+        "      }",
+        "    NotificationRecord(0x2: pkg=com.requested user=UserHandle{0} id=0 tag=null key=0|com.requested|0|null|10101)",
+        "      extras={",
+        "        android.title=String (Syncing)",
+        "      }",
+      ),
+    );
+    expect(attributeRowByDumpsys(records, new Set(["Syncing"]))).toBeNull();
+  });
 });

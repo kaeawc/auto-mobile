@@ -30,51 +30,99 @@ const BODY_EXTRAS = [
 // `NotificationRecord.dump` prints `<key>=<SimpleClassName> (<value>)` for
 // CharSequence extras, and `<SimpleClassName> [<n> chars]` when the dump is
 // redacted — a redacted dump therefore yields no correlation evidence rather
-// than a wrong owner.
-const EXTRA_LINE = /^(android\.[A-Za-z0-9_.]+)=[A-Za-z][A-Za-z0-9_$.]*\s+\((.*)\)$/;
+// than a wrong owner. A value containing newlines is printed verbatim, so the
+// closing delimiter can land several physical lines later (#6875).
+const EXTRA_START = /^(android\.[A-Za-z0-9_.]+)=[A-Za-z][A-Za-z0-9_$.]*\s+\((.*)$/;
 const RECORD_LINE = /NotificationRecord\(.*?\bpkg=([^\s]+)/;
+
+/** A CharSequence extra whose closing delimiter has not been read yet. */
+interface PendingExtra {
+  key: string;
+  lines: string[];
+}
+
+const addExtra = (record: DumpsysNotificationRecord, key: string, value: string): void => {
+  // An extras value the row could never render is not evidence: hierarchy
+  // extraction drops empty strings, so keeping an empty `android.text` would
+  // leave the record permanently unmatchable (#6875).
+  if (value.trim().length === 0) {
+    return;
+  }
+  if (TITLE_EXTRAS.includes(key)) {
+    record.titles.push(value);
+  } else if (BODY_EXTRAS.includes(key)) {
+    record.bodies.push(value);
+  }
+};
+
+// Read one record's `extras={...}` body. A value containing newlines spans
+// physical lines, so accumulate until the closing delimiter; a line that starts
+// another extra ends an unterminated value rather than swallowing it.
+const applyExtras = (record: DumpsysNotificationRecord, lines: readonly string[]): void => {
+  let pending: PendingExtra | null = null;
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (pending) {
+      if (line.endsWith(")")) {
+        addExtra(record, pending.key, [...pending.lines, line.slice(0, -1)].join("\n"));
+        pending = null;
+        continue;
+      }
+      if (!EXTRA_START.test(trimmed)) {
+        pending.lines.push(line);
+        continue;
+      }
+      pending = null;
+    }
+    const extra = EXTRA_START.exec(trimmed);
+    if (!extra) {
+      continue;
+    }
+    if (extra[2].endsWith(")")) {
+      addExtra(record, extra[1], extra[2].slice(0, -1));
+    } else {
+      pending = { key: extra[1], lines: [extra[2]] };
+    }
+  }
+};
 
 /** Parse `dumpsys notification --noredact` into per-package correlation records. */
 export const parseDumpsysNotificationRecords = (output: string): DumpsysNotificationRecord[] => {
   const records: DumpsysNotificationRecord[] = [];
   let current: DumpsysNotificationRecord | null = null;
-  let inExtras = false;
+  // The physical lines of the extras block being read, or `null` outside one.
+  let extrasLines: string[] | null = null;
+  const flushExtras = (): void => {
+    if (current && extrasLines) {
+      applyExtras(current, extrasLines);
+    }
+    extrasLines = null;
+  };
   for (const line of output.split(/\r?\n/)) {
     const trimmed = line.trim();
     const record = RECORD_LINE.exec(trimmed);
     if (record) {
+      flushExtras();
       current = { pkg: record[1], titles: [], bodies: [] };
       records.push(current);
-      inExtras = false;
       continue;
     }
     if (!current) {
       continue;
     }
-    if (trimmed.startsWith("extras={")) {
-      inExtras = true;
+    if (extrasLines === null) {
+      if (trimmed.startsWith("extras={")) {
+        extrasLines = [];
+      }
       continue;
     }
-    if (inExtras && trimmed === "}") {
-      inExtras = false;
+    if (trimmed === "}") {
+      flushExtras();
       continue;
     }
-    const extra = inExtras ? EXTRA_LINE.exec(trimmed) : null;
-    if (!extra) {
-      continue;
-    }
-    // An extras value the row could never render is not evidence: hierarchy
-    // extraction drops empty strings, so keeping an empty `android.text` would
-    // leave the record permanently unmatchable (#6875).
-    if (extra[2].trim().length === 0) {
-      continue;
-    }
-    if (TITLE_EXTRAS.includes(extra[1])) {
-      current.titles.push(extra[2]);
-    } else if (BODY_EXTRAS.includes(extra[1])) {
-      current.bodies.push(extra[2]);
-    }
+    extrasLines.push(line);
   }
+  flushExtras();
   return records;
 };
 
@@ -108,6 +156,15 @@ const recordSharesRowEvidence = (
   rowTexts: ReadonlySet<string>,
 ): boolean => populatedCategories(record).some((values) => rowRendersAnyOf(values, rowTexts));
 
+// A record with no readable extras at all — a redacted dump, or a custom
+// `RemoteViews` notification whose text lives only in its layout — could have
+// posted any header-less row: nothing in it contradicts the rendered text. It
+// is therefore a plausible owner of every row, which is what keeps a row whose
+// text another package happens to duplicate from being named for that other
+// package (#6875).
+const recordIsOpaque = (record: DumpsysNotificationRecord): boolean =>
+  populatedCategories(record).length === 0;
+
 const packagesMatching = (
   records: readonly DumpsysNotificationRecord[],
   predicate: (record: DumpsysNotificationRecord) => boolean,
@@ -122,8 +179,9 @@ export const attributeRowByDumpsys = (
   records: readonly DumpsysNotificationRecord[],
   rowTexts: ReadonlySet<string>,
 ): string | null => {
-  const plausible = packagesMatching(records, (record) =>
-    recordSharesRowEvidence(record, rowTexts),
+  const plausible = packagesMatching(
+    records,
+    (record) => recordIsOpaque(record) || recordSharesRowEvidence(record, rowTexts),
   );
   if (plausible.size !== 1) {
     return null;

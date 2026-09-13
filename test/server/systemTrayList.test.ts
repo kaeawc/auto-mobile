@@ -732,3 +732,80 @@ describe("systemTray list silent-section correlation content", () => {
     expect(result.notifications).toMatchObject([{ appId: WELLBEING, ownership: "dumpsys" }]);
   });
 });
+
+// SystemUI renders the timer chrome of a chronometer notification itself, and
+// the running value it shows is in no record's extras, so counting it as
+// correlation content only lets an unrelated app whose title reads "00:01"
+// hide an otherwise exact match (#6875).
+describe("systemTray list silent-section chronometer chrome", () => {
+  const WELLBEING = "com.google.android.apps.wellbeing";
+  const SLEEP_TITLE = "Need better sleep?";
+  const SLEEP_BODY = "Use Bedtime mode to silence your phone";
+  const execResult = (stdout: string) => ({
+    stdout,
+    stderr: "",
+    toString: () => stdout,
+    trim: () => stdout.trim(),
+    includes: (search: string) => stdout.includes(search),
+  });
+  const timerRow = (title: string, body: string, elapsed: string) =>
+    node("com.android.systemui:id/expandableNotificationRow", "", [
+      node("android:id/title", title),
+      node("android:id/text", body),
+      node("android:id/chronometer", elapsed),
+      node("android:id/time", "now"),
+    ]);
+  const dumpsys = (...records: string[]) =>
+    ["Current Notification Manager state:", "  Notification List:", ...records].join("\n");
+  const record = (pkg: string, title: string, text: string) =>
+    [
+      `    NotificationRecord(0x1: pkg=${pkg} user=UserHandle{0} id=0 tag=null key=0|${pkg}|0|null|10164)`,
+      "      extras={",
+      `        android.title=String (${title})`,
+      `        android.text=String (${text})`,
+      "      }",
+    ].join("\n");
+
+  test("ignores chronometer and timestamp chrome when deciding plausible owners", async () => {
+    const { adb } = setup([page(timerRow(SLEEP_TITLE, SLEEP_BODY, "00:01"))]);
+    adb.setCommandResponse(
+      "dumpsys notification",
+      execResult(
+        dumpsys(
+          record(WELLBEING, SLEEP_TITLE, SLEEP_BODY),
+          record("com.example.clock", "00:01", "Timer running"),
+        ),
+      ),
+    );
+    const result = await listSystemTrayNotifications(device, WELLBEING, "Digital Wellbeing", 5000);
+    expect(result.notifications).toMatchObject([
+      { appId: WELLBEING, title: SLEEP_TITLE, body: SLEEP_BODY, ownership: "dumpsys" },
+    ]);
+    expect(result.unattributedRows).toBe(0);
+  });
+
+  test("still reports the chronometer text the row rendered", async () => {
+    const { adb } = setup([page(timerRow(SLEEP_TITLE, SLEEP_BODY, "00:01"))]);
+    adb.setCommandResponse(
+      "dumpsys notification",
+      execResult(dumpsys(record(WELLBEING, SLEEP_TITLE, SLEEP_BODY))),
+    );
+    const result = await listSystemTrayNotifications(device, WELLBEING, "Digital Wellbeing", 5000);
+    expect(result.notifications[0].texts).toContain("00:01");
+  });
+
+  test("reads the notification dump with an explicit output buffer", async () => {
+    const { adb } = setup([page(timerRow(SLEEP_TITLE, SLEEP_BODY, "00:01"))]);
+    adb.setCommandResponse(
+      "dumpsys notification",
+      execResult(dumpsys(record(WELLBEING, SLEEP_TITLE, SLEEP_BODY))),
+    );
+    await listSystemTrayNotifications(device, WELLBEING, "Digital Wellbeing", 5000);
+    const call = adb
+      .getCommandCalls()
+      .find((entry) => entry.command.includes("dumpsys notification"))!;
+    // The default child-process buffer is 1 MiB; an unredacted aggregate dump
+    // exceeds it on notification-heavy devices and would reject outright.
+    expect(call.maxBuffer).toBeGreaterThan(1024 * 1024);
+  });
+});

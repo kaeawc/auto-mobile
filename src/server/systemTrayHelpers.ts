@@ -1478,6 +1478,12 @@ const NON_CONTENT_ROW_IDS = new Set([
   "feedback",
   "close_button",
   "snooze_button",
+  // Timer chrome: SystemUI renders the running chronometer value and the post
+  // timestamp itself, so neither appears in the extras `dumpsys` correlates
+  // against, and the chronometer's value changes between observations.
+  "chronometer",
+  "time",
+  "time_divider",
 ]);
 
 // Chrome is inherited: everything below an action container or a row control
@@ -1704,6 +1710,11 @@ const trayAtScrollEnd = (hierarchy: ViewHierarchyResult): boolean =>
 // the extras values the rendered row can be correlated against. A redacted or
 // unavailable dump yields no records, which leaves such rows unattributed
 // rather than attributed by guess.
+// The aggregate unredacted dump of every posted notification routinely exceeds
+// the child process's 1 MiB default stdout buffer, which rejects the read
+// outright and leaves every header-less row unattributed.
+const DUMPSYS_NOTIFICATION_MAX_BUFFER = 8 * 1024 * 1024;
+
 const readDumpsysNotificationRecords = async (
   adb: SystemTrayAdb,
   signal?: AbortSignal,
@@ -1712,7 +1723,7 @@ const readDumpsysNotificationRecords = async (
     const result = await adb.executeCommand(
       "shell dumpsys notification --noredact",
       undefined,
-      undefined,
+      DUMPSYS_NOTIFICATION_MAX_BUFFER,
       true,
       signal,
     );

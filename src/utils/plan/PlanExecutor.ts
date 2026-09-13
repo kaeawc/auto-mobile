@@ -15,6 +15,7 @@ import { isDebugModeEnabled } from "../debug";
 import {
   ExecutePlanStepDebugInfo,
   type PlanExecutionOptions,
+  type PlanStepWarnings,
 } from "../../models/ExecutePlanResult";
 import { throwIfAborted, getStructuredPayload } from "../toolUtils";
 import { ZodError } from "zod/v4";
@@ -61,11 +62,29 @@ interface StepExecutionContext {
   debugLog?: boolean;
 }
 
+/**
+ * The string warnings a tool payload reported, or undefined when it reported
+ * none (issue #6868).
+ */
+function toolResultWarnings(payload: Record<string, unknown>): string[] | undefined {
+  if (!Array.isArray(payload.warnings)) {
+    return undefined;
+  }
+  const warnings = payload.warnings.filter((entry): entry is string => typeof entry === "string");
+  return warnings.length > 0 ? warnings : undefined;
+}
+
 interface StepExecutionResult {
   status: StepExecutionStatus;
   error?: string;
   details: Record<string, unknown>;
   failureObservation?: FailureObservationSummary;
+  /**
+   * Best-effort warnings the tool reported while still succeeding (issue
+   * #6868). Carried separately from `details` so the plan result can promote
+   * them out of the debug-only step trace (#6887 review).
+   */
+  warnings?: string[];
 }
 
 /**
@@ -202,15 +221,26 @@ export class DefaultPlanExecutor implements PlanExecutor {
     toolName: string,
     toolResult: unknown,
     details: Record<string, unknown>,
-  ): void {
-    if (toolName !== "tapOn" || toolResult === null || typeof toolResult !== "object") {
-      return;
+  ): string[] | undefined {
+    if (toolResult === null || typeof toolResult !== "object") {
+      return undefined;
     }
     const tr = toolResult as Record<string, unknown>;
     const payload = getStructuredPayload<Record<string, unknown>>(tr) ?? tr;
-    if (payload.tapDebug !== undefined && payload.tapDebug !== null) {
+    // `warnings` is the generic best-effort-epilogue channel (issue #6868): the
+    // step stays successful, but the outcome it reports — a keyboard that would
+    // not dismiss, say — used to be the step's `success:false` and is the only
+    // thing telling a plan author why a later step saw the screen it saw. Copy it
+    // for EVERY tool rather than dropping it into the void, and return it so the
+    // caller can promote it onto the plan result (#6887 review).
+    const warnings = toolResultWarnings(payload);
+    if (warnings) {
+      details.warnings = warnings;
+    }
+    if (toolName === "tapOn" && payload.tapDebug !== undefined && payload.tapDebug !== null) {
       details.tapDebug = payload.tapDebug;
     }
+    return warnings;
   }
 
   /**
@@ -530,11 +560,12 @@ export class DefaultPlanExecutor implements PlanExecutor {
           details.stepObservation = stepObservation;
         }
       }
-      this.mergeToolDiagnosticsIntoStepDetails(step.tool, toolResult, details);
+      const warnings = this.mergeToolDiagnosticsIntoStepDetails(step.tool, toolResult, details);
 
       return {
         status: "completed",
         details,
+        ...(warnings ? { warnings } : {}),
       };
     } catch (error) {
       if (isDeviceLostError(error)) {
@@ -656,6 +687,9 @@ export class DefaultPlanExecutor implements PlanExecutor {
     const startTime = this.timer.now();
     // Always capture step data for test recording, not just in debug mode
     const debugSteps: ExecutePlanStepDebugInfo[] = [];
+    // Promoted out of the debug trace so an ordinary plan's caller sees them
+    // (#6887 review).
+    const warnings: PlanStepWarnings[] = [];
 
     try {
       // Validate and normalize startStep
@@ -740,6 +774,9 @@ export class DefaultPlanExecutor implements PlanExecutor {
               executionTimeMs: this.timer.now() - startTime,
               steps: debugSteps,
             },
+            // Warnings from the steps that DID succeed explain the state the
+            // failing step ran against, so a failed plan keeps them too.
+            ...(warnings.length > 0 ? { warnings } : {}),
           };
         }
 
@@ -749,6 +786,9 @@ export class DefaultPlanExecutor implements PlanExecutor {
           durationMs: this.timer.now() - stepStartTime,
           details: stepResult.details,
         });
+        if (stepResult.warnings) {
+          warnings.push({ stepIndex: i, tool: step.tool, warnings: stepResult.warnings });
+        }
 
         executedSteps++;
         logger.info(
@@ -767,6 +807,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
           executionTimeMs: this.timer.now() - startTime,
           steps: debugSteps,
         },
+        ...(warnings.length > 0 ? { warnings } : {}),
       };
     } catch (error) {
       if (isDeviceLostError(error)) {
@@ -796,6 +837,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
           executionTimeMs: this.timer.now() - startTime,
           steps: debugSteps,
         },
+        ...(warnings.length > 0 ? { warnings } : {}),
       };
     }
   }
@@ -968,6 +1010,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
             error: errorMsg,
           },
           skippedSteps: [],
+          warnings: [],
         };
       }
     });
@@ -983,6 +1026,12 @@ export class DefaultPlanExecutor implements PlanExecutor {
     logger.info(
       `[PARALLEL_EXEC] Parallel execution completed. Success: ${allSucceeded}, Total steps: ${totalExecutedSteps}/${totalSteps}`,
     );
+
+    // Device tracks run in parallel, so order the aggregate by plan step index
+    // to give the caller a stable, plan-shaped reading of what was warned about.
+    const warnings = results
+      .flatMap((result) => result.warnings)
+      .sort((a, b) => a.stepIndex - b.stepIndex);
 
     // Log per-device timing in debug mode or on failure
     if (debugMode || !allSucceeded) {
@@ -1015,6 +1064,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
           }
         : undefined,
       perDeviceResults,
+      ...(warnings.length > 0 ? { warnings } : {}),
     };
   }
 
@@ -1042,9 +1092,11 @@ export class DefaultPlanExecutor implements PlanExecutor {
       failureObservation?: FailureObservationSummary;
     };
     skippedSteps: DeviceSkippedStepResult[];
+    warnings: PlanStepWarnings[];
   }> {
     let executedSteps = 0;
     const skippedSteps: DeviceSkippedStepResult[] = [];
+    const warnings: PlanStepWarnings[] = [];
 
     try {
       for (let trackIndex = 0; trackIndex < track.length; trackIndex++) {
@@ -1107,7 +1159,17 @@ export class DefaultPlanExecutor implements PlanExecutor {
                 : {}),
             },
             skippedSteps,
+            warnings,
           };
+        }
+
+        if (stepResult.warnings) {
+          warnings.push({
+            stepIndex: planIndex,
+            tool: step.tool,
+            device,
+            warnings: stepResult.warnings,
+          });
         }
 
         executedSteps++;
@@ -1125,6 +1187,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
         executedSteps,
         totalSteps: track.length,
         skippedSteps,
+        warnings,
       };
     } catch (error) {
       if (isDeviceLostError(error)) {
@@ -1144,6 +1207,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
           error: errorMsg,
         },
         skippedSteps,
+        warnings,
       };
     }
   }

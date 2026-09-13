@@ -13,6 +13,10 @@ import {
   createDefaultStreamSocketAuthenticator,
   type StreamSocketAuthenticator,
 } from "./streamSocketAuth";
+import { daemonDeviceAdmissionGate, type DeviceAdmissionGate } from "./deviceAdmissionGate";
+
+/** Completes the FUNNEL 2 refusal: "Refusing `<purpose>` on device '<serial>'". */
+const TEST_RECORDING_PURPOSE = "to start a test recording";
 
 const resolveDevice = async (deviceId?: string, platform?: Platform): Promise<BootedDevice> => {
   const deviceSessionManager = DeviceSessionManager.getInstance();
@@ -51,6 +55,7 @@ export class TestRecordingSocketServer extends RequestResponseSocketServer<
   TestRecordingResponse
 > {
   private readonly authenticator: StreamSocketAuthenticator;
+  private readonly admissionGate: DeviceAdmissionGate;
 
   constructor(
     socketPath: string = getSocketPath(TEST_RECORDING_SOCKET_CONFIG),
@@ -58,9 +63,11 @@ export class TestRecordingSocketServer extends RequestResponseSocketServer<
     authenticator: StreamSocketAuthenticator = createDefaultStreamSocketAuthenticator(
       "testRecording",
     ),
+    admissionGate: DeviceAdmissionGate = daemonDeviceAdmissionGate,
   ) {
     super(socketPath, timer, "TestRecording");
     this.authenticator = authenticator;
+    this.admissionGate = admissionGate;
   }
 
   protected async handleRequest(request: TestRecordingCommand): Promise<TestRecordingResponse> {
@@ -78,8 +85,19 @@ export class TestRecordingSocketServer extends RequestResponseSocketServer<
           sessionUuid: request.sessionUuid,
           deviceId: request.deviceId,
         });
+        // FUNNEL 2, before any device work. The quarantine preserves the owning
+        // session, so the authorization above still passes on a serial whose AVD
+        // the pool can no longer identify, and `resolveDevice` would go on to
+        // ready whichever runtime now answers on it
+        // ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
+        // Gated twice because an omitted `deviceId` names its target only after
+        // resolution.
+        if (request.deviceId !== undefined) {
+          this.admissionGate.assertDeviceActionable(request.deviceId, TEST_RECORDING_PURPOSE);
+        }
         const platform = ensurePlatform(request.platform);
         const device = await resolveDevice(request.deviceId, platform);
+        this.admissionGate.assertDeviceActionable(device.deviceId, TEST_RECORDING_PURPOSE);
         const result = await startTestRecording(device);
         return {
           success: true,

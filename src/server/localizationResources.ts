@@ -1,8 +1,8 @@
 import { ResourceRegistry, ResourceContent } from "./resourceRegistry";
-import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
 import { SystemConfigurationManager } from "../features/utility/SystemConfigurationManager";
 import { BootedDevice, LocalizationSettingsResult } from "../models";
 import { logger } from "../utils/logger";
+import { findBootedDeviceForResource } from "./resourceDeviceResolver";
 
 const LOCALIZATION_RESOURCE_TEMPLATES = {
   DEVICE_LOCALIZATION: "automobile:devices/{deviceId}/localization",
@@ -26,20 +26,7 @@ interface LocalizationResourceContent {
 }
 
 async function findBootedDevice(deviceId: string): Promise<BootedDevice | null> {
-  try {
-    const manager = PlatformDeviceManagerFactory.getInstance();
-    const androidDevices = await manager.getBootedDevices("android");
-    const android = androidDevices.find((device) => device.deviceId === deviceId);
-    if (android) {
-      return android;
-    }
-
-    const iosDevices = await manager.getBootedDevices("ios");
-    return iosDevices.find((device) => device.deviceId === deviceId) ?? null;
-  } catch (error) {
-    logger.warn(`[LocalizationResources] Failed to list booted devices: ${error}`);
-    return null;
-  }
+  return findBootedDeviceForResource(deviceId, "LocalizationResources");
 }
 
 function toLocalizationResourceContent(

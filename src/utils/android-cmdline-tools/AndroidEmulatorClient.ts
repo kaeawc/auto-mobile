@@ -4,7 +4,7 @@ import { existsSync } from "node:fs";
 import { promisify } from "util";
 import { logger } from "../logger";
 import { BootedDevice, DeviceInfo, ExecResult, ActionableError } from "../../models";
-import { AdbClientFactory, defaultAdbClientFactory } from "./AdbClientFactory";
+import { AdbClientFactory, unadmittedAdbClientFactory } from "./AdbClientFactory";
 import { arch } from "os";
 import { detectAndroidCommandLineTools, getBestAndroidToolsLocation } from "./detection";
 import { defaultTimer, Timer } from "../SystemTimer";
@@ -15,6 +15,8 @@ import {
 } from "../ios/IOSHostPortAvailabilityChecker";
 import type { AvdConfig, AvdConfigReader } from "./AvdConfigReader";
 import { FileAvdConfigReader, MIN_AVD_RAM_MB } from "./AvdConfigReader";
+import type { RunningAvdAdvertisementReader } from "./RunningAvdAdvertisementReader";
+import { TmpdirRunningAvdAdvertisementReader } from "./RunningAvdAdvertisementReader";
 import { WakeAndUnlock } from "../../features/action/WakeAndUnlock";
 import { DeviceLockStore } from "../../features/action/DeviceLockStore";
 import type { FormFactor } from "../../models/DeviceMatchCriteria";
@@ -451,6 +453,16 @@ function emulatorDeviceIdForConsolePort(consolePort: number): string {
   return `emulator-${consolePort}`;
 }
 
+/**
+ * Whether a spawned emulator child is still running. A ChildProcess reports a
+ * code or a signal once it has exited and leaves both unset until then, so this
+ * is the guard that stops a reservation whose `exit` event never arrived from
+ * blocking every later launch of that AVD.
+ */
+function isLaunchChildAlive(child: ChildProcess): boolean {
+  return (child.exitCode ?? null) === null && (child.signalCode ?? null) === null;
+}
+
 function shouldCaptureEmulatorReservationSnapshot(deviceId: string | undefined): boolean {
   return deviceId === undefined || deviceId.startsWith("emulator-");
 }
@@ -482,6 +494,12 @@ type EmulatorDeviceIdReservation = {
   readonly deviceId: string;
   readonly ports: EmulatorPortPair;
   readonly appendPort: boolean;
+  /**
+   * The AVD this reservation was taken for. A reservation is the only host-side
+   * fact that ties a console port to an AVD NAME while the runtime is still
+   * mid-boot and answers the scan as `Unknown (<serial>)` (#6407).
+   */
+  readonly avdName: string;
 };
 
 type TerminalEmulatorReservation = {
@@ -537,6 +555,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
   private platform: NodeJS.Platform;
   private hostArchitecture: string;
   private readonly hostPortAvailabilityChecker: HostPortAvailabilityChecker;
+  private readonly runningAvdAdvertisementReader: RunningAvdAdvertisementReader;
   private readonly launchTargetDeviceIds = new WeakMap<ChildProcess, string>();
   // startDevice creates a fresh client per request, so reservations must cover
   // every client in the daemon rather than one client instance.
@@ -549,6 +568,23 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     string,
     TerminalEmulatorReservation
   >();
+  /**
+   * AVDs whose launch this PROCESS has claimed and not yet finished. An
+   * in-flight launch is invisible to every host-side signal for seconds (adb
+   * has no serial yet, then the serial has no name), so the claim — not the
+   * name label — is what makes a concurrent second launch of the same AVD
+   * impossible in-process (#6407). Ownership hands off to the console-port
+   * reservation once the process has spawned.
+   */
+  private static readonly inFlightAvdLaunches = new Set<string>();
+  /**
+   * AVD name of every launch child this process spawned WITHOUT a console-port
+   * reservation. A reservation-less spawn happens whenever the pre-launch
+   * device snapshot came back incomplete, and it leaves the AVD with no serial
+   * to correlate against the scan, so the live child itself is the only
+   * evidence that this AVD is already coming up (#6407).
+   */
+  private static readonly unreservedLaunchAvdNames = new Map<ChildProcess, string>();
   private static terminalReservationGeneration = 0;
   private static hostPortAvailabilityCheckerForTesting: HostPortAvailabilityChecker | undefined;
   private readonly launchErrors = new WeakMap<ChildProcess, ActionableError>();
@@ -574,12 +610,16 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       | null = null,
     spawnFn: typeof spawn | null = null,
     timer: Timer = defaultTimer,
-    adbFactory: AdbClientFactory = defaultAdbClientFactory,
+    // Below the admission gate, not behind it: discovery reading the AVD name on
+    // a quarantined serial is the only event that can LIFT the quarantine, and
+    // `emu kill` on one is how the pool settles a serial it can no longer
+    // identify ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
+    adbFactory: AdbClientFactory = unadmittedAdbClientFactory,
     avdConfigReader?: AvdConfigReader,
     platform: NodeJS.Platform = process.platform,
     hostArchitecture: string = arch(),
-    hostPortAvailabilityChecker: HostPortAvailabilityChecker = AndroidEmulatorClient.hostPortAvailabilityCheckerForTesting ??
-      new TcpHostPortAvailabilityChecker(),
+    hostPortAvailabilityChecker: HostPortAvailabilityChecker = AndroidEmulatorClient.defaultHostPortAvailabilityChecker(),
+    runningAvdAdvertisementReader: RunningAvdAdvertisementReader = new TmpdirRunningAvdAdvertisementReader(),
   ) {
     this.execAsync = execAsyncFn || execAsync;
     this.spawnFn = spawnFn || spawn;
@@ -589,14 +629,24 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     this.platform = platform;
     this.hostArchitecture = hostArchitecture;
     this.hostPortAvailabilityChecker = hostPortAvailabilityChecker;
+    this.runningAvdAdvertisementReader = runningAvdAdvertisementReader;
     // Only set a fallback emulator path here; proper detection happens lazily
     this.emulatorPath = this.getFallbackEmulatorPath();
+  }
+
+  private static defaultHostPortAvailabilityChecker(): HostPortAvailabilityChecker {
+    return (
+      AndroidEmulatorClient.hostPortAvailabilityCheckerForTesting ??
+      new TcpHostPortAvailabilityChecker()
+    );
   }
 
   static resetLaunchReservationsForTesting(): void {
     AndroidEmulatorClient.reservedLaunchDeviceIds.clear();
     AndroidEmulatorClient.pendingLaunchDeviceIds.clear();
     AndroidEmulatorClient.terminalReservedDeviceIds.clear();
+    AndroidEmulatorClient.inFlightAvdLaunches.clear();
+    AndroidEmulatorClient.unreservedLaunchAvdNames.clear();
     AndroidEmulatorClient.terminalReservationGeneration = 0;
   }
 
@@ -1310,52 +1360,16 @@ export class AndroidEmulatorClient implements AndroidEmulator {
    */
   async isAvdStarting(avdName: string): Promise<boolean> {
     try {
-      const { existsSync, readdirSync, readFileSync } = require("fs");
-      const path = require("path");
-
-      // Check the temp directory where emulator advertises running instances
-      const runningDir = path.join(require("os").tmpdir(), "avd", "running");
-
-      if (!existsSync(runningDir)) {
-        return false;
-      }
-
-      // Read all pid_*.ini files
-      const files = readdirSync(runningDir);
-      const pidFiles = files.filter((f: string) => f.startsWith("pid_") && f.endsWith(".ini"));
-
-      for (const file of pidFiles) {
-        try {
-          const filePath = path.join(runningDir, file);
-          const content = readFileSync(filePath, "utf-8");
-
-          // Check if this file is for our AVD
-          const avdIdMatch = content.match(/^avd\.id=(.+)$/m);
-          if (avdIdMatch && avdIdMatch[1] === avdName) {
-            // Extract PID from filename (pid_12345.ini -> 12345)
-            const pidMatch = file.match(/pid_(\d+)\.ini/);
-            if (pidMatch) {
-              const pid = parseInt(pidMatch[1], 10);
-
-              // Check if the process is still alive
-              try {
-                process.kill(pid, 0); // Signal 0 checks if process exists without killing it
-                logger.info(`AVD '${avdName}' is currently starting (PID: ${pid})`);
-                return true;
-              } catch (e) {
-                // Process doesn't exist, the pid file is stale
-                logger.debug(`Stale pid file found for AVD '${avdName}' (PID ${pid} not running)`);
-              }
-            }
-          }
-        } catch (error) {
-          logger.debug(`Failed to read pid file ${file}: ${error}`);
-        }
-      }
-
-      return false;
+      return await this.runningAvdAdvertisementReader.isAvdAdvertisedRunning(avdName);
     } catch (error) {
-      logger.debug(`Failed to check if AVD is starting: ${error}`);
+      // Degrade to "no advertisement", but never silently: this reader is a
+      // SECONDARY signal (the in-flight claim and the port-correlated scan are
+      // the guards that must hold), and a read failure here used to collapse to
+      // a debug line that the default INFO level dropped (#6407).
+      logger.warn(
+        `Failed to read running-AVD advertisements for '${avdName}': ${errorMessage(error)}`,
+        error,
+      );
       return false;
     }
   }
@@ -1646,6 +1660,62 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     };
   }
 
+  /**
+   * Whether this AVD is already up or coming up, so the launch must adopt it
+   * instead of spawning a second emulator for it.
+   *
+   * `getBootedDevicesChecked` rather than the swallow-to-[] wrapper: an adb
+   * discovery failure must surface as an error, never be read as "this AVD is
+   * not running" (#6407).
+   */
+  private async adoptsExistingAvdLaunch(
+    avdName: string,
+    perf: ReturnType<typeof createGlobalPerformanceTracker>,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    perf.startOperation("checkAlreadyRunning");
+    try {
+      const runningEmulators = await this.getBootedDevicesChecked(
+        false,
+        { bypassDeviceListCache: true },
+        signal,
+      );
+      if (runningEmulators.some((emulator) => emulator.name === avdName)) {
+        logger.info(`AVD '${avdName}' is already running - waiting for it to be ready`);
+        return true;
+      }
+      // Mid-boot the scan can only label the emulator `Unknown (<serial>)`, so
+      // the console-port reservation, not the name, is the evidence (#6407).
+      const launchingDeviceId = this.findReservedLaunchSerial(avdName, runningEmulators);
+      if (launchingDeviceId) {
+        logger.info(
+          `AVD '${avdName}' is already starting on ${launchingDeviceId} (this process reserved that console port) - waiting for it to be ready`,
+        );
+        return true;
+      }
+      const preAdbLaunchSerial = this.findLiveReservationAwaitingAdb(avdName, runningEmulators);
+      if (preAdbLaunchSerial) {
+        logger.info(
+          `AVD '${avdName}' is already starting on ${preAdbLaunchSerial} (this process holds a live reservation adb has not listed yet) - waiting for it to be ready`,
+        );
+        return true;
+      }
+      if (this.hasLiveUnreservedLaunch(avdName)) {
+        logger.info(
+          `AVD '${avdName}' is already starting (this process holds a live launch for it that adb has not named yet) - waiting for it to be ready`,
+        );
+        return true;
+      }
+      if (await this.isAvdStarting(avdName)) {
+        logger.info(`AVD '${avdName}' is already starting - waiting for it to be ready`);
+        return true;
+      }
+      return false;
+    } finally {
+      perf.endOperation("checkAlreadyRunning");
+    }
+  }
+
   private throwIfLaunchCancelled(avdName: string, isCancelled?: () => boolean): void {
     if (isCancelled?.()) {
       throw new ActionableError(`Android emulator launch for '${avdName}' was cancelled`);
@@ -1688,23 +1758,50 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       );
     }
 
-    // Check if already running or starting
-    perf.startOperation("checkAlreadyRunning");
-    const alreadyRunning = await this.isAvdRunning(avdName, { bypassDeviceListCache: true });
-    const alreadyStarting = !alreadyRunning && (await this.isAvdStarting(avdName));
-    perf.endOperation("checkAlreadyRunning");
-
-    if (alreadyRunning) {
-      logger.info(`AVD '${avdName}' is already running - waiting for it to be ready`);
-      // We did not spawn this AVD, so there is no process handle to hand back.
-      // Return null rather than a fabricated `{} as ChildProcess` (issue #3938);
-      // the caller (waitForEmulatorReady) waits for readiness regardless.
+    // Claim the AVD before any further await. The claim and its check are
+    // adjacent and synchronous, so two concurrent launches of the same AVD in
+    // this process can never both reach the spawn (#6407).
+    if (AndroidEmulatorClient.inFlightAvdLaunches.has(avdName)) {
+      logger.info(
+        `AVD '${avdName}' already has a launch in flight in this process - waiting for it to be ready`,
+      );
+      // Joining an in-flight launch gives us no process handle of our own
+      // (issue #3938); the caller's readiness wait adopts the same device.
       return null;
     }
+    AndroidEmulatorClient.inFlightAvdLaunches.add(avdName);
+    try {
+      return await this.startClaimedEmulatorProcess(
+        avdName,
+        perf,
+        requestedExtraArgs,
+        onSpawn,
+        isCancelled,
+        capturePreLaunchDeviceIds,
+        expectedDeviceId,
+        signal,
+      );
+    } finally {
+      // The claim covers this process up to the spawn; from there the console
+      // port reservation carries the AVD identity through the mid-boot window.
+      AndroidEmulatorClient.inFlightAvdLaunches.delete(avdName);
+    }
+  }
 
-    if (alreadyStarting) {
-      logger.info(`AVD '${avdName}' is already starting - waiting for it to be ready`);
-      // Started by another actor — no process handle to hand back (issue #3938).
+  private async startClaimedEmulatorProcess(
+    avdName: string,
+    perf: ReturnType<typeof createGlobalPerformanceTracker>,
+    requestedExtraArgs?: readonly string[],
+    onSpawn?: (process: ChildProcess) => void,
+    isCancelled?: () => boolean,
+    capturePreLaunchDeviceIds: boolean = false,
+    expectedDeviceId?: string,
+    signal?: AbortSignal,
+  ): Promise<ChildProcess | null> {
+    if (await this.adoptsExistingAvdLaunch(avdName, perf, signal)) {
+      // Some other actor already owns this AVD, so we hold no process handle for
+      // it. Return null rather than a fabricated `{} as ChildProcess`
+      // (issue #3938); the caller waits for readiness regardless.
       return null;
     }
 
@@ -1744,6 +1841,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     this.throwIfLaunchCancelled(avdName, isCancelled);
     const reservedEmulator = await this.addReservedEmulatorPort(
       args,
+      avdName,
       preLaunchEmulatorDeviceSnapshot,
       expectedDeviceId,
       signal,
@@ -1766,6 +1864,8 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       perf.endOperation("spawnEmulator");
       if (reservedEmulator) {
         this.recordReservedEmulatorDeviceId(child, reservedEmulator);
+      } else {
+        AndroidEmulatorClient.unreservedLaunchAvdNames.set(child, avdName);
       }
       onSpawn?.(child);
 
@@ -1852,6 +1952,12 @@ export class AndroidEmulatorClient implements AndroidEmulator {
           duplicateAvdDetected ||
           output.includes("Running multiple emulators with the same AVD")
         ) {
+          // The in-process guards make this unreachable within one daemon, so a
+          // duplicate that still happens came from ANOTHER process. Adoption
+          // stays the behaviour, but it is no longer silent (#6407).
+          logger.warn(
+            `Emulator launch for AVD '${avdName}' exited as a duplicate of an emulator started outside this process; adopting it`,
+          );
           this.launchErrors.delete(child);
           this.launchTargetDeviceIds.delete(child);
           const resolveFinalization = resolvePostValidationExit;
@@ -2052,8 +2158,8 @@ export class AndroidEmulatorClient implements AndroidEmulator {
             duplicateAvdDetected ||
             finalizedOutput.includes("Running multiple emulators with the same AVD")
           ) {
-            logger.info(
-              `AVD '${avdName}' is already starting/running - this is expected, will wait for it to be ready`,
+            logger.warn(
+              `AVD '${avdName}' is already starting/running in another process - adopting it instead of the duplicate we launched`,
             );
             if (!startupValidationComplete) {
               startupValidationComplete = true;
@@ -2180,7 +2286,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
 
       child.on("exit", (code, signal) => {
         this.timer.clearTimeout(startupTimeout);
-        this.releaseReservedEmulatorDeviceId(child);
+        this.releaseLaunchChild(child);
         childTerminationObserved = true;
         exitCode = code;
         exitSignal = signal;
@@ -2203,7 +2309,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
 
       child.on("close", (code, signal) => {
         this.timer.clearTimeout(startupTimeout);
-        this.releaseReservedEmulatorDeviceId(child);
+        this.releaseLaunchChild(child);
         clearExitDrainTimeout();
         childTerminationObserved = true;
         exitCode ??= code;
@@ -2362,6 +2468,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
   }
 
   private async allocateReservedEmulatorPorts(
+    avdName: string,
     preexistingDeviceIds: ReadonlySet<string>,
     signal?: AbortSignal,
   ): Promise<EmulatorDeviceIdReservation> {
@@ -2382,7 +2489,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
           !currentUnavailablePorts.has(ports.consolePort) &&
           !currentUnavailablePorts.has(ports.adbPort)
         ) {
-          return this.reservePendingEmulatorDeviceId(ports, true);
+          return this.reservePendingEmulatorDeviceId(avdName, ports, true);
         }
       }
     }
@@ -2478,6 +2585,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
   }
 
   private reservePendingEmulatorDeviceId(
+    avdName: string,
     ports: EmulatorPortPair,
     appendPort: boolean,
   ): EmulatorDeviceIdReservation {
@@ -2485,12 +2593,14 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       deviceId: emulatorDeviceIdForConsolePort(ports.consolePort),
       ports,
       appendPort,
+      avdName,
     };
     AndroidEmulatorClient.pendingLaunchDeviceIds.set(reservation.deviceId, reservation);
     return reservation;
   }
 
   private async reserveEmulatorDeviceId(
+    avdName: string,
     preLaunchSnapshot: EmulatorDeviceIdSnapshot | undefined,
     args: readonly string[],
     expectedDeviceId?: string,
@@ -2514,21 +2624,23 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     const ports = configuredPorts ?? expectedEmulatorPorts;
     if (ports) {
       await this.assertEmulatorPortsAvailable(ports, preLaunchSnapshot?.deviceIds, signal);
-      return this.reservePendingEmulatorDeviceId(ports, configuredPorts === undefined);
+      return this.reservePendingEmulatorDeviceId(avdName, ports, configuredPorts === undefined);
     }
     if (!preLaunchSnapshot?.isComplete) {
       return undefined;
     }
-    return this.allocateReservedEmulatorPorts(preLaunchSnapshot.deviceIds, signal);
+    return this.allocateReservedEmulatorPorts(avdName, preLaunchSnapshot.deviceIds, signal);
   }
 
   private async addReservedEmulatorPort(
     args: string[],
+    avdName: string,
     preLaunchSnapshot: EmulatorDeviceIdSnapshot | undefined,
     expectedDeviceId?: string,
     signal?: AbortSignal,
   ): Promise<EmulatorDeviceIdReservation | undefined> {
     const reservation = await this.reserveEmulatorDeviceId(
+      avdName,
       preLaunchSnapshot,
       args,
       expectedDeviceId,
@@ -2538,6 +2650,104 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       args.push("-port", String(reservation.ports.consolePort));
     }
     return reservation;
+  }
+
+  /**
+   * The serial of an emulator THIS process is launching for `avdName`, found by
+   * correlating the console-port reservations it holds against the scan.
+   *
+   * A mid-boot emulator answers the scan as `Unknown (<serial>)` for seconds
+   * (minutes on a cold boot), so the name label cannot answer "is this AVD
+   * already up" (#6407). The reservation can: it was taken for this AVD, and it
+   * fixes the console port the serial is derived from. Only a placeholder name
+   * counts — a serial that has resolved to some OTHER AVD is a stale
+   * reservation, never evidence about this one.
+   */
+  private findReservedLaunchSerial(
+    avdName: string,
+    runningEmulators: readonly BootedDevice[],
+  ): string | undefined {
+    const reservedSerials = new Set<string>();
+    const reservations = [
+      ...AndroidEmulatorClient.pendingLaunchDeviceIds.values(),
+      ...AndroidEmulatorClient.reservedLaunchDeviceIds.values(),
+    ];
+    for (const reservation of reservations) {
+      if (reservation.avdName === avdName) {
+        reservedSerials.add(reservation.deviceId);
+      }
+    }
+    return runningEmulators.find(
+      (emulator) =>
+        reservedSerials.has(emulator.deviceId) &&
+        this.isUnknownEmulatorName(emulator.name, emulator.deviceId),
+    )?.deviceId;
+  }
+
+  /**
+   * The serial this process reserved for `avdName` whose emulator is alive but
+   * has NOT appeared in the adb scan yet.
+   *
+   * Startup validation resolves off the first emulator output marker, which the
+   * emulator prints seconds before adb lists the runtime, and the name-level
+   * in-flight claim is dropped at that point. In that gap
+   * `findReservedLaunchSerial` has nothing in the scan to correlate against, so
+   * the reservation — held only from the spawn until the child exits — is the
+   * one piece of evidence that this AVD is already coming up (#6407).
+   *
+   * A reserved serial the scan DOES list is deliberately not handled here: it
+   * is either the mid-boot placeholder `findReservedLaunchSerial` already
+   * matches, or a serial that has resolved to some other AVD, which makes the
+   * reservation stale rather than evidence about this one.
+   */
+  private findLiveReservationAwaitingAdb(
+    avdName: string,
+    runningEmulators: readonly BootedDevice[],
+  ): string | undefined {
+    const scannedDeviceIds = new Set(runningEmulators.map((emulator) => emulator.deviceId));
+    for (const [child, reservation] of AndroidEmulatorClient.reservedLaunchDeviceIds) {
+      if (
+        reservation.avdName === avdName &&
+        !scannedDeviceIds.has(reservation.deviceId) &&
+        isLaunchChildAlive(child)
+      ) {
+        return reservation.deviceId;
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * Whether this process still holds a live launch child for `avdName` that
+   * reserved no console port.
+   *
+   * The name-level in-flight claim is released as soon as startup validation
+   * resolves off the first emulator output marker, seconds before adb lists the
+   * runtime. With a reservation, `findLiveReservationAwaitingAdb` covers that
+   * gap; without one there is no serial to correlate, so the running child is
+   * the claim. Callers reach this only after the scan failed to show the AVD by
+   * name, and an exited child is both pruned here and ignored, so a missed
+   * `exit` event cannot block later launches of the AVD forever.
+   */
+  private hasLiveUnreservedLaunch(avdName: string): boolean {
+    let live = false;
+    for (const [child, launchedAvdName] of [...AndroidEmulatorClient.unreservedLaunchAvdNames]) {
+      if (!isLaunchChildAlive(child)) {
+        AndroidEmulatorClient.unreservedLaunchAvdNames.delete(child);
+        continue;
+      }
+      live ||= launchedAvdName === avdName;
+    }
+    return live;
+  }
+
+  /** Drop every launch-guard record this process holds for an exited child. */
+  private releaseLaunchChild(childProcess?: ChildProcess | null): void {
+    if (!childProcess) {
+      return;
+    }
+    AndroidEmulatorClient.unreservedLaunchAvdNames.delete(childProcess);
+    this.releaseReservedEmulatorDeviceId(childProcess);
   }
 
   private recordReservedEmulatorDeviceId(
@@ -2781,6 +2991,90 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     );
   }
 
+  /**
+   * Returns the first readiness predicate the probed device fails, or undefined when
+   * every required Android readiness signal is satisfied.
+   */
+  private unmetReadinessPredicate(
+    deviceId: string,
+    stateOutput: string,
+    packageManager: ExecResult,
+    sysBootCompleted: string,
+    bootAnimationState: string,
+  ): ReadinessDiagnostic | undefined {
+    if (!stateOutput.includes("device")) {
+      return this.unmetReadinessDiagnostic(
+        "device-state",
+        "adb get-state did not report 'device'",
+        stateOutput,
+        deviceId,
+      );
+    }
+    // Only an explicit package-manager "Failure" blocks readiness. A non-empty stderr
+    // on its own is routinely benign (linker and ART warnings on a healthy device) and
+    // used to keep a fully booted emulator not-ready forever. See #6818.
+    // Checked BEFORE the empty-listing branch: the real failure shape is an empty
+    // stdout plus the reason on stderr, and reporting that as `observed=""` would
+    // throw away the only actionable detail the timeout error carries.
+    if (packageManager.stderr.includes("Failure")) {
+      return this.unmetReadinessDiagnostic(
+        "package-manager",
+        "pm list packages reported a failure",
+        packageManager.stderr.trim(),
+        deviceId,
+      );
+    }
+    if (!packageManager.stdout.includes("package:")) {
+      // With no listing on stdout there is nothing benign for stderr to be noise
+      // about, and the boot-time shape carries the reason there — e.g.
+      // `cmd: Can't find service: package` while the package service is still
+      // coming up. Prefer it over the vacuous `observed=""` (#6818).
+      const stderr = packageManager.stderr.trim();
+      return this.unmetReadinessDiagnostic(
+        "package-manager",
+        "pm list packages returned no 'package:' entries",
+        stderr.length > 0 ? stderr : packageManager.stdout.trim(),
+        deviceId,
+      );
+    }
+    if (sysBootCompleted !== "1") {
+      return this.unmetReadinessDiagnostic(
+        "system-boot-complete",
+        "sys.boot_completed is not 1",
+        sysBootCompleted,
+        deviceId,
+      );
+    }
+    if (bootAnimationState && bootAnimationState !== "stopped") {
+      return this.unmetReadinessDiagnostic(
+        "boot-animation",
+        "init.svc.bootanim has not stopped",
+        bootAnimationState,
+        deviceId,
+      );
+    }
+    return undefined;
+  }
+
+  /**
+   * Records an unmet readiness predicate with the value actually observed, so the
+   * readiness timeout error names the exact check that never passed (#6818).
+   */
+  private unmetReadinessDiagnostic(
+    phase: ReadinessDiagnosticPhase,
+    check: string,
+    observed: string,
+    deviceId: string,
+  ): ReadinessDiagnostic {
+    const diagnostic = this.readinessDiagnostic(
+      phase,
+      `${check}; observed="${observed}"`,
+      deviceId,
+    );
+    logger.debug(`[PARALLEL] ❌ ${deviceId} not ready: ${diagnostic.summary}`);
+    return diagnostic;
+  }
+
   private rejectedReadinessDiagnostic(
     checks: Array<[ReadinessDiagnosticPhase, PromiseSettledResult<ExecResult>]>,
   ): ReadinessDiagnostic | undefined {
@@ -2909,7 +3203,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
         if (code !== 0) {
           const combinedOutput = processOutput.join("");
           if (combinedOutput.includes("Running multiple emulators with the same AVD")) {
-            logger.info(
+            logger.warn(
               `AVD '${avdName}' is owned by another emulator process; continuing readiness polling`,
             );
             return;
@@ -3005,7 +3299,8 @@ export class AndroidEmulatorClient implements AndroidEmulator {
             { bypassDeviceListCache: true },
             signal,
           );
-          lastDiagnostic = this.relevantScanDiagnostic(scan, correlatedTargetDeviceId);
+          const scanDiagnostic = this.relevantScanDiagnostic(scan, correlatedTargetDeviceId);
+          lastDiagnostic = scanDiagnostic;
           const runningEmulators = scan.devices;
           logger.debug(`Device scan complete - found ${runningEmulators.length} running emulators`);
           const readinessTimeoutMs = Math.max(0, timeoutMs - (this.timer.now() - startTime));
@@ -3116,32 +3411,17 @@ export class AndroidEmulatorClient implements AndroidEmulator {
                   logger.debug(
                     `[PARALLEL] Package manager command completed for ${emulator.deviceId} - output: ${packageManagerResult.value.stdout.length} bytes`,
                   );
-                  if (!stateOutput.includes("device")) {
-                    logger.debug(
-                      `[PARALLEL] ❌ Device state check failed for ${emulator.deviceId}: state="${stateOutput}"`,
-                    );
-                  } else if (
-                    !packageManagerResult.value.stdout ||
-                    !packageManagerResult.value.stdout.includes("package:")
-                  ) {
-                    logger.debug(
-                      `[PARALLEL] ❌ Package manager returned no packages for ${emulator.deviceId} (${packageManagerResult.value.stdout.length} bytes output)`,
-                    );
-                  } else if (
-                    packageManagerResult.value.stderr ||
-                    packageManagerResult.value.stderr.includes("Failure")
-                  ) {
-                    logger.debug(
-                      `[PARALLEL] ❌ Package manager returned failure for ${emulator.deviceId}: ${packageManagerResult.value.stderr}`,
-                    );
-                  } else if (sysBootCompleted !== "1") {
-                    logger.debug(
-                      `[PARALLEL] ❌ sys.boot_completed is not set for ${emulator.deviceId}: "${sysBootCompleted}"`,
-                    );
-                  } else if (bootAnimationState && bootAnimationState !== "stopped") {
-                    logger.debug(
-                      `[PARALLEL] ❌ boot animation is still active for ${emulator.deviceId}: "${bootAnimationState}"`,
-                    );
+                  const unmetPredicate = this.unmetReadinessPredicate(
+                    emulator.deviceId,
+                    stateOutput,
+                    packageManagerResult.value,
+                    sysBootCompleted,
+                    bootAnimationState,
+                  );
+                  if (unmetPredicate) {
+                    // An upstream scan failure (discovery, AVD-name resolution) is the
+                    // root cause when it is present, so it outranks the probe verdict.
+                    lastDiagnostic = scanDiagnostic ?? unmetPredicate;
                   } else {
                     logger.debug(
                       `[PARALLEL] ✅ Device state check passed for ${emulator.deviceId}`,

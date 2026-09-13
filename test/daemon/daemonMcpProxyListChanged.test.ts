@@ -232,6 +232,69 @@ describe("DaemonMcpProxy list-changed forwarding", () => {
     expect(fakeClient.subscribeToNotificationsCalls).toBe(2);
   });
 
+  // #6886 review: acquisition changes the SESSION SCOPE discovery is fetched
+  // under, but the proxy only publishes the result-minted binding after the
+  // daemon's `tools/list_changed` has already been relayed. An eager client
+  // that re-lists on that notification therefore caches a list scoped to the
+  // OLD binding, and nothing invalidates it afterwards — a tool enabled by
+  // `enableTools` stays absent from discovery indefinitely while being
+  // callable. Binding must itself invalidate and re-notify.
+  describe("result-minted session binding", () => {
+    const mintingClient = () =>
+      new FakeDaemonClient({
+        daemonMethodResults: new Map<string, any>([["tools/list", TOOLS_V1]]),
+        toolResultFor: () => ({
+          content: [{ type: "text", text: JSON.stringify({ sessionId: "session-1" }) }],
+        }),
+      });
+
+    test("invalidates the tool cache so the next list is fetched under the new session", async () => {
+      mockDaemonAvailable();
+      const fakeClient = mintingClient();
+      const proxy = createProxy(fakeClient);
+
+      await proxy.listTools();
+      await proxy.callTool("getAndroid", {});
+      await proxy.listTools();
+
+      const listCalls = fakeClient.callDaemonMethodCalls.filter(
+        (call) => call.method === "tools/list",
+      );
+      expect(listCalls.length).toBe(2);
+      expect(listCalls[1]!.params.sessionUuid).toBe("session-1");
+    });
+
+    test("re-emits tools/list_changed after the binding is published", async () => {
+      mockDaemonAvailable();
+      const fakeClient = mintingClient();
+      const proxy = createProxy(fakeClient);
+      const kinds: string[] = [];
+
+      await proxy.listTools();
+      proxy.onListChanged((kind) => {
+        kinds.push(kind);
+      });
+      await proxy.callTool("getAndroid", {});
+
+      expect(kinds).toEqual(["tools"]);
+    });
+
+    test("does not re-notify when the acquisition re-binds the SAME session", async () => {
+      mockDaemonAvailable();
+      const fakeClient = mintingClient();
+      const proxy = createProxy(fakeClient);
+
+      await proxy.callTool("getAndroid", {});
+      const kinds: string[] = [];
+      proxy.onListChanged((kind) => {
+        kinds.push(kind);
+      });
+      await proxy.callTool("getAndroid", {});
+
+      expect(kinds).toEqual([]);
+    });
+  });
+
   test("clients without notification support skip subscription entirely", async () => {
     mockDaemonAvailable();
     // Legacy-shaped client: only the five required DaemonClientLike members.

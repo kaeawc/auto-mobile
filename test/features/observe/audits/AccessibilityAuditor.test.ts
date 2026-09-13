@@ -1,5 +1,13 @@
-import { describe, expect, test } from "bun:test";
-import { AccessibilityAuditor } from "../../../../src/features/observe/audits/AccessibilityAuditor";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import fs from "fs/promises";
+import os from "os";
+import path from "path";
+import {
+  AccessibilityAuditor,
+  findLatestScreenshotPath,
+} from "../../../../src/features/observe/audits/AccessibilityAuditor";
+import { TEMP_SUBDIRS } from "../../../../src/utils/tempDir";
+import { screenshotFileName } from "../../../../src/utils/screenshot/screenshotFormats";
 import { NoOpPerformanceTracker } from "../../../../src/utils/PerformanceTracker";
 import type { BootedDevice, ObserveResult } from "../../../../src/models";
 import type { AccessibilityAuditConfig } from "../../../../src/models/AccessibilityAudit";
@@ -90,5 +98,75 @@ describe("AccessibilityAuditor", () => {
     });
     await auditor.run(result, new NoOpPerformanceTracker());
     expect(result.errors).toBeUndefined();
+  });
+});
+
+describe("findLatestScreenshotPath", () => {
+  let dataDir: string;
+  let screenshotDir: string;
+  let previousDataDir: string | undefined;
+
+  beforeEach(async () => {
+    dataDir = await fs.mkdtemp(path.join(os.tmpdir(), "auditor-screenshots-"));
+    screenshotDir = path.join(dataDir, TEMP_SUBDIRS.SCREENSHOTS);
+    await fs.mkdir(screenshotDir, { recursive: true });
+    previousDataDir = process.env.AUTOMOBILE_DATA_DIR;
+    process.env.AUTOMOBILE_DATA_DIR = dataDir;
+  });
+
+  afterEach(async () => {
+    if (previousDataDir === undefined) {
+      delete process.env.AUTOMOBILE_DATA_DIR;
+    } else {
+      process.env.AUTOMOBILE_DATA_DIR = previousDataDir;
+    }
+    await fs.rm(dataDir, { recursive: true, force: true });
+  });
+
+  async function seed(name: string, mtimeSeconds: number): Promise<string> {
+    const filePath = path.join(screenshotDir, name);
+    await fs.writeFile(filePath, Buffer.alloc(8));
+    await fs.utimes(filePath, mtimeSeconds, mtimeSeconds);
+    return filePath;
+  }
+
+  test("finds a .jpg capture when the cache holds only CtrlProxy output", async () => {
+    const jpg = await seed("screenshot_2.jpg", 2_000);
+
+    expect(await findLatestScreenshotPath()).toBe(jpg);
+  });
+
+  test("picks the newest file by mtime across mixed .jpg/.png/.webp content", async () => {
+    await seed("screenshot_1.png", 1_000);
+    await seed("screenshot_2.webp", 2_000);
+    const newest = await seed("screenshot_3.jpg", 3_000);
+
+    expect(await findLatestScreenshotPath()).toBe(newest);
+  });
+
+  test("ignores another device's newer capture when resolving for a known device", async () => {
+    await seed(screenshotFileName(1, "device-a", "aaa", "jpg"), 1_000);
+    const ownCapture = await seed(screenshotFileName(2, "device-b", "bbb", "jpg"), 2_000);
+    await seed(screenshotFileName(3, "device-a", "ccc", "jpg"), 3_000);
+
+    expect(await findLatestScreenshotPath("device-b")).toBe(ownCapture);
+  });
+
+  test("returns nothing when the requested device has no capture on disk", async () => {
+    await seed(screenshotFileName(3, "device-a", "ccc", "jpg"), 3_000);
+
+    expect(await findLatestScreenshotPath("device-b")).toBeUndefined();
+  });
+
+  test("matches captures whose device id needed sanitizing for the filename", async () => {
+    const own = await seed(screenshotFileName(4, "127.0.0.1:5555", "ddd", "png"), 4_000);
+
+    expect(await findLatestScreenshotPath("127.0.0.1:5555")).toBe(own);
+  });
+
+  test("does not hand a device the capture of a peer whose id sanitizes identically", async () => {
+    await seed(screenshotFileName(5, "host.name:5555", "eee", "png"), 5_000);
+
+    expect(await findLatestScreenshotPath("host-name:5555")).toBeUndefined();
   });
 });

@@ -24,6 +24,11 @@ import type {
   WebRtcStreamSocketResponse,
 } from "../../src/daemon/webrtcStreamSocketTypes";
 import type { BootedDevice } from "../../src/models";
+import { ActionableError } from "../../src/models";
+import {
+  permissiveDeviceAdmissionGate,
+  type DeviceAdmissionGate,
+} from "../../src/daemon/deviceAdmissionGate";
 import { WebRtcPublisher, WhipClient } from "../../src/features/webrtc";
 import type {
   AndroidH264Source,
@@ -86,8 +91,11 @@ class TestableServer extends WebRtcStreamSocketServer {
   constructor(
     deps: WebRtcStreamSocketServerDependencies,
     authenticator: StreamSocketAuthenticator = allowAllAuthenticator,
+    // Explicit rather than defaulted: the real default consults the running
+    // daemon's pool, which another suite in this process may have initialized.
+    admissionGate: DeviceAdmissionGate = permissiveDeviceAdmissionGate,
   ) {
-    super("/fake/webrtc-stream.sock", new FakeTimer(), deps, authenticator);
+    super("/fake/webrtc-stream.sock", new FakeTimer(), deps, authenticator, admissionGate);
   }
   async simulate(socket: FakeSocket, request: WebRtcStreamSocketRequest): Promise<void> {
     await (this as any).processLine(socket as unknown as Socket, JSON.stringify(request));
@@ -444,6 +452,51 @@ describe("WebRtcStreamSocketServer", () => {
     const response = lastResponse(socket);
     expect(response.success).toBe(false);
     expect(response.error).toContain("Invalid JSON");
+  });
+
+  // FUNNEL 2: the quarantine deliberately preserves the owning session, so
+  // authorization still succeeds on a serial whose AVD identity the pool can no
+  // longer prove. A capture started on it would publish whichever runtime now
+  // answers ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
+  describe("device admission (issue #6863)", () => {
+    const quarantineGate: DeviceAdmissionGate = {
+      assertDeviceActionable: (deviceId, purpose) => {
+        if (deviceId === "emulator-5554") {
+          throw new ActionableError(`Refusing ${purpose} on device '${deviceId}'`);
+        }
+      },
+    };
+
+    test("refuses a start on a quarantined serial without starting the stream", async () => {
+      const server = new TestableServer(makeDeps(), allowAllAuthenticator, quarantineGate);
+      const socket = new FakeSocket();
+
+      await server.simulate(socket, {
+        id: "1",
+        action: "start",
+        deviceId: "emulator-5554",
+        whipEndpoint: "https://coord/whip",
+      });
+
+      const response = lastResponse(socket);
+      expect(response.success).toBe(false);
+      expect(response.error).toContain("Refusing to start a WebRTC stream on device");
+      expect(started).toHaveLength(0);
+    });
+
+    test("refuses a start whose omitted deviceId resolves to a quarantined serial", async () => {
+      const server = new TestableServer(makeDeps(), allowAllAuthenticator, quarantineGate);
+      const socket = new FakeSocket();
+
+      await server.simulate(socket, {
+        id: "1",
+        action: "start",
+        whipEndpoint: "https://coord/whip",
+      });
+
+      expect(lastResponse(socket).success).toBe(false);
+      expect(started).toHaveLength(0);
+    });
   });
 
   describe("authentication (issue #4751)", () => {

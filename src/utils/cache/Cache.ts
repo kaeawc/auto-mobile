@@ -1,4 +1,5 @@
 import { Timer, defaultTimer } from "../SystemTimer";
+import { logger, type Logger } from "../logger";
 
 /**
  * Configuration for cache behavior.
@@ -21,6 +22,11 @@ interface CacheOptions {
   /**
    * Maximum total size in bytes (for size-aware caches).
    * Default: unlimited
+   *
+   * A single value whose `sizeBytes` alone exceeds this budget is rejected
+   * outright by `set()` (logged, not cached) rather than admitted and left
+   * permanently pinning `currentSizeBytes` above the budget -- no amount of
+   * evicting other entries can make room for it (issue #6653).
    */
   maxSizeBytes?: number;
 }
@@ -33,8 +39,6 @@ interface CacheEntry<T> {
   value: T;
   /** Timestamp when the entry was created */
   createdAt: number;
-  /** Timestamp when the entry was last accessed */
-  lastAccessedAt: number;
   /** Size in bytes (if tracked) */
   sizeBytes?: number;
 }
@@ -99,8 +103,16 @@ interface Cache<K, V> {
   getStats(): CacheStats;
 
   /**
-   * Remove expired entries.
-   * Called automatically on get/set, but can be called manually.
+   * Remove all currently-expired entries. With monotonic timestamps, this
+   * stops at the first live entry and costs only the expired prefix; after a
+   * backwards wall-clock step it scans the remaining entries for correctness.
+   *
+   * `set()` runs this same bounded sweep automatically before every insert,
+   * and `get()`/`has()` opportunistically evict the single key they touch
+   * when it has expired -- so an unbounded key space does not accumulate
+   * expired dead weight indefinitely even if a caller never invokes
+   * `cleanup()` manually (issue #6653). Call it directly only to force an
+   * immediate full pass, e.g. before reporting memory stats.
    */
   cleanup(): number;
 }
@@ -115,9 +127,24 @@ export const DEFAULT_CACHE_OPTIONS: Required<Omit<CacheOptions, "maxSizeBytes">>
 
 /**
  * TTL-based cache implementation with LRU eviction.
+ *
+ * Two Maps track different orderings of the same key set so both eviction
+ * paths stay O(1)/bounded instead of scanning every entry (issue #6653):
+ *  - `entries` iteration order tracks access recency: a hit in `get()` moves
+ *    its key to the tail, so the front is always the least-recently-used
+ *    entry and `evictOldest()` just peeks it.
+ *  - `expiryOrder` iteration order tracks creation time while the injected
+ *    clock is monotonic (a fresh `set()` appends, including on overwrite), so
+ *    the front is the oldest-created entry and a TTL sweep can stop at the
+ *    first live entry. A backwards wall-clock step falls back to a full scan.
  */
 export class TTLCache<K, V> implements Cache<K, V> {
   private readonly entries: Map<K, CacheEntry<V>> = new Map();
+  private readonly expiryOrder: Set<K> = new Set();
+  // Date.now() can move backwards. When it does, insertion order is no longer
+  // guaranteed to match expiration order, so a sweep must inspect every entry.
+  private newestCreatedAt = Number.NEGATIVE_INFINITY;
+  private expiryOrderMayBeOutOfOrder = false;
   private readonly ttlMs: number;
   private readonly maxEntries: number;
   private readonly maxSizeBytes: number;
@@ -129,10 +156,16 @@ export class TTLCache<K, V> implements Cache<K, V> {
     ttlEvictions: 0,
     sizeEvictions: 0,
   };
+  // Cumulative entries touched by evictOldest()'s O(1) peek and the
+  // expiry sweep's bounded prefix walk. A test-only seam (mirrors
+  // BufferQueue.compactionWorkUnits) proving eviction/cleanup cost stays
+  // linear in entries actually evicted, never quadratic in cache size.
+  private evictionScanWork: number = 0;
 
   constructor(
     private readonly timer: Timer = defaultTimer,
     options?: CacheOptions,
+    private readonly log: Logger = logger,
   ) {
     this.ttlMs = options?.ttlMs ?? DEFAULT_CACHE_OPTIONS.ttlMs;
     this.maxEntries = options?.maxEntries ?? DEFAULT_CACHE_OPTIONS.maxEntries;
@@ -150,59 +183,72 @@ export class TTLCache<K, V> implements Cache<K, V> {
     const now = this.timer.now();
     if (now - entry.createdAt >= this.ttlMs) {
       // Entry has expired
-      this.entries.delete(key);
-      this.currentSizeBytes -= entry.sizeBytes ?? 0;
+      this.removeEntry(key);
       this.stats.ttlEvictions++;
       this.stats.misses++;
       this.updateSizeStats();
       return undefined;
     }
 
-    // Update last access time for LRU
-    entry.lastAccessedAt = now;
+    // Move this key to the tail of `entries` so its iteration order tracks
+    // access recency -- see the class doc and evictOldest().
+    this.entries.delete(key);
+    this.entries.set(key, entry);
     this.stats.hits++;
     return entry.value;
   }
 
   set(key: K, value: V, sizeBytes?: number): void {
+    // Reject a value that alone exceeds the byte budget outright: no amount
+    // of evicting OTHER entries can bring currentSizeBytes back under
+    // maxSizeBytes once even one oversized value is admitted (issue #6653).
+    // Checked before any mutation so a rejected call is a complete no-op,
+    // including leaving any existing entry for this key untouched.
+    if (this.isOversizedValue(sizeBytes)) {
+      this.log.warn(
+        `[TTLCache] rejecting value for key that alone exceeds maxSizeBytes ` +
+          `(${sizeBytes} > ${this.maxSizeBytes} bytes); value not cached`,
+      );
+      return;
+    }
+
     const now = this.timer.now();
 
     // Remove existing entry if present
-    const existing = this.entries.get(key);
-    if (existing) {
-      this.currentSizeBytes -= existing.sizeBytes ?? 0;
-      this.entries.delete(key);
+    if (this.entries.has(key)) {
+      this.removeEntry(key);
     }
 
-    // Check size constraints
-    if (sizeBytes !== undefined && this.maxSizeBytes !== Infinity) {
-      // Evict entries if needed to make room
-      while (this.currentSizeBytes + sizeBytes > this.maxSizeBytes && this.entries.size > 0) {
-        this.evictOldest();
-        this.stats.sizeEvictions++;
-      }
-    }
+    // Opportunistic amortized cleanup: every set() clears any already-expired
+    // prefix before considering size/count eviction, so an unbounded key
+    // space does not accumulate dead entries indefinitely even if callers
+    // never call cleanup() themselves (issue #6653). Cost is proportional to
+    // entries actually expired, not cache size -- see sweepExpiredPrefix.
+    this.sweepExpiredPrefix(now);
 
-    // Check entry count constraints (guard against maxEntries <= 0)
-    while (this.maxEntries > 0 && this.entries.size >= this.maxEntries && this.entries.size > 0) {
-      this.evictOldest();
-      this.stats.sizeEvictions++;
-    }
+    this.evictForCapacity(sizeBytes);
 
     // Skip caching if maxEntries is 0 or negative (caching disabled)
     if (this.maxEntries <= 0) {
       return;
     }
 
+    // Removals can reset the ordering when the cache becomes empty. Record
+    // the incoming timestamp only once those removals have finished.
+    if (now < this.newestCreatedAt) {
+      this.expiryOrderMayBeOutOfOrder = true;
+    }
+    this.newestCreatedAt = Math.max(this.newestCreatedAt, now);
+
     // Add new entry
     const entry: CacheEntry<V> = {
       value,
       createdAt: now,
-      lastAccessedAt: now,
       sizeBytes,
     };
 
     this.entries.set(key, entry);
+    this.expiryOrder.add(key);
     this.currentSizeBytes += sizeBytes ?? 0;
     this.updateSizeStats();
   }
@@ -215,8 +261,7 @@ export class TTLCache<K, V> implements Cache<K, V> {
 
     const now = this.timer.now();
     if (now - entry.createdAt >= this.ttlMs) {
-      this.entries.delete(key);
-      this.currentSizeBytes -= entry.sizeBytes ?? 0;
+      this.removeEntry(key);
       this.stats.ttlEvictions++;
       this.updateSizeStats();
       return false;
@@ -226,10 +271,8 @@ export class TTLCache<K, V> implements Cache<K, V> {
   }
 
   delete(key: K): boolean {
-    const entry = this.entries.get(key);
-    if (entry) {
-      this.currentSizeBytes -= entry.sizeBytes ?? 0;
-      this.entries.delete(key);
+    if (this.entries.has(key)) {
+      this.removeEntry(key);
       this.updateSizeStats();
       return true;
     }
@@ -238,6 +281,9 @@ export class TTLCache<K, V> implements Cache<K, V> {
 
   clear(): void {
     this.entries.clear();
+    this.expiryOrder.clear();
+    this.newestCreatedAt = Number.NEGATIVE_INFINITY;
+    this.expiryOrderMayBeOutOfOrder = false;
     this.currentSizeBytes = 0;
     this.updateSizeStats();
   }
@@ -251,20 +297,7 @@ export class TTLCache<K, V> implements Cache<K, V> {
   }
 
   cleanup(): number {
-    const now = this.timer.now();
-    let evicted = 0;
-
-    for (const [key, entry] of this.entries) {
-      if (now - entry.createdAt >= this.ttlMs) {
-        this.entries.delete(key);
-        this.currentSizeBytes -= entry.sizeBytes ?? 0;
-        this.stats.ttlEvictions++;
-        evicted++;
-      }
-    }
-
-    this.updateSizeStats();
-    return evicted;
+    return this.sweepExpiredPrefix(this.timer.now());
   }
 
   /**
@@ -281,23 +314,123 @@ export class TTLCache<K, V> implements Cache<K, V> {
     return Array.from(this.entries.keys());
   }
 
-  private evictOldest(): void {
-    let oldestKey: K | undefined;
-    let oldestTime = Infinity;
+  /**
+   * Test seam: cumulative entries touched by evictOldest()'s O(1) peek and
+   * the expiry sweep's bounded prefix walk (see the class doc and
+   * evictionScanWork). Lets tests pin eviction/cleanup cost as linear in
+   * entries actually evicted rather than quadratic in cache size, without a
+   * flaky wall-clock benchmark.
+   */
+  get evictionScanWorkUnits(): number {
+    return this.evictionScanWork;
+  }
 
-    for (const [key, entry] of this.entries) {
-      if (entry.lastAccessedAt < oldestTime) {
-        oldestTime = entry.lastAccessedAt;
-        oldestKey = key;
+  /**
+   * Remove expired entries. While timestamps are monotonic, `expiryOrder` is
+   * ascending and the sweep stops at the first live entry. A backwards
+   * wall-clock step removes that guarantee, so the sweep continues through
+   * every entry to avoid retaining a later, already-expired value.
+   */
+  private sweepExpiredPrefix(now: number): number {
+    let evicted = 0;
+    const fullScan = this.expiryOrderMayBeOutOfOrder;
+    let previousLiveTimestamp = Number.NEGATIVE_INFINITY;
+    let survivingDisorder = false;
+
+    for (const key of this.expiryOrder) {
+      this.evictionScanWork++;
+      const entry = this.entries.get(key);
+      // expiryOrder and entries are kept in lockstep by every mutator below.
+      // Keep progressing defensively if that invariant is ever broken.
+      if (!entry) {
+        continue;
+      }
+      if (now - entry.createdAt < this.ttlMs) {
+        if (!fullScan) {
+          break;
+        }
+        if (entry.createdAt < previousLiveTimestamp) {
+          survivingDisorder = true;
+        }
+        previousLiveTimestamp = Math.max(previousLiveTimestamp, entry.createdAt);
+        continue;
+      }
+      this.removeEntry(key);
+      this.stats.ttlEvictions++;
+      evicted++;
+    }
+
+    if (fullScan) {
+      this.expiryOrderMayBeOutOfOrder = survivingDisorder;
+      this.newestCreatedAt = previousLiveTimestamp;
+    }
+    if (evicted > 0) {
+      this.updateSizeStats();
+    }
+    return evicted;
+  }
+
+  /**
+   * True when `sizeBytes` alone would exceed a finite `maxSizeBytes` budget
+   * -- no eviction of other entries could ever make room for it (issue
+   * #6653).
+   */
+  private isOversizedValue(sizeBytes: number | undefined): boolean {
+    return (
+      sizeBytes !== undefined && this.maxSizeBytes !== Infinity && sizeBytes > this.maxSizeBytes
+    );
+  }
+
+  /**
+   * Evict entries (oldest-first, O(1) each via evictOldest()) until the
+   * incoming value fits within maxSizeBytes and the entry count is under
+   * maxEntries.
+   */
+  private evictForCapacity(sizeBytes: number | undefined): void {
+    if (sizeBytes !== undefined && this.maxSizeBytes !== Infinity) {
+      while (this.currentSizeBytes + sizeBytes > this.maxSizeBytes && this.entries.size > 0) {
+        this.evictOldest();
+        this.stats.sizeEvictions++;
       }
     }
 
-    if (oldestKey !== undefined) {
-      const entry = this.entries.get(oldestKey);
-      if (entry) {
-        this.currentSizeBytes -= entry.sizeBytes ?? 0;
-      }
-      this.entries.delete(oldestKey);
+    // Guard against maxEntries <= 0 (caching disabled; set() returns early).
+    while (this.maxEntries > 0 && this.entries.size >= this.maxEntries && this.entries.size > 0) {
+      this.evictOldest();
+      this.stats.sizeEvictions++;
+    }
+  }
+
+  /**
+   * Evict the least-recently-used entry in O(1): `entries` iteration order
+   * tracks access recency (see the class doc and get()), so the front is
+   * always the LRU key -- no scan needed to find it.
+   */
+  private evictOldest(): void {
+    const oldestKey: K | undefined = this.entries.keys().next().value;
+    if (oldestKey === undefined) {
+      return;
+    }
+    this.evictionScanWork++;
+    this.removeEntry(oldestKey);
+  }
+
+  /**
+   * Remove a key from both orderings and the value store, adjusting the
+   * tracked byte total. Centralizes the bookkeeping every removal path
+   * (expiry, explicit delete, LRU eviction) must keep in sync; callers are
+   * responsible for any stats increment and updateSizeStats() call.
+   */
+  private removeEntry(key: K): void {
+    const entry = this.entries.get(key);
+    if (entry) {
+      this.currentSizeBytes -= entry.sizeBytes ?? 0;
+      this.entries.delete(key);
+    }
+    this.expiryOrder.delete(key);
+    if (this.entries.size === 0) {
+      this.newestCreatedAt = Number.NEGATIVE_INFINITY;
+      this.expiryOrderMayBeOutOfOrder = false;
     }
   }
 

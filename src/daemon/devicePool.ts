@@ -30,6 +30,7 @@ import {
 } from "./DeviceCriteriaMatcher";
 import { resetAdbDeviceListCache } from "../utils/android-cmdline-tools/AdbClient";
 import { hasMutableDisplayName, isIosPhysicalUdid } from "../utils/ios-cmdline-tools/iosDeviceType";
+import { isAndroidEmulatorSerial } from "../utils/androidSerial";
 import { didSourceSucceedForDevice, type DiscoverySource } from "../utils/discoverySource";
 import { consolePortFromSerial } from "../utils/android-cmdline-tools/EmulatorConsoleClient";
 import { getInstalledAppsCacheWriteCoordinator } from "../db/installedAppsCacheWriteCoordinator";
@@ -140,12 +141,19 @@ export type DeviceRecoveryEligibility =
  */
 type MutableMetadataSource = "refresh" | "snapshot";
 
+/**
+ * The display name Android discovery falls back to when the emulator console
+ * could not answer `avd name`. It is a placeholder, not an identity claim —
+ * see {@link DevicePool.namesAgreeOnIdentity}.
+ */
+function unknownAndroidRuntimeName(deviceId: string): string {
+  return `Unknown (${deviceId})`;
+}
+
 export interface PooledDevice {
   id: string; // Device ID (e.g., "emulator-5554")
   name: string; // Device name (e.g., "Pixel 7")
   platform: Platform; // Device platform
-  /** ADB transport identity for Android devices; changes when a serial reconnects. */
-  transportId?: string;
   sessionId: string | null; // Session currently using it, null if idle
   status: DeviceStatus; // Current status
   lastUsedAt: number; // Last usage timestamp
@@ -186,6 +194,113 @@ export interface PooledDevice {
    * (issue: DevicePool shutdown-marker same-serial-reuse race, follow-up to PR #5015).
    */
   incarnation: number;
+  /**
+   * Quarantine flag: the LATEST discovery observation for this LIVE entry
+   * carried the `Unknown (<serial>)` placeholder, so the pool no longer knows
+   * which AVD is on the serial.
+   *
+   * The placeholder is not evidence of a replacement (it would evict a live
+   * emulator on a transient console read) and it is not evidence of continuity
+   * either, so the entry is neither evicted nor trusted: session and
+   * `incarnation` are preserved, and everything that would ACT on or ROUTE BY the
+   * pooled identity is withheld until a resolved name settles it.
+   *
+   * TWO FUNNELS carry this state, so no consumer decides for itself and review
+   * has no per-site gating to find:
+   *
+   * - **FUNNEL 1 — {@link DevicePool.reconcileDiscoveryObservation}.** The ONE way
+   *   an observation ENTERS or LEAVES the quarantine. Every path that discovers
+   *   Android devices and then consults pooled identity folds its observation in
+   *   there first — the refresh sweep and the assignment-time liveness check from
+   *   inside the pool, and the disconnect monitor, the booted-devices resource,
+   *   `listDevices`, the shutdown/kill preflight, the teardown precondition,
+   *   pre-boot serial validation, the Android start lifecycle target,
+   *   `provisionDevice`'s exact-boot discovery and the socket server's
+   *   input-target and `ide/*` routes from outside it. Guarded by
+   *   `test/lint/deviceDiscoveryReconcileFunnel.test.ts`.
+   * - **FUNNEL 2 — {@link DevicePool.assertDeviceActionable}.** The ONE gate every
+   *   device-addressed operation at the daemon boundary passes, with or without a
+   *   session. Guarded by `test/lint/deviceAddressedAdmissionGate.test.ts`.
+   *
+   * The transitions, all of them, applied by
+   * {@link DevicePool.reconcileObservedPooledIdentity}:
+   *
+   * - **enter** — the observation is the placeholder. Entering also CANCELS AND
+   *   DRAINS the bound session's in-flight executions through the injected
+   *   `cancelDeviceSessionExecutions` seam
+   *   ({@link DevicePool.enterPooledIdentityQuarantine}): FUNNEL 2 only refuses
+   *   LATER calls, while an execution already registered keeps issuing
+   *   serial-addressed operations. The session and the `incarnation` survive;
+   *   only the work in flight is stopped.
+   * - **enter** — a resolved name DISAGREES and the replacement it calls for
+   *   cannot be installed: either `evictMissingPooledDevice` is deferring eviction
+   *   while killDevice holds a shutdown reservation, or the observation arrived
+   *   through FUNNEL 1 from a path that does not own pool membership
+   *   ({@link DevicePool.quarantineDisagreeingPooledIdentity}).
+   * - **leave, restored** — a resolved name MATCHES. Same entry, same session,
+   *   same `incarnation`.
+   * - **leave, replaced** — a resolved name DISAGREES and the replacement
+   *   installs: a fresh incarnation, the old session retired, exactly as an
+   *   observed disappearance. A disagreement NEVER lifts the quarantine on the
+   *   old entry by itself.
+   *
+   * The five consumers that read this state:
+   *
+   * 1. **Assignment** — the shared gate
+   *    ({@link DevicePool.ensurePooledDevicePresentForUse}) reports a quarantined
+   *    entry as not assignable, including one the assignment's OWN liveness check
+   *    just quarantined, so idle selection skips it and the exact-device paths
+   *    (`bindOrReuseDeviceSession`, autolock) refuse by serial.
+   * 2. **Tool execution** — FUNNEL 2.
+   *    {@link DevicePool.assertSessionReadyForAutomation} is one of its callers,
+   *    not a second gate: a session addresses its device by serial, so it is just
+   *    the session-keyed spelling of a device-addressed operation.
+   * 3. **Publishing** — {@link DevicePool.describesPooledRuntime} reads it, so the
+   *    booted-devices resource publishes neither the pooled epoch nor the pooled
+   *    AVD label. It is also FUNNEL 1's idempotence check: an observation that
+   *    already describes the pooled runtime changes nothing.
+   * 4. **Destructive confirmation** — `deviceTools.getValidatedPooledAndroidAvdName`
+   *    returns undefined, so no kill/delete path can act on the cached label.
+   *    The kill does not merely drop the label: a quarantined entry produces a
+   *    `quarantined` capture whose runtime confirmation is MANDATORY (the
+   *    emulator console must name itself; an unanswered probe or a differing
+   *    name refuses), because dropping the label also dropped the confirmation
+   *    it exists to trigger. That confirmation is why the teardown path MATCHES
+   *    through the quarantine (`getBootedAndroidTeardownStableName`) rather than
+   *    refusing on it — a strictly stronger gate than the flag.
+   * 5. **Stream routing** — the daemon's `DeviceSessionResolver` withholds the
+   *    serial↔uuid mapping in both directions and every push server drops that
+   *    serial's frames, so a possible replacement's passive events cannot reach
+   *    the previous AVD's subscribers. The resolver also exposes FUNNEL 2, so a
+   *    push server can REFUSE a device-addressed request (`request_observation`)
+   *    instead of serving it into that routing black hole.
+   */
+  identityUnresolved?: boolean;
+
+  /**
+   * The `BootedDevice.observedAt` of the newest identity observation folded into
+   * this entry, when that observation carried one — in EITHER direction: the
+   * placeholder or disagreement that entered {@link identityUnresolved}, and the
+   * resolved name that confirmed or lifted it.
+   *
+   * Discovery calls run concurrently and finish out of order, so the observation
+   * a funnel folds in is not necessarily the newest one. Recording it on the
+   * quarantine transitions alone made the ordering rule one-sided: an older
+   * listing that read the AVD name before it became unreadable could not lift a
+   * newer quarantine, but a delayed placeholder or disagreement could still
+   * quarantine an entry a NEWER observation had just resolved — cancelling the
+   * bound session's in-flight executions and blocking routing on evidence the
+   * pool already knew was superseded. Both directions are now ordered against
+   * this one stamp, which is how the pool already orders mutable-name updates
+   * (`nameObservedAt`)
+   * ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
+   *
+   * Absent when no identity observation has carried a stamp (start-path
+   * snapshots, legacy callers, test fakes): two unorderable observations are not
+   * evidence of order, so the transition proceeds rather than wedging the entry
+   * in whichever state it is in.
+   */
+  identityObservedAt?: number;
 }
 
 interface RollbackAssignment {
@@ -243,7 +358,33 @@ interface DeviceRemovedListener {
 }
 
 interface DeviceSessionExecutionCanceller {
-  (sessionId: string, reason: string): Promise<number>;
+  (sessionId: string, reason: string, options?: { excludeExecutionId?: string }): Promise<number>;
+}
+
+/**
+ * What a FUNNEL 1 caller can tell the pool about the observation it is folding
+ * in. It carries the discovering execution plus whether discovery resolved
+ * Android emulator names.
+ *
+ * Entering the quarantine cancels every execution indexed under the bound
+ * session, and a session-bound destructive call -- `killDevice`, `deleteDevice`
+ * -- can be the very path whose own discovery reads the placeholder. Cancelling
+ * it would lose the `runWithinShutdownDeadline` signal race for the operation
+ * that is ABOUT to confirm-or-refuse on exactly the evidence it just produced,
+ * so the discovering execution is exempted while every other execution on the
+ * session is still stopped
+ * ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
+ */
+export interface DiscoveryReconcileOptions {
+  /** The execution that performed this discovery; exempt from quarantine cancellation. */
+  readonly excludeExecutionId?: string;
+  /**
+   * Whether discovery resolved Android emulator names. `false` short-circuits
+   * identity resolution entirely: a serial-only listing carries no identity
+   * evidence for any entry, so interpreting its synthetic placeholders per
+   * device would quarantine healthy pooled peers that were never probed.
+   */
+  readonly namesResolved?: boolean;
 }
 
 export type DeviceReadinessReservation = (() => Promise<void>) & {
@@ -378,6 +519,7 @@ export class DevicePool {
   private readonly idGenerator: IdGenerator;
   private lastUsedAtMarker = 0;
   private lastReleasedDeviceId: string | null = null;
+  private readonly mcpSessionAcquiredAutolocks = new Map<string, Set<string>>();
   private readonly mcpSessionAutolockMap: Map<string, string> = new Map();
   private readonly mcpSessionRecoveryDevices: Map<string, McpSessionRecoveryLease> = new Map();
   private readonly refreshMissingDeviceMisses: Map<string, number> = new Map();
@@ -606,7 +748,6 @@ export class DevicePool {
         id: device.deviceId,
         name: device.name,
         platform: device.platform,
-        transportId: device.transportId,
         sessionId: null,
         status: "idle",
         lastUsedAt: now,
@@ -690,25 +831,14 @@ export class DevicePool {
           if (refreshGeneration !== this.refreshGeneration) {
             return false;
           }
-          let pooledDevice = this.devices.get(device.deviceId);
-          let runtimeReplaced = false;
-          if (pooledDevice && !this.matchesRuntimeIdentity(pooledDevice, device)) {
-            runtimeReplaced = await this.replacePooledDeviceForRuntimeIdentity(
-              pooledDevice,
-              device,
-            );
-            pooledDevice = this.devices.get(device.deviceId);
-          }
+          const pooledDevice = this.devices.get(device.deviceId);
           if (pooledDevice) {
-            pooledDevice.iosVersion = device.iosVersion;
-            this.applyMutableRuntimeMetadata(pooledDevice, device, "refresh");
-            return runtimeReplaced;
+            return await this.foldObservationIntoPooledEntry(pooledDevice, device, "refresh");
           }
           this.devices.set(device.deviceId, {
             id: device.deviceId,
             name: device.name,
             platform: device.platform,
-            transportId: device.transportId,
             sessionId: null,
             status: "idle",
             lastUsedAt: now,
@@ -814,7 +944,6 @@ export class DevicePool {
         id: device.deviceId,
         name: device.name,
         platform: device.platform,
-        transportId: device.transportId,
         sessionId: null,
         status: "idle",
         lastUsedAt: now,
@@ -853,24 +982,18 @@ export class DevicePool {
 
   /**
    * Replace a pooled connection whose stable serial now identifies a different
-   * runtime. Preserve AutoMobile-owned emulator state because the process and
-   * AVD did not change; only the ADB connection incarnation did.
+   * runtime.
+   *
+   * Reaching here means the discovered name genuinely disagrees with the pooled
+   * one (see {@link matchesRuntimeIdentity}, which tolerates the placeholder an
+   * unreadable AVD name produces), so a different AVD has taken this serial.
+   * AutoMobile-owned emulator state belongs to the AVD that is gone and must not
+   * be carried across.
    */
   private async replacePooledDeviceForRuntimeIdentity(
     pooledDevice: PooledDevice,
     bootedDevice: BootedDevice,
   ): Promise<boolean> {
-    const preserveAutoMobileOwnership = this.hasTransportOnlyIdentityChange(
-      pooledDevice,
-      bootedDevice,
-    );
-    const sourceImage = preserveAutoMobileOwnership ? pooledDevice.androidImage : undefined;
-    const startedProcess = preserveAutoMobileOwnership
-      ? this.startedDeviceProcesses.get(pooledDevice.id)
-      : undefined;
-    const startedProcessOutput = preserveAutoMobileOwnership
-      ? this.startedDeviceProcessOutput.get(pooledDevice.id)
-      : undefined;
     await this.evictMissingPooledDevice(
       pooledDevice,
       `runtime identity changed to ${bootedDevice.platform}:${bootedDevice.name}`,
@@ -878,13 +1001,7 @@ export class DevicePool {
     if (this.devices.has(bootedDevice.deviceId)) {
       return false;
     }
-    await this.addDevice(bootedDevice, sourceImage);
-    if (startedProcess) {
-      this.startedDeviceProcesses.set(bootedDevice.deviceId, startedProcess);
-    }
-    if (startedProcessOutput) {
-      this.startedDeviceProcessOutput.set(bootedDevice.deviceId, startedProcessOutput);
-    }
+    await this.addDevice(bootedDevice);
     return true;
   }
 
@@ -2128,17 +2245,51 @@ export class DevicePool {
     return evicted;
   }
 
+  /**
+   * Whether a pooled entry must be re-proved PRESENT before it is handed out.
+   *
+   * Every Android entry must: a handset unplugged after the last refresh is
+   * gone from `adb devices` but still sitting in the pool, and assigning it
+   * hands a session a device that cannot answer (#6863 review).
+   */
   private shouldValidatePooledDevicePresence(device: PooledDevice): boolean {
-    return (
-      device.platform === "android" &&
-      (consolePortFromSerial(device.id) !== null || device.transportId !== undefined)
-    );
+    return device.platform === "android";
   }
 
+  /**
+   * Whether a pooled entry's serial can be REASSIGNED to a different runtime.
+   *
+   * Emulator console ports are the reused identifiers: `emulator-5554` is handed
+   * to whichever AVD boots into that console slot next, so a serial that is
+   * present still has to prove it is the same runtime. A handset serial is
+   * globally unique and never reassigned, so presence is the whole question
+   * there — and its name (`ro.product.model`) is not identity, so running it
+   * through identity reconciliation could only produce false replacements.
+   */
+  private hasReusableSerial(device: PooledDevice): boolean {
+    return device.platform === "android" && consolePortFromSerial(device.id) !== null;
+  }
+
+  /**
+   * The shared assignability gate every hand-out path runs an Android entry
+   * through: idle selection, exact `bindOrReuseDeviceSession`, autolock and the
+   * pre-allocation sweeps. It answers one question — may this entry be handed to
+   * a session right now — which is presence AND a resolved identity, since the
+   * liveness check it performs is also what ENTERS the quarantine.
+   */
   private async ensurePooledDevicePresentForUse(
     device: PooledDevice,
     deferRecovery: boolean = false,
     assignmentLockHeld: boolean = false,
+  ): Promise<boolean> {
+    const present = await this.ensurePooledDevicePresent(device, deferRecovery, assignmentLockHeld);
+    return present && this.isPooledDeviceIdentityAssignable(device);
+  }
+
+  private async ensurePooledDevicePresent(
+    device: PooledDevice,
+    deferRecovery: boolean,
+    assignmentLockHeld: boolean,
   ): Promise<boolean> {
     if (!this.shouldValidatePooledDevicePresence(device)) {
       return true;
@@ -2154,18 +2305,10 @@ export class DevicePool {
     }
 
     const bootedDevice = discovery.devices.find((booted) => booted.deviceId === device.id);
-    if (bootedDevice && this.matchesRuntimeIdentity(device, bootedDevice)) {
-      this.refreshMissingDeviceMisses.delete(device.id);
-      return true;
-    }
-
     if (bootedDevice) {
-      const replaced = await this.replaceIdlePooledDeviceForLivenessCheck(
-        device,
-        bootedDevice,
-        assignmentLockHeld,
-      );
-      return !replaced && this.devices.get(device.id) === device;
+      return this.hasReusableSerial(device)
+        ? await this.reconcileDiscoveredPooledDevice(device, bootedDevice, assignmentLockHeld)
+        : this.confirmLivePooledDevice(device);
     }
 
     if (deferRecovery && this.shouldRebootDisconnectedAndroidDevice(device)) {
@@ -2180,6 +2323,45 @@ export class DevicePool {
     }
     await this.evictMissingPooledDevice(device, "not present in adb devices", true);
     return false;
+  }
+
+  /**
+   * Settle a liveness check for a serial discovery still reports as booted:
+   * either the pooled entry is the runtime that answered, or a different one
+   * has taken the serial and the entry must be replaced.
+   */
+  private async reconcileDiscoveredPooledDevice(
+    device: PooledDevice,
+    bootedDevice: BootedDevice,
+    assignmentLockHeld: boolean,
+  ): Promise<boolean> {
+    if (this.matchesRuntimeIdentity(device, bootedDevice)) {
+      await this.reconcilePooledIdentityResolution(device, bootedDevice);
+      return this.confirmLivePooledDevice(device);
+    }
+    const replaced = await this.replaceIdlePooledDeviceForLivenessCheck(
+      device,
+      bootedDevice,
+      assignmentLockHeld,
+    );
+    return !replaced && this.devices.get(device.id) === device;
+  }
+
+  /**
+   * Accept a pooled entry discovery just confirmed is present.
+   *
+   * Guarded on entry identity: a concurrent re-add can have replaced this entry
+   * while discovery was in flight, and serial, platform and name cannot tell the
+   * incarnations apart — only the pool's own entry object can — so the captured
+   * object would be a previous incarnation and must not be handed out.
+   */
+  private confirmLivePooledDevice(device: PooledDevice): boolean {
+    if (this.devices.get(device.id) !== device) {
+      logger.debug(`Rejecting superseded pooled incarnation of ${device.id} after liveness check`);
+      return false;
+    }
+    this.refreshMissingDeviceMisses.delete(device.id);
+    return true;
   }
 
   private async replaceIdlePooledDeviceForLivenessCheck(
@@ -4130,6 +4312,16 @@ export class DevicePool {
 
     while (device) {
       const skippedDeviceId = device.id;
+      // Quarantined: the serial is there, but which AVD answers on it is not
+      // known, so handing it to a session would bind that session to a runtime the
+      // pool cannot name. Checked here as well as inside the shared gate below so
+      // an already-quarantined entry is skipped without a discovery round trip
+      // (#6863 review).
+      if (!this.isPooledDeviceIdentityAssignable(device)) {
+        candidates = candidates.filter((candidate) => candidate.id !== skippedDeviceId);
+        device = this.selectIdleDevice(candidates);
+        continue;
+      }
       if (this.shouldValidatePooledDevicePresence(device)) {
         if (await this.ensurePooledDevicePresentForUse(device, true, true)) {
           return { device, livenessUnknown };
@@ -5003,10 +5195,7 @@ export class DevicePool {
    */
   async reserveDeviceForReadiness(
     deviceId: string,
-    expectedIdentity: Pick<
-      BootedDevice,
-      "deviceId" | "name" | "platform" | "transportId" | "observedAt"
-    >,
+    expectedIdentity: Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">,
     stableRuntimeName = expectedIdentity.name,
     verifiedAndroidAvdName?: string,
     autolockClient?: AutolockClient,
@@ -5027,11 +5216,7 @@ export class DevicePool {
         // Acquisition may reboot a device during readiness recovery. Prove
         // ownership before reserving it or beginning those side effects.
         this.getOwnedAutolockSession(pooled, autolockClient);
-        if (this.hasTransportOnlyIdentityChange(pooled, expectedIdentity)) {
-          await this.replacePooledDeviceForRuntimeIdentity(pooled, expectedIdentity);
-        } else {
-          this.assertRuntimeIdentity(pooled, expectedIdentity);
-        }
+        this.assertRuntimeIdentity(pooled, expectedIdentity);
       }
       throwIfRequestAborted();
       const current = this.devices.get(deviceId);
@@ -5548,6 +5733,15 @@ export class DevicePool {
     if (!replacement) {
       throw new ActionableError(unavailableMessage);
     }
+    // An exact-device request names the serial, and the quarantine is precisely
+    // the pool's inability to say which runtime answers on it — so this refuses
+    // rather than falling through to the unavailable message, which would invite
+    // a retry against the same unknown runtime (#6863 review).
+    if (replacement.identityUnresolved === true) {
+      throw new ActionableError(
+        this.describeUnresolvedPooledIdentity(replacement, "Refusing to assign device"),
+      );
+    }
     this.assertRuntimeIdentity(replacement, expectedIdentity);
     await this.assertIdleDeviceAssignable(
       replacement,
@@ -5578,8 +5772,13 @@ export class DevicePool {
     }
 
     return async () => {
+      const wasAutolocked = this.devices.get(previousDeviceId)?.autolockSessionId === sessionId;
       const session = await this.sessionManager.rebindSession(sessionId, deviceId, platform);
       await this.releaseDevice(previousDeviceId, sessionId);
+      const replacement = this.devices.get(deviceId);
+      if (wasAutolocked && replacement?.sessionId === sessionId) {
+        replacement.autolockSessionId = sessionId;
+      }
       return session;
     };
   }
@@ -5602,9 +5801,7 @@ export class DevicePool {
 
   private assertRuntimeIdentity(
     pooled: PooledDevice,
-    expected:
-      | Pick<BootedDevice, "deviceId" | "name" | "platform" | "transportId" | "observedAt">
-      | undefined,
+    expected: Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt"> | undefined,
   ): void {
     if (!expected || this.matchesRuntimeIdentity(pooled, expected)) {
       // A tolerated match is still an opportunity to reconcile: every caller
@@ -5618,21 +5815,532 @@ export class DevicePool {
     }
     throw new ActionableError(
       `Device pool identity mismatch for '${expected.deviceId}': ` +
-        `resolved=[${expected.name} platform=${expected.platform} transportId=${expected.transportId}] ` +
-        `pooled=[${pooled.name} platform=${pooled.platform} transportId=${pooled.transportId}].`,
+        `resolved=[${expected.name} platform=${expected.platform}] ` +
+        `pooled=[${pooled.name} platform=${pooled.platform} incarnation=${pooled.incarnation}].`,
     );
   }
 
+  /**
+   * Whether this pool's entry for a serial describes the runtime a discovery
+   * listing just reported on it — false when there is no entry at all.
+   *
+   * Public because consumers JOIN discovery to pool state by serial alone, and a
+   * serial can be reused by a different runtime before the next refresh. A join
+   * that has not been checked this way must not publish pool-derived epoch
+   * information about the discovered runtime (#6863 review).
+   *
+   * `Unknown (<serial>)` answers this question with NO. The placeholder means
+   * the emulator console did not answer `avd name`, so it is not information:
+   * {@link matchesRuntimeIdentity} tolerates it in the direction that matters
+   * there (it must never evict a live entry), but tolerance is not agreement,
+   * and this predicate exists precisely to gate what gets PUBLISHED about the
+   * discovered runtime. Same rule, both directions: a placeholder is never
+   * evidence of a replacement and never evidence of continuity.
+   */
+  /**
+   * FUNNEL 1 — the ONE way a discovery observation enters the pool's identity
+   * state.
+   *
+   * Every code path that discovers Android devices and then CONSULTS pooled
+   * identity (publishing an epoch, resolving a label, routing a serial, admitting
+   * device-addressed work) must fold its observation in here FIRST. Before this
+   * funnel each such site decided for itself what to do with an
+   * `Unknown (<serial>)` placeholder, so a read that was the first to see one
+   * merely withheld its own output while the pool — and therefore every OTHER
+   * consumer, including the admission gate — carried on trusting the stale label
+   * ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
+   *
+   * It applies exactly the transitions the refresh sweep applies to the entry's
+   * IDENTITY — enter on the placeholder, restore on a matching resolved name,
+   * enter on a disagreeing one — because it shares the sweep's implementation of
+   * them ({@link reconcileObservedPooledIdentity}).
+   *
+   * What it deliberately does NOT do is change pool MEMBERSHIP. Installing a
+   * replacement evicts an incarnation and retires its session, and that belongs to
+   * the paths that own allocation (the refresh sweep and the assignment-time
+   * liveness check), not to a resource read or a stream request. A disagreement
+   * reaching this funnel is therefore quarantined and left for those paths to
+   * settle — which is the same conservative rule the sweep already applies when
+   * its own replacement is deferred behind a shutdown reservation. Quarantining
+   * withholds trust everywhere at once (assignment, tool admission, publishing,
+   * destructive confirmation, stream routing), so nothing acts on the stale label
+   * in the meantime.
+   *
+   * Idempotent and cheap: an observation that already {@link describesPooledRuntime}
+   * transitions nothing and only advances the entry's identity-ordering stamp
+   * ({@link PooledDevice.identityObservedAt}), and serials with no
+   * pool entry, non-Android platforms and handsets (whose serial is never
+   * reassigned) are skipped for the same reason. It takes no lock, because it
+   * changes no membership — only the quarantine flag and the in-flight executions
+   * that flag invalidates — so it is safe to call from a path that may already
+   * hold the assignment mutex.
+   *
+   * Enforced by `test/lint/deviceDiscoveryReconcileFunnel.test.ts`, which fails on
+   * a new direct discovery call site that is not in its allowlist.
+   */
+  async reconcileDiscoveryObservation(
+    devices: readonly BootedDevice[],
+    source: string,
+    options: DiscoveryReconcileOptions = {},
+  ): Promise<void> {
+    for (const device of devices) {
+      if (device.platform !== "android") {
+        continue;
+      }
+      const pooled = this.devices.get(device.deviceId);
+      if (!pooled) {
+        continue;
+      }
+      if (this.describesPooledRuntime(device)) {
+        // Nothing to transition — the observation agrees, carries a resolved name
+        // and the entry is live — but it is still the newest identity evidence
+        // for this entry, and a straggler that lands after it must be ordered
+        // against it rather than quarantining what this observation just proved
+        // ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
+        if (this.hasReusableSerial(pooled)) {
+          this.recordIdentityObservation(pooled, device.observedAt);
+        }
+        continue;
+      }
+      logger.debug(`[DevicePool] Reconciling '${device.name}' on ${device.deviceId} (${source})`);
+      await this.reconcileObservedPooledIdentity(pooled, device, options);
+    }
+  }
+
+  /**
+   * The identity half of folding an observation into a pooled entry, shared by
+   * {@link reconcileDiscoveryObservation} and the refresh sweep so the quarantine
+   * rules cannot drift between them.
+   *
+   * Three outcomes, and only three: the observation agrees and resolves the name
+   * (restore), agrees but carries the placeholder (enter), or disagrees (enter).
+   * Handsets short-circuit inside {@link reconcilePooledIdentityResolution} /
+   * {@link quarantineDisagreeingPooledIdentity}: their serial is never reassigned
+   * and their name is not identity.
+   */
+  private async reconcileObservedPooledIdentity(
+    pooled: PooledDevice,
+    device: Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">,
+    options: DiscoveryReconcileOptions = {},
+  ): Promise<void> {
+    if (this.matchesRuntimeIdentity(pooled, device)) {
+      await this.reconcilePooledIdentityResolution(pooled, device, options);
+      return;
+    }
+    await this.quarantineDisagreeingPooledIdentity(
+      pooled,
+      device,
+      "and the pool cannot install the replacement from this observation",
+      options,
+    );
+  }
+
+  /**
+   * The per-entry body of the refresh sweep, which — unlike
+   * {@link reconcileDiscoveryObservation} — owns pool membership and so installs
+   * the replacement a disagreeing observation calls for. Returns whether the
+   * runtime was REPLACED, which the sweep counts as an add.
+   */
+  private async foldObservationIntoPooledEntry(
+    pooled: PooledDevice,
+    device: BootedDevice,
+    metadataSource: MutableMetadataSource,
+  ): Promise<boolean> {
+    let entry: PooledDevice | undefined = pooled;
+    let runtimeReplaced = false;
+    let replacementDeferred = false;
+    if (!this.matchesRuntimeIdentity(pooled, device)) {
+      runtimeReplaced = await this.replacePooledDeviceForRuntimeIdentity(pooled, device);
+      entry = this.devices.get(device.deviceId);
+      replacementDeferred = !runtimeReplaced && entry === pooled;
+    }
+    if (!entry) {
+      return runtimeReplaced;
+    }
+    entry.iosVersion = device.iosVersion;
+    if (replacementDeferred) {
+      // The entry the pool still holds is the one this observation DISAGREES
+      // with, so neither its metadata nor its identity may be updated from it.
+      await this.quarantineDisagreeingPooledIdentity(
+        entry,
+        device,
+        "and its replacement could not be installed yet",
+      );
+      return runtimeReplaced;
+    }
+    this.applyMutableRuntimeMetadata(entry, device, metadataSource);
+    await this.reconcilePooledIdentityResolution(entry, device);
+    return runtimeReplaced;
+  }
+
+  describesPooledRuntime(expected: Pick<BootedDevice, "deviceId" | "name" | "platform">): boolean {
+    const pooled = this.devices.get(expected.deviceId);
+    if (pooled === undefined || !this.matchesRuntimeIdentity(pooled, expected)) {
+      return false;
+    }
+    // Read the quarantine state, plus this observation's own placeholder: a
+    // caller can reach here with a discovery listing the pool has not folded in
+    // yet, and that listing is the newer evidence of the two.
+    return !pooled.identityUnresolved && !this.hasUnresolvedEmulatorName(expected);
+  }
+
+  /**
+   * Whether the pool has an entry for `deviceId` whose identity is currently
+   * QUARANTINED — see {@link PooledDevice.identityUnresolved}.
+   *
+   * Public because the tool layer refuses serial-addressed work on a quarantined
+   * entry: the serial resolves, but which AVD answers on it does not, and every
+   * destructive or stateful action would be acting on a label the pool can no
+   * longer tie to the runtime ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
+   */
+  isPooledIdentityUnresolved(deviceId: string): boolean {
+    return this.devices.get(deviceId)?.identityUnresolved === true;
+  }
+
+  /**
+   * FUNNEL 2 — the ONE admission gate every device-addressed operation at the
+   * daemon boundary passes, with or without a session.
+   *
+   * Refuses a serial whose pooled identity is QUARANTINED: the serial resolves,
+   * but which AVD answers on it does not, so any action addressed to it would be
+   * acting on a label the pool can no longer tie to the runtime.
+   *
+   * `purpose` completes the refusal ("Refusing `<purpose>` on device '<serial>'"),
+   * so a tap, an observation and a stored-value mutation are all refused in the
+   * same words with the same two facts: the serial, and the label the daemon can
+   * no longer tie to it.
+   *
+   * This exists because the quarantine was first enforced only at
+   * {@link assertSessionReadyForAutomation}, which is keyed on a SESSION. An
+   * explicit-`deviceId` request against an idle quarantined emulator has no
+   * session, so it bypassed the gate entirely and executed against whatever now
+   * answers on the serial. `assertSessionReadyForAutomation` is now one caller of
+   * this gate rather than the gate itself
+   * ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
+   *
+   * A serial with no pool entry passes: the quarantine is a statement about a
+   * pooled entry, and refusing an unpooled serial would break direct-mode and
+   * pre-allocation paths that legitimately address a device the pool never held.
+   *
+   * Reached directly by the pool's own callers, through `DeviceSessionResolver`
+   * by the push servers that already hold one, and through
+   * `DeviceAdmissionGate` (src/daemon/deviceAdmissionGate.ts) by the capture and
+   * recording servers, which hold no pool reference. Authorization is never a
+   * substitute for it: the quarantine deliberately PRESERVES the owning session,
+   * so an authorized subscribe, stream start or recording start still passes and
+   * would act on whichever replacement AVD now answers on the serial
+   * ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
+   *
+   * Enforced by `test/lint/deviceAddressedAdmissionGate.test.ts`, which fails on a
+   * device-addressed socket handler that does not reach this gate.
+   */
+  assertDeviceActionable(deviceId: string, purpose: string): void {
+    const pooled = this.devices.get(deviceId);
+    if (pooled?.identityUnresolved !== true) {
+      return;
+    }
+    throw new ActionableError(
+      this.describeUnresolvedPooledIdentity(pooled, `Refusing ${purpose} on device`),
+    );
+  }
+
+  /**
+   * The single wording for every refusal the quarantine produces, so assignment,
+   * tool execution and their tests all name the same two facts: the serial, and
+   * the label the daemon can no longer tie to the runtime on it.
+   */
+  private describeUnresolvedPooledIdentity(device: PooledDevice, refusal: string): string {
+    return (
+      `${refusal} '${device.id}': this daemon has it recorded as AVD ` +
+      `'${device.avdName ?? device.name}', but discovery could not read the AVD name from the ` +
+      "runtime, so its identity is unresolved. Retry after the next device discovery resolves " +
+      "it, or re-acquire the device."
+    );
+  }
+
+  /**
+   * The quarantine half of the shared assignability gate: an entry that is — or
+   * that the liveness check just made — quarantined is not assignable, and is
+   * reported exactly as a missing device is, so the operation that ENTERS the
+   * quarantine fails at assignment instead of handing back a session that would
+   * then fail every tool at {@link assertSessionReadyForAutomation}
+   * ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
+   */
+  private isPooledDeviceIdentityAssignable(device: PooledDevice): boolean {
+    if (device.identityUnresolved !== true) {
+      return true;
+    }
+    logger.warn(
+      this.describeUnresolvedPooledIdentity(device, "[DevicePool] Cannot hand out device"),
+    );
+    return false;
+  }
+
+  /**
+   * Enter or leave the unresolved-identity quarantine for a live entry a
+   * discovery sweep just observed under a TOLERATED name match.
+   *
+   * Entering: the observation is the `Unknown (<serial>)` placeholder. The entry
+   * stays exactly as it is — same session, same `incarnation` — because the
+   * placeholder is not evidence that the serial was reused; it is only evidence
+   * that the pool can no longer prove it was not.
+   *
+   * Leaving: the observation carries a RESOLVED name. Reaching here at all means
+   * {@link namesAgreeOnIdentity} accepted it, i.e. it is the pooled label (or the
+   * AVD this pool started), which is proof of continuity — so the entry goes back
+   * to live, unchanged. A resolved name that DISAGREES never reaches this method:
+   * {@link matchesRuntimeIdentity} rejects it upstream and the entry is replaced
+   * under a fresh incarnation, retiring the old session exactly as an observed
+   * disappearance does.
+   *
+   * Guarded by {@link hasReusableSerial}: a handset's serial is never reassigned
+   * and its name (`ro.product.model`) is not identity, so there is no continuity
+   * question for the placeholder to leave open.
+   */
+  private async reconcilePooledIdentityResolution(
+    pooled: PooledDevice,
+    discovered: Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">,
+    options: DiscoveryReconcileOptions = {},
+  ): Promise<void> {
+    if (options.namesResolved === false) {
+      return;
+    }
+    if (!this.hasReusableSerial(pooled) || this.isStaleIdentityObservation(pooled, discovered)) {
+      return;
+    }
+    if (this.hasUnresolvedEmulatorName(discovered)) {
+      await this.enterPooledIdentityQuarantine(
+        pooled,
+        "discovery could not read the AVD name, so the pooled identity " +
+          `'${pooled.avdName ?? pooled.name}' can no longer be tied to the runtime`,
+        discovered.observedAt,
+        options,
+      );
+      return;
+    }
+    // The resolved name is the newest identity evidence for this entry whether or
+    // not it is quarantined; recording it on the LIVE path too is what lets a
+    // later straggler be recognised as stale before it quarantines anything.
+    this.recordIdentityObservation(pooled, discovered.observedAt);
+    if (pooled.identityUnresolved !== true) {
+      return;
+    }
+    delete pooled.identityUnresolved;
+    logger.info(
+      `[DevicePool] Lifting the identity quarantine on ${pooled.id}: discovery read ` +
+        `'${discovered.name}'`,
+    );
+  }
+
+  /**
+   * Whether `discovered` is OLDER than the newest identity observation already
+   * folded into this entry — the out-of-order straggler described on
+   * {@link PooledDevice.identityObservedAt}. Only a comparison of two stamped
+   * observations decides it; an unstamped observation on either side is
+   * unorderable and is not treated as stale.
+   *
+   * Asked before BOTH identity transitions, so a straggler can neither lift a
+   * newer quarantine nor quarantine a newer resolution.
+   */
+  private isStaleIdentityObservation(
+    pooled: PooledDevice,
+    discovered: Pick<BootedDevice, "name" | "observedAt">,
+  ): boolean {
+    if (
+      pooled.identityObservedAt === undefined ||
+      discovered.observedAt === undefined ||
+      discovered.observedAt >= pooled.identityObservedAt
+    ) {
+      return false;
+    }
+    logger.debug(
+      `[DevicePool] Ignoring '${discovered.name}' for ${pooled.id}: observation ` +
+        `${discovered.observedAt} is older than the ${pooled.identityObservedAt} identity ` +
+        "observation already folded in",
+    );
+    return true;
+  }
+
+  /**
+   * Advance {@link PooledDevice.identityObservedAt} to the newest stamp seen.
+   * Monotonic: an unstamped or older observation leaves it where it is, so the
+   * entry's ordering evidence can only move forward.
+   */
+  private recordIdentityObservation(pooled: PooledDevice, observedAt?: number): void {
+    if (observedAt !== undefined && observedAt > (pooled.identityObservedAt ?? -Infinity)) {
+      pooled.identityObservedAt = observedAt;
+    }
+  }
+
+  /**
+   * Quarantine a pooled entry a discovery observation DISAGREES with, in the two
+   * cases where the pool cannot install the replacement that disagreement calls
+   * for.
+   *
+   * Case one, the refresh sweep: {@link replacePooledDeviceForRuntimeIdentity}
+   * evicts the old incarnation before adding the discovered runtime, and
+   * {@link evictMissingPooledDevice} DEFERS that eviction while killDevice holds a
+   * shutdown reservation. The refresh then reloads the same old entry, and the
+   * discovered name -- which disagrees with it -- would otherwise reach
+   * {@link reconcilePooledIdentityResolution} and read as proof of continuity.
+   *
+   * Case two, {@link reconcileDiscoveryObservation}: the observation came from a
+   * path that does not own pool membership, so it may not evict an incarnation or
+   * retire its session at all.
+   *
+   * A disagreement is never proof of continuity. The entry is held in quarantine
+   * until the replacement actually installs, which is the only event that retires
+   * the old session and mints the new incarnation
+   * ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
+   */
+  private async quarantineDisagreeingPooledIdentity(
+    pooled: PooledDevice,
+    discovered: Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">,
+    because: string,
+    options: DiscoveryReconcileOptions = {},
+  ): Promise<void> {
+    if (!this.hasReusableSerial(pooled) || this.isStaleIdentityObservation(pooled, discovered)) {
+      return;
+    }
+    await this.enterPooledIdentityQuarantine(
+      pooled,
+      `discovery reports '${discovered.name}' on this serial while the pooled identity is ` +
+        `'${pooled.avdName ?? pooled.name}', ${because}`,
+      discovered.observedAt,
+      options,
+    );
+  }
+
+  /**
+   * Enter the quarantine, once.
+   *
+   * The entry keeps its session and its `incarnation` -- the quarantine
+   * withholds trust, it does not retire the epoch -- but the work already IN
+   * FLIGHT on the bound session is not covered by any admission gate: those
+   * executions are registered and keep issuing serial-addressed operations that
+   * can land on whatever now answers on the serial. So they are cancelled and
+   * drained through the same injected seam the ADB-reset quarantine uses, under
+   * the device-loss reason so each one surfaces a typed `DeviceLostError`
+   * naming the serial ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863)
+   * review).
+   *
+   * The ONE exception is {@link DiscoveryReconcileOptions.excludeExecutionId}:
+   * the execution whose own discovery produced this observation. It is the
+   * operation that is about to act on this evidence -- a session-bound
+   * `killDevice` confirming its target, say -- and cancelling it would make the
+   * funnel defeat the very refusal it exists to enable.
+   */
+  private async enterPooledIdentityQuarantine(
+    pooled: PooledDevice,
+    reason: string,
+    observedAt?: number,
+    options: DiscoveryReconcileOptions = {},
+  ): Promise<void> {
+    // Re-observing the same unresolved runtime advances the evidence a later
+    // lift is ordered against, so a straggler newer than the FIRST placeholder
+    // but older than the latest one cannot lift the quarantine
+    // ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
+    this.recordIdentityObservation(pooled, observedAt);
+    if (pooled.identityUnresolved === true) {
+      return;
+    }
+    pooled.identityUnresolved = true;
+    logger.warn(`[DevicePool] Quarantining ${pooled.id}: ${reason}`);
+    const sessionId = pooled.sessionId;
+    if (!sessionId) {
+      return;
+    }
+    const cancelled = await this.cancelDeviceSessionExecutions(
+      sessionId,
+      deviceLossCancellationReason(pooled.id),
+      // The execution that PRODUCED this observation is the one operation that
+      // must survive it: cancelling it would abort the destructive call that is
+      // about to confirm-or-refuse on this very evidence
+      // ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
+      { excludeExecutionId: options.excludeExecutionId },
+    );
+    if (cancelled > 0) {
+      logger.warn(
+        `[DevicePool] Cancelled ${cancelled} in-flight execution(s) on session ${sessionId} ` +
+          `while quarantining ${pooled.id}`,
+      );
+    }
+  }
+
+  /**
+   * Whether a discovered name is the `Unknown (<serial>)` placeholder rather
+   * than a name read from the runtime. Guarded by {@link isAndroidEmulatorSerial}
+   * because a handset's name is `ro.product.model` and its identity rides on its
+   * globally-unique serial, not on its name.
+   */
+  private hasUnresolvedEmulatorName(
+    expected: Pick<BootedDevice, "deviceId" | "name" | "platform">,
+  ): boolean {
+    return (
+      expected.platform === "android" &&
+      isAndroidEmulatorSerial(expected.deviceId) &&
+      expected.name === unknownAndroidRuntimeName(expected.deviceId)
+    );
+  }
+
+  /**
+   * Whether a discovery observation describes the same runtime as a pooled
+   * entry.
+   *
+   * A discovery listing carries no connection-epoch token, so serial, platform
+   * and name are all there is to compare; the pool's own `incarnation` is the
+   * only epoch boundary, and it is minted when the pool re-creates an entry
+   * (see `daemon/deviceSessionRegistry.ts`). Name handling is delegated to
+   * {@link namesAgreeOnIdentity}.
+   */
   private matchesRuntimeIdentity(
     pooled: PooledDevice,
-    expected: Pick<BootedDevice, "deviceId" | "name" | "platform" | "transportId">,
+    expected: Pick<BootedDevice, "deviceId" | "name" | "platform">,
   ): boolean {
     return (
       pooled.id === expected.deviceId &&
-      (this.hasMutableDisplayName(pooled) || pooled.name === expected.name) &&
       pooled.platform === expected.platform &&
-      (expected.transportId === undefined || pooled.transportId === expected.transportId)
+      this.namesAgreeOnIdentity(pooled, expected)
     );
+  }
+
+  /**
+   * Whether a pooled label and a freshly-discovered name can be the same
+   * runtime.
+   *
+   * Name equality is the rule, with two documented tolerances:
+   *  - a device class whose name is mutable metadata (iOS physical) never
+   *    carries identity in its name at all;
+   *  - `Unknown (<serial>)` is the placeholder Android discovery emits when the
+   *    emulator console could not answer `avd name`. It asserts nothing, so
+   *    reading it as "a different AVD took this serial" would evict a live
+   *    pooled emulator — and its AutoMobile ownership — on a transient console
+   *    read. The tolerance is guarded by {@link isAndroidEmulatorSerial}
+   *    because a handset's name is `ro.product.model`, which is not unique;
+   *    handsets stay on strict name equality behind their unique serial.
+   *
+   * The placeholder tolerance exists ONLY to avoid that eviction. It is not
+   * agreement: {@link reconcilePooledIdentityResolution} quarantines the entry
+   * the moment a sweep tolerates one, and every consumer that would ACT on the
+   * pooled identity reads that state instead of this predicate.
+   */
+  private namesAgreeOnIdentity(
+    pooled: PooledDevice,
+    expected: Pick<BootedDevice, "name">,
+  ): boolean {
+    if (this.hasMutableDisplayName(pooled) || pooled.name === expected.name) {
+      return true;
+    }
+    if (pooled.platform !== "android" || !isAndroidEmulatorSerial(pooled.id)) {
+      return false;
+    }
+    const placeholder = unknownAndroidRuntimeName(pooled.id);
+    if (expected.name === placeholder) {
+      return true;
+    }
+    // The pooled label is the placeholder. Accept a resolved name only when the
+    // AVD this pool started says so — never on the strength of a name alone.
+    return pooled.name === placeholder && pooled.avdName === expected.name;
   }
 
   /**
@@ -5642,6 +6350,34 @@ export class DevicePool {
    */
   private hasMutableDisplayName(pooled: PooledDevice): boolean {
     return hasMutableDisplayName(pooled.platform, pooled.id);
+  }
+
+  /**
+   * Upgrade a pooled emulator still labelled `Unknown (<serial>)` to the AVD
+   * name a later discovery managed to read.
+   *
+   * {@link namesAgreeOnIdentity} tolerates the placeholder in both directions so
+   * an unreadable console never evicts a live entry; without this the tolerated
+   * match would also leave the pooled label stuck on the placeholder, and
+   * name-based pool consumers (DeviceCriteriaMatcher.filterDevices) would never
+   * match the real AVD. Only a name the pool already vouches for through
+   * `avdName` is adopted, so this cannot rename an entry onto a different AVD.
+   */
+  private resolvePlaceholderEmulatorName(
+    pooled: PooledDevice,
+    discovered: Pick<BootedDevice, "name">,
+  ): void {
+    if (
+      pooled.platform !== "android" ||
+      !isAndroidEmulatorSerial(pooled.id) ||
+      pooled.name !== unknownAndroidRuntimeName(pooled.id) ||
+      pooled.avdName === undefined ||
+      pooled.avdName !== discovered.name
+    ) {
+      return;
+    }
+    logger.info(`Device ${pooled.id} resolved its AVD name to '${discovered.name}'`);
+    pooled.name = discovered.name;
   }
 
   /**
@@ -5655,6 +6391,7 @@ export class DevicePool {
     discovered: Pick<BootedDevice, "name" | "observedAt">,
     source: MutableMetadataSource,
   ): void {
+    this.resolvePlaceholderEmulatorName(pooled, discovered);
     if (!this.hasMutableDisplayName(pooled)) {
       return;
     }
@@ -5694,35 +6431,6 @@ export class DevicePool {
       delete pooled.nameObservedAt;
       pooled.nameRefreshGeneration = this.refreshGeneration;
     }
-  }
-
-  private hasTransportOnlyIdentityChange(
-    pooled: PooledDevice,
-    expected: Pick<BootedDevice, "deviceId" | "name" | "platform" | "transportId">,
-  ): boolean {
-    return (
-      pooled.id === expected.deviceId &&
-      pooled.platform === expected.platform &&
-      this.hasSameOrUnknownEmulatorName(pooled, expected) &&
-      !this.matchesRuntimeIdentity(pooled, expected)
-    );
-  }
-
-  private hasSameOrUnknownEmulatorName(
-    pooled: PooledDevice,
-    expected: Pick<BootedDevice, "deviceId" | "name">,
-  ): boolean {
-    if (pooled.name === expected.name) {
-      return true;
-    }
-    if (!pooled.id.startsWith("emulator-")) {
-      return false;
-    }
-    const unknownName = `Unknown (${pooled.id})`;
-    return (
-      expected.name === unknownName ||
-      (pooled.name === unknownName && pooled.avdName === expected.name)
-    );
   }
 
   /**
@@ -5883,6 +6591,9 @@ export class DevicePool {
     this.sessionManager.setDeviceReadiness(sessionId, achievedReadiness);
     if (mcpSessionId) {
       this.mcpSessionAutolockMap.set(mcpSessionId, sessionId);
+      const acquired = this.mcpSessionAcquiredAutolocks.get(mcpSessionId) ?? new Set<string>();
+      acquired.add(sessionId);
+      this.mcpSessionAcquiredAutolocks.set(mcpSessionId, acquired);
     }
     await this.persistAcquiredAutolockSession(device, session, assignmentSnapshot, mcpSessionId);
 
@@ -6073,11 +6784,32 @@ export class DevicePool {
     mcpSessionId: string | undefined,
     platform?: Platform,
     execution?: SessionExecutionMetadata,
+    deviceId?: string,
   ): string | undefined {
     if (!mcpSessionId) {
       return undefined;
     }
 
+    if (platform || deviceId) {
+      const selected = this.resolveAutolockDeviceSelector(
+        mcpSessionId,
+        platform,
+        execution,
+        deviceId,
+      );
+      if (selected || deviceId) {
+        return selected;
+      }
+    }
+
+    return this.resolveLatestAutolockSession(mcpSessionId, platform, execution);
+  }
+
+  private resolveLatestAutolockSession(
+    mcpSessionId: string,
+    platform: Platform | undefined,
+    execution: SessionExecutionMetadata | undefined,
+  ): string | undefined {
     const sessionId = this.mcpSessionAutolockMap.get(mcpSessionId);
     if (!sessionId) {
       return undefined;
@@ -6105,12 +6837,94 @@ export class DevicePool {
     return sessionId;
   }
 
+  private resolveAutolockDeviceSelector(
+    mcpSessionId: string,
+    platform: Platform | undefined,
+    execution: SessionExecutionMetadata | undefined,
+    deviceId: string | undefined,
+  ): string | undefined {
+    const candidates = [...(this.mcpSessionAcquiredAutolocks.get(mcpSessionId) ?? [])].flatMap(
+      (id) => {
+        const session = this.sessionManager.getSessionForNewExecution(id, execution);
+        if (!session) {
+          return [];
+        }
+        const device = this.devices.get(session.assignedDevice);
+        if (device && device.autolockSessionId === id && device.sessionId === id) {
+          return [
+            { sessionId: id, deviceId: device.id, platform: device.platform, recovering: false },
+          ];
+        }
+        // A session detached by a process-wide ADB reset is still owned by this
+        // MCP connection; its device is simply absent from the pool while the
+        // reset is recovered. Dropping it here would let an implicit selector
+        // silently route to the connection's *other* device (#6807).
+        return this.adbServerResetQuarantinedSessions.has(id)
+          ? [
+              {
+                sessionId: id,
+                deviceId: session.assignedDevice,
+                platform: session.platform,
+                recovering: true,
+              },
+            ]
+          : [];
+      },
+    );
+    const matches = candidates.filter(
+      (candidate) =>
+        (!platform || candidate.platform === platform) &&
+        (!deviceId || candidate.deviceId === deviceId),
+    );
+    if (matches.length === 1) {
+      // A lone recovering match is not ambiguous: returning it lets the caller
+      // surface the recovery error for the device the client actually owns.
+      return matches[0].sessionId;
+    }
+    if (candidates.length > 0 && !deviceId) {
+      throw new ActionableError(
+        `Cannot resolve requested platform/deviceId unambiguously. Candidate sessions: ${candidates
+          .map(
+            (candidate) =>
+              `${candidate.sessionId} (${candidate.deviceId}, ${candidate.platform}` +
+              `${candidate.recovering ? ", recovering" : ""})`,
+          )
+          .join(", ")}. Pass an explicit sessionUuid/deviceId.`,
+      );
+    }
+    return undefined;
+  }
+
+  /** Restore retained capabilities without letting an older queued request reset the default. */
+  async restoreAutolockSessionsForMcpSession(
+    sessionIds: readonly string[],
+    mcpSessionId: string,
+  ): Promise<void> {
+    for (const id of sessionIds) {
+      // Nothing left to restore for a session this connection already holds
+      // while it also already has a default. Re-checked each iteration rather
+      // than snapshotted, so an attachment cannot act on a stale reading.
+      if (
+        this.mcpSessionAcquiredAutolocks.get(mcpSessionId)?.has(id) &&
+        this.resolveAutolockSessionForMcpSession(mcpSessionId) !== undefined
+      ) {
+        continue;
+      }
+      // "if-absent" defers the default decision to attach time, under the
+      // assignment mutex. A pre-loop snapshot would be stale by the time the
+      // second attachment runs, letting restoration clobber a `setActiveDevice`
+      // that landed in between (#6807).
+      await this.attachAutolockSessionToMcpSession(id, mcpSessionId, "if-absent");
+    }
+  }
+
   /**
    * Associate a live autolock session with a reconnected MCP client session.
    */
   async attachAutolockSessionToMcpSession(
     sessionId: string,
     mcpSessionId: string | undefined,
+    makeDefault: boolean | "if-absent" = true,
   ): Promise<void> {
     if (!mcpSessionId) {
       return;
@@ -6133,7 +6947,16 @@ export class DevicePool {
         lastUsedAtMs: session.lastUsedAt,
         expiresAtMs: session.expiresAt,
       });
-      this.mcpSessionAutolockMap.set(mcpSessionId, sessionId);
+      if (
+        makeDefault === true ||
+        (makeDefault === "if-absent" &&
+          this.resolveAutolockSessionForMcpSession(mcpSessionId) === undefined)
+      ) {
+        this.mcpSessionAutolockMap.set(mcpSessionId, sessionId);
+      }
+      const acquired = this.mcpSessionAcquiredAutolocks.get(mcpSessionId) ?? new Set<string>();
+      acquired.add(sessionId);
+      this.mcpSessionAcquiredAutolocks.set(mcpSessionId, acquired);
     });
   }
 
@@ -6203,6 +7026,12 @@ export class DevicePool {
   }
 
   private clearMcpAutolockMappings(sessionId: string): void {
+    for (const [mcpSessionId, acquired] of this.mcpSessionAcquiredAutolocks) {
+      acquired.delete(sessionId);
+      if (acquired.size === 0) {
+        this.mcpSessionAcquiredAutolocks.delete(mcpSessionId);
+      }
+    }
     for (const [mcpSessionId, mappedSessionId] of this.mcpSessionAutolockMap) {
       if (mappedSessionId === sessionId) {
         this.mcpSessionAutolockMap.delete(mcpSessionId);
@@ -6281,6 +7110,26 @@ export class DevicePool {
   }
 
   /**
+   * Connection epoch of the pooled device on `deviceId`, or undefined when the
+   * serial is not pooled. The canonical answer for every per-device cache that
+   * must not survive a same-serial reincarnation; see
+   * `utils/deviceIncarnation.ts`.
+   */
+  getDeviceIncarnation(deviceId: string): number | undefined {
+    return this.devices.get(deviceId)?.incarnation;
+  }
+
+  /** Advance the epoch for an already pooled device after a VM restore. */
+  bumpDeviceIncarnation(deviceId: string): boolean {
+    const device = this.devices.get(deviceId);
+    if (!device) {
+      return false;
+    }
+    device.incarnation = this.nextDeviceIncarnation();
+    return true;
+  }
+
+  /**
    * Get device assigned to session
    */
   getDeviceForSession(sessionId: string): PooledDevice | null {
@@ -6309,6 +7158,12 @@ export class DevicePool {
     // session; execution cancellation only happens later in retirement, so this
     // is the gate that closes that window (see #5494, follow-up to #5452/#5491).
     const assignedDeviceId = this.sessionManager.getSession(sessionId)?.assignedDevice;
+    // The session addresses its device BY SERIAL, so this path is just the
+    // session-keyed spelling of a device-addressed operation and goes through
+    // FUNNEL 2 like every other one (#6863 review).
+    if (assignedDeviceId) {
+      this.assertDeviceActionable(assignedDeviceId, "to run");
+    }
     if (assignedDeviceId && this.isDeviceUnderShutdown(assignedDeviceId)) {
       throw new ActionableError(
         `Session '${sessionId}' is bound to device '${assignedDeviceId}', which is shutting down. ` +
@@ -6538,6 +7393,12 @@ export class DevicePool {
           .track(() => this.installedAppsRepository.clearDeviceSession(deviceId))
           .then(() => undefined),
       );
+      // The device has left the pool for good, so forget its per-device
+      // cache-coherence bookkeeping now that the final invalidation above has
+      // drained — otherwise the coordinator retains a generation entry for every
+      // device id the daemon ever saw (#6704). releaseDevice is generation-safe:
+      // a rebuild that predates it cannot commit, and a reused serial starts clean.
+      await getInstalledAppsCacheWriteCoordinator().releaseDevice(deviceId);
       logger.info(`[DevicePool] Cleared installed apps cache for device ${deviceId}`);
     } catch (error) {
       logger.warn(`Failed to clear device session cache for ${deviceId}: ${error}`);

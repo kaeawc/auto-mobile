@@ -5128,6 +5128,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         } else {
           @Suppress("DEPRECATION") packageManager.getInstalledPackages(0)
         }
+      // Launchability comes from ONE batched MAIN/LAUNCHER query rather than a
+      // per-package getLaunchIntentForPackage, which would accept MAIN/INFO and
+      // disagree with the adb fallback for the same install (#6924 review).
+      val launchablePackages = launchablePackageNames(packageManager)
       val records = mutableListOf<dev.jasonpearson.automobile.protocol.InstalledPackageRecord>()
       for (info in infos) {
         val isSystem =
@@ -5137,12 +5141,23 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         val versionCode =
           if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) info.longVersionCode
           else @Suppress("DEPRECATION") info.versionCode.toLong()
+        // The same batched MAIN/LAUNCHER query that establishes launchability also carries the
+        // label shown by launchers. Its helper falls back safely when an app disappears mid-list.
+        val label =
+          preferredInstalledPackageLabel(
+            info.packageName,
+            info.applicationInfo,
+            launchablePackages,
+            packageManager,
+          )
         records.add(
           dev.jasonpearson.automobile.protocol.InstalledPackageRecord(
             packageName = info.packageName,
             isSystem = isSystem,
             versionName = info.versionName,
             versionCode = versionCode,
+            label = label,
+            launchable = launchablePackages?.packageNames?.contains(info.packageName),
           )
         )
       }

@@ -1,3 +1,20 @@
+/**
+ * killDevice identity + termination-primitive contract.
+ *
+ * The kill is unconditionally the serial-scoped emulator console kill
+ * `adb -s <serial> emu kill`. That is the only termination that lets the
+ * emulator write its quick-boot snapshot on exit (#6849), and `adb emu`
+ * selects only via `-s`/ANDROID_SERIAL, so serial scoping is also what keeps
+ * the kill unambiguous with several emulators attached (#6845).
+ *
+ * Transport ids are deliberately NOT used anywhere in the kill path. The
+ * former `-t <id> get-serialno` pre-check — a defense against a replacement
+ * emulator inheriting the serial between the discovery snapshot and the kill —
+ * has been removed by maintainer decision: it cost an extra adb round trip on
+ * every teardown, and callers already confirm disappearance and incarnation.
+ * Tests whose premise was that transport verification have been removed with
+ * it; do not reintroduce them.
+ */
 import { expect, test } from "bun:test";
 import { AdbClient } from "../../../src/utils/android-cmdline-tools/AdbClient";
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
@@ -11,7 +28,6 @@ const original: BootedDevice = {
   name: "Pixel_8",
   platform: "android",
   deviceId: "emulator-5554",
-  transportId: "1",
 };
 
 function execResult(stdout: string) {
@@ -24,149 +40,43 @@ function execResult(stdout: string) {
   };
 }
 
-function fixture(observed: BootedDevice, transportSerial: string = observed.deviceId!) {
+function fixture(observed: BootedDevice) {
   const adb = new FakeAdbExecutor();
   adb.setDevices([observed]);
   adb.setCommandResponse("emu avd name", execResult(`${observed.name}\nOK\n`));
-  adb.setCommandResponse("get-serialno", execResult(`${transportSerial}\n`));
   const factory = new FakeAdbClientFactory(adb);
   const client = new AndroidEmulatorClient(null, null, new FakeTimer(), factory);
   return { client, adb, factory };
 }
 
 /**
- * `adb emu` ignores `-t`, so no executed command may ever combine them: with a
- * second emulator attached such an invocation fails with "more than one
- * emulator detected; use -s" and the emulator survives (issue #6845).
+ * No executed command may ever reach for a transport id, a transport-to-serial
+ * resolution, or a guest power-off: `adb emu` ignores `-t`, and `shell reboot
+ * -p` skips the quick-boot snapshot (#6849, #6845).
  */
-function expectNoTransportScopedEmuCommand(argv: string[][]) {
+function expectNoTransportOrRebootCommand(argv: string[][]) {
   for (const args of argv) {
-    expect(args.includes("-t") && args.includes("emu")).toBe(false);
+    expect(args).not.toContain("-t");
+    expect(args).not.toContain("get-serialno");
+    expect(args).not.toContain("reboot");
   }
 }
 
-for (const replacement of [
-  { ...original, name: "Pixel_9", transportId: "2" },
-  { ...original, transportId: "2" },
-  { ...original, name: "Pixel_9" },
-  { ...original, transportId: undefined },
-]) {
-  test(`refuses replacement ${replacement.name} transport ${replacement.transportId}`, async () => {
-    const { client, adb } = fixture(replacement);
-    await expect(client.killDevice(original)).rejects.toThrow("identity");
-    expect(adb.getExecutedCommands().some((command) => command.endsWith("emu kill"))).toBe(false);
-    expectNoTransportScopedEmuCommand(adb.getExecutedArgv());
-  });
-}
-
-test("verifies the checked transport resolves to the serial, then terminates through it", async () => {
-  const { client, adb, factory } = fixture(original);
-  await expect(client.killDevice(original)).resolves.toMatchObject(original);
-
-  const argv = adb.getExecutedArgv();
-  const serialCheckIndex = argv.findIndex((args) => args.join(" ") === "-t 1 get-serialno");
-  const killIndex = argv.findIndex((args) => args.join(" ") === "-t 1 shell reboot -p");
-  expect(serialCheckIndex).toBeGreaterThanOrEqual(0);
-  expect(killIndex).toBeGreaterThan(serialCheckIndex);
-  expectNoTransportScopedEmuCommand(argv);
-  // Nothing reselects the emulator by its reusable serial.
-  expect(argv.some((args) => args.join(" ").endsWith("emu kill"))).toBe(false);
-  expect(factory.getCalls().at(-1)?.device).toBeNull();
-});
-
-test("refuses the kill when the checked transport now resolves to a different serial", async () => {
-  const { client, adb } = fixture(original, "emulator-5556");
-  await expect(client.killDevice(original)).rejects.toThrow("identity");
-  expect(adb.getExecutedCommands().some((command) => command.endsWith("emu kill"))).toBe(false);
-  expectNoTransportScopedEmuCommand(adb.getExecutedArgv());
-});
-
-test("unknown expected transport permits a matching cold-boot AVD and binds to its discovered transport", async () => {
-  const { client, adb } = fixture(original);
-  await client.killDevice({ ...original, transportId: undefined });
-  expect(adb.getExecutedArgv()).toContainEqual(["-t", "1", "get-serialno"]);
-  expect(adb.getExecutedArgv()).toContainEqual(["-t", "1", "shell", "reboot", "-p"]);
-  expectNoTransportScopedEmuCommand(adb.getExecutedArgv());
-  expect(adb.getExecutedCommands().some((command) => command.endsWith("emu kill"))).toBe(false);
-});
-
-test("matching legacy discovery without transport still allows ordinary termination", async () => {
-  const legacy = { ...original, transportId: undefined };
-  const { client, adb, factory } = fixture(legacy);
-  await client.killDevice(legacy);
-  // No discovered transport to bind to, so the legacy serial-scoped console
-  // kill stays the only available primitive.
-  expect(adb.getExecutedCommands()).toContain("emu kill");
-  expect(adb.getExecutedCommands().some((command) => command.includes("get-serialno"))).toBe(false);
-  expect(factory.getCalls().at(-1)?.device?.deviceId).toBe(original.deviceId);
-});
-
-for (const replacedBeforeDispatch of [false, true]) {
-  test(`real ADB builder terminates through the checked transport; replacement=${replacedBeforeDispatch}`, async () => {
-    const commands: string[][] = [];
-    let transportSerial = "emulator-5554";
-    let replacementKilled = false;
-    const timer = new FakeTimer();
-    const factory: AdbClientFactory = {
-      create: (device) =>
-        new AdbClient(
-          device ?? null,
-          async (_file: string, args: string[], _maxBuffer?: number) => {
-            commands.push(args);
-            let stdout = "";
-            if (args.join(" ") === "devices -l") {
-              stdout = "List of devices attached\nemulator-5554 device transport_id:1\n";
-            } else if (args.slice(-3).join(" ") === "emu avd name") {
-              stdout = "Pixel_8\nOK\n";
-              if (replacedBeforeDispatch) {
-                // The serial was reused by a replacement emulator that also
-                // inherited transport 1.
-                transportSerial = "emulator-5556";
-              }
-            } else if (args.at(-1) === "get-serialno") {
-              stdout = `${transportSerial}\n`;
-            } else if (
-              args.slice(-2).join(" ") === "emu kill" ||
-              args.slice(-3).join(" ") === "shell reboot -p"
-            ) {
-              replacementKilled = transportSerial !== "emulator-5554";
-            }
-            return {
-              stdout,
-              stderr: "",
-              toString: () => stdout,
-              trim: () => stdout.trim(),
-              includes: (part: string) => stdout.includes(part),
-            };
-          },
-          null,
-          undefined,
-          timer,
-        ),
-    };
-    const client = new AndroidEmulatorClient(null, null, timer, factory);
-    if (replacedBeforeDispatch) {
-      await expect(client.killDevice(original)).rejects.toThrow("identity");
-    } else {
-      await expect(client.killDevice(original)).resolves.toMatchObject(original);
-    }
-    expect(commands.filter((args) => args.slice(-2).join(" ") === "emu kill")).toEqual([]);
-    expect(commands.filter((args) => args.slice(-3).join(" ") === "shell reboot -p")).toEqual(
-      replacedBeforeDispatch ? [] : [["-t", "1", "shell", "reboot", "-p"]],
-    );
-    expectNoTransportScopedEmuCommand(commands);
-    expect(replacementKilled).toBe(false);
-  });
-}
-
-test("does not terminate a replacement that inherits the serial after the transport check", async () => {
+/**
+ * Builds a real {@link AdbClient} over a recording executor so the assertions
+ * see the exact argv adb would receive, including the `-s <serial>` prefix the
+ * client adds for a device-scoped call.
+ */
+function recordingFactory(attached: string[]): {
+  factory: AdbClientFactory;
+  commands: string[][];
+  timer: FakeTimer;
+} {
   const commands: string[][] = [];
-  // adb never reuses a transport id, so a replacement that inherits the serial
-  // arrives on a new transport and transport 1 stops resolving.
-  let transportOneSerial: string | null = "emulator-5554";
-  let serialOwner: "original" | "replacement" = "original";
-  let replacementTerminated = false;
   const timer = new FakeTimer();
+  const deviceLines = attached
+    .map((serial, index) => `${serial} device transport_id:${index + 1}\n`)
+    .join("");
   const factory: AdbClientFactory = {
     create: (device) =>
       new AdbClient(
@@ -175,22 +85,9 @@ test("does not terminate a replacement that inherits the serial after the transp
           commands.push(args);
           let stdout = "";
           if (args.join(" ") === "devices -l") {
-            stdout = "List of devices attached\nemulator-5554 device transport_id:1\n";
-          } else if (args[0] === "-t" && transportOneSerial === null) {
-            throw new Error(`error: transport id ${args[1]} not found`);
+            stdout = `List of devices attached\n${deviceLines}`;
           } else if (args.slice(-3).join(" ") === "emu avd name") {
             stdout = "Pixel_8\nOK\n";
-          } else if (args.at(-1) === "get-serialno") {
-            stdout = `${transportOneSerial}\n`;
-            // The checked emulator exits right after the check and a different
-            // emulator inherits serial emulator-5554 on a fresh transport.
-            transportOneSerial = null;
-            serialOwner = "replacement";
-          } else if (
-            args.slice(-2).join(" ") === "emu kill" ||
-            args.slice(-3).join(" ") === "shell reboot -p"
-          ) {
-            replacementTerminated = serialOwner === "replacement";
           }
           return {
             stdout,
@@ -205,9 +102,273 @@ test("does not terminate a replacement that inherits the serial after the transp
         timer,
       ),
   };
+  return { factory, commands, timer };
+}
+
+test("never issues a transport-scoped, serial-resolving or reboot command in the kill path", async () => {
+  const { client, adb } = fixture(original);
+  await expect(client.killDevice(original)).resolves.toMatchObject(original);
+  expectNoTransportOrRebootCommand(adb.getExecutedArgv());
+});
+
+test("dispatches the kill serial-scoped through the discovered emulator", async () => {
+  const { client, adb, factory } = fixture(original);
+  await expect(client.killDevice(original)).resolves.toMatchObject(original);
+  expect(adb.getExecutedCommands().some((command) => command.endsWith("emu kill"))).toBe(true);
+  // The console client is built from the discovered emulator, so AdbClient
+  // prefixes `-s <serial>` — never `-t` (#6845).
+  expect(factory.getCalls().at(-1)?.device?.deviceId).toBe(original.deviceId);
+});
+
+test("the real ADB builder emits exactly `-s <serial> emu kill`", async () => {
+  const { factory, commands, timer } = recordingFactory(["emulator-5554"]);
   const client = new AndroidEmulatorClient(null, null, timer, factory);
-  await expect(client.killDevice(original)).rejects.toThrow();
-  expect(replacementTerminated).toBe(false);
-  // Nothing destructive was reselected by the reusable serial.
+  await expect(client.killDevice(original)).resolves.toMatchObject({
+    deviceId: "emulator-5554",
+  });
+  expect(commands.filter((args) => args.slice(-2).join(" ") === "emu kill")).toEqual([
+    ["-s", "emulator-5554", "emu", "kill"],
+  ]);
+  expectNoTransportOrRebootCommand(commands);
+});
+
+test("with two booted emulators each kill selects only its own serial", async () => {
+  const { factory, commands, timer } = recordingFactory(["emulator-5554", "emulator-5556"]);
+  const client = new AndroidEmulatorClient(null, null, timer, factory);
+
+  await client.killDevice({ ...original, deviceId: "emulator-5554" });
+  expect(commands.filter((args) => args.slice(-2).join(" ") === "emu kill")).toEqual([
+    ["-s", "emulator-5554", "emu", "kill"],
+  ]);
+
+  await client.killDevice({ ...original, deviceId: "emulator-5556" });
+  expect(commands.filter((args) => args.slice(-2).join(" ") === "emu kill")).toEqual([
+    ["-s", "emulator-5554", "emu", "kill"],
+    ["-s", "emulator-5556", "emu", "kill"],
+  ]);
+  expectNoTransportOrRebootCommand(commands);
+});
+
+test("terminates through the graceful console kill so the quick-boot snapshot is saved (#6849)", async () => {
+  // A guest `shell reboot -p` powers the OS off without letting the emulator
+  // write its quick-boot snapshot, so the next quick-boot of the AVD resumes
+  // into a halted guest that never comes adb-online. killDevice must use the
+  // emulator console `emu kill`, which saves the snapshot on exit.
+  const { client, adb } = fixture(original);
+  await expect(client.killDevice(original)).resolves.toMatchObject(original);
+  expect(adb.getExecutedCommands().some((command) => command.includes("reboot -p"))).toBe(false);
+  expect(adb.getExecutedCommands().some((command) => command.endsWith("emu kill"))).toBe(true);
+});
+
+test("refuses a discovered replacement AVD on the expected serial", async () => {
+  const { client, adb } = fixture({ ...original, name: "Pixel_9" });
+  await expect(client.killDevice(original)).rejects.toThrow("identity");
+  expect(adb.getExecutedCommands().some((command) => command.endsWith("emu kill"))).toBe(false);
+  expectNoTransportOrRebootCommand(adb.getExecutedArgv());
+});
+
+// Two unknowns are not an equality. When the requested target's name is the
+// `Unknown (<serial>)` placeholder AND the fresh discovery reports the same
+// placeholder, the check above passes on nothing: neither side names an AVD, so
+// a replacement emulator that also cannot name itself would be killed under the
+// previous occupant's request
+// ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
+test("refuses when both the requested and the discovered name are the placeholder", async () => {
+  const placeholder: BootedDevice = {
+    ...original,
+    name: "Unknown (emulator-5554)",
+  };
+  const { client, adb } = fixture(placeholder);
+  await expect(client.killDevice(placeholder)).rejects.toThrow(/could not name itself/);
+  expect(adb.getExecutedCommands().some((command) => command.endsWith("emu kill"))).toBe(false);
+});
+
+test("refuses when the expected emulator is no longer running", async () => {
+  const { client, adb } = fixture({ ...original, deviceId: "emulator-5556" });
+  await expect(client.killDevice(original)).rejects.toThrow("is not running");
+  expect(adb.getExecutedCommands().some((command) => command.endsWith("emu kill"))).toBe(false);
+});
+
+test("an adb listing that still reports transport_id does not affect the kill identity", () => {
+  // `adb devices -l` keeps printing a `transport_id:` column; discovery no
+  // longer parses it, and the kill identity is serial + AVD name + platform.
+  const { client, adb } = fixture(original);
+  return (async () => {
+    await expect(client.killDevice(original)).resolves.toMatchObject({
+      deviceId: original.deviceId,
+    });
+    expect(adb.getExecutedCommands().some((command) => command.endsWith("emu kill"))).toBe(true);
+    expectNoTransportOrRebootCommand(adb.getExecutedArgv());
+  })();
+});
+
+// `force` (#6864) carries the caller's "act on whatever occupies this serial"
+// contract down to the platform kill. It bypasses ONLY the duplicate name
+// comparison -- the deviceTools layer has already decided not to establish an
+// identity -- and leaves serial selection and the `emu kill` primitive exactly
+// as they are.
+test("force kills a discovered replacement AVD on the expected serial", async () => {
+  const { client, adb, factory } = fixture({ ...original, name: "Pixel_9" });
+  // The checked target comes back under the placeholder: a forced discovery is
+  // serial-only, so no runtime was asked to name itself. That is the honest
+  // answer, and downstream both `isSameBootedDeviceIdentity` and
+  // `isConfirmedDeviceReplacement` read the placeholder as no information
+  // rather than as an identity.
+  await expect(client.killDevice(original, { force: true })).resolves.toMatchObject({
+    deviceId: "emulator-5554",
+    name: "Unknown (emulator-5554)",
+  });
+  expect(adb.getExecutedCommands().some((command) => command.endsWith("emu kill"))).toBe(true);
+  expect(factory.getCalls().at(-1)?.device?.deviceId).toBe(original.deviceId);
+  expectNoTransportOrRebootCommand(adb.getExecutedArgv());
+});
+
+test("force kills when both the requested and the discovered name are the placeholder", async () => {
+  const placeholder: BootedDevice = {
+    ...original,
+    name: "Unknown (emulator-5554)",
+  };
+  const { client, adb } = fixture(placeholder);
+  await expect(client.killDevice(placeholder, { force: true })).resolves.toMatchObject({
+    deviceId: "emulator-5554",
+  });
+  expect(adb.getExecutedCommands().some((command) => command.endsWith("emu kill"))).toBe(true);
+});
+
+test("force kills when the request carries a pooled label the discovery cannot confirm", async () => {
+  // The teardown path rewrites the target's name to the pooled AVD label before
+  // the kill, so a wedged console produces label-vs-placeholder here.
+  const { client, adb } = fixture({ ...original, name: "Unknown (emulator-5554)" });
+  await expect(client.killDevice(original, { force: true })).resolves.toMatchObject({
+    deviceId: "emulator-5554",
+  });
+  expect(adb.getExecutedCommands().some((command) => command.endsWith("emu kill"))).toBe(true);
+});
+
+test("force still refuses when the expected emulator is no longer running", async () => {
+  // Serial selection is not an identity check: with nothing on the serial there
+  // is nothing for "kill whatever occupies this serial" to act on.
+  const { client, adb } = fixture({ ...original, deviceId: "emulator-5556" });
+  await expect(client.killDevice(original, { force: true })).rejects.toThrow("is not running");
+  expect(adb.getExecutedCommands().some((command) => command.endsWith("emu kill"))).toBe(false);
+});
+
+test("force does not cross platforms", async () => {
+  const { client, adb } = fixture(original);
+  await expect(
+    client.killDevice({ ...original, platform: "ios" } as BootedDevice, { force: true }),
+  ).rejects.toThrow("identity");
+  expect(adb.getExecutedCommands().some((command) => command.endsWith("emu kill"))).toBe(false);
+});
+
+test("an unforced kill is unchanged by the new option", async () => {
+  const { client, adb } = fixture({ ...original, name: "Pixel_9" });
+  await expect(client.killDevice(original, { force: false })).rejects.toThrow("identity");
+  expect(adb.getExecutedCommands().some((command) => command.endsWith("emu kill"))).toBe(false);
+});
+
+/**
+ * The per-emulator AVD-name probe budget inside
+ * `getBootedDevicesWithDiagnostics`. A wedged console spends all of it and
+ * answers nothing.
+ */
+const AVD_NAME_PROBE_BUDGET_MS = 2000;
+
+/**
+ * Every attached emulator has a wedged console: `emu avd name` (and the
+ * `getprop` fallback) burn their whole budget and then fail. `setCurrentTime`
+ * moves the clock without firing the client's own pending timeouts, so the cost
+ * is charged exactly the way a stalled adb round trip charges it.
+ */
+function wedgedConsoleFactory(attached: string[]): {
+  factory: AdbClientFactory;
+  commands: string[][];
+  timer: FakeTimer;
+} {
+  const commands: string[][] = [];
+  const timer = new FakeTimer();
+  const deviceLines = attached
+    .map((serial, index) => `${serial} device transport_id:${index + 1}\n`)
+    .join("");
+  const factory: AdbClientFactory = {
+    create: (device) =>
+      new AdbClient(
+        device ?? null,
+        async (_file: string, args: string[], _maxBuffer?: number) => {
+          commands.push(args);
+          const joined = args.join(" ");
+          if (joined === "devices -l") {
+            const stdout = `List of devices attached\n${deviceLines}`;
+            return {
+              stdout,
+              stderr: "",
+              toString: () => stdout,
+              trim: () => stdout.trim(),
+              includes: (part: string) => stdout.includes(part),
+            };
+          }
+          if (joined.includes("avd name") || joined.includes("ro.boot.qemu.avd_name")) {
+            timer.setCurrentTime(timer.now() + AVD_NAME_PROBE_BUDGET_MS);
+            throw new Error("emulator console did not respond");
+          }
+          return {
+            stdout: "",
+            stderr: "",
+            toString: () => "",
+            trim: () => "",
+            includes: () => false,
+          };
+        },
+        null,
+        undefined,
+        timer,
+      ),
+  };
+  return { factory, commands, timer };
+}
+
+function nameProbes(commands: string[][]): string[][] {
+  return commands.filter((args) => {
+    const joined = args.join(" ");
+    return joined.includes("avd name") || joined.includes("ro.boot.qemu.avd_name");
+  });
+}
+
+// The force flag is worthless if the discovery that precedes it spends the
+// caller's whole deadline on the very probes force exists to skip: with three
+// wedged consoles the sequential enrichment alone costs 6s, so a 5s forced
+// teardown never reaches `emu kill`
+// ([#6874](https://github.com/kaeawc/auto-mobile/pull/6874) review).
+test("a forced kill dispatches within its deadline with several wedged consoles", async () => {
+  const { factory, commands, timer } = wedgedConsoleFactory([
+    "emulator-5554",
+    "emulator-5556",
+    "emulator-5558",
+  ]);
+  const client = new AndroidEmulatorClient(null, null, timer, factory);
+  const startedAt = timer.now();
+
+  await client.killDevice(original, { force: true });
+
+  expect(nameProbes(commands)).toEqual([]);
+  expect(timer.now() - startedAt).toBeLessThan(5000);
+  expect(commands.filter((args) => args.slice(-2).join(" ") === "emu kill")).toEqual([
+    ["-s", "emulator-5554", "emu", "kill"],
+  ]);
+});
+
+test("an unforced kill still enriches discovery with the AVD-name probe", async () => {
+  const { factory, commands, timer } = wedgedConsoleFactory([
+    "emulator-5554",
+    "emulator-5556",
+    "emulator-5558",
+  ]);
+  const client = new AndroidEmulatorClient(null, null, timer, factory);
+  const startedAt = timer.now();
+
+  await expect(client.killDevice(original)).rejects.toThrow(/identity|could not name itself/);
+
+  expect(nameProbes(commands).length).toBe(3);
+  expect(timer.now() - startedAt).toBe(3 * AVD_NAME_PROBE_BUDGET_MS);
   expect(commands.some((args) => args.slice(-2).join(" ") === "emu kill")).toBe(false);
 });

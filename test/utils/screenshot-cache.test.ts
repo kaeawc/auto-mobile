@@ -72,3 +72,40 @@ describe("ScreenshotCache", function () {
     expect(refreshed.buffer.equals(buffer2)).toBe(true);
   });
 });
+
+describe("ScreenshotCache.getScreenshotFiles", function () {
+  let tempDir: string;
+
+  beforeEach(async function () {
+    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "screenshot-files-"));
+  });
+
+  afterEach(async function () {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  });
+
+  test("includes .jpg captures written by the Android CtrlProxy path", async function () {
+    await fs.writeFile(path.join(tempDir, "screenshot_1.jpg"), RED_PNG);
+
+    const files = await ScreenshotCache.getScreenshotFiles(tempDir);
+
+    expect(files.map((f) => path.basename(f))).toEqual(["screenshot_1.jpg"]);
+  });
+
+  test("includes every extension TakeScreenshot can write and excludes others", async function () {
+    await fs.writeFile(path.join(tempDir, "a.png"), RED_PNG);
+    await fs.writeFile(path.join(tempDir, "b.jpg"), RED_PNG);
+    await fs.writeFile(path.join(tempDir, "c.jpeg"), RED_PNG);
+    await fs.writeFile(path.join(tempDir, "d.webp"), RED_PNG);
+    await fs.writeFile(path.join(tempDir, "notes.txt"), RED_PNG);
+
+    const files = await ScreenshotCache.getScreenshotFiles(tempDir);
+
+    expect(files.map((f) => path.basename(f)).sort()).toEqual([
+      "a.png",
+      "b.jpg",
+      "c.jpeg",
+      "d.webp",
+    ]);
+  });
+});

@@ -1,10 +1,10 @@
 import type { Kysely } from "kysely";
-import { getDatabase, ensureMigrations } from "./database";
+import { getDatabase } from "./database";
 import type { Database, InstalledApp as DbInstalledApp, NewInstalledApp } from "./types";
 
 export interface InstalledAppsStore {
-  getLatestVerification(deviceId: string): Promise<number | null>;
-  getLatestVerificationForProfile(deviceId: string, userId: number): Promise<number | null>;
+  getCacheVerifiedAt(deviceId: string): Promise<number | null>;
+  getProfileCacheVerifiedAt(deviceId: string, userId: number): Promise<number | null>;
   listInstalledApps(deviceId: string): Promise<DbInstalledApp[]>;
   replaceInstalledApps(deviceId: string, apps: NewInstalledApp[]): Promise<void>;
   upsertInstalledApp(
@@ -35,19 +35,31 @@ export class InstalledAppsRepository implements InstalledAppsStore {
     this.db = db ?? null;
   }
 
-  private async getDb(): Promise<Kysely<Database>> {
-    if (this.db) {
-      return this.db;
-    }
-    await ensureMigrations();
-    return getDatabase();
+  // Migration gating is owned by startup (ensureMigrations) plus the app dialect
+  // first-query gate (waitForMigrationsBeforeQuery, #6703); a repository helper
+  // must NOT await ensureMigrations itself. Resolve the injected executor, else
+  // the singleton, synchronously.
+  private getDb(): Kysely<Database> {
+    return this.db ?? getDatabase();
   }
 
-  async getLatestVerification(deviceId: string): Promise<number | null> {
+  /**
+   * Point in time from which the device's WHOLE cached row set is known
+   * verified, i.e. the MINIMUM `last_verified_at` across its rows.
+   *
+   * A full rebuild (`replaceInstalledApps`) stamps every row with the same
+   * timestamp, so min == max there. Single-row writes do not: `upsertInstalledApp`
+   * is driven by CtrlProxy package broadcasts and touches exactly one
+   * (device, user, package) row. Taking the MAXIMUM would let one such write
+   * make an otherwise hours-old row set look freshly verified, so its TTL
+   * would be extended and stale rows served (issue #6639). The minimum is the
+   * only aggregate that describes the row set a cache read actually returns.
+   */
+  async getCacheVerifiedAt(deviceId: string): Promise<number | null> {
     const db = await this.getDb();
     const row = await db
       .selectFrom("installed_apps")
-      .select(db.fn.max<number>("last_verified_at").as("last_verified_at"))
+      .select(db.fn.min<number>("last_verified_at").as("last_verified_at"))
       .where("device_id", "=", deviceId)
       .executeTakeFirst();
 
@@ -58,11 +70,12 @@ export class InstalledAppsRepository implements InstalledAppsStore {
     return Number(row.last_verified_at);
   }
 
-  async getLatestVerificationForProfile(deviceId: string, userId: number): Promise<number | null> {
+  /** Per-profile counterpart of {@link getCacheVerifiedAt} (same MIN semantics). */
+  async getProfileCacheVerifiedAt(deviceId: string, userId: number): Promise<number | null> {
     const db = await this.getDb();
     const row = await db
       .selectFrom("installed_apps")
-      .select(db.fn.max<number>("last_verified_at").as("last_verified_at"))
+      .select(db.fn.min<number>("last_verified_at").as("last_verified_at"))
       .where("device_id", "=", deviceId)
       .where("user_id", "=", userId)
       .executeTakeFirst();
@@ -90,6 +103,12 @@ export class InstalledAppsRepository implements InstalledAppsStore {
     });
   }
 
+  /**
+   * Patches a single (device, user, package) row from a CtrlProxy package
+   * broadcast. This verifies only the row it touches — device-wide freshness
+   * is read with {@link getCacheVerifiedAt}, which is deliberately a MINIMUM so
+   * this write cannot vouch for rows it never looked at (issue #6639).
+   */
   async upsertInstalledApp(
     deviceId: string,
     userId: number,

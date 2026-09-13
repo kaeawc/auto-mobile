@@ -83,6 +83,7 @@ const SWIFT_REQUEST_TYPES = [
   "set_network_mock_rules",
   "set_network_fault_rules",
   "set_network_error_simulation",
+  "get_sdk_capabilities",
   "execute_sql",
   "list_databases",
   "storage_capabilities",

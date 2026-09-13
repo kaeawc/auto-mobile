@@ -9,7 +9,11 @@ import {
 } from "./socketServer/index";
 import type { ObserveResult, Platform, ViewHierarchyResult } from "../models";
 import type { StorageChangedEvent } from "../features/storage/storageTypes";
-import { type DeviceSessionResolver, nullDeviceSessionResolver } from "./deviceSessionResolver";
+import {
+  type DeviceSessionResolver,
+  nullDeviceSessionResolver,
+  SuspendedDeviceRoutingLog,
+} from "./deviceSessionResolver";
 import type { DeviceSessionRecord } from "./deviceSessionRegistry";
 import { DEVICE_DATA_STREAM_SOCKET_CONFIG } from "./daemonFiles";
 import type { ScreenshotMetadata } from "../features/observe/ScreenshotMetadata";
@@ -319,7 +323,7 @@ interface StorageSubscriptionState {
 // legitimately wait up to 15s for a fresh hierarchy. Keep this wrapper timeout
 // above that so slow-but-valid iOS captures are not reported as stream errors
 // before the platform observe path has its allotted time to complete.
-const DEFAULT_OBSERVATION_REQUEST_TIMEOUT_MS = 20_000;
+export const DEFAULT_OBSERVATION_REQUEST_TIMEOUT_MS = 20_000;
 const DEFAULT_SCREENSHOT_INTERVAL_MS = 3000;
 const DEFAULT_HIERARCHY_INTERVAL_MS = 1000;
 const MIN_SCREENSHOT_INTERVAL_MS = 250;
@@ -363,6 +367,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     return this.currentFrameContexts.get(deviceId);
   }
   private deviceSessionResolver: DeviceSessionResolver = nullDeviceSessionResolver;
+  private readonly suspendedRoutingLog = new SuspendedDeviceRoutingLog();
   private onSubscriberConnected: OnSubscriberConnectedCallback | null = null;
   private onScreenshotCadenceChanged: OnScreenshotCadenceChangedCallback | null = null;
   private onHierarchyCadenceChanged: OnHierarchyCadenceChangedCallback | null = null;
@@ -404,11 +409,30 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
   }
 
   /**
+   * Whether frames attributed to this serial must be dropped because the pool's
+   * entry for it is quarantined — see
+   * {@link DeviceSessionResolver.isRoutingSuspended}. Logged once per quarantine,
+   * not once per frame.
+   */
+  private isDeviceRoutingSuspended(deviceId: string): boolean {
+    return this.suspendedRoutingLog.shouldDropFrame(
+      this.deviceSessionResolver,
+      deviceId,
+      "DeviceDataStream",
+    );
+  }
+
+  /**
    * Stamp a device-attributed frame with the live `deviceSessionUuid` for its
    * serial and push it, routing on that uuid. A serial with no live epoch resolves
-   * to `null`, reaching only all-device subscribers.
+   * to `null`, reaching only all-device subscribers; a serial whose pooled identity
+   * is quarantined reaches nobody, because the serial is the only attribution the
+   * frame has and it is exactly what is in doubt (#6863 review).
    */
   private pushForDevice(deviceId: string, message: DeviceDataStreamMessage): number {
+    if (this.isDeviceRoutingSuspended(deviceId)) {
+      return 0;
+    }
     const deviceSessionUuid = this.deviceSessionResolver.resolveUuid(deviceId);
     return this.pushToSubscribers({
       message: { ...message, deviceSessionUuid },
@@ -624,6 +648,9 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     navigationGraph: NavigationGraphStreamData,
     deviceId: string | null,
   ): void {
+    if (deviceId !== null && this.isDeviceRoutingSuspended(deviceId)) {
+      return;
+    }
     const deviceSessionUuid = deviceId ? this.deviceSessionResolver.resolveUuid(deviceId) : null;
     const message: DeviceDataStreamMessage = {
       type: "navigation_update",
@@ -925,90 +952,9 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     }
 
     // Handle per-file storage (un)subscription: register/release a device-side content observer so
-    // external writes to a key/value store emit storage_update frames. The acknowledgement follows
-    // the device-side result, so the desktop can safely reconcile its snapshot after registration.
+    // external writes to a key/value store emit storage_update frames.
     if (request.command === "subscribe_storage" || request.command === "unsubscribe_storage") {
-      const subscribe = request.command === "subscribe_storage";
-      const { packageName, fileName } = request;
-      if (!packageName || !fileName) {
-        const errorResponse: SubscriptionResponse = {
-          id: request.id,
-          type: "error",
-          success: false,
-          error: `${request.command} requires packageName and fileName`,
-        };
-        this.sendJson(socket, errorResponse);
-        return;
-      }
-
-      let storageDeviceSessionUuid: string | null;
-      try {
-        // JSON parsing does not validate fields at runtime; reject a malformed key
-        // before it can quietly resolve to a null (all-device) target.
-        storageDeviceSessionUuid = this.parseDeviceSessionUuid(request.deviceSessionUuid);
-      } catch (error) {
-        const errorResponse: SubscriptionResponse = {
-          id: request.id,
-          type: "error",
-          success: false,
-          error: errorMessage(error),
-        };
-        this.sendJson(socket, errorResponse);
-        return;
-      }
-
-      // Resolve the target device from the pane's session/serial, mirroring request_observation.
-      // A supplied-but-unresolvable session UUID must NOT fall through to a null (all-device)
-      // target: daemon.ts treats null as every device, so a stale/unknown UUID would otherwise
-      // register or release the content observer on every Android device and still ack success.
-      // Reject it exactly as the `subscribe` path does; a missing UUID stays an intentional
-      // device-scoped-by-serial request.
-      const storageDeviceId =
-        storageDeviceSessionUuid === null
-          ? (request.deviceId ?? null)
-          : this.deviceSessionResolver.resolveDeviceId(storageDeviceSessionUuid);
-      if (storageDeviceSessionUuid !== null && storageDeviceId === null) {
-        const errorResponse: SubscriptionResponse = {
-          id: request.id,
-          type: "error",
-          success: false,
-          error: `deviceSessionUuid '${storageDeviceSessionUuid}' does not identify a live device session`,
-        };
-        this.sendJson(socket, errorResponse);
-        return;
-      }
-
-      // The CtrlProxy observer is keyed by serial/package/file, not by the session epoch. A
-      // reconnecting pane receives a new session UUID for the same serial; keeping UUIDs in this
-      // ownership key lets the retired pane's teardown unregister the refreshed pane's observer.
-      const key = `${storageDeviceId ?? "all"}:${packageName}:${fileName}`;
-      const storageRequest = { deviceId: storageDeviceId, packageName, fileName, subscribe };
-      try {
-        if (subscribe) {
-          await this.subscribeStorageForSocket(socket, key, storageRequest);
-        } else {
-          await this.unsubscribeStorageForSocket(socket, key, storageRequest);
-        }
-      } catch (error) {
-        logger.warn(
-          `[DeviceDataStream] Error handling ${request.command} for ${packageName}/${fileName}: ${errorMessage(error)}`,
-        );
-        const errorResponse: SubscriptionResponse = {
-          id: request.id,
-          type: "error",
-          success: false,
-          error: errorMessage(error),
-        };
-        this.sendJson(socket, errorResponse);
-        return;
-      }
-
-      const response: SubscriptionResponse = {
-        id: request.id,
-        type: "subscription_response",
-        success: true,
-      };
-      this.sendJson(socket, response);
+      await this.handleStorageSubscriptionRequest(socket, request);
       return;
     }
 
@@ -1415,19 +1361,6 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     return this.parseClampedIntervalMs(value, MIN_HIERARCHY_INTERVAL_MS, MAX_HIERARCHY_INTERVAL_MS);
   }
 
-  private parseDeviceSessionUuid(value: unknown): string | null {
-    if (value === undefined || value === null) {
-      return null;
-    }
-    if (typeof value !== "string") {
-      throw new Error("deviceSessionUuid must be a string or null");
-    }
-    if (value.trim().length === 0) {
-      throw new Error("deviceSessionUuid must not be blank");
-    }
-    return value;
-  }
-
   private parseClampedIntervalMs(
     value: unknown,
     minIntervalMs: number,
@@ -1484,6 +1417,119 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     }
   }
 
+  /**
+   * Register or release a device-side content observer for one key/value file, so
+   * external writes to it emit `storage_update` frames. The acknowledgement follows
+   * the device-side result, so the desktop can safely reconcile its snapshot after
+   * registration.
+   */
+  private async handleStorageSubscriptionRequest(
+    socket: Socket,
+    request: {
+      id?: string;
+      command: string;
+      deviceId?: string;
+      deviceSessionUuid?: string;
+      packageName?: string;
+      fileName?: string;
+    },
+  ): Promise<void> {
+    const subscribe = request.command === "subscribe_storage";
+    const { packageName, fileName } = request;
+    if (!packageName || !fileName) {
+      this.sendJson(socket, {
+        id: request.id,
+        type: "error",
+        success: false,
+        error: `${request.command} requires packageName and fileName`,
+      } satisfies SubscriptionResponse);
+      return;
+    }
+
+    let storageDeviceId: string | null;
+    try {
+      storageDeviceId = this.resolveStorageTargetDeviceId(request, subscribe);
+    } catch (error) {
+      this.sendJson(socket, {
+        id: request.id,
+        type: "error",
+        success: false,
+        error: errorMessage(error),
+      } satisfies SubscriptionResponse);
+      return;
+    }
+
+    // The CtrlProxy observer is keyed by serial/package/file, not by the session epoch. A
+    // reconnecting pane receives a new session UUID for the same serial; keeping UUIDs in this
+    // ownership key lets the retired pane's teardown unregister the refreshed pane's observer.
+    const key = `${storageDeviceId ?? "all"}:${packageName}:${fileName}`;
+    const storageRequest = { deviceId: storageDeviceId, packageName, fileName, subscribe };
+    try {
+      if (subscribe) {
+        await this.subscribeStorageForSocket(socket, key, storageRequest);
+      } else {
+        await this.unsubscribeStorageForSocket(socket, key, storageRequest);
+      }
+    } catch (error) {
+      logger.warn(
+        `[DeviceDataStream] Error handling ${request.command} for ${packageName}/${fileName}: ${errorMessage(error)}`,
+      );
+      this.sendJson(socket, {
+        id: request.id,
+        type: "error",
+        success: false,
+        error: errorMessage(error),
+      } satisfies SubscriptionResponse);
+      return;
+    }
+
+    this.sendJson(socket, {
+      id: request.id,
+      type: "subscription_response",
+      success: true,
+    } satisfies SubscriptionResponse);
+  }
+
+  /**
+   * The serial a storage (un)subscription targets, or null for an all-device
+   * request. Throws the message the caller reports verbatim.
+   *
+   * A supplied-but-unresolvable session UUID must NOT fall through to a null
+   * (all-device) target: daemon.ts treats null as every device, so a stale or
+   * unknown UUID would otherwise register or release the content observer on every
+   * Android device and still ack success. A missing UUID stays an intentional
+   * device-scoped-by-serial request.
+   *
+   * FUNNEL 2 for that raw-serial form: the session-keyed form resolves through
+   * `resolveDeviceId`, which already withholds a quarantined serial, while the raw
+   * one skips that resolution entirely — and registering an observer on a serial
+   * the pool can no longer tie to a runtime observes whichever AVD now answers
+   * ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review). Teardown is
+   * exempt: refusing it would strand the observer this daemon registered, and
+   * releasing it touches only bookkeeping the quarantine does not question.
+   */
+  private resolveStorageTargetDeviceId(
+    request: { deviceId?: string; deviceSessionUuid?: string },
+    subscribe: boolean,
+  ): string | null {
+    // JSON parsing does not validate fields at runtime; reject a malformed key
+    // before it can quietly resolve to a null (all-device) target.
+    const deviceSessionUuid = this.parseDeviceSessionUuid(request.deviceSessionUuid);
+    const deviceId =
+      deviceSessionUuid === null
+        ? (request.deviceId ?? null)
+        : this.deviceSessionResolver.resolveDeviceId(deviceSessionUuid);
+    if (deviceSessionUuid !== null && deviceId === null) {
+      throw new Error(
+        `deviceSessionUuid '${deviceSessionUuid}' does not identify a live device session`,
+      );
+    }
+    if (subscribe && deviceId !== null) {
+      this.deviceSessionResolver.assertDeviceActionable(deviceId, "to watch stored values");
+    }
+    return deviceId;
+  }
+
   private async handleObservationRequest(
     socket: Socket,
     request: { id?: string; deviceId?: string },
@@ -1500,6 +1546,15 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     }
 
     try {
+      // FUNNEL 2, BEFORE observing. A device-specific request names the serial,
+      // and the quarantine is precisely the pool's inability to say which runtime
+      // answers on it. Without this the handler observed the unknown runtime,
+      // `pushForDevice` then dropped every frame because routing is suspended,
+      // and the requester was acknowledged `success: true` with no hierarchy
+      // ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
+      if (request.deviceId !== undefined) {
+        this.deviceSessionResolver.assertDeviceActionable(request.deviceId, "to observe");
+      }
       const frameContextGenerationsAtStart = new Map(this.frameContextGenerations);
       const observations = await this.requestObservationWithTimeout({
         deviceId: request.deviceId ?? null,
@@ -1509,28 +1564,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
         throw new Error("Observation request did not capture any devices");
       }
 
-      // Push valid hierarchies independently so that, for all-device requests,
-      // healthy devices still receive a refresh even when another device has no
-      // hierarchy (e.g. accessibility/CtrlProxy unavailable). Failures are
-      // collected and surfaced in the response rather than aborting the batch.
-      const failures: string[] = [];
-      for (const { deviceId, observation } of observations) {
-        const hierarchy = observation.viewHierarchy;
-        if (!hierarchy) {
-          failures.push(this.describeMissingHierarchy(deviceId, observation));
-          continue;
-        }
-        if (
-          (this.frameContextGenerations.get(deviceId) ?? 0) !==
-          (frameContextGenerationsAtStart.get(deviceId) ?? 0)
-        ) {
-          logger.debug(
-            `[DeviceDataStream] Skipped stale explicit observation for ${deviceId}; a newer hierarchy arrived`,
-          );
-          continue;
-        }
-        this.pushHierarchyUpdate(deviceId, hierarchy, hierarchy.frameContext);
-      }
+      const failures = this.pushObservedHierarchies(observations, frameContextGenerationsAtStart);
 
       if (failures.length > 0) {
         // Healthy devices already received their hierarchy_update pushes above;
@@ -1561,6 +1595,51 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
       };
       this.sendJson(socket, errorResponse);
     }
+  }
+
+  /**
+   * Push each observed hierarchy independently and return the per-device
+   * failures, so that for an all-device request a healthy device still receives
+   * its refresh even when another device produced nothing. Failures are surfaced
+   * in the response rather than aborting the batch.
+   *
+   * A device whose pooled identity is quarantined is one of those failures: FUNNEL
+   * 2 cannot preflight an all-device request, which names no serial, and
+   * `pushForDevice` would drop that serial's frames because routing is suspended —
+   * delivering nothing while the requester is acknowledged `success: true`, the
+   * same false acknowledgement the device-specific form was fixed for
+   * ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
+   */
+  private pushObservedHierarchies(
+    observations: readonly RequestedObservation[],
+    frameContextGenerationsAtStart: ReadonlyMap<string, number>,
+  ): string[] {
+    const failures: string[] = [];
+    for (const { deviceId, observation } of observations) {
+      if (this.deviceSessionResolver.isRoutingSuspended(deviceId)) {
+        failures.push(
+          `Observation request failed for ${deviceId}: its pooled AVD identity is unresolved, ` +
+            "so there is no routing identity to attribute the hierarchy to",
+        );
+        continue;
+      }
+      const hierarchy = observation.viewHierarchy;
+      if (!hierarchy) {
+        failures.push(this.describeMissingHierarchy(deviceId, observation));
+        continue;
+      }
+      if (
+        (this.frameContextGenerations.get(deviceId) ?? 0) !==
+        (frameContextGenerationsAtStart.get(deviceId) ?? 0)
+      ) {
+        logger.debug(
+          `[DeviceDataStream] Skipped stale explicit observation for ${deviceId}; a newer hierarchy arrived`,
+        );
+        continue;
+      }
+      this.pushHierarchyUpdate(deviceId, hierarchy, hierarchy.frameContext);
+    }
+    return failures;
   }
 
   private describeMissingHierarchy(deviceId: string, observation: ObserveResult): string {

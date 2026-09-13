@@ -33,6 +33,7 @@ import {
   invalidateInstalledAppResourceCache,
   notifyInstalledAppResourceUpdated,
   queryInstalledApps,
+  type AppsQueryResourceContent,
   type AppsQueryType,
 } from "./appResources";
 import { logger } from "../utils/logger";
@@ -65,6 +66,48 @@ export function setListAppsToolDependencies(deps: Partial<ListAppsToolDependenci
 
 export function resetListAppsToolDependencies(): void {
   listAppsToolDependencies = null;
+}
+
+export interface LaunchAppExecutor {
+  execute(
+    appId: string,
+    clearAppData?: boolean,
+    coldBoot?: boolean,
+    activityName?: string,
+    userId?: number,
+    skipUiStability?: boolean,
+    signal?: AbortSignal,
+  ): Promise<LaunchAppResult>;
+}
+
+// Injection seam for the launchApp handler (mirrors the terminateApp/crashApp
+// dependency seams in this file). Lets a unit test exercise the REGISTERED
+// handler wiring with a fake LaunchApp, so the already-foreground response shape
+// is covered by a test rather than only the response builder (issue #6868).
+export interface LaunchAppToolDependencies {
+  createLaunchApp(device: BootedDevice): LaunchAppExecutor;
+}
+
+let launchAppToolDependencies: LaunchAppToolDependencies | null = null;
+
+function getLaunchAppToolDependencies(): LaunchAppToolDependencies {
+  if (!launchAppToolDependencies) {
+    launchAppToolDependencies = {
+      createLaunchApp: (device) => new LaunchApp(device),
+    };
+  }
+  return launchAppToolDependencies;
+}
+
+export function setLaunchAppToolDependencies(deps: Partial<LaunchAppToolDependencies>): void {
+  const currentDeps = getLaunchAppToolDependencies();
+  launchAppToolDependencies = {
+    createLaunchApp: deps.createLaunchApp ?? currentDeps.createLaunchApp,
+  };
+}
+
+export function resetLaunchAppToolDependencies(): void {
+  launchAppToolDependencies = null;
 }
 
 export interface TerminateAppExecutor {
@@ -209,14 +252,21 @@ function buildLaunchMessage(
   appId: string,
   verified: boolean | undefined,
   verifyFailureReason: LaunchVerificationFailureReason | undefined,
+  alreadyForeground: boolean | undefined,
 ): string {
+  // An app that was already foreground was never launched — say so rather than
+  // claiming a launch that did not happen (issue #6868). The verification suffix
+  // is unchanged: it describes the observed end state either way.
+  const lead = alreadyForeground
+    ? `App ${appId} was already in the foreground`
+    : `Launched app ${appId}`;
   if (verified === true) {
-    return `Launched app ${appId} (foreground verified)`;
+    return `${lead} (foreground verified)`;
   }
   if (verifyFailureReason) {
-    return `Launched app ${appId} (verification failed: ${launchVerificationFailureMessage(verifyFailureReason)})`;
+    return `${lead} (verification failed: ${launchVerificationFailureMessage(verifyFailureReason)})`;
   }
-  return `Launched app ${appId}`;
+  return lead;
 }
 
 /**
@@ -281,7 +331,7 @@ export function buildLaunchAppResponse(appId: string, result: LaunchAppResult) {
   const verified = isVerified ? true : verifyFailureReason ? false : undefined;
 
   return {
-    message: buildLaunchMessage(appId, verified, verifyFailureReason),
+    message: buildLaunchMessage(appId, verified, verifyFailureReason, result.alreadyForeground),
     verified,
     ...(verifyFailureReason ? { verifyFailureReason } : {}),
     observedAppId,
@@ -291,11 +341,19 @@ export function buildLaunchAppResponse(appId: string, result: LaunchAppResult) {
 }
 
 // Schema definitions
+// #6613: these app schemas advertised `additionalProperties: false` but were
+// not `.strict()`, so an undeclared caller argument (e.g. `installApp{userId}`,
+// which this tool does not support) was silently dropped and the call ran
+// against the auto-detected user instead of failing. `withAppIdAliases` runs its
+// `z.preprocess` alias normalization before these schemas parse, so documented
+// aliases still work under strict mode (same precedent as launchApp).
 export const packageNameSchema = withAppIdAliases(
   addDeviceTargetingToSchema(
-    z.object({
-      appId: z.string(),
-    }),
+    z
+      .object({
+        appId: z.string(),
+      })
+      .strict(),
   ),
 );
 
@@ -304,18 +362,22 @@ export const packageNameSchema = withAppIdAliases(
 // observation defaults to the compact skeleton, opt-out-able via raw/project.
 export const terminateAppSchema = withAppIdAliases(
   addDeviceTargetingToSchema(
-    z.object({
-      appId: z.string(),
-      ...responseShapeControlFields,
-    }),
+    z
+      .object({
+        appId: z.string(),
+        ...responseShapeControlFields,
+      })
+      .strict(),
   ),
 );
 
 export const crashAppSchema = withAppIdAliases(
   addDeviceTargetingToSchema(
-    z.object({
-      appId: z.string().trim().min(1),
-    }),
+    z
+      .object({
+        appId: z.string().trim().min(1),
+      })
+      .strict(),
   ),
 );
 
@@ -362,20 +424,24 @@ export const launchAppSchema = withAppIdAliases(
 );
 
 export const installAppSchema = addDeviceTargetingToSchema(
-  z.object({
-    artifactPath: z.string().describe("App artifact path (.apk, .app, or .ipa)"),
-  }),
+  z
+    .object({
+      artifactPath: z.string().describe("App artifact path (.apk, .app, or .ipa)"),
+    })
+    .strict(),
 );
 
 export const uninstallAppSchema = withAppIdAliases(
   addDeviceTargetingToSchema(
-    z.object({
-      appId: z.string(),
-      keepData: z
-        .boolean()
-        .optional()
-        .describe("Keep app data after uninstall (Android only, default false)"),
-    }),
+    z
+      .object({
+        appId: z.string(),
+        keepData: z
+          .boolean()
+          .optional()
+          .describe("Keep app data after uninstall (Android only, default false)"),
+      })
+      .strict(),
   ),
 );
 
@@ -511,32 +577,44 @@ export const resetKeychainSchema = withAppIdAliases(
   ),
 );
 
+// #6613: `listApps` advertises `additionalProperties: false` in tools/list, so
+// its runtime schema must reject undeclared arguments too. Without `.strict()`
+// a call such as `listApps({ appId: "com.example" })` had the unsupported
+// filter silently dropped and returned the full unfiltered listing.
 export const listAppsSchema = addDeviceTargetingToSchema(
-  z.object({
-    type: z
-      .enum(["user", "system", "all"])
-      .optional()
-      .describe(
-        "Filter by app type. Defaults to 'user', EXCEPT on a physical iOS device where " +
-          "user/system classification is unavailable (devicectl reports no such signal there): " +
-          "on such a device an omitted type returns every app (reported as 'all'), and an " +
-          "explicit 'user' or 'system' filter is rejected rather than silently honored.",
-      ),
-    search: z
-      .string()
-      .optional()
-      .describe(
-        "Filter by a case-insensitive substring of the package name/bundle id. Also matches " +
-          "the app's display name where the platform reports one (iOS only today — Android's " +
-          "listing does not include app labels).",
-      ),
-    profile: z
-      .number()
-      .int()
-      .min(0)
-      .optional()
-      .describe("Filter to apps visible to this user profile id."),
-  }),
+  z
+    .object({
+      type: z
+        .enum(["launchable", "user", "system", "all"])
+        .optional()
+        .describe(
+          "Filter by app type. Defaults to 'launchable': every app with a launcher entry point, " +
+            "user-installed or preinstalled, so the apps a human names (Contacts, Clock, Settings) " +
+            "are visible while content providers and RRO overlays are not. 'user' and 'system' " +
+            "keep their meaning and must be asked for explicitly; 'all' returns every installed " +
+            "package. The default degrades to 'user' when the device reports no launchability " +
+            "signal, and an explicit 'launchable' is then rejected rather than silently empty. " +
+            "On a physical iOS device, where user/system classification is unavailable (devicectl " +
+            "reports no such signal), an omitted type returns every app (reported as 'all') and an " +
+            "explicit 'user' or 'system' filter is rejected rather than silently honored.",
+        ),
+      search: z
+        .string()
+        .optional()
+        .describe(
+          "Filter by a case-insensitive substring of the package name/bundle id or of the app's " +
+            "display label ('contacts' matches both com.android.contacts and an app labelled " +
+            "Contacts). Android labels require the installed CtrlProxy APK; without it only the " +
+            "package name is matched.",
+        ),
+      profile: z
+        .number()
+        .int()
+        .min(0)
+        .optional()
+        .describe("Filter to apps visible to this user profile id."),
+    })
+    .strict(),
 );
 
 export interface ListAppsArgs {
@@ -627,6 +705,59 @@ export const setAppPermissionsHandler = async (
   return wholeOperationFailed ? { ...response, isError: true as const } : response;
 };
 
+/**
+ * Says which filters were applied and how many apps they hid. The previous
+ * message reported only the surviving count, so a default-filtered listing
+ * looked like the device's whole inventory and a client had to guess that `type`
+ * had other values (#6798). `search` and `profile` narrow the result too, so the
+ * hidden count is attributed to every active filter and the `type:"all"` advice
+ * is offered only when `type` is the one that actually hid something — advising
+ * it after `type:"all", search:"contacts"` would name an already-active filter
+ * that cannot restore anything (#6798 review).
+ */
+export function describeListAppsResult(
+  deviceId: string,
+  content: Pick<
+    AppsQueryResourceContent,
+    "totalCount" | "installedCount" | "query" | "launchabilityUnknownProfiles"
+  >,
+): string {
+  const found = `Found ${content.totalCount} app(s) on ${deviceId}`;
+  const unknownProfiles = content.launchabilityUnknownProfiles ?? [];
+  const unknownNote =
+    unknownProfiles.length > 0
+      ? ` (launchability is unknown for profile(s) ${unknownProfiles.join(", ")}, so the ` +
+        "launchable filter could not judge their apps)"
+      : "";
+  const hidden = content.installedCount - content.totalCount;
+  if (hidden <= 0) {
+    return `${found}${unknownNote}`;
+  }
+
+  const effectiveType = content.query.type ?? "launchable";
+  const typeNarrowed = effectiveType !== "all";
+  const activeFilters: string[] = [];
+  if (typeNarrowed) {
+    activeFilters.push(`type=${effectiveType}`);
+  }
+  if (content.query.search) {
+    activeFilters.push(`search="${content.query.search}"`);
+  }
+  if (content.query.profile !== undefined) {
+    activeFilters.push(`profile=${content.query.profile}`);
+  }
+
+  const filterClause = activeFilters.length > 0 ? `${activeFilters.join(", ")}; ` : "";
+  // Only actionable when type is the sole narrowing filter: otherwise the
+  // remaining filters would still hide those packages.
+  const advice =
+    typeNarrowed && activeFilters.length === 1 ? ' — pass type:"all" to include them' : "";
+  return (
+    `${found} (${filterClause}${hidden} of ${content.installedCount} installed package(s) hidden ` +
+    `by the active filter(s)${advice})${unknownNote}`
+  );
+}
+
 // Register tools
 export function registerAppTools() {
   const listAppsHandler = async (device: BootedDevice, args: ListAppsArgs) => {
@@ -641,7 +772,7 @@ export function registerAppTools() {
       });
 
       return toolResponseFormatter.createJSONToolResponse({
-        message: `Found ${content.totalCount} app(s) on ${device.deviceId}`,
+        message: describeListAppsResult(device.deviceId, content),
         ...content,
       });
     } catch (error) {
@@ -658,7 +789,7 @@ export function registerAppTools() {
   ) => {
     try {
       signal?.throwIfAborted();
-      const launchApp = new LaunchApp(device);
+      const launchApp = getLaunchAppToolDependencies().createLaunchApp(device);
       const result = await launchApp.execute(
         args.appId,
         args.clearAppData ?? false,
@@ -870,7 +1001,7 @@ export function registerAppTools() {
   // Register with the tool registry
   ToolRegistry.registerDeviceAware(
     "launchApp",
-    "Launch app by package name",
+    "Launch app by package name. On Android an app that is already in the foreground returns success with alreadyForeground:true plus the observation, not an error; iOS re-launches it and returns an ordinary success without that marker.",
     launchAppSchema,
     launchAppHandler,
     { defaultEnabled: true },
@@ -934,7 +1065,11 @@ export function registerAppTools() {
 
   ToolRegistry.registerDeviceAware(
     "listApps",
-    "List installed apps on a device. Filters by type (default: user), search, and profile.",
+    "List installed apps on a device, with optional display label and launchable fields when " +
+      "reported by the platform or transport. The label is typically omitted on Android when " +
+      "the installed CtrlProxy APK lacks label support; launchable is typically omitted for " +
+      "physical iOS/devicectl records. Filters by type (default: launchable — every app with a launcher entry point, " +
+      "preinstalled ones included), search (package name or label), and profile.",
     listAppsSchema,
     listAppsHandler,
     {

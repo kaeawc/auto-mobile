@@ -240,7 +240,7 @@ describe("proxy server session ownership errors", () => {
       await client.callTool({ name: "getApple", arguments: {} });
       await client.callTool({
         name: "observe",
-        arguments: { deviceId: "ios-simulator-1" },
+        arguments: {},
       });
 
       expect(originalClient.callToolCalls).toEqual([{ toolName: "getApple", params: {} }]);
@@ -248,7 +248,7 @@ describe("proxy server session ownership errors", () => {
         { toolName: "getApple", params: {} },
         {
           toolName: "observe",
-          params: { deviceId: "ios-simulator-1", sessionUuid: "replacement-session" },
+          params: { sessionUuid: "replacement-session" },
         },
       ]);
     } finally {

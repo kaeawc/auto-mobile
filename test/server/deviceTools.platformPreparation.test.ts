@@ -22,7 +22,10 @@ import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { DeviceBootTimeoutError } from "../../src/utils/deviceBootService";
-import type { VirtualDeviceLifecycleCoordinator } from "../../src/utils/virtualDeviceLifecycleCoordinator";
+import type {
+  VirtualDeviceLifecycleCoordinator,
+  VirtualDeviceLifecycleLease,
+} from "../../src/utils/virtualDeviceLifecycleCoordinator";
 
 describe("platform device preparation tools", () => {
   let deviceUtils: FakeDeviceUtils;
@@ -156,7 +159,6 @@ describe("platform device preparation tools", () => {
       platform: "android",
       name: "Pixel_9_API_36",
       deviceId: "emulator-5562",
-      transportId: "17",
     };
     deviceUtils.setBootedDevices("android", [emulator]);
     matcher.setBootedResult(emulator);
@@ -172,8 +174,29 @@ describe("platform device preparation tools", () => {
       avdName: "Pixel_9_API_36",
       adbSerial: "emulator-5562",
       emulatorConsolePort: 5562,
-      adbTransportId: "17",
     });
+  });
+
+  test("getAndroid reports Android API and release metadata from its selected AVD image", async () => {
+    const emulator: BootedDevice = {
+      platform: "android",
+      name: "Pixel_9_API_36",
+      deviceId: "emulator-5562",
+    };
+    const image = {
+      platform: "android" as const,
+      name: emulator.name,
+      isRunning: true,
+      apiLevel: 36,
+      osVersion: "16",
+    };
+    deviceUtils.setDeviceImages("android", [image]);
+    deviceUtils.setBootedDevices("android", [emulator]);
+    matcher.setBootedResult(emulator);
+
+    const result = await callTool("getAndroid", { avdName: emulator.name });
+
+    expect(result.deviceIdentity).toMatchObject({ apiLevel: 36, osVersion: "16" });
   });
 
   test("getApple accepts only a simulator UDID and returns its simulator identity", async () => {
@@ -337,6 +360,53 @@ describe("platform device preparation tools", () => {
     });
   });
 
+  test("getAndroid validates an avdName and serial pair after its startup lease", async () => {
+    const emulator: BootedDevice = {
+      platform: "android",
+      name: "Pixel_A",
+      deviceId: "emulator-5556",
+    };
+    const image: DeviceInfo = {
+      platform: "android",
+      name: emulator.name,
+      isRunning: false,
+      source: "local",
+    };
+    sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      deviceUtils,
+      new DefaultRetryExecutor(timer),
+    );
+    await pool.addDevice(emulator, image);
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    deviceUtils.setDeviceImages("android", [image]);
+    deviceUtils.setBootedDevices("android", []);
+    const detached = await pool.detachAdbServerResetCohort([pool.getDevice(emulator.deviceId)!]);
+
+    const preparation = callTool("getAndroid", {
+      avdName: emulator.name,
+      deviceId: emulator.deviceId,
+    });
+
+    try {
+      for (let attempt = 0; attempt < 50; attempt++) {
+        await Promise.resolve();
+      }
+      deviceUtils.setBootedDevices("android", [emulator]);
+      await pool.releaseAdbServerResetCohortReservations(detached.devices);
+
+      await expect(preparation).resolves.toMatchObject({
+        deviceIdentity: { avdName: emulator.name, adbSerial: emulator.deviceId },
+      });
+    } finally {
+      await pool.releaseAdbServerResetCohortReservations(detached.devices);
+    }
+  });
+
   test("getAndroid rejects contradictory avdName and deviceId instead of silently preferring one", async () => {
     const emulator: BootedDevice = {
       platform: "android",
@@ -352,6 +422,50 @@ describe("platform device preparation tools", () => {
 
     expect(failure).toBeInstanceOf(ActionableError);
     expect((failure as ActionableError).message).toContain("identifier_conflict");
+    // The conflict is decided from a discovery sweep, so no device is booted
+    // (and then killed) only to report it.
+    expect(deviceUtils.wasMethodCalled("startDevice")).toBe(false);
+  });
+
+  test("getAndroid rejects a stopped AVD paired with a foreign running serial before booting", async () => {
+    // avdName names a stopped AVD; the requested serial is running a different
+    // AVD. The pair is contradictory without booting anything, so the old
+    // post-boot recheck (which cold-booted Pixel_A and killed it) is wrong here.
+    deviceUtils.setDeviceImages("android", [
+      { platform: "android", name: "Pixel_A", isRunning: false, source: "local" },
+    ]);
+    deviceUtils.setBootedDevices("android", [
+      { platform: "android", name: "Pixel_B", deviceId: "emulator-5556" },
+    ]);
+
+    const failure = await callTool("getAndroid", {
+      avdName: "Pixel_A",
+      deviceId: "emulator-5556",
+    }).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(ActionableError);
+    expect((failure as ActionableError).message).toContain("identifier_conflict");
+    expect((failure as ActionableError).message).toContain("Pixel_B");
+    expect(deviceUtils.wasMethodCalled("startDevice")).toBe(false);
+  });
+
+  test("getAndroid rejects an avdName paired with a serial that is not running before booting", async () => {
+    // Neither identifier maps to a running device: the serial is absent from
+    // discovery. That is still a contradiction the caller must resolve, decided
+    // before any boot.
+    deviceUtils.setDeviceImages("android", [
+      { platform: "android", name: "Pixel_C", isRunning: false, source: "local" },
+    ]);
+
+    const failure = await callTool("getAndroid", {
+      avdName: "Pixel_C",
+      deviceId: "emulator-5599",
+    }).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(ActionableError);
+    expect((failure as ActionableError).message).toContain("identifier_conflict");
+    expect((failure as ActionableError).message).toContain("not running");
+    expect(deviceUtils.wasMethodCalled("startDevice")).toBe(false);
   });
 
   test("getApple rejects contradictory udid and deviceId instead of silently preferring one", () => {
@@ -438,6 +552,106 @@ describe("platform device preparation tools", () => {
       avdName: emulator.name,
       androidImage: { name: emulator.name, platform: "android" },
     });
+  });
+
+  test("preserves admitted Android metadata for a serial-targeted warm acquisition", async () => {
+    const emulator: BootedDevice = {
+      platform: "android",
+      name: "Pixel_9_API_36",
+      deviceId: "emulator-5562",
+    };
+    const admittedImage: DeviceInfo = {
+      platform: "android",
+      name: emulator.name,
+      isRunning: true,
+      apiLevel: 36,
+      osVersion: "16",
+    };
+    sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      deviceUtils,
+      new DefaultRetryExecutor(timer),
+    );
+    await pool.addDevice(emulator, admittedImage);
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    deviceUtils.setBootedDevices("android", [emulator]);
+
+    const result = await callTool("getAndroid", { deviceId: emulator.deviceId });
+
+    expect(pool.getDevice(emulator.deviceId)?.androidImage).toMatchObject({
+      apiLevel: 36,
+      osVersion: "16",
+    });
+    expect(result).toMatchObject({ apiLevel: 36, osVersion: "16" });
+  });
+
+  test("preserves all admitted Android metadata for a serial-targeted warm acquisition", async () => {
+    const emulator: BootedDevice = {
+      platform: "android",
+      name: "Pixel_9_API_36",
+      deviceId: "emulator-5562",
+    };
+    const admittedImage: DeviceInfo = {
+      platform: "android",
+      name: emulator.name,
+      isRunning: true,
+      deviceId: emulator.deviceId,
+      source: "local",
+      apiLevel: 36,
+      osVersion: "16",
+      formFactor: "phone",
+      screenWidth: 1080,
+      screenHeight: 2400,
+      screenDensity: 420,
+      capabilityInventory: {
+        schemaVersion: 1,
+        capabilities: [{ id: "android.hardware.nfc", state: "available", source: "avd_config" }],
+      },
+    };
+    sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      deviceUtils,
+      new DefaultRetryExecutor(timer),
+    );
+    await pool.addDevice(emulator, admittedImage);
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    deviceUtils.setBootedDevices("android", [emulator]);
+
+    await callTool("getAndroid", { deviceId: emulator.deviceId });
+
+    expect(pool.getDevice(emulator.deviceId)?.androidImage).toMatchObject(admittedImage);
+  });
+
+  test("does not record an image for a serial-targeted externally booted emulator", async () => {
+    const emulator: BootedDevice = {
+      platform: "android",
+      name: "Pixel_9_API_36",
+      deviceId: "emulator-5562",
+    };
+    sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      deviceUtils,
+      new DefaultRetryExecutor(timer),
+    );
+    await pool.addDevice(emulator);
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    deviceUtils.setBootedDevices("android", [emulator]);
+
+    await callTool("getAndroid", { deviceId: emulator.deviceId });
+
+    expect(pool.getDevice(emulator.deviceId)?.androidImage).toBeUndefined();
   });
 
   test("still returns the bound session when post-boot resource notification fails", async () => {
@@ -682,6 +896,270 @@ describe("platform device preparation tools", () => {
     } finally {
       await pool.releaseAdbServerResetCohortReservations(detached.devices);
     }
+  });
+
+  test("bounds pre-boot avdName and serial validation by the boot deadline", async () => {
+    class SlowDiscovery extends FakeDeviceUtils {
+      override async getBootedDevicesDetailed(platform: "android" | "ios" | "either") {
+        timer.advanceTime(11);
+        return await super.getBootedDevicesDetailed(platform);
+      }
+    }
+    const slow = new SlowDiscovery();
+    const emulator: BootedDevice = {
+      platform: "android",
+      name: "Pixel_A",
+      deviceId: "emulator-5556",
+    };
+    slow.setBootedDevices("android", [emulator]);
+    setDeviceToolsDependencies({ deviceManagerFactory: () => slow });
+
+    const failure = await callTool("getAndroid", {
+      avdName: emulator.name,
+      deviceId: emulator.deviceId,
+      bootTimeoutMs: 10,
+    }).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(ActionableError);
+    expect((failure as ActionableError).message).toContain(
+      "pre-boot serial validation did not complete",
+    );
+    expect((failure as ActionableError).message).toContain("after 10ms");
+  });
+
+  test("drops a late pre-boot serial observation after the boot deadline releases its lease", async () => {
+    class SlowDiscovery extends FakeDeviceUtils {
+      override async getBootedDevicesDetailed(platform: "android" | "ios" | "either") {
+        const discovery = await super.getBootedDevicesDetailed(platform);
+        // The platform discovery ignored the coordinated abort long enough for
+        // the deadline to settle its caller before returning this observation.
+        timer.advanceTime(1_001);
+        return discovery;
+      }
+    }
+    const slow = new SlowDiscovery();
+    const emulator: BootedDevice = {
+      platform: "android",
+      name: "Pixel_9_API_36",
+      deviceId: "emulator-5554",
+    };
+    slow.setBootedDevices("android", [emulator]);
+    sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      slow,
+      new DefaultRetryExecutor(timer),
+    );
+    await pool.initializeWithDevices([emulator]);
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    const observations: Array<{ source: string }> = [];
+    const reconcile = pool.reconcileDiscoveryObservation.bind(pool);
+    pool.reconcileDiscoveryObservation = async (devices, source, options) => {
+      observations.push({ source });
+      await reconcile(devices, source, options);
+    };
+    let releases = 0;
+    const lease: VirtualDeviceLifecycleLease = {
+      signal: new AbortController().signal,
+      identity: { kind: "selector", platform: "android", selector: emulator.name },
+      bindCanonicalIdentity: async () => {},
+      transitionToTeardown: () => {},
+      release: () => {
+        releases++;
+      },
+    };
+    const lifecycleCoordinator: VirtualDeviceLifecycleCoordinator = {
+      reserve: async () => lease,
+    };
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => slow,
+      lifecycleCoordinator,
+    });
+
+    const failure = await callTool("getAndroid", {
+      avdName: emulator.name,
+      deviceId: emulator.deviceId,
+      bootTimeoutMs: 1_000,
+    }).catch((error: unknown) => error);
+    // Allow the losing discovery callback to finish after its deadline race.
+    for (let attempt = 0; attempt < 50; attempt++) {
+      await Promise.resolve();
+    }
+
+    expect(failure).toBeInstanceOf(Error);
+    expect(observations.some(({ source }) => source === "pre-boot-serial-validation")).toBe(false);
+    expect(releases).toBe(1);
+  });
+
+  test("releases the lifecycle lease promptly when abort-aware pre-boot discovery reaches its deadline", async () => {
+    const bootTimeoutMs = 1_000;
+    let markDiscoveryStarted: (() => void) | undefined;
+    const discoveryStarted = new Promise<void>((resolve) => {
+      markDiscoveryStarted = resolve;
+    });
+    class AbortAwareDiscovery extends FakeDeviceUtils {
+      override async getBootedDevicesDetailed(
+        platform: "android" | "ios" | "either",
+        options?: { signal?: AbortSignal },
+      ) {
+        const discovery = await super.getBootedDevicesDetailed(platform);
+        markDiscoveryStarted!();
+        await new Promise<void>((resolve, reject) => {
+          const adbTimeout = timer.setTimeout(resolve, 10_000);
+          options?.signal?.addEventListener(
+            "abort",
+            () => {
+              timer.clearTimeout(adbTimeout);
+              reject(options.signal?.reason ?? new Error("discovery aborted"));
+            },
+            { once: true },
+          );
+        });
+        return discovery;
+      }
+    }
+    const slow = new AbortAwareDiscovery();
+    const emulator: BootedDevice = {
+      platform: "android",
+      name: "Pixel_9_API_36",
+      deviceId: "emulator-5554",
+    };
+    slow.setBootedDevices("android", [emulator]);
+    sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      slow,
+      new DefaultRetryExecutor(timer),
+    );
+    await pool.initializeWithDevices([emulator]);
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    const observations: string[] = [];
+    const reconcile = pool.reconcileDiscoveryObservation.bind(pool);
+    pool.reconcileDiscoveryObservation = async (devices, source, options) => {
+      observations.push(source);
+      await reconcile(devices, source, options);
+    };
+    let releases = 0;
+    const lease: VirtualDeviceLifecycleLease = {
+      signal: new AbortController().signal,
+      identity: { kind: "selector", platform: "android", selector: emulator.name },
+      bindCanonicalIdentity: async () => {},
+      transitionToTeardown: () => {},
+      release: () => {
+        releases++;
+      },
+    };
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => slow,
+      lifecycleCoordinator: { reserve: async () => lease },
+    });
+
+    let failure: unknown;
+    void callTool("getAndroid", {
+      avdName: emulator.name,
+      deviceId: emulator.deviceId,
+      bootTimeoutMs,
+    }).catch((error: unknown) => {
+      failure = error;
+    });
+    await discoveryStarted;
+    await timer.advanceTimeAsync(bootTimeoutMs);
+
+    expect(failure).toBeInstanceOf(ActionableError);
+    expect(releases).toBe(1);
+    expect(observations).not.toContain("pre-boot-serial-validation");
+  });
+
+  test("keeps the lifecycle lease held while a pre-boot reconcile is still draining when the boot deadline fires", async () => {
+    const bootTimeoutMs = 1_000;
+    const emulatorA: BootedDevice = {
+      platform: "android",
+      name: "Pixel_9_API_36",
+      deviceId: "emulator-5554",
+    };
+    const emulatorB: BootedDevice = {
+      platform: "android",
+      name: "Pixel_9_API_36_2",
+      deviceId: "emulator-5556",
+    };
+    deviceUtils.setBootedDevices("android", [emulatorA, emulatorB]);
+    sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      deviceUtils,
+      new DefaultRetryExecutor(timer),
+    );
+    await pool.initializeWithDevices([emulatorA, emulatorB]);
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    const initialDeviceB = pool.getDevice(emulatorB.deviceId);
+    let resolveGate: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      resolveGate = resolve;
+    });
+    const observations: string[] = [];
+    const reconcile = pool.reconcileDiscoveryObservation.bind(pool);
+    let reconcileSettled = false;
+    pool.reconcileDiscoveryObservation = async (devices, source, options) => {
+      observations.push(source);
+      timer.advanceTime(bootTimeoutMs + 1);
+      await gate;
+      await reconcile(devices, source, options);
+      reconcileSettled = true;
+    };
+    let releases = 0;
+    let deviceBAtRelease: ReturnType<typeof pool.getDevice> | undefined;
+    const lease: VirtualDeviceLifecycleLease = {
+      signal: new AbortController().signal,
+      identity: { kind: "selector", platform: "android", selector: emulatorA.name },
+      bindCanonicalIdentity: async () => {},
+      transitionToTeardown: () => {},
+      release: () => {
+        releases++;
+        deviceBAtRelease = pool.getDevice(emulatorB.deviceId);
+      },
+    };
+    const lifecycleCoordinator: VirtualDeviceLifecycleCoordinator = {
+      reserve: async () => lease,
+    };
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => deviceUtils,
+      lifecycleCoordinator,
+    });
+
+    const failure = await callTool("getAndroid", {
+      avdName: emulatorA.name,
+      deviceId: emulatorA.deviceId,
+      bootTimeoutMs,
+    }).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(ActionableError);
+    expect((failure as ActionableError).message).toContain(
+      "pre-boot serial validation did not complete",
+    );
+    expect(releases).toBe(0);
+    expect(reconcileSettled).toBe(false);
+    expect(observations).toEqual(["pre-boot-serial-validation"]);
+    expect(initialDeviceB).toBeDefined();
+
+    resolveGate!();
+    for (let attempt = 0; attempt < 50; attempt++) {
+      await Promise.resolve();
+    }
+
+    expect(reconcileSettled).toBe(true);
+    expect(releases).toBe(1);
+    expect(observations).toEqual(["pre-boot-serial-validation"]);
+    expect(deviceBAtRelease).toBe(initialDeviceB);
+    expect(pool.getDevice(emulatorB.deviceId)).toBe(deviceBAtRelease);
   });
 
   test("waits for fuzzy legacy Android names that match a reserved AVD", async () => {

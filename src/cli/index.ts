@@ -17,6 +17,12 @@ import {
   DEVICE_SESSION_ACQUISITION_TOOLS,
   isDeviceSessionAcquisitionTool,
 } from "../server/deviceSessionResult";
+import { AUTOMATIC_TOOL_OUTPUT_RETENTION } from "../server/toolRegistry";
+import { JsonToolOutputArtifactWriter } from "../server/toolOutputArtifactWriter";
+import type { ObservationArtifactWriter } from "../server/finalizeToolResponse";
+import { getDefaultToolOutputsDir } from "../utils/toolOutputArtifacts";
+import { serverConfig } from "../utils/ServerConfig";
+import { cliStderr, cliStdout, renderCliToolOutput, type CliByteSink } from "./toolOutput";
 
 // Import all tool registration functions
 import { registerObserveTools } from "../server/observeTools";
@@ -382,11 +388,23 @@ export function parseCliArgs(args: string[]): {
  * threading can be observed without globally mocking the daemonMcpProxy module
  * (which would replace the real DaemonMcpProxy that daemonMcpProxy.test.ts needs).
  */
-let daemonProxyFactory: (config: DaemonMcpProxyConfig) => DaemonMcpProxy = (config) =>
+/**
+ * The daemon-proxy surface a one-shot `--cli` invocation actually uses: forward
+ * one tool call, declare the session it owns (#6870), close. Narrow on purpose
+ * so a stand-in cannot silently omit a member the CLI calls — a `DaemonMcpProxy`
+ * satisfies it structurally.
+ */
+export interface CliDaemonProxy {
+  callTool(name: string, params: Record<string, any>): Promise<any>;
+  adoptCliSessionLiveness(): Promise<string | undefined>;
+  close(): Promise<void>;
+}
+
+let daemonProxyFactory: (config: DaemonMcpProxyConfig) => CliDaemonProxy = (config) =>
   new DaemonMcpProxy(config);
 
 export function setDaemonProxyFactoryForTesting(
-  factory: (config: DaemonMcpProxyConfig) => DaemonMcpProxy,
+  factory: (config: DaemonMcpProxyConfig) => CliDaemonProxy,
 ): void {
   daemonProxyFactory = factory;
 }
@@ -435,6 +453,14 @@ async function runToolViaDaemon(
       `Error calling daemon: ${message}. ` + `Try: auto-mobile --daemon restart`,
     );
   } finally {
+    // Declare the session this one-shot process owns BEFORE closing (#6870).
+    // Without it the connection's heartbeat keeper dies with the process and the
+    // daemon reaps the session after its 10s heartbeat timeout — less than the
+    // time an agent spends reading this result and choosing the next call, so
+    // every follow-up `--cli` call failed with `session_ownership_lost`. Runs on
+    // the failure path too: a tool call that threw still leaves the session the
+    // caller will retry against. Never throws (see adoptCliSessionLiveness).
+    await proxy.adoptCliSessionLiveness();
     // Always close the proxy connection to prevent connection leaks
     await proxy.close();
   }
@@ -582,8 +608,57 @@ export function isCliToolFailure(result: any): boolean {
   return result?.isError === true || cliToolResultPayload(result)?.success === false;
 }
 
+/**
+ * Where the CLI's tool output goes. Injected so a test can capture it; the
+ * defaults are blocking writes to the process streams so `process.exit()` after
+ * a command cannot cut the JSON in half (issue #6870).
+ */
+let cliOutputSinks: { stdout: CliByteSink; stderr: CliByteSink } = {
+  stdout: cliStdout,
+  stderr: cliStderr,
+};
+
+export function setCliOutputSinksForTesting(sinks: {
+  stdout: CliByteSink;
+  stderr: CliByteSink;
+}): void {
+  cliOutputSinks = sinks;
+}
+
+export function resetCliOutputSinksForTesting(): void {
+  cliOutputSinks = { stdout: cliStdout, stderr: cliStderr };
+}
+
+/**
+ * The artifact writer an oversized CLI result spills to (issue #6870).
+ *
+ * Undefined when no writable tool-outputs directory can be resolved — the
+ * renderer then emits an explicit `truncated: true` notice instead, which is
+ * still complete, parseable JSON.
+ */
+function createCliArtifactWriter(): ObservationArtifactWriter | undefined {
+  try {
+    return new JsonToolOutputArtifactWriter({
+      outputDirectory: serverConfig.getToolOutputsDir() ?? getDefaultToolOutputsDir(),
+      retention: AUTOMATIC_TOOL_OUTPUT_RETENTION,
+    });
+  } catch (error) {
+    // Spilling is itself the fallback path; failing to build the writer only
+    // downgrades the output to the truncation notice, never the invocation.
+    logger.debug(`[cli] no tool-output artifact writer available: ${errorMessage(error)}`);
+    return undefined;
+  }
+}
+
 function handleToolResult(result: any, toolName: string): void {
-  console.log(JSON.stringify(result, null, 2));
+  // Count the bytes BEFORE writing: an oversized result is spilled to an
+  // artifact and replaced by its envelope rather than emitted and cut (#6870).
+  cliOutputSinks.stdout.write(
+    renderCliToolOutput(result, {
+      tool: toolName,
+      artifactWriter: createCliArtifactWriter(),
+    }) + "\n",
+  );
 
   // MCP tool errors use the top-level `isError` flag, while older daemon
   // responses encode their failure in the JSON payload.
@@ -738,6 +813,10 @@ Parameters:
 Session-based Execution:
   When using --session-uuid, the tool will be executed on the device assigned to that session.
   This allows multiple tool calls to target the same device in parallel.
+  A session acquired or used from the CLI is held on a wall-clock idle timeout
+  (10 minutes by default, AUTOMOBILE_CLI_SESSION_IDLE_TIMEOUT_MS) rather than the
+  heartbeat contract a long-running MCP connection keeps, so it survives the gap
+  between one-shot invocations. Every call refreshes it.
 `);
 
   // Show categorized tools

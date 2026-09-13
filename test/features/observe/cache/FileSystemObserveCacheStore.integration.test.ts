@@ -54,13 +54,13 @@ describe("FileSystemObserveCacheStore", function () {
     expect(store.getRecentInMemoryForDevice("device-1")).toBe(result);
   });
 
-  test("put then getRecentInMemory (cross-device) returns the latest result", async function () {
+  test("put then getRecentInMemoryEntry (cross-device) returns the latest result and its device", async function () {
     const older = makeResult("older");
     const newer = makeResult("newer");
     await store.put("device-1", older);
     timer.advanceTime(10);
     await store.put("device-2", newer);
-    expect(store.getRecentInMemory()).toBe(newer);
+    expect(store.getRecentInMemoryEntry()).toEqual({ deviceId: "device-2", result: newer });
   });
 
   test("TTL: entry older than 5 minutes is evicted from memory on read", async function () {
@@ -68,7 +68,7 @@ describe("FileSystemObserveCacheStore", function () {
     await store.put("device-1", result);
     timer.advanceTime(OBSERVE_RESULT_CACHE_TTL_MS + 1);
     expect(store.getRecentInMemoryForDevice("device-1")).toBeUndefined();
-    expect(store.getRecentInMemory()).toBeUndefined();
+    expect(store.getRecentInMemoryEntry()).toBeUndefined();
   });
 
   test("multi-device isolation: getRecentInMemoryForDevice returns only matching device", async function () {
@@ -113,7 +113,7 @@ describe("FileSystemObserveCacheStore", function () {
     await store.put("device-2", makeResult("d2"));
 
     store.clear();
-    expect(store.getRecentInMemory()).toBeUndefined();
+    expect(store.getRecentInMemoryEntry()).toBeUndefined();
     expect(store.getRecentInMemoryForDevice("device-1")).toBeUndefined();
     expect(store.getRecentInMemoryForDevice("device-2")).toBeUndefined();
   });

@@ -13,12 +13,16 @@ import {
 import type { ObserveScopeInput } from "../models/ObserveScope";
 import { capLayoutWarnings } from "../features/observe/audits/SafeAreaAuditor";
 import {
-  isInPlacePressButton,
-  isNavigationPressButton,
-} from "../features/action/pressButtonPolicy";
+  classifyObservationAction,
+  type ObservationActionClass,
+} from "../features/action/observationActionClass";
 import { serverConfig } from "../utils/ServerConfig";
-import { getStructuredPayload, stringifyToolResponse } from "../utils/toolUtils";
-import { isSubmitImeAction } from "../models/ImeActionResult";
+import { stringifyToolResponse } from "../utils/toolUtils";
+import { readToolEnvelopePayload, writeToolEnvelopePayload } from "./toolEnvelopePayload";
+import { boundStructuredField, truncateBodyText } from "../utils/truncateBodyText";
+import { logger } from "../utils/logger";
+import { errorMessage } from "../utils/describeUnknownError";
+import { isDeviceSessionAcquisitionTool } from "./deviceSessionResult";
 
 /**
  * Read/write access to the per-session diff baseline — the "last observation
@@ -54,6 +58,17 @@ export interface ObservationArtifactWriteInput {
   tool: string;
   payload: ObservationArtifactPayload;
   data: unknown;
+  /**
+   * Exact bytes to persist, for a caller that has already rendered `data` and
+   * must store precisely what it rendered — the CLI, whose pretty-printed
+   * output is the thing it measured and whose reported byte count has to match
+   * the file on disk (#6870).
+   *
+   * NOT a serialization strategy hook: the writer already persists `data`
+   * completely (see `serializeArtifactContent`), so a caller that just wants the
+   * whole payload written should omit this and pass `data` alone.
+   */
+  serialized?: string;
 }
 
 export interface ObservationArtifactWriter {
@@ -76,59 +91,6 @@ const OBSERVE_WAIT_METADATA_KEYS = [
   "matchedElement",
   "candidates",
 ] as const;
-
-type ObservationActionClass = "navigation" | "inPlace" | "scroll" | "unknown";
-
-function classifyObservationAction(
-  name: string,
-  args?: Record<string, unknown>,
-): ObservationActionClass {
-  switch (name) {
-    case "tapOn":
-    case "tapAny":
-    case "homeScreen":
-    case "recentApps":
-    case "openLink":
-      return "navigation";
-    case "pressButton": {
-      if (isNavigationPressButton(args?.button)) {
-        return "navigation";
-      }
-      if (isInPlacePressButton(args?.button)) {
-        return "inPlace";
-      }
-      return "unknown";
-    }
-    case "inputText":
-      return isSubmitImeAction(args?.imeAction) ? "navigation" : "inPlace";
-    case "sendKeys": {
-      const commands = Array.isArray(args?.commands) ? args.commands : [];
-      const maySubmit = commands.some((command) => {
-        if (!command || typeof command !== "object") {
-          return false;
-        }
-        const value = command as Record<string, unknown>;
-        return (
-          value.action === "key" &&
-          ["enter", "done", "go", "search", "send"].includes(String(value.key))
-        );
-      });
-      return maySubmit ? "navigation" : "inPlace";
-    }
-    case "clearText":
-    case "selectAllText":
-    case "keyboard":
-    case "clipboard":
-      return "inPlace";
-    case "imeAction":
-      return isSubmitImeAction(args?.action) ? "navigation" : "inPlace";
-    case "swipeOn":
-    case "dragAndDrop":
-      return "scroll";
-    default:
-      return "unknown";
-  }
-}
 
 /**
  * Action tools that embed a post-action observation AND expose the `raw`/`project`
@@ -244,14 +206,39 @@ function resolveDiffContext(
  * fresh" across modes. Sourced from `rawObservation` (the pre-sanitize
  * observation) rather than `servedObservation` so it is populated
  * unconditionally, regardless of projection.
+ *
+ * `settled` (issue #6866) rides along for the same reason: the embedded-observation
+ * stability verdict is a top-level field the hierarchy diff never sees, and a client
+ * that only ever receives diffs must still be able to tell a stability-checked
+ * capture from an unchecked one.
  */
 function resolveDiffScreenState(
   rawObservation: ObserveResult,
-): Pick<ObserveDiff, "activeWindow" | "freshness"> {
+): Pick<ObserveDiff, "activeWindow" | "freshness" | "settled"> {
   return {
     activeWindow: rawObservation.activeWindow,
     freshness: rawObservation.freshness,
+    settled: rawObservation.settled,
   };
+}
+
+/**
+ * The `truncationReasons` to attach to a diff response (issue #6601): a diff
+ * replaces the projected observation outright, so the provenance the skeleton
+ * projection lifted out of `viewHierarchy` — and, under `project:"full"`, the
+ * `viewHierarchy.truncationReasons` that never needed lifting — would be
+ * dropped with the observation it replaced. Resolved from the served projection
+ * first and otherwise from the raw observation's hierarchy, so the field is
+ * populated in every projection mode. `undefined` (nothing was truncated)
+ * serializes away exactly like an absent key.
+ */
+function resolveDiffTruncationReasons(
+  servedObservation: ObserveResult,
+  rawObservation: ObserveResult,
+): string[] | undefined {
+  const reasons =
+    servedObservation.truncationReasons ?? rawObservation.viewHierarchy?.truncationReasons;
+  return reasons && reasons.length > 0 ? [...reasons] : undefined;
 }
 
 /**
@@ -335,41 +322,14 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
     return response;
   }
 
-  const envelope = response as {
-    content?: Array<{ type?: string; text?: string }>;
-    structuredContent?: unknown;
-  };
-
   // Prefer structuredContent; fall back to the serialized text part when a tool
   // returned text only. Anything else (image parts, non-JSON text) is left alone.
-  const structuredPayload = getStructuredPayload<Record<string, unknown>>(envelope);
-  const hasStructured = structuredPayload !== undefined;
-
-  const textPart =
-    Array.isArray(envelope.content) &&
-    envelope.content[0]?.type === "text" &&
-    typeof envelope.content[0].text === "string"
-      ? envelope.content[0]
-      : undefined;
-
-  let payload: Record<string, unknown> | undefined;
-  if (structuredPayload) {
-    payload = structuredPayload;
-  } else if (textPart) {
-    try {
-      const parsed = JSON.parse(textPart.text as string);
-      if (parsed && typeof parsed === "object") {
-        payload = parsed as Record<string, unknown>;
-      }
-    } catch {
-      // Not JSON — nothing to sanitize, leave the response as-is.
-      return response;
-    }
-  }
-
-  if (!payload) {
+  const envelopeView = readToolEnvelopePayload(response);
+  if (!envelopeView) {
     return response;
   }
+  const payload = envelopeView.payload;
+  const hasStructured = envelopeView.hasStructured;
 
   const cfg: SanitizeObserveConfig = {
     // Elements are dropped by default; `--observe-result-include-elements` opts
@@ -573,6 +533,12 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
           // `undefined` when the underlying observation lacks them, which drops
           // out of the serialized diff the same way an absent key would.
           Object.assign(diff, resolveDiffScreenState(payload.observation as ObserveResult));
+          // Issue #6601: nor may a diff silently drop the hierarchy's truncation
+          // provenance — see resolveDiffTruncationReasons.
+          diff.truncationReasons = resolveDiffTruncationReasons(
+            servedObservation,
+            payload.observation as ObserveResult,
+          );
           const screenChangedWithEmptyDiff =
             hasScreenChangedEffect(payload) && isEmptyObserveDiff(diff);
           observationOut = screenChangedWithEmptyDiff ? servedObservation : diff;
@@ -609,7 +575,7 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
     !ctx.internal &&
     hasArtifactableObservation &&
     sanitizedPayload &&
-    shouldArtifactObservationPayload(ctx, sanitizedPayload)
+    shouldArtifactObservationPayload(ctx, sanitizedPayload, hasStructured)
   ) {
     if (isObserveTool) {
       // Keep compact wait status inline: without it, an artifacted `observe`
@@ -630,17 +596,38 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
     sanitizedPayload ??= artifactNonObservationPayload(ctx, payload);
   }
 
+  // Hard ceiling (issue #6870). Spilling `observation` bounds only the
+  // observation: `observationDiff` rides at the TOP level beside it, and so does
+  // every other tool field, so a response could still be handed to the client
+  // far over the inline limit — which a one-shot `--cli` transport then cut
+  // mid-string into unparseable JSON. With a writer available, spill whatever
+  // residue is still oversized and keep only the headline fields inline, so the
+  // client always gets complete, parseable JSON plus a pointer to the rest.
+  const boundedCandidate = sanitizedPayload ?? payload;
+  if (ctx.artifactWriter && !ctx.internal && exceedsInlineLimit(boundedCandidate, hasStructured)) {
+    try {
+      sanitizedPayload = spillOversizedPayload(ctx, boundedCandidate, hasStructured);
+    } catch (error) {
+      // The operation itself already succeeded; only the spill failed (a full or
+      // read-only tool-output directory). Throwing here would return NO result
+      // for work the device has already done, which for a side-effecting tool
+      // invites a duplicate retry. Fall back to the pre-#6870 behaviour — serve
+      // the payload un-spilled — and leave a trace, since the response then
+      // exceeds the ceiling. The `--cli` renderer still refuses to cut JSON
+      // mid-string and emits its own truncation notice instead.
+      logger.warn(
+        `finalizeToolResponse: could not spill the oversized ${ctx.name} response: ${errorMessage(error)}`,
+        error,
+      );
+    }
+  }
+
   if (!sanitizedPayload) {
     return response;
   }
 
   // Rewrite both representations from the same object so they cannot diverge.
-  if (hasStructured) {
-    envelope.structuredContent = sanitizedPayload;
-  }
-  if (textPart) {
-    textPart.text = stringifyToolResponse(sanitizedPayload);
-  }
+  writeToolEnvelopePayload(envelopeView, sanitizedPayload);
   pendingBaselineUpdate &&
     ctx.baselineStore!.set(pendingBaselineUpdate.sessionUuid, pendingBaselineUpdate.observation);
 
@@ -656,21 +643,162 @@ function pickObserveWaitMetadata(payload: Record<string, unknown>): Record<strin
   );
 }
 
+/**
+ * The fields kept inline when an oversized residue is spilled wholesale (#6870).
+ *
+ * A client that gets only an artifact pointer still has to know whether the tool
+ * succeeded and, if not, why — reading the spilled file to learn that a tap
+ * failed would be a worse contract than the oversized payload it replaced.
+ */
+const INLINE_RESIDUE_KEYS = ["success", "error", ...OBSERVE_WAIT_METADATA_KEYS] as const;
+const DEVICE_SESSION_RESIDUE_KEYS = ["sessionUuid", "sessionId"] as const;
+
+/**
+ * Per-field cap on what a retained residue field may contribute (#6870).
+ *
+ * The retained fields are headlines, not payloads, but nothing stops one of them
+ * from being huge on its own: a stack trace lands in `error`, and a `countStable`
+ * wait that never matched returns every candidate it saw. Copying such a field
+ * back verbatim would blow the very ceiling the spill exists to enforce. At
+ * {@link INLINE_RESIDUE_KEYS}.length plus the two device-session fields caps the
+ * largest acquisition residue at ~48 KB,
+ * comfortably inside {@link DEFAULT_OBSERVATION_INLINE_MAX_BYTES} once the
+ * artifact envelope is added.
+ */
+const INLINE_RESIDUE_FIELD_LIMIT = 4 * 1024;
+
+/**
+ * Keep the headline fields inline, each bounded: an oversized string is cut to
+ * the cap (still a string, so `error` stays readable), and an oversized
+ * structure is replaced with the canonical `{ _truncated, bytes }` marker. The
+ * complete value is always in the artifact the caller writes alongside this.
+ */
+function pickInlineResidue(
+  ctx: FinalizeToolResponseContext,
+  payload: Record<string, unknown>,
+): Record<string, unknown> {
+  return Object.fromEntries(
+    inlineResidueKeys(ctx)
+      .filter((key) => payload[key] !== undefined)
+      .map((key) => [key, boundResidueField(payload[key])]),
+  );
+}
+
+/**
+ * Replace an over-ceiling payload with its artifact pointer plus a bounded
+ * residue of the headline fields.
+ */
+function spillOversizedPayload(
+  ctx: FinalizeToolResponseContext,
+  payload: Record<string, unknown>,
+  hasStructured: boolean,
+): Record<string, unknown> {
+  // No `serialized` override: the writer persists `data` complete (extras
+  // included), so every spill path — this one and the observation-only one above
+  // — produces the same complete artifact without per-call-site plumbing.
+  const artifact = writeJsonArtifact(ctx, "ToolResponse", payload);
+  const spilled = { ...pickInlineResidue(ctx, payload), ...artifact };
+  // The per-field cap is counted in UTF-16 code units, so multi-byte text can
+  // still serialize past the ceiling across every retained field. Fall back to
+  // markers-only, whose size does not depend on the input at all.
+  return exceedsInlineLimit(spilled, hasStructured)
+    ? { ...markerResidue(ctx, payload), ...artifact }
+    : spilled;
+}
+
+function inlineResidueKeys(ctx: FinalizeToolResponseContext): readonly string[] {
+  return isDeviceSessionAcquisitionTool(ctx.name)
+    ? [...INLINE_RESIDUE_KEYS, ...DEVICE_SESSION_RESIDUE_KEYS]
+    : INLINE_RESIDUE_KEYS;
+}
+
+/**
+ * The last-resort residue: every non-scalar field replaced with the
+ * `{ _truncated, bytes }` marker, so the inline size is a fixed function of the
+ * field COUNT rather than of the payload. Scalars (a `success` boolean, a
+ * `polls` count) are the headline a client actually acts on and are always tiny.
+ */
+function markerResidue(
+  ctx: FinalizeToolResponseContext,
+  payload: Record<string, unknown>,
+): Record<string, unknown> {
+  return Object.fromEntries(
+    inlineResidueKeys(ctx)
+      .filter((key) => payload[key] !== undefined)
+      .map((key) => [
+        key,
+        typeof payload[key] === "object" || typeof payload[key] === "string"
+          ? boundStructuredField(payload[key], false, 0)
+          : payload[key],
+      ]),
+  );
+}
+
+function boundResidueField(value: unknown): unknown {
+  if (typeof value === "string") {
+    return value.length <= INLINE_RESIDUE_FIELD_LIMIT
+      ? value
+      : `${truncateBodyText(value, INLINE_RESIDUE_FIELD_LIMIT)}${RESIDUE_TRUNCATION_SUFFIX}`;
+  }
+  return boundStructuredField(value, false, INLINE_RESIDUE_FIELD_LIMIT);
+}
+
+/** Marks a residue string as cut, so a client never reads a partial value as whole. */
+const RESIDUE_TRUNCATION_SUFFIX = "… [truncated; complete value in the tool-output artifact]";
+
 function artifactMode(ctx: FinalizeToolResponseContext): ObservationArtifactMode {
   return ctx.artifactMode ?? "always";
+}
+
+/** Whether the payload, as the client will actually receive it, is over the ceiling. */
+function exceedsInlineLimit(payload: Record<string, unknown>, hasStructured: boolean): boolean {
+  return emittedByteLength(payload, hasStructured) > DEFAULT_OBSERVATION_INLINE_MAX_BYTES;
+}
+
+/**
+ * Bytes this payload will actually put on the wire (#6870 review).
+ *
+ * The text part is rendered with `stringifyToolResponse`, whose replacer drops
+ * every property named `extras`. But `structuredContent` is assigned the
+ * UNSTRIPPED payload object and is serialized by the transport with a plain
+ * `JSON.stringify`, extras included. Measuring only the stripped rendering let a
+ * result whose bulk is accessibility `extras` measure as a handful of bytes and
+ * sail straight past the hard ceiling while 70 KB of structured content went to
+ * the client. Measure the larger of the two renderings, so the gate bounds
+ * whichever representation is actually emitted.
+ */
+function emittedByteLength(payload: Record<string, unknown>, hasStructured: boolean): number {
+  const strippedBytes = Buffer.byteLength(stringifyToolResponse(payload), "utf8");
+  if (!hasStructured) {
+    return strippedBytes;
+  }
+  return Math.max(strippedBytes, structuredByteLength(payload, strippedBytes));
+}
+
+function structuredByteLength(payload: Record<string, unknown>, fallback: number): number {
+  try {
+    return Buffer.byteLength(JSON.stringify(payload), "utf8");
+  } catch (error) {
+    // A payload the transport itself cannot serialize (a cycle, a BigInt) has no
+    // structured byte count to compare against; the stripped rendering is the
+    // only measurement available. Safe to swallow: this is sizing, not delivery.
+    logger.debug(`finalizeToolResponse: structured payload is not measurable: ${error}`);
+    return fallback;
+  }
 }
 
 function shouldArtifactObservationPayload(
   ctx: FinalizeToolResponseContext,
   payload: Record<string, unknown>,
+  hasStructured: boolean,
 ): boolean {
   if (artifactMode(ctx) === "always") {
     return true;
   }
 
-  return (
-    Buffer.byteLength(stringifyToolResponse(payload), "utf8") > DEFAULT_OBSERVATION_INLINE_MAX_BYTES
-  );
+  // Measures the whole served payload — `observationDiff` and every other
+  // top-level field included — not just the observation subtree.
+  return exceedsInlineLimit(payload, hasStructured);
 }
 
 function writeObservationArtifact(

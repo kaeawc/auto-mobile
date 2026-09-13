@@ -631,13 +631,18 @@ describe("logPruner transient unlink failures (Windows EBUSY/EPERM)", () => {
   test("does not retry a non-transient unlink failure", async () => {
     await withTempLogDir(async (dir) => {
       const launchLog = "daemon-launch-4242.log";
-      await writeFile(path.join(dir, launchLog), "x");
+      const launchLogPath = path.join(dir, launchLog);
+      await writeFile(launchLogPath, "x");
+      const { mtimeMs } = await stat(launchLogPath);
 
       let attempts = 0;
 
       await pruneLogFiles({
         ...deadNamespace,
         dir,
+        // Derive the sweep clock from the file mtime so the -1ms stale
+        // precondition does not depend on filesystem and wall clocks agreeing.
+        now: mtimeMs,
         unlink: async () => {
           attempts += 1;
           throw errnoError("EISDIR");

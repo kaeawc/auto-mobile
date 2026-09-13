@@ -31,7 +31,10 @@ import {
 import { resolveContainerSwipeCoordinates } from "./resolveContainerSwipeCoordinates";
 import { getScreenBounds } from "../../../utils/screenBounds";
 import { exponentialBackoff } from "../../../utils/Backoff";
+import { computeHierarchyFingerprint, waitForScrollIdle } from "../../../utils/scrollIdle";
 import type { ProgressCallback } from "../BaseVisualChange";
+
+const SCROLL_IDLE_POLL_INTERVAL_MS = 150;
 
 function oppositeDirection(dir: SwipeDirection): SwipeDirection {
   switch (dir) {
@@ -610,11 +613,7 @@ export class ScrollUntilVisible {
   }
 
   computeHierarchyFingerprint(viewHierarchy: ViewHierarchyResult): string {
-    if (!viewHierarchy.hierarchy) {
-      return "";
-    }
-
-    return JSON.stringify(viewHierarchy.hierarchy);
+    return computeHierarchyFingerprint(viewHierarchy);
   }
 
   private async setAccessibilityFocusOnElement(
@@ -696,39 +695,17 @@ export class ScrollUntilVisible {
     currentObservation: ObserveResult,
     maxWaitMs: number,
   ): Promise<ObserveResult> {
-    if (!currentObservation.viewHierarchy) {
-      return currentObservation;
-    }
-    const startTime = this.deps.timer.now();
-    const pollIntervalMs = 150;
-    let previousFingerprint = this.computeHierarchyFingerprint(currentObservation.viewHierarchy);
-    let latestObservation = currentObservation;
-
-    while (this.deps.timer.now() - startTime < maxWaitMs) {
-      const newObservation = await this.deps.observeScreen.execute({
-        skipScreenshot: true,
-        skipAccessibilityAudit: true,
-      });
-      if (!newObservation.viewHierarchy) {
-        break;
-      }
-      const newFingerprint = this.computeHierarchyFingerprint(newObservation.viewHierarchy);
-      if (newFingerprint === previousFingerprint) {
-        logger.info(
-          `[SwipeOn] Scroll settled after ${this.deps.timer.now() - startTime}ms idle check`,
-        );
-        return newObservation;
-      }
-      logger.info(
-        `[SwipeOn] Scroll still settling (elapsed=${this.deps.timer.now() - startTime}ms), retrying in ${pollIntervalMs}ms`,
-      );
-      previousFingerprint = newFingerprint;
-      latestObservation = newObservation;
-      await this.deps.timer.sleep(pollIntervalMs);
-    }
-
-    logger.info(`[SwipeOn] Scroll idle check reached ${maxWaitMs}ms limit, proceeding`);
-    return latestObservation;
+    return waitForScrollIdle(currentObservation, {
+      observe: () =>
+        this.deps.observeScreen.execute({
+          skipScreenshot: true,
+          skipAccessibilityAudit: true,
+        }),
+      timer: this.deps.timer,
+      maxWaitMs,
+      pollIntervalMs: SCROLL_IDLE_POLL_INTERVAL_MS,
+      logPrefix: "[SwipeOn]",
+    });
   }
 
   private resolveContainerSwipeCoordinates(

@@ -194,7 +194,39 @@ function cleanupReadinessWaiter(waiter: ReadinessWaiter): void {
  * readiness has been recorded and the caller's own satisfaction check
  * (re-run in a loop) passes without redoing setup.
  */
-const deviceAcquisitionReadiness = new Map<string, Promise<void>>();
+interface AcquisitionReadinessEntry {
+  /**
+   * Every acquisition still in flight for this key, in arrival order. A
+   * recovery can move one acquisition's marker onto a key another acquisition
+   * is already tracking, so a key can legitimately cover more than one.
+   */
+  pending: Promise<void>[];
+  /**
+   * What awaiters receive. A lone pending acquisition is handed out by
+   * identity; two or more are composed so the key stays pending until the LAST
+   * of them settles.
+   */
+  marker: Promise<void>;
+}
+
+const deviceAcquisitionReadiness = new Map<string, AcquisitionReadinessEntry>();
+
+/** Install (or clear) the pending set for `key` and recompute its marker. */
+function setAcquisitionReadinessPending(key: string, pending: Promise<void>[]): void {
+  if (pending.length === 0) {
+    deviceAcquisitionReadiness.delete(key);
+    return;
+  }
+  deviceAcquisitionReadiness.set(key, {
+    pending,
+    marker:
+      pending.length === 1
+        ? pending[0]!
+        : // Markers never reject (they settle from a `finally`), but allSettled
+          // keeps a composite safe regardless of how a member was produced.
+          Promise.allSettled(pending).then(() => undefined),
+  });
+}
 
 /**
  * Run `fn` while `key` is marked as having readiness acquisition in flight.
@@ -209,16 +241,22 @@ export async function trackDeviceAcquisitionReadiness<T>(
   const marker = new Promise<void>((resolve) => {
     settle = resolve;
   });
-  deviceAcquisitionReadiness.set(key, marker);
+  const existing = deviceAcquisitionReadiness.get(key);
+  setAcquisitionReadinessPending(key, existing ? [...existing.pending, marker] : [marker]);
   try {
     return await fn();
   } finally {
     settle();
     // A recovery can replace a device serial after this acquisition begins.
-    // Clear every alias of this marker, not only its original key.
-    for (const [markerKey, current] of deviceAcquisitionReadiness) {
-      if (current === marker) {
-        deviceAcquisitionReadiness.delete(markerKey);
+    // Drop this marker from every alias it reached, not only its original key,
+    // and keep an alias alive while another acquisition it covers is still in
+    // flight.
+    for (const [markerKey, entry] of [...deviceAcquisitionReadiness]) {
+      if (entry.pending.includes(marker)) {
+        setAcquisitionReadinessPending(
+          markerKey,
+          entry.pending.filter((pending) => pending !== marker),
+        );
       }
     }
   }
@@ -226,10 +264,25 @@ export async function trackDeviceAcquisitionReadiness<T>(
 
 /** Move an in-flight acquisition marker to a replacement device identity. */
 export function moveDeviceAcquisitionReadiness(fromKey: string, toKey: string): void {
-  const marker = deviceAcquisitionReadiness.get(fromKey);
-  if (marker && fromKey !== toKey) {
-    deviceAcquisitionReadiness.set(toKey, marker);
+  const from = deviceAcquisitionReadiness.get(fromKey);
+  if (!from || fromKey === toKey) {
+    return;
   }
+  // Do not clobber a distinct in-flight acquisition already tracking readiness
+  // for the replacement identity, and do not drop it either: retain BOTH until
+  // both settle. Replacing it would hand every awaiter on `toKey` this marker
+  // instead, and merely keeping it would let `toKey` clear the moment that
+  // other acquisition settles while this one is still mid-flight. Either way an
+  // awaiter could stop waiting with a CtrlProxy setup still running and start a
+  // duplicate one - the double-setup race the marker exists to prevent (#6280).
+  const existing = deviceAcquisitionReadiness.get(toKey);
+  const merged = existing
+    ? [
+        ...existing.pending,
+        ...from.pending.filter((pending) => !existing.pending.includes(pending)),
+      ]
+    : [...from.pending];
+  setAcquisitionReadinessPending(toKey, merged);
 }
 
 /**
@@ -237,5 +290,5 @@ export function moveDeviceAcquisitionReadiness(fromKey: string, toKey: string): 
  * acquisition is currently binding/recording readiness for it.
  */
 export function getDeviceAcquisitionReadiness(key: string): Promise<void> | undefined {
-  return deviceAcquisitionReadiness.get(key);
+  return deviceAcquisitionReadiness.get(key)?.marker;
 }

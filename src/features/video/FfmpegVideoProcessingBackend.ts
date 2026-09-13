@@ -54,7 +54,17 @@ export const IOS_RECORDING_FILE_READY_TIMEOUT_MS = 15000;
 const IOS_RECORDING_FILE_READY_INITIAL_BACKOFF_MS = 100;
 const IOS_RECORDING_FILE_READY_MAX_BACKOFF_MS = 1000;
 const FFMPEG_POST_PROCESS_TIMEOUT_MS = 60000;
-const IOS_RECORDING_START_TIMEOUT_MS = 5000;
+// Total budget for the whole iOS start path: the simctl availability probe, the
+// spawn, and every attempt's "Recording started" handshake. The handshake is the
+// expensive part — simctl only emits it after encoding the first video frame — and
+// the budget is split across the bounded retries, so the original 5s left each
+// attempt under two seconds. On the self-hosted macOS runner (which also runs
+// xcodebuild and Simulator) that was routinely too short, so essentially every PR
+// saw the iOS video-recording lane fail with "Timed out waiting for Recording
+// started" (#6857). Keep it bounded — an actually-wedged simulator must still
+// fail rather than hang — but at the same order as the stop-side waits, which
+// already carry the "loaded CI macOS runner" rationale.
+export const IOS_RECORDING_START_TIMEOUT_MS = 15000;
 const IOS_RECORDING_START_CLEANUP_TIMEOUT_MS = 500;
 // A cold or loaded simulator can silently miss the very first `recordVideo`
 // start handshake (#4076): simctl produces no "Recording started" and no error,
@@ -62,7 +72,16 @@ const IOS_RECORDING_START_CLEANUP_TIMEOUT_MS = 500;
 // before failing, capturing simulator state on each miss so a genuine wedge is
 // diagnosable rather than surfacing as a bare timeout.
 const IOS_RECORDING_START_MAX_ATTEMPTS = 2;
-const IOS_RECORDING_DIAGNOSTIC_TIMEOUT_MS = 5000;
+// Budget for the terminal attempt's simulator-state probe. Nothing is waiting on
+// the start deadline once the last attempt has failed, so the probe gets a budget a
+// loaded host can actually deliver — `xcrun simctl list devices` regularly needs
+// more than a few hundred milliseconds there, and a probe that times out reports
+// nothing about the simulator at all (#6857).
+const IOS_RECORDING_DIAGNOSTIC_TIMEOUT_MS = 3000;
+// Budget for a between-attempt probe. That one still shares the start deadline with
+// the pending retry, so it stays a small slice: enriching a failure must never
+// starve the attempt that could still succeed.
+const IOS_RECORDING_RETRY_DIAGNOSTIC_TIMEOUT_MS = 250;
 // `simctl` emits this only after processing its first video frame. The earlier
 // "Defaulting to display" diagnostic proves only display selection, which can
 // still produce a zero-byte capture on a cold simulator.
@@ -885,6 +904,7 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
       input.simctl,
       input.device,
       input.startDeadlineMs,
+      input.attempt >= input.maxAttempts,
     );
     logger.warn(
       `[FfmpegVideo] iOS recording start attempt ${input.attempt}/${input.maxAttempts} failed: ${input.error} (${diagnostics})`,
@@ -917,11 +937,25 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
     simctl: SimCtl,
     device: BootedDevice,
     startDeadlineMs: number,
+    isFinalAttempt: boolean,
   ): Promise<string> {
-    const diagnosticBudgetMs = Math.max(0, Math.min(250, startDeadlineMs - this.timer.now()));
+    if (isFinalAttempt) {
+      // No retry is left to protect, so the probe is deliberately NOT clipped to the
+      // (usually exhausted) start deadline. Clipping it meant the one attempt whose
+      // diagnostics matter most reported "startup budget exhausted" and never looked.
+      return await this.captureSimulatorDiagnostics(
+        simctl,
+        device,
+        IOS_RECORDING_DIAGNOSTIC_TIMEOUT_MS,
+      );
+    }
+    const diagnosticBudgetMs = Math.max(
+      0,
+      Math.min(IOS_RECORDING_RETRY_DIAGNOSTIC_TIMEOUT_MS, startDeadlineMs - this.timer.now()),
+    );
     return diagnosticBudgetMs > 0
       ? await this.captureSimulatorDiagnostics(simctl, device, diagnosticBudgetMs)
-      : "simulator state unavailable: startup budget exhausted";
+      : "simulator state unknown: start budget reserved for the pending retry";
   }
 
   /**
@@ -934,15 +968,24 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
     device: BootedDevice,
     timeoutMs: number,
   ): Promise<string> {
+    const budgetMs = Math.min(IOS_RECORDING_DIAGNOSTIC_TIMEOUT_MS, timeoutMs);
+    const probeStartedAtMs = this.timer.now();
     try {
       const result = await simctl.executeCommandArgs(
         ["list", "devices", device.deviceId],
-        Math.min(IOS_RECORDING_DIAGNOSTIC_TIMEOUT_MS, timeoutMs),
+        budgetMs,
       );
       const text = (result.stdout || result.stderr || "").replace(/\s+/g, " ").trim();
       return text ? `simulator state: ${text.slice(0, 500)}` : "simulator state: (empty)";
     } catch (error) {
       const reason = errorMessage(error);
+      // A probe that burned its whole budget says nothing about the simulator — only
+      // that the host was too busy to answer in time. Reporting that as "unavailable"
+      // reads like a definitive "the simulator is gone" and sent the triage of #6857
+      // after the probe instead of the handshake timeout that actually failed the start.
+      if (this.timer.now() - probeStartedAtMs >= budgetMs) {
+        return `simulator state unknown: state probe exceeded its ${budgetMs}ms budget (host may be loaded): ${reason}`;
+      }
       return `simulator state unavailable: ${reason}`;
     }
   }

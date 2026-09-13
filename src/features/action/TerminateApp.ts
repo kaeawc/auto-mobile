@@ -16,6 +16,7 @@ import { getIosInstalledAppBundleId } from "../../utils/ios-cmdline-tools/iosIns
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { RealObserveScreen } from "../observe/ObserveScreen";
 import { isAndroidPackageRunning } from "../../utils/android-cmdline-tools/androidProcessState";
+import { registerDeviceIncarnationListener } from "../../utils/deviceIncarnation";
 
 /**
  * Invalidates the host-side cached window/hierarchy record for a device after
@@ -43,6 +44,16 @@ export class DefaultDeviceWindowCacheInvalidator implements DeviceWindowCacheInv
     RealObserveScreen.clearCache(device.deviceId);
   }
 }
+
+registerDeviceIncarnationListener({
+  name: "observe-window-cache",
+  onDeviceIncarnationChanged: (deviceId) =>
+    new DefaultDeviceWindowCacheInvalidator().invalidate({
+      deviceId,
+      name: deviceId,
+      platform: "android",
+    }),
+});
 
 /**
  * Physical-device app terminator. `DeviceAppManager` satisfies this

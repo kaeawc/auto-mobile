@@ -70,8 +70,17 @@ export interface DeviceServiceStatus {
 
 interface DeviceIdentity {
   stableId: string;
+  /**
+   * Key for THIS connection epoch of the device. An adb serial is reused across
+   * boots, so the serial alone cannot tell a consumer "same device, stream
+   * continues" from "device rebooted, flush your state". When the pool knows the
+   * device's `incarnation` AND that pooled entry describes the runtime this
+   * discovery just reported on the serial, this is `<deviceId>#<incarnation>`;
+   * otherwise the serial alone, which callers must read as "no epoch
+   * information". The identity check matters because the pool join is by serial:
+   * an unchecked join could publish a retired entry's epoch for a new runtime.
+   */
   connectionId: string;
-  transportId?: string;
 }
 
 interface DeviceReadiness {
@@ -117,6 +126,18 @@ interface BootedDeviceInfo {
    * Consumed by the desktop workspace to gate the contextual Unlock control (issue #4694).
    */
   locked?: boolean;
+  /**
+   * Set when the pool holds this serial under an IDENTITY QUARANTINE: the serial
+   * resolves, but which AVD answers on it does not.
+   *
+   * Published rather than inferred from the absent pool context, because the two
+   * are not the same fact: an entry can carry no pool context simply because the
+   * pool never held the serial. This one says the daemon HAD an identity for it
+   * and can no longer tie it to the runtime — which is also why this entry is
+   * built from discovery alone and carries no probed service status or lock
+   * state ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
+   */
+  identityUnresolved?: boolean;
 }
 
 // Resource content schema
@@ -164,7 +185,14 @@ interface PoolDeviceInfo {
   poolStatus: PoolDeviceStatus;
   assignedSession?: string;
   recoveryEligibility: DeviceRecoveryEligibility;
+  /**
+   * The AVD this pool started on the serial, and the epoch of that allocation.
+   * The whole {@link PoolDeviceContext} -- these two included -- exists ONLY
+   * when the pooled entry describes the runtime discovery just reported on the
+   * serial; see {@link resolvePoolDeviceContext}.
+   */
   avdName?: string;
+  incarnation?: number;
 }
 
 /**
@@ -296,10 +324,9 @@ async function getDeviceLockStates(): Promise<ResourceContent> {
 // Convert BootedDevice to BootedDeviceInfo
 function toBootedDeviceInfo(
   device: BootedDevice,
-  poolInfo?: PoolDeviceInfo,
-  sessionInfo?: DeviceSessionInfo,
-  deviceSessionUuid?: string | null,
+  poolContext?: PoolDeviceContext,
 ): BootedDeviceInfo {
+  const poolInfo = poolContext?.poolInfo;
   const isVirtual = isVirtualDevice(device);
   const runtime = device.iosVersion ?? device.osVersion;
   const info: BootedDeviceInfo = {
@@ -315,8 +342,8 @@ function toBootedDeviceInfo(
     capabilities: { automation: null },
   };
 
-  if (deviceSessionUuid) {
-    info.deviceSessionUuid = deviceSessionUuid;
+  if (poolContext?.deviceSessionUuid) {
+    info.deviceSessionUuid = poolContext.deviceSessionUuid;
   }
   if (runtime) {
     info.runtime = runtime;
@@ -329,28 +356,38 @@ function toBootedDeviceInfo(
     info.assignedSession = poolInfo.assignedSession;
     info.recoveryEligibility = poolInfo.recoveryEligibility;
   }
-  if (sessionInfo) {
-    info.session = sessionInfo;
+  if (poolContext?.sessionInfo) {
+    info.session = poolContext.sessionInfo;
   }
   return info;
 }
 
+/**
+ * The two identities a consumer needs: WHICH device (`stableId`, the AVD name
+ * for an emulator because a serial is reused across boots) and WHICH RUN of it
+ * (`connectionId`, the pool's per-allocation incarnation).
+ *
+ * Both fall back to discovery's own answer when the pool has nothing to say
+ * about this runtime -- including when discovery reports `Unknown (<serial>)`,
+ * where the pooled AVD label could belong to the previous occupant of the
+ * serial. A caller that needs the real AVD name in that case must re-resolve it
+ * from the runtime rather than read it here (#6863 review).
+ */
 function toDeviceIdentity(
   device: BootedDevice,
   poolInfo: PoolDeviceInfo | undefined,
   isVirtual: boolean,
 ): DeviceIdentity {
-  const identity: DeviceIdentity = {
+  return {
     stableId:
       device.platform === "android" && isVirtual
         ? (poolInfo?.avdName ?? device.name)
         : device.deviceId,
-    connectionId: device.transportId ?? device.deviceId,
+    connectionId:
+      poolInfo?.incarnation === undefined
+        ? device.deviceId
+        : `${device.deviceId}#${poolInfo.incarnation}`,
   };
-  if (device.transportId) {
-    identity.transportId = device.transportId;
-  }
-  return identity;
 }
 
 function isVirtualDevice(device: BootedDevice): boolean {
@@ -361,16 +398,40 @@ function isVirtualDevice(device: BootedDevice): boolean {
   return device.deviceId.includes("-") && device.deviceId.length > 30;
 }
 
-function getPoolDeviceInfo(
+/**
+ * Everything the resource publishes about WHICH RUNTIME is on a serial, resolved
+ * as ONE unit so it can be withheld as one.
+ *
+ * The join to daemon state is by serial alone, and a different device can hold
+ * that serial before the pool refreshes -- or the emulator console can have gone
+ * quiet, leaving discovery with the `Unknown (<serial>)` placeholder, which
+ * asserts nothing either way. Naming the retired entry's epoch would tell
+ * consumers to keep state exactly when the new epoch is supposed to make them
+ * flush it; naming its AVD would publish the previous occupant's label as this
+ * runtime's `stableId`; and handing out the retired `deviceSessionUuid` would
+ * have the desktop subscribe to this runtime's streams under a dead epoch. So
+ * `describesPooledRuntime` gates the pool entry, the session and the registry
+ * epoch TOGETHER: on a mismatch the entry carries no pool context at all and its
+ * identity is built purely from discovery (#6863 review).
+ */
+interface PoolDeviceContext {
+  poolInfo: PoolDeviceInfo;
+  sessionInfo?: DeviceSessionInfo;
+  deviceSessionUuid?: string;
+}
+
+function resolvePoolDeviceContext(
   devicePool: DevicePool | null,
-  deviceId: string,
-): PoolDeviceInfo | undefined {
+  device: BootedDevice,
+  sessionInfoByDeviceId: Map<string, DeviceSessionInfo> | null,
+  resolveDeviceSessionUuid: (deviceId: string) => string | null,
+): PoolDeviceContext | undefined {
   if (!devicePool) {
     return undefined;
   }
 
-  const pooledDevice = devicePool.getDevice(deviceId);
-  if (!pooledDevice) {
+  const pooledDevice = devicePool.getDevice(device.deviceId);
+  if (!pooledDevice || !devicePool.describesPooledRuntime(device)) {
     return undefined;
   }
 
@@ -378,10 +439,15 @@ function getPoolDeviceInfo(
     pooledDevice.status === "busy" ? "assigned" : pooledDevice.status;
 
   return {
-    poolStatus,
-    assignedSession: pooledDevice.sessionId || undefined,
-    recoveryEligibility: devicePool.getRecoveryEligibility(deviceId),
-    avdName: pooledDevice.avdName,
+    poolInfo: {
+      poolStatus,
+      assignedSession: pooledDevice.sessionId || undefined,
+      recoveryEligibility: devicePool.getRecoveryEligibility(device.deviceId),
+      avdName: pooledDevice.avdName,
+      incarnation: pooledDevice.incarnation,
+    },
+    sessionInfo: sessionInfoByDeviceId?.get(device.deviceId),
+    deviceSessionUuid: resolveDeviceSessionUuid(device.deviceId) ?? undefined,
   };
 }
 
@@ -497,16 +563,29 @@ async function discoverBootedDevicesForPlatform(
   try {
     const discovery =
       await PlatformDeviceManagerFactory.getInstance().getBootedDevicesDetailed(platform);
+    // FUNNEL 1: fold this observation into the pool BEFORE any of it is joined to
+    // pooled identity below. This read can be the first discovery to see the
+    // `Unknown (<serial>)` placeholder, and withholding only its own output would
+    // leave the pool -- and therefore the admission gate and every stream
+    // resolver -- still trusting the stale label
+    // ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
+    await devicePool?.reconcileDiscoveryObservation(discovery.devices, "booted-devices-resource");
     const complete = discovery.succeededSources
       ? sourcesForPlatform(platform).every((source) => discovery.succeededSources!.has(source))
       : discovery.succeededPlatforms.has(platform);
     return {
       devices: discovery.devices.map((device) =>
-        toBootedDeviceInfo(
-          device,
-          getPoolDeviceInfo(devicePool, device.deviceId),
-          sessionInfoByDeviceId?.get(device.deviceId),
-          resolveDeviceSessionUuid(device.deviceId),
+        withIdentityQuarantineMarker(
+          toBootedDeviceInfo(
+            device,
+            resolvePoolDeviceContext(
+              devicePool,
+              device,
+              sessionInfoByDeviceId,
+              resolveDeviceSessionUuid,
+            ),
+          ),
+          devicePool,
         ),
       ),
       succeededPlatforms: complete ? new Set([platform]) : new Set(),
@@ -605,6 +684,33 @@ function readDaemonDeviceContext(): DaemonDeviceContext {
   return { devicePool, poolStatus, sessionInfoByDeviceId, resolveDeviceSessionUuid };
 }
 
+/**
+ * Stamp the entry when the reconciliation this request just performed left the
+ * serial under an identity quarantine, so consumers see WHY it carries nothing
+ * but discovery identity.
+ */
+function withIdentityQuarantineMarker(
+  device: BootedDeviceInfo,
+  devicePool: DevicePool | null,
+): BootedDeviceInfo {
+  if (devicePool?.isPooledIdentityUnresolved(device.deviceId) !== true) {
+    return device;
+  }
+  return { ...device, identityUnresolved: true };
+}
+
+/**
+ * Whether this entry may be PROBED. A quarantined serial is exactly the one the
+ * daemon must not address: FUNNEL 2 refuses every device-addressed operation on
+ * it, and an enrichment probe is one — package/service queries and
+ * `adb dumpsys window policy` issued against whichever runtime now owns the
+ * serial. Skipping is what the published `identityUnresolved` marker then
+ * explains ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
+ */
+function isProbeableDevice(device: BootedDeviceInfo): boolean {
+  return device.identityUnresolved !== true;
+}
+
 async function enrichDeviceServiceStatuses(devices: BootedDeviceInfo[]): Promise<void> {
   if (!serviceStatusEnabled) {
     return;
@@ -613,6 +719,9 @@ async function enrichDeviceServiceStatuses(devices: BootedDeviceInfo[]): Promise
   const SERVICE_STATUS_TIMEOUT_MS = 5000;
   const serviceStatusResults = await Promise.allSettled(
     devices.map(async (device) => {
+      if (!isProbeableDevice(device)) {
+        return undefined;
+      }
       try {
         return await Promise.race([
           queryDeviceServiceStatus(device),
@@ -683,11 +792,13 @@ async function enrichDeviceLockStates(devices: BootedDeviceInfo[]): Promise<void
   }
 
   const lockResults = await Promise.allSettled(
-    devices.map((device) =>
-      probeDeviceLock(
-        { name: device.name, platform: device.platform, deviceId: device.deviceId },
-        lockProbe,
-      ),
+    devices.map(async (device) =>
+      isProbeableDevice(device)
+        ? await probeDeviceLock(
+            { name: device.name, platform: device.platform, deviceId: device.deviceId },
+            lockProbe,
+          )
+        : undefined,
     ),
   );
 

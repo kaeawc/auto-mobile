@@ -173,6 +173,33 @@
   [[ "$output" == *'git tag "$TAG" "$EXPECTED_RELEASE_COMMIT"'* ]]
 }
 
+@test "prepare-release builds the notarized Network Filter probe with both provisioning profiles" {
+  wiring_requires_yq
+  local workflow=".github/workflows/build-network-filter-probe.yml"
+
+  run yq -r '.on.workflow_call.secrets | keys[]' "$workflow"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"MACOS_NETWORK_FILTER_CONTROLLER_PROFILE_BASE64"* ]]
+  [[ "$output" == *"MACOS_NETWORK_FILTER_PROVIDER_PROFILE_BASE64"* ]]
+
+  run yq -r '.jobs.build.steps[] | select(.name == "Build, sign, and notarize Network Filter identity probe") | .run' "$workflow"
+  [ "$status" -eq 0 ]
+  [ "$output" = "./scripts/ios/build-network-filter-probe.sh signed" ]
+
+  run yq -r '.jobs."build-candidate-network-filter-identity-probe".uses' .github/workflows/prepare-release.yml
+  [ "$status" -eq 0 ]
+  [ "$output" = "./.github/workflows/build-network-filter-probe.yml" ]
+
+  run yq -r '.jobs."build-candidate-network-filter-identity-probe".secrets | keys[]' .github/workflows/prepare-release.yml
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"MACOS_NETWORK_FILTER_CONTROLLER_PROFILE_BASE64"* ]]
+  [[ "$output" == *"MACOS_NETWORK_FILTER_PROVIDER_PROFILE_BASE64"* ]]
+
+  run yq -r '.jobs."verify-prepared-release".needs[]' .github/workflows/prepare-release.yml
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"build-candidate-network-filter-identity-probe"* ]]
+}
+
 @test "prepare-release keeps intermediate version commits on a run-scoped staging ref (#4686)" {
   wiring_requires_yq
   local workflow=".github/workflows/prepare-release.yml"
@@ -710,4 +737,22 @@ wiring_requires_yq() {
     | grep -v '^[[:space:]]*#')"
   [[ "$script" == *'REF_TYPE'* ]]
   [[ "$script" == *'REF_NAME'* ]]
+}
+
+# The Homebrew formula step used to race npm's publish/propagation: `npm
+# publish` returns before the registry serves the new version, so the tarball
+# fetch 404'd for its whole budget and reddened the 0.0.69 release (#6810).
+# update-brew-formula.sh now waits on the npm version document with exponential
+# backoff first; the workflow's job must bound that wait so a registry that
+# never serves the version cannot hold a runner open.
+@test "release.yml bounds the Homebrew publish job with a timeout" {
+  wiring_requires_yq
+  workflow=".github/workflows/release.yml"
+  run yq -r '.jobs."publish-homebrew"."timeout-minutes"' "$workflow"
+  [ "$status" -eq 0 ]
+  [[ "$output" != "null" ]]
+  # Long enough for the script's bounded propagation wait (~6 min) plus its
+  # tarball retry budget (~5 min), short enough to fail rather than hang.
+  [ "$output" -ge 15 ]
+  [ "$output" -le 45 ]
 }

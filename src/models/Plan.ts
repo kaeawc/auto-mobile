@@ -1,6 +1,6 @@
 import { Platform } from "./Platform";
 import type { FailureObservationSummary } from "./FailureObservation";
-import type { ExecutePlanDebugInfo } from "./ExecutePlanResult";
+import type { ExecutePlanDebugInfo, PlanStepWarnings } from "./ExecutePlanResult";
 
 export interface PlanStep {
   tool: string;
@@ -57,6 +57,12 @@ export interface PlanExecutionResult {
   perDeviceResults?: Map<string, DeviceExecutionResult>; // For multi-device plans
   /** Per-step trace (always populated by the executor; may include `stepObservation` when `captureObserveSteps` is set). */
   debug?: ExecutePlanDebugInfo;
+  /**
+   * Best-effort warnings from steps that still SUCCEEDED, in step order
+   * (issue #6868). Unlike `debug`, this survives into the `executePlan`
+   * response unconditionally (#6887 review).
+   */
+  warnings?: PlanStepWarnings[];
 }
 
 export interface DeviceExecutionResult {

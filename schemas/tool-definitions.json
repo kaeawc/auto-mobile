@@ -438,7 +438,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -618,7 +618,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -998,6 +998,11 @@
           "type": "integer",
           "exclusiveMinimum": 0,
           "maximum": 890000
+        },
+        "force": {
+          "description": "Drop every AVD-name comparison on the way to the kill -- the emulator-console probe that confirms which AVD is running on this serial, and the platform kill's own check against a fresh discovery -- and act on whatever occupies the serial. Use only when the console has wedged and the normal call refuses because the AVD name cannot be confirmed. This does not override the conflict check, it removes it: force means 'act on whatever emulator currently occupies this serial', including a different AVD that took the serial over. It does NOT select a different serial, and a serial with nothing running on it still refuses. Nor does it override the refusal raised when this daemon's pool entry for the serial was retired and replaced while the action was being prepared, or deleteDevice's refusal to delete a stopped image while a booted emulator that cannot be identified at all is attached. Android emulators only; accepted and ignored for iOS and physical devices.",
+          "default": false,
+          "type": "boolean"
         }
       },
       "required": ["operationId", "target", "mode", "verifyAbsence"],
@@ -1243,7 +1248,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -1473,6 +1478,34 @@
           },
           "required": ["executionTimeMs", "steps"],
           "additionalProperties": false
+        },
+        "warnings": {
+          "description": "Best-effort warnings from steps that still succeeded",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "stepIndex": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "tool": {
+                "type": "string"
+              },
+              "device": {
+                "type": "string"
+              },
+              "warnings": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": ["stepIndex", "tool", "warnings"],
+            "additionalProperties": false
+          }
         }
       },
       "required": ["success", "executedSteps", "totalSteps"],
@@ -1620,6 +1653,98 @@
           "description": "Booted device serial, e.g. emulator-5554 (the `deviceId` field of automobile:devices/booted/android), or a defined AVD image name, which is cold-booted by name. Prefer avdName to boot or coordinate a named AVD.",
           "type": "string",
           "minLength": 1
+        },
+        "enableTools": {
+          "description": "Exact case-sensitive AutoMobile tool names to enable for the session this call mints, applied before the response is built so the returned enabledTools/gatedTools reflect them. An unknown or non-configurable name rejects the call before any device work starts.",
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "enum": [
+              "accessibility",
+              "accessibilityFocus",
+              "biometricAuth",
+              "changeLocalization",
+              "clearKeyValueFile",
+              "clearMockNetwork",
+              "clearText",
+              "clipboard",
+              "crashApp",
+              "debugSearch",
+              "deleteDevice",
+              "deviceSnapshot",
+              "displayConfig",
+              "dragAndDrop",
+              "executePlan",
+              "explore",
+              "exportPlan",
+              "getAndroid",
+              "getAppPermissions",
+              "getApple",
+              "getDataStore",
+              "getDeepLinks",
+              "getDeviceState",
+              "getIosSimulatorCapabilities",
+              "getNavigationGraph",
+              "getNetworkGraph",
+              "getNotificationPolicy",
+              "getPreference",
+              "highlight",
+              "homeScreen",
+              "identifyInteractions",
+              "imeAction",
+              "inputText",
+              "installApp",
+              "keyboard",
+              "killDevice",
+              "launchApp",
+              "listApps",
+              "listDataStores",
+              "listDeviceImages",
+              "listDevices",
+              "mockNetwork",
+              "navigateTo",
+              "network",
+              "observe",
+              "openLink",
+              "phoneCall",
+              "pinchOn",
+              "postNotification",
+              "pressButton",
+              "provisionDevice",
+              "putAppFile",
+              "recentApps",
+              "recordSteps",
+              "removeKeyValue",
+              "resetKeychain",
+              "rotate",
+              "selectAllText",
+              "sendKeys",
+              "sendSms",
+              "setActiveDevice",
+              "setAppPermissions",
+              "setDeviceResources",
+              "setDeviceState",
+              "setKeyValue",
+              "setNotificationPolicy",
+              "setPreference",
+              "setUIState",
+              "shake",
+              "sqlQuery",
+              "stageSharedStorage",
+              "stageSharedStorageFixtures",
+              "startTestRecording",
+              "swipeOn",
+              "systemTray",
+              "tapAny",
+              "tapOn",
+              "terminateApp",
+              "uninstallApp",
+              "videoRecording",
+              "wakeAndUnlock"
+            ]
+          }
         }
       },
       "additionalProperties": false
@@ -1653,6 +1778,98 @@
           "description": "Booted device identifier (the `deviceId` field of automobile:devices/booted/ios); alias for udid",
           "type": "string",
           "minLength": 1
+        },
+        "enableTools": {
+          "description": "Exact case-sensitive AutoMobile tool names to enable for the session this call mints, applied before the response is built so the returned enabledTools/gatedTools reflect them. An unknown or non-configurable name rejects the call before any device work starts.",
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "enum": [
+              "accessibility",
+              "accessibilityFocus",
+              "biometricAuth",
+              "changeLocalization",
+              "clearKeyValueFile",
+              "clearMockNetwork",
+              "clearText",
+              "clipboard",
+              "crashApp",
+              "debugSearch",
+              "deleteDevice",
+              "deviceSnapshot",
+              "displayConfig",
+              "dragAndDrop",
+              "executePlan",
+              "explore",
+              "exportPlan",
+              "getAndroid",
+              "getAppPermissions",
+              "getApple",
+              "getDataStore",
+              "getDeepLinks",
+              "getDeviceState",
+              "getIosSimulatorCapabilities",
+              "getNavigationGraph",
+              "getNetworkGraph",
+              "getNotificationPolicy",
+              "getPreference",
+              "highlight",
+              "homeScreen",
+              "identifyInteractions",
+              "imeAction",
+              "inputText",
+              "installApp",
+              "keyboard",
+              "killDevice",
+              "launchApp",
+              "listApps",
+              "listDataStores",
+              "listDeviceImages",
+              "listDevices",
+              "mockNetwork",
+              "navigateTo",
+              "network",
+              "observe",
+              "openLink",
+              "phoneCall",
+              "pinchOn",
+              "postNotification",
+              "pressButton",
+              "provisionDevice",
+              "putAppFile",
+              "recentApps",
+              "recordSteps",
+              "removeKeyValue",
+              "resetKeychain",
+              "rotate",
+              "selectAllText",
+              "sendKeys",
+              "sendSms",
+              "setActiveDevice",
+              "setAppPermissions",
+              "setDeviceResources",
+              "setDeviceState",
+              "setKeyValue",
+              "setNotificationPolicy",
+              "setPreference",
+              "setUIState",
+              "shake",
+              "sqlQuery",
+              "stageSharedStorage",
+              "stageSharedStorageFixtures",
+              "startTestRecording",
+              "swipeOn",
+              "systemTray",
+              "tapAny",
+              "tapOn",
+              "terminateApp",
+              "uninstallApp",
+              "videoRecording",
+              "wakeAndUnlock"
+            ]
+          }
         }
       },
       "additionalProperties": false
@@ -1766,18 +1983,18 @@
   },
   {
     "name": "getDeviceState",
-    "description": "Read device-level state such as Do Not Disturb, iOS Simulator biometric enrollment, and device-wide network condition",
+    "description": "Read device-level state: Do Not Disturb, the connectivity toggles (airplaneMode, wifiEnabled, bluetoothEnabled, locationEnabled), iOS Simulator biometric enrollment, and device-wide network condition. Use it as the idempotency oracle before flipping a toggle — a bare call returns doNotDisturb + connectivity, so you can check whether Airplane mode is already on instead of inferring it from the status bar. Each connectivity field is true/false, or omitted when the device could not answer (the key is absent on this API level, or the value did not parse) — omitted never means off. Android only: iOS reports connectivity unsupported, because Airplane mode / Wi-Fi / Bluetooth / Location have no simctl or devicectl read verb and a simulator shares the host's network stack.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "include": {
-          "description": "State fields to read; supports doNotDisturb, biometrics, and networkCondition",
+          "description": "State fields to read; supports doNotDisturb, connectivity, biometrics, and networkCondition. Defaults to doNotDisturb + connectivity, so a bare call answers whether Airplane mode / Wi-Fi / Bluetooth / Location are already on.",
           "minItems": 1,
           "type": "array",
           "items": {
             "type": "string",
-            "enum": ["doNotDisturb", "biometrics", "networkCondition"]
+            "enum": ["doNotDisturb", "connectivity", "biometrics", "networkCondition"]
           }
         },
         "platform": {
@@ -2131,7 +2348,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -2243,7 +2460,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -2265,7 +2482,7 @@
   },
   {
     "name": "inputText",
-    "description": "Input text. The optional mode field is Android-only and ignored on iOS.",
+    "description": "Input text. The optional mode field is Android-only and ignored on iOS. If the text lands but the optional keyboard dismissal fails, the response stays a success with keyboardDismissed:false and a warnings entry.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -2354,7 +2571,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -2457,13 +2674,15 @@
             "platform": {
               "type": "string",
               "enum": ["android", "ios"]
-            },
-            "transportId": {
-              "type": "string"
             }
           },
           "required": ["name", "deviceId", "platform"],
           "additionalProperties": false
+        },
+        "force": {
+          "description": "Drop every AVD-name comparison on the way to the kill -- the emulator-console probe that confirms which AVD is running on this serial, and the platform kill's own check against a fresh discovery -- and act on whatever occupies the serial. Use only when the console has wedged and the normal call refuses because the AVD name cannot be confirmed. This does not override the conflict check, it removes it: force means 'act on whatever emulator currently occupies this serial', including a different AVD that took the serial over. It does NOT select a different serial, and a serial with nothing running on it still refuses. Nor does it override the refusal raised when this daemon's pool entry for the serial was retired and replaced while the action was being prepared, or deleteDevice's refusal to delete a stopped image while a booted emulator that cannot be identified at all is attached. Android emulators only; accepted and ignored for iOS and physical devices.",
+          "default": false,
+          "type": "boolean"
         }
       },
       "required": ["device"],
@@ -2472,7 +2691,7 @@
   },
   {
     "name": "launchApp",
-    "description": "Launch app by package name",
+    "description": "Launch app by package name. On Android an app that is already in the foreground returns success with alreadyForeground:true plus the observation, not an error; iOS re-launches it and returns an ordinary success without that marker.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -2493,7 +2712,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -2519,18 +2738,18 @@
   },
   {
     "name": "listApps",
-    "description": "List installed apps on a device. Filters by type (default: user), search, and profile.",
+    "description": "List installed apps on a device, with optional display label and launchable fields when reported by the platform or transport. The label is typically omitted on Android when the installed CtrlProxy APK lacks label support; launchable is typically omitted for physical iOS/devicectl records. Filters by type (default: launchable — every app with a launcher entry point, preinstalled ones included), search (package name or label), and profile.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "type": {
-          "description": "Filter by app type. Defaults to 'user', EXCEPT on a physical iOS device where user/system classification is unavailable (devicectl reports no such signal there): on such a device an omitted type returns every app (reported as 'all'), and an explicit 'user' or 'system' filter is rejected rather than silently honored.",
+          "description": "Filter by app type. Defaults to 'launchable': every app with a launcher entry point, user-installed or preinstalled, so the apps a human names (Contacts, Clock, Settings) are visible while content providers and RRO overlays are not. 'user' and 'system' keep their meaning and must be asked for explicitly; 'all' returns every installed package. The default degrades to 'user' when the device reports no launchability signal, and an explicit 'launchable' is then rejected rather than silently empty. On a physical iOS device, where user/system classification is unavailable (devicectl reports no such signal), an omitted type returns every app (reported as 'all') and an explicit 'user' or 'system' filter is rejected rather than silently honored.",
           "type": "string",
-          "enum": ["user", "system", "all"]
+          "enum": ["launchable", "user", "system", "all"]
         },
         "search": {
-          "description": "Filter by a case-insensitive substring of the package name/bundle id. Also matches the app's display name where the platform reports one (iOS only today — Android's listing does not include app labels).",
+          "description": "Filter by a case-insensitive substring of the package name/bundle id or of the app's display label ('contacts' matches both com.android.contacts and an app labelled Contacts). Android labels require the installed CtrlProxy APK; without it only the package name is matched.",
           "type": "string"
         },
         "profile": {
@@ -3055,7 +3274,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Output projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) in place of viewHierarchy/elements. Each skeleton elementId/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "description": "Output projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) in place of viewHierarchy/elements. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -4273,9 +4492,23 @@
               },
               "required": ["available", "source", "units"],
               "additionalProperties": false
+            },
+            "truncationReasons": {
+              "description": "Why the captured hierarchy is incomplete (issue #6601). Present only when rows were dropped — a device-side stop (max_nodes, max_depth) or the per-node child cap (max_children[<node> kept N of M]). This is the nested location `sanitizeObserveResult` leaves the warning under `project:\"full\"` or `raw:true`; the skeleton projection instead lifts the same information to the top-level `truncationReasons` field.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
             }
           },
           "additionalProperties": {}
+        },
+        "truncationReasons": {
+          "description": "Why the captured hierarchy is incomplete (issue #6601), lifted out of `viewHierarchy` by the skeleton projection that removes it. Present only when rows were dropped — a device-side stop (max_nodes, max_depth) or the per-node child cap (max_children[<node> kept N of M]). When present, `skeleton`/`context` are a subset of the screen: an element missing from them is not evidence it is absent.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         },
         "skeleton": {
           "type": "array",
@@ -6829,7 +7062,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -6990,7 +7223,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -7117,7 +7350,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -7459,12 +7692,111 @@
           "type": "integer",
           "exclusiveMinimum": 0,
           "maximum": 830000
+        },
+        "enableTools": {
+          "description": "Exact case-sensitive AutoMobile tool names to enable for the session this call mints, applied before the response is built so the returned enabledTools/gatedTools reflect them. An unknown or non-configurable name rejects the call before any device work starts. Requires boot=true.",
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "enum": [
+              "accessibility",
+              "accessibilityFocus",
+              "biometricAuth",
+              "changeLocalization",
+              "clearKeyValueFile",
+              "clearMockNetwork",
+              "clearText",
+              "clipboard",
+              "crashApp",
+              "debugSearch",
+              "deleteDevice",
+              "deviceSnapshot",
+              "displayConfig",
+              "dragAndDrop",
+              "executePlan",
+              "explore",
+              "exportPlan",
+              "getAndroid",
+              "getAppPermissions",
+              "getApple",
+              "getDataStore",
+              "getDeepLinks",
+              "getDeviceState",
+              "getIosSimulatorCapabilities",
+              "getNavigationGraph",
+              "getNetworkGraph",
+              "getNotificationPolicy",
+              "getPreference",
+              "highlight",
+              "homeScreen",
+              "identifyInteractions",
+              "imeAction",
+              "inputText",
+              "installApp",
+              "keyboard",
+              "killDevice",
+              "launchApp",
+              "listApps",
+              "listDataStores",
+              "listDeviceImages",
+              "listDevices",
+              "mockNetwork",
+              "navigateTo",
+              "network",
+              "observe",
+              "openLink",
+              "phoneCall",
+              "pinchOn",
+              "postNotification",
+              "pressButton",
+              "provisionDevice",
+              "putAppFile",
+              "recentApps",
+              "recordSteps",
+              "removeKeyValue",
+              "resetKeychain",
+              "rotate",
+              "selectAllText",
+              "sendKeys",
+              "sendSms",
+              "setActiveDevice",
+              "setAppPermissions",
+              "setDeviceResources",
+              "setDeviceState",
+              "setKeyValue",
+              "setNotificationPolicy",
+              "setPreference",
+              "setUIState",
+              "shake",
+              "sqlQuery",
+              "stageSharedStorage",
+              "stageSharedStorageFixtures",
+              "startTestRecording",
+              "swipeOn",
+              "systemTray",
+              "tapAny",
+              "tapOn",
+              "terminateApp",
+              "uninstallApp",
+              "videoRecording",
+              "wakeAndUnlock"
+            ]
+          }
         }
       },
       "required": ["operationId", "device"],
       "additionalProperties": false,
       "if": {
-        "required": ["resources"]
+        "anyOf": [
+          {
+            "required": ["resources"]
+          },
+          {
+            "required": ["enableTools"]
+          }
+        ]
       },
       "then": {
         "properties": {
@@ -7638,7 +7970,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -7821,7 +8153,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -7857,7 +8189,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -8039,7 +8371,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -8818,13 +9150,13 @@
   },
   {
     "name": "setToolEnabled",
-    "description": "Enable or disable one exact AutoMobile tool for this MCP session.",
+    "description": "Enable or disable AutoMobile tools for this MCP session: one exact name via toolName, or a whole batch in one call via toolNames. Returns the resulting enabled set.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "toolName": {
-          "description": "Exact case-sensitive AutoMobile tool name to enable or disable. The listed choices include optional tools absent from tools/list until enabled.",
+          "description": "Exact case-sensitive AutoMobile tool name to enable or disable. The listed choices include optional tools absent from tools/list until enabled. Provide either toolName or toolNames.",
           "type": "string",
           "minLength": 1,
           "enum": [
@@ -8911,8 +9243,100 @@
             "wakeAndUnlock"
           ]
         },
+        "toolNames": {
+          "description": "Exact case-sensitive AutoMobile tool names to enable or disable in ONE call, applied all-or-nothing: an unknown or non-configurable name rejects the whole request before anything is written. Provide either toolName or toolNames.",
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "enum": [
+              "accessibility",
+              "accessibilityFocus",
+              "biometricAuth",
+              "changeLocalization",
+              "clearKeyValueFile",
+              "clearMockNetwork",
+              "clearText",
+              "clipboard",
+              "crashApp",
+              "debugSearch",
+              "deleteDevice",
+              "deviceSnapshot",
+              "displayConfig",
+              "dragAndDrop",
+              "executePlan",
+              "explore",
+              "exportPlan",
+              "getAndroid",
+              "getAppPermissions",
+              "getApple",
+              "getDataStore",
+              "getDeepLinks",
+              "getDeviceState",
+              "getIosSimulatorCapabilities",
+              "getNavigationGraph",
+              "getNetworkGraph",
+              "getNotificationPolicy",
+              "getPreference",
+              "highlight",
+              "homeScreen",
+              "identifyInteractions",
+              "imeAction",
+              "inputText",
+              "installApp",
+              "keyboard",
+              "killDevice",
+              "launchApp",
+              "listApps",
+              "listDataStores",
+              "listDeviceImages",
+              "listDevices",
+              "mockNetwork",
+              "navigateTo",
+              "network",
+              "observe",
+              "openLink",
+              "phoneCall",
+              "pinchOn",
+              "postNotification",
+              "pressButton",
+              "provisionDevice",
+              "putAppFile",
+              "recentApps",
+              "recordSteps",
+              "removeKeyValue",
+              "resetKeychain",
+              "rotate",
+              "selectAllText",
+              "sendKeys",
+              "sendSms",
+              "setActiveDevice",
+              "setAppPermissions",
+              "setDeviceResources",
+              "setDeviceState",
+              "setKeyValue",
+              "setNotificationPolicy",
+              "setPreference",
+              "setUIState",
+              "shake",
+              "sqlQuery",
+              "stageSharedStorage",
+              "stageSharedStorageFixtures",
+              "startTestRecording",
+              "swipeOn",
+              "systemTray",
+              "tapAny",
+              "tapOn",
+              "terminateApp",
+              "uninstallApp",
+              "videoRecording",
+              "wakeAndUnlock"
+            ]
+          }
+        },
         "enabled": {
-          "description": "Whether to enable the tool (default: true).",
+          "description": "Whether to enable the tools (default: true).",
           "default": true,
           "type": "boolean"
         },
@@ -8922,8 +9346,18 @@
           "minLength": 1
         }
       },
-      "required": ["toolName"],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "if": {
+        "required": ["toolName"]
+      },
+      "then": {
+        "not": {
+          "required": ["toolNames"]
+        }
+      },
+      "else": {
+        "required": ["toolNames"]
+      }
     }
   },
   {
@@ -9085,7 +9519,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -9423,7 +9857,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -9445,18 +9879,18 @@
   },
   {
     "name": "systemTray",
-    "description": "System tray actions for notifications (open/close/find/tap/dismiss/clearAll)",
+    "description": "System tray actions for notifications (open/close/list/find/tap/dismiss/clearAll)",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "action": {
-          "description": "open/close/find/tap/dismiss/clearAll notification",
+          "description": "open/close/list/find/tap/dismiss/clearAll notification",
           "type": "string",
-          "enum": ["open", "close", "find", "tap", "dismiss", "clearAll"]
+          "enum": ["open", "close", "list", "find", "tap", "dismiss", "clearAll"]
         },
         "notification": {
-          "description": "Notification criteria to match",
+          "description": "Notification criteria to match; list requires appId and scans up to three swipes on Android",
           "type": "object",
           "properties": {
             "title": {
@@ -9473,6 +9907,60 @@
             },
             "tapActionLabel": {
               "description": "Action button label to tap (for 'tap' action)",
+              "type": "string"
+            },
+            "packageId": {
+              "type": "string"
+            },
+            "package": {
+              "type": "string"
+            },
+            "packageName": {
+              "type": "string"
+            },
+            "appPackage": {
+              "type": "string"
+            },
+            "appPackageId": {
+              "type": "string"
+            },
+            "bundle": {
+              "type": "string"
+            },
+            "bundleId": {
+              "type": "string"
+            },
+            "bundleID": {
+              "type": "string"
+            },
+            "bundleIdentifier": {
+              "type": "string"
+            },
+            "application": {
+              "type": "string"
+            },
+            "applicationId": {
+              "type": "string"
+            },
+            "applicationIdentifier": {
+              "type": "string"
+            },
+            "app": {
+              "type": "string"
+            },
+            "appIdentifier": {
+              "type": "string"
+            },
+            "package_id": {
+              "type": "string"
+            },
+            "package_name": {
+              "type": "string"
+            },
+            "bundle_id": {
+              "type": "string"
+            },
+            "application_id": {
               "type": "string"
             }
           },
@@ -9491,7 +9979,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -9508,7 +9996,195 @@
         }
       },
       "required": ["action"],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "if": {
+        "required": ["action"],
+        "properties": {
+          "action": {
+            "const": "list"
+          }
+        }
+      },
+      "then": {
+        "required": ["notification"],
+        "properties": {
+          "notification": {
+            "anyOf": [
+              {
+                "required": ["appId"],
+                "properties": {
+                  "appId": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              {
+                "required": ["packageId"],
+                "properties": {
+                  "packageId": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              {
+                "required": ["package"],
+                "properties": {
+                  "package": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              {
+                "required": ["packageName"],
+                "properties": {
+                  "packageName": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              {
+                "required": ["appPackage"],
+                "properties": {
+                  "appPackage": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              {
+                "required": ["appPackageId"],
+                "properties": {
+                  "appPackageId": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              {
+                "required": ["bundle"],
+                "properties": {
+                  "bundle": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              {
+                "required": ["bundleId"],
+                "properties": {
+                  "bundleId": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              {
+                "required": ["bundleID"],
+                "properties": {
+                  "bundleID": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              {
+                "required": ["bundleIdentifier"],
+                "properties": {
+                  "bundleIdentifier": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              {
+                "required": ["application"],
+                "properties": {
+                  "application": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              {
+                "required": ["applicationId"],
+                "properties": {
+                  "applicationId": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              {
+                "required": ["applicationIdentifier"],
+                "properties": {
+                  "applicationIdentifier": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              {
+                "required": ["app"],
+                "properties": {
+                  "app": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              {
+                "required": ["appIdentifier"],
+                "properties": {
+                  "appIdentifier": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              {
+                "required": ["package_id"],
+                "properties": {
+                  "package_id": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              {
+                "required": ["package_name"],
+                "properties": {
+                  "package_name": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              {
+                "required": ["bundle_id"],
+                "properties": {
+                  "bundle_id": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              {
+                "required": ["application_id"],
+                "properties": {
+                  "application_id": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
     }
   },
   {
@@ -9583,7 +10259,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -9764,7 +10440,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -10383,6 +11059,17 @@
                   },
                   "required": ["isFresh"],
                   "additionalProperties": {}
+                },
+                "truncationReasons": {
+                  "description": "Why the captured hierarchy is incomplete (issue #6601) — the same field a skeleton-projected full observation carries, so a client reads it the same way in both modes. Present only when rows were dropped: a device-side stop (max_nodes, max_depth) or the per-node child cap (max_children[<node> kept N of M]). When present, `skeleton`/`context` are a subset of the screen.",
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "settled": {
+                  "description": "Same name/meaning as a full observation's `settled` (issue #6866): whether the observation this diff was computed from passed the hierarchy-stability gate. Populated from the post-action observation, not by `diffObserveResult` itself, so a diff-mode client has the same accessor as a full-mode one.",
+                  "type": "boolean"
                 },
                 "added": {
                   "type": "array",
@@ -11172,6 +11859,509 @@
                   },
                   "required": ["platform", "source", "confidence", "key", "components"],
                   "additionalProperties": {}
+                },
+                "viewHierarchy": {
+                  "type": "object",
+                  "properties": {
+                    "hierarchy": {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        },
+                        "node": {
+                          "anyOf": [
+                            {
+                              "$ref": "#/$defs/__schema0"
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "$ref": "#/$defs/__schema0"
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      "additionalProperties": {}
+                    },
+                    "windows": {
+                      "anyOf": [
+                        {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "bounds": {
+                                "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid.",
+                                "anyOf": [
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "left": {
+                                        "type": "number"
+                                      },
+                                      "top": {
+                                        "type": "number"
+                                      },
+                                      "right": {
+                                        "type": "number"
+                                      },
+                                      "bottom": {
+                                        "type": "number"
+                                      },
+                                      "centerX": {
+                                        "type": "number"
+                                      },
+                                      "centerY": {
+                                        "type": "number"
+                                      }
+                                    },
+                                    "required": ["left", "top", "right", "bottom"],
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object.",
+                                    "type": "array",
+                                    "prefixItems": [
+                                      {
+                                        "type": "number"
+                                      },
+                                      {
+                                        "type": "number"
+                                      },
+                                      {
+                                        "type": "number"
+                                      },
+                                      {
+                                        "type": "number"
+                                      }
+                                    ]
+                                  }
+                                ]
+                              },
+                              "hierarchy": {
+                                "$ref": "#/$defs/__schema0"
+                              }
+                            },
+                            "additionalProperties": {}
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "contentHiddenRegions": {
+                      "anyOf": [
+                        {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "bounds": {
+                                "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid.",
+                                "anyOf": [
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "left": {
+                                        "type": "number"
+                                      },
+                                      "top": {
+                                        "type": "number"
+                                      },
+                                      "right": {
+                                        "type": "number"
+                                      },
+                                      "bottom": {
+                                        "type": "number"
+                                      },
+                                      "centerX": {
+                                        "type": "number"
+                                      },
+                                      "centerY": {
+                                        "type": "number"
+                                      }
+                                    },
+                                    "required": ["left", "top", "right", "bottom"],
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object.",
+                                    "type": "array",
+                                    "prefixItems": [
+                                      {
+                                        "type": "number"
+                                      },
+                                      {
+                                        "type": "number"
+                                      },
+                                      {
+                                        "type": "number"
+                                      },
+                                      {
+                                        "type": "number"
+                                      }
+                                    ]
+                                  }
+                                ]
+                              },
+                              "reason": {
+                                "type": "string"
+                              },
+                              "areaPercent": {
+                                "type": "number"
+                              }
+                            },
+                            "required": ["bounds", "reason", "areaPercent"],
+                            "additionalProperties": {}
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "accessibility-focused-element": {
+                      "$ref": "#/$defs/__schema0"
+                    },
+                    "systemInsets": {
+                      "type": "object",
+                      "properties": {
+                        "top": {
+                          "type": "number"
+                        },
+                        "right": {
+                          "type": "number"
+                        },
+                        "bottom": {
+                          "type": "number"
+                        },
+                        "left": {
+                          "type": "number"
+                        }
+                      },
+                      "required": ["top", "right", "bottom", "left"],
+                      "additionalProperties": false
+                    },
+                    "insets": {
+                      "type": "object",
+                      "properties": {
+                        "available": {
+                          "type": "boolean"
+                        },
+                        "source": {
+                          "type": "string",
+                          "enum": [
+                            "android-window-metrics",
+                            "android-resource-fallback",
+                            "ios-sdk-safe-area",
+                            "unavailable"
+                          ]
+                        },
+                        "units": {
+                          "type": "string",
+                          "enum": ["physical-pixels", "points", "unknown"]
+                        },
+                        "systemBars": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "visible": {
+                                  "type": "object",
+                                  "properties": {
+                                    "top": {
+                                      "type": "number"
+                                    },
+                                    "right": {
+                                      "type": "number"
+                                    },
+                                    "bottom": {
+                                      "type": "number"
+                                    },
+                                    "left": {
+                                      "type": "number"
+                                    }
+                                  },
+                                  "required": ["top", "right", "bottom", "left"],
+                                  "additionalProperties": false
+                                },
+                                "stable": {
+                                  "type": "object",
+                                  "properties": {
+                                    "top": {
+                                      "type": "number"
+                                    },
+                                    "right": {
+                                      "type": "number"
+                                    },
+                                    "bottom": {
+                                      "type": "number"
+                                    },
+                                    "left": {
+                                      "type": "number"
+                                    }
+                                  },
+                                  "required": ["top", "right", "bottom", "left"],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "required": ["visible", "stable"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "displayCutout": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "top": {
+                                  "type": "number"
+                                },
+                                "right": {
+                                  "type": "number"
+                                },
+                                "bottom": {
+                                  "type": "number"
+                                },
+                                "left": {
+                                  "type": "number"
+                                }
+                              },
+                              "required": ["top", "right", "bottom", "left"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "displayCutoutInfo": {
+                          "type": "object",
+                          "properties": {
+                            "classification": {
+                              "type": "string",
+                              "enum": ["none", "notch", "dynamic_island", "hole_punch", "unknown"]
+                            },
+                            "bounds": {
+                              "anyOf": [
+                                {
+                                  "type": "array",
+                                  "items": {
+                                    "anyOf": [
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "left": {
+                                            "type": "number"
+                                          },
+                                          "top": {
+                                            "type": "number"
+                                          },
+                                          "right": {
+                                            "type": "number"
+                                          },
+                                          "bottom": {
+                                            "type": "number"
+                                          },
+                                          "centerX": {
+                                            "type": "number"
+                                          },
+                                          "centerY": {
+                                            "type": "number"
+                                          }
+                                        },
+                                        "required": ["left", "top", "right", "bottom"],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "description": "Compact bounds tuple [left, top, right, bottom].",
+                                        "minItems": 4,
+                                        "maxItems": 4,
+                                        "type": "array",
+                                        "items": {
+                                          "type": "number"
+                                        }
+                                      }
+                                    ]
+                                  }
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "required": ["classification"],
+                          "additionalProperties": false
+                        },
+                        "systemGestures": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "top": {
+                                  "type": "number"
+                                },
+                                "right": {
+                                  "type": "number"
+                                },
+                                "bottom": {
+                                  "type": "number"
+                                },
+                                "left": {
+                                  "type": "number"
+                                }
+                              },
+                              "required": ["top", "right", "bottom", "left"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "mandatorySystemGestures": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "top": {
+                                  "type": "number"
+                                },
+                                "right": {
+                                  "type": "number"
+                                },
+                                "bottom": {
+                                  "type": "number"
+                                },
+                                "left": {
+                                  "type": "number"
+                                }
+                              },
+                              "required": ["top", "right", "bottom", "left"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "tappableElement": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "top": {
+                                  "type": "number"
+                                },
+                                "right": {
+                                  "type": "number"
+                                },
+                                "bottom": {
+                                  "type": "number"
+                                },
+                                "left": {
+                                  "type": "number"
+                                }
+                              },
+                              "required": ["top", "right", "bottom", "left"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "safeArea": {
+                          "type": "object",
+                          "properties": {
+                            "top": {
+                              "type": "number"
+                            },
+                            "right": {
+                              "type": "number"
+                            },
+                            "bottom": {
+                              "type": "number"
+                            },
+                            "left": {
+                              "type": "number"
+                            }
+                          },
+                          "required": ["top", "right", "bottom", "left"],
+                          "additionalProperties": false
+                        },
+                        "systemChrome": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "visibility": {
+                                  "type": "string",
+                                  "enum": ["visible", "hidden", "partial", "unknown"]
+                                },
+                                "statusBar": {
+                                  "type": "string",
+                                  "enum": ["visible", "hidden", "unknown"]
+                                },
+                                "navigationBar": {
+                                  "type": "string",
+                                  "enum": ["visible", "hidden", "unknown"]
+                                },
+                                "homeIndicatorAutoHideRequested": {
+                                  "anyOf": [
+                                    {
+                                      "type": "boolean"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "source": {
+                                  "type": "string",
+                                  "enum": ["android-window-insets", "ios-status-bar-manager"]
+                                }
+                              },
+                              "required": ["visibility", "statusBar", "source"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": ["available", "source", "units"],
+                      "additionalProperties": false
+                    },
+                    "truncationReasons": {
+                      "description": "Why the captured hierarchy is incomplete (issue #6601). Present only when rows were dropped — a device-side stop (max_nodes, max_depth) or the per-node child cap (max_children[<node> kept N of M]). This is the nested location `sanitizeObserveResult` leaves the warning under `project:\"full\"` or `raw:true`; the skeleton projection instead lifts the same information to the top-level `truncationReasons` field.",
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "additionalProperties": {}
+                },
+                "truncationReasons": {
+                  "description": "Why the captured hierarchy is incomplete (issue #6601) — the same field a diffed observation carries, so a client reads it the same way in both modes. Present only when rows were dropped: a device-side stop (max_nodes, max_depth) or the per-node child cap (max_children[<node> kept N of M]). When present, `skeleton`/`context` are a subset of the screen.",
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "settled": {
+                  "description": "Whether this observation passed the hierarchy-stability gate (issue #6866): two consecutive structurally-equal captures. `false` means the bound expired, the action was not navigation-class, or the action failed — in every case the capture was never confirmed stable. Stamped on every embedded action observation.",
+                  "type": "boolean"
                 }
               },
               "additionalProperties": {}
@@ -11946,7 +13136,85 @@
         "debug": {}
       },
       "required": ["success"],
-      "additionalProperties": {}
+      "additionalProperties": {},
+      "$defs": {
+        "__schema0": {
+          "type": "object",
+          "properties": {
+            "bounds": {
+              "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid.",
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "left": {
+                      "type": "number"
+                    },
+                    "top": {
+                      "type": "number"
+                    },
+                    "right": {
+                      "type": "number"
+                    },
+                    "bottom": {
+                      "type": "number"
+                    },
+                    "centerX": {
+                      "type": "number"
+                    },
+                    "centerY": {
+                      "type": "number"
+                    }
+                  },
+                  "required": ["left", "top", "right", "bottom"],
+                  "additionalProperties": false
+                },
+                {
+                  "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object.",
+                  "type": "array",
+                  "prefixItems": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    }
+                  ]
+                }
+              ]
+            },
+            "occlusionState": {
+              "type": "string"
+            },
+            "occludedBy": {
+              "type": "string"
+            },
+            "occludedByViewId": {
+              "type": "string"
+            },
+            "node": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/__schema0"
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/__schema0"
+                  }
+                }
+              ]
+            }
+          },
+          "additionalProperties": {}
+        }
+      }
     }
   },
   {
@@ -11964,7 +13232,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },

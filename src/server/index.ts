@@ -5,6 +5,7 @@ import { formatToolParamError } from "./toolParamError";
 import { reviveNonFiniteArguments } from "../utils/nonFiniteJson";
 import { stringifyToolResponse } from "../utils/toolUtils";
 import { logger } from "../utils/logger";
+import { errorMessage } from "../utils/describeUnknownError";
 import { defaultTimer } from "../utils/SystemTimer";
 import { executionTracker } from "./executionTracker";
 import { combineAbortSignals, runWithAbortSignal } from "../utils/AbortContext";
@@ -20,8 +21,8 @@ import {
   INTERNAL_EXECUTION_ID_PARAM,
   INTERNAL_LIVE_DEADLINE_KEY_PARAM,
   INTERNAL_MCP_SESSION_PARAM,
-  DAEMON_NON_FINITE_ENCODED_PARAM,
   deleteInternalToolParams,
+  INTERNAL_TOOL_PARAM_NAMES,
 } from "../daemon/constants";
 import {
   deviceLostErrorFromAbortSignal,
@@ -65,6 +66,161 @@ function failCancelledAcquisition(acquiredSessionUuid: string): never {
     unregisterDirectSession(acquiredSessionUuid);
   }
   throw new ActionableError("MCP request was cancelled during acquisition.");
+}
+
+/**
+ * The `enableTools` a device-acquisition call declared (#6869). The three
+ * acquisition tools advertise the field (`enableToolsSchemaField` in
+ * `src/server/toolSelectionTools.ts`); their handlers ignore it, because the
+ * grant is applied here — against the session the handler MINTS, which only the
+ * result carries.
+ */
+function resolveRequestedEnableTools(toolName: string, parsedParams: unknown): string[] {
+  if (
+    !isDeviceSessionAcquisitionTool(toolName) ||
+    !parsedParams ||
+    typeof parsedParams !== "object"
+  ) {
+    return [];
+  }
+  const requested = (parsedParams as { enableTools?: unknown }).enableTools;
+  if (!Array.isArray(requested) || requested.length === 0) {
+    return [];
+  }
+  const names = requested.filter((name): name is string => typeof name === "string");
+  // Reject an unknown or non-configurable name BEFORE the device work starts. A
+  // caller that misspelled one capability should not pay for a boot and a
+  // session mint to find out.
+  assertUserConfigurableToolNames(names);
+  return names;
+}
+
+/**
+ * The response field that states a lost `enableTools` declaration — empty when
+ * the declaration landed, so it can always be spread into an enrichment.
+ */
+type CapabilityDeclarationFailure = { enableToolsError?: string };
+
+/**
+ * Grant the declared capabilities against the session an acquisition handler
+ * MINTED (only its result carries that UUID), and refresh discovery.
+ *
+ * Returns the message to report when the grant did NOT land (#6886 review).
+ * Folding this failure into the surrounding enrichment catch made a rejected
+ * capability write indistinguishable from a successful acquisition, so the
+ * caller's next call hit a tool that was never enabled with nothing in the
+ * response to explain it. The device is acquired and the session minted by the
+ * time this runs, so neither may be discarded — the failure is reported as an
+ * explicit `enableToolsError` field on an otherwise intact acquisition result.
+ */
+async function applyAcquisitionToolSelection(
+  service: McpServerOptions["sessionToolSelectionService"],
+  sessionUuid: string,
+  enableTools: readonly string[],
+): Promise<CapabilityDeclarationFailure> {
+  if (enableTools.length === 0) {
+    return {};
+  }
+  try {
+    await applyToolSelection(service, sessionUuid, enableTools, true);
+    ToolRegistry.notifyToolListChanged();
+    return {};
+  } catch (error) {
+    const enableToolsError =
+      `Could not enable ${enableTools.join(", ")} for session ${sessionUuid}: ` +
+      `${errorMessage(error)}. The device session is usable; re-declare the ` +
+      `capabilities with ${SET_TOOL_ENABLED_TOOL_NAME}.`;
+    logger.warn(`[MCP] ${enableToolsError}`, error);
+    return { enableToolsError };
+  }
+}
+
+/**
+ * Report a lost capability declaration on its own, for the path where the
+ * optional enabled/gated report could not be built either (#6886 review). A
+ * successful declaration leaves the result untouched.
+ */
+function withCapabilityDeclarationFailure<
+  T extends { content: Array<{ type: string; text?: string }> },
+>(result: T, failure: CapabilityDeclarationFailure): T {
+  return failure.enableToolsError ? enrichAcquisitionResult(result, failure) : result;
+}
+
+/**
+ * provisionDevice mints a session too, so it accepts `enableTools` and reports
+ * the resulting `enabledTools` (#6869). It deliberately does NOT reuse the
+ * getAndroid/getApple discovery path: that one also computes `gatedTools` and
+ * fails a cancelled acquisition, neither of which is part of provisionDevice's
+ * existing contract. The device is provisioned and the session minted by the
+ * time this runs, so a failed capability report must not discard either.
+ *
+ * The RETAINED session — not `isError` — is what makes this an acquisition
+ * (#6886 review). When optional resource configuration fails, provisionDevice
+ * deliberately returns `isError: true` alongside a usable `sessionUuid`
+ * (`createProvisionDeviceResponse` in `src/server/deviceTools.ts`), and
+ * `DaemonMcpProxy` binds that session; gating on `isError` left the caller
+ * bound to a live session with none of its declared capabilities and neither
+ * `enabledTools` nor `enableToolsError` to say so. A truly failed acquisition
+ * mints nothing, so `!sessionUuid` still grants nothing.
+ */
+async function enrichProvisionDeviceResult<
+  T extends { content: Array<{ type: string; text?: string }> },
+>(
+  toolName: string,
+  result: T,
+  sessionUuid: string | undefined,
+  service: McpServerOptions["sessionToolSelectionService"],
+  enableTools: readonly string[],
+  connectionProfileUuid: string | undefined,
+): Promise<T> {
+  if (toolName !== "provisionDevice" || !sessionUuid) {
+    return result;
+  }
+  const failure = await applyAcquisitionToolSelection(service, sessionUuid, enableTools);
+  try {
+    return enrichAcquisitionResult(result, {
+      // The connection profile is the other half of the union `tools/list` and
+      // the call gate apply, and the session this call just minted carries no
+      // override of its own — so a capability enabled on the profile is
+      // callable and belongs in this report (#6886 review).
+      enabledTools: await listEnabledToolNames(service, [sessionUuid], connectionProfileUuid),
+      ...failure,
+    });
+  } catch (error) {
+    logger.warn("[MCP] Could not enrich provisionDevice with enabled tools", { error });
+    // A failed capability declaration still has to reach the caller even when
+    // the optional enabled-set report cannot be built (#6886 review).
+    return withCapabilityDeclarationFailure(result, failure);
+  }
+}
+
+/**
+ * Merge server-computed session fields (`gatedTools`, `enabledTools`) into an
+ * acquisition result, in both the text envelope and `structuredContent`.
+ */
+function enrichAcquisitionResult<T extends { content: Array<{ type: string; text?: string }> }>(
+  result: T,
+  fields: Record<string, unknown>,
+): T {
+  let enriched = false;
+  return {
+    ...result,
+    content: result.content.map((item: { type: string; text?: string }) => {
+      if (enriched || item.type !== "text" || typeof item.text !== "string") {
+        return item;
+      }
+      enriched = true;
+      return { ...item, text: stringifyToolResponse({ ...JSON.parse(item.text), ...fields }) };
+    }),
+    ...((result as { structuredContent?: Record<string, unknown> }).structuredContent
+      ? {
+          structuredContent: {
+            ...(result as { structuredContent?: Record<string, unknown> }).structuredContent,
+            ...fields,
+          },
+        }
+      : {}),
+  };
 }
 
 async function awaitWithCancellation<T>(
@@ -120,7 +276,13 @@ import { registerFormTools } from "./formTools";
 import { registerAccessibilityTools } from "./accessibilityTools";
 import { registerAccessibilityFocusTools } from "./accessibilityFocusTools";
 import { registerNetworkTools } from "./networkTools";
-import { registerToolSelectionTools, SET_TOOL_ENABLED_TOOL_NAME } from "./toolSelectionTools";
+import {
+  applyToolSelection,
+  assertUserConfigurableToolNames,
+  listEnabledToolNames,
+  registerToolSelectionTools,
+  SET_TOOL_ENABLED_TOOL_NAME,
+} from "./toolSelectionTools";
 import {
   DEVICE_SESSION_RECOVERY_PROMPT,
   DEVICE_SESSION_RECOVERY_TOOLS,
@@ -269,17 +431,17 @@ function stripInternalToolParams(params: unknown): unknown {
     return params;
   }
 
-  if (
-    !(INTERNAL_MCP_SESSION_PARAM in params) &&
-    !(INTERNAL_EXECUTION_ID_PARAM in params) &&
-    !(INTERNAL_EXECUTION_START_TIME_PARAM in params) &&
-    !(DAEMON_NON_FINITE_ENCODED_PARAM in params)
-  ) {
+  // Consult the CANONICAL list rather than an ad-hoc subset: the daemon's
+  // `ide/getNavigationGraph` route forwards `__mcpRequestTimeoutMs` as the ONLY
+  // internal marker, and a guard that omitted the timeout/deadline names left it
+  // on the arguments -- which a `.strict()` input schema (#6712) then rejected
+  // with "Unrecognized key" before the handler ran (#6917 review).
+  if (!INTERNAL_TOOL_PARAM_NAMES.some((name) => name in params)) {
     return params;
   }
 
   const rest = { ...(params as Record<string, unknown>) };
-  // Strips DAEMON_NON_FINITE_ENCODED_PARAM too as a safety net: revival already
+  // Strips `DAEMON_NON_FINITE_ENCODED_PARAM` too as a safety net: revival already
   // removes that transport-provenance flag (#5863), but this guards the tool
   // boundary against any future path that sets it without reviving.
   deleteInternalToolParams(rest);
@@ -594,7 +756,8 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     const requestMcpSessionId = daemonMode ? extractInternalMcpSessionId(toolParams) : undefined;
     const implicitAutolockMcpSessionId =
       requestMcpSessionId ?? (!daemonMode ? sessionId : undefined);
-    const routingSessionUuid = sessionToolBinding.effectiveSessionUuid(sessionId, toolParams);
+    let routingSessionUuid = sessionToolBinding.effectiveSessionUuid(sessionId, toolParams);
+    let resolvedImplicitAutolockSessionUuid: string | undefined;
     let connectionProfileUuid = sessionToolBinding.connectionToolSelectionProfileUuid(sessionId);
     const rawRequestedToolSelectionProfileUuid = (toolParams as Record<string, unknown>)
       .sessionUuid;
@@ -607,6 +770,63 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     const tool = ToolRegistry.getTool(name);
     if (!tool) {
       throw new ActionableError(`Unknown tool: ${name}`);
+    }
+
+    if (
+      (tool.requiresDevice && !isDeviceSessionAcquisitionTool(name)) ||
+      name === "setActiveDevice"
+    ) {
+      const daemonState = DaemonState.getInstance();
+      const rawArgs = toolParams as Record<string, unknown>;
+      if (
+        daemonState.isInitialized() &&
+        implicitAutolockMcpSessionId &&
+        !options.sessionContext?.initialSessionToolBinding &&
+        !rawArgs.sessionUuid &&
+        !rawArgs.device
+      ) {
+        // Loopback MCP clients are reused by execution scope, not by socket.
+        // Their local bindings are partial; only the pool owns all acquisitions.
+        const platform =
+          rawArgs.platform === "android" || rawArgs.platform === "ios"
+            ? rawArgs.platform
+            : undefined;
+        const deviceId = typeof rawArgs.deviceId === "string" ? rawArgs.deviceId : undefined;
+        routingSessionUuid = daemonState
+          .getDevicePool()
+          .resolveAutolockSessionForMcpSession(
+            implicitAutolockMcpSessionId,
+            platform,
+            undefined,
+            deviceId,
+          );
+        if (!routingSessionUuid && name === "setActiveDevice") {
+          routingSessionUuid = daemonState
+            .getDevicePool()
+            .resolveAutolockSessionForMcpSession(implicitAutolockMcpSessionId);
+        }
+        resolvedImplicitAutolockSessionUuid = routingSessionUuid;
+      } else {
+        routingSessionUuid = sessionToolBinding.resolveDeviceSessionUuid(
+          sessionId,
+          toolParams,
+          (id) => {
+            if (!DaemonState.getInstance().isInitialized()) {
+              return resolveDirectSessionDevice(id)?.device;
+            }
+            const manager = DaemonState.getInstance().getSessionManager();
+            const session = manager.getSession(id);
+            if (!session || !manager.isAdmittedForAutomation(session) || !session.assignedDevice) {
+              return undefined;
+            }
+            const device = DaemonState.getInstance()
+              .getDevicePool()
+              .getDevice(session.assignedDevice);
+            return device ? { deviceId: device.id, platform: device.platform } : undefined;
+          },
+          name === "setActiveDevice",
+        );
+      }
     }
 
     // #6069: enforce connection ownership on the DEVICE-routing path. If this
@@ -639,7 +859,8 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       if (
         boundDeviceSessionUuid &&
         explicitSessionUuid &&
-        explicitSessionUuid !== boundDeviceSessionUuid
+        explicitSessionUuid !== boundDeviceSessionUuid &&
+        !sessionToolBinding.ownsSession(sessionId, explicitSessionUuid)
       ) {
         throw new ActionableError(
           `MCP connection is bound to device session ${boundDeviceSessionUuid}; ` +
@@ -759,9 +980,12 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       parsedParams = tool.schema.parse(strippedToolParams);
     } catch (error) {
       throw new ActionableError(
-        `Invalid parameters for tool ${name}: ${formatToolParamError(name, error, strippedToolParams)}`,
+        `Invalid parameters for tool ${name}: ${formatToolParamError(name, error, strippedToolParams, tool.schema)}`,
       );
     }
+
+    // #6869: the capabilities this acquisition declares, validated up front.
+    const requestedEnableTools = resolveRequestedEnableTools(name, parsedParams);
 
     const executionSessionUuid =
       derivedLabelSessionUuid ?? providedSessionUuid ?? routingSessionUuid;
@@ -776,11 +1000,22 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       executionSessionUuid,
       sessionId,
     );
+    if (resolvedImplicitAutolockSessionUuid) {
+      // Routing resolved before ToolRegistry, so retain its implicit-session
+      // tracking here without following later changes to the socket's default.
+      executionTracker.setResolvedAutolockSessionUuid(
+        execution.id,
+        resolvedImplicitAutolockSessionUuid,
+      );
+    }
     const requestSignal = combineAbortSignals(execution.abortController.signal, extra.signal);
     const handlerParams =
       parsedParams && typeof parsedParams === "object"
         ? {
             ...parsedParams,
+            ...(name === "setActiveDevice" && routingSessionUuid
+              ? { sessionUuid: routingSessionUuid }
+              : {}),
             ...(implicitAutolockMcpSessionId
               ? { [INTERNAL_MCP_SESSION_PARAM]: implicitAutolockMcpSessionId }
               : {}),
@@ -946,40 +1181,42 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         acquiredSessionUuid
       ) {
         let acquisitionEnrichmentCancelled = false;
+        // #6869: the caller's `enableTools` declaration lands BEFORE discovery,
+        // so the gatedTools/enabledTools pair below reports the session as the
+        // caller's next call will find it. #6886 review: a failure here is
+        // reported as `enableToolsError` rather than swallowed by the enrichment
+        // catch below, which made a lost declaration look like a plain success —
+        // while still never stranding the session the handler just minted.
+        const capabilityFailure = await applyAcquisitionToolSelection(
+          options.sessionToolSelectionService,
+          acquiredSessionUuid,
+          requestedEnableTools,
+        );
         try {
           const listed = new Set(
             (
               await awaitWithCancellation(listSessionTools(acquiredSessionUuid), requestSignal)
             ).tools.map((tool) => tool.name),
           );
-          const gatedTools = ToolRegistry.getAllTools()
-            .filter(
-              (tool) => ToolRegistry.isUserConfigurableTool(tool.name) && !listed.has(tool.name),
-            )
+          const configurable = ToolRegistry.getAllTools()
+            .filter((tool) => ToolRegistry.isUserConfigurableTool(tool.name))
             .map((tool) => tool.name)
             .sort();
-          let enriched = false;
-          result = {
-            ...result,
-            content: result.content.map((item: { type: string; text?: string }) => {
-              if (enriched || item.type !== "text" || typeof item.text !== "string") {
-                return item;
-              }
-              enriched = true;
-              return {
-                ...item,
-                text: stringifyToolResponse({ ...JSON.parse(item.text), gatedTools }),
-              };
-            }),
-            ...(result.structuredContent
-              ? { structuredContent: { ...result.structuredContent, gatedTools } }
-              : {}),
-          };
+          const gatedTools = configurable.filter((toolName) => !listed.has(toolName));
+          const enabledTools = configurable.filter((toolName) => listed.has(toolName));
+          result = enrichAcquisitionResult(result, {
+            gatedTools,
+            enabledTools,
+            ...capabilityFailure,
+          });
         } catch (error) {
           acquisitionEnrichmentCancelled ||= Boolean(requestSignal?.aborted);
           // Acquisition already succeeded. Preserve its session handle so the
           // proxy can bind and heartbeat it even if optional discovery fails.
           logger.warn("[MCP] Could not enrich acquisition with gated tools", { tool: name, error });
+          // A failed capability declaration is not optional detail; report it
+          // even when the gated/enabled pair cannot be computed.
+          result = withCapabilityDeclarationFailure(result, capabilityFailure);
         }
         // Scoped to the acquisition enrichment on purpose. At the
         // top level this ran for EVERY tool, so a cancellation landing while any
@@ -990,6 +1227,25 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         if (acquisitionEnrichmentCancelled || requestSignal?.aborted) {
           failCancelledAcquisition(acquiredSessionUuid);
         }
+      }
+      // #6869 — a no-op for every tool but provisionDevice (guard inside).
+      result = await enrichProvisionDeviceResult(
+        name,
+        result,
+        acquiredSessionUuid,
+        options.sessionToolSelectionService,
+        requestedEnableTools,
+        connectionProfileUuid,
+      );
+      if (
+        name === "setActiveDevice" &&
+        !result?.isError &&
+        sessionToolBinding.bind(
+          sessionId,
+          getDeviceSessionIdFromResult(result) ?? routingSessionUuid,
+        )
+      ) {
+        ToolRegistry.notifyToolListChanged();
       }
       const isRecordingIdCleanup =
         name === "videoRecording" &&
@@ -1017,10 +1273,16 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
           ? sessionForBinding !== null &&
             sessionForBinding !== undefined &&
             daemonSessionManager.isAdmittedForAutomation(sessionForBinding)
-          : resolveDirectSessionDevice(providedSessionUuid) !== undefined) &&
-        sessionToolBinding.bind(sessionId, providedSessionUuid)
+          : resolveDirectSessionDevice(providedSessionUuid) !== undefined)
       ) {
-        ToolRegistry.notifyToolListChanged();
+        if (sessionToolBinding.bind(sessionId, providedSessionUuid)) {
+          ToolRegistry.notifyToolListChanged();
+        }
+        if (tool.requiresDevice && daemonSessionManager && implicitAutolockMcpSessionId) {
+          await DaemonState.getInstance()
+            .getDevicePool()
+            .attachAutolockSessionToMcpSession(providedSessionUuid, implicitAutolockMcpSessionId);
+        }
       }
       // Wire-boundary output policy: strip the duplicated `structuredContent`
       // tree for no-schema tools unconditionally (issue #2759) and for schema

@@ -227,22 +227,6 @@ export class ScreenshotJobTracker {
     return ScreenshotJobTracker.latestJobIds.get(deviceId) === jobId;
   }
 
-  static getMostRecentPendingDeviceId(): string | undefined {
-    let latestDeviceId: string | undefined;
-    let latestStart = 0;
-
-    for (const [deviceId, entries] of ScreenshotJobTracker.jobs.entries()) {
-      for (const entry of entries) {
-        if (entry.startedAt >= latestStart) {
-          latestStart = entry.startedAt;
-          latestDeviceId = deviceId;
-        }
-      }
-    }
-
-    return latestDeviceId;
-  }
-
   static async waitForCompletion(
     deviceId: string,
     timeoutMs: number,

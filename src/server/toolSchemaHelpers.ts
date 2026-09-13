@@ -25,7 +25,8 @@ export const responseShapeControlFields = {
       "Observation projection. 'skeleton' (default) returns a flat, actionable-only list " +
         "(elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' " +
         "returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is " +
-        "directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+        "directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` " +
+        "(drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
     ),
 } as const;
 

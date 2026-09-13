@@ -8,12 +8,48 @@ import {
 
 class FakeRepository implements SessionToolSelectionRepository {
   readonly rows = new Map<string, Map<string, boolean>>();
+  readonly singleWrites: Array<[string, string, boolean]> = [];
+  readonly batches: Array<[string, ReadonlyArray<{ toolName: string; enabled: boolean }>]> = [];
 
   async list(sessionUuid: string): Promise<Map<string, boolean>> {
     return new Map(this.rows.get(sessionUuid) ?? []);
   }
 
   async set(sessionUuid: string, toolName: string, enabled: boolean): Promise<void> {
+    this.singleWrites.push([sessionUuid, toolName, enabled]);
+    const values = this.rows.get(sessionUuid) ?? new Map<string, boolean>();
+    values.set(toolName, enabled);
+    this.rows.set(sessionUuid, values);
+  }
+
+  async setMany(
+    sessionUuid: string,
+    entries: ReadonlyArray<{ toolName: string; enabled: boolean }>,
+  ): Promise<void> {
+    this.batches.push([sessionUuid, entries]);
+    const values = this.rows.get(sessionUuid) ?? new Map<string, boolean>();
+    for (const entry of entries) {
+      values.set(entry.toolName, entry.enabled);
+    }
+    this.rows.set(sessionUuid, values);
+  }
+
+  async deleteSession(sessionUuid: string): Promise<void> {
+    this.rows.delete(sessionUuid);
+  }
+}
+
+/** A repository with no batch support, to exercise the per-name fallback. */
+class SingleWriteOnlyRepository implements SessionToolSelectionRepository {
+  readonly writes: Array<[string, string, boolean]> = [];
+  private readonly rows = new Map<string, Map<string, boolean>>();
+
+  async list(sessionUuid: string): Promise<Map<string, boolean>> {
+    return new Map(this.rows.get(sessionUuid) ?? []);
+  }
+
+  async set(sessionUuid: string, toolName: string, enabled: boolean): Promise<void> {
+    this.writes.push([sessionUuid, toolName, enabled]);
     const values = this.rows.get(sessionUuid) ?? new Map<string, boolean>();
     values.set(toolName, enabled);
     this.rows.set(sessionUuid, values);
@@ -61,6 +97,44 @@ describe("SessionToolSelectionService", () => {
 
     expect(await service.isEnabled("session-1", "clipboard", false)).toBe(true);
     expect(await service.isEnabled("session-1", "selectAllText", false)).toBe(false);
+  });
+  // #6886 review — a batch must reach the repository as ONE operation, so the
+  // repository (SQLite: a transaction) owns its atomicity. A per-name loop here
+  // would leave the first names written when a later one fails.
+  test("hands a whole batch to the repository as a single operation", async () => {
+    const repository = new FakeRepository();
+    const service = new SessionToolSelectionService(repository);
+
+    await service.setEnabledMany("session-1", ["inputText", "clearText"], true);
+
+    expect(repository.batches).toEqual([
+      [
+        "session-1",
+        [
+          { toolName: "inputText", enabled: true },
+          { toolName: "clearText", enabled: true },
+        ],
+      ],
+    ]);
+    expect(repository.singleWrites).toEqual([]);
+    expect(await repository.list("session-1")).toEqual(
+      new Map([
+        ["inputText", true],
+        ["clearText", true],
+      ]),
+    );
+  });
+
+  test("falls back to per-name writes for a repository without batch support", async () => {
+    const repository = new SingleWriteOnlyRepository();
+    const service = new SessionToolSelectionService(repository);
+
+    await service.setEnabledMany("session-1", ["inputText", "clearText"], false);
+
+    expect(repository.writes).toEqual([
+      ["session-1", "inputText", false],
+      ["session-1", "clearText", false],
+    ]);
   });
 });
 

@@ -11,7 +11,7 @@ import { logger } from "../../../utils/logger";
 import { getTempDir, TEMP_SUBDIRS } from "../../../utils/tempDir";
 import { Timer, defaultTimer } from "../../../utils/SystemTimer";
 import type { ObserveResult } from "../../../models";
-import type { ObserveResultCacheStore } from "./ObserveResultCacheStore";
+import type { ObserveResultCacheStore, RecentObserveCacheEntry } from "./ObserveResultCacheStore";
 
 /**
  * Cached entry held in memory.
@@ -183,8 +183,9 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
     return await this.checkDisk(deviceId);
   }
 
-  getRecentInMemory(): ObserveResult | undefined {
-    return this.findMostRecentInMemory();
+  getRecentInMemoryEntry(): RecentObserveCacheEntry | undefined {
+    const entry = this.collectLiveMostRecent();
+    return entry ? { deviceId: entry.deviceId, result: entry.observeResult } : undefined;
   }
 
   getRecentInMemoryForDevice(deviceId: string): ObserveResult | undefined {

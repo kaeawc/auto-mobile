@@ -9,7 +9,7 @@ import WebSocket from "ws";
 import { logger } from "../../../utils/logger";
 import type { PerformanceTracker, TimingEntry } from "../../../utils/PerformanceTracker";
 import { NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
-import { throwIfAborted } from "../../../utils/toolUtils";
+import { awaitWhileRequestIsLive, throwIfAborted } from "../../../utils/toolUtils";
 import { AndroidCtrlProxyManager } from "../../../utils/CtrlProxyManager";
 import type { ViewHierarchyResult } from "../../../models";
 import { screenScaleMetadataSpread } from "../../../models/ScreenScaleMetadata";
@@ -153,9 +153,16 @@ export class CtrlProxyHierarchy {
     );
 
     try {
-      // Ensure WebSocket connection is established
+      // Ensure WebSocket connection is established. `ensureConnected` takes no
+      // signal and its handshake is allowed 5000ms, so awaiting it bare would
+      // leave every caller-owned bound tighter than that (the #6866
+      // embedded-observation settle gate advertises 1s) enforcing nothing until
+      // the handshake resolved on its own — this read's own `throwIfAborted`
+      // checkpoints all sit BELOW it. Let the signal end the wait instead; the
+      // catch below degrades it to the same no-hierarchy answer as every other
+      // failure here (#6890 review).
       const connected = await perf.track("ensureConnection", () =>
-        this.context.ensureConnected(perf),
+        awaitWhileRequestIsLive(this.context.ensureConnected(perf), signal),
       );
       if (!connected) {
         logger.warn("[CTRL_PROXY] Failed to establish WebSocket connection");
@@ -562,8 +569,12 @@ export class CtrlProxyHierarchy {
     try {
       logger.debug("[CTRL_PROXY] Requesting hierarchy sync via WebSocket");
 
-      // Ensure WebSocket connection is established
-      await this.context.ensureConnected(perf);
+      // Ensure WebSocket connection is established. Signal-fenced for the same
+      // reason as `getLatestHierarchy` above: an uninterruptible 5000ms
+      // handshake must not outlive the caller's deadline, and a sync
+      // extraction must never be dispatched after it expired (#6890 review).
+      await awaitWhileRequestIsLive(this.context.ensureConnected(perf), signal);
+      throwIfAborted(signal);
 
       // Try WebSocket request first (faster path). Returns the correlating requestId when sent so a
       // runner type:"error" frame for this hierarchy request can reject the wait fast (issue #3032).

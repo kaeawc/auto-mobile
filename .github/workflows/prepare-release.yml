@@ -177,6 +177,27 @@ jobs:
       APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
       APPLE_NOTARY_PRIVATE_KEY_BASE64: ${{ secrets.APPLE_NOTARY_PRIVATE_KEY_BASE64 }}
 
+  # The identity probe is a separately approved Network Extension bundle. Keep
+  # it in the same signed/notarized candidate set as the other macOS helpers so
+  # native isolation testing never consumes an unsigned local build.
+  build-candidate-network-filter-identity-probe:
+    needs: prepare-version
+    uses: ./.github/workflows/build-network-filter-probe.yml
+    with:
+      checkout-ref: ${{ needs.prepare-version.outputs.release_commit }}
+      upload-artifact: true
+      artifact-retention-days: 90
+    secrets:
+      MACOS_DEVELOPER_ID_CERT_BASE64: ${{ secrets.MACOS_DEVELOPER_ID_CERT_BASE64 }}
+      MACOS_DEVELOPER_ID_CERT_PASSWORD: ${{ secrets.MACOS_DEVELOPER_ID_CERT_PASSWORD }}
+      MACOS_KEYCHAIN_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
+      MACOS_DEVELOPER_ID_SIGNING_IDENTITY: ${{ secrets.MACOS_DEVELOPER_ID_SIGNING_IDENTITY }}
+      APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+      APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+      APPLE_NOTARY_PRIVATE_KEY_BASE64: ${{ secrets.APPLE_NOTARY_PRIVATE_KEY_BASE64 }}
+      MACOS_NETWORK_FILTER_CONTROLLER_PROFILE_BASE64: ${{ secrets.MACOS_NETWORK_FILTER_CONTROLLER_PROFILE_BASE64 }}
+      MACOS_NETWORK_FILTER_PROVIDER_PROFILE_BASE64: ${{ secrets.MACOS_NETWORK_FILTER_PROVIDER_PROFILE_BASE64 }}
+
   # Desktop installers are built here as signed + notarized release candidates and
   # reused by release.yml (downloaded by prepare run id). Unlike the artifacts
   # above they do not feed release constants, so finalize-release does not depend
@@ -208,6 +229,7 @@ jobs:
         build-candidate-control-proxy-apk,
         build-candidate-video-server-jar,
         build-candidate-screen-capture-helper,
+        build-candidate-network-filter-identity-probe,
       ]
     outputs:
       release_commit: ${{ steps.commit.outputs.release_commit }}
@@ -307,6 +329,7 @@ jobs:
         build-candidate-control-proxy-apk,
         build-candidate-video-server-jar,
         build-candidate-screen-capture-helper,
+        build-candidate-network-filter-identity-probe,
         build-candidate-desktop-app-installers,
       ]
     permissions:

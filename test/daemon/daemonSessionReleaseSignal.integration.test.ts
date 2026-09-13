@@ -9,6 +9,9 @@ import { SessionReleaseBroadcaster } from "../../src/server/sessionReleaseBroadc
 import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
 import { createTestDatabase } from "../db/testDbHelper";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
+import type { DevicePool } from "../../src/daemon/devicePool";
+import type { BootedDevice } from "../../src/models";
 
 // Issue #4610: the daemon registers a release callback (next to the nav-graph /
 // observe-cache cleanup) that fans the released session key out to the
@@ -22,6 +25,18 @@ interface DaemonHeartbeatMonitorInternals {
 
 interface DaemonSessionReleaseInternals {
   cancelAndReleaseSession(sessionId: string, releaseReason: string): Promise<void>;
+}
+
+/**
+ * Point a daemon-owned pool's discovery at a fake that lists exactly these
+ * devices. A pooled Android entry is re-proved present against discovery before
+ * it is handed out (handsets included), and the daemon builds its pool with the
+ * real device manager, which would shell out to adb.
+ */
+function stubPoolDiscovery(devicePool: DevicePool, devices: BootedDevice[]): void {
+  const deviceManager = new FakeDeviceManager();
+  deviceManager.bootedDevices = [...devices];
+  Object.assign(devicePool, { deviceManager });
 }
 
 describe("Daemon session-release signal wiring", () => {
@@ -118,13 +133,9 @@ describe("Daemon session-release signal wiring", () => {
     );
 
     try {
-      await devicePool.initializeWithDevices([
-        {
-          name: "Pixel",
-          deviceId,
-          platform: "android",
-        },
-      ]);
+      const device: BootedDevice = { name: "Pixel", deviceId, platform: "android" };
+      stubPoolDiscovery(devicePool, [device]);
+      await devicePool.initializeWithDevices([device]);
       await devicePool.assignDeviceToSession(sessionId, "android");
 
       await expect(

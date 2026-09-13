@@ -92,6 +92,17 @@ const executePlanResultSchema = z
     deviceId: z.string().optional(),
     deviceMapping: z.record(z.string(), z.string()).optional(),
     debug: executePlanDebugSchema.optional(),
+    warnings: z
+      .array(
+        z.object({
+          stepIndex: z.number().int(),
+          tool: z.string(),
+          device: z.string().optional(),
+          warnings: z.array(z.string()),
+        }),
+      )
+      .optional()
+      .describe("Best-effort warnings from steps that still succeeded"),
   })
   .passthrough();
 

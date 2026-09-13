@@ -92,6 +92,16 @@ const HEARTBEAT_ENV_KEYS = [
   "AUTO_MOBILE_SESSION_HEARTBEAT_TIMEOUT_MS",
 ] as const;
 
+test("resetDeviceReadinessForDevice drops restored automation readiness", async () => {
+  const manager = new SessionManager(new FakeTimer(), new FakeDeviceSessionPersistence());
+  await manager.createSession("restore-session", "emulator-5554", "android");
+  manager.setDeviceReadiness("restore-session", "automationReady");
+
+  manager.resetDeviceReadinessForDevice("emulator-5554");
+
+  expect(manager.getDeviceReadiness("restore-session")).toBe("booted");
+});
+
 function clearHeartbeatEnv(): void {
   for (const key of HEARTBEAT_ENV_KEYS) {
     delete process.env[key];
@@ -1501,17 +1511,20 @@ describe("SessionManager", () => {
           },
         }),
       );
+      const device = { name: "device-1", deviceId: "device-1", platform: "android" as const };
+      const deviceManager = new FakeDeviceManager();
+      // A pooled Android entry is re-proved present against discovery before it
+      // is handed out, handsets included, so discovery has to list it.
+      deviceManager.bootedDevices = [device];
       const pool = new DevicePool(
         manager,
         "test-daemon",
         fakeTimer,
         new FakeInstalledAppsRepository(),
-        new FakeDeviceManager(),
+        deviceManager,
       );
       try {
-        await pool.initializeWithDevices([
-          { name: "device-1", deviceId: "device-1", platform: "android" },
-        ]);
+        await pool.initializeWithDevices([device]);
         await pool.assignDeviceToSession("s1", "android");
         manager.setKeepScreenAwake("s1", { applied: true, method: "svc", svcWasEnabled: false });
 

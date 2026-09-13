@@ -4,9 +4,9 @@ import { ActionableError, ExecResult } from "../../models";
 import { logger } from "../logger";
 import { createExecResult } from "../execResult";
 import { defaultTimer, Timer } from "../SystemTimer";
-import { getAbortSignal } from "../AbortContext";
+import { combineAbortSignals, getAbortSignal } from "../AbortContext";
 import { DEFAULT_RUNNER_READINESS_TIMEOUT_MS } from "../runnerReadinessConfig";
-import { waitForSpawn } from "../ChildProcessTracker";
+import { trackProcess, waitForExit, waitForSpawn } from "../ChildProcessTracker";
 
 export interface XcodebuildCommandOptions {
   timeoutMs?: number;
@@ -19,7 +19,10 @@ export interface XcodebuildStreamingOptions {
   readonly detached?: boolean;
   readonly stdio?: SpawnOptions["stdio"];
   readonly timeoutMs?: number;
+  /** Explicit resident process lifetime; never defaults to request cancellation. */
   readonly signal?: AbortSignal;
+  /** Pre-spawn cancellation, defaulting to the ambient request signal. */
+  readonly startupSignal?: AbortSignal;
 }
 
 export type XcodebuildSpawner = (
@@ -27,6 +30,8 @@ export type XcodebuildSpawner = (
   args: string[],
   options: SpawnOptions,
 ) => ChildProcess;
+
+export type XcodebuildProcessKiller = (pid: number, signal?: NodeJS.Signals | number) => boolean;
 
 export interface XcodebuildAvailabilityOptions {
   timeoutMs?: number;
@@ -86,6 +91,7 @@ export class XcodebuildClient implements Xcodebuild {
       | null = null,
     timer: Timer = defaultTimer,
     private readonly spawnProcess: XcodebuildSpawner = spawn,
+    private readonly killProcess: XcodebuildProcessKiller = process.kill,
   ) {
     this.execAsync = execAsyncFn || execAsync;
     this.timer = timer;
@@ -181,27 +187,47 @@ export class XcodebuildClient implements Xcodebuild {
    * Launch a long-lived xcodebuild invocation without a shell. Callers retain
    * lifecycle ownership of the returned child, while this boundary owns binary
    * resolution, availability diagnostics, and argv-safe process creation.
+   *
+   * Two DIFFERENT signals are in play here, deliberately kept apart (issue
+   * #6410). The *startup* signal — `options.startupSignal ?? getAbortSignal()` —
+   * bounds only the pre-spawn availability probe (`isAvailableWithin`); it is
+   * correct for that probe to inherit the ambient per-request abort signal, the
+   * same way short-lived reads do (see `AbortContext.ts`). The *process*
+   * signal handed to `spawnProcess` is different: this runner is meant to
+   * outlive the request that happened to start it (it is a shared, long-lived
+   * resident process — see the callers' `SharedCtrlProxyStart` ownership).
+   * Node's `signal` spawn option kills the child for the child's entire
+   * lifetime with no way to detach afterward, so it must NEVER default to the
+   * ambient request signal. Only a signal the caller explicitly supplies is
+   * forwarded to spawn; callers that want the runner's OS-level kill wired to
+   * a signal must own that AbortController themselves and abort it only from
+   * their own teardown path.
    */
   async startStreaming(
     args: string[],
     options: XcodebuildStreamingOptions = {},
   ): Promise<ChildProcess> {
-    const signal = options.signal ?? getAbortSignal();
+    const startupSignal = combineAbortSignals(
+      options.startupSignal ?? getAbortSignal(),
+      options.signal,
+    );
+    startupSignal?.throwIfAborted();
     if (
       !(await this.isAvailableWithin(
         options.timeoutMs ?? DEFAULT_RUNNER_READINESS_TIMEOUT_MS,
-        signal,
+        startupSignal,
       ))
     ) {
       throw new ActionableError("xcodebuild is not available. Please install Xcode to continue.");
     }
 
+    startupSignal?.throwIfAborted();
     const child = this.spawnProcess("xcodebuild", args, {
       detached: options.detached,
       env: options.env,
       stdio: options.stdio,
       shell: false,
-      signal,
+      signal: options.signal,
     });
 
     try {
@@ -213,6 +239,11 @@ export class XcodebuildClient implements Xcodebuild {
       throw new ActionableError(`xcodebuild failed to start: ${String(error)}`);
     }
 
+    if (startupSignal?.aborted) {
+      await this.retireCancelledStartup(child, options.detached === true);
+      startupSignal.throwIfAborted();
+    }
+
     if (!child.pid) {
       child.kill();
       throw new ActionableError("xcodebuild failed to start: no process ID was assigned.");
@@ -221,11 +252,40 @@ export class XcodebuildClient implements Xcodebuild {
     return child;
   }
 
+  private async retireCancelledStartup(child: ChildProcess, detached: boolean): Promise<void> {
+    const tracker = trackProcess(child);
+    try {
+      if (detached && child.pid) {
+        this.killProcess(-child.pid, "SIGKILL");
+      } else {
+        child.kill("SIGKILL");
+      }
+    } catch (error) {
+      // Signal delivery may race a natural exit; the bounded tracker wait below is authoritative.
+      logger.debug(`[iOS] Cancelled xcodebuild runner signal raced process exit: ${error}`);
+    }
+
+    try {
+      await waitForExit(child, tracker.exitPromise, { timer: this.timer, signal: null });
+    } catch (error) {
+      // Startup cancellation remains the caller contract even when best-effort reaping is unconfirmed.
+      logger.debug(`[iOS] Cancelled xcodebuild runner exit was not confirmed: ${error}`);
+    }
+  }
+
   private async isAvailableWithin(timeoutMs: number, callerSignal?: AbortSignal): Promise<boolean> {
     const controller = new AbortController();
     const signal = callerSignal
       ? AbortSignal.any([callerSignal, controller.signal])
       : controller.signal;
+    callerSignal?.throwIfAborted();
+    let onAbort: (() => void) | undefined;
+    const cancelled = new Promise<never>((_resolve, reject) => {
+      if (callerSignal) {
+        onAbort = () => reject(callerSignal.reason);
+        callerSignal.addEventListener("abort", onAbort, { once: true });
+      }
+    });
     let timeoutId: NodeJS.Timeout;
     const timeout = new Promise<boolean>((_, reject) => {
       timeoutId = this.timer.setTimeout(() => {
@@ -234,9 +294,12 @@ export class XcodebuildClient implements Xcodebuild {
       }, timeoutMs);
     });
     try {
-      return await Promise.race([this.isLocalXcodebuildAvailable(signal), timeout]);
+      return await Promise.race([this.isLocalXcodebuildAvailable(signal), timeout, cancelled]);
     } finally {
       this.timer.clearTimeout(timeoutId!);
+      if (onAbort) {
+        callerSignal?.removeEventListener("abort", onAbort);
+      }
     }
   }
 

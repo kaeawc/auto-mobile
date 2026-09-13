@@ -5,6 +5,9 @@ import { ActionableError, BootedDevice, SomePlatform, type ViewHierarchyResult }
 import { NavigationGraphManager } from "../features/navigation/NavigationGraphManager";
 import { UIStateExtractor } from "../features/navigation/UIStateExtractor";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
+import { RealSettleObserve } from "../features/observe/SettleObserve";
+import type { SettleObserve } from "../features/observe/interfaces/SettleObserve";
+import { settleEmbeddedObservationInResponse } from "./embeddedObservationSettle";
 import { serverConfig } from "../utils/ServerConfig";
 import { MemoryAudit } from "../features/memory/MemoryAudit";
 import { TelemetryRecorder } from "../features/telemetry/TelemetryRecorder";
@@ -61,6 +64,7 @@ import {
 } from "../features/toolSelection/toolSelectionContext";
 import { isDeviceLostError, throwDeviceLostFromAbortSignal } from "./deviceLossOutcome";
 import { executionTracker } from "./executionTracker";
+import { SET_TOOL_ENABLED_TOOL_NAME } from "../features/toolSelection/toolSelectionControl";
 import {
   INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
   INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
@@ -407,7 +411,7 @@ type ObservationArtifactWriterFactory = (
   retention?: ToolOutputArtifactRetention,
 ) => ObservationArtifactWriter;
 
-const AUTOMATIC_TOOL_OUTPUT_RETENTION: ToolOutputArtifactRetention = {
+export const AUTOMATIC_TOOL_OUTPUT_RETENTION: ToolOutputArtifactRetention = {
   maxAgeMs: 24 * 60 * 60 * 1000,
   maxFiles: 500,
   overflowMinAgeMs: 60 * 60 * 1000,
@@ -616,7 +620,7 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         providedDeviceId = context.deviceId;
         logger.info(`[ToolRegistry] Resolved device from session: ${providedDeviceId}`);
       }
-      if (platform === "either" && context.devicePlatform) {
+      if (context.devicePlatform) {
         platform = context.devicePlatform;
       }
     } else if (shouldResolveDevice && sessionUuid) {
@@ -640,9 +644,7 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         // narrowing to the session's platform here would send an explicit
         // cross-platform deviceId to the wrong platform's search and fail
         // (mirrors the #5870 deviceId-resolves-platform rule).
-        if (platform === "either") {
-          platform = directSession.device.platform;
-        }
+        platform = directSession.device.platform;
       }
     } else if (sessionUuid) {
       logger.warn(`[ToolRegistry] SessionUuid provided but DaemonState not initialized!`);
@@ -767,7 +769,12 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     const platformFilter = platform === "android" || platform === "ios" ? platform : undefined;
     const sessionId = DaemonState.getInstance()
       .getDevicePool()
-      .resolveAutolockSessionForMcpSession(mcpSessionId, platformFilter, execution);
+      .resolveAutolockSessionForMcpSession(
+        mcpSessionId,
+        platformFilter,
+        execution,
+        providedDeviceId,
+      );
     if (!sessionId) {
       return undefined;
     }
@@ -934,6 +941,16 @@ function unwrapToolResponse(response: any): any {
   }
 }
 
+/**
+ * Build the settle delegate the embedded-observation stability gate (#6866)
+ * re-observes with. Injected so tests drive the gate on a FakeObserveScreen +
+ * FakeTimer instead of a device.
+ */
+export type SettleObserveFactory = (
+  device: BootedDevice,
+  timer: Timer,
+) => SettleObserve | undefined;
+
 export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
   constructor(
     private readonly createArtifactWriter: ObservationArtifactWriterFactory = (
@@ -941,6 +958,8 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
       timer,
       retention,
     ) => new JsonToolOutputArtifactWriter({ outputDirectory, timer, retention }),
+    private readonly createSettleObserve: SettleObserveFactory = (device, timer) =>
+      new RealSettleObserve(new RealObserveScreen(device), timer),
   ) {}
 
   async handle(input: AfterToolCallInput): Promise<AfterToolCallResult> {
@@ -948,6 +967,7 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
       name,
       args,
       internalCall,
+      device,
       response,
       sessionUuid,
       shouldResolveDevice,
@@ -978,6 +998,28 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
       });
       logger[resultLog.level](resultLog.message);
     }
+
+    // Issue #6866: a navigation-class action's embedded observation can be
+    // captured before the destination screen finishes inflating, so the client's
+    // first look misses a not-yet-attached child (the Settings `switchWidget`)
+    // and the parent row's content-derived `s2-…` id changes on the next
+    // observe. Gate that capture on hierarchy stability HERE — before the
+    // session hierarchy cache, the diff baseline and the skeleton projection all
+    // read it — so every downstream consumer sees the settled screen. In-place,
+    // scroll and unknown classes are untouched and keep their current latency.
+    //
+    // Invoked unconditionally, including for `success: false`: the helper owns
+    // that distinction and short-circuits a failed action to a plain
+    // `settled: false` stamp WITHOUT re-observing, so guarding on the tool's
+    // success here only made that stamp unreachable and left a failed action's
+    // observation carrying no stability verdict at all.
+    await settleEmbeddedObservationInResponse(response, {
+      name,
+      args: typeof args === "object" && args !== null ? args : undefined,
+      internal: internalCall,
+      signal,
+      createSettleObserve: () => (device ? this.createSettleObserve(device, timer) : undefined),
+    });
 
     const durationMs = timer.now() - toolStartMs;
 
@@ -1142,6 +1184,24 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
       }
     }
   }
+}
+
+/**
+ * Copy an advertised array-field schema with `enum` applied to its items.
+ * Preserves the field's own description and constraints; only the item
+ * vocabulary is added.
+ */
+function withItemsEnum(
+  field: Record<string, unknown> | undefined,
+  values: string[],
+): Record<string, unknown> {
+  return {
+    ...field,
+    items: {
+      ...(field?.items as Record<string, unknown> | undefined),
+      enum: values,
+    },
+  };
 }
 
 // The registry that holds all tools
@@ -1733,16 +1793,11 @@ export class ToolRegistryClass {
       // Keep the compact enabled-tool profile while making optional capabilities
       // discoverable through the always-listed selection control (#6797).
       // Copy the cached schema: availability can change between listings.
-      if (tool.name === "setToolEnabled") {
-        const properties = inputSchema.properties as Record<string, Record<string, unknown>>;
-        definition.inputSchema = {
-          ...inputSchema,
-          properties: {
-            ...properties,
-            toolName: { ...properties.toolName, enum: configurableToolNames },
-          },
-        };
-      }
+      definition.inputSchema = this.withConfigurableToolVocabulary(
+        tool.name,
+        inputSchema,
+        configurableToolNames,
+      );
       if (outputSchema) {
         definition.outputSchema = outputSchema;
       }
@@ -1755,6 +1810,56 @@ export class ToolRegistryClass {
       }
       return definition;
     });
+  }
+
+  /**
+   * Decorate the advertised schema with the enum of tool names this listing
+   * accepts, so a schema-driven client cannot build a call the handler rejects.
+   *
+   * Two fields carry that vocabulary: `setToolEnabled`'s `toolName`/`toolNames`
+   * (#6797, #6869) and the `enableTools` array the device-acquisition tools
+   * (`getAndroid`, `getApple`, `provisionDevice`) take so acquisition and
+   * capability declaration are one call. `resolveRequestedEnableTools` rejects
+   * every unknown or non-configurable name before any device work starts, so
+   * advertising "any non-empty string" there both allowed schema-valid calls
+   * that invocation refuses and hid the vocabulary of the one-call flow
+   * (#6886 review). Detected by the field's presence rather than a hardcoded
+   * tool list, so a future acquisition tool is covered by declaring the field.
+   */
+  private withConfigurableToolVocabulary(
+    toolName: string,
+    inputSchema: Record<string, unknown>,
+    configurableToolNames: string[],
+  ): Record<string, unknown> {
+    const properties = inputSchema.properties as
+      | Record<string, Record<string, unknown>>
+      | undefined;
+    if (!properties) {
+      return inputSchema;
+    }
+    if (toolName === SET_TOOL_ENABLED_TOOL_NAME) {
+      return {
+        ...inputSchema,
+        properties: {
+          ...properties,
+          toolName: { ...properties.toolName, enum: configurableToolNames },
+          // #6869 — the batch spelling carries the same vocabulary, so a
+          // client declaring a whole toolset in one call reads the choices
+          // from the field it is actually filling in.
+          toolNames: withItemsEnum(properties.toolNames, configurableToolNames),
+        },
+      };
+    }
+    if (!properties.enableTools) {
+      return inputSchema;
+    }
+    return {
+      ...inputSchema,
+      properties: {
+        ...properties,
+        enableTools: withItemsEnum(properties.enableTools, configurableToolNames),
+      },
+    };
   }
 
   private getCachedToolDefinitionSchemas(

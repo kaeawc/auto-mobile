@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
 import { DaemonState } from "../../src/daemon/daemonState";
+import {
+  OBSERVATION_BATCH_HEADROOM_MS,
+  PER_DEVICE_OBSERVATION_TIMEOUT_MS,
+} from "../../src/daemon/observationRequestBatch";
 import type {
   DeviceSessionRecord,
   DeviceSessionRegistry,
@@ -25,7 +29,17 @@ interface RoutingTargets {
   telemetryPush: RoutingTarget | null;
 }
 
+interface PooledEntry {
+  id: string;
+  platform: string;
+}
+
 interface DaemonStreamInternals {
+  devicePool: {
+    isPooledIdentityUnresolved(deviceId: string): boolean;
+    getAllDevices(): PooledEntry[];
+    assertDeviceActionable(deviceId: string, purpose: string): void;
+  };
   observationStreamHealth: {
     isHealthy(): boolean;
     recover(): Promise<void>;
@@ -36,6 +50,12 @@ interface DaemonStreamInternals {
   setupNavigationGraphStreamListener(server: unknown): void;
   setupNavigationGraphUpdateListener(manager: NavigationGraphManager): void;
   attemptRecovery(failureKind?: string): Promise<void>;
+  applyStorageSubscriptionRequest(request: {
+    deviceId: string | null;
+    packageName: string;
+    fileName: string;
+    subscribe: boolean;
+  }): Promise<void>;
 }
 
 class FakePushServer implements RoutingTarget {
@@ -53,6 +73,7 @@ class FakeDeviceDataStreamServer extends FakePushServer {
   screenshotCadenceCallbackInstalled = false;
   hierarchyCadenceCallbackInstalled = false;
   observationCallbackInstalled = false;
+  observationRequestTimeoutMs: number | undefined;
   navigationRequestCallbackInstalled = false;
   storageSubscriptionCallbackInstalled = false;
 
@@ -81,8 +102,9 @@ class FakeDeviceDataStreamServer extends FakePushServer {
     this.hierarchyCadenceCallbackInstalled = true;
   }
 
-  setOnObservationRequested(_handler: unknown): void {
+  setOnObservationRequested(_handler: unknown, timeoutMs?: number): void {
     this.observationCallbackInstalled = true;
+    this.observationRequestTimeoutMs = timeoutMs;
   }
 
   setOnNavigationGraphRequested(_handler: unknown): void {
@@ -168,8 +190,55 @@ describe("Daemon stream wiring", () => {
       expect(replacementStream.screenshotCadenceCallbackInstalled).toBe(true);
       expect(replacementStream.hierarchyCadenceCallbackInstalled).toBe(true);
       expect(replacementStream.observationCallbackInstalled).toBe(true);
+      expect(replacementStream.observationRequestTimeoutMs).toBe(
+        PER_DEVICE_OBSERVATION_TIMEOUT_MS + OBSERVATION_BATCH_HEADROOM_MS,
+      );
       expect(replacementStream.navigationRequestCallbackInstalled).toBe(true);
       expect(replacementStream.storageSubscriptionCallbackInstalled).toBe(true);
+    } finally {
+      daemon.getSessionManager().stopCleanupTimer();
+    }
+  });
+
+  // The resolver handed to every push server reads the POOL's quarantine, not just
+  // the registry, so a serial whose AVD identity is unresolved has no routing
+  // identity in either direction while the epoch itself is preserved (#6863 review).
+  test("withholds routing identity for a pool-quarantined serial", async () => {
+    const timer = new FakeTimer();
+    const db = await createTestDatabase();
+    const daemon = new Daemon(
+      {},
+      undefined,
+      timer,
+      new DeviceSessionRepository(db),
+      new CountingIdGenerator("device-session"),
+    );
+    const internals = daemon as unknown as DaemonStreamInternals;
+    const stream = new FakeDeviceDataStreamServer();
+    internals.getDeviceSessionRoutingTargets = () => targets(stream);
+    let quarantined = false;
+    internals.devicePool.isPooledIdentityUnresolved = (deviceId: string) =>
+      quarantined && deviceId === "emulator-5554";
+
+    try {
+      internals.setupDeviceSessionRouting();
+      const record = internals.deviceSessionRegistry.onDeviceConnected({
+        deviceId: "emulator-5554",
+        platform: "android",
+        incarnation: 1,
+      });
+      expect(stream.resolver?.resolveUuid("emulator-5554")).toBe(record.deviceSessionUuid);
+
+      quarantined = true;
+
+      expect(stream.resolver?.resolveUuid("emulator-5554")).toBeNull();
+      expect(stream.resolver?.resolveDeviceId(record.deviceSessionUuid)).toBeNull();
+      expect(stream.resolver?.isRoutingSuspended("emulator-5554")).toBe(true);
+
+      quarantined = false;
+
+      // The epoch was preserved underneath, so routing resumes on the SAME uuid.
+      expect(stream.resolver?.resolveUuid("emulator-5554")).toBe(record.deviceSessionUuid);
     } finally {
       daemon.getSessionManager().stopCleanupTimer();
     }
@@ -393,5 +462,97 @@ describe("Daemon stream wiring", () => {
     } finally {
       daemon.getSessionManager().stopCleanupTimer();
     }
+  });
+
+  // An all-device `subscribe_storage` names no serial, so the socket server's
+  // FUNNEL 2 preflight cannot run: `storageDeviceId` is null and the fan-out
+  // below interprets null as EVERY pooled Android device. Each target it expands
+  // to is device-addressed work in its own right and must pass the gate, or the
+  // request installs a content observer on whichever replacement AVD answers on a
+  // quarantined serial and still acks success
+  // ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
+  describe("all-device storage subscription fan-out", () => {
+    async function daemonWithPool(
+      pooled: PooledEntry[],
+      quarantined: ReadonlySet<string>,
+    ): Promise<{ daemon: Daemon; internals: DaemonStreamInternals }> {
+      const db = await createTestDatabase();
+      const daemon = new Daemon(
+        {},
+        undefined,
+        new FakeTimer(),
+        new DeviceSessionRepository(db),
+        new CountingIdGenerator("device-session"),
+      );
+      const internals = daemon as unknown as DaemonStreamInternals;
+      internals.devicePool.getAllDevices = () => pooled;
+      internals.devicePool.assertDeviceActionable = (deviceId: string, purpose: string) => {
+        if (quarantined.has(deviceId)) {
+          throw new Error(`Refusing ${purpose} on device '${deviceId}'`);
+        }
+      };
+      return { daemon, internals };
+    }
+
+    test("refuses an all-device subscribe that expands to a quarantined serial", async () => {
+      const { daemon, internals } = await daemonWithPool(
+        [
+          { id: "emulator-5554", platform: "android" },
+          { id: "emulator-5556", platform: "android" },
+        ],
+        new Set(["emulator-5556"]),
+      );
+
+      try {
+        await expect(
+          internals.applyStorageSubscriptionRequest({
+            deviceId: null,
+            packageName: "com.example",
+            fileName: "prefs.xml",
+            subscribe: true,
+          }),
+        ).rejects.toThrow(/emulator-5556/);
+      } finally {
+        daemon.getSessionManager().stopCleanupTimer();
+      }
+    });
+
+    test("applies an all-device subscribe when no target is quarantined", async () => {
+      const { daemon, internals } = await daemonWithPool(
+        [{ id: "emulator-5554", platform: "android" }],
+        new Set(),
+      );
+
+      try {
+        await internals.applyStorageSubscriptionRequest({
+          deviceId: null,
+          packageName: "com.example",
+          fileName: "prefs.xml",
+          subscribe: true,
+        });
+      } finally {
+        daemon.getSessionManager().stopCleanupTimer();
+      }
+    });
+
+    // Teardown stays exempt for the same reason the socket server exempts it:
+    // refusing it would strand the observer this daemon registered.
+    test("still releases an all-device subscription that expands to a quarantined serial", async () => {
+      const { daemon, internals } = await daemonWithPool(
+        [{ id: "emulator-5554", platform: "android" }],
+        new Set(["emulator-5554"]),
+      );
+
+      try {
+        await internals.applyStorageSubscriptionRequest({
+          deviceId: null,
+          packageName: "com.example",
+          fileName: "prefs.xml",
+          subscribe: false,
+        });
+      } finally {
+        daemon.getSessionManager().stopCleanupTimer();
+      }
+    });
   });
 });

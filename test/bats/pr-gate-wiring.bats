@@ -113,6 +113,13 @@ wiring_requires_yq() {
   [[ "$block" == *"needs.bats-integration-tests.result"* ]]
 }
 
+@test "Android emulator compile smoke includes test-source compilation" {
+  block="$(job_block android-emulator-compile-smoke)"
+  [[ -n "$block" ]]
+  [[ "$block" == *":junit-runner:compileTestKotlin"* ]]
+  [[ "$block" == *":playground:app:compileDebugUnitTestKotlin"* ]]
+}
+
 @test "node-tests-gate rolls up complete unit and host integration matrices" {
   block="$(job_block node-tests-gate)"
   [[ "$block" == *"- node-unit-tests"* ]]
@@ -223,8 +230,8 @@ wiring_requires_yq() {
   [[ "$block" == *"if: needs.detect-changes.outputs.webrtc_should_run == 'true'"* ]]
 
   block="$(job_block ios-device-webrtc)"
-  [[ "$block" == *"needs: detect-changes"* ]]
-  [[ "$block" == *"if: needs.detect-changes.outputs.webrtc_should_run == 'true'"* ]]
+  [[ "$block" == *"needs: [detect-changes, fast-validation]"* ]]
+  [[ "$block" == *"if: needs.detect-changes.outputs.webrtc_should_run == 'true' && needs.fast-validation.result == 'success'"* ]]
 }
 
 @test "WebRTC change detection covers publisher and device inputs" {

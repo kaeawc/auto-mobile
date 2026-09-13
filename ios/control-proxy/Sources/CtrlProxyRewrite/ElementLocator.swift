@@ -70,6 +70,11 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
         /// Bundle id of the app currently being observed.
         public var foregroundBundleId: String? { tracker.bundleId }
 
+        public func refreshForegroundBundleId() -> String? {
+            ensureForegroundApp()
+            return tracker.bundleId
+        }
+
         /// Springboard app for detecting foreground app - always kept
         private lazy var springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
 
@@ -1432,6 +1437,7 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
         }
 
         public var foregroundBundleId: String? { nil }
+        public func refreshForegroundBundleId() -> String? { nil }
     #endif
 
     // MARK: - Platform-independent helpers (host-compiled and host-tested)

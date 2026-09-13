@@ -149,4 +149,103 @@ describe("PerDeviceInstalledAppsCacheWriteCoordinator", () => {
     expect(coordinator.markRebuilt(deviceId, generation)).toBe(true);
     expect(coordinator.isDirty(deviceId)).toBe(false);
   });
+
+  test("late release cannot discard a replacement invalidation fence", async () => {
+    const coordinator = new PerDeviceInstalledAppsCacheWriteCoordinator();
+    await coordinator.invalidate("reused", async () => {});
+    const retired = coordinator.beginRebuild("reused");
+    await expect(
+      coordinator.invalidate("reused", async () => {
+        throw new Error("replacement invalidation failed");
+      }),
+    ).rejects.toThrow("replacement invalidation failed");
+    const replacement = coordinator.beginRebuild("reused");
+    await coordinator.releaseDevice("reused", retired);
+    expect(coordinator.isDirty("reused")).toBe(true);
+    expect(await coordinator.commitRebuild("reused", replacement, async () => {})).toBe(true);
+  });
+
+  test("releaseDevice returns the tracked-device count to zero across many unique ids (#6704)", async () => {
+    const coordinator = new PerDeviceInstalledAppsCacheWriteCoordinator();
+    const deviceIds = Array.from({ length: 50 }, (_, index) => `released-device-${index}`);
+
+    // Simulate pool removal for each: a final invalidate() (which leaves a
+    // generation + dirty entry), then release.
+    for (const deviceId of deviceIds) {
+      await coordinator.invalidate(deviceId, async () => undefined);
+    }
+    expect(coordinator.trackedDeviceCount()).toBe(deviceIds.length);
+
+    for (const deviceId of deviceIds) {
+      await coordinator.releaseDevice(deviceId);
+    }
+    // No idle per-device state retained after every device is released.
+    expect(coordinator.trackedDeviceCount()).toBe(0);
+  });
+
+  test("a rebuild captured before releaseDevice cannot commit afterward (#6704)", async () => {
+    const coordinator = new PerDeviceInstalledAppsCacheWriteCoordinator();
+    const deviceId = "released-device-stale";
+
+    // Capture the very first token before any invalidation.
+    const generation = coordinator.beginRebuild(deviceId);
+
+    // Pool removal releases the device before the lagging rebuild commits.
+    await coordinator.releaseDevice(deviceId);
+
+    const writes: string[] = [];
+    const staleRebuild = coordinator.commitRebuild(deviceId, generation, async () => {
+      writes.push("stale");
+    });
+    await expect(staleRebuild).resolves.toBe(false);
+    expect(writes).toEqual([]);
+    // The fenced attempt leaked no bookkeeping.
+    expect(coordinator.trackedDeviceCount()).toBe(0);
+  });
+
+  test("re-adding a released device id starts from clean state (#6704)", async () => {
+    const coordinator = new PerDeviceInstalledAppsCacheWriteCoordinator();
+    const deviceId = "released-device-reuse";
+
+    await coordinator.invalidate(deviceId, async () => undefined);
+    await coordinator.releaseDevice(deviceId);
+    expect(coordinator.trackedDeviceCount()).toBe(0);
+    expect(coordinator.isDirty(deviceId)).toBe(false);
+
+    // Reused serial: a fresh incarnation commits normally.
+    const generation = coordinator.beginRebuild(deviceId);
+    expect(generation).toBeGreaterThan(0);
+    const writes: string[] = [];
+    await expect(
+      coordinator.commitRebuild(deviceId, generation, async () => {
+        writes.push("fresh");
+      }),
+    ).resolves.toBe(true);
+    expect(writes).toEqual(["fresh"]);
+  });
+
+  test("preserves a rebuild queued after the release drain marker", async () => {
+    const coordinator = new PerDeviceInstalledAppsCacheWriteCoordinator();
+    const deviceId = "reused-during-release";
+    let finishWrite!: () => void;
+    const blocked = new Promise<void>((resolve) => {
+      finishWrite = resolve;
+    });
+    const original = coordinator.beginRebuild(deviceId);
+    const first = coordinator.commitRebuild(deviceId, original, () => blocked);
+    await Promise.resolve();
+    await Promise.resolve();
+    const release = coordinator.releaseDevice(deviceId);
+    const fresh = coordinator.beginRebuild(deviceId);
+    const writes: string[] = [];
+    const rebuild = coordinator.commitRebuild(deviceId, fresh, async () => {
+      writes.push("fresh");
+    });
+    finishWrite();
+    await first;
+    await release;
+    expect(await rebuild).toBe(true);
+    expect(writes).toEqual(["fresh"]);
+    expect(await coordinator.commitRebuild(deviceId, original, async () => {})).toBe(false);
+  });
 });

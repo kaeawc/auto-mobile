@@ -1,5 +1,5 @@
 import { type Kysely, sql } from "kysely";
-import { ensureMigrations, getDatabase } from "./database";
+import { getDatabase } from "./database";
 import type { Database } from "./types";
 import { logger } from "../utils/logger";
 
@@ -18,12 +18,12 @@ export class DeviceLockRepository {
     this.db = db ?? null;
   }
 
-  private async getDb(): Promise<Kysely<Database>> {
-    if (this.db) {
-      return this.db;
-    }
-    await ensureMigrations();
-    return getDatabase();
+  // Migration gating is owned by startup (ensureMigrations) plus the app dialect
+  // first-query gate (waitForMigrationsBeforeQuery, #6703); a repository helper
+  // must NOT await ensureMigrations itself. Resolve the injected executor, else
+  // the singleton, synchronously.
+  private getDb(): Kysely<Database> {
+    return this.db ?? getDatabase();
   }
 
   /** The credential remembered for a device, or null when none is recorded. */

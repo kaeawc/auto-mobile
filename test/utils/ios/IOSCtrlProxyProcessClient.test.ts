@@ -141,7 +141,7 @@ describe("IOSCtrlProxyProcessClient", () => {
 
     expect(process).toEqual({ pid: 42, port: 8765 });
     expect(host.getExecutedCommands()).toContain("pgrep -x xcodebuild");
-    expect(host.getExecutedCommands()).toContain("ps -p 42 -o ppid= -o args=");
+    expect(host.getExecutedCommands()).toContain("ps -p 42 -o ppid= -o args= -ww");
   });
 
   test("does not report a daemon-managed runner behind an orphaned shell as external, even when its own environment carries a device identity marker (#6372 predicate-divergence regression)", async () => {
@@ -183,6 +183,103 @@ describe("IOSCtrlProxyProcessClient", () => {
     await expect(client.isOwnedRunnerAlive(42, "DEVICE-1")).resolves.toBe(false);
   });
 
+  test.each([100, 101])(
+    "checks untruncated arguments and daemon parent PID (%s)",
+    async (parentPid) => {
+      const command = `${parentPid} xcodebuild test-without-building -xctestrun /tmp/${"long-path/".repeat(40)}CtrlProxy.xctestrun -destination id=DEVICE-1`;
+      const host: HostCommandExecutor = {
+        async executeCommand(file, args) {
+          expect(file).toBe("ps");
+          return result(args.includes("-ww") ? command : command.slice(0, 256));
+        },
+      };
+      const client = new IOSCtrlProxyProcessClient(host, new FakeTimer(), { ownerPid: 100 });
+      expect(await client.isOwnedRunnerAlive(42, "DEVICE-1")).toBe(parentPid === 100);
+    },
+  );
+
+  test("recognizes the wrapped no-match ps exit without assuming ownership", async () => {
+    const failure = Object.assign(new Error("no matching process"), {
+      code: 1,
+      stdout: "",
+      stderr: "",
+    });
+    const host: HostCommandExecutor = {
+      async executeCommand() {
+        throw new Error("wrapped command failure", { cause: failure });
+      },
+    };
+    const client = new IOSCtrlProxyProcessClient(host, new FakeTimer());
+    expect(await client.isOwnedRunnerAlive(42, "DEVICE-1")).toBe(false);
+  });
+
+  test("distinguishes owned, absent, and foreign runners", async () => {
+    const host = new FakeHostCommandExecutor();
+    host.setCommandResponse("ps -p 42", result());
+    host.setCommandResponse("ps -p 43", result("101 unrelated-process"));
+    host.setCommandResponse(
+      "ps -p 44",
+      result(
+        "100 xcodebuild test-without-building -xctestrun /tmp/CtrlProxy.xctestrun -destination id=DEVICE-1",
+      ),
+    );
+    const client = new IOSCtrlProxyProcessClient(host, new FakeTimer(), { ownerPid: 100 });
+
+    await expect(client.checkRunnerOwnership(44, "DEVICE-1")).resolves.toBe("owned");
+    await expect(client.checkRunnerOwnership(42, "DEVICE-1")).resolves.toBe("absent");
+    await expect(client.checkRunnerOwnership(43, "DEVICE-1")).resolves.toBe("foreign");
+  });
+
+  test("force termination signals the tracked process group when its root is absent", async () => {
+    const commands: string[] = [];
+    const host: HostCommandExecutor = {
+      async executeCommand(file, args) {
+        commands.push(`${file} ${args.join(" ")}`);
+        if (file === "ps") {
+          return result();
+        }
+        if (file === "kill" && args[0] === "-0") {
+          throw new Error("No such process");
+        }
+        return result();
+      },
+    };
+    const client = new IOSCtrlProxyProcessClient(host, new FakeTimer());
+
+    await client.terminateProcessTree(42, 250, {
+      skipGraceful: true,
+      expectedDeviceId: "DEVICE-1",
+    });
+
+    expect(commands).toContain("kill -KILL -- -42");
+  });
+
+  test("does not signal a PID recycled while descendants are enumerated", async () => {
+    const commands: string[] = [];
+    const host: HostCommandExecutor = {
+      async executeCommand(file, args) {
+        commands.push(`${file} ${args.join(" ")}`);
+        if (args.includes("-axo")) {
+          return result("42 100\n43 42");
+        }
+        return result("101 unrelated-process");
+      },
+    };
+    const client = new IOSCtrlProxyProcessClient(host, new FakeTimer(), { ownerPid: 100 });
+    await client.terminateProcessTree(42, 250, { expectedDeviceId: "DEVICE-1" });
+    expect(commands.some((command) => command.startsWith("kill "))).toBe(false);
+  });
+
+  test("preserves a transient ownership inspection failure", async () => {
+    const failure = new Error("ps temporarily unavailable");
+    const host: HostCommandExecutor = {
+      executeCommand: async () => {
+        throw failure;
+      },
+    };
+    const client = new IOSCtrlProxyProcessClient(host, new FakeTimer());
+    await expect(client.isOwnedRunnerAlive(42, "DEVICE-1")).rejects.toBe(failure);
+  });
   test("signals the owned process group, then descendants, and escalates after the bounded wait", async () => {
     const host = new FakeHostCommandExecutor();
     const timer = new FakeTimer();

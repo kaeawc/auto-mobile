@@ -7,6 +7,9 @@ import {
   DefaultIOSCtrlProxyBundleDownloader,
   assertZipEntriesContained,
 } from "../../src/utils/IOSCtrlProxyBundleDownloader";
+import { EventEmitter } from "node:events";
+import { FakeTimer } from "../fakes/FakeTimer";
+import type { ExtractBundleWorker } from "../../src/utils/IOSCtrlProxyBundleDownloader";
 
 describe("IOSCtrlProxyBundleDownloader zip-slip containment (#4761)", function () {
   let tempDir: string;
@@ -89,6 +92,71 @@ describe("IOSCtrlProxyBundleDownloader zip-slip containment (#4761)", function (
 
       // The traversal target must not have been written to the parent directory.
       await expect(fs.access(path.join(tempDir, "escapee.txt"))).rejects.toThrow();
+    });
+
+    test("dispatches extraction and waits for worker completion independently of the main timer", async function () {
+      const timer = new FakeTimer();
+      class FakeWorker extends EventEmitter {
+        terminated = false;
+        async terminate(): Promise<number> {
+          this.terminated = true;
+          return 0;
+        }
+      }
+      const worker = new FakeWorker();
+      let dispatched!: () => void;
+      const dispatch = new Promise<void>((resolve) => {
+        dispatched = resolve;
+      });
+      const destination = path.join(tempDir, "extract");
+      const bundlePath = path.join(tempDir, "bundle.zip");
+      const downloader = new DefaultIOSCtrlProxyBundleDownloader(undefined, undefined, (data) => {
+        expect(data).toEqual({ bundlePath, destination });
+        dispatched();
+        return worker as ExtractBundleWorker;
+      });
+      let completed = false;
+      const extraction = downloader.extractBundle(bundlePath, destination).then(() => {
+        completed = true;
+      });
+      await dispatch;
+      let ticked = false;
+      timer.setTimeout(() => {
+        ticked = true;
+      }, 1);
+      timer.advanceTime(1);
+      expect(ticked).toBe(true);
+      expect(completed).toBe(false);
+      worker.emit("message", { ok: true });
+      await extraction;
+      expect(completed).toBe(true);
+      expect(worker.terminated).toBe(true);
+    });
+
+    test.each([0, 1])("rejects worker exit without a result (code %s)", async function (code) {
+      const worker = new EventEmitter() as EventEmitter & ExtractBundleWorker;
+      worker.terminate = async () => 0;
+      const downloader = new DefaultIOSCtrlProxyBundleDownloader(undefined, undefined, () => {
+        queueMicrotask(() => worker.emit("exit", code));
+        return worker;
+      });
+      await expect(
+        downloader.extractBundle("unused.zip", path.join(tempDir, "out")),
+      ).rejects.toThrow("without a result");
+    });
+
+    test("handles worker termination rejection", async function () {
+      const worker = new EventEmitter() as EventEmitter & ExtractBundleWorker;
+      worker.terminate = async () => {
+        throw new Error("termination failed");
+      };
+      const downloader = new DefaultIOSCtrlProxyBundleDownloader(undefined, undefined, () => {
+        queueMicrotask(() => worker.emit("message", { ok: true }));
+        return worker;
+      });
+      await expect(
+        downloader.extractBundle("unused.zip", path.join(tempDir, "out")),
+      ).rejects.toThrow("termination failed");
     });
   });
 });

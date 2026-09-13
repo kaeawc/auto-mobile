@@ -38,6 +38,7 @@ import type { ViewHierarchy as ViewHierarchyInterface } from "./interfaces/ViewH
 import type { PredictiveUIState as PredictiveUIStateInterface } from "./interfaces/PredictiveUIState";
 
 import { getObserveCacheStore, setObserveCacheStore } from "./cache/ObserveCacheRegistry";
+import type { RecentObserveCacheEntry } from "./cache/ObserveResultCacheStore";
 import {
   getScreenshotStateStore,
   setScreenshotStateStore,
@@ -480,24 +481,36 @@ export class RealObserveScreen implements ObserveScreen {
 
   // ---------- Static API (kept for back-compat with resource handlers/daemon) ----------
 
+  /**
+   * The most recent cached observation across all devices, together with the
+   * device it came from.
+   *
+   * Callers that also need the matching screenshot MUST resolve the device here
+   * once and then use the `ForDevice` accessors, rather than running a second
+   * independent "most recent across all devices" lookup against the screenshot
+   * store — those two stores advance independently, so a multi-device daemon
+   * could otherwise pair one device's hierarchy with another's screenshot
+   * (issue #6600).
+   */
+  static getRecentCachedObservation(): RecentObserveCacheEntry | undefined {
+    const entry = getObserveCacheStore().getRecentInMemoryEntry();
+    if (!entry) {
+      return undefined;
+    }
+    const result = boundCachedLayoutWarnings(entry.result);
+    return result ? { deviceId: entry.deviceId, result } : undefined;
+  }
+
   static getRecentCachedResult(): ObserveResult | undefined {
-    return boundCachedLayoutWarnings(getObserveCacheStore().getRecentInMemory());
+    return RealObserveScreen.getRecentCachedObservation()?.result;
   }
 
   static getRecentCachedResultForDevice(deviceId: string): ObserveResult | undefined {
     return boundCachedLayoutWarnings(getObserveCacheStore().getRecentInMemoryForDevice(deviceId));
   }
 
-  static getRecentCachedScreenshotPath(): string | undefined {
-    return getScreenshotStateStore().getPath();
-  }
-
   static getRecentCachedScreenshotPathForDevice(deviceId: string): string | undefined {
     return getScreenshotStateStore().getPath(deviceId);
-  }
-
-  static getRecentCachedScreenshotError(): string | undefined {
-    return getScreenshotStateStore().getError();
   }
 
   static getRecentCachedScreenshotErrorForDevice(deviceId: string): string | undefined {
@@ -604,8 +617,9 @@ export class RealObserveScreen implements ObserveScreen {
         device,
         // Prefer the recorder-backed cached path before falling back to disk scan.
         screenshotPathResolver: () =>
-          resolveLatestScreenshotPath(() =>
-            getScreenshotStateStore().getPath(this.device.deviceId),
+          resolveLatestScreenshotPath(
+            () => getScreenshotStateStore().getPath(this.device.deviceId),
+            this.device.deviceId,
           ),
       });
     this.accessibilityStateDetector =

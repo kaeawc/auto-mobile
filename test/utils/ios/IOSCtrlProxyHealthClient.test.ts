@@ -80,6 +80,52 @@ describe("IOSCtrlProxyHealthClient (local curl transport)", function () {
     expect(await client.checkHealthEndpointOnPortForDevice(8765, DEVICE_ID)).toBe(false);
   });
 
+  // #6415: a runner build that reports no deviceId at all (older build, or the
+  // env-injection fallback that also drops the device-id var) must still count
+  // as "ours" when status is ok — only a PRESENT-but-different deviceId is a
+  // foreign runner. Without this compat carve-out, checkHealthEndpoint() could
+  // never route through the strict check without regressing older runners.
+  test("checkHealthEndpointOnPortForDevice accepts an 'ok' body reporting no deviceId (compat)", async function () {
+    const { client } = makeClient(() => execResult('{"status":"ok"}'));
+    expect(await client.checkHealthEndpointOnPortForDevice(8765, DEVICE_ID)).toBe(false);
+    expect(
+      await client.checkHealthEndpointOnPortForDevice(8765, DEVICE_ID, undefined, {
+        requireDeviceId: false,
+      }),
+    ).toBe(true);
+  });
+
+  // #6415 follow-up: ownership/forced-teardown decisions must fail closed on a
+  // missing deviceId — the compat carve-out above is for the liveness gate only.
+  describe("checkHealthEndpointOnPortForDevice with requireDeviceId (strict ownership gate)", function () {
+    test("rejects an 'ok' body reporting no deviceId", async function () {
+      const { client } = makeClient(() => execResult('{"status":"ok"}'));
+      expect(
+        await client.checkHealthEndpointOnPortForDevice(8765, DEVICE_ID, undefined, {
+          requireDeviceId: true,
+        }),
+      ).toBe(false);
+    });
+
+    test("rejects a mismatched deviceId", async function () {
+      const { client } = makeClient(() => execResult('{"status":"ok","deviceId":"OTHER"}'));
+      expect(
+        await client.checkHealthEndpointOnPortForDevice(8765, DEVICE_ID, undefined, {
+          requireDeviceId: true,
+        }),
+      ).toBe(false);
+    });
+
+    test("accepts a matching deviceId", async function () {
+      const { client } = makeClient(() => execResult(`{"status":"ok","deviceId":"${DEVICE_ID}"}`));
+      expect(
+        await client.checkHealthEndpointOnPortForDevice(8765, DEVICE_ID, undefined, {
+          requireDeviceId: true,
+        }),
+      ).toBe(true);
+    });
+  });
+
   test("readReportedPortFromHealth returns the self-reported port for our device", async function () {
     const { client } = makeClient(() =>
       execResult(`{"status":"ok","deviceId":"${DEVICE_ID}","port":9100}`),

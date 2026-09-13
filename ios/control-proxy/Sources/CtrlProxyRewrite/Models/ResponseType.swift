@@ -46,6 +46,7 @@ public enum ResponseType: String, Sendable {
     case setNetworkMockRulesResult = "set_network_mock_rules_result"
     case setNetworkFaultRulesResult = "set_network_fault_rules_result"
     case setNetworkErrorSimulationResult = "set_network_error_simulation_result"
+    case sdkCapabilitiesResult = "sdk_capabilities_result"
 
     // Database inspection
     case executeSqlResult = "execute_sql_result"

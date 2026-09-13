@@ -100,7 +100,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
   ): Promise<ViewHierarchyResult> {
     switch (this.device.platform) {
       case "ios":
-        return this.getiOSViewHierarchy(perf, skipWaitForFresh, minTimestamp, timeoutMs);
+        return this.getiOSViewHierarchy(perf, skipWaitForFresh, minTimestamp, timeoutMs, signal);
       case "android":
         return this.getAndroidViewHierarchy(
           queryOptions,
@@ -120,6 +120,12 @@ export class ViewHierarchy implements ViewHierarchyInterface {
    * @param perf - Performance tracker for timing data
    * @param skipWaitForFresh - If true, skip waiting for fresh data and use cache if available
    * @param minTimestamp - If provided, cached data must have updatedAt >= this value
+   * @param timeoutMs - Per-request budget for the synchronous CtrlProxy fetch
+   * @param signal - Caller cancellation, forwarded to the CtrlProxy client. Without it this
+   *   read is fenced ONLY by `timeoutMs` (default 15s below), so a caller whose own deadline is
+   *   much tighter -- the #6866 embedded-observation settle gate advertises a 1s bound -- would
+   *   block for the full default against a wedged runner. The Android branch has always
+   *   forwarded it; dropping it here was the iOS asymmetry (#6890 review, P1).
    * @returns Promise with parsed XML view hierarchy
    */
   async getiOSViewHierarchy(
@@ -127,6 +133,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
     skipWaitForFresh: boolean = false,
     minTimestamp: number = 0,
     timeoutMs?: number,
+    signal?: AbortSignal,
   ): Promise<ViewHierarchyResult> {
     const startTime = this.timer.now();
     logger.info(
@@ -144,6 +151,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
         perf,
         skipWaitForFresh,
         minTimestamp,
+        signal,
       );
 
       if (!result || !result.hierarchy) {

@@ -37,6 +37,14 @@ import {
  * emitted key is named `elementId` (not `id`) to literally match the selector
  * field name — see issue #6153.
  *
+ * The soft keyboard is a mode, not a set of targets: the whole input-method
+ * window collapses into ONE `<ime> | Keyboard (<package>) | input` row rather
+ * than ~40 per-keycap tap rows burying the app's own affordances (issue #6871).
+ * See {@link detectImeWindow}. `project: "full"` / `raw: true` still emit every
+ * key. The same issue gives an unlabelled state container (a preference row's
+ * `Switch`) its owning row's label — see {@link attributeContainerLabels} — and
+ * a row with no label at all simply omits the key.
+ *
  * `skeleton` is actionable-only (issue #6221 item 1): a row with zero
  * affordances never appears there. Such rows (a screen title, the
  * `com.android.systemui` status bar, a standalone notification line) instead
@@ -192,11 +200,12 @@ function strictlyContains(
  * identity key dedups them. `media` carries no actionable affordance and is
  * intentionally excluded. Elements without valid numeric bounds are skipped.
  */
-function accumulateByIdentity(elements: ObserveElements): SkeletonAccumulator[] {
+function accumulateByIdentity(
+  elements: ObserveElements,
+  ime: ImeWindow | undefined,
+): SkeletonAccumulator[] {
   const byIdentity = new Map<string, SkeletonAccumulator>();
-  const appElements = [...elements.clickable, ...elements.scrollable, ...elements.text].filter(
-    (element) => !getElementProvenance(element)?.keyboardPackage,
-  );
+  const appElements = allElements(elements).filter((element) => !isImeKeycap(element, ime));
   for (const el of appElements) {
     const bounds = boundsTuple(el);
     if (!bounds) {
@@ -565,14 +574,16 @@ function isSystemUiEntry(acc: SkeletonAccumulator): boolean {
   return acc.elementId !== undefined && SYSTEMUI_STATUS_BAR_ID_PATTERN.test(acc.elementId);
 }
 
-/** The smallest bounds tuple enclosing every entry's bounds. */
-function unionBounds(entries: readonly SkeletonAccumulator[]): SkeletonElement["bounds"] {
-  let [left, top, right, bottom] = entries[0].bounds;
-  for (const entry of entries.slice(1)) {
-    left = Math.min(left, entry.bounds[0]);
-    top = Math.min(top, entry.bounds[1]);
-    right = Math.max(right, entry.bounds[2]);
-    bottom = Math.max(bottom, entry.bounds[3]);
+/** The smallest bounds tuple enclosing every supplied box. */
+function unionBounds(
+  boxes: readonly NonNullable<SkeletonElement["bounds"]>[],
+): SkeletonElement["bounds"] {
+  let [left, top, right, bottom] = boxes[0];
+  for (const box of boxes.slice(1)) {
+    left = Math.min(left, box[0]);
+    top = Math.min(top, box[1]);
+    right = Math.max(right, box[2]);
+    bottom = Math.max(bottom, box[3]);
   }
   return [left, top, right, bottom];
 }
@@ -608,10 +619,337 @@ function collapseSystemUiBlock(nonActionable: SkeletonAccumulator[]): SkeletonAc
       summaryParts.length > 0
         ? `Status bar: ${summaryParts.join(", ")}`
         : "Status bar (no readable status text)",
-    bounds: unionBounds(systemUiEntries),
+    bounds: unionBounds(systemUiEntries.map((entry) => entry.bounds)),
     affordances: new Set<Affordance>(),
   };
   return [...other, summary];
+}
+
+/**
+ * Synthetic elementId for the collapsed IME row. Like
+ * {@link SYSTEMUI_SUMMARY_ELEMENT_ID} it is deliberately NOT shaped like a real
+ * `package:id/name` resource-id, so it can never be mistaken for a selector: the
+ * supported way to drive a keyboard is `inputText` / `sendKeys`, never a tap per
+ * keycap (issue #6871).
+ */
+const IME_ELEMENT_ID = "<ime>";
+
+/**
+ * The `…:id/key_pos_*` resource-id family every AOSP/Gboard-derived IME gives
+ * its keycaps. The suffix is NOT a `<row>_<col>` grid coordinate — the captured
+ * Gboard fixtures under `test/fixtures/observe/diff/` carry `key_pos_shift`,
+ * `key_pos_space`, `key_pos_del`, `key_pos_ime_action` and
+ * `key_pos_header_access_points_menu` alongside positional ones — so the prefix
+ * is all that can be matched, and corroboration has to come from
+ * {@link MIN_FALLBACK_KEYCAPS} rather than from the suffix shape.
+ *
+ * This is the FALLBACK identification path (issue #6871): the authoritative one
+ * is `ElementProvenance.keyboardPackage`, which the collector inherits from the
+ * control proxy's `automobile:imePackage` window extra — but that extra only
+ * exists on a re-cut control proxy, so on an older on-device build (and on the
+ * `uiautomator dump` path) the ~40 keycaps still reached the skeleton. The
+ * capture group is the IME's own package, which is also what distinguishes a
+ * keycap from the framework chrome that shares the window
+ * (`android:id/input_method_nav_back`).
+ */
+const KEYCAP_ID_PATTERN = /^([A-Za-z0-9_.]+):id\/key_pos_/;
+
+/**
+ * How many DISTINCT `key_pos_*` resource-ids one package must own before the
+ * fallback path is willing to call it a keyboard (issue #6871).
+ *
+ * Without this fence a single app control that merely borrows the prefix
+ * (`com.app:id/key_pos_preview`) was conclusive evidence on a screen with no
+ * keyboard at all: its own row was folded away, `keyboard` announced
+ * `{ visible: true, package: "com.app" }`, and a synthetic `<ime>` row appeared
+ * for a keyboard that was never up. Nothing authoritative exists on that path to
+ * override the false marker, so the corroboration has to come from the markers
+ * themselves — a keyboard is a grid of keys and always presents many, while a
+ * borrowed prefix is one node. Two is the smallest threshold that rejects the
+ * lone decoy; the real captures carry eight or more.
+ */
+const MIN_FALLBACK_KEYCAPS = 2;
+
+/** Every collected element, in the category order the projection consumes them. */
+function allElements(elements: ObserveElements): Element[] {
+  return [...elements.clickable, ...elements.scrollable, ...elements.text];
+}
+
+/** The `package` half of a canonical `package:id/name` Android resource-id. */
+const RESOURCE_ID_PACKAGE_PATTERN = /^([A-Za-z0-9_.]+):id\//;
+
+/** The owning package of a `package:id/name` resource-id, when it has that shape. */
+function idPackage(el: Element): string | undefined {
+  return RESOURCE_ID_PACKAGE_PATTERN.exec(deriveId(el) ?? "")?.[1];
+}
+
+/**
+ * The detected input-method window: its package, plus the provenance group and
+ * pre-order span of the keyboard subtree — the nodes that identified it, widened
+ * to the outermost node the IME owns around them (see
+ * {@link widenToEnclosingImeSubtree}). The span lets an anonymous node between
+ * two keycaps (a key with no resource-id) collapse too, without relaxing
+ * membership to anything outside that one window's subtree.
+ */
+interface ImeWindow {
+  package: string;
+  group?: number;
+  spanEnter: number;
+  spanExit: number;
+}
+
+/** The IME package this element announces, by provenance first and keycap id second. */
+function imeMarker(el: Element): string | undefined {
+  return (
+    getElementProvenance(el)?.keyboardPackage ?? KEYCAP_ID_PATTERN.exec(deriveId(el) ?? "")?.[1]
+  );
+}
+
+/**
+ * The IME package the capture itself vouches for: the control proxy's
+ * `automobile:imePackage` window extra, surfaced either as the capture-level
+ * keyboard identity or as per-element provenance. This is authoritative — the
+ * keycap resource-id family is only a guess (issue #6871).
+ */
+function authoritativeImePackage(elements: ObserveElements): string | undefined {
+  const captured = getCapturedKeyboard(elements)?.package;
+  if (captured) {
+    return captured;
+  }
+  for (const el of allElements(elements)) {
+    const inherited = getElementProvenance(el)?.keyboardPackage;
+    if (inherited) {
+      return inherited;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * The first package that owns at least {@link MIN_FALLBACK_KEYCAPS} distinct
+ * `key_pos_*` resource-ids, in collection order (issue #6871).
+ *
+ * Distinct ids, not node count: the same element can reach this through more
+ * than one category of {@link allElements}, and a repeated id is one marker
+ * seen twice, not two keys.
+ */
+function corroboratedKeycapPackage(elements: ObserveElements): string | undefined {
+  const keycapIdsByPackage = new Map<string, Set<string>>();
+  for (const el of allElements(elements)) {
+    const id = deriveId(el) ?? "";
+    const pkg = KEYCAP_ID_PATTERN.exec(id)?.[1];
+    if (pkg === undefined) {
+      continue;
+    }
+    const ids = keycapIdsByPackage.get(pkg) ?? new Set<string>();
+    ids.add(id);
+    keycapIdsByPackage.set(pkg, ids);
+  }
+  for (const [pkg, ids] of keycapIdsByPackage) {
+    if (ids.size >= MIN_FALLBACK_KEYCAPS) {
+      return pkg;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Identify the input-method window, if one is on screen (issue #6871).
+ *
+ * The package is chosen in a FIRST pass that prefers authoritative identity
+ * ({@link authoritativeImePackage}) and only falls back to
+ * {@link corroboratedKeycapPackage} when the capture vouches for none.
+ * Otherwise an app control that happens to carry that id family
+ * (`com.app:id/key_pos_preview`) and is emitted before the real keyboard would
+ * lock the collapse onto the app: the row would be labelled with the wrong
+ * package while the real keycaps stayed exposed. A second pass then measures the
+ * group/span of the nodes that actually belong to that one package.
+ */
+function detectImeWindow(elements: ObserveElements): ImeWindow | undefined {
+  const detected = authoritativeImePackage(elements) ?? corroboratedKeycapPackage(elements);
+  if (!detected) {
+    return undefined;
+  }
+  const ime: ImeWindow = { package: detected, spanEnter: Infinity, spanExit: -Infinity };
+  for (const el of allElements(elements)) {
+    const provenance = getElementProvenance(el);
+    if (imeMarker(el) !== ime.package || !provenance) {
+      continue;
+    }
+    ime.group ??= provenance.group;
+    if (provenance.group === ime.group) {
+      ime.spanEnter = Math.min(ime.spanEnter, provenance.enter);
+      ime.spanExit = Math.max(ime.spanExit, provenance.exit);
+    }
+  }
+  widenToEnclosingImeSubtree(elements, ime);
+  return ime;
+}
+
+/**
+ * Grow the detected span from the marker nodes to the whole keyboard subtree
+ * they sit in (issue #6871).
+ *
+ * The markers are only the nodes carrying the `key_pos_*` id family, so on the
+ * fallback path the span is a keycap-only interval that STARTS AFTER and ENDS
+ * BEFORE the IME's own container (`com.ime:id/keyboard_container`, which is
+ * itself clickable). Membership measured against that narrow interval left the
+ * container — and any anonymous key outside it — as extra rows beside `<ime>`,
+ * breaking the one-row collapse this projection exists to guarantee.
+ *
+ * Only a node the IME itself OWNS by `package:id/name` can widen the span, so
+ * the framework window root (or the app's own decor node) can never drag the
+ * whole screen into the keyboard. Candidates enclosing the marker span are
+ * nested in one another by construction — they are ancestors of the same nodes
+ * — so taking the widest is well defined, and measuring every candidate against
+ * the ORIGINAL marker span keeps it independent of collection order.
+ */
+function widenToEnclosingImeSubtree(elements: ObserveElements, ime: ImeWindow): void {
+  if (ime.group === undefined) {
+    return;
+  }
+  const markerEnter = ime.spanEnter;
+  const markerExit = ime.spanExit;
+  for (const el of allElements(elements)) {
+    const provenance = getElementProvenance(el);
+    if (!provenance || provenance.group !== ime.group || idPackage(el) !== ime.package) {
+      continue;
+    }
+    if (provenance.enter <= markerEnter && provenance.exit >= markerExit) {
+      ime.spanEnter = Math.min(ime.spanEnter, provenance.enter);
+      ime.spanExit = Math.max(ime.spanExit, provenance.exit);
+    }
+  }
+}
+
+/**
+ * Whether `el` sits inside the detected IME window (issue #6871).
+ *
+ * Inherited `keyboardPackage` provenance is authoritative on its own — the
+ * collector only sets it on the IME root's own subtree. Everything else is
+ * decided by the detected group/span, so an app control in ANOTHER window that
+ * merely shares the keyboard's package (a keyboard app showing its own settings
+ * screen while its IME is up) is not folded away and does not stretch the
+ * synthetic row's bounds across two windows. The package-only match is reserved
+ * for provenance-less input, where group/span ancestry does not exist; when the
+ * capture vouches for an IME that no collected node places (visible keyboard,
+ * no accessible keys) nothing is a member at all.
+ */
+function isImeMember(el: Element, ime: ImeWindow): boolean {
+  const provenance = getElementProvenance(el);
+  if (provenance?.keyboardPackage === ime.package) {
+    return true;
+  }
+  if (provenance === undefined) {
+    return idPackage(el) === ime.package;
+  }
+  return (
+    ime.group !== undefined &&
+    provenance.group === ime.group &&
+    provenance.enter >= ime.spanEnter &&
+    provenance.exit <= ime.spanExit
+  );
+}
+
+/**
+ * Whether `el` is a keycap that collapses into the single IME row. A member
+ * whose resource-id belongs to a DIFFERENT package than the IME is framework
+ * chrome sharing the window — `android:id/input_method_nav_back` is the one the
+ * dogfood loop named — and stays individually actionable (issue #6871).
+ *
+ * Package equality is deliberately the whole test for the IME's own nodes. The
+ * IME's toolbar/emoji/clipboard affordances are NOT separable from its keys:
+ * the captured Gboard fixtures give them the very same keycap id family
+ * (`key_pos_header_access_points_menu`, `key_pos_switch_to_symbol`,
+ * `key_pos_ime_action`), and the majority of keys carry no resource-id at all,
+ * so any narrower key test would re-expose the ~40-row flood #6871 exists to
+ * remove while still folding the toolbar. Driving the keyboard is `inputText` /
+ * `sendKeys`, never a tap inside its window, so one row is the honest shape.
+ */
+function isImeKeycap(el: Element, ime: ImeWindow | undefined): boolean {
+  if (!ime || !isImeMember(el, ime)) {
+    return false;
+  }
+  const owner = idPackage(el);
+  return owner === undefined || owner === ime.package;
+}
+
+/**
+ * The single row that replaces every keycap: `<ime> | Keyboard (<package>) |
+ * input` (issue #6871). `input` is the only honest affordance — `inputText` /
+ * `sendKeys` are the supported way to drive it. Absent when the IME was
+ * identified but contributed no bounded node (the `keyboard` summary still
+ * reports it), so the row never claims a box it does not have.
+ */
+function imeAccumulator(
+  elements: ObserveElements,
+  ime: ImeWindow | undefined,
+): SkeletonAccumulator | undefined {
+  if (!ime) {
+    return undefined;
+  }
+  const boxes = allElements(elements)
+    .filter((el) => isImeKeycap(el, ime))
+    .map(boundsTuple)
+    .filter((box): box is NonNullable<SkeletonElement["bounds"]> => box !== undefined);
+  if (boxes.length === 0) {
+    return undefined;
+  }
+  return {
+    elementId: IME_ELEMENT_ID,
+    label: `Keyboard (${ime.package})`,
+    bounds: unionBounds(boxes),
+    affordances: new Set<Affordance>(["input"]),
+  };
+}
+
+/** Affordances whose row is a state/scroll container that commonly carries no text of its own. */
+const ATTRIBUTABLE_AFFORDANCES: readonly Affordance[] = ["toggle", "scroll"];
+
+/**
+ * Attribute an owning row's label to unlabelled state containers (issue #6871).
+ *
+ * {@link hoistContainerLabels} folds text ONTO clickable containers, but never
+ * INTO a row that has an affordance of its own — so the Android preference-row
+ * `Switch` (`clickable="false"`, `checkable="true"`; it is the node carrying
+ * `checked`, see issue #6257) came through with no label at all, and a client
+ * saw a `checked` state with nothing tying it to the setting it belongs to.
+ * Here each unlabelled toggle/scroll container takes the label of its tightest
+ * labelled enclosing row, so `switchWidget` reads `Airplane mode` instead of
+ * nothing. Candidates are snapshotted before any mutation, so attribution is
+ * order-independent and never chains one derived label onto another. A
+ * container with no labelled ancestor (a scrollable fragment root) keeps no
+ * label — {@link toSkeletonEntry} then omits the key entirely rather than
+ * emitting a placeholder.
+ */
+function attributeContainerLabels(accumulators: SkeletonAccumulator[]): void {
+  const labelled = accumulators.filter((acc) => acc.label !== undefined);
+  if (labelled.length === 0) {
+    return;
+  }
+  for (const acc of accumulators) {
+    if (acc.label !== undefined || !ATTRIBUTABLE_AFFORDANCES.some((a) => acc.affordances.has(a))) {
+      continue;
+    }
+    acc.label = smallestLabelledAncestor(acc, labelled)?.label;
+  }
+}
+
+/** The tightest labelled accumulator enclosing `acc`, by the same ancestry rule as hoisting. */
+function smallestLabelledAncestor(
+  acc: SkeletonAccumulator,
+  labelled: SkeletonAccumulator[],
+): SkeletonAccumulator | undefined {
+  let best: SkeletonAccumulator | undefined;
+  for (const candidate of labelled) {
+    if (!containerEnclosesText(candidate, acc)) {
+      continue;
+    }
+    if (!best || isTighterContainer(candidate, best)) {
+      best = candidate;
+    }
+  }
+  return best;
 }
 
 /** The `skeleton` (actionable) and `context` (non-actionable) halves of a projection. */
@@ -637,15 +975,26 @@ export interface SkeletonProjectionResult {
  * something a client will ever need to disambiguate for `tapOn`.
  */
 export function projectSkeleton(elements: ObserveElements): SkeletonProjectionResult {
-  const accumulators = accumulateByIdentity(elements);
+  const ime = detectImeWindow(elements);
+  const accumulators = accumulateByIdentity(elements, ime);
   const clickable = accumulators.filter((acc) => acc.affordances.has("tap"));
   // Hoist descendant text onto labelless/underlabelled clickable rows (issue
   // #5869) before the keep filter suppresses the now-folded text accumulators.
   hoistContainerLabels(accumulators, clickable);
+  // …then attribute an owning row's label to the state-carrying containers that
+  // hoisting deliberately never folds into (issue #6871).
+  attributeContainerLabels(accumulators);
 
   const kept = accumulators.filter((acc) => shouldKeep(acc, clickable));
   const actionable = kept.filter((acc) => acc.affordances.size > 0);
   const nonActionable = kept.filter((acc) => acc.affordances.size === 0);
+
+  // One row for the whole IME window, appended last: the keyboard is a mode, not
+  // a list of targets, so it must never come before the app's own affordances.
+  const imeRow = imeAccumulator(elements, ime);
+  if (imeRow) {
+    actionable.push(imeRow);
+  }
 
   // Disambiguate duplicate ids (issue #6221 item 2) against the FINAL emitted
   // actionable set, not the pre-filter accumulators — a duplicate suppressed by
@@ -654,21 +1003,12 @@ export function projectSkeleton(elements: ObserveElements): SkeletonProjectionRe
   assignDuplicateIndexes(actionable);
 
   return {
-    keyboard: getCapturedKeyboard(elements) ?? keyboardSummary(elements),
+    // Report only observed IME identity; missing capture evidence does not mean hidden.
+    keyboard:
+      getCapturedKeyboard(elements) ?? (ime ? { visible: true, package: ime.package } : undefined),
     skeleton: actionable.map(toSkeletonEntry),
     context: collapseSystemUiBlock(nonActionable).map(toSkeletonEntry),
   };
-}
-
-/** Report only observed IME identity; missing capture evidence does not mean hidden. */
-function keyboardSummary(elements: ObserveElements): ObserveResult["keyboard"] {
-  for (const element of [...elements.clickable, ...elements.scrollable, ...elements.text]) {
-    const packageName = getElementProvenance(element)?.keyboardPackage;
-    if (packageName) {
-      return { visible: true, package: packageName };
-    }
-  }
-  return undefined;
 }
 
 /**

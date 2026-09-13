@@ -630,6 +630,21 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
     sanitizedPayload ??= artifactNonObservationPayload(ctx, payload);
   }
 
+  // Hard ceiling (issue #6870). Spilling `observation` bounds only the
+  // observation: `observationDiff` rides at the TOP level beside it, and so does
+  // every other tool field, so a response could still be handed to the client
+  // far over the inline limit — which a one-shot `--cli` transport then cut
+  // mid-string into unparseable JSON. With a writer available, spill whatever
+  // residue is still oversized and keep only the headline fields inline, so the
+  // client always gets complete, parseable JSON plus a pointer to the rest.
+  const boundedCandidate = sanitizedPayload ?? payload;
+  if (ctx.artifactWriter && !ctx.internal && exceedsInlineLimit(boundedCandidate)) {
+    sanitizedPayload = {
+      ...pickInlineResidue(boundedCandidate),
+      ...writeJsonArtifact(ctx, "ToolResponse", boundedCandidate),
+    };
+  }
+
   if (!sanitizedPayload) {
     return response;
   }
@@ -656,8 +671,33 @@ function pickObserveWaitMetadata(payload: Record<string, unknown>): Record<strin
   );
 }
 
+/**
+ * The fields kept inline when an oversized residue is spilled wholesale (#6870).
+ *
+ * A client that gets only an artifact pointer still has to know whether the tool
+ * succeeded and, if not, why — reading the spilled file to learn that a tap
+ * failed would be a worse contract than the oversized payload it replaced.
+ */
+const INLINE_RESIDUE_KEYS = ["success", "error", ...OBSERVE_WAIT_METADATA_KEYS] as const;
+
+function pickInlineResidue(payload: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    INLINE_RESIDUE_KEYS.filter((key) => payload[key] !== undefined).map((key) => [
+      key,
+      payload[key],
+    ]),
+  );
+}
+
 function artifactMode(ctx: FinalizeToolResponseContext): ObservationArtifactMode {
   return ctx.artifactMode ?? "always";
+}
+
+/** Whether the serialized payload is over the inline ceiling. */
+function exceedsInlineLimit(payload: Record<string, unknown>): boolean {
+  return (
+    Buffer.byteLength(stringifyToolResponse(payload), "utf8") > DEFAULT_OBSERVATION_INLINE_MAX_BYTES
+  );
 }
 
 function shouldArtifactObservationPayload(
@@ -668,9 +708,9 @@ function shouldArtifactObservationPayload(
     return true;
   }
 
-  return (
-    Buffer.byteLength(stringifyToolResponse(payload), "utf8") > DEFAULT_OBSERVATION_INLINE_MAX_BYTES
-  );
+  // Measures the whole served payload — `observationDiff` and every other
+  // top-level field included — not just the observation subtree.
+  return exceedsInlineLimit(payload);
 }
 
 function writeObservationArtifact(

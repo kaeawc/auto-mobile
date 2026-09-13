@@ -2065,6 +2065,86 @@ describe("finalizeToolResponse", () => {
         expect((finalized.structuredContent as any).observation.viewHierarchy).toBeUndefined();
       });
     });
+
+    /**
+     * Issue #6870: spilling `observation` alone leaves everything else inline —
+     * `observationDiff` rides at the TOP level, beside it, and so does any bulky
+     * tool field. A response could therefore still exceed the inline ceiling
+     * after the #5882 spill fired, and over a one-shot `--cli` transport that
+     * oversized JSON reached the client cut mid-string. With a writer available
+     * the finalized payload must never exceed the ceiling.
+     */
+    describe("residual overflow after the observation spill (#6870)", () => {
+      const oversizedCtx = (writer: FakeObservationArtifactWriter) =>
+        ({ name: "tapOn", artifactMode: "oversized", artifactWriter: writer }) as any;
+
+      const payloadBytes = (finalized: any): number =>
+        Buffer.byteLength(stringifyToolResponse(finalized.structuredContent), "utf8");
+
+      // `observationDiff` sits at the top level of the served payload, outside
+      // `observation`, so the size gate must measure it — and whatever the spill
+      // leaves behind must still fit.
+      test("bounds a payload whose bulk sits beside the observation", () => {
+        const writer = new FakeObservationArtifactWriter();
+        const finalized = finalizeToolResponse(
+          createStructuredToolResponse({
+            success: true,
+            observation: makeObserveResult(),
+            diffLikeSidecar: { mode: "diff", pad: "y".repeat(70_000) },
+          }),
+          oversizedCtx(writer),
+        );
+
+        const structured = finalized.structuredContent as any;
+        expect(writer.writes.length).toBeGreaterThan(0);
+        expect(payloadBytes(finalized)).toBeLessThanOrEqual(DEFAULT_OBSERVATION_INLINE_MAX_BYTES);
+        expect(structured.diffLikeSidecar).toBeUndefined();
+      });
+
+      test("spills the residue and keeps the success/error headline inline", () => {
+        const writer = new FakeObservationArtifactWriter();
+        const finalized = finalizeToolResponse(
+          createStructuredToolResponse({
+            success: false,
+            error: "tap failed",
+            pad: "z".repeat(90_000),
+            observation: makeObserveResult(),
+          }),
+          oversizedCtx(writer),
+        );
+
+        const structured = finalized.structuredContent as any;
+        expect(payloadBytes(finalized)).toBeLessThanOrEqual(DEFAULT_OBSERVATION_INLINE_MAX_BYTES);
+        expect(structured.success).toBe(false);
+        expect(structured.error).toBe("tap failed");
+        expect(structured.pad).toBeUndefined();
+        expect(structured.artifact).toMatchObject({ format: "json", tool: "tapOn" });
+      });
+
+      test("a payload with no observation at all is still bounded", () => {
+        const writer = new FakeObservationArtifactWriter();
+        const finalized = finalizeToolResponse(
+          createStructuredToolResponse({ success: true, rows: "q".repeat(90_000) }),
+          oversizedCtx(writer),
+        );
+
+        const structured = finalized.structuredContent as any;
+        expect(payloadBytes(finalized)).toBeLessThanOrEqual(DEFAULT_OBSERVATION_INLINE_MAX_BYTES);
+        expect(structured.artifact).toMatchObject({ format: "json", tool: "tapOn" });
+        expect(structured.rows).toBeUndefined();
+      });
+
+      test("leaves an in-limit payload untouched", () => {
+        const writer = new FakeObservationArtifactWriter();
+        const finalized = finalizeToolResponse(
+          createStructuredToolResponse({ success: true, rows: "q".repeat(10) }),
+          oversizedCtx(writer),
+        );
+
+        expect(finalized.structuredContent).toEqual({ success: true, rows: "q".repeat(10) });
+        expect(writer.writes).toHaveLength(0);
+      });
+    });
   });
 
   describe("non-observation artifact mode (#3481)", () => {

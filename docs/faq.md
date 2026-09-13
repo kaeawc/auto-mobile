@@ -59,6 +59,25 @@ every later `--cli` call refreshes. Tune it with
 the session is released and the id is spent: acquire a new one with `getAndroid`
 or `getApple`.
 
+## A `--cli` result printed an `artifact` block instead of the data. Why?
+
+Because the result did not fit inline. The CLI counts the serialized bytes
+before writing and, past a 64 KiB ceiling, writes the complete JSON to a
+tool-output file and prints an envelope pointing at it:
+
+```json
+{
+  "truncated": false,
+  "bytes": 128044,
+  "artifact": { "path": "/…/tool-outputs/1789-tapOn-….json", "format": "json", "tool": "tapOn" },
+  "note": "… The complete JSON result is in artifact.path."
+}
+```
+
+Read `artifact.path` for the full payload. If the payload could not be written
+anywhere, the CLI prints `"truncated": true` with a reason instead. Either way
+the output is always complete, parseable JSON — it is never cut mid-value.
+
 ## My MCP client cannot see AutoMobile. What should I do?
 
 Run the installer again and select the intended client and configuration scope,

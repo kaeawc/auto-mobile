@@ -17,6 +17,12 @@ import {
   DEVICE_SESSION_ACQUISITION_TOOLS,
   isDeviceSessionAcquisitionTool,
 } from "../server/deviceSessionResult";
+import { AUTOMATIC_TOOL_OUTPUT_RETENTION } from "../server/toolRegistry";
+import { JsonToolOutputArtifactWriter } from "../server/toolOutputArtifactWriter";
+import type { ObservationArtifactWriter } from "../server/finalizeToolResponse";
+import { getDefaultToolOutputsDir } from "../utils/toolOutputArtifacts";
+import { serverConfig } from "../utils/ServerConfig";
+import { cliStderr, cliStdout, renderCliToolOutput, type CliByteSink } from "./toolOutput";
 
 // Import all tool registration functions
 import { registerObserveTools } from "../server/observeTools";
@@ -602,8 +608,57 @@ export function isCliToolFailure(result: any): boolean {
   return result?.isError === true || cliToolResultPayload(result)?.success === false;
 }
 
+/**
+ * Where the CLI's tool output goes. Injected so a test can capture it; the
+ * defaults are blocking writes to the process streams so `process.exit()` after
+ * a command cannot cut the JSON in half (issue #6870).
+ */
+let cliOutputSinks: { stdout: CliByteSink; stderr: CliByteSink } = {
+  stdout: cliStdout,
+  stderr: cliStderr,
+};
+
+export function setCliOutputSinksForTesting(sinks: {
+  stdout: CliByteSink;
+  stderr: CliByteSink;
+}): void {
+  cliOutputSinks = sinks;
+}
+
+export function resetCliOutputSinksForTesting(): void {
+  cliOutputSinks = { stdout: cliStdout, stderr: cliStderr };
+}
+
+/**
+ * The artifact writer an oversized CLI result spills to (issue #6870).
+ *
+ * Undefined when no writable tool-outputs directory can be resolved — the
+ * renderer then emits an explicit `truncated: true` notice instead, which is
+ * still complete, parseable JSON.
+ */
+function createCliArtifactWriter(): ObservationArtifactWriter | undefined {
+  try {
+    return new JsonToolOutputArtifactWriter({
+      outputDirectory: serverConfig.getToolOutputsDir() ?? getDefaultToolOutputsDir(),
+      retention: AUTOMATIC_TOOL_OUTPUT_RETENTION,
+    });
+  } catch (error) {
+    // Spilling is itself the fallback path; failing to build the writer only
+    // downgrades the output to the truncation notice, never the invocation.
+    logger.debug(`[cli] no tool-output artifact writer available: ${errorMessage(error)}`);
+    return undefined;
+  }
+}
+
 function handleToolResult(result: any, toolName: string): void {
-  console.log(JSON.stringify(result, null, 2));
+  // Count the bytes BEFORE writing: an oversized result is spilled to an
+  // artifact and replaced by its envelope rather than emitted and cut (#6870).
+  cliOutputSinks.stdout.write(
+    renderCliToolOutput(result, {
+      tool: toolName,
+      artifactWriter: createCliArtifactWriter(),
+    }) + "\n",
+  );
 
   // MCP tool errors use the top-level `isError` flag, while older daemon
   // responses encode their failure in the JSON payload.

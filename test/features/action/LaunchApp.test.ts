@@ -106,8 +106,13 @@ describe("LaunchApp", () => {
       controller.signal,
     );
 
+    // #6868: "make this app foreground" is a goal, not a transition. An app that
+    // is already there is the goal satisfied — a success carrying
+    // `alreadyForeground: true` plus the observation, never an error a client has
+    // to string-match to decide whether to continue.
     expect(result.success).toBe(true);
-    expect(result.error).toBe("App is already in foreground");
+    expect(result.alreadyForeground).toBe(true);
+    expect(result.error).toBeUndefined();
     expect(result.observation).toBeDefined();
     expect(fakeObserveScreen.getExecuteCallCount()).toBeGreaterThan(0);
     expect(
@@ -116,6 +121,49 @@ describe("LaunchApp", () => {
         .every((options) => options.signal === controller.signal),
     ).toBe(true);
     expect(fakeAwaitIdle.wasMethodCalled("initializeUiStabilityTracking")).toBe(true);
+  });
+
+  // The already-foreground branch reads the foreground app and THEN observes, so
+  // another app (or a system surface) can take over in between. Reconcile that
+  // observation through the same validation path a real launch uses instead of
+  // asserting `alreadyForeground: true` over a capture of a different app.
+  test("re-observes before claiming already-foreground when the first observation shows another app", async () => {
+    fakeTimer.enableAutoAdvance();
+    fakeAdb.setForegroundApp({ packageName, userId: 0 });
+    fakeAdb.setCommandResponse("shell dumpsys activity processes", {
+      stdout: "123:com.example.app/u0a123\n",
+      stderr: "",
+    });
+    fakeObserveScreen.setObserveResult((index) =>
+      createObserveResult(index === 0 ? "com.example.other" : packageName),
+    );
+
+    const result = await launchApp.execute(packageName, false, false);
+
+    expect(result.success).toBe(true);
+    expect(result.alreadyForeground).toBe(true);
+    expect(result.observation?.activeWindow?.appId).toBe(packageName);
+    expect(fakeObserveScreen.getExecuteCallCount()).toBeGreaterThan(1);
+  });
+
+  test("does not report already-foreground over an observation that never shows the app", async () => {
+    fakeTimer.enableAutoAdvance();
+    const otherPackageName = "com.example.other";
+    fakeAdb.setForegroundApp({ packageName, userId: 0 });
+    fakeAdb.setCommandResponse("shell dumpsys activity processes", {
+      stdout: "123:com.example.app/u0a123\n",
+      stderr: "",
+    });
+    fakeObserveScreen.setObserveResult(() => createObserveResult(otherPackageName));
+
+    const result = await launchApp.execute(packageName, false, false);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain(
+      `Timed out waiting for launch observation to show ${packageName}`,
+    );
+    expect(result.observation).toBeUndefined();
+    expect(result.observationOmitted?.reason).toBe("stale_launch_observation");
   });
 
   test("recognizes a running app whose process uses a numeric system UID", async () => {
@@ -143,7 +191,8 @@ describe("LaunchApp", () => {
     );
 
     expect(result.success).toBe(true);
-    expect(result.error).toBe("App is already in foreground");
+    expect(result.alreadyForeground).toBe(true);
+    expect(result.error).toBeUndefined();
     expect(fakeAdb.wasCommandExecuted("shell dumpsys activity processes")).toBe(true);
   });
 

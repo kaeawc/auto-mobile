@@ -35,16 +35,16 @@
 // mutex, not a SQLite lock, so `busy_timeout` never applies to it). Instead each
 // tier, and each eviction batch WITHIN `evictOldest`, runs in its own short
 // transaction, so the connection is released between them and other queries can
-// interleave. The protected build-key set is re-read INSIDE every one of those
-// short transactions rather than computed once and cached across chunks: since
-// the connection is released between chunks, a concurrent write can change which
-// build key is active mid-pass, and re-reading per chunk (mirroring how
-// `collectOldestEvictable` already re-queries its candidate set fresh every
-// batch) keeps each chunk's "read active set, then mutate" step atomic without
-// ever risking a stale protected set skipping or double-deleting a row. FK-safe
-// ordering across tiers still holds: the TTL/cap tiers' transactions commit
-// before the orphan-build-key sweep's transaction begins. File unlinks run AFTER
-// every commit as a side effect (never inside a txn).
+// interleave. Batched tiers keep one protected-build snapshot so they do not
+// repeat a whole-database grouped-MAX scan for every chunk, then revalidate the
+// apps represented by a selected batch inside its short transaction before
+// mutating. Global oldest-first eviction is the exception: it revalidates every
+// app before each delete, because a protection change in an app outside the
+// selected batch can expose an even older row. This preserves atomic active-data
+// safety without making large multi-app databases quadratic. FK-safe ordering
+// across tiers still holds: the TTL/cap tiers' transactions commit before the
+// orphan-build-key sweep's transaction begins. File unlinks run AFTER every
+// commit as a side effect (never inside a txn).
 //
 // SQLite scale safety: every statement in this module keeps its bound-parameter
 // count and expression-tree depth bounded regardless of DB size. Row-count id
@@ -66,6 +66,9 @@ import { logger as defaultLogger, type Logger } from "../utils/logger";
 export type RetentionBatchYield = () => Promise<void>;
 
 const yieldToIo: RetentionBatchYield = () => new Promise((resolve) => setImmediate(resolve));
+
+/** Injectable protected-set query used to make concurrency and query scope observable in tests. */
+export type ProtectedBuildKeyResolver = typeof computeProtectedBuildKeyIds;
 
 /** Tunable retention thresholds. All durations are milliseconds. */
 export interface NavigationRetentionConfig {
@@ -258,6 +261,7 @@ export class NavigationRetention {
     private readonly removeScreenshotFile?: ScreenshotFileRemover,
     private readonly logger: Logger = defaultLogger,
     private readonly yieldBetweenBatches: RetentionBatchYield = yieldToIo,
+    private readonly resolveProtectedBuildKeyIds: ProtectedBuildKeyResolver = computeProtectedBuildKeyIds,
   ) {
     this.config = resolveNavigationRetentionConfig(config);
   }
@@ -310,8 +314,8 @@ export class NavigationRetention {
    * stale set is cleared in chunks of `evictionChunkSize` — each UPDATE binds at
    * most that many ids. Clearing the pointer removes rows from the next batch's
    * predicate, so the loop terminates. Each batch is its own short transaction
-   * (#6650): the protected set is re-read fresh inside it, so a build key that
-   * becomes active between batches is honored by every batch after that point.
+   * (#6650): the selected batch's apps are revalidated inside it, so a build key
+   * that becomes active between batches is honored by every later mutation.
    * Each batch's files are unlinked right after that batch commits (outside the
    * txn) — pairing the clear-commit with its unlink so a failure in this loop or
    * a later tier can never strand a file whose DB pointer is already gone.
@@ -322,7 +326,7 @@ export class NavigationRetention {
     // A full protected-build scan is expensive on an accumulated database. Keep a
     // snapshot for ordinary batches, then revalidate only each selected batch's
     // apps under its transaction before clearing pointers.
-    let protectedIds = await computeProtectedBuildKeyIds(this.db);
+    let protectedIds = await this.resolveProtectedBuildKeyIds(this.db);
 
     for (;;) {
       const batchResult = await this.db.transaction().execute(async (trx) => {
@@ -349,7 +353,11 @@ export class NavigationRetention {
         }
 
         const batchAppIds = Array.from(new Set(batch.map((row) => row.app_id)));
-        const currentProtectedIds = await computeProtectedBuildKeyIds(trx, undefined, batchAppIds);
+        const currentProtectedIds = await this.resolveProtectedBuildKeyIds(
+          trx,
+          undefined,
+          batchAppIds,
+        );
         const protectedNodeRows = await loadProtectedNodeRows(
           trx,
           batch.map((row) => row.id),
@@ -398,13 +406,14 @@ export class NavigationRetention {
       await this.removeFiles(batchResult.clearedPaths);
 
       if (batchResult.activeBuildChanged) {
-        protectedIds = await computeProtectedBuildKeyIds(this.db);
+        protectedIds = await this.resolveProtectedBuildKeyIds(this.db);
       }
 
       // A changed active build can make every row in the selected snapshot
       // ineligible while exposing rows hidden by the prior snapshot. Re-select
       // once against the refreshed protection set before deciding the tier is done.
       if (batchResult.clearedCount === 0 && batchResult.activeBuildChanged) {
+        await this.yieldBetweenBatches();
         continue;
       }
       if (!batchResult.isFullBatch || batchResult.clearedCount === 0) {
@@ -418,7 +427,9 @@ export class NavigationRetention {
    * LONG tier: delete observation rows last seen before the cutoff, except those
    * on a protected (active) build key. Each bounded delete batch runs in its
    * own transaction, so an overdue retention pass cannot monopolize the single
-   * daemon connection in one predicate-wide SQLite delete.
+   * daemon connection in one predicate-wide SQLite delete. Each table takes one
+   * full protected-set snapshot, then transactionally revalidates only the apps
+   * represented by its selected rows before deleting them.
    */
   private async pruneObservationsByTtl(
     now: number,
@@ -432,32 +443,65 @@ export class NavigationRetention {
 
   private async pruneNodeObservationsByTtl(cutoff: number): Promise<number> {
     let deletedTotal = 0;
+    let protectedIds = await this.resolveProtectedBuildKeyIds(this.db);
     for (;;) {
-      const deleted = await this.db.transaction().execute(async (trx) => {
-        const protectedIds = await computeProtectedBuildKeyIds(trx);
+      const batchResult = await this.db.transaction().execute(async (trx) => {
         let query = trx
-          .selectFrom("navigation_node_observations")
-          .select("id")
-          .where("last_seen_at", "<", cutoff);
+          .selectFrom("navigation_node_observations as observation")
+          .innerJoin("navigation_build_keys as buildKey", "buildKey.id", "observation.build_key_id")
+          .select(["observation.id", "observation.build_key_id", "buildKey.app_id"])
+          .where("observation.last_seen_at", "<", cutoff);
         if (protectedIds.length > 0) {
-          query = query.where("build_key_id", "not in", protectedIds);
+          query = query.where("observation.build_key_id", "not in", protectedIds);
         }
         const rows = await query.limit(this.config.evictionChunkSize).execute();
         if (rows.length === 0) {
-          return 0;
+          return null;
+        }
+
+        const batchAppIds = Array.from(new Set(rows.map((row) => row.app_id)));
+        const currentProtectedIds = await this.resolveProtectedBuildKeyIds(
+          trx,
+          undefined,
+          batchAppIds,
+        );
+        const currentProtected = new Set(currentProtectedIds);
+        const eligibleIds = rows
+          .filter((row) => !currentProtected.has(row.build_key_id))
+          .map((row) => row.id);
+        const protectionChanged = currentProtectedIds.some((id) => !protectedIds.includes(id));
+        if (eligibleIds.length === 0) {
+          return {
+            deletedCount: 0,
+            isFullBatch: rows.length === this.config.evictionChunkSize,
+            protectionChanged,
+          };
         }
         const result = await trx
           .deleteFrom("navigation_node_observations")
-          .where(
-            "id",
-            "in",
-            rows.map((row) => row.id),
-          )
+          .where("id", "in", eligibleIds)
           .executeTakeFirst();
-        return Number(result.numDeletedRows ?? 0);
+        return {
+          deletedCount: Number(result.numDeletedRows ?? 0),
+          isFullBatch: rows.length === this.config.evictionChunkSize,
+          protectionChanged,
+        };
       });
-      deletedTotal += deleted;
-      if (deleted < this.config.evictionChunkSize) {
+      if (batchResult === null) {
+        return deletedTotal;
+      }
+      deletedTotal += batchResult.deletedCount;
+      if (batchResult.protectionChanged) {
+        protectedIds = await this.resolveProtectedBuildKeyIds(this.db);
+        if (batchResult.deletedCount === 0) {
+          await this.yieldBetweenBatches();
+          continue;
+        }
+      }
+      if (
+        (!batchResult.isFullBatch && !batchResult.protectionChanged) ||
+        batchResult.deletedCount === 0
+      ) {
         return deletedTotal;
       }
       await this.yieldBetweenBatches();
@@ -466,32 +510,65 @@ export class NavigationRetention {
 
   private async pruneEdgeObservationsByTtl(cutoff: number): Promise<number> {
     let deletedTotal = 0;
+    let protectedIds = await this.resolveProtectedBuildKeyIds(this.db);
     for (;;) {
-      const deleted = await this.db.transaction().execute(async (trx) => {
-        const protectedIds = await computeProtectedBuildKeyIds(trx);
+      const batchResult = await this.db.transaction().execute(async (trx) => {
         let query = trx
-          .selectFrom("navigation_edge_observations")
-          .select("id")
-          .where("last_seen_at", "<", cutoff);
+          .selectFrom("navigation_edge_observations as observation")
+          .innerJoin("navigation_build_keys as buildKey", "buildKey.id", "observation.build_key_id")
+          .select(["observation.id", "observation.build_key_id", "buildKey.app_id"])
+          .where("observation.last_seen_at", "<", cutoff);
         if (protectedIds.length > 0) {
-          query = query.where("build_key_id", "not in", protectedIds);
+          query = query.where("observation.build_key_id", "not in", protectedIds);
         }
         const rows = await query.limit(this.config.evictionChunkSize).execute();
         if (rows.length === 0) {
-          return 0;
+          return null;
+        }
+
+        const batchAppIds = Array.from(new Set(rows.map((row) => row.app_id)));
+        const currentProtectedIds = await this.resolveProtectedBuildKeyIds(
+          trx,
+          undefined,
+          batchAppIds,
+        );
+        const currentProtected = new Set(currentProtectedIds);
+        const eligibleIds = rows
+          .filter((row) => !currentProtected.has(row.build_key_id))
+          .map((row) => row.id);
+        const protectionChanged = currentProtectedIds.some((id) => !protectedIds.includes(id));
+        if (eligibleIds.length === 0) {
+          return {
+            deletedCount: 0,
+            isFullBatch: rows.length === this.config.evictionChunkSize,
+            protectionChanged,
+          };
         }
         const result = await trx
           .deleteFrom("navigation_edge_observations")
-          .where(
-            "id",
-            "in",
-            rows.map((row) => row.id),
-          )
+          .where("id", "in", eligibleIds)
           .executeTakeFirst();
-        return Number(result.numDeletedRows ?? 0);
+        return {
+          deletedCount: Number(result.numDeletedRows ?? 0),
+          isFullBatch: rows.length === this.config.evictionChunkSize,
+          protectionChanged,
+        };
       });
-      deletedTotal += deleted;
-      if (deleted < this.config.evictionChunkSize) {
+      if (batchResult === null) {
+        return deletedTotal;
+      }
+      deletedTotal += batchResult.deletedCount;
+      if (batchResult.protectionChanged) {
+        protectedIds = await this.resolveProtectedBuildKeyIds(this.db);
+        if (batchResult.deletedCount === 0) {
+          await this.yieldBetweenBatches();
+          continue;
+        }
+      }
+      if (
+        (!batchResult.isFullBatch && !batchResult.protectionChanged) ||
+        batchResult.deletedCount === 0
+      ) {
         return deletedTotal;
       }
       await this.yieldBetweenBatches();
@@ -523,10 +600,10 @@ export class NavigationRetention {
       const overflow = count - this.config.perAppMaxObservations;
       if (overflow > 0) {
         await this.evictOldest(appId, overflow, summary);
-        // A one-batch pass never reaches evictOldest's internal yield. Give
-        // arrivals a turn before starting the next app's synchronous SQLite work.
-        await this.yieldBetweenBatches();
       }
+      // Counting an under-cap app and a one-batch eviction are both entirely
+      // synchronous SQLite work. Give arrivals a turn before scanning the next app.
+      await this.yieldBetweenBatches();
     }
 
     const globalCount = await countObservations(this.db, null);
@@ -544,12 +621,10 @@ export class NavigationRetention {
    * be irreducible below its active set).
    *
    * Each batch is its own short transaction (#6650), releasing the connection
-   * between batches. The protected build-key set is re-read fresh inside every
-   * batch's transaction (never cached from a prior batch), so it always reflects
-   * whichever build key is active AT THE TIME of that batch's delete — the same
-   * self-correcting principle `collectOldestEvictable` already applies to the
-   * victim rows themselves, extended to the protected set they are excluded
-   * against.
+   * between batches. A per-app pass snapshots and revalidates only that app. A
+   * global pass snapshots and revalidates the full protected set before every
+   * delete so a newly exposed older row in any app forces re-selection. Empty
+   * selections are also revalidated before the loop decides it is irreducible.
    *
    * Perf note: each batch reads the oldest rows `ORDER BY last_seen_at, id`
    * across build keys. The `(last_seen_at, id)` index from
@@ -563,26 +638,35 @@ export class NavigationRetention {
     summary: NavigationRetentionSummary,
   ): Promise<void> {
     let remaining = count;
-    // Reuse a whole-database protected-build snapshot for this eviction pass.
-    // Every selected batch revalidates only its own candidate apps before delete.
-    let protectedIds = await computeProtectedBuildKeyIds(this.db);
+    // Per-app enforcement never needs another app's grouped-MAX scan. Global
+    // oldest-first enforcement must snapshot and revalidate every app.
+    const protectedScope = appId === null ? undefined : [appId];
+    let protectedIds = await this.resolveProtectedBuildKeyIds(this.db, undefined, protectedScope);
     while (remaining > 0) {
       const batch = Math.min(remaining, this.config.evictionChunkSize);
       const batchResult = await this.db.transaction().execute(async (trx) => {
         const victims = await collectOldestEvictable(trx, appId, protectedIds, batch);
         if (victims.length === 0) {
-          return { evictedCount: 0, protectionChanged: false };
+          const currentProtectedIds = await this.resolveProtectedBuildKeyIds(
+            trx,
+            undefined,
+            protectedScope,
+          );
+          return {
+            evictedCount: 0,
+            protectionChanged: !containSameIds(currentProtectedIds, protectedIds),
+          };
         }
 
-        const candidateBuildKeys = await loadBuildKeysByIds(
-          trx,
-          victims.map((victim) => victim.buildKeyId),
-        );
-        const currentProtectedIds = await computeProtectedBuildKeyIds(
+        const currentProtectedIds = await this.resolveProtectedBuildKeyIds(
           trx,
           undefined,
-          Array.from(new Set(candidateBuildKeys.map((key) => key.appId))),
+          protectedScope,
         );
+        if (!containSameIds(currentProtectedIds, protectedIds)) {
+          return { evictedCount: 0, protectionChanged: true };
+        }
+
         const maxSeen = await loadMaxSeenByBuildKeyIds(
           trx,
           victims.map((victim) => victim.buildKeyId),
@@ -594,10 +678,7 @@ export class NavigationRetention {
             victim.lastSeenAt < (maxSeen.get(victim.buildKeyId) ?? Number.NEGATIVE_INFINITY),
         );
         if (eligibleVictims.length === 0) {
-          return {
-            evictedCount: 0,
-            protectionChanged: currentProtectedIds.some((id) => !protectedIds.includes(id)),
-          };
+          return { evictedCount: 0, protectionChanged: false };
         }
 
         const nodeIds = eligibleVictims.filter((v) => v.isNode).map((v) => v.id);
@@ -621,7 +702,8 @@ export class NavigationRetention {
 
       if (batchResult.evictedCount === 0) {
         if (batchResult.protectionChanged) {
-          protectedIds = await computeProtectedBuildKeyIds(this.db);
+          protectedIds = await this.resolveProtectedBuildKeyIds(this.db, undefined, protectedScope);
+          await this.yieldBetweenBatches();
           continue;
         }
         return;
@@ -646,7 +728,7 @@ export class NavigationRetention {
     const chunk = this.config.evictionChunkSize;
     for (;;) {
       const deleted = await this.db.transaction().execute(async (trx) => {
-        const protectedIds = await computeProtectedBuildKeyIds(trx);
+        const protectedIds = await this.resolveProtectedBuildKeyIds(trx);
 
         let query = trx
           .selectFrom("navigation_build_keys")
@@ -701,21 +783,6 @@ async function loadBuildKeys(
   return rows.map((row) => ({ id: row.id, appId: row.app_id }));
 }
 
-async function loadBuildKeysByIds(
-  db: Kysely<Database>,
-  ids: readonly number[],
-): Promise<BuildKeyRow[]> {
-  if (ids.length === 0) {
-    return [];
-  }
-  const rows = await db
-    .selectFrom("navigation_build_keys")
-    .select(["id", "app_id"])
-    .where("id", "in", Array.from(new Set(ids)))
-    .execute();
-  return rows.map((row) => ({ id: row.id, appId: row.app_id }));
-}
-
 /**
  * The active/most-recent build key per app: the one whose observations have the
  * greatest `last_seen_at` (ties and no-observation apps fall back to the newest
@@ -753,6 +820,14 @@ function isNewerBuild(
     return true;
   }
   return seen > current.seen || (seen === current.seen && id > current.id);
+}
+
+function containSameIds(left: readonly number[], right: readonly number[]): boolean {
+  if (left.length !== right.length) {
+    return false;
+  }
+  const rightIds = new Set(right);
+  return left.every((id) => rightIds.has(id));
 }
 
 /** Greatest `last_seen_at` per build key across both observation tables. */

@@ -153,6 +153,7 @@ describe("NavigationRetention prune", () => {
   function retention(
     config = CONFIG,
     yieldBetweenBatches?: () => Promise<void>,
+    protectedBuildKeyResolver?: typeof computeProtectedBuildKeyIds,
   ): NavigationRetention {
     return new NavigationRetention(
       db,
@@ -162,6 +163,7 @@ describe("NavigationRetention prune", () => {
       },
       undefined,
       yieldBetweenBatches,
+      protectedBuildKeyResolver,
     );
   }
 
@@ -348,7 +350,46 @@ describe("NavigationRetention prune", () => {
     expect(Number(edgeCount?.c)).toBe(1);
   });
 
-  test("chunks overdue TTL cleanup and yields between committed batches", async () => {
+  test("revalidates each TTL batch only for apps represented in that batch", async () => {
+    const nodeId = await seedNode("Home", 100);
+    const edge = await repo.createEdge(APP, "Home", "Detail", "tapOn", null, 100);
+    const oldBuild = await buildKey(APP, 1);
+    const activeBuild = await buildKey(APP, 2);
+    for (let index = 0; index < 5; index += 1) {
+      await nodeObs(nodeId, oldBuild, `old-node-${index}`, 100 + index);
+      await repo.recordEdgeObservation(
+        edge.id,
+        oldBuild,
+        "device-1",
+        `old-edge-${index}`,
+        100 + index,
+      );
+    }
+    await nodeObs(nodeId, activeBuild, "active", 100_000);
+
+    await repo.getOrCreateApp(APP2);
+    const otherNode = await repo.getOrCreateNode(APP2, "Other", 100);
+    const otherBuild = await buildKey(APP2, 1);
+    await repo.recordNodeObservation(otherNode.id, otherBuild, "device-2", "other", 100_000);
+
+    const protectedScopes: (readonly string[] | undefined)[] = [];
+    const summary = await retention(
+      { ...CONFIG, evictionChunkSize: 2 },
+      undefined,
+      async (database, buildKeys, scopedAppIds) => {
+        protectedScopes.push(scopedAppIds);
+        return computeProtectedBuildKeyIds(database, buildKeys, scopedAppIds);
+      },
+    ).prune(50_000);
+
+    expect(summary.nodeObservationsDeleted).toBe(5);
+    expect(summary.edgeObservationsDeleted).toBe(5);
+    const ttlBatchScopes = protectedScopes.filter((scope) => scope !== undefined);
+    expect(ttlBatchScopes).toHaveLength(6);
+    expect(ttlBatchScopes.every((scope) => scope?.length === 1 && scope[0] === APP)).toBe(true);
+  });
+
+  test("serves a read scheduled after one TTL batch before starting the next transaction", async () => {
     const nodeId = await seedNode("Home", 100);
     const bkOld = await buildKey(APP, 1);
     const bkNew = await buildKey(APP, 2);
@@ -357,17 +398,37 @@ describe("NavigationRetention prune", () => {
     }
     await nodeObs(nodeId, bkNew, "active", 100_000);
 
+    const originalTransaction = db.transaction.bind(db);
+    let transactionStarts = 0;
+    const transactionSpy = spyOn(db, "transaction").mockImplementation(() => {
+      transactionStarts += 1;
+      return originalTransaction();
+    });
     let yields = 0;
     let readAfterFirstYield: Promise<unknown> | undefined;
+    let transactionCountWhenReadScheduled: number | undefined;
+    let transactionCountWhenReadServed: number | undefined;
     const summary = await retention({ ...CONFIG, evictionChunkSize: 2 }, async () => {
       yields += 1;
-      readAfterFirstYield ??= db.selectFrom("navigation_build_keys").selectAll().execute();
+      if (!readAfterFirstYield) {
+        transactionCountWhenReadScheduled = transactionStarts;
+        readAfterFirstYield = db
+          .selectFrom("navigation_build_keys")
+          .selectAll()
+          .execute()
+          .then((rows) => {
+            transactionCountWhenReadServed = transactionStarts;
+            return rows;
+          });
+      }
       await readAfterFirstYield;
     }).prune(50_000);
 
     expect(summary.nodeObservationsDeleted).toBe(5);
     expect(yields).toBeGreaterThan(0);
     await expect(readAfterFirstYield).resolves.toHaveLength(2);
+    expect(transactionCountWhenReadServed).toBe(transactionCountWhenReadScheduled);
+    transactionSpy.mockRestore();
   });
 
   test("yields between one-batch per-app cap passes", async () => {
@@ -390,6 +451,32 @@ describe("NavigationRetention prune", () => {
 
     expect(summary.nodeObservationsDeleted).toBe(2);
     expect(yields).toBeGreaterThanOrEqual(2);
+  });
+
+  test("yields once per app while scanning apps that are already under cap", async () => {
+    const appIds = ["com.example.one", "com.example.two", "com.example.three"];
+    for (const appId of appIds) {
+      await repo.getOrCreateApp(appId);
+      const node = await repo.getOrCreateNode(appId, "Home", 1);
+      const build = await repo.getOrCreateBuildKey(appId, 1, `hash-${appId}`);
+      await repo.recordNodeObservation(node.id, build.id, "device-1", appId, 10_000);
+    }
+
+    let yields = 0;
+    const summary = await retention(
+      {
+        ...CONFIG,
+        structureTtlMs: 10_000_000,
+        perAppMaxObservations: 2,
+        globalMaxObservations: 10,
+      },
+      async () => {
+        yields += 1;
+      },
+    ).prune(1_000_000);
+
+    expect(summary.nodeObservationsDeleted).toBe(0);
+    expect(yields).toBe(appIds.length);
   });
 
   // ---- LRU size cap (backstop) ----
@@ -420,6 +507,124 @@ describe("NavigationRetention prune", () => {
       .execute();
     const sessions = remaining.map((r) => r.session_uuid).sort();
     expect(sessions).toEqual(["active", "s4"]); // oldest s0..s3 gone; newest kept
+  });
+
+  test("scopes both protected-set reads for each per-app eviction pass", async () => {
+    const appIds = ["com.example.one", "com.example.two", "com.example.three"];
+    for (const appId of appIds) {
+      await repo.getOrCreateApp(appId);
+      const node = await repo.getOrCreateNode(appId, "Home", 1);
+      const build = await repo.getOrCreateBuildKey(appId, 1, `hash-${appId}`);
+      for (let index = 0; index < 3; index += 1) {
+        await repo.recordNodeObservation(node.id, build.id, "device-1", `${appId}-${index}`, index);
+      }
+    }
+
+    const protectedScopes: (readonly string[] | undefined)[] = [];
+    const summary = await retention(
+      {
+        ...CONFIG,
+        structureTtlMs: 10_000_000,
+        perAppMaxObservations: 2,
+        globalMaxObservations: 100,
+      },
+      undefined,
+      async (database, buildKeys, scopedAppIds) => {
+        protectedScopes.push(scopedAppIds);
+        return computeProtectedBuildKeyIds(database, buildKeys, scopedAppIds);
+      },
+    ).prune(1_000_000);
+
+    expect(summary.nodeObservationsDeleted).toBe(appIds.length);
+    for (const appId of appIds) {
+      expect(protectedScopes.filter((scope) => scope?.[0] === appId)).toHaveLength(2);
+    }
+  });
+
+  test("retries an empty eviction selection when the scoped protected set changed", async () => {
+    const nodeId = await seedNode("Home", 1);
+    const oldBuild = await buildKey(APP, 1);
+    const replacementBuild = await buildKey(APP, 2);
+    await nodeObs(nodeId, oldBuild, "old-a", 100);
+    await nodeObs(nodeId, oldBuild, "old-b", 100);
+
+    // Model the protected-set snapshot changing after the initial read without
+    // real timers: both tied rows are hidden by the stale snapshot, so selection
+    // is empty and only an explicit revalidation can expose them for a retry.
+    let scopedReads = 0;
+    const summary = await retention(
+      {
+        ...CONFIG,
+        structureTtlMs: 10_000_000,
+        perAppMaxObservations: 1,
+        globalMaxObservations: 100,
+      },
+      undefined,
+      async (database, buildKeys, scopedAppIds) => {
+        if (scopedAppIds?.length === 1 && scopedAppIds[0] === APP) {
+          scopedReads += 1;
+          return scopedReads === 1 ? [oldBuild] : [replacementBuild];
+        }
+        return computeProtectedBuildKeyIds(database, buildKeys, scopedAppIds);
+      },
+    ).prune(1_000_000);
+
+    expect(scopedReads).toBeGreaterThan(1);
+    expect(summary.nodeObservationsDeleted).toBe(1);
+    expect(await countNodeObs()).toBe(1);
+  });
+
+  test("refreshes all apps before committing a global oldest-first batch", async () => {
+    const appANode = await seedNode("A", 1);
+    const appAOldBuild = await buildKey(APP, 1);
+    const appANewBuild = await buildKey(APP, 2);
+    await nodeObs(appANode, appAOldBuild, "a-old", 100);
+
+    await repo.getOrCreateApp(APP2);
+    const appBNode = await repo.getOrCreateNode(APP2, "B", 1);
+    const appBOldBuild = await buildKey(APP2, 1);
+    const appBActiveBuild = await buildKey(APP2, 2);
+    await repo.recordNodeObservation(appBNode.id, appBOldBuild, "device-2", "b-old", 200);
+    await repo.recordNodeObservation(appBNode.id, appBActiveBuild, "device-2", "b-active", 900);
+
+    let fullProtectedReads = 0;
+    let shiftedAppA = false;
+    const summary = await retention(
+      {
+        ...CONFIG,
+        structureTtlMs: 10_000_000,
+        perAppMaxObservations: 100,
+        globalMaxObservations: 2,
+        evictionChunkSize: 1,
+      },
+      undefined,
+      async (database, buildKeys, scopedAppIds) => {
+        const protectedIds = await computeProtectedBuildKeyIds(database, buildKeys, scopedAppIds);
+        if (scopedAppIds === undefined) {
+          fullProtectedReads += 1;
+          // With empty screenshot/TTL tiers, the fourth full read is the global
+          // eviction snapshot. Land the new app-A observation after that query
+          // has returned its stale result but before its first batch transaction.
+          if (fullProtectedReads === 4) {
+            await nodeObs(appANode, appANewBuild, "a-active", 1_000);
+            shiftedAppA = true;
+          }
+        }
+        return protectedIds;
+      },
+    ).prune(1_000_000);
+
+    expect(shiftedAppA).toBe(true);
+    expect(summary.nodeObservationsDeleted).toBe(1);
+    const survivors = await db
+      .selectFrom("navigation_node_observations")
+      .select("session_uuid")
+      .execute();
+    expect(survivors.map((row) => row.session_uuid).sort()).toEqual([
+      "a-active",
+      "b-active",
+      "b-old",
+    ]);
   });
 
   test("cap bounds a continuously-used SINGLE-build app, keeping the most recent", async () => {

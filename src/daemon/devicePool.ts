@@ -206,6 +206,27 @@ export interface PooledDevice {
    * pooled identity is withheld until a resolved name settles it — see
    * {@link DevicePool.reconcilePooledIdentityResolution}.
    *
+   * The transitions, all of them:
+   *
+   * - **enter** — any discovery (a refresh sweep, or the liveness check an
+   *   assignment runs itself) observes the placeholder on a live entry. Entering
+   *   also CANCELS AND DRAINS the bound session's in-flight executions through
+   *   the injected `cancelDeviceSessionExecutions` seam
+   *   ({@link DevicePool.enterPooledIdentityQuarantine}): the admission gate only
+   *   refuses LATER calls, while an execution already registered keeps issuing
+   *   serial-addressed operations. The session and the `incarnation` survive;
+   *   only the work in flight is stopped.
+   * - **enter** — a resolved name DISAGREES but the replacement could not be
+   *   installed, because `evictMissingPooledDevice` defers eviction while
+   *   killDevice holds a shutdown reservation
+   *   ({@link DevicePool.quarantineDeferredPooledReplacement}).
+   * - **leave, restored** — a resolved name MATCHES. Same entry, same session,
+   *   same `incarnation`.
+   * - **leave, replaced** — a resolved name DISAGREES and the replacement
+   *   installs: a fresh incarnation, the old session retired, exactly as an
+   *   observed disappearance. A disagreement NEVER lifts the quarantine on the
+   *   old entry by itself.
+   *
    * The five consumers that read this state:
    *
    * 1. **Assignment** — the shared gate
@@ -221,6 +242,11 @@ export interface PooledDevice {
    *    AVD label.
    * 4. **Destructive confirmation** — `deviceTools.getValidatedPooledAndroidAvdName`
    *    returns undefined, so no kill/delete path can act on the cached label.
+   *    The kill does not merely drop the label: a quarantined entry produces a
+   *    `quarantined` capture whose runtime confirmation is MANDATORY (the
+   *    emulator console must name itself; an unanswered probe or a differing
+   *    name refuses), because dropping the label also dropped the confirmation
+   *    it exists to trigger.
    * 5. **Stream routing** — the daemon's `DeviceSessionResolver` withholds the
    *    serial↔uuid mapping in both directions and every push server drops that
    *    serial's frames, so a possible replacement's passive events cannot reach
@@ -5902,10 +5928,7 @@ export class DevicePool {
    * naming the serial ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863)
    * review).
    */
-  private async enterPooledIdentityQuarantine(
-    pooled: PooledDevice,
-    reason: string,
-  ): Promise<void> {
+  private async enterPooledIdentityQuarantine(pooled: PooledDevice, reason: string): Promise<void> {
     if (pooled.identityUnresolved === true) {
       return;
     }

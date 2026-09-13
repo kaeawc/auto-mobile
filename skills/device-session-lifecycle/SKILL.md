@@ -84,7 +84,19 @@ is kept — same session, same `incarnation` — but:
 - **destructive confirmation** — `deviceTools.getValidatedPooledAndroidAvdName`
   returns undefined, so no destructive path can act on the cached label —
   including the stopped-image inventory path in `deleteDevice`, which previously
-  bypassed the unresolved-runtime guard on the strength of that label;
+  bypassed the unresolved-runtime guard on the strength of that label. Dropping
+  the label is not enough for a KILL, because it also drops the confirmation the
+  label exists to trigger: a quarantined entry produces its own `quarantined`
+  capture kind whose runtime confirmation is MANDATORY (an unanswered console or
+  a differing name refuses), and `AndroidEmulatorClient.killDevice` refuses when
+  both the requested and the discovered name are the placeholder — two unknowns
+  are not an equality;
+- **in-flight work** — entering the quarantine cancels and drains the bound
+  session's already-registered executions through the injected
+  `cancelDeviceSessionExecutions` seam (the one the ADB-reset quarantine uses).
+  The admission gate only refuses LATER calls; an execution already in flight
+  keeps issuing serial-addressed operations. The session and the `incarnation`
+  survive — only the work is stopped;
 - **stream routing** — the daemon builds its `DeviceSessionResolver` over the
   pool quarantine, so a quarantined serial has NO routing identity in either
   direction (serial→uuid and uuid→serial), and each push server
@@ -99,6 +111,22 @@ Leaving the quarantine is decided by the next discovery that READS a name: the
 pooled label (or the AVD this pool started) restores the entry unchanged, and a
 different name is a replacement — a fresh incarnation, the old session retired,
 exactly as an observed disappearance. Handsets never enter the state.
+
+**A disagreement only leaves the quarantine through the replacement actually
+installing.** `replacePooledDeviceForRuntimeIdentity` installs it by evicting the
+old incarnation, and `evictMissingPooledDevice` DEFERS eviction while killDevice
+holds a shutdown reservation — so the refresh reloads the very entry the
+discovered runtime disagrees with. Reconciling there would read the disagreeing
+name as proof of continuity; instead that entry is quarantined (and its metadata
+left alone) until the replacement installs. The rule in one line: the quarantine
+lifts on an identity MATCH, never on a differing name.
+
+**The teardown's own discovery is authoritative over the pool's label.** On the
+FIRST discovery after a different AVD takes a pooled serial, the pool has not
+quarantined anything yet and still holds the previous occupant's label.
+`deleteDevice`'s unresolved-runtime guard therefore reads its OWN observation,
+not `getValidatedPooledAndroidAvdName`: a booted emulator this discovery cannot
+name refuses the stopped-image inventory path outright.
 
 **Documented blind spot**: a same-serial restart faster than one discovery
 interval never reaches the pool, so it reads as continuity. Every host-side

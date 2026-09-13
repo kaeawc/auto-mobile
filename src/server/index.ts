@@ -96,6 +96,12 @@ function resolveRequestedEnableTools(toolName: string, parsedParams: unknown): s
 }
 
 /**
+ * The response field that states a lost `enableTools` declaration — empty when
+ * the declaration landed, so it can always be spread into an enrichment.
+ */
+type CapabilityDeclarationFailure = { enableToolsError?: string };
+
+/**
  * Grant the declared capabilities against the session an acquisition handler
  * MINTED (only its result carries that UUID), and refresh discovery.
  *
@@ -128,12 +134,6 @@ async function applyAcquisitionToolSelection(
     return { enableToolsError };
   }
 }
-
-/**
- * The response field that states a lost `enableTools` declaration — empty when
- * the declaration landed, so it can always be spread into an enrichment.
- */
-type CapabilityDeclarationFailure = { enableToolsError?: string };
 
 /**
  * Report a lost capability declaration on its own, for the path where the

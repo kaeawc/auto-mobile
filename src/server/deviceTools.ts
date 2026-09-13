@@ -2190,7 +2190,13 @@ async function killProcessAndRetireOwnership(
   strictDeadline = false,
   timeoutMs = DEVICE_SHUTDOWN_TIMEOUT_MS,
   killTarget: BootedDevice,
-  force = false,
+  /**
+   * Required rather than defaulted: this is the one function that hands the
+   * caller's #6864 escape hatch to the platform kill, and a default here counts
+   * against the function's complexity ratchet for no benefit -- it has a single
+   * call site.
+   */
+  force: boolean,
 ): Promise<string | undefined> {
   const deviceManager = dependencies.deviceManagerFactory();
   if (device.platform === "android") {

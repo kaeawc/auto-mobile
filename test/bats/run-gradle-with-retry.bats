@@ -79,3 +79,97 @@ SCRIPT
   [[ "$output" == *"Failure did not match Maven/plugin repository retry patterns."* ]]
   [[ "$output" != *"attempt 2/2"* ]]
 }
+
+@test "retries a DNS host-resolution failure (UnknownHostException)" {
+  # Detekt on main went red because Gradle could not resolve
+  # data.services.jetbrains.com while resolving :ide-plugin:compileClasspath
+  # (#6880). DNS trouble on a hosted runner is transient and rerun-curable, but
+  # the signature matched none of the HTTP-shaped retry patterns, so the wrapper
+  # gave up after the first attempt.
+  write_fake_gradle <<'SCRIPT'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--stop" ]]; then
+  exit 0
+fi
+
+state_file="${FAKE_GRADLE_STATE}"
+attempt="$(cat "$state_file" 2>/dev/null || echo 0)"
+attempt=$((attempt + 1))
+echo "$attempt" > "$state_file"
+
+if [[ "$attempt" -eq 1 ]]; then
+  echo "Could not determine the dependencies of task ':ide-plugin:compileJava'."
+  echo "Caused by: java.io.UncheckedIOException: java.net.UnknownHostException: data.services.jetbrains.com"
+  exit 1
+fi
+
+echo "BUILD SUCCESSFUL"
+SCRIPT
+
+  run env GRADLE_RETRY_LOG_DIR="$LOG_DIR" GRADLE_RETRY_DELAY_SECONDS=1 \
+    FAKE_GRADLE_STATE="${TEST_ROOT}/state" \
+    bash "$SCRIPT" -- "$COMMAND" :ide-plugin:detekt
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Running Gradle attempt 2/2"* ]]
+}
+
+@test "retries a glibc-worded name-resolution failure" {
+  # The same class of failure, worded by whichever resolver surfaced it.
+  write_fake_gradle <<'SCRIPT'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--stop" ]]; then
+  exit 0
+fi
+
+state_file="${FAKE_GRADLE_STATE}"
+attempt="$(cat "$state_file" 2>/dev/null || echo 0)"
+attempt=$((attempt + 1))
+echo "$attempt" > "$state_file"
+
+if [[ "$attempt" -eq 1 ]]; then
+  echo "Caused by: java.net.SocketException: Temporary failure in name resolution"
+  exit 1
+fi
+
+echo "BUILD SUCCESSFUL"
+SCRIPT
+
+  run env GRADLE_RETRY_LOG_DIR="$LOG_DIR" GRADLE_RETRY_DELAY_SECONDS=1 \
+    FAKE_GRADLE_STATE="${TEST_ROOT}/state" \
+    bash "$SCRIPT" -- "$COMMAND" :ide-plugin:detekt
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Running Gradle attempt 2/2"* ]]
+}
+
+@test "retries a dependency-resolution failure phrased for a single configuration" {
+  # "Could not resolve all dependencies for configuration" is the wording in
+  # the #6880 log; the wrapper only knew "Could not resolve all files for
+  # configuration".
+  write_fake_gradle <<'SCRIPT'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--stop" ]]; then
+  exit 0
+fi
+
+state_file="${FAKE_GRADLE_STATE}"
+attempt="$(cat "$state_file" 2>/dev/null || echo 0)"
+attempt=$((attempt + 1))
+echo "$attempt" > "$state_file"
+
+if [[ "$attempt" -eq 1 ]]; then
+  echo "Could not resolve all dependencies for configuration ':ide-plugin:compileClasspath'."
+  exit 1
+fi
+
+echo "BUILD SUCCESSFUL"
+SCRIPT
+
+  run env GRADLE_RETRY_LOG_DIR="$LOG_DIR" GRADLE_RETRY_DELAY_SECONDS=1 \
+    FAKE_GRADLE_STATE="${TEST_ROOT}/state" \
+    bash "$SCRIPT" -- "$COMMAND" :ide-plugin:detekt
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Running Gradle attempt 2/2"* ]]
+}

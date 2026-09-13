@@ -117,6 +117,7 @@ teardown() {
   # of attempts, then exit non-zero with the count. Offline via a failing curl.
   run env TAG=v0.0.0-does-not-exist REPO=kaeawc/auto-mobile GH_TOKEN=x \
     BREW_TARBALL_FETCH_ATTEMPTS=2 BREW_TARBALL_FETCH_DELAY_SECONDS=0 \
+    BREW_NPM_PROPAGATION_ATTEMPTS=2 BREW_NPM_PROPAGATION_DELAY_SECONDS=0 \
     bash scripts/release/update-brew-formula.sh
   [ "$status" -ne 0 ]
   [[ "$output" == *"after 2 attempts"* ]]
@@ -146,4 +147,157 @@ teardown() {
   # Formula["bun"].opt_bin.
   grep -qF 'formula_opt_bin("bun")' auto-mobile.rb
   ! grep -qF 'Formula["bun"].opt_bin' auto-mobile.rb
+}
+
+# --- npm publish/propagation race (#6810) ------------------------------------
+# `npm publish` returns before the registry serves the new version, so the
+# formula step used to walk straight into a 404 loop on the tarball URL and
+# redden the Release. The script now waits for the version document — the
+# registry's own statement that the version exists — with exponential backoff
+# before it reaches for the tarball.
+
+# A fake curl that records every requested URL to ${TEST_ROOT}/curl-urls and
+# fails the npm version document the first ${FAKE_NPM_404S} times it is asked
+# for it. Everything else (the tarball) succeeds with deterministic bytes.
+use_propagating_curl() {
+  cat > "${TEST_ROOT}/fakebin/curl" <<'FAKE_CURL'
+#!/usr/bin/env bash
+out=""
+url=""
+args=("$@")
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -o) out="$2"; shift 2 ;;
+    -*) shift ;;
+    *) url="$1"; shift ;;
+  esac
+done
+printf '%s\n' "$url" >> "${CURL_URL_LOG}"
+
+if [[ "$url" != *".tgz" ]]; then
+  seen="$(cat "${NPM_DOC_STATE}" 2>/dev/null || echo 0)"
+  seen=$((seen + 1))
+  echo "$seen" > "${NPM_DOC_STATE}"
+  if [[ "$seen" -le "${FAKE_NPM_404S:-0}" ]]; then
+    echo "curl: (22) The requested URL returned error: 404" >&2
+    exit 22
+  fi
+fi
+
+[ -n "$out" ] && printf 'fake-tarball-bytes' > "$out"
+exit 0
+FAKE_CURL
+  chmod +x "${TEST_ROOT}/fakebin/curl"
+  PATH="${TEST_ROOT}/fakebin:${PATH}"
+}
+
+@test "checks the npm version document before fetching the tarball" {
+  cd "$TEST_ROOT"
+  use_propagating_curl
+  run env TAG=v0.0.26 REPO=kaeawc/auto-mobile RENDER_ONLY=1 \
+    CURL_URL_LOG="${TEST_ROOT}/curl-urls" NPM_DOC_STATE="${TEST_ROOT}/npm-doc" \
+    FAKE_NPM_404S=0 BREW_NPM_PROPAGATION_DELAY_SECONDS=0 \
+    bash scripts/release/update-brew-formula.sh
+  [ "$status" -eq 0 ]
+
+  # The version document is asked for first, the tarball second.
+  first_url="$(head -n 1 "${TEST_ROOT}/curl-urls")"
+  [[ "$first_url" != *".tgz" ]]
+  [[ "$first_url" == *"registry.npmjs.org"* ]]
+  [[ "$first_url" == *"0.0.26"* ]]
+  grep -q '\.tgz$' "${TEST_ROOT}/curl-urls"
+}
+
+@test "waits out an npm propagation lag, then renders the formula" {
+  cd "$TEST_ROOT"
+  use_propagating_curl
+  # Three 404s on the version document, as in the 0.0.69 release: the script
+  # must keep waiting rather than burn the tarball budget on a version the
+  # registry has not published yet.
+  run env TAG=v0.0.26 REPO=kaeawc/auto-mobile RENDER_ONLY=1 \
+    CURL_URL_LOG="${TEST_ROOT}/curl-urls" NPM_DOC_STATE="${TEST_ROOT}/npm-doc" \
+    FAKE_NPM_404S=3 BREW_NPM_PROPAGATION_DELAY_SECONDS=0 \
+    bash scripts/release/update-brew-formula.sh
+  [ "$status" -eq 0 ]
+  [ -f auto-mobile.rb ]
+  [[ "$output" == *"attempt 1/"* ]]
+  [[ "$output" == *"attempt 3/"* ]]
+  grep -q '\.tgz$' "${TEST_ROOT}/curl-urls"
+}
+
+@test "backs off exponentially between propagation checks, capped" {
+  cd "$TEST_ROOT"
+  use_propagating_curl
+  run env TAG=v0.0.26 REPO=kaeawc/auto-mobile RENDER_ONLY=1 \
+    CURL_URL_LOG="${TEST_ROOT}/curl-urls" NPM_DOC_STATE="${TEST_ROOT}/npm-doc" \
+    FAKE_NPM_404S=4 BREW_NPM_PROPAGATION_ATTEMPTS=5 \
+    BREW_NPM_PROPAGATION_DELAY_SECONDS=0 \
+    BREW_NPM_PROPAGATION_MAX_DELAY_SECONDS=4 \
+    bash scripts/release/update-brew-formula.sh
+  [ "$status" -eq 0 ]
+  # Delays are announced before each sleep; with a 0s base every announced
+  # delay stays 0, so assert the shape of the schedule instead: one line per
+  # unsuccessful attempt, numbered against the configured cap.
+  [[ "$output" == *"attempt 1/5"* ]]
+  [[ "$output" == *"attempt 4/5"* ]]
+  [[ "$output" != *"attempt 5/5"* ]]
+}
+
+@test "exponential backoff doubles the announced delay up to the cap" {
+  cd "$TEST_ROOT"
+  use_propagating_curl
+  run env TAG=v0.0.26 REPO=kaeawc/auto-mobile RENDER_ONLY=1 \
+    CURL_URL_LOG="${TEST_ROOT}/curl-urls" NPM_DOC_STATE="${TEST_ROOT}/npm-doc" \
+    FAKE_NPM_404S=4 BREW_NPM_PROPAGATION_ATTEMPTS=6 \
+    BREW_NPM_PROPAGATION_DELAY_SECONDS=1 \
+    BREW_NPM_PROPAGATION_MAX_DELAY_SECONDS=2 \
+    bash scripts/release/update-brew-formula.sh
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"retrying in 1s"* ]]
+  [[ "$output" == *"retrying in 2s"* ]]
+  # Capped: never announces 4s.
+  [[ "$output" != *"retrying in 4s"* ]]
+}
+
+@test "an exhausted propagation wait warns but still tries the tarball" {
+  cd "$TEST_ROOT"
+  use_propagating_curl
+  # The version document never appears. The wait is bounded, so the script
+  # falls through to the tarball fetch (which owns the definitive error)
+  # instead of inventing a second hard failure mode.
+  run env TAG=v0.0.26 REPO=kaeawc/auto-mobile RENDER_ONLY=1 \
+    CURL_URL_LOG="${TEST_ROOT}/curl-urls" NPM_DOC_STATE="${TEST_ROOT}/npm-doc" \
+    FAKE_NPM_404S=99 BREW_NPM_PROPAGATION_ATTEMPTS=2 \
+    BREW_NPM_PROPAGATION_DELAY_SECONDS=0 \
+    bash scripts/release/update-brew-formula.sh
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"still not visible"* ]]
+  grep -q '\.tgz$' "${TEST_ROOT}/curl-urls"
+}
+
+@test "rejects a zero-padded BREW_NPM_PROPAGATION_ATTEMPTS override" {
+  cd "$TEST_ROOT"
+  run env TAG=v0.0.26 REPO=kaeawc/auto-mobile GH_TOKEN=x \
+    BREW_NPM_PROPAGATION_ATTEMPTS=08 \
+    bash scripts/release/update-brew-formula.sh
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"BREW_NPM_PROPAGATION_ATTEMPTS"* ]]
+}
+
+@test "rejects a non-numeric BREW_NPM_PROPAGATION_DELAY_SECONDS override" {
+  cd "$TEST_ROOT"
+  run env TAG=v0.0.26 REPO=kaeawc/auto-mobile GH_TOKEN=x \
+    BREW_NPM_PROPAGATION_DELAY_SECONDS=soon \
+    bash scripts/release/update-brew-formula.sh
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"BREW_NPM_PROPAGATION_DELAY_SECONDS"* ]]
+}
+
+@test "rejects a non-numeric BREW_NPM_PROPAGATION_MAX_DELAY_SECONDS override" {
+  cd "$TEST_ROOT"
+  run env TAG=v0.0.26 REPO=kaeawc/auto-mobile GH_TOKEN=x \
+    BREW_NPM_PROPAGATION_MAX_DELAY_SECONDS=lots \
+    bash scripts/release/update-brew-formula.sh
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"BREW_NPM_PROPAGATION_MAX_DELAY_SECONDS"* ]]
 }

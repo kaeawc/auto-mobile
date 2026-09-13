@@ -689,6 +689,15 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && needs.validate-release-tag.outputs.is_release_tag == 'true'
     needs: [validate-release-tag, verify-and-release]
     runs-on: ubuntu-latest
+    # `npm publish` returns before the registry serves the new version, so this
+    # job used to walk straight into a 404 loop on the tarball and redden the
+    # release on a race that resolved itself minutes later (#6810).
+    # update-brew-formula.sh now waits on the npm version document with
+    # exponential backoff (~6 min) before its tarball retry budget (~5 min);
+    # both bounds live in the script, and this timeout is the outer bound so a
+    # registry that never serves the version fails the job instead of holding a
+    # runner open.
+    timeout-minutes: 20
     steps:
       - name: Checkout code
         uses: actions/checkout@v6

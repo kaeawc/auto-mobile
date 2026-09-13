@@ -691,7 +691,7 @@ export class ListInstalledApps {
         }
         // The accessibility service resolves labels and launch intents in the
         // same PackageManager pass, so the catalog costs nothing extra here.
-        // Only an on-device SDK that predates those fields needs the adb probe
+        // Only an on-device CtrlProxy that predates those fields needs the adb probe
         // as a top-up (#6798).
         const catalog = options.namesOnly
           ? (new Map() as AndroidAppCatalog)

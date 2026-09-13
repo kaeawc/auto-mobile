@@ -583,7 +583,7 @@ export const listAppsSchema = addDeviceTargetingToSchema(
       .describe(
         "Filter by a case-insensitive substring of the package name/bundle id or of the app's " +
           "display label ('contacts' matches both com.android.contacts and an app labelled " +
-          "Contacts). Android labels require the on-device AutoMobile SDK; without it only the " +
+          "Contacts). Android labels require the installed CtrlProxy APK; without it only the " +
           "package name is matched.",
       ),
     profile: z

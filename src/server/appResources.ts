@@ -639,7 +639,7 @@ async function fetchAppsForDevice(
 
 /**
  * True when the device reported apps but not one of them carried a
- * launchability signal — an old on-device SDK plus a failed `cmd package`
+ * launchability signal — an old on-device CtrlProxy plus a failed `cmd package`
  * probe, or a physical iOS device. The `launchable` filter must degrade rather
  * than report every app as unlaunchable (#6798). A device with zero apps is not
  * "unknown": there is nothing to misreport.
@@ -1025,7 +1025,7 @@ function assertRequestedTypeIsAnswerable(
     throw new Error(
       `Cannot filter by type=launchable for device ${deviceId}${
         options.profile === undefined ? "" : ` profile ${options.profile}`
-      }: no launchability signal is available (the on-device AutoMobile SDK predates the field ` +
+      }: no launchability signal is available (the installed CtrlProxy APK predates the field ` +
         "and the `cmd package query-activities` probe did not answer). Use type=user, type=system " +
         "or type=all.",
     );

@@ -62,7 +62,7 @@ describe("androidAppCatalog (#6798)", () => {
     ).toBe(false);
   });
 
-  test("an older on-device SDK reports neither field; launchability stays unknown, not false", () => {
+  test("an older on-device CtrlProxy reports neither field; launchability stays unknown, not false", () => {
     const catalog = catalogFromPackageRecords([
       { packageName: "com.example.app", isSystem: false },
       { packageName: "com.example.blank", isSystem: false, label: "   " },

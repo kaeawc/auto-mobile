@@ -63,6 +63,54 @@ function extractHashFilesPatterns(key: string): string[] {
   return [...call[1].matchAll(/'([^']*)'/g)].map((match) => match[1]);
 }
 
+function validateDerivedDataCacheKeyPatterns(patterns: string[]): string[] {
+  const violations: string[] = [];
+  const scopes = new Set(
+    patterns
+      .filter((pattern) => pattern.includes("**"))
+      .map((pattern) => pattern.slice(0, pattern.indexOf("**"))),
+  );
+  if (scopes.size === 0) {
+    scopes.add("");
+  }
+
+  for (const scope of scopes) {
+    for (const extension of REQUIRED_EXTENSIONS) {
+      const expectedSuffix =
+        extension === ".xcassets"
+          ? ".xcassets/**"
+          : extension.startsWith(".")
+            ? `*${extension}`
+            : extension;
+      if (
+        !patterns.some((pattern) => pattern.startsWith(scope) && pattern.endsWith(expectedSuffix))
+      ) {
+        violations.push(`scope '${scope}' does not hash '${expectedSuffix}' inputs`);
+      }
+    }
+
+    if (
+      !REQUIRED_PROJECT_DESCRIPTOR_EXTENSIONS.some((suffix) =>
+        patterns.some((pattern) => pattern.startsWith(scope) && pattern.endsWith(suffix)),
+      )
+    ) {
+      violations.push(
+        `scope '${scope}' does not hash a project-descriptor input (.pbxproj or project.yml)`,
+      );
+    }
+  }
+
+  for (const pattern of patterns) {
+    for (const forbidden of FORBIDDEN_HASH_SEGMENTS) {
+      if (pattern.includes(forbidden)) {
+        violations.push(`pattern '${pattern}' re-includes forbidden segment '${forbidden}'`);
+      }
+    }
+  }
+
+  return violations;
+}
+
 function collectDerivedDataCacheSteps(workflowRelativePath: string): JobStep[] {
   return loadAllJobSteps(workflowRelativePath).filter(({ step }) => isDerivedDataCacheStep(step));
 }
@@ -88,35 +136,32 @@ describe("DerivedData cache keys hash every build input", () => {
           `${workflow}/${jobId}: DerivedData cache key has no hashFiles(...) call: ${withKey}`,
         ).toBeGreaterThan(0);
 
-        for (const extension of REQUIRED_EXTENSIONS) {
-          const expectedSuffix =
-            extension === ".xcassets"
-              ? ".xcassets/**"
-              : extension.startsWith(".")
-                ? `*${extension}`
-                : extension;
-          expect(
-            patterns.some((pattern) => pattern.endsWith(expectedSuffix)),
-            `${workflow}/${jobId}: DerivedData cache key does not hash '${expectedSuffix}' inputs: ${patterns.join(", ")}`,
-          ).toBe(true);
-        }
-
         expect(
-          REQUIRED_PROJECT_DESCRIPTOR_EXTENSIONS.some((suffix) =>
-            patterns.some((pattern) => pattern.endsWith(suffix)),
-          ),
-          `${workflow}/${jobId}: DerivedData cache key does not hash a project-descriptor input (.pbxproj or project.yml): ${patterns.join(", ")}`,
-        ).toBe(true);
-
-        for (const pattern of patterns) {
-          for (const forbidden of FORBIDDEN_HASH_SEGMENTS) {
-            expect(
-              pattern.includes(forbidden),
-              `${workflow}/${jobId}: DerivedData cache key hashFiles pattern '${pattern}' re-includes forbidden segment '${forbidden}'`,
-            ).toBe(false);
-          }
-        }
+          validateDerivedDataCacheKeyPatterns(patterns),
+          `${workflow}/${jobId}: ${patterns.join(", ")}`,
+        ).toEqual([]);
       }
     });
   }
+});
+
+test("DerivedData cache guard checks every required input in every directory scope", () => {
+  const patterns = ["ios/Playground/**/*.xcprivacy", "ios/Playground/**/*.pbxproj"];
+  for (const extension of REQUIRED_EXTENSIONS) {
+    if (extension !== ".xcprivacy") {
+      const suffix =
+        extension === ".xcassets"
+          ? ".xcassets/**"
+          : extension.startsWith(".")
+            ? `*${extension}`
+            : extension;
+      patterns.push(`ios/Playground/**/${suffix}`);
+      patterns.push(`ios/auto-mobile-sdk/**/${suffix}`);
+    }
+  }
+  patterns.push("ios/auto-mobile-sdk/**/*.pbxproj");
+
+  expect(validateDerivedDataCacheKeyPatterns(patterns)).toContain(
+    "scope 'ios/auto-mobile-sdk/' does not hash '*.xcprivacy' inputs",
+  );
 });

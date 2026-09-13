@@ -1852,12 +1852,22 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
    * true only when the old runner is STILL answering at the end of the grace — a
    * listener that merely lags the process teardown stops answering well inside it,
    * and the restart may proceed. Honours the caller's abort signal while polling.
+   *
+   * Strict: a responder that omits deviceId must NOT be mistaken for the runner we
+   * just tried to stop. Fail closed here — unlike the liveness gate elsewhere, where a
+   * missing deviceId is compat-accepted — so a foreign/ambiguous responder on this
+   * port never blocks a legitimate restart (#6415 follow-up).
    */
   private async isRunnerStillHealthyAfterForcedTeardown(signal?: AbortSignal): Promise<boolean> {
     const graceDeadlineMs = this.timer.now() + FORCE_RESTART_DRAIN_GRACE_MS;
     for (;;) {
       if (
-        !(await this.checkHealthEndpointOnPortForDevice(this.servicePort, this.device.deviceId))
+        !(await this.checkHealthEndpointOnPortForDevice(
+          this.servicePort,
+          this.device.deviceId,
+          undefined,
+          { requireDeviceId: true },
+        ))
       ) {
         return false;
       }
@@ -2903,8 +2913,23 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     logger.info("[IOSCtrlProxy] Installed CtrlProxy app hash matches expected bundle");
   }
 
+  /**
+   * The primary "is our runner up" gate. Routes through the identity-checked
+   * probe (issue #6415) rather than the loose "any 'ok'/'healthy' body" check,
+   * so a foreign responder on the service port — a sibling simulator's runner,
+   * a stale runner from a previous daemon run, or the Android runner reached
+   * through `adb forward` — is never mistaken for this device's runner. Every
+   * caller (`isRunning()`, the `start()` short-circuit, `waitForHealthEndpoint`,
+   * `isCtrlProxyProcessAlive()`) inherits the identity check through this one
+   * method.
+   */
   private async checkHealthEndpoint(): Promise<boolean> {
-    return this.healthClient.checkHealthEndpointOnPort(this.servicePort);
+    return this.healthClient.checkHealthEndpointOnPortForDevice(
+      this.servicePort,
+      this.device.deviceId,
+      undefined,
+      { requireDeviceId: false },
+    );
   }
 
   /**
@@ -2943,8 +2968,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     port: number,
     deviceId: string,
     timeoutMs?: number,
+    options?: { requireDeviceId?: boolean },
   ): Promise<boolean> {
-    return this.healthClient.checkHealthEndpointOnPortForDevice(port, deviceId, timeoutMs);
+    return this.healthClient.checkHealthEndpointOnPortForDevice(port, deviceId, timeoutMs, options);
   }
 
   private getIproxyStartTimeoutMs(): number {

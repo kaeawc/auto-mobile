@@ -125,7 +125,11 @@ export class FakeObserveCacheStore implements ObserveResultCacheStore {
       if (deviceId && entry.deviceId !== deviceId) {
         continue;
       }
-      if (!mostRecent || entry.timestamp > mostRecent.timestamp) {
+      // `>=`, not `>`: mirrors FileSystemObserveCacheStore.collectLiveMostRecent,
+      // where the latest insertion wins a timestamp tie. Under a FakeTimer two
+      // puts routinely share a tick, so a strict `>` here would hand tests the
+      // opposite device from production.
+      if (!mostRecent || entry.timestamp >= mostRecent.timestamp) {
         mostRecent = entry;
       }
     }

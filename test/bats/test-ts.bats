@@ -3,6 +3,34 @@
 SCRIPT="scripts/test-ts.sh"
 TIMING_SCRIPT="scripts/validate-bun-test-timings.sh"
 
+# Mirrors the real shape of `bun test --reporter=junit` output from the repo's
+# Bun (1.3.14): an XML declaration, a <testsuites> root, nested <testsuite>
+# elements, and `file=` on the <testcase> as well as on the suite. Bun 1.2.x
+# omits `file=` on the suite entirely, which is why the gate must read the
+# testcase attribute; fixtures that invented `<testsuite file>` as the only
+# source of the path hid that (review thread PRRT_kwDOP-GF5M6h5GB8 on PR #6922).
+#
+# Usage: write_junit_report <outfile> <suite-file> [<classname> <name> <seconds>]...
+write_junit_report() {
+  local outfile="$1" suite_file="$2" count
+  shift 2
+  count="$(($# / 3))"
+  {
+    printf '<?xml version="1.0" encoding="UTF-8"?>\n'
+    printf '<testsuites name="bun test" tests="%d" assertions="%d" failures="0" skipped="0" time="0.200236">\n' \
+      "$count" "$count"
+    printf '  <testsuite name="%s" file="%s" tests="%d" assertions="%d" failures="0" skipped="0" time="0" hostname="mac.lan">\n' \
+      "$suite_file" "$suite_file" "$count" "$count"
+    while [[ "$#" -gt 0 ]]; do
+      printf '    <testcase name="%s" classname="%s" time="%s" file="%s" line="1" assertions="1" />\n' \
+        "$2" "$1" "$3" "$suite_file"
+      shift 3
+    done
+    printf '  </testsuite>\n'
+    printf '</testsuites>\n'
+  } > "$outfile"
+}
+
 setup() {
   STUB_BIN="$(mktemp -d)"
   BUN_ARGS_FILE="$(mktemp)"
@@ -25,6 +53,27 @@ EOF
   cat > "$STUB_BIN/bun" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$BUN_ARGS_FILE"
+# Same shape the real `bun test --reporter=junit` writes: `file=` lands on the
+# <testcase>, not only on the enclosing <testsuite>.
+stub_junit_report() {
+  local outfile="$1" suite_file="$2" count
+  shift 2
+  count="$(($# / 3))"
+  {
+    printf '<?xml version="1.0" encoding="UTF-8"?>\n'
+    printf '<testsuites name="bun test" tests="%d" assertions="%d" failures="0" skipped="0" time="0.200236">\n' \
+      "$count" "$count"
+    printf '  <testsuite name="%s" file="%s" tests="%d" assertions="%d" failures="0" skipped="0" time="0" hostname="mac.lan">\n' \
+      "$suite_file" "$suite_file" "$count" "$count"
+    while [[ "$#" -gt 0 ]]; do
+      printf '    <testcase name="%s" classname="%s" time="%s" file="%s" line="1" assertions="1" />\n' \
+        "$2" "$1" "$3" "$suite_file"
+      shift 3
+    done
+    printf '  </testsuite>\n'
+    printf '</testsuites>\n'
+  } > "$outfile"
+}
 report=""
 target=""
 while [[ "$#" -gt 0 ]]; do
@@ -45,13 +94,11 @@ if [[ -n "${STUB_RECHECK_DUP_TIMES:-}" ]]; then
   # Two testcases sharing one file+classname+name, so a test can pin how the
   # gate keeps duplicate names apart across recheck runs.
   read -r -a dup_times <<< "$STUB_RECHECK_DUP_TIMES"
-  {
-    printf '<testsuite file="%s">\n' "${target:-test/example.test.ts}"
-    for dup_seconds in "${dup_times[@]}"; do
-      printf '<testcase name="dup" classname="suite" time="%s" />\n' "$dup_seconds"
-    done
-    printf '</testsuite>\n'
-  } > "$report"
+  dup_cases=()
+  for dup_seconds in "${dup_times[@]}"; do
+    dup_cases+=(suite dup "$dup_seconds")
+  done
+  stub_junit_report "$report" "${target:-test/example.test.ts}" "${dup_cases[@]}"
   exit 0
 fi
 if [[ -n "${STUB_RECHECK_TIMES:-}" ]]; then
@@ -76,11 +123,11 @@ if [[ -n "${STUB_RECHECK_TIMES:-}" ]]; then
     stub_classname="$(basename "${target:-test/example.test.ts}" .test.ts)"
     stub_name="case"
   fi
-  printf '<testsuite file="%s"><testcase name="%s" classname="%s" time="%s" /></testsuite>\n' \
-    "${target:-test/example.test.ts}" "$stub_name" "$stub_classname" "$seconds" > "$report"
+  stub_junit_report "$report" "${target:-test/example.test.ts}" \
+    "$stub_classname" "$stub_name" "$seconds"
   exit 0
 fi
-printf '<testsuites><testcase name="fast" classname="fixture" time="0.001" /></testsuites>\n' > "$report"
+stub_junit_report "$report" "${target:-test/example.test.ts}" fixture fast 0.001
 EOF
   chmod +x "$STUB_BIN/git" "$STUB_BIN/bun"
 }
@@ -393,8 +440,7 @@ run_lane() {
 @test "timing gate reuses complete unit-lane reports for source changes" {
   report_dir="$BATS_TEST_TMPDIR/unit-timing-reports"
   mkdir -p "$report_dir"
-  printf '<testsuites><testcase name="fast" classname="fixture" time="0.001" /></testsuites>\n' \
-    > "$report_dir/shard-0.xml"
+  write_junit_report "$report_dir/shard-0.xml" "test/example.test.ts" fixture fast 0.001
 
   run env \
     PATH="$STUB_BIN:$PATH" \
@@ -414,8 +460,7 @@ OFFENDER_FILE="test/scripts/testLaneClassification.test.ts"
 seed_outlier_report() {
   report_dir="$BATS_TEST_TMPDIR/unit-timing-reports"
   mkdir -p "$report_dir"
-  printf '<testsuite file="%s"><testcase name="slow" classname="suite" time="0.200" /></testsuite>\n' \
-    "$OFFENDER_FILE" > "$report_dir/shard-0.xml"
+  write_junit_report "$report_dir/shard-0.xml" "$OFFENDER_FILE" suite slow 0.200
 }
 
 run_timing_gate_with_recheck_times() {
@@ -504,9 +549,16 @@ run_timing_gate_with_recheck_times() {
 @test "timing gate fails an unrecheckable outlier on its first sample" {
   report_dir="$BATS_TEST_TMPDIR/unit-timing-reports"
   mkdir -p "$report_dir"
-  # No file attribute: there is nothing to re-run, so the one sample stands.
-  printf '<testsuites><testcase name="slow" classname="suite" time="0.200" /></testsuites>\n' \
-    > "$report_dir/shard-0.xml"
+  # Deliberately file-less on BOTH the suite and the testcase: there is nothing
+  # to re-run, so the one sample stands.
+  {
+    printf '<?xml version="1.0" encoding="UTF-8"?>\n'
+    printf '<testsuites name="bun test" tests="1" failures="0" skipped="0" time="0.2">\n'
+    printf '  <testsuite name="suite" tests="1" failures="0" skipped="0" time="0" hostname="mac.lan">\n'
+    printf '    <testcase name="slow" classname="suite" time="0.200" line="1" assertions="1" />\n'
+    printf '  </testsuite>\n'
+    printf '</testsuites>\n'
+  } > "$report_dir/shard-0.xml"
 
   run env \
     PATH="$STUB_BIN:$PATH" \
@@ -527,13 +579,21 @@ seed_loaded_runner_report() {
   local count="$1" index path seconds
   report_dir="$BATS_TEST_TMPDIR/unit-timing-reports"
   mkdir -p "$report_dir"
-  printf '<testsuites>\n' > "$report_dir/shard-0.xml"
+  {
+    printf '<?xml version="1.0" encoding="UTF-8"?>\n'
+    printf '<testsuites name="bun test" failures="0" skipped="0" time="7.2">\n'
+  } > "$report_dir/shard-0.xml"
   for ((index = 0; index < count; index += 1)); do
     path="$BATS_TEST_TMPDIR/suite${index}.test.ts"
     printf 'export {};\n' > "$path"
     seconds="$(printf '0.%03d' "$((300 - index))")"
-    printf '<testsuite file="%s"><testcase name="case" classname="suite%s" time="%s" /></testsuite>\n' \
-      "$path" "$index" "$seconds" >> "$report_dir/shard-0.xml"
+    {
+      printf '  <testsuite name="%s" file="%s" tests="1" assertions="1" failures="0" skipped="0" time="0" hostname="mac.lan">\n' \
+        "$path" "$path"
+      printf '    <testcase name="case" classname="suite%s" time="%s" file="%s" line="1" assertions="1" />\n' \
+        "$index" "$seconds" "$path"
+      printf '  </testsuite>\n'
+    } >> "$report_dir/shard-0.xml"
   done
   printf '</testsuites>\n' >> "$report_dir/shard-0.xml"
 }
@@ -628,8 +688,7 @@ repeat_stub_times() {
 @test "timing gate measures a testcase whose name contains a tab" {
   report_dir="$BATS_TEST_TMPDIR/unit-timing-reports"
   mkdir -p "$report_dir"
-  printf '<testsuites><testcase name="slow\tcase" classname="suite" time="0.200" /></testsuites>\n' \
-    > "$report_dir/shard-0.xml"
+  write_junit_report "$report_dir/shard-0.xml" "$OFFENDER_FILE" suite "$(printf 'slow\tcase')" 0.200
 
   run env \
     PATH="$STUB_BIN:$PATH" \
@@ -648,12 +707,9 @@ repeat_stub_times() {
 @test "timing gate keeps duplicate test names apart across recheck runs" {
   report_dir="$BATS_TEST_TMPDIR/unit-timing-reports"
   mkdir -p "$report_dir"
-  {
-    printf '<testsuite file="%s">\n' "$OFFENDER_FILE"
-    printf '<testcase name="dup" classname="suite" time="0.010" />\n'
-    printf '<testcase name="dup" classname="suite" time="0.150" />\n'
-    printf '</testsuite>\n'
-  } > "$report_dir/shard-0.xml"
+  write_junit_report "$report_dir/shard-0.xml" "$OFFENDER_FILE" \
+    suite dup 0.010 \
+    suite dup 0.150
 
   run env \
     PATH="$STUB_BIN:$PATH" \
@@ -687,4 +743,147 @@ repeat_stub_times() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"measuring Bun-affected unit tests"* ]]
   grep -q -- "--changed=origin/main" "$BUN_ARGS_FILE"
+}
+
+# Bun 1.2.x writes the source path ONLY on <testcase>; reading just the
+# <testsuite> attribute left the path empty for a real report, so no recheck
+# ran and a noisy first sample failed directly (review thread
+# PRRT_kwDOP-GF5M6h5GB8 on PR #6922).
+@test "timing gate reads the source path from the testcase attribute" {
+  report_dir="$BATS_TEST_TMPDIR/unit-timing-reports"
+  mkdir -p "$report_dir"
+  {
+    printf '<?xml version="1.0" encoding="UTF-8"?>\n'
+    printf '<testsuites name="bun test" tests="1" assertions="1" failures="0" skipped="0" time="0.200236">\n'
+    printf '  <testsuite name="suite" tests="1" assertions="1" failures="0" skipped="0" time="0" hostname="mac.lan">\n'
+    printf '    <testcase name="slow" classname="suite" time="0.200" file="%s" line="16" assertions="1" />\n' \
+      "$OFFENDER_FILE"
+    printf '  </testsuite>\n'
+    printf '</testsuites>\n'
+  } > "$report_dir/shard-0.xml"
+
+  run_timing_gate_with_recheck_times "0.010 0.012 0.011"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Rechecking 1 file(s)"* ]]
+  [[ "$output" == *"Recheck cleared suite.slow"* ]]
+  [ "$(grep -c -- "$OFFENDER_FILE" "$BUN_ARGS_FILE")" -eq 3 ]
+}
+
+# An offender in a test file THIS change touched can be the regression the gate
+# exists to catch, and the PR's own diff bounds how many of those there are. It
+# must never be deferred behind the cap (review thread PRRT_kwDOP-GF5M6h5GCA on
+# PR #6922).
+seed_changed_offender_report() {
+  local index path seconds
+  report_dir="$BATS_TEST_TMPDIR/unit-timing-reports"
+  mkdir -p "$report_dir"
+  {
+    printf '<?xml version="1.0" encoding="UTF-8"?>\n'
+    printf '<testsuites name="bun test" failures="0" skipped="0" time="1.2">\n'
+  } > "$report_dir/shard-0.xml"
+  for ((index = 0; index < 3; index += 1)); do
+    path="$BATS_TEST_TMPDIR/suite${index}.test.ts"
+    printf 'export {};\n' > "$path"
+    seconds="$(printf '0.%03d' "$((300 - index))")"
+    {
+      printf '  <testsuite name="%s" file="%s" tests="1" failures="0" skipped="0" time="0">\n' "$path" "$path"
+      printf '    <testcase name="case" classname="suite%s" time="%s" file="%s" line="1" assertions="1" />\n' \
+        "$index" "$seconds" "$path"
+      printf '  </testsuite>\n'
+    } >> "$report_dir/shard-0.xml"
+  done
+  # Ranked LAST by first sample, so a cap of 1 would otherwise defer it.
+  {
+    printf '  <testsuite name="%s" file="%s" tests="1" failures="0" skipped="0" time="0">\n' \
+      "$OFFENDER_FILE" "$OFFENDER_FILE"
+    printf '    <testcase name="case" classname="testLaneClassification" time="0.150" file="%s" line="1" assertions="1" />\n' \
+      "$OFFENDER_FILE"
+    printf '  </testsuite>\n'
+    printf '</testsuites>\n'
+  } >> "$report_dir/shard-0.xml"
+}
+
+@test "timing gate rechecks a changed-file offender ranked past the cap" {
+  seed_changed_offender_report
+
+  run env \
+    PATH="$STUB_BIN:$PATH" \
+    BUN_TEST_TIMING_BASE_REF=origin/main \
+    BUN_TEST_TIMING_REPORT_DIR="$report_dir" \
+    BUN_TEST_TIMING_RECHECK_MAX_FILES=1 \
+    TIMING_CHANGED_FILES="src/example.ts\n$OFFENDER_FILE\n" \
+    STUB_RECHECK_CLASSNAME_FROM_FILE=1 \
+    STUB_RECHECK_TIMES="0.150 0.150 0.150 0.010 0.010 0.010" \
+    bash "$TIMING_SCRIPT" "$BATS_TEST_TMPDIR/timings.xml"
+  [ "$status" -eq 1 ]
+  # Rechecked first and outside the cap, then failed on its isolated median.
+  [ "$(grep -c -- "$OFFENDER_FILE" "$BUN_ARGS_FILE")" -eq 3 ]
+  [[ "$output" == *"Test exceeded 100ms: testLaneClassification.case (median 150.00ms of 3 isolated runs)"* ]]
+  # The cap still applies to the files this change did not touch.
+  [ "$(grep -c "suite0\.test\.ts" "$BUN_ARGS_FILE")" -eq 3 ]
+  ! grep -q "suite1\.test\.ts" "$BUN_ARGS_FILE"
+  [[ "$output" == *"2 file(s) over the 100ms budget were not rechecked"* ]]
+}
+
+@test "timing gate reports an unchanged offender beyond the cap as unverified and exits 0" {
+  seed_changed_offender_report
+
+  run env \
+    PATH="$STUB_BIN:$PATH" \
+    BUN_TEST_TIMING_BASE_REF=origin/main \
+    BUN_TEST_TIMING_REPORT_DIR="$report_dir" \
+    BUN_TEST_TIMING_RECHECK_MAX_FILES=1 \
+    TIMING_CHANGED_FILES="src/example.ts\n$OFFENDER_FILE\n" \
+    STUB_RECHECK_CLASSNAME_FROM_FILE=1 \
+    STUB_RECHECK_TIMES="0.010 0.010 0.010 0.010 0.010 0.010" \
+    bash "$TIMING_SCRIPT" "$BATS_TEST_TMPDIR/timings.xml"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Budget not verified for suite1.case"* ]]
+  [[ "$output" == *"Budget not verified for suite2.case"* ]]
+  [[ "$output" != *"Test exceeded"* ]]
+}
+
+# `08` and `010` are digit-only but invalid/8 in Bash arithmetic, which skipped
+# the recheck entirely and exited 0 (review thread PRRT_kwDOP-GF5M6h5GCD on
+# PR #6922).
+@test "timing gate rejects a recheck file cap with a leading zero" {
+  seed_outlier_report
+
+  run env \
+    PATH="$STUB_BIN:$PATH" \
+    BUN_TEST_TIMING_BASE_REF=origin/main \
+    BUN_TEST_TIMING_REPORT_DIR="$report_dir" \
+    BUN_TEST_TIMING_RECHECK_MAX_FILES=08 \
+    TIMING_CHANGED_FILES='src/example.ts\n' \
+    bash "$TIMING_SCRIPT" "$BATS_TEST_TMPDIR/timings.xml"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"BUN_TEST_TIMING_RECHECK_MAX_FILES must be a positive integer"* ]]
+}
+
+@test "timing gate rejects a recheck run count with a leading zero" {
+  seed_outlier_report
+
+  run env \
+    PATH="$STUB_BIN:$PATH" \
+    BUN_TEST_TIMING_BASE_REF=origin/main \
+    BUN_TEST_TIMING_REPORT_DIR="$report_dir" \
+    BUN_TEST_TIMING_RECHECK_RUNS=03 \
+    TIMING_CHANGED_FILES='src/example.ts\n' \
+    bash "$TIMING_SCRIPT" "$BATS_TEST_TMPDIR/timings.xml"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"BUN_TEST_TIMING_RECHECK_RUNS must be a positive integer"* ]]
+}
+
+@test "timing gate rejects a budget with a leading zero" {
+  seed_outlier_report
+
+  run env \
+    PATH="$STUB_BIN:$PATH" \
+    BUN_TEST_TIMING_BASE_REF=origin/main \
+    BUN_TEST_TIMING_REPORT_DIR="$report_dir" \
+    BUN_TEST_MAX_MS=0100 \
+    TIMING_CHANGED_FILES='src/example.ts\n' \
+    bash "$TIMING_SCRIPT" "$BATS_TEST_TMPDIR/timings.xml"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"BUN_TEST_MAX_MS must be a positive integer"* ]]
 }

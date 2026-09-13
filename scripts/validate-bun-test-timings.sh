@@ -21,6 +21,20 @@
 # worst offenders and is failed on its isolated median. Files past the cap are
 # reported as unverified: this gate never fails a re-runnable test it has no
 # isolated evidence against.
+#
+# The cap is NOT allowed to hide the one thing this gate exists to catch. An
+# offender that lives in a test file THIS change touched can be the change's own
+# regression, and how many of those there are is bounded by the diff, not by the
+# runner's load. So offenders split into two populations:
+#
+#   * CHANGED test files  - rechecked first and OUTSIDE the cap, and failed
+#                           closed on their isolated median. Never deferred.
+#   * UNCHANGED test files - compete for the cap, worst first. Past it they are
+#                           reported as unverified and do not fail the gate:
+#                           they cannot be this change's regression.
+#
+# Without a base ref there is no diff, so every offender is in the second
+# population and the cap alone bounds the wall time.
 set -euo pipefail
 
 report_path="${1:-scratch/bun-test-report.xml}"
@@ -28,14 +42,25 @@ report_dir="${report_path%.xml}.d"
 recheck_dir="${report_path%.xml}.recheck.d"
 max_ms="${BUN_TEST_MAX_MS:-100}"
 recheck_runs="${BUN_TEST_TIMING_RECHECK_RUNS:-3}"
-# Wall-time ceiling on the recheck: at most this many distinct files are re-run,
-# worst offender first. Offenders past it are reported, never failed.
+# Wall-time ceiling on the recheck: at most this many distinct files in UNCHANGED
+# test files are re-run, worst offender first. Offenders past it are reported,
+# never failed. Offenders in changed test files ignore this cap entirely.
 recheck_max_files="${BUN_TEST_TIMING_RECHECK_MAX_FILES:-8}"
 
-if [[ ! "$recheck_max_files" =~ ^[0-9]+$ ]] || [[ "$recheck_max_files" -lt 1 ]]; then
-  echo "BUN_TEST_TIMING_RECHECK_MAX_FILES must be a positive integer (got '${recheck_max_files}')." >&2
-  exit 2
-fi
+# Every one of these is used in Bash arithmetic, where a leading zero means
+# octal: `08` is an arithmetic error and `010` silently means eight. Digit-only
+# validation let both through, so require a canonical positive decimal instead.
+require_positive_int() {
+  local name="$1" value="$2"
+  if [[ ! "$value" =~ ^[1-9][0-9]*$ ]]; then
+    echo "${name} must be a positive integer without leading zeros (got '${value}')." >&2
+    exit 2
+  fi
+}
+
+require_positive_int BUN_TEST_MAX_MS "$max_ms"
+require_positive_int BUN_TEST_TIMING_RECHECK_RUNS "$recheck_runs"
+require_positive_int BUN_TEST_TIMING_RECHECK_MAX_FILES "$recheck_max_files"
 
 mkdir -p "$(dirname "$report_path")"
 
@@ -79,9 +104,9 @@ FNR == 1 {
   split("", occurrences)
 }
 /<testsuite/ {
-  candidate = attr($0, "file")
+  candidate = sanitize(decode_xml(attr($0, "file")))
   if (candidate != "") {
-    current_file = sanitize(candidate)
+    current_file = candidate
   }
 }
 /<testcase/ {
@@ -91,10 +116,16 @@ FNR == 1 {
     next
   }
   classname = sanitize(decode_xml(attr($0, "classname")))
-  key = current_file SUBSEP classname SUBSEP name
+  # Bun writes the source path on the <testcase> itself; only some releases also
+  # repeat it on the enclosing <testsuite>. Read the testcase attribute first and
+  # fall back to the one on the enclosing suite, so every real report stays
+  # re-runnable.
+  case_file = sanitize(decode_xml(attr($0, "file")))
+  test_file = (case_file != "") ? case_file : current_file
+  key = test_file SUBSEP classname SUBSEP name
   occurrences[key] += 1
   printf "%s%s%s%s%s%s%.6f%s%d%s%s\n", \
-    current_file, sep, classname, sep, name, sep, time_str * 1000.0, \
+    test_file, sep, classname, sep, name, sep, time_str * 1000.0, \
     sep, occurrences[key], sep, FILENAME
 }
 '
@@ -102,6 +133,11 @@ FNR == 1 {
 testcase_rows() {
   awk -v sep="$field_sep" "$testcase_rows_awk" "$@"
 }
+
+# Test files this change touches. An offender in one of these is never deferred
+# behind the recheck cap: it is the population this gate exists to catch, and
+# the diff bounds how many of them there can be.
+changed_test_files=()
 
 if [[ -n "${BUN_TEST_TIMING_BASE_REF:-}" ]]; then
   rm -rf "$report_dir"
@@ -120,6 +156,13 @@ if [[ -n "${BUN_TEST_TIMING_BASE_REF:-}" ]]; then
   changed_count=0
   affects_unit_tests=false
   for file in ${changed_files[@]+"${changed_files[@]}"}; do
+    case "$file" in
+      test/*.test.ts)
+        if [[ "$file" != *.integration.test.ts && "$file" != test/stress/* ]]; then
+          changed_test_files+=("$file")
+        fi
+        ;;
+    esac
     case "$file" in
       src/*|package.json|bun.lock|bunfig.toml|scripts/test-ts.sh|scripts/validate-bun-test-timings.sh)
         # Runtime inputs can change test loading, preloads, or scheduling for
@@ -202,6 +245,21 @@ offender_rows="$recheck_dir/offenders.tsv"
 recheck_rows="$recheck_dir/recheck.tsv"
 rechecked_list="$recheck_dir/rechecked-files.txt"
 deferred_list="$recheck_dir/deferred-files.txt"
+changed_test_list="$recheck_dir/changed-test-files.txt"
+
+: > "$changed_test_list"
+for file in ${changed_test_files[@]+"${changed_test_files[@]}"}; do
+  printf '%s\n' "$file" >> "$changed_test_list"
+done
+
+# Report paths and `git diff` paths are both repository-relative here; tolerate a
+# leading "./" on the report side rather than silently treating a changed file as
+# unchanged (which would let the cap defer it).
+is_changed_test_file() {
+  local candidate="${1#./}"
+  [[ -s "$changed_test_list" ]] || return 1
+  grep -Fxq -- "$candidate" "$changed_test_list"
+}
 
 testcase_rows "$@" > "$measured_rows"
 if [[ ! -s "$measured_rows" ]]; then
@@ -238,15 +296,37 @@ done < <(
 : > "$rechecked_list"
 : > "$deferred_list"
 recheck_files=()
+changed_offender_count=0
+capped_recheck_count=0
 deferred_count=0
+
+# Pass 1: offenders in test files this change touched. Always rechecked, first
+# and outside the cap, and failed closed on their isolated median.
 for file in ${offender_files[@]+"${offender_files[@]}"}; do
   if [[ ! -f "$file" ]]; then
     # Nothing to re-run; the first sample stands for this file's offenders.
     continue
   fi
-  if [[ "${#recheck_files[@]}" -lt "$recheck_max_files" ]]; then
+  if is_changed_test_file "$file"; then
     recheck_files+=("$file")
     printf '%s\n' "$file" >> "$rechecked_list"
+    changed_offender_count=$((changed_offender_count + 1))
+  fi
+done
+
+# Pass 2: offenders in test files this change did not touch. These compete for
+# the cap, worst first; past it they are reported, never failed.
+for file in ${offender_files[@]+"${offender_files[@]}"}; do
+  if [[ ! -f "$file" ]]; then
+    continue
+  fi
+  if is_changed_test_file "$file"; then
+    continue
+  fi
+  if [[ "$capped_recheck_count" -lt "$recheck_max_files" ]]; then
+    recheck_files+=("$file")
+    printf '%s\n' "$file" >> "$rechecked_list"
+    capped_recheck_count=$((capped_recheck_count + 1))
   else
     deferred_count=$((deferred_count + 1))
     printf '%s\n' "$file" >> "$deferred_list"
@@ -256,8 +336,11 @@ done
 if [[ "${#recheck_files[@]}" -gt 0 ]]; then
   echo "Rechecking ${#recheck_files[@]} file(s) over the ${max_ms}ms budget: ${recheck_runs} isolated run(s) each, median enforced."
 fi
+if [[ "$changed_offender_count" -gt 0 ]]; then
+  echo "${changed_offender_count} of them are test file(s) this change touches: rechecked first, outside the ${recheck_max_files}-file cap, and failed on their isolated median."
+fi
 if [[ "$deferred_count" -gt 0 ]]; then
-  echo "${deferred_count} file(s) over the ${max_ms}ms budget were not rechecked (recheck capped at ${recheck_max_files} file(s), worst first); reporting them as unverified rather than failing them without isolated evidence."
+  echo "${deferred_count} file(s) over the ${max_ms}ms budget were not rechecked (recheck capped at ${recheck_max_files} file(s), worst first, among test files this change did NOT touch); reporting them as unverified rather than failing them without isolated evidence."
 fi
 
 if [[ "${#recheck_files[@]}" -gt 0 ]]; then
@@ -351,9 +434,10 @@ FILENAME == recheck_file {
     next
   }
   if ($1 in deferred) {
-    # Bounded recheck, worst first: without an isolated median this sample is
-    # not evidence of a regression, so report it instead of failing on it.
-    printf "Budget not verified for %s (first sample %.2fms): the recheck was capped before reaching its file.\n", label, $4
+    # Bounded recheck, worst first, over files this change did not touch: without
+    # an isolated median this sample is not evidence of a regression by THIS
+    # change, so report it instead of failing on it.
+    printf "Budget not verified for %s (first sample %.2fms): the recheck was capped before reaching its file, which this change did not touch.\n", label, $4
     next
   }
   printf "Test exceeded %dms: %s (%.2fms)\n", limit_ms, label, $4 > "/dev/stderr"

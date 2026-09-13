@@ -128,8 +128,23 @@ is kept — same session, same `incarnation` — but:
   `runTrackedDeviceInput` ahead of its sessionless early return (tap, swipe,
   typeText, button, key, gestures), `request_observation` in the device-data
   stream server (which refuses BEFORE observing, instead of acking `success:
-true` after pushing zero frames), and the `ide/*` device-addressed routes. The
-  stream server reaches it through the `DeviceSessionResolver` it already holds.
+true` after pushing zero frames), the `ide/*` device-addressed routes, the
+  raw-serial `subscribe_storage` target, and the capture servers — video-stream
+  `subscribe`, `webrtcStream` `start` and `testRecording` `start`. Authorization
+  is NOT this gate: the quarantine deliberately preserves the owning session, so
+  an authorized subscribe or start still passes it and would capture whichever
+  replacement AVD now answers on the serial. The push servers reach the gate
+  through the `DeviceSessionResolver` they already hold; the capture and
+  recording servers, which hold no pool reference, take the narrower
+  `DeviceAdmissionGate` (`src/daemon/deviceAdmissionGate.ts`) instead. Teardown
+  spellings are deliberately exempt — refusing an unsubscribe or a stop would
+  strand device-side state this daemon registered.
+
+An all-device `request_observation` names no serial for the gate to preflight,
+so the same false acknowledgement is prevented on the way out instead: a
+quarantined device is reported as a per-device failure (alongside the
+missing-hierarchy ones) rather than pushed into the routing black hole and acked
+`success: true`.
 
 The enforcement is two lint tests, not review attention:
 `test/lint/deviceDiscoveryReconcileFunnel.test.ts` inventories every discovery
@@ -141,6 +156,15 @@ Leaving the quarantine is decided by the next discovery that READS a name: the
 pooled label (or the AVD this pool started) restores the entry unchanged, and a
 different name is a replacement — a fresh incarnation, the old session retired,
 exactly as an observed disappearance. Handsets never enter the state.
+
+**Only NEWER evidence lifts it.** Discovery calls run concurrently and finish out
+of order, so an older listing that read the AVD name before it became unreadable
+can land after the placeholder. `PooledDevice.identityUnresolvedAt` records the
+`observedAt` of the observation that entered (or re-confirmed) the quarantine, and
+a strictly older stamped observation is ignored — the same newer-wins ordering the
+pool applies to mutable-name updates through `nameObservedAt`. Unstamped
+observations stay unorderable and lift as before, so a legacy caller cannot wedge
+an entry in quarantine.
 
 **A disagreement only leaves the quarantine through the replacement actually
 installing.** `replacePooledDeviceForRuntimeIdentity` installs it by evicting the

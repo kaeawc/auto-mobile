@@ -70,6 +70,25 @@ enable/disable conflicts fail startup. Repeatable `--enable-tool` and
 `--disable-tool` flags override these environment values; persisted
 `setToolEnabled` choices override startup defaults.
 
+## CLI session lifetime
+
+Each `--cli` invocation is its own process, so it cannot send the periodic
+heartbeat a long-running MCP connection does. A session acquired or used by
+`--cli` is therefore held on a wall-clock idle timeout instead of the 10 s
+heartbeat contract, refreshed by every `--cli` call that touches it:
+
+```bash
+export AUTOMOBILE_CLI_SESSION_IDLE_TIMEOUT_MS=600000
+```
+
+The default is 10 minutes, and the ceiling is 1 hour. The value is read from the
+`--cli` process, not the daemon's, and travels with the invocation, so changing
+it takes effect on the very next call — no daemon restart. Sessions owned by a
+long-lived MCP client (stdio or HTTP) are unaffected and keep the heartbeat
+contract; if such a client takes over a session a `--cli` call had held, that
+session goes back to the heartbeat contract and stops occupying its device for
+the idle window once the client disconnects.
+
 ## Automatic observation screenshots
 
 Explicit `observe` calls retain their existing screenshot behavior. Automatic

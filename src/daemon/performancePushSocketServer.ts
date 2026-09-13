@@ -223,7 +223,9 @@ export class PerformancePushSocketServer extends PushSubscriptionSocketServer<
 
   protected parseSubscriptionFilter(request: Record<string, unknown>): PerformanceFilter {
     return {
-      deviceSessionUuid: (request.deviceSessionUuid as string) ?? null,
+      // Validated, not cast: a blank/non-string key would otherwise become a filter that
+      // matches nothing while the subscribe call still acks success (#6676).
+      deviceSessionUuid: this.parseDeviceSessionUuid(request.deviceSessionUuid),
       packageName: (request.packageName as string) ?? null,
     };
   }

@@ -174,6 +174,18 @@ export interface ObserveResult {
   viewHierarchy?: ViewHierarchyResult;
 
   /**
+   * Why the captured hierarchy is incomplete, lifted from
+   * `viewHierarchy.truncationReasons` by the skeleton projection (issue #6601),
+   * which removes the tree that otherwise carries it. Present only when
+   * something was actually dropped: a device-side stop (`max_nodes`,
+   * `max_depth`, a cancelled walk) or the host-side per-node child cap
+   * (`max_children[<node> kept N of M]`). Its presence means the rows in
+   * `skeleton` / `context` are a SUBSET of what is on screen, so an element
+   * missing from them is not evidence it is absent.
+   */
+  truncationReasons?: string[];
+
+  /**
    * Interactable Skeleton Projection (issue #4388): a flat, actionable-only
    * summary emitted in place of `viewHierarchy` / `elements`. The `"skeleton"`
    * projection is now the default; it is absent only when a caller opts out with

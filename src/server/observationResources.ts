@@ -120,10 +120,30 @@ export const RESOURCE_URIS = {
   FRESH_SESSION_SCREENSHOT: "automobile:device-session/{sessionUuid}/screenshot",
 } as const;
 
-// Helper to get the latest screenshot path from cache
-async function getLatestScreenshotPath(): Promise<string | undefined> {
+// The unscoped `automobile:observation/latest` and
+// `automobile:observation/latest/screenshot` resources are separate reads
+// (issue #6600). Each independently resolves the most-recent-across-all-devices
+// observation from one `getRecentCachedObservation()` call at the instant it is
+// read. That makes each read internally atomic: its hierarchy, or its
+// screenshot-device resolution, cannot be assembled from stale, shared, or racy
+// state.
+//
+// The pair is consequently a best-effort point-in-time snapshot, not a hard
+// cross-read guarantee: a new observation can land in the small window between
+// the two reads. Callers that need a guaranteed hierarchy/screenshot match from
+// exactly one device need an observation-id-scoped resource, which does not
+// exist yet — tracked as a follow-up; see the follow-up issue linked from PR
+// #6914.
+
+function resolveLatestScreenshotDeviceId(): string | undefined {
+  return RealObserveScreen.getRecentCachedObservation()?.deviceId;
+}
+
+// Helper to get the cached screenshot path for the device selected by this
+// screenshot read's atomic latest-observation lookup (issue #6600).
+async function getLatestScreenshotPath(deviceId: string): Promise<string | undefined> {
   try {
-    const screenshotPath = RealObserveScreen.getRecentCachedScreenshotPath();
+    const screenshotPath = RealObserveScreen.getRecentCachedScreenshotPathForDevice(deviceId);
     if (!screenshotPath) {
       return undefined;
     }
@@ -143,9 +163,9 @@ async function getLatestScreenshotPath(): Promise<string | undefined> {
 // Handler for latest observation resource (text/json)
 async function getLatestObservation(): Promise<ResourceContent> {
   try {
-    const cachedResult = RealObserveScreen.getRecentCachedResult();
+    const cachedObservation = RealObserveScreen.getRecentCachedObservation();
 
-    if (!cachedResult) {
+    if (!cachedObservation) {
       return {
         uri: RESOURCE_URIS.LATEST_OBSERVATION,
         mimeType: "application/json",
@@ -164,7 +184,7 @@ async function getLatestObservation(): Promise<ResourceContent> {
     return {
       uri: RESOURCE_URIS.LATEST_OBSERVATION,
       mimeType: "application/json",
-      text: stringifyToolResponse(cachedResult),
+      text: stringifyToolResponse(cachedObservation.result),
     };
   } catch (error) {
     logger.error(`[ObservationResources] Failed to get latest observation: ${error}`);
@@ -185,8 +205,8 @@ async function getLatestObservation(): Promise<ResourceContent> {
 // Handler for latest screenshot resource (image/png as blob)
 async function getLatestScreenshot(): Promise<ResourceContent> {
   try {
-    const cachedResult = RealObserveScreen.getRecentCachedResult();
-    if (!cachedResult) {
+    const deviceId = resolveLatestScreenshotDeviceId();
+    if (!deviceId) {
       return {
         uri: RESOURCE_URIS.LATEST_SCREENSHOT,
         mimeType: "application/json",
@@ -201,18 +221,15 @@ async function getLatestScreenshot(): Promise<ResourceContent> {
       };
     }
 
-    let screenshotPath = await getLatestScreenshotPath();
+    let screenshotPath = await getLatestScreenshotPath(deviceId);
 
-    if (!screenshotPath) {
-      const pendingDeviceId = ScreenshotJobTracker.getMostRecentPendingDeviceId();
-      if (pendingDeviceId) {
-        await ScreenshotJobTracker.waitForCompletion(pendingDeviceId, 3000);
-        screenshotPath = await getLatestScreenshotPath();
-      }
+    if (!screenshotPath && ScreenshotJobTracker.isPending(deviceId)) {
+      await ScreenshotJobTracker.waitForCompletion(deviceId, 3000);
+      screenshotPath = await getLatestScreenshotPath(deviceId);
     }
 
     if (!screenshotPath) {
-      const screenshotError = RealObserveScreen.getRecentCachedScreenshotError();
+      const screenshotError = RealObserveScreen.getRecentCachedScreenshotErrorForDevice(deviceId);
       const errorMessage = screenshotError
         ? `No screenshot available from the latest observation: ${screenshotError}`
         : "No screenshot available. Call the 'observe' tool again to capture a screenshot.";
@@ -621,7 +638,7 @@ export function registerObservationResources(): void {
   ResourceRegistry.register(
     RESOURCE_URIS.LATEST_OBSERVATION,
     "Latest Observation",
-    "The most recent screen observation including view hierarchy, elements, and metadata. Updated automatically after each observe() call.",
+    "The hierarchy and unscoped screenshot are a best-effort point-in-time snapshot per read, with no hard cross-read guarantee: another device's newer observation can land between reads.",
     "application/json",
     getLatestObservation,
   );

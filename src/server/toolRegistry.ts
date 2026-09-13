@@ -411,7 +411,7 @@ type ObservationArtifactWriterFactory = (
   retention?: ToolOutputArtifactRetention,
 ) => ObservationArtifactWriter;
 
-const AUTOMATIC_TOOL_OUTPUT_RETENTION: ToolOutputArtifactRetention = {
+export const AUTOMATIC_TOOL_OUTPUT_RETENTION: ToolOutputArtifactRetention = {
   maxAgeMs: 24 * 60 * 60 * 1000,
   maxFiles: 500,
   overflowMinAgeMs: 60 * 60 * 1000,

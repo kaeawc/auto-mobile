@@ -998,6 +998,11 @@
           "type": "integer",
           "exclusiveMinimum": 0,
           "maximum": 890000
+        },
+        "force": {
+          "description": "Drop every AVD-name comparison on the way to the kill -- the emulator-console probe that confirms which AVD is running on this serial, and the platform kill's own check against a fresh discovery -- and act on whatever occupies the serial. Use only when the console has wedged and the normal call refuses because the AVD name cannot be confirmed. This does not override the conflict check, it removes it: force means 'act on whatever emulator currently occupies this serial', including a different AVD that took the serial over. It does NOT select a different serial, and a serial with nothing running on it still refuses. Nor does it override the refusal raised when this daemon's pool entry for the serial was retired and replaced while the action was being prepared, or deleteDevice's refusal to delete a stopped image while a booted emulator that cannot be identified at all is attached. Android emulators only; accepted and ignored for iOS and physical devices.",
+          "default": false,
+          "type": "boolean"
         }
       },
       "required": ["operationId", "target", "mode", "verifyAbsence"],
@@ -2673,6 +2678,11 @@
           },
           "required": ["name", "deviceId", "platform"],
           "additionalProperties": false
+        },
+        "force": {
+          "description": "Drop every AVD-name comparison on the way to the kill -- the emulator-console probe that confirms which AVD is running on this serial, and the platform kill's own check against a fresh discovery -- and act on whatever occupies the serial. Use only when the console has wedged and the normal call refuses because the AVD name cannot be confirmed. This does not override the conflict check, it removes it: force means 'act on whatever emulator currently occupies this serial', including a different AVD that took the serial over. It does NOT select a different serial, and a serial with nothing running on it still refuses. Nor does it override the refusal raised when this daemon's pool entry for the serial was retired and replaced while the action was being prepared, or deleteDevice's refusal to delete a stopped image while a booted emulator that cannot be identified at all is attached. Android emulators only; accepted and ignored for iOS and physical devices.",
+          "default": false,
+          "type": "boolean"
         }
       },
       "required": ["device"],
@@ -4482,9 +4492,23 @@
               },
               "required": ["available", "source", "units"],
               "additionalProperties": false
+            },
+            "truncationReasons": {
+              "description": "Why the captured hierarchy is incomplete (issue #6601). Present only when rows were dropped — a device-side stop (max_nodes, max_depth) or the per-node child cap (max_children[<node> kept N of M]). This is the nested location `sanitizeObserveResult` leaves the warning under `project:\"full\"` or `raw:true`; the skeleton projection instead lifts the same information to the top-level `truncationReasons` field.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
             }
           },
           "additionalProperties": {}
+        },
+        "truncationReasons": {
+          "description": "Why the captured hierarchy is incomplete (issue #6601), lifted out of `viewHierarchy` by the skeleton projection that removes it. Present only when rows were dropped — a device-side stop (max_nodes, max_depth) or the per-node child cap (max_children[<node> kept N of M]). When present, `skeleton`/`context` are a subset of the screen: an element missing from them is not evidence it is absent.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         },
         "skeleton": {
           "type": "array",
@@ -11036,6 +11060,13 @@
                   "required": ["isFresh"],
                   "additionalProperties": {}
                 },
+                "truncationReasons": {
+                  "description": "Why the captured hierarchy is incomplete (issue #6601) — the same field a skeleton-projected full observation carries, so a client reads it the same way in both modes. Present only when rows were dropped: a device-side stop (max_nodes, max_depth) or the per-node child cap (max_children[<node> kept N of M]). When present, `skeleton`/`context` are a subset of the screen.",
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
                 "settled": {
                   "description": "Same name/meaning as a full observation's `settled` (issue #6866): whether the observation this diff was computed from passed the hierarchy-stability gate. Populated from the post-action observation, not by `diffObserveResult` itself, so a diff-mode client has the same accessor as a full-mode one.",
                   "type": "boolean"
@@ -11829,6 +11860,505 @@
                   "required": ["platform", "source", "confidence", "key", "components"],
                   "additionalProperties": {}
                 },
+                "viewHierarchy": {
+                  "type": "object",
+                  "properties": {
+                    "hierarchy": {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        },
+                        "node": {
+                          "anyOf": [
+                            {
+                              "$ref": "#/$defs/__schema0"
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "$ref": "#/$defs/__schema0"
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      "additionalProperties": {}
+                    },
+                    "windows": {
+                      "anyOf": [
+                        {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "bounds": {
+                                "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid.",
+                                "anyOf": [
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "left": {
+                                        "type": "number"
+                                      },
+                                      "top": {
+                                        "type": "number"
+                                      },
+                                      "right": {
+                                        "type": "number"
+                                      },
+                                      "bottom": {
+                                        "type": "number"
+                                      },
+                                      "centerX": {
+                                        "type": "number"
+                                      },
+                                      "centerY": {
+                                        "type": "number"
+                                      }
+                                    },
+                                    "required": ["left", "top", "right", "bottom"],
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object.",
+                                    "type": "array",
+                                    "prefixItems": [
+                                      {
+                                        "type": "number"
+                                      },
+                                      {
+                                        "type": "number"
+                                      },
+                                      {
+                                        "type": "number"
+                                      },
+                                      {
+                                        "type": "number"
+                                      }
+                                    ]
+                                  }
+                                ]
+                              },
+                              "hierarchy": {
+                                "$ref": "#/$defs/__schema0"
+                              }
+                            },
+                            "additionalProperties": {}
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "contentHiddenRegions": {
+                      "anyOf": [
+                        {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "bounds": {
+                                "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid.",
+                                "anyOf": [
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "left": {
+                                        "type": "number"
+                                      },
+                                      "top": {
+                                        "type": "number"
+                                      },
+                                      "right": {
+                                        "type": "number"
+                                      },
+                                      "bottom": {
+                                        "type": "number"
+                                      },
+                                      "centerX": {
+                                        "type": "number"
+                                      },
+                                      "centerY": {
+                                        "type": "number"
+                                      }
+                                    },
+                                    "required": ["left", "top", "right", "bottom"],
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object.",
+                                    "type": "array",
+                                    "prefixItems": [
+                                      {
+                                        "type": "number"
+                                      },
+                                      {
+                                        "type": "number"
+                                      },
+                                      {
+                                        "type": "number"
+                                      },
+                                      {
+                                        "type": "number"
+                                      }
+                                    ]
+                                  }
+                                ]
+                              },
+                              "reason": {
+                                "type": "string"
+                              },
+                              "areaPercent": {
+                                "type": "number"
+                              }
+                            },
+                            "required": ["bounds", "reason", "areaPercent"],
+                            "additionalProperties": {}
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "accessibility-focused-element": {
+                      "$ref": "#/$defs/__schema0"
+                    },
+                    "systemInsets": {
+                      "type": "object",
+                      "properties": {
+                        "top": {
+                          "type": "number"
+                        },
+                        "right": {
+                          "type": "number"
+                        },
+                        "bottom": {
+                          "type": "number"
+                        },
+                        "left": {
+                          "type": "number"
+                        }
+                      },
+                      "required": ["top", "right", "bottom", "left"],
+                      "additionalProperties": false
+                    },
+                    "insets": {
+                      "type": "object",
+                      "properties": {
+                        "available": {
+                          "type": "boolean"
+                        },
+                        "source": {
+                          "type": "string",
+                          "enum": [
+                            "android-window-metrics",
+                            "android-resource-fallback",
+                            "ios-sdk-safe-area",
+                            "unavailable"
+                          ]
+                        },
+                        "units": {
+                          "type": "string",
+                          "enum": ["physical-pixels", "points", "unknown"]
+                        },
+                        "systemBars": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "visible": {
+                                  "type": "object",
+                                  "properties": {
+                                    "top": {
+                                      "type": "number"
+                                    },
+                                    "right": {
+                                      "type": "number"
+                                    },
+                                    "bottom": {
+                                      "type": "number"
+                                    },
+                                    "left": {
+                                      "type": "number"
+                                    }
+                                  },
+                                  "required": ["top", "right", "bottom", "left"],
+                                  "additionalProperties": false
+                                },
+                                "stable": {
+                                  "type": "object",
+                                  "properties": {
+                                    "top": {
+                                      "type": "number"
+                                    },
+                                    "right": {
+                                      "type": "number"
+                                    },
+                                    "bottom": {
+                                      "type": "number"
+                                    },
+                                    "left": {
+                                      "type": "number"
+                                    }
+                                  },
+                                  "required": ["top", "right", "bottom", "left"],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "required": ["visible", "stable"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "displayCutout": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "top": {
+                                  "type": "number"
+                                },
+                                "right": {
+                                  "type": "number"
+                                },
+                                "bottom": {
+                                  "type": "number"
+                                },
+                                "left": {
+                                  "type": "number"
+                                }
+                              },
+                              "required": ["top", "right", "bottom", "left"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "displayCutoutInfo": {
+                          "type": "object",
+                          "properties": {
+                            "classification": {
+                              "type": "string",
+                              "enum": ["none", "notch", "dynamic_island", "hole_punch", "unknown"]
+                            },
+                            "bounds": {
+                              "anyOf": [
+                                {
+                                  "type": "array",
+                                  "items": {
+                                    "anyOf": [
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "left": {
+                                            "type": "number"
+                                          },
+                                          "top": {
+                                            "type": "number"
+                                          },
+                                          "right": {
+                                            "type": "number"
+                                          },
+                                          "bottom": {
+                                            "type": "number"
+                                          },
+                                          "centerX": {
+                                            "type": "number"
+                                          },
+                                          "centerY": {
+                                            "type": "number"
+                                          }
+                                        },
+                                        "required": ["left", "top", "right", "bottom"],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "description": "Compact bounds tuple [left, top, right, bottom].",
+                                        "minItems": 4,
+                                        "maxItems": 4,
+                                        "type": "array",
+                                        "items": {
+                                          "type": "number"
+                                        }
+                                      }
+                                    ]
+                                  }
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "required": ["classification"],
+                          "additionalProperties": false
+                        },
+                        "systemGestures": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "top": {
+                                  "type": "number"
+                                },
+                                "right": {
+                                  "type": "number"
+                                },
+                                "bottom": {
+                                  "type": "number"
+                                },
+                                "left": {
+                                  "type": "number"
+                                }
+                              },
+                              "required": ["top", "right", "bottom", "left"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "mandatorySystemGestures": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "top": {
+                                  "type": "number"
+                                },
+                                "right": {
+                                  "type": "number"
+                                },
+                                "bottom": {
+                                  "type": "number"
+                                },
+                                "left": {
+                                  "type": "number"
+                                }
+                              },
+                              "required": ["top", "right", "bottom", "left"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "tappableElement": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "top": {
+                                  "type": "number"
+                                },
+                                "right": {
+                                  "type": "number"
+                                },
+                                "bottom": {
+                                  "type": "number"
+                                },
+                                "left": {
+                                  "type": "number"
+                                }
+                              },
+                              "required": ["top", "right", "bottom", "left"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "safeArea": {
+                          "type": "object",
+                          "properties": {
+                            "top": {
+                              "type": "number"
+                            },
+                            "right": {
+                              "type": "number"
+                            },
+                            "bottom": {
+                              "type": "number"
+                            },
+                            "left": {
+                              "type": "number"
+                            }
+                          },
+                          "required": ["top", "right", "bottom", "left"],
+                          "additionalProperties": false
+                        },
+                        "systemChrome": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "visibility": {
+                                  "type": "string",
+                                  "enum": ["visible", "hidden", "partial", "unknown"]
+                                },
+                                "statusBar": {
+                                  "type": "string",
+                                  "enum": ["visible", "hidden", "unknown"]
+                                },
+                                "navigationBar": {
+                                  "type": "string",
+                                  "enum": ["visible", "hidden", "unknown"]
+                                },
+                                "homeIndicatorAutoHideRequested": {
+                                  "anyOf": [
+                                    {
+                                      "type": "boolean"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "source": {
+                                  "type": "string",
+                                  "enum": ["android-window-insets", "ios-status-bar-manager"]
+                                }
+                              },
+                              "required": ["visibility", "statusBar", "source"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": ["available", "source", "units"],
+                      "additionalProperties": false
+                    },
+                    "truncationReasons": {
+                      "description": "Why the captured hierarchy is incomplete (issue #6601). Present only when rows were dropped — a device-side stop (max_nodes, max_depth) or the per-node child cap (max_children[<node> kept N of M]). This is the nested location `sanitizeObserveResult` leaves the warning under `project:\"full\"` or `raw:true`; the skeleton projection instead lifts the same information to the top-level `truncationReasons` field.",
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "additionalProperties": {}
+                },
+                "truncationReasons": {
+                  "description": "Why the captured hierarchy is incomplete (issue #6601) — the same field a diffed observation carries, so a client reads it the same way in both modes. Present only when rows were dropped: a device-side stop (max_nodes, max_depth) or the per-node child cap (max_children[<node> kept N of M]). When present, `skeleton`/`context` are a subset of the screen.",
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
                 "settled": {
                   "description": "Whether this observation passed the hierarchy-stability gate (issue #6866): two consecutive structurally-equal captures. `false` means the bound expired, the action was not navigation-class, or the action failed — in every case the capture was never confirmed stable. Stamped on every embedded action observation.",
                   "type": "boolean"
@@ -12606,7 +13136,85 @@
         "debug": {}
       },
       "required": ["success"],
-      "additionalProperties": {}
+      "additionalProperties": {},
+      "$defs": {
+        "__schema0": {
+          "type": "object",
+          "properties": {
+            "bounds": {
+              "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid.",
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "left": {
+                      "type": "number"
+                    },
+                    "top": {
+                      "type": "number"
+                    },
+                    "right": {
+                      "type": "number"
+                    },
+                    "bottom": {
+                      "type": "number"
+                    },
+                    "centerX": {
+                      "type": "number"
+                    },
+                    "centerY": {
+                      "type": "number"
+                    }
+                  },
+                  "required": ["left", "top", "right", "bottom"],
+                  "additionalProperties": false
+                },
+                {
+                  "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object.",
+                  "type": "array",
+                  "prefixItems": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    }
+                  ]
+                }
+              ]
+            },
+            "occlusionState": {
+              "type": "string"
+            },
+            "occludedBy": {
+              "type": "string"
+            },
+            "occludedByViewId": {
+              "type": "string"
+            },
+            "node": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/__schema0"
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/__schema0"
+                  }
+                }
+              ]
+            }
+          },
+          "additionalProperties": {}
+        }
+      }
     }
   },
   {

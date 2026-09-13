@@ -164,6 +164,10 @@ export function sanitizeObserveResult(
  * emitted copy. A hierarchy-less observation (capture failure) yields an empty
  * skeleton and no `context` — still a valid, if empty, projection.
  *
+ * Any `viewHierarchy.truncationReasons` are lifted to the payload top level
+ * first (issue #6601), so a projection that removes the tree still tells the
+ * caller the rows it does list may be incomplete.
+ *
  * `source` is the pre-clone `obs`: its elements still carry the non-enumerable
  * ancestry provenance (issue #5881) that the `sanitizeObserveResult` JSON clone
  * strips from `out`. The projection reads but never mutates them, so the "input
@@ -183,6 +187,18 @@ function projectSkeletonOnto(out: ObserveResult, source: ObserveResult): void {
     out.context = context;
   } else {
     delete out.context;
+  }
+  // Lift the hierarchy's truncation provenance before the tree that carries it
+  // is dropped (issue #6601). The skeleton is projected from elements that were
+  // already capped (per-node child cap, or a device-side `max_nodes`/`max_depth`
+  // stop), so without this the default projection reports a short list with no
+  // hint that rows are missing — exactly the silent false negative
+  // `truncationReasons` exists to prevent. `layoutWarnings` / `performanceAudit`
+  // are deliberately advisory and dropped here; this is not advisory, it is the
+  // completeness contract of the rows the skeleton does list.
+  const truncationReasons = out.viewHierarchy?.truncationReasons;
+  if (truncationReasons && truncationReasons.length > 0) {
+    out.truncationReasons = [...truncationReasons];
   }
   delete out.viewHierarchy;
   delete out.elements;
@@ -632,6 +648,15 @@ export interface ObserveDiff {
    * no single accessor for "is this capture fresh" across full and diff modes.
    */
   freshness?: ObserveResult["freshness"];
+  /**
+   * Why the captured hierarchy is incomplete — the same top-level field a
+   * skeleton-projected full observation carries (issue #6601). A diff REPLACES
+   * the projected observation, so without this the provenance the projection
+   * lifted out of `viewHierarchy` is dropped with it and a capped `skeleton`
+   * reads as a complete one. Populated by the `finalizeToolResponse` call site
+   * from the post-action observation, not by {@link diffObserveResult}.
+   */
+  truncationReasons?: string[];
   /**
    * Whether the observation this diff was computed from passed the
    * embedded-observation stability gate (issue #6866). Populated by the

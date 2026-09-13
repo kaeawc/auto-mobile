@@ -3,7 +3,12 @@ import { DeviceLabelMap, Session, type SessionReleaseSnapshot } from "./sessionM
 import type { DeviceRecoveryEligibility, DeviceRecoveryPolicy, PooledDevice } from "./devicePool";
 import type { DeviceSessionRecord } from "./deviceSessionRegistry";
 import type { BootedDevice } from "../models";
-import { DAEMON_HEARTBEAT_METHOD, DAEMON_LIST_DEVICE_SESSIONS_METHOD } from "./constants";
+import {
+  CLI_SESSION_LIVENESS_POLICY,
+  HEARTBEAT_SESSION_LIVENESS_POLICY,
+  DAEMON_HEARTBEAT_METHOD,
+  DAEMON_LIST_DEVICE_SESSIONS_METHOD,
+} from "./constants";
 
 /** Socket endpoint clients may query before sending optional newer parameters. */
 export const DAEMON_CAPABILITIES_METHOD = "daemon/capabilities";
@@ -24,6 +29,10 @@ export interface DaemonStateAccess {
     getSession(sessionId: string): Session | null;
     getTerminalReleaseSnapshot?(sessionId: string): SessionReleaseSnapshot | undefined;
     recordHeartbeat?(sessionId: string): void;
+    /** Opt a one-shot `--cli`-owned session out of the heartbeat contract (#6870). */
+    adoptCliLivenessPolicy?(sessionId: string, idleTimeoutMs?: number): boolean;
+    /** Put a CLI-adopted session back on the strict heartbeat contract (#6870). */
+    restoreHeartbeatLivenessPolicy?(sessionId: string): boolean;
     getSessionForDevice?(deviceId: string): string | null;
     getDeviceLabels(sessionId: string): DeviceLabelMap | undefined;
     releaseSession(sessionId: string): Promise<string | null>;
@@ -103,7 +112,10 @@ export async function handleDaemonRequest(
 
   switch (request.method) {
     case DAEMON_HEARTBEAT_METHOD: {
-      const sessionId = (request.params as { sessionId?: string } | undefined)?.sessionId;
+      const heartbeatParams = request.params as
+        | { sessionId?: string; livenessPolicy?: string; idleTimeoutMs?: number }
+        | undefined;
+      const sessionId = heartbeatParams?.sessionId;
       if (!sessionId) {
         return {
           success: false,
@@ -116,6 +128,40 @@ export async function handleDaemonRequest(
           success: false,
           error: `Session not found: ${sessionId}`,
         };
+      }
+      // A one-shot `--cli` client declares itself here (issue #6870) so the
+      // daemon stops holding its session to the 10 s heartbeat contract no
+      // one-shot process can keep. Any other client omits the field and keeps
+      // the strict contract exactly as before.
+      if (heartbeatParams?.livenessPolicy === CLI_SESSION_LIVENESS_POLICY) {
+        // The invocation carries its own resolved idle timeout: it reuses a
+        // running daemon, whose process env was read at startup and cannot
+        // reflect this invocation's override (issue #6870 review). The manager
+        // re-validates and bounds it.
+        manager.adoptCliLivenessPolicy?.(sessionId, heartbeatParams.idleTimeoutMs);
+        return {
+          success: true,
+          result: {
+            sessionId,
+            livenessPolicy: "cli-idle",
+            idleTimeoutMs: manager.getSession(sessionId)?.heartbeatTimeoutMs,
+          },
+        };
+      }
+      if (heartbeatParams?.livenessPolicy === HEARTBEAT_SESSION_LIVENESS_POLICY) {
+        // A long-lived stdio/HTTP proxy CAN keep the strict contract and says so
+        // on every heartbeat, so a session a previous `--cli` invocation moved
+        // onto the minutes-long idle window goes back to it (issue #6870
+        // review) instead of holding its device for that window after this
+        // client disconnects.
+        // `restoreHeartbeatLivenessPolicy` records the heartbeat itself as part
+        // of re-stamping the deadlines off the restored timeouts.
+        if (manager.restoreHeartbeatLivenessPolicy?.(sessionId)) {
+          return {
+            success: true,
+            result: { sessionId, livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY },
+          };
+        }
       }
       manager.recordHeartbeat?.(sessionId);
       return { success: true, result: { sessionId } };

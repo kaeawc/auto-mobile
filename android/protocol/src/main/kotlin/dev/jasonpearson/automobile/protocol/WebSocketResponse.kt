@@ -745,6 +745,12 @@ data class InstalledPackageRecord(
   val isSystem: Boolean,
   val versionName: String? = null,
   val versionCode: Long? = null,
+  /** Launcher label as a human sees it, from `PackageManager.getApplicationLabel` (#6798). */
+  val label: String? = null,
+  /**
+   * Whether the package has a launchable entry point, i.e. `launchApp` can do something (#6798).
+   */
+  val launchable: Boolean? = null,
 )
 
 @Serializable

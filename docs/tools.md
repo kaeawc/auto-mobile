@@ -91,22 +91,22 @@ or `--enable-tool sendKeys`.
 
 ## Apps, files & app data
 
-| Tool                                                                                             | What it does                                                                                                               |
-| ------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
-| 📱 <code>listApps</code>                                                                         | Lists installed apps on a device (params: `device`, `type`, `search`, `profile`; default `type=user`).                     |
-| 🚀 <code>launchApp</code>                                                                        | Launches an app by package name; on Android an app already in the foreground is a success flagged `alreadyForeground`.     |
-| ❌ <code>terminateApp</code>                                                                     | Terminates an app by package name.                                                                                         |
-| 💥 <code>crashApp</code>                                                                         | Intentionally crashes a running app through the platform crash path.                                                       |
-| 📦 <code>installApp</code>                                                                       | Installs an APK, app bundle, or IPA.                                                                                       |
-| 🗑️ <code>uninstallApp</code>                                                                     | Uninstalls an app by package name or bundle identifier.                                                                    |
-| 🔗 <code>getDeepLinks</code>                                                                     | Queries an app's deep links.                                                                                               |
-| 📄 <code>putAppFile</code>                                                                       | Writes local-file, UTF-8, or base64 content into an app container.                                                         |
-| 📥 <code>stageSharedStorage</code>                                                               | Stages host-file, UTF-8, or base64 fixtures into a bounded Android Downloads namespace for system pickers (Android only).  |
-| ⚙️ <code>getPreference</code> / ⚙️ <code>setPreference</code>                                    | Reads or writes Android system properties, SharedPreferences, or iOS UserDefaults.                                         |
-| 🔑 <code>setKeyValue</code> / 🔑 <code>removeKeyValue</code> / 🔑 <code>clearKeyValueFile</code> | Manages an app key-value storage file.                                                                                     |
-| 🗃️ <code>listDataStores</code> / 🗃️ <code>getDataStore</code>                                    | Lists or reads Android Jetpack DataStore entries with the SDK adapter.                                                     |
-| 🗄️ <code>sqlQuery</code>                                                                         | Executes SQL against an app SQLite database.                                                                               |
-| 🔐 <code>resetKeychain</code>                                                                    | Resets all Keychain data on an iOS Simulator after explicit confirmation; unsupported on Android and physical iOS devices. |
+| Tool                                                                                             | What it does                                                                                                                             |
+| ------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| 📱 <code>listApps</code>                                                                         | Lists installed apps with optional label/launchability when reported (`device`, `type`, `search`, `profile`; default `type=launchable`). |
+| 🚀 <code>launchApp</code>                                                                        | Launches an app by package name; on Android an app already in the foreground is a success flagged `alreadyForeground`.                   |
+| ❌ <code>terminateApp</code>                                                                     | Terminates an app by package name.                                                                                                       |
+| 💥 <code>crashApp</code>                                                                         | Intentionally crashes a running app through the platform crash path.                                                                     |
+| 📦 <code>installApp</code>                                                                       | Installs an APK, app bundle, or IPA.                                                                                                     |
+| 🗑️ <code>uninstallApp</code>                                                                     | Uninstalls an app by package name or bundle identifier.                                                                                  |
+| 🔗 <code>getDeepLinks</code>                                                                     | Queries an app's deep links.                                                                                                             |
+| 📄 <code>putAppFile</code>                                                                       | Writes local-file, UTF-8, or base64 content into an app container.                                                                       |
+| 📥 <code>stageSharedStorage</code>                                                               | Stages host-file, UTF-8, or base64 fixtures into a bounded Android Downloads namespace for system pickers (Android only).                |
+| ⚙️ <code>getPreference</code> / ⚙️ <code>setPreference</code>                                    | Reads or writes Android system properties, SharedPreferences, or iOS UserDefaults.                                                       |
+| 🔑 <code>setKeyValue</code> / 🔑 <code>removeKeyValue</code> / 🔑 <code>clearKeyValueFile</code> | Manages an app key-value storage file.                                                                                                   |
+| 🗃️ <code>listDataStores</code> / 🗃️ <code>getDataStore</code>                                    | Lists or reads Android Jetpack DataStore entries with the SDK adapter.                                                                   |
+| 🗄️ <code>sqlQuery</code>                                                                         | Executes SQL against an app SQLite database.                                                                                             |
+| 🔐 <code>resetKeychain</code>                                                                    | Resets all Keychain data on an iOS Simulator after explicit confirmation; unsupported on Android and physical iOS devices.               |
 
 ??? note "Intentional crash contract"
 

@@ -78,6 +78,7 @@ import {
   stopDeviceDataStreamSocketServer,
   getDeviceDataStreamServer,
 } from "./deviceDataStreamSocketServer";
+import { runObservationRequestBatch } from "./observationRequestBatch";
 import {
   startFailuresStreamSocketServer,
   stopFailuresStreamSocketServer,
@@ -1359,29 +1360,34 @@ export class Daemon {
         );
       }
 
-      const requestStart = this.timer.now();
-      const observations = [];
-      for (const pooledDevice of pooledDevices) {
-        if (signal.aborted) {
-          throw new Error("Observation request was aborted");
-        }
-
-        const bootedDevice: BootedDevice = {
-          deviceId: pooledDevice.id,
-          name: pooledDevice.name,
-          platform: pooledDevice.platform,
-          iosVersion: pooledDevice.iosVersion,
-        };
-        const observeScreen = new RealObserveScreen(bootedDevice);
-        const observation = await observeScreen.execute({
-          skipWaitForFresh: false,
-          minTimestamp: requestStart,
-          signal,
-        });
-        observations.push({ deviceId: pooledDevice.id, observation });
+      if (signal.aborted) {
+        throw new Error("Observation request was aborted");
       }
 
-      return observations;
+      const requestStart = this.timer.now();
+      return runObservationRequestBatch(
+        pooledDevices,
+        async (pooledDevice, observationSignal) => {
+          const bootedDevice: BootedDevice = {
+            deviceId: pooledDevice.id,
+            name: pooledDevice.name,
+            platform: pooledDevice.platform,
+            iosVersion: pooledDevice.iosVersion,
+          };
+          const observeScreen = new RealObserveScreen(bootedDevice);
+          return observeScreen.execute({
+            skipWaitForFresh: false,
+            minTimestamp: requestStart,
+            signal: observationSignal,
+          });
+        },
+        {
+          timer: this.timer,
+          signal,
+          assertDeviceActionable: (pooledDevice) =>
+            this.devicePool.assertDeviceActionable(pooledDevice.id, "to observe"),
+        },
+      );
     });
 
     logger.info("[Daemon] Observation stream callback configured");

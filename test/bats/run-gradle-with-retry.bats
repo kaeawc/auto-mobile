@@ -8,6 +8,25 @@ setup() {
   TEST_ROOT="$(mktemp -d)"
   LOG_DIR="${TEST_ROOT}/logs"
   COMMAND="${TEST_ROOT}/fake-gradle.sh"
+  use_fake_sleep
+}
+
+# Shadow `sleep` through a fake-bin PATH entry, recording one line per requested
+# delay instead of waiting for real. The wrapper calls `sleep` as a bare command,
+# so PATH decides which one runs. Every retry case here would otherwise burn a
+# real GRADLE_RETRY_DELAY_SECONDS proving a constant; the log is what the delay
+# assertions read, which is the behaviour worth asserting anyway.
+use_fake_sleep() {
+  mkdir -p "${TEST_ROOT}/fakebin"
+  SLEEP_LOG="${TEST_ROOT}/sleeps"
+  : > "$SLEEP_LOG"
+  cat > "${TEST_ROOT}/fakebin/sleep" <<'FAKE_SLEEP'
+#!/usr/bin/env bash
+printf '%s\n' "$1" >> "${SLEEP_LOG}"
+exit 0
+FAKE_SLEEP
+  chmod +x "${TEST_ROOT}/fakebin/sleep"
+  PATH="${TEST_ROOT}/fakebin:${PATH}"
 }
 
 teardown() {
@@ -26,11 +45,14 @@ echo "BUILD SUCCESSFUL"
 SCRIPT
 
   run env GRADLE_RETRY_LOG_DIR="$LOG_DIR" GRADLE_RETRY_DELAY_SECONDS=1 \
+    SLEEP_LOG="$SLEEP_LOG" \
     bash "$SCRIPT" -- "$COMMAND" :playground:app:assembleDebug
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"Running Gradle attempt 1/2"* ]]
   [[ "$output" != *"attempt 2/2"* ]]
+  # A first-attempt success never reaches the backoff.
+  [ ! -s "$SLEEP_LOG" ]
 }
 
 @test "retries Maven plugin resolution failure with refreshed dependencies" {
@@ -56,12 +78,14 @@ echo "BUILD SUCCESSFUL"
 SCRIPT
 
   run env GRADLE_RETRY_LOG_DIR="$LOG_DIR" GRADLE_RETRY_DELAY_SECONDS=1 \
+    SLEEP_LOG="$SLEEP_LOG" \
     FAKE_GRADLE_STATE="${TEST_ROOT}/state" FAKE_GRADLE_ARGS="${TEST_ROOT}/args" \
     bash "$SCRIPT" -- "$COMMAND" :playground:app:assembleDebug --stacktrace
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"Retryable Maven/plugin repository failure detected."* ]]
   [[ "$output" == *"Running Gradle attempt 2/2"* ]]
+  [ "$(tr '\n' ' ' < "$SLEEP_LOG")" = "1 " ]
   grep -q -- "--refresh-dependencies" "${TEST_ROOT}/args"
 }
 
@@ -73,11 +97,14 @@ exit 1
 SCRIPT
 
   run env GRADLE_RETRY_LOG_DIR="$LOG_DIR" GRADLE_RETRY_DELAY_SECONDS=1 \
+    SLEEP_LOG="$SLEEP_LOG" \
     bash "$SCRIPT" -- "$COMMAND" :junit-runner:compileKotlin
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"Failure did not match Maven/plugin repository retry patterns."* ]]
   [[ "$output" != *"attempt 2/2"* ]]
+  # A non-retryable failure exits before the backoff too.
+  [ ! -s "$SLEEP_LOG" ]
 }
 
 @test "retries a DNS host-resolution failure (UnknownHostException)" {
@@ -107,11 +134,13 @@ echo "BUILD SUCCESSFUL"
 SCRIPT
 
   run env GRADLE_RETRY_LOG_DIR="$LOG_DIR" GRADLE_RETRY_DELAY_SECONDS=1 \
+    SLEEP_LOG="$SLEEP_LOG" \
     FAKE_GRADLE_STATE="${TEST_ROOT}/state" \
     bash "$SCRIPT" -- "$COMMAND" :ide-plugin:detekt
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"Running Gradle attempt 2/2"* ]]
+  [ "$(tr '\n' ' ' < "$SLEEP_LOG")" = "1 " ]
 }
 
 @test "retries a glibc-worded name-resolution failure" {
@@ -136,11 +165,13 @@ echo "BUILD SUCCESSFUL"
 SCRIPT
 
   run env GRADLE_RETRY_LOG_DIR="$LOG_DIR" GRADLE_RETRY_DELAY_SECONDS=1 \
+    SLEEP_LOG="$SLEEP_LOG" \
     FAKE_GRADLE_STATE="${TEST_ROOT}/state" \
     bash "$SCRIPT" -- "$COMMAND" :ide-plugin:detekt
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"Running Gradle attempt 2/2"* ]]
+  [ "$(tr '\n' ' ' < "$SLEEP_LOG")" = "1 " ]
 }
 
 @test "retries a dependency-resolution failure phrased for a single configuration" {
@@ -167,9 +198,11 @@ echo "BUILD SUCCESSFUL"
 SCRIPT
 
   run env GRADLE_RETRY_LOG_DIR="$LOG_DIR" GRADLE_RETRY_DELAY_SECONDS=1 \
+    SLEEP_LOG="$SLEEP_LOG" \
     FAKE_GRADLE_STATE="${TEST_ROOT}/state" \
     bash "$SCRIPT" -- "$COMMAND" :ide-plugin:detekt
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"Running Gradle attempt 2/2"* ]]
+  [ "$(tr '\n' ' ' < "$SLEEP_LOG")" = "1 " ]
 }

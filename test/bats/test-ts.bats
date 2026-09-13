@@ -51,6 +51,11 @@ if [[ -n "${STUB_RECHECK_TIMES:-}" ]]; then
   read -r -a stub_times <<< "$STUB_RECHECK_TIMES"
   seconds="${stub_times[$index]:-0.001}"
   printf '%s\n' "$((index + 1))" > "$STUB_RECHECK_INDEX"
+  if [[ "$seconds" == "skip" ]]; then
+    # A recheck run that dies before the reporter writes the offending testcase.
+    printf 'stub bun crashed before writing a report\n' >&2
+    exit 1
+  fi
   printf '<testsuite file="%s"><testcase name="slow" classname="suite" time="%s" /></testsuite>\n' \
     "${target:-test/example.test.ts}" "$seconds" > "$report"
   exit 0
@@ -424,6 +429,25 @@ run_timing_gate_with_recheck_times() {
   run_timing_gate_with_recheck_times "0.010 0.150 0.160"
   [ "$status" -eq 1 ]
   [[ "$output" == *"Test exceeded 100ms: suite.slow (median 150.00ms of 3 isolated runs)"* ]]
+}
+
+# A recheck run that dies before the reporter writes the offending testcase
+# leaves fewer samples than configured. Accepting that partial set lets ONE fast
+# sample clear a real budget breach, which is the opposite of what the gate is
+# for (review thread PRRT_kwDOP-GF5M6h4wit on PR #6922).
+@test "timing gate fails an outlier whose recheck produced fewer samples than configured" {
+  seed_outlier_report
+  run_timing_gate_with_recheck_times "skip skip 0.010"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Test exceeded 100ms: suite.slow (200.00ms; recheck produced 1 of 3 isolated samples)"* ]]
+  [[ "$output" != *"Recheck cleared"* ]]
+}
+
+@test "timing gate still fails a breaching median when a recheck sample is missing" {
+  seed_outlier_report
+  run_timing_gate_with_recheck_times "0.150 skip 0.160"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Test exceeded 100ms: suite.slow"* ]]
 }
 
 @test "timing gate rechecks the whole offending file, not a single test name" {

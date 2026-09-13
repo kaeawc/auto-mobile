@@ -223,7 +223,7 @@ elif [[ "$offender_file_count" -gt 0 ]]; then
   done
 fi
 
-awk -F'\t' -v limit_ms="$max_ms" -v recheck_file="$recheck_rows" '
+awk -F'\t' -v limit_ms="$max_ms" -v recheck_file="$recheck_rows" -v recheck_runs="$recheck_runs" '
 function median(key,    values, count, outer, inner, swap) {
   count = split(samples[key], values, ",")
   for (outer = 1; outer <= count; outer += 1) {
@@ -250,6 +250,15 @@ FILENAME == recheck_file {
   key = $1 SUBSEP $2 SUBSEP $3
   label = ($2 != "" && $3 != "") ? $2 "." $3 : $3
   if (key in samples) {
+    # A recheck run can die before the reporter writes this testcase, and a
+    # median over the survivors is not the evidence the gate asked for: one fast
+    # sample would clear a real breach. Fewer samples than configured means the
+    # recheck did not happen, so the first measurement stands.
+    if (runs[key] < recheck_runs + 0) {
+      printf "Test exceeded %dms: %s (%.2fms; recheck produced %d of %d isolated samples)\n", limit_ms, label, $4, runs[key], recheck_runs > "/dev/stderr"
+      fail = 1
+      next
+    }
     effective = median(key)
     if (effective > limit_ms) {
       printf "Test exceeded %dms: %s (median %.2fms of %d isolated runs)\n", limit_ms, label, effective, runs[key] > "/dev/stderr"

@@ -78,7 +78,7 @@ function validateDerivedDataCacheKeyPatterns(patterns: string[], jobId: string):
   const violations: string[] = [];
   const scopesFromPatterns = new Set(
     patterns
-      .filter((pattern) => pattern.includes("**"))
+      .filter((pattern) => !pattern.startsWith("!") && pattern.includes("**"))
       .map((pattern) => pattern.slice(0, pattern.indexOf("**"))),
   );
   const requiredScopes = REQUIRED_SCOPES_BY_JOB_ID[jobId] ?? [];
@@ -116,14 +116,39 @@ function validateDerivedDataCacheKeyPatterns(patterns: string[], jobId: string):
   }
 
   for (const pattern of patterns) {
+    const isNegated = pattern.startsWith("!");
+    const patternBody = isNegated ? pattern.slice(1) : pattern;
+    if (isNegated) {
+      if (!FORBIDDEN_HASH_SEGMENTS.some((forbidden) => patternBody.includes(forbidden))) {
+        violations.push(
+          `pattern '${pattern}' excludes required build inputs from the DerivedData cache key hash`,
+        );
+      }
+      continue;
+    }
+
     for (const forbidden of FORBIDDEN_HASH_SEGMENTS) {
-      if (pattern.includes(forbidden)) {
+      if (patternBody.includes(forbidden)) {
         violations.push(`pattern '${pattern}' re-includes forbidden segment '${forbidden}'`);
       }
     }
   }
 
   return violations;
+}
+
+function requiredPatternsForScopes(scopes: readonly string[]): string[] {
+  return scopes.flatMap((scope) =>
+    REQUIRED_EXTENSIONS.map((extension) => {
+      const suffix =
+        extension === ".xcassets"
+          ? "*.xcassets/**"
+          : extension.startsWith(".")
+            ? `*${extension}`
+            : extension;
+      return `${scope}**/${suffix}`;
+    }),
+  );
 }
 
 function collectDerivedDataCacheSteps(workflowRelativePath: string): JobStep[] {
@@ -213,4 +238,20 @@ test("DerivedData cache guard rejects narrowed filename globs", () => {
   expect(validateDerivedDataCacheKeyPatterns(patterns, "ios-playground-tests")).toContain(
     "scope 'ios/Playground/' does not hash '*.swift' inputs",
   );
+});
+
+test("DerivedData cache guard rejects negated build inputs", () => {
+  const patterns = requiredPatternsForScopes(Object.values(REQUIRED_SCOPES_BY_JOB_ID).flat());
+  patterns.push("!ios/Playground/Sources/ContentView.swift");
+
+  expect(validateDerivedDataCacheKeyPatterns(patterns, "ios-playground-tests")).toContain(
+    "pattern '!ios/Playground/Sources/ContentView.swift' excludes required build inputs from the DerivedData cache key hash",
+  );
+});
+
+test("DerivedData cache guard permits negations of forbidden directories", () => {
+  const patterns = requiredPatternsForScopes(Object.values(REQUIRED_SCOPES_BY_JOB_ID).flat());
+  patterns.push("!**/DerivedData/**", "!**/.build/**", "!**/SourcePackages/**");
+
+  expect(validateDerivedDataCacheKeyPatterns(patterns, "ios-playground-tests")).toEqual([]);
 });

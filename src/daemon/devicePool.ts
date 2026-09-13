@@ -733,17 +733,27 @@ export class DevicePool {
           }
           let pooledDevice = this.devices.get(device.deviceId);
           let runtimeReplaced = false;
+          let replacementDeferred = false;
           if (pooledDevice && !this.matchesRuntimeIdentity(pooledDevice, device)) {
+            const supersededDevice = pooledDevice;
             runtimeReplaced = await this.replacePooledDeviceForRuntimeIdentity(
-              pooledDevice,
+              supersededDevice,
               device,
             );
             pooledDevice = this.devices.get(device.deviceId);
+            replacementDeferred = !runtimeReplaced && pooledDevice === supersededDevice;
           }
           if (pooledDevice) {
             pooledDevice.iosVersion = device.iosVersion;
+            if (replacementDeferred) {
+              // The entry the pool still holds is the one this observation
+              // DISAGREES with, so neither its metadata nor its identity may be
+              // updated from it.
+              await this.quarantineDeferredPooledReplacement(pooledDevice, device);
+              return runtimeReplaced;
+            }
             this.applyMutableRuntimeMetadata(pooledDevice, device, "refresh");
-            this.reconcilePooledIdentityResolution(pooledDevice, device);
+            await this.reconcilePooledIdentityResolution(pooledDevice, device);
             return runtimeReplaced;
           }
           this.devices.set(device.deviceId, {
@@ -2247,7 +2257,7 @@ export class DevicePool {
     assignmentLockHeld: boolean,
   ): Promise<boolean> {
     if (this.matchesRuntimeIdentity(device, bootedDevice)) {
-      this.reconcilePooledIdentityResolution(device, bootedDevice);
+      await this.reconcilePooledIdentityResolution(device, bootedDevice);
       return this.confirmLivePooledDevice(device);
     }
     const replaced = await this.replaceIdlePooledDeviceForLivenessCheck(
@@ -5825,23 +5835,22 @@ export class DevicePool {
    * and its name (`ro.product.model`) is not identity, so there is no continuity
    * question for the placeholder to leave open.
    */
-  private reconcilePooledIdentityResolution(
+  private async reconcilePooledIdentityResolution(
     pooled: PooledDevice,
     discovered: Pick<BootedDevice, "deviceId" | "name" | "platform">,
-  ): void {
+  ): Promise<void> {
     if (!this.hasReusableSerial(pooled)) {
       return;
     }
-    const unresolved = this.hasUnresolvedEmulatorName(discovered);
-    if (unresolved === (pooled.identityUnresolved === true)) {
+    if (this.hasUnresolvedEmulatorName(discovered)) {
+      await this.enterPooledIdentityQuarantine(
+        pooled,
+        "discovery could not read the AVD name, so the pooled identity " +
+          `'${pooled.avdName ?? pooled.name}' can no longer be tied to the runtime`,
+      );
       return;
     }
-    if (unresolved) {
-      pooled.identityUnresolved = true;
-      logger.warn(
-        `[DevicePool] Quarantining ${pooled.id}: discovery could not read the AVD name, so the ` +
-          `pooled identity '${pooled.avdName ?? pooled.name}' can no longer be tied to the runtime`,
-      );
+    if (pooled.identityUnresolved !== true) {
       return;
     }
     delete pooled.identityUnresolved;
@@ -5849,6 +5858,73 @@ export class DevicePool {
       `[DevicePool] Lifting the identity quarantine on ${pooled.id}: discovery read ` +
         `'${discovered.name}'`,
     );
+  }
+
+  /**
+   * Quarantine a pooled entry whose replacement could not be installed.
+   *
+   * {@link replacePooledDeviceForRuntimeIdentity} evicts the old incarnation
+   * before adding the discovered runtime, and {@link evictMissingPooledDevice}
+   * DEFERS that eviction while killDevice holds a shutdown reservation. The
+   * refresh then reloads the same old entry, and the discovered name -- which
+   * DISAGREES with it -- would otherwise reach
+   * {@link reconcilePooledIdentityResolution} and read as proof of continuity.
+   *
+   * A disagreement is never that proof. The entry is held in quarantine until
+   * the replacement actually installs, which is the only event that retires the
+   * old session and mints the new incarnation
+   * ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
+   */
+  private async quarantineDeferredPooledReplacement(
+    pooled: PooledDevice,
+    discovered: Pick<BootedDevice, "deviceId" | "name" | "platform">,
+  ): Promise<void> {
+    if (!this.hasReusableSerial(pooled)) {
+      return;
+    }
+    await this.enterPooledIdentityQuarantine(
+      pooled,
+      `discovery reports '${discovered.name}' on this serial while the pooled identity is ` +
+        `'${pooled.avdName ?? pooled.name}', and its replacement could not be installed yet`,
+    );
+  }
+
+  /**
+   * Enter the quarantine, once.
+   *
+   * The entry keeps its session and its `incarnation` -- the quarantine
+   * withholds trust, it does not retire the epoch -- but the work already IN
+   * FLIGHT on the bound session is not covered by any admission gate: those
+   * executions are registered and keep issuing serial-addressed operations that
+   * can land on whatever now answers on the serial. So they are cancelled and
+   * drained through the same injected seam the ADB-reset quarantine uses, under
+   * the device-loss reason so each one surfaces a typed `DeviceLostError`
+   * naming the serial ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863)
+   * review).
+   */
+  private async enterPooledIdentityQuarantine(
+    pooled: PooledDevice,
+    reason: string,
+  ): Promise<void> {
+    if (pooled.identityUnresolved === true) {
+      return;
+    }
+    pooled.identityUnresolved = true;
+    logger.warn(`[DevicePool] Quarantining ${pooled.id}: ${reason}`);
+    const sessionId = pooled.sessionId;
+    if (!sessionId) {
+      return;
+    }
+    const cancelled = await this.cancelDeviceSessionExecutions(
+      sessionId,
+      deviceLossCancellationReason(pooled.id),
+    );
+    if (cancelled > 0) {
+      logger.warn(
+        `[DevicePool] Cancelled ${cancelled} in-flight execution(s) on session ${sessionId} ` +
+          `while quarantining ${pooled.id}`,
+      );
+    }
   }
 
   /**

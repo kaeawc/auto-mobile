@@ -270,6 +270,7 @@ export class Daemon {
   private heartbeatMonitor: SessionHeartbeatMonitor | null = null;
   private navigationRetentionMonitor: NavigationRetentionMonitor | null = null;
   private deviceDisconnectMonitor: SingleFlightInterval | null = null;
+  private deferredSessionRecoverySweeps: Set<Promise<void>> = new Set();
   private pidFileWritten = false;
   private socketBindCommitted = false;
   // Preserves a live incumbent daemon's PID record across our own early-owner
@@ -1781,6 +1782,15 @@ export class Daemon {
             return;
           }
 
+          this.trackDeferredSessionRecoverySweep(
+            this.devicePool.retryDueDeferredSessionRecoveries().catch((error) => {
+              logger.warn(
+                `[DisconnectMonitor] Deferred session recovery sweep failed: ${error}`,
+                error,
+              );
+            }),
+          );
+
           const discovery = await deviceManager.getBootedDevicesDetailed("either");
           // FUNNEL 1: this sweep joins the observation to `getAllDevices()` by
           // serial below, so the pool must fold it in first (#6863 review).
@@ -2022,6 +2032,14 @@ export class Daemon {
       },
     );
     this.deviceDisconnectMonitor.start();
+  }
+
+  private trackDeferredSessionRecoverySweep(sweep: Promise<void>): void {
+    this.deferredSessionRecoverySweeps.add(sweep);
+    void sweep.then(
+      () => this.deferredSessionRecoverySweeps.delete(sweep),
+      () => this.deferredSessionRecoverySweeps.delete(sweep),
+    );
   }
 
   private async tryRecoverProcessWideAdbServerResetDevice(
@@ -2584,6 +2602,27 @@ export class Daemon {
             }
             if (!disconnectSettled) {
               logger.warn("Device disconnect monitor did not settle before daemon shutdown");
+            }
+            let timeoutHandle: NodeJS.Timeout | undefined;
+            try {
+              const sweepsSettled = await Promise.race([
+                Promise.allSettled(this.deferredSessionRecoverySweeps).then(() => true),
+                new Promise<boolean>((resolve) => {
+                  timeoutHandle = this.timer.setTimeout(
+                    () => resolve(false),
+                    DEVICE_LOSS_EXECUTION_DRAIN_TIMEOUT_MS,
+                  );
+                }),
+              ]);
+              if (!sweepsSettled) {
+                logger.warn(
+                  `Timed out after ${DEVICE_LOSS_EXECUTION_DRAIN_TIMEOUT_MS}ms draining deferred session recovery sweeps; continuing daemon shutdown`,
+                );
+              }
+            } finally {
+              if (timeoutHandle !== undefined) {
+                this.timer.clearTimeout(timeoutHandle);
+              }
             }
           },
         },

@@ -651,6 +651,39 @@ describe("Daemon shutdown session release (issue #5303)", () => {
     }
   });
 
+  test("does not block shutdown on a deferred recovery sweep that never settles", async () => {
+    const timer = new FakeTimer();
+    const repository = new FakeDeviceSessionRepository();
+    const daemon = new Daemon(
+      {},
+      new FakeInstalledAppsRepository(),
+      timer,
+      repository as unknown as DeviceSessionRepository,
+    );
+    const internals = daemon as unknown as {
+      trackDeferredSessionRecoverySweep(sweep: Promise<void>): void;
+    };
+    const loggerCloseSpy = spyOn(logger, "closeAfterFlush").mockResolvedValue(undefined);
+    const warnSpy = spyOn(logger, "warn");
+
+    try {
+      internals.trackDeferredSessionRecoverySweep(Promise.withResolvers<void>().promise);
+      const stop = daemon.stop();
+      for (let i = 0; i < 40; i++) {
+        await Promise.resolve();
+      }
+      timer.advanceTime(1_000);
+      await stop;
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("deferred session recovery sweeps"),
+      );
+    } finally {
+      loggerCloseSpy.mockRestore();
+      warnSpy.mockRestore();
+    }
+  });
+
   test("releases expired sessions that remain in memory during shutdown", async () => {
     const timer = new FakeTimer();
     const repository = new FakeDeviceSessionRepository();

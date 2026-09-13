@@ -243,15 +243,28 @@ export interface EmbeddedObservationSettleContext {
 }
 
 /**
+ * The action's embedded observation, or `undefined` when the payload carries
+ * none in a usable shape (absent, primitive, or an array).
+ */
+function readEmbeddedObservation(payload: Record<string, unknown>): ObserveResult | undefined {
+  const observation = payload.observation;
+  if (!observation || typeof observation !== "object" || Array.isArray(observation)) {
+    return undefined;
+  }
+  return observation as ObserveResult;
+}
+
+/**
  * Apply {@link settleEmbeddedObservation} to a completed action-tool envelope
  * in place, stamping `observation.settled` so a client can tell a
  * stability-checked capture from an unchecked one without guessing (issue
  * #6866). Runs BEFORE `finalizeToolResponse`, so the settled hierarchy is what
  * the session caches, diffs against, and projects to the skeleton.
  *
- * A no-op for `observe` (which owns its own `waitFor` settle at the payload top
- * level), for internal calls, for a failed action, and for a payload with no
- * embedded observation.
+ * A complete no-op for `observe` (which owns its own `waitFor` settle at the
+ * payload top level), for internal calls, and for a payload with no embedded
+ * observation. A FAILED action is still stamped — it just is not re-observed,
+ * so the tool pipeline can call this unconditionally.
  */
 export async function settleEmbeddedObservationInResponse(
   response: unknown,
@@ -264,8 +277,8 @@ export async function settleEmbeddedObservationInResponse(
   if (!view) {
     return;
   }
-  const observation = view.payload.observation;
-  if (!observation || typeof observation !== "object" || Array.isArray(observation)) {
+  const observation = readEmbeddedObservation(view.payload);
+  if (!observation) {
     return;
   }
   // A handler that ran its OWN stability wait publishes the verdict at the
@@ -285,7 +298,7 @@ export async function settleEmbeddedObservationInResponse(
     // failed command but keeping its post-command observation).
     writeToolEnvelopePayload(view, {
       ...view.payload,
-      observation: { ...(observation as ObserveResult), settled: handlerSettled },
+      observation: { ...observation, settled: handlerSettled },
     });
     return;
   }
@@ -303,17 +316,16 @@ export async function settleEmbeddedObservationInResponse(
   const outcome = settleObserve
     ? await settleEmbeddedObservation({
         actionClass,
-        observation: observation as ObserveResult,
+        observation,
         settleObserve,
         signal: ctx.signal,
       })
-    : { observation: observation as ObserveResult, settled: false };
+    : { observation, settled: false };
 
   // The handler's verdict is about the capture the HANDLER took. Once the gate
   // has adopted a later capture in its place, that verdict no longer describes
   // the observation being returned, so only the gate's own answer is honest.
-  const settled =
-    outcome.settled || (handlerSettled && outcome.observation === (observation as ObserveResult));
+  const settled = outcome.settled || (handlerSettled && outcome.observation === observation);
 
   writeToolEnvelopePayload(view, {
     ...view.payload,

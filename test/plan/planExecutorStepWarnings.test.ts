@@ -61,6 +61,94 @@ describe("PlanExecutor — best-effort warnings in debug.steps", () => {
     ]);
   });
 
+  // `debug` is only forwarded into the executePlan response when the unrelated
+  // `captureObserveSteps` option is set, so a warning that lives only in the
+  // debug trace never reaches an ordinary plan's caller (#6887 review). The
+  // executor promotes it to a first-class `warnings` field on the result.
+  test("a successful step's warnings are promoted onto the plan result", async () => {
+    registerInputText({
+      success: true,
+      text: "hello",
+      keyboardDismissed: false,
+      warnings: ["keyboard dismissal failed: Keyboard state unavailable"],
+    });
+
+    const plan: Plan = {
+      name: "input-warning-plan",
+      steps: [
+        { tool: "inputText", params: { text: "hello", dismissKeyboard: true } },
+        { tool: "inputText", params: { text: "world", dismissKeyboard: true } },
+      ],
+    };
+
+    const result = await planExecutor.executePlan(plan, 0, "android", "emulator-5554");
+
+    expect(result.success).toBe(true);
+    expect(result.warnings).toEqual([
+      {
+        stepIndex: 0,
+        tool: "inputText",
+        warnings: ["keyboard dismissal failed: Keyboard state unavailable"],
+      },
+      {
+        stepIndex: 1,
+        tool: "inputText",
+        warnings: ["keyboard dismissal failed: Keyboard state unavailable"],
+      },
+    ]);
+  });
+
+  test("a multi-device plan labels each promoted warning with its device", async () => {
+    registerInputText({
+      success: true,
+      text: "hello",
+      keyboardDismissed: false,
+      warnings: ["keyboard dismissal failed: Keyboard state unavailable"],
+    });
+
+    const plan: Plan = {
+      name: "input-warning-multi-device-plan",
+      devices: ["A", "B"],
+      steps: [
+        { tool: "inputText", params: { text: "hello", dismissKeyboard: true, device: "A" } },
+        { tool: "inputText", params: { text: "world", dismissKeyboard: true, device: "B" } },
+      ],
+    };
+
+    const result = await planExecutor.executePlan(plan, 0, "android", "emulator-5554");
+
+    expect(result.success).toBe(true);
+    expect(
+      [...(result.warnings ?? [])].sort((a, b) => (a.device ?? "").localeCompare(b.device ?? "")),
+    ).toEqual([
+      {
+        stepIndex: 0,
+        tool: "inputText",
+        device: "A",
+        warnings: ["keyboard dismissal failed: Keyboard state unavailable"],
+      },
+      {
+        stepIndex: 1,
+        tool: "inputText",
+        device: "B",
+        warnings: ["keyboard dismissal failed: Keyboard state unavailable"],
+      },
+    ]);
+  });
+
+  test("a clean plan carries no warnings key", async () => {
+    registerInputText({ success: true, text: "hello", keyboardDismissed: true });
+
+    const plan: Plan = {
+      name: "input-clean-result-plan",
+      steps: [{ tool: "inputText", params: { text: "hello", dismissKeyboard: true } }],
+    };
+
+    const result = await planExecutor.executePlan(plan, 0, "android", "emulator-5554");
+
+    expect(result.warnings).toBeUndefined();
+  });
+
   test("a clean step carries no warnings key", async () => {
     registerInputText({ success: true, text: "hello", keyboardDismissed: true });
 

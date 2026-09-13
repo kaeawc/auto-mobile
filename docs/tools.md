@@ -70,7 +70,11 @@ observation without copying type-command text into the metadata.
 lands but the optional `dismissKeyboard` cleanup cannot be confirmed, the
 response stays a success carrying `keyboardDismissed: false` and a
 `warnings: ["keyboard dismissal failed: ..."]` entry — so a client never has to
-parse prose to decide whether retyping would double the text.
+parse prose to decide whether retyping would double the text. Inside
+`executePlan` those warnings are promoted to the response's own `warnings` list,
+each entry naming the `stepIndex`, `tool`, and (for multi-device plans) the
+`device` that reported it, so an ordinary plan does not have to opt into the
+`captureObserveSteps` debug trace to see them.
 
 `sendKeys` is the default text-input path on any AutoMobile release whose
 CtrlProxy artifacts are 0.0.68 or newer, which is the case for current releases.

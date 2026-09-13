@@ -2457,9 +2457,6 @@
             "platform": {
               "type": "string",
               "enum": ["android", "ios"]
-            },
-            "transportId": {
-              "type": "string"
             }
           },
           "required": ["name", "deviceId", "platform"],

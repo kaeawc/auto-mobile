@@ -624,33 +624,6 @@ describe("unscoped latest observation resources", () => {
     expect(JSON.parse(screenshot.text!).error).toContain("No screenshot available");
   });
 
-  test("advertises a session-scoped screenshot that stays paired with the observed device", async () => {
-    const deviceBSessionUuid = "device-b-session";
-    registerDirectSessionDevice(deviceBSessionUuid, deviceB);
-    await cacheObservationFor(deviceB, "device-b-hierarchy");
-    getScreenshotStateStore().update(deviceB.deviceId, "/tmp/device-b.png");
-    setScreenshotFileSystem({
-      stat: async () => ({ isFile: () => true }),
-      readFile: async (path) => Buffer.from(path === "/tmp/device-b.png" ? "device-b" : "device-a"),
-    });
-
-    const observation = await readLatestObservation();
-    const pairedScreenshotUri = "automobile:observation/session/device-b-session/latest/screenshot";
-
-    expect(JSON.parse(observation.text!).pairedScreenshotUri).toBe(pairedScreenshotUri);
-    expect(
-      (await readTemplate(pairedScreenshotUri, { sessionUuid: deviceBSessionUuid })).blob,
-    ).toBe(Buffer.from("device-b").toString("base64"));
-
-    cacheTimer.advanceTime(1);
-    await cacheObservationFor(deviceA, "device-a-hierarchy");
-    getScreenshotStateStore().update(deviceA.deviceId, "/tmp/device-a.png");
-
-    expect(
-      (await readTemplate(pairedScreenshotUri, { sessionUuid: deviceBSessionUuid })).blob,
-    ).toBe(Buffer.from("device-b").toString("base64"));
-  });
-
   test("waits for the observed device's pending job, not the newest pending job", async () => {
     // Device A has a stale cached capture and, later, the newest pending job;
     // device B is the device the latest observation belongs to (issue #6600).
@@ -716,7 +689,6 @@ describe("unscoped latest observation resources", () => {
     const screenshot = await readLatestScreenshot();
 
     expect(JSON.parse(observation.text!).viewHierarchy).toBe("device-a-hierarchy");
-    expect(JSON.parse(observation.text!).pairedScreenshotUri).toBeNull();
     expect(screenshot.mimeType).toBe("image/png");
     expect(readPaths).toEqual(["/tmp/device-a.png"]);
   });

@@ -22,15 +22,6 @@ export function resolveDirectSessionDevice(sessionUuid: string): DirectSessionDe
     : undefined;
 }
 
-export function resolveDirectSessionUuidForDevice(deviceId: string): string | undefined {
-  for (const [sessionUuid, device] of sessions) {
-    if (device.deviceId === deviceId) {
-      return sessionUuid;
-    }
-  }
-  return undefined;
-}
-
 /**
  * Drop one session's mapping. Used when an acquisition that minted `sessionUuid`
  * is cancelled in direct (non-daemon) mode, where there is no SessionManager to

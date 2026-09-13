@@ -5,10 +5,7 @@ import { stringifyToolResponse } from "../utils/toolUtils";
 import { ScreenshotJobTracker } from "../utils/ScreenshotJobTracker";
 import { DaemonState } from "../daemon/daemonState";
 import { TakeScreenshot } from "../features/observe/TakeScreenshot";
-import {
-  resolveDirectSessionDevice,
-  resolveDirectSessionUuidForDevice,
-} from "./directSessionDeviceRegistry";
+import { resolveDirectSessionDevice } from "./directSessionDeviceRegistry";
 import type { TrackedScreenshotService } from "../features/observe/screenshot/ObserveScreenshotRecorder";
 import type { BootedDevice } from "../models";
 import * as realFs from "fs/promises";
@@ -124,26 +121,19 @@ export const RESOURCE_URIS = {
 } as const;
 
 // The unscoped `automobile:observation/latest` and
-// `automobile:observation/latest/screenshot` resources are separate reads.
-// Each independently resolves the most-recent-across-all-devices observation
-// from one `getRecentCachedObservation()` call at the instant it is read. That
-// makes each read internally atomic: its hierarchy, or its screenshot-device
-// resolution, cannot be assembled from stale, shared, or racy state.
+// `automobile:observation/latest/screenshot` resources are separate reads
+// (issue #6600). Each independently resolves the most-recent-across-all-devices
+// observation from one `getRecentCachedObservation()` call at the instant it is
+// read. That makes each read internally atomic: its hierarchy, or its
+// screenshot-device resolution, cannot be assembled from stale, shared, or racy
+// state.
 //
 // The pair is consequently a best-effort point-in-time snapshot, not a hard
-// cross-read guarantee: a new observation can complete in the small window
-// between the two reads. Callers that require a hierarchy and screenshot from
-// exactly one device must read `pairedScreenshotUri` from the hierarchy and
-// then use that linked session-scoped screenshot resource, which is scoped to
-// one device by construction (issue #6600).
-
-function resolvePairedScreenshotSessionUuid(deviceId: string): string | undefined {
-  const daemonState = DaemonState.getInstance();
-  if (daemonState.isInitialized()) {
-    return daemonState.getDevicePool().getDevice(deviceId)?.sessionId ?? undefined;
-  }
-  return resolveDirectSessionUuidForDevice(deviceId);
-}
+// cross-read guarantee: a new observation can land in the small window between
+// the two reads. Callers that need a guaranteed hierarchy/screenshot match from
+// exactly one device need an observation-id-scoped resource, which does not
+// exist yet — tracked as a follow-up; see the follow-up issue linked from PR
+// #6914.
 
 function resolveLatestScreenshotDeviceId(): string | undefined {
   return RealObserveScreen.getRecentCachedObservation()?.deviceId;
@@ -190,17 +180,11 @@ async function getLatestObservation(): Promise<ResourceContent> {
       };
     }
 
-    const sessionUuid = resolvePairedScreenshotSessionUuid(cachedObservation.deviceId);
-    // Use null rather than omission when the latest observation has no active session owner.
-    const pairedScreenshotUri = sessionUuid
-      ? RESOURCE_URIS.SESSION_SCREENSHOT.replace("{sessionUuid}", sessionUuid)
-      : null;
-
     // Return the observation as JSON
     return {
       uri: RESOURCE_URIS.LATEST_OBSERVATION,
       mimeType: "application/json",
-      text: stringifyToolResponse({ ...cachedObservation.result, pairedScreenshotUri }),
+      text: stringifyToolResponse(cachedObservation.result),
     };
   } catch (error) {
     logger.error(`[ObservationResources] Failed to get latest observation: ${error}`);
@@ -654,7 +638,7 @@ export function registerObservationResources(): void {
   ResourceRegistry.register(
     RESOURCE_URIS.LATEST_OBSERVATION,
     "Latest Observation",
-    "The hierarchy and unscoped screenshot are a best-effort point-in-time snapshot per read, with no cross-read binding: another device's newer observation can land between reads. For a guaranteed matching pair, read pairedScreenshotUri in this JSON instead of automobile:observation/latest/screenshot.",
+    "The hierarchy and unscoped screenshot are a best-effort point-in-time snapshot per read, with no hard cross-read guarantee: another device's newer observation can land between reads.",
     "application/json",
     getLatestObservation,
   );

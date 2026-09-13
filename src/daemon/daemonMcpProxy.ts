@@ -37,6 +37,7 @@ import { listChangedKindForMethod, type ListChangedKind } from "../server/listCh
 import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../server/sessionReleaseBroadcast";
 import {
   DEVICE_SESSION_RECOVERY_PROMPT,
+  declaresDeviceSessionInvalid,
   getDeviceSessionIdFromResult,
   DEVICE_SESSION_ACQUISITION_TOOLS,
   isDeviceSessionAcquisitionTool,
@@ -1997,7 +1998,7 @@ export class DaemonMcpProxy {
         if (name === "provisionDevice") {
           await this.bindResultMintedDeviceSession(name, result, callReleaseEpoch);
         }
-        this.refreshReplayLeaseForBoundSessionResult(forwardedArgs, callReleaseEpoch);
+        this.bindForwardedSessionOnErrorResult(name, forwardedArgs, result, callReleaseEpoch);
         return result;
       }
       this.rememberToolSelectionProfile(name, callerArgs, result);
@@ -2813,8 +2814,36 @@ export class DaemonMcpProxy {
     }
   }
 
-  private refreshReplayLeaseForBoundSessionResult(
+  /**
+   * Own the forwarded device session behind an `isError: true` RESULT.
+   *
+   * A failed interaction tool answers with an ordinary MCP error envelope rather
+   * than a rejection, so the handler DID run against the forwarded session and
+   * that session is still live — exactly what
+   * {@link refreshReplayLeaseAfterAdmittedFailure} assumes on the throwing path.
+   * Binding it here too is what lets a `--cli --session-uuid` invocation whose
+   * very first call fails still declare the session CLI-owned before exiting;
+   * without it the session stayed on the 10 s heartbeat policy and the retry
+   * after ordinary think-time got `session_ownership_lost` (issue #6870).
+   *
+   * An error result may only ESTABLISH a first binding, never SWITCH one: a call
+   * that names some OTHER session and fails leaves the connection on the session
+   * it already had, so an unissued UUID cannot steal the binding (issue #2737).
+   * Three further answers establish nothing:
+   *   - a connection already fenced terminally — its session is gone;
+   *   - a tool that owns its own binding lifecycle (`executePlan`), does not
+   *     route by device session (`setToolEnabled`, `setActiveDevice`), or mints
+   *     its session in the RESULT (the acquisition tools, handled above);
+   *   - an envelope that declares the named session gone
+   *     ({@link declaresDeviceSessionInvalid}) — resurrecting it would heartbeat
+   *     a dead session instead of leaving the connection unbound.
+   * Refreshing the lease of the ALREADY-bound session keeps its prior behaviour,
+   * minus the session-invalid case, which was never a live session to refresh.
+   */
+  private bindForwardedSessionOnErrorResult(
+    name: string,
     forwardedArgs: Record<string, unknown>,
+    result: unknown,
     callReleaseEpoch: number,
   ): void {
     const releaseReason = this.forwardedSessionReleaseReasonSince(forwardedArgs, callReleaseEpoch);
@@ -2823,10 +2852,32 @@ export class DaemonMcpProxy {
       return;
     }
     const forwardedSessionUuid = this.sessionUuidFromArgs(forwardedArgs);
-    if (forwardedSessionUuid && forwardedSessionUuid === this.boundSessionUuid) {
-      this.updateBoundSessionUuid(forwardedSessionUuid);
-      this.startBoundSessionHeartbeat();
+    if (!forwardedSessionUuid || declaresDeviceSessionInvalid(result)) {
+      return;
     }
+    const alreadyBound = forwardedSessionUuid === this.boundSessionUuid;
+    if (
+      !alreadyBound &&
+      (this.boundSessionUuid !== undefined ||
+        this.terminalBoundSession !== undefined ||
+        !this.mayBindSessionFromErrorResult(name))
+    ) {
+      return;
+    }
+    this.updateBoundSessionUuid(forwardedSessionUuid);
+    this.startBoundSessionHeartbeat();
+  }
+
+  private mayBindSessionFromErrorResult(name: string): boolean {
+    if (
+      name === "executePlan" ||
+      name === "setActiveDevice" ||
+      name === SET_TOOL_ENABLED_TOOL_NAME ||
+      isDeviceSessionAcquisitionTool(name)
+    ) {
+      return false;
+    }
+    return this.toolAcceptsSessionUuid(name);
   }
 
   private async toolUnavailableError(name: string): Promise<DaemonToolUnavailableError> {

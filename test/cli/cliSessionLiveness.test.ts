@@ -187,6 +187,80 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
     }
   });
 
+  test("declares the policy for a joined session whose tool returned an error envelope", async () => {
+    // A failed interaction tool answers with a NORMAL MCP error envelope
+    // (isError: true), not a rejection. The handler still ran against the
+    // forwarded session, so that session is live and this one-shot process owns
+    // it — without binding it, the adoption below is a no-op and the next
+    // invocation loses the session to the 10 s heartbeat policy (#6870).
+    const client = new FakeDaemonClient({
+      toolResultFor: (name) =>
+        name === "tapOn"
+          ? { content: [{ type: "text", text: "No element matched the selector" }], isError: true }
+          : undefined,
+      onCallDaemonMethod: async (method, params) => {
+        if (method === DAEMON_HEARTBEAT_METHOD && typeof params.sessionId === "string") {
+          if (params.livenessPolicy === CLI_SESSION_LIVENESS_POLICY) {
+            sessionManager.adoptCliLivenessPolicy(params.sessionId);
+          } else {
+            sessionManager.recordHeartbeat(params.sessionId);
+          }
+        }
+      },
+    });
+    await sessionManager.createSession("joined", "emulator-5554", "android", 30 * 60_000);
+    const proxy = proxyOver(client);
+
+    try {
+      const result = await proxy.callTool("tapOn", { sessionUuid: "joined" });
+      expect(result.isError).toBe(true);
+      expect(await proxy.adoptCliSessionLiveness()).toBe("joined");
+    } finally {
+      await proxy.close();
+    }
+
+    expect(sessionManager.getSession("joined")?.livenessPolicy).toBe("cli-idle");
+  });
+
+  test("does not adopt a session the error envelope declares lost", async () => {
+    // `session_ownership_lost` rides the SAME isError envelope shape. The named
+    // session is gone, so binding it would resurrect a dead session and
+    // heartbeat it; leave the connection unbound instead.
+    const client = new FakeDaemonClient({
+      toolResultFor: (name) =>
+        name === "tapOn"
+          ? {
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify({
+                    error: {
+                      code: "session_ownership_lost",
+                      message: "Session ownership lost for joined: reaped.",
+                      sessionUuid: "joined",
+                      retryable: true,
+                    },
+                  }),
+                },
+              ],
+              isError: true,
+            }
+          : undefined,
+    });
+    const proxy = proxyOver(client);
+
+    try {
+      await proxy.callTool("tapOn", { sessionUuid: "joined" });
+      expect(await proxy.adoptCliSessionLiveness()).toBeUndefined();
+    } finally {
+      await proxy.close();
+    }
+
+    expect(
+      client.callDaemonMethodCalls.filter((call) => call.method === DAEMON_HEARTBEAT_METHOD),
+    ).toHaveLength(0);
+  });
+
   test("runCliCommand declares the policy once per invocation", async () => {
     const declarations: number[] = [];
     setDaemonProxyFactoryForTesting((): any => ({

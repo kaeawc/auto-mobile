@@ -467,15 +467,17 @@ export const provisionDeviceSchema = withJsonSchemaOverride(
 // Wording shared by killDevice and deleteDevice so the two escape hatches cannot
 // drift apart in what they promise (#6864).
 const FORCE_SKIP_AVD_VERIFICATION_DESCRIPTION =
-  "Skip the emulator-console probe that confirms which AVD is running on this serial, and act on " +
-  "the serial as given. Use only when the console has wedged and the normal call refuses because " +
-  "the AVD name cannot be confirmed. This does not override the conflict check, it removes it: " +
-  "force means 'act on whatever emulator currently occupies this serial', including a different " +
-  "AVD that took the serial over. It does NOT override the refusal raised when this daemon's " +
-  "pool entry for the serial was retired and replaced while the action was being prepared, nor " +
-  "deleteDevice's refusal to delete a stopped image while a booted emulator that cannot be " +
-  "identified at all is attached. Android emulators only; accepted and ignored for iOS and " +
-  "physical devices.";
+  "Drop every AVD-name comparison on the way to the kill -- the emulator-console probe that " +
+  "confirms which AVD is running on this serial, and the platform kill's own check against a " +
+  "fresh discovery -- and act on whatever occupies the serial. Use only when the console has " +
+  "wedged and the normal call refuses because the AVD name cannot be confirmed. This does not " +
+  "override the conflict check, it removes it: force means 'act on whatever emulator currently " +
+  "occupies this serial', including a different AVD that took the serial over. It does NOT " +
+  "select a different serial, and a serial with nothing running on it still refuses. Nor does " +
+  "it override the refusal raised when this daemon's pool entry for the serial was retired and " +
+  "replaced while the action was being prepared, or deleteDevice's refusal to delete a stopped " +
+  "image while a booted emulator that cannot be identified at all is attached. Android " +
+  "emulators only; accepted and ignored for iOS and physical devices.";
 
 export const killDeviceSchema = z.object({
   device: z.object({
@@ -2152,7 +2154,7 @@ async function resolvePooledAvdKillTarget(
   shutdownDeadlineMs: number,
   requestAbortSignal: AbortSignal | undefined,
 ): Promise<BootedDevice> {
-  if (!pooledAvdIdentity) {
+  if (!pooledAvdIdentity?.capture) {
     return device;
   }
   const confirmation = await confirmPooledAvdIdentity(
@@ -2188,6 +2190,7 @@ async function killProcessAndRetireOwnership(
   strictDeadline = false,
   timeoutMs = DEVICE_SHUTDOWN_TIMEOUT_MS,
   killTarget: BootedDevice,
+  force = false,
 ): Promise<string | undefined> {
   const deviceManager = dependencies.deviceManagerFactory();
   if (device.platform === "android") {
@@ -2208,7 +2211,7 @@ async function killProcessAndRetireOwnership(
       requestAbortSignal,
       async (signal, timeoutMs) => {
         platformShutdown = deviceManager
-          .killDevice(killTarget, { signal, timeoutMs })
+          .killDevice(killTarget, { signal, timeoutMs, force })
           .finally(() => {
             platformShutdownSettled = true;
           });
@@ -2396,6 +2399,7 @@ async function shutdownDevice(
         strictDeadline,
         timeoutMs,
         killTarget,
+        pooledAvdIdentity?.force ?? false,
       );
 
       if (alreadyStoppedMessage !== undefined) {
@@ -2641,13 +2645,16 @@ type PooledAvdCaptureResult =
  * preflight that pinned it: the captured label + epoch, and whether the caller
  * asked to skip the console probe (#6864).
  *
- * `force` rides WITH the capture rather than beside it because it is only ever
- * meaningful where a capture exists -- there is no probe to skip on an iOS
- * target, a handset, or an emulator that named itself, none of which produce a
- * capture at all.
+ * `force` rides WITH the capture rather than beside it because the two are one
+ * decision taken at one moment: whether this daemon is going to establish an
+ * identity for the serial before killing it. `capture` is absent where there is
+ * nothing to confirm -- an iOS target, a handset, an emulator that named itself
+ * -- but `force` still travels, because it also governs the PLATFORM kill's own
+ * name comparison ([#6874](https://github.com/kaeawc/auto-mobile/pull/6874)
+ * review).
  */
 interface PooledAvdKillIdentity {
-  capture: PooledAvdCapture;
+  capture?: PooledAvdCapture;
   force: boolean;
 }
 
@@ -2677,15 +2684,13 @@ function pooledAvdCaptureRequiringConfirmation(
 
 /**
  * The same capture, paired with the caller's `force` flag, in the shape
- * `shutdownDevice` carries to the kill-time check (#6864). A target with no
- * capture carries nothing: there is no probe for `force` to skip.
+ * `shutdownDevice` carries into its execute step (#6864).
  */
 function pooledAvdKillIdentity(
   result: PooledAvdCaptureResult,
   force: boolean,
-): PooledAvdKillIdentity | undefined {
-  const capture = pooledAvdCaptureRequiringConfirmation(result);
-  return capture ? { capture, force } : undefined;
+): PooledAvdKillIdentity {
+  return { capture: pooledAvdCaptureRequiringConfirmation(result), force };
 }
 
 /**
@@ -7678,9 +7683,7 @@ export function registerDeviceTools() {
                 true,
                 context.timeoutMs,
                 retainLeaseUntil,
-                target.pooledAvdCapture
-                  ? { capture: target.pooledAvdCapture, force: args.force ?? false }
-                  : undefined,
+                { capture: target.pooledAvdCapture, force: args.force ?? false },
               );
               stop = stopped.alreadyStoppedMessage ? "not_required" : "accepted";
             } else {

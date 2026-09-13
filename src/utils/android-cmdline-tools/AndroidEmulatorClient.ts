@@ -189,11 +189,15 @@ export interface AndroidEmulator {
   /**
    * Request termination of the expected running emulator.
    * @param device - The device to kill
+   * @param options - `force` drops the AVD-name comparison against the fresh
+   *   discovery, for a caller that has already decided to act on whatever
+   *   occupies the serial (#6864). Serial selection is not part of that: a
+   *   serial with nothing on it still refuses.
    * @returns The checked target after ADB accepts termination; callers confirm disappearance.
    */
   killDevice(
     device: BootedDevice,
-    options?: { timeoutMs?: number; signal?: AbortSignal },
+    options?: { timeoutMs?: number; signal?: AbortSignal; force?: boolean },
   ): Promise<BootedDevice>;
 
   /**
@@ -2233,11 +2237,12 @@ export class AndroidEmulatorClient implements AndroidEmulator {
   /**
    * Request termination of the expected running emulator.
    * @param device - The device to kill
+   * @param options - `force` drops the AVD-name comparison below (#6864).
    * @returns The checked target after ADB accepts termination; callers confirm disappearance.
    */
   async killDevice(
     device: BootedDevice,
-    options: { timeoutMs?: number; signal?: AbortSignal } = {},
+    options: { timeoutMs?: number; signal?: AbortSignal; force?: boolean } = {},
   ): Promise<BootedDevice> {
     const runningEmulators = await this.getBootedDevicesChecked(
       false,
@@ -2252,28 +2257,54 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       throw new ActionableError(`Emulator '${device.name}' is not running`);
     }
 
-    if (emulator.name !== device.name || emulator.platform !== device.platform) {
+    if (emulator.platform !== device.platform) {
       throw new ActionableError(
         `Emulator '${device.deviceId}' identity changed before termination; refusing to kill its replacement.`,
       );
     }
 
-    // Two unknowns are not an equality. `Unknown (<serial>)` on either side is
-    // the absence of a name, so a request carrying the placeholder that meets a
-    // discovery carrying the placeholder has matched on nothing -- and the
-    // emulator answering on the serial now may be a replacement of the one the
-    // caller resolved. Callers that legitimately target an emulator whose
-    // console is mute resolve its AVD name first and put THAT in the target
-    // (`deviceTools.confirmPooledAvdIdentity`), so reaching here with two
-    // placeholders means no identity was ever established (#6863 review).
-    if (
-      this.isUnknownEmulatorName(device.name, device.deviceId) &&
-      this.isUnknownEmulatorName(emulator.name, emulator.deviceId)
-    ) {
-      throw new ActionableError(
-        `Refusing to kill '${device.deviceId}': the emulator could not name itself, so this ` +
-          "daemon cannot tell it apart from a replacement that took the serial. Resolve its AVD " +
-          `name and retry, or stop it by hand with \`adb -s ${device.deviceId} emu kill\`.`,
+    // `force` is the caller's decision, taken one layer up, to act on whatever
+    // occupies this serial (#6864). It drops exactly the two NAME comparisons
+    // below and nothing else: the serial selection above still has to find a
+    // running emulator, and the termination primitive is unchanged.
+    //
+    // Dropping them is what makes the flag work at all. `deviceTools` reaches
+    // here having deliberately NOT established an identity -- either skipping
+    // the emulator-console probe whose wedging is the whole reason force
+    // exists, or carrying the pooled AVD label no probe stood behind -- so a
+    // second comparison against the same unanswerable discovery can only refuse
+    // the forced kill on the caller's behalf a second time
+    // ([#6874](https://github.com/kaeawc/auto-mobile/pull/6874) review).
+    if (!options.force) {
+      if (emulator.name !== device.name) {
+        throw new ActionableError(
+          `Emulator '${device.deviceId}' identity changed before termination; refusing to kill its replacement.`,
+        );
+      }
+
+      // Two unknowns are not an equality. `Unknown (<serial>)` on either side is
+      // the absence of a name, so a request carrying the placeholder that meets a
+      // discovery carrying the placeholder has matched on nothing -- and the
+      // emulator answering on the serial now may be a replacement of the one the
+      // caller resolved. Callers that legitimately target an emulator whose
+      // console is mute resolve its AVD name first and put THAT in the target
+      // (`deviceTools.confirmPooledAvdIdentity`), so reaching here with two
+      // placeholders means no identity was ever established (#6863 review).
+      if (
+        this.isUnknownEmulatorName(device.name, device.deviceId) &&
+        this.isUnknownEmulatorName(emulator.name, emulator.deviceId)
+      ) {
+        throw new ActionableError(
+          `Refusing to kill '${device.deviceId}': the emulator could not name itself, so this ` +
+            "daemon cannot tell it apart from a replacement that took the serial. Resolve its AVD " +
+            `name and retry, or stop it by hand with \`adb -s ${device.deviceId} emu kill\`.`,
+        );
+      }
+    } else {
+      logger.warn(
+        `[AndroidEmulatorClient] force=true: killing whatever occupies '${device.deviceId}' ` +
+          `without comparing the requested AVD name '${device.name}' against the discovered ` +
+          `'${emulator.name}'.`,
       );
     }
 

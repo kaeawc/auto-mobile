@@ -50,6 +50,14 @@ class FailingKillDeviceManager extends FakeDeviceUtils {
   readonly killedDeviceIds: string[] = [];
   /** The full targets handed to the platform kill, so a test can assert the NAME it was given. */
   readonly killedDeviceTargets: BootedDevice[] = [];
+  /**
+   * The shutdown options handed to the platform kill. `force` has to REACH the
+   * platform layer, not merely skip the deviceTools probe: without it
+   * `AndroidEmulatorClient.killDevice` re-discovers the serial and refuses the
+   * forced target's name all over again
+   * ([#6874](https://github.com/kaeawc/auto-mobile/pull/6874) review).
+   */
+  readonly killedDeviceOptions: Array<DeviceShutdownOptions | undefined> = [];
 
   constructor() {
     super();
@@ -66,9 +74,10 @@ class FailingKillDeviceManager extends FakeDeviceUtils {
     return this.childProcess;
   }
 
-  override async killDevice(device: BootedDevice): Promise<void> {
+  override async killDevice(device: BootedDevice, options?: DeviceShutdownOptions): Promise<void> {
     this.killedDeviceIds.push(device.deviceId);
     this.killedDeviceTargets.push(device);
+    this.killedDeviceOptions.push(options);
     throw new Error("adb emu kill failed");
   }
 }
@@ -96,9 +105,10 @@ class DeadlineSpendingFakeTimer extends FakeTimer {
 }
 
 class SuccessfulKillDeviceManager extends FailingKillDeviceManager {
-  override async killDevice(device: BootedDevice): Promise<void> {
+  override async killDevice(device: BootedDevice, options?: DeviceShutdownOptions): Promise<void> {
     this.killedDeviceIds.push(device.deviceId);
     this.killedDeviceTargets.push(device);
+    this.killedDeviceOptions.push(options);
     this.setBootedDevices(device.platform, []);
   }
 }
@@ -685,6 +695,38 @@ describe("killDevice handler", () => {
       expect(manager.killedDeviceTargets.map((device) => device.name)).toEqual([
         "Unknown (emulator-5554)",
       ]);
+    });
+
+    // ...and the platform kill must be told so. `AndroidEmulatorClient.killDevice`
+    // re-discovers the serial and compares the discovered AVD name against the
+    // target's, so a forced kill that reached it WITHOUT `force` would refuse
+    // itself there -- placeholder against placeholder in the wedged-console
+    // case, pooled label against placeholder on the teardown path
+    // ([#6874](https://github.com/kaeawc/auto-mobile/pull/6874) review).
+    test("force reaches the platform kill so its own identity check is dropped too", async () => {
+      manager = new SuccessfulKillDeviceManager();
+      setDeviceToolsDependencies({ deviceManagerFactory: () => manager });
+      await poolWithUnknownRuntime(unknownEmulator, "Pixel_8_Old");
+
+      await expect(
+        killTool().handler({ device: unknownEmulator, force: true }),
+      ).resolves.toBeDefined();
+
+      expect(manager.killedDeviceOptions.map((options) => options?.force)).toEqual([true]);
+    });
+
+    // The same channel carries the DEFAULT, and it has to carry it as `false`:
+    // the platform check is the only thing standing between a confirmed kill and
+    // a replacement that took the serial after the confirmation.
+    test("an unforced kill tells the platform kill to keep its identity check", async () => {
+      manager = new SuccessfulKillDeviceManager();
+      setDeviceToolsDependencies({ deviceManagerFactory: () => manager });
+      await poolWithUnknownRuntime(unknownEmulator, "Pixel_8_Old");
+      runtimeAvdNames.set("emulator-5554", "Pixel_8_Old");
+
+      await expect(killTool().handler({ device: unknownEmulator })).resolves.toBeDefined();
+
+      expect(manager.killedDeviceOptions.map((options) => options?.force)).toEqual([false]);
     });
 
     // `force` does not "override the conflict refusal" — it removes the only

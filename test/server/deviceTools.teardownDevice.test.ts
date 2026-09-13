@@ -42,7 +42,11 @@ import {
   setSegmentedSessionTimer,
 } from "../../src/server/videoRecordingTools";
 import type { ProvisionDeviceOperationStore } from "../../src/db/provisionDeviceOperationRepository";
-import type { BootedDeviceDiscovery, DeviceDestroyOptions } from "../../src/utils/deviceUtils";
+import type {
+  BootedDeviceDiscovery,
+  DeviceDestroyOptions,
+  DeviceShutdownOptions,
+} from "../../src/utils/deviceUtils";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDeviceTeardownOperationStore } from "../fakes/FakeDeviceTeardownOperationStore";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
@@ -68,6 +72,14 @@ interface DestroyRequest {
 class TeardownDeviceManager extends FakeDeviceUtils {
   readonly destroyRequests: DestroyRequest[] = [];
   readonly killedDevices: BootedDevice[] = [];
+  /**
+   * The shutdown options each kill was given, so a test can assert that `force`
+   * REACHED the platform layer. On this path the target's name has already been
+   * rewritten to the pooled AVD label, which the platform kill would otherwise
+   * compare against a discovery that can only answer `Unknown (<serial>)`
+   * ([#6874](https://github.com/kaeawc/auto-mobile/pull/6874) review).
+   */
+  readonly killedDeviceOptions: Array<DeviceShutdownOptions | undefined> = [];
   destroyError?: Error;
   killError?: Error;
   replacementAfterKill?: BootedDevice;
@@ -98,8 +110,9 @@ class TeardownDeviceManager extends FakeDeviceUtils {
     return await super.getBootedDevicesDetailed(platform);
   }
 
-  override async killDevice(device: BootedDevice): Promise<void> {
+  override async killDevice(device: BootedDevice, options?: DeviceShutdownOptions): Promise<void> {
     this.killedDevices.push(device);
+    this.killedDeviceOptions.push(options);
     this.discoveriesSinceKill = 0;
     this.killStarted?.();
     await this.killGate;
@@ -1226,6 +1239,14 @@ describe("deleteDevice handler", () => {
     expect(body.state).toBe("destroyed");
     expect(runtimeAvdNameProbes).toEqual([]);
     expect(manager.wasMethodCalled("killDevice")).toBe(true);
+    // `createBootedTeardownTarget` has already rewritten the target's name to
+    // the pooled label, and the discovery inside the platform kill can only
+    // answer the placeholder. Without `force` travelling with it, the kill
+    // refuses the mismatch and the forced teardown fails in exactly the wedged
+    // console case the flag exists for
+    // ([#6874](https://github.com/kaeawc/auto-mobile/pull/6874) review).
+    expect(manager.killedDevices.map((device) => device.name)).toEqual([pooledAvdName]);
+    expect(manager.killedDeviceOptions.map((options) => options?.force)).toEqual([true]);
     expect(manager.destroyRequests).toEqual([
       expect.objectContaining({
         device: expect.objectContaining({ platform: "android", name: pooledAvdName }),

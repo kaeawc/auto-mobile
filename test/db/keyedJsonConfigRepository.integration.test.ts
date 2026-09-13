@@ -136,8 +136,37 @@ describe("KeyedJsonConfigRepository", () => {
 
       await repo.setConfig({ theme: "dark" });
 
-      expect(ensureMigrationsSpy).toHaveBeenCalledTimes(1);
+      // #6703: the repository helper resolves the default database lazily on the
+      // first operation (getDatabase, once) but no longer awaits ensureMigrations
+      // itself — migration gating is owned by startup + the application dialect's
+      // waitForMigrationsBeforeQuery first-query gate, so every repository follows
+      // one contract instead of two.
+      expect(ensureMigrationsSpy).toHaveBeenCalledTimes(0);
       expect(getDatabaseSpy).toHaveBeenCalledTimes(1);
+      expect(await db.selectFrom("appearance_configs").selectAll().execute()).toHaveLength(1);
+    } finally {
+      ensureMigrationsSpy.mockRestore();
+      getDatabaseSpy.mockRestore();
+    }
+  });
+
+  test("an injected executor resolves without touching the default database or migrations (#6703)", async () => {
+    const ensureMigrationsSpy = spyOn(databaseModule, "ensureMigrations").mockResolvedValue();
+    const getDatabaseSpy = spyOn(databaseModule, "getDatabase");
+
+    try {
+      // Built with an injected executor: the unified sync getDb() contract resolves
+      // that executor directly and never touches the global singleton or migration
+      // gating — the other side of the one contract the singleton test pins.
+      const repo = new KeyedJsonConfigRepository<{ theme: string }>({
+        tableName: "appearance_configs",
+        db,
+      });
+
+      await repo.setConfig({ theme: "light" });
+
+      expect(getDatabaseSpy).toHaveBeenCalledTimes(0);
+      expect(ensureMigrationsSpy).toHaveBeenCalledTimes(0);
       expect(await db.selectFrom("appearance_configs").selectAll().execute()).toHaveLength(1);
     } finally {
       ensureMigrationsSpy.mockRestore();

@@ -6698,6 +6698,72 @@ describe("DevicePool", () => {
       expect(devicePool.getDevice("emulator-5554")?.sessionId).toBeNull();
     });
 
+    // The quarantine can be ENTERED by the assignment-time liveness check itself,
+    // with no refresh sweep in between. The operation that enters it must fail at
+    // assignment rather than hand back a session that then fails every tool
+    // (#6863 review).
+    test("does not assign an emulator the assignment-time liveness check just quarantined", async () => {
+      await initializeLiveDevices([
+        poolDevice("emulator-5554", "Pixel_8_API_35"),
+        poolDevice("emulator-5556", "Pixel_7_API_34"),
+      ]);
+      // No refresh: the placeholder is what the assignment's own discovery reads.
+      fakeDeviceManager.bootedDevices = [
+        unresolved("emulator-5554"),
+        poolDevice("emulator-5556", "Pixel_7_API_34"),
+      ];
+
+      const assigned = await devicePool.assignDeviceToSession("session-1");
+
+      expect(devicePool.isPooledIdentityUnresolved("emulator-5554")).toBe(true);
+      expect(assigned).toBe("emulator-5556");
+      expect(devicePool.getDevice("emulator-5554")?.sessionId).toBeNull();
+    });
+
+    test("assigns the entry again once a later sweep resolves the name", async () => {
+      const device = poolDevice("emulator-5554", "Pixel_8_API_35");
+      await initializeLiveDevices([device]);
+      await refreshWith([unresolved("emulator-5554")]);
+      expect(devicePool.isPooledIdentityUnresolved("emulator-5554")).toBe(true);
+
+      await refreshWith([device]);
+      const assigned = await devicePool.assignDeviceToSession("session-1");
+
+      expect(assigned).toBe("emulator-5554");
+    });
+
+    test("refuses an exact bind whose liveness check finds an unresolved identity", async () => {
+      const device = poolDevice("emulator-5554", "Pixel_8_API_35");
+      await initializeLiveDevices([device]);
+      fakeDeviceManager.bootedDevices = [unresolved("emulator-5554")];
+
+      await expect(
+        devicePool.bindOrReuseDeviceSession("session-1", "emulator-5554", "android", androidImage),
+      ).rejects.toThrow(/emulator-5554[\s\S]*identity is unresolved/);
+      expect(devicePool.getDevice("emulator-5554")?.sessionId).toBeNull();
+    });
+
+    test("refuses an autolock whose liveness check finds an unresolved identity", async () => {
+      const originalAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+      process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
+      try {
+        const device = poolDevice("emulator-5554", "Pixel_8_API_35");
+        await initializeLiveDevices([device]);
+        fakeDeviceManager.bootedDevices = [unresolved("emulator-5554")];
+
+        await expect(
+          devicePool.autolockDevice("emulator-5554", "android", "mcp-session-1"),
+        ).rejects.toThrow(/emulator-5554[\s\S]*identity is unresolved/);
+        expect(devicePool.getDevice("emulator-5554")?.sessionId).toBeNull();
+      } finally {
+        if (originalAutolock === undefined) {
+          delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+        } else {
+          process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = originalAutolock;
+        }
+      }
+    });
+
     test("refuses tool execution for a session bound to an unresolved emulator", async () => {
       const device = poolDevice("emulator-5554", "Pixel_8_API_35");
       fakeDeviceManager.bootedDevices = [device];
@@ -6730,6 +6796,103 @@ describe("DevicePool", () => {
       // Even a later observation that HAPPENS to carry the pooled name cannot
       // publish pool context until a discovery sweep lifts the quarantine.
       expect(devicePool.describesPooledRuntime(device)).toBe(false);
+    });
+
+    // A resolved name that DISAGREES is a replacement, and the pool installs it
+    // by evicting the old incarnation. `evictMissingPooledDevice` deliberately
+    // DEFERS that eviction while killDevice holds a shutdown reservation, so the
+    // refresh reloads the very entry the discovered runtime disagrees with. That
+    // entry must stay quarantined until the replacement actually installs --
+    // otherwise the disagreeing name reads as proof of continuity and re-admits
+    // the old session's tools and stream routing to a different AVD
+    // ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
+    test("keeps the quarantine when a differing name arrives while eviction is deferred", async () => {
+      const device = poolDevice("emulator-5554", "Pixel_8_API_35");
+      await initializeLiveDevices([device]);
+      const incarnation = devicePool.getDevice("emulator-5554")!.incarnation;
+      await refreshWith([unresolved("emulator-5554")]);
+      expect(devicePool.isPooledIdentityUnresolved("emulator-5554")).toBe(true);
+      const reservation = await devicePool.reserveDeviceForShutdown("emulator-5554");
+      expect(reservation).toBeDefined();
+
+      await refreshWith([poolDevice("emulator-5554", "Pixel_7_API_34")]);
+
+      // Eviction was deferred, so this is still the OLD incarnation -- and it is
+      // still untrusted.
+      expect(devicePool.getDevice("emulator-5554")?.incarnation).toBe(incarnation);
+      expect(devicePool.isPooledIdentityUnresolved("emulator-5554")).toBe(true);
+
+      await reservation!.release();
+      await refreshWith([poolDevice("emulator-5554", "Pixel_7_API_34")]);
+
+      const replacement = devicePool.getDevice("emulator-5554");
+      expect(replacement?.name).toBe("Pixel_7_API_34");
+      expect(replacement?.incarnation).toBeGreaterThan(incarnation);
+      expect(devicePool.isPooledIdentityUnresolved("emulator-5554")).toBe(false);
+    });
+
+    // Same deferral, but the entry was NOT quarantined beforehand: the
+    // disagreement itself is what makes the pooled label untrustworthy.
+    test("quarantines a live entry whose deferred replacement disagrees with it", async () => {
+      const device = poolDevice("emulator-5554", "Pixel_8_API_35");
+      await initializeLiveDevices([device]);
+      const incarnation = devicePool.getDevice("emulator-5554")!.incarnation;
+      const reservation = await devicePool.reserveDeviceForShutdown("emulator-5554");
+
+      await refreshWith([poolDevice("emulator-5554", "Pixel_7_API_34")]);
+
+      expect(devicePool.getDevice("emulator-5554")?.incarnation).toBe(incarnation);
+      expect(devicePool.getDevice("emulator-5554")?.name).toBe("Pixel_8_API_35");
+      expect(devicePool.isPooledIdentityUnresolved("emulator-5554")).toBe(true);
+      await reservation!.release();
+    });
+
+    // Entering the quarantine must also stop the work already in flight on the
+    // bound session. The admission gate only refuses LATER calls, while an
+    // execution already registered in `executionTracker` keeps issuing
+    // serial-addressed operations that can land on a replacement AVD
+    // ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
+    test("cancels the bound session's in-flight executions when entering quarantine", async () => {
+      const cancellations: { sessionId: string; reason: string }[] = [];
+      devicePool = new DevicePool(
+        sessionManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        fakeAppsRepo,
+        fakeDeviceManager,
+        new DefaultRetryExecutor(fakeTimer),
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        async (sessionId, reason) => {
+          cancellations.push({ sessionId, reason });
+          return 1;
+        },
+      );
+      const device = poolDevice("emulator-5554", "Pixel_8_API_35");
+      await initializeLiveDevices([device]);
+      await devicePool.bindOrReuseDeviceSession(
+        "owner-session",
+        "emulator-5554",
+        "android",
+        androidImage,
+      );
+      const incarnation = devicePool.getDevice("emulator-5554")!.incarnation;
+
+      await refreshWith([unresolved("emulator-5554")]);
+
+      expect(cancellations.map((entry) => entry.sessionId)).toEqual(["owner-session"]);
+      expect(cancellations[0]?.reason).toContain("emulator-5554");
+      // Session and incarnation survive the quarantine: it withholds trust, it
+      // does not retire the epoch.
+      const quarantined = devicePool.getDevice("emulator-5554");
+      expect(quarantined?.sessionId).toBe("owner-session");
+      expect(quarantined?.incarnation).toBe(incarnation);
     });
 
     test("never quarantines a handset, whose name is not its identity", async () => {

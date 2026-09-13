@@ -32,6 +32,17 @@ describe("VoiceOverToggle", () => {
     fakeDetector.reset();
   });
 
+  const fakeSimulatorClientProvider = () => new FakeIOSCtrlProxy();
+
+  const makeSimulatorToggle = (timer?: FakeTimer) =>
+    new VoiceOverToggle(
+      SIMULATOR_DEVICE,
+      fakeDetector,
+      fakeExec,
+      timer,
+      fakeSimulatorClientProvider,
+    );
+
   describe("physical device (Settings-driven via CtrlProxy)", () => {
     let fakeClient: FakeIOSCtrlProxy;
 
@@ -106,7 +117,7 @@ describe("VoiceOverToggle", () => {
       // Post-apply confirmation re-detect reports VoiceOver on (#3921).
       fakeDetector.setVoiceOverEnabled(true);
 
-      const toggle = new VoiceOverToggle(SIMULATOR_DEVICE, fakeDetector, fakeExec);
+      const toggle = makeSimulatorToggle();
       const result = await toggle.toggle(true);
 
       expect(result.supported).toBe(true);
@@ -122,7 +133,7 @@ describe("VoiceOverToggle", () => {
       const fakeTimer = new FakeTimer();
       fakeTimer.enableAutoAdvance();
 
-      const toggle = new VoiceOverToggle(SIMULATOR_DEVICE, fakeDetector, fakeExec, fakeTimer);
+      const toggle = makeSimulatorToggle(fakeTimer);
       const result = await toggle.toggle(true);
 
       expect(result.supported).toBe(true);
@@ -135,7 +146,7 @@ describe("VoiceOverToggle", () => {
       const fakeTimer = new FakeTimer();
       fakeTimer.enableAutoAdvance();
 
-      const toggle = new VoiceOverToggle(SIMULATOR_DEVICE, fakeDetector, fakeExec, fakeTimer);
+      const toggle = makeSimulatorToggle(fakeTimer);
       const result = await toggle.toggle(true);
 
       expect(result).toMatchObject({ supported: true, applied: true, currentState: true });
@@ -153,7 +164,7 @@ describe("VoiceOverToggle", () => {
       const fakeTimer = new FakeTimer();
       fakeTimer.enableAutoAdvance();
 
-      const toggle = new VoiceOverToggle(SIMULATOR_DEVICE, fakeDetector, fakeExec, fakeTimer);
+      const toggle = makeSimulatorToggle(fakeTimer);
       const result = await toggle.toggle(true);
 
       expect(result).toMatchObject({ supported: true, applied: false, currentState: false });
@@ -166,7 +177,7 @@ describe("VoiceOverToggle", () => {
       const udid = SIMULATOR_DEVICE.deviceId;
       fakeDetector.setVoiceOverEnabled(true);
 
-      const toggle = new VoiceOverToggle(SIMULATOR_DEVICE, fakeDetector, fakeExec);
+      const toggle = makeSimulatorToggle();
       await toggle.toggle(true);
 
       expect(
@@ -201,7 +212,7 @@ describe("VoiceOverToggle", () => {
       const fakeTimer = new FakeTimer();
       fakeTimer.enableAutoAdvance();
 
-      const toggle = new VoiceOverToggle(SIMULATOR_DEVICE, fakeDetector, fakeExec, fakeTimer);
+      const toggle = makeSimulatorToggle(fakeTimer);
       const result = await toggle.toggle(true);
 
       expect(result.supported).toBe(true);
@@ -241,7 +252,7 @@ describe("VoiceOverToggle", () => {
       // toggle(false) must still run simctl rather than silently no-op.
       fakeDetector.setVoiceOverEnabled(false);
 
-      const toggle = new VoiceOverToggle(SIMULATOR_DEVICE, fakeDetector, fakeExec);
+      const toggle = makeSimulatorToggle();
       const result = await toggle.toggle(false);
 
       expect(result.applied).toBe(true);
@@ -253,7 +264,7 @@ describe("VoiceOverToggle", () => {
     test("returns supported:true applied:true", async () => {
       const fakeTimer = new FakeTimer();
       fakeTimer.enableAutoAdvance();
-      const toggle = new VoiceOverToggle(SIMULATOR_DEVICE, fakeDetector, fakeExec, fakeTimer);
+      const toggle = makeSimulatorToggle(fakeTimer);
       const result = await toggle.toggle(false);
 
       expect(result.supported).toBe(true);
@@ -262,10 +273,53 @@ describe("VoiceOverToggle", () => {
       expect(fakeTimer.getSleepHistory()).toEqual([]);
     });
 
+    // #6496: an indeterminate post-disable probe must never be coalesced into
+    // a coincidental confirmed-false match.
+    test("does not report applied:true when the post-disable confirmation probe is indeterminate", async () => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      fakeDetector.setPersistentResolvedState(null);
+      const toggle = makeSimulatorToggle(timer);
+      const result = await toggle.toggle(false);
+
+      expect(result.supported).toBe(true);
+      expect(result.applied).toBe(false);
+      expect(result.currentState).toBeUndefined();
+      expect(result.reason).toBeTruthy();
+      // The poll loop must run its full window rather than short-circuiting
+      // on the first (unreadable) probe.
+      expect(timer.getCurrentTime()).toBe(10_000);
+    });
+
+    // Companion happy-path check (#6496): a confirmed-false probe on the
+    // very first read must still report applied:true immediately — the fix
+    // for the indeterminate case must not slow down the honest-success path.
+    test("reports applied:true immediately when the post-disable probe confirms disabled on the first read", async () => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const realDetector = new DefaultIosVoiceOverDetector(timer);
+      const fakeClient = new FakeIOSCtrlProxy();
+      fakeClient.setVoiceOverState(false);
+
+      const toggle = new VoiceOverToggle(
+        SIMULATOR_DEVICE,
+        realDetector,
+        fakeExec,
+        timer,
+        () => fakeClient,
+      );
+      const result = await toggle.toggle(false);
+
+      expect(result.supported).toBe(true);
+      expect(result.applied).toBe(true);
+      expect(result.currentState).toBe(false);
+      expect(timer.getSleepHistory()).toEqual([]);
+    });
+
     test("runs correct xcrun simctl spawn commands when disabling", async () => {
       const udid = SIMULATOR_DEVICE.deviceId;
 
-      const toggle = new VoiceOverToggle(SIMULATOR_DEVICE, fakeDetector, fakeExec);
+      const toggle = makeSimulatorToggle();
       await toggle.toggle(false);
 
       expect(
@@ -292,7 +346,7 @@ describe("VoiceOverToggle", () => {
         );
       });
 
-      const toggle = new VoiceOverToggle(SIMULATOR_DEVICE, fakeDetector, fakeExec);
+      const toggle = makeSimulatorToggle();
       const result = await toggle.toggle(false);
 
       expect(result.supported).toBe(true);
@@ -307,7 +361,7 @@ describe("VoiceOverToggle", () => {
         throw new Error("simctl spawn failed");
       });
 
-      const toggle = new VoiceOverToggle(SIMULATOR_DEVICE, fakeDetector, fakeExec);
+      const toggle = makeSimulatorToggle();
       // #3921: the simctl failure is wrapped into a typed result, matching
       // TalkBackToggle's graceful contract, rather than propagating raw.
       const result = await toggle.toggle(true);
@@ -321,7 +375,7 @@ describe("VoiceOverToggle", () => {
   describe("cache invalidation", () => {
     test("invalidates detector cache after applying", async () => {
       fakeDetector.setVoiceOverEnabled(true);
-      const toggle = new VoiceOverToggle(SIMULATOR_DEVICE, fakeDetector, fakeExec);
+      const toggle = makeSimulatorToggle();
       await toggle.toggle(true);
 
       expect(fakeDetector.getInvalidatedDevices()).toContain(SIMULATOR_DEVICE.deviceId);

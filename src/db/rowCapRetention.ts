@@ -15,6 +15,11 @@
 
 import type { Kysely } from "kysely";
 import type { Database } from "./types";
+import {
+  createAmortizedRetentionState,
+  runAmortizedRetentionGate,
+  type AmortizedRetentionState,
+} from "./retentionGate";
 
 // Run the cleanup body at most once per this many inserts. Worst-case overshoot
 // is bounded (cap + CLEANUP_CHECK_INTERVAL rows) and negligible against a 10k
@@ -25,7 +30,17 @@ export const CLEANUP_CHECK_INTERVAL = 256;
 // column (the trim's ordering keys). Kept as an explicit union — rather than a
 // broad `keyof Database` — so `.select(["id", "timestamp"])` stays type-checked
 // and callers can't point the helper at a table that lacks those columns.
-export type RowCapTable = "performance_audit_results" | "test_executions" | "failure_occurrences";
+// `tool_calls`/`crashes`/`anrs` (#6464) join the same union: `tool_calls.timestamp`
+// is an ISO string like `performance_audit_results`, while `crashes`/`anrs.timestamp`
+// are numeric like `test_executions` — the mixed-type precedent already established
+// by this union's first two members.
+export type RowCapTable =
+  | "performance_audit_results"
+  | "test_executions"
+  | "failure_occurrences"
+  | "tool_calls"
+  | "crashes"
+  | "anrs";
 
 /**
  * Trim `table` to at most `maxRows` rows, keeping the newest by
@@ -77,51 +92,28 @@ export async function pruneTableByRowCap(
   return Number(deleted.numDeletedRows ?? 0);
 }
 
-export interface RowCapRetentionState {
-  cleanupInProgress: boolean;
-  insertsSinceCleanup: number;
-}
+/** @deprecated Alias of the shared {@link AmortizedRetentionState} (#6702). */
+export type RowCapRetentionState = AmortizedRetentionState;
 
-export function createRowCapRetentionState(): RowCapRetentionState {
-  return { cleanupInProgress: false, insertsSinceCleanup: 0 };
-}
+export const createRowCapRetentionState = createAmortizedRetentionState;
 
 /**
  * Amortize a retention cleanup body across inserts.
  *
- * The counter is bumped synchronously on every call so cleanup still fires
- * deterministically every `checkInterval` inserts without putting the scan on
- * the hot path. When the gate trips, `runCleanup` runs behind an in-progress
- * guard that drops overlapping calls (the next insert will re-arm the gate).
- * `runCleanup` is expected to swallow its own errors; this wrapper only manages
- * the amortization counter and the guard.
+ * Delegates the counter/guard state machine to the shared
+ * {@link runAmortizedRetentionGate} (#6702) — this wrapper only fixes
+ * `inserted` at `1`, since these repos insert one capped row per call, so —
+ * unlike the batched event repositories — there is no per-batch insert count
+ * to thread through. `runCleanup` is expected to swallow its own errors;
+ * errors it does not swallow propagate to the caller.
  *
  * `checkInterval` is injectable so unit tests can trip the gate without 256
- * calls. (These repos insert one capped row per call, so — unlike the batched
- * event repositories — there is no per-batch insert count to thread through.)
+ * calls.
  */
 export async function runAmortizedRetention(
   state: RowCapRetentionState,
   runCleanup: () => Promise<void>,
   checkInterval: number = CLEANUP_CHECK_INTERVAL,
 ): Promise<void> {
-  state.insertsSinceCleanup += 1;
-  if (state.insertsSinceCleanup < checkInterval) {
-    return;
-  }
-
-  // Only reset the counter once we've committed to running the cleanup body.
-  // If a cleanup is already in progress, leave the counter at-or-above
-  // `checkInterval` so the very next insert re-checks this gate instead of
-  // silently re-arming a fresh `checkInterval`-insert countdown (#6657).
-  if (state.cleanupInProgress) {
-    return;
-  }
-  state.insertsSinceCleanup = 0;
-  state.cleanupInProgress = true;
-  try {
-    await runCleanup();
-  } finally {
-    state.cleanupInProgress = false;
-  }
+  await runAmortizedRetentionGate(state, runCleanup, checkInterval);
 }

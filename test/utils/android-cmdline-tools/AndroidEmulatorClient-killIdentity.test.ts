@@ -167,6 +167,22 @@ test("refuses a discovered replacement AVD on the expected serial", async () => 
   expectNoTransportOrRebootCommand(adb.getExecutedArgv());
 });
 
+// Two unknowns are not an equality. When the requested target's name is the
+// `Unknown (<serial>)` placeholder AND the fresh discovery reports the same
+// placeholder, the check above passes on nothing: neither side names an AVD, so
+// a replacement emulator that also cannot name itself would be killed under the
+// previous occupant's request
+// ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
+test("refuses when both the requested and the discovered name are the placeholder", async () => {
+  const placeholder: BootedDevice = {
+    ...original,
+    name: "Unknown (emulator-5554)",
+  };
+  const { client, adb } = fixture(placeholder);
+  await expect(client.killDevice(placeholder)).rejects.toThrow(/could not name itself/);
+  expect(adb.getExecutedCommands().some((command) => command.endsWith("emu kill"))).toBe(false);
+});
+
 test("refuses when the expected emulator is no longer running", async () => {
   const { client, adb } = fixture({ ...original, deviceId: "emulator-5556" });
   await expect(client.killDevice(original)).rejects.toThrow("is not running");

@@ -40,6 +40,7 @@ import { syncInstalledAppResources } from "./appResources";
 import { listActiveVideoRecordings, stopVideoRecording } from "./videoRecordingManager";
 import { stopSegmentedVideoRecordingsForDevice } from "./videoRecordingTools";
 import { IOSCtrlProxyManager } from "../utils/IOSCtrlProxyManager";
+import { AndroidCtrlProxyManager } from "../utils/CtrlProxyManager";
 import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
 import { logger } from "../utils/logger";
 import { createPerformanceTracker } from "../utils/PerformanceTracker";
@@ -952,15 +953,17 @@ async function defaultStopAndroidObservers(device: BootedDevice): Promise<void> 
 async function clearInstalledAppsAfterShutdown(
   dependencies: DeviceToolsDependencies,
   deviceId: string,
-): Promise<void> {
+): Promise<boolean> {
   try {
     await dependencies.clearInstalledAppsForDevice(deviceId);
+    return true;
   } catch (error) {
     // The device is already stopped; the next app verification refreshes stale cache rows.
     logger.warn(
       `[DeviceTools] Failed to clear installed apps for ${deviceId} after shutdown: ${error}`,
       error,
     );
+    return false;
   }
 }
 
@@ -2420,13 +2423,42 @@ async function shutdownDevice(
       await shutdownReservation?.release();
       unregisterDirectSessionsForDevice(device.deviceId);
 
+      const cleanup = clearInstalledAppsAfterShutdown(dependencies, device.deviceId);
+      const notification = cleanup.then(async (cacheCleared) => {
+        await notifyResourcesAfterShutdown(dependencies);
+        // Failed persistence must keep the dirty fence across device-ID reuse.
+        if (cacheCleared) {
+          const coordinator = getInstalledAppsCacheWriteCoordinator();
+          // Capture the expected generation AFTER the notification above, not
+          // before. For a device with a registered app resource,
+          // notifyResourcesAfterShutdown() -> syncInstalledAppResources()
+          // (src/server/appResources.ts) invalidates this same, already-gone
+          // device again as part of the SAME shutdown flow. Capturing the
+          // generation earlier meant that expected, self-triggered
+          // invalidation always advanced it past what releaseDevice's
+          // expected-generation guard held, so the guard always mismatched
+          // and release always no-opped -- leaking the exact per-device
+          // bookkeeping (#6704) this fix exists to release, for every killed
+          // device that had a registered app resource. beginRebuild() is a
+          // synchronous read here (the generation is already assigned), so
+          // there is no await between it and releaseDevice() below.
+          const generation = coordinator.beginRebuild(device.deviceId);
+          await coordinator.releaseDevice(device.deviceId, generation);
+        }
+      });
+      // Keep late cleanup visible to DB shutdown without blocking a later
+      // device teardown retry if resource notification never settles.
+      void getDbWriteBarrier().trackExisting(notification);
+
       await runPostShutdownStep(
         shutdownContext,
         perf,
         "cleanup",
         "installed-app cleanup did not complete",
         strictDeadline,
-        async () => await clearInstalledAppsAfterShutdown(dependencies, device.deviceId),
+        async () => {
+          await cleanup;
+        },
       );
       await runPostShutdownStep(
         shutdownContext,
@@ -2434,7 +2466,7 @@ async function shutdownDevice(
         "notifyResources",
         "resource notification did not complete",
         strictDeadline,
-        async () => await notifyResourcesAfterShutdown(dependencies),
+        async () => await notification,
       );
 
       perf.end();
@@ -2505,7 +2537,11 @@ function resolveKillDeviceStableTarget(
  *     label stops standing for the runtime: the serial may have been taken over
  *     by a different AVD that simply cannot name itself either. Returning the
  *     cached label there is what let a teardown of the NEW AVD miss the booted
- *     runtime and fall through to the stopped-image inventory path;
+ *     runtime and fall through to the stopped-image inventory path. The one
+ *     caller that must still SEE a quarantined entry is the destructive
+ *     identity check, which reads it through
+ *     {@link getPooledAndroidEntryForIdentityCheck} and turns it into a
+ *     `quarantined` capture whose runtime confirmation is mandatory;
  *  4. that entry must carry an `avdName`, which the pool writes only from the
  *     AVD it itself started (`recordSourceAndroidAvd`), never from discovery.
  *
@@ -2522,15 +2558,37 @@ function getValidatedPooledAndroidEntry(
   device: BootedDevice,
   devicePool: DevicePool | undefined,
 ): PooledDevice | undefined {
+  if (devicePool?.isPooledIdentityUnresolved(device.deviceId)) {
+    return undefined;
+  }
+  return getPooledAndroidEntryForIdentityCheck(device, devicePool);
+}
+
+/**
+ * The same lookup WITHOUT rule 3, for the one caller that must still see a
+ * QUARANTINED entry: the destructive identity check.
+ *
+ * Every other consumer reads a quarantined entry as "no label" and stops there,
+ * which is right for routing, publishing and matching. A kill cannot stop
+ * there: dropping the entry also dropped the CONFIRMATION the label exists to
+ * trigger, so the quarantined emulator fell back to the same unchecked path as
+ * a runtime that named itself and a sessionless `killDevice` carrying
+ * `Unknown (<serial>)` reached `AndroidEmulatorClient.killDevice` on nothing
+ * but that placeholder. Quarantine is the state in which the runtime MUST be
+ * made to name itself, so the check takes the entry and
+ * {@link capturePooledAvdIdentity} marks the capture `quarantined`
+ * ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
+ */
+function getPooledAndroidEntryForIdentityCheck(
+  device: BootedDevice,
+  devicePool: DevicePool | undefined,
+): PooledDevice | undefined {
   if (device.platform !== "android" || !isUnknownAndroidRuntimeName(device)) {
     return undefined;
   }
   if (!isAndroidEmulatorSerial(device.deviceId)) {
     // A handset's name is `ro.product.model`, not an AVD; there is nothing to
     // substitute and nothing that would make a pooled label trustworthy.
-    return undefined;
-  }
-  if (devicePool?.isPooledIdentityUnresolved(device.deviceId)) {
     return undefined;
   }
   return devicePool?.getDevice(device.deviceId) ?? undefined;
@@ -2562,11 +2620,20 @@ type PooledAvdNameRefusal =
 interface PooledAvdCapture {
   avdName: string;
   incarnation: number;
+  /**
+   * The pooled entry was QUARANTINED at capture time
+   * (`DevicePool.isPooledIdentityUnresolved`), so the label is not the pool's
+   * statement about the runtime -- it is only the last name this daemon saw on
+   * the serial. The confirmation is therefore mandatory rather than merely
+   * corroborating: without a name from the runtime there is no identity at all.
+   */
+  quarantined?: true;
 }
 
 type PooledAvdCaptureResult =
   | { kind: "none" }
   | { kind: "capture"; capture: PooledAvdCapture }
+  | { kind: "quarantined"; capture: PooledAvdCapture }
   | { kind: "refusal"; refusal: PooledAvdNameRefusal };
 
 /**
@@ -2576,8 +2643,8 @@ type PooledAvdCaptureResult =
  *
  * `force` rides WITH the capture rather than beside it because it is only ever
  * meaningful where a capture exists -- there is no probe to skip on an iOS
- * target, a handset, an emulator that named itself, or a quarantined pool entry
- * the daemon already refuses to read a label from.
+ * target, a handset, or an emulator that named itself, none of which produce a
+ * capture at all.
  */
 interface PooledAvdKillIdentity {
   capture: PooledAvdCapture;
@@ -2595,6 +2662,31 @@ type PooledAvdConfirmation =
   | { kind: "confirmed"; confirmedAvdName: string }
   | { kind: "skipped" }
   | { kind: "refusal"; refusal: PooledAvdNameRefusal };
+
+/**
+ * The capture a destructive action must carry into
+ * {@link confirmPooledAvdIdentity}, for the two kinds that require the runtime
+ * to name itself before the platform kill. `none` -- a runtime that named
+ * itself, and every physical handset -- carries nothing.
+ */
+function pooledAvdCaptureRequiringConfirmation(
+  result: PooledAvdCaptureResult,
+): PooledAvdCapture | undefined {
+  return result.kind === "capture" || result.kind === "quarantined" ? result.capture : undefined;
+}
+
+/**
+ * The same capture, paired with the caller's `force` flag, in the shape
+ * `shutdownDevice` carries to the kill-time check (#6864). A target with no
+ * capture carries nothing: there is no probe for `force` to skip.
+ */
+function pooledAvdKillIdentity(
+  result: PooledAvdCaptureResult,
+  force: boolean,
+): PooledAvdKillIdentity | undefined {
+  const capture = pooledAvdCaptureRequiringConfirmation(result);
+  return capture ? { capture, force } : undefined;
+}
 
 /**
  * An identity refusal raised from inside the shutdown path. It is an
@@ -2632,7 +2724,7 @@ function capturePooledAvdIdentity(
   devicePool: DevicePool | undefined,
   budget: PooledAvdNameProbeBudget,
 ): PooledAvdCaptureResult {
-  const pooled = getValidatedPooledAndroidEntry(device, devicePool);
+  const pooled = getPooledAndroidEntryForIdentityCheck(device, devicePool);
   const avdName = pooled?.avdName;
   if (!pooled || !avdName) {
     return { kind: "none" };
@@ -2640,13 +2732,21 @@ function capturePooledAvdIdentity(
   if (budget.deadlineMs - budget.timer.now() <= 0) {
     return { kind: "refusal", refusal: { reason: "unresolved", pooledAvdName: avdName } };
   }
-  return { kind: "capture", capture: { avdName, incarnation: pooled.incarnation } };
+  const quarantined = devicePool?.isPooledIdentityUnresolved(device.deviceId) === true;
+  return quarantined
+    ? {
+        kind: "quarantined",
+        capture: { avdName, incarnation: pooled.incarnation, quarantined: true },
+      }
+    : { kind: "capture", capture: { avdName, incarnation: pooled.incarnation } };
 }
 
 /**
  * KILL-TIME half of the identity check, run immediately before the platform
  * kill on an emulator whose discovered name is `Unknown (<serial>)` and whose
- * AVD name therefore comes from the pool.
+ * AVD name therefore comes from the pool -- including a pool entry that is
+ * QUARANTINED, where the label is not the pool's statement about the runtime
+ * and this probe is the only identity evidence there is.
  *
  * Two things must still hold:
  *  - the pool must still hold the CAPTURED incarnation under that label. A new
@@ -2685,13 +2785,17 @@ function capturePooledAvdIdentity(
  *    either. That one fires only when the action's deadline is ALREADY spent, in
  *    which case nothing downstream of it can finish either.
  *
+ * It DOES clear the mandatory confirmation a QUARANTINED capture otherwise
+ * carries. That case is the wedged-console kill this flag exists for: the pool
+ * cannot name the serial either, so the probe is still the only identity
+ * evidence there is -- and when it does not answer, the quarantined kill is
+ * exactly as stuck as the unquarantined one. Skipping it leaves the caller's own
+ * target (the `Unknown (<serial>)` placeholder) in place, which is what the
+ * serial-scoped `emu kill` needs.
+ *
  * `force` never reaches here at all where there is no pooled label to skip
- * verifying -- an iOS target, a handset, an emulator that named itself, or a
- * QUARANTINED pool entry, which `getValidatedPooledAndroidEntry` already refuses
- * to read a label from. That last case is the wedged-console kill this flag
- * exists for, and it needs no probe skipped: with no capture the kill already
- * runs against the serial under the placeholder name discovery reports, so
- * `force` is accepted and changes nothing.
+ * verifying -- an iOS target, a handset, or an emulator that named itself --
+ * because none of those produce a capture. It is accepted and changes nothing.
  *
  * The probe is bounded by whichever is smaller, the verification ceiling or the
  * caller's REMAINING deadline: it runs inside a lifecycle lease that is already
@@ -2723,6 +2827,15 @@ async function confirmPooledAvdIdentity(
         "the serial over.",
     );
     return { kind: "skipped" };
+  }
+  if (capture.quarantined) {
+    // Not an extra check, a louder one: for a quarantined entry the probe is the
+    // ONLY identity evidence there is, and a refusal here is the fail-closed
+    // outcome rather than a surprising one (#6863 review).
+    logger.warn(
+      `[DeviceTools] The pooled identity of ${device.deviceId} is quarantined; the runtime must ` +
+        `name itself before this action may act on '${pooledAvdName}'.`,
+    );
   }
   const remainingMs = budget.deadlineMs - budget.timer.now();
   if (remainingMs <= 0) {
@@ -3110,6 +3223,42 @@ async function readTeardownInventory(
   );
 }
 
+async function evictTeardownManagers(context: TeardownContext, runtimeId?: string): Promise<void> {
+  const { platform, stableId } = context.args.target;
+  if (platform === "ios") {
+    if (runtimeId) {
+      await IOSCtrlProxyManager.evict(runtimeId, context.dependencies.timer, context.deadlineMs);
+    } else {
+      await IOSCtrlProxyManager.evict(stableId, context.dependencies.timer, context.deadlineMs);
+      await IOSCtrlProxyManager.evictSimulatorByName(
+        stableId,
+        context.dependencies.timer,
+        context.deadlineMs,
+      );
+    }
+  } else {
+    AndroidCtrlProxyManager.evict(runtimeId ?? stableId, stableId);
+  }
+}
+
+async function finalizeTeardownEviction(
+  context: TeardownContext,
+  target: TeardownResolvedTarget,
+  androidManager: AndroidCtrlProxyManager | undefined,
+): Promise<void> {
+  unregisterDirectSessionsForStableIdentity(
+    target.device.platform,
+    target.device.platform === "android"
+      ? target.device.name
+      : (target.device.deviceId ?? context.args.target.stableId),
+  );
+  if (androidManager) {
+    AndroidCtrlProxyManager.evictInstance(androidManager);
+  } else {
+    await evictTeardownManagers(context, target.device.deviceId);
+  }
+}
+
 async function resolveAbsentTeardownTarget(
   context: TeardownContext,
   booted: BootedDeviceDiscovery,
@@ -3127,7 +3276,20 @@ async function resolveAbsentTeardownTarget(
       ),
     };
   }
+  const daemonState = DaemonState.getInstance();
+  const runtimeId = daemonState.isInitialized()
+    ? findAbsentTeardownPooledDevices(daemonState.getDevicePool(), context.args.target)[0]?.id
+    : undefined;
+  const androidManager =
+    context.args.target.platform === "android" && runtimeId
+      ? AndroidCtrlProxyManager.getExistingInstance(runtimeId)
+      : undefined;
   await retireAbsentTeardownOwnership(context);
+  if (androidManager) {
+    AndroidCtrlProxyManager.evictInstance(androidManager);
+  } else {
+    await evictTeardownManagers(context, runtimeId);
+  }
   unregisterDirectSessionsForStableIdentity(
     context.args.target.platform,
     context.args.target.stableId,
@@ -3316,18 +3478,31 @@ async function resolveTeardownTarget(context: TeardownContext): Promise<Teardown
     };
   }
   if (bootedTarget.target) {
+    const captureRequiringConfirmation = pooledAvdCaptureRequiringConfirmation(pooledAvdCapture);
     const resolvedTarget: TeardownResolvedTarget =
-      bootedTarget.target.wasBooted && pooledAvdCapture.kind === "capture"
-        ? { ...bootedTarget.target, pooledAvdCapture: pooledAvdCapture.capture }
+      bootedTarget.target.wasBooted && captureRequiringConfirmation
+        ? { ...bootedTarget.target, pooledAvdCapture: captureRequiringConfirmation }
         : bootedTarget.target;
     return await finalizeIosNameResolvedTeardownTarget(context, resolvedTarget);
   }
+  // Nothing booted matched this teardown, so the next step is the STOPPED-image
+  // inventory path -- and a booted emulator that could not name itself may be
+  // the very AVD whose image is about to be destroyed.
+  //
+  // The question is answered from THIS discovery, not from the pool. The pool's
+  // quarantine encodes exactly this observation, but only from the sweep that
+  // FOLLOWS it: on the first discovery after a different AVD takes a pooled
+  // serial, the pool still holds the previous occupant's label and reading it
+  // here would treat the placeholder as resolved -- which is what let a
+  // teardown of the new AVD miss the booted runtime and destroy its image while
+  // it was running. The teardown's own observation is the newer evidence of the
+  // two, so it decides ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863)
+  // review).
   const unresolvedAndroidRuntime = booted.devices.find(
     (device) =>
       device.platform === "android" &&
       isVirtualAndroidDevice(device) &&
-      isUnknownAndroidRuntimeName(device) &&
-      !getValidatedPooledAndroidAvdName(device, devicePool),
+      isUnknownAndroidRuntimeName(device),
   );
   if (unresolvedAndroidRuntime) {
     return {
@@ -3486,6 +3661,7 @@ async function destroyTeardownTarget(
   target: TeardownResolvedTarget,
   retainStableLifecycleUntil: (operation: Promise<unknown>) => void,
   markDestructionStarted: () => void,
+  onLateSuccess: () => void,
 ): Promise<void> {
   const deadlineTarget: BootedDevice = {
     name: target.device.name,
@@ -3514,6 +3690,13 @@ async function destroyTeardownTarget(
   } catch (error) {
     if (destroy) {
       retainStableLifecycleUntil(destroy);
+      void destroy.then(
+        () => onLateSuccess(),
+        () => {
+          // A rejected late destroy did not remove the platform device, so no eviction is safe.
+          logger.debug("[DeviceTools] Late platform deletion rejected; retaining teardown state");
+        },
+      );
     }
     throw error;
   }
@@ -7418,9 +7601,7 @@ export function registerDeviceTools() {
         false,
         DEVICE_SHUTDOWN_TIMEOUT_MS,
         retainLifecycleUntil,
-        pooledAvdCapture.kind === "capture"
-          ? { capture: pooledAvdCapture.capture, force: args.force ?? false }
-          : undefined,
+        pooledAvdKillIdentity(pooledAvdCapture, args.force ?? false),
       );
       return createKillDeviceResponse(args, result.timing, result.alreadyStoppedMessage);
     } finally {
@@ -7442,6 +7623,7 @@ export function registerDeviceTools() {
     type TeardownState = {
       context: TeardownContext;
       target: TeardownResolvedTarget;
+      androidManager?: AndroidCtrlProxyManager;
       earlyResponse?: TeardownToolResponse;
     };
     try {
@@ -7474,7 +7656,14 @@ export function registerDeviceTools() {
             if ("response" in resolution) {
               return { response: resolution.response };
             }
-            return { target: { context, target: resolution.target } };
+            const runtime = resolution.target.wasBooted
+              ? resolution.target.bootedDevice
+              : undefined;
+            const androidManager =
+              runtime?.platform === "android"
+                ? AndroidCtrlProxyManager.getExistingInstance(runtime.deviceId)
+                : undefined;
+            return { target: { context, target: resolution.target, androidManager } };
           },
           stop: async (state, requestAbortSignal, retainLeaseUntil) => {
             const { context, target } = state;
@@ -7510,13 +7699,16 @@ export function registerDeviceTools() {
               return;
             }
             const { context, target } = state;
-            await destroyTeardownTarget(context, target, retainLeaseUntil, markDestructionStarted);
-            unregisterDirectSessionsForStableIdentity(
-              target.device.platform,
-              target.device.platform === "android"
-                ? target.device.name
-                : (target.device.deviceId ?? args.target.stableId),
+            await destroyTeardownTarget(
+              context,
+              target,
+              retainLeaseUntil,
+              markDestructionStarted,
+              () => {
+                void finalizeTeardownEviction(context, target, state.androidManager);
+              },
             );
+            await finalizeTeardownEviction(context, target, state.androidManager);
           },
           verify: async (state, stop) => {
             if (state.earlyResponse) {

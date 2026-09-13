@@ -1,8 +1,17 @@
 import type { Kysely } from "kysely";
-import { ensureMigrations, getDatabase } from "./database";
+import { getDatabase } from "./database";
 import type { Database, DeviceSession, DeviceSessionStatus, NewDeviceSession } from "./types";
 import { logger } from "../utils/logger";
 import type { Platform } from "../models";
+import { defaultTimer, type Timer } from "../utils/SystemTimer";
+
+// Terminal-state (`released`/`expired`) rows accumulate for the life of the
+// on-disk DB with no delete path (#6464). Bound their retention window rather
+// than adding a new column: `released_at_ms` is already set at the same time a
+// row transitions terminal (by both `markReleased` and
+// `markStaleActiveSessionsExpired`), so it is a reliable "became terminal" age
+// marker without a migration.
+const DEVICE_SESSION_RETENTION_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 export interface DeviceSessionRecord {
   sessionUuid: string;
@@ -42,19 +51,29 @@ export interface DeviceSessionPersistence {
 export class DeviceSessionRepository {
   private db: Kysely<Database> | null;
 
-  constructor(db?: Kysely<Database>) {
+  constructor(
+    db?: Kysely<Database>,
+    private readonly timer: Timer = defaultTimer,
+  ) {
     this.db = db ?? null;
   }
 
-  private async getDb(): Promise<Kysely<Database>> {
-    if (this.db) {
-      return this.db;
-    }
-    await ensureMigrations();
-    return getDatabase();
+  // Migration gating is owned by startup (ensureMigrations) plus the app dialect
+  // first-query gate (waitForMigrationsBeforeQuery, #6703); a repository helper
+  // must NOT await ensureMigrations itself. Resolve the injected executor, else
+  // the singleton, synchronously.
+  private getDb(): Kysely<Database> {
+    return this.db ?? getDatabase();
   }
 
   async upsertActiveSession(record: DeviceSessionRecord): Promise<void> {
+    // Mirrors `DeviceTeardownOperationRepository.begin()`'s
+    // `expires_at_ms <= now` pattern: a cheap, unconditional, indexed range
+    // delete run before the write rather than gated behind amortization —
+    // session starts are far less frequent than the amortized-per-insert
+    // tables (#6464). Self-contained: a prune failure must never block a new
+    // session from being persisted, so it swallows its own errors.
+    await this.pruneExpiredSessions(this.timer.now());
     try {
       const db = await this.getDb();
       const now = new Date().toISOString();
@@ -233,5 +252,25 @@ export class DeviceSessionRepository {
       .selectAll()
       .where("session_uuid", "=", sessionUuid)
       .executeTakeFirst();
+  }
+
+  /**
+   * Delete terminal-state (`released`/`expired`) rows past the retention
+   * window (#6464), using the current clock independently of a rebound
+   * session's original creation time. Best-effort: a failure here
+   * must not block a new session from persisting.
+   */
+  private async pruneExpiredSessions(nowMs: number): Promise<void> {
+    try {
+      const db = await this.getDb();
+      const cutoffMs = nowMs - DEVICE_SESSION_RETENTION_MAX_AGE_MS;
+      await db
+        .deleteFrom("device_sessions")
+        .where("released_at_ms", "is not", null)
+        .where("released_at_ms", "<", cutoffMs)
+        .execute();
+    } catch (error) {
+      logger.warn(`[DeviceSessionRepository] Failed to prune expired sessions: ${error}`, error);
+    }
   }
 }

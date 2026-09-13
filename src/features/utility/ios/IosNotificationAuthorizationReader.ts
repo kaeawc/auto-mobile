@@ -3,6 +3,8 @@ import * as path from "path";
 import { isIosSimulatorUdid } from "../../../utils/ios-cmdline-tools/iosDeviceType";
 import { logger } from "../../../utils/logger";
 import { PlistClient } from "../../../utils/ios-cmdline-tools/PlistClient";
+import { parsePlist, type PlistValue } from "../../../utils/ios-cmdline-tools/XctestrunPlist";
+import { defaultDeviceSetRoot } from "../../../utils/ios-cmdline-tools/SimulatorTccSqliteClient";
 import type { NotificationPolicyAccessState } from "../NotificationPolicy";
 
 /**
@@ -32,8 +34,9 @@ export interface IosNotificationAuthorizationReader {
  * than json because BulletinBoard blobs are NSKeyedArchiver archives containing
  * `CFKeyedArchiverUID` refs, which `plutil -convert json` rejects ("invalid
  * object in plist for destination format"). xml1 round-trips them losslessly,
- * and the scalar settings we need (`authorizationStatus`, etc.) appear as plain
- * `<integer>` values we can extract without a full plist parser.
+ * and the resulting XML is parsed with the repo's structured plist parser
+ * ({@link parsePlist}) to extract the scalar settings we need
+ * (`authorizationStatus`, etc.).
  */
 export interface BulletinBoardReaderDeps {
   /** Run `plutil -convert xml1 -o - -- <path>` and return the XML string. */
@@ -46,34 +49,99 @@ export interface BulletinBoardReaderDeps {
   deviceDataRoot(udid: string): string;
 }
 
+/** An ordered plist `<dict>`, as produced by {@link parsePlist}. */
+type PlistDict = Map<string, PlistValue>;
+
 /**
  * Extract the base64 `<data>` blob registered under `sectionInfo[bundleId]` in
- * the outer `VersionedSectionInfo.plist` XML. Returns null if the bundle has no
- * section registered.
+ * the outer `VersionedSectionInfo.plist` XML by parsing it with the repo's
+ * structured plist parser ({@link parsePlist}, built on `xml2js`) and walking
+ * the `sectionInfo` dict directly, rather than regex-matching `bundleId`
+ * anywhere in the document. Returns null if the bundle has no section
+ * registered.
  */
-export function extractSectionDataBase64(outerXml: string, bundleId: string): string | null {
-  // Match `<key>bundleId</key>` followed (ignoring whitespace) by `<data>…</data>`.
-  // Bundle IDs are dotted identifiers, so escape regex metacharacters.
-  const escaped = bundleId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const re = new RegExp(`<key>${escaped}</key>\\s*<data>([\\s\\S]*?)</data>`);
-  const match = outerXml.match(re);
-  if (!match) {
+export async function extractSectionDataBase64(
+  outerXml: string,
+  bundleId: string,
+): Promise<string | null> {
+  const root = await parsePlist(outerXml);
+  if (!(root instanceof Map)) {
+    return null;
+  }
+  const sectionInfo = root.get("sectionInfo");
+  if (!(sectionInfo instanceof Map)) {
+    return null;
+  }
+  const data = sectionInfo.get(bundleId);
+  if (typeof data !== "string") {
     return null;
   }
   // Strip all whitespace from the base64 payload (plutil wraps it across lines).
-  return match[1].replace(/\s+/g, "");
+  return data.replace(/\s+/g, "");
+}
+
+/** The scalar keys that identify a BulletinBoard settings dict. */
+const SETTINGS_KEYS = [
+  "authorizationStatus",
+  "pushSettings",
+  "alertType",
+  "lockScreenSetting",
+  "notificationCenterSetting",
+] as const;
+
+function collectDicts(node: PlistValue | undefined, out: PlistDict[]): void {
+  if (node === undefined) {
+    return;
+  }
+  if (node instanceof Map) {
+    out.push(node);
+    for (const value of node.values()) {
+      collectDicts(value, out);
+    }
+  } else if (Array.isArray(node)) {
+    for (const item of node) {
+      collectDicts(item, out);
+    }
+  }
+}
+
+/**
+ * Find the settings dict among every `<dict>` in the archive's `$objects`
+ * graph. The `$objects` array is flat and order-dependent, so more than one
+ * dict can carry an `authorizationStatus` key (issue #6583); among those
+ * candidates, pick the one that also carries the most other known settings
+ * keys as siblings, rather than trusting document order.
+ */
+function findSettingsDict(root: PlistValue): PlistDict | undefined {
+  const dicts: PlistDict[] = [];
+  collectDicts(root, dicts);
+  const candidates = dicts.filter((dict) => dict.get("authorizationStatus") !== undefined);
+  return candidates.reduce<PlistDict | undefined>((best, dict) => {
+    if (!best) {
+      return dict;
+    }
+    const score = (d: PlistDict) => SETTINGS_KEYS.filter((key) => d.get(key) !== undefined).length;
+    return score(dict) > score(best) ? dict : best;
+  }, undefined);
 }
 
 /**
  * Extract the BulletinBoard settings scalars from the decoded nested-blob XML.
- * The settings dict is the `<dict>` carrying `<key>authorizationStatus</key>`;
- * we pull each integer key globally (the archive has exactly one settings dict).
+ * All scalars are read from the *same* coherent settings `<dict>` (see
+ * {@link findSettingsDict}) rather than independently regex-matched anywhere
+ * in the document.
  */
-export function parseSettingsFromNestedXml(nestedXml: string): BulletinBoardSettings {
+export async function parseSettingsFromNestedXml(
+  nestedXml: string,
+): Promise<BulletinBoardSettings> {
+  const root = await parsePlist(nestedXml);
+  const dict = findSettingsDict(root);
+  if (!dict) {
+    return {};
+  }
   const intKey = (key: string): number | undefined => {
-    const re = new RegExp(`<key>${key}</key>\\s*<integer>(-?\\d+)</integer>`);
-    const match = nestedXml.match(re);
-    return match ? Number(match[1]) : undefined;
+    const value = dict.get(key);
+    return typeof value === "number" ? value : undefined;
   };
   return {
     authorizationStatus: intKey("authorizationStatus"),
@@ -82,6 +150,16 @@ export function parseSettingsFromNestedXml(nestedXml: string): BulletinBoardSett
     lockScreenSetting: intKey("lockScreenSetting"),
     notificationCenterSetting: intKey("notificationCenterSetting"),
   };
+}
+
+/**
+ * Resolve a simulator's per-device data root the same way the TCC client does
+ * (via `CORESIMULATOR_DEVICE_SET_PATH`, falling back to the default
+ * CoreSimulator device set layout) rather than hard-coding the default
+ * device set (issue #6583).
+ */
+export function resolveDeviceDataRoot(udid: string, homeDirectory: string = os.homedir()): string {
+  return path.join(defaultDeviceSetRoot(homeDirectory), udid);
 }
 
 export class BulletinBoardAuthorizationReader implements IosNotificationAuthorizationReader {
@@ -112,7 +190,7 @@ export class BulletinBoardAuthorizationReader implements IosNotificationAuthoriz
       };
     }
 
-    const base64Blob = extractSectionDataBase64(outerXml, bundleId);
+    const base64Blob = await extractSectionDataBase64(outerXml, bundleId);
     if (!base64Blob) {
       return {
         supported: true,
@@ -183,7 +261,6 @@ export function defaultBulletinBoardReader(): IosNotificationAuthorizationReader
       const { promises: fs } = await import("fs");
       await fs.rm(path.dirname(file), { recursive: true, force: true });
     },
-    deviceDataRoot: (udid) =>
-      path.join(os.homedir(), "Library/Developer/CoreSimulator/Devices", udid),
+    deviceDataRoot: (udid) => resolveDeviceDataRoot(udid),
   });
 }

@@ -19,8 +19,14 @@ interface FlattenedIssue {
   issue: ZodIssue;
   // null when the issue is not union-derived (a top-level sibling, e.g. a bad enum
   // on a field beside a union-typed field) — those are always the caller's real
-  // mistake and are never suppressed.
+  // mistake and are never suppressed. Equal to `chain[0]`, the OUTERMOST union.
   union: UnionContext | null;
+  // Every union the issue passed through, outermost first. Suppression
+  // (`selectGenuineIssues`) deliberately reasons about the outermost union alone,
+  // but merging unrecognized-key sets must keep the inner arms apart: they all
+  // carry the same OUTER branch index, so collapsing them loses the fact that an
+  // inner arm ACCEPTED a key (PR #6882 review).
+  chain: readonly UnionContext[];
 }
 
 interface FlattenResult {
@@ -32,29 +38,29 @@ function flattenZodIssues(issues: ZodIssue[]): FlattenResult {
   const flattened: FlattenedIssue[] = [];
   let unionCounter = 0;
 
-  const visit = (issue: ZodIssue, union: UnionContext | null) => {
+  const visit = (issue: ZodIssue, chain: readonly UnionContext[]) => {
     if (issue.code === "invalid_union" && Array.isArray(issue.errors) && issue.errors.length) {
-      // Establish a context only for the outermost union; a nested union keeps the
-      // outer branch's context so its issues stay attributed to the discriminating
-      // arm the caller actually took.
-      const outer = union;
-      const unionId = outer ? outer.unionId : unionCounter++;
-      const branchCount = outer ? outer.branchCount : issue.errors.length;
+      // Every union gets its own context, appended to the chain. `chain[0]` stays
+      // the outermost union, so an issue reached through a nested union remains
+      // attributed to the discriminating outer arm the caller actually took while
+      // the inner arm it came from is still recoverable.
+      const unionId = unionCounter++;
+      const branchCount = issue.errors.length;
       issue.errors.forEach((unionIssues, branchIndex) => {
-        const branchContext: UnionContext = outer ?? { unionId, branchIndex, branchCount };
+        const nested: readonly UnionContext[] = [...chain, { unionId, branchIndex, branchCount }];
         unionIssues.forEach((unionIssue) => {
           const normalizedIssue = issue.path.length
             ? { ...unionIssue, path: [...issue.path, ...unionIssue.path] }
             : unionIssue;
-          visit(normalizedIssue as ZodIssue, branchContext);
+          visit(normalizedIssue as ZodIssue, nested);
         });
       });
       return;
     }
-    flattened.push({ issue, union });
+    flattened.push({ issue, union: chain[0] ?? null, chain });
   };
 
-  issues.forEach((issue) => visit(issue, null));
+  issues.forEach((issue) => visit(issue, []));
   return { issues: flattened, sawUnion: unionCounter > 0 };
 }
 
@@ -111,34 +117,55 @@ function withMergedKeys(
   return { ...issue, keys, message };
 }
 
+// One branch's unrecognized-key report, tagged with the union arms it travelled
+// through so nested unions can be intersected at their own level.
+interface KeyReport {
+  chain: readonly UnionContext[];
+  keys: string[];
+}
+
+// Rejected-by-every-arm keys for one union level, recursing into nested unions.
+// At each level: an arm that reported nothing accepts every supplied key, so the
+// level collapses to the empty set; otherwise the arms' own sets (themselves
+// resolved one level deeper) are intersected. Reports that carry no further union
+// context are merged with a set union — they come from one object schema, which
+// emits at most one `unrecognized_keys` issue.
+function rejectedByEveryArm(reports: readonly KeyReport[], level: number): Set<string> {
+  const context = reports[0]?.chain[level];
+  const sameUnion = (report: KeyReport): boolean =>
+    report.chain[level]?.unionId === context?.unionId;
+  if (!context || !reports.every(sameUnion)) {
+    return new Set(reports.flatMap((report) => report.keys));
+  }
+  const byArm = new Map<number, KeyReport[]>();
+  for (const report of reports) {
+    const arm = report.chain[level].branchIndex;
+    byArm.set(arm, [...(byArm.get(arm) ?? []), report]);
+  }
+  if (byArm.size !== context.branchCount) {
+    return new Set<string>();
+  }
+  const [first, ...rest] = [...byArm.values()].map((arm) => rejectedByEveryArm(arm, level + 1));
+  return new Set([...first].filter((name) => rest.every((arm) => arm.has(name))));
+}
+
 function groupUnrecognizedKeys(flattenedIssues: FlattenedIssue[]): Map<string, UnrecognizedGroup> {
-  const byGroup = new Map<string, { branchCount: number; byBranch: Map<number, Set<string>> }>();
+  const byGroup = new Map<string, KeyReport[]>();
   for (const entry of flattenedIssues) {
     if (!entry.union || !isUnrecognizedKeys(entry.issue)) {
       continue;
     }
     const key = coverageKey(entry.union.unionId, entry.issue.path);
-    const group = byGroup.get(key) ?? {
-      branchCount: entry.union.branchCount,
-      byBranch: new Map<number, Set<string>>(),
-    };
-    const branch = group.byBranch.get(entry.union.branchIndex) ?? new Set<string>();
-    group.byBranch.set(
-      entry.union.branchIndex,
-      new Set([...branch, ...entry.issue.keys.map(String)]),
-    );
-    byGroup.set(key, group);
+    const reports = byGroup.get(key) ?? [];
+    reports.push({ chain: entry.chain, keys: entry.issue.keys.map(String) });
+    byGroup.set(key, reports);
   }
 
   const merged = new Map<string, UnrecognizedGroup>();
-  for (const [key, group] of byGroup) {
-    const branches = [...group.byBranch.values()];
-    const reported = [...new Set(branches.flatMap((branch) => [...branch]))];
-    const complete = group.byBranch.size === group.branchCount;
-    const intersection = complete
-      ? reported.filter((name) => branches.every((branch) => branch.has(name)))
-      : [];
-    merged.set(key, { intersection, reported });
+  for (const [key, reports] of byGroup) {
+    const reported = [...new Set(reports.flatMap((report) => report.keys))];
+    const rejected = rejectedByEveryArm(reports, 0);
+    merged.set(key, { intersection: reported.filter((name) => rejected.has(name)), reported });
   }
   return merged;
 }

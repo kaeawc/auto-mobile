@@ -389,3 +389,38 @@ describe("formatToolParamError viable-arm provided value (#5862)", () => {
     expect(message).toContain("value expected string");
   });
 });
+
+// PR #6882 review: `flattenZodIssues` attributes a NESTED union's arms to the same
+// OUTER branch index, so merging them with a set union made an outer branch look
+// like it rejected every key any inner arm rejected. The later intersection then
+// named a key that an inner arm ACCEPTS as unrecognized — the exact contradiction
+// #6867 set out to remove, one level deeper. Inner arms must be intersected (a key
+// any arm accepts is not unknown) before aggregating by outer branch.
+describe("formatToolParamError nested union unrecognized keys (#6867 follow-up)", () => {
+  const formatObserve = (input: unknown): string => {
+    const result = observeSchema.safeParse(input as object);
+    expect(result.success).toBe(false);
+    if (result.success) {
+      throw new Error("expected invalid observe input");
+    }
+    return formatToolParamError("observe", result.error, input, observeSchema);
+  };
+
+  test("a nested container union names only the key no arm accepts", () => {
+    const message = formatObserve({
+      platform: "android",
+      waitFor: { text: "ready", container: { elementId: "scope", bogus: 1 } },
+    });
+    expect(message).toContain('waitFor.container Unrecognized key: "bogus"');
+    expect(message).not.toContain('"elementId"');
+  });
+
+  test("a nested container union with only valid-but-exclusive keys stays exclusive", () => {
+    const message = formatObserve({
+      platform: "android",
+      waitFor: { text: "ready", container: { elementId: "scope", text: "other" } },
+    });
+    expect(message).not.toContain("Unrecognized");
+    expect(message).toContain("provide exactly one");
+  });
+});

@@ -1460,6 +1460,31 @@ export interface ListedTrayNotification {
   ownership: TrayOwnershipEvidence;
 }
 
+const ACTION_FIELD_IDS = ["action0", "action1", "action2", "action_text"];
+
+// Chrome SystemUI renders around the posted content: action buttons (and their
+// container) plus the row's own expand/dismiss/feedback controls. Their labels
+// come from the framework or from a `Notification.Action`, never from the
+// extras `dumpsys` correlates against, so counting them as correlation content
+// only lets an unrelated app whose title happens to read "Reply" make a
+// header-less row look ambiguous (#6875).
+const NON_CONTENT_ROW_IDS = new Set([
+  ...ACTION_FIELD_IDS,
+  "actions",
+  "action_list_margin_target",
+  "smart_reply_container",
+  "expand_button",
+  "expand_button_touch_container",
+  "feedback",
+  "close_button",
+  "snooze_button",
+]);
+
+// Chrome is inherited: everything below an action container or a row control
+// is chrome too.
+const isRowContent = (parentIsContent: boolean, id: string): boolean =>
+  parentIsContent && !NON_CONTENT_ROW_IDS.has(id);
+
 // Read semantic Android notification fields, preserving custom-layout text as a
 // fallback. A group header must not inherit fields from its sibling child rows.
 const readTrayNotificationFields = (root: any) => {
@@ -1473,6 +1498,16 @@ const readTrayNotificationFields = (root: any) => {
     bodies: [] as string[],
     actions: [] as string[],
     texts: [] as string[],
+    // `texts` minus SystemUI's own chrome: what the posting app actually
+    // supplied, and the only text ownership correlation may rely on.
+    contentTexts: [] as string[],
+  };
+  // Chrome labels stay reported, but never become correlation evidence.
+  const recordTexts = (candidates: string[], content: boolean): void => {
+    fields.texts.push(...candidates);
+    if (content) {
+      fields.contentTexts.push(...candidates);
+    }
   };
   const assignSemanticField = (id: string, text: string): void => {
     if (["app_name_text", "app_name"].includes(id)) {
@@ -1484,7 +1519,7 @@ const readTrayNotificationFields = (root: any) => {
     if (["text", "big_text", "text2"].includes(id)) {
       fields.bodies.push(text);
     }
-    if (["action0", "action1", "action2", "action_text"].includes(id)) {
+    if (ACTION_FIELD_IDS.includes(id)) {
       fields.actions.push(text);
     }
   };
@@ -1492,7 +1527,7 @@ const readTrayNotificationFields = (root: any) => {
   // Preserve repeated message nodes within one layout; select the fullest
   // layout instead of deduplicating message values across compact/expanded UI.
   const messageLayouts: string[][] = [[]];
-  const pending = [{ node: root, messages: messageLayouts[0] }];
+  const pending = [{ node: root, messages: messageLayouts[0], content: true }];
   while (pending.length) {
     const entry = pending.shift()!;
     const { node } = entry;
@@ -1515,7 +1550,8 @@ const readTrayNotificationFields = (root: any) => {
     // `content-desc` (and the iOS accessibility label) routinely carry text the
     // rendered `text` omits, so keep every candidate rather than the first.
     const candidates = extractNodeTextCandidates(node);
-    fields.texts.push(...candidates);
+    const content = isRowContent(entry.content, id);
+    recordTexts(candidates, content);
     const text = candidates[0];
     if (text) {
       assignSemanticField(id, text);
@@ -1524,7 +1560,7 @@ const readTrayNotificationFields = (root: any) => {
       }
     }
     const children = [node.node].flat().filter((child) => child && typeof child === "object");
-    pending.push(...children.map((node: any) => ({ node, messages })));
+    pending.push(...children.map((node: any) => ({ node, messages, content })));
   }
   const messages = messageLayouts.reduce((fullest, layout) =>
     layout.length > fullest.length ? layout : fullest,
@@ -1536,6 +1572,9 @@ const readTrayNotificationFields = (root: any) => {
 interface TrayObservedRow {
   // An observed row has no attribution yet: ownership is decided per request.
   notification: Omit<ListedTrayNotification, "appId" | "ownership">;
+  // The row's app-supplied text, carried beside the reported fields so
+  // correlation never sees SystemUI's chrome (#6875).
+  correlationTexts: string[];
   bounds?: Element["bounds"];
 }
 
@@ -1549,6 +1588,7 @@ const readTrayNotifications = (hierarchy: ViewHierarchyResult): TrayObservedRow[
     const nodeId = getNodeProperties(candidate.node)?.["unique-id"];
     notifications.push({
       bounds: candidate.element?.bounds,
+      correlationTexts: [...new Set(fields.contentTexts)],
       notification: {
         id: typeof nodeId === "string" && nodeId.length > 0 ? nodeId : null,
         appLabel: label,
@@ -1698,7 +1738,7 @@ const attributeTrayRow = (
   if (row.notification.appLabel !== null) {
     return appLabel && row.notification.appLabel === appLabel ? "header" : "other";
   }
-  const owner = attributeRowByDumpsys(records, new Set(row.notification.texts));
+  const owner = attributeRowByDumpsys(records, new Set(row.correlationTexts));
   if (owner === null) {
     return "unknown";
   }

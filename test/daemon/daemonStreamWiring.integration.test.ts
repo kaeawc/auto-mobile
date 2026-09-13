@@ -25,8 +25,17 @@ interface RoutingTargets {
   telemetryPush: RoutingTarget | null;
 }
 
+interface PooledEntry {
+  id: string;
+  platform: string;
+}
+
 interface DaemonStreamInternals {
-  devicePool: { isPooledIdentityUnresolved(deviceId: string): boolean };
+  devicePool: {
+    isPooledIdentityUnresolved(deviceId: string): boolean;
+    getAllDevices(): PooledEntry[];
+    assertDeviceActionable(deviceId: string, purpose: string): void;
+  };
   observationStreamHealth: {
     isHealthy(): boolean;
     recover(): Promise<void>;
@@ -37,6 +46,12 @@ interface DaemonStreamInternals {
   setupNavigationGraphStreamListener(server: unknown): void;
   setupNavigationGraphUpdateListener(manager: NavigationGraphManager): void;
   attemptRecovery(failureKind?: string): Promise<void>;
+  applyStorageSubscriptionRequest(request: {
+    deviceId: string | null;
+    packageName: string;
+    fileName: string;
+    subscribe: boolean;
+  }): Promise<void>;
 }
 
 class FakePushServer implements RoutingTarget {
@@ -438,5 +453,97 @@ describe("Daemon stream wiring", () => {
     } finally {
       daemon.getSessionManager().stopCleanupTimer();
     }
+  });
+
+  // An all-device `subscribe_storage` names no serial, so the socket server's
+  // FUNNEL 2 preflight cannot run: `storageDeviceId` is null and the fan-out
+  // below interprets null as EVERY pooled Android device. Each target it expands
+  // to is device-addressed work in its own right and must pass the gate, or the
+  // request installs a content observer on whichever replacement AVD answers on a
+  // quarantined serial and still acks success
+  // ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
+  describe("all-device storage subscription fan-out", () => {
+    async function daemonWithPool(
+      pooled: PooledEntry[],
+      quarantined: ReadonlySet<string>,
+    ): Promise<{ daemon: Daemon; internals: DaemonStreamInternals }> {
+      const db = await createTestDatabase();
+      const daemon = new Daemon(
+        {},
+        undefined,
+        new FakeTimer(),
+        new DeviceSessionRepository(db),
+        new CountingIdGenerator("device-session"),
+      );
+      const internals = daemon as unknown as DaemonStreamInternals;
+      internals.devicePool.getAllDevices = () => pooled;
+      internals.devicePool.assertDeviceActionable = (deviceId: string, purpose: string) => {
+        if (quarantined.has(deviceId)) {
+          throw new Error(`Refusing ${purpose} on device '${deviceId}'`);
+        }
+      };
+      return { daemon, internals };
+    }
+
+    test("refuses an all-device subscribe that expands to a quarantined serial", async () => {
+      const { daemon, internals } = await daemonWithPool(
+        [
+          { id: "emulator-5554", platform: "android" },
+          { id: "emulator-5556", platform: "android" },
+        ],
+        new Set(["emulator-5556"]),
+      );
+
+      try {
+        await expect(
+          internals.applyStorageSubscriptionRequest({
+            deviceId: null,
+            packageName: "com.example",
+            fileName: "prefs.xml",
+            subscribe: true,
+          }),
+        ).rejects.toThrow(/emulator-5556/);
+      } finally {
+        daemon.getSessionManager().stopCleanupTimer();
+      }
+    });
+
+    test("applies an all-device subscribe when no target is quarantined", async () => {
+      const { daemon, internals } = await daemonWithPool(
+        [{ id: "emulator-5554", platform: "android" }],
+        new Set(),
+      );
+
+      try {
+        await internals.applyStorageSubscriptionRequest({
+          deviceId: null,
+          packageName: "com.example",
+          fileName: "prefs.xml",
+          subscribe: true,
+        });
+      } finally {
+        daemon.getSessionManager().stopCleanupTimer();
+      }
+    });
+
+    // Teardown stays exempt for the same reason the socket server exempts it:
+    // refusing it would strand the observer this daemon registered.
+    test("still releases an all-device subscription that expands to a quarantined serial", async () => {
+      const { daemon, internals } = await daemonWithPool(
+        [{ id: "emulator-5554", platform: "android" }],
+        new Set(["emulator-5554"]),
+      );
+
+      try {
+        await internals.applyStorageSubscriptionRequest({
+          deviceId: null,
+          packageName: "com.example",
+          fileName: "prefs.xml",
+          subscribe: false,
+        });
+      } finally {
+        daemon.getSessionManager().stopCleanupTimer();
+      }
+    });
   });
 });

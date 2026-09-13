@@ -298,7 +298,17 @@ export interface ObserveResult {
   /** Whether a declarative waitFor condition matched. */
   matched?: boolean;
 
-  /** Whether a whole-screen declarative waitFor stable condition settled. */
+  /**
+   * Whether this observation passed a hierarchy-stability check.
+   *
+   * Two producers, one meaning ("two consecutive structurally-equal
+   * hierarchies"):
+   *  - `observe(waitFor: {for: "stable"})` — the standalone whole-screen settle.
+   *  - The embedded-observation gate on a navigation-class action (issue #6866),
+   *    which stamps every action observation so a client can tell a
+   *    stability-checked capture from an unchecked one. `false` means the bound
+   *    expired, or the action was not navigation-class and was never gated.
+   */
   settled?: boolean;
 
   /** True if a declarative waitFor condition or stability wait timed out. */
@@ -348,6 +358,21 @@ export interface ObserveResult {
    * Contains WCAG 2.1 violation detection and compliance checking
    */
   accessibilityAudit?: AccessibilityAuditResult;
+
+  /**
+   * Why a REQUESTED accessibility audit is absent from this observation.
+   *
+   * Present only when an audit was run and then deliberately dropped, so a
+   * client can tell "auditing was off" from "auditing was on and its result no
+   * longer describes this capture". The one producer today is the
+   * embedded-observation settle gate (#6866): when it adopts a settled capture
+   * in place of the action's own, the audit attached to the original — whose
+   * elements, violations, fingerprint and screen id were all derived from that
+   * original hierarchy, while settle polls skip auditing entirely — describes a
+   * tree that is no longer being returned, so it is dropped rather than
+   * mismatched onto the adopted one.
+   */
+  accessibilityAuditSkipped?: "settled_capture_adopted";
 
   /**
    * Freshness metadata for the observation

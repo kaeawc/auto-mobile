@@ -2870,6 +2870,9 @@ export class UnixSocketServer {
         const bootedDevices = await PlatformDeviceManagerFactory.getInstance().getBootedDevices(
           args.platform,
         );
+        // FUNNEL 1 then FUNNEL 2: reconcile before addressing the serial.
+        await this.reconcileDiscoveryObservation(bootedDevices, "socket:ide/updateService");
+        this.assertDeviceActionable(args.deviceId, "to update the accessibility service");
         const targetDevice = bootedDevices.find((d) => d.deviceId === args.deviceId);
         if (!targetDevice) {
           throw new Error(`Device not found: ${args.deviceId}`);
@@ -3033,6 +3036,9 @@ export class UnixSocketServer {
     }
     const bootedDevices =
       await PlatformDeviceManagerFactory.getInstance().getBootedDevices(platform);
+    // FUNNEL 1 then FUNNEL 2: reconcile before addressing the serial.
+    await this.reconcileDiscoveryObservation(bootedDevices, "socket:ide/keyValueMutation");
+    this.assertDeviceActionable(deviceId, "to mutate stored values");
     const targetDevice = bootedDevices.find((d) => d.deviceId === deviceId);
     if (!targetDevice) {
       throw new Error(`Device not found: ${deviceId}`);
@@ -4493,11 +4499,45 @@ export class UnixSocketServer {
     );
   }
 
+  /**
+   * FUNNEL 1 for this socket server: fold a discovery observation into pooled
+   * identity before anything here joins it to pool state. See
+   * `DevicePool.reconcileDiscoveryObservation`. A no-op in direct mode, where
+   * there is no pool.
+   */
+  private async reconcileDiscoveryObservation(
+    devices: readonly BootedDevice[],
+    source: string,
+  ): Promise<void> {
+    if (!this.daemonState.isInitialized()) {
+      return;
+    }
+    await this.daemonState.getDevicePool().reconcileDiscoveryObservation?.(devices, source);
+  }
+
+  /**
+   * FUNNEL 2 for this socket server: refuse a serial whose pooled identity is
+   * quarantined. See `DevicePool.assertDeviceActionable`. A no-op in direct mode,
+   * where nothing holds cross-call identity state to quarantine.
+   */
+  private assertDeviceActionable(deviceId: string, purpose: string): void {
+    if (!this.daemonState.isInitialized()) {
+      return;
+    }
+    this.daemonState.getDevicePool().assertDeviceActionable?.(deviceId, purpose);
+  }
+
   private async runTrackedDeviceInput<T>(
     toolName: string,
     targetDevice: BootedDevice,
     operation: (signal?: AbortSignal) => Promise<T>,
   ): Promise<T> {
+    // FUNNEL 2, ahead of the session lookup: a device-addressed input on a
+    // quarantined serial must be refused WITH OR WITHOUT a session. The
+    // session-keyed gate below cannot see an idle emulator, so an explicit
+    // `deviceId` tap on one used to execute against whatever now answers on that
+    // serial ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
+    this.assertDeviceActionable(targetDevice.deviceId, "to run");
     const sessionManager = this.daemonState.isInitialized()
       ? this.daemonState.getSessionManager()
       : undefined;
@@ -4535,6 +4575,10 @@ export class UnixSocketServer {
         bypassAndroidDeviceListCache,
       },
     );
+    // FUNNEL 1: the target this resolves is handed straight to the device-addressed
+    // admission gate, which reads pool state — so the pool must have seen this
+    // observation first (#6863 review).
+    await this.reconcileDiscoveryObservation(discovery.devices, `socket:${action}`);
     if (!discovery.succeededPlatforms.has(platform)) {
       throw new Error(`Unable to discover booted ${platform} devices for ${action}`);
     }

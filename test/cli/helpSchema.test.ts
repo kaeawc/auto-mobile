@@ -125,7 +125,7 @@ test("help output and errors stay isolated between callers", async () => {
 test("array choices stay grouped inside the JSON array type", () => {
   const shape = getCliHelpSchemaShape(getDeviceStateSchema);
   expect(getCliHelpParameterInfo(shape?.include).typeName).toBe(
-    '("doNotDisturb" | "biometrics" | "networkCondition")[] (JSON)',
+    '("doNotDisturb" | "connectivity" | "biometrics" | "networkCondition")[] (JSON)',
   );
 });
 

@@ -4,6 +4,7 @@ import dev.jasonpearson.automobile.desktop.core.testing.FakeAutoMobileClient
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -65,6 +66,40 @@ class DeviceSnapshotActionsTest {
     assertEquals("nightly", snapshots.single().snapshotName)
     assertEquals("android", snapshots.single().platform)
     assertEquals(2048L, snapshots.single().sizeBytes)
+  }
+
+  @Test
+  fun `a snapshot whose size could not be measured does not break the whole listing`() {
+    // A vm capture whose AVD directory cannot be resolved is serialized with
+    // "sizeBytes": null. Decoding that into a non-nullable Long threw, so one
+    // unsized row stopped the dashboard from listing ANY snapshot (#6891 review).
+    val client = FakeAutoMobileClient()
+    client.setResourceResponseWithText(
+      DEVICE_SNAPSHOT_ARCHIVE_URI,
+      """
+      {
+        "snapshots": [
+          {"snapshotName":"unsized","deviceId":"emulator-5554","deviceName":"am-api34",
+           "platform":"android","snapshotType":"vm","includeAppData":true,
+           "includeSettings":true,"createdAt":"2026-09-13T00:00:00Z",
+           "lastAccessedAt":"2026-09-13T01:00:00Z","sizeBytes":null,"sizeLabel":"unknown"},
+          {"snapshotName":"sized","deviceId":"emulator-5554","deviceName":"am-api34",
+           "platform":"android","snapshotType":"vm","includeAppData":true,
+           "includeSettings":true,"createdAt":"2026-09-13T00:00:00Z",
+           "lastAccessedAt":"2026-09-13T01:00:00Z","sizeBytes":2048}
+        ],
+        "count": 2,
+        "totalSizeBytes": 2048
+      }
+      """
+        .trimIndent(),
+    )
+
+    val snapshots = actionsWith(client).listSnapshots()
+
+    assertEquals(listOf("unsized", "sized"), snapshots.map { it.snapshotName })
+    assertNull(snapshots.first().sizeBytes)
+    assertEquals(2048L, snapshots.last().sizeBytes)
   }
 
   @Test

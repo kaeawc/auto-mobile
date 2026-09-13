@@ -341,3 +341,44 @@ describe("observeResultSchema: context array (#6221 item 1)", () => {
     expect(parsed.context).toBeUndefined();
   });
 });
+
+/**
+ * `settled` (issue #6866) is stamped onto EVERY embedded action observation —
+ * full arm and diff arm alike — so a client can tell a stability-checked capture
+ * from an unchecked one. A passthrough schema tolerates the wire value, but a
+ * schema-driven client or a generated type can only discover the accessor if
+ * both arms declare it.
+ */
+describe("observation arms advertise `settled` (#6866)", () => {
+  test("the full-observation arm declares it", () => {
+    const json = toJSONSchema(observationSummarySchema) as Record<string, any>;
+    expect(json.properties.settled).toBeDefined();
+    expect(json.properties.settled.type).toBe("boolean");
+    expect(json.required ?? []).not.toContain("settled");
+  });
+
+  test("the diff arm declares it", () => {
+    const json = toJSONSchema(observeDiffSchema) as Record<string, any>;
+    expect(json.properties.settled).toBeDefined();
+    expect(json.properties.settled.type).toBe("boolean");
+    expect(json.required ?? []).not.toContain("settled");
+  });
+
+  test("a generated action-tool output schema therefore carries it on the observation", () => {
+    expect(JSON.stringify(toJSONSchema(tapOnResultSchema))).toContain('"settled"');
+  });
+
+  test("both arms still accept an observation carrying the flag", () => {
+    expect(observationSummarySchema.parse({ settled: true }).settled).toBe(true);
+    expect(
+      observeDiffSchema.parse({
+        isDiff: true,
+        skeleton: [],
+        added: [],
+        removed: [],
+        changed: [],
+        settled: false,
+      }).settled,
+    ).toBe(false);
+  });
+});

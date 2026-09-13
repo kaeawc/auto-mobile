@@ -175,6 +175,32 @@ describe("ExecutionTracker", function () {
     expect(timer.getPendingTimeoutCount()).toBe(0);
   });
 
+  // An execution that was deliberately exempted from the cancellation is not
+  // going to end, so the drain must not wait on it: doing so spends the whole
+  // budget and reports a false timeout for work that was never cancelled
+  // ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
+  test("does not wait on an execution the cancellation exempted", async function () {
+    const timer = new FakeTimer();
+    const tracker = new ExecutionTracker(timer, new FakeIdGenerator(["kill", "tap"]));
+    const kill = tracker.startExecution("killDevice", undefined, "device-session");
+    const tap = tracker.startExecution("tapOn", undefined, "device-session");
+
+    await tracker.cancelDeviceSessionExecutions(
+      "device-session",
+      "device-disconnected:emulator-5554",
+      { excludeExecutionId: kill.id },
+    );
+    const drained = tracker.waitForDeviceSessionExecutionsToEnd("device-session", 1_000, {
+      excludeExecutionId: kill.id,
+    });
+    tracker.endExecution(tap.id);
+
+    await expect(drained).resolves.toBe(true);
+    expect(kill.abortController.signal.aborted).toBe(false);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+    tracker.endExecution(kill.id);
+  });
+
   test("bounds the wait for signal-ignorant device work", async function () {
     const timer = new FakeTimer();
     const tracker = new ExecutionTracker(timer, new FakeIdGenerator(["execution-1"]));

@@ -29,7 +29,10 @@ case "$1 $2" in
       */check-runs/5/annotations) printf '[{"message":"XCTAssertEqual failed: (\\"foo\\") is not equal to (\\"bar\\")"}]\n' ;;
       */check-runs/9/annotations) printf '[{"message":"expect(received).toBe(expected) ... some product assertion failed"}]\n' ;;
       */check-runs/10/annotations) printf '[{"message":"oxlint: no-unused-vars lint failure"}]\n' ;;
+      */check-runs/12/annotations|*/check-runs/13/annotations|*/check-runs/14/annotations) printf '[]\n' ;;
+      */check-runs/15/annotations|*/check-runs/16/annotations|*/check-runs/17/annotations) printf '[]\n' ;;
       */actions/jobs/6/logs) printf 'readiness phase exceeded the remaining deadline\n' ;;
+      */actions/jobs/12/logs|*/actions/jobs/13/logs|*/actions/jobs/14/logs|*/actions/jobs/15/logs|*/actions/jobs/16/logs|*/actions/jobs/17/logs) printf 'integration fixture failure\n' ;;
       *) printf '[]\n' ;;
     esac
     ;;
@@ -180,4 +183,41 @@ JSON
   [ "$status" -eq 0 ]
   [[ "$output" == *"Android → Check results → none → UNKNOWN — no signature match, investigate"* ]]
   [[ "$output" != *"Android → Check results → none → CHECK-UPSTREAM-FIRST"* ]]
+}
+
+@test "does not mark iOS advisory-only when matrix Playground Tests also fails" {
+  fixture="$BATS_TEST_TMPDIR/ios-hard-and-advisory-run.json"
+  cat > "$fixture" <<'JSON'
+{
+  "headBranch": "work/ios-playground-hard-failure",
+  "jobs": [
+    {"databaseId": 12, "name": "XCTestRunner Simulator Tests", "conclusion": "failure", "steps": [{"name": "Run XCTestRunner integration tests", "conclusion": "failure"}]},
+    {"databaseId": 13, "name": "iOS Playground Tests (iPhone 17)", "conclusion": "failure", "steps": [{"name": "Run Playground tests", "conclusion": "failure"}]},
+    {"databaseId": 14, "name": "iOS", "conclusion": "failure", "steps": [{"name": "Check results", "conclusion": "failure"}]}
+  ]
+}
+JSON
+
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" bash "$SCRIPT" 323
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"iOS → Check results → none → UNKNOWN — no signature match, investigate"* ]]
+  [[ "$output" != *"iOS → Check results → none → CHECK-UPSTREAM-FIRST"* ]]
+}
+
+@test "marks WebRTC upstream-only when publisher and iOS capture fail" {
+  fixture="$BATS_TEST_TMPDIR/webrtc-advisory-run.json"
+  cat > "$fixture" <<'JSON'
+{
+  "headBranch": "work/webrtc-capture",
+  "jobs": [
+    {"databaseId": 15, "name": "WebRTC Publisher Integration (MediaMTX)", "conclusion": "failure", "steps": [{"name": "Run MediaMTX integration", "conclusion": "failure"}]},
+    {"databaseId": 16, "name": "iOS Device Capture to WHEP", "conclusion": "failure", "steps": [{"name": "Run iOS capture", "conclusion": "failure"}]},
+    {"databaseId": 17, "name": "WebRTC", "conclusion": "failure", "steps": [{"name": "Check results", "conclusion": "failure"}]}
+  ]
+}
+JSON
+
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" bash "$SCRIPT" 324
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"WebRTC → Check results → none → CHECK-UPSTREAM-FIRST"* ]]
 }

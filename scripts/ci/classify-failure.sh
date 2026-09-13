@@ -67,7 +67,7 @@ advisory_only_gate() {
     iOS)
       [[ -n "$failures" ]] \
         && grep -Fqx 'XCTestRunner Simulator Tests' <<< "$failures" \
-        && ! grep -Eq '^(iOS Build|iOS Playground Tests|Build Root SPM Package)$' <<< "$failures"
+        && ! grep -Eq '^(iOS Build|iOS Playground Tests( \(.*\))?|Build Root SPM Package)$' <<< "$failures"
       ;;
     Android)
       [[ -n "$failures" ]] \
@@ -81,7 +81,7 @@ advisory_only_gate() {
       ;;
     WebRTC)
       [[ -n "$failures" ]] \
-        && grep -Eq '^(WebRTC Publisher Integration|Android Device WebRTC|iOS Device WebRTC)' <<< "$failures"
+        && grep -Eq '^(WebRTC Publisher Integration|Android Device Capture to WHEP|iOS Device Capture to WHEP)' <<< "$failures"
       ;;
     *) return 1 ;;
   esac

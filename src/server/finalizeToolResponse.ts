@@ -13,12 +13,12 @@ import {
 import type { ObserveScopeInput } from "../models/ObserveScope";
 import { capLayoutWarnings } from "../features/observe/audits/SafeAreaAuditor";
 import {
-  isInPlacePressButton,
-  isNavigationPressButton,
-} from "../features/action/pressButtonPolicy";
+  classifyObservationAction,
+  type ObservationActionClass,
+} from "../features/action/observationActionClass";
 import { serverConfig } from "../utils/ServerConfig";
-import { getStructuredPayload, stringifyToolResponse } from "../utils/toolUtils";
-import { isSubmitImeAction } from "../models/ImeActionResult";
+import { stringifyToolResponse } from "../utils/toolUtils";
+import { readToolEnvelopePayload, writeToolEnvelopePayload } from "./toolEnvelopePayload";
 import { boundStructuredField, truncateBodyText } from "../utils/truncateBodyText";
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
@@ -88,59 +88,6 @@ const OBSERVE_WAIT_METADATA_KEYS = [
   "matchedElement",
   "candidates",
 ] as const;
-
-type ObservationActionClass = "navigation" | "inPlace" | "scroll" | "unknown";
-
-function classifyObservationAction(
-  name: string,
-  args?: Record<string, unknown>,
-): ObservationActionClass {
-  switch (name) {
-    case "tapOn":
-    case "tapAny":
-    case "homeScreen":
-    case "recentApps":
-    case "openLink":
-      return "navigation";
-    case "pressButton": {
-      if (isNavigationPressButton(args?.button)) {
-        return "navigation";
-      }
-      if (isInPlacePressButton(args?.button)) {
-        return "inPlace";
-      }
-      return "unknown";
-    }
-    case "inputText":
-      return isSubmitImeAction(args?.imeAction) ? "navigation" : "inPlace";
-    case "sendKeys": {
-      const commands = Array.isArray(args?.commands) ? args.commands : [];
-      const maySubmit = commands.some((command) => {
-        if (!command || typeof command !== "object") {
-          return false;
-        }
-        const value = command as Record<string, unknown>;
-        return (
-          value.action === "key" &&
-          ["enter", "done", "go", "search", "send"].includes(String(value.key))
-        );
-      });
-      return maySubmit ? "navigation" : "inPlace";
-    }
-    case "clearText":
-    case "selectAllText":
-    case "keyboard":
-    case "clipboard":
-      return "inPlace";
-    case "imeAction":
-      return isSubmitImeAction(args?.action) ? "navigation" : "inPlace";
-    case "swipeOn":
-    case "dragAndDrop":
-      return "scroll";
-    default:
-      return "unknown";
-  }
-}
 
 /**
  * Action tools that embed a post-action observation AND expose the `raw`/`project`
@@ -256,13 +203,19 @@ function resolveDiffContext(
  * fresh" across modes. Sourced from `rawObservation` (the pre-sanitize
  * observation) rather than `servedObservation` so it is populated
  * unconditionally, regardless of projection.
+ *
+ * `settled` (issue #6866) rides along for the same reason: the embedded-observation
+ * stability verdict is a top-level field the hierarchy diff never sees, and a client
+ * that only ever receives diffs must still be able to tell a stability-checked
+ * capture from an unchecked one.
  */
 function resolveDiffScreenState(
   rawObservation: ObserveResult,
-): Pick<ObserveDiff, "activeWindow" | "freshness"> {
+): Pick<ObserveDiff, "activeWindow" | "freshness" | "settled"> {
   return {
     activeWindow: rawObservation.activeWindow,
     freshness: rawObservation.freshness,
+    settled: rawObservation.settled,
   };
 }
 
@@ -347,41 +300,14 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
     return response;
   }
 
-  const envelope = response as {
-    content?: Array<{ type?: string; text?: string }>;
-    structuredContent?: unknown;
-  };
-
   // Prefer structuredContent; fall back to the serialized text part when a tool
   // returned text only. Anything else (image parts, non-JSON text) is left alone.
-  const structuredPayload = getStructuredPayload<Record<string, unknown>>(envelope);
-  const hasStructured = structuredPayload !== undefined;
-
-  const textPart =
-    Array.isArray(envelope.content) &&
-    envelope.content[0]?.type === "text" &&
-    typeof envelope.content[0].text === "string"
-      ? envelope.content[0]
-      : undefined;
-
-  let payload: Record<string, unknown> | undefined;
-  if (structuredPayload) {
-    payload = structuredPayload;
-  } else if (textPart) {
-    try {
-      const parsed = JSON.parse(textPart.text as string);
-      if (parsed && typeof parsed === "object") {
-        payload = parsed as Record<string, unknown>;
-      }
-    } catch {
-      // Not JSON — nothing to sanitize, leave the response as-is.
-      return response;
-    }
-  }
-
-  if (!payload) {
+  const envelopeView = readToolEnvelopePayload(response);
+  if (!envelopeView) {
     return response;
   }
+  const payload = envelopeView.payload;
+  const hasStructured = envelopeView.hasStructured;
 
   const cfg: SanitizeObserveConfig = {
     // Elements are dropped by default; `--observe-result-include-elements` opts
@@ -673,12 +599,7 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
   }
 
   // Rewrite both representations from the same object so they cannot diverge.
-  if (hasStructured) {
-    envelope.structuredContent = sanitizedPayload;
-  }
-  if (textPart) {
-    textPart.text = stringifyToolResponse(sanitizedPayload);
-  }
+  writeToolEnvelopePayload(envelopeView, sanitizedPayload);
   pendingBaselineUpdate &&
     ctx.baselineStore!.set(pendingBaselineUpdate.sessionUuid, pendingBaselineUpdate.observation);
 

@@ -818,7 +818,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       parsedParams = tool.schema.parse(strippedToolParams);
     } catch (error) {
       throw new ActionableError(
-        `Invalid parameters for tool ${name}: ${formatToolParamError(name, error, strippedToolParams)}`,
+        `Invalid parameters for tool ${name}: ${formatToolParamError(name, error, strippedToolParams, tool.schema)}`,
       );
     }
 

@@ -214,6 +214,7 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
     perf?: PerformanceTracker,
     skipWaitForFresh?: boolean,
     minTimestamp?: number,
+    signal?: AbortSignal,
   ): Promise<CtrlProxyHierarchyResponse>;
 
   requestHierarchySync(
@@ -2317,6 +2318,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     perf?: PerformanceTracker,
     skipWaitForFresh?: boolean,
     minTimestamp?: number,
+    signal?: AbortSignal,
   ): Promise<CtrlProxyHierarchyResponse> {
     return this.hierarchy.getLatestHierarchy(
       waitForFresh,
@@ -2324,6 +2326,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       perf,
       skipWaitForFresh,
       minTimestamp,
+      signal,
     );
   }
 

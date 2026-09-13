@@ -4,6 +4,7 @@ import {
   ActionableError,
   DeviceSnapshotManifest,
   DeviceSnapshotType,
+  toActionableError,
 } from "../../models";
 import type { SnapshotRestoreProvider } from "../../utils/interfaces/SnapshotProvider";
 import {
@@ -179,14 +180,21 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
 
       logger.info(`VM snapshot restored successfully`);
 
-      // Wait a moment for emulator to stabilize after snapshot load
-      await this.timer.sleep(2000);
+      await this.emulator.waitForEmulatorReady(
+        manifest.deviceName,
+        vmSnapshotTimeoutMs,
+        null,
+        this.device.deviceId,
+      );
 
       logger.info("VM snapshot restoration complete");
     } catch (error) {
       const message = errorMessage(error);
       logger.error(`Failed to restore VM snapshot: ${message}`);
-      throw new ActionableError(`Failed to restore VM snapshot: ${message}`);
+      throw toActionableError(
+        error,
+        `Failed to restore VM snapshot '${snapshotName}' on device ${this.device.deviceId}`,
+      );
     }
   }
 

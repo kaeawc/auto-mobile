@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { RestoreSnapshot } from "../../../src/features/action/RestoreSnapshot";
 import { BootedDevice, DeviceSnapshotManifest } from "../../../src/models";
 import { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
+import { AndroidEmulatorClient } from "../../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -15,6 +16,12 @@ describe("RestoreSnapshot", () => {
   let fakeAdb: FakeAdbClient;
   let fakeAdbFactory: AdbClientFactory;
   let fakeTimer: FakeTimer;
+  let emulatorReadinessCalls: Array<{
+    avdName: string;
+    timeoutMs: number | undefined;
+    childProcess: null | undefined;
+    targetDeviceId: string | undefined;
+  }>;
   let restoreSnapshot: RestoreSnapshot;
   let store: DeviceSnapshotStore;
   let testBasePath: string;
@@ -33,13 +40,25 @@ describe("RestoreSnapshot", () => {
     fakeAdbFactory = { create: () => fakeAdb as any };
     fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
+    emulatorReadinessCalls = [];
+    const fakeEmulator = {
+      waitForEmulatorReady: async (
+        avdName: string,
+        timeoutMs?: number,
+        childProcess?: null,
+        targetDeviceId?: string,
+      ) => {
+        emulatorReadinessCalls.push({ avdName, timeoutMs, childProcess, targetDeviceId });
+        return device;
+      },
+    } as AndroidEmulatorClient;
 
     // Create secure temporary directory for tests
     testBasePath = await fs.mkdtemp(path.join(os.tmpdir(), "snapshot-restore-test-"));
     store = new DeviceSnapshotStore(testBasePath);
 
     // Create RestoreSnapshot instance with fakes
-    restoreSnapshot = new RestoreSnapshot(device, fakeAdbFactory, undefined, fakeTimer, store);
+    restoreSnapshot = new RestoreSnapshot(device, fakeAdbFactory, fakeEmulator, fakeTimer, store);
 
     // Setup default command results
     fakeAdb.setCommandResult("shell pm clear com.example.app", "Success");
@@ -87,7 +106,15 @@ describe("RestoreSnapshot", () => {
       expect(result.snapshotType).toBe("vm");
       expect(result.restoredAt).toBeDefined();
       expect(fakeAdb.wasCommandExecuted(`emu avd snapshot load ${snapshotName}`)).toBe(true);
-      expect(fakeTimer.wasSleepCalled(2000)).toBe(true); // Stabilization sleep
+      expect(emulatorReadinessCalls).toEqual([
+        {
+          avdName: manifest.deviceName,
+          timeoutMs: 30000,
+          childProcess: null,
+          targetDeviceId: device.deviceId,
+        },
+      ]);
+      expect(fakeTimer.wasSleepCalled(2000)).toBe(false);
     });
 
     it("should throw error when VM snapshot load fails with KO", async () => {
@@ -119,6 +146,37 @@ describe("RestoreSnapshot", () => {
           useVmSnapshot: true,
         }),
       ).rejects.toThrow("Failed to restore VM snapshot");
+    });
+
+    it("surfaces readiness failures with the snapshot and device identity", async () => {
+      const snapshotName = "test-vm-readiness-timeout";
+      const manifest: DeviceSnapshotManifest = {
+        snapshotName,
+        timestamp: new Date().toISOString(),
+        deviceId: device.deviceId,
+        deviceName: device.name,
+        platform: "android",
+        snapshotType: "vm",
+        includeAppData: true,
+        includeSettings: false,
+      };
+      fakeAdb.setCommandResult(`emu avd snapshot load ${snapshotName}`, "OK");
+      const notReadyEmulator = {
+        waitForEmulatorReady: async () => {
+          throw new Error("timed out waiting for boot completion");
+        },
+      } as AndroidEmulatorClient;
+      const restoring = new RestoreSnapshot(
+        device,
+        fakeAdbFactory,
+        notReadyEmulator,
+        fakeTimer,
+        store,
+      );
+
+      await expect(
+        restoring.execute({ snapshotName, manifest, useVmSnapshot: true }),
+      ).rejects.toThrow(`snapshot '${snapshotName}' on device ${device.deviceId}`);
     });
 
     it("should throw error when VM snapshot load fails with KO in stdout", async () => {

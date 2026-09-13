@@ -430,6 +430,96 @@ describe("deviceSnapshotManager", () => {
     expect(updated?.lastAccessedAt).toBe(nowIso);
   });
 
+  test("restoreDeviceSnapshot invalidates an Android VM device incarnation after restore", async () => {
+    const vmDevice: BootedDevice = {
+      ...TEST_DEVICE,
+      deviceId: "emulator-5554",
+      name: "Pixel_9_Pro",
+    };
+    const manifest: DeviceSnapshotManifest = {
+      snapshotName: "vm-restore",
+      timestamp: new Date(0).toISOString(),
+      deviceId: vmDevice.deviceId,
+      deviceName: vmDevice.name,
+      platform: "android",
+      snapshotType: "vm",
+      includeAppData: true,
+      includeSettings: false,
+    };
+    const calls: string[] = [];
+
+    await repository.insertSnapshot({
+      snapshotName: manifest.snapshotName,
+      deviceId: manifest.deviceId,
+      deviceName: manifest.deviceName,
+      platform: manifest.platform,
+      snapshotType: manifest.snapshotType,
+      includeAppData: manifest.includeAppData,
+      includeSettings: manifest.includeSettings,
+      createdAt: manifest.timestamp,
+      lastAccessedAt: manifest.timestamp,
+      sizeBytes: 0,
+      manifest,
+    });
+    await setDeviceSnapshotManagerDependencies({
+      createRestoreProvider: () => ({
+        restore: async (args) => {
+          calls.push("restore");
+          return { snapshotType: args.manifest.snapshotType, restoredAt: manifest.timestamp };
+        },
+      }),
+      deviceIncarnationInvalidator: {
+        invalidate: async (invalidatedDevice) => {
+          expect(invalidatedDevice).toBe(vmDevice);
+          calls.push("invalidate");
+        },
+      },
+    });
+
+    await restoreDeviceSnapshot(vmDevice, { snapshotName: manifest.snapshotName });
+
+    expect(calls).toEqual(["restore", "invalidate"]);
+  });
+
+  test("restoreDeviceSnapshot does not invalidate a settings-only Android restore", async () => {
+    const manifest: DeviceSnapshotManifest = {
+      snapshotName: "settings-restore",
+      timestamp: new Date(0).toISOString(),
+      deviceId: TEST_DEVICE.deviceId,
+      deviceName: TEST_DEVICE.name,
+      platform: "android",
+      snapshotType: "adb",
+      includeAppData: false,
+      includeSettings: true,
+    };
+    let invalidated = false;
+
+    await repository.insertSnapshot({
+      snapshotName: manifest.snapshotName,
+      deviceId: manifest.deviceId,
+      deviceName: manifest.deviceName,
+      platform: manifest.platform,
+      snapshotType: manifest.snapshotType,
+      includeAppData: manifest.includeAppData,
+      includeSettings: manifest.includeSettings,
+      createdAt: manifest.timestamp,
+      lastAccessedAt: manifest.timestamp,
+      sizeBytes: 0,
+      manifest,
+    });
+    await setDeviceSnapshotManagerDependencies({
+      deviceIncarnationInvalidator: {
+        invalidate: async () => {
+          invalidated = true;
+        },
+      },
+    });
+
+    await restoreDeviceSnapshot(TEST_DEVICE, { snapshotName: manifest.snapshotName });
+
+    expect(invalidated).toBe(false);
+  });
+
   test("restoreDeviceSnapshot round-trips an iOS manifest carrying iosSettings", async () => {
     const createdAt = new Date(0).toISOString();
     const manifest: DeviceSnapshotManifest = {

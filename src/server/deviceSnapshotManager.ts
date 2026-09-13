@@ -40,6 +40,10 @@ import {
 } from "../utils/android-cmdline-tools/AvdSnapshotService";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
+import {
+  DefaultDeviceIncarnationInvalidator,
+  type DeviceIncarnationInvalidator,
+} from "./DeviceIncarnationInvalidator";
 
 interface DeviceSnapshotCaptureArgs {
   snapshotName?: string;
@@ -108,6 +112,7 @@ interface DeviceSnapshotManagerDependencies {
     timer: Timer,
     store: DeviceSnapshotStore,
   ) => SnapshotRestoreProvider;
+  deviceIncarnationInvalidator: DeviceIncarnationInvalidator;
 }
 
 let moduleDependencies: DeviceSnapshotManagerDependencies | null = null;
@@ -212,6 +217,7 @@ async function getDeviceSnapshotDependencies(): Promise<DeviceSnapshotManagerDep
       createRestoreProvider: (device, timer, store) => {
         return new RestoreSnapshot(device, undefined, undefined, timer, store);
       },
+      deviceIncarnationInvalidator: new DefaultDeviceIncarnationInvalidator(),
     };
   }
 
@@ -231,6 +237,8 @@ export async function setDeviceSnapshotManagerDependencies(
     now: deps.now ?? current.now,
     createCaptureProvider: deps.createCaptureProvider ?? current.createCaptureProvider,
     createRestoreProvider: deps.createRestoreProvider ?? current.createRestoreProvider,
+    deviceIncarnationInvalidator:
+      deps.deviceIncarnationInvalidator ?? current.deviceIncarnationInvalidator,
   };
 }
 
@@ -1445,8 +1453,14 @@ export async function restoreDeviceSnapshot(
   result: RestoreSnapshotResult;
   manifest: DeviceSnapshotManifest;
 }> {
-  const { snapshotRepository, snapshotStore, timer, now, createRestoreProvider } =
-    await getDeviceSnapshotDependencies();
+  const {
+    snapshotRepository,
+    snapshotStore,
+    timer,
+    now,
+    createRestoreProvider,
+    deviceIncarnationInvalidator,
+  } = await getDeviceSnapshotDependencies();
 
   // Reject a traversal/absolute name before any snapshot lookup or legacy
   // manifest read resolves a path from it (issue #5705).
@@ -1484,6 +1498,15 @@ export async function restoreDeviceSnapshot(
       useVmSnapshot,
       vmSnapshotTimeoutMs,
     });
+
+    if (
+      device.platform === "android" &&
+      device.deviceId.startsWith("emulator-") &&
+      record.manifest.snapshotType === "vm" &&
+      useVmSnapshot
+    ) {
+      await deviceIncarnationInvalidator.invalidate(device);
+    }
 
     const timestamp = now().toISOString();
     await snapshotRepository.touchSnapshot(record.snapshotName, timestamp);

@@ -745,17 +745,20 @@ function detectImeWindow(elements: ObserveElements): ImeWindow | undefined {
  * merely shares the keyboard's package (a keyboard app showing its own settings
  * screen while its IME is up) is not folded away and does not stretch the
  * synthetic row's bounds across two windows. The package-only match is reserved
- * for provenance-less input, where group/span ancestry does not exist.
+ * for provenance-less input, where group/span ancestry does not exist; when the
+ * capture vouches for an IME that no collected node places (visible keyboard,
+ * no accessible keys) nothing is a member at all.
  */
 function isImeMember(el: Element, ime: ImeWindow): boolean {
   const provenance = getElementProvenance(el);
   if (provenance?.keyboardPackage === ime.package) {
     return true;
   }
-  if (provenance === undefined || ime.group === undefined) {
+  if (provenance === undefined) {
     return idPackage(el) === ime.package;
   }
   return (
+    ime.group !== undefined &&
     provenance.group === ime.group &&
     provenance.enter >= ime.spanEnter &&
     provenance.exit <= ime.spanExit

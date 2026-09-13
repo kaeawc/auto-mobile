@@ -335,6 +335,22 @@ function sharedPackageObservation(): ObserveResult {
 }
 
 describe("IME window membership (#6871)", () => {
+  test("a captured IME with no accessible keys never folds same-package app controls", () => {
+    const source = sharedPackageObservation();
+    // Drop every key: the capture still vouches for the IME, but no collected
+    // node can place its window, so nothing may be folded by package alone.
+    (
+      source.viewHierarchy as unknown as { windows: { hierarchy: { node: ViewHierarchyNode } }[] }
+    ).windows[0].hierarchy.node.node = [];
+    source.elements = new DefaultObserveElementCollector().collect(
+      source.viewHierarchy!,
+      "android",
+    );
+    const result = sanitizeObserveResult(source, { dropElements: true, project: "skeleton" });
+    expect(result.skeleton!.map((entry) => entry.elementId)).toEqual(["com.keyboard:id/save"]);
+    expect(result.keyboard).toEqual({ visible: true, package: "com.keyboard" });
+  });
+
   test("a same-package app control in another window is not folded into the IME", () => {
     const result = sanitizeObserveResult(sharedPackageObservation(), {
       dropElements: true,

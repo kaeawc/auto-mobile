@@ -21,7 +21,8 @@ export interface AccessibilityAuditorOptions {
 
 /**
  * Fallback used when the per-device screenshot state has no cached path —
- * scans the screenshots tempdir for the most recent .png/.webp by mtime.
+ * scans the screenshots tempdir for the most recent screenshot by mtime
+ * (.png/.jpg/.jpeg/.webp — the Android CtrlProxy path writes .jpg).
  */
 export async function findLatestScreenshotPath(): Promise<string | undefined> {
   try {

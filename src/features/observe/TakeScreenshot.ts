@@ -34,6 +34,7 @@ import {
   IOS_CTRLPROXY_SCREENSHOT_METADATA,
   metadataForScreenshotFormat,
 } from "./ScreenshotMetadata";
+import { screenshotExtensionForFormat } from "../../utils/screenshot/screenshotFormats";
 
 /** Secure file mode: owner read/write only */
 const SECURE_FILE_MODE = 0o600;
@@ -182,8 +183,7 @@ export class TakeScreenshot implements ScreenshotService {
    * @returns Full file path for screenshot
    */
   generateScreenshotPath(timestamp: number, options: ScreenshotOptions): string {
-    const fileExtension =
-      options.format === "webp" ? "webp" : options.format === "jpeg" ? "jpg" : "png";
+    const fileExtension = screenshotExtensionForFormat(options.format ?? "png");
     return path.join(
       TakeScreenshot.getCacheDir(),
       `screenshot_${timestamp}_${this.idGenerator.next()}.${fileExtension}`,
@@ -337,7 +337,7 @@ export class TakeScreenshot implements ScreenshotService {
     const imageBuffer = Buffer.from(result.data, "base64");
     const screenshotPath = replaceScreenshotExtension(
       finalPath,
-      format === "jpeg" ? "jpg" : format,
+      screenshotExtensionForFormat(format),
     );
     await writeFileSecure(screenshotPath, imageBuffer);
     return {

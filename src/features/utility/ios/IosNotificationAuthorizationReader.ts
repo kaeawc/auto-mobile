@@ -73,6 +73,11 @@ export async function extractSectionDataBase64(
     return null;
   }
   const data = sectionInfo.get(bundleId);
+  // `<data>` decodes to a Buffer; re-encode it rather than re-deriving base64
+  // from the raw XML text (plutil wraps the payload across indented lines).
+  if (Buffer.isBuffer(data)) {
+    return data.toString("base64");
+  }
   if (typeof data !== "string") {
     return null;
   }

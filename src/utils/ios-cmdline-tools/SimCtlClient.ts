@@ -299,8 +299,12 @@ export interface SimCtl {
    * Open Simulator.app. If udid is provided, focuses that specific device window.
    * With multiple simulators booted, this ensures the right device is visible.
    * @param udid - Optional device UDID to focus
+   * @returns true if the GUI launch was performed, false if it was skipped
+   *   because this host has no Aqua session. Callers that memoize "Simulator
+   *   is up" must only do so on true — a headless skip left nothing running,
+   *   and a later call may find a GUI session (issue #6372).
    */
-  openSimulatorApp(udid?: string, signal?: AbortSignal): Promise<void>;
+  openSimulatorApp(udid?: string, signal?: AbortSignal): Promise<boolean>;
 
   /**
    * Deliver a simulated remote push notification to a booted simulator.
@@ -567,8 +571,14 @@ export class SimCtlClient implements SimCtl {
   ) => ChildProcess;
   private readonly fileSystem: SimCtlFileSystem;
   private readonly bootOptions: SimCtlBootOptions;
-  // Cached result of the launchctl headless-session probe (null = not yet probed)
+  // Cached result of the launchctl headless-session probe (null = not yet probed).
+  // Re-probed after HEADLESS_SESSION_CACHE_TTL so a GUI login/logout mid-process
+  // (e.g. an SSH session that later gains a GUI, or vice versa) does not leave a
+  // stale answer cached for the process lifetime (issue #6372).
   private headlessSessionCache: boolean | null = null;
+  private headlessSessionCacheTimestamp = 0;
+  private headlessSessionProbeSequence = 0;
+  private static readonly HEADLESS_SESSION_CACHE_TTL = 30_000; // 30 seconds
 
   // Static cache for device list
   private static deviceListCache: { devices: DeviceInfo[]; timestamp: number } | null = null;
@@ -992,7 +1002,9 @@ export class SimCtlClient implements SimCtl {
         reject(new Error(`Timed out opening Simulator.app for ${udid}`));
       }, remainingMs);
     });
-    const contenders: Array<Promise<void>> = [
+    // The launch/skip outcome is irrelevant here: this path only focuses the
+    // window of an already-booted simulator.
+    const contenders: Array<Promise<unknown>> = [
       this.openSimulatorApp(udid, operationSignal),
       timeout,
     ];
@@ -2518,14 +2530,14 @@ export class SimCtlClient implements SimCtl {
     }
   }
 
-  async openSimulatorApp(udid?: string, signal?: AbortSignal): Promise<void> {
+  async openSimulatorApp(udid?: string, signal?: AbortSignal): Promise<boolean> {
     // On a headless macOS host (no Aqua GUI session, e.g. a launchd daemon or
     // SSH context) `open -a Simulator` fails with OSLaunchdErrorDomain Code=125
     // after a slow retry, wasting wall-clock against the daemon-start budget.
     // The booted simulator + CtrlProxy work without the GUI, so skip the launch.
     if (await this.isHeadlessSession(signal)) {
       logger.debug("Skipping open -a Simulator: headless session (no Aqua GUI)");
-      return;
+      return false;
     }
 
     // Ensure Simulator.app is open (creates windows for all booted devices)
@@ -2548,6 +2560,8 @@ export class SimCtlClient implements SimCtl {
         logger.debug(`[iOS] Could not activate Simulator.app for ${udid}: ${error}`);
       }
     }
+
+    return true;
   }
 
   /**
@@ -2565,7 +2579,9 @@ export class SimCtlClient implements SimCtl {
    *     context with no GUI domain.
    *
    * If detection itself fails we assume a GUI session to preserve the prior
-   * behavior. The result is cached so launchctl is probed at most once.
+   * behavior. The result is cached for {@link HEADLESS_SESSION_CACHE_TTL} so
+   * launchctl is not probed on every call, but a stale answer does not persist
+   * for the process lifetime — mirrors the {@link DEVICE_LIST_CACHE_TTL} pattern.
    */
   private async isHeadlessSession(signal?: AbortSignal): Promise<boolean> {
     if (this.platform !== "darwin") {
@@ -2577,10 +2593,26 @@ export class SimCtlClient implements SimCtl {
       return override === "true" || override === "1";
     }
 
-    if (this.headlessSessionCache === null) {
-      this.headlessSessionCache = await this.detectHeadlessSession(signal);
+    const cacheAge = this.timer.now() - this.headlessSessionCacheTimestamp;
+    if (
+      this.headlessSessionCache !== null &&
+      cacheAge >= 0 &&
+      cacheAge < SimCtlClient.HEADLESS_SESSION_CACHE_TTL
+    ) {
+      return this.headlessSessionCache;
     }
-    return this.headlessSessionCache;
+
+    // Two device starts can race past the expired TTL and each launch an
+    // independent probe. A sequence distinguishes probes that begin in the
+    // same timer tick; only the newest one may update the cache. Each caller
+    // keeps its own probe and cancellation signal.
+    const probeSequence = ++this.headlessSessionProbeSequence;
+    const headless = await this.detectHeadlessSession(signal);
+    if (probeSequence === this.headlessSessionProbeSequence) {
+      this.headlessSessionCache = headless;
+      this.headlessSessionCacheTimestamp = this.timer.now();
+    }
+    return headless;
   }
 
   private async detectHeadlessSession(signal?: AbortSignal): Promise<boolean> {

@@ -335,6 +335,53 @@ describe("platform device preparation tools", () => {
     });
   });
 
+  test("getAndroid validates an avdName and serial pair after its startup lease", async () => {
+    const emulator: BootedDevice = {
+      platform: "android",
+      name: "Pixel_A",
+      deviceId: "emulator-5556",
+    };
+    const image: DeviceInfo = {
+      platform: "android",
+      name: emulator.name,
+      isRunning: false,
+      source: "local",
+    };
+    sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      deviceUtils,
+      new DefaultRetryExecutor(timer),
+    );
+    await pool.addDevice(emulator, image);
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    deviceUtils.setDeviceImages("android", [image]);
+    deviceUtils.setBootedDevices("android", []);
+    const detached = await pool.detachAdbServerResetCohort([pool.getDevice(emulator.deviceId)!]);
+
+    const preparation = callTool("getAndroid", {
+      avdName: emulator.name,
+      deviceId: emulator.deviceId,
+    });
+
+    try {
+      for (let attempt = 0; attempt < 50; attempt++) {
+        await Promise.resolve();
+      }
+      deviceUtils.setBootedDevices("android", [emulator]);
+      await pool.releaseAdbServerResetCohortReservations(detached.devices);
+
+      await expect(preparation).resolves.toMatchObject({
+        deviceIdentity: { avdName: emulator.name, adbSerial: emulator.deviceId },
+      });
+    } finally {
+      await pool.releaseAdbServerResetCohortReservations(detached.devices);
+    }
+  });
+
   test("getAndroid rejects contradictory avdName and deviceId instead of silently preferring one", async () => {
     const emulator: BootedDevice = {
       platform: "android",
@@ -724,6 +771,35 @@ describe("platform device preparation tools", () => {
     } finally {
       await pool.releaseAdbServerResetCohortReservations(detached.devices);
     }
+  });
+
+  test("bounds pre-boot avdName and serial validation by the boot deadline", async () => {
+    class SlowDiscovery extends FakeDeviceUtils {
+      override async getBootedDevicesDetailed(platform: "android" | "ios" | "either") {
+        timer.advanceTime(11);
+        return await super.getBootedDevicesDetailed(platform);
+      }
+    }
+    const slow = new SlowDiscovery();
+    const emulator: BootedDevice = {
+      platform: "android",
+      name: "Pixel_A",
+      deviceId: "emulator-5556",
+    };
+    slow.setBootedDevices("android", [emulator]);
+    setDeviceToolsDependencies({ deviceManagerFactory: () => slow });
+
+    const failure = await callTool("getAndroid", {
+      avdName: emulator.name,
+      deviceId: emulator.deviceId,
+      bootTimeoutMs: 10,
+    }).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(ActionableError);
+    expect((failure as ActionableError).message).toContain(
+      "pre-boot serial validation did not complete",
+    );
+    expect((failure as ActionableError).message).toContain("after 10ms");
   });
 
   test("waits for fuzzy legacy Android names that match a reserved AVD", async () => {

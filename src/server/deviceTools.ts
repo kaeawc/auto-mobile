@@ -4131,6 +4131,9 @@ function validateBootIdentity(
 async function validateRequestedAndroidSerialBeforeBoot(
   pair: { avdName: string; deviceId: string } | undefined,
   deviceUtils: PlatformDeviceManager,
+  bootDeadlineMs: number,
+  timer: Timer,
+  signal: AbortSignal | undefined,
 ): Promise<void> {
   if (!pair) {
     return;
@@ -4139,12 +4142,24 @@ async function validateRequestedAndroidSerialBeforeBoot(
   if (!avdName || !isAndroidEmulatorSerial(deviceId) || avdName === deviceId) {
     return;
   }
-  const discovery = await deviceUtils.getBootedDevicesDetailed("android", {
-    bypassAndroidDeviceListCache: true,
-  });
-  // FUNNEL 1: the post-boot recheck this defers to decides with pool/incarnation
-  // context, so the pool must have seen this observation (#6863 review).
-  await reconcileDiscoveryObservation(discovery.devices, "pre-boot-serial-validation");
+  const discovery = await runWithinShutdownDeadline(
+    { name: avdName, platform: "android", deviceId },
+    timer,
+    bootDeadlineMs,
+    "Android pre-boot serial validation did not complete",
+    signal,
+    async () => {
+      const discovery = await deviceUtils.getBootedDevicesDetailed("android", {
+        bypassAndroidDeviceListCache: true,
+      });
+      // FUNNEL 1: the post-boot recheck this defers to decides with pool/incarnation
+      // context, so the pool must have seen this observation (#6863 review).
+      await reconcileDiscoveryObservation(discovery.devices, "pre-boot-serial-validation");
+      return discovery;
+    },
+    undefined,
+    "pre-boot serial validation",
+  );
   if (!discovery.succeededPlatforms.has("android")) {
     // Discovery was unavailable this sweep; a pair we cannot yet contradict is
     // deferred to the post-boot recheck rather than rejected on missing data.
@@ -7167,12 +7182,6 @@ export function registerDeviceTools() {
       | Awaited<ReturnType<typeof reserveStartDeviceLifecycleReservations>>
       | undefined;
     try {
-      // Reject a contradictory getAndroid avdName + serial pair before booting,
-      // so a stopped AVD is not cold-booted and killed just to report it.
-      await validateRequestedAndroidSerialBeforeBoot(
-        budgets.requestedAndroidIdentifierPair,
-        deviceUtils,
-      );
       lifecycleReservations = await reserveStartDeviceLifecycleReservations(
         args,
         budgets,
@@ -7189,6 +7198,17 @@ export function registerDeviceTools() {
         coordinatedSignals.length === 1
           ? coordinatedSignals[0]
           : AbortSignal.any(coordinatedSignals);
+      // Reject a contradictory getAndroid avdName + serial pair before booting,
+      // so a stopped AVD is not cold-booted and killed just to report it. Run
+      // after its lifecycle lease, however, so a serial not yet visible during
+      // reset recovery gets a chance to appear before discovery decides.
+      await validateRequestedAndroidSerialBeforeBoot(
+        budgets.requestedAndroidIdentifierPair,
+        deviceUtils,
+        bootDeadlineMs,
+        deps.timer,
+        coordinatedSignal,
+      );
       return await bootAndPrepareDevice(
         args,
         budgets,

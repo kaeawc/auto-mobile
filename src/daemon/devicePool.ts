@@ -119,6 +119,7 @@ interface SessionPreservingRecovery {
 }
 interface RecoveringSessionLoss {
   deviceId: string;
+  expectedDevice?: PooledDevice;
   incidentId?: string;
   preparation?: symbol;
   avdName?: string;
@@ -2600,11 +2601,18 @@ export class DevicePool {
         !this.sessionPreservingRecoveries.has(sessionId),
     );
     for (const [, loss] of dueRecoveries) {
-      await this.recoverSessionBoundAndroidDeviceAfterLoss(
-        loss.deviceId,
-        loss.incidentId,
-        this.devices.get(loss.deviceId),
-      );
+      if (loss.expectedDevice) {
+        await this.recoverSessionBoundAndroidDeviceAfterAdbServerReset(
+          loss.deviceId,
+          loss.expectedDevice,
+        );
+      } else {
+        await this.recoverSessionBoundAndroidDeviceAfterLoss(
+          loss.deviceId,
+          loss.incidentId,
+          this.devices.get(loss.deviceId),
+        );
+      }
     }
   }
 
@@ -2886,8 +2894,11 @@ export class DevicePool {
         this.adbServerResetQuarantinedSessions.add(session.sessionId);
         this.recoveringSessionLosses.set(session.sessionId, {
           deviceId: device.id,
+          expectedDevice: device,
           incidentId,
           avdName: device.avdName,
+          deferredUntil: this.timer.now() + UNCONFIRMED_RECOVERY_SHUTDOWN_COOLDOWN_MS,
+          deferredShutdowns: 0,
         });
         deferred = true;
         return "deferred";

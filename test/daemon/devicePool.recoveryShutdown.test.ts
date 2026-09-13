@@ -265,6 +265,39 @@ test("detached ADB-reset ownership remains quarantined when emulator shutdown is
   }
 });
 
+test("ADB-reset recovery settles its incident when the deferred sweep runs", async () => {
+  const { timer, sessions, manager, pool, captured } = await setup();
+  try {
+    const cohort = await pool.detachAdbServerResetCohort([captured]);
+    const incidentId = captured.adbServerResetIncidentId;
+    if (!incidentId) {
+      throw new Error("Expected ADB-reset incident to be recorded");
+    }
+    const recovery = pool.recoverSessionBoundAndroidDeviceAfterAdbServerReset(
+      original.deviceId,
+      captured,
+    );
+    await manager.killAccepted.promise;
+    await flush();
+    timer.advanceTime(30_000);
+    expect(await recovery).toBe(false);
+    expect(
+      (await pool.waitForEmulatorLossIncident(incidentId, 0))?.recovery.outcome,
+    ).toBeUndefined();
+
+    manager.bootedDevices = [];
+    timer.advanceTime(30_000);
+    await pool.retryDueDeferredSessionRecoveries();
+
+    expect((await pool.waitForEmulatorLossIncident(incidentId, 0))?.recovery.outcome).toMatch(
+      /^(recovered|exhausted)$/,
+    );
+    await pool.releaseAdbServerResetCohortReservations(cohort.devices);
+  } finally {
+    sessions.stopCleanupTimer();
+  }
+});
+
 test("ordinary session recovery retries after its deferred shutdown cooldown", async () => {
   const { timer, sessions, manager, pool, captured } = await setup();
   try {

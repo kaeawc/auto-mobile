@@ -14,6 +14,9 @@ import { logger } from "../utils/logger";
  */
 export const PER_DEVICE_OBSERVATION_TIMEOUT_MS = DEFAULT_OBSERVATION_REQUEST_TIMEOUT_MS;
 
+/** Margin added to the outer batch wrapper so each per-device timer settles first. */
+export const OBSERVATION_BATCH_HEADROOM_MS = 3_000;
+
 export interface ObservationRequestDevice {
   id: string;
 }

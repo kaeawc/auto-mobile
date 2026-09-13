@@ -5,6 +5,12 @@ import {
   type NavigationGraphStreamData,
   type RequestedObservation,
 } from "../../src/daemon/deviceDataStreamSocketServer";
+import {
+  OBSERVATION_BATCH_HEADROOM_MS,
+  PER_DEVICE_OBSERVATION_TIMEOUT_MS,
+  runObservationRequestBatch,
+} from "../../src/daemon/observationRequestBatch";
+import type { ObserveResult } from "../../src/models";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeDeviceSessionResolver } from "../fakes/FakeDeviceSessionResolver";
@@ -521,6 +527,55 @@ describe("DeviceDataStreamSocketServer", () => {
       expect(msgs[0].id).toBe("obs-4");
       expect(msgs[0].success).toBe(false);
       expect(msgs[0].error).toBe("Observation request timed out after 100ms");
+    });
+
+    it("settles a stalled device in the batch before the outer request deadline", async () => {
+      server.setOnObservationRequested(
+        ({ signal }) =>
+          runObservationRequestBatch(
+            [{ id: "stalled" }, { id: "healthy" }],
+            async (device): Promise<ObserveResult> => {
+              if (device.id === "stalled") {
+                return new Promise<ObserveResult>(() => undefined);
+              }
+              return requestedObservation(device.id).observation;
+            },
+            { timer, signal },
+          ),
+        PER_DEVICE_OBSERVATION_TIMEOUT_MS + OBSERVATION_BATCH_HEADROOM_MS,
+      );
+      const { socket } = server.simulateSubscription({});
+
+      const request = server.processLineForTest(
+        socket,
+        JSON.stringify({ id: "obs-batch-timeout", command: "request_observation" }),
+      );
+      await Promise.resolve();
+      await timer.advanceTimeAsync(PER_DEVICE_OBSERVATION_TIMEOUT_MS);
+      await request;
+
+      const messages = socket.getWrittenMessages<{
+        id?: string;
+        type: string;
+        deviceId?: string;
+        error?: string;
+      }>();
+      const observationMessages = messages.filter((message) => message.type !== "ping");
+      expect(observationMessages).toHaveLength(2);
+      expect(observationMessages).not.toContainEqual(
+        expect.objectContaining({
+          error: `Observation request timed out after ${PER_DEVICE_OBSERVATION_TIMEOUT_MS}ms`,
+        }),
+      );
+      expect(observationMessages[0]).toMatchObject({
+        type: "hierarchy_update",
+        deviceId: "healthy",
+      });
+      expect(observationMessages[1]).toMatchObject({
+        id: "obs-batch-timeout",
+        type: "error",
+        error: `Observation request failed for stalled: Observation request timed out after ${PER_DEVICE_OBSERVATION_TIMEOUT_MS}ms for device stalled`,
+      });
     });
   });
 

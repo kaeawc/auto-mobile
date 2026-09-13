@@ -78,7 +78,11 @@ import {
   stopDeviceDataStreamSocketServer,
   getDeviceDataStreamServer,
 } from "./deviceDataStreamSocketServer";
-import { runObservationRequestBatch } from "./observationRequestBatch";
+import {
+  OBSERVATION_BATCH_HEADROOM_MS,
+  PER_DEVICE_OBSERVATION_TIMEOUT_MS,
+  runObservationRequestBatch,
+} from "./observationRequestBatch";
 import {
   startFailuresStreamSocketServer,
   stopFailuresStreamSocketServer,
@@ -1388,7 +1392,7 @@ export class Daemon {
             this.devicePool.assertDeviceActionable(pooledDevice.id, "to observe"),
         },
       );
-    });
+    }, PER_DEVICE_OBSERVATION_TIMEOUT_MS + OBSERVATION_BATCH_HEADROOM_MS);
 
     logger.info("[Daemon] Observation stream callback configured");
 

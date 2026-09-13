@@ -1413,6 +1413,7 @@ describe("SimCtlClient boot self-verification", () => {
     expect(readyError).toBeInstanceOf(ActionableError);
     expect((bootError as Error).message).toContain(availabilityError);
     expect((readyError as Error).message).toContain(availabilityError);
+  });
 
   // Issue #6411: `readSimulatorState` used to collapse "device absent from
   // the listing" and "the listing itself failed" into the same `undefined`,

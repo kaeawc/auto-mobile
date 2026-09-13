@@ -432,7 +432,11 @@ describe("settleEmbeddedObservation adoption guard (#6866)", () => {
     // the action holds, so the gate hands it back — honestly unsettled.
     fake.setObserveResult((index) =>
       obs(
-        { class: "android.widget.TextView", "resource-id": "android:id/clock", text: `0:0${index}` },
+        {
+          class: "android.widget.TextView",
+          "resource-id": "android:id/clock",
+          text: `0:0${index}`,
+        },
         20 + index * 10,
       ),
     );

@@ -5,6 +5,11 @@ import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeWindow } from "../../fakes/FakeWindow";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { runWithAbortSignal } from "../../../src/utils/AbortContext";
+import {
+  clearResolvedHomePackageCache,
+  resolveConfiguredHomePackage,
+} from "../../../src/features/observe/androidLauncherPackages";
+import { setDeviceIncarnationResolver } from "../../../src/utils/deviceIncarnation";
 import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
 import type { BootedDevice } from "../../../src/models";
 import type { ActiveWindowInfo } from "../../../src/models/ActiveWindowInfo";
@@ -53,11 +58,14 @@ describe("PressButton Android keycode dispatch", () => {
     fakeAdb = new FakeAdbExecutor();
     fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
+    clearResolvedHomePackageCache();
   });
 
   afterEach(() => {
     getInstanceSpy?.mockRestore();
     getInstanceSpy = null;
+    setDeviceIncarnationResolver(undefined);
+    clearResolvedHomePackageCache();
   });
 
   const press = (button: string, window?: WindowInterface) => {
@@ -223,6 +231,69 @@ describe("PressButton Android keycode dispatch", () => {
 
   // Deadline/abort plumbing (issue #6289): press() accepts a signal, threaded
   // into the ADB keyevent fallback and the home-foreground verification reads.
+  // A failed verification is the only signal available that the cached
+  // configured-HOME package may no longer describe the device in front of us
+  // (#6863 review): in direct mode there is no incarnation token, so a
+  // reconnect or a reused serial leaves the cache looking valid. Evicting on
+  // failure lets the next attempt re-resolve instead of reporting a real Home
+  // press as failed for the rest of the cache window.
+  describe("home verification self-heals a stale launcher cache", () => {
+    const verifier = (window: WindowInterface): PressButton => {
+      const pressButton = Object.create(PressButton.prototype) as PressButton;
+      (pressButton as any).timer = fakeTimer;
+      (pressButton as any).adb = fakeAdb;
+      (pressButton as any).device = androidDevice;
+      (pressButton as any).window = window;
+      return pressButton;
+    };
+
+    test("evicts the cached HOME package when verification fails", async () => {
+      // An epoch token is registered, so the entry would otherwise survive the
+      // full TTL -- only the failure eviction can make the next call re-resolve.
+      setDeviceIncarnationResolver(() => 1);
+      fakeAdb.setCommandResponse("resolve-activity", {
+        stdout: "com.launcher.a/.Main",
+        stderr: "",
+      });
+
+      await expect(
+        (verifier(sequencedWindow(["com.other.app"])) as any).verifyAndroidHomeForeground({
+          retryDelaysMs: [],
+        }),
+      ).resolves.toBe(false);
+
+      fakeAdb.setCommandResponse("resolve-activity", {
+        stdout: "com.launcher.b/.Main",
+        stderr: "",
+      });
+      expect(
+        await resolveConfiguredHomePackage(fakeAdb, androidDevice.deviceId, fakeTimer, "1"),
+      ).toBe("com.launcher.b");
+    });
+
+    test("keeps the cached HOME package when verification succeeds", async () => {
+      setDeviceIncarnationResolver(() => 1);
+      fakeAdb.setCommandResponse("resolve-activity", {
+        stdout: "com.launcher.a/.Main",
+        stderr: "",
+      });
+
+      await expect(
+        (verifier(sequencedWindow(["com.launcher.a"])) as any).verifyAndroidHomeForeground({
+          retryDelaysMs: [],
+        }),
+      ).resolves.toBe(true);
+
+      fakeAdb.setCommandResponse("resolve-activity", {
+        stdout: "com.launcher.b/.Main",
+        stderr: "",
+      });
+      expect(
+        await resolveConfiguredHomePackage(fakeAdb, androidDevice.deviceId, fakeTimer, "1"),
+      ).toBe("com.launcher.a");
+    });
+  });
+
   describe("AbortSignal propagation (issue #6289)", () => {
     test("forwards the signal into the ADB keyevent fallback and home verification", async () => {
       getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({

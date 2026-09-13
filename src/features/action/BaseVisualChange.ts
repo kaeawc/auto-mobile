@@ -7,7 +7,10 @@ import { AwaitIdle } from "../observe/AwaitIdle";
 import { RealObserveScreen } from "../observe/ObserveScreen";
 import type { ObserveScreen } from "../observe/interfaces/ObserveScreen";
 import { Window } from "../observe/Window";
-import { isForegroundLauncher } from "../observe/androidLauncherPackages";
+import {
+  clearResolvedHomePackageCache,
+  isForegroundLauncher,
+} from "../observe/androidLauncherPackages";
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { DEFAULT_FUZZY_MATCH_TOLERANCE_PERCENT } from "../../utils/constants";
@@ -30,6 +33,7 @@ import { sequenceBackoff } from "../../utils/Backoff";
 import { getDeviceDataStreamServer } from "../../daemon/deviceDataStreamSocketServer";
 import { shouldSkipActionObservationScreenshot } from "../observe/automaticScreenshotPolicy";
 import { serverConfig } from "../../utils/ServerConfig";
+import { deviceIncarnationToken } from "../../utils/deviceIncarnation";
 
 export interface ProgressCallback {
   (progress: number, total?: number, message?: string): Promise<void>;
@@ -605,6 +609,32 @@ export class BaseVisualChange {
       retryDelaysMs?: readonly number[];
     } = {},
   ): Promise<boolean> {
+    const verified = await this.readAndroidHomeForeground(options);
+    if (!verified) {
+      // Self-heal a launcher cache that may no longer describe this device
+      // (#6863 review). The cached configured-HOME package is
+      // invalidated by a connection-epoch change, but in direct mode no
+      // incarnation resolver is registered, so a reconnect or a reused serial
+      // leaves the entry looking valid. A failed verification is the only
+      // evidence available that the cached package may be the previous
+      // runtime's, so drop it and let the next press re-resolve rather than
+      // keep reporting real Home presses as failures. A cancellation rethrows
+      // above and never reaches here -- an aborted read is not evidence.
+      clearResolvedHomePackageCache(this.device.deviceId);
+    }
+    return verified;
+  }
+
+  /**
+   * The retry loop behind {@link verifyAndroidHomeForeground}. Split out so the
+   * failure path has exactly one place to self-heal the launcher cache,
+   * regardless of which of the loop's several `return false` exits was taken.
+   */
+  private async readAndroidHomeForeground(options: {
+    signal?: AbortSignal;
+    timeoutMs?: number;
+    retryDelaysMs?: readonly number[];
+  }): Promise<boolean> {
     // Combine explicit + ambient ONCE so the reads and the abort classification
     // below observe the SAME signal (issue #6289): on the ambient-only route the
     // explicit signal is undefined, so checking it alone would miss the abort.
@@ -642,7 +672,7 @@ export class BaseVisualChange {
           this.adb,
           this.device.deviceId,
           this.timer,
-          this.device.transportId,
+          deviceIncarnationToken(this.device.deviceId),
           signal,
           remainingMs(),
         );

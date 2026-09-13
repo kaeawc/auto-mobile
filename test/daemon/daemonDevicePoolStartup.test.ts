@@ -21,10 +21,18 @@ class DeferredDiscoveryDeviceManager extends FakeDeviceManager {
   private readonly started = Promise.withResolvers<void>();
   private readonly release = Promise.withResolvers<void>();
 
+  private discoveryCount = 0;
+
   override async getBootedDevicesDetailed(platform: SomePlatform) {
     this.discoveryStarted = true;
     this.started.resolve();
-    await this.release.promise;
+    this.discoveryCount++;
+    // Only the FIRST discovery is the deferred startup one. Later callers (the
+    // pool re-proving an idle entry present before it is assigned) must not be
+    // parked behind it, the way a real adb would not be.
+    if (this.discoveryCount === 1) {
+      await this.release.promise;
+    }
     return await super.getBootedDevicesDetailed(platform);
   }
 

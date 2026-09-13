@@ -4,7 +4,10 @@ import type {
   DeviceResourceMap,
   DeviceResourceStatus,
 } from "./DeviceResource";
-import type { ConfigurableDeviceResource } from "./deviceResourceDescriptions";
+import type {
+  ConfigurableDeviceResource,
+  AndroidOnlyDeviceResource,
+} from "./deviceResourceDescriptions";
 
 /**
  * iOS resource snapshot.
@@ -18,7 +21,7 @@ export interface AppleDeviceResource extends DeviceResource<
   platform: "ios";
   resources: DeviceResourceMap &
     Partial<
-      Record<Exclude<ConfigurableDeviceResource, "googlePlayServices">, DeviceResourceStatus>
+      Record<Exclude<ConfigurableDeviceResource, AndroidOnlyDeviceResource>, DeviceResourceStatus>
     > & {
       icloudSync: DeviceResourceStatus;
       photoAnalysis: DeviceResourceStatus;

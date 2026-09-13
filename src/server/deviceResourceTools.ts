@@ -22,7 +22,7 @@ import {
 export function registerDeviceResourceTools(dependencies: () => DeviceToolsDependencies): void {
   ToolRegistry.registerDeviceAware(
     "setDeviceResources",
-    "Set selected device resources and verify installed services. Wallpaper, widgets, and Live Activities are independent. All settings are opt-in; omitted resources stay unchanged. iOS Simulator controls are runtime-dependent; Android controls report unsupported.",
+    "Set selected device resources and verify native state. All settings are opt-in; omitted resources stay unchanged. iOS Simulator services and Android optional apps/settings are runtime-dependent. Android changes return a restore receipt for exact restoration during the same boot. Disabling Google infrastructure changes push/auth behavior.",
     setDeviceResourcesSchema,
     async (device, args: z.infer<typeof setDeviceResourcesSchema>, _progress, signal) => {
       const callerSignal = signal ?? getAbortSignal();
@@ -58,7 +58,8 @@ export function registerDeviceResourceTools(dependencies: () => DeviceToolsDepen
             operationSignal.throwIfAborted();
             return deps.deviceResourceControllerFactory().setResources({
               device,
-              resources: parsed.resources,
+              resources: parsed.resources ?? {},
+              restore: parsed.restore,
               deadlineMs,
               signal: operationSignal,
             });

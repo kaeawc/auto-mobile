@@ -1,4 +1,5 @@
 import { z } from "zod/v4";
+import { androidResourceRestorationSchema } from "../models/AndroidResourceRestoration";
 import {
   DEFAULT_DEVICE_RESOURCE_TIMEOUT_MS,
   MAX_DEVICE_READY_TIMEOUT_MS,
@@ -31,19 +32,38 @@ export const deviceResourceConfigurationSchema = withJsonSchemaOverride(
   },
 );
 
-export const setDeviceResourcesSchema = addDeviceTargetingToSchema(
-  z
-    .object({
-      resources: deviceResourceConfigurationSchema,
-      timeoutMs: z
-        .number()
-        .int()
-        .positive()
-        .max(MAX_DEVICE_READY_TIMEOUT_MS)
-        .optional()
-        .describe(
-          `Total configuration budget in milliseconds. Defaults to ${DEFAULT_DEVICE_RESOURCE_TIMEOUT_MS}.`,
-        ),
-    })
-    .strict(),
+export const setDeviceResourcesSchema = withJsonSchemaOverride(
+  addDeviceTargetingToSchema(
+    z
+      .object({
+        resources: deviceResourceConfigurationSchema.optional(),
+        restore: androidResourceRestorationSchema
+          .optional()
+          .describe(
+            "Restore exact prior Android overrides from a returned receipt. Requires the same boot and user. Specify resources or restore, never both.",
+          ),
+        timeoutMs: z
+          .number()
+          .int()
+          .positive()
+          .max(MAX_DEVICE_READY_TIMEOUT_MS)
+          .optional()
+          .describe(
+            `Total configuration budget in milliseconds. Defaults to ${DEFAULT_DEVICE_RESOURCE_TIMEOUT_MS}.`,
+          ),
+      })
+      .strict(),
+  ).refine(
+    (value) => (value.resources !== undefined) !== (value.restore !== undefined),
+    "Specify exactly one of resources or restore.",
+  ),
+  (jsonSchema) => {
+    // Exactly-one(resources, restore) expressed with if/then/else rather than a
+    // top-level oneOf/allOf: MCP clients (and the schema.integration test) reject
+    // tool input schemas whose OUTERMOST schema is a bare combinator. if/then/else
+    // are ordinary keywords at the root, so this is allowed there.
+    jsonSchema.if = { required: ["resources"] };
+    jsonSchema.then = { not: { required: ["restore"] } };
+    jsonSchema.else = { required: ["restore"] };
+  },
 );

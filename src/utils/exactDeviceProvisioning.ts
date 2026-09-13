@@ -17,6 +17,11 @@ import { SimCtlClient } from "./ios-cmdline-tools/SimCtlClient";
 import { throwIfAborted } from "./toolUtils";
 import { defaultTimer, type Timer } from "./SystemTimer";
 import {
+  androidAvdConfigurationSchema,
+  androidAvdConfigurationKeys,
+  type AndroidAvdConfiguration,
+} from "../models/AndroidAvdConfiguration";
+import {
   classifyDisplayCutout,
   type DisplayCutoutClassification,
   type DisplayCutoutPreference,
@@ -32,9 +37,7 @@ export interface AndroidDeviceSpecification {
   runtime: string;
   deviceType: string;
   displayCutout?: DisplayCutoutPreference;
-  configuration?: {
-    memoryMb?: number;
-  };
+  configuration?: AndroidAvdConfiguration;
 }
 
 export interface IosDeviceSpecification {
@@ -110,6 +113,7 @@ export interface ExactIosSimulatorClient {
 
 export interface AndroidAvdConfigWriter {
   setMemoryMb(avdName: string, memoryMb: number): Promise<void>;
+  setConfiguration?(avdName: string, configuration: AndroidAvdConfiguration): Promise<void>;
 }
 
 interface FileAndroidAvdConfigWriterDependencies {
@@ -145,6 +149,24 @@ export class FileAndroidAvdConfigWriter implements AndroidAvdConfigWriter {
         `Android AVD memoryMb must be a positive integer; got ${memoryMb}.`,
       );
     }
+    return this.setConfiguration(avdName, { memoryMb });
+  }
+
+  async setConfiguration(avdName: string, configuration: AndroidAvdConfiguration): Promise<void> {
+    const validated = androidAvdConfigurationSchema.parse(configuration);
+    const replacements = new Map<string, string>();
+    for (const key of Object.keys(validated) as (keyof AndroidAvdConfiguration)[]) {
+      const value = validated[key];
+      if (value !== undefined) {
+        replacements.set(
+          androidAvdConfigurationKeys[key],
+          typeof value === "boolean" ? (value ? "yes" : "no") : String(value),
+        );
+      }
+    }
+    if (validated.gpuMode !== undefined) {
+      replacements.set("hw.gpu.enabled", "yes");
+    }
     const avdHome = resolveAndroidAvdHome(
       this.dependencies.environment,
       this.dependencies.homeDirectory(),
@@ -152,19 +174,23 @@ export class FileAndroidAvdConfigWriter implements AndroidAvdConfigWriter {
     const configPath = join(avdHome, `${avdName}.avd`, "config.ini");
     const content = await this.dependencies.readFile(configPath, "utf8");
     const lines = content.split(/\r?\n/);
-    let replaced = false;
+    const replaced = new Set<string>();
     const updated = lines.map((line) => {
-      if (line.startsWith("hw.ramSize=")) {
-        replaced = true;
-        return `hw.ramSize=${memoryMb}`;
+      const key = line.slice(0, line.indexOf("=")).trim();
+      if (replacements.has(key)) {
+        replaced.add(key);
+        return `${key}=${replacements.get(key)}`;
       }
       return line;
     });
-    if (!replaced) {
+    for (const [key, value] of replacements) {
+      if (replaced.has(key)) {
+        continue;
+      }
       if (updated.at(-1) !== "") {
         updated.push("");
       }
-      updated.push(`hw.ramSize=${memoryMb}`, "");
+      updated.push(`${key}=${value}`, "");
     }
     await this.dependencies.writeFile(configPath, updated.join("\n"), "utf8");
   }
@@ -233,7 +259,13 @@ function sameAndroidSpecification(
   return (
     sameAndroidDeviceIdentity(spec, config) &&
     (spec.configuration?.memoryMb === undefined ||
-      config?.ramSizeMb === spec.configuration.memoryMb)
+      config?.ramSizeMb === spec.configuration.memoryMb) &&
+    Object.entries(spec.configuration ?? {}).every(
+      ([key, value]) =>
+        key === "memoryMb" ||
+        value === undefined ||
+        config?.hardware?.[key as keyof AndroidAvdConfiguration] === value,
+    )
   );
 }
 
@@ -242,6 +274,22 @@ function sameAndroidSpecification(
  * never falls back to a "close enough" image, runtime, or device profile.
  */
 export class DefaultExactDeviceProvisioner implements ExactDeviceProvisioner {
+  private async configureAndroid(
+    name: string,
+    configuration: AndroidAvdConfiguration,
+  ): Promise<void> {
+    const writer = this.dependencies.androidConfigWriter;
+    if (writer.setConfiguration) {
+      await writer.setConfiguration(name, configuration);
+    } else if (Object.keys(configuration).some((key) => key !== "memoryMb")) {
+      throw new ProvisionDeviceError(
+        "unsupported",
+        "The configured AVD writer does not support emulator hardware controls.",
+      );
+    } else if (configuration.memoryMb !== undefined) {
+      await writer.setMemoryMb(name, configuration.memoryMb);
+    }
+  }
   private readonly lifecycleCoordinator: VirtualDeviceLifecycleCoordinator;
   private readonly timer: Pick<Timer, "now">;
 
@@ -433,13 +481,11 @@ export class DefaultExactDeviceProvisioner implements ExactDeviceProvisioner {
     }
     if (
       request.reconcileExistingConfiguration &&
-      spec.configuration?.memoryMb !== undefined &&
+      spec.configuration !== undefined &&
+      !existing.isRunning &&
       sameAndroidDeviceIdentity(spec, config)
     ) {
-      await this.dependencies.androidConfigWriter.setMemoryMb(
-        existing.name,
-        spec.configuration.memoryMb,
-      );
+      await this.configureAndroid(existing.name, spec.configuration);
       const reconciled = await this.dependencies.androidConfigReader.readConfig(existing.name);
       if (sameAndroidSpecification(spec, reconciled)) {
         return;
@@ -489,11 +535,8 @@ export class DefaultExactDeviceProvisioner implements ExactDeviceProvisioner {
         `Failed to create Android AVD '${request.name}': ${created.message}`,
       );
     }
-    if (spec.configuration?.memoryMb !== undefined) {
-      await this.dependencies.androidConfigWriter.setMemoryMb(
-        request.name,
-        spec.configuration.memoryMb,
-      );
+    if (spec.configuration) {
+      await this.configureAndroid(request.name, spec.configuration);
     }
     return {
       created: true,

@@ -16,12 +16,15 @@ import { defaultTimer, type Timer } from "./SystemTimer";
 import { errorMessage } from "./describeUnknownError";
 import { logger } from "./logger";
 import { iosDeviceResourceCatalog, iosDeviceResourcePlistNames } from "./iosDeviceResourceCatalog";
+import { AndroidDeviceResourceController } from "./androidDeviceResourceController";
+import type { AndroidResourceRestoration } from "../models/AndroidResourceRestoration";
 
 export interface DeviceResourceRequest {
   device: BootedDevice;
   resources: DeviceResourceConfiguration;
   deadlineMs: number;
   signal?: AbortSignal;
+  restore?: AndroidResourceRestoration;
 }
 
 export interface DeviceResourceController {
@@ -80,9 +83,16 @@ export class DefaultDeviceResourceController implements DeviceResourceController
     private readonly plist: Pick<PlistReader, "readJsonFile"> = new PlistClient(),
     private readonly timer: Pick<Timer, "now" | "sleep"> = defaultTimer,
     private readonly readDirectory: (path: string) => Promise<string[]> = readdir,
+    private readonly android: DeviceResourceController = new AndroidDeviceResourceController(),
   ) {}
 
   async setResources(request: DeviceResourceRequest): Promise<DeviceResourceConfigurationResult> {
+    if (request.device.platform === "android") {
+      return this.android.setResources(request);
+    }
+    if (request.restore) {
+      throw new Error("Android resource restoration requires an Android emulator");
+    }
     const result: DeviceResourceConfigurationResult = {
       success: true,
       requested: request.resources,
@@ -119,12 +129,6 @@ export class DefaultDeviceResourceController implements DeviceResourceController
     resource: ConfigurableDeviceResource,
     desired: RequestedDeviceResourceState,
   ): Promise<DeviceResourceStatus> {
-    if (run.request.device.platform === "android") {
-      return {
-        state: "unsupported",
-        reason: "Android resource control is not implemented; no device settings were changed.",
-      };
-    }
     const catalog: Partial<Record<ConfigurableDeviceResource, readonly string[]>> =
       iosDeviceResourceCatalog;
     const labels = catalog[resource];

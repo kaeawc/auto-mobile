@@ -42,6 +42,21 @@ describe("device resource advertised constraints", () => {
     );
   });
 
+  test.each(["live", "artifact"])("%s schema accepts restoration alone", (source) => {
+    const validate = validators.get(`${source}/setDeviceResources`)!;
+    const restore = {
+      deviceId: "emulator-5580",
+      bootId: "11111111-1111-4111-8111-111111111111",
+      userId: 0,
+      entries: [
+        { resource: "animations", kind: "global", target: "animator_duration_scale", value: null },
+      ],
+    };
+    expect(validate({ restore })).toBe(true);
+    expect(validate({})).toBe(false);
+    expect(validate({ restore, resources: { animations: "disabled" } })).toBe(false);
+  });
+
   test.each(["live", "artifact"])(
     "%s schema requires booting when configuring resources",
     (source) => {
@@ -53,4 +68,21 @@ describe("device resource advertised constraints", () => {
       expect(validate({ operationId: "test", device, boot: false })).toBe(true);
     },
   );
+});
+
+test("restoration and desired resource configuration are mutually exclusive", async () => {
+  const { setDeviceResourcesSchema } = await import("../../src/server/deviceResourceSchemas");
+  const restore = {
+    deviceId: "emulator-5580",
+    bootId: "11111111-1111-4111-8111-111111111111",
+    userId: 0,
+    entries: [
+      { resource: "animations", kind: "global", target: "animator_duration_scale", value: null },
+    ],
+  };
+  expect(setDeviceResourcesSchema.safeParse({ restore }).success).toBe(true);
+  expect(setDeviceResourcesSchema.safeParse({}).success).toBe(false);
+  expect(
+    setDeviceResourcesSchema.safeParse({ restore, resources: { animations: "enabled" } }).success,
+  ).toBe(false);
 });

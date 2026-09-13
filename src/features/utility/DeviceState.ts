@@ -272,7 +272,7 @@ export interface DeviceConnectivityState {
   supported: boolean;
   /** `settings get global airplane_mode_on`. */
   airplaneMode?: boolean;
-  /** `settings get global wifi_on`. */
+  /** `settings get global wifi_on` (1/2 on, 0/3 off — 2 and 3 are airplane-mode states). */
   wifiEnabled?: boolean;
   /** `settings get global bluetooth_on`. */
   bluetoothEnabled?: boolean;
@@ -812,8 +812,11 @@ interface ConnectivityReadSpec {
   field: DeviceConnectivityField;
   namespace: "global" | "secure";
   key: string;
-  /** `boolean`: 1/0. `nonZero`: any non-zero integer is "on" (location_mode). */
-  shape: "boolean" | "nonZero";
+  /**
+   * `boolean`: 1/0. `nonZero`: any non-zero integer is "on" (location_mode).
+   * `wifi`: the four-state `wifi_on` encoding, including its airplane-mode states.
+   */
+  shape: "boolean" | "nonZero" | "wifi";
 }
 
 /**
@@ -827,7 +830,7 @@ interface ConnectivityReadSpec {
  */
 const ANDROID_CONNECTIVITY_READS: readonly ConnectivityReadSpec[] = [
   { field: "airplaneMode", namespace: "global", key: "airplane_mode_on", shape: "boolean" },
-  { field: "wifiEnabled", namespace: "global", key: "wifi_on", shape: "boolean" },
+  { field: "wifiEnabled", namespace: "global", key: "wifi_on", shape: "wifi" },
   { field: "bluetoothEnabled", namespace: "global", key: "bluetooth_on", shape: "boolean" },
   { field: "locationEnabled", namespace: "secure", key: "location_mode", shape: "nonZero" },
 ];
@@ -884,6 +887,28 @@ function parseAndroidBooleanSetting(raw: string | undefined): boolean | undefine
 }
 
 /**
+ * `wifi_on` is NOT a flag: AOSP's `WifiSettingsStore` persists four states, and
+ * two of them are the normal ones while airplane mode is on —
+ * `2` (WIFI_ENABLED_AIRPLANE_OVERRIDE: Wi-Fi re-enabled on top of airplane mode)
+ * and `3` (WIFI_DISABLED_AIRPLANE_ON: Wi-Fi turned off BY airplane mode, to be
+ * restored when it is turned off again). Reading this key with the strict 0/1
+ * parser would blank `wifiEnabled` exactly during those transitions (#6872).
+ * Anything outside the four known states stays unreadable rather than coerced.
+ */
+function parseAndroidWifiSetting(raw: string | undefined): boolean | undefined {
+  switch (raw?.trim()) {
+    case "1":
+    case "2":
+      return true;
+    case "0":
+    case "3":
+      return false;
+    default:
+      return undefined;
+  }
+}
+
+/**
  * `location_mode` is an integer tier, not a flag: `0` is off and every other
  * valid tier is on. A non-integer (`null`, empty, `3abc`) is unreadable.
  */
@@ -893,6 +918,21 @@ function parseAndroidNonZeroSetting(raw: string | undefined): boolean | undefine
     return undefined;
   }
   return Number.parseInt(value, 10) !== 0;
+}
+
+/** Decode one raw `settings get` answer per its spec's encoding. */
+function decodeAndroidConnectivityValue(
+  shape: ConnectivityReadSpec["shape"],
+  raw: string | undefined,
+): boolean | undefined {
+  switch (shape) {
+    case "boolean":
+      return parseAndroidBooleanSetting(raw);
+    case "wifi":
+      return parseAndroidWifiSetting(raw);
+    case "nonZero":
+      return parseAndroidNonZeroSetting(raw);
+  }
 }
 
 /**
@@ -1190,10 +1230,7 @@ export class DeviceState {
     const parsed: Partial<Record<DeviceConnectivityField, boolean>> = {};
     const unreadable: DeviceConnectivityField[] = [];
     for (const read of ANDROID_CONNECTIVITY_READS) {
-      const value =
-        read.shape === "boolean"
-          ? parseAndroidBooleanSetting(rawValues[read.field])
-          : parseAndroidNonZeroSetting(rawValues[read.field]);
+      const value = decodeAndroidConnectivityValue(read.shape, rawValues[read.field]);
       if (value === undefined) {
         unreadable.push(read.field);
       } else {

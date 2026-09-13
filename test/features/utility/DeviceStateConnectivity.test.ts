@@ -112,6 +112,49 @@ describe("DeviceState connectivity toggles (issue #6872)", () => {
     }
   });
 
+  test("decodes the airplane-mode wifi_on states (2 enabled override, 3 disabled by airplane)", async () => {
+    // AOSP's WifiSettingsStore persists four states in Settings.Global.wifi_on:
+    // 0 disabled, 1 enabled, 2 enabled via an airplane-mode override, and
+    // 3 disabled BY airplane mode. 2 and 3 are the common states while airplane
+    // mode is on, so a strict 0/1 read would blank wifiEnabled exactly then.
+    for (const [raw, expected] of [
+      ["0", false],
+      ["1", true],
+      ["2", true],
+      ["3", false],
+    ] as const) {
+      const adbFactory = new FakeAdbClientFactory();
+      adbFactory
+        .getFakeClient()
+        .setCommandResult(
+          ANDROID_CONNECTIVITY_READ_COMMAND,
+          connectivityOutput({ airplaneMode: "1", wifiEnabled: raw }),
+        );
+
+      const result = await new DeviceState(androidDevice, { adbFactory }).getState([
+        "connectivity",
+      ]);
+
+      expect(result.connectivity?.wifiEnabled).toBe(expected);
+      expect(result.connectivity?.warning ?? "").not.toContain("wifiEnabled");
+    }
+  });
+
+  test("leaves a wifi_on value outside the known states undefined", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    adbFactory
+      .getFakeClient()
+      .setCommandResult(
+        ANDROID_CONNECTIVITY_READ_COMMAND,
+        connectivityOutput({ airplaneMode: "1", wifiEnabled: "4" }),
+      );
+
+    const result = await new DeviceState(androidDevice, { adbFactory }).getState(["connectivity"]);
+
+    expect(result.connectivity?.wifiEnabled).toBeUndefined();
+    expect(result.connectivity?.warning).toContain("wifiEnabled");
+  });
+
   test("leaves a missing key undefined without failing the sibling reads", async () => {
     const adbFactory = new FakeAdbClientFactory();
     const client = adbFactory.getFakeClient();
@@ -148,7 +191,7 @@ describe("DeviceState connectivity toggles (issue #6872)", () => {
       ANDROID_CONNECTIVITY_READ_COMMAND,
       connectivityOutput({
         airplaneMode: "banana",
-        wifiEnabled: "2",
+        wifiEnabled: "9",
         bluetoothEnabled: "true",
         locationEnabled: "3abc",
       }),

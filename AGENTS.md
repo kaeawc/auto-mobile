@@ -17,6 +17,7 @@ Bun TypeScript MCP server providing Android & iOS device automation capabilities
   reviewers (e.g. Codex) must NOT flag bare `#NNNN` references that appear in
   source-code comments or Markdown files; treat those as compliant.
 - After implementation changes, run relevant validation commands
+- Before pushing shell/scripts changes, run `scripts/prepush-shell.sh` and `bun run format` (the formatter catches Fast Validation fan-out); if `bun.lock` and/or `package.json` changed in the diff, run `bun scripts/release/pin-runtime-deps.ts --write` and commit `package.json`, `bun.lock`, and `scripts/release/runtime-graph.json`; otherwise rebase onto current main and do not hand-edit pins to mask a stale base; never run two `bats test/bats/` sweeps concurrently on one machine; when an Actions API job log is empty, read the `fast-validation-logs` workflow artifact's per-check `.status`/`.log` files under `scratch/fast-validate-*/`.
 - Write terminal output to `scratch/` when not visible
 - Local validation scripts live under `scripts/` and should almost always be written in bash with shellcheck validation
 - Run `scripts/prepush-android.sh` from the repository root before pushing changes under `android/`; its scoped Detekt pass is a smoke check, not a substitute for the full-tree CI Detekt job.
@@ -197,6 +198,7 @@ plain `git` stays fine for read-only queries (`git log`, `git diff`, `gh`).
 ### Workflow Skills
 
 - check-ci: Inspect PR checks, fetch failing logs, reproduce likely failures locally, and summarize next steps. Path: `skills/check-ci/SKILL.md`.
+- shell-prepush: Use this workflow skill before pushing shell or scripts changes to run scoped fast validation and targeted BATS tests, interpret stale dependency-pin failures, and retrieve empty Fast Validation logs from artifacts. Path: `skills/shell-prepush/SKILL.md`.
 - github-pr-feedback: Collect every PR discussion and review thread, triage it, and safely resolve feedback after verified fixes without posting comments. Path: `skills/github-pr-feedback/SKILL.md`.
 - dead-code: Detect and remove dead code using repo scripts and targeted validation. Path: `skills/dead-code/SKILL.md`.
 - observe: Inspect the current connected device state through AutoMobile observation tooling. Path: `skills/observe/SKILL.md`.

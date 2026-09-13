@@ -125,6 +125,44 @@ final class StreamableHTTPSSETests: XCTestCase {
         XCTAssertEqual(response.text, "ok")
     }
 
+    /// A JSON-RPC id is matched by type AND value. `"2"` and `2.5` are different ids from `2`;
+    /// adopting either would return an unrelated frame's result to this request.
+    func testStringAndFractionalIdFramesAreNotMatched() throws {
+        let stringId =
+            "{\"jsonrpc\":\"2.0\",\"id\":\"2\",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"string\"}]}}"
+        let fractionalId =
+            "{\"jsonrpc\":\"2.0\",\"id\":2.5,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"fraction\"}]}}"
+        StubURLProtocol.enqueue([
+            .eventStream("event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}\n\n"),
+            .eventStream(
+                "event: message\ndata: \(stringId)\n\nevent: message\ndata: \(fractionalId)\n\n"
+                    + "event: message\ndata: \(Self.okResult(id: 2))\n\n"
+            ),
+        ])
+        let client = try makeClient()
+
+        let response = try client.callTool(name: "observe", arguments: [:], timeout: 5)
+
+        XCTAssertEqual(response.text, "ok")
+    }
+
+    /// Foundation bridges JSON `true` to an `NSNumber` whose `int64Value` is 1, so a boolean id
+    /// must be rejected explicitly rather than read as the numeric id 1.
+    func testBooleanIdFrameIsNotMatched() throws {
+        StubURLProtocol.enqueue([
+            .eventStream("event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":true,\"result\":{}}\n\n"),
+        ])
+        let client = try makeClient()
+
+        XCTAssertThrowsError(try client.initialize(timeout: 5)) { error in
+            guard case let .invalidResponse(message)? = error as? MCPClientError else {
+                XCTFail("Expected MCPClientError.invalidResponse, got \(error)")
+                return
+            }
+            XCTAssertTrue(message.contains("No SSE frame matched request id 1"), message)
+        }
+    }
+
     func testJSONContentTypeStillParsed() throws {
         StubURLProtocol.enqueue([
             .json("{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}"),

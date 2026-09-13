@@ -197,15 +197,25 @@ public final class StreamableHTTPMCPClient: AutoMobileMCPClient, @unchecked Send
         value == nil || value is NSNull
     }
 
+    /// JSON-RPC ids are matched by type AND value, never by coercion. This client only ever sends
+    /// integer ids, so a string `"1"`, a fractional `1.5` and a boolean `true` are all *different*
+    /// ids from `1` — but Foundation bridges JSON booleans and fractions to `NSNumber`, whose
+    /// `int64Value` flattens both to 1, and comparing a string id against `String(id)` equates two
+    /// distinct JSON types. Either coercion adopts an interleaved frame that belongs to some other
+    /// request as this request's response.
     private static func matchesRequestId(_ value: Any?, id: Int64) -> Bool {
-        switch value {
-        case let number as NSNumber:
-            return number.int64Value == id
-        case let string as String:
-            return string == String(id)
-        default:
+        guard let number = value as? NSNumber, !isBoolean(number) else {
             return false
         }
+        // NSNumber's own equality compares numeric values without truncating, so a fractional or
+        // out-of-range id is a mismatch instead of being rounded into this request's id.
+        return number == NSNumber(value: id)
+    }
+
+    /// `true`/`false` bridge to `NSNumber` (`kCFBooleanTrue`/`kCFBooleanFalse`) and compare equal to
+    /// 1/0, so the JSON type has to be recovered through CoreFoundation.
+    private static func isBoolean(_ number: NSNumber) -> Bool {
+        CFGetTypeID(number as CFTypeRef) == CFBooleanGetTypeID()
     }
 
     /// Bounded, single-line body excerpt for `invalidResponse` messages, per the structured-error

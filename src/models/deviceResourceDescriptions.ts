@@ -58,11 +58,73 @@ export const deviceResourceDescriptions = {
   businessServices: "Apple business messaging services; excludes ordinary app messaging.",
   backgroundSync:
     "General OS background app scheduling. Control is unsupported to preserve application behavior.",
-  animations: "System UI animations. Control is currently unsupported.",
+  animations:
+    "Android system animation scales: disabled sets all three to zero; enabled sets them to one. Excludes app-owned animation.",
+  screensavers: "Android dream/screensaver activation; excludes wallpaper and widgets.",
+  backup:
+    "Android Backup Manager scheduling for the current user; disables backup and restore test behavior.",
+  mailApp:
+    "Android optional mail apps, including Gmail. Removes mail intent handlers; preserves other apps' messaging.",
+  calendarApp: "Android Calendar app availability; preserves CalendarProvider.",
+  contactsApp: "Android Contacts app availability; preserves ContactsProvider.",
+  mapsApp: "Android Google Maps app; external navigation intents become unavailable.",
+  videoApp: "Android YouTube app; native video links become unavailable.",
+  musicApp: "Android YouTube Music app; preserves shared audio playback.",
+  photosApp:
+    "Android Google Photos app; changes cloud photo sources and choosers. Preserves MediaProvider and DocumentsUI.",
+  assistantApp:
+    "Android Google Search/Assistant app, including voice and home-search integrations.",
+  digitalWellbeing: "Android Digital Wellbeing usage tracking, focus, and app limits.",
+  printing: "Android print spooler and print recommendations; printing becomes unavailable.",
+  accessibilityApps:
+    "Optional Android accessibility apps. Active accessibility services are protected.",
+  textToSpeech:
+    "Android Google speech synthesis; speech-dependent functionality becomes unavailable.",
+  storeApp: "Android Play Store app; installation, updates, billing and licensing may fail.",
+  healthConnect:
+    "Android Health Connect controller and backup app; health integrations become unavailable.",
+  adServices:
+    "Android AdServices API package; advertising/privacy APIs may fail. Does not remove mainline/APEX infrastructure.",
+  onDevicePersonalization:
+    "Android on-device personalization service package; dependent APIs may fail.",
+  wallpaperApps:
+    "Android wallpaper picker and optional live-wallpaper apps; changes wallpaper selection. Does not disable the shared wallpaper framework or widgets.",
+  dialerApp: "Optional Android dialer apps. Default role holders remain protected.",
+  messagesApp:
+    "Optional Android SMS/Messages apps. Default role holders remain protected; excludes other apps' messaging.",
+  googleServicesFramework:
+    "Android Google Services Framework; aggressive control that can break Google account and push integrations.",
   googlePlayServices:
-    "Google Play infrastructure. Control is unsupported to preserve application behavior.",
+    "Android Google Play services; aggressive control that breaks dependent push, authentication, location and other integrations. Keep enabled for Slack-compatible workflows.",
   icloudSync:
     "Broad iCloud/account synchronization. Control is unsupported; use the narrower icloudSettingsSync setting.",
 } as const;
 
 export type ConfigurableDeviceResource = keyof typeof deviceResourceDescriptions;
+
+export const androidOnlyDeviceResources = [
+  "screensavers",
+  "backup",
+  "mailApp",
+  "calendarApp",
+  "contactsApp",
+  "mapsApp",
+  "videoApp",
+  "musicApp",
+  "photosApp",
+  "assistantApp",
+  "digitalWellbeing",
+  "printing",
+  "accessibilityApps",
+  "textToSpeech",
+  "storeApp",
+  "healthConnect",
+  "adServices",
+  "onDevicePersonalization",
+  "wallpaperApps",
+  "dialerApp",
+  "messagesApp",
+  "googleServicesFramework",
+  "googlePlayServices",
+] as const satisfies readonly ConfigurableDeviceResource[];
+export type AndroidOnlyDeviceResource = (typeof androidOnlyDeviceResources)[number];

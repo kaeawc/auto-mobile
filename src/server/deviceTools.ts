@@ -2,6 +2,7 @@ import { errorMessage } from "../utils/describeUnknownError";
 import type { ChildProcess } from "child_process";
 import { createHash } from "node:crypto";
 import { z } from "zod/v4";
+import { androidAvdConfigurationSchema } from "../models/AndroidAvdConfiguration";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import { ToolRegistry, ProgressCallback } from "./toolRegistry";
 import { deviceResourceConfigurationSchema } from "./deviceResourceSchemas";
@@ -369,12 +370,7 @@ const androidProvisionDeviceSpecSchema = z
       .describe(
         "Required display cutout class for the exact device type; 'any' accepts every class",
       ),
-    configuration: z
-      .object({
-        memoryMb: z.number().int().positive().optional(),
-      })
-      .strict()
-      .optional(),
+    configuration: androidAvdConfigurationSchema.optional(),
   })
   .strict()
   .superRefine((spec, context) => {

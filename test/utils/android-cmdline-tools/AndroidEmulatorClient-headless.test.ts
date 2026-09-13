@@ -158,6 +158,7 @@ describe("AndroidEmulatorClient startEmulator headless wiring", () => {
   let fakeFactory: TestAdbClientFactory;
   let fakeAvdConfigReader: FakeAvdConfigReader;
   const savedHeadless = process.env.AUTOMOBILE_EMULATOR_HEADLESS;
+  const savedAudio = process.env.AUTOMOBILE_EMULATOR_AUDIO;
 
   beforeEach(() => {
     fakeTimer = new FakeTimer();
@@ -167,6 +168,11 @@ describe("AndroidEmulatorClient startEmulator headless wiring", () => {
   });
 
   function restoreEnv() {
+    if (savedAudio === undefined) {
+      delete process.env.AUTOMOBILE_EMULATOR_AUDIO;
+    } else {
+      process.env.AUTOMOBILE_EMULATOR_AUDIO = savedAudio;
+    }
     if (savedHeadless === undefined) {
       delete process.env.AUTOMOBILE_EMULATOR_HEADLESS;
     } else {
@@ -187,8 +193,9 @@ describe("AndroidEmulatorClient startEmulator headless wiring", () => {
     return emitter;
   }
 
-  test("passes -no-window -no-audio when headless mode is enabled", async () => {
+  test.each(["true", "false"])("headless mode respects independent audio=%s", async (audio) => {
     process.env.AUTOMOBILE_EMULATOR_HEADLESS = "true";
+    process.env.AUTOMOBILE_EMULATOR_AUDIO = audio;
     let capturedArgs: string[] = [];
     const fakeChild = createFakeChildProcess();
 
@@ -224,7 +231,7 @@ describe("AndroidEmulatorClient startEmulator headless wiring", () => {
         "Pixel_9_Pro", // validateAvdMemory()
       ]);
       expect(capturedArgs).toContain("-no-window");
-      expect(capturedArgs).toContain("-no-audio");
+      expect(capturedArgs.includes("-no-audio")).toBe(audio === "false");
     } finally {
       restoreEnv();
     }

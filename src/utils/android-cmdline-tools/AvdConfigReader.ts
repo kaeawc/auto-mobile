@@ -1,4 +1,9 @@
 import { logger } from "../logger";
+import {
+  androidAvdConfigurationSchema,
+  androidAvdConfigurationKeys,
+  type AndroidAvdConfiguration,
+} from "../../models/AndroidAvdConfiguration";
 import { dirname, join } from "node:path";
 import {
   buildAndroidAvdCapabilityInventory,
@@ -12,6 +17,7 @@ export const MIN_AVD_RAM_MB = 2048;
  * Parsed AVD configuration from config.ini
  */
 export interface AvdConfig {
+  hardware?: AndroidAvdConfiguration;
   apiLevel?: number;
   osVersion?: string;
   /** Normalized emulator CPU architecture used by the AVD. */
@@ -240,7 +246,31 @@ export class FileAvdConfigReader implements AvdConfigReader {
  */
 export function parseAvdConfig(content: string): AvdConfig {
   const props = parseKeyValueProperties(content);
+  const hardware: Record<string, unknown> = {};
+  for (const [key, property] of Object.entries(androidAvdConfigurationKeys)) {
+    const raw = props.get(property);
+    if (raw === undefined) {
+      continue;
+    }
+    const value =
+      key === "audioInput" || key === "audioOutput"
+        ? raw === "yes"
+          ? true
+          : raw === "no"
+            ? false
+            : raw
+        : ["memoryMb", "cpuCores", "screenWidth", "screenHeight", "screenDensity"].includes(key)
+          ? Number(raw)
+          : raw;
+    if (
+      androidAvdConfigurationSchema.shape[key as keyof AndroidAvdConfiguration].safeParse(value)
+        .success
+    ) {
+      hardware[key] = value;
+    }
+  }
   return {
+    hardware: hardware as AndroidAvdConfiguration,
     ...parseScreenDimensions(props),
     ...parseRamSize(props),
     ...parseDeviceMetadata(props),

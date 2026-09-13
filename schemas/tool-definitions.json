@@ -7334,12 +7334,122 @@
               "enum": ["enabled", "disabled"]
             },
             "animations": {
-              "description": "System UI animations. Control is currently unsupported.",
+              "description": "Android system animation scales: disabled sets all three to zero; enabled sets them to one. Excludes app-owned animation.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "screensavers": {
+              "description": "Android dream/screensaver activation; excludes wallpaper and widgets.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "backup": {
+              "description": "Android Backup Manager scheduling for the current user; disables backup and restore test behavior.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "mailApp": {
+              "description": "Android optional mail apps, including Gmail. Removes mail intent handlers; preserves other apps' messaging.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "calendarApp": {
+              "description": "Android Calendar app availability; preserves CalendarProvider.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "contactsApp": {
+              "description": "Android Contacts app availability; preserves ContactsProvider.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "mapsApp": {
+              "description": "Android Google Maps app; external navigation intents become unavailable.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "videoApp": {
+              "description": "Android YouTube app; native video links become unavailable.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "musicApp": {
+              "description": "Android YouTube Music app; preserves shared audio playback.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "photosApp": {
+              "description": "Android Google Photos app; changes cloud photo sources and choosers. Preserves MediaProvider and DocumentsUI.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "assistantApp": {
+              "description": "Android Google Search/Assistant app, including voice and home-search integrations.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "digitalWellbeing": {
+              "description": "Android Digital Wellbeing usage tracking, focus, and app limits.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "printing": {
+              "description": "Android print spooler and print recommendations; printing becomes unavailable.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "accessibilityApps": {
+              "description": "Optional Android accessibility apps. Active accessibility services are protected.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "textToSpeech": {
+              "description": "Android Google speech synthesis; speech-dependent functionality becomes unavailable.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "storeApp": {
+              "description": "Android Play Store app; installation, updates, billing and licensing may fail.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "healthConnect": {
+              "description": "Android Health Connect controller and backup app; health integrations become unavailable.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "adServices": {
+              "description": "Android AdServices API package; advertising/privacy APIs may fail. Does not remove mainline/APEX infrastructure.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "onDevicePersonalization": {
+              "description": "Android on-device personalization service package; dependent APIs may fail.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "wallpaperApps": {
+              "description": "Android wallpaper picker and optional live-wallpaper apps; changes wallpaper selection. Does not disable the shared wallpaper framework or widgets.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "dialerApp": {
+              "description": "Optional Android dialer apps. Default role holders remain protected.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "messagesApp": {
+              "description": "Optional Android SMS/Messages apps. Default role holders remain protected; excludes other apps' messaging.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "googleServicesFramework": {
+              "description": "Android Google Services Framework; aggressive control that can break Google account and push integrations.",
               "type": "string",
               "enum": ["enabled", "disabled"]
             },
             "googlePlayServices": {
-              "description": "Google Play infrastructure. Control is unsupported to preserve application behavior.",
+              "description": "Android Google Play services; aggressive control that breaks dependent push, authentication, location and other integrations. Keep enabled for Slack-compatible workflows.",
               "type": "string",
               "enum": ["enabled", "disabled"]
             },
@@ -7391,6 +7501,44 @@
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 9007199254740991
+                        },
+                        "cpuCores": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 16
+                        },
+                        "gpuMode": {
+                          "type": "string",
+                          "enum": ["auto", "host", "software", "swiftshader", "lavapipe", "swangle"]
+                        },
+                        "screenWidth": {
+                          "type": "integer",
+                          "minimum": 240,
+                          "maximum": 7680
+                        },
+                        "screenHeight": {
+                          "type": "integer",
+                          "minimum": 240,
+                          "maximum": 7680
+                        },
+                        "screenDensity": {
+                          "type": "integer",
+                          "minimum": 72,
+                          "maximum": 1000
+                        },
+                        "cameraFront": {
+                          "type": "string",
+                          "enum": ["none", "emulated"]
+                        },
+                        "cameraBack": {
+                          "type": "string",
+                          "enum": ["none", "emulated"]
+                        },
+                        "audioInput": {
+                          "type": "boolean"
+                        },
+                        "audioOutput": {
+                          "type": "boolean"
                         }
                       },
                       "additionalProperties": false
@@ -8207,7 +8355,7 @@
   },
   {
     "name": "setDeviceResources",
-    "description": "Set selected device resources and verify installed services. Wallpaper, widgets, and Live Activities are independent. All settings are opt-in; omitted resources stay unchanged. iOS Simulator controls are runtime-dependent; Android controls report unsupported.",
+    "description": "Set selected device resources and verify native state. All settings are opt-in; omitted resources stay unchanged. iOS Simulator services and Android optional apps/settings are runtime-dependent. Android changes return a restore receipt for exact restoration during the same boot. Disabling Google infrastructure changes push/auth behavior.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -8396,12 +8544,122 @@
               "enum": ["enabled", "disabled"]
             },
             "animations": {
-              "description": "System UI animations. Control is currently unsupported.",
+              "description": "Android system animation scales: disabled sets all three to zero; enabled sets them to one. Excludes app-owned animation.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "screensavers": {
+              "description": "Android dream/screensaver activation; excludes wallpaper and widgets.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "backup": {
+              "description": "Android Backup Manager scheduling for the current user; disables backup and restore test behavior.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "mailApp": {
+              "description": "Android optional mail apps, including Gmail. Removes mail intent handlers; preserves other apps' messaging.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "calendarApp": {
+              "description": "Android Calendar app availability; preserves CalendarProvider.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "contactsApp": {
+              "description": "Android Contacts app availability; preserves ContactsProvider.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "mapsApp": {
+              "description": "Android Google Maps app; external navigation intents become unavailable.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "videoApp": {
+              "description": "Android YouTube app; native video links become unavailable.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "musicApp": {
+              "description": "Android YouTube Music app; preserves shared audio playback.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "photosApp": {
+              "description": "Android Google Photos app; changes cloud photo sources and choosers. Preserves MediaProvider and DocumentsUI.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "assistantApp": {
+              "description": "Android Google Search/Assistant app, including voice and home-search integrations.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "digitalWellbeing": {
+              "description": "Android Digital Wellbeing usage tracking, focus, and app limits.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "printing": {
+              "description": "Android print spooler and print recommendations; printing becomes unavailable.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "accessibilityApps": {
+              "description": "Optional Android accessibility apps. Active accessibility services are protected.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "textToSpeech": {
+              "description": "Android Google speech synthesis; speech-dependent functionality becomes unavailable.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "storeApp": {
+              "description": "Android Play Store app; installation, updates, billing and licensing may fail.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "healthConnect": {
+              "description": "Android Health Connect controller and backup app; health integrations become unavailable.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "adServices": {
+              "description": "Android AdServices API package; advertising/privacy APIs may fail. Does not remove mainline/APEX infrastructure.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "onDevicePersonalization": {
+              "description": "Android on-device personalization service package; dependent APIs may fail.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "wallpaperApps": {
+              "description": "Android wallpaper picker and optional live-wallpaper apps; changes wallpaper selection. Does not disable the shared wallpaper framework or widgets.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "dialerApp": {
+              "description": "Optional Android dialer apps. Default role holders remain protected.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "messagesApp": {
+              "description": "Optional Android SMS/Messages apps. Default role holders remain protected; excludes other apps' messaging.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "googleServicesFramework": {
+              "description": "Android Google Services Framework; aggressive control that can break Google account and push integrations.",
               "type": "string",
               "enum": ["enabled", "disabled"]
             },
             "googlePlayServices": {
-              "description": "Google Play infrastructure. Control is unsupported to preserve application behavior.",
+              "description": "Android Google Play services; aggressive control that breaks dependent push, authentication, location and other integrations. Keep enabled for Slack-compatible workflows.",
               "type": "string",
               "enum": ["enabled", "disabled"]
             },
@@ -8413,6 +8671,122 @@
           },
           "additionalProperties": false,
           "minProperties": 1
+        },
+        "restore": {
+          "description": "Restore exact prior Android overrides from a returned receipt. Requires the same boot and user. Specify resources or restore, never both.",
+          "type": "object",
+          "properties": {
+            "deviceId": {
+              "type": "string"
+            },
+            "bootId": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000)$"
+            },
+            "userId": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "entries": {
+              "minItems": 1,
+              "maxItems": 100,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "resource": {
+                    "type": "string",
+                    "enum": [
+                      "wallpaperRendering",
+                      "widgets",
+                      "liveActivities",
+                      "healthServices",
+                      "homeServices",
+                      "fitnessServices",
+                      "familyServices",
+                      "screenTime",
+                      "newsServices",
+                      "weatherServices",
+                      "tipsServices",
+                      "gameServices",
+                      "mapsSync",
+                      "advertising",
+                      "diagnosticReporting",
+                      "photoAnalysis",
+                      "assistantSuggestions",
+                      "appleIntelligence",
+                      "searchIndexing",
+                      "appStoreServices",
+                      "appleMediaSync",
+                      "mailServices",
+                      "calendarServices",
+                      "reminderServices",
+                      "personalDataSync",
+                      "safariSync",
+                      "icloudSettingsSync",
+                      "messagingMaintenance",
+                      "watchConnectivity",
+                      "carPlay",
+                      "tvRemote",
+                      "findMy",
+                      "continuity",
+                      "walletServices",
+                      "businessServices",
+                      "backgroundSync",
+                      "animations",
+                      "screensavers",
+                      "backup",
+                      "mailApp",
+                      "calendarApp",
+                      "contactsApp",
+                      "mapsApp",
+                      "videoApp",
+                      "musicApp",
+                      "photosApp",
+                      "assistantApp",
+                      "digitalWellbeing",
+                      "printing",
+                      "accessibilityApps",
+                      "textToSpeech",
+                      "storeApp",
+                      "healthConnect",
+                      "adServices",
+                      "onDevicePersonalization",
+                      "wallpaperApps",
+                      "dialerApp",
+                      "messagesApp",
+                      "googleServicesFramework",
+                      "googlePlayServices",
+                      "icloudSync"
+                    ]
+                  },
+                  "target": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": ["package", "global", "secure", "backup"]
+                  },
+                  "value": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": ["resource", "target", "kind", "value"],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": ["deviceId", "bootId", "userId", "entries"],
+          "additionalProperties": false
         },
         "timeoutMs": {
           "description": "Total configuration budget in milliseconds. Defaults to 300000.",
@@ -8436,8 +8810,25 @@
           "type": "string"
         }
       },
-      "required": ["resources"],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "oneOf": [
+            {
+              "required": ["resources"],
+              "not": {
+                "required": ["restore"]
+              }
+            },
+            {
+              "required": ["restore"],
+              "not": {
+                "required": ["resources"]
+              }
+            }
+          ]
+        }
+      ]
     }
   },
   {

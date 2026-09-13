@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
+import { parseAvdConfig } from "../../src/utils/android-cmdline-tools/AvdConfigReader";
 import type { DeviceInfo } from "../../src/models";
 import {
   DefaultExactDeviceProvisioner,
@@ -25,6 +26,36 @@ function androidImage(name: string): DeviceInfo {
 }
 
 describe("DefaultExactDeviceProvisioner", () => {
+  test("writes and reads independent hardware options without changing other AVD properties", async () => {
+    let content = "hw.cpu.ncore = 4\nhw.ramSize=2048\nuntouched=yes\n";
+    const writer = new FileAndroidAvdConfigWriter({
+      readFile: async () => content,
+      writeFile: async (_path, updated) => {
+        content = updated;
+      },
+      environment: { ANDROID_AVD_HOME: "/avds" },
+      homeDirectory: () => "/home/test",
+    });
+    const configuration = {
+      cpuCores: 2,
+      gpuMode: "host",
+      screenWidth: 720,
+      screenHeight: 1280,
+      screenDensity: 280,
+      cameraFront: "none",
+      audioInput: false,
+      audioOutput: true,
+    } as const;
+    await writer.setConfiguration("phone", configuration);
+    expect(parseAvdConfig(content).hardware).toMatchObject(configuration);
+    expect(content).toContain("untouched=yes");
+    expect(content).toContain("hw.ramSize=2048");
+    expect(content).toContain("hw.gpu.enabled=yes");
+    expect(content).not.toContain("hw.cpu.ncore = 4");
+    const before = content;
+    await expect(writer.setConfiguration("phone", { cpuCores: 0 })).rejects.toThrow();
+    expect(content).toBe(before);
+  });
   test("updates only hw.ramSize in the conventional AVD config", async () => {
     const writes: Array<{ path: string; content: string }> = [];
     const writer = new FileAndroidAvdConfigWriter({
@@ -442,45 +473,55 @@ describe("DefaultExactDeviceProvisioner", () => {
     }
   });
 
-  test("reconciles requested Android memory on a retry after partial provisioning", async () => {
-    let ramSizeMb = 2048;
-    const writes: number[] = [];
-    const provisioner = new DefaultExactDeviceProvisioner({
-      listDeviceImages: async () => [androidImage("phone-api-36-a")],
-      isCreationAllowed: () => true,
-      avdManager: {} as ExactAndroidAvdClient,
-      androidConfigReader: {
-        readConfig: async () => ({
-          apiLevel: 36,
-          tag: "google_apis",
-          architecture: "x86_64",
-          deviceName: "pixel_9",
-          ramSizeMb,
-        }),
-      },
-      androidConfigWriter: {
-        setMemoryMb: async (_name, memoryMb) => {
-          writes.push(memoryMb);
-          ramSizeMb = memoryMb;
+  test.each([false, true])(
+    "reconciles memory only on a stopped AVD (running=%s)",
+    async (isRunning) => {
+      let ramSizeMb = 2048;
+      const writes: number[] = [];
+      const provisioner = new DefaultExactDeviceProvisioner({
+        listDeviceImages: async () => [{ ...androidImage("phone-api-36-a"), isRunning }],
+        isCreationAllowed: () => true,
+        avdManager: {} as ExactAndroidAvdClient,
+        androidConfigReader: {
+          readConfig: async () => ({
+            apiLevel: 36,
+            tag: "google_apis",
+            architecture: "x86_64",
+            deviceName: "pixel_9",
+            ramSizeMb,
+          }),
         },
-      },
-      iosSimulator: {} as ExactIosSimulatorClient,
-    });
+        androidConfigWriter: {
+          setMemoryMb: async (_name, memoryMb) => {
+            writes.push(memoryMb);
+            ramSizeMb = memoryMb;
+          },
+        },
+        iosSimulator: {} as ExactIosSimulatorClient,
+      });
 
-    const result = await provisioner.provision({
-      platform: "android",
-      name: "phone-api-36-a",
-      spec: ANDROID_SPEC,
-      reconcileExistingConfiguration: true,
-    });
+      const operation = provisioner.provision({
+        platform: "android",
+        name: "phone-api-36-a",
+        spec: ANDROID_SPEC,
+        reconcileExistingConfiguration: true,
+      });
 
-    expect(writes).toEqual([4096]);
-    expect(result).toEqual({
-      created: false,
-      device: androidImage("phone-api-36-a"),
-      resolvedSpec: { ...ANDROID_SPEC, displayCutout: "hole_punch" },
-    });
-  });
+      if (isRunning) {
+        await expect(operation).rejects.toMatchObject({ code: "identity_conflict" });
+        expect(writes).toEqual([]);
+        return;
+      }
+      const result = await operation;
+
+      expect(writes).toEqual([4096]);
+      expect(result).toEqual({
+        created: false,
+        device: androidImage("phone-api-36-a"),
+        resolvedSpec: { ...ANDROID_SPEC, displayCutout: "hole_punch" },
+      });
+    },
+  );
 
   test("does not reconcile a pre-existing Android AVD without creation provenance", async () => {
     const writes: number[] = [];

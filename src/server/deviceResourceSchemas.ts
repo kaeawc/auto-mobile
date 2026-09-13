@@ -1,4 +1,5 @@
 import { z } from "zod/v4";
+import { androidResourceRestorationSchema } from "../models/AndroidResourceRestoration";
 import {
   DEFAULT_DEVICE_RESOURCE_TIMEOUT_MS,
   MAX_DEVICE_READY_TIMEOUT_MS,
@@ -31,19 +32,39 @@ export const deviceResourceConfigurationSchema = withJsonSchemaOverride(
   },
 );
 
-export const setDeviceResourcesSchema = addDeviceTargetingToSchema(
-  z
-    .object({
-      resources: deviceResourceConfigurationSchema,
-      timeoutMs: z
-        .number()
-        .int()
-        .positive()
-        .max(MAX_DEVICE_READY_TIMEOUT_MS)
-        .optional()
-        .describe(
-          `Total configuration budget in milliseconds. Defaults to ${DEFAULT_DEVICE_RESOURCE_TIMEOUT_MS}.`,
-        ),
-    })
-    .strict(),
+export const setDeviceResourcesSchema = withJsonSchemaOverride(
+  addDeviceTargetingToSchema(
+    z
+      .object({
+        resources: deviceResourceConfigurationSchema.optional(),
+        restore: androidResourceRestorationSchema
+          .optional()
+          .describe(
+            "Restore exact prior Android overrides from a returned receipt. Requires the same boot and user. Specify resources or restore, never both.",
+          ),
+        timeoutMs: z
+          .number()
+          .int()
+          .positive()
+          .max(MAX_DEVICE_READY_TIMEOUT_MS)
+          .optional()
+          .describe(
+            `Total configuration budget in milliseconds. Defaults to ${DEFAULT_DEVICE_RESOURCE_TIMEOUT_MS}.`,
+          ),
+      })
+      .strict(),
+  ).refine(
+    (value) => (value.resources !== undefined) !== (value.restore !== undefined),
+    "Specify exactly one of resources or restore.",
+  ),
+  (jsonSchema) => {
+    jsonSchema.allOf = [
+      {
+        oneOf: [
+          { required: ["resources"], not: { required: ["restore"] } },
+          { required: ["restore"], not: { required: ["resources"] } },
+        ],
+      },
+    ];
+  },
 );

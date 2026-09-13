@@ -210,13 +210,13 @@ describe("device resource control", () => {
 
   test("unsupported Android settings run no Apple or Android commands", async () => {
     request.device = { platform: "android", name: "Pixel", deviceId: "emulator-5554" };
-    request.resources = { wallpaperRendering: "disabled", googlePlayServices: "disabled" };
+    request.resources = { wallpaperRendering: "disabled", widgets: "disabled" };
     expect(await controller.setResources(request)).toMatchObject({
       success: false,
       changed: [],
       resources: {
         wallpaperRendering: { state: "unsupported" },
-        googlePlayServices: { state: "unsupported" },
+        widgets: { state: "unsupported" },
       },
     });
     expect(simctl.calls).toEqual([]);

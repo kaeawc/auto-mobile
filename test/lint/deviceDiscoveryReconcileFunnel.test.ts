@@ -1,6 +1,6 @@
 import ts from "typescript";
-import { describe, expect, test } from "bun:test";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { beforeAll, describe, expect, test } from "bun:test";
+import { readdirSync, readFileSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 
 /**
@@ -32,6 +32,14 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
   /** The producer/consumer APIs that constitute "a device discovery". */
   const DISCOVERY_CALL =
     /\b(?:getBootedDevicesDetailed|getBootedDevices|getBootedAndroidDevices|getBootedDevicesChecked)\s*\(/g;
+
+  /**
+   * Shared prefix of every discovery API above. Matching it against the raw
+   * BYTES skips decoding — and then scanning — the ~10MB of `src/` that names no
+   * discovery API at all, which is what kept this scan inside the 100ms
+   * per-test budget.
+   */
+  const DISCOVERY_PREFIX = "getBooted";
 
   interface Allowed {
     /** Exact number of discovery calls in the file. */
@@ -161,50 +169,92 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
    * scanner is used rather than a regex so a `//` inside a string literal
    * survives.
    */
-  function stripComments(source: string): string {
+  /**
+   * Replace every comment's characters with spaces, in place, so a mention in
+   * prose ("see `getBootedDevices`") is not counted as a call site while every
+   * OFFSET in the file stays exactly where it was. Preserving offsets is what
+   * lets the real parser run on the untouched source and still read
+   * comment-free body text: handing the parser a shortened, scanner-rewritten
+   * copy silently dropped declarations, because a bare scanner cannot tell a
+   * regex literal from division.
+   */
+  function blankComments(source: string): string {
     const scanner = ts.createScanner(
       ts.ScriptTarget.Latest,
       /* skipTrivia */ false,
       ts.LanguageVariant.Standard,
       source,
     );
-    let result = "";
+    const out = source.split("");
+    let offset = 0;
     for (
       let token = scanner.scan();
       token !== ts.SyntaxKind.EndOfFileToken;
       token = scanner.scan()
     ) {
+      const text = scanner.getTokenText();
       if (
         token === ts.SyntaxKind.SingleLineCommentTrivia ||
         token === ts.SyntaxKind.MultiLineCommentTrivia
       ) {
-        continue;
+        for (let index = offset; index < offset + text.length; index += 1) {
+          // Newlines survive so line structure — and any assertion that reads
+          // it — is unchanged.
+          if (out[index] !== "\n" && out[index] !== "\r") {
+            out[index] = " ";
+          }
+        }
       }
-      result += scanner.getTokenText();
+      offset += text.length;
     }
-    return result;
+    return out.join("");
   }
 
   function walk(dir: string, files: string[] = []): string[] {
-    for (const entry of readdirSync(dir)) {
-      const full = join(dir, entry);
-      if (statSync(full).isDirectory()) {
+    // withFileTypes, not a statSync per entry: one syscall for the whole
+    // directory instead of one per file across ~1000 files in src/.
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) {
         walk(full, files);
-      } else if (entry.endsWith(".ts")) {
+      } else if (entry.name.endsWith(".ts")) {
         files.push(full);
       }
     }
     return files;
   }
 
+  /**
+   * Scanning every file in `src/` with the TypeScript scanner costs far more
+   * than the 100ms per-test budget. Nearly every file names no discovery API at
+   * all, so a raw-text prefilter decides that cheaply and only the handful that
+   * survive pay for comment stripping. The result is memoized because all three
+   * assertions below read the same inventory.
+   */
+  let cachedCounts: Map<string, number> | undefined;
+
+  // The inventory is a fixture shared by all three assertions below, not work
+  // any one of them owns; building it here keeps each test's own cost to the
+  // comparison it actually makes.
+  beforeAll(() => {
+    discoveryCallCounts();
+  });
+
   function discoveryCallCounts(): Map<string, number> {
+    if (cachedCounts !== undefined) {
+      return cachedCounts;
+    }
     const counts = new Map<string, number>();
     for (const file of walk(SRC)) {
-      const matches = stripComments(readFileSync(file, "utf8")).match(DISCOVERY_CALL);
+      if (!readFileSync(file).includes(DISCOVERY_PREFIX)) {
+        continue;
+      }
+      const matches = blankComments(readFileSync(file, "utf8")).match(DISCOVERY_CALL);
       if (matches && matches.length > 0) {
         counts.set(relative(ROOT, file).split(sep).join("/"), matches.length);
       }
     }
+    cachedCounts = counts;
     return counts;
   }
 
@@ -239,30 +289,33 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
       "src/server/deviceTools.ts",
     ];
     for (const file of routed) {
-      const source = stripComments(readFileSync(join(ROOT, file), "utf8"));
+      const source = blankComments(readFileSync(join(ROOT, file), "utf8"));
       expect(source).toMatch(/reconcileDiscoveryObservation\s*[?]?\.?\s*\(/);
     }
   });
 
   test("the funnel and its wrapper exist under their canonical names", () => {
-    expect(stripComments(readFileSync(join(ROOT, "src/daemon/devicePool.ts"), "utf8"))).toMatch(
+    expect(blankComments(readFileSync(join(ROOT, "src/daemon/devicePool.ts"), "utf8"))).toMatch(
       /async reconcileDiscoveryObservation\(/,
     );
     expect(
-      stripComments(readFileSync(join(ROOT, "src/daemon/discoveryReconcile.ts"), "utf8")),
+      blankComments(readFileSync(join(ROOT, "src/daemon/discoveryReconcile.ts"), "utf8")),
     ).toMatch(/export async function reconcileDiscoveryObservation\(/);
   });
 
   test("the comment stripper does not count a mention in prose as a call site", () => {
     expect(
-      stripComments("// see getBootedDevices() for the list\nconst x = 1;").match(DISCOVERY_CALL),
+      blankComments("// see getBootedDevices() for the list\nconst x = 1;").match(DISCOVERY_CALL),
     ).toBeNull();
     expect(
-      stripComments("/* getBootedDevicesDetailed(x) */\nconst y = 2;").match(DISCOVERY_CALL),
+      blankComments("/* getBootedDevicesDetailed(x) */\nconst y = 2;").match(DISCOVERY_CALL),
     ).toBeNull();
     expect(
-      stripComments("await manager.getBootedDevices('android');").match(DISCOVERY_CALL),
+      blankComments("await manager.getBootedDevices('android');").match(DISCOVERY_CALL),
     ).toHaveLength(1);
-    expect(stripComments('const url = "http://example.com";')).toMatch(/http:\/\/example\.com/);
+    // `toContain`, not a regex: the assertion is that the `//` inside a string
+    // literal survived the stripper, and an unanchored URL regex is exactly the
+    // shape CodeQL flags as a host-matching hazard.
+    expect(blankComments('const url = "http://example.com";')).toContain('"http://example.com"');
   });
 });

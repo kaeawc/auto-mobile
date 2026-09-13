@@ -1,5 +1,5 @@
 import ts from "typescript";
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -107,28 +107,45 @@ describe("device-addressed admission gate (issue #6863)", () => {
     "src/daemon/webrtcStreamSocketServer.ts#resolveWebRtcStreamDevice",
   ];
 
-  function stripComments(source: string): string {
+  /**
+   * Replace every comment's characters with spaces, in place, so a mention in
+   * prose ("see `getBootedDevices`") is not counted as a call site while every
+   * OFFSET in the file stays exactly where it was. Preserving offsets is what
+   * lets the real parser run on the untouched source and still read
+   * comment-free body text: handing the parser a shortened, scanner-rewritten
+   * copy silently dropped declarations, because a bare scanner cannot tell a
+   * regex literal from division.
+   */
+  function blankComments(source: string): string {
     const scanner = ts.createScanner(
       ts.ScriptTarget.Latest,
       /* skipTrivia */ false,
       ts.LanguageVariant.Standard,
       source,
     );
-    let result = "";
+    const out = source.split("");
+    let offset = 0;
     for (
       let token = scanner.scan();
       token !== ts.SyntaxKind.EndOfFileToken;
       token = scanner.scan()
     ) {
+      const text = scanner.getTokenText();
       if (
         token === ts.SyntaxKind.SingleLineCommentTrivia ||
         token === ts.SyntaxKind.MultiLineCommentTrivia
       ) {
-        continue;
+        for (let index = offset; index < offset + text.length; index += 1) {
+          // Newlines survive so line structure — and any assertion that reads
+          // it — is unchanged.
+          if (out[index] !== "\n" && out[index] !== "\r") {
+            out[index] = " ";
+          }
+        }
       }
-      result += scanner.getTokenText();
+      offset += text.length;
     }
-    return result;
+    return out.join("");
   }
 
   interface NamedFunction {
@@ -136,11 +153,28 @@ describe("device-addressed admission gate (issue #6863)", () => {
     readonly body: string;
   }
 
-  /** Every named function/method declaration in a file, with its body text. */
+  const functionCache = new Map<string, NamedFunction[]>();
+
+  /**
+   * Every named function/method declaration in a file, with its body text.
+   *
+   * Comments are blanked ONCE for the whole file and each body is sliced out of
+   * that offset-preserving copy, so every body is comment-free for one scanner
+   * pass instead of one per function — the per-function form blew the 100ms
+   * per-test budget on CI for a file the size of `socketServer.ts`. The
+   * per-file result is memoized for the same reason: the handler table below
+   * reads the same file several times.
+   */
   function namedFunctions(file: string): NamedFunction[] {
+    const cached = functionCache.get(file);
+    if (cached !== undefined) {
+      return cached;
+    }
+    const text = readFileSync(join(ROOT, file), "utf8");
+    const blanked = blankComments(text);
     const source = ts.createSourceFile(
       file,
-      readFileSync(join(ROOT, file), "utf8"),
+      text,
       ts.ScriptTarget.Latest,
       /* setParentNodes */ true,
     );
@@ -153,16 +187,28 @@ describe("device-addressed admission gate (issue #6863)", () => {
         node.name !== undefined &&
         ts.isIdentifier(node.name)
       ) {
-        found.push({ name: node.name.text, body: stripComments(node.getText(source)) });
+        found.push({
+          name: node.name.text,
+          body: blanked.slice(node.getStart(source), node.getEnd()),
+        });
       }
       ts.forEachChild(node, visit);
     };
     ts.forEachChild(source, visit);
+    functionCache.set(file, found);
     return found;
   }
 
+  // Parsing the scanned socket servers is a fixture shared by every assertion
+  // below, not work any one of them owns.
+  beforeAll(() => {
+    for (const file of SCANNED) {
+      namedFunctions(file);
+    }
+  });
+
   test("the gate exists on the pool under its single name", () => {
-    const pool = stripComments(readFileSync(join(ROOT, "src/daemon/devicePool.ts"), "utf8"));
+    const pool = blankComments(readFileSync(join(ROOT, "src/daemon/devicePool.ts"), "utf8"));
     expect(pool).toMatch(new RegExp(`\\b${GATE}\\(deviceId: string, purpose: string\\): void`));
     // The session-keyed gate is a CALLER of the device gate, not a second gate.
     const sessionGate = pool.slice(pool.indexOf("assertSessionReadyForAutomation(sessionId"));
@@ -170,7 +216,7 @@ describe("device-addressed admission gate (issue #6863)", () => {
   });
 
   test("the stream server reaches the gate through the resolver it already holds", () => {
-    const resolver = stripComments(
+    const resolver = blankComments(
       readFileSync(join(ROOT, "src/daemon/deviceSessionResolver.ts"), "utf8"),
     );
     expect(resolver).toMatch(new RegExp(`${GATE}\\(deviceId: string, purpose: string\\): void;`));

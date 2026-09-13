@@ -67,6 +67,48 @@ export function resetListAppsToolDependencies(): void {
   listAppsToolDependencies = null;
 }
 
+export interface LaunchAppExecutor {
+  execute(
+    appId: string,
+    clearAppData?: boolean,
+    coldBoot?: boolean,
+    activityName?: string,
+    userId?: number,
+    skipUiStability?: boolean,
+    signal?: AbortSignal,
+  ): Promise<LaunchAppResult>;
+}
+
+// Injection seam for the launchApp handler (mirrors the terminateApp/crashApp
+// dependency seams in this file). Lets a unit test exercise the REGISTERED
+// handler wiring with a fake LaunchApp, so the already-foreground response shape
+// is covered by a test rather than only the response builder (issue #6868).
+export interface LaunchAppToolDependencies {
+  createLaunchApp(device: BootedDevice): LaunchAppExecutor;
+}
+
+let launchAppToolDependencies: LaunchAppToolDependencies | null = null;
+
+function getLaunchAppToolDependencies(): LaunchAppToolDependencies {
+  if (!launchAppToolDependencies) {
+    launchAppToolDependencies = {
+      createLaunchApp: (device) => new LaunchApp(device),
+    };
+  }
+  return launchAppToolDependencies;
+}
+
+export function setLaunchAppToolDependencies(deps: Partial<LaunchAppToolDependencies>): void {
+  const currentDeps = getLaunchAppToolDependencies();
+  launchAppToolDependencies = {
+    createLaunchApp: deps.createLaunchApp ?? currentDeps.createLaunchApp,
+  };
+}
+
+export function resetLaunchAppToolDependencies(): void {
+  launchAppToolDependencies = null;
+}
+
 export interface TerminateAppExecutor {
   execute(
     appId: string,
@@ -209,14 +251,21 @@ function buildLaunchMessage(
   appId: string,
   verified: boolean | undefined,
   verifyFailureReason: LaunchVerificationFailureReason | undefined,
+  alreadyForeground: boolean | undefined,
 ): string {
+  // An app that was already foreground was never launched — say so rather than
+  // claiming a launch that did not happen (issue #6868). The verification suffix
+  // is unchanged: it describes the observed end state either way.
+  const lead = alreadyForeground
+    ? `App ${appId} was already in the foreground`
+    : `Launched app ${appId}`;
   if (verified === true) {
-    return `Launched app ${appId} (foreground verified)`;
+    return `${lead} (foreground verified)`;
   }
   if (verifyFailureReason) {
-    return `Launched app ${appId} (verification failed: ${launchVerificationFailureMessage(verifyFailureReason)})`;
+    return `${lead} (verification failed: ${launchVerificationFailureMessage(verifyFailureReason)})`;
   }
-  return `Launched app ${appId}`;
+  return lead;
 }
 
 /**
@@ -281,7 +330,7 @@ export function buildLaunchAppResponse(appId: string, result: LaunchAppResult) {
   const verified = isVerified ? true : verifyFailureReason ? false : undefined;
 
   return {
-    message: buildLaunchMessage(appId, verified, verifyFailureReason),
+    message: buildLaunchMessage(appId, verified, verifyFailureReason, result.alreadyForeground),
     verified,
     ...(verifyFailureReason ? { verifyFailureReason } : {}),
     observedAppId,
@@ -658,7 +707,7 @@ export function registerAppTools() {
   ) => {
     try {
       signal?.throwIfAborted();
-      const launchApp = new LaunchApp(device);
+      const launchApp = getLaunchAppToolDependencies().createLaunchApp(device);
       const result = await launchApp.execute(
         args.appId,
         args.clearAppData ?? false,
@@ -870,7 +919,7 @@ export function registerAppTools() {
   // Register with the tool registry
   ToolRegistry.registerDeviceAware(
     "launchApp",
-    "Launch app by package name",
+    "Launch app by package name. On Android an app that is already in the foreground returns success with alreadyForeground:true plus the observation, not an error; iOS re-launches it and returns an ordinary success without that marker.",
     launchAppSchema,
     launchAppHandler,
     { defaultEnabled: true },

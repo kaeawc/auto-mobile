@@ -1473,6 +1473,34 @@
           },
           "required": ["executionTimeMs", "steps"],
           "additionalProperties": false
+        },
+        "warnings": {
+          "description": "Best-effort warnings from steps that still succeeded",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "stepIndex": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "tool": {
+                "type": "string"
+              },
+              "device": {
+                "type": "string"
+              },
+              "warnings": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": ["stepIndex", "tool", "warnings"],
+            "additionalProperties": false
+          }
         }
       },
       "required": ["success", "executedSteps", "totalSteps"],
@@ -2265,7 +2293,7 @@
   },
   {
     "name": "inputText",
-    "description": "Input text. The optional mode field is Android-only and ignored on iOS.",
+    "description": "Input text. The optional mode field is Android-only and ignored on iOS. If the text lands but the optional keyboard dismissal fails, the response stays a success with keyboardDismissed:false and a warnings entry.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -2469,7 +2497,7 @@
   },
   {
     "name": "launchApp",
-    "description": "Launch app by package name",
+    "description": "Launch app by package name. On Android an app that is already in the foreground returns success with alreadyForeground:true plus the observation, not an error; iOS re-launches it and returns an ordinary success without that marker.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",

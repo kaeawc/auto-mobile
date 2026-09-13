@@ -690,4 +690,75 @@ describe("criticalSection tool", () => {
       /Critical section "wrap-lock" failed for device dev-wrap: Failed at step 2\/2 \(mockWrapBoom\): kaboom/,
     );
   });
+  // A best-effort epilogue failure (issue #6868) keeps its step successful and
+  // reports itself through `warnings`. The critical section retained only the
+  // tool name and a success bit, so that outcome — previously the step's whole
+  // `success:false` — vanished and the section reported an entirely clean
+  // success while later steps ran against a screen the caller did not expect.
+  test("surfaces a successful step's warnings on the critical-section result", async () => {
+    const tool = ToolRegistry.getToolForPlan("criticalSection");
+    expect(tool).toBeDefined();
+
+    const fakeDevice: BootedDevice = {
+      platform: "android",
+      deviceId: "warn-device",
+      name: "Warn Device",
+    };
+
+    ToolRegistry.register("mockWarnStep", "warns", z.object({}), async () => ({
+      success: true,
+      keyboardDismissed: false,
+      warnings: ["keyboard dismissal failed: Keyboard state unavailable"],
+    }));
+    ToolRegistry.register("mockCleanStep", "clean", z.object({}), async () => ({
+      success: true,
+    }));
+
+    CriticalSectionCoordinator.getInstance().registerExpectedDevices("warn-lock", 1);
+
+    const params = {
+      lock: "warn-lock",
+      deviceCount: 1,
+      steps: [
+        { tool: "mockCleanStep", params: {} },
+        { tool: "mockWarnStep", params: {} },
+      ],
+    };
+
+    const response = await tool!.deviceAwareHandler!(fakeDevice, params, undefined, undefined);
+    const result = JSON.parse(response.content[0].text);
+
+    expect(result.success).toBe(true);
+    expect(result.executedSteps).toBe(2);
+    expect(result.warnings).toEqual([
+      "step 2 (mockWarnStep): keyboard dismissal failed: Keyboard state unavailable",
+    ]);
+  });
+
+  test("omits warnings entirely when every step is clean", async () => {
+    const tool = ToolRegistry.getToolForPlan("criticalSection");
+
+    const fakeDevice: BootedDevice = {
+      platform: "android",
+      deviceId: "clean-device",
+      name: "Clean Device",
+    };
+
+    ToolRegistry.register("mockCleanStep", "clean", z.object({}), async () => ({
+      success: true,
+    }));
+
+    CriticalSectionCoordinator.getInstance().registerExpectedDevices("clean-lock", 1);
+
+    const response = await tool!.deviceAwareHandler!(
+      fakeDevice,
+      { lock: "clean-lock", deviceCount: 1, steps: [{ tool: "mockCleanStep", params: {} }] },
+      undefined,
+      undefined,
+    );
+    const result = JSON.parse(response.content[0].text);
+
+    expect(result.success).toBe(true);
+    expect(result.warnings).toBeUndefined();
+  });
 });

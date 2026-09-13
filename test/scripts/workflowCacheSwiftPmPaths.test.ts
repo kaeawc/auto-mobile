@@ -33,8 +33,8 @@ function loadWorkflowCachePaths(workflowRelativePath: string) {
 
 function collectForbiddenCachePaths(entries: string[]): string[] {
   return entries.filter((entry) => {
-    const path = entry.endsWith("/") ? entry.slice(0, -1) : entry;
-    return path.endsWith(".build") || path.endsWith("SourcePackages");
+    const path = entry.replace(/\/+$/, "");
+    return path.split("/").some((segment) => segment === ".build" || segment === "SourcePackages");
   });
 }
 
@@ -72,6 +72,9 @@ jobs:
           path: |-
             ios/Package.swift/.build
             ios/SourcePackages
+            ios/control-proxy/.build/workspace-state.json
+            \${{ runner.temp }}/DerivedData/SourcePackages/**
+            ios/x/.build/**
 `) as WorkflowDefinition;
 
     const { cacheStepCount, entries } = collectCachePaths(allJobSteps(workflow));
@@ -81,6 +84,9 @@ jobs:
       "ios/control-proxy/.build",
       "ios/Package.swift/.build",
       "ios/SourcePackages",
+      "ios/control-proxy/.build/workspace-state.json",
+      "${{ runner.temp }}/DerivedData/SourcePackages/**",
+      "ios/x/.build/**",
     ]);
   });
 });

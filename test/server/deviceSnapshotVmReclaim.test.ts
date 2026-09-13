@@ -269,6 +269,79 @@ describe("deviceSnapshotManager VM snapshot sizing and reclaim (#6490)", () => {
     expect(pending?.pendingReclaimReason).toContain("emulator");
   });
 
+  describe("the reclaim intent is durable across the console delete (#6891 review)", () => {
+    // The console delete is the irreversible step: once the emulator accepts it
+    // the gigabytes are gone. If the process dies — or the row deletion that
+    // follows fails — while the row still reads "not pending", that row keeps
+    // being listed and offered for restore with no payload behind it, and the
+    // pending sweep cannot repair it because it only ever selects pending rows.
+    async function seedLiveVmRow(snapshotName: string): Promise<void> {
+      const timestamp = new Date(1000).toISOString();
+      avdSnapshots.setVmSnapshot(AVD_NAME, snapshotName, 2 * 1024 * MB);
+      await repository.insertSnapshot({
+        snapshotName,
+        deviceId: EMULATOR.deviceId,
+        deviceName: AVD_NAME,
+        platform: "android",
+        snapshotType: "vm",
+        includeAppData: true,
+        includeSettings: false,
+        createdAt: timestamp,
+        lastAccessedAt: timestamp,
+        sizeBytes: 2 * 1024 * MB,
+        manifest: vmManifest(snapshotName, timestamp),
+      });
+    }
+
+    test("the row is already flagged pending when the emulator is asked to delete", async () => {
+      await seedLiveVmRow("vm-crash");
+      let pendingAtDeleteTime: boolean | undefined;
+      await setDeviceSnapshotManagerDependencies({
+        avdSnapshots: {
+          measureVmSnapshotBytes: (avdName: string, snapshotName: string) =>
+            avdSnapshots.measureVmSnapshotBytes(avdName, snapshotName),
+          listAvdSnapshotDirectories: (avdName: string) =>
+            avdSnapshots.listAvdSnapshotDirectories(avdName),
+          listKnownAvdNames: () => avdSnapshots.listKnownAvdNames(),
+          findLiveEmulatorSerial: (avdName: string) => avdSnapshots.findLiveEmulatorSerial(avdName),
+          deleteVmSnapshot: async (deviceId: string, snapshotName: string, timeoutMs: number) => {
+            pendingAtDeleteTime = (await repository.getSnapshot(snapshotName))?.pendingReclaim;
+            return avdSnapshots.deleteVmSnapshot(deviceId, snapshotName, timeoutMs);
+          },
+        },
+      });
+
+      const { evictedSnapshotNames } = await updateDeviceSnapshotConfig({ maxArchiveSizeMb: 1 });
+
+      expect(pendingAtDeleteTime).toBe(true);
+      expect(evictedSnapshotNames).toEqual(["vm-crash"]);
+      expect(await repository.getSnapshot("vm-crash")).toBeNull();
+    });
+
+    test("a row deletion that fails after the payload is gone stays sweepable", async () => {
+      await seedLiveVmRow("vm-orphaned-row");
+      const failingStore = Object.create(store) as typeof store;
+      failingStore.deleteSnapshotData = async () => {
+        throw new Error("archive directory is unreadable");
+      };
+      await setDeviceSnapshotManagerDependencies({ snapshotStore: failingStore as any });
+
+      const { evictedSnapshotNames } = await updateDeviceSnapshotConfig({ maxArchiveSizeMb: 1 });
+
+      expect(evictedSnapshotNames).toEqual([]);
+      expect(avdSnapshots.hasVmSnapshot(AVD_NAME, "vm-orphaned-row")).toBe(false);
+      expect((await repository.getSnapshot("vm-orphaned-row"))?.pendingReclaim).toBe(true);
+
+      // With the store healthy again the sweep finishes what the failure
+      // interrupted, instead of leaving a restorable row with no payload.
+      await setDeviceSnapshotManagerDependencies({ snapshotStore: store as any });
+      store.queueGeneratedName("vm-after");
+      await captureDeviceSnapshot(EMULATOR, {});
+
+      expect(await repository.getSnapshot("vm-orphaned-row")).toBeNull();
+    });
+  });
+
   test("the sweep completes a pending reclaim when that AVD's emulator is next seen live", async () => {
     const timestamp = new Date(1000).toISOString();
     avdSnapshots.setVmSnapshot(AVD_NAME, "vm-pending", 2 * 1024 * MB);

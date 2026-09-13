@@ -875,6 +875,20 @@ async function reclaimVmSnapshotPayload(
   const avdName = record.deviceName;
 
   const serial = await avdSnapshots.findLiveEmulatorSerial(avdName);
+  if (serial) {
+    // Write the intent down BEFORE the irreversible step. Once the emulator
+    // accepts the delete the payload is gone; if this process dies there — or
+    // the row deletion that follows fails — a row still reading "not pending"
+    // keeps being listed and offered for restore with nothing behind it, and
+    // the sweep cannot repair it because it selects only pending rows. Flagged
+    // first, the worst case is a retry that finds the payload already absent,
+    // which deleteVmSnapshot already counts as reclaimed (#6891 review).
+    await snapshotRepository.updateSnapshot(record.snapshotName, {
+      pendingReclaim: true,
+      pendingReclaimReason: `reclaiming the in-AVD payload on AVD '${avdName}'`,
+    });
+  }
+
   const outcome = serial
     ? await avdSnapshots.deleteVmSnapshot(serial, record.snapshotName, vmSnapshotTimeoutMs)
     : {

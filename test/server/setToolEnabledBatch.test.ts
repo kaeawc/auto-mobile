@@ -8,6 +8,11 @@ import {
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import {
+  getAndroidSchema,
+  getAppleSchema,
+  provisionDeviceSchema,
+} from "../../src/server/deviceTools";
+import {
   registerToolSelectionTools,
   SET_TOOL_ENABLED_TOOL_NAME,
   setToolEnabledSchema,
@@ -267,6 +272,50 @@ describe("setToolEnabled batch enable (#6869)", () => {
 
       expect(properties.toolName.enum).toEqual(["clearText", "imeAction", "inputText", "observe"]);
       expect(properties.toolNames.items.enum).toEqual(properties.toolName.enum);
+    });
+
+    test("advertises the same vocabulary on the acquisition tools' enableTools", () => {
+      // #6886 review: `resolveRequestedEnableTools` rejects every unknown or
+      // non-configurable name before acquisition, so a schema advertising
+      // "any non-empty string" lets a schema-driven client build a call the
+      // invocation refuses — and hides the vocabulary of the one-call flow.
+      for (const [name, schema] of [
+        ["getAndroid", getAndroidSchema],
+        ["getApple", getAppleSchema],
+        ["provisionDevice", provisionDeviceSchema],
+      ] as const) {
+        ToolRegistry.register(name, name, schema as any, async () => ({
+          content: [{ type: "text" as const, text: name }],
+        }));
+      }
+
+      const configurable = [
+        "clearText",
+        "getAndroid",
+        "getApple",
+        "imeAction",
+        "inputText",
+        "observe",
+        "provisionDevice",
+      ];
+      for (const name of ["getAndroid", "getApple", "provisionDevice"]) {
+        const definition = ToolRegistry.getToolDefinitions().find((tool) => tool.name === name)!;
+        const properties = definition.inputSchema.properties as Record<string, any>;
+        expect(properties.enableTools.items.enum).toEqual(configurable);
+      }
+    });
+
+    test("an acquisition call naming an unconfigurable tool fails its advertised schema", () => {
+      ToolRegistry.register("getAndroid", "getAndroid", getAndroidSchema as any, async () => ({
+        content: [{ type: "text" as const, text: "getAndroid" }],
+      }));
+      const definition = ToolRegistry.getToolDefinitions().find(
+        (tool) => tool.name === "getAndroid",
+      )!;
+      const validate = new Ajv2020({ strict: false }).compile(definition.inputSchema);
+
+      expect(validate({ deviceId: "emulator-5554", enableTools: ["inputText"] })).toBe(true);
+      expect(validate({ deviceId: "emulator-5554", enableTools: ["notATool"] })).toBe(false);
     });
 
     test("advertises the exactly-one-name rule so a client cannot build a rejected call", () => {

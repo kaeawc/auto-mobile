@@ -18,7 +18,7 @@ import {
   resetVideoRecordingManagerDependencies,
   setVideoRecordingManagerDependencies,
 } from "../../src/server/videoRecordingManager";
-import type { BootedDevice, DeviceInfo } from "../../src/models";
+import type { BootedDevice, DeviceInfo, Platform } from "../../src/models";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { getAbortSignal, runWithAbortSignal } from "../../src/utils/AbortContext";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
@@ -156,6 +156,45 @@ class ShutdownDiscoveryOptionsDeviceManager extends SuccessfulKillDeviceManager 
       this.shutdownDiscoveryOptions.push(options);
     }
     return await super.getBootedDevicesDetailed(platform);
+  }
+}
+
+class TargetOnlySuccessfulKillDeviceManager extends ShutdownDiscoveryOptionsDeviceManager {
+  private androidBootedDevices: BootedDevice[] = [];
+
+  override setBootedDevices(platform: Platform, devices: BootedDevice[]): void {
+    if (platform === "android") {
+      this.androidBootedDevices = devices;
+    }
+    super.setBootedDevices(platform, devices);
+  }
+
+  override async killDevice(device: BootedDevice, options?: DeviceShutdownOptions): Promise<void> {
+    this.killedDeviceIds.push(device.deviceId);
+    this.killedDeviceTargets.push(device);
+    this.killedDeviceOptions.push(options);
+    this.setBootedDevices(
+      device.platform,
+      this.androidBootedDevices.filter((booted) => booted.deviceId !== device.deviceId),
+    );
+  }
+
+  override async getBootedDevicesDetailed(
+    platform: SomePlatform,
+    options?: BootedDeviceDiscoveryOptions,
+  ): Promise<BootedDeviceDiscovery> {
+    const discovery = await super.getBootedDevicesDetailed(platform, options);
+    if (options?.skipAndroidNameEnrichment !== true) {
+      return discovery;
+    }
+    return {
+      ...discovery,
+      devices: discovery.devices.map((device) =>
+        device.platform === "android"
+          ? { ...device, name: `Unknown (${device.deviceId})` }
+          : device,
+      ),
+    };
   }
 }
 
@@ -1785,6 +1824,76 @@ describe("killDevice handler", () => {
       bypassAndroidDeviceListCache: true,
       skipAndroidNameEnrichment: true,
     });
+    // Once the target has disappeared, retirement performs one more bounded
+    // recheck after releasing its session. That post-release scan must retain
+    // the forced serial-only mode as well.
+    expect(cacheAwareManager.shutdownDiscoveryOptions[1]).toEqual({
+      bypassAndroidDeviceListCache: true,
+      skipAndroidNameEnrichment: true,
+    });
+  });
+
+  test("force leaves unrelated pooled peers live after serial-only shutdown discovery", async () => {
+    const timer = new FakeTimer();
+    const targetOnlyManager = new TargetOnlySuccessfulKillDeviceManager();
+    manager = targetOnlyManager;
+    const deviceSessionRepository = new FakeDeviceSessionRepository();
+    const target: BootedDevice = {
+      name: "Pixel_8_API_35",
+      platform: "android",
+      deviceId: "emulator-5554",
+    };
+    const peers: BootedDevice[] = [
+      { name: "Pixel_7_API_34", platform: "android", deviceId: "emulator-5556" },
+      { name: "Pixel_6_API_33", platform: "android", deviceId: "emulator-5558" },
+    ];
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => targetOnlyManager,
+      notifyResourcesChanged: async () => {},
+      ensureCtrlProxyReady: async () => {},
+      clearInstalledAppsForDevice: async () => {},
+      timer,
+    });
+    sessionManager = new SessionManager(timer, deviceSessionRepository);
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      targetOnlyManager,
+      new DefaultRetryExecutor(timer),
+      deviceSessionRepository,
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    targetOnlyManager.setBootedDevices("android", [target, ...peers]);
+    for (const device of [target, ...peers]) {
+      await pool.addDevice(device, {
+        platform: "android",
+        name: device.name,
+        isRunning: true,
+      });
+    }
+    for (const [index, peer] of peers.entries()) {
+      await pool.bindOrReuseDeviceSession(`peer-session-${index}`, peer.deviceId, "android", {
+        platform: "android",
+        name: peer.name,
+        isRunning: true,
+      });
+    }
+    const tool = ToolRegistry.getTool("killDevice");
+    if (!tool) {
+      throw new Error("killDevice not registered");
+    }
+
+    await tool.handler({ device: target, force: true });
+
+    for (const [index, peer] of peers.entries()) {
+      expect(pool.getDevice(peer.deviceId)?.identityUnresolved).toBeUndefined();
+      expect(pool.getDevice(peer.deviceId)?.sessionId).toBe(`peer-session-${index}`);
+      expect(sessionManager.getSession(`peer-session-${index}`)?.assignedDevice).toBe(
+        peer.deviceId,
+      );
+    }
   });
 
   test("waits for the runtime the Android kill preflight actually resolved", async () => {

@@ -1386,6 +1386,10 @@ describe("deleteDevice handler", () => {
     // PRRT_kwDOP-GF5M6h5LDF) -- an unforced discovery here is exactly the cost
     // wedged peer consoles impose on a forced teardown's deadline.
     expect(manager.bootedDiscoveryOptions[1]?.skipAndroidNameEnrichment).toBe(true);
+    // After session release, retirement performs a third discovery to rule out
+    // a same-serial replacement. It must remain serial-only under force so
+    // wedged peer consoles cannot consume the destructive deadline here.
+    expect(manager.bootedDiscoveryOptions[2]?.skipAndroidNameEnrichment).toBe(true);
     expect(manager.killedDevices.map((device) => device.deviceId)).toEqual(["emulator-5556"]);
   });
 

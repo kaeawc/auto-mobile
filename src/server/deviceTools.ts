@@ -1613,6 +1613,7 @@ async function getShutdownDiscovery(
         // device-loss failure instead of reaching confirm-or-refuse
         // ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
         excludeExecutionId: getShutdownInitiatingExecutionId(),
+        namesResolved: !skipAndroidNameEnrichment,
       });
       return discovery;
     },
@@ -1815,11 +1816,16 @@ async function findReplacementAfterSessionRelease(
   requestAbortSignal: AbortSignal | undefined,
   strictDeadline = false,
   timeoutMs = DEVICE_SHUTDOWN_TIMEOUT_MS,
+  skipAndroidNameEnrichment = false,
 ): Promise<BootedDevice | undefined> {
   // The absence observation only proves the old incarnation was gone before
   // session release. A same-ID replacement can appear while that release
   // awaits persistence, so ordinary shutdown keeps a short, bounded recheck
   // even after the disappearance deadline was consumed.
+  // Under force, a replacement can only be confirmed by a DIFFERING resolved
+  // name (see `isConfirmedDeviceReplacement`), so this serial-only recheck
+  // reports no confirmed replacement quickly instead of probing every peer's
+  // console -- the same conservative trade-off as the pre-release scan (#6864).
   const recheckDeadlineMs = shutdownRecheckDeadlineMs(timer, deadlineMs, strictDeadline);
   const discovery = await getShutdownDiscovery(
     deviceManager,
@@ -1828,6 +1834,7 @@ async function findReplacementAfterSessionRelease(
     recheckDeadlineMs,
     requestAbortSignal,
     timeoutMs,
+    skipAndroidNameEnrichment,
   );
   const replacement = findDiscoveredDevice(discovery, device);
   if (
@@ -1846,6 +1853,7 @@ async function findReplacementAfterSessionRelease(
     recheckDeadlineMs,
     requestAbortSignal,
     timeoutMs,
+    skipAndroidNameEnrichment,
   );
 }
 
@@ -1861,6 +1869,7 @@ function finishLateShutdownRetirement(
   stopPerformanceMonitoring: (deviceId: string) => void,
   retainReservationUntil: (retirement: Promise<void>) => void,
   terminalReleaseRetriesRemaining: number,
+  skipAndroidNameEnrichment: boolean,
 ): void {
   const continueRetirement = async () => {
     await retireShutdownOwnership(
@@ -1875,6 +1884,10 @@ function finishLateShutdownRetirement(
       stopPerformanceMonitoring,
       retainReservationUntil,
       false,
+      false,
+      DEVICE_SHUTDOWN_TIMEOUT_MS,
+      DEVICE_SHUTDOWN_TERMINAL_RELEASE_RETRIES,
+      skipAndroidNameEnrichment,
     );
   };
   const retryRetirement = async (error: unknown) => {
@@ -1897,6 +1910,7 @@ function finishLateShutdownRetirement(
       false,
       DEVICE_SHUTDOWN_TIMEOUT_MS,
       terminalReleaseRetriesRemaining - 1,
+      skipAndroidNameEnrichment,
     );
   };
   const lateRetirement = release.then(continueRetirement, retryRetirement);
@@ -1920,6 +1934,7 @@ function retainFailedShutdownRetirement(
   stopPerformanceMonitoring: (deviceId: string) => void,
   retainReservationUntil: (retirement: Promise<void>) => void,
   retryAfterFailure: boolean,
+  skipAndroidNameEnrichment: boolean,
 ): void {
   const retirement = retryAfterFailure
     ? timer.sleep(DEVICE_SHUTDOWN_POST_RELEASE_RECHECK_TIMEOUT_MS).then(async () => {
@@ -1935,6 +1950,10 @@ function retainFailedShutdownRetirement(
           stopPerformanceMonitoring,
           () => undefined,
           false,
+          false,
+          DEVICE_SHUTDOWN_TIMEOUT_MS,
+          DEVICE_SHUTDOWN_TERMINAL_RELEASE_RETRIES,
+          skipAndroidNameEnrichment,
         );
       })
     : Promise.reject(error);
@@ -1960,6 +1979,7 @@ async function findReplacementOrRetainShutdownReservation(
   retryAfterFailure: boolean,
   strictDeadline: boolean,
   timeoutMs: number,
+  skipAndroidNameEnrichment = false,
 ): Promise<BootedDevice | undefined> {
   try {
     return (
@@ -1972,6 +1992,7 @@ async function findReplacementOrRetainShutdownReservation(
         abortSignal,
         strictDeadline,
         timeoutMs,
+        skipAndroidNameEnrichment,
       ))
     );
   } catch (error) {
@@ -1987,6 +2008,7 @@ async function findReplacementOrRetainShutdownReservation(
       stopPerformanceMonitoring,
       retainReservationUntil,
       retryAfterFailure,
+      skipAndroidNameEnrichment,
     );
     throw error;
   }
@@ -2008,6 +2030,7 @@ function preserveLateShutdownRetirement(
   stopPerformanceMonitoring: (deviceId: string) => void,
   retainReservationUntil: (retirement: Promise<void>) => void,
   terminalReleaseRetriesRemaining: number,
+  skipAndroidNameEnrichment: boolean,
 ): void {
   if (
     !isShutdownTimeoutError(error) &&
@@ -2034,6 +2057,7 @@ function preserveLateShutdownRetirement(
     stopPerformanceMonitoring,
     retainReservationUntil,
     terminalReleaseRetriesRemaining,
+    skipAndroidNameEnrichment,
   );
 }
 
@@ -2052,6 +2076,7 @@ async function releaseShutdownSessionOwnership(
   strictDeadline: boolean,
   timeoutMs: number,
   terminalReleaseRetriesRemaining: number,
+  skipAndroidNameEnrichment = false,
 ): Promise<void> {
   const sessionManager = daemonState.getSessionManager();
   const sessionId = expectedSession?.sessionId;
@@ -2097,9 +2122,32 @@ async function releaseShutdownSessionOwnership(
       stopPerformanceMonitoring,
       retainReservationUntil,
       terminalReleaseRetriesRemaining,
+      skipAndroidNameEnrichment,
     );
     throw error;
   }
+}
+
+function captureCurrentShutdownPooledOwnership(
+  device: BootedDevice,
+  expectedPooledDevice: PooledDevice | null,
+):
+  | { daemonState: DaemonState; devicePool: DevicePool; expectedPooledDevice: PooledDevice }
+  | undefined {
+  if (!expectedPooledDevice) {
+    return undefined;
+  }
+  const daemonState = DaemonState.getInstance();
+  if (!daemonState.isInitialized()) {
+    return undefined;
+  }
+  const devicePool = daemonState.getDevicePool();
+  // A fast reboot can reuse a serial. Do not release or remove a later pool
+  // incarnation that happens to use the same device ID.
+  if (devicePool.getDevice(device.deviceId) !== expectedPooledDevice) {
+    return undefined;
+  }
+  return { daemonState, devicePool, expectedPooledDevice };
 }
 
 async function retireShutdownOwnership(
@@ -2117,24 +2165,17 @@ async function retireShutdownOwnership(
   strictDeadline = false,
   timeoutMs = DEVICE_SHUTDOWN_TIMEOUT_MS,
   terminalReleaseRetriesRemaining = DEVICE_SHUTDOWN_TERMINAL_RELEASE_RETRIES,
+  skipAndroidNameEnrichment = false,
 ): Promise<void> {
-  if (!expectedPooledDevice) {
+  const ownership = captureCurrentShutdownPooledOwnership(device, expectedPooledDevice);
+  if (!ownership) {
     return;
   }
-  const daemonState = DaemonState.getInstance();
-  if (!daemonState.isInitialized()) {
-    return;
-  }
-  const devicePool = daemonState.getDevicePool();
-  // A fast reboot can reuse a serial. Do not release or remove a later pool
-  // incarnation that happens to use the same device ID.
-  if (devicePool.getDevice(device.deviceId) !== expectedPooledDevice) {
-    return;
-  }
+  const { daemonState, devicePool, expectedPooledDevice: capturedPooledDevice } = ownership;
 
   await releaseShutdownSessionOwnership(
     device,
-    expectedPooledDevice,
+    capturedPooledDevice,
     expectedSession,
     daemonState,
     observedReplacement,
@@ -2147,8 +2188,9 @@ async function retireShutdownOwnership(
     strictDeadline,
     timeoutMs,
     terminalReleaseRetriesRemaining,
+    skipAndroidNameEnrichment,
   );
-  if (devicePool.getDevice(device.deviceId) !== expectedPooledDevice) {
+  if (devicePool.getDevice(device.deviceId) !== capturedPooledDevice) {
     return;
   }
 
@@ -2159,7 +2201,7 @@ async function retireShutdownOwnership(
   // that boots at the disappearance deadline.
   const replacement = await findReplacementOrRetainShutdownReservation(
     device,
-    expectedPooledDevice,
+    capturedPooledDevice,
     expectedSession,
     observedReplacement,
     deviceManager,
@@ -2171,21 +2213,22 @@ async function retireShutdownOwnership(
     retryAfterDiscoveryFailure,
     strictDeadline,
     timeoutMs,
+    skipAndroidNameEnrichment,
   );
   if (replacement) {
     await rebuildSameIdReplacement(
       device,
-      expectedPooledDevice,
+      capturedPooledDevice,
       replacement,
       daemonState,
       stopPerformanceMonitoring,
     );
     return;
   }
-  if (devicePool.getDevice(device.deviceId) !== expectedPooledDevice) {
+  if (devicePool.getDevice(device.deviceId) !== capturedPooledDevice) {
     return;
   }
-  if (await devicePool.retireDeviceForShutdown(expectedPooledDevice)) {
+  if (await devicePool.retireDeviceForShutdown(capturedPooledDevice)) {
     stopPerformanceMonitoring(device.deviceId);
     daemonState.getDeviceSessionRegistry().onDeviceDisconnected(device.deviceId);
   }
@@ -2354,6 +2397,8 @@ async function killProcessAndRetireOwnership(
       true,
       strictDeadline,
       timeoutMs,
+      DEVICE_SHUTDOWN_TERMINAL_RELEASE_RETRIES,
+      force,
     );
     perf.endOperation("retireOwnership");
     return undefined;
@@ -2496,6 +2541,8 @@ async function shutdownDevice(
           true,
           strictDeadline,
           timeoutMs,
+          DEVICE_SHUTDOWN_TERMINAL_RELEASE_RETRIES,
+          pooledAvdIdentity?.force ?? false,
         );
         perf.endOperation("retireOwnership");
       }
@@ -3347,6 +3394,7 @@ async function readTeardownBootedDiscovery(
         // accepted teardown carries on
         // ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
         excludeExecutionId: getShutdownInitiatingExecutionId(),
+        namesResolved: !skipAndroidNameEnrichment,
       });
       return discovery;
     },
@@ -3793,6 +3841,8 @@ async function retireTeardownPooledOwnership(
       false,
       true,
       context.timeoutMs,
+      DEVICE_SHUTDOWN_TERMINAL_RELEASE_RETRIES,
+      context.args.force ?? false,
     );
   } finally {
     if (!retainsReservation) {

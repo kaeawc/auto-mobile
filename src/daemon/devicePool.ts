@@ -363,8 +363,8 @@ interface DeviceSessionExecutionCanceller {
 
 /**
  * What a FUNNEL 1 caller can tell the pool about the observation it is folding
- * in. Exists for exactly one fact today: WHICH execution performed the
- * discovery.
+ * in. It carries the discovering execution plus whether discovery resolved
+ * Android emulator names.
  *
  * Entering the quarantine cancels every execution indexed under the bound
  * session, and a session-bound destructive call -- `killDevice`, `deleteDevice`
@@ -378,6 +378,13 @@ interface DeviceSessionExecutionCanceller {
 export interface DiscoveryReconcileOptions {
   /** The execution that performed this discovery; exempt from quarantine cancellation. */
   readonly excludeExecutionId?: string;
+  /**
+   * Whether discovery resolved Android emulator names. `false` short-circuits
+   * identity resolution entirely: a serial-only listing carries no identity
+   * evidence for any entry, so interpreting its synthetic placeholders per
+   * device would quarantine healthy pooled peers that were never probed.
+   */
+  readonly namesResolved?: boolean;
 }
 
 export type DeviceReadinessReservation = (() => Promise<void>) & {
@@ -6095,6 +6102,9 @@ export class DevicePool {
     discovered: Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">,
     options: DiscoveryReconcileOptions = {},
   ): Promise<void> {
+    if (options.namesResolved === false) {
+      return;
+    }
     if (!this.hasReusableSerial(pooled) || this.isStaleIdentityObservation(pooled, discovered)) {
       return;
     }

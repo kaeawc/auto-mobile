@@ -793,6 +793,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
           }
           return {
             ...device,
+            apiLevel: config.apiLevel ?? device.apiLevel,
             osVersion: config.osVersion ?? device.osVersion,
             screenWidth: config.screenWidth ?? device.screenWidth,
             screenHeight: config.screenHeight ?? device.screenHeight,

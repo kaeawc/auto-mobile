@@ -3432,6 +3432,14 @@ interface TeardownContext {
   timeoutMs: number;
   lifecycleLease?: VirtualDeviceLifecycleLease;
   initialAndroidRuntimeIds?: Set<string>;
+  /**
+   * `force` exists to escape wedged emulator consoles, so every Android
+   * discovery run for THIS teardown must stay serial-only rather than
+   * re-probing consoles one call site at a time (#6946). Computed once at
+   * context construction so a new discovery added to this flow inherits the
+   * mode automatically instead of silently reintroducing a name-aware scan.
+   */
+  serialOnlyAndroidDiscovery: boolean;
 }
 
 async function stopSegmentedVideoRecordingsBeforeDestroy(
@@ -3507,7 +3515,7 @@ async function readTeardownTargetDiscovery(
   context: TeardownContext,
   devicePool: DevicePool | undefined,
 ): Promise<BootedDeviceDiscovery> {
-  if (context.args.force !== true || context.args.target.platform !== "android") {
+  if (!context.serialOnlyAndroidDiscovery || context.args.target.platform !== "android") {
     return await readTeardownBootedDiscovery(context);
   }
   const serialOnly = await readTeardownBootedDiscovery(context, undefined, true);
@@ -4029,6 +4037,7 @@ async function checkForRestartedTeardownTarget(
     phase === "stop"
       ? "post-shutdown booted-device discovery did not complete"
       : "post-delete booted-device discovery did not complete",
+    context.serialOnlyAndroidDiscovery,
   );
   if (!completedInventoryFor(booted, target.device.platform)) {
     return createTeardownFailureResponse(
@@ -8037,6 +8046,7 @@ export function registerDeviceTools() {
               deadlineMs,
               timeoutMs,
               lifecycleLease,
+              serialOnlyAndroidDiscovery: args.force === true,
             };
             const resolution = await resolveTeardownTarget(context);
             if ("response" in resolution) {

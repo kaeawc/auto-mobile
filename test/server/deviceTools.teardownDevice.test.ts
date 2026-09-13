@@ -1390,6 +1390,15 @@ describe("deleteDevice handler", () => {
     // a same-serial replacement. It must remain serial-only under force so
     // wedged peer consoles cannot consume the destructive deadline here.
     expect(manager.bootedDiscoveryOptions[2]?.skipAndroidNameEnrichment).toBe(true);
+    // `checkForRestartedTeardownTarget` runs twice more: once immediately
+    // after the stop phase to confirm the target did not restart, and once
+    // more during verification. Both are name-aware Android discoveries by
+    // default, so under `force` they must carry the same serial-only mode
+    // as every other discovery in this flow, or three wedged peer consoles
+    // can consume the remaining forced-teardown deadline after the target
+    // was already killed (#6946).
+    expect(manager.bootedDiscoveryOptions[3]?.skipAndroidNameEnrichment).toBe(true);
+    expect(manager.bootedDiscoveryOptions[4]?.skipAndroidNameEnrichment).toBe(true);
     expect(manager.killedDevices.map((device) => device.deviceId)).toEqual(["emulator-5556"]);
   });
 

@@ -119,7 +119,7 @@ while IFS= read -r path; do
   if [[ -n "${path}" ]]; then
     changed_files+=("${path}")
   fi
-done < <(git diff --name-only "${merge_base}" HEAD)
+done < <(git diff --no-renames --name-only "${merge_base}" HEAD)
 
 if [[ "${#changed_files[@]}" -eq 0 ]]; then
   echo "No changed files since merge-base with ${BASE}; nothing to validate."
@@ -127,6 +127,8 @@ if [[ "${#changed_files[@]}" -eq 0 ]]; then
 fi
 
 selected_checks=()
+bats_files=()
+hook_files=()
 for path in "${changed_files[@]}"; do
   case "${path}" in
     scripts/*.sh|.githooks/*)
@@ -137,13 +139,21 @@ for path in "${changed_files[@]}"; do
   esac
 
   case "${path}" in
+    .githooks/*)
+      if [[ -f "${path}" ]]; then
+        hook_files+=("${path}")
+      fi
+      ;;
+  esac
+
+  case "${path}" in
     .claude/commands/*.md|skills/*.md)
       add_check "markdown-bash"
       ;;
   esac
 
   case "${path}" in
-    skills/*/SKILL.md|AGENTS.md|.claude/plugin*)
+    skills/**|.agents/skills/**|AGENTS.md|.claude-plugin/**)
       add_check "codex-skills"
       add_check "claude-plugin"
       ;;
@@ -165,6 +175,12 @@ for path in "${changed_files[@]}"; do
   esac
 
   case "${path}" in
+    .github/actions/*.yml|.github/actions/*.yaml|.github/workflows/*.yml|.github/workflows/*.yaml|Dockerfile|scripts/local-dev/lib/deps.sh)
+      add_check "bun-version-coherence"
+      ;;
+  esac
+
+  case "${path}" in
     scripts/*)
       add_check "stdlib-first"
       ;;
@@ -182,6 +198,18 @@ for path in "${changed_files[@]}"; do
       ;;
   esac
 
+  case "${path}" in
+    .gitattributes|*/.gitattributes)
+      add_check "lfs-pointers"
+      ;;
+  esac
+
+  case "${path}" in
+    test/bats/*.bats)
+      add_bats_file "${path}"
+      ;;
+  esac
+
   lfs_filter="$(lfs_filter_for_path "${path}")"
   binary_diff="$(binary_diff_for_path "${merge_base}" "${path}")"
   if [[ "${lfs_filter}" == "true" || "${binary_diff}" == "true" ]]; then
@@ -189,23 +217,36 @@ for path in "${changed_files[@]}"; do
   fi
 done
 
-if [[ "${#selected_checks[@]}" -eq 0 ]]; then
+if [[ "${#selected_checks[@]}" -eq 0 && "${#bats_files[@]}" -eq 0 ]]; then
   echo "No shell/BATS-relevant fast validation checks match changed files; nothing to validate."
   exit 0
 fi
 
-checks_csv="$(IFS=,; echo "${selected_checks[*]}")"
-echo "Fast validation: ./scripts/all_fast_validate_checks.sh --only ${checks_csv}"
-set +e
-./scripts/all_fast_validate_checks.sh --only "${checks_csv}"
-fast_validation_status=$?
-set -e
-if [[ "${fast_validation_status}" -ne 0 ]]; then
-  echo "Fast validation failed. Re-run: ./scripts/all_fast_validate_checks.sh --only ${checks_csv}" >&2
-  exit "${fast_validation_status}"
+if [[ "${#selected_checks[@]}" -gt 0 ]]; then
+  checks_csv="$(IFS=,; echo "${selected_checks[*]}")"
+  echo "Fast validation: ./scripts/all_fast_validate_checks.sh --only ${checks_csv}"
+  set +e
+  ./scripts/all_fast_validate_checks.sh --only "${checks_csv}"
+  fast_validation_status=$?
+  set -e
+  if [[ "${fast_validation_status}" -ne 0 ]]; then
+    echo "Fast validation failed. Re-run: ./scripts/all_fast_validate_checks.sh --only ${checks_csv}" >&2
+    exit "${fast_validation_status}"
+  fi
 fi
 
-bats_files=()
+for hook_file in ${hook_files[@]+"${hook_files[@]}"}; do
+  echo "ShellCheck: shellcheck ${hook_file}"
+  set +e
+  shellcheck "${hook_file}" >&2
+  shellcheck_status=$?
+  set -e
+  if [[ "${shellcheck_status}" -ne 0 ]]; then
+    echo "ShellCheck failed. Re-run: shellcheck ${hook_file}" >&2
+    exit "${shellcheck_status}"
+  fi
+done
+
 for path in "${changed_files[@]}"; do
   case "${path}" in
     scripts/*)

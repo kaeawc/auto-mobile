@@ -101,15 +101,21 @@ snapshot archive costs and what still needs cleaning up:
 | `unsizedCount`         | Records whose payload could not be measured. They are **not** in `totalSizeBytes`, so a non-zero count means the archive is larger than the total says. |
 | `pendingReclaimCount`  | Records whose in-AVD VM snapshot still needs deleting because its emulator was offline.                                                                 |
 | `orphanedAvdSnapshots` | In-AVD snapshot directories with no record behind them.                                                                                                 |
-| `maxArchiveSizeMb`     | The configured byte budget (default 100 MB).                                                                                                            |
+| `maxVmSnapshotsPerAvd` | Maximum VM snapshots retained for each Android AVD (default 3).                                                                                         |
+| `maxVmArchiveSizeMb`   | Optional additional per-AVD byte ceiling for VM snapshots; `null` means unlimited.                                                                      |
+| `maxArchiveSizeMb`     | The byte budget for non-`vm` (`app_data`, `adb`, `simctl`) archive records (default 100 MB).                                                            |
 
 An Android emulator VM snapshot does not live in the archive store — the
 emulator writes it inside the AVD, at
 `~/.android/avd/<avd>.avd/snapshots/<name>/` (`ram.bin`, `textures.bin`,
 `snapshot.pb`, ...), which is routinely a couple of gigabytes. That directory is
-what a `vm` record's size measures, so VM snapshots count against
-`maxArchiveSizeMb` like any other snapshot and are evicted least-recently-used
-first once the budget is exceeded (#6490).
+what a `vm` record's size measures. VM snapshots are retained per AVD by
+`maxVmSnapshotsPerAvd` (default 3), evicting least-recently-accessed records
+first. Operators that also need a VM byte ceiling can opt into the per-AVD
+`maxVmArchiveSizeMb` setting; it is unlimited by default because a single VM
+snapshot is routinely gigabytes. `maxArchiveSizeMb` does not apply to `vm`
+records; it continues to govern only archive-store `app_data`, `adb`, and
+`simctl` records.
 
 Evicting a `vm` record deletes the in-AVD snapshot through the emulator console
 (`adb -s <serial> emu avd snapshot del <name>`). When that emulator is not

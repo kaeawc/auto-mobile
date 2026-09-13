@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import type { BootedDevice, DeviceSnapshotConfig, DeviceSnapshotManifest } from "../../src/models";
+import {
+  ActionableError,
+  type BootedDevice,
+  type DeviceSnapshotConfig,
+  type DeviceSnapshotManifest,
+} from "../../src/models";
 import {
   captureDeviceSnapshot,
   listDeviceSnapshots,
@@ -49,6 +54,7 @@ describe("deviceSnapshotManager VM snapshot sizing and reclaim (#6490)", () => {
     useVmSnapshot: true,
     strictBackupMode: false,
     vmSnapshotTimeoutMs: 12000,
+    maxVmSnapshotsPerAvd: 3,
     maxArchiveSizeMb: 4096,
   };
 
@@ -110,22 +116,72 @@ describe("deviceSnapshotManager VM snapshot sizing and reclaim (#6490)", () => {
     expect(record?.sizeBytes).toBe(2 * 1024 * MB);
   });
 
-  test("a capture that is itself over budget is evicted, not silently kept", async () => {
-    // The eviction pass used to run INSIDE the capture's name lock, so it always
-    // skipped the row that capture had just written. A single VM snapshot larger
-    // than the whole budget — routine at the 100 MB default — therefore left the
-    // archive permanently over its limit with nothing to retry it (#6490 review).
+  test("a VM capture larger than the non-VM byte budget is retained", async () => {
+    // A real VM payload is routinely multiple GB, while maxArchiveSizeMb is the
+    // small archive-store budget for adb/app_data/simctl snapshots. It must not
+    // delete the VM row the successful capture just created (#6960).
     await updateDeviceSnapshotConfig({ maxArchiveSizeMb: 1 });
     store.queueGeneratedName("vm-oversized");
 
     const { evictedSnapshotNames } = await captureDeviceSnapshot(EMULATOR, {});
 
-    expect(evictedSnapshotNames).toEqual(["vm-oversized"]);
-    expect(await repository.getSnapshot("vm-oversized")).toBeNull();
-    expect(avdSnapshots.getDeleteCalls().map((call) => call.snapshotName)).toEqual([
-      "vm-oversized",
-    ]);
-    expect(avdSnapshots.hasVmSnapshot(AVD_NAME, "vm-oversized")).toBe(false);
+    expect(evictedSnapshotNames).toEqual([]);
+    expect(await repository.getSnapshot("vm-oversized")).not.toBeNull();
+    expect(avdSnapshots.getDeleteCalls()).toEqual([]);
+    expect(avdSnapshots.hasVmSnapshot(AVD_NAME, "vm-oversized")).toBe(true);
+  });
+
+  test("VM count retention keeps the just-captured oldest record and evicts other oldest rows first", async () => {
+    for (const [index, name] of ["vm-old", "vm-mid"].entries()) {
+      const timestamp = new Date(2_000 + index).toISOString();
+      avdSnapshots.setVmSnapshot(AVD_NAME, name, 2 * MB);
+      await repository.insertSnapshot({
+        snapshotName: name,
+        deviceId: EMULATOR.deviceId,
+        deviceName: AVD_NAME,
+        platform: "android",
+        snapshotType: "vm",
+        includeAppData: true,
+        includeSettings: false,
+        createdAt: timestamp,
+        lastAccessedAt: timestamp,
+        sizeBytes: 2 * MB,
+        manifest: vmManifest(name, timestamp),
+      });
+    }
+    await updateDeviceSnapshotConfig({ maxVmSnapshotsPerAvd: 2 });
+    store.queueGeneratedName("vm-skewed");
+
+    const { evictedSnapshotNames } = await captureDeviceSnapshot(EMULATOR, {});
+
+    expect(evictedSnapshotNames).toEqual(["vm-old"]);
+    expect(await repository.getSnapshot("vm-skewed")).not.toBeNull();
+    expect(await repository.getSnapshot("vm-mid")).not.toBeNull();
+    expect(await repository.getSnapshot("vm-old")).toBeNull();
+  });
+
+  test("an explicit VM byte ceiling smaller than a capture rolls back its row and payload", async () => {
+    await updateDeviceSnapshotConfig({ maxVmArchiveSizeMb: 1 });
+    store.queueGeneratedName("vm-too-large");
+
+    const capture = captureDeviceSnapshot(EMULATOR, {});
+    await expect(capture).rejects.toBeInstanceOf(ActionableError);
+    await expect(capture).rejects.toThrow(/maxVmArchiveSizeMb/i);
+
+    expect(await repository.getSnapshot("vm-too-large")).toBeNull();
+    expect(avdSnapshots.hasVmSnapshot(AVD_NAME, "vm-too-large")).toBe(false);
+    expect(store.getDeletedSnapshots()).toContain("vm-too-large");
+  });
+
+  test("a rejected VM capture reports an incomplete reclaim instead of claiming rollback", async () => {
+    await updateDeviceSnapshotConfig({ maxVmArchiveSizeMb: 1 });
+    avdSnapshots.failNextDeletesWith("emulator console unavailable");
+    store.queueGeneratedName("vm-reclaim-pending");
+
+    await expect(captureDeviceSnapshot(EMULATOR, {})).rejects.toThrow(/could not be reclaimed/i);
+
+    expect(await repository.getSnapshot("vm-reclaim-pending")).not.toBeNull();
+    expect(avdSnapshots.hasVmSnapshot(AVD_NAME, "vm-reclaim-pending")).toBe(true);
   });
 
   test("a vm capture whose AVD directory cannot be found records an unknown size, never 0", async () => {
@@ -154,7 +210,7 @@ describe("deviceSnapshotManager VM snapshot sizing and reclaim (#6490)", () => {
     expect(listed.totalSizeBytes).toBe(0);
   });
 
-  test("an archive of vm snapshots over the limit evicts oldest-first and issues one delete each", async () => {
+  test("an archive of VM snapshots over its per-AVD count evicts oldest-first and issues one delete each", async () => {
     for (const [index, name] of ["vm-old", "vm-mid", "vm-new"].entries()) {
       const timestamp = new Date(1000 + index).toISOString();
       avdSnapshots.setVmSnapshot(AVD_NAME, name, 2 * 1024 * MB);
@@ -173,9 +229,9 @@ describe("deviceSnapshotManager VM snapshot sizing and reclaim (#6490)", () => {
       });
     }
 
-    // 6 GB archived, 3 GB budget: the two least-recently-accessed rows go.
+    // Three rows with a one-snapshot per-AVD retention: the two oldest go.
     const { evictedSnapshotNames } = await updateDeviceSnapshotConfig({
-      maxArchiveSizeMb: 3 * 1024,
+      maxVmSnapshotsPerAvd: 1,
     });
 
     expect(evictedSnapshotNames).toEqual(["vm-old", "vm-mid"]);
@@ -187,6 +243,41 @@ describe("deviceSnapshotManager VM snapshot sizing and reclaim (#6490)", () => {
     expect(avdSnapshots.hasVmSnapshot(AVD_NAME, "vm-old")).toBe(false);
     expect(await repository.getSnapshot("vm-old")).toBeNull();
     expect(await repository.getSnapshot("vm-new")).not.toBeNull();
+  });
+
+  test("tightening VM retention sweeps every AVD, not only the most recent capture's AVD", async () => {
+    const otherAvd = "am-api34-ga-arm64";
+    const otherSerial = "emulator-5554";
+    avdSnapshots.setLiveEmulator(otherAvd, otherSerial);
+    for (const [deviceName, deviceId] of [
+      [AVD_NAME, EMULATOR.deviceId],
+      [otherAvd, otherSerial],
+    ] as const) {
+      for (const [index, name] of ["old", "new"].entries()) {
+        const snapshotName = `${deviceName}-${name}`;
+        const timestamp = new Date(4_000 + index).toISOString();
+        avdSnapshots.setVmSnapshot(deviceName, snapshotName, MB);
+        await repository.insertSnapshot({
+          snapshotName,
+          deviceId,
+          deviceName,
+          platform: "android",
+          snapshotType: "vm",
+          includeAppData: true,
+          includeSettings: false,
+          createdAt: timestamp,
+          lastAccessedAt: timestamp,
+          sizeBytes: MB,
+          manifest: { ...vmManifest(snapshotName, timestamp), deviceId, deviceName },
+        });
+      }
+    }
+
+    const { evictedSnapshotNames } = await updateDeviceSnapshotConfig({ maxVmSnapshotsPerAvd: 1 });
+
+    expect(evictedSnapshotNames.sort()).toEqual([`${AVD_NAME}-old`, `${otherAvd}-old`].sort());
+    expect(await repository.getSnapshot(`${AVD_NAME}-new`)).not.toBeNull();
+    expect(await repository.getSnapshot(`${otherAvd}-new`)).not.toBeNull();
   });
 
   describe("a row left unsized is re-measured before the budget is enforced (#6891 review)", () => {
@@ -218,7 +309,7 @@ describe("deviceSnapshotManager VM snapshot sizing and reclaim (#6490)", () => {
     test("the re-measured size is persisted and stops being reported as unsized", async () => {
       await seedUnsizedVmRow(2 * 1024 * MB);
 
-      await updateDeviceSnapshotConfig({ maxArchiveSizeMb: 8 * 1024 });
+      await updateDeviceSnapshotConfig({ maxVmSnapshotsPerAvd: 3 });
 
       expect((await repository.getSnapshot("vm-legacy"))?.sizeBytes).toBe(2 * 1024 * MB);
       const listed = await listDeviceSnapshots();
@@ -226,10 +317,12 @@ describe("deviceSnapshotManager VM snapshot sizing and reclaim (#6490)", () => {
       expect(listed.totalSizeBytes).toBe(2 * 1024 * MB);
     });
 
-    test("a re-measured row over the budget is evicted instead of hiding behind an unknown size", async () => {
+    test("a re-measured row over the optional VM byte budget is evicted instead of hiding behind an unknown size", async () => {
       await seedUnsizedVmRow(2 * 1024 * MB);
 
-      const { evictedSnapshotNames } = await updateDeviceSnapshotConfig({ maxArchiveSizeMb: 1024 });
+      const { evictedSnapshotNames } = await updateDeviceSnapshotConfig({
+        maxVmArchiveSizeMb: 1024,
+      });
 
       expect(evictedSnapshotNames).toEqual(["vm-legacy"]);
       expect(await repository.getSnapshot("vm-legacy")).toBeNull();
@@ -239,7 +332,7 @@ describe("deviceSnapshotManager VM snapshot sizing and reclaim (#6490)", () => {
     test("a payload that still cannot be located stays unknown rather than becoming a fabricated 0", async () => {
       await seedUnsizedVmRow(null);
 
-      await updateDeviceSnapshotConfig({ maxArchiveSizeMb: 1024 });
+      await updateDeviceSnapshotConfig({ maxVmSnapshotsPerAvd: 3 });
 
       expect((await repository.getSnapshot("vm-legacy"))?.sizeBytes).toBeNull();
       expect((await listDeviceSnapshots()).unsizedCount).toBe(1);
@@ -264,7 +357,7 @@ describe("deviceSnapshotManager VM snapshot sizing and reclaim (#6490)", () => {
       manifest: vmManifest("vm-offline", timestamp),
     });
 
-    const { evictedSnapshotNames } = await updateDeviceSnapshotConfig({ maxArchiveSizeMb: 1 });
+    const { evictedSnapshotNames } = await updateDeviceSnapshotConfig({ maxVmArchiveSizeMb: 1 });
 
     expect(evictedSnapshotNames).toEqual([]);
     expect(avdSnapshots.getDeleteCalls()).toEqual([]);
@@ -315,7 +408,7 @@ describe("deviceSnapshotManager VM snapshot sizing and reclaim (#6490)", () => {
         },
       });
 
-      const { evictedSnapshotNames } = await updateDeviceSnapshotConfig({ maxArchiveSizeMb: 1 });
+      const { evictedSnapshotNames } = await updateDeviceSnapshotConfig({ maxVmArchiveSizeMb: 1 });
 
       expect(pendingAtDeleteTime).toBe(true);
       expect(evictedSnapshotNames).toEqual(["vm-crash"]);
@@ -330,7 +423,7 @@ describe("deviceSnapshotManager VM snapshot sizing and reclaim (#6490)", () => {
       };
       await setDeviceSnapshotManagerDependencies({ snapshotStore: failingStore as any });
 
-      const { evictedSnapshotNames } = await updateDeviceSnapshotConfig({ maxArchiveSizeMb: 1 });
+      const { evictedSnapshotNames } = await updateDeviceSnapshotConfig({ maxVmArchiveSizeMb: 1 });
 
       expect(evictedSnapshotNames).toEqual([]);
       expect(avdSnapshots.hasVmSnapshot(AVD_NAME, "vm-orphaned-row")).toBe(false);
@@ -339,6 +432,7 @@ describe("deviceSnapshotManager VM snapshot sizing and reclaim (#6490)", () => {
       // With the store healthy again the sweep finishes what the failure
       // interrupted, instead of leaving a restorable row with no payload.
       await setDeviceSnapshotManagerDependencies({ snapshotStore: store as any });
+      await updateDeviceSnapshotConfig({ maxVmArchiveSizeMb: 0 });
       store.queueGeneratedName("vm-after");
       await captureDeviceSnapshot(EMULATOR, {});
 
@@ -480,6 +574,7 @@ describe("orphan accounting is keyed by AVD and record type (#6891 review)", () 
       useVmSnapshot: true,
       strictBackupMode: false,
       vmSnapshotTimeoutMs: 12000,
+      maxVmSnapshotsPerAvd: 3,
       maxArchiveSizeMb: 4096,
     });
     await setDeviceSnapshotManagerDependencies({
@@ -578,6 +673,7 @@ describe("reclaim never races a same-name capture (#6490 review)", () => {
       useVmSnapshot: true,
       strictBackupMode: false,
       vmSnapshotTimeoutMs: 12000,
+      maxVmSnapshotsPerAvd: 3,
       maxArchiveSizeMb: 4096,
     });
     await setDeviceSnapshotManagerDependencies({
@@ -660,7 +756,7 @@ describe("reclaim never races a same-name capture (#6490 review)", () => {
     const capturing = captureDeviceSnapshot(EMULATOR, { snapshotName: "vm-inflight" });
     await atGate;
 
-    const { evictedSnapshotNames } = await updateDeviceSnapshotConfig({ maxArchiveSizeMb: 1 });
+    const { evictedSnapshotNames } = await updateDeviceSnapshotConfig({ maxVmArchiveSizeMb: 1 });
 
     releaseCapture();
     await capturing;
@@ -708,7 +804,7 @@ describe("reclaim never races a same-name capture (#6490 review)", () => {
     const restoring = restoreDeviceSnapshot(EMULATOR, { snapshotName: "vm-restoring" });
     await atGate;
 
-    const { evictedSnapshotNames } = await updateDeviceSnapshotConfig({ maxArchiveSizeMb: 1 });
+    const { evictedSnapshotNames } = await updateDeviceSnapshotConfig({ maxVmArchiveSizeMb: 1 });
 
     releaseRestore();
     await restoring;
@@ -750,7 +846,7 @@ describe("reclaim never races a same-name capture (#6490 review)", () => {
       return rows;
     };
 
-    const { evictedSnapshotNames } = await updateDeviceSnapshotConfig({ maxArchiveSizeMb: 1 });
+    const { evictedSnapshotNames } = await updateDeviceSnapshotConfig({ maxVmArchiveSizeMb: 1 });
 
     expect(evictedSnapshotNames).toEqual([]);
     expect(avdSnapshots.getDeleteCalls()).toEqual([]);

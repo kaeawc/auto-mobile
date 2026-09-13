@@ -26,13 +26,19 @@ describe("parseDeviceSnapshotConfig (property-based)", () => {
     );
   });
 
-  test("integer timeout fields are always positive integers for positive input", () => {
+  test("integer timeout and VM-count fields are always positive integers for positive input", () => {
     fc.assert(
       fc.property(positiveNumber, (vm) => {
         const config = parseDeviceSnapshotConfig({
           vmSnapshotTimeoutMs: vm,
+          maxVmSnapshotsPerAvd: vm,
         });
-        return Number.isInteger(config.vmSnapshotTimeoutMs) && config.vmSnapshotTimeoutMs > 0;
+        return (
+          Number.isInteger(config.vmSnapshotTimeoutMs) &&
+          config.vmSnapshotTimeoutMs > 0 &&
+          Number.isInteger(config.maxVmSnapshotsPerAvd) &&
+          config.maxVmSnapshotsPerAvd > 0
+        );
       }),
       RUN_OPTIONS,
     );
@@ -49,15 +55,19 @@ describe("parseDeviceSnapshotConfig (property-based)", () => {
 
   test("parsing is idempotent: parse(parse(x)) === parse(x)", () => {
     fc.assert(
-      fc.property(positiveNumber, positiveNumber, (vm, size) => {
+      fc.property(positiveNumber, positiveNumber, positiveNumber, (vm, count, size) => {
         const once = parseDeviceSnapshotConfig({
           vmSnapshotTimeoutMs: vm,
+          maxVmSnapshotsPerAvd: count,
           maxArchiveSizeMb: size,
+          maxVmArchiveSizeMb: size,
         });
         const twice = parseDeviceSnapshotConfig(once);
         return (
           twice.vmSnapshotTimeoutMs === once.vmSnapshotTimeoutMs &&
-          twice.maxArchiveSizeMb === once.maxArchiveSizeMb
+          twice.maxVmSnapshotsPerAvd === once.maxVmSnapshotsPerAvd &&
+          twice.maxArchiveSizeMb === once.maxArchiveSizeMb &&
+          twice.maxVmArchiveSizeMb === once.maxVmArchiveSizeMb
         );
       }),
       RUN_OPTIONS,
@@ -73,14 +83,22 @@ describe("parseDeviceSnapshotConfig (property-based)", () => {
       fc.property(nonPositive, (value) => {
         const config = parseDeviceSnapshotConfig({
           vmSnapshotTimeoutMs: value,
+          maxVmSnapshotsPerAvd: value,
           maxArchiveSizeMb: value,
+          maxVmArchiveSizeMb: value,
         });
         return (
           config.vmSnapshotTimeoutMs === DEFAULT_DEVICE_SNAPSHOT_CONFIG.vmSnapshotTimeoutMs &&
-          config.maxArchiveSizeMb === DEFAULT_DEVICE_SNAPSHOT_CONFIG.maxArchiveSizeMb
+          config.maxVmSnapshotsPerAvd === DEFAULT_DEVICE_SNAPSHOT_CONFIG.maxVmSnapshotsPerAvd &&
+          config.maxArchiveSizeMb === DEFAULT_DEVICE_SNAPSHOT_CONFIG.maxArchiveSizeMb &&
+          config.maxVmArchiveSizeMb === undefined
         );
       }),
       RUN_OPTIONS,
     );
+  });
+
+  test("the optional VM byte budget is undefined when absent", () => {
+    expect(parseDeviceSnapshotConfig({}).maxVmArchiveSizeMb).toBeUndefined();
   });
 });

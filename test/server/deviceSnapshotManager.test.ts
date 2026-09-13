@@ -95,6 +95,7 @@ describe("deviceSnapshotManager", () => {
       useVmSnapshot: true,
       strictBackupMode: false,
       vmSnapshotTimeoutMs: 12000,
+      maxVmSnapshotsPerAvd: 3,
       maxArchiveSizeMb: 1,
     };
     await configRepository.setConfig(config);
@@ -271,6 +272,7 @@ describe("deviceSnapshotManager", () => {
       useVmSnapshot: false,
       strictBackupMode: false,
       vmSnapshotTimeoutMs: 12000,
+      maxVmSnapshotsPerAvd: 3,
       maxArchiveSizeMb,
     };
     await configRepository.setConfig(config);
@@ -780,6 +782,7 @@ describe("deviceSnapshotManager", () => {
       useVmSnapshot: true,
       strictBackupMode: false,
       vmSnapshotTimeoutMs: 0,
+      maxVmSnapshotsPerAvd: 3,
       maxArchiveSizeMb: 100,
     };
     await configRepository.setConfig(legacyConfig);

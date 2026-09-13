@@ -34,6 +34,10 @@ async function getSnapshotArchive(): Promise<ResourceContent> {
           // never auto-deleted — see docs/using/test-prep-tools.md for the
           // manual cleanup path.
           orphanedAvdSnapshots,
+          maxVmSnapshotsPerAvd: config.maxVmSnapshotsPerAvd,
+          // JSON omits undefined, but callers need to see that the optional
+          // ceiling is deliberately unlimited rather than absent from output.
+          maxVmArchiveSizeMb: config.maxVmArchiveSizeMb ?? null,
           maxArchiveSizeMb: config.maxArchiveSizeMb,
         },
         null,

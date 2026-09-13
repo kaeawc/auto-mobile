@@ -38,6 +38,16 @@ fi
 if [[ $(basename "$0") == swift && ${1:-} == test && ${2:-} == list ]]; then
   if [[ ${PREPUSH_IOS_SWIFT_TEST_LIST_DENYLIST_ONLY:-} == 1 ]]; then
     echo "XCTestRunnerTests.RemindersAddPlanTests/testExample"
+  elif [[ ${PREPUSH_IOS_SWIFT_TEST_LIST_BUILD_NOISE:-} == 1 ]]; then
+    echo "Building for debugging..."
+    echo "XCTestRunnerTests.AutoMobileVersionTests/testExample"
+    echo "XCTestRunnerTests.topLevelExample()"
+    echo "Build complete! (2.34s)"
+  elif [[ ${PREPUSH_IOS_SWIFT_TEST_LIST_TOP_LEVEL_ONLY:-} == 1 ]]; then
+    echo "XCTestRunnerTests.soloTopLevelExample()"
+  elif [[ ${PREPUSH_IOS_SWIFT_TEST_LIST_TOP_LEVEL:-} == 1 ]]; then
+    echo "XCTestRunnerTests.AutoMobileVersionTests/testExample"
+    echo "XCTestRunnerTests.topLevelExample()"
   elif [[ ${PREPUSH_IOS_SWIFT_TEST_LIST_NON_ASCII:-} == 1 ]]; then
     echo "XCTestRunnerTests.CaféTests/testExample"
     echo "XCTestRunnerTests.PlainTests/testExample"
@@ -179,6 +189,39 @@ commit_changed_swift_file() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"CaféTests"* ]]
   [[ "$output" == *"PlainTests"* ]]
+}
+
+@test "includes top-level Swift Testing tests in the filter" {
+  run env PATH="${mock_bin}:$PATH" PREPUSH_IOS_COMMAND_LOG="${command_log}" \
+    PREPUSH_IOS_SWIFT_TEST_LIST_TOP_LEVEL=1 bash "${repo_root}/scripts/prepush-ios.sh"
+
+  [ "$status" -eq 0 ]
+  run grep 'swift test -Xswiftc -warnings-as-errors --filter' "${command_log}"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"topLevelExample"* ]]
+}
+
+@test "excludes swift test list build noise from the XCTestRunner filter" {
+  run env PATH="${mock_bin}:$PATH" PREPUSH_IOS_COMMAND_LOG="${command_log}" \
+    PREPUSH_IOS_SWIFT_TEST_LIST_BUILD_NOISE=1 bash "${repo_root}/scripts/prepush-ios.sh"
+
+  [ "$status" -eq 0 ]
+  run grep 'swift test -Xswiftc -warnings-as-errors --filter' "${command_log}"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"Building for debugging"* ]]
+  [[ "$output" != *"Build complete"* ]]
+  [ "$(grep -o 'AutoMobileVersionTests' <<<"$output" | wc -l | tr -d ' ')" -eq 1 ]
+  [ "$(grep -o 'topLevelExample' <<<"$output" | wc -l | tr -d ' ')" -eq 1 ]
+}
+
+@test "runs a list containing only a top-level Swift Testing test" {
+  run env PATH="${mock_bin}:$PATH" PREPUSH_IOS_COMMAND_LOG="${command_log}" \
+    PREPUSH_IOS_SWIFT_TEST_LIST_TOP_LEVEL_ONLY=1 bash "${repo_root}/scripts/prepush-ios.sh"
+
+  [ "$status" -eq 0 ]
+  run grep 'swift test -Xswiftc -warnings-as-errors --filter' "${command_log}"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"soloTopLevelExample"* ]]
 }
 
 @test "fails when swift test list has only simulator-dependent classes" {

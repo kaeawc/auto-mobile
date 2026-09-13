@@ -126,7 +126,9 @@ while IFS= read -r test_class; do
     fi
   fi
 done < <(
-  printf '%s\n' "${swift_test_list_output}" | sed -n 's/^XCTestRunnerTests\.\([^/]*\)\/.*/\1/p'
+  printf '%s\n' "${swift_test_list_output}" | sed -n \
+    -e 's/^XCTestRunnerTests\.\([^/]*\)\/.*/\1/p' \
+    -e 's/^XCTestRunnerTests\.\([^/()]*\)()$/\1/p'
 )
 
 if [[ ${#test_classes[@]} -eq 0 ]]; then

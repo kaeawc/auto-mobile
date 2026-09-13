@@ -216,6 +216,8 @@ class WebSocketResponseTest {
               isSystem = false,
               versionName = "1.0",
               versionCode = 1L,
+              label = "Example App",
+              launchable = true,
             ),
             InstalledPackageRecord(packageName = "com.android.systemui", isSystem = true),
           ),
@@ -231,6 +233,9 @@ class WebSocketResponseTest {
     assertTrue(encoded.contains(""""versionName":"1.0""""))
     assertTrue(encoded.contains(""""versionCode":1"""))
     assertTrue(encoded.contains(""""packageName":"com.android.systemui""""))
+    // #6798: the host reads these to answer "which package is Contacts?".
+    assertTrue(encoded.contains(""""label":"Example App""""))
+    assertTrue(encoded.contains(""""launchable":true"""))
   }
 
   @Test

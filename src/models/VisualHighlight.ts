@@ -1,10 +1,5 @@
-export type HighlightShapeType = "box" | "circle" | "path";
-
-export type HighlightSmoothingAlgorithm = "none" | "catmull-rom" | "bezier" | "douglas-peucker";
-
-export type HighlightLineCap = "butt" | "round" | "square";
-
-export type HighlightLineJoin = "miter" | "round" | "bevel";
+/** The sole highlight presentation is a red, animated hand-drawn circle. */
+export type HighlightShapeType = "circle";
 
 export interface HighlightBounds {
   x: number;
@@ -15,41 +10,10 @@ export interface HighlightBounds {
   sourceHeight?: number | null;
 }
 
-export interface HighlightStyle {
-  strokeColor?: string | null;
-  strokeWidth?: number | null;
-  dashPattern?: number[] | null;
-  smoothing?: HighlightSmoothingAlgorithm | null;
-  tension?: number | null;
-  capStyle?: HighlightLineCap | null;
-  joinStyle?: HighlightLineJoin | null;
-}
-
-export interface HighlightPoint {
-  x: number;
-  y: number;
-}
-
-export interface HighlightBoxShape {
-  type: "box";
-  bounds: HighlightBounds;
-  style?: HighlightStyle | null;
-}
-
-export interface HighlightCircleShape {
+export interface HighlightShape {
   type: "circle";
   bounds: HighlightBounds;
-  style?: HighlightStyle | null;
 }
-
-export interface HighlightPathShape {
-  type: "path";
-  points: HighlightPoint[];
-  bounds?: HighlightBounds | null;
-  style?: HighlightStyle | null;
-}
-
-export type HighlightShape = HighlightBoxShape | HighlightCircleShape | HighlightPathShape;
 
 export interface HighlightOperationResult {
   success: boolean;

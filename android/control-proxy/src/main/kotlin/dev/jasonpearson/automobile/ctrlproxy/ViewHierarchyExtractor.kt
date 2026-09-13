@@ -452,7 +452,17 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
     val sortedWindowRoots =
       windowEntries
         .sortedWith(compareBy<WindowEntry> { it.windowLayer }.thenBy { it.windowId })
-        .map { it.hierarchy }
+        .map {
+          // Preserve IME ownership after window roots are combined (issue #6795).
+          // The desktop projection folds this subtree; raw captures retain every key.
+          if (it.windowType == "input_method" && !it.packageName.isNullOrBlank()) {
+            it.hierarchy.copy(
+              extras = it.hierarchy.extras.orEmpty() + ("automobile:imePackage" to it.packageName)
+            )
+          } else {
+            it.hierarchy
+          }
+        }
     val unifiedHierarchy =
       if (sortedWindowRoots.isEmpty()) null else UIElementInfo(children = sortedWindowRoots)
 

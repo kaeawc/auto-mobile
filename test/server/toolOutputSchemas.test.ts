@@ -9,6 +9,7 @@ import {
   observeResultSchema,
   tapOnResultSchema,
   toolOutputArtifactMetadataSchema,
+  viewHierarchyResultSchema,
 } from "../../src/server/toolOutputSchemas";
 
 /**
@@ -307,6 +308,57 @@ describe("observationOutputSchema: discriminated union of full observation vs di
   });
 });
 
+describe("observationSummarySchema: truncation reasons (#6601)", () => {
+  test("declares and preserves truncation reasons on a full action observation", () => {
+    const full = {
+      activeWindow: { appId: "com.example" },
+      truncationReasons: ["max_children[root] kept 10 of 12"],
+    };
+
+    const parsed = observationSummarySchema.parse(full);
+    expect(parsed.truncationReasons).toEqual(full.truncationReasons);
+
+    const json = toJSONSchema(observationSummarySchema) as Record<string, any>;
+    expect(json.properties.truncationReasons).toBeDefined();
+    expect(json.required ?? []).not.toContain("truncationReasons");
+  });
+
+  test("declares nested hierarchy truncation reasons on full/raw action observations", () => {
+    const full = {
+      activeWindow: { appId: "com.example" },
+      viewHierarchy: {
+        hierarchy: { node: { bounds: [0, 0, 100, 50] } },
+        truncationReasons: ["max_children[root] kept 10 of 12"],
+      },
+    };
+
+    const parsed = observationOutputSchema.parse(full);
+    expect(parsed.viewHierarchy?.truncationReasons).toEqual(full.viewHierarchy.truncationReasons);
+
+    const json = toJSONSchema(observationSummarySchema) as Record<string, any>;
+    const viewHierarchy = json.properties.viewHierarchy as Record<string, any>;
+    const viewHierarchySchema = viewHierarchy.$ref
+      ? (json.$defs[viewHierarchy.$ref.replace("#/$defs/", "")] as Record<string, any>)
+      : viewHierarchy;
+    expect(viewHierarchySchema.properties.truncationReasons).toBeDefined();
+  });
+});
+
+describe("viewHierarchyResultSchema: nested truncation reasons (#6601)", () => {
+  test("declares and preserves truncation reasons on a full/raw hierarchy", () => {
+    const viewHierarchy = {
+      truncationReasons: ["max_children[root] kept 10 of 12"],
+    };
+
+    const parsed = viewHierarchyResultSchema.parse(viewHierarchy);
+    expect(parsed.truncationReasons).toEqual(viewHierarchy.truncationReasons);
+
+    const json = toJSONSchema(viewHierarchyResultSchema) as Record<string, any>;
+    expect(json.properties.truncationReasons).toBeDefined();
+    expect(json.required ?? []).not.toContain("truncationReasons");
+  });
+});
+
 /**
  * `context` sibling array on `observeResultSchema` (issue #6221 item 1): the
  * non-actionable rows the same projection that produces `skeleton` emits.
@@ -339,5 +391,46 @@ describe("observeResultSchema: context array (#6221 item 1)", () => {
     const result = { skeleton: [] };
     const parsed = observeResultSchema.parse(result);
     expect(parsed.context).toBeUndefined();
+  });
+});
+
+/**
+ * `settled` (issue #6866) is stamped onto EVERY embedded action observation —
+ * full arm and diff arm alike — so a client can tell a stability-checked capture
+ * from an unchecked one. A passthrough schema tolerates the wire value, but a
+ * schema-driven client or a generated type can only discover the accessor if
+ * both arms declare it.
+ */
+describe("observation arms advertise `settled` (#6866)", () => {
+  test("the full-observation arm declares it", () => {
+    const json = toJSONSchema(observationSummarySchema) as Record<string, any>;
+    expect(json.properties.settled).toBeDefined();
+    expect(json.properties.settled.type).toBe("boolean");
+    expect(json.required ?? []).not.toContain("settled");
+  });
+
+  test("the diff arm declares it", () => {
+    const json = toJSONSchema(observeDiffSchema) as Record<string, any>;
+    expect(json.properties.settled).toBeDefined();
+    expect(json.properties.settled.type).toBe("boolean");
+    expect(json.required ?? []).not.toContain("settled");
+  });
+
+  test("a generated action-tool output schema therefore carries it on the observation", () => {
+    expect(JSON.stringify(toJSONSchema(tapOnResultSchema))).toContain('"settled"');
+  });
+
+  test("both arms still accept an observation carrying the flag", () => {
+    expect(observationSummarySchema.parse({ settled: true }).settled).toBe(true);
+    expect(
+      observeDiffSchema.parse({
+        isDiff: true,
+        skeleton: [],
+        added: [],
+        removed: [],
+        changed: [],
+        settled: false,
+      }).settled,
+    ).toBe(false);
   });
 });

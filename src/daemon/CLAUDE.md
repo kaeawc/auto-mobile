@@ -49,6 +49,15 @@ class MySocketServer extends PushSubscriptionSocketServer<MyFilter, MyPushData> 
 
 **Examples:** `performancePushSocketServer`, `deviceDataStreamSocketServer`
 
+`parseSubscriptionFilter` MUST validate wire values rather than casting them. JSON
+parsing does no runtime checking, so a bare `(request.x as string) ?? null` lets a
+blank or non-string key become a filter that matches nothing while the subscribe
+call still acks `success: true` — an inert subscription the client cannot detect
+(#6676). Use the base class's `parseDeviceSessionUuid()` for the shared
+`deviceSessionUuid` key; a throw from `parseSubscriptionFilter` is answered with
+the standard `{ type: "error", success: false, error }` envelope and no
+subscription is created.
+
 ## Key Benefits of Base Classes
 
 1. **Timer injection** - Use `this.timer` for testable time-dependent code (via `FakeTimer` in tests)

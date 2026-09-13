@@ -8,9 +8,13 @@ import type {
   TimeAggregation,
 } from "./failuresStreamSocketTypes";
 import { FAILURES_STREAM_SOCKET_CONFIG } from "./daemonFiles";
+import {
+  normalizeStreamLimit,
+  normalizeStreamSinceId,
+  normalizeStreamTimestampMs,
+} from "./streamQueryNormalizers";
 
 const DEFAULT_LIMIT = 100;
-const STREAM_LIMIT_MAX = 500;
 const failureAnalyticsRepository = new FailureAnalyticsRepository();
 
 /**
@@ -40,73 +44,6 @@ function getDateRangeDuration(preset: DateRangePreset): number {
     case "30d":
       return 30 * 24 * 60 * 60 * 1000;
   }
-}
-
-/**
- * Normalize and validate timestamp
- */
-function normalizeTimestamp(value: unknown, label: string): number | undefined {
-  if (value === undefined || value === null) {
-    return undefined;
-  }
-  if (typeof value === "number") {
-    if (!Number.isFinite(value) || value < 0) {
-      throw new Error(`Invalid ${label}: ${value}`);
-    }
-    return value;
-  }
-  if (typeof value === "string") {
-    const trimmed = value.trim();
-    if (trimmed === "") {
-      return undefined;
-    }
-    // Parse a bare numeric string as an epoch-ms number FIRST: `new Date("1000")`
-    // yields the year 1000 (a large negative epoch), not 1000ms after the epoch,
-    // so a numeric cursor like "1000" or " 1 " must be read as Number, and "-5"
-    // must trip the negative guard rather than becoming a year.
-    const num = Number(trimmed);
-    if (Number.isFinite(num)) {
-      if (num < 0) {
-        throw new Error(`Invalid ${label}: ${value}`);
-      }
-      return num;
-    }
-    // Fall back to ISO date parsing for non-numeric strings.
-    const date = new Date(trimmed);
-    if (!Number.isNaN(date.getTime())) {
-      return date.getTime();
-    }
-    throw new Error(`Invalid ${label}: ${value}`);
-  }
-  throw new Error(`Invalid ${label}: ${String(value)}`);
-}
-
-/**
- * Normalize limit value
- */
-function normalizeLimit(value: unknown): number {
-  if (value === undefined || value === null) {
-    return DEFAULT_LIMIT;
-  }
-  const parsed = typeof value === "number" ? value : Number(value);
-  if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed <= 0) {
-    throw new Error(`Invalid limit: ${String(value)}`);
-  }
-  return Math.min(parsed, STREAM_LIMIT_MAX);
-}
-
-/**
- * Normalize sinceId value
- */
-function normalizeSinceId(value: unknown): number | undefined {
-  if (value === undefined || value === null) {
-    return undefined;
-  }
-  const parsed = typeof value === "number" ? value : Number(value);
-  if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed < 0) {
-    throw new Error(`Invalid sinceId: ${String(value)}`);
-  }
-  return parsed;
 }
 
 /**
@@ -192,13 +129,13 @@ export class FailuresStreamSocketServer extends RequestResponseSocketServer<
   private async handlePollNotifications(
     request: FailuresStreamSocketRequest,
   ): Promise<FailuresStreamSocketResponse> {
-    const sinceTimestamp = normalizeTimestamp(request.sinceTimestamp, "sinceTimestamp");
-    const sinceId = normalizeSinceId(request.sinceId);
-    const limit = normalizeLimit(request.limit);
+    const sinceTimestamp = normalizeStreamTimestampMs(request.sinceTimestamp, "sinceTimestamp");
+    const sinceId = normalizeStreamSinceId(request.sinceId);
+    const limit = normalizeStreamLimit(request.limit, DEFAULT_LIMIT);
 
     // Calculate time range if dateRange is provided
-    let startTime = normalizeTimestamp(request.startTime, "startTime");
-    let endTime = normalizeTimestamp(request.endTime, "endTime");
+    let startTime = normalizeStreamTimestampMs(request.startTime, "startTime");
+    let endTime = normalizeStreamTimestampMs(request.endTime, "endTime");
 
     const dateRange = normalizeDateRange(request.dateRange);
     if (dateRange && !startTime) {
@@ -229,8 +166,8 @@ export class FailuresStreamSocketServer extends RequestResponseSocketServer<
     request: FailuresStreamSocketRequest,
   ): Promise<FailuresStreamSocketResponse> {
     // Calculate time range if dateRange is provided
-    let startTime = normalizeTimestamp(request.startTime, "startTime");
-    let endTime = normalizeTimestamp(request.endTime, "endTime");
+    let startTime = normalizeStreamTimestampMs(request.startTime, "startTime");
+    let endTime = normalizeStreamTimestampMs(request.endTime, "endTime");
 
     const dateRange = normalizeDateRange(request.dateRange);
     if (dateRange && !startTime) {
@@ -259,8 +196,8 @@ export class FailuresStreamSocketServer extends RequestResponseSocketServer<
     const aggregation = normalizeAggregation(request.aggregation);
 
     // Calculate time range
-    let startTime = normalizeTimestamp(request.startTime, "startTime");
-    let endTime = normalizeTimestamp(request.endTime, "endTime");
+    let startTime = normalizeStreamTimestampMs(request.startTime, "startTime");
+    let endTime = normalizeStreamTimestampMs(request.endTime, "endTime");
 
     const dateRange = normalizeDateRange(request.dateRange);
     const now = this.timer.now();

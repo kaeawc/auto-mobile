@@ -543,6 +543,8 @@ export interface EmulatorLossIncidentsTable {
 export interface ProvisionDeviceOperationsTable {
   operation_id: string;
   request_fingerprint: string;
+  /** Fence identifying the attempt that currently owns this row. */
+  attempt_id: Generated<string>;
   status: string;
   result_json: string | null;
   error_code: string | null;
@@ -605,6 +607,11 @@ export interface DeviceSnapshotsTable {
   created_at: string;
   last_accessed_at: string;
   size_bytes: number;
+  /** 1 when the recorded size is a placeholder because the payload could not be measured (#6490). */
+  size_unknown: Generated<number>;
+  /** 1 when the in-AVD VM snapshot still needs deleting on a live emulator (#6490). */
+  pending_reclaim: Generated<number>;
+  pending_reclaim_reason: string | null;
   manifest_json: string;
 }
 

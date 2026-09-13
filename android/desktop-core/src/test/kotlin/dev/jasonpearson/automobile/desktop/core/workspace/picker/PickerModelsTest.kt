@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.desktop.core.workspace.picker
 
 import dev.jasonpearson.automobile.desktop.core.mcp.BootedDeviceInfo
+import dev.jasonpearson.automobile.desktop.core.mcp.DeviceIdentity
 import dev.jasonpearson.automobile.desktop.core.mcp.DeviceImageInfo
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -22,15 +23,59 @@ class PickerModelsTest {
     DeviceImageInfo(name = name, platform = "android", deviceId = deviceId)
 
   @Test
-  fun `a re-keyed virtual device hides exactly one same-named image, not both`() {
+  fun `an unresolved AVD probe preserves the successful boot attribution`() {
+    val devices =
+      buildPickerDevices(
+        booted =
+          listOf(
+            booted("Unknown (emulator-5554)", "emulator-5554", true)
+              .copy(identity = DeviceIdentity("Unknown (emulator-5554)", "emulator-5554"))
+          ),
+        images = listOf(image("Pixel", "avd_a")),
+        sourceImageToRuntimeId = mapOf("avd_a" to "emulator-5554"),
+      )
+    assertEquals(listOf("emulator-5554"), devices.map { it.id })
+  }
+
+  @Test
+  fun `stable source identity joins an unresolved name and overrides a recycled serial attribution`() {
+    val devices =
+      buildPickerDevices(
+        booted =
+          listOf(
+            booted("Unknown (emulator-5554)", "emulator-5554", true)
+              .copy(
+                identity = DeviceIdentity("avd_b", "transport-new"),
+                deviceSessionUuid = "epoch-new",
+              )
+          ),
+        images = listOf(image("Pixel", "avd_a"), image("Pixel", "avd_b")),
+        sourceImageToRuntimeId = mapOf("avd_a" to "emulator-5554"),
+      )
+    assertEquals(listOf("emulator-5554", "avd_a"), devices.map { it.id })
+    assertEquals("epoch-new", devices.first().deviceSessionUuid)
+  }
+
+  @Test
+  fun `a legacy name match never hides a device on a different platform`() {
+    val devices =
+      buildPickerDevices(
+        booted = listOf(booted("Shared name", "emulator-5554", true)),
+        images = listOf(image("Shared name", "ios-udid").copy(platform = "ios")),
+      )
+    assertEquals(listOf("emulator-5554", "ios-udid"), devices.map { it.id })
+  }
+
+  @Test
+  fun `an ambiguous legacy name preserves both distinct source images`() {
     val devices =
       buildPickerDevices(
         booted = listOf(booted("Pixel 8", "emulator-5554", isVirtual = true)),
         images = listOf(image("Pixel 8", "avd_a"), image("Pixel 8", "avd_b")),
       )
     assertTrue(devices.any { it.id == "emulator-5554" && it.state == DeviceState.Booted })
-    // Virtual re-key hides one same-named image; the distinct sibling remains bootable.
-    assertEquals(1, devices.count { it.state == DeviceState.Shutdown && it.name == "Pixel 8" })
+    // No stable identity is available: a positional guess would hide a distinct device.
+    assertEquals(2, devices.count { it.state == DeviceState.Shutdown && it.name == "Pixel 8" })
   }
 
   @Test

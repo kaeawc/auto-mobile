@@ -164,20 +164,41 @@ export function sanitizeObserveResult(
  * emitted copy. A hierarchy-less observation (capture failure) yields an empty
  * skeleton and no `context` — still a valid, if empty, projection.
  *
+ * Any `viewHierarchy.truncationReasons` are lifted to the payload top level
+ * first (issue #6601), so a projection that removes the tree still tells the
+ * caller the rows it does list may be incomplete.
+ *
  * `source` is the pre-clone `obs`: its elements still carry the non-enumerable
  * ancestry provenance (issue #5881) that the `sanitizeObserveResult` JSON clone
  * strips from `out`. The projection reads but never mutates them, so the "input
  * is never mutated" contract holds; only `out` (the clone) is edited.
  */
 function projectSkeletonOnto(out: ObserveResult, source: ObserveResult): void {
-  const { skeleton, context } = source.elements
+  const { skeleton, context, keyboard } = source.elements
     ? projectSkeleton(source.elements)
-    : { skeleton: [] as SkeletonElement[], context: [] as SkeletonElement[] };
+    : { skeleton: [] as SkeletonElement[], context: [] as SkeletonElement[], keyboard: undefined };
   out.skeleton = skeleton;
+  if (keyboard) {
+    out.keyboard = keyboard;
+  } else {
+    delete out.keyboard;
+  }
   if (context.length > 0) {
     out.context = context;
   } else {
     delete out.context;
+  }
+  // Lift the hierarchy's truncation provenance before the tree that carries it
+  // is dropped (issue #6601). The skeleton is projected from elements that were
+  // already capped (per-node child cap, or a device-side `max_nodes`/`max_depth`
+  // stop), so without this the default projection reports a short list with no
+  // hint that rows are missing — exactly the silent false negative
+  // `truncationReasons` exists to prevent. `layoutWarnings` / `performanceAudit`
+  // are deliberately advisory and dropped here; this is not advisory, it is the
+  // completeness contract of the rows the skeleton does list.
+  const truncationReasons = out.viewHierarchy?.truncationReasons;
+  if (truncationReasons && truncationReasons.length > 0) {
+    out.truncationReasons = [...truncationReasons];
   }
   delete out.viewHierarchy;
   delete out.elements;
@@ -594,6 +615,7 @@ export interface ObserveDiffNodeChange {
  * current state text).
  */
 export interface ObserveDiff {
+  keyboard?: ObserveResult["keyboard"];
   isDiff: true;
   /**
    * Actionable-only selector surface (issue #6221 items 1 and 4.1), ALWAYS
@@ -626,6 +648,23 @@ export interface ObserveDiff {
    * no single accessor for "is this capture fresh" across full and diff modes.
    */
   freshness?: ObserveResult["freshness"];
+  /**
+   * Why the captured hierarchy is incomplete — the same top-level field a
+   * skeleton-projected full observation carries (issue #6601). A diff REPLACES
+   * the projected observation, so without this the provenance the projection
+   * lifted out of `viewHierarchy` is dropped with it and a capped `skeleton`
+   * reads as a complete one. Populated by the `finalizeToolResponse` call site
+   * from the post-action observation, not by {@link diffObserveResult}.
+   */
+  truncationReasons?: string[];
+  /**
+   * Whether the observation this diff was computed from passed the
+   * embedded-observation stability gate (issue #6866). Populated by the
+   * `finalizeToolResponse` call site from the post-action observation, not by
+   * {@link diffObserveResult} — without it a diff-mode client could not tell a
+   * settled capture from a half-inflated one.
+   */
+  settled?: boolean;
   added: ObserveDiffNode[];
   removed: ObserveDiffNode[];
   changed: ObserveDiffNodeChange[];
@@ -638,6 +677,8 @@ export interface ObserveDiff {
 }
 
 export interface DiffObserveConfig {
+  /** Compact output suppresses captured IME subtrees; full/raw diffs retain them. */
+  collapseKeyboard?: boolean;
   /**
    * Top-level scalar ObserveResult fields to diff. Defaults to
    * `DIFF_SCALAR_FIELDS`. `updatedAt` is deliberately excluded from the default
@@ -806,7 +847,7 @@ function platformClassNameForDiff(node: Record<string, unknown>): string {
  * key is globally unique by position and identical cells in sibling subtrees do
  * not collide.
  */
-function flattenForDiff(obs: ObserveResult): FlatObserveNode[] {
+function flattenForDiff(obs: ObserveResult, collapseKeyboard = false): FlatObserveNode[] {
   const out: FlatObserveNode[] = [];
   const walk = (
     node: ViewHierarchyNode | undefined,
@@ -818,6 +859,9 @@ function flattenForDiff(obs: ObserveResult): FlatObserveNode[] {
       return;
     }
     const rec = node as unknown as Record<string, unknown>;
+    if (collapseKeyboard && node.extras?.["automobile:imePackage"]) {
+      return;
+    }
     const localKey = nodeKey(rec, siblingIndex);
     const pathKey = parentPath === "" ? localKey : `${parentPath}${PATH_KEY_SEP}${localKey}`;
     out.push({ pathKey, key: localKey, attributes: nodeAttributes(rec), ancestorClasses });
@@ -1396,8 +1440,8 @@ export function diffObserveResult(
   next: ObserveResult,
   cfg?: DiffObserveConfig,
 ): ObserveDiff {
-  const nextFlatNodes = flattenForDiff(next);
-  const baseByKey = groupByKey(flattenForDiff(baseline));
+  const nextFlatNodes = flattenForDiff(next, cfg?.collapseKeyboard);
+  const baseByKey = groupByKey(flattenForDiff(baseline, cfg?.collapseKeyboard));
   const nextByKey = groupByKey(nextFlatNodes);
   // Occurrence-index map for ambiguous elementIds among `next`'s nodes (PR #6242
   // review PRRT_kwDOP-GF5M6fq3iI) — see computeElementIdOccurrenceIndexes' doc.

@@ -10,7 +10,7 @@
 import { describe, expect, test } from "bun:test";
 import { existsSync, readFileSync } from "fs";
 import { resolve } from "path";
-import type { HighlightBoxShape } from "../../../../src/models/VisualHighlight";
+import type { HighlightShape } from "../../../../src/models/VisualHighlight";
 import type { NetworkMockRuleSync } from "../../../../src/server/networkMockRules";
 import {
   ctrlProxyRequests,
@@ -120,8 +120,8 @@ describe("ctrlProxyProtocol — Kotlin contract coverage", () => {
  * ships with zero wire coverage (builder #37) — closing the gap the old per-case tests left open.
  */
 describe("ctrlProxyProtocol — builders serialize byte-identically", () => {
-  const shape: HighlightBoxShape = { type: "box", bounds: { x: 1, y: 2, width: 3, height: 4 } };
-  const shapeJson = '{"type":"box","bounds":{"x":1,"y":2,"width":3,"height":4}}';
+  const shape: HighlightShape = { type: "circle", bounds: { x: 1, y: 2, width: 3, height: 4 } };
+  const shapeJson = '{"type":"circle","bounds":{"x":1,"y":2,"width":3,"height":4}}';
   const longCert = "A".repeat(4096);
   const networkRules: NetworkMockRuleSync[] = [
     {

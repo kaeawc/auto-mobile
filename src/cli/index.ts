@@ -1,12 +1,28 @@
+import { toJSONSchema } from "zod/v4";
 import { errorMessage } from "../utils/describeUnknownError";
 import { ToolRegistry } from "../server/toolRegistry";
 import { logger } from "../utils/logger";
 import { ActionableError } from "../models";
 import { DaemonClient, DaemonUnavailableError } from "../daemon/client";
-import { DaemonMcpProxy } from "../daemon/daemonMcpProxy";
+import {
+  DaemonMcpProxy,
+  DaemonVersionMismatchError,
+  DaemonBuildMismatchError,
+  DaemonAssetVersionMismatchError,
+} from "../daemon/daemonMcpProxy";
 import type { DaemonMcpProxyConfig } from "../daemon/daemonMcpProxy";
 import type { DaemonOptions } from "../daemon/types";
 import { resolveDaemonInstallSpecifier } from "../constants/release";
+import {
+  DEVICE_SESSION_ACQUISITION_TOOLS,
+  isDeviceSessionAcquisitionTool,
+} from "../server/deviceSessionResult";
+import { AUTOMATIC_TOOL_OUTPUT_RETENTION } from "../server/toolRegistry";
+import { JsonToolOutputArtifactWriter } from "../server/toolOutputArtifactWriter";
+import type { ObservationArtifactWriter } from "../server/finalizeToolResponse";
+import { getDefaultToolOutputsDir } from "../utils/toolOutputArtifacts";
+import { serverConfig } from "../utils/ServerConfig";
+import { cliStderr, cliStdout, renderCliToolOutput, type CliByteSink } from "./toolOutput";
 
 // Import all tool registration functions
 import { registerObserveTools } from "../server/observeTools";
@@ -372,11 +388,23 @@ export function parseCliArgs(args: string[]): {
  * threading can be observed without globally mocking the daemonMcpProxy module
  * (which would replace the real DaemonMcpProxy that daemonMcpProxy.test.ts needs).
  */
-let daemonProxyFactory: (config: DaemonMcpProxyConfig) => DaemonMcpProxy = (config) =>
+/**
+ * The daemon-proxy surface a one-shot `--cli` invocation actually uses: forward
+ * one tool call, declare the session it owns (#6870), close. Narrow on purpose
+ * so a stand-in cannot silently omit a member the CLI calls — a `DaemonMcpProxy`
+ * satisfies it structurally.
+ */
+export interface CliDaemonProxy {
+  callTool(name: string, params: Record<string, any>): Promise<any>;
+  adoptCliSessionLiveness(): Promise<string | undefined>;
+  close(): Promise<void>;
+}
+
+let daemonProxyFactory: (config: DaemonMcpProxyConfig) => CliDaemonProxy = (config) =>
   new DaemonMcpProxy(config);
 
 export function setDaemonProxyFactoryForTesting(
-  factory: (config: DaemonMcpProxyConfig) => DaemonMcpProxy,
+  factory: (config: DaemonMcpProxyConfig) => CliDaemonProxy,
 ): void {
   daemonProxyFactory = factory;
 }
@@ -402,6 +430,15 @@ async function runToolViaDaemon(
     }
     return result;
   } catch (error) {
+    if (
+      error instanceof DaemonVersionMismatchError ||
+      error instanceof DaemonBuildMismatchError ||
+      error instanceof DaemonAssetVersionMismatchError
+    ) {
+      throw new ActionableError(
+        `Daemon preflight failed; no device operation started. ${error.message}`,
+      );
+    }
     if (error instanceof DaemonUnavailableError) {
       throw new ActionableError(
         `Daemon became unavailable during tool execution: ${error.message}. ` +
@@ -416,6 +453,14 @@ async function runToolViaDaemon(
       `Error calling daemon: ${message}. ` + `Try: auto-mobile --daemon restart`,
     );
   } finally {
+    // Declare the session this one-shot process owns BEFORE closing (#6870).
+    // Without it the connection's heartbeat keeper dies with the process and the
+    // daemon reaps the session after its 10s heartbeat timeout — less than the
+    // time an agent spends reading this result and choosing the next call, so
+    // every follow-up `--cli` call failed with `session_ownership_lost`. Runs on
+    // the failure path too: a tool call that threw still leaves the session the
+    // caller will retry against. Never throws (see adoptCliSessionLiveness).
+    await proxy.adoptCliSessionLiveness();
     // Always close the proxy connection to prevent connection leaks
     await proxy.close();
   }
@@ -563,8 +608,57 @@ export function isCliToolFailure(result: any): boolean {
   return result?.isError === true || cliToolResultPayload(result)?.success === false;
 }
 
+/**
+ * Where the CLI's tool output goes. Injected so a test can capture it; the
+ * defaults are blocking writes to the process streams so `process.exit()` after
+ * a command cannot cut the JSON in half (issue #6870).
+ */
+let cliOutputSinks: { stdout: CliByteSink; stderr: CliByteSink } = {
+  stdout: cliStdout,
+  stderr: cliStderr,
+};
+
+export function setCliOutputSinksForTesting(sinks: {
+  stdout: CliByteSink;
+  stderr: CliByteSink;
+}): void {
+  cliOutputSinks = sinks;
+}
+
+export function resetCliOutputSinksForTesting(): void {
+  cliOutputSinks = { stdout: cliStdout, stderr: cliStderr };
+}
+
+/**
+ * The artifact writer an oversized CLI result spills to (issue #6870).
+ *
+ * Undefined when no writable tool-outputs directory can be resolved — the
+ * renderer then emits an explicit `truncated: true` notice instead, which is
+ * still complete, parseable JSON.
+ */
+function createCliArtifactWriter(): ObservationArtifactWriter | undefined {
+  try {
+    return new JsonToolOutputArtifactWriter({
+      outputDirectory: serverConfig.getToolOutputsDir() ?? getDefaultToolOutputsDir(),
+      retention: AUTOMATIC_TOOL_OUTPUT_RETENTION,
+    });
+  } catch (error) {
+    // Spilling is itself the fallback path; failing to build the writer only
+    // downgrades the output to the truncation notice, never the invocation.
+    logger.debug(`[cli] no tool-output artifact writer available: ${errorMessage(error)}`);
+    return undefined;
+  }
+}
+
 function handleToolResult(result: any, toolName: string): void {
-  console.log(JSON.stringify(result, null, 2));
+  // Count the bytes BEFORE writing: an oversized result is spilled to an
+  // artifact and replaced by its envelope rather than emitted and cut (#6870).
+  cliOutputSinks.stdout.write(
+    renderCliToolOutput(result, {
+      tool: toolName,
+      artifactWriter: createCliArtifactWriter(),
+    }) + "\n",
+  );
 
   // MCP tool errors use the top-level `isError` flag, while older daemon
   // responses encode their failure in the JSON payload.
@@ -605,13 +699,23 @@ function handleToolResult(result: any, toolName: string): void {
   }
 }
 
-// Main CLI command runner
-export async function runCliCommand(args: string[], daemonOptions?: DaemonOptions): Promise<void> {
+/** Output boundary for CLI help; defaults to the process console. */
+export interface CliOutput {
+  log(message: string): void;
+  error(message: string): void;
+}
+
+/** Run a CLI command, with injectable help output for isolated callers. */
+export async function runCliCommand(
+  args: string[],
+  daemonOptions?: DaemonOptions,
+  helpOutput: CliOutput = console,
+): Promise<void> {
   try {
     if (args.length === 0) {
       // Show help with available tools
       initializeCliTools();
-      showHelp();
+      showHelp(helpOutput);
       return;
     }
 
@@ -619,9 +723,9 @@ export async function runCliCommand(args: string[], daemonOptions?: DaemonOption
     if (args[0] === "help" || args[0] === "--help" || args[0] === "-h") {
       initializeCliTools();
       if (args.length > 1) {
-        showToolHelp(args[1]);
+        showToolHelp(args[1], helpOutput);
       } else {
-        showHelp();
+        showHelp(helpOutput);
       }
       return;
     }
@@ -629,10 +733,17 @@ export async function runCliCommand(args: string[], daemonOptions?: DaemonOption
     // Parse tool name, session UUID, and parameters
     const { toolName, sessionUuid, params } = parseCliArgs(args);
 
-    // Add session UUID to params if provided
+    // Add session UUID to params if provided. Acquisition tools MINT a session
+    // rather than joining one, and their schemas are `.strict()`, so folding the
+    // flag in made every `--session-uuid ... getAndroid` call fail with
+    // `Unrecognized key: "sessionUuid"` before any device work started.
     if (sessionUuid) {
-      params.sessionUuid = sessionUuid;
-      logger.debug(`Using session UUID: ${sessionUuid}`);
+      if (isDeviceSessionAcquisitionTool(toolName)) {
+        logger.debug(`Ignoring session UUID for acquisition tool ${toolName}: it mints its own`);
+      } else {
+        params.sessionUuid = sessionUuid;
+        logger.debug(`Using session UUID: ${sessionUuid}`);
+      }
     }
 
     // Special handling for doctor command - try daemon first, fallback to direct
@@ -661,13 +772,13 @@ export async function runCliCommand(args: string[], daemonOptions?: DaemonOption
 }
 
 // Show general help
-function showHelp(): void {
+function showHelp(output: CliOutput): void {
   const tools = ToolRegistry.getAllTools();
   // Concrete pinned specifier (honors AUTOMOBILE_VERSION), never the floating
   // @latest tag — help output should be reproducible (#2746).
   const installSpecifier = resolveDaemonInstallSpecifier();
 
-  console.log(`
+  output.log(`
 AutoMobile CLI - Android Device Automation
 
 Usage:
@@ -677,15 +788,18 @@ Usage:
 Examples:
   bunx ${installSpecifier} --cli listDeviceImages
   bunx ${installSpecifier} --cli observe
-  bunx ${installSpecifier} --cli tapOn --text "Submit"
+  bunx ${installSpecifier} --cli tapOn --selector '{"text":"Submit"}'
   bunx ${installSpecifier} --cli getAndroid --avd-name "pixel_7_api_34"
   bunx ${installSpecifier} --cli getApple --udid "SIMULATOR-UDID"
   bunx ${installSpecifier} --cli --session-uuid abc-123-uuid observe
-  bunx ${installSpecifier} --cli --session-uuid $SESSION_UUID tapOn --text "Submit"
+  bunx ${installSpecifier} --cli --session-uuid $SESSION_UUID tapOn --selector '{"text":"Submit"}'
 
 Options:
   help [tool-name]              Show help for a specific tool
-  --session-uuid <uuid>         Associate tool execution with a session (optional)
+  --session-uuid <uuid>         Associate tool execution with a session (optional).
+                                Ignored for the device-acquisition tools
+                                (${DEVICE_SESSION_ACQUISITION_TOOLS.join(", ")}),
+                                which mint their own session.
 
 Parameters:
   Parameters are passed as --key value pairs
@@ -699,6 +813,10 @@ Parameters:
 Session-based Execution:
   When using --session-uuid, the tool will be executed on the device assigned to that session.
   This allows multiple tool calls to target the same device in parallel.
+  A session acquired or used from the CLI is held on a wall-clock idle timeout
+  (10 minutes by default, AUTOMOBILE_CLI_SESSION_IDLE_TIMEOUT_MS) rather than the
+  heartbeat contract a long-running MCP connection keeps, so it survives the gap
+  between one-shot invocations. Every call refreshes it.
 `);
 
   // Show categorized tools
@@ -741,65 +859,66 @@ Session-based Execution:
     categories.get(category)!.push(tool);
   });
 
-  console.log("\nAvailable Tools:");
-  console.log("================");
+  output.log("\nAvailable Tools:");
+  output.log("================");
 
   // Display tools by category
   categories.forEach((toolList, category) => {
-    console.log(`\n${category}:`);
+    output.log(`\n${category}:`);
     toolList.forEach((tool) => {
-      console.log(`  ${tool.name.padEnd(25)} - ${tool.description}`);
+      output.log(`  ${tool.name.padEnd(25)} - ${tool.description}`);
     });
   });
 
-  console.log(`\nTotal: ${tools.length} tools available`);
-  console.log(
+  output.log(`\nTotal: ${tools.length} tools available`);
+  output.log(
     `\nUse 'bunx ${installSpecifier} --cli help <tool-name>' for detailed information about a specific tool.`,
   );
 }
 
 // Show help for a specific tool
-function showToolHelp(toolName: string): void {
+function showToolHelp(toolName: string, output: CliOutput): void {
   const installSpecifier = resolveDaemonInstallSpecifier();
   const tool = ToolRegistry.getTool(toolName);
   if (!tool) {
-    console.error(`Unknown tool: ${toolName}`);
-    console.log(`\nUse 'bunx ${installSpecifier} --cli help' to see available tools.`);
+    output.error(`Unknown tool: ${toolName}`);
+    output.log(`\nUse 'bunx ${installSpecifier} --cli help' to see available tools.`);
     return;
   }
 
-  console.log(`\nTool: ${tool.name}`);
-  console.log("=".repeat(tool.name.length + 6));
-  console.log(`Description: ${tool.description}`);
+  output.log(`\nTool: ${tool.name}`);
+  output.log("=".repeat(tool.name.length + 6));
+  output.log(`Description: ${tool.description}`);
 
   if (tool.supportsProgress) {
-    console.log("Supports: Progress notifications");
+    output.log("Supports: Progress notifications");
   }
 
   // Show schema information
-  console.log("\nParameters:");
+  output.log("\nParameters:");
+  output.log('  Pass objects and arrays as JSON, e.g. --selector \'{"text":"Submit"}\'.');
   try {
     const shape = getCliHelpSchemaShape(tool.schema);
     if (shape) {
       Object.entries(shape).forEach(([key, value]: [string, any]) => {
         const parameter = getCliHelpParameterInfo(value);
 
-        console.log(`  --${key} ${parameter.isOptional ? "(optional)" : "(required)"}`);
-        console.log(`    Type: ${parameter.typeName}`);
+        output.log(`  --${key} ${parameter.isOptional ? "(optional)" : "(required)"}`);
+        output.log(`    Type: ${parameter.typeName}`);
 
         if (parameter.description) {
-          console.log(`    Description: ${parameter.description}`);
+          output.log(`    Description: ${parameter.description}`);
         }
       });
     } else {
-      console.log("  No parameters required");
+      output.log("  No parameters required");
     }
   } catch (error) {
-    console.log("  Could not parse parameter schema");
+    output.log("  Could not parse parameter schema");
   }
 
-  console.log(`\nExample usage:`);
-  console.log(`  bunx ${installSpecifier} --cli ${toolName} [parameters...]`);
+  output.log(`\nExample usage:`);
+  output.log(`  bunx ${installSpecifier} --cli ${toolName} [parameters...]`);
 }
 
 export function getCliHelpSchemaShape(schema: any): CliHelpSchemaShape {
@@ -819,6 +938,7 @@ export function getCliHelpSchemaShape(schema: any): CliHelpSchemaShape {
   return undefined;
 }
 
+/** Describe accepted input values, including nested fields and schema alternatives. */
 export function getCliHelpParameterInfo(schema: any): CliHelpParameterInfo {
   const isOptional =
     typeof schema?.isOptional === "function"
@@ -826,11 +946,71 @@ export function getCliHelpParameterInfo(schema: any): CliHelpParameterInfo {
       : schema?._def?.typeName === "ZodOptional";
   const actualType = isOptional ? (schema?._def?.innerType ?? schema) : schema;
   const rawTypeName = actualType?._def?.typeName ?? actualType?._def?.type ?? "unknown";
-  const typeName = String(rawTypeName).replace(/^Zod/, "").toLowerCase();
+  const normalizedType = String(rawTypeName).replace(/^Zod/, "").toLowerCase();
+  const typeName = [
+    "union",
+    "intersection",
+    "object",
+    "record",
+    "array",
+    "enum",
+    "literal",
+    "nullable",
+  ].includes(normalizedType)
+    ? formatCliHelpJsonSchema(toJSONSchema(actualType, { io: "input" }))
+    : normalizedType;
 
   return {
     isOptional,
     typeName,
     description: schema?.description ?? actualType?.description ?? actualType?._def?.description,
   };
+}
+
+/** Render JSON schema structure without losing union alternatives or nested keys. */
+function formatCliHelpJsonSchema(schema: any): string {
+  if (schema.not && Object.keys(schema.not).length === 0) {
+    return "never";
+  }
+  if (schema.allOf) {
+    return schema.allOf
+      .map((member: any) => "(" + formatCliHelpJsonSchema(member) + ")")
+      .join(" & ");
+  }
+  const alternatives = schema.anyOf ?? schema.oneOf;
+  if (alternatives) {
+    return alternatives.map((member: any) => formatCliHelpJsonSchema(member)).join(" | ");
+  }
+  if ("const" in schema) {
+    return JSON.stringify(schema.const);
+  }
+  if (schema.enum) {
+    return schema.enum.map((value: unknown) => JSON.stringify(value)).join(" | ");
+  }
+  if (schema.type === "object") {
+    return formatCliHelpObjectSchema(schema);
+  }
+  if (schema.type === "array") {
+    return "(" + formatCliHelpJsonSchema(schema.items ?? {}) + ")[] (JSON)";
+  }
+  return schema.type ?? "any";
+}
+
+/** Describe fixed fields and open record entries in an object input schema. */
+function formatCliHelpObjectSchema(schema: any): string {
+  const fields = Object.entries(schema.properties ?? {}).map(
+    ([key, value]) =>
+      JSON.stringify(key) +
+      (schema.required?.includes(key) ? "" : "?") +
+      ": " +
+      formatCliHelpJsonSchema(value),
+  );
+  if (schema.additionalProperties) {
+    const valueType =
+      schema.additionalProperties === true
+        ? "any"
+        : formatCliHelpJsonSchema(schema.additionalProperties);
+    fields.push("[key: string]: " + valueType);
+  }
+  return "JSON { " + fields.join(", ") + " }";
 }

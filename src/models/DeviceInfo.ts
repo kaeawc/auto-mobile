@@ -8,6 +8,7 @@ export interface DeviceInfo {
   isRunning: boolean;
   deviceId?: string;
   source?: "local";
+  apiLevel?: number;
   osVersion?: string;
   formFactor?: FormFactor;
   screenWidth?: number;
@@ -36,10 +37,9 @@ export interface BootedDevice {
    * stamp.
    */
   observedAt?: number;
-  /** ADB transport identity, which changes when a serial reconnects. */
-  transportId?: string;
   source?: "local";
   iosVersion?: string;
+  apiLevel?: number;
   osVersion?: string;
   formFactor?: FormFactor;
   screenWidth?: number;

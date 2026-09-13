@@ -352,6 +352,13 @@ describe("NotificationUIDetector", () => {
 
   describe("createNotificationUIDetector factory", () => {
     const buildDeps = (): SystemTrayDependencies => ({
+      appInventoryFactory: () => ({
+        executeDetailedResult: async () => ({
+          successful: true,
+          apps: { profiles: {}, system: [] },
+        }),
+      }),
+      appLabelResolver: async () => null,
       observeScreenFactory: () => ({ execute: async () => ({}) as ObserveResult }),
       adbFactory: () => ({
         executeCommand: async () => ({ stdout: "", stderr: "" }),
@@ -368,6 +375,24 @@ describe("NotificationUIDetector", () => {
       const detector = createNotificationUIDetector(androidDevice, buildDeps);
       expect(detector).toBeInstanceOf(AndroidNotificationUIDetector);
       expect(detector.device).toBe(androidDevice);
+    });
+    it("passes cancellation through to Android shade commands", async () => {
+      const controller = new AbortController();
+      let commandSignal: AbortSignal | undefined;
+      const deps = buildDeps();
+      deps.adbFactory = () => ({
+        getDeviceTimestampMs: async () => 0,
+        executeCommand: async (_command, _timeout, _buffer, _retry, signal) => {
+          commandSignal = signal;
+          return { stdout: "", stderr: "" };
+        },
+      });
+      await createNotificationUIDetector(
+        androidDevice,
+        () => deps,
+        controller.signal,
+      ).collapseTray();
+      expect(commandSignal).toBe(controller.signal);
     });
 
     it("returns an IosNotificationUIDetector for iOS devices", () => {

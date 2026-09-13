@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { EventEmitter } from "events";
-import { DeviceSessionManager } from "../../src/utils/DeviceSessionManager";
+import {
+  DeviceSessionManager,
+  SIMULATOR_APP_OPEN_GATE_TTL_MS,
+} from "../../src/utils/DeviceSessionManager";
 import { IOSCtrlProxyManager } from "../../src/utils/IOSCtrlProxyManager";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
@@ -539,7 +542,7 @@ describe("DeviceSessionManager legacy iOS auto-start readiness", () => {
       isAvailable: true,
     });
     const simctl = Object.assign(fakeSimctl, {
-      openSimulatorApp: async () => {},
+      openSimulatorApp: async () => true,
     });
     const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, simctl as never, {
       iosCtrlProxyManager: iosManager,
@@ -629,7 +632,7 @@ describe("DeviceSessionManager legacy iOS auto-start readiness", () => {
     fakeSimctl.setCreatedSimulatorUdid(createdUdid);
     Object.assign(fakeSimctl, {
       resolveRuntimeIdentifier: async () => "com.apple.CoreSimulator.SimRuntime.iOS-26-0",
-      openSimulatorApp: async () => {},
+      openSimulatorApp: async () => true,
     });
     fakeSimctl.bootSimulator = async () => {
       bootStarted.resolve();
@@ -889,6 +892,78 @@ describe("DeviceSessionManager iOS openSimulatorApp", () => {
     await manager.verifyIosDevice("ios-sim-1");
     expect(fakeSimctl.getMethodCalls("openSimulatorApp")).toHaveLength(2);
   });
+
+  // A headless verification must NOT latch the process-lifetime flag: the
+  // Simulator GUI was never launched, so the only thing that would ever launch
+  // it again is a later verification. Latching on a no-op left Simulator.app
+  // unopened for the daemon's lifetime once the host gained an Aqua session,
+  // and made SimCtlClient's headless-session cache TTL unreachable from the
+  // session path (PR #6830 review).
+  test("should re-attempt openSimulatorApp when the first call was a headless no-op", async () => {
+    const fakeSimctl = new FakeSimCtlClient();
+    fakeSimctl.setDeviceInfo("ios-sim-1", {
+      udid: "ios-sim-1",
+      name: "iPhone 15",
+      state: "Booted",
+      isAvailable: true,
+    });
+    fakeSimctl.setSimulatorAppHeadless(true);
+
+    const manager = DeviceSessionManager.createInstance(
+      buildIosProvider(fakeAdb, fakeDeviceUtils, fakeSimctl),
+    );
+
+    await manager.verifyIosDevice("ios-sim-1");
+    await manager.verifyIosDevice("ios-sim-1");
+    expect(fakeSimctl.getMethodCalls("openSimulatorApp")).toHaveLength(2);
+
+    // The host gains a GUI login session: the next verification launches, and
+    // only then does the flag latch.
+    fakeSimctl.setSimulatorAppHeadless(false);
+    await manager.verifyIosDevice("ios-sim-1");
+    expect(fakeSimctl.getMethodCalls("openSimulatorApp")).toHaveLength(3);
+
+    await manager.verifyIosDevice("ios-sim-1");
+    expect(fakeSimctl.getMethodCalls("openSimulatorApp")).toHaveLength(3);
+  });
+
+  // A GUI launch must not latch for the process lifetime: the daemon outlives
+  // the Aqua session, so a logout (or a user quitting Simulator.app) leaves the
+  // GUI closed with nothing left to reopen it. The gate expires after
+  // SIMULATOR_APP_OPEN_GATE_TTL_MS so GUI -> headless -> GUI transitions reach
+  // SimCtlClient's own headless-session probe again (PR #6830 review).
+  test("should re-probe openSimulatorApp once the GUI-launch gate expires", async () => {
+    const fakeSimctl = new FakeSimCtlClient();
+    fakeSimctl.setDeviceInfo("ios-sim-1", {
+      udid: "ios-sim-1",
+      name: "iPhone 15",
+      state: "Booted",
+      isAvailable: true,
+    });
+    const timer = new FakeTimer();
+
+    const manager = DeviceSessionManager.createInstance(
+      buildIosProvider(fakeAdb, fakeDeviceUtils, fakeSimctl),
+      undefined,
+      { timer },
+    );
+
+    await manager.verifyIosDevice("ios-sim-1");
+    expect(fakeSimctl.getMethodCalls("openSimulatorApp")).toHaveLength(1);
+
+    // Still inside the gate: no re-probe.
+    timer.advanceTime(SIMULATOR_APP_OPEN_GATE_TTL_MS - 1);
+    await manager.verifyIosDevice("ios-sim-1");
+    expect(fakeSimctl.getMethodCalls("openSimulatorApp")).toHaveLength(1);
+
+    // Gate expired: re-probe, and the fresh launch re-arms it.
+    timer.advanceTime(1);
+    await manager.verifyIosDevice("ios-sim-1");
+    expect(fakeSimctl.getMethodCalls("openSimulatorApp")).toHaveLength(2);
+
+    await manager.verifyIosDevice("ios-sim-1");
+    expect(fakeSimctl.getMethodCalls("openSimulatorApp")).toHaveLength(2);
+  });
 });
 
 describe("DeviceSessionManager dual-platform resolution", () => {
@@ -966,7 +1041,7 @@ describe("DeviceSessionManager dual-platform resolution", () => {
     const manager = DeviceSessionManager.createInstance(buildProvider(), fakeAdbFactory);
 
     await expect(manager.ensureDeviceReady("either")).rejects.toThrow(
-      "Both Android and iOS devices are connected",
+      "pass sessionUuid (from getAndroid/getApple), platform, or a bound device label on this call",
     );
   });
 

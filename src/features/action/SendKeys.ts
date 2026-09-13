@@ -212,7 +212,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       textLength: Array.from(command.text).length,
       operation,
       requestedMode,
-      resolvedMode,
+      resolvedMode: this.device.platform === "ios" ? ("xcuiTypeText" as const) : resolvedMode,
     };
 
     try {
@@ -512,10 +512,15 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     }
 
     if (operation === "replace") {
-      const clearResult = await this.clearEventOnlyForReplace(
-        getFocusedTextLength(focusResult.hierarchy),
-        signal,
-      );
+      const textLength = getFocusedTextLength(focusResult.hierarchy);
+      if (textLength === undefined) {
+        return {
+          success: false,
+          error:
+            "eventOnly replacement requires a known focused text length; use a11y replacement instead",
+        };
+      }
+      const clearResult = await this.clearEventOnlyForReplace(textLength, signal);
       if (!clearResult.success) {
         return clearResult;
       }
@@ -656,12 +661,15 @@ export class SendKeys {
     progress?: ProgressCallback,
     signal?: AbortSignal,
   ): Promise<SendKeysResult> {
+    signal?.throwIfAborted();
+    // Accept hierarchy updates emitted while focus or command delivery is completing.
+    const actionStartTimestamp = await this.timestampProvider.now();
     const focusFailure = await this.focusTarget(selector, signal);
     signal?.throwIfAborted();
     const execution = focusFailure
       ? { results: [], failure: focusFailure }
       : await this.executeCommands(commands, progress, signal);
-    const minTimestamp = focusFailure ? undefined : await this.timestampProvider.now();
+    const minTimestamp = focusFailure ? undefined : actionStartTimestamp;
     signal?.throwIfAborted();
     await progress?.(commands.length, commands.length, "Observing final keyboard input state");
     const observation = await this.observer.execute({

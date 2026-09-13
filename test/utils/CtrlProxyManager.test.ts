@@ -99,6 +99,106 @@ describe("CtrlProxyManager", function () {
       process.env[DAEMON_LAUNCH_CWD_ENV] = originalLaunchCwdEnv;
     }
   });
+
+  test("evicts per-serial readiness caches after a VM incarnation change", () => {
+    expect(AndroidCtrlProxyManager.getExistingInstance(testDevice.deviceId)).toBe(
+      accessibilityServiceClient,
+    );
+
+    AndroidCtrlProxyManager.invalidateForDeviceIncarnation(testDevice.deviceId);
+
+    expect(AndroidCtrlProxyManager.getExistingInstance(testDevice.deviceId)).toBeUndefined();
+  });
+
+  describe("framework boot failures", () => {
+    for (const { method, command, service, readyOutput } of [
+      {
+        method: "isInstalled" as const,
+        command: `shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`,
+        service: "package",
+        readyOutput: `package:${AndroidCtrlProxyManager.PACKAGE}`,
+      },
+      {
+        method: "isEnabled" as const,
+        command: "shell settings get secure enabled_accessibility_services",
+        service: "settings",
+        readyOutput: `${AndroidCtrlProxyManager.PACKAGE}/.CtrlProxy`,
+      },
+    ]) {
+      test.each(["stdout", "stderr"] as const)(
+        `${method} preserves missing service output from %s and recovers`,
+        async (stream) => {
+          const diagnostic = `cmd: Can't find service: ${service}`;
+          fakeAdb.setCommandResponseSequence(command, [
+            { stdout: "", stderr: "", [stream]: diagnostic },
+            { stdout: readyOutput, stderr: "" },
+          ]);
+
+          await expect(accessibilityServiceClient[method]()).rejects.toThrow(diagnostic);
+          await expect(accessibilityServiceClient[method]()).resolves.toBe(true);
+        },
+      );
+
+      test(`${method} preserves a thrown missing service error`, async () => {
+        const diagnostic = `Can't find service: ${service}`;
+        fakeAdb.setCommandError(command, new Error(diagnostic));
+
+        await expect(accessibilityServiceClient[method]()).rejects.toThrow(diagnostic);
+      });
+
+      test(`${method} retains the false result for permission failures`, async () => {
+        fakeAdb.setCommandError(command, new Error("Permission denied"));
+
+        await expect(accessibilityServiceClient[method]()).resolves.toBe(false);
+      });
+    }
+  });
+
+  describe("evict", function () {
+    test("deletes the map entry so a subsequent getInstance constructs a fresh manager", function () {
+      const evicted = accessibilityServiceClient;
+
+      AndroidCtrlProxyManager.evict(testDevice.deviceId);
+
+      const fresh = AndroidCtrlProxyManager.getInstance(testDevice, fakeAdbFactory);
+      expect(fresh).not.toBe(evicted);
+    });
+
+    test("leaves other devices' instances untouched", function () {
+      const otherDevice: BootedDevice = {
+        deviceId: "other-device",
+        platform: "android",
+        isEmulator: true,
+        name: "Other Device",
+      };
+      const other = AndroidCtrlProxyManager.getInstance(otherDevice, fakeAdbFactory);
+
+      AndroidCtrlProxyManager.evict(testDevice.deviceId);
+
+      expect(AndroidCtrlProxyManager.getInstance(otherDevice, fakeAdbFactory)).toBe(other);
+    });
+
+    test("evicts stopped AVD runtime serials while preserving a same-name physical device", function () {
+      const device = { ...testDevice, deviceId: "emulator-5556", name: "Deleted_AVD" };
+      const physical = { ...device, deviceId: "physical-serial", isEmulator: false };
+      const old = AndroidCtrlProxyManager.getInstance(device, fakeAdbFactory);
+      const retained = AndroidCtrlProxyManager.getInstance(physical, fakeAdbFactory);
+      AndroidCtrlProxyManager.evict("Deleted_AVD", "Deleted_AVD");
+      expect(AndroidCtrlProxyManager.getInstance(device, fakeAdbFactory)).not.toBe(old);
+      expect(AndroidCtrlProxyManager.getInstance(physical, fakeAdbFactory)).toBe(retained);
+    });
+
+    test("preserves a reused serial now belonging to another AVD", function () {
+      const replacement = { ...testDevice, deviceId: "emulator-5556", name: "Replacement_AVD" };
+      const manager = AndroidCtrlProxyManager.getInstance(replacement, fakeAdbFactory);
+      AndroidCtrlProxyManager.evict(replacement.deviceId, "Deleted_AVD");
+      expect(AndroidCtrlProxyManager.getInstance(replacement, fakeAdbFactory)).toBe(manager);
+    });
+    test("is a no-op when no instance was ever constructed for the device id", function () {
+      expect(() => AndroidCtrlProxyManager.evict("never-constructed-device")).not.toThrow();
+    });
+  });
+
   describe("isInstalled", function () {
     test("should return true when accessibility service package is installed", async function () {
       fakeAdb.setCommandResponse(

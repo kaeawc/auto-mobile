@@ -10,7 +10,6 @@ import {
   MIN_LAUNCH_APP_MCP_TIMEOUT_MS,
   MIN_PREFERENCE_MCP_TIMEOUT_MS,
   MIN_PROVISION_DEVICE_MCP_TIMEOUT_MS,
-  MIN_START_DEVICE_MCP_TIMEOUT_MS,
   MIN_TEARDOWN_DEVICE_MCP_TIMEOUT_MS,
   MIN_UNINSTALL_APP_MCP_TIMEOUT_MS,
   MIN_VIDEO_RECORDING_MCP_TIMEOUT_MS,
@@ -110,9 +109,9 @@ describe("resolveMcpRequestTimeoutMs", () => {
       expected: MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS,
     },
     {
-      name: "startDevice floor when timeoutMs omitted",
+      name: "startDevice default includes cold boot and runner setup",
       tool: "startDevice",
-      expected: MIN_START_DEVICE_MCP_TIMEOUT_MS,
+      expected: 365_000,
     },
     {
       name: "provisionDevice floor when timeoutMs omitted",
@@ -173,10 +172,10 @@ describe("resolveMcpRequestTimeoutMs", () => {
       expected: MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS,
     },
     {
-      name: "raises short startDevice to floor",
+      name: "raises short startDevice transport to default lifecycle budget",
       tool: "startDevice",
       timeoutMs: 60_000,
-      expected: MIN_START_DEVICE_MCP_TIMEOUT_MS,
+      expected: 365_000,
     },
     {
       name: "raises short provisionDevice to floor",
@@ -247,10 +246,10 @@ describe("resolveMcpRequestTimeoutMs", () => {
       expected: 900_000,
     },
     {
-      name: "preserves startDevice above floor",
+      name: "preserves startDevice above default lifecycle budget",
       tool: "startDevice",
-      timeoutMs: 300_000,
-      expected: 300_000,
+      timeoutMs: 400_000,
+      expected: 400_000,
     },
     {
       name: "preserves provisionDevice outer request timeout above the floor",

@@ -16,8 +16,8 @@ export const DEVICE_TIMESTAMP_SECOND_GRANULARITY_MARGIN_MS = 1000;
 export function getFocusedTextLength(
   viewHierarchy: ViewHierarchyResult,
   parser: ElementParser = new DefaultElementParser(),
-): number {
-  let textLength = 0;
+): number | undefined {
+  let textLength: number | undefined;
   const rootNodes = parser.extractRootNodes(viewHierarchy);
 
   for (const rootNode of rootNodes) {
@@ -25,10 +25,9 @@ export function getFocusedTextLength(
       const nodeProperties = parser.extractNodeProperties(node);
       if (
         (nodeProperties.focused === "true" || nodeProperties.focused === true) &&
-        nodeProperties.text &&
         typeof nodeProperties.text === "string"
       ) {
-        textLength = Math.max(textLength, nodeProperties.text.length);
+        textLength = Math.max(textLength ?? 0, nodeProperties.text.length);
       }
     });
   }
@@ -238,7 +237,7 @@ export class ClearText extends BaseVisualChange {
       return { success: true };
     }
 
-    const textLength = getFocusedTextLength(observeResult.viewHierarchy, this.parser);
+    const textLength = getFocusedTextLength(observeResult.viewHierarchy, this.parser) ?? 0;
 
     // TODO: Move cursor to the end of the text
 

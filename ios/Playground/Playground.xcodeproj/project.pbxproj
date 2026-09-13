@@ -10,6 +10,7 @@
 		007B2120C2735B42A20C510B /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2F4747AC5700DF138836D5F /* Theme.swift */; };
 		15B37A3EDBAFD6BD0FC98BFC /* DemosTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25213AE8A9FD9A5B1EEFD97F /* DemosTab.swift */; };
 		1EE5E98648A8DFD56C1EE62C /* FilesPickerProbeUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06C02BE035F32E984F52B8D0 /* FilesPickerProbeUITests.swift */; };
+		22E39FE3242348ED7A4EBEAC /* AutoMobileSDK in Frameworks */ = {isa = PBXBuildFile; productRef = 3137B15D8D485C363DB78A3E /* AutoMobileSDK */; };
 		2F8BA3EDD179892E3C489DCB /* FilesPickerProbeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C80CB4E7FD9E92FD2A08F2F /* FilesPickerProbeView.swift */; };
 		327A28D4620038BBA8D02656 /* Shapes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5122FF517804CD75B0F75CBA /* Shapes.swift */; };
 		4546703D0511A96D6060F587 /* CrayonSketch.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0972F015B9B7D85BD6F3270 /* CrayonSketch.swift */; };
@@ -18,7 +19,7 @@
 		54C16E199D10E281E1E316CF /* SettingsTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64FD18EC8D1B9A665615C374 /* SettingsTab.swift */; };
 		553F94B4D033BCA44B07AC4E /* PlaygroundApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6EA6F80147865B6F32DD526 /* PlaygroundApp.swift */; };
 		619CDEE3F264DBB3415041D0 /* ShantellSans.ttf in Resources */ = {isa = PBXBuildFile; fileRef = E1B25FBAC5217DE05EA701CF /* ShantellSans.ttf */; };
-		72CDA6DB361FDC97490C3C2C /* AutoMobileSDK in Frameworks */ = {isa = PBXBuildFile; productRef = 3137B15D8D485C363DB78A3E /* AutoMobileSDK */; };
+		72CDA6DB361FDC97490C3C2C /* AutoMobileHighlightCore in Frameworks */ = {isa = PBXBuildFile; productRef = 6F8D59223D0149A0731816E3 /* AutoMobileHighlightCore */; };
 		7C8CF515031B975C05FA2AD2 /* PlaygroundThemeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBFA8ECD2DC59DBF8A6FBBF3 /* PlaygroundThemeTests.swift */; };
 		7FDB62C4B6F0092619122928 /* SemanticLinksDemo.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAF63AC7E447335C9A68A4F7 /* SemanticLinksDemo.swift */; };
 		95CF2D08679D32C4A9966ACD /* CrayonSketchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11B156E0FBE749405E1F2D0D /* CrayonSketchTests.swift */; };
@@ -54,6 +55,7 @@
 		06C02BE035F32E984F52B8D0 /* FilesPickerProbeUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilesPickerProbeUITests.swift; sourceTree = "<group>"; };
 		0C5B41C44C18F0045A6B61C2 /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Release.xcconfig; sourceTree = "<group>"; };
 		11B156E0FBE749405E1F2D0D /* CrayonSketchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrayonSketchTests.swift; sourceTree = "<group>"; };
+		24F5CDEF4DC174B7ACDBB1C8 /* highlight-core */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "highlight-core"; path = "../highlight-core"; sourceTree = SOURCE_ROOT; };
 		25213AE8A9FD9A5B1EEFD97F /* DemosTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemosTab.swift; sourceTree = "<group>"; };
 		2B46870C2DDF4A2F73A5778B /* Colors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Colors.swift; sourceTree = "<group>"; };
 		32941883720B375F3B66BA7A /* SemanticLinkRotorDiscoveryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SemanticLinkRotorDiscoveryTests.swift; sourceTree = "<group>"; };
@@ -95,7 +97,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				72CDA6DB361FDC97490C3C2C /* AutoMobileSDK in Frameworks */,
+				72CDA6DB361FDC97490C3C2C /* AutoMobileHighlightCore in Frameworks */,
+				22E39FE3242348ED7A4EBEAC /* AutoMobileSDK in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -137,6 +140,7 @@
 			isa = PBXGroup;
 			children = (
 				AA0EB8290A6E5436B2C8CE6F /* auto-mobile-sdk */,
+				24F5CDEF4DC174B7ACDBB1C8 /* highlight-core */,
 			);
 			name = Packages;
 			sourceTree = "<group>";
@@ -235,6 +239,7 @@
 			);
 			name = PlaygroundTests;
 			packageProductDependencies = (
+				6F8D59223D0149A0731816E3 /* AutoMobileHighlightCore */,
 				3137B15D8D485C363DB78A3E /* AutoMobileSDK */,
 			);
 			productName = PlaygroundTests;
@@ -310,6 +315,7 @@
 			mainGroup = E23F411CF4F5D5291A0322DE;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
+				ED405DCADB445BA8869F435F /* XCLocalSwiftPackageReference "../highlight-core" */,
 				A0A6301668FFF52D74D2CC20 /* XCLocalSwiftPackageReference "../auto-mobile-sdk" */,
 			);
 			preferredProjectObjectVersion = 77;
@@ -658,6 +664,10 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = "../auto-mobile-sdk";
 		};
+		ED405DCADB445BA8869F435F /* XCLocalSwiftPackageReference "../highlight-core" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = "../highlight-core";
+		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -668,6 +678,10 @@
 		5B1F96DAE2D3DE50DD89C21C /* AutoMobileSDK */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = AutoMobileSDK;
+		};
+		6F8D59223D0149A0731816E3 /* AutoMobileHighlightCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = AutoMobileHighlightCore;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

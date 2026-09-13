@@ -74,6 +74,7 @@ class WebSocketServerIntegrationTest {
                   when {
                     highlightId.isNullOrBlank() -> "Missing highlight id"
                     shape == null -> "Missing highlight shape"
+                    shape.type != "circle" -> "Only hand-drawn circle highlights are supported"
                     else -> null
                   }
                 enqueueHighlightResponse(requestId, error == null, error)
@@ -567,7 +568,7 @@ class WebSocketServerIntegrationTest {
 
         val requestId = "req-add"
         val message =
-          """{"type":"add_highlight","requestId":"$requestId","id":"highlight-1","shape":{"type":"box","bounds":{"x":10,"y":20,"width":100,"height":80},"style":{"strokeColor":"#FF0000","strokeWidth":4,"dashPattern":null}}}"""
+          """{"type":"add_highlight","requestId":"$requestId","id":"highlight-1","shape":{"type":"circle","bounds":{"x":10,"y":20,"width":100,"height":80}}}"""
         send(Frame.Text(message))
 
         val responseFrame = withTimeout(1000) { incoming.receive() } as Frame.Text
@@ -582,7 +583,7 @@ class WebSocketServerIntegrationTest {
   }
 
   @Test
-  fun `add_path_highlight returns highlight response`() = runBlocking {
+  fun `unsupported highlights return error responses`() = runBlocking {
     server.start()
 
     val client = HttpClient(CIO) { install(WebSockets) }
@@ -595,17 +596,23 @@ class WebSocketServerIntegrationTest {
       ) {
         incoming.receive() // Connection message
 
-        val requestId = "req-add-path"
-        val message =
-          """{"type":"add_highlight","requestId":"$requestId","id":"path-1","shape":{"type":"path","points":[{"x":10,"y":20},{"x":40,"y":35},{"x":80,"y":25}],"style":{"strokeColor":"#FF8800","strokeWidth":5,"smoothing":"catmull-rom","tension":0.6}}}"""
-        send(Frame.Text(message))
+        for (shapeType in listOf("box", "path")) {
+          val requestId = "req-add-$shapeType"
+          val message =
+            """{"type":"add_highlight","requestId":"$requestId","id":"unsupported-1","shape":{"type":"$shapeType","bounds":{"x":10,"y":20,"width":100,"height":80}}}"""
+          send(Frame.Text(message))
 
-        val responseFrame = withTimeout(1000) { incoming.receive() } as Frame.Text
-        val responseJson = json.parseToJsonElement(responseFrame.readText()).jsonObject
+          val responseFrame = withTimeout(1000) { incoming.receive() } as Frame.Text
+          val responseJson = json.parseToJsonElement(responseFrame.readText()).jsonObject
 
-        assertEquals("highlight_response", responseJson["type"]?.jsonPrimitive?.content)
-        assertEquals(requestId, responseJson["requestId"]?.jsonPrimitive?.content)
-        assertEquals("true", responseJson["success"]?.jsonPrimitive?.content)
+          assertEquals("highlight_response", responseJson["type"]?.jsonPrimitive?.content)
+          assertEquals(requestId, responseJson["requestId"]?.jsonPrimitive?.content)
+          assertEquals("false", responseJson["success"]?.jsonPrimitive?.content)
+          assertEquals(
+            "Only hand-drawn circle highlights are supported",
+            responseJson["error"]?.jsonPrimitive?.content,
+          )
+        }
       }
     }
   }
@@ -626,7 +633,7 @@ class WebSocketServerIntegrationTest {
 
         val requestId = "req-invalid"
         val message =
-          """{"type":"add_highlight","requestId":"$requestId","shape":{"type":"box","bounds":{"x":10,"y":20,"width":100,"height":80},"style":{"strokeColor":"#FF0000","strokeWidth":4,"dashPattern":null}}}"""
+          """{"type":"add_highlight","requestId":"$requestId","shape":{"type":"circle","bounds":{"x":10,"y":20,"width":100,"height":80}}}"""
         send(Frame.Text(message))
 
         val responseFrame = withTimeout(1000) { incoming.receive() } as Frame.Text

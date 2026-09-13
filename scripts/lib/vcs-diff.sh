@@ -8,6 +8,14 @@ vcs_uses_jj() {
   [[ -d ".jj" && ! -e ".git" ]]
 }
 
+vcs_root() {
+  if vcs_uses_jj; then
+    jj workspace root
+    return
+  fi
+  git rev-parse --show-toplevel
+}
+
 vcs_base_ref() {
   local requested_base_ref="$1"
   if vcs_uses_jj && [[ "$requested_base_ref" == "origin/main" ]]; then
@@ -50,7 +58,9 @@ vcs_changed_files_since_merge_base() {
     jj diff --from "fork_point(@ | ${base_ref})" --to @ --name-only -- "$@"
     return
   fi
-  git diff --name-only "$base_ref"...HEAD -- "$@"
+  # Module-scoped callers must see both sides of a cross-module rename. Git's
+  # rename detection otherwise reports only the destination path.
+  git diff --no-renames --name-only "$base_ref"...HEAD -- "$@"
 }
 
 vcs_touched_files() {

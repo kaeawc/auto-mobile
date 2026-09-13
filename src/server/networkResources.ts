@@ -12,13 +12,13 @@ import { computePercentile } from "../utils/percentile";
 const NETWORK_RESOURCE_URIS = {
   REQUEST: "automobile:network/request/{requestId}",
   TRAFFIC: "automobile:network/traffic",
-  LIVE: "automobile://network/traffic/live",
-  ERRORS: "automobile://network/traffic/errors",
-  SLOW: "automobile://network/traffic/slow",
-  STATS: "automobile://network/stats",
-  STATE: "automobile://network/state",
-  MOCKS: "automobile://network/mocks",
-  CONNECTIVITY: "automobile://network/connectivity",
+  LIVE: "automobile:network/traffic/live",
+  ERRORS: "automobile:network/traffic/errors",
+  SLOW: "automobile:network/traffic/slow",
+  STATS: "automobile:network/stats",
+  STATE: "automobile:network/state",
+  MOCKS: "automobile:network/mocks",
+  CONNECTIVITY: "automobile:network/connectivity",
 } as const;
 
 const TRAFFIC_QUERY_KEYS = [

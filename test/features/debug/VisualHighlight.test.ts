@@ -21,32 +21,19 @@ describe("VisualHighlight", () => {
   };
 
   const highlightShape: HighlightShape = {
-    type: "box",
+    type: "circle",
     bounds: {
       x: 10,
       y: 20,
       width: 100,
       height: 80,
     },
-    style: {
-      strokeColor: "#FF0000",
-      strokeWidth: 4,
-    },
   };
 
   const pathShape: HighlightShape = {
-    type: "path",
-    points: [
-      { x: 5, y: 10 },
-      { x: 25, y: 40 },
-      { x: 50, y: 20 },
-    ],
-    style: {
-      strokeColor: "#FF8800",
-      strokeWidth: 6,
-      smoothing: "catmull-rom",
-      tension: 0.6,
-    },
+    type: "circle",
+
+    bounds: { x: 5, y: 10, width: 45, height: 30 },
   };
 
   test("addHighlight returns parsed highlight response", async () => {
@@ -64,7 +51,7 @@ describe("VisualHighlight", () => {
     expect(result.success).toBe(true);
   });
 
-  test("addHighlight accepts path shapes", async () => {
+  test("addHighlight accepts circle bounds", async () => {
     const response: HighlightOperationResult = {
       success: true,
     };
@@ -168,10 +155,6 @@ describe("VisualHighlightClient", () => {
       y: 10,
       width: 40,
       height: 40,
-    },
-    style: {
-      strokeColor: "#00FF00",
-      strokeWidth: 3,
     },
   };
 

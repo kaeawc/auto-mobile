@@ -2,11 +2,15 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import type { BootedDevice, ExecResult } from "../../models";
 import {
   SimulatorTccSqliteClient,
+  permissionForTccService,
+  tccServiceForPermission,
   type TccPermissionReader,
 } from "../../utils/ios-cmdline-tools/SimulatorTccSqliteClient";
 import type { HostCommandExecutor } from "../../utils/HostCommandExecutor";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
+import { withDeviceReadinessLock } from "../../utils/deviceReadinessLock";
+import { getAbortSignal } from "../../utils/AbortContext";
 
 export type IosSimulatorPermissionAction = "grant" | "revoke" | "reset";
 
@@ -84,22 +88,6 @@ export class SqliteTccPermissionReader extends SimulatorTccSqliteClient {
   }
 }
 
-const TCC_SERVICE_BY_PERMISSION = new Map<string, string>([
-  ["calendar", "kTCCServiceCalendar"],
-  ["camera", "kTCCServiceCamera"],
-  ["contacts", "kTCCServiceAddressBook"],
-  ["contacts-limited", "kTCCServiceAddressBook"],
-  ["location", "kTCCServiceLocationWhenInUse"],
-  ["location-always", "kTCCServiceLocationAlways"],
-  ["media-library", "kTCCServiceMediaLibrary"],
-  ["microphone", "kTCCServiceMicrophone"],
-  ["motion", "kTCCServiceMotion"],
-  ["photos", "kTCCServicePhotos"],
-  ["photos-add", "kTCCServicePhotosAdd"],
-  ["reminders", "kTCCServiceReminders"],
-  ["siri", "kTCCServiceSiri"],
-]);
-
 export function isIosSimulatorDevice(device: BootedDevice): boolean {
   return isIosSimulatorUdid(device.deviceId);
 }
@@ -108,21 +96,6 @@ export function normalizePermissions(permissions: string[] | undefined): string[
   return (permissions ?? [])
     .map((permission) => permission.trim())
     .filter((permission) => permission.length > 0);
-}
-
-function tccServiceForPermission(permission: string): string {
-  return permission.startsWith("kTCCService")
-    ? permission
-    : (TCC_SERVICE_BY_PERMISSION.get(permission) ?? permission);
-}
-
-function permissionForTccService(service: string): string {
-  for (const [permission, tccService] of TCC_SERVICE_BY_PERMISSION) {
-    if (tccService === service) {
-      return permission;
-    }
-  }
-  return service;
 }
 
 function stateFromAuthValue(
@@ -160,6 +133,7 @@ export class IosSimulatorPermissions {
     device: BootedDevice,
     simctl: IosSimulatorPrivacyClient | null = null,
     tccReader: TccPermissionReader | null = null,
+    private readonly withPrivacyLock: typeof withDeviceReadinessLock = withDeviceReadinessLock,
   ) {
     this.device = device;
     this.simctl = simctl || new SimCtlClient(device);
@@ -211,26 +185,42 @@ export class IosSimulatorPermissions {
       };
     }
 
-    const results: IosSimulatorPermissionCommandResult[] = await Promise.all(
-      normalizedPermissions.map(async (permission) => {
-        try {
-          const result = await this.simctl.executeCommandArgs([
-            "privacy",
-            this.device.deviceId,
-            action,
-            permission,
-            normalizedAppId,
-          ]);
-          return { permission, success: true, stdout: result.stdout, stderr: result.stderr };
-        } catch (error) {
-          return {
-            permission,
-            success: false,
-            error: errorMessage(error),
-          };
-        }
-      }),
+    return this.withPrivacyLock(
+      `ios-privacy:${this.device.deviceId}`,
+      () => this.applyPermissions(action, normalizedAppId, normalizedPermissions),
+      { signal: getAbortSignal() },
     );
+  }
+
+  private async applyPermissions(
+    action: IosSimulatorPermissionAction,
+    normalizedAppId: string,
+    normalizedPermissions: string[],
+  ): Promise<IosSimulatorPermissionMutationResult> {
+    // Serialized across instances and batches: concurrent `simctl privacy` invocations for
+    // the same device/app race each other against the simulator's shared
+    // TCC.db and against simctl's own app-relaunch side effect, producing
+    // spurious per-permission failures (issue #6581). One permission's grant
+    // must fully apply before the next one starts.
+    const results: IosSimulatorPermissionCommandResult[] = [];
+    for (const permission of normalizedPermissions) {
+      try {
+        const result = await this.simctl.executeCommandArgs([
+          "privacy",
+          this.device.deviceId,
+          action,
+          permission,
+          normalizedAppId,
+        ]);
+        results.push({ permission, success: true, stdout: result.stdout, stderr: result.stderr });
+      } catch (error) {
+        results.push({
+          permission,
+          success: false,
+          error: errorMessage(error),
+        });
+      }
+    }
 
     const failedCount = results.filter((result) => !result.success).length;
 

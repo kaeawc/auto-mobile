@@ -124,7 +124,8 @@ export const formatMcpServerVersion = (baseVersion: string, git: GitVersionInfo 
  *
  * - An explicit `MCP_SERVER_VERSION` is an exact override (CI/test pin) and is
  *   never stamped.
- * - Otherwise the base version comes from `npm_package_version` or package.json,
+ * - Otherwise the base version comes from package.json, falling back to
+ *   `npm_package_version` only when the manifest version is unavailable,
  *   and is stamped with the git commit when the build is a source checkout.
  * - With no resolvable base version, returns "unknown" (unstamped).
  */
@@ -134,7 +135,7 @@ export const resolveMcpServerVersion = (deps: McpVersionDeps): string => {
     return override;
   }
 
-  const base = deps.env.npm_package_version || deps.readPackageVersion() || "unknown";
+  const base = deps.readPackageVersion() || deps.env.npm_package_version || "unknown";
   if (base === "unknown") {
     return base;
   }

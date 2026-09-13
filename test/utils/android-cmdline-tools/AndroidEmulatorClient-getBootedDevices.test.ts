@@ -76,14 +76,13 @@ describe("AndroidEmulatorClient.getBootedDevicesChecked", () => {
     ]);
   });
 
-  test("preserves transport identity when AVD-name lookup fails", async () => {
+  test("falls back to a placeholder name when AVD-name lookup fails", async () => {
     const adb = new FakeAdbExecutor();
     adb.setDevices([
       {
         name: "ignored",
         platform: "android",
         deviceId: "emulator-5554",
-        transportId: "42",
       } satisfies BootedDevice,
     ]);
     adb.setCommandError("emu avd name", new Error("emulator console unavailable"));
@@ -99,7 +98,6 @@ describe("AndroidEmulatorClient.getBootedDevicesChecked", () => {
         name: "Unknown (emulator-5554)",
         platform: "android",
         deviceId: "emulator-5554",
-        transportId: "42",
         source: "local",
       },
     ]);
@@ -107,6 +105,7 @@ describe("AndroidEmulatorClient.getBootedDevicesChecked", () => {
 
   test("bypasses the device-list cache only when terminating", async () => {
     const adb = new RecordingAdbExecutor();
+    adb.setCommandResponse("emu avd name", execResult("Pixel 8\nOK\n"));
     adb.setDevices([
       {
         name: "Pixel 8",

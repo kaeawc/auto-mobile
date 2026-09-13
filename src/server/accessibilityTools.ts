@@ -89,6 +89,13 @@ export function registerAccessibilityTools() {
             voiceover.reason ?? "VoiceOver toggle is not supported on this device",
           );
         }
+        if (!voiceover.applied) {
+          // Unconfirmed toggle (e.g. a CtrlProxy outage during confirmation
+          // polling) must surface as a failure, never as a normal enabled:false
+          // response — otherwise the client can't distinguish "confirmed off"
+          // from "we don't actually know" (#6496).
+          throw new ActionableError(voiceover.reason ?? "VoiceOver toggle could not be confirmed");
+        }
         const enabled = voiceover.currentState ?? false;
         const service = enabled ? ("voiceover" as const) : ("unknown" as const);
         return createStructuredToolResponse({ enabled, service });

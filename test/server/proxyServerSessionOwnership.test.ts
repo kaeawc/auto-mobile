@@ -74,13 +74,13 @@ describe("proxy server session ownership errors", () => {
                 code: "session_ownership_lost",
                 message:
                   "Session ownership lost for session-123: heartbeat-timeout. " +
-                  "Call getAndroid, getApple, or startDevice to acquire a new device session.",
+                  "Call getAndroid or getApple to acquire a new device session.",
                 sessionUuid: "session-123",
                 reason: "heartbeat-timeout",
                 retryable: true,
                 recovery: {
                   action: "acquire_replacement_session",
-                  tools: ["getAndroid", "getApple", "startDevice"],
+                  tools: ["getAndroid", "getApple"],
                 },
                 release: {
                   sessionId: "session-123",
@@ -223,12 +223,12 @@ describe("proxy server session ownership errors", () => {
                 message:
                   "This MCP connection has no active device session " +
                   "(the previous session was released: daemon-shutdown). " +
-                  "Call getAndroid, getApple, or startDevice to acquire a new device session.",
+                  "Call getAndroid or getApple to acquire a new device session.",
                 reason: "daemon-shutdown",
                 retryable: true,
                 recovery: {
                   action: "acquire_replacement_session",
-                  tools: ["getAndroid", "getApple", "startDevice"],
+                  tools: ["getAndroid", "getApple"],
                 },
               },
             }),
@@ -240,7 +240,7 @@ describe("proxy server session ownership errors", () => {
       await client.callTool({ name: "getApple", arguments: {} });
       await client.callTool({
         name: "observe",
-        arguments: { deviceId: "ios-simulator-1" },
+        arguments: {},
       });
 
       expect(originalClient.callToolCalls).toEqual([{ toolName: "getApple", params: {} }]);
@@ -248,7 +248,7 @@ describe("proxy server session ownership errors", () => {
         { toolName: "getApple", params: {} },
         {
           toolName: "observe",
-          params: { deviceId: "ios-simulator-1", sessionUuid: "replacement-session" },
+          params: { sessionUuid: "replacement-session" },
         },
       ]);
     } finally {

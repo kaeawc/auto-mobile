@@ -286,7 +286,7 @@
         "requestId": "fixture-request-id",
         "id": "hl-1",
         "shape": {
-          "type": "box",
+          "type": "circle",
           "bounds": {
             "x": 10,
             "y": 21,
@@ -294,15 +294,6 @@
             "height": 51,
             "sourceWidth": 390,
             "sourceHeight": 844
-          },
-          "style": {
-            "strokeColor": "#FF0000",
-            "strokeWidth": 3.5,
-            "dashPattern": [4, 2],
-            "smoothing": "bezier",
-            "tension": 0.5,
-            "capStyle": "round",
-            "joinStyle": "miter"
           }
         }
       }
@@ -315,17 +306,7 @@
         "requestId": "fixture-request-id",
         "id": "hl-2",
         "shape": {
-          "type": "path",
-          "points": [
-            {
-              "x": 1.5,
-              "y": 2.5
-            },
-            {
-              "x": 3.5,
-              "y": 4.5
-            }
-          ],
+          "type": "circle",
           "bounds": {
             "x": 1,
             "y": 2,

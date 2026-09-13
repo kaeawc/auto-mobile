@@ -112,12 +112,7 @@ export class CtrlProxyHighlights {
    * Normalize highlight shape bounds to integers.
    */
   private normalizeHighlightShape(shape: HighlightShape): HighlightShape {
-    const normalizeBounds = (
-      bounds: HighlightShape["bounds"],
-    ): NormalizedHighlightBounds | undefined => {
-      if (!bounds) {
-        return bounds;
-      }
+    const normalizeBounds = (bounds: HighlightShape["bounds"]): NormalizedHighlightBounds => {
       return {
         x: Math.round(bounds.x),
         y: Math.round(bounds.y),
@@ -133,13 +128,6 @@ export class CtrlProxyHighlights {
             : Math.round(bounds.sourceHeight),
       };
     };
-
-    if (shape.type === "path") {
-      return {
-        ...shape,
-        bounds: normalizeBounds(shape.bounds),
-      };
-    }
 
     return {
       ...shape,

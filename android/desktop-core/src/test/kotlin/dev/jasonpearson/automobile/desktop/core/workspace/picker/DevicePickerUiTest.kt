@@ -48,6 +48,23 @@ class DevicePickerUiTest {
   }
 
   @Test
+  fun `renders same-id devices on both platforms with distinct click targets`() = runComposeUiTest {
+    var action: DevicePickerAction? = null
+    picker(
+      DevicePickerUiState.Content(
+        listOf(
+          PickerDevice("shared", "Android twin", Platform.Android, DeviceState.Booted),
+          PickerDevice("shared", "iOS twin", Platform.Ios, DeviceState.Booted),
+        )
+      ),
+      onAction = { action = it },
+    )
+    onNodeWithContentDescription("Observe Android twin").assertIsDisplayed()
+    onNodeWithContentDescription("Observe iOS twin").performClick()
+    assertEquals(DevicePickerAction.ObserveOne("ios:shared"), action)
+  }
+
+  @Test
   fun `renders rail options and device cards`() = runComposeUiTest {
     picker()
     onNodeWithContentDescription("Select filter Booted").assertIsDisplayed()
@@ -63,7 +80,7 @@ class DevicePickerUiTest {
     var action: DevicePickerAction? = null
     picker(onAction = { action = it })
     onNodeWithContentDescription("Observe Pixel 8").performClick()
-    assertEquals(DevicePickerAction.ObserveOne("p8"), action)
+    assertEquals(DevicePickerAction.ObserveOne("android:p8"), action)
   }
 
   @Test
@@ -71,12 +88,12 @@ class DevicePickerUiTest {
     var action: DevicePickerAction? = null
     picker(onAction = { action = it })
     onNodeWithContentDescription("Boot iPhone 15").performClick()
-    assertEquals(DevicePickerAction.BootDevice("i15"), action)
+    assertEquals(DevicePickerAction.BootDevice("ios:i15"), action)
   }
 
   @Test
   fun `a booting card shows Booting and offers no boot affordance`() = runComposeUiTest {
-    picker(content(bootingIds = setOf("i15")))
+    picker(content(bootingIds = setOf("ios:i15")))
     // No boot/retry affordance while a boot is in flight — the card is a passive "Booting…".
     onNodeWithText("Booting…").assertIsDisplayed()
     onNodeWithText("Click to boot").assertDoesNotExist()
@@ -87,10 +104,10 @@ class DevicePickerUiTest {
   @Test
   fun `a failed card offers a retry that dispatches BootDevice`() = runComposeUiTest {
     var action: DevicePickerAction? = null
-    picker(content(bootErrors = mapOf("i15" to "boom")), onAction = { action = it })
+    picker(content(bootErrors = mapOf("ios:i15" to "boom")), onAction = { action = it })
     onNodeWithText("Boot failed · Click to retry").assertIsDisplayed()
     onNodeWithContentDescription("Retry boot iPhone 15").performClick()
-    assertEquals(DevicePickerAction.BootDevice("i15"), action)
+    assertEquals(DevicePickerAction.BootDevice("ios:i15"), action)
   }
 
   @Test
@@ -105,7 +122,7 @@ class DevicePickerUiTest {
   fun `the observe-selected button appears only once a selection exists and dispatches`() =
     runComposeUiTest {
       var action: DevicePickerAction? = null
-      picker(content(selected = setOf("p8")), onAction = { action = it })
+      picker(content(selected = setOf("android:p8")), onAction = { action = it })
       onNodeWithContentDescription("Observe selected").assertIsEnabled().performClick()
       assertEquals(DevicePickerAction.ObserveSelected, action)
     }

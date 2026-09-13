@@ -1,10 +1,14 @@
 import { describe, it, expect, spyOn, test } from "bun:test";
 import { CompiledQuery, Kysely, sql } from "kysely";
 import { Database } from "bun:sqlite";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { BunSqliteConnectionState, BunSqliteDialect } from "../../src/db/bunSqliteDialect";
 import { ActionableError } from "../../src/models/ActionableError";
 import { defaultTimer } from "../../src/utils/SystemTimer";
 import { logger } from "../../src/utils/logger";
+import { removeTempDbDir } from "./tempDbDir";
 
 /**
  * Regression for issue #2792: destroy() racing queries queued in Kysely's
@@ -420,20 +424,108 @@ describe("BunSqliteConnectionState — prepared statement cache (#2797)", () => 
     expect(db.preparedFor("select * from foo")[1].finalized).toBe(false);
   });
 
-  test("clears cached statements before reuse when schema_version changes", async () => {
+  test("prepares the schema probe only once across repeated cache hits (#6649)", async () => {
+    const db = new FakeDatabase();
+    const state = makeState(db);
+    const owner = Symbol("lease");
+
+    // Reuse the schema probe as well as the application statement.
+    for (let index = 0; index < 5; index += 1) {
+      await state.executeQuery(rawQuery("select * from foo where id = ?", [index]), owner);
+    }
+
+    expect(db.preparedFor("select * from foo where id = ?")).toHaveLength(1);
+    expect(db.prepareCalls.filter((sql) => sql === "PRAGMA schema_version")).toHaveLength(1);
+  });
+
+  test("invalidates cached statements on the first lookup after a schema change", async () => {
     const db = new FakeDatabase();
     const state = makeState(db);
     const owner = Symbol("lease");
 
     await state.executeQuery(rawQuery("select * from foo"), owner);
-    const cachedSelect = db.preparedFor("select * from foo")[0];
+    const staleStatement = db.preparedFor("select * from foo")[0];
 
+    // Model DDL from another process immediately after warming the cache.
     db.schemaVersion += 1;
     await state.executeQuery(rawQuery("select * from foo"), owner);
 
-    expect(cachedSelect.finalized).toBe(true);
+    expect(staleStatement.finalized).toBe(true);
     expect(db.preparedFor("select * from foo")).toHaveLength(2);
-    expect(db.preparedFor("select * from foo")[1].finalized).toBe(false);
+    expect(db.prepareCalls.filter((sql) => sql === "PRAGMA schema_version")).toHaveLength(1);
+  });
+
+  test("still re-prepares after DDL through this connection and establishes a fresh baseline", async () => {
+    const db = new FakeDatabase();
+    const state = makeState(db);
+    const owner = Symbol("lease");
+
+    await state.executeQuery(rawQuery("select * from foo"), owner);
+    await state.executeQuery(rawQuery("select * from foo"), owner);
+
+    await state.executeQuery(rawQuery("alter table foo add column name text"), owner);
+
+    await state.executeQuery(rawQuery("select * from foo"), owner);
+
+    const selectStatements = db.preparedFor("select * from foo");
+    expect(selectStatements).toHaveLength(2);
+    // The pre-DDL cached statement was finalized by #clearStatementCache();
+    // the post-DDL query re-prepared a fresh one using the same schema probe.
+    expect(selectStatements[0].finalized).toBe(true);
+    expect(selectStatements[1].finalized).toBe(false);
+    expect(db.prepareCalls.filter((sql) => sql === "PRAGMA schema_version")).toHaveLength(1);
+  });
+
+  test("misses avoid probes while the next cache hit detects external DDL", async () => {
+    const db = new FakeDatabase();
+    const state = makeState(db);
+    const owner = Symbol("lease");
+    await state.executeQuery(rawQuery("select * from foo"), owner);
+    const cached = db.preparedFor("select * from foo")[0];
+    const probe = db.preparedFor("PRAGMA schema_version")[0];
+
+    db.schemaVersion += 1;
+    await state.executeQuery(rawQuery("select * from bar"), owner);
+    expect(cached.finalized).toBe(false);
+    expect(db.calls.filter((call) => call.sql === "PRAGMA schema_version")).toHaveLength(1);
+    await state.executeQuery(rawQuery("select * from foo"), owner);
+    expect(cached.finalized).toBe(true);
+    expect(db.calls.filter((call) => call.sql === "PRAGMA schema_version")).toHaveLength(2);
+    expect(probe.finalized).toBe(false);
+    expect(db.preparedFor("PRAGMA schema_version")).toHaveLength(1);
+
+    state.close();
+    expect(probe.finalized).toBe(true);
+  });
+
+  test("re-prepares a cached SELECT after another connection changes the schema", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "auto-mobile-schema-cache-"));
+    const dbPath = join(tempDir, "shared.db");
+    const primary = new Database(dbPath);
+    const external = new Database(dbPath);
+    const state = new BunSqliteConnectionState(primary);
+    const owner = Symbol("lease");
+
+    try {
+      primary.exec("CREATE TABLE widgets (id INTEGER PRIMARY KEY, name TEXT, retained TEXT)");
+      primary.exec("INSERT INTO widgets VALUES (1, 'before', 'after')");
+
+      await state.executeQuery(rawQuery("select * from widgets"), owner);
+
+      // A second direct-mode process shares the same SQLite file and removes a
+      // column. The very next hit must use the new column names.
+      external.exec("ALTER TABLE widgets DROP COLUMN name");
+      const result = await state.executeQuery<{ id: number }>(
+        rawQuery("select * from widgets"),
+        owner,
+      );
+
+      expect(result.rows).toEqual([{ id: 1, retained: "after" }]);
+    } finally {
+      state.close();
+      external.close();
+      await removeTempDbDir(tempDir);
+    }
   });
 
   test("preserves SELECT, RETURNING, and write result shapes", async () => {
@@ -626,5 +718,98 @@ describe("BunSqliteConnectionState — close-time database maintenance", () => {
     state.close();
 
     expect(opened).toBe(false);
+  });
+});
+
+describe("BunSqliteConnectionState — FIFO admission fairness + no thundering herd (#6699)", () => {
+  test("one completion resumes only the eligible waiters and preserves FIFO across queries and transactions", async () => {
+    const state = makeState(new FakeDatabase());
+
+    // Hold a transaction open so every later operation must queue behind it.
+    const holder = Symbol("holder");
+    await state.beginTransaction(holder);
+
+    const order: string[] = [];
+    const q1 = state.executeQuery(rawQuery("select 1"), Symbol("q1")).then(() => {
+      order.push("q1");
+    });
+    const t2 = Symbol("t2");
+    const txn2 = state.beginTransaction(t2).then(async () => {
+      order.push("t2");
+      await state.commitTransaction(t2);
+    });
+    const q3 = state.executeQuery(rawQuery("select 1"), Symbol("q3")).then(() => {
+      order.push("q3");
+    });
+
+    await Promise.resolve();
+    expect(state.queuedWaiterCount).toBe(3); // all three parked behind the held txn
+
+    const resumesBefore = state.resumeCount;
+    // Releasing the holder runs exactly one #pump. It admits only q1 (the head
+    // query); t2 (a transaction) is then blocked by q1's now-active query, and q3
+    // is behind t2 in FIFO — so neither is woken. The old broadcast #notifyWaiters
+    // resolved all three every time, forcing t2 and q3 to re-park.
+    await state.commitTransaction(holder);
+    await Promise.resolve();
+    expect(state.resumeCount - resumesBefore).toBe(1);
+    expect(state.queuedWaiterCount).toBe(2);
+
+    await withTimeout(Promise.all([q1, txn2, q3]), 1000);
+    // FIFO: q1 (queued before t2) beats the transaction; q3 (queued after t2) runs
+    // after it — an earlier query is not starved by a later transaction, and a
+    // transaction is not starved by a later query.
+    expect(order).toEqual(["q1", "t2", "q3"]);
+  });
+
+  test("an earlier-queued query is not starved by a sustained later transaction stream", async () => {
+    const state = makeState(new FakeDatabase());
+
+    const holder = Symbol("holder");
+    await state.beginTransaction(holder);
+
+    const order: string[] = [];
+    const qEarly = state.executeQuery(rawQuery("select 1"), Symbol("qEarly")).then(() => {
+      order.push("qEarly");
+    });
+    // Three transactions queued AFTER qEarly — a sustained transaction stream.
+    const txns = [Symbol("tA"), Symbol("tB"), Symbol("tC")].map((owner, index) =>
+      state.beginTransaction(owner).then(async () => {
+        order.push(`t${index}`);
+        await state.commitTransaction(owner);
+      }),
+    );
+
+    await Promise.resolve();
+    await state.commitTransaction(holder);
+
+    await withTimeout(Promise.all([qEarly, ...txns]), 2000);
+    // qEarly was queued first, so despite three later transactions it admits
+    // before any of them — the transaction preference is bounded by FIFO order,
+    // not unbounded as it was when a query yielded to every pending transaction.
+    expect(order[0]).toBe("qEarly");
+  });
+
+  test("a transaction queued before a query still runs first (bounded transaction preference preserved)", async () => {
+    const state = makeState(new FakeDatabase());
+
+    const holder = Symbol("holder");
+    await state.beginTransaction(holder);
+
+    const order: string[] = [];
+    const tEarly = Symbol("tEarly");
+    const txnEarly = state.beginTransaction(tEarly).then(async () => {
+      order.push("tEarly");
+      await state.commitTransaction(tEarly);
+    });
+    const qLate = state.executeQuery(rawQuery("select 1"), Symbol("qLate")).then(() => {
+      order.push("qLate");
+    });
+
+    await Promise.resolve();
+    await state.commitTransaction(holder);
+
+    await withTimeout(Promise.all([txnEarly, qLate]), 1000);
+    expect(order).toEqual(["tEarly", "qLate"]);
   });
 });

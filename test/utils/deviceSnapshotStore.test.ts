@@ -200,4 +200,52 @@ describe("DeviceSnapshotStore", () => {
     const size = await store.getSnapshotSizeBytes(snapshotName);
     expect(size).toBe(5);
   });
+
+  describe("getDirectorySize / listSubdirectoryNames (#6490)", () => {
+    it("distinguishes a missing directory (null) from an empty one (0)", async () => {
+      const emptyDir = path.join(testBasePath, "empty");
+      await fs.mkdir(emptyDir, { recursive: true });
+
+      expect(await store.getDirectorySize(emptyDir)).toBe(0);
+      expect(await store.getDirectorySize(path.join(testBasePath, "does-not-exist"))).toBeNull();
+    });
+
+    it("measures an arbitrary directory recursively, so an in-AVD payload can be sized", async () => {
+      // Shaped like ~/.android/avd/<avd>.avd/snapshots/<name>.
+      const snapshotDir = path.join(testBasePath, "fake-avd.avd", "snapshots", "snap");
+      await fs.mkdir(path.join(snapshotDir, "nested"), { recursive: true });
+      await fs.writeFile(path.join(snapshotDir, "ram.bin"), "0123456789");
+      await fs.writeFile(path.join(snapshotDir, "nested", "textures.bin"), "abc");
+
+      expect(await store.getDirectorySize(snapshotDir)).toBe(13);
+    });
+
+    it("lists only subdirectories, and reports null for a missing directory", async () => {
+      const snapshotsRoot = path.join(testBasePath, "snapshots-root");
+      await fs.mkdir(path.join(snapshotsRoot, "default_boot"), { recursive: true });
+      await fs.mkdir(path.join(snapshotsRoot, "sweepSnap"), { recursive: true });
+      await fs.writeFile(path.join(snapshotsRoot, "not-a-dir.txt"), "x");
+
+      expect((await store.listSubdirectoryNames(snapshotsRoot))?.sort()).toEqual([
+        "default_boot",
+        "sweepSnap",
+      ]);
+      expect(await store.listSubdirectoryNames(path.join(testBasePath, "nope"))).toBeNull();
+    });
+
+    it("lists only files, so a relocated AVD's `<name>.ini` registry is visible", async () => {
+      // Shaped like ~/.android/avd: one conventional AVD directory next to the
+      // registry file a relocated AVD leaves behind (#6490 review).
+      const avdHome = path.join(testBasePath, "avd-home");
+      await fs.mkdir(path.join(avdHome, "am-api34.avd"), { recursive: true });
+      await fs.writeFile(path.join(avdHome, "am-api34.ini"), "path=/x");
+      await fs.writeFile(path.join(avdHome, "am-relocated.ini"), "path=/y");
+
+      expect((await store.listFileNames(avdHome))?.sort()).toEqual([
+        "am-api34.ini",
+        "am-relocated.ini",
+      ]);
+      expect(await store.listFileNames(path.join(testBasePath, "nope"))).toBeNull();
+    });
+  });
 });

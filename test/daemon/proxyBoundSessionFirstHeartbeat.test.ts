@@ -8,7 +8,7 @@ import {
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/server/sessionReleaseBroadcast";
-import { DAEMON_VERSION } from "../../src/daemon/constants";
+import { DAEMON_VERSION, HEARTBEAT_SESSION_LIVENESS_POLICY } from "../../src/daemon/constants";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -363,7 +363,10 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
         (call) => call.method === "daemon/heartbeat",
       );
       expect(heartbeats).toEqual([
-        { method: "daemon/heartbeat", params: { sessionId: BOUND_SESSION } },
+        {
+          method: "daemon/heartbeat",
+          params: { sessionId: BOUND_SESSION, livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY },
+        },
       ]);
     } finally {
       isAvailableSpy.mockRestore();
@@ -509,7 +512,10 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
       // Exactly one on the fresh transport: the reconnect coalesces with the
       // in-flight keeper tick instead of adding an establishment heartbeat.
       expect(freshHeartbeats).toEqual([
-        { method: "daemon/heartbeat", params: { sessionId: BOUND_SESSION } },
+        {
+          method: "daemon/heartbeat",
+          params: { sessionId: BOUND_SESSION, livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY },
+        },
       ]);
       expect(sessionManager.getSession(BOUND_SESSION)).not.toBeNull();
     } finally {

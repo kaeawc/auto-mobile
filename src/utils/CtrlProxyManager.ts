@@ -1,10 +1,13 @@
 import { errorMessage } from "./describeUnknownError";
+import { toActionableError } from "../models/ActionableError";
+import { isAndroidFrameworkUnavailable } from "./android-cmdline-tools/isAndroidFrameworkUnavailable";
 import {
   AdbClientFactory,
   defaultAdbClientFactory,
 } from "./android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "./android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "./logger";
+import { registerDeviceIncarnationListener } from "./deviceIncarnation";
 import * as fs from "fs/promises";
 import type { Dirent } from "fs";
 import * as path from "path";
@@ -225,6 +228,45 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
    */
   public static resetInstances(): void {
     AndroidCtrlProxyManager.instances.clear();
+  }
+
+  /**
+   * Evict a single device's manager instance. Mirrors
+   * `IOSCtrlProxyManager.evict` so both platforms share the same per-device
+   * teardown seam (issue #6580) — call this from device teardown/destroy so a
+   * deleted device does not retain a manager for the daemon's lifetime.
+   * `AndroidCtrlProxyManager` holds no `PortManager` reservation, so deleting
+   * the map entry is the entire eviction.
+   */
+  public static getExistingInstance(deviceId: string): AndroidCtrlProxyManager | undefined {
+    return AndroidCtrlProxyManager.instances.get(deviceId);
+  }
+
+  public static evictInstance(instance: AndroidCtrlProxyManager): void {
+    if (AndroidCtrlProxyManager.instances.get(instance.device.deviceId) === instance) {
+      AndroidCtrlProxyManager.instances.delete(instance.device.deviceId);
+    }
+  }
+
+  public static evict(deviceId: string, avdName?: string): void {
+    if (!avdName) {
+      AndroidCtrlProxyManager.instances.delete(deviceId);
+    }
+    if (avdName) {
+      // The stopped AVD inventory lacks an ADB serial. The manager retains
+      // the booted incarnation's name and runtime ID, including direct sessions.
+      for (const [runtimeId, manager] of AndroidCtrlProxyManager.instances) {
+        if (runtimeId.startsWith("emulator-") && manager.device.name === avdName) {
+          AndroidCtrlProxyManager.instances.delete(runtimeId);
+        }
+      }
+    }
+  }
+
+  /** Drop every serial-scoped readiness cache after a guest snapshot restore. */
+  public static invalidateForDeviceIncarnation(deviceId: string): void {
+    AndroidCtrlProxyManager.getExistingInstance(deviceId)?.resetSetupState();
+    AndroidCtrlProxyManager.evict(deviceId);
   }
 
   /**
@@ -732,6 +774,10 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         undefined,
         true,
       );
+      const diagnostic = `${result.stdout}\n${result.stderr}`;
+      if (isAndroidFrameworkUnavailable(diagnostic)) {
+        throw new ActionableError(diagnostic);
+      }
       const isInstalled = result.stdout.includes(AndroidCtrlProxyManager.PACKAGE);
 
       // Cache the result
@@ -745,6 +791,11 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       );
       return isInstalled;
     } catch (error) {
+      // Preserve boot failures for the readiness retry loop; false means that
+      // inspection completed without finding the installed runner.
+      if (isAndroidFrameworkUnavailable(error)) {
+        throw toActionableError(error, "Android framework unavailable");
+      }
       logger.warn(`[CTRL_PROXY] Error checking installation status: ${error}`);
       return false;
     }
@@ -772,6 +823,10 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       const result = await this.adb.executeCommand(
         "shell settings get secure enabled_accessibility_services",
       );
+      const diagnostic = `${result.stdout}\n${result.stderr}`;
+      if (isAndroidFrameworkUnavailable(diagnostic)) {
+        throw new ActionableError(diagnostic);
+      }
       const isEnabled = result.stdout.includes(AndroidCtrlProxyManager.PACKAGE);
 
       // Cache the result
@@ -785,6 +840,10 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       );
       return isEnabled;
     } catch (error) {
+      // A missing settings service during boot is not a disabled runner.
+      if (isAndroidFrameworkUnavailable(error)) {
+        throw toActionableError(error, "Android framework unavailable");
+      }
       logger.warn(`[CTRL_PROXY] Error checking enabled status: ${error}`);
       return false;
     }
@@ -2149,3 +2208,9 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     return Boolean(skipEnv && (skipEnv === "1" || skipEnv.toLowerCase() === "true"));
   }
 }
+
+registerDeviceIncarnationListener({
+  name: "ctrlproxy-manager",
+  onDeviceIncarnationChanged: (deviceId) =>
+    AndroidCtrlProxyManager.invalidateForDeviceIncarnation(deviceId),
+});

@@ -39,6 +39,17 @@ export const INTERNAL_MCP_REQUEST_TIMEOUT_PARAM = "__mcpRequestTimeoutMs";
 export const INTERNAL_EXECUTION_START_TIME_PARAM = "__executionStartTime";
 
 /**
+ * MCP session identity the daemon injects so a tool handler can autolock on
+ * behalf of the calling session. Exported here (rather than kept local to
+ * `server/index.ts`, where it originates) so it can take part in the canonical
+ * {@link INTERNAL_TOOL_PARAM_NAMES} list without an import cycle.
+ */
+export const INTERNAL_MCP_SESSION_PARAM = "__mcpSessionId";
+
+/** This execution's id, injected alongside {@link INTERNAL_EXECUTION_START_TIME_PARAM}. */
+export const INTERNAL_EXECUTION_ID_PARAM = "__executionId";
+
+/**
  * ABSOLUTE wall-clock deadline (on the same `defaultTimer` clock used
  * throughout `src/server/` and `src/features/`), computed at the instant the
  * daemon captured {@link INTERNAL_MCP_REQUEST_TIMEOUT_PARAM} in
@@ -298,6 +309,9 @@ export const DAEMON_TOOL_SELECTION_PROFILE_PARAM = "__autoMobileToolSelectionPro
  */
 export const DAEMON_BOUND_SESSION_PARAM = "__autoMobileBoundSessionUuid";
 
+/** Retained session capabilities restored on selector calls after a socket reconnect. */
+export const DAEMON_OWNED_SESSIONS_PARAM = "__autoMobileOwnedSessionUuids";
+
 /** Socket RPC field identifying a released session used only for inactive resource reads. */
 export const DAEMON_RELEASED_SESSION_PARAM = "__autoMobileReleasedSessionUuid";
 
@@ -311,6 +325,33 @@ export const DAEMON_RELEASED_SESSION_PARAM = "__autoMobileReleasedSessionUuid";
  * walk entirely. It is stripped before the tool runs (see `stripInternalToolParams`).
  */
 export const DAEMON_NON_FINITE_ENCODED_PARAM = "__autoMobileNonFiniteEncoded";
+
+/**
+ * Every internal argument name `server/index.ts` may inject into a tool call's
+ * params. This is the CANONICAL list: `stripInternalToolParams` strips exactly
+ * these before the tool runs, and a handler that re-parses its own public
+ * arguments against a `.strict()` schema (e.g. `provisionDevice`) must strip
+ * exactly these too. Keeping one list means adding a new internal param cannot
+ * silently break a strict-schema handler with an "Unrecognized key" ZodError,
+ * which is precisely how `__mcpLiveDeadlineKey` broke `provisionDevice` for
+ * every caller that sends a progress token.
+ */
+export const INTERNAL_TOOL_PARAM_NAMES = [
+  INTERNAL_MCP_SESSION_PARAM,
+  INTERNAL_EXECUTION_ID_PARAM,
+  INTERNAL_EXECUTION_START_TIME_PARAM,
+  INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
+  INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
+  INTERNAL_LIVE_DEADLINE_KEY_PARAM,
+  DAEMON_NON_FINITE_ENCODED_PARAM,
+] as const;
+
+/** Delete every {@link INTERNAL_TOOL_PARAM_NAMES} key from `params`, in place. */
+export function deleteInternalToolParams(params: Record<string, unknown>): void {
+  for (const name of INTERNAL_TOOL_PARAM_NAMES) {
+    delete params[name];
+  }
+}
 
 /** Loopback-only header for a released session's inactive resource-read capability. */
 export const DAEMON_RELEASED_SESSION_HEADER = "x-auto-mobile-released-session-uuid";
@@ -343,6 +384,79 @@ export const DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD = "daemon/subscribe-notificat
  * heartbeat-timeout and get it reaped (issue #6135).
  */
 export const DAEMON_HEARTBEAT_METHOD = "daemon/heartbeat";
+
+/**
+ * Optional `daemon/heartbeat` parameter value declaring that the heartbeating
+ * client is a one-shot `--cli` process (issue #6870).
+ *
+ * A `--cli` invocation is its own process: it connects, runs one tool, and
+ * exits, so it structurally cannot keep the 10 s heartbeat liveness contract
+ * between an agent's calls. Sending
+ * `{ sessionId, livenessPolicy: CLI_SESSION_LIVENESS_POLICY }` records the
+ * heartbeat AND moves the session onto the wall-clock CLI idle timeout
+ * (minutes, see `getCliSessionIdleTimeoutMs`). Sessions owned by long-lived
+ * stdio/HTTP MCP clients never send it and keep the strict contract.
+ */
+export const CLI_SESSION_LIVENESS_POLICY = "cli";
+
+/**
+ * Optional `daemon/heartbeat` parameter value declaring that the heartbeating
+ * client is a long-lived stdio/HTTP MCP proxy that CAN keep the strict 10 s
+ * contract (issue #6870 review).
+ *
+ * Adoption of {@link CLI_SESSION_LIVENESS_POLICY} is sticky: it widens the
+ * session's timeouts to the CLI idle window. If a long-lived proxy later owns
+ * that same session UUID, an unmarked heartbeat would only stamp
+ * `lastHeartbeat` and leave the minutes-long window in place, so the session
+ * would keep holding its device for the whole idle window after that client
+ * disconnects. Proxy heartbeats therefore declare `heartbeat` explicitly and
+ * the daemon restores the session's pre-adoption (strict) timeouts.
+ */
+export const HEARTBEAT_SESSION_LIVENESS_POLICY = "heartbeat";
+
+/**
+ * Default wall-clock idle timeout for a CLI-owned session (issue #6870).
+ *
+ * Ten minutes, deliberately measured in minutes rather than the 10 s heartbeat
+ * timeout: the gap between two `--cli` invocations is an agent reading the
+ * previous result and choosing the next call, which routinely exceeds 10 s.
+ * Each invocation refreshes the clock (activity and the CLI's own heartbeat
+ * both stamp `lastHeartbeat`), so only a genuinely abandoned session expires.
+ */
+export const DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS = 10 * 60 * 1000;
+
+/**
+ * Ceiling applied to a CLI idle timeout the daemon did not resolve itself
+ * (issue #6870 review).
+ *
+ * The `--cli` process sends its own resolved
+ * `AUTOMOBILE_CLI_SESSION_IDLE_TIMEOUT_MS` with the adoption request, because a
+ * CLI invocation reuses a running daemon and cannot otherwise change what that
+ * daemon's process environment resolved at startup. Since the value now comes
+ * off the wire, bound it: a client must not be able to pin a device for an
+ * unbounded stretch by declaring an absurd idle window.
+ */
+export const MAX_CLI_SESSION_IDLE_TIMEOUT_MS = 60 * 60 * 1000;
+
+/** The configured {@link DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS}, env-overridable. */
+export function getCliSessionIdleTimeoutMs(): number {
+  const rawValue =
+    process.env.AUTOMOBILE_CLI_SESSION_IDLE_TIMEOUT_MS ??
+    process.env.AUTO_MOBILE_CLI_SESSION_IDLE_TIMEOUT_MS;
+  const parsed = rawValue ? Number.parseInt(rawValue, 10) : NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS;
+}
+
+/**
+ * Validate a client-supplied CLI idle timeout, or return undefined when it is
+ * absent/unusable so the daemon falls back to its own resolution.
+ */
+export function sanitizeCliSessionIdleTimeoutMs(requestedMs: unknown): number | undefined {
+  if (typeof requestedMs !== "number" || !Number.isFinite(requestedMs) || requestedMs <= 0) {
+    return undefined;
+  }
+  return Math.min(Math.floor(requestedMs), MAX_CLI_SESSION_IDLE_TIMEOUT_MS);
+}
 
 /**
  * Control-socket method returning the current `deviceId (serial/UDID) ↔

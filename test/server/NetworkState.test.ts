@@ -278,9 +278,9 @@ describe("NetworkState", () => {
       state.onNetworkEvent(makeNotification());
       timer.advanceTime(200);
 
-      expect(notifier.notifications).toContain("automobile://network/traffic/live");
-      expect(notifier.notifications).toContain("automobile://network/stats");
-      expect(notifier.notifications).not.toContain("automobile://network/traffic/errors");
+      expect(notifier.notifications).toContain("automobile:network/traffic/live");
+      expect(notifier.notifications).toContain("automobile:network/stats");
+      expect(notifier.notifications).not.toContain("automobile:network/traffic/errors");
     });
 
     it("notifies errors resource on 4xx/5xx", () => {
@@ -288,7 +288,7 @@ describe("NetworkState", () => {
       state.onNetworkEvent(makeNotification({ statusCode: 500 }));
       timer.advanceTime(200);
 
-      expect(notifier.notifications).toContain("automobile://network/traffic/errors");
+      expect(notifier.notifications).toContain("automobile:network/traffic/errors");
     });
 
     it("filters to errors only", () => {
@@ -329,7 +329,7 @@ describe("NetworkState", () => {
       state.onNetworkEvent(makeNotification({ durationMs: 1500 }));
       timer.advanceTime(200);
 
-      expect(notifier.notifications).toContain("automobile://network/traffic/slow");
+      expect(notifier.notifications).toContain("automobile:network/traffic/slow");
     });
 
     it("does not notify slow resource on fast request", () => {
@@ -339,7 +339,7 @@ describe("NetworkState", () => {
       state.onNetworkEvent(makeNotification({ durationMs: 100 }));
       timer.advanceTime(200);
 
-      expect(notifier.notifications).not.toContain("automobile://network/traffic/slow");
+      expect(notifier.notifications).not.toContain("automobile:network/traffic/slow");
     });
 
     it("debounces rapid notifications", () => {
@@ -356,8 +356,8 @@ describe("NetworkState", () => {
       timer.advanceTime(100);
 
       // Should only fire one batch of notifications
-      expect(notifier.notifications).toContain("automobile://network/traffic/live");
-      expect(notifier.notifications).toContain("automobile://network/stats");
+      expect(notifier.notifications).toContain("automobile:network/traffic/live");
+      expect(notifier.notifications).toContain("automobile:network/stats");
     });
   });
 

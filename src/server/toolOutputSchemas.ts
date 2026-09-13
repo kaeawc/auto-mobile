@@ -143,39 +143,6 @@ const screenIdentitySchema = z
   })
   .passthrough();
 
-// `.passthrough()` — action tools default their embedded observation to the
-// compact `skeleton` (issue #5872) and carry the raw `viewHierarchy` under
-// raw/project:"full"; both flow through without an explicit field here (the
-// schemas they'd reference are declared later in this module).
-//
-// This is one arm of the `observation` discriminated union documented on
-// `observationOutputSchema` further down this module (issue #6221 item 4): the
-// FULL-object arm, identified by the ABSENCE of `isDiff` (the diff arm,
-// `observeDiffSchema`, always carries `isDiff: true`). A consumer branches on
-// `"isDiff" in observation && observation.isDiff === true`.
-//
-// `isDiff: z.literal(false).optional()` (PR #6242 review PRRT_kwDOP-GF5M6fq3iN)
-// makes this arm GENUINELY reject a diff-shaped object rather than silently
-// accepting it via `.passthrough()`: every OTHER field here is optional, so
-// without this an invalid diff (e.g. `{isDiff: true, added: [], removed: [],
-// changed: []}` missing the mandatory `skeleton`) would fail `observeDiffSchema`
-// and then fall through to match this permissive arm anyway. `isDiff` is a
-// genuinely-typed member of this schema, so a real `isDiff: true` payload now
-// fails HERE too — the union as a whole rejects the malformed diff instead of
-// silently accepting it under the wrong arm. The server itself never emits
-// `isDiff: false` explicitly (absence is the real-world full-observation
-// shape); the literal exists purely to close this validation gap.
-export const observationSummarySchema = z
-  .object({
-    isDiff: z.literal(false).optional(),
-    selectedElements: z.array(selectedElementSchema).optional(),
-    focusedElement: elementSchema.optional(),
-    accessibilityFocusedElement: elementSchema.optional(),
-    activeWindow: activeWindowSchema.optional(),
-    screenIdentity: screenIdentitySchema.optional(),
-  })
-  .passthrough();
-
 const observationDiffScreenIdentitySchema = z
   .object({
     activeWindow: activeWindowSchema.optional(),
@@ -510,6 +477,64 @@ export const viewHierarchyResultSchema = z
     "accessibility-focused-element": viewHierarchyNodeSchema.optional(),
     systemInsets: systemInsetsSchema.optional(),
     insets: observationInsetsSchema.optional(),
+    truncationReasons: z
+      .array(z.string())
+      .optional()
+      .describe(
+        "Why the captured hierarchy is incomplete (issue #6601). Present only " +
+          "when rows were dropped — a device-side stop (max_nodes, max_depth) or " +
+          "the per-node child cap (max_children[<node> kept N of M]). This is the " +
+          "nested location `sanitizeObserveResult` leaves the warning under " +
+          '`project:"full"` or `raw:true`; the skeleton projection instead lifts ' +
+          "the same information to the top-level `truncationReasons` field.",
+      ),
+  })
+  .passthrough();
+
+// This is one arm of the `observation` discriminated union documented on
+// `observationOutputSchema` further down this module (issue #6221 item 4): the
+// FULL-object arm, identified by the ABSENCE of `isDiff` (the diff arm,
+// `observeDiffSchema`, always carries `isDiff: true`). A consumer branches on
+// `"isDiff" in observation && observation.isDiff === true`.
+//
+// `isDiff: z.literal(false).optional()` (PR #6242 review PRRT_kwDOP-GF5M6fq3iN)
+// makes this arm GENUINELY reject a diff-shaped object rather than silently
+// accepting it via `.passthrough()`: every OTHER field here is optional, so
+// without this an invalid diff (e.g. `{isDiff: true, added: [], removed: [],
+// changed: []}` missing the mandatory `skeleton`) would fail `observeDiffSchema`
+// and then fall through to match this permissive arm anyway. `isDiff` is a
+// genuinely-typed member of this schema, so a real `isDiff: true` payload now
+// fails HERE too — the union as a whole rejects the malformed diff instead of
+// silently accepting it under the wrong arm. The server itself never emits
+// `isDiff: false` explicitly (absence is the real-world full-observation
+// shape); the literal exists purely to close this validation gap.
+export const observationSummarySchema = z
+  .object({
+    isDiff: z.literal(false).optional(),
+    selectedElements: z.array(selectedElementSchema).optional(),
+    focusedElement: elementSchema.optional(),
+    accessibilityFocusedElement: elementSchema.optional(),
+    activeWindow: activeWindowSchema.optional(),
+    screenIdentity: screenIdentitySchema.optional(),
+    // Full/raw action projections place the raw ObserveResult (the observe tool's shape) under `.observation`.
+    viewHierarchy: viewHierarchyResultSchema.optional(),
+    truncationReasons: z
+      .array(z.string())
+      .optional()
+      .describe(
+        "Why the captured hierarchy is incomplete (issue #6601) — the same field " +
+          "a diffed observation carries, so a client reads it the same way in both " +
+          "modes. Present only when rows were dropped: a device-side stop " +
+          "(max_nodes, max_depth) or the per-node child cap (max_children[<node> " +
+          "kept N of M]). When present, `skeleton`/`context` are a subset of the " +
+          "screen.",
+      ),
+    settled: z
+      .boolean()
+      .optional()
+      .describe(
+        "Whether this observation passed the hierarchy-stability gate (issue #6866): two consecutive structurally-equal captures. `false` means the bound expired, the action was not navigation-class, or the action failed — in every case the capture was never confirmed stable. Stamped on every embedded action observation.",
+      ),
   })
   .passthrough();
 
@@ -690,6 +715,7 @@ export const observeDiffNodeChangeSchema = z
  */
 export const observeDiffSchema = z
   .object({
+    keyboard: z.object({ visible: z.literal(true), package: z.string() }).optional(),
     isDiff: z.literal(true),
     skeleton: z
       .array(skeletonElementSchema)
@@ -724,6 +750,26 @@ export const observeDiffSchema = z
           "client no single accessor for 'is this capture fresh' across full and " +
           "diff modes. Populated from the post-transition observation, not by " +
           "`diffObserveResult` itself.",
+      ),
+    truncationReasons: z
+      .array(z.string())
+      .optional()
+      .describe(
+        "Why the captured hierarchy is incomplete (issue #6601) — the same field " +
+          "a skeleton-projected full observation carries, so a client reads it the " +
+          "same way in both modes. Present only when rows were dropped: a " +
+          "device-side stop (max_nodes, max_depth) or the per-node child cap " +
+          "(max_children[<node> kept N of M]). When present, `skeleton`/`context` " +
+          "are a subset of the screen.",
+      ),
+    settled: z
+      .boolean()
+      .optional()
+      .describe(
+        "Same name/meaning as a full observation's `settled` (issue #6866): whether " +
+          "the observation this diff was computed from passed the hierarchy-stability " +
+          "gate. Populated from the post-action observation, not by `diffObserveResult` " +
+          "itself, so a diff-mode client has the same accessor as a full-mode one.",
       ),
     added: z.array(observeDiffNodeSchema),
     removed: z.array(observeDiffNodeSchema),
@@ -846,6 +892,7 @@ const perfSnapshotSchema = z.object({
 
 export const observeResultSchema = z
   .object({
+    keyboard: z.object({ visible: z.literal(true), package: z.string() }).optional(),
     screenSize: screenSizeSchema.optional(),
     systemInsets: systemInsetsSchema.optional(),
     insets: observationInsetsSchema.optional(),
@@ -857,6 +904,17 @@ export const observeResultSchema = z
       })
       .optional(),
     viewHierarchy: viewHierarchyResultSchema.optional(),
+    truncationReasons: z
+      .array(z.string())
+      .optional()
+      .describe(
+        "Why the captured hierarchy is incomplete (issue #6601), lifted out of " +
+          "`viewHierarchy` by the skeleton projection that removes it. Present only " +
+          "when rows were dropped — a device-side stop (max_nodes, max_depth) or the " +
+          "per-node child cap (max_children[<node> kept N of M]). When present, " +
+          "`skeleton`/`context` are a subset of the screen: an element missing from " +
+          "them is not evidence it is absent.",
+      ),
     skeleton: z.array(skeletonElementSchema).optional(),
     context: z
       .array(skeletonElementSchema)

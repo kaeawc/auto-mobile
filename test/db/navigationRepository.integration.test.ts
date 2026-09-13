@@ -1,4 +1,4 @@
-import { beforeEach, afterEach, describe, expect, test } from "bun:test";
+import { beforeEach, afterEach, describe, expect, spyOn, test } from "bun:test";
 import type { Kysely } from "kysely";
 import type { Database } from "../../src/db/types";
 import { NavigationRepository } from "../../src/db/navigationRepository";
@@ -364,6 +364,125 @@ describe("NavigationRepository", () => {
       const modals = await repo.getNodeModals(node.id);
       expect(modals).toEqual(["dialog_x", "dialog_y"]);
     });
+
+    test("wraps the delete+insert pair in a single transaction (issue #6656)", async () => {
+      await repo.getOrCreateApp("com.example.app");
+      const node = await repo.getOrCreateNode("com.example.app", "Home", 1000);
+      const transactionSpy = spyOn(db, "transaction");
+
+      await repo.setNodeModals(node.id, ["dialog_a"]);
+
+      expect(transactionSpy).toHaveBeenCalledTimes(1);
+    });
+
+    test("does not throw when called from within an existing transaction (issue #6656)", async () => {
+      await repo.getOrCreateApp("com.example.app");
+      const node = await repo.getOrCreateNode("com.example.app", "Home", 1000);
+
+      // Mirrors the db.isTransaction guard already in getOrCreateUIElement /
+      // linkUIElementsToEdge: a repo bound to a caller's open transaction must run
+      // the body directly rather than attempt a nested BEGIN.
+      await db.transaction().execute(async (trx) => {
+        await repo.withExecutor(trx).setNodeModals(node.id, ["dialog_a"]);
+      });
+
+      const modals = await repo.getNodeModals(node.id);
+      expect(modals).toEqual(["dialog_a"]);
+    });
+
+    test("N concurrent setNodeModals for the same node never reject and leave the stack fully intact (issue #6656)", async () => {
+      const N = 10;
+      await repo.getOrCreateApp("com.example.app");
+      const node = await repo.getOrCreateNode("com.example.app", "Home", 1000);
+
+      // Without the delete+insert pair wrapped in a transaction, concurrent callers
+      // can interleave DELETE/DELETE/INSERT/INSERT and hit the UNIQUE(node_id,
+      // stack_level) constraint on the second INSERT, rejecting the whole call.
+      await expect(
+        Promise.all(
+          Array.from({ length: N }, () => repo.setNodeModals(node.id, ["dialog_a", "dialog_b"])),
+        ),
+      ).resolves.toBeDefined();
+
+      const modals = await repo.getNodeModals(node.id);
+      expect(modals).toEqual(["dialog_a", "dialog_b"]);
+    });
+  });
+
+  describe("setEdgeModals / getEdgeModals", () => {
+    test("sets and retrieves modal stack for an edge position", async () => {
+      await repo.getOrCreateApp("com.example.app");
+      const edge = await repo.createEdge("com.example.app", "A", "B", "tapOn", null, 1000);
+
+      await repo.setEdgeModals(edge.id, "from", ["dialog_a", "dialog_b"]);
+
+      const modals = await repo.getEdgeModals(edge.id, "from");
+      expect(modals).toEqual(["dialog_a", "dialog_b"]);
+    });
+
+    test("replaces modal stack on second set", async () => {
+      await repo.getOrCreateApp("com.example.app");
+      const edge = await repo.createEdge("com.example.app", "A", "B", "tapOn", null, 1000);
+
+      await repo.setEdgeModals(edge.id, "from", ["dialog_a"]);
+      await repo.setEdgeModals(edge.id, "from", ["dialog_x", "dialog_y"]);
+
+      const modals = await repo.getEdgeModals(edge.id, "from");
+      expect(modals).toEqual(["dialog_x", "dialog_y"]);
+    });
+
+    test("from and to positions are independent", async () => {
+      await repo.getOrCreateApp("com.example.app");
+      const edge = await repo.createEdge("com.example.app", "A", "B", "tapOn", null, 1000);
+
+      await repo.setEdgeModals(edge.id, "from", ["dialog_from"]);
+      await repo.setEdgeModals(edge.id, "to", ["dialog_to"]);
+
+      expect(await repo.getEdgeModals(edge.id, "from")).toEqual(["dialog_from"]);
+      expect(await repo.getEdgeModals(edge.id, "to")).toEqual(["dialog_to"]);
+    });
+
+    test("wraps the delete+insert pair in a single transaction (issue #6656)", async () => {
+      await repo.getOrCreateApp("com.example.app");
+      const edge = await repo.createEdge("com.example.app", "A", "B", "tapOn", null, 1000);
+      const transactionSpy = spyOn(db, "transaction");
+
+      await repo.setEdgeModals(edge.id, "from", ["dialog_a"]);
+
+      expect(transactionSpy).toHaveBeenCalledTimes(1);
+    });
+
+    test("does not throw when called from within an existing transaction (issue #6656)", async () => {
+      await repo.getOrCreateApp("com.example.app");
+      const edge = await repo.createEdge("com.example.app", "A", "B", "tapOn", null, 1000);
+
+      await db.transaction().execute(async (trx) => {
+        await repo.withExecutor(trx).setEdgeModals(edge.id, "from", ["dialog_a"]);
+      });
+
+      const modals = await repo.getEdgeModals(edge.id, "from");
+      expect(modals).toEqual(["dialog_a"]);
+    });
+
+    test("N concurrent setEdgeModals for the same edge+position never reject and leave the stack fully intact (issue #6656)", async () => {
+      const N = 10;
+      await repo.getOrCreateApp("com.example.app");
+      const edge = await repo.createEdge("com.example.app", "A", "B", "tapOn", null, 1000);
+
+      // Without the delete+insert pair wrapped in a transaction, concurrent callers
+      // can interleave DELETE/DELETE/INSERT/INSERT and hit the UNIQUE(edge_id,
+      // position, stack_level) constraint on the second INSERT, rejecting the call.
+      await expect(
+        Promise.all(
+          Array.from({ length: N }, () =>
+            repo.setEdgeModals(edge.id, "from", ["dialog_a", "dialog_b"]),
+          ),
+        ),
+      ).resolves.toBeDefined();
+
+      const modals = await repo.getEdgeModals(edge.id, "from");
+      expect(modals).toEqual(["dialog_a", "dialog_b"]);
+    });
   });
 
   describe("setScrollPosition / getScrollPosition", () => {
@@ -399,6 +518,67 @@ describe("NavigationRepository", () => {
 
       const scroll = await repo.getScrollPosition(edge.id);
       expect(scroll!.swipeCount).toBe(0);
+    });
+
+    test("wraps the delete+insert pair in a single transaction (issue #6656)", async () => {
+      await repo.getOrCreateApp("com.example.app");
+      const edge = await repo.createEdge("com.example.app", "A", "B", "swipeOn", null, 1000);
+      const target = await repo.getOrCreateUIElement(
+        "com.example.app",
+        { text: "Target", resourceId: "target_elem" },
+        1000,
+      );
+      const transactionSpy = spyOn(db, "transaction");
+
+      await repo.setScrollPosition(edge.id, target.id, "down");
+
+      expect(transactionSpy).toHaveBeenCalledTimes(1);
+    });
+
+    test("does not throw when called from within an existing transaction (issue #6656)", async () => {
+      await repo.getOrCreateApp("com.example.app");
+      const edge = await repo.createEdge("com.example.app", "A", "B", "swipeOn", null, 1000);
+      const target = await repo.getOrCreateUIElement(
+        "com.example.app",
+        { text: "Target", resourceId: "target_elem" },
+        1000,
+      );
+
+      await db.transaction().execute(async (trx) => {
+        await repo.withExecutor(trx).setScrollPosition(edge.id, target.id, "down");
+      });
+
+      const scroll = await repo.getScrollPosition(edge.id);
+      expect(scroll!.targetElement.id).toBe(target.id);
+    });
+
+    test("N concurrent setScrollPosition for the same edge never reject and leave one row intact (issue #6656)", async () => {
+      const N = 10;
+      await repo.getOrCreateApp("com.example.app");
+      const edge = await repo.createEdge("com.example.app", "A", "B", "swipeOn", null, 1000);
+      const target = await repo.getOrCreateUIElement(
+        "com.example.app",
+        { text: "Target", resourceId: "target_elem" },
+        1000,
+      );
+
+      // Without the delete+insert pair wrapped in a transaction, concurrent callers
+      // can interleave DELETE/DELETE/INSERT/INSERT and hit the PRIMARY KEY(edge_id)
+      // constraint on the second INSERT, rejecting the call outright.
+      await expect(
+        Promise.all(
+          Array.from({ length: N }, () =>
+            repo.setScrollPosition(edge.id, target.id, "down", undefined, "slow", 3),
+          ),
+        ),
+      ).resolves.toBeDefined();
+
+      const scroll = await repo.getScrollPosition(edge.id);
+      expect(scroll).toBeDefined();
+      expect(scroll!.direction).toBe("down");
+      expect(scroll!.speed).toBe("slow");
+      expect(scroll!.swipeCount).toBe(3);
+      expect(scroll!.targetElement.id).toBe(target.id);
     });
   });
 

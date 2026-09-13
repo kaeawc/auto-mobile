@@ -55,13 +55,14 @@ describe("DisplayConfig parsers", () => {
   test("parseFontScale handles default, unset, and malformed", () => {
     expect(parseFontScale("1.3\n")).toBe(1.3);
     expect(parseFontScale("null")).toBe(1.0);
-    expect(parseFontScale("")).toBe(1.0);
+    expect(parseFontScale("")).toBeUndefined();
+    expect(parseFontScale("1.2e0")).toBe(1.2);
     expect(parseFontScale("garbage")).toBeUndefined();
   });
 
   test("parseFontScaleSnapshot preserves unset separately from explicit 1", () => {
     expect(parseFontScaleSnapshot("null")).toBe("default");
-    expect(parseFontScaleSnapshot("")).toBe("default");
+    expect(parseFontScaleSnapshot("")).toBeUndefined();
     expect(parseFontScaleSnapshot("1.0")).toBe(1.0);
   });
 
@@ -96,6 +97,49 @@ describe("DisplayConfig parsers", () => {
 });
 
 describe("DisplayConfig getConfig", () => {
+  test.each(["1.2garbage", "1.2.3", "1e", "Infinity", "-1", "", "  ", "0x1", "0b1"])(
+    "rejects malformed font baseline %s before mutation",
+    async (fontScale) => {
+      const adbFactory = new FakeAdbClientFactory();
+      seedReads(adbFactory, { fontScale });
+      const result = await new DisplayConfig(androidEmulator, { adbFactory }).setConfig({
+        fontScale: 2,
+      });
+      expect(result.success).toBe(false);
+      expect(result.previous).toBeUndefined();
+      expect(
+        adbFactory
+          .getFakeClient()
+          .getCommandCalls()
+          .some((call) => call.command.includes("settings put")),
+      ).toBe(false);
+    },
+  );
+
+  test.each(["440junk", "440.5", "0", "-440"])(
+    "rejects malformed density baseline %s",
+    async (density) => {
+      const adbFactory = new FakeAdbClientFactory();
+      seedReads(adbFactory, { density: `Physical density: 440\nOverride density: ${density}\n` });
+      const result = await new DisplayConfig(androidEmulator, { adbFactory }).getConfig();
+      expect(result.success).toBe(false);
+      expect(result.current).toBeUndefined();
+    },
+  );
+
+  test.each([{ fontScale: "default" as const }, { reset: true }])(
+    "does not confirm font reset while an explicit scale of one remains",
+    async (input) => {
+      const adbFactory = new FakeAdbClientFactory();
+      seedReads(adbFactory, { fontScale: "1.0\n" });
+      const result = await new DisplayConfig(androidEmulator, { adbFactory }).setConfig(input);
+      expect(result.success).toBe(false);
+      expect(result.previous?.fontScale).toBe(1);
+      expect(result.applied?.fontScale).toBe(1);
+      expect(result.error).toContain("Font scale remained");
+    },
+  );
+
   test("reads font scale, effective density, and theme", async () => {
     const adbFactory = new FakeAdbClientFactory();
     seedReads(adbFactory, {
@@ -335,7 +379,7 @@ describe("DisplayConfig setConfig", () => {
 
   test("reset restores font scale, density, and theme to defaults", async () => {
     const adbFactory = new FakeAdbClientFactory();
-    seedReads(adbFactory);
+    seedReads(adbFactory, { fontScale: "null\n" });
 
     const result = await new DisplayConfig(androidEmulator, { adbFactory }).setConfig({
       reset: true,

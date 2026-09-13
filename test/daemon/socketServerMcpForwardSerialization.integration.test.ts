@@ -637,7 +637,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
       });
       const sessionlessCall = await client.request("tools/call", {
         name: "videoRecording",
-        arguments: { action: "stop", recordingId: "recording-1", deviceId: "device-a" },
+        arguments: { action: "stop", recordingId: "recording-1" },
       });
       const navigationGraph = await client.request("ide/getNavigationGraph", {
         deviceId: "device-a",
@@ -739,7 +739,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
       // queued behind socket A's op (same executionKey device:device-a).
       const queuedCall = socketB.request("tools/call", {
         name: "videoRecording",
-        arguments: { action: "stop", recordingId: "recording-1", deviceId: "device-a" },
+        arguments: { action: "stop", recordingId: "recording-1" },
       });
       // Let socket B read the frame and compute its initial (bound) route while
       // the binding still exists.
@@ -756,6 +756,9 @@ describe("UnixSocketServer MCP forward serialization", () => {
       ).boundMcpClientKeysBySocketSession;
       const socketSessionId = boundClientKeysBySocketSession.keys().next().value as string;
       expect(socketSessionId).toBeDefined();
+      // Disconnect drops the transport binding, while the pool still owns the
+      // live session. Keep its device scope so this exercises client retention.
+      mcpAutolockSessions.set(socketSessionId, "session-a");
       (
         server as unknown as {
           clearBoundMcpClientKey(socketSessionId: string): void;
@@ -856,7 +859,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
       // queued behind socket A's op (same executionKey device:device-a).
       const queuedCall = socketB.request("tools/call", {
         name: "videoRecording",
-        arguments: { action: "stop", recordingId: "recording-1", deviceId: "device-a" },
+        arguments: { action: "stop", recordingId: "recording-1" },
       });
       // Let socket B read the frame and compute its initial (bound) route while
       // session-a is still active.
@@ -876,8 +879,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
       const queued = forwardedCalls.find((call) => call.toolName === "videoRecording");
       expect(queued).toBeDefined();
       // The released session must NOT be replayed: the call re-resolves to the
-      // shared unbound client socket A created for device:device-a (created with
-      // undefined), never B's session-a bound client.
+      // unbound client (created with undefined), never B's session-a bound client.
       expect(queued?.createdWith).toBeUndefined();
     } finally {
       releaseBlocker();

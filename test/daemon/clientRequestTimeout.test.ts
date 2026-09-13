@@ -4,10 +4,13 @@ import { DaemonClient } from "../../src/daemon/client";
 import { McpTimeoutError } from "../../src/daemon/McpTimeoutError";
 import {
   DEFAULT_MCP_REQUEST_TIMEOUT_MS,
-  MIN_START_DEVICE_MCP_TIMEOUT_MS,
   MIN_UNINSTALL_APP_MCP_TIMEOUT_MS,
   MAX_PROGRESS_EXTENDED_MCP_REQUEST_TIMEOUT_MS,
 } from "../../src/daemon/mcpRequestTimeout";
+import {
+  DEFAULT_START_DEVICE_TIMEOUT_MS,
+  START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
+} from "../../src/utils/deviceTimeouts";
 import { PROGRESS_NOTIFICATION_METHOD } from "../../src/daemon/types";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -34,11 +37,12 @@ describe("DaemonClient per-request timeout", () => {
     fakeTimer = new FakeTimer();
   });
 
-  test("startDevice uses MIN_START_DEVICE_MCP_TIMEOUT_MS", async () => {
+  test("startDevice allows the full default acquisition budget plus response overhead", async () => {
     const client = createConnectedClient(fakeTimer);
+    const timeoutMs = DEFAULT_START_DEVICE_TIMEOUT_MS + START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS;
 
     const promise = client.callTool("startDevice", {});
-    fakeTimer.advanceTime(MIN_START_DEVICE_MCP_TIMEOUT_MS);
+    fakeTimer.advanceTime(timeoutMs);
 
     try {
       await promise;
@@ -47,7 +51,7 @@ describe("DaemonClient per-request timeout", () => {
       expect(err).toBeInstanceOf(McpTimeoutError);
       const timeoutErr = err as McpTimeoutError;
       expect(timeoutErr.toolName).toBe("startDevice");
-      expect(timeoutErr.timeoutMs).toBe(MIN_START_DEVICE_MCP_TIMEOUT_MS);
+      expect(timeoutErr.timeoutMs).toBe(timeoutMs);
       expect(timeoutErr.origin).toBe("DaemonClient.sendRequest");
     } finally {
       await client.close();
@@ -137,10 +141,12 @@ describe("DaemonClient per-request timeout", () => {
   });
 
   test("connectionTimeout overrides per-tool floor when larger", async () => {
-    const client = createConnectedClient(fakeTimer, 300_000);
+    const timeoutMs =
+      DEFAULT_START_DEVICE_TIMEOUT_MS + START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS + 60_000;
+    const client = createConnectedClient(fakeTimer, timeoutMs);
 
     const promise = client.callTool("startDevice", {});
-    fakeTimer.advanceTime(300_000);
+    fakeTimer.advanceTime(timeoutMs);
 
     try {
       await promise;
@@ -149,7 +155,7 @@ describe("DaemonClient per-request timeout", () => {
       expect(err).toBeInstanceOf(McpTimeoutError);
       const timeoutErr = err as McpTimeoutError;
       expect(timeoutErr.toolName).toBe("startDevice");
-      expect(timeoutErr.timeoutMs).toBe(300_000);
+      expect(timeoutErr.timeoutMs).toBe(timeoutMs);
     } finally {
       await client.close();
     }

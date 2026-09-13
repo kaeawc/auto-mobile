@@ -69,7 +69,10 @@ final class SdkHierarchyClientTests: XCTestCase {
     }
 
     func testIsAvailableReflectsHealth() async {
-        let available = StubHTTPTransport(status: 200, body: Data(#"{"status":"ok","bundleId":null,"capabilities":[]}"#.utf8))
+        let available = StubHTTPTransport(
+            status: 200,
+            body: Data(#"{"status":"ok","bundleId":null,"capabilities":[]}"#.utf8)
+        )
         let unavailable = StubHTTPTransport([.transportError])
         let okClient = await makeClient(unavailable, health: available).isAvailable()
         let downClient = await makeClient(available, health: unavailable).isAvailable()
@@ -106,7 +109,12 @@ final class SdkHierarchyClientTests: XCTestCase {
     func testSetNetworkErrorSimulationHitsPath() async {
         let stub = StubHTTPTransport(status: 200)
         let ok = await makeClient(stub)
-            .setNetworkErrorSimulation(NetworkErrorSimulationDTO(enabled: true, errorType: "timeout", limit: 1, expiresAtEpochMs: nil))
+            .setNetworkErrorSimulation(NetworkErrorSimulationDTO(
+                enabled: true,
+                errorType: "timeout",
+                limit: 1,
+                expiresAtEpochMs: nil
+            ))
         XCTAssertTrue(ok)
         XCTAssertEqual(stub.recordedRequests.first?.url?.path, "/network/error-simulation")
     }
@@ -119,29 +127,33 @@ final class SdkHierarchyClientTests: XCTestCase {
     // MARK: - addHighlight outcome classification
 
     func testAddHighlightRenderedOn200() async {
-        let outcome = await makeClient(StubHTTPTransport(status: 200)).addHighlight(id: "h", shape: Self.boxShape)
+        let outcome = await makeClient(StubHTTPTransport(status: 200)).addHighlight(id: "h", shape: Self.circleShape)
         XCTAssertEqual(outcome, .rendered)
     }
 
     func testAddHighlightRejectedOnNon200() async {
-        let outcome = await makeClient(StubHTTPTransport(status: 422)).addHighlight(id: "h", shape: Self.boxShape)
+        let outcome = await makeClient(StubHTTPTransport(status: 422)).addHighlight(id: "h", shape: Self.circleShape)
         XCTAssertEqual(outcome, .rejected)
     }
 
     func testAddHighlightUnavailableOnNonHTTP() async {
-        let outcome = await makeClient(StubHTTPTransport([.nonHTTPResponse])).addHighlight(id: "h", shape: Self.boxShape)
+        let outcome = await makeClient(StubHTTPTransport([.nonHTTPResponse])).addHighlight(
+            id: "h",
+            shape: Self.circleShape
+        )
         XCTAssertEqual(outcome, .unavailable)
     }
 
     func testAddHighlightUnavailableOnTransportError() async {
-        let outcome = await makeClient(StubHTTPTransport([.transportError])).addHighlight(id: "h", shape: Self.boxShape)
+        let outcome = await makeClient(StubHTTPTransport([.transportError])).addHighlight(
+            id: "h",
+            shape: Self.circleShape
+        )
         XCTAssertEqual(outcome, .unavailable)
     }
 
-    private static let boxShape = HighlightShape(
-        type: "box",
-        bounds: HighlightBounds(x: 0, y: 0, width: 10, height: 10),
-        points: nil,
-        style: nil
+    private static let circleShape = HighlightShape(
+        type: .circle,
+        bounds: HighlightBounds(x: 0, y: 0, width: 10, height: 10)
     )
 }

@@ -1,12 +1,18 @@
 import { describe, expect, test } from "bun:test";
 import type { BootedDevice } from "../../src/models";
 import {
+  RunnerReadinessError,
   RunnerReadinessService,
   SystemUiAnrRecoveryRequiredError,
+  type AndroidFrameworkReadinessResult,
   type ReadinessAndroidManager,
   type ReadinessClient,
   type ReadinessIosManager,
 } from "../../src/utils/RunnerReadinessService";
+import {
+  acquireDeviceReadinessLock,
+  deviceReadinessLockKey,
+} from "../../src/utils/deviceReadinessLock";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 const androidDevice = (deviceId = "emulator-5554"): BootedDevice => ({
@@ -155,7 +161,15 @@ class FakeIosManager implements ReadinessIosManager {
     await this.onForceRestart?.(options);
   }
 
-  resetSetupState(): void {}
+  resetSetupStateCalls = 0;
+  resetSetupStateCallOrder: number[] = [];
+  setupCallOrder: number[] = [];
+  private callSeq = 0;
+
+  resetSetupState(): void {
+    this.resetSetupStateCalls++;
+    this.resetSetupStateCallOrder.push(++this.callSeq);
+  }
 
   async setup(
     _force?: boolean,
@@ -164,6 +178,7 @@ class FakeIosManager implements ReadinessIosManager {
     minimumHealthPollDurationMs?: number,
   ) {
     this.setupCalls++;
+    this.setupCallOrder.push(++this.callSeq);
     this.setupSignal = signal;
     this.setupMinimumHealthPollDurationMs = minimumHealthPollDurationMs;
     if (this.onSetup) {
@@ -187,6 +202,11 @@ function createService(
     getIosClient?: (device: BootedDevice, port: number) => FakeReadinessClient;
     autoAdvance?: boolean;
     awaitIosStartupMaintenance?: () => Promise<void>;
+    getAndroidFrameworkReadiness?: (
+      device: BootedDevice,
+      signal: AbortSignal,
+      timeoutMs: number,
+    ) => Promise<AndroidFrameworkReadinessResult>;
     getAndroidRunnerConnectDiagnostic?: () => Promise<{
       deviceLock: { locked: boolean; keyguardShowing: boolean; secure?: boolean } | null;
       primaryUserStartState?: string;
@@ -209,6 +229,7 @@ function createService(
     iosClient,
     service: new RunnerReadinessService({
       timer,
+      getAndroidFrameworkReadiness: options.getAndroidFrameworkReadiness,
       getAndroidManager: () => androidManager,
       getAndroidClient: () => androidClient,
       getIosManager: () => iosManager,
@@ -294,6 +315,362 @@ function appScreenMimickingEnglishSystemUiAnr(): ViewHierarchyResult {
 }
 
 describe("RunnerReadinessService", () => {
+  test("does not let Android framework inspection block runner setup", async () => {
+    const inspectionStarted = Promise.withResolvers<void>();
+    const inspection = Promise.withResolvers<AndroidFrameworkReadinessResult>();
+    const androidClient = new FakeReadinessClient();
+    androidClient.connected = false;
+    const { service, androidManager } = createService({
+      androidClient,
+      getAndroidFrameworkReadiness: async () => {
+        inspectionStarted.resolve();
+        return inspection.promise;
+      },
+    });
+
+    await service.ensureReady({
+      device: androidDevice(),
+      requestedIdentity: "platform=android name=Pixel_9_Pro",
+      totalDeadlineMs: 30_000,
+      readinessTimeoutMs: 10_000,
+    });
+    await inspectionStarted.promise;
+    expect(androidManager.setupCalls).toBe(1);
+    inspection.resolve({ ready: true });
+  });
+
+  test.each(["throw", "reject"])("contains a diagnostic probe that %ss", async (failure) => {
+    const { service } = createService({
+      getAndroidFrameworkReadiness: () => {
+        const error = new Error("diagnostic unavailable");
+        if (failure === "throw") {
+          throw error;
+        }
+        return Promise.reject(error);
+      },
+    });
+    await service.ensureReady({
+      device: androidDevice(),
+      requestedIdentity: "android",
+      totalDeadlineMs: 30_000,
+      readinessTimeoutMs: 10_000,
+    });
+  });
+
+  test("settles owned diagnostic work before successive readiness calls return", async () => {
+    let active = 0;
+    const signals: AbortSignal[] = [];
+    const androidClient = new FakeReadinessClient();
+    androidClient.healthResults = [true, true];
+    const { service } = createService({
+      androidClient,
+      getAndroidFrameworkReadiness: async (_device, signal) => {
+        active++;
+        signals.push(signal);
+        try {
+          return await new Promise<AndroidFrameworkReadinessResult>((_resolve, reject) => {
+            signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+          });
+        } finally {
+          active--;
+        }
+      },
+    });
+    for (let i = 0; i < 2; i++) {
+      await service.ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "android",
+        totalDeadlineMs: 30_000,
+        readinessTimeoutMs: 10_000,
+      });
+      expect(active).toBe(0);
+      expect(signals[i]?.aborted).toBe(true);
+    }
+  });
+
+  test.each(["package", "settings"])(
+    "retries required setup when %s appears later",
+    async (resource) => {
+      const manager = new FakeAndroidManager();
+      let attempts = 0;
+      manager.ensureCompatibleVersion = async () => {
+        attempts++;
+        return attempts === 1
+          ? { status: "failed", error: `Can't find service: ${resource}` }
+          : { status: "compatible" };
+      };
+      const { service, timer } = createService({ androidManager: manager });
+      await service.ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "android",
+        totalDeadlineMs: 1_000,
+        readinessTimeoutMs: 500,
+      });
+      expect(attempts).toBe(2);
+      expect(timer.now()).toBe(250);
+    },
+  );
+
+  test("retries thrown framework setup failures and resets the setup gate", async () => {
+    const manager = new FakeAndroidManager();
+    manager.installed = false;
+    manager.setup = async () => {
+      manager.setupCalls++;
+      if (manager.setupCalls === 1) {
+        throw new Error("Can't find service: settings");
+      }
+      manager.installed = true;
+      return { success: true, message: "ready" };
+    };
+    const { service } = createService({ androidManager: manager });
+    await service.ensureReady({
+      device: androidDevice(),
+      requestedIdentity: "android",
+      totalDeadlineMs: 1_000,
+      readinessTimeoutMs: 500,
+    });
+    expect(manager.setupCalls).toBe(2);
+    expect(manager.resetSetupStateCalls).toBeGreaterThanOrEqual(2);
+  });
+
+  test("stops transient setup retries at the shared absolute deadline", async () => {
+    const manager = new FakeAndroidManager();
+    let attempts = 0;
+    manager.ensureCompatibleVersion = async () => {
+      attempts++;
+      throw new Error("Can't find service: package");
+    };
+    const { service, timer } = createService({ androidManager: manager });
+    await expect(
+      service.ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "android",
+        totalDeadlineMs: 600,
+        readinessTimeoutMs: 500,
+      }),
+    ).rejects.toThrow(/Can't find service: package/);
+    expect(attempts).toBe(3);
+    expect(timer.now()).toBe(600);
+  });
+
+  test.each(["package", "settings"])(
+    "retries missing %s with runner downloads disabled",
+    async (resource) => {
+      const manager = new FakeAndroidManager();
+      let reads = 0;
+      const read = async () => {
+        reads++;
+        if (reads === 1) {
+          throw new Error(`Can't find service: ${resource}`);
+        }
+        return true;
+      };
+      if (resource === "package") {
+        manager.isInstalled = read;
+      } else {
+        manager.isEnabled = read;
+      }
+      const { service } = createService({ androidManager: manager });
+      await service.ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "android",
+        totalDeadlineMs: 1_000,
+        readinessTimeoutMs: 500,
+        skipCtrlProxyDownload: true,
+      });
+      expect(reads).toBe(2);
+      expect(manager.setupCalls).toBe(0);
+    },
+  );
+
+  test("does not retry permanent setup errors because an optional probe is unready", async () => {
+    const manager = new FakeAndroidManager();
+    let attempts = 0;
+    manager.ensureCompatibleVersion = async () => {
+      attempts++;
+      return { status: "failed", error: "INSTALL_FAILED_INVALID_APK" };
+    };
+    const { service, timer } = createService({
+      androidManager: manager,
+      getAndroidFrameworkReadiness: async () => ({
+        ready: false,
+        unavailableResources: ["package"],
+      }),
+    });
+    await expect(
+      service.ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "android",
+        totalDeadlineMs: 30_000,
+        readinessTimeoutMs: 10_000,
+      }),
+    ).rejects.toThrow("INSTALL_FAILED_INVALID_APK");
+    expect(attempts).toBe(1);
+    expect(timer.now()).toBe(0);
+  });
+
+  test("classifies the setup failure without treating device names as diagnostics", async () => {
+    const manager = new FakeAndroidManager();
+    let attempts = 0;
+    manager.ensureCompatibleVersion = async () => {
+      attempts++;
+      return { status: "failed", error: "INSTALL_FAILED_INVALID_APK" };
+    };
+    const { service } = createService({ androidManager: manager });
+    await expect(
+      service.ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "Can't find service: package ",
+        totalDeadlineMs: 1_000,
+        readinessTimeoutMs: 500,
+      }),
+    ).rejects.toThrow("INSTALL_FAILED_INVALID_APK");
+    expect(attempts).toBe(1);
+  });
+
+  test("does not leave a sibling status read running across a framework retry", async () => {
+    const manager = new FakeAndroidManager();
+    let installationReads = 0;
+    let active = 0;
+    manager.isInstalled = async () => {
+      installationReads++;
+      if (installationReads === 1) {
+        throw new Error("Can't find service: package");
+      }
+      return true;
+    };
+    manager.isEnabled = async () => {
+      if (installationReads === 1) {
+        active++;
+        return new Promise<boolean>(() => {});
+      }
+      return true;
+    };
+    const { service } = createService({ androidManager: manager });
+    await service.ensureReady({
+      device: androidDevice(),
+      requestedIdentity: "android",
+      totalDeadlineMs: 1_000,
+      readinessTimeoutMs: 500,
+    });
+    expect(installationReads).toBe(2);
+    expect(active).toBe(0);
+  });
+
+  test.each(["failure", "cancellation"])(
+    "aborts diagnostic work when required readiness ends in %s",
+    async (outcome) => {
+      const controller = new AbortController();
+      let inspectionSignal: AbortSignal | undefined;
+      let settled = false;
+      const manager = new FakeAndroidManager();
+      manager.ensureCompatibleVersion = async () => {
+        if (outcome === "cancellation") {
+          controller.abort(new Error("caller cancelled"));
+        }
+        throw new Error("required setup failed");
+      };
+      const { service } = createService({
+        androidManager: manager,
+        getAndroidFrameworkReadiness: async (_device, signal) => {
+          inspectionSignal = signal;
+          try {
+            signal.throwIfAborted();
+            return await new Promise<AndroidFrameworkReadinessResult>((_resolve, reject) => {
+              signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+            });
+          } finally {
+            settled = true;
+          }
+        },
+      });
+      await expect(
+        service.ensureReady({
+          device: androidDevice(),
+          requestedIdentity: "android",
+          totalDeadlineMs: 30_000,
+          readinessTimeoutMs: 10_000,
+          signal: controller.signal,
+        }),
+      ).rejects.toThrow(outcome === "cancellation" ? "caller cancelled" : "required setup failed");
+      // Cancellation can prevent the deferred probe from starting at all.
+      if (inspectionSignal) {
+        expect(inspectionSignal.aborted).toBe(true);
+        expect(settled).toBe(true);
+      }
+    },
+  );
+
+  test("cancels a transient retry delay without starting another setup", async () => {
+    const timer = new FakeTimer();
+    const controller = new AbortController();
+    const manager = new FakeAndroidManager();
+    let attempts = 0;
+    manager.ensureCompatibleVersion = async () => {
+      attempts++;
+      throw new Error("Can't find service: package");
+    };
+    const { service } = createService({ timer, androidManager: manager, autoAdvance: false });
+    const ready = service.ensureReady({
+      device: androidDevice(),
+      requestedIdentity: "android",
+      totalDeadlineMs: 30_000,
+      readinessTimeoutMs: 10_000,
+      signal: controller.signal,
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    controller.abort(new Error("caller cancelled"));
+    await expect(ready).rejects.toThrow("caller cancelled");
+    expect(attempts).toBe(1);
+    expect(timer.now()).toBe(0);
+  });
+
+  test("does not let a permanent framework inspection failure prevent readiness", async () => {
+    const controller = new AbortController();
+    const { service } = createService({
+      getAndroidFrameworkReadiness: async () => ({
+        ready: false,
+        unavailableResources: ["package", "settings"],
+      }),
+    });
+
+    await expect(
+      service.ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "platform=android name=Pixel_9_Pro",
+        totalDeadlineMs: 30_000,
+        readinessTimeoutMs: 10_000,
+        signal: controller.signal,
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  test("propagates cancellation arriving while diagnostic work settles", async () => {
+    const controller = new AbortController();
+    const { service } = createService({
+      getAndroidFrameworkReadiness: async (_device, signal) =>
+        new Promise<AndroidFrameworkReadinessResult>((resolve) => {
+          signal.addEventListener(
+            "abort",
+            () => {
+              controller.abort(new Error("cancelled during diagnostic cleanup"));
+              resolve({ ready: true });
+            },
+            { once: true },
+          );
+        }),
+    });
+    await expect(
+      service.ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "android",
+        totalDeadlineMs: 30_000,
+        readinessTimeoutMs: 10_000,
+        signal: controller.signal,
+      }),
+    ).rejects.toThrow("cancelled during diagnostic cleanup");
+  });
+
   test("keeps an already-ready Android device on the fast path", async () => {
     const { service, androidManager, androidClient } = createService();
 
@@ -728,6 +1105,45 @@ describe("RunnerReadinessService", () => {
     expect(restartedClient.healthCalls).toBe(1);
   });
 
+  for (const skipCtrlProxyDownload of [false, true]) {
+    test(`uses the final iOS runner port after ${skipCtrlProxyDownload ? "cached start" : "setup"}`, async () => {
+      const iosManager = new FakeIosManager();
+      const staleClient = new FakeReadinessClient();
+      staleClient.connected = false;
+      // The stale port could belong to another healthy runner. Never probe it.
+      const readyClient = new FakeReadinessClient();
+      const requestedPorts: number[] = [];
+      const timer = new FakeTimer();
+      const reallocate = async () => {
+        timer.advanceTime(90_000);
+        iosManager.servicePort = 9_876;
+      };
+      iosManager.onSetup = reallocate;
+      iosManager.onStart = reallocate;
+      const { service } = createService({
+        timer,
+        iosManager,
+        getIosClient: (_device, port) => {
+          requestedPorts.push(port);
+          return port === 9_876 ? readyClient : staleClient;
+        },
+      });
+
+      await service.ensureReady({
+        device: iosDevice,
+        requestedIdentity: "platform=ios deviceId=IOS-UDID",
+        totalDeadlineMs: 180_000,
+        readinessTimeoutMs: 30_000,
+        skipCtrlProxyDownload,
+      });
+
+      expect(requestedPorts).toEqual([8_765, 9_876]);
+      expect(staleClient.connectionCalls).toBe(0);
+      expect(staleClient.healthCalls).toBe(0);
+      expect(readyClient.healthCalls).toBe(1);
+    });
+  }
+
   test("cancels the iOS force-restart when its readiness budget expires", async () => {
     const timer = new FakeTimer();
     const iosManager = new FakeIosManager();
@@ -756,6 +1172,32 @@ describe("RunnerReadinessService", () => {
     timer.advanceTime(1_000);
     await expect(ready).rejects.toThrow(/phase=runner-setup/);
     expect(iosManager.forceRestartOptions?.signal?.aborted).toBe(true);
+  });
+
+  // #6416: the disconnected branch of ensureIosReady called manager.setup()
+  // without first resetting the setup gate, unlike the connected branch
+  // (line ~613) and the Android path (RunnerReadinessService.ts:265). A prior
+  // readiness attempt can leave attemptedSetup latched with a stale positive
+  // cachedAvailability (or, post-#6416 fix, an isRunning() cache) so setup()
+  // reports "already running" against a runner that is actually gone.
+  test("resets the iOS setup gate before calling setup() on the disconnected branch", async () => {
+    const iosManager = new FakeIosManager();
+    const iosClient = new FakeReadinessClient();
+    iosClient.connected = false;
+    const { service } = createService({ iosManager, iosClient });
+
+    await service.ensureReady({
+      device: iosDevice,
+      requestedIdentity: "platform=ios deviceId=IOS-UDID",
+      totalDeadlineMs: 30_000,
+      readinessTimeoutMs: 30_000,
+    });
+
+    expect(iosManager.resetSetupStateCalls).toBe(1);
+    expect(iosManager.setupCalls).toBe(1);
+    expect(Math.min(...iosManager.resetSetupStateCallOrder)).toBeLessThan(
+      Math.min(...iosManager.setupCallOrder),
+    );
   });
 
   test("starts only the cached iOS runner when downloads are disabled", async () => {
@@ -1125,6 +1567,107 @@ describe("RunnerReadinessService", () => {
         readinessTimeoutMs: 1_000,
       }),
     ).rejects.not.toThrow(/runner did not become responsive/);
+  });
+
+  test("does not flag a terminal connect fault as a deadline exhaustion", async () => {
+    const client = new FakeReadinessClient();
+    client.connected = false;
+    client.connectionResults = [];
+    client.getLastConnectionFailureMessage = () =>
+      "Another AutoMobile process (PID 71579) owns CtrlProxy forwarding for emulator-5554.";
+    client.isLastConnectionFailureForwardingLeaseConflict = () => true;
+    const { service } = createService({ androidClient: client });
+
+    const error = await service
+      .ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "platform=android deviceId=emulator-5554",
+        totalDeadlineMs: 1_000,
+        readinessTimeoutMs: 1_000,
+      })
+      .catch((thrown: unknown) => thrown);
+
+    // The orphaned forwarding lease is a platform fault, not a slow device.
+    // It merely happens to be reported once the phase budget is spent, and
+    // provisionDevice maps `deadlineExhausted` to a RETRYABLE `timeout`.
+    expect(error).toBeInstanceOf(RunnerReadinessError);
+    expect((error as RunnerReadinessError).deadlineExhausted).toBe(false);
+  });
+
+  test("flags a genuine readiness budget exhaustion as a deadline exhaustion", async () => {
+    const client = new FakeReadinessClient();
+    client.connected = false;
+    client.connectionResults = [];
+    const { service } = createService({ androidClient: client });
+
+    const error = await service
+      .ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "platform=android deviceId=emulator-5554",
+        totalDeadlineMs: 1_000,
+        readinessTimeoutMs: 1_000,
+      })
+      .catch((thrown: unknown) => thrown);
+
+    expect(error).toBeInstanceOf(RunnerReadinessError);
+    expect((error as RunnerReadinessError).deadlineExhausted).toBe(true);
+  });
+
+  test("propagates caller cancellation while queued for the readiness setup lock instead of flagging a deadline exhaustion", async () => {
+    // The readiness lock rejects a queued waiter on caller abort as well as on
+    // its own timeout; only the latter is a deadline exhaustion, which
+    // provisionDevice maps to a RETRYABLE `timeout`.
+    const { service } = createService({ autoAdvance: false });
+    const key = deviceReadinessLockKey("android", "emulator-5554");
+    const releaseHolder = await acquireDeviceReadinessLock(key);
+    const controller = new AbortController();
+
+    try {
+      const pending = service
+        .ensureReady({
+          device: androidDevice(),
+          requestedIdentity: "platform=android deviceId=emulator-5554",
+          totalDeadlineMs: 1_000,
+          readinessTimeoutMs: 1_000,
+          signal: controller.signal,
+        })
+        .catch((thrown: unknown) => thrown);
+      await Promise.resolve();
+      controller.abort(new Error("caller cancelled"));
+      const error = await pending;
+
+      expect(error).not.toBeInstanceOf(RunnerReadinessError);
+      expect((error as Error).message).toBe("caller cancelled");
+    } finally {
+      releaseHolder();
+    }
+  });
+
+  test("flags readiness setup lock budget expiry as a deadline exhaustion", async () => {
+    const timer = new FakeTimer();
+    const { service } = createService({ timer, autoAdvance: false });
+    const key = deviceReadinessLockKey("android", "emulator-5554");
+    const releaseHolder = await acquireDeviceReadinessLock(key);
+
+    try {
+      const pending = service
+        .ensureReady({
+          device: androidDevice(),
+          requestedIdentity: "platform=android deviceId=emulator-5554",
+          totalDeadlineMs: 1_000,
+          readinessTimeoutMs: 1_000,
+        })
+        .catch((thrown: unknown) => thrown);
+      await Promise.resolve();
+      timer.advanceTime(2_000);
+      await Promise.resolve();
+      const error = await pending;
+
+      expect(error).toBeInstanceOf(RunnerReadinessError);
+      expect((error as RunnerReadinessError).deadlineExhausted).toBe(true);
+    } finally {
+      releaseHolder();
+    }
   });
 
   test("preserves the Android diagnostic for an ordinary connect failure that is not a forwarding-lease conflict (issue #6260 PRRT ft82e)", async () => {

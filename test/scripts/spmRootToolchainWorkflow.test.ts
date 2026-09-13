@@ -82,7 +82,9 @@ describe("root SPM toolchain floor workflow", () => {
             expect(spawnSync("bash", ["-e", "-c", prepare], { cwd: root, env }).status).not.toBe(0);
           }
           expect(spawnSync("bash", ["-e", "-c", cleanup], { cwd: root, env }).status).toBe(0);
-          if (target) expect(existsSync(join(root, target))).toBe(false);
+          if (target) {
+            expect(existsSync(join(root, target))).toBe(false);
+          }
           expect(existsSync(join(root, "unrelated"))).toBe(true);
         } finally {
           rmSync(root, { recursive: true, force: true });

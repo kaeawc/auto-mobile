@@ -87,6 +87,60 @@ describe("DefaultElementFinder", () => {
       const results = finder.findElementsByText(hierarchy, "Login", { elementId: "my-form" });
       expect(results).toHaveLength(1);
     });
+
+    // Issue #6607: exact/partial bucketing must honor the same caseSensitive
+    // flag used to decide the match, otherwise a case-differing exact match is
+    // demoted to "partial" and dropped whenever an unrelated exact-case match
+    // exists elsewhere in the hierarchy.
+    describe("case-insensitive exact bucketing (#6607)", () => {
+      const topsOf = (results: { bounds: { top: number } }[]) =>
+        results.map((result) => result.bounds.top).sort((a, b) => a - b);
+
+      test("case-differing text is an exact match alongside an exact-case match", () => {
+        const hierarchy = makeHierarchy([
+          { $: { text: "Delete", bounds: bounds(0, 0, 100, 50) } },
+          { $: { text: "DELETE", bounds: bounds(0, 100, 100, 150) } },
+          { $: { text: "Delete everything", bounds: bounds(0, 200, 100, 250) } },
+        ]);
+        const results = finder.findElementsByText(hierarchy, "Delete");
+        expect(topsOf(results)).toEqual([0, 100]);
+      });
+
+      test("case-differing content-desc is an exact match alongside an exact-case match", () => {
+        const hierarchy = makeHierarchy([
+          { $: { "content-desc": "Delete", bounds: bounds(0, 0, 100, 50) } },
+          { $: { "content-desc": "DELETE", bounds: bounds(0, 100, 100, 150) } },
+          { $: { "content-desc": "Delete everything", bounds: bounds(0, 200, 100, 250) } },
+        ]);
+        const results = finder.findElementsByText(hierarchy, "Delete");
+        expect(topsOf(results)).toEqual([0, 100]);
+      });
+
+      test("case-differing ios-accessibility-label is an exact match alongside an exact-case match", () => {
+        const hierarchy = makeHierarchy([
+          { $: { "ios-accessibility-label": "Delete", bounds: bounds(0, 0, 100, 50) } },
+          { $: { "ios-accessibility-label": "DELETE", bounds: bounds(0, 100, 100, 150) } },
+          {
+            $: {
+              "ios-accessibility-label": "Delete everything",
+              bounds: bounds(0, 200, 100, 250),
+            },
+          },
+        ]);
+        const results = finder.findElementsByText(hierarchy, "Delete");
+        expect(topsOf(results)).toEqual([0, 100]);
+      });
+
+      test("caseSensitive:true still buckets only the exact-case match", () => {
+        const hierarchy = makeHierarchy([
+          { $: { text: "Delete", bounds: bounds(0, 0, 100, 50) } },
+          { $: { text: "DELETE", bounds: bounds(0, 100, 100, 150) } },
+          { $: { text: "Delete everything", bounds: bounds(0, 200, 100, 250) } },
+        ]);
+        const results = finder.findElementsByText(hierarchy, "Delete", null, true, true);
+        expect(topsOf(results)).toEqual([0]);
+      });
+    });
   });
 
   describe("findElementByText", () => {

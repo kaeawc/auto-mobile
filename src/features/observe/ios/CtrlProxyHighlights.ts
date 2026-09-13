@@ -64,13 +64,6 @@ export class CtrlProxyHighlights {
       };
     };
 
-    if (shape.type === "path") {
-      return {
-        ...shape,
-        bounds: shape.bounds ? normalizeBounds(shape.bounds) : shape.bounds,
-      };
-    }
-
     return {
       ...shape,
       bounds: normalizeBounds(shape.bounds),

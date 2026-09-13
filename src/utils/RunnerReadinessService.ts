@@ -8,6 +8,8 @@ import { IOSCtrlProxyManager } from "./IOSCtrlProxyManager";
 import { checkIosCtrlProxyOverride } from "./iosCtrlProxyOverride";
 import { redactAndroidCommandOutput } from "./android-cmdline-tools/redactAndroidCommandOutput";
 import { defaultAdbClientFactory } from "./android-cmdline-tools/AdbClientFactory";
+import { isAndroidFrameworkUnavailable } from "./android-cmdline-tools/isAndroidFrameworkUnavailable";
+import { DefaultRetryExecutor } from "./retry/RetryExecutor";
 import { defaultTimer, type Timer } from "./SystemTimer";
 import {
   acquireDeviceReadinessLock,
@@ -40,7 +42,20 @@ type RunnerReadinessPhase =
   | "runner-connect"
   | "runner-health";
 
-export class RunnerReadinessError extends ActionableError {}
+export class RunnerReadinessError extends ActionableError {
+  constructor(
+    message: string,
+    readonly retryableAndroidFrameworkFailure = false,
+    /**
+     * The phase ran out of budget rather than hitting a platform fault, so the
+     * failure is purely time-based and callers may report it as a timeout and
+     * retry it (`provisionDevice` maps this to error code `"timeout"`).
+     */
+    readonly deadlineExhausted = false,
+  ) {
+    super(message);
+  }
+}
 
 export class SystemUiAnrRecoveryRequiredError extends RunnerReadinessError {}
 
@@ -142,6 +157,12 @@ export interface AndroidRunnerConnectDiagnostic {
   primaryUserStartState?: string;
 }
 
+export interface AndroidFrameworkReadinessResult {
+  ready: boolean;
+  unavailableResources?: string[];
+  diagnostic?: string;
+}
+
 interface SystemUiAnrReadinessClient {
   getAccessibilityHierarchy: NonNullable<ReadinessClient["getAccessibilityHierarchy"]>;
   requestTapCoordinates: NonNullable<ReadinessClient["requestTapCoordinates"]>;
@@ -149,6 +170,11 @@ interface SystemUiAnrReadinessClient {
 
 export interface RunnerReadinessDependencies {
   timer: Timer;
+  getAndroidFrameworkReadiness?(
+    device: BootedDevice,
+    signal: AbortSignal,
+    timeoutMs: number,
+  ): Promise<AndroidFrameworkReadinessResult>;
   getAndroidManager(device: BootedDevice): ReadinessAndroidManager;
   getAndroidClient(device: BootedDevice): ReadinessClient;
   getIosManager(device: BootedDevice): ReadinessIosManager;
@@ -216,7 +242,9 @@ export class RunnerReadinessService {
     key: string,
   ): Promise<DeviceReadinessLockRelease> {
     if (this.remainingForPhase(context, "runner-setup") <= 0) {
-      this.fail(context, "runner-setup", 1, "readiness budget exhausted before setup lock");
+      this.fail(context, "runner-setup", 1, "readiness budget exhausted before setup lock", {
+        deadlineExhausted: true,
+      });
     }
     try {
       // Shared per-device lock (#6227): the session-scoped readiness upgrade in
@@ -229,11 +257,66 @@ export class RunnerReadinessService {
         timeoutError: () => new Error("readiness setup lock exceeded this request's deadline"),
       });
     } catch (error) {
-      this.fail(context, "runner-setup", 1, normalizeDiagnostic(error));
+      // The queued wait also rejects on caller abort; that cancellation must
+      // propagate unchanged rather than be reported as a deadline exhaustion,
+      // which provisionDevice maps to a RETRYABLE `timeout`.
+      this.throwIfCallerCancelled(context, error);
+      // Otherwise the lock wait is bounded by the remaining setup budget, so
+      // the only failure it can report here is that bound being reached.
+      this.fail(context, "runner-setup", 1, normalizeDiagnostic(error), {
+        deadlineExhausted: true,
+      });
     }
   }
 
   private async ensureAndroidReady(context: ReadinessAttemptContext): Promise<void> {
+    this.throwIfCallerCancelled(context);
+    const finishInspection = this.inspectAndroidFrameworkBestEffort(context);
+    try {
+      let lastDiagnostic = "Android framework readiness budget exhausted";
+      await new DefaultRetryExecutor(this.dependencies.timer).executeOrThrow(
+        async (attempt) => {
+          this.throwIfCallerCancelled(context);
+          if (this.remainingForPhase(context, "runner-setup") <= 0) {
+            this.fail(context, "runner-setup", attempt, lastDiagnostic, {
+              deadlineExhausted: true,
+            });
+          }
+          if (attempt > 1) {
+            this.dependencies.getAndroidManager(context.device).resetSetupState();
+          }
+          await this.ensureAndroidReadyAttempt(context);
+          this.throwIfCallerCancelled(context);
+        },
+        {
+          maxAttempts:
+            Math.ceil(this.remainingForPhase(context, "runner-setup") / READINESS_RETRY_DELAY_MS) +
+            1,
+          signal: context.signal,
+          delays: () =>
+            Math.min(READINESS_RETRY_DELAY_MS, this.remainingForPhase(context, "runner-setup")),
+          // Retry required setup only when Android explicitly reports a missing
+          // boot service. Optional inspection never determines readiness.
+          shouldRetry: (error) =>
+            error instanceof RunnerReadinessError &&
+            error.retryableAndroidFrameworkFailure &&
+            this.remainingForPhase(context, "runner-setup") > 0,
+          onRetry: (error) => {
+            lastDiagnostic = normalizeDiagnostic(error);
+            logger.debug(`Retrying Android framework setup: ${lastDiagnostic}`);
+          },
+        },
+      );
+    } catch (error) {
+      this.throwIfCallerCancelled(context, error);
+      throw error;
+    } finally {
+      await finishInspection?.();
+      this.throwIfCallerCancelled(context);
+    }
+  }
+
+  private async ensureAndroidReadyAttempt(context: ReadinessAttemptContext): Promise<void> {
     const manager = this.dependencies.getAndroidManager(context.device);
     const client = this.dependencies.getAndroidClient(context.device);
     if (context.skipCtrlProxyDownload) {
@@ -251,9 +334,12 @@ export class RunnerReadinessService {
     );
     this.assertAndroidCompatibility(context, compatibility);
 
-    const [installed, enabled] = await this.runPhase(context, "runner-setup", 1, (signal) =>
-      Promise.all([manager.isInstalled(signal), manager.isEnabled(signal)]),
-    );
+    // Read sequentially so a transient failure cannot leave a sibling ADB
+    // command running when the next setup attempt starts.
+    const [installed, enabled] = await this.runPhase(context, "runner-setup", 1, async (signal) => [
+      await manager.isInstalled(signal),
+      await manager.isEnabled(signal),
+    ]);
     if (await this.isResponsiveFastPath(context, client, installed && enabled)) {
       await this.recoverSystemUiAnrIfPresent(context, client);
       return;
@@ -268,14 +354,68 @@ export class RunnerReadinessService {
     await this.recoverSystemUiAnrIfPresent(context, client);
   }
 
+  private inspectAndroidFrameworkBestEffort(
+    context: ReadinessAttemptContext,
+  ): (() => Promise<void>) | undefined {
+    const probe = this.dependencies.getAndroidFrameworkReadiness;
+    if (!probe) {
+      return;
+    }
+    const remainingMs = Math.max(0, context.totalDeadlineMs - this.dependencies.timer.now());
+    if (remainingMs <= 0) {
+      return;
+    }
+    const controller = new AbortController();
+    const inspectionSignal = context.signal
+      ? AbortSignal.any([context.signal, controller.signal])
+      : controller.signal;
+    const timeoutMs = Math.min(READINESS_PROBE_TIMEOUT_MS, remainingMs);
+    const timeout = this.dependencies.timer.setTimeout(
+      () => controller.abort(new Error("Android framework inspection timed out")),
+      timeoutMs,
+    );
+    // Defer invocation so synchronous injected failures follow the same
+    // diagnostic-only rejection path as asynchronous ADB failures.
+    const inspection = Promise.resolve()
+      .then(() => {
+        inspectionSignal.throwIfAborted();
+        return probe(context.device, inspectionSignal, timeoutMs);
+      })
+      .then(
+        (result) => {
+          if (!result.ready) {
+            logger.debug(
+              `Android framework inspection is not ready yet: ${
+                result.unavailableResources?.join(", ") ?? "unknown resources"
+              }${result.diagnostic ? `; ${normalizeDiagnostic(result.diagnostic)}` : ""}`,
+            );
+          }
+        },
+        (error: unknown) => {
+          // Framework inspection is diagnostic only; required runner readiness
+          // below owns the request outcome and cancellation.
+          logger.debug(`Android framework inspection failed: ${normalizeDiagnostic(error)}`);
+        },
+      )
+      .finally(() => this.dependencies.timer.clearTimeout(timeout));
+    return async () => {
+      controller.abort(new Error("Android readiness inspection finished"));
+      this.dependencies.timer.clearTimeout(timeout);
+      // Bound cleanup even for a broken injected probe that ignores abort;
+      // production ADB commands observe the signal and settle here.
+      await this.awaitAbortSettlement(inspection);
+    };
+  }
+
   private async ensureAndroidReadyWithoutDownloads(
     context: ReadinessAttemptContext,
     manager: ReadinessAndroidManager,
     client: ReadinessClient,
   ): Promise<void> {
-    const [installed, enabled] = await this.runPhase(context, "runner-setup", 1, (signal) =>
-      Promise.all([manager.isInstalled(signal), manager.isEnabled(signal)]),
-    );
+    const [installed, enabled] = await this.runPhase(context, "runner-setup", 1, async (signal) => [
+      await manager.isInstalled(signal),
+      await manager.isEnabled(signal),
+    ]);
     if (!installed) {
       this.fail(
         context,
@@ -572,9 +712,10 @@ export class RunnerReadinessService {
     if (!setup.success) {
       this.fail(context, "runner-setup", 1, setup.error ?? setup.message);
     }
-    const [installed, enabled] = await this.runPhase(context, "runner-setup", 1, (signal) =>
-      Promise.all([manager.isInstalled(signal), manager.isEnabled(signal)]),
-    );
+    const [installed, enabled] = await this.runPhase(context, "runner-setup", 1, async (signal) => [
+      await manager.isInstalled(signal),
+      await manager.isEnabled(signal),
+    ]);
     if (!installed || !enabled) {
       this.fail(
         context,
@@ -629,10 +770,17 @@ export class RunnerReadinessService {
     }
 
     if (context.skipCtrlProxyDownload) {
-      await this.ensureIosReadyWithoutDownloads(context, manager, client);
+      await this.ensureIosReadyWithoutDownloads(context, manager);
       return;
     }
 
+    // A prior readiness request may have left the setup gate latched
+    // (attemptedSetup) with a stale positive from earlier in this daemon's
+    // lifetime. Reopen it before this independent request tries setup again,
+    // matching the Android path (see :265) and the connected branch above
+    // (:613) — otherwise setup() can report "already running" against a
+    // runner that died without a local child-exit event (#6416).
+    manager.resetSetupState();
     const setup = await this.runPhase(context, "runner-setup", 1, (signal) =>
       manager.setup(false, context.perf, signal, this.remainingForPhase(context, "runner-setup")),
     );
@@ -640,13 +788,15 @@ export class RunnerReadinessService {
     if (!setup.success) {
       this.fail(context, "runner-setup", 1, setup.error ?? setup.message);
     }
+    // Setup can reallocate a busy port or adopt the runner's actual listener.
+    // Resolve the client after launch, just as the force-restart path does.
+    client = this.dependencies.getIosClient(context.device, manager.getServicePort());
     await this.waitForResponsiveClient(context, client);
   }
 
   private async ensureIosReadyWithoutDownloads(
     context: ReadinessAttemptContext,
     manager: ReadinessIosManager,
-    client: ReadinessClient,
   ): Promise<void> {
     const installed = await this.runPhase(context, "runner-setup", 1, () => manager.isInstalled());
     if (!installed) {
@@ -663,6 +813,7 @@ export class RunnerReadinessService {
         minimumHealthPollDurationMs: this.remainingForPhase(context, "runner-setup"),
       }),
     );
+    const client = this.dependencies.getIosClient(context.device, manager.getServicePort());
     await this.waitForResponsiveClient(context, client);
   }
 
@@ -744,6 +895,7 @@ export class RunnerReadinessService {
       phase,
       attempts,
       `runner did not become responsive before the readiness deadline${diagnostic}`,
+      { deadlineExhausted: true },
     );
   }
 
@@ -805,7 +957,9 @@ export class RunnerReadinessService {
     operation: (signal: AbortSignal) => Promise<T>,
   ): Promise<T> {
     if (this.remainingForPhase(context, phase) <= 0) {
-      this.fail(context, phase, attempts, "readiness budget exhausted before phase started");
+      this.fail(context, phase, attempts, "readiness budget exhausted before phase started", {
+        deadlineExhausted: true,
+      });
     }
     const remainingMs = this.remainingForPhase(context, phase);
     const controller = new AbortController();
@@ -830,7 +984,11 @@ export class RunnerReadinessService {
         await this.awaitAbortSettlement(operationPromise);
       }
       this.throwIfCallerCancelled(context, error);
-      return this.fail(context, phase, attempts, normalizeDiagnostic(error));
+      // Only the phase-timeout path above is budget-driven; an error thrown by
+      // the operation itself is a platform fault whatever the clock says.
+      return this.fail(context, phase, attempts, normalizeDiagnostic(error), {
+        deadlineExhausted: controller.signal.aborted,
+      });
     } finally {
       if (timeoutHandle) {
         this.dependencies.timer.clearTimeout(timeoutHandle);
@@ -899,19 +1057,34 @@ export class RunnerReadinessService {
     );
   }
 
+  /**
+   * Report a readiness failure. `deadlineExhausted` says the phase ran out of
+   * BUDGET, so callers may treat it as a retryable timeout -- it must be stated
+   * by the caller, never inferred from the remaining budget at throw time: a
+   * terminal platform fault (runner not installed, version mismatch, a setup
+   * error, an orphaned forwarding lease) that happens to land as the phase
+   * deadline passes would otherwise be mapped to a retryable `timeout` and
+   * retried forever.
+   */
   private fail(
     context: ReadinessAttemptContext,
     phase: RunnerReadinessPhase,
     attempts: number,
     detail: string,
+    options?: { deadlineExhausted?: boolean },
   ): never {
     const { device } = context;
     const mapping =
       `platform=${device.platform} requested=[${context.requestedIdentity}] ` +
       `resolved=[${device.name} (${device.deviceId})]`;
+    const remainingBudgetMs = this.remainingForPhase(context, phase);
     throw new RunnerReadinessError(
       `${context.operationName ?? "startDevice"} automation runner readiness failed: ${mapping} phase=${phase} ` +
-        `attempts=${attempts} remainingBudgetMs=${this.remainingForPhase(context, phase)}: ${normalizeDiagnostic(detail)}`,
+        `attempts=${attempts} remainingBudgetMs=${remainingBudgetMs}: ${normalizeDiagnostic(detail)}`,
+      device.platform === "android" &&
+        RunnerReadinessService.isSetupPhase(phase) &&
+        isAndroidFrameworkUnavailable(detail),
+      options?.deadlineExhausted ?? false,
     );
   }
 }
@@ -926,11 +1099,60 @@ function normalizeDiagnostic(error: unknown): string {
   return `${redacted.slice(0, half)}\n...[diagnostic truncated]...\n${redacted.slice(-half)}`;
 }
 
+async function getDefaultAndroidFrameworkReadiness(
+  device: BootedDevice,
+  signal: AbortSignal,
+  timeoutMs: number,
+): Promise<AndroidFrameworkReadinessResult> {
+  const adb = defaultAdbClientFactory.create(device);
+  const [packageLookup, settingsLookup] = await Promise.allSettled([
+    adb.execute(["shell", "cmd", "package", "path", "android"], {
+      timeoutMs,
+      noRetry: true,
+      signal,
+    }),
+    adb.execute(["shell", "settings", "get", "secure", "accessibility_enabled"], {
+      timeoutMs,
+      noRetry: true,
+      signal,
+    }),
+  ]);
+  signal.throwIfAborted();
+
+  const unavailableResources: string[] = [];
+  const diagnostics: string[] = [];
+  if (packageLookup.status === "rejected" || !packageLookup.value.stdout.includes("package:")) {
+    unavailableResources.push("package");
+    diagnostics.push(
+      packageLookup.status === "rejected"
+        ? `package: ${normalizeDiagnostic(packageLookup.reason)}`
+        : `package: ${normalizeDiagnostic(packageLookup.value.stdout || packageLookup.value.stderr)}`,
+    );
+  }
+  if (
+    settingsLookup.status === "rejected" ||
+    isAndroidFrameworkUnavailable(`${settingsLookup.value.stdout}\n${settingsLookup.value.stderr}`)
+  ) {
+    unavailableResources.push("settings");
+    diagnostics.push(
+      settingsLookup.status === "rejected"
+        ? `settings: ${normalizeDiagnostic(settingsLookup.reason)}`
+        : `settings: ${normalizeDiagnostic(settingsLookup.value.stdout || settingsLookup.value.stderr)}`,
+    );
+  }
+  return {
+    ready: unavailableResources.length === 0,
+    ...(unavailableResources.length > 0 ? { unavailableResources } : {}),
+    ...(diagnostics.length > 0 ? { diagnostic: diagnostics.join("; ") } : {}),
+  };
+}
+
 export function createDefaultRunnerReadinessService(
   timer: Timer = defaultTimer,
 ): RunnerReadinessService {
   return new RunnerReadinessService({
     timer,
+    getAndroidFrameworkReadiness: getDefaultAndroidFrameworkReadiness,
     getAndroidManager: (device) => AndroidCtrlProxyManager.getInstance(device),
     getAndroidClient: (device) => AndroidCtrlProxyClient.getInstance(device),
     getIosManager: (device) => IOSCtrlProxyManager.getInstance(device),

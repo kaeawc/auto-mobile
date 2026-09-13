@@ -78,3 +78,33 @@ network failures; browser viewers may need to reconnect too.
   `AUTOMOBILE_WEBRTC_WHIP_TOKEN`.
 - Connected but black video: configure a reachable TURN server or MediaMTX ICE
   host.
+
+### iOS Simulator highlights
+
+On macOS, `highlight` draws over the Simulator through `screen-capture-helper`;
+With a helper advertising `simulator-highlights`, Simulators do not need the
+AutoMobile SDK in the target app. Older pinned helpers retain the SDK route until
+a capable helper is released; a local helper can be selected using the override below. Physical iOS devices
+continue to use the SDK overlay. The host helper needs Screen Recording and
+Accessibility access in System Settings → Privacy & Security. The Simulator window
+must be visible. For capture of highlights, keep the window fully on one monitor.
+
+Highlights draw a red hand-drawn circle using Android’s irregular arcs, varying
+stroke width, and 1.2-second draw/hold/fade animation. Circle bounds use device
+coordinates, with `bounds.sourceWidth` and `bounds.sourceHeight` describing their
+source coordinate space. Selector-based highlights obtain these dimensions from
+the hierarchy automatically. The helper reads the Simulator's accessibility
+display bounds to exclude its toolbar and bezel when positioning circles. Box, path, color, and stroke-style options are not supported.
+
+While a highlight is visible, ScreenCaptureKit captures only the selected Simulator
+and the helper's overlay windows, cropped to the Simulator window. The same capture
+path feeds raw frames and H.264 streams. Separate device screenshots do not include
+the host overlay. Outside highlights, capture uses its independent-window filter.
+The overlay host stays alive until its parent daemon exits because ScreenCaptureKit
+retains connections to applications whose windows have appeared in a stream.
+
+For a local development build, build `ios/screen-capture` with SwiftPM and set
+`AUTOMOBILE_IOS_SCREEN_CAPTURE_HELPER` to the absolute path of its
+`screen-capture-helper` executable when starting AutoMobile. Both capture and
+highlighting must use this build; older released helpers do not support the overlay
+command. Rebuilt or unsigned executables may require renewed macOS privacy approval.

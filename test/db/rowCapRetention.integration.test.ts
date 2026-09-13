@@ -88,6 +88,55 @@ describe("runAmortizedRetention (#3435/#3436/#3440)", () => {
     expect(maxConcurrent).toBe(1);
   });
 
+  test("a bailed-out call while a cleanup is in flight leaves the counter armed for the next insert (#6657)", async () => {
+    const state = createRowCapRetentionState();
+    const checkInterval = 3;
+    let runs = 0;
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const body = async (): Promise<void> => {
+      runs++;
+      await gate;
+    };
+
+    // One insert away from tripping the gate.
+    state.insertsSinceCleanup = checkInterval - 1;
+
+    // This call trips the gate and parks inside the cleanup body (on `gate`).
+    const first = runAmortizedRetention(state, body, checkInterval);
+
+    // A burst of checkInterval-worth of further inserts lands before that
+    // cleanup resolves. Each is fired without awaiting the prior one, so they
+    // run synchronously up to their own guard check while `first` is still
+    // parked — the exact interleaving from a sustained write burst.
+    const burst: Promise<void>[] = [];
+    for (let i = 0; i < checkInterval; i++) {
+      burst.push(runAmortizedRetention(state, body, checkInterval));
+    }
+
+    // Buggy behavior: the counter is zeroed before the in-progress check, so
+    // every burst call above would already have re-tripped and re-zeroed it,
+    // ending near 0 (well under checkInterval) and silently discarding the
+    // in-flight cleanup's gate. Fixed behavior: none of the bailed-out burst
+    // calls reset the counter, so it stays >= checkInterval.
+    expect(state.cleanupInProgress).toBe(true);
+    expect(state.insertsSinceCleanup).toBeGreaterThanOrEqual(checkInterval);
+    expect(runs).toBe(1); // only the in-flight cleanup has run so far
+
+    release();
+    await Promise.all(burst);
+    await first;
+    expect(state.cleanupInProgress).toBe(false);
+
+    // With the counter left armed, the very next insert retries the gate
+    // immediately rather than waiting another full checkInterval.
+    await runAmortizedRetention(state, body, checkInterval);
+    expect(runs).toBe(2);
+    expect(state.insertsSinceCleanup).toBe(0);
+  });
+
   test("releases the guard even when the cleanup body throws", async () => {
     const state = createRowCapRetentionState();
 

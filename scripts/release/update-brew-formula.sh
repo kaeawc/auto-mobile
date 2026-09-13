@@ -13,6 +13,11 @@
 #   RENDER_ONLY=1  Write the rendered formula to ./auto-mobile.rb in the
 #                  current directory and exit without git operations. Used
 #                  by tests; in CI the unset default does the full publish.
+#   BREW_NPM_PROPAGATION_ATTEMPTS / _DELAY_SECONDS / _MAX_DELAY_SECONDS
+#                  Bound on the wait for npm to start serving this version
+#                  (default 10 attempts, 5s initial delay doubling to a 60s
+#                  cap ~= 6 min). Exceeding it warns and falls through to the
+#                  tarball fetch below.
 #
 # Resolves the published npm tarball SHA256 from the registry; the npm
 # publish step must run before this script.
@@ -49,6 +54,11 @@ fi
 VERSION="${TAG#v}"
 PKG="@kaeawc/auto-mobile"
 TARBALL_URL="https://registry.npmjs.org/${PKG}/-/auto-mobile-${VERSION}.tgz"
+# The registry's own statement that this version exists. `npm publish` returns
+# before the version is served, so this document is the thing to wait on: the
+# tarball URL only ever 404s until the version is published, and a 404 there is
+# indistinguishable from a release that will never appear.
+VERSION_DOC_URL="https://registry.npmjs.org/@kaeawc%2fauto-mobile/${VERSION}"
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
@@ -75,6 +85,66 @@ if ! [[ "$retry_delay" =~ ^[0-9]+$ ]]; then
   echo "Invalid BREW_TARBALL_FETCH_DELAY_SECONDS='${retry_delay}' (want a non-negative base-10 integer)" >&2
   exit 1
 fi
+
+# --- npm publish/propagation wait -------------------------------------------
+# Release 0.0.69 went red here: the Homebrew job started while npm had accepted
+# the publish but was not yet serving the version, so every tarball attempt
+# 404'd, the 30x10s budget drained, and the release failed on a race that had
+# resolved itself minutes later (issue #6810). Poll the *version document*
+# first, with exponential backoff, so slow-but-normal propagation is waited out
+# on cheap requests instead of eating the tarball budget.
+npm_propagation_attempts="${BREW_NPM_PROPAGATION_ATTEMPTS:-10}"
+npm_propagation_delay="${BREW_NPM_PROPAGATION_DELAY_SECONDS:-5}"
+npm_propagation_max_delay="${BREW_NPM_PROPAGATION_MAX_DELAY_SECONDS:-60}"
+# Same zero-padded/non-decimal guard as the tarball knobs above: an invalid
+# octal literal in a `while` condition is swallowed by `set -e` and turns the
+# bound into an unbounded loop.
+if ! [[ "$npm_propagation_attempts" =~ ^[1-9][0-9]*$ ]]; then
+  echo "Invalid BREW_NPM_PROPAGATION_ATTEMPTS='${npm_propagation_attempts}' (want a positive base-10 integer)" >&2
+  exit 1
+fi
+if ! [[ "$npm_propagation_delay" =~ ^(0|[1-9][0-9]*)$ ]]; then
+  echo "Invalid BREW_NPM_PROPAGATION_DELAY_SECONDS='${npm_propagation_delay}' (want a non-negative base-10 integer)" >&2
+  exit 1
+fi
+if ! [[ "$npm_propagation_max_delay" =~ ^(0|[1-9][0-9]*)$ ]]; then
+  echo "Invalid BREW_NPM_PROPAGATION_MAX_DELAY_SECONDS='${npm_propagation_max_delay}' (want a non-negative base-10 integer)" >&2
+  exit 1
+fi
+
+wait_for_npm_propagation() {
+  local attempt=1
+  local delay="$npm_propagation_delay"
+  # Clamp before the first sleep, not only after doubling: an override whose
+  # initial delay exceeds the maximum (say 300s initial against a 2s cap) would
+  # otherwise sleep the uncapped value once and can eat the workflow timeout on
+  # the very first retry.
+  if [[ "$delay" -gt "$npm_propagation_max_delay" ]]; then
+    delay="$npm_propagation_max_delay"
+  fi
+
+  while ! curl -fsS "$VERSION_DOC_URL" -o /dev/null; do
+    if [[ "$attempt" -ge "$npm_propagation_attempts" ]]; then
+      # Bounded on purpose, and deliberately non-fatal: the tarball fetch below
+      # owns the definitive error for "this version is not on npm", so warn and
+      # let it speak rather than inventing a second hard failure mode.
+      echo "WARNING: ${PKG}@${VERSION} is still not visible in the npm registry after ${attempt} attempts; trying the tarball anyway" >&2
+      return 0
+    fi
+    echo "npm has not published ${PKG}@${VERSION} yet, retrying in ${delay}s (attempt ${attempt}/${npm_propagation_attempts})" >&2
+    attempt=$((attempt + 1))
+    sleep "$delay"
+    delay=$((delay * 2))
+    if [[ "$delay" -gt "$npm_propagation_max_delay" ]]; then
+      delay="$npm_propagation_max_delay"
+    fi
+  done
+
+  echo "npm registry serves ${PKG}@${VERSION}; fetching the tarball." >&2
+}
+
+wait_for_npm_propagation
+
 attempt=1
 while ! curl -fsSL "$TARBALL_URL" -o "$tmp/auto-mobile.tgz"; do
   if [[ "$attempt" -ge "$max_attempts" ]]; then

@@ -1,3 +1,4 @@
+@testable import CtrlProxyRewrite
 import Foundation
 import XCTest
 
@@ -20,10 +21,27 @@ final class ResponseModelParityTests: XCTestCase {
         let encoded = RewriteResponses.connectedEventEncoded(id: 42)
         guard let object = JSONGolden.object(encoded) else { return }
         XCTAssertEqual(object["supportedCommands"] as? [String], commands)
+        XCTAssertTrue(commands.contains("get_sdk_capabilities"))
         // The handshake also advertises optional runner features (RunnerFeature.allCases,
         // sorted); the daemon reads it to gate feature use, so `display_cutout_info` is a
         // load-bearing wire identifier (#5787).
         XCTAssertEqual(object["supportedFeatures"] as? [String], ["display_cutout_info"])
+    }
+
+    func testSdkCapabilitiesResponseDistinguishesRunnerSupportFromForegroundSdkAvailability() {
+        let response = SdkCapabilitiesResponse(
+            requestId: "sdk-1",
+            available: false,
+            bundleId: nil,
+            capabilities: [],
+            totalTimeMs: 1
+        )
+        let encoded = (try? JSONEncoder().encode(response)) ?? Data()
+        guard let object = JSONGolden.object(encoded) else { return }
+        XCTAssertEqual(object["type"] as? String, "sdk_capabilities_result")
+        XCTAssertEqual(object["success"] as? Bool, true)
+        XCTAssertEqual(object["available"] as? Bool, false)
+        XCTAssertEqual(object["capabilities"] as? [String], [])
     }
 
     // MARK: - WebSocketResponse / HierarchyUpdate Codable round-trip

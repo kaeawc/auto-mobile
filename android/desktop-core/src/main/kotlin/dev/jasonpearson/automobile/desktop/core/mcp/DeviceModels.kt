@@ -13,6 +13,19 @@ data class BootedDevicesResponse(
   val physicalCount: Int,
   val lastUpdated: String,
   val devices: List<BootedDeviceInfo>,
+  val observationComplete: Boolean = true,
+  val platformObservations: Map<String, DevicePlatformObservation> = emptyMap(),
+  val sourceObservations: Map<String, DevicePlatformObservation> = emptyMap(),
+)
+
+@Serializable data class DevicePlatformObservation(val observationComplete: Boolean = false)
+
+@Serializable
+data class DeviceIdentity(
+  val stableId: String,
+  // Key for one connection epoch of the device: `<deviceId>#<incarnation>` when the daemon's pool
+  // knows the incarnation, otherwise the bare serial, which carries no epoch information.
+  val connectionId: String,
 )
 
 @Serializable
@@ -45,6 +58,7 @@ data class BootedDeviceInfo(
   // Daemon-minted identity for this live device epoch. Older daemons omit it, so it must remain
   // optional while UUID-scoped consumers fail closed.
   val deviceSessionUuid: String? = null,
+  val identity: DeviceIdentity? = null,
 )
 
 @Serializable

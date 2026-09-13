@@ -81,7 +81,7 @@ Captured while answering "where does ctrl-proxy fit, and what else needs a Swift
 **ctrl-proxy structure — two simplifications evaluated and rejected (don't re-litigate):**
 
 - The server runs _inside the XCUITest runner_ (`CtrlProxyUITests-Runner.app` → `testRunService`),
-  not in `CtrlProxyApp` (that app is only the required UI-test _host_; blank VC). Cross-app
+  not in `AutoMobileTest` (that app is only the required UI-test _host_; blank VC). Cross-app
   hierarchy reads + gesture injection come from `XCUIApplication`/`XCUIElement`, a privilege
   `testmanagerd` grants **only** to a UI-test process — no entitlement grants it, so it can never
   be a packaged/App-Store app. `control-proxy.ipa` is just a zip of `Build/Products/`.

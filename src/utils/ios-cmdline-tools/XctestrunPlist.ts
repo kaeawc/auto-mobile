@@ -10,6 +10,14 @@ import { Parser } from "xml2js";
  *
  * Only the plist subset that appears in `.xctestrun` files is supported:
  * dict, array, string, integer, real, true/false, date, data.
+ *
+ * `<data>` parses to a `Buffer` and `<real>` parses to a {@link PlistReal}
+ * wrapper (rather than a bare `number`) so that a round-trip through
+ * {@link buildPlist} writes back the same plist type it read — a plain
+ * `number` always means `<integer>`. Without the wrapper, an integral
+ * `<real>` (e.g. `<real>30</real>`) would satisfy `Number.isInteger` and get
+ * rewritten as `<integer>30</integer>`, silently corrupting the type
+ * (issue #6372).
  */
 export type PlistValue =
   | string
@@ -17,8 +25,14 @@ export type PlistValue =
   | boolean
   | Date
   | Buffer
+  | PlistReal
   | PlistValue[]
   | Map<string, PlistValue>;
+
+/** Wraps a `<real>` plist value so it round-trips distinctly from `<integer>`. */
+export class PlistReal {
+  constructor(public readonly value: number) {}
+}
 
 interface PlistNode {
   "#name": string;
@@ -54,13 +68,15 @@ const nodeToValue = (node: PlistNode | undefined): PlistValue => {
     case "array":
       return (node.$$ ?? []).map((child) => nodeToValue(child));
     case "string":
-    case "data":
       return node._ ?? "";
+    case "data":
+      return node._ ? Buffer.from(node._, "base64") : Buffer.alloc(0);
     case "date":
       return node._ ? new Date(node._) : new Date(0);
     case "integer":
-    case "real":
       return node._ ? Number(node._) : 0;
+    case "real":
+      return new PlistReal(node._ ? Number(node._) : 0);
     case "true":
       return true;
     case "false":
@@ -117,6 +133,10 @@ const valueToXml = (value: PlistValue, depth: number): string => {
     return `${pad}${value ? "<true/>" : "<false/>"}`;
   }
 
+  if (value instanceof PlistReal) {
+    return `${pad}<real>${value.value}</real>`;
+  }
+
   if (typeof value === "number") {
     return Number.isInteger(value)
       ? `${pad}<integer>${value}</integer>`
@@ -149,8 +169,40 @@ export const buildPlist = (value: PlistValue): string => {
 };
 
 /**
+ * Recursively collect every `Map` in `value` (walking into arrays and nested
+ * dicts) whose `IsUITestBundle` key is exactly `true`.
+ *
+ * This makes the walk layout-agnostic: it finds UI-test targets whether they
+ * sit at the plist top level (FormatVersion 1, `{ <TargetName>: { ... } }`)
+ * or nested under a test-plan configuration array (FormatVersion 2,
+ * `TestConfigurations[].TestTargets[]`), without needing to branch on
+ * `__xctestrun_metadata__.FormatVersion`.
+ */
+const collectUITestTargets = (value: PlistValue): Map<string, PlistValue>[] => {
+  if (Array.isArray(value)) {
+    return value.flatMap((child) => collectUITestTargets(child));
+  }
+
+  if (!(value instanceof Map)) {
+    return [];
+  }
+
+  const targets: Map<string, PlistValue>[] = [];
+  if (value.get("IsUITestBundle") === true) {
+    targets.push(value);
+  }
+  for (const child of value.values()) {
+    targets.push(...collectUITestTargets(child));
+  }
+  return targets;
+};
+
+/**
  * Merge `env` (string key/value pairs) into the `EnvironmentVariables` dict of
- * every test target in `root` that is a UI-test bundle (`IsUITestBundle` true).
+ * every test target in `root` that is a UI-test bundle (`IsUITestBundle` true),
+ * regardless of whether it sits at the plist top level (FormatVersion 1) or
+ * nested under `TestConfigurations[].TestTargets[]` (FormatVersion 2 — the
+ * layout `xcodebuild` emits when the scheme resolves a test plan).
  *
  * Existing keys are overwritten, missing `EnvironmentVariables` dicts are
  * created, and non-UI targets are left untouched.
@@ -161,24 +213,19 @@ export const injectUITestEnvironment = (
   root: Map<string, PlistValue>,
   env: Record<string, string>,
 ): number => {
-  let injected = 0;
+  const targets = collectUITestTargets(root);
 
-  for (const value of root.values()) {
-    if (!(value instanceof Map) || value.get("IsUITestBundle") !== true) {
-      continue;
-    }
-
-    let envDict = value.get("EnvironmentVariables");
+  for (const target of targets) {
+    let envDict = target.get("EnvironmentVariables");
     if (!(envDict instanceof Map)) {
       envDict = new Map<string, PlistValue>();
-      value.set("EnvironmentVariables", envDict);
+      target.set("EnvironmentVariables", envDict);
     }
 
     for (const [key, val] of Object.entries(env)) {
       (envDict as Map<string, PlistValue>).set(key, val);
     }
-    injected += 1;
   }
 
-  return injected;
+  return targets.length;
 };

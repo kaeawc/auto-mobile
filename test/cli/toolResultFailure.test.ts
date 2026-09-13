@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { DaemonVersionMismatchError } from "../../src/daemon/daemonMcpProxy";
 import {
   isCliToolFailure,
   resetDaemonProxyFactoryForTesting,
@@ -14,6 +15,30 @@ describe("isCliToolFailure (issue #6017)", () => {
     process.exit = originalProcessExit;
     console.error = originalConsoleError;
     resetDaemonProxyFactoryForTesting();
+  });
+
+  test("reports version skew as preflight rather than an interrupted tool", async () => {
+    const messages: string[] = [];
+    process.exit = (() => {}) as typeof process.exit;
+    console.error = (...args: unknown[]) => {
+      messages.push(args.join(" "));
+    };
+    setDaemonProxyFactoryForTesting((): any => ({
+      callTool: async () => {
+        throw new DaemonVersionMismatchError({
+          clientVersion: "0.0.70",
+          daemonVersion: "0.0.68",
+          reason: "autoStartDisabled",
+          detail: "auto-start is disabled",
+        });
+      },
+      adoptCliSessionLiveness: async (): Promise<string | undefined> => undefined,
+      close: async () => {},
+    }));
+    await runCliCommand(["listDevices"]);
+    expect(messages.join("\n")).toContain("Daemon preflight failed; no device operation started");
+    expect(messages.join("\n")).toContain("daemon=0.0.68, client=0.0.70");
+    expect(messages.join("\n")).not.toContain("became unavailable during tool execution");
   });
 
   test("recognizes an in-band session ownership error envelope", () => {
@@ -74,6 +99,7 @@ describe("isCliToolFailure (issue #6017)", () => {
         content: [{ type: "text", text: "MCP error -32001: Request timed out" }],
         isError: true,
       }),
+      adoptCliSessionLiveness: async (): Promise<string | undefined> => undefined,
       close: async (): Promise<void> => {
         // no-op fake
       },
@@ -115,6 +141,7 @@ describe("handleToolResult null/non-object payload guard (issue #6086)", () => {
     }) as typeof console.log;
     setDaemonProxyFactoryForTesting((): any => ({
       callTool: async () => envelope,
+      adoptCliSessionLiveness: async (): Promise<string | undefined> => undefined,
       close: async (): Promise<void> => {
         // no-op fake
       },

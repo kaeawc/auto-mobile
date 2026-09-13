@@ -51,6 +51,9 @@ describe("ToolExecutionContext", () => {
       fakeAppsRepo,
       fakeDeviceManager,
     );
+    // Discovery has to list the pooled device: an idle Android entry is
+    // re-proved present before it is assigned, handsets included.
+    fakeDeviceManager.bootedDevices = [createBootedDevice("device-1")];
     await devicePool.initializeWithDevices([createBootedDevice("device-1")]);
     originalGetInstance = AndroidCtrlProxyManager.getInstance;
     originalClientGetInstance = AndroidCtrlProxyClient.getInstance;
@@ -110,6 +113,46 @@ describe("ToolExecutionContext", () => {
     expect(passed.deviceId).toBe("device-1");
     expect(passed.platform).toBe("android");
   });
+
+  test.each(["new", "persisted"])(
+    "rejects a failed proxy connection for a %s session and allows retry",
+    async (entrypoint) => {
+      let connected = false;
+      let setupCalls = 0;
+      setDeviceReadinessProxyDriverProviderForTesting(() => ({
+        resetSetupState: () => {},
+        setup: async () => {
+          setupCalls++;
+          return { success: true, message: "ok" };
+        },
+        waitForConnection: async () => connected,
+        isInstalled: async () => true,
+        isVersionCompatible: async () => true,
+      }));
+      if (entrypoint === "persisted") {
+        await sessionManager.createSession("connection-failure", "device-1", "android");
+        sessionManager.setDeviceReadiness("connection-failure", "booted");
+      }
+      await expect(
+        createToolExecutionContext(
+          "connection-failure",
+          sessionManager,
+          devicePool,
+          sessionOptions,
+        ),
+      ).rejects.toThrow("CtrlProxy connection");
+      expect(sessionManager.getDeviceReadiness("connection-failure")).not.toBe("automationReady");
+      connected = true;
+      await createToolExecutionContext(
+        "connection-failure",
+        sessionManager,
+        devicePool,
+        sessionOptions,
+      );
+      expect(sessionManager.getDeviceReadiness("connection-failure")).toBe("automationReady");
+      expect(setupCalls).toBe(2);
+    },
+  );
 
   test("does not run accessibility setup when a pooled emulator serial is stale", async () => {
     const staleDeviceManager = new FakeDeviceManager();
@@ -373,6 +416,28 @@ describe("ToolExecutionContext", () => {
     expect(upgradedContext.deviceId).toBe("device-1");
     expect(setupCalls).toBe(1);
     expect(sessionManager.getDeviceReadiness("session-1")).toBe("automationReady");
+  });
+
+  test("reruns automation readiness after a VM restore resets the session marker", async () => {
+    let setupCalls = 0;
+    AndroidCtrlProxyManager.getInstance = () =>
+      ({
+        resetSetupState: () => {},
+        setup: async () => {
+          setupCalls += 1;
+          return { success: true, message: "ok" };
+        },
+      }) as any;
+    AndroidCtrlProxyClient.getInstance = (() => ({
+      waitForConnection: async () => true,
+      close: async () => {},
+    })) as any;
+
+    await createToolExecutionContext("restore-session", sessionManager, devicePool, sessionOptions);
+    sessionManager.resetDeviceReadinessForDevice("device-1");
+    await createToolExecutionContext("restore-session", sessionManager, devicePool, sessionOptions);
+
+    expect(setupCalls).toBe(2);
   });
 
   test("does not redundantly re-run setup for a booted tool after an automationReady session (#6227)", async () => {
@@ -1421,12 +1486,14 @@ describe("ToolExecutionContext", () => {
       async markReleased(): Promise<void> {},
       async markStaleActiveSessionsExpired(): Promise<void> {},
     });
+    const boundedDeviceManager = new FakeDeviceManager();
+    boundedDeviceManager.bootedDevices = [createBootedDevice("device-1")];
     const boundedPool = new DevicePool(
       boundedSessionManager,
       "test-daemon-session-id",
       boundedTimer,
       fakeAppsRepo,
-      new FakeDeviceManager(),
+      boundedDeviceManager,
     );
     await boundedPool.initializeWithDevices([createBootedDevice("device-1")]);
     let finishSetup!: () => void;

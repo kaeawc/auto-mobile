@@ -45,6 +45,7 @@ import { FakeSocket } from "../../fakes/FakeNetServer";
 import { FakeScreenshotBackoffScheduler } from "../../../src/features/observe/ScreenshotBackoffScheduler";
 import { CTRLPROXY_RATE_LIMITED_ERROR } from "../../../src/features/observe/android/screenshotFallbackReason";
 import { STABLE_VIEW_ID_PREFIX } from "../../../src/features/observe/android/StableNodeIdentity";
+import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
 
 describe("AndroidCtrlProxyClient", function () {
   let accessibilityServiceClient: AndroidCtrlProxyClient;
@@ -3009,16 +3010,12 @@ describe("AndroidCtrlProxyClient", function () {
       );
 
       const shape: HighlightShape = {
-        type: "box",
+        type: "circle",
         bounds: {
           x: 10,
           y: 20,
           width: 100,
           height: 80,
-        },
-        style: {
-          strokeColor: "#FF0000",
-          strokeWidth: 4,
         },
       };
 
@@ -3079,9 +3076,8 @@ describe("AndroidCtrlProxyClient", function () {
       );
 
       const shape: HighlightShape = {
-        type: "box",
+        type: "circle",
         bounds: { x: 10, y: 20, width: 100, height: 80 },
-        style: { strokeColor: "#FF0000", strokeWidth: 4 },
       };
 
       try {
@@ -3133,9 +3129,8 @@ describe("AndroidCtrlProxyClient", function () {
       );
 
       const shape: HighlightShape = {
-        type: "box",
+        type: "circle",
         bounds: { x: 10, y: 20, width: 100, height: 80 },
-        style: { strokeColor: "#FF0000", strokeWidth: 4 },
       };
 
       try {
@@ -3199,9 +3194,8 @@ describe("AndroidCtrlProxyClient", function () {
       );
 
       const shape: HighlightShape = {
-        type: "box",
+        type: "circle",
         bounds: { x: 10, y: 20, width: 100, height: 80 },
-        style: { strokeColor: "#FF0000", strokeWidth: 4 },
       };
 
       try {
@@ -4664,6 +4658,105 @@ describe("AndroidCtrlProxyClient", function () {
         pixelHeight: null,
       });
       expect(accessibilityServiceClient.getScreenScaleMetadata()).toBeNull();
+    });
+  });
+
+  describe("screenshot cancellation (issue #6605)", function () {
+    const createConnectedCapturingClient = async (
+      localTimer: FakeTimer,
+      fakeScheduler: FakeScreenshotBackoffScheduler,
+    ): Promise<{ client: AndroidCtrlProxyClient; socket: CapturingWebSocket }> => {
+      const { factory, getSocket } = createCapturingWebSocketFactory(localTimer);
+      const client = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        factory,
+        localTimer,
+        undefined, // installedAppsRepository
+        undefined, // retryExecutor
+        undefined, // crashEventSink
+        undefined, // deviceConnectionLostNotifier
+        undefined, // sdkEventIngestor
+        undefined, // loggerInstance
+        undefined, // certificateFileSystem
+        fakeScheduler,
+      );
+      client.invalidateCache();
+      await client.ensureConnected();
+      const socket = (await waitForSocket(getSocket)) as CapturingWebSocket | null;
+      await waitForSocketOpen(socket);
+      if (!socket) {
+        throw new Error("Expected capturing CtrlProxy socket");
+      }
+      return { client, socket };
+    };
+
+    const screenshotFrames = (socket: CapturingWebSocket): unknown[] =>
+      socket.sentMessages
+        .map((raw) => {
+          try {
+            return JSON.parse(raw) as { type?: string };
+          } catch {
+            return null;
+          }
+        })
+        .filter((message) => message !== null && message.type === "request_screenshot");
+
+    test("never dispatches the a11y request when the caller aborted before the call", async function () {
+      const localTimer = new FakeTimer();
+      localTimer.enableAutoAdvance();
+      const fakeScheduler = new FakeScreenshotBackoffScheduler();
+      const { client, socket } = await createConnectedCapturingClient(localTimer, fakeScheduler);
+      const controller = new AbortController();
+      controller.abort();
+
+      const result = await client.requestScreenshot(500, undefined, false, controller.signal);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe(OPERATION_CANCELLED_MESSAGE);
+      expect(screenshotFrames(socket)).toHaveLength(0);
+      expect(fakeScheduler.noteCaptureStartedCalls).toBe(0);
+
+      await client.close();
+    });
+
+    test("never dispatches the a11y request when cancellation lands while connecting", async function () {
+      const localTimer = new FakeTimer();
+      localTimer.enableAutoAdvance();
+      const fakeScheduler = new FakeScreenshotBackoffScheduler();
+      const { factory, getSocket } = createCapturingWebSocketFactory(localTimer);
+      const client = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        factory,
+        localTimer,
+        undefined, // installedAppsRepository
+        undefined, // retryExecutor
+        undefined, // crashEventSink
+        undefined, // deviceConnectionLostNotifier
+        undefined, // sdkEventIngestor
+        undefined, // loggerInstance
+        undefined, // certificateFileSystem
+        fakeScheduler,
+      );
+      client.invalidateCache();
+      const controller = new AbortController();
+
+      // The capture starts on a disconnected client, so connectWebSocket() is still
+      // in flight when the caller gives up - the race the outer await used to lose.
+      const capture = client.requestScreenshot(500, undefined, false, controller.signal);
+      controller.abort();
+
+      const result = await capture;
+      await flushPromises();
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe(OPERATION_CANCELLED_MESSAGE);
+      const socket = (await waitForSocket(getSocket)) as CapturingWebSocket | null;
+      expect(socket === null ? [] : screenshotFrames(socket)).toHaveLength(0);
+      expect(fakeScheduler.noteCaptureStartedCalls).toBe(0);
+
+      await client.close();
     });
   });
 

@@ -506,7 +506,7 @@ export class IOSScreenCaptureHelper extends EventEmitter {
  * Parse a `capture-capability: <token>` handshake line, returning the token or
  * null when the line is not a capability marker (issue #4787).
  */
-function parseCapabilityMarker(line: string): string | null {
+export function parseCapabilityMarker(line: string): string | null {
   const trimmed = line.trim();
   if (!trimmed.startsWith(CAPTURE_CAPABILITY_PREFIX)) {
     return null;

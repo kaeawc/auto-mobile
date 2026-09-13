@@ -347,13 +347,13 @@ describe("device loss MCP outcome", () => {
         code: "session_ownership_lost",
         message:
           "Session ownership lost for device-session-a: heartbeat-timeout. " +
-          "Call getAndroid, getApple, or startDevice to acquire a new device session.",
+          "Call getAndroid or getApple to acquire a new device session.",
         sessionUuid: "device-session-a",
         reason: "heartbeat-timeout",
         retryable: true,
         recovery: {
           action: "acquire_replacement_session",
-          tools: ["getAndroid", "getApple", "startDevice"],
+          tools: ["getAndroid", "getApple"],
         },
         release,
       },

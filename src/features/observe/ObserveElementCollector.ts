@@ -5,7 +5,11 @@ import { isClickableElementProperties } from "../../utils/elementProperties";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
 import { DefaultElementParser } from "../utility/ElementParser";
 import { FlattenedElementEntry, IdentifyMediaViews } from "./IdentifyMediaViews";
-import { ElementProvenance, setElementProvenance } from "./output/elementProvenance";
+import {
+  ElementProvenance,
+  setElementProvenance,
+  setCapturedKeyboard,
+} from "./output/elementProvenance";
 
 export interface ObserveElementCollector {
   collect(
@@ -28,6 +32,7 @@ export class DefaultObserveElementCollector implements ObserveElementCollector {
     const scrollable: Element[] = [];
     const flattenedEntries: FlattenedElementEntry[] = [];
     let currentIndex = 0;
+    let keyboardPackage: string | undefined;
 
     // Each root/window becomes its own ancestry group so downstream skeleton
     // hoisting/suppression can tell a genuine descendant from an unrelated node
@@ -45,12 +50,13 @@ export class DefaultObserveElementCollector implements ObserveElementCollector {
     const provenanceState: ProvenanceState = { enter: 0, records: [] };
 
     for (const { root, group } of rootGroups) {
-      this.collectFromRoot(root, group, provenanceState, {
-        clickable,
-        scrollable,
-        flattenedEntries,
-        nextIndex: () => currentIndex++,
-      });
+      keyboardPackage =
+        this.collectFromRoot(root, group, platform, provenanceState, {
+          clickable,
+          scrollable,
+          flattenedEntries,
+          nextIndex: () => currentIndex++,
+        }) ?? keyboardPackage;
     }
 
     finalizeProvenanceExits(provenanceState.records);
@@ -60,12 +66,18 @@ export class DefaultObserveElementCollector implements ObserveElementCollector {
       .map((entry) => entry.element);
     const media = this.mediaClassifier.classify(viewHierarchy, platform, flattenedEntries);
 
-    return { clickable, scrollable, text, media };
+    const elements: NonNullable<ObserveResult["elements"]> = { clickable, scrollable, text, media };
+    // Like element ancestry, this is output-projection metadata, not raw element content.
+    if (keyboardPackage) {
+      setCapturedKeyboard(elements, { visible: true, package: keyboardPackage });
+    }
+    return elements;
   }
 
   private collectFromRoot(
     rootNode: ViewHierarchyNode,
     group: number,
+    platform: "android" | "ios",
     provenanceState: ProvenanceState,
     collections: {
       clickable: Element[];
@@ -73,13 +85,23 @@ export class DefaultObserveElementCollector implements ObserveElementCollector {
       flattenedEntries: FlattenedElementEntry[];
       nextIndex: () => number;
     },
-  ): void {
+  ): string | undefined {
     // Stack of enclosing parsed nodes (by tree depth) so each parsed node links
     // to its nearest parsed ancestor — bounds-less nodes are skipped in the
     // arrays but must not break ancestry between the nodes that survive.
     const ancestors: { depth: number; provenance: ElementProvenance }[] = [];
+    let keyboardRoot: { depth: number; package: string } | undefined;
+    let capturedKeyboardPackage: string | undefined;
 
     this.parser.traverseNode(rootNode, (node: ViewHierarchyNode, depth: number) => {
+      const nodeProperties = this.parser.extractNodeProperties(node);
+      keyboardRoot = nextKeyboardRoot(
+        keyboardRoot,
+        nodeProperties.extras?.["automobile:imePackage"],
+        depth,
+        platform,
+      );
+      capturedKeyboardPackage = keyboardRoot?.package ?? capturedKeyboardPackage;
       // Pop stale same-or-deeper entries for EVERY visited node, before the
       // bounds-less early return — otherwise a skipped wrapper never terminates a
       // preceding parsed sibling's ancestry, and the wrapper's parsed descendants
@@ -96,27 +118,17 @@ export class DefaultObserveElementCollector implements ObserveElementCollector {
 
       const parent = ancestors.length > 0 ? ancestors[ancestors.length - 1].provenance : undefined;
       const enter = provenanceState.enter++;
-      const provenance: ElementProvenance = { group, enter, exit: enter };
+      const provenance: ElementProvenance = {
+        group,
+        enter,
+        exit: enter,
+        keyboardPackage: keyboardRoot?.package,
+      };
       setElementProvenance(parsedNode, provenance);
       provenanceState.records.push({ provenance, parent });
       ancestors.push({ depth, provenance });
 
-      const nodeProperties = this.parser.extractNodeProperties(node);
-      // A `checkable` node (Android `Switch`/`SwitchCompat`/`CheckBox`) commonly
-      // sits inside a clickable preference row with `clickable="false"` on the
-      // switch itself — the parent row owns the tap, the switch only reflects
-      // state. Without this, such a node is invisible to every downstream
-      // collection and its `checked` state never reaches the skeleton
-      // projection's `toggle` affordance (issue #6257).
-      if (
-        isClickableElementProperties(nodeProperties) ||
-        isTruthy(nodeProperties.checkable as boolean | string | undefined)
-      ) {
-        collections.clickable.push(parsedNode);
-      }
-      if (nodeProperties.scrollable === "true" || nodeProperties.scrollable === true) {
-        collections.scrollable.push(parsedNode);
-      }
+      collectActionableNode(parsedNode, nodeProperties, collections);
 
       const accessibilityText = nodeProperties.text || nodeProperties["content-desc"] || undefined;
       collections.flattenedEntries.push({
@@ -126,7 +138,36 @@ export class DefaultObserveElementCollector implements ObserveElementCollector {
         text: accessibilityText,
       });
     });
+    return capturedKeyboardPackage;
   }
+}
+
+/** Categorize actions independently of traversal and IME ownership. */
+function collectActionableNode(
+  element: Element,
+  properties: Element,
+  collections: { clickable: Element[]; scrollable: Element[] },
+): void {
+  // A non-clickable switch still needs its toggle affordance (issue #6257).
+  if (isClickableElementProperties(properties) || isTruthy(properties.checkable)) {
+    collections.clickable.push(element);
+  }
+  if (isTruthy(properties.scrollable)) {
+    collections.scrollable.push(element);
+  }
+}
+
+/** Track IME ownership even through bounds-less wrappers, ending it at the next sibling. */
+function nextKeyboardRoot(
+  current: { depth: number; package: string } | undefined,
+  imePackage: unknown,
+  depth: number,
+  platform: "android" | "ios",
+): { depth: number; package: string } | undefined {
+  if (platform === "android" && typeof imePackage === "string" && imePackage.length > 0) {
+    return { depth, package: imePackage };
+  }
+  return current && depth > current.depth ? current : undefined;
 }
 
 /** Shared pre-order counter and parent records accumulated across all roots. */

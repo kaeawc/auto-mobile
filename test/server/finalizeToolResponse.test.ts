@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   DEFAULT_OBSERVATION_INLINE_MAX_BYTES,
   finalizeToolResponse,
@@ -11,6 +11,9 @@ import {
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { GFXINFO_DUMP_MARKER } from "../../src/features/observe/output/ObserveResultOutput";
 import type { ObserveResult } from "../../src/models/ObserveResult";
+import { setElementProvenance } from "../../src/features/observe/output/elementProvenance";
+import { logger } from "../../src/utils/logger";
+import { getDeviceSessionIdFromResult } from "../../src/server/deviceSessionResult";
 
 /**
  * Build a minimal ObserveResult whose hierarchy carries trimmable attributes:
@@ -73,10 +76,15 @@ function makeObserveResultWithBounds(): ObserveResult {
 }
 
 class FakeObservationArtifactWriter {
-  writes: Array<{ tool: string; payload: string; data: unknown }> = [];
+  writes: Array<{ tool: string; payload: string; data: unknown; serialized?: string }> = [];
   throwOnWrite: Error | undefined;
 
-  writeJsonArtifact(input: { tool: string; payload: string; data: unknown }): unknown {
+  writeJsonArtifact(input: {
+    tool: string;
+    payload: string;
+    data: unknown;
+    serialized?: string;
+  }): unknown {
     if (this.throwOnWrite) {
       throw this.throwOnWrite;
     }
@@ -311,6 +319,26 @@ describe("finalizeToolResponse", () => {
       expect(observation.viewHierarchy).toBeDefined();
       expect(observation.skeleton).toBeUndefined();
     });
+  });
+
+  // A default `observe` projects to the skeleton, which deletes `viewHierarchy`
+  // — the only carrier of the hierarchy's truncation provenance (issue #6601
+  // review PRRT_kwDOP-GF5M6h4sDi). The finalized default response must still
+  // say the tree was capped, or the agent reads a short list as a complete one.
+  test("a default observe response keeps the hierarchy truncation reasons", () => {
+    const obs = makeObserveResult();
+    obs.viewHierarchy!.truncationReasons = ["max_children[com.example:id/root kept 64 of 70]"];
+
+    const finalized = finalizeToolResponse(createStructuredToolResponse(obs), {
+      name: "observe",
+    });
+
+    const payload = finalized.structuredContent as ObserveResult;
+    expect(payload.viewHierarchy).toBeUndefined();
+    expect(payload.truncationReasons).toEqual(["max_children[com.example:id/root kept 64 of 70]"]);
+    expect(JSON.parse(finalized.content[0].text).truncationReasons).toEqual([
+      "max_children[com.example:id/root kept 64 of 70]",
+    ]);
   });
 
   test("EC4: elements are kept only when the include-elements gate is enabled", () => {
@@ -944,6 +972,89 @@ describe("finalizeToolResponse", () => {
       expect(parsed.observation.freshness).toEqual(obsSc.freshness);
     });
 
+    // A diff REPLACES the projected observation, so the truncation provenance
+    // the skeleton projection lifts to the top level (issue #6601) is dropped
+    // with it — review thread PRRT_kwDOP-GF5M6h4v0N on PR #6912. The agent then
+    // reads a capped skeleton as a complete one.
+    test("a diffed observation carries the hierarchy truncation reasons (issue #6601)", () => {
+      const { store } = makeStore();
+      const reasons = ["max_children[com.example:id/root kept 64 of 70]"];
+      const capped = (): ObserveResult => {
+        const observation = sameScreenObserve();
+        observation.viewHierarchy!.truncationReasons = [...reasons];
+        return observation;
+      };
+
+      finalizeToolResponse(createStructuredToolResponse(capped()), {
+        name: "observe",
+        sessionUuid: "s1",
+        baselineStore: store,
+      });
+
+      const next = capped();
+      (next.viewHierarchy!.hierarchy.node as any).node[0].checked = "true";
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: next }),
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
+      );
+
+      const obsSc = (finalized.structuredContent as any).observation;
+      expect(obsSc.isDiff).toBe(true);
+      expect(obsSc.truncationReasons).toEqual(reasons);
+
+      // Text mirror agrees.
+      const parsed = JSON.parse(finalized.content[0].text);
+      expect(parsed.observation.truncationReasons).toEqual(reasons);
+    });
+
+    test("a diffed observation under project:'full' still carries the truncation reasons (issue #6601)", () => {
+      const { store } = makeStore();
+      const reasons = ["max_nodes"];
+      const capped = (): ObserveResult => {
+        const observation = sameScreenObserve();
+        observation.viewHierarchy!.truncationReasons = [...reasons];
+        return observation;
+      };
+
+      finalizeToolResponse(createStructuredToolResponse(capped()), {
+        name: "observe",
+        sessionUuid: "s1",
+        baselineStore: store,
+      });
+
+      const next = capped();
+      (next.viewHierarchy!.hierarchy.node as any).node[0].checked = "true";
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: next }),
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store, args: { project: "full" } },
+      );
+
+      const obsSc = (finalized.structuredContent as any).observation;
+      expect(obsSc.isDiff).toBe(true);
+      expect(obsSc.truncationReasons).toEqual(reasons);
+    });
+
+    test("a diffed observation of an untruncated hierarchy carries no truncationReasons", () => {
+      const { store } = makeStore();
+      finalizeToolResponse(createStructuredToolResponse(sameScreenObserve()), {
+        name: "observe",
+        sessionUuid: "s1",
+        baselineStore: store,
+      });
+
+      const next = sameScreenObserve();
+      (next.viewHierarchy!.hierarchy.node as any).node[0].checked = "true";
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: next }),
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
+      );
+
+      const obsSc = (finalized.structuredContent as any).observation;
+      expect(obsSc.isDiff).toBe(true);
+      expect(obsSc.truncationReasons).toBeUndefined();
+      expect("truncationReasons" in JSON.parse(finalized.content[0].text).observation).toBe(false);
+    });
+
     test("a diffed observation carries a usable `skeleton` even under raw:true / project:'full' (PR #6242 review PRRT_kwDOP-GF5M6fq3iK)", () => {
       const { store } = makeStore();
       const withSkeletonElements = (): ObserveResult => ({
@@ -1046,6 +1157,63 @@ describe("finalizeToolResponse", () => {
       const parsed = JSON.parse(finalized.content[0].text);
       expect(parsed.observation.context).toEqual(obsSc.context);
     });
+
+    test.each(["skeleton", "full"] as const)(
+      "%s diffs preserve the keyboard projection contract",
+      (project) => {
+        const { store } = makeStore();
+        finalizeToolResponse(createStructuredToolResponse(sameScreenObserve()), {
+          name: "observe",
+          sessionUuid: "s1",
+          baselineStore: store,
+        });
+        const next = sameScreenObserve();
+        (next.viewHierarchy!.hierarchy.node as any).node[0].checked = "true";
+        const key = {
+          text: "Q",
+          clickable: true,
+          bounds: { left: 0, top: 100, right: 50, bottom: 150 },
+        };
+        setElementProvenance(key, {
+          group: 1,
+          enter: 1,
+          exit: 1,
+          keyboardPackage: "example.keyboard",
+        });
+        next.elements = { clickable: [key], text: [key], scrollable: [], media: [] };
+        (next.viewHierarchy!.hierarchy.node as any).node.push({
+          extras: { "automobile:imePackage": "example.keyboard" },
+          node: [key],
+        });
+        const result = finalizeToolResponse(
+          createStructuredToolResponse({ success: true, observation: next }),
+          {
+            name: "tapOn",
+            args: { project },
+            sessionUuid: "s1",
+            baselineStore: store,
+          },
+        );
+        const observation = (result.structuredContent as any).observation;
+        expect(observation.isDiff).toBe(true);
+        expect(observation.keyboard).toEqual({ visible: true, package: "example.keyboard" });
+        // The keyboard survives as exactly ONE row, never a key per cap (issue #6871).
+        expect(observation.skeleton).toEqual([
+          {
+            elementId: "<ime>",
+            label: "Keyboard (example.keyboard)",
+            bounds: [0, 100, 50, 150],
+            affordances: ["input"],
+          },
+        ]);
+        expect(observation.added.some((entry: any) => entry.attributes.text === "Q")).toBe(
+          project === "full",
+        );
+        expect(JSON.parse(result.content[0].text).observation.keyboard).toEqual(
+          observation.keyboard,
+        );
+      },
+    );
 
     test("a diff with no surviving readout row omits `context` entirely rather than emitting `[]`", () => {
       const { store } = makeStore();
@@ -2013,6 +2181,354 @@ describe("finalizeToolResponse", () => {
           },
         });
         expect((finalized.structuredContent as any).observation.viewHierarchy).toBeUndefined();
+      });
+    });
+
+    /**
+     * Issue #6870: spilling `observation` alone leaves everything else inline —
+     * `observationDiff` rides at the TOP level, beside it, and so does any bulky
+     * tool field. A response could therefore still exceed the inline ceiling
+     * after the #5882 spill fired, and over a one-shot `--cli` transport that
+     * oversized JSON reached the client cut mid-string. With a writer available
+     * the finalized payload must never exceed the ceiling.
+     */
+    describe("residual overflow after the observation spill (#6870)", () => {
+      const oversizedCtx = (writer: FakeObservationArtifactWriter) =>
+        ({ name: "tapOn", artifactMode: "oversized", artifactWriter: writer }) as any;
+
+      const payloadBytes = (finalized: any): number =>
+        Buffer.byteLength(stringifyToolResponse(finalized.structuredContent), "utf8");
+
+      test("keeps a provisioned session UUID routable after spilling its oversized result", () => {
+        const writer = new FakeObservationArtifactWriter();
+        const sessionUuid = "provisioned-session-uuid";
+        const finalized = finalizeToolResponse(
+          createStructuredToolResponse({
+            success: true,
+            sessionUuid,
+            operationId: "o".repeat(DEFAULT_OBSERVATION_INLINE_MAX_BYTES + 1),
+          }),
+          { name: "provisionDevice", artifactMode: "oversized", artifactWriter: writer } as any,
+        );
+
+        expect(writer.writes).toHaveLength(1);
+        expect((finalized.structuredContent as any).sessionUuid).toBe(sessionUuid);
+        expect(getDeviceSessionIdFromResult({ content: finalized.content })).toBe(sessionUuid);
+      });
+
+      // `observationDiff` sits at the top level of the served payload, outside
+      // `observation`, so the size gate must measure it — and whatever the spill
+      // leaves behind must still fit.
+      test("bounds a payload whose bulk sits beside the observation", () => {
+        const writer = new FakeObservationArtifactWriter();
+        const finalized = finalizeToolResponse(
+          createStructuredToolResponse({
+            success: true,
+            observation: makeObserveResult(),
+            diffLikeSidecar: { mode: "diff", pad: "y".repeat(70_000) },
+          }),
+          oversizedCtx(writer),
+        );
+
+        const structured = finalized.structuredContent as any;
+        expect(writer.writes.length).toBeGreaterThan(0);
+        expect(payloadBytes(finalized)).toBeLessThanOrEqual(DEFAULT_OBSERVATION_INLINE_MAX_BYTES);
+        expect(structured.diffLikeSidecar).toBeUndefined();
+      });
+
+      test("spills the residue and keeps the success/error headline inline", () => {
+        const writer = new FakeObservationArtifactWriter();
+        const finalized = finalizeToolResponse(
+          createStructuredToolResponse({
+            success: false,
+            error: "tap failed",
+            pad: "z".repeat(90_000),
+            observation: makeObserveResult(),
+          }),
+          oversizedCtx(writer),
+        );
+
+        const structured = finalized.structuredContent as any;
+        expect(payloadBytes(finalized)).toBeLessThanOrEqual(DEFAULT_OBSERVATION_INLINE_MAX_BYTES);
+        expect(structured.success).toBe(false);
+        expect(structured.error).toBe("tap failed");
+        expect(structured.pad).toBeUndefined();
+        expect(structured.artifact).toMatchObject({ format: "json", tool: "tapOn" });
+      });
+
+      test("a payload with no observation at all is still bounded", () => {
+        const writer = new FakeObservationArtifactWriter();
+        const finalized = finalizeToolResponse(
+          createStructuredToolResponse({ success: true, rows: "q".repeat(90_000) }),
+          oversizedCtx(writer),
+        );
+
+        const structured = finalized.structuredContent as any;
+        expect(payloadBytes(finalized)).toBeLessThanOrEqual(DEFAULT_OBSERVATION_INLINE_MAX_BYTES);
+        expect(structured.artifact).toMatchObject({ format: "json", tool: "tapOn" });
+        expect(structured.rows).toBeUndefined();
+      });
+
+      // The residue kept inline is itself unbounded unless it is capped: a
+      // 70 KB `error`, or an observe-wait `candidates` array, is copied back
+      // beside the artifact pointer and blows the ceiling all over again.
+      test("bounds an oversized error string kept inline", () => {
+        const writer = new FakeObservationArtifactWriter();
+        const finalized = finalizeToolResponse(
+          createStructuredToolResponse({
+            success: false,
+            error: "e".repeat(70_000),
+          }),
+          oversizedCtx(writer),
+        );
+
+        const structured = finalized.structuredContent as any;
+        expect(payloadBytes(finalized)).toBeLessThanOrEqual(DEFAULT_OBSERVATION_INLINE_MAX_BYTES);
+        expect(typeof structured.error).toBe("string");
+        expect(structured.error.startsWith("eeee")).toBe(true);
+        expect(structured.error.length).toBeLessThan(70_000);
+        expect(structured.artifact).toMatchObject({ format: "json", tool: "tapOn" });
+      });
+
+      /**
+       * `createStructuredToolResponse` hoists `success`/`error` onto the ENVELOPE
+       * beside `content`/`structuredContent` — a third representation of the same
+       * payload. Bounding only the structured payload left a 70,000-character
+       * `error` sitting at the top level, so the finalized envelope was still
+       * ~79 KiB and the two representations disagreed about the same field
+       * (#6870 review, PRRT_kwDOP-GF5M6h5Djc).
+       */
+      test("bounds the hoisted top-level error alongside the spilled payload", () => {
+        const writer = new FakeObservationArtifactWriter();
+        const finalized = finalizeToolResponse(
+          createStructuredToolResponse({
+            success: false,
+            error: "e".repeat(70_000),
+          }),
+          oversizedCtx(writer),
+        );
+
+        const structured = finalized.structuredContent as any;
+        expect(finalized.error).toBe(structured.error);
+        expect(finalized.success).toBe(false);
+        expect(Buffer.byteLength(JSON.stringify(finalized), "utf8")).toBeLessThanOrEqual(
+          2 * DEFAULT_OBSERVATION_INLINE_MAX_BYTES,
+        );
+      });
+
+      // When even the bounded residue overflows, `error` becomes the
+      // `{ _truncated, bytes }` marker — a shape the hoisted string field cannot
+      // represent. Dropping the hoist keeps the two representations from
+      // disagreeing; `success: false` still carries the failure signal.
+      test("drops the hoisted error when the residue replaces it with a marker", () => {
+        const writer = new FakeObservationArtifactWriter();
+        const huge = "\u6f22".repeat(70_000);
+        const finalized = finalizeToolResponse(
+          createStructuredToolResponse({
+            success: false,
+            error: huge,
+            awaitedElement: huge,
+            awaitDuration: huge,
+            awaitTimeout: huge,
+            matched: huge,
+            settled: huge,
+            timedOut: huge,
+            polls: huge,
+            waitMs: huge,
+            matchedElement: huge,
+            candidates: [huge],
+          }),
+          oversizedCtx(writer),
+        );
+
+        const structured = finalized.structuredContent as any;
+        expect(structured.error).toEqual({ _truncated: true, bytes: expect.any(Number) });
+        expect("error" in finalized).toBe(false);
+        expect(finalized.success).toBe(false);
+      });
+
+      test("bounds an oversized observe-wait candidates array kept inline", () => {
+        const writer = new FakeObservationArtifactWriter();
+        const finalized = finalizeToolResponse(
+          createStructuredToolResponse({
+            success: true,
+            matched: false,
+            timedOut: true,
+            candidates: Array.from({ length: 4_000 }, (_, index) => ({
+              text: `candidate-${index}`,
+              bounds: { left: index, top: index, right: index + 10, bottom: index + 10 },
+            })),
+          }),
+          oversizedCtx(writer),
+        );
+
+        const structured = finalized.structuredContent as any;
+        expect(payloadBytes(finalized)).toBeLessThanOrEqual(DEFAULT_OBSERVATION_INLINE_MAX_BYTES);
+        // The scalar wait verdict still rides inline; only the unbounded array
+        // is replaced with a marker pointing at the spilled artifact.
+        expect(structured.matched).toBe(false);
+        expect(structured.timedOut).toBe(true);
+        expect(structured.candidates).toEqual({ _truncated: true, bytes: expect.any(Number) });
+      });
+
+      test("stays under the ceiling when every retained field is oversized", () => {
+        const writer = new FakeObservationArtifactWriter();
+        const huge = "h".repeat(70_000);
+        const finalized = finalizeToolResponse(
+          createStructuredToolResponse({
+            success: false,
+            error: huge,
+            awaitedElement: huge,
+            awaitDuration: huge,
+            awaitTimeout: huge,
+            matched: huge,
+            settled: huge,
+            timedOut: huge,
+            polls: huge,
+            waitMs: huge,
+            matchedElement: huge,
+            candidates: [huge],
+          }),
+          oversizedCtx(writer),
+        );
+
+        expect(payloadBytes(finalized)).toBeLessThanOrEqual(DEFAULT_OBSERVATION_INLINE_MAX_BYTES);
+      });
+
+      // A per-field cap counted in UTF-16 code units is not a byte cap: three
+      // bytes per unit of CJK/emoji text, times every retained field, is still
+      // multiples of the ceiling. The bound has to hold on the serialized bytes.
+      test("stays under the ceiling for multi-byte retained fields", () => {
+        const writer = new FakeObservationArtifactWriter();
+        const huge = "\u6f22".repeat(70_000);
+        const finalized = finalizeToolResponse(
+          createStructuredToolResponse({
+            success: false,
+            error: huge,
+            awaitedElement: huge,
+            awaitDuration: huge,
+            awaitTimeout: huge,
+            matched: huge,
+            settled: huge,
+            timedOut: huge,
+            polls: huge,
+            waitMs: huge,
+            matchedElement: huge,
+            candidates: [huge],
+          }),
+          oversizedCtx(writer),
+        );
+
+        const structured = finalized.structuredContent as any;
+        expect(payloadBytes(finalized)).toBeLessThanOrEqual(DEFAULT_OBSERVATION_INLINE_MAX_BYTES);
+        expect(structured.artifact).toMatchObject({ format: "json", tool: "tapOn" });
+      });
+
+      test("keeps a small error and candidate list verbatim", () => {
+        const writer = new FakeObservationArtifactWriter();
+        const finalized = finalizeToolResponse(
+          createStructuredToolResponse({
+            success: false,
+            error: "tap failed",
+            candidates: [{ text: "Submit" }],
+            pad: "z".repeat(90_000),
+          }),
+          oversizedCtx(writer),
+        );
+
+        const structured = finalized.structuredContent as any;
+        expect(structured.error).toBe("tap failed");
+        expect(structured.candidates).toEqual([{ text: "Submit" }]);
+      });
+
+      test("leaves an in-limit payload untouched", () => {
+        const writer = new FakeObservationArtifactWriter();
+        const finalized = finalizeToolResponse(
+          createStructuredToolResponse({ success: true, rows: "q".repeat(10) }),
+          oversizedCtx(writer),
+        );
+
+        expect(finalized.structuredContent).toEqual({ success: true, rows: "q".repeat(10) });
+        expect(writer.writes).toHaveLength(0);
+      });
+
+      /**
+       * The gate measured with `stringifyToolResponse`, whose replacer deletes
+       * every `extras` property. `structuredContent` is assigned the UNSTRIPPED
+       * payload object and serialized by the transport with a plain
+       * `JSON.stringify`, so a result whose bulk is accessibility `extras`
+       * measured as a few bytes here and was handed to the client at full size —
+       * exactly the overflow the ceiling exists to stop (#6870 review).
+       */
+      test("measures the unstripped structured payload, not the extras-stripped rendering", () => {
+        const writer = new FakeObservationArtifactWriter();
+        const finalized = finalizeToolResponse(
+          createStructuredToolResponse({
+            success: true,
+            detail: { extras: { accessibility: "x".repeat(70_000) } },
+          }),
+          oversizedCtx(writer),
+        );
+
+        const structured = finalized.structuredContent as any;
+        expect(writer.writes).toHaveLength(1);
+        expect(Buffer.byteLength(JSON.stringify(structured), "utf8")).toBeLessThanOrEqual(
+          DEFAULT_OBSERVATION_INLINE_MAX_BYTES,
+        );
+        expect(structured.detail).toBeUndefined();
+        expect(structured.artifact).toMatchObject({ format: "json", tool: "tapOn" });
+      });
+
+      // The artifact is advertised as the COMPLETE result, so it must round-trip
+      // what would have been served — `extras` included. The spill hands the
+      // writer the unstripped payload and nothing else; persisting it whole is
+      // the WRITER's contract (see toolOutputArtifactWriter.test.ts), so no call
+      // site re-serializes on its own (#6870 review).
+      test("hands the artifact writer the extras-bearing payload itself", () => {
+        const writer = new FakeObservationArtifactWriter();
+        finalizeToolResponse(
+          createStructuredToolResponse({
+            success: true,
+            detail: { extras: { accessibility: "x".repeat(70_000) } },
+          }),
+          oversizedCtx(writer),
+        );
+
+        expect(writer.writes).toHaveLength(1);
+        expect(writer.writes[0].serialized).toBeUndefined();
+        expect((writer.writes[0].data as any).detail.extras).toEqual({
+          accessibility: "x".repeat(70_000),
+        });
+      });
+
+      /**
+       * A full or read-only tool-output directory must not turn an
+       * already-completed tool call into a thrown finalization: the caller gets
+       * no result at all and, for a side-effecting tool, may retry an action that
+       * already happened. Fall back to the pre-#6870 behaviour — the payload is
+       * served un-spilled — and warn (#6870 review).
+       */
+      test("falls back to the un-spilled payload when the artifact write fails", () => {
+        const writer = new FakeObservationArtifactWriter();
+        writer.throwOnWrite = new Error("artifact disk is full");
+        const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+
+        try {
+          const finalized = finalizeToolResponse(
+            createStructuredToolResponse({ success: true, rows: "q".repeat(90_000) }),
+            oversizedCtx(writer),
+          );
+
+          const structured = finalized.structuredContent as any;
+          expect(structured.success).toBe(true);
+          expect(structured.rows).toBe("q".repeat(90_000));
+          expect(structured.artifact).toBeUndefined();
+          expect(
+            warnSpy.mock.calls.some((call) => String(call[0]).includes("artifact disk is full")),
+          ).toBe(true);
+        } finally {
+          warnSpy.mockRestore();
+        }
       });
     });
   });

@@ -174,6 +174,18 @@ export interface ObserveResult {
   viewHierarchy?: ViewHierarchyResult;
 
   /**
+   * Why the captured hierarchy is incomplete, lifted from
+   * `viewHierarchy.truncationReasons` by the skeleton projection (issue #6601),
+   * which removes the tree that otherwise carries it. Present only when
+   * something was actually dropped: a device-side stop (`max_nodes`,
+   * `max_depth`, a cancelled walk) or the host-side per-node child cap
+   * (`max_children[<node> kept N of M]`). Its presence means the rows in
+   * `skeleton` / `context` are a SUBSET of what is on screen, so an element
+   * missing from them is not evidence it is absent.
+   */
+  truncationReasons?: string[];
+
+  /**
    * Interactable Skeleton Projection (issue #4388): a flat, actionable-only
    * summary emitted in place of `viewHierarchy` / `elements`. The `"skeleton"`
    * projection is now the default; it is absent only when a caller opts out with
@@ -186,6 +198,8 @@ export interface ObserveResult {
    * never `tapOn`/`inputText`/etc.
    */
   skeleton?: SkeletonElement[];
+  /** Observed Android IME window, replacing its individual keys in compact output. */
+  keyboard?: { visible: true; package: string };
 
   /**
    * Non-actionable rows from the same projection that produces `skeleton`
@@ -296,7 +310,17 @@ export interface ObserveResult {
   /** Whether a declarative waitFor condition matched. */
   matched?: boolean;
 
-  /** Whether a whole-screen declarative waitFor stable condition settled. */
+  /**
+   * Whether this observation passed a hierarchy-stability check.
+   *
+   * Two producers, one meaning ("two consecutive structurally-equal
+   * hierarchies"):
+   *  - `observe(waitFor: {for: "stable"})` — the standalone whole-screen settle.
+   *  - The embedded-observation gate on a navigation-class action (issue #6866),
+   *    which stamps every action observation so a client can tell a
+   *    stability-checked capture from an unchecked one. `false` means the bound
+   *    expired, or the action was not navigation-class and was never gated.
+   */
   settled?: boolean;
 
   /** True if a declarative waitFor condition or stability wait timed out. */
@@ -346,6 +370,21 @@ export interface ObserveResult {
    * Contains WCAG 2.1 violation detection and compliance checking
    */
   accessibilityAudit?: AccessibilityAuditResult;
+
+  /**
+   * Why a REQUESTED accessibility audit is absent from this observation.
+   *
+   * Present only when an audit was run and then deliberately dropped, so a
+   * client can tell "auditing was off" from "auditing was on and its result no
+   * longer describes this capture". The one producer today is the
+   * embedded-observation settle gate (#6866): when it adopts a settled capture
+   * in place of the action's own, the audit attached to the original — whose
+   * elements, violations, fingerprint and screen id were all derived from that
+   * original hierarchy, while settle polls skip auditing entirely — describes a
+   * tree that is no longer being returned, so it is dropped rather than
+   * mismatched onto the adopted one.
+   */
+  accessibilityAuditSkipped?: "settled_capture_adopted";
 
   /**
    * Freshness metadata for the observation

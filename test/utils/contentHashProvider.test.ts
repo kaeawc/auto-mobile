@@ -138,6 +138,79 @@ describe("CachingContentHashProvider", () => {
     expect(hasher.calls).toHaveLength(5);
   });
 
+  test("single-flight: concurrent calls for the same key share one computeHash invocation", async () => {
+    // Deferred promise: both callers race in before either has awaited computeHash,
+    // so a non-single-flight implementation would call computeHash twice (#6654).
+    let resolveHash: (value: string) => void = () => {};
+    let computeCalls = 0;
+    const hasher: AppContentHasher = {
+      async computeHash() {
+        computeCalls += 1;
+        return new Promise<string>((resolve) => {
+          resolveHash = resolve;
+        });
+      },
+    };
+    const provider = new CachingContentHashProvider(hasher);
+
+    const first = provider.resolveContentHash(fakeDevice("emu-1"), "com.example.app", 5);
+    const second = provider.resolveContentHash(fakeDevice("emu-1"), "com.example.app", 5);
+    resolveHash("sha256:SHARED");
+
+    expect(await first).toBe("sha256:SHARED");
+    expect(await second).toBe("sha256:SHARED");
+    expect(computeCalls).toBe(1);
+  });
+
+  test("single-flight: a rejected computation is not cached, so a later call retries", async () => {
+    let computeCalls = 0;
+    const hasher: AppContentHasher = {
+      async computeHash() {
+        computeCalls += 1;
+        if (computeCalls === 1) {
+          throw new Error("transient failure");
+        }
+        return "sha256:RETRIED";
+      },
+    };
+    const provider = new CachingContentHashProvider(hasher);
+
+    // Two concurrent callers share the failing in-flight computation; both get null.
+    const first = provider.resolveContentHash(fakeDevice("emu-1"), "com.example.app", 5);
+    const second = provider.resolveContentHash(fakeDevice("emu-1"), "com.example.app", 5);
+    expect(await first).toBeNull();
+    expect(await second).toBeNull();
+    expect(computeCalls).toBe(1);
+
+    // The in-flight entry was cleared on failure, so a later call retries (not poisoned).
+    const third = await provider.resolveContentHash(fakeDevice("emu-1"), "com.example.app", 5);
+    expect(third).toBe("sha256:RETRIED");
+    expect(computeCalls).toBe(2);
+  });
+
+  test("single-flight de-duplication is scoped per key: a different key is not blocked", async () => {
+    let releaseFirst: (value: string) => void = () => {};
+    const hasher: AppContentHasher = {
+      async computeHash(_device, packageId) {
+        if (packageId === "com.example.app") {
+          return new Promise<string>((resolve) => {
+            releaseFirst = resolve;
+          });
+        }
+        return "sha256:OTHER";
+      },
+    };
+    const provider = new CachingContentHashProvider(hasher);
+
+    const blocked = provider.resolveContentHash(fakeDevice("emu-1"), "com.example.app", 5);
+    // A distinct key (different packageId) resolves without waiting on the in-flight one.
+    const other = await provider.resolveContentHash(fakeDevice("emu-1"), "com.other.app", 5);
+    expect(other).toBe("sha256:OTHER");
+
+    releaseFirst("sha256:FIRST");
+    expect(await blocked).toBe("sha256:FIRST");
+  });
+
   test("an in-flight resolution started before invalidate does not repopulate the cache", async () => {
     // Interleave: start resolve (blocks), invalidate, then let the old computation
     // finish — it must NOT poison the cache with the pre-update hash.
@@ -165,6 +238,75 @@ describe("CachingContentHashProvider", () => {
     const result = await provider.resolveContentHash(fakeDevice("emu-1"), "com.example.app", 5);
     expect(result).toBe("sha256:FRESH");
     expect(computeCalls).toBe(2);
+  });
+
+  test("invalidate prevents a later caller from sharing an older in-flight hash", async () => {
+    let releaseStale: (value: string) => void = () => {};
+    let computeCalls = 0;
+    const hasher: AppContentHasher = {
+      async computeHash() {
+        computeCalls += 1;
+        if (computeCalls === 1) {
+          return new Promise<string>((resolve) => {
+            releaseStale = resolve;
+          });
+        }
+        return "sha256:FRESH";
+      },
+    };
+    const provider = new CachingContentHashProvider(hasher);
+
+    const stale = provider.resolveContentHash(fakeDevice("emu-1"), "com.example.app", 5);
+    provider.invalidate("emu-1", "com.example.app");
+    const fresh = provider.resolveContentHash(fakeDevice("emu-1"), "com.example.app", 5);
+
+    // The new caller starts fresh work immediately; it must not receive the
+    // pre-invalidation promise even though that promise has not settled yet.
+    expect(await fresh).toBe("sha256:FRESH");
+    expect(computeCalls).toBe(2);
+
+    releaseStale("sha256:STALE");
+    expect(await stale).toBe("sha256:STALE");
+
+    // The old promise's finally must not clear the newer cache/in-flight state.
+    expect(await provider.resolveContentHash(fakeDevice("emu-1"), "com.example.app", 5)).toBe(
+      "sha256:FRESH",
+    );
+    expect(computeCalls).toBe(2);
+  });
+
+  test("an older completion cannot remove an in-flight replacement after invalidate", async () => {
+    let releaseStale: (value: string) => void = () => {};
+    let releaseFresh: (value: string) => void = () => {};
+    let computeCalls = 0;
+    const hasher: AppContentHasher = {
+      async computeHash() {
+        computeCalls += 1;
+        return new Promise<string>((resolve) => {
+          if (computeCalls === 1) {
+            releaseStale = resolve;
+          } else {
+            releaseFresh = resolve;
+          }
+        });
+      },
+    };
+    const provider = new CachingContentHashProvider(hasher);
+
+    const stale = provider.resolveContentHash(fakeDevice("emu-1"), "com.example.app", 5);
+    provider.invalidate("emu-1", "com.example.app");
+    const fresh = provider.resolveContentHash(fakeDevice("emu-1"), "com.example.app", 5);
+    expect(computeCalls).toBe(2);
+
+    releaseStale("sha256:STALE");
+    expect(await stale).toBe("sha256:STALE");
+
+    // The stale completion must leave the replacement flight available to callers.
+    const later = provider.resolveContentHash(fakeDevice("emu-1"), "com.example.app", 5);
+    expect(computeCalls).toBe(2);
+    releaseFresh("sha256:FRESH");
+    expect(await fresh).toBe("sha256:FRESH");
+    expect(await later).toBe("sha256:FRESH");
   });
 });
 

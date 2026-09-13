@@ -1,3 +1,4 @@
+import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import { describe, expect, test, beforeEach, afterEach } from "bun:test";
 import {
   SessionManager,
@@ -90,6 +91,16 @@ const HEARTBEAT_ENV_KEYS = [
   "AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS",
   "AUTO_MOBILE_SESSION_HEARTBEAT_TIMEOUT_MS",
 ] as const;
+
+test("resetDeviceReadinessForDevice drops restored automation readiness", async () => {
+  const manager = new SessionManager(new FakeTimer(), new FakeDeviceSessionPersistence());
+  await manager.createSession("restore-session", "emulator-5554", "android");
+  manager.setDeviceReadiness("restore-session", "automationReady");
+
+  manager.resetDeviceReadinessForDevice("emulator-5554");
+
+  expect(manager.getDeviceReadiness("restore-session")).toBe("booted");
+});
 
 function clearHeartbeatEnv(): void {
   for (const key of HEARTBEAT_ENV_KEYS) {
@@ -229,6 +240,31 @@ describe("SessionManager", () => {
         repository.finishUpsert();
         await creating;
       } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+
+    test("fences session publication when persistence outlives acquisition cancellation", async () => {
+      const repository = new DeferredDeviceSessionPersistence();
+      const manager = new SessionManager(fakeTimer, repository);
+      const controller = new AbortController();
+      try {
+        repository.deferNextUpsert();
+        const creating = runWithAbortSignal(controller.signal, () =>
+          manager.createSession("expired-acquisition", "emulator-5554", "android"),
+        );
+        await repository.waitForUpsert();
+        controller.abort(new Error("provision deadline exhausted"));
+        repository.finishUpsert();
+        await expect(creating).rejects.toThrow("provision deadline exhausted");
+        expect(manager.getSession("expired-acquisition")).toBeNull();
+        expect(manager.getSessionForDevice("emulator-5554")).toBeNull();
+        expect(manager.getTerminalReleaseSnapshot("expired-acquisition")).toMatchObject({
+          releaseReason: "session-creation-cancelled",
+          terminal: true,
+        });
+      } finally {
+        repository.finishUpsert();
         manager.stopCleanupTimer();
       }
     });
@@ -1475,17 +1511,20 @@ describe("SessionManager", () => {
           },
         }),
       );
+      const device = { name: "device-1", deviceId: "device-1", platform: "android" as const };
+      const deviceManager = new FakeDeviceManager();
+      // A pooled Android entry is re-proved present against discovery before it
+      // is handed out, handsets included, so discovery has to list it.
+      deviceManager.bootedDevices = [device];
       const pool = new DevicePool(
         manager,
         "test-daemon",
         fakeTimer,
         new FakeInstalledAppsRepository(),
-        new FakeDeviceManager(),
+        deviceManager,
       );
       try {
-        await pool.initializeWithDevices([
-          { name: "device-1", deviceId: "device-1", platform: "android" },
-        ]);
+        await pool.initializeWithDevices([device]);
         await pool.assignDeviceToSession("s1", "android");
         manager.setKeepScreenAwake("s1", { applied: true, method: "svc", svcWasEnabled: false });
 

@@ -189,19 +189,34 @@ export class InMemoryVirtualDeviceLifecycleCoordinator implements VirtualDeviceL
     options: VirtualDeviceLifecycleReservationOptions,
     controller: AbortController,
   ): Promise<LifecycleOwner> {
+    if (options.signal?.aborted) {
+      throw reservationCancellationError(options.signal, options.operation);
+    }
     const state = this.states.get(key) ?? { waiters: [] };
     this.states.set(key, state);
     if (!state.owner) {
       return this.assignOwner(key, state, options.operation, controller);
     }
-
-    if (options.operation === "teardown" && state.owner.operation !== "teardown") {
-      state.owner.controller.abort(new DeviceLifecyclePreemptedError(identity));
-    }
-
     const remainingMs = options.deadlineMs - this.timer.now();
     if (remainingMs <= 0) {
       throw this.timeoutError(identity, options.operation);
+    }
+
+    if (options.operation === "teardown") {
+      const preempted = new DeviceLifecyclePreemptedError(identity);
+      if (state.owner.operation !== "teardown") {
+        state.owner.controller.abort(preempted);
+      }
+      // Existing waiters may have resolved this identity before queueing. An
+      // explicit teardown invalidates that work, including behind another
+      // teardown; transferred provision cleanup keeps its existing semantics.
+      for (const waiter of [...state.waiters]) {
+        if (waiter.operation !== "teardown") {
+          this.removeWaiter(key, state, waiter);
+          waiter.controller.abort(preempted);
+          waiter.reject(preempted);
+        }
+      }
     }
 
     let timeout: NodeJS.Timeout | undefined;

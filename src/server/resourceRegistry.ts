@@ -18,9 +18,14 @@ export interface ResourceReadContext {
   signal?: AbortSignal;
 }
 
-// Interface for resource content handlers
+// Interface for resource content handlers.
+//
+// The read context is optional so the many handlers that ignore it stay
+// zero-argument functions; handlers that must correlate two reads from the same
+// client (e.g. the latest-observation pair, issue #6600) declare it and receive
+// it from `registerWithServer`.
 interface ResourceHandler {
-  (): Promise<ResourceContent>;
+  (context?: ResourceReadContext): Promise<ResourceContent>;
 }
 
 // Interface for resource template handlers (with parameters)
@@ -376,7 +381,7 @@ class ResourceRegistryClass {
       // First, try to find an exact match resource
       const resource = this.getResource(uri);
       if (resource) {
-        const content = await resource.handler();
+        const content = await resource.handler(getReadContext(extra.signal));
         return {
           contents: [content],
         };
@@ -404,7 +409,7 @@ class ResourceRegistryClass {
           `  - automobile:devices/{deviceId}/apps - List apps for a device\n` +
           `  - automobile:apps?deviceId={deviceId} - Query apps with filters\n` +
           `  - automobile:observation/latest - Latest screen observation\n\n` +
-          `Use the listApps tool to list apps directly (params: device, type, search, profile; default type=user).`,
+          `Use the listApps tool to list apps directly (params: device, type, search, profile; default type=launchable).`,
       );
     });
 

@@ -5,6 +5,12 @@ import {
   type NavigationGraphStreamData,
   type RequestedObservation,
 } from "../../src/daemon/deviceDataStreamSocketServer";
+import {
+  OBSERVATION_BATCH_HEADROOM_MS,
+  PER_DEVICE_OBSERVATION_TIMEOUT_MS,
+  runObservationRequestBatch,
+} from "../../src/daemon/observationRequestBatch";
+import type { ObserveResult } from "../../src/models";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeDeviceSessionResolver } from "../fakes/FakeDeviceSessionResolver";
@@ -181,6 +187,80 @@ describe("DeviceDataStreamSocketServer", () => {
       expect(msgs[1].type).toBe("subscription_response");
       expect(msgs[1].id).toBe("obs-1");
       expect(msgs[1].success).toBe(true);
+    });
+
+    // The device-addressed admission gate (`DevicePool.assertDeviceActionable`,
+    // reached here through the resolver) must refuse BEFORE the serial-addressed
+    // observation runs. Without it the handler observed the unknown runtime,
+    // `pushForDevice` then dropped every frame because routing is suspended, and
+    // the requester was acknowledged with `success: true` and no hierarchy
+    // ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
+    it("rejects an explicit observation while the pooled identity is quarantined", async () => {
+      let observed = false;
+      server.setOnObservationRequested(async (request) => {
+        observed = true;
+        return [requestedObservation(request.deviceId ?? "emulator-5554")];
+      });
+      const { socket } = server.simulateSubscription({ deviceId: "emulator-5554" });
+      server.sessionResolver.quarantine("emulator-5554");
+
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({
+          id: "obs-quarantined",
+          command: "request_observation",
+          deviceId: "emulator-5554",
+        }),
+      );
+
+      expect(observed).toBe(false);
+      const msgs = socket.getWrittenMessages<{
+        id?: string;
+        type: string;
+        success?: boolean;
+        error?: string;
+      }>();
+      expect(msgs).toHaveLength(1);
+      expect(msgs[0].type).toBe("error");
+      expect(msgs[0].success).toBe(false);
+      expect(msgs[0].id).toBe("obs-quarantined");
+      expect(msgs[0].error).toContain("emulator-5554");
+    });
+
+    // An all-device request names no serial, so the gate above cannot preflight
+    // it — but the same false acknowledgement follows: `pushForDevice` drops a
+    // quarantined serial's hierarchy because routing is suspended, and the
+    // requester was told `success: true` with nothing delivered
+    // ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
+    it("reports the quarantined device of an all-device observation instead of acking success", async () => {
+      server.setOnObservationRequested(async () => [
+        requestedObservation("emulator-5554"),
+        requestedObservation("emulator-5556"),
+      ]);
+      const { socket } = server.simulateSubscription({ deviceId: null });
+      server.sessionResolver.quarantine("emulator-5554");
+
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({ id: "obs-all", command: "request_observation" }),
+      );
+
+      const msgs = socket.getWrittenMessages<{
+        id?: string;
+        type: string;
+        success?: boolean;
+        error?: string;
+        deviceId?: string;
+      }>();
+      // The healthy device still gets its hierarchy; the quarantined one is
+      // reported as a per-device failure rather than silently dropped.
+      const pushed = msgs.filter((message) => message.type === "hierarchy_update");
+      expect(pushed.map((message) => message.deviceId)).toEqual(["emulator-5556"]);
+      const ack = msgs[msgs.length - 1];
+      expect(ack.type).toBe("error");
+      expect(ack.success).toBe(false);
+      expect(ack.id).toBe("obs-all");
+      expect(ack.error).toContain("emulator-5554");
     });
 
     it("forwards proven frame context and clears it when an explicit observation lacks provenance", async () => {
@@ -447,6 +527,55 @@ describe("DeviceDataStreamSocketServer", () => {
       expect(msgs[0].id).toBe("obs-4");
       expect(msgs[0].success).toBe(false);
       expect(msgs[0].error).toBe("Observation request timed out after 100ms");
+    });
+
+    it("settles a stalled device in the batch before the outer request deadline", async () => {
+      server.setOnObservationRequested(
+        ({ signal }) =>
+          runObservationRequestBatch(
+            [{ id: "stalled" }, { id: "healthy" }],
+            async (device): Promise<ObserveResult> => {
+              if (device.id === "stalled") {
+                return new Promise<ObserveResult>(() => undefined);
+              }
+              return requestedObservation(device.id).observation;
+            },
+            { timer, signal },
+          ),
+        PER_DEVICE_OBSERVATION_TIMEOUT_MS + OBSERVATION_BATCH_HEADROOM_MS,
+      );
+      const { socket } = server.simulateSubscription({});
+
+      const request = server.processLineForTest(
+        socket,
+        JSON.stringify({ id: "obs-batch-timeout", command: "request_observation" }),
+      );
+      await Promise.resolve();
+      await timer.advanceTimeAsync(PER_DEVICE_OBSERVATION_TIMEOUT_MS);
+      await request;
+
+      const messages = socket.getWrittenMessages<{
+        id?: string;
+        type: string;
+        deviceId?: string;
+        error?: string;
+      }>();
+      const observationMessages = messages.filter((message) => message.type !== "ping");
+      expect(observationMessages).toHaveLength(2);
+      expect(observationMessages).not.toContainEqual(
+        expect.objectContaining({
+          error: `Observation request timed out after ${PER_DEVICE_OBSERVATION_TIMEOUT_MS}ms`,
+        }),
+      );
+      expect(observationMessages[0]).toMatchObject({
+        type: "hierarchy_update",
+        deviceId: "healthy",
+      });
+      expect(observationMessages[1]).toMatchObject({
+        id: "obs-batch-timeout",
+        type: "error",
+        error: `Observation request failed for stalled: Observation request timed out after ${PER_DEVICE_OBSERVATION_TIMEOUT_MS}ms for device stalled`,
+      });
     });
   });
 
@@ -2350,6 +2479,80 @@ describe("DeviceDataStreamSocketServer", () => {
       expect(msgs[0].success).toBe(true);
     });
 
+    // FUNNEL 2. The session-keyed target above resolves through
+    // `resolveDeviceId`, which already withholds a quarantined serial; the RAW
+    // `deviceId` target skips that resolution entirely, so it needs the gate to
+    // avoid registering a device-side content observer on a runtime the pool can
+    // no longer identify
+    // ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
+    it("refuses a raw-serial storage subscribe while the pooled identity is quarantined", async () => {
+      const calls: StorageSubReq[] = [];
+      server.setOnStorageSubscriptionRequested(async (req) => {
+        calls.push(req);
+      });
+      server.sessionResolver.quarantine("emulator-5554");
+
+      const socket = new FakeSocket();
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({
+          id: "s-quarantined",
+          command: "subscribe_storage",
+          deviceId: "emulator-5554",
+          packageName: "com.example.app",
+          fileName: "prefs.xml",
+        }),
+      );
+
+      expect(calls).toEqual([]);
+      const msgs = socket.getWrittenMessages<{
+        id?: string;
+        type: string;
+        success?: boolean;
+        error?: string;
+      }>();
+      expect(msgs).toHaveLength(1);
+      expect(msgs[0].type).toBe("error");
+      expect(msgs[0].success).toBe(false);
+      expect(msgs[0].error).toContain("emulator-5554");
+    });
+
+    // Teardown is exempt: refusing an unsubscribe would strand the device-side
+    // observer the daemon itself registered, and releasing it touches only
+    // bookkeeping the quarantine does not call into question.
+    it("still releases a raw-serial storage subscription while quarantined", async () => {
+      const calls: StorageSubReq[] = [];
+      server.setOnStorageSubscriptionRequested(async (req) => {
+        calls.push(req);
+      });
+      const socket = new FakeSocket();
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({
+          id: "s-live",
+          command: "subscribe_storage",
+          deviceId: "emulator-5554",
+          packageName: "com.example.app",
+          fileName: "prefs.xml",
+        }),
+      );
+      calls.length = 0;
+      server.sessionResolver.quarantine("emulator-5554");
+
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({
+          id: "s-release",
+          command: "unsubscribe_storage",
+          deviceId: "emulator-5554",
+          packageName: "com.example.app",
+          fileName: "prefs.xml",
+        }),
+      );
+
+      expect(calls[0].subscribe).toBe(false);
+    });
+
     it("passes subscribe:false for an unsubscribe", async () => {
       const calls: StorageSubReq[] = [];
       server.setOnStorageSubscriptionRequested(async (req) => {
@@ -2928,6 +3131,57 @@ describe("DeviceDataStreamSocketServer", () => {
         packageName: "com.example.app",
         fileName: "prefs.xml",
       });
+    });
+  });
+  // Stream routing while the pool cannot say WHICH AVD is on a serial (#6863
+  // review). The pooled entry keeps its session and its epoch, but a possible
+  // replacement's passive frames must not reach the previous AVD's subscribers —
+  // nor anyone else, since the serial they are attributed to is the only thing
+  // the daemon still knows about them.
+  describe("unresolved pooled identity", () => {
+    const frame = (text: string) =>
+      ({ hierarchy: { node: { $: { class: "Root", text } } } }) as any;
+
+    it("drops device-attributed frames while routing is suspended", () => {
+      const { socket } = server.simulateSubscription({ deviceId: "device-1" });
+      server.sessionResolver.quarantine("device-1");
+
+      server.pushHierarchyUpdate("device-1", frame("a"));
+
+      expect(socket.getWrittenMessages()).toHaveLength(0);
+    });
+
+    it("drops them for all-device subscribers too, not just the previous epoch's", () => {
+      const { socket } = server.simulateSubscription({ deviceId: "device-1" });
+      const all = server.simulateSubscription({});
+      server.sessionResolver.quarantine("device-1");
+
+      server.pushHierarchyUpdate("device-1", frame("a"));
+
+      expect(socket.getWrittenMessages()).toHaveLength(0);
+      expect(all.socket.getWrittenMessages()).toHaveLength(0);
+    });
+
+    it("keeps routing every other device's frames", () => {
+      const { socket } = server.simulateSubscription({ deviceId: "device-2" });
+      server.sessionResolver.quarantine("device-1");
+
+      server.pushHierarchyUpdate("device-2", frame("a"));
+
+      expect(socket.getWrittenMessages()).toHaveLength(1);
+    });
+
+    it("resumes routing under the same uuid once the quarantine lifts", () => {
+      const { socket } = server.simulateSubscription({ deviceId: "device-1" });
+      server.sessionResolver.quarantine("device-1");
+      server.pushHierarchyUpdate("device-1", frame("a"));
+
+      server.sessionResolver.resolveIdentity("device-1");
+      server.pushHierarchyUpdate("device-1", frame("b"));
+
+      const messages = socket.getWrittenMessages<{ type: string; deviceSessionUuid: string }>();
+      expect(messages).toHaveLength(1);
+      expect(messages[0].deviceSessionUuid).toBe(sessionUuidFor("device-1"));
     });
   });
 });

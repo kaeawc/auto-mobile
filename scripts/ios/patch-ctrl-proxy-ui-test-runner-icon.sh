@@ -31,7 +31,7 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-ASSET_CATALOG="${PROJECT_ROOT}/ios/control-proxy/CtrlProxyApp/Assets.xcassets"
+ASSET_CATALOG="${PROJECT_ROOT}/ios/control-proxy/AutoMobileTest/Assets.xcassets"
 SIMULATOR_PRODUCTS="${DERIVED_DATA}/Build/Products/Debug-iphonesimulator"
 RUNNER_APP="${SIMULATOR_PRODUCTS}/CtrlProxyUITests-Runner.app"
 RUNNER_INFO_PLIST="${RUNNER_APP}/Info.plist"

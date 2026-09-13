@@ -30,6 +30,7 @@ public struct CommandLineOptions: Equatable {
         case capture(deviceID: String?, encode: EncodeSettings?)
         case listSimulators
         case captureSimulator(windowID: UInt32, fps: Int, audio: Bool, encode: EncodeSettings?)
+        case highlightSimulator(deviceName: String, json: String)
         case help
     }
 
@@ -64,9 +65,17 @@ public struct CommandLineOptions: Equatable {
         var encodeRequested = false
         var bitrateBps: Int?
         var bitsPerPixel: Double?
+        var highlightJSON: String?
+        var highlightDeviceName: String?
 
         while let arg = iterator.next() {
             switch arg {
+            case "--highlight-simulator":
+                guard let value = iterator.next(), !value.isEmpty else { throw ParseError.missingValue(flag: arg) }
+                highlightDeviceName = value
+            case "--highlight-json":
+                guard let value = iterator.next() else { throw ParseError.missingValue(flag: arg) }
+                highlightJSON = value
             case "--list-devices":
                 listDevices = true
             case "--device-id":
@@ -88,10 +97,9 @@ public struct CommandLineOptions: Equatable {
                 guard let value = iterator.next() else {
                     throw ParseError.missingValue(flag: arg)
                 }
-                guard
-                    let parsed = Int(value),
-                    parsed >= minSimulatorFPS,
-                    parsed <= maxSimulatorFPS
+                guard let parsed = Int(value),
+                      parsed >= minSimulatorFPS,
+                      parsed <= maxSimulatorFPS
                 else {
                     throw ParseError.invalidValue(flag: arg, value: value)
                 }
@@ -133,6 +141,16 @@ public struct CommandLineOptions: Equatable {
 
         if help {
             return CommandLineOptions(mode: .help)
+        }
+
+        if highlightJSON != nil || highlightDeviceName != nil {
+            guard let highlightJSON, let highlightDeviceName, simulatorWindowID == nil,
+                  !listDevices, !listSimulators, deviceID == nil,
+                  simulatorFPS == nil, !audio, !encodeRequested, bitrateBps == nil, bitsPerPixel == nil
+            else {
+                throw ParseError.conflictingFlags("--highlight-json requires only --highlight-simulator <device name>")
+            }
+            return CommandLineOptions(mode: .highlightSimulator(deviceName: highlightDeviceName, json: highlightJSON))
         }
 
         let modeFlagCount = [
@@ -219,6 +237,8 @@ public struct CommandLineOptions: Equatable {
     SIMULATOR OPTIONS (macOS iOS Simulator windows via ScreenCaptureKit):
         --list-simulators       Emit discovered simulator windows as JSON.
         --simulator-window <n>  CGWindowID of the simulator window to capture.
+        --highlight-simulator <name> Run a persistent overlay host for the named Simulator.
+        --highlight-json <json> Initial {requestId,id,shape} command; subsequent commands arrive on stdin.
         --simulator-fps <n>     Target frame rate (5-60, default 5). Higher
                                 values waste CPU for typical MCP workloads.
         --audio                 Capture Simulator window audio as 8 kHz mono PCM16LE.

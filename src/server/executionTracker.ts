@@ -168,11 +168,18 @@ export class ExecutionTracker {
     return this.cancelExecutionIds(executionIds, "deviceSessionUuid", sessionUuid, reason, options);
   }
 
+  /**
+   * `query` is the same exemption the cancel above accepts: an execution that
+   * was deliberately NOT cancelled is not going to end here, so waiting on it
+   * would spend the whole drain budget and log a false timeout
+   * ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
+   */
   async waitForDeviceSessionExecutionsToEnd(
     sessionUuid: string,
     timeoutMs: number,
+    query?: ActiveExecutionQuery,
   ): Promise<boolean> {
-    if (!this.hasActiveDeviceSessionExecutions(sessionUuid)) {
+    if (!this.hasActiveDeviceSessionExecutions(sessionUuid, query)) {
       return true;
     }
     return await new Promise<boolean>((resolve) => {
@@ -190,7 +197,7 @@ export class ExecutionTracker {
         resolve(drained);
       };
       const check = (): void => {
-        if (!this.hasActiveDeviceSessionExecutions(sessionUuid)) {
+        if (!this.hasActiveDeviceSessionExecutions(sessionUuid, query)) {
           finish(true);
         }
       };
@@ -200,10 +207,13 @@ export class ExecutionTracker {
     });
   }
 
-  private hasActiveDeviceSessionExecutions(sessionUuid: string): boolean {
+  private hasActiveDeviceSessionExecutions(
+    sessionUuid: string,
+    query?: ActiveExecutionQuery,
+  ): boolean {
     return (
-      this.hasActiveSessionUuidExecutions(sessionUuid) ||
-      this.hasActiveAutolockSessionExecutions(sessionUuid)
+      this.hasActiveSessionUuidExecutions(sessionUuid, query) ||
+      this.hasActiveAutolockSessionExecutions(sessionUuid, query)
     );
   }
 

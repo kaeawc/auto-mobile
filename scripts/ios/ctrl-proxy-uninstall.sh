@@ -55,9 +55,9 @@ if [ -n "$DEVICE_ID" ]; then
     echo -e "${BLUE}Uninstalling CtrlProxy iOS apps...${NC}"
 
     if xcrun simctl uninstall "$DEVICE_ID" "$CTRL_PROXY_APP_BUNDLE_ID" 2>/dev/null; then
-        echo -e "  ${GREEN}✓${NC} Uninstalled CtrlProxyApp"
+        echo -e "  ${GREEN}✓${NC} Uninstalled AutoMobileTest"
     else
-        echo -e "  ${YELLOW}○${NC} CtrlProxyApp not installed"
+        echo -e "  ${YELLOW}○${NC} AutoMobileTest not installed"
     fi
 
     if xcrun simctl uninstall "$DEVICE_ID" "$CTRL_PROXY_UITESTS_BUNDLE_ID" 2>/dev/null; then

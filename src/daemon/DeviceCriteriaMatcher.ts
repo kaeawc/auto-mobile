@@ -1,5 +1,6 @@
 import { BootedDevice, DeviceInfo, Platform } from "../models";
 import type { PooledDevice } from "./devicePool";
+import { iosVersionStringFromRuntimeId } from "../utils/ios-cmdline-tools/iosVersion";
 
 export interface DeviceAllocationCriteria {
   platform?: Platform;
@@ -264,7 +265,6 @@ export class DeviceCriteriaMatcher {
   }
 
   private iosVersionFromRuntime(runtime?: string): string | undefined {
-    const match = runtime?.match(/iOS[-_](\d+(?:[-_]\d+)*)/);
-    return match?.[1].replace(/[-_]/g, ".");
+    return iosVersionStringFromRuntimeId(runtime);
   }
 }

@@ -55,6 +55,26 @@ describe("MCP Tools List", () => {
       expect(wireNames.length).toBeLessThanOrEqual(allToolNames.length);
     });
 
+    test("discovers optional tool names through setToolEnabled before enabling them", async () => {
+      const result = await fixture.client.listTools();
+      const selection = result.tools.find((tool) => tool.name === "setToolEnabled");
+      const toolNameSchema = selection?.inputSchema.properties?.toolName as { enum: string[] };
+
+      expect(result.tools.map((tool) => tool.name)).not.toContain("systemTray");
+      expect(result.tools.map((tool) => tool.name)).not.toContain("setNotificationPolicy");
+      expect(toolNameSchema.enum).toContain("systemTray");
+      expect(toolNameSchema.enum).toContain("setNotificationPolicy");
+      expect(toolNameSchema.enum).not.toContain("setToolEnabled");
+      expect(toolNameSchema.enum).not.toContain("barrier");
+      expect(toolNameSchema.enum).not.toContain("criticalSection");
+      expect(toolNameSchema.enum).toEqual(
+        ToolRegistry.getAllTools()
+          .filter((tool) => ToolRegistry.isUserConfigurableTool(tool.name))
+          .map((tool) => tool.name)
+          .sort(),
+      );
+    });
+
     test("given a tool is registered, endpoint should return a list with that tool", async function () {
       const { client } = fixture.getContext();
 

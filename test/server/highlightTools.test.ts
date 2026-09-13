@@ -26,15 +26,12 @@ describe("Highlight Tools Registration", () => {
     expect(tool).toBeDefined();
 
     const validShape = {
-      type: "box",
+      type: "circle",
       bounds: {
         x: 10,
         y: 20,
         width: 100,
         height: 50,
-      },
-      style: {
-        strokeColor: "#FF0000",
       },
     };
 
@@ -71,7 +68,7 @@ describe("Highlight Tools Registration", () => {
       tool!.schema.parse({
         platform: "android",
         shape: {
-          type: "box",
+          type: "circle",
           bounds: {
             x: 10,
             y: 20,
@@ -101,7 +98,7 @@ describe("Highlight Tools Registration", () => {
     expect(tool!.deviceAwareHandler).toBeDefined();
 
     const validShape = {
-      type: "box",
+      type: "circle",
       bounds: {
         x: 10,
         y: 20,

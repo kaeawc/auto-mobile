@@ -224,12 +224,34 @@ describe("resolveMcpServerVersion", () => {
     expect(resolveMcpServerVersion(deps({ env: { MCP_SERVER_VERSION: "9.9.9" } }))).toBe("9.9.9");
   });
 
-  test("npm_package_version is used as the base and stamped when git is present", () => {
+  test("npm_package_version is a fallback when the package manifest is unavailable", () => {
     expect(
       resolveMcpServerVersion(
-        deps({ env: { npm_package_version: "1.2.3" }, readGitVersion: () => git("abcdef123456") }),
+        deps({
+          env: { npm_package_version: "1.2.3" },
+          readPackageVersion: () => null,
+          readGitVersion: () => git("abcdef123456"),
+        }),
       ),
     ).toBe("1.2.3+gabcdef123456");
+  });
+
+  test("an installed release ignores an inherited npm package version", () => {
+    expect(
+      resolveMcpServerVersion(
+        deps({
+          env: { npm_package_version: "0.0.68" },
+          readPackageVersion: () => "0.0.69",
+          readGitVersion: () => null,
+        }),
+      ),
+    ).toBe("0.0.69");
+  });
+
+  test("a source checkout stamps its manifest version despite an inherited npm version", () => {
+    expect(resolveMcpServerVersion(deps({ env: { npm_package_version: "1.2.3" } }))).toBe(
+      "0.0.39+g1a2b3c4d5e6f",
+    );
   });
 
   test("package.json version is used as the base and stamped when git is present", () => {

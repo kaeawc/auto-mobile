@@ -315,20 +315,20 @@ export class NetworkState {
 
     try {
       // Always notify the live traffic resource
-      this.notifier.notifyResourceUpdated("automobile://network/traffic/live");
+      this.notifier.notifyResourceUpdated("automobile:network/traffic/live");
 
       // Notify errors resource if any errors in batch
       if (hasErrors) {
-        this.notifier.notifyResourceUpdated("automobile://network/traffic/errors");
+        this.notifier.notifyResourceUpdated("automobile:network/traffic/errors");
       }
 
       // Notify slow resource if any slow requests in batch
       if (hasSlow) {
-        this.notifier.notifyResourceUpdated("automobile://network/traffic/slow");
+        this.notifier.notifyResourceUpdated("automobile:network/traffic/slow");
       }
 
       // Stats resource always gets notified (it computes aggregates on read)
-      this.notifier.notifyResourceUpdated("automobile://network/stats");
+      this.notifier.notifyResourceUpdated("automobile:network/stats");
     } catch (e) {
       logger.error(`[NetworkState] Failed to send notifications: ${e}`);
     }

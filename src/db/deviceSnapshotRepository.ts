@@ -1,5 +1,5 @@
 import type { Kysely } from "kysely";
-import { ensureMigrations, getDatabase } from "./database";
+import { getDatabase } from "./database";
 import type { DeviceSnapshotManifest, DeviceSnapshotMetadata, DeviceSnapshotType } from "../models";
 import type {
   Database,
@@ -18,6 +18,8 @@ export interface DeviceSnapshotQuery {
   limit?: number;
   orderByLastAccessed?: "asc" | "desc";
   orderByCreatedAt?: "asc" | "desc";
+  /** Restrict to rows whose in-AVD payload still needs reclaiming (#6490). */
+  pendingReclaim?: boolean;
 }
 
 function parseManifest(snapshotName: string, manifestJson: string): DeviceSnapshotManifest | null {
@@ -47,43 +49,80 @@ function toRecord(row: DbDeviceSnapshot): DeviceSnapshotRecord | null {
     includeSettings: Boolean(row.include_settings),
     createdAt: row.created_at,
     lastAccessedAt: row.last_accessed_at,
-    sizeBytes: row.size_bytes,
+    // size_unknown is the nullable-size carrier: SQLite cannot relax
+    // size_bytes NOT NULL in place, so an unmeasurable payload is stored as
+    // (0, 1) and read back as null — never as a silent zero (#6490).
+    sizeBytes: row.size_unknown ? null : row.size_bytes,
+    pendingReclaim: Boolean(row.pending_reclaim),
+    ...(row.pending_reclaim_reason === null
+      ? {}
+      : { pendingReclaimReason: row.pending_reclaim_reason }),
     manifest,
   };
 }
 
+/**
+ * Column writers keyed by record field. A declarative table rather than a
+ * ladder of `if (update.x !== undefined)` blocks, so adding a column (#6490
+ * added three) costs one entry instead of another branch in an already-complex
+ * function.
+ */
+const SNAPSHOT_UPDATE_WRITERS: {
+  [K in keyof DeviceSnapshotRecord]?: (
+    payload: DeviceSnapshotUpdate,
+    value: NonNullable<DeviceSnapshotRecord[K]>,
+  ) => void;
+} = {
+  deviceId: (payload, value) => {
+    payload.device_id = value;
+  },
+  deviceName: (payload, value) => {
+    payload.device_name = value;
+  },
+  platform: (payload, value) => {
+    payload.platform = value;
+  },
+  snapshotType: (payload, value) => {
+    payload.snapshot_type = value;
+  },
+  includeAppData: (payload, value) => {
+    payload.include_app_data = value ? 1 : 0;
+  },
+  includeSettings: (payload, value) => {
+    payload.include_settings = value ? 1 : 0;
+  },
+  createdAt: (payload, value) => {
+    payload.created_at = value;
+  },
+  lastAccessedAt: (payload, value) => {
+    payload.last_accessed_at = value;
+  },
+  pendingReclaim: (payload, value) => {
+    payload.pending_reclaim = value ? 1 : 0;
+  },
+  pendingReclaimReason: (payload, value) => {
+    payload.pending_reclaim_reason = value;
+  },
+  manifest: (payload, value) => {
+    payload.manifest_json = JSON.stringify(value);
+  },
+};
+
 function buildUpdatePayload(update: Partial<DeviceSnapshotRecord>): DeviceSnapshotUpdate {
   const payload: DeviceSnapshotUpdate = {};
 
-  if (update.deviceId !== undefined) {
-    payload.device_id = update.deviceId;
+  for (const [field, write] of Object.entries(SNAPSHOT_UPDATE_WRITERS)) {
+    const value = update[field as keyof DeviceSnapshotRecord];
+    if (value !== undefined) {
+      (write as (target: DeviceSnapshotUpdate, raw: unknown) => void)(payload, value);
+    }
   }
-  if (update.deviceName !== undefined) {
-    payload.device_name = update.deviceName;
-  }
-  if (update.platform !== undefined) {
-    payload.platform = update.platform;
-  }
-  if (update.snapshotType !== undefined) {
-    payload.snapshot_type = update.snapshotType;
-  }
-  if (update.includeAppData !== undefined) {
-    payload.include_app_data = update.includeAppData ? 1 : 0;
-  }
-  if (update.includeSettings !== undefined) {
-    payload.include_settings = update.includeSettings ? 1 : 0;
-  }
-  if (update.createdAt !== undefined) {
-    payload.created_at = update.createdAt;
-  }
-  if (update.lastAccessedAt !== undefined) {
-    payload.last_accessed_at = update.lastAccessedAt;
-  }
+
+  // sizeBytes is the one field whose `null` is meaningful (unknown size), so it
+  // writes two columns and cannot go through the table above (#6490).
   if (update.sizeBytes !== undefined) {
-    payload.size_bytes = update.sizeBytes;
-  }
-  if (update.manifest !== undefined) {
-    payload.manifest_json = JSON.stringify(update.manifest);
+    payload.size_bytes = update.sizeBytes ?? 0;
+    payload.size_unknown = update.sizeBytes === null ? 1 : 0;
   }
 
   return payload;
@@ -96,12 +135,12 @@ export class DeviceSnapshotRepository {
     this.db = db ?? null;
   }
 
-  private async getDb(): Promise<Kysely<Database>> {
-    if (this.db) {
-      return this.db;
-    }
-    await ensureMigrations();
-    return getDatabase();
+  // Migration gating is owned by startup (ensureMigrations) plus the app dialect
+  // first-query gate (waitForMigrationsBeforeQuery, #6703); a repository helper
+  // must NOT await ensureMigrations itself. Resolve the injected executor, else
+  // the singleton, synchronously.
+  private getDb(): Kysely<Database> {
+    return this.db ?? getDatabase();
   }
 
   async insertSnapshot(record: DeviceSnapshotRecord): Promise<void> {
@@ -116,7 +155,10 @@ export class DeviceSnapshotRepository {
       include_settings: record.includeSettings ? 1 : 0,
       created_at: record.createdAt,
       last_accessed_at: record.lastAccessedAt,
-      size_bytes: record.sizeBytes,
+      size_bytes: record.sizeBytes ?? 0,
+      size_unknown: record.sizeBytes === null ? 1 : 0,
+      pending_reclaim: record.pendingReclaim ? 1 : 0,
+      pending_reclaim_reason: record.pendingReclaimReason ?? null,
       manifest_json: JSON.stringify(record.manifest),
     };
 
@@ -137,6 +179,9 @@ export class DeviceSnapshotRepository {
           include_settings: row.include_settings,
           last_accessed_at: row.last_accessed_at,
           size_bytes: row.size_bytes,
+          size_unknown: row.size_unknown,
+          pending_reclaim: row.pending_reclaim,
+          pending_reclaim_reason: row.pending_reclaim_reason,
           manifest_json: row.manifest_json,
         }),
       )
@@ -180,6 +225,9 @@ export class DeviceSnapshotRepository {
     }
     if (query.snapshotType) {
       builder = builder.where("snapshot_type", "=", query.snapshotType);
+    }
+    if (query.pendingReclaim !== undefined) {
+      builder = builder.where("pending_reclaim", "=", query.pendingReclaim ? 1 : 0);
     }
     if (query.orderByLastAccessed) {
       builder = builder.orderBy("last_accessed_at", query.orderByLastAccessed);

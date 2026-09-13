@@ -45,10 +45,8 @@ const DEFAULT_MAX_DURATION_SECONDS = 30;
 // `videoRecording` schema's maxDuration ceiling mirrors IOS_MAX_DURATION_SECONDS.
 const MAX_DURATION_SECONDS = 300;
 export const IOS_MAX_DURATION_SECONDS = 3600;
-// Android uses HighlightAnimator's total fade-in + display + fade-out duration.
-// iOS SDK overlays auto-remove after their 3 second TTL.
-const ANDROID_HIGHLIGHT_ANIMATION_DURATION_MS = 6000;
-const IOS_HIGHLIGHT_ANIMATION_DURATION_MS = 3000;
+// Both renderers use the same 500ms draw, 500ms hold, and 200ms fade.
+const HIGHLIGHT_ANIMATION_DURATION_MS = 1200;
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
@@ -672,14 +670,8 @@ function recordHighlightAdded(
     description: highlight.description,
     shape: highlight.shape,
     appearedAtMs,
-    disappearedAtMs: appearedAtMs + highlightAnimationDurationMs(session.platform),
+    disappearedAtMs: appearedAtMs + HIGHLIGHT_ANIMATION_DURATION_MS,
   });
-}
-
-function highlightAnimationDurationMs(platform: BootedDevice["platform"]): number {
-  return platform === "ios"
-    ? IOS_HIGHLIGHT_ANIMATION_DURATION_MS
-    : ANDROID_HIGHLIGHT_ANIMATION_DURATION_MS;
 }
 
 /**

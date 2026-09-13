@@ -6,6 +6,7 @@ import {
   type ProcessLifecycleProcess,
 } from "../src/processLifecycle";
 import { FakeTimer } from "./fakes/FakeTimer";
+import { DAEMON_SHUTDOWN_TIMEOUT_MS } from "../src/daemon/constants";
 
 class FakeProcess implements ProcessLifecycleProcess {
   readonly listeners = new Map<keyof ProcessLifecycleEventMap, Array<(...args: any[]) => void>>();
@@ -301,33 +302,51 @@ describe("process lifecycle handlers", () => {
     }
   });
 
-  test("does not time out signal cleanup", async () => {
+  test.each(["SIGINT", "SIGTERM"] as const)(
+    "bounds %s cleanup even without stdin",
+    async (signal) => {
+      const fakeProcess = new FakeProcess();
+      const timer = new FakeTimer();
+      const lifecycle = new ProcessLifecycleHandlers(fakeProcess, timer, 50);
+      let finishShutdown!: () => void;
+
+      lifecycle.install();
+      lifecycle.setShutdownHandler(async () => {
+        await new Promise<void>((resolve) => {
+          finishShutdown = resolve;
+        });
+      });
+
+      fakeProcess.emit(signal);
+      await flushMicrotasks();
+      timer.advanceTime(50);
+      await flushMicrotasks();
+
+      expect(fakeProcess.exitCodes).toEqual([1]);
+
+      finishShutdown();
+      await flushMicrotasks();
+
+      expect(fakeProcess.exitCodes).toEqual([1]);
+    },
+  );
+
+  test("finishes the default watchdog before the daemon supervisor escalates", async () => {
     const fakeProcess = new FakeProcess();
     const timer = new FakeTimer();
-    const lifecycle = new ProcessLifecycleHandlers(fakeProcess, timer, 50);
-    let finishShutdown!: () => void;
-
+    const lifecycle = new ProcessLifecycleHandlers(fakeProcess, timer);
     lifecycle.install();
-    lifecycle.setShutdownHandler(async () => {
-      await new Promise<void>((resolve) => {
-        finishShutdown = resolve;
-      });
-    });
+    lifecycle.setShutdownHandler(async () => await new Promise<void>(() => {}));
 
     fakeProcess.emit("SIGTERM");
     await flushMicrotasks();
-    timer.advanceTime(50);
+    timer.advanceTime(DAEMON_SHUTDOWN_TIMEOUT_MS - 1);
     await flushMicrotasks();
 
-    expect(fakeProcess.exitCodes).toEqual([]);
-
-    finishShutdown();
-    await flushMicrotasks();
-
-    expect(fakeProcess.exitCodes).toEqual([0]);
+    expect(fakeProcess.exitCodes).toEqual([1]);
   });
 
-  test("uses the stdin timeout when stdin closes during signal cleanup", async () => {
+  test("does not restart the signal timeout when stdin closes during cleanup", async () => {
     const fakeProcess = new FakeProcess();
     const fakeStdin = new FakeStdin();
     const timer = new FakeTimer();
@@ -341,8 +360,9 @@ describe("process lifecycle handlers", () => {
 
       fakeProcess.emit("SIGTERM");
       await flushMicrotasks();
+      timer.advanceTime(25);
       fakeStdin.emit("close");
-      timer.advanceTime(50);
+      timer.advanceTime(25);
       await flushMicrotasks();
 
       expect(fakeProcess.exitCodes).toEqual([1]);

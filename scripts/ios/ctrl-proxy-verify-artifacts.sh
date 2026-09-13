@@ -59,7 +59,7 @@ echo -e "${BLUE}Checking artifacts...${NC}"
 # in which case xctestrunner-integration-tests.sh trusts this verifier and only fails later
 # during launch. Mirrors IOSCtrlProxyBuilder.verifyPlatformArtifacts() (issue #5834 review).
 REQUIRED_ARTIFACTS=(
-    "${SIM_DIR}/CtrlProxyApp.app"
+    "${SIM_DIR}/AutoMobileTest.app"
     "${SIM_DIR}/CtrlProxyUITests-Runner.app"
     "${SIM_DIR}/CtrlProxyUITests-Runner.app/PlugIns/CtrlProxyUITests.xctest"
 )

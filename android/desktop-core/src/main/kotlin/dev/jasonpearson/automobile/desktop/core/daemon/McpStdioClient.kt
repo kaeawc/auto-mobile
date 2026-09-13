@@ -231,21 +231,13 @@ class McpStdioClient(
     }
   }
 
-  override fun killDevice(name: String, deviceId: String, platform: String): KillDeviceResult {
-    val response =
-      callTool(
-        "killDevice",
-        buildJsonObject {
-          put(
-            "device",
-            buildJsonObject {
-              put("name", JsonPrimitive(name))
-              put("deviceId", JsonPrimitive(deviceId))
-              put("platform", JsonPrimitive(platform))
-            },
-          )
-        },
-      )
+  override fun killDevice(
+    name: String,
+    deviceId: String,
+    platform: String,
+    force: Boolean,
+  ): KillDeviceResult {
+    val response = callTool("killDevice", killDeviceArguments(name, deviceId, platform, force))
     return try {
       decodeToolResponse(json, response, serializer<KillDeviceResult>())
     } catch (e: Exception) {

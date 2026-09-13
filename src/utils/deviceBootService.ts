@@ -7,6 +7,7 @@ import type {
   MatchingStrategy,
 } from "../models/DeviceMatchCriteria";
 import type { DeviceCreationGate } from "./deviceCreationGate";
+import { isAndroidEmulatorSerial } from "./androidSerial";
 import {
   DEFAULT_DEVICE_READY_TIMEOUT_MS,
   type PlatformDeviceManager,
@@ -27,6 +28,22 @@ import {
 import { stableStringify } from "./stableStringify";
 
 const ABORT_SETTLEMENT_GRACE_MS = 1_000;
+
+/** A boot deadline failure, kept distinct from platform command failures. */
+export class DeviceBootTimeoutError extends ActionableError {
+  readonly code = "timeout";
+
+  constructor(
+    readonly operation: string,
+    readonly phase: string,
+    readonly elapsedMs: number,
+    readonly budgetMs: number,
+  ) {
+    super(
+      `${operation} timeout exhausted while ${phase}; remainingBudgetMs=0; elapsedMs=${elapsedMs}; budgetMs=${budgetMs}; origin=DeviceBootService`,
+    );
+  }
+}
 
 /**
  * True for an `AbortSignal.reason` that carries no caller-supplied context: a
@@ -50,6 +67,7 @@ function isDefaultAbortReason(reason: unknown): boolean {
 
 /** Inputs which affect device discovery, creation, and readiness, but not MCP sessions or automation setup. */
 export interface DeviceBootRequest {
+  operationName?: string;
   platform: "android" | "ios";
   minOsVersion?: string;
   maxOsVersion?: string;
@@ -99,6 +117,8 @@ export interface DeviceBootServiceDependencies {
 }
 
 interface BootDeadlineContext {
+  operationName: string;
+  startedAtMs: number;
   deadlineMs: number;
   signal?: AbortSignal;
   lifecycleLease?: VirtualDeviceLifecycleLease;
@@ -164,6 +184,8 @@ export class DeviceBootService {
   async boot(request: DeviceBootRequest, progress?: DeviceBootProgress): Promise<DeviceBootResult> {
     const timeoutMs = request.timeoutMs ?? DEFAULT_DEVICE_READY_TIMEOUT_MS;
     const context: BootDeadlineContext = {
+      operationName: request.operationName ?? "startDevice",
+      startedAtMs: this.timer.now(),
       deadlineMs: request.totalDeadlineMs ?? this.timer.now() + timeoutMs,
       signal: request.signal,
       lifecycleLease: this.dependencies.lifecycleLease,
@@ -245,7 +267,12 @@ export class DeviceBootService {
           `Available images: ${images.map((device) => device.name).join(", ") || "none"}.`,
       );
     }
-    return this.bootImage(image, context, progress, false);
+    // `deviceId` also accepts an AVD/image name (see getAndroidSchema), so the
+    // serial lookup above cannot see an already-running image named this way.
+    // Route through the same reuse-before-cold-boot path as the name matcher so
+    // both spellings of the same target resolve identically (#3334): booting a
+    // live image is rejected by the platform, or spawns a doomed second child.
+    return this.bootMatchedImage(image, context, progress);
   }
 
   private async bootMatchingDevice(
@@ -325,9 +352,14 @@ export class DeviceBootService {
     const booted = await this.runPhase(context, "resolving the running device image", () =>
       this.dependencies.deviceManager.getBootedDevices(image.platform),
     );
-    const running = booted.find(
-      (device) => device.deviceId === image.deviceId || device.name === image.name,
-    );
+    // Exact lifecycle identity first: simulators can share a display name, so a
+    // same-name sibling listed ahead of the requested UDID would be handed back
+    // here and then rejected by the caller's identity check -- failing an
+    // acquisition whose target is up. The name fallback still covers an
+    // AVD/image name spelling of `deviceId`, which carries no serial.
+    const running =
+      booted.find((device) => device.deviceId === image.deviceId) ??
+      booted.find((device) => device.name === image.name);
     if (!running) {
       return this.bootImage(image, context, progress, false);
     }
@@ -423,7 +455,7 @@ export class DeviceBootService {
         const ready = await this.runPhase(context, "waiting for a running device", (signal) =>
           this.dependencies.deviceManager.waitForDeviceReady(
             { ...device, isRunning: true },
-            this.remaining(context.deadlineMs, "waiting for a running device"),
+            this.remaining(context, "waiting for a running device"),
             undefined,
             signal,
           ),
@@ -464,7 +496,7 @@ export class DeviceBootService {
     const handle = await this.runPhase(context, "starting the device", async (signal) => {
       const started = await this.dependencies.deviceManager.startDevice(
         image,
-        this.remaining(context.deadlineMs, "starting the device"),
+        this.remaining(context, "starting the device"),
       );
       const cancelStarted = () => {
         started?.kill();
@@ -493,10 +525,11 @@ export class DeviceBootService {
           this.dependencies.deviceManager,
           image,
           handle,
-          this.remaining(context.deadlineMs, "waiting for device boot readiness"),
+          this.remaining(context, "waiting for device boot readiness"),
           signal,
           this.timer,
           cancelHandle,
+          () => this.timeoutError(context, "waiting for device boot readiness"),
         ),
       );
       await this.reportProgress(context, progress, 100, "Device is ready for use");
@@ -533,12 +566,10 @@ export class DeviceBootService {
     );
   }
 
-  private remaining(deadlineMs: number, phase: string): number {
-    const remainingMs = Math.floor(deadlineMs - this.timer.now());
+  private remaining(context: BootDeadlineContext, phase: string): number {
+    const remainingMs = Math.floor(context.deadlineMs - this.timer.now());
     if (remainingMs <= 0) {
-      throw new ActionableError(
-        `startDevice timeout exhausted while ${phase}; remainingBudgetMs=0`,
-      );
+      throw this.timeoutError(context, phase);
     }
     return remainingMs;
   }
@@ -549,7 +580,7 @@ export class DeviceBootService {
     operation: (signal: AbortSignal) => Promise<T>,
     awaitAbortSettlement = true,
   ): Promise<T> {
-    const remainingMs = this.remaining(context.deadlineMs, phase);
+    const remainingMs = this.remaining(context, phase);
     const cancellation = createPhaseCancellation(context.signal, phase);
     cancellation.throwIfCancelled();
     const controller = new AbortController();
@@ -591,12 +622,9 @@ export class DeviceBootService {
         ...(externalAbortPromise ? [externalAbortPromise] : []),
         new Promise<never>((_resolve, reject) => {
           timeoutHandle = this.timer.setTimeout(() => {
-            controller.abort(new Error(`startDevice timeout exhausted while ${phase}`));
-            reject(
-              new ActionableError(
-                `startDevice timeout exhausted while ${phase}; remainingBudgetMs=0`,
-              ),
-            );
+            const error = this.timeoutError(context, phase);
+            controller.abort(error);
+            reject(error);
           }, remainingMs);
         }),
         cancellation.promise,
@@ -610,6 +638,7 @@ export class DeviceBootService {
       cancellation.throwIfCancelled();
       if (controller.signal.aborted) {
         throw this.phaseTimeoutFailure(
+          context,
           controller,
           operationFailureRecorded,
           operationFailure,
@@ -626,7 +655,17 @@ export class DeviceBootService {
     }
   }
 
+  private timeoutError(context: BootDeadlineContext, phase: string): DeviceBootTimeoutError {
+    return new DeviceBootTimeoutError(
+      context.operationName,
+      phase,
+      this.timer.now() - context.startedAtMs,
+      Math.max(0, context.deadlineMs - context.startedAtMs),
+    );
+  }
+
   private phaseTimeoutFailure(
+    context: BootDeadlineContext,
     controller: AbortController,
     operationFailureRecorded: boolean,
     operationFailure: unknown,
@@ -635,7 +674,7 @@ export class DeviceBootService {
     if (operationFailureRecorded && operationFailure !== controller.signal.reason) {
       return operationFailure;
     }
-    return new ActionableError(`startDevice timeout exhausted while ${phase}; remainingBudgetMs=0`);
+    return this.timeoutError(context, phase);
   }
 
   private throwExternalAbortReason(signal: AbortSignal | undefined, phase: string): void {
@@ -679,6 +718,7 @@ export class DeviceBootService {
 export function enrichBootedDevice(device: BootedDevice, image: DeviceInfo): BootedDevice {
   return {
     ...device,
+    apiLevel: device.apiLevel ?? image.apiLevel,
     osVersion: device.osVersion ?? image.osVersion,
     formFactor: device.formFactor ?? image.formFactor,
     screenWidth: device.screenWidth ?? image.screenWidth,
@@ -695,9 +735,12 @@ export function enrichBootedDevicesFromImages(
   );
   const imagesByName = new Map(images.map((image) => [image.name, image]));
   return booted.map((device) => {
+    const canMatchAndroidByName =
+      device.platform !== "android" ||
+      (device.deviceId !== undefined && isAndroidEmulatorSerial(device.deviceId));
     const image =
       (device.deviceId ? imagesById.get(device.deviceId) : undefined) ??
-      imagesByName.get(device.name);
+      (canMatchAndroidByName ? imagesByName.get(device.name) : undefined);
     return image ? enrichBootedDevice(device, image) : device;
   });
 }

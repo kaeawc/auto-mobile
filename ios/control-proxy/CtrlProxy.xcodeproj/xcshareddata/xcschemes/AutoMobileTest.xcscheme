@@ -15,9 +15,9 @@
             buildForAnalyzing = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "829FFB06AC273BEE7049A7F2"
-               BuildableName = "CtrlProxyApp.app"
-               BlueprintName = "CtrlProxyApp"
+               BlueprintIdentifier = "5D66E2BAEFA539346A9AFF24"
+               BuildableName = "AutoMobileTest.app"
+               BlueprintName = "AutoMobileTest"
                ReferencedContainer = "container:CtrlProxy.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
@@ -46,9 +46,9 @@
       <MacroExpansion>
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "829FFB06AC273BEE7049A7F2"
-            BuildableName = "CtrlProxyApp.app"
-            BlueprintName = "CtrlProxyApp"
+            BlueprintIdentifier = "5D66E2BAEFA539346A9AFF24"
+            BuildableName = "AutoMobileTest.app"
+            BlueprintName = "AutoMobileTest"
             ReferencedContainer = "container:CtrlProxy.xcodeproj">
          </BuildableReference>
       </MacroExpansion>
@@ -82,9 +82,9 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "829FFB06AC273BEE7049A7F2"
-            BuildableName = "CtrlProxyApp.app"
-            BlueprintName = "CtrlProxyApp"
+            BlueprintIdentifier = "5D66E2BAEFA539346A9AFF24"
+            BuildableName = "AutoMobileTest.app"
+            BlueprintName = "AutoMobileTest"
             ReferencedContainer = "container:CtrlProxy.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
@@ -101,9 +101,9 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "829FFB06AC273BEE7049A7F2"
-            BuildableName = "CtrlProxyApp.app"
-            BlueprintName = "CtrlProxyApp"
+            BlueprintIdentifier = "5D66E2BAEFA539346A9AFF24"
+            BuildableName = "AutoMobileTest.app"
+            BlueprintName = "AutoMobileTest"
             ReferencedContainer = "container:CtrlProxy.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>

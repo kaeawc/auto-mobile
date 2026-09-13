@@ -1,0 +1,150 @@
+import { describe, expect, test } from "bun:test";
+import {
+  applyLauncherPackages,
+  catalogFromPackageRecords,
+  launcherActivitiesCommand,
+  mergeSystemAppCatalogEntry,
+  needsLauncherProbe,
+  parseLauncherPackages,
+  type AndroidAppCatalog,
+  type SystemAppCatalogTarget,
+} from "../../../src/features/observe/androidAppCatalog";
+
+describe("androidAppCatalog (#6798)", () => {
+  test("the launcher probe is one batched per-user MAIN/LAUNCHER query", () => {
+    expect(launcherActivitiesCommand(0)).toBe(
+      "shell cmd package query-activities --brief --user 0 " +
+        "-a android.intent.action.MAIN -c android.intent.category.LAUNCHER",
+    );
+    expect(launcherActivitiesCommand(10)).toContain("--user 10");
+  });
+
+  test("parses the flattened components out of --brief output, chrome and all", () => {
+    const stdout = [
+      "3 activities found:",
+      "  Activity #0:",
+      "    com.android.contacts/.activities.PeopleActivity",
+      "  Activity #1:",
+      "    com.google.android.deskclock/com.android.deskclock.DeskClock",
+      "  Activity #2:",
+      "    com.android.settings/.homepage.SettingsHomepageActivity",
+      "",
+    ].join("\n");
+
+    expect(parseLauncherPackages(stdout)).toEqual(
+      new Set(["com.android.contacts", "com.google.android.deskclock", "com.android.settings"]),
+    );
+  });
+
+  test("an empty / 'No activities found' listing yields no launcher packages", () => {
+    expect(parseLauncherPackages("No activities found\n")).toEqual(new Set());
+    expect(parseLauncherPackages("")).toEqual(new Set());
+  });
+
+  test("CtrlProxy records supply labels and launchability without an adb probe", () => {
+    const catalog = catalogFromPackageRecords([
+      { packageName: "com.android.contacts", isSystem: true, label: "Contacts", launchable: true },
+      {
+        packageName: "com.android.providers.contacts",
+        isSystem: true,
+        label: "Contacts Storage",
+        launchable: false,
+      },
+    ]);
+
+    expect(catalog.get("com.android.contacts")).toEqual({ label: "Contacts", launchable: true });
+    expect(catalog.get("com.android.providers.contacts")).toEqual({
+      label: "Contacts Storage",
+      launchable: false,
+    });
+    expect(
+      needsLauncherProbe(catalog, ["com.android.contacts", "com.android.providers.contacts"]),
+    ).toBe(false);
+  });
+
+  test("an older on-device CtrlProxy reports neither field; launchability stays unknown, not false", () => {
+    const catalog = catalogFromPackageRecords([
+      { packageName: "com.example.app", isSystem: false },
+      { packageName: "com.example.blank", isSystem: false, label: "   " },
+    ]);
+
+    expect(catalog.get("com.example.app")).toEqual({});
+    expect(catalog.get("com.example.blank")).toEqual({});
+    expect(needsLauncherProbe(catalog, ["com.example.app", "com.example.blank"])).toBe(true);
+  });
+
+  test("an explicit null launchability signal remains unknown and needs the probe", () => {
+    const catalog = catalogFromPackageRecords([
+      { packageName: "com.example.app", isSystem: false, launchable: null },
+    ]);
+
+    expect(catalog.get("com.example.app")).toEqual({});
+    expect(needsLauncherProbe(catalog, ["com.example.app"])).toBe(true);
+  });
+
+  test("an explicit null label is treated as not reported", () => {
+    const catalog = catalogFromPackageRecords([
+      { packageName: "com.example.app", isSystem: false, label: null },
+    ]);
+
+    expect(catalog.get("com.example.app")?.label).toBeUndefined();
+    expect(catalog.get("com.example.app")).toEqual({});
+  });
+
+  test("a package the CtrlProxy pass did not mention still needs the probe", () => {
+    // CtrlProxy answers for its own user only, so a work-profile package set can
+    // be entirely uncovered by a catalog that carries booleans for another user.
+    const catalog = catalogFromPackageRecords([
+      { packageName: "com.example.app", isSystem: false, launchable: true },
+    ]);
+
+    expect(needsLauncherProbe(catalog, ["com.example.app"])).toBe(false);
+    expect(needsLauncherProbe(catalog, ["com.example.app", "com.example.work"])).toBe(true);
+  });
+
+  test("a deduplicated system app keeps launchability per user", () => {
+    const app: SystemAppCatalogTarget = {};
+
+    mergeSystemAppCatalogEntry(app, 0, { label: "Contacts", launchable: false });
+    mergeSystemAppCatalogEntry(app, 10, { launchable: true });
+
+    expect(app.launchableByUserId).toEqual({ 0: false, 10: true });
+    // The scalar summarizes "launches for at least one of this app's users".
+    expect(app.launchable).toBe(true);
+    expect(app.label).toBe("Contacts");
+  });
+
+  test("merging an unreported entry leaves that user out rather than claiming false", () => {
+    const app: SystemAppCatalogTarget = {};
+
+    mergeSystemAppCatalogEntry(app, 0, { launchable: true });
+    mergeSystemAppCatalogEntry(app, 10, {});
+    mergeSystemAppCatalogEntry(app, 11, undefined);
+
+    expect(app.launchableByUserId).toEqual({ 0: true });
+    expect(app.launchable).toBe(true);
+  });
+
+  test("keeps launchability unknown when an installed user has no report", () => {
+    const app: SystemAppCatalogTarget = { userIds: [0, 10] };
+
+    mergeSystemAppCatalogEntry(app, 0, { launchable: false });
+    mergeSystemAppCatalogEntry(app, 10, undefined);
+
+    expect(app.launchableByUserId).toEqual({ 0: false });
+    expect(app.launchable).toBeUndefined();
+  });
+
+  test("the launcher probe fills in a definite launchable for every known package", () => {
+    const catalog: AndroidAppCatalog = new Map([["com.android.contacts", { label: "Contacts" }]]);
+
+    applyLauncherPackages(
+      catalog,
+      ["com.android.contacts", "com.android.providers.contacts"],
+      new Set(["com.android.contacts"]),
+    );
+
+    expect(catalog.get("com.android.contacts")).toEqual({ label: "Contacts", launchable: true });
+    expect(catalog.get("com.android.providers.contacts")).toEqual({ launchable: false });
+  });
+});

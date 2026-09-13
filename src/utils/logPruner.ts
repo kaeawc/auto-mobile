@@ -1,4 +1,6 @@
 import path from "path";
+import { sequenceBackoff } from "./Backoff";
+import { defaultTimer } from "./SystemTimer";
 import { readdirAsync, statAsync, unlinkAsync } from "./io";
 
 /**
@@ -73,8 +75,88 @@ export interface LogPruneOptions {
    * sweep retains the log rather than guessing that its owner exited.
    */
   readDaemonLaunchLogOwnerTombstone?: (launchLogPath: string) => DaemonLaunchLogOwner | undefined;
+  /** Injectable unlink for testing; defaults to `fs.promises.unlink`. */
+  unlink?: (filePath: string) => Promise<void>;
+  /**
+   * Injectable backoff sleep for the bounded transient-unlink retry below;
+   * defaults to the shared system timer. Injected (never a raw `setTimeout`)
+   * so tests exercise the retry without real delays.
+   */
+  sleep?: (ms: number) => Promise<void>;
   /** Optional diagnostic sink. Kept injectable so log pruning does not import the logger that calls it. */
   logger?: { debug(message: string, ...args: unknown[]): void };
+}
+
+/**
+ * Seams the unlink path needs, resolved once per sweep.
+ */
+interface UnlinkContext {
+  unlink: (filePath: string) => Promise<void>;
+  sleep: (ms: number) => Promise<void>;
+  logger?: { debug(message: string, ...args: unknown[]): void };
+}
+
+/**
+ * Windows fails an `unlink` of a JUST-WRITTEN file transiently with `EBUSY` or
+ * `EPERM` while Defender / the search indexer still holds a handle on it. The
+ * handle is released within milliseconds, so a small bounded retry turns those
+ * into the deletion the sweep intended instead of leaving the file behind for a
+ * whole extra prune cycle. Only these two codes are retried: every other errno
+ * (`EISDIR`, `EROFS`, …) is a real failure that will not fix itself, and
+ * `ENOENT` already means the file is gone.
+ */
+const TRANSIENT_UNLINK_CODES: ReadonlySet<string> = new Set(["EBUSY", "EPERM"]);
+
+/** Attempts = 1 initial + 3 retries; total added latency stays under ~90ms. */
+const UNLINK_MAX_ATTEMPTS = 4;
+
+/** Canonical backoff primitive (CLAUDE.md), one delay per retry. */
+const UNLINK_RETRY_BACKOFF = sequenceBackoff([10, 25, 50]);
+
+type UnlinkAttempt = "removed" | "transient" | "failed";
+
+async function attemptUnlink(io: UnlinkContext, fullPath: string): Promise<UnlinkAttempt> {
+  try {
+    await io.unlink(fullPath);
+    return "removed";
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException)?.code;
+    if (code === "ENOENT") {
+      // Another process removed it concurrently — the intended end state.
+      return "removed";
+    }
+    if (code !== undefined && TRANSIENT_UNLINK_CODES.has(code)) {
+      return "transient";
+    }
+    // Log pruning is best-effort: a non-transient failure only leaves the file.
+    io.logger?.debug(`log pruning could not remove ${fullPath}: ${error}`, error);
+    return "failed";
+  }
+}
+
+/**
+ * Unlink `fullPath`, retrying a bounded number of times on the transient
+ * Windows lock errors above. Returns whether the file is gone. Behaviour is
+ * identical to a plain unlink whenever the first attempt succeeds.
+ */
+async function unlinkWithRetry(io: UnlinkContext, fullPath: string): Promise<boolean> {
+  for (let attempt = 1; attempt <= UNLINK_MAX_ATTEMPTS; attempt++) {
+    const outcome = await attemptUnlink(io, fullPath);
+    if (outcome === "removed") {
+      return true;
+    }
+    if (outcome === "failed") {
+      return false;
+    }
+    if (attempt === UNLINK_MAX_ATTEMPTS) {
+      io.logger?.debug(
+        `log pruning gave up on ${fullPath} after ${UNLINK_MAX_ATTEMPTS} transient unlink failures`,
+      );
+      return false;
+    }
+    await io.sleep(UNLINK_RETRY_BACKOFF.delayForAttempt(attempt));
+  }
+  return false;
 }
 
 function defaultIsProcessAlive(pid: number): boolean {
@@ -130,13 +212,21 @@ function isDaemonLaunchLog(file: string): boolean {
   return /^daemon-launch-\d+(?:-.*)?\.log$/.test(file);
 }
 
-async function removeLaunchLogTombstone(launchLogPath: string): Promise<void> {
-  await unlinkAsync(`${launchLogPath}.owner`).catch(() => {
-    /* the sidecar is owned by the launch log and may already be gone */
-  });
+function resolveUnlinkContext(opts: LogPruneOptions): UnlinkContext {
+  return {
+    unlink: opts.unlink ?? unlinkAsync,
+    sleep: opts.sleep ?? ((ms: number) => defaultTimer.sleep(ms)),
+    logger: opts.logger,
+  };
+}
+
+async function removeLaunchLogTombstone(io: UnlinkContext, launchLogPath: string): Promise<void> {
+  // The sidecar is owned by the launch log and may already be gone.
+  await unlinkWithRetry(io, `${launchLogPath}.owner`);
 }
 
 async function pruneStaleLog(
+  io: UnlinkContext,
   fullPath: string,
   file: string,
   now: number,
@@ -147,11 +237,9 @@ async function pruneStaleLog(
     if (now - stats.mtimeMs <= abandonedMaxAgeMs) {
       return;
     }
-    const removed = await unlinkAsync(fullPath)
-      .then(() => true)
-      .catch(() => false);
+    const removed = await unlinkWithRetry(io, fullPath);
     if (removed && isDaemonLaunchLog(file)) {
-      await removeLaunchLogTombstone(fullPath);
+      await removeLaunchLogTombstone(io, fullPath);
     }
   } catch {
     // Another process may have removed it concurrently — ignore.
@@ -176,6 +264,7 @@ export async function pruneLogFiles(opts: LogPruneOptions): Promise<void> {
   const now = opts.now ?? Date.now();
   const isAlive = opts.isProcessAlive ?? defaultIsProcessAlive;
   const isDaemonRunning = opts.isDaemonRunning ?? (() => false);
+  const io = resolveUnlinkContext(opts);
 
   type LaunchLogProtection = "alive" | "dead" | "unknown";
 
@@ -275,9 +364,8 @@ export async function pruneLogFiles(opts: LogPruneOptions): Promise<void> {
   const ownFiles = logFiles.filter((f) => isOwnedBy(f, opts.ownPrefix)).sort();
   if (ownFiles.length > opts.maxOwnFiles) {
     for (const file of ownFiles.slice(0, ownFiles.length - opts.maxOwnFiles)) {
-      await unlinkAsync(path.join(opts.dir, file)).catch(() => {
-        /* best effort */
-      });
+      // Best effort, with the same bounded retry over transient Windows locks.
+      await unlinkWithRetry(io, path.join(opts.dir, file));
     }
   }
 
@@ -306,6 +394,6 @@ export async function pruneLogFiles(opts: LogPruneOptions): Promise<void> {
         continue;
       }
     }
-    await pruneStaleLog(path.join(opts.dir, file), file, now, opts.abandonedMaxAgeMs);
+    await pruneStaleLog(io, path.join(opts.dir, file), file, now, opts.abandonedMaxAgeMs);
   }
 }

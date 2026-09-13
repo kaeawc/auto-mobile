@@ -1,4 +1,16 @@
 import type { Element } from "../../../models/Element";
+import type { ObserveResult } from "../../../models/ObserveResult";
+
+const CAPTURED_KEYBOARD = Symbol("auto-mobile.capturedKeyboard");
+
+/** Capture-level IME identity also survives when there are no accessible keys. */
+export function setCapturedKeyboard(elements: object, keyboard: ObserveResult["keyboard"]): void {
+  Object.defineProperty(elements, CAPTURED_KEYBOARD, { value: keyboard });
+}
+
+export function getCapturedKeyboard(elements: object): ObserveResult["keyboard"] {
+  return (elements as { [CAPTURED_KEYBOARD]?: ObserveResult["keyboard"] })[CAPTURED_KEYBOARD];
+}
 
 /**
  * Root/window ancestry provenance for a collected element (issue #5881).
@@ -34,6 +46,8 @@ export interface ElementProvenance {
   enter: number;
   /** Maximum `enter` within this node's parsed subtree (inclusive interval end). */
   exit: number;
+  /** Android IME root identity inherited by descendants; never inferred from key labels. */
+  keyboardPackage?: string;
 }
 
 /**

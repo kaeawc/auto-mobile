@@ -1,3 +1,4 @@
+import { getAbortSignal } from "../utils/AbortContext";
 import { defaultTimer, Timer } from "../utils/SystemTimer";
 import { logger } from "../utils/logger";
 import { BootedDevice, Platform } from "../models";
@@ -18,6 +19,11 @@ import {
   type NetworkConditionProfile,
 } from "../features/utility/DeviceState";
 import { deviceReadinessRank, type DeviceReadinessLevel } from "../utils/DeviceSessionManager";
+import {
+  getCliSessionIdleTimeoutMs as resolveCliSessionIdleTimeoutMs,
+  MAX_CLI_SESSION_IDLE_TIMEOUT_MS,
+  sanitizeCliSessionIdleTimeoutMs as sanitizeRequestedCliIdleTimeoutMs,
+} from "./constants";
 
 /**
  * Device-label → session-UUID map. `buildDeviceLabelMap` assigns each configured
@@ -130,7 +136,35 @@ export interface Session {
   heartbeatTimeoutMs: number; // Heartbeat timeout for this session
   heartbeatTimeoutSource: "default" | "custom"; // Whether the heartbeat timeout was defaulted or explicitly provided
   hasReceivedHeartbeat: boolean; // Whether any heartbeat has been received
+  livenessPolicy: SessionLivenessPolicy; // How this session's liveness is judged (#6870)
+  /**
+   * The strict-contract timeouts this session had before it adopted the
+   * `cli-idle` policy, so a later long-lived owner can restore them (#6870).
+   * Absent whenever the session is on (or has never left) the `heartbeat`
+   * policy.
+   */
+  preCliLiveness?: PreCliLivenessSnapshot;
 }
+
+/** The heartbeat-policy timeouts `adoptCliLivenessPolicy` overwrote (#6870). */
+export interface PreCliLivenessSnapshot {
+  heartbeatTimeoutMs: number;
+  heartbeatTimeoutSource: "default" | "custom";
+  sessionTimeoutMs: number;
+}
+
+/**
+ * How the heartbeat monitor judges a session's liveness (issue #6870).
+ *
+ * - `heartbeat` (the default): the strict contract a long-lived stdio/HTTP MCP
+ *   client can keep — a first heartbeat within the pre-first-heartbeat grace,
+ *   then one every `heartbeatTimeoutMs` (10 s by default).
+ * - `cli-idle`: the contract a one-shot `--cli` process can keep. Each
+ *   invocation connects, runs one tool and exits, so between calls nobody is
+ *   heartbeating; the session is instead reaped only after a wall-clock idle
+ *   period measured in minutes, and never for a missing first heartbeat.
+ */
+export type SessionLivenessPolicy = "heartbeat" | "cli-idle";
 
 /**
  * Session Manager
@@ -264,6 +298,7 @@ const EXPIRY_RELEASE_REASONS = new Set([
   "cleanup-expired",
   "missing-first-heartbeat",
   "heartbeat-timeout",
+  "cli-idle-timeout",
 ]);
 
 class UnissuedSessionError extends ActionableError {}
@@ -272,7 +307,9 @@ function isTerminalReleaseReason(releaseReason: string): boolean {
   return (
     releaseReason === "missing-first-heartbeat" ||
     releaseReason === "heartbeat-timeout" ||
+    releaseReason === "cli-idle-timeout" ||
     releaseReason === "device-killed" ||
+    releaseReason === "session-creation-cancelled" ||
     releaseReason.startsWith("device-disconnected:")
   );
 }
@@ -286,6 +323,19 @@ export function getDefaultSessionHeartbeatTimeoutMs(): number {
     ? parsed
     : SessionManager.DEFAULT_HEARTBEAT_TIMEOUT_MS;
 }
+
+/**
+ * The CLI idle-timeout contract lives in `./constants` so the CLI-side proxy can
+ * resolve its own override without importing the daemon's session machinery
+ * (issue #6870 review). Re-exported here for the daemon-side callers and tests
+ * that have always read it from this module.
+ */
+export {
+  DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS,
+  MAX_CLI_SESSION_IDLE_TIMEOUT_MS,
+  getCliSessionIdleTimeoutMs,
+  sanitizeCliSessionIdleTimeoutMs,
+} from "./constants";
 
 /** Default grace before a never-heartbeated default-policy session is reaped. */
 export const DEFAULT_PRE_FIRST_HEARTBEAT_GRACE_MS = 5_000;
@@ -411,7 +461,10 @@ export class SessionManager {
 
   constructor(
     timer: Timer = defaultTimer,
-    deviceSessionRepository: DeviceSessionPersistence = new DeviceSessionRepository(),
+    deviceSessionRepository: DeviceSessionPersistence = new DeviceSessionRepository(
+      undefined,
+      timer,
+    ),
     // Resolve the shared barrier per write, not once at construction, so a
     // same-process DB reopen (resetDbWriteBarrier swaps in a fresh barrier) is
     // seen instead of a pinned drained instance (issue #2912). Because the barrier
@@ -486,6 +539,16 @@ export class SessionManager {
     return this.pendingDeviceCleanups.get(deviceId) ?? null;
   }
 
+  /** Release owns the device until both bounded teardown and any overflow work settle. */
+  hasDeviceCleanupInProgress(deviceId: string): boolean {
+    return (
+      this.pendingDeviceCleanups.has(deviceId) ||
+      Array.from(this.activeReleasePromises).some(
+        (release) => release.session.assignedDevice === deviceId,
+      )
+    );
+  }
+
   /**
    * Keep sessions assigned while their work is still running, even if their
    * idle timeout elapses. The daemon supplies the execution tracker; tests can
@@ -517,6 +580,7 @@ export class SessionManager {
     timeoutMs?: number,
     heartbeatTimeoutMs?: number,
   ): Promise<Session> {
+    getAbortSignal()?.throwIfAborted();
     if (!this.acceptingSessionCreations) {
       throw new ActionableError(
         `Cannot create device session ${sessionId}: the daemon is shutting down.`,
@@ -564,6 +628,9 @@ export class SessionManager {
       heartbeatTimeoutMs: heartbeatTimeoutMs ?? getDefaultSessionHeartbeatTimeoutMs(),
       heartbeatTimeoutSource,
       hasReceivedHeartbeat: false,
+      // Strict by default: only a client that declares itself one-shot (`--cli`,
+      // via `adoptCliLivenessPolicy`) is exempted from the heartbeat contract.
+      livenessPolicy: "heartbeat",
     };
 
     const creation: PendingSessionCreation = { promise: this.persistAndPublishSession(session) };
@@ -614,14 +681,15 @@ export class SessionManager {
   }
 
   private async rejectCreationAfterShutdownFence(session: Session): Promise<void> {
-    if (this.acceptingSessionCreations) {
+    const cancellation = getAbortSignal();
+    if (this.acceptingSessionCreations && !cancellation?.aborted) {
       return;
     }
     const releasedAtMs = this.timer.now();
     const snapshot: SessionReleaseSnapshot = {
       sessionId: session.sessionId,
       deviceId: session.assignedDevice,
-      releaseReason: "daemon-shutdown",
+      releaseReason: cancellation?.aborted ? "session-creation-cancelled" : "daemon-shutdown",
       releasedAtMs,
       terminal: true,
       heartbeat: {
@@ -633,6 +701,7 @@ export class SessionManager {
     };
     await this.persistTerminalReleaseIfNeeded(snapshot);
     this.notifySessionRelease(snapshot);
+    cancellation?.throwIfAborted();
     throw new TerminalSessionError(session.sessionId, snapshot);
   }
 
@@ -2579,6 +2648,18 @@ export class SessionManager {
   }
 
   /**
+   * Drop a restored guest's automation proof without using the monotonic setter.
+   * The next device-aware request must rerun runner/accessibility readiness.
+   */
+  resetDeviceReadinessForDevice(deviceId: string): void {
+    const sessionId = this.getSessionForDevice(deviceId);
+    if (!sessionId) {
+      return;
+    }
+    this.updateSessionCache(sessionId, { deviceReadiness: "booted" });
+  }
+
+  /**
    * Preserve the pre-session iOS Simulator enrollment state. This setter is
    * intentionally write-once per session: every later enrollment change must
    * restore the same state the session first observed.
@@ -2725,6 +2806,98 @@ export class SessionManager {
   }
 
   /**
+   * Move a session onto the CLI liveness policy and record a heartbeat (#6870).
+   *
+   * Called when a one-shot `--cli` process declares ownership of the session it
+   * just minted or joined. From here on the heartbeat monitor stops applying the
+   * 10 s contract (which no one-shot process can keep between invocations) and
+   * reaps the session only after {@link getCliSessionIdleTimeoutMs} of wall-clock
+   * idleness. Returns false when the session is unknown — the CLI's declaration
+   * is best-effort and must never fail the tool call that carried it.
+   */
+  adoptCliLivenessPolicy(sessionId: string, requestedIdleTimeoutMs?: number): boolean {
+    const session = this.getSession(sessionId);
+    if (!session) {
+      logger.warn(`Cannot adopt CLI liveness policy for session ${sessionId}: not found`);
+      return false;
+    }
+    // A `--cli` invocation reuses whatever daemon is already running, so the
+    // daemon process environment cannot be the only source of the idle timeout:
+    // the invocation sends its own resolved (and here re-validated, bounded)
+    // value, and only an absent/unusable one falls back to this process's env
+    // (issue #6870 review).
+    const idleTimeoutMs =
+      sanitizeRequestedCliIdleTimeoutMs(requestedIdleTimeoutMs) ??
+      Math.min(resolveCliSessionIdleTimeoutMs(), MAX_CLI_SESSION_IDLE_TIMEOUT_MS);
+    if (session.livenessPolicy === "heartbeat") {
+      // Remember the strict contract exactly once, so a long-lived owner taking
+      // this UUID over can put the session back on it (issue #6870 review). A
+      // re-adoption must not overwrite the snapshot with the CLI's own widened
+      // values.
+      session.preCliLiveness = {
+        heartbeatTimeoutMs: session.heartbeatTimeoutMs,
+        heartbeatTimeoutSource: session.heartbeatTimeoutSource,
+        sessionTimeoutMs: session.sessionTimeoutMs,
+      };
+    }
+    session.livenessPolicy = "cli-idle";
+    session.heartbeatTimeoutMs = idleTimeoutMs;
+    // Widen the ordinary expiry deadline too. An autolocked session is created
+    // with a 60 s `sessionTimeoutMs`, and the heartbeat monitor sweeps
+    // `cleanupExpiredSessions()` on every tick — so leaving `expiresAt` on the
+    // 60 s clock would release a CLI-owned session long before the CLI idle
+    // timeout the policy promises. `Math.max` keeps adoption from ever
+    // *shortening* the deadline of a session that already had a longer one
+    // (a plain 30-minute session stays at 30 minutes; the cli-idle policy still
+    // reaps it at the idle timeout, which is the stricter of the two).
+    session.sessionTimeoutMs = Math.max(session.sessionTimeoutMs, idleTimeoutMs);
+    this.recordHeartbeat(sessionId);
+    logger.debug(
+      `Session ${sessionId} adopted the CLI liveness policy (idle timeout ${session.heartbeatTimeoutMs}ms)`,
+    );
+    return true;
+  }
+
+  /**
+   * Put a CLI-adopted session back on the strict heartbeat contract (#6870).
+   *
+   * `adoptCliLivenessPolicy` is sticky by design — a one-shot process is gone by
+   * the time the next invocation arrives — but a long-lived stdio/HTTP proxy
+   * that later owns the same session UUID *can* keep the 10 s contract, and its
+   * heartbeats say so. Without this, that session would stay on the minutes-long
+   * idle window and keep holding its device for the whole window after the
+   * long-lived client disconnects. Returns false when there was nothing to
+   * restore (unknown session, or one that never adopted the CLI policy).
+   */
+  restoreHeartbeatLivenessPolicy(sessionId: string): boolean {
+    const session = this.getSession(sessionId);
+    if (!session || session.livenessPolicy !== "cli-idle") {
+      return false;
+    }
+    // Defensive fallback: a session that is somehow on the CLI policy without a
+    // snapshot (a future recovery path that persists the policy) must still come
+    // back to a strict timeout rather than keep the minutes-long one.
+    const snapshot: PreCliLivenessSnapshot = session.preCliLiveness ?? {
+      heartbeatTimeoutMs: getDefaultSessionHeartbeatTimeoutMs(),
+      heartbeatTimeoutSource: "default",
+      sessionTimeoutMs: session.sessionTimeoutMs,
+    };
+    session.livenessPolicy = "heartbeat";
+    session.heartbeatTimeoutMs = snapshot.heartbeatTimeoutMs;
+    session.heartbeatTimeoutSource = snapshot.heartbeatTimeoutSource;
+    session.sessionTimeoutMs = snapshot.sessionTimeoutMs;
+    delete session.preCliLiveness;
+    // Re-stamp the deadlines off the restored (shorter) timeouts: recordHeartbeat
+    // recomputes `expiresAt` from `sessionTimeoutMs`, so the widened deadline
+    // adoption installed does not outlive the policy that justified it.
+    this.recordHeartbeat(sessionId);
+    logger.debug(
+      `Session ${sessionId} restored the heartbeat liveness policy (timeout ${session.heartbeatTimeoutMs}ms)`,
+    );
+    return true;
+  }
+
+  /**
    * Clear session cache (for specific key or all)
    */
   clearSessionCache(sessionId: string, key?: string): void {
@@ -2793,6 +2966,15 @@ export class SessionManager {
    * Check if session is expired
    */
   private isSessionExpired(session: Session): boolean {
+    // A CLI-owned session (#6870) is governed solely by the wall-clock idle
+    // policy `SessionHeartbeatMonitor` applies, which releases it as
+    // `cli-idle-timeout`. The ordinary expiry deadline must not release it
+    // first: autolock mints sessions with a 60 s `sessionTimeoutMs`, and both
+    // deadlines would otherwise land on the same millisecond once adoption
+    // widens `expiresAt`, letting the generic sweep win the tie.
+    if (session.livenessPolicy === "cli-idle") {
+      return false;
+    }
     return (
       !this.activeSessionExecutionChecker(session.sessionId) && this.timer.now() > session.expiresAt
     );

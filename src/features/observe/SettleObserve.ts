@@ -5,9 +5,9 @@ import type { ObserveDiff } from "./output/ObserveResultOutput";
 import { pollObserveUntil } from "./ObservePoll";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 
-const DEFAULT_TIMEOUT_MS = 2500;
-const DEFAULT_POLL_MS = 150;
-const DEFAULT_STABLE_READS = 2;
+export const DEFAULT_SETTLE_TIMEOUT_MS = 2500;
+export const DEFAULT_SETTLE_POLL_MS = 150;
+export const DEFAULT_SETTLE_STABLE_READS = 2;
 
 /**
  * Whether a structural diff represents a *stable* screen for settle purposes.
@@ -17,7 +17,7 @@ const DEFAULT_STABLE_READS = 2;
  * capture attributes, including occlusion metadata, so every remaining change is
  * actionable instability.
  */
-function isStabilityDiffEmpty(diff: ObserveDiff): boolean {
+export function isStabilityDiffEmpty(diff: ObserveDiff): boolean {
   return (
     diff.added.length === 0 &&
     diff.removed.length === 0 &&
@@ -46,9 +46,9 @@ export class RealSettleObserve implements SettleObserve {
   ) {}
 
   async execute(options: SettleOptions = {}): Promise<SettleResult> {
-    const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-    const pollMs = options.pollMs ?? DEFAULT_POLL_MS;
-    const stableReads = options.stableReads ?? DEFAULT_STABLE_READS;
+    const timeoutMs = options.timeoutMs ?? DEFAULT_SETTLE_TIMEOUT_MS;
+    const pollMs = options.pollMs ?? DEFAULT_SETTLE_POLL_MS;
+    const stableReads = options.stableReads ?? DEFAULT_SETTLE_STABLE_READS;
 
     // Length of the current run of consecutive structurally-equal snapshots.
     let equalRun = 0;
@@ -56,7 +56,13 @@ export class RealSettleObserve implements SettleObserve {
     const outcome = await pollObserveUntil(
       this.observeScreen,
       this.timer,
-      { timeoutMs, pollMs, signal: options.signal },
+      {
+        timeoutMs,
+        pollMs,
+        signal: options.signal,
+        initialMinTimestampMs: options.initialMinTimestampMs,
+        skipPerformanceAudit: options.skipPerformanceAudit,
+      },
       (observation, previous) => {
         if (previous === undefined) {
           equalRun = 1;

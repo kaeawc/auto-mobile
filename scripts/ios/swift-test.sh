@@ -67,10 +67,12 @@ echo ""
 # control-proxy has unit tests that can run on macOS
 # XCTestRunner unit tests run on macOS (integration tests are handled by xctestrunner-integration-tests.sh)
 TESTABLE_PACKAGES=(
+    "highlight-core"
     "auto-mobile-sdk"
     "control-proxy"
     "XCTestRunner"
     "screen-capture"
+    "network-filter"
 )
 
 # Total tests executed in a `swift test` transcript.

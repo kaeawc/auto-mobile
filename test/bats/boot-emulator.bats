@@ -28,3 +28,17 @@ MOCK
   [[ "$(<"$args_file")" == *"600000"* ]]
   rm -f "$args_file"
 }
+
+@test "parses device JSON from stdout when boot writes a warning to stderr" {
+  cat > "${MOCK_BIN}/bun" <<'MOCK'
+#!/usr/bin/env bash
+echo "warning: something" >&2
+printf '%s\n' '{"deviceId":"emulator-5554"}'
+MOCK
+  chmod +x "${MOCK_BIN}/bun"
+
+  run env bash -c 'cd /tmp && "$1" --avd-name pixel_ci' _ "$(pwd)/$SCRIPT"
+
+  [ "$status" -eq 0 ]
+  [ "$output" = "emulator-5554" ]
+}

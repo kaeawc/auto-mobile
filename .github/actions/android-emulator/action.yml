@@ -177,7 +177,13 @@ runs:
         export AUTOMOBILE_BOOT_PROGRESS=true
         export AUTOMOBILE_EMULATOR_DIAGNOSTICS_DIR="${{ github.workspace }}/android-emulator-diagnostics/attempt-1"
         "${{ github.workspace }}/scripts/android/boot-emulator.sh" --avd-name "${{ inputs.avd-name }}"
-        "${{ github.workspace }}/scripts/android/run-emulator-tests.sh" "${{ inputs.accessibility-apk-path }}" "${{ inputs.script }}"
+        "${{ github.workspace }}/scripts/android/run-emulator-tests.sh" "${{ inputs.accessibility-apk-path }}" "${{ inputs.script }}" || {
+          test_status=$?
+          "${{ github.workspace }}/scripts/android/collect-emulator-diagnostics.sh" \
+            "${AUTOMOBILE_EMULATOR_DIAGNOSTICS_DIR}" \
+            "run-emulator-tests.sh failed with exit code ${test_status}."
+          exit "${test_status}"
+        }
 
     # Runner-health timeouts are the remaining sampled flake class. Keep the
     # existing bounded retry, but make its first failure inspectable before it
@@ -200,7 +206,13 @@ runs:
         export AUTOMOBILE_BOOT_PROGRESS=true
         export AUTOMOBILE_EMULATOR_DIAGNOSTICS_DIR="${{ github.workspace }}/android-emulator-diagnostics/attempt-2"
         "${{ github.workspace }}/scripts/android/boot-emulator.sh" --avd-name "${{ inputs.avd-name }}"
-        "${{ github.workspace }}/scripts/android/run-emulator-tests.sh" "${{ inputs.accessibility-apk-path }}" "${{ inputs.script }}"
+        "${{ github.workspace }}/scripts/android/run-emulator-tests.sh" "${{ inputs.accessibility-apk-path }}" "${{ inputs.script }}" || {
+          test_status=$?
+          "${{ github.workspace }}/scripts/android/collect-emulator-diagnostics.sh" \
+            "${AUTOMOBILE_EMULATOR_DIAGNOSTICS_DIR}" \
+            "run-emulator-tests.sh failed with exit code ${test_status}."
+          exit "${test_status}"
+        }
 
     - name: Verify Emulator Tests Passed
       if: always()

@@ -61,11 +61,30 @@ if [[ "${#android_changes[@]}" -eq 0 ]]; then
   exit 0
 fi
 
+root_gradle_changed=false
+for changed_file in "${android_changes[@]}"; do
+  case "${changed_file}" in
+    android/build.gradle.kts|android/settings.gradle.kts|android/gradle.properties|android/gradle/*)
+      root_gradle_changed=true
+      break
+      ;;
+  esac
+done
+
+validate_root_gradle_configuration() {
+  echo "==> configuration validation (root Gradle files changed)"
+  (cd android && ./gradlew help)
+}
+
 kotlin_changes=()
 while IFS= read -r changed_file; do
   [[ -n "${changed_file}" ]] && kotlin_changes+=("${changed_file}")
-done < <(printf '%s\n' "${android_changes[@]}" | rg '^android/.*\.(kt|kts)$' || true)
+done < <(printf '%s\n' "${android_changes[@]+"${android_changes[@]}"}" | rg '^android/.*\.(kt|kts)$' || true)
 if [[ "${#kotlin_changes[@]}" -eq 0 ]]; then
+  if [[ "${root_gradle_changed}" == "true" ]]; then
+    validate_root_gradle_configuration
+    exit 0
+  fi
   echo "No changed Kotlin files; ktfmt, scoped Detekt, compile, and tests are no-ops."
   exit 0
 fi
@@ -98,8 +117,16 @@ done < <(printf '%s\n' "${modules[@]+"${modules[@]}"}" | sort -u)
 modules=("${unique_modules[@]+"${unique_modules[@]}"}")
 
 if [[ "${#modules[@]}" -eq 0 ]]; then
+  if [[ "${root_gradle_changed}" == "true" ]]; then
+    validate_root_gradle_configuration
+    exit 0
+  fi
   echo "No changed Kotlin modules; scoped Detekt, compile, and tests are no-ops."
   exit 0
+fi
+
+if [[ "${root_gradle_changed}" == "true" ]]; then
+  validate_root_gradle_configuration
 fi
 
 detekt_tasks=()

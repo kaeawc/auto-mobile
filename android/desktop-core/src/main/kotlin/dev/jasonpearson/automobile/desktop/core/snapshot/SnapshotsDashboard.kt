@@ -255,9 +255,9 @@ private fun Hint(text: String, color: Color) {
   Text(text, fontSize = 10.sp, color = color.copy(alpha = 0.8f))
 }
 
-internal fun formatSize(bytes: Long): String =
+internal fun formatSize(bytes: Long?): String =
   when {
-    bytes <= 0 -> "unknown size"
+    bytes == null || bytes <= 0 -> "unknown size"
     bytes >= 1_000_000_000 -> "${bytes / 1_000_000_000} GB"
     bytes >= 1_000_000 -> "${bytes / 1_000_000} MB"
     bytes >= 1_000 -> "${bytes / 1_000} KB"

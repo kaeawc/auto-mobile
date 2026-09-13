@@ -46,6 +46,8 @@ export class FakeAdbClient implements FakeAdbClientContract {
     new Map();
   private commandSequenceCursor: Map<string, number> = new Map();
   private commandErrors: Map<string, Error> = new Map();
+  // Models failures before ADB can dispatch, so beforeDispatch must not run.
+  private preDispatchErrors: Map<string, Error> = new Map();
   private foregroundApp: { packageName: string; userId: number } | null = null;
   private foregroundAppError: Error | null = null;
   private hangingCommandPatterns: string[] = [];
@@ -126,8 +128,12 @@ export class FakeAdbClient implements FakeAdbClientContract {
    * a test can configure a result via {@link setCommandResult}.
    */
   async execute(args: string[], options?: AdbExecuteOptions): Promise<ExecResult> {
-    await options?.beforeDispatch?.(options.timeoutMs);
     const command = args.join(" ");
+    const preDispatchError = this.preDispatchErrors.get(command);
+    if (preDispatchError) {
+      throw preDispatchError;
+    }
+    await options?.beforeDispatch?.(options.timeoutMs);
     return this.executeCommand(
       command,
       options?.timeoutMs,
@@ -237,6 +243,11 @@ export class FakeAdbClient implements FakeAdbClientContract {
    */
   setCommandError(command: string, error: Error): void {
     this.commandErrors.set(command, error);
+  }
+
+  /** Configure an error before {@link AdbExecuteOptions.beforeDispatch} can run. */
+  setPreDispatchError(command: string, error: Error): void {
+    this.preDispatchErrors.set(command, error);
   }
 
   clearCommandError(command: string): void {
@@ -380,6 +391,7 @@ export class FakeAdbClient implements FakeAdbClientContract {
     this.commandCalls = [];
     this.commandResults.clear();
     this.commandErrors.clear();
+    this.preDispatchErrors.clear();
     // Also clear the scripted seams added for the action-lifecycle slice, or a
     // suite that reuses a client after reset() inherits stale sequences/cursors,
     // a lingering foreground-app error, and hanging-command patterns.

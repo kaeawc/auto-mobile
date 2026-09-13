@@ -544,7 +544,7 @@ jobs:
           path: |
             ${{ runner.temp }}/automobile-derived-data-nightly-xcode-${{ matrix.config.xcode }}/Build
             ${{ runner.temp }}/automobile-derived-data-nightly-xcode-${{ matrix.config.xcode }}/ModuleCache.noindex
-          key: ${{ runner.os }}-derived-nightly-xcode-build-${{ matrix.config.xcode }}-${{ hashFiles('ios/**/*.swift', 'ios/**/project.yml', 'ios/**/*.pbxproj') }}
+          key: ${{ runner.os }}-derived-nightly-xcode-build-${{ matrix.config.xcode }}-${{ hashFiles('ios/**/*.swift', 'ios/**/*.m', 'ios/**/*.mm', 'ios/**/*.h', 'ios/**/*.c', 'ios/**/*.cpp', 'ios/**/*.xcconfig', 'ios/**/*.plist', 'ios/**/*.entitlements', 'ios/**/*.storyboard', 'ios/**/*.xib', 'ios/**/*.xcassets/**', 'ios/**/*.strings', 'ios/**/*.ttf', 'ios/**/*.otf', 'ios/**/*.xcprivacy', 'ios/**/*.pbxproj', 'ios/**/*.xcscheme', 'ios/**/project.yml', 'ios/**/Package.swift', 'ios/**/Package.resolved') }}
           restore-keys: |
             ${{ runner.os }}-derived-nightly-xcode-build-${{ matrix.config.xcode }}-
 

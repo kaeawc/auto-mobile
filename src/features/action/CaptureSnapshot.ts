@@ -42,6 +42,12 @@ import * as path from "path";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import type { SettingsNamespace } from "../observe/android";
+import {
+  defaultEmulatorConsoleBusyRegistry,
+  type EmulatorConsoleBusyRegistry,
+} from "../../utils/android-cmdline-tools/EmulatorConsoleBusyRegistry";
+
+export const VM_SNAPSHOT_SAVE_DISPATCHED = "isVmSnapshotSaveDispatched";
 
 export interface CaptureSnapshotArgs {
   snapshotName: string;
@@ -81,6 +87,7 @@ export class CaptureSnapshot implements SnapshotCaptureProvider {
     _timer: Timer = defaultTimer,
     store: DeviceSnapshotStore = new DeviceSnapshotStore(),
     simctl?: SimCtlClient,
+    private readonly consoleBusyRegistry: EmulatorConsoleBusyRegistry = defaultEmulatorConsoleBusyRegistry,
   ) {
     this.device = device;
     this.adb = adbFactory.create(device);
@@ -171,6 +178,7 @@ export class CaptureSnapshot implements SnapshotCaptureProvider {
     vmSnapshotTimeoutMs: number,
   ): Promise<DeviceSnapshotManifest> {
     logger.info(`Using VM snapshot for emulator ${this.device.deviceId}`);
+    let saveDispatched = false;
 
     try {
       // Save VM snapshot using ADB emu command
@@ -179,7 +187,14 @@ export class CaptureSnapshot implements SnapshotCaptureProvider {
 
       let result;
       try {
-        result = await this.adb.executeCommand(saveCommand, vmSnapshotTimeoutMs);
+        result = await this.consoleBusyRegistry.runExclusive(this.device.deviceId, () =>
+          this.adb.execute(saveCommand.split(" "), {
+            timeoutMs: vmSnapshotTimeoutMs,
+            beforeDispatch: async () => {
+              saveDispatched = true;
+            },
+          }),
+        );
       } catch (error) {
         throw new Error(formatVmSnapshotExecutionError("save", snapshotName, error));
       }
@@ -218,7 +233,11 @@ export class CaptureSnapshot implements SnapshotCaptureProvider {
     } catch (error) {
       const message = errorMessage(error);
       logger.error(`Failed to capture VM snapshot: ${message}`);
-      throw new ActionableError(`Failed to capture VM snapshot: ${message}`);
+      const actionable = new ActionableError(`Failed to capture VM snapshot: ${message}`);
+      if (saveDispatched) {
+        Object.assign(actionable, { [VM_SNAPSHOT_SAVE_DISPATCHED]: true });
+      }
+      throw actionable;
     }
   }
 

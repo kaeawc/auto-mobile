@@ -1,5 +1,8 @@
 import { describe, it, test, expect, beforeEach, afterEach } from "bun:test";
-import { CaptureSnapshot } from "../../../src/features/action/CaptureSnapshot";
+import {
+  CaptureSnapshot,
+  VM_SNAPSHOT_SAVE_DISPATCHED,
+} from "../../../src/features/action/CaptureSnapshot";
 import { BootedDevice } from "../../../src/models";
 import { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
@@ -9,6 +12,7 @@ import { DeviceSnapshotStore } from "../../../src/utils/DeviceSnapshotStore";
 import { promises as fs } from "fs";
 import * as path from "path";
 import * as os from "os";
+import { FakeEmulatorConsoleBusyRegistry } from "../../fakes/FakeEmulatorConsoleBusyRegistry";
 
 describe("CaptureSnapshot", () => {
   let device: BootedDevice;
@@ -79,6 +83,26 @@ describe("CaptureSnapshot", () => {
       expect(result.manifest.snapshotType).toBe("vm");
       expect(result.manifest.includeAppData).toBe(true); // VM snapshot includes everything
       expect(fakeAdb.wasCommandExecuted(`emu avd snapshot save ${snapshotName}`)).toBe(true);
+    });
+
+    it("holds the injected console-busy marker for a VM save", async () => {
+      const snapshotName = "console-fenced";
+      const consoleBusy = new FakeEmulatorConsoleBusyRegistry();
+      const capture = new CaptureSnapshot(
+        device,
+        fakeAdbFactory,
+        undefined,
+        fakeTimer,
+        store,
+        undefined,
+        consoleBusy,
+      );
+      fakeAdb.setCommandResult(`emu avd snapshot save ${snapshotName}`, "OK");
+
+      await capture.execute({ snapshotName, includeSettings: false, useVmSnapshot: true });
+
+      expect(consoleBusy.getExclusiveDeviceIds()).toEqual([device.deviceId]);
+      expect(consoleBusy.isBusy(device.deviceId)).toBe(false);
     });
 
     it("should capture VM snapshot with settings", async () => {
@@ -217,6 +241,37 @@ describe("CaptureSnapshot", () => {
           useVmSnapshot: true,
         }),
       ).rejects.toThrow("offline");
+    });
+
+    it("marks a failed capture after its VM save has been dispatched", async () => {
+      const snapshotName = "test-vm-dispatched-failure";
+      fakeAdb.setCommandError(`emu avd snapshot save ${snapshotName}`, new Error("device offline"));
+
+      const failure = await captureSnapshot
+        .execute({ snapshotName, includeSettings: false, useVmSnapshot: true })
+        .then(
+          () => new Error("expected the VM snapshot save to fail"),
+          (error: unknown) => error,
+        );
+
+      expect((failure as Record<string, unknown>)[VM_SNAPSHOT_SAVE_DISPATCHED]).toBe(true);
+    });
+
+    it("does not mark a failed capture when its VM save never dispatches", async () => {
+      const snapshotName = "test-vm-pre-dispatch-failure";
+      fakeAdb.setPreDispatchError(
+        `emu avd snapshot save ${snapshotName}`,
+        new Error("adb executable not found"),
+      );
+
+      const failure = await captureSnapshot
+        .execute({ snapshotName, includeSettings: false, useVmSnapshot: true })
+        .then(
+          () => new Error("expected the VM snapshot save to fail"),
+          (error: unknown) => error,
+        );
+
+      expect((failure as Record<string, unknown>)[VM_SNAPSHOT_SAVE_DISPATCHED]).toBeUndefined();
     });
 
     it("should pass VM snapshot timeout to adb command", async () => {

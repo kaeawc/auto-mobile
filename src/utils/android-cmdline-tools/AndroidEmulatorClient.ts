@@ -25,6 +25,10 @@ import {
   AndroidCommandOutputStreamRedactor,
   redactAndroidCommandOutput,
 } from "./redactAndroidCommandOutput";
+import {
+  defaultEmulatorConsoleBusyRegistry,
+  type EmulatorConsoleBusyRegistry,
+} from "./EmulatorConsoleBusyRegistry";
 
 const MODERN_PLAY_IMAGE_MIN_API_LEVEL = 30;
 const MAX_LAUNCH_OUTPUT_LINES = 50;
@@ -132,6 +136,12 @@ function resolveEmulatorPollingInterval(value: string | undefined): number {
     return DEFAULT_EMULATOR_POLLING_INTERVAL_MS;
   }
   return Math.max(configuredInterval, MIN_EMULATOR_POLLING_INTERVAL_MS);
+}
+
+function resolveConsoleBusyRegistry(
+  registry: EmulatorConsoleBusyRegistry | undefined,
+): EmulatorConsoleBusyRegistry {
+  return registry ?? defaultEmulatorConsoleBusyRegistry;
 }
 
 /**
@@ -588,6 +598,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
   private hostArchitecture: string;
   private readonly hostPortAvailabilityChecker: HostPortAvailabilityChecker;
   private readonly runningAvdAdvertisementReader: RunningAvdAdvertisementReader;
+  private readonly consoleBusyRegistry: EmulatorConsoleBusyRegistry;
   private readonly launchTargetDeviceIds = new WeakMap<ChildProcess, string>();
   // startDevice creates a fresh client per request, so reservations must cover
   // every client in the daemon rather than one client instance.
@@ -635,6 +646,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
    * @param platform - Host platform (for testing)
    * @param hostArchitecture - Host CPU architecture (for testing)
    * @param hostPortAvailabilityChecker - Checks whether emulator ports are free (for testing)
+   * @param consoleBusyRegistry - Tracks daemon-owned console-exclusive operations (for testing)
    */
   constructor(
     execAsyncFn:
@@ -652,6 +664,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     hostArchitecture: string = arch(),
     hostPortAvailabilityChecker: HostPortAvailabilityChecker = AndroidEmulatorClient.defaultHostPortAvailabilityChecker(),
     runningAvdAdvertisementReader: RunningAvdAdvertisementReader = new TmpdirRunningAvdAdvertisementReader(),
+    consoleBusyRegistry?: EmulatorConsoleBusyRegistry,
   ) {
     this.execAsync = execAsyncFn || execAsync;
     this.spawnFn = spawnFn || spawn;
@@ -662,6 +675,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     this.hostArchitecture = hostArchitecture;
     this.hostPortAvailabilityChecker = hostPortAvailabilityChecker;
     this.runningAvdAdvertisementReader = runningAvdAdvertisementReader;
+    this.consoleBusyRegistry = resolveConsoleBusyRegistry(consoleBusyRegistry);
     // Only set a fallback emulator path here; proper detection happens lazily
     this.emulatorPath = this.getFallbackEmulatorPath();
   }
@@ -1455,11 +1469,17 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     device: BootedDevice,
     infoTimeoutMs: number,
     signal?: AbortSignal,
-  ): Promise<{ name: string; diagnostic?: ReadinessDiagnostic }> {
+  ): Promise<{
+    name: string;
+    diagnostic?: ReadinessDiagnostic;
+    consoleBusyDuringProbe?: boolean;
+  }> {
     const deviceId = device.deviceId;
     const adbWithDevice = this.adbFactory.create(device);
     const deadlineMs = this.timer.now() + infoTimeoutMs;
     let diagnostic: ReadinessDiagnostic | undefined;
+    const busyBeforeDispatch = this.consoleBusyRegistry.isBusy(deviceId);
+    const generationBeforeDispatch = this.consoleBusyRegistry.getGeneration(deviceId);
     try {
       const result = await adbWithDevice.executeCommand(
         "emu avd name",
@@ -1481,12 +1501,17 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       logger.debug(`Failed to get AVD name for ${deviceId}: ${error}`);
     }
 
+    const consoleBusyDuringProbe =
+      busyBeforeDispatch ||
+      this.consoleBusyRegistry.isBusy(deviceId) ||
+      generationBeforeDispatch !== this.consoleBusyRegistry.getGeneration(deviceId);
+
     const remainingMs = deadlineMs - this.timer.now();
     if (remainingMs <= 0) {
       logger.debug(
         `AVD name resolution for ${deviceId} spent its ${infoTimeoutMs}ms budget on the console probe; skipping the property fallback`,
       );
-      return { name: "", diagnostic };
+      return { name: "", diagnostic, consoleBusyDuringProbe };
     }
 
     try {
@@ -1501,13 +1526,14 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       logger.debug(
         `AVD name property fallback for ${deviceId}: raw="${result.stdout}" (${result.stdout.length} chars), cleaned="${avdName}"`,
       );
-      return avdName ? { name: avdName } : { name: "", diagnostic };
+      return avdName ? { name: avdName } : { name: "", diagnostic, consoleBusyDuringProbe };
     } catch (error) {
       this.throwIfReadinessAborted(signal);
       logger.debug(`Failed to get AVD name property for ${deviceId}: ${error}`);
       return {
         name: "",
         diagnostic: this.readinessDiagnostic("avd-name-resolution", error, deviceId),
+        consoleBusyDuringProbe,
       };
     }
   }
@@ -1565,6 +1591,10 @@ export class AndroidEmulatorClient implements AndroidEmulator {
           platform: "android",
           deviceId: deviceId,
           source: "local",
+          ...(avdName.name === "" &&
+            avdName.consoleBusyDuringProbe === true && {
+              consoleBusyDuringProbe: avdName.consoleBusyDuringProbe,
+            }),
         });
       }
 

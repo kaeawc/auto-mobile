@@ -166,6 +166,36 @@ describe("deviceSnapshotManager", () => {
     expect(listed).toEqual([]);
   });
 
+  test("records a pending reclaim when a dispatched VM save fails", async () => {
+    const emulator: BootedDevice = {
+      deviceId: "emulator-5554",
+      name: "Pixel_8_API_35",
+      platform: "android",
+    };
+    store.queueGeneratedName("orphaned-vm-save");
+    await setDeviceSnapshotManagerDependencies({
+      createCaptureProvider: () => ({
+        capture: async () => {
+          const error = new ActionableError("VM snapshot save was cancelled");
+          Object.assign(error, { isVmSnapshotSaveDispatched: true });
+          throw error;
+        },
+      }),
+    });
+
+    await expect(captureDeviceSnapshot(emulator, { useVmSnapshot: true })).rejects.toThrow(
+      /cancelled/i,
+    );
+
+    expect(await repository.getSnapshot("orphaned-vm-save")).toMatchObject({
+      snapshotName: "orphaned-vm-save",
+      deviceId: "emulator-5554",
+      deviceName: "Pixel_8_API_35",
+      snapshotType: "vm",
+      pendingReclaim: true,
+    });
+  });
+
   test("re-capturing an existing name replaces it instead of erroring (#5713)", async () => {
     const first = await captureDeviceSnapshot(TEST_DEVICE, {
       snapshotName: "dup",

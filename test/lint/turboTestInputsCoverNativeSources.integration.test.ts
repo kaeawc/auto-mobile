@@ -584,6 +584,14 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
       "named only inside the workflow-YAML text asserted by webrtcDeviceIntegrationWorkflow.test.ts",
     ],
     [
+      "ios/Playground",
+      "appears only in cache-key glob-pattern string literals used to validate .github/workflows/*.yml content, not read from disk",
+    ],
+    [
+      "ios/auto-mobile-sdk",
+      "appears only in cache-key glob-pattern string literals used to validate .github/workflows/*.yml content, not read from disk",
+    ],
+    [
       "ios/control-proxy/project.yml",
       "xcodegen drift check creates a required spec copy in a temp repo",
     ],

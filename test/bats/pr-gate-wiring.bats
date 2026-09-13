@@ -223,8 +223,8 @@ wiring_requires_yq() {
   [[ "$block" == *"if: needs.detect-changes.outputs.webrtc_should_run == 'true'"* ]]
 
   block="$(job_block ios-device-webrtc)"
-  [[ "$block" == *"needs: detect-changes"* ]]
-  [[ "$block" == *"if: needs.detect-changes.outputs.webrtc_should_run == 'true'"* ]]
+  [[ "$block" == *"needs: [detect-changes, fast-validation]"* ]]
+  [[ "$block" == *"if: needs.detect-changes.outputs.webrtc_should_run == 'true' && needs.fast-validation.result == 'success'"* ]]
 }
 
 @test "WebRTC change detection covers publisher and device inputs" {

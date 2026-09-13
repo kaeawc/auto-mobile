@@ -72,7 +72,16 @@ manifest) and enforced by:
 ## Refreshing the graph (dependency / security updates)
 
 When a runtime dependency or a security override changes the resolved graph
-(e.g. a Dependabot bump to `sharp`, `jimp`, or one of their transitives):
+(e.g. a Dependabot bump to `jimp` or one of their transitives, or a manual
+`sharp` bump):
+
+> `sharp` and every `@img/*` entry are ignored in `.github/dependabot.yml` and
+> must be bumped by hand. Dependabot bumps only the entries eligible when it
+> opens the PR, which splits sharp's 24-entry native matrix (PR #6820 left six
+> behind and sharp stopped loading on linux-x64), and it cannot regenerate
+> `scripts/release/runtime-graph.json`. Bump `sharp` together with every
+> `@img/sharp-*` / `@img/sharp-libvips-*` pin, then follow the steps below;
+> `scripts/check-sharp-matrix-coherence.ts` rejects a partial bump.
 
 1. Update the version(s) as usual and run `bun install` so `bun.lock` reflects
    the new resolution.

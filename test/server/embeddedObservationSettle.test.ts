@@ -374,3 +374,75 @@ describe("settleEmbeddedObservationInResponse (#6866)", () => {
     expect((response.structuredContent as Record<string, any>).observation.settled).toBeUndefined();
   });
 });
+
+describe("settleEmbeddedObservation adoption guard (#6866)", () => {
+  test("a fallback capture OLDER than the action's own is never adopted", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const fake = new FakeObserveScreen();
+    // Every poll serves a pre-tap cache entry: older than the capture the action
+    // already holds, so `pollObserveUntil` admits none of them and falls back to
+    // the last raw read on timeout.
+    fake.setObserveResult(obs(AIRPLANE_ROW_HALF_INFLATED, 50));
+
+    const captured = obs(AIRPLANE_ROW_INFLATED, 100);
+    const outcome = await settleEmbeddedObservation({
+      actionClass: "navigation",
+      observation: captured,
+      settleObserve: settleFor(fake, timer),
+    });
+
+    expect(outcome.settled).toBe(false);
+    expect(outcome.observation).toBe(captured);
+  });
+
+  test("an explicitly stale fallback capture is never adopted", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const fake = new FakeObserveScreen();
+    // Newer by device clock, but ObserveScreen retracted its freshness (a
+    // wrong-window capture, #5867). It is not evidence the gate may promote.
+    fake.setObserveResult({
+      ...obs(AIRPLANE_ROW_HALF_INFLATED, 200),
+      freshness: { isFresh: false, category: "window_identity" },
+    } as ObserveResult);
+
+    const captured = obs(AIRPLANE_ROW_INFLATED, 100);
+    const outcome = await settleEmbeddedObservation({
+      actionClass: "navigation",
+      observation: captured,
+      settleObserve: settleFor(fake, timer),
+    });
+
+    expect(outcome.settled).toBe(false);
+    expect(outcome.observation).toBe(captured);
+  });
+
+  test("a trustworthy newer frame is still adopted on timeout, flagged unsettled", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const fake = new FakeObserveScreen();
+    // A ticking clock: never two structurally-equal reads, but every read is a
+    // genuine post-action capture. The newest one beats the half-inflated tree
+    // the action holds, so the gate hands it back — honestly unsettled.
+    fake.setObserveResult((index) =>
+      obs(
+        { class: "android.widget.TextView", "resource-id": "android:id/clock", text: `0:0${index}` },
+        20 + index * 10,
+      ),
+    );
+
+    const captured = obs(AIRPLANE_ROW_HALF_INFLATED, 10);
+    const outcome = await settleEmbeddedObservation({
+      actionClass: "navigation",
+      observation: captured,
+      settleObserve: settleFor(fake, timer),
+    });
+
+    expect(outcome.settled).toBe(false);
+    expect(outcome.observation).not.toBe(captured);
+    expect((outcome.observation.viewHierarchy!.hierarchy.node as any)["resource-id"]).toBe(
+      "android:id/clock",
+    );
+  });
+});

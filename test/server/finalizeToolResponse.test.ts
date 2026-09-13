@@ -1087,7 +1087,15 @@ describe("finalizeToolResponse", () => {
         const observation = (result.structuredContent as any).observation;
         expect(observation.isDiff).toBe(true);
         expect(observation.keyboard).toEqual({ visible: true, package: "example.keyboard" });
-        expect(observation.skeleton).toEqual([]);
+        // The keyboard survives as exactly ONE row, never a key per cap (issue #6871).
+        expect(observation.skeleton).toEqual([
+          {
+            elementId: "<ime>",
+            label: "Keyboard (example.keyboard)",
+            bounds: [0, 100, 50, 150],
+            affordances: ["input"],
+          },
+        ]);
         expect(observation.added.some((entry: any) => entry.attributes.text === "Q")).toBe(
           project === "full",
         );

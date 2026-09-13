@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod/v4";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import { ToolRegistry, ProgressCallback } from "./toolRegistry";
+import { enableToolsSchemaField } from "./toolSelectionTools";
 import { deviceResourceConfigurationSchema } from "./deviceResourceSchemas";
 import { registerDeviceResourceTools } from "./deviceResourceTools";
 import {
@@ -64,6 +65,7 @@ import {
   type DeviceProvisioner,
 } from "../utils/deviceProvisioning";
 import { DaemonState } from "../daemon/daemonState";
+import { reconcileDiscoveryObservation } from "../daemon/discoveryReconcile";
 import type { DeviceReadinessLevel } from "../utils/DeviceSessionManager";
 import type { DevicePool, DeviceReadinessReservation, PooledDevice } from "../daemon/devicePool";
 import { McpSessionRecoveryInProgressError } from "../daemon/devicePool";
@@ -286,6 +288,11 @@ export const getAndroidSchema = devicePreparationTimeoutSchema
       .describe(
         "Booted device serial, e.g. emulator-5554 (the `deviceId` field of automobile:devices/booted/android), or a defined AVD image name, which is cold-booted by name. Prefer avdName to boot or coordinate a named AVD.",
       ),
+    // #6869 — declare the session's capabilities in the SAME call that acquires
+    // the device, instead of one setToolEnabled round-trip per gated tool. The
+    // grant is applied in src/server/index.ts against the session this call
+    // mints; this handler ignores the field.
+    enableTools: enableToolsSchemaField,
   })
   .superRefine(validateDevicePreparationTimeout)
   .superRefine((value, ctx) => {
@@ -323,6 +330,8 @@ export const getAppleSchema = devicePreparationTimeoutSchema
       .describe(
         "Booted device identifier (the `deviceId` field of automobile:devices/booted/ios); alias for udid",
       ),
+    // See getAndroidSchema.enableTools (#6869).
+    enableTools: enableToolsSchemaField,
   })
   .superRefine(validateDevicePreparationTimeout)
   .superRefine((value, ctx) => {
@@ -452,14 +461,32 @@ export const provisionDeviceSchema = withJsonSchemaOverride(
         .max(MAX_PROVISION_DEVICE_TIMEOUT_MS)
         .optional()
         .describe("Total provision, boot, resource configuration, and readiness timeout in ms"),
+      // See getAndroidSchema.enableTools (#6869). Requires boot=true: the
+      // no-boot branch returns before a session exists (#6886 review).
+      enableTools: enableToolsSchemaField.describe(
+        `${enableToolsSchemaField.description} Requires boot=true.`,
+      ),
     })
     .strict()
     .refine((args) => !args.resources || args.boot !== false, {
       path: ["resources"],
       message: "Resource configuration requires boot=true.",
+    })
+    // A boot=false provision returns before any session is minted, so there is
+    // nothing to grant the declared capabilities against — accepting the
+    // request would discard it silently (#6886 review). Reject it up front,
+    // like the resources constraint above.
+    .refine((args) => !args.enableTools || args.boot !== false, {
+      path: ["enableTools"],
+      message: "Capability declaration requires boot=true; boot=false mints no session.",
     }),
   (jsonSchema) => {
-    jsonSchema.if = { required: ["resources"] };
+    // Both fields carry the same consequent, so they share one conditional.
+    // The combinator stays nested inside `if` — a top-level `allOf` is not
+    // publishable (#5870).
+    jsonSchema.if = {
+      anyOf: ["resources", "enableTools"].map((field) => ({ required: [field] })),
+    };
     jsonSchema.then = { properties: { boot: { const: true } } };
   },
 );
@@ -1537,6 +1564,24 @@ async function runPostShutdownStep(
   }
 }
 
+/**
+ * `skipAndroidNameEnrichment` is the shutdown-confirmation half of the same
+ * `force` fast path `readTeardownTargetDiscovery` already gives target
+ * RESOLUTION (#6864): a forced kill still confirms its target's disappearance
+ * by discovery, and unforced discovery enriches every attached emulator with
+ * `emu avd name`, sequentially, budgeting 2s each. Wedged peer consoles can
+ * burn a whole forced teardown deadline confirming a kill that itself
+ * completed instantly, reporting a shutdown timeout even though the platform
+ * kill succeeded
+ * ([#6874](https://github.com/kaeawc/auto-mobile/pull/6874) review). A
+ * serial-only scan is enough here: `findDiscoveredDevice` matches by
+ * `deviceId`, so the target's disappearance is confirmed without a name, and
+ * an unresolved `Unknown (<serial>)` name on a still-present serial already
+ * reads as "not yet a confirmed replacement" via
+ * {@link isConfirmedDeviceReplacement}'s unresolved-name guard, the same
+ * conservative "keep waiting" outcome an unforced caller gets from a
+ * momentarily wedged console.
+ */
 async function getShutdownDiscovery(
   deviceManager: PlatformDeviceManager,
   device: BootedDevice,
@@ -1544,6 +1589,7 @@ async function getShutdownDiscovery(
   deadlineMs: number,
   requestAbortSignal: AbortSignal | undefined,
   timeoutMs = DEVICE_SHUTDOWN_TIMEOUT_MS,
+  skipAndroidNameEnrichment = false,
 ) {
   return await runWithinShutdownDeadline(
     device,
@@ -1551,10 +1597,25 @@ async function getShutdownDiscovery(
     deadlineMs,
     "platform discovery did not complete",
     requestAbortSignal ?? getAbortSignal(),
-    async () =>
-      await deviceManager.getBootedDevicesDetailed(device.platform, {
+    async () => {
+      const discovery = await deviceManager.getBootedDevicesDetailed(device.platform, {
         bypassAndroidDeviceListCache: true,
-      }),
+        ...(skipAndroidNameEnrichment ? { skipAndroidNameEnrichment: true } : {}),
+      });
+      // FUNNEL 1: the kill/teardown preflight decides whether the pooled AVD
+      // label may be acted on destructively, so the pool must see this
+      // observation before that decision (#6863 review).
+      await reconcileDiscoveryObservation(discovery.devices, "shutdown-preflight", {
+        // This kill IS the discovering execution. Entering the quarantine
+        // cancels the pooled session's in-flight work, and without this
+        // exemption that includes the kill awaiting this very observation: it
+        // would lose the `runWithinShutdownDeadline` signal race and report a
+        // device-loss failure instead of reaching confirm-or-refuse
+        // ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
+        excludeExecutionId: getShutdownInitiatingExecutionId(),
+      });
+      return discovery;
+    },
     timeoutMs,
   );
 }
@@ -1594,6 +1655,7 @@ async function waitForDeviceShutdown(
   deadlineMs: number,
   requestAbortSignal: AbortSignal | undefined,
   timeoutMs = DEVICE_SHUTDOWN_TIMEOUT_MS,
+  skipAndroidNameEnrichment = false,
 ): Promise<BootedDevice | undefined> {
   let lastDiscoveryDetail = "platform discovery did not complete";
   for (;;) {
@@ -1607,6 +1669,7 @@ async function waitForDeviceShutdown(
       deadlineMs,
       requestAbortSignal,
       timeoutMs,
+      skipAndroidNameEnrichment,
     );
     const platformWasDiscovered = discovery.succeededPlatforms.has(device.platform);
     const matchingDevice = findDiscoveredDevice(discovery, device);
@@ -2271,6 +2334,7 @@ async function killProcessAndRetireOwnership(
       shutdownDeadlineMs,
       requestAbortSignal,
       timeoutMs,
+      force,
     );
     perf.endOperation("waitForShutdown");
     shutdownWasConfirmed = true;
@@ -2905,33 +2969,45 @@ function pooledAvdNameRefusalMessage(device: BootedDevice, refusal: PooledAvdNam
  * The stable AVD label a booted emulator is matched and acted on by: the name
  * the runtime gave, or the pool's label when the runtime could not name itself.
  *
- * `allowQuarantinedPooledLabel` is the FORCED reading of the same lookup
- * (#6864). Unforced, a quarantined entry reads as "no label" -- rule 3 of
- * {@link getValidatedPooledAndroidEntry} -- and that is right for every
- * non-destructive consumer. But the quarantine is precisely the persistent
- * state a wedged console puts the daemon in, so under that rule a forced
- * teardown of the AVD this daemon itself published matched NOTHING booted and
- * was refused by the unresolved-runtime precondition long before the forced
- * branch in {@link confirmPooledAvdIdentity} could skip the probe -- the escape
- * hatch was unreachable in its own headline case. Forced, the caller's label is
- * bound to the pooled serial instead, which is also the only way `destroyDevice`
- * receives a real AVD name rather than the `Unknown (<serial>)` placeholder
- * `deleteAvd` cannot delete
- * ([#6874](https://github.com/kaeawc/auto-mobile/pull/6874) review).
- *
- * This widens what force can MATCH, not what it may act on unchecked: the
- * `moved` incarnation refusal, the stopped-image inventory refusal and the
- * post-stop restart checks all still run on the resolved target.
+ * This is the NON-DESTRUCTIVE reading: a quarantined entry reads as "no
+ * label" -- rule 3 of {@link getValidatedPooledAndroidEntry} -- which is right
+ * for every consumer that only needs a display name, not a target to act on.
+ * The destructive teardown path uses {@link getBootedAndroidTeardownStableName}
+ * instead, which sees through the quarantine.
  */
 function getBootedAndroidStableName(
   device: BootedDevice,
   devicePool: DevicePool | undefined,
-  allowQuarantinedPooledLabel = false,
 ): string {
-  const pooledAvdName = allowQuarantinedPooledLabel
-    ? getPooledAndroidEntryForIdentityCheck(device, devicePool)?.avdName
-    : getValidatedPooledAndroidAvdName(device, devicePool);
+  const pooledAvdName = getValidatedPooledAndroidAvdName(device, devicePool);
   return pooledAvdName ?? device.name;
+}
+
+/**
+ * The same stable name for the DESTRUCTIVE path, which sees through the
+ * quarantine.
+ *
+ * FUNNEL 1 folds a teardown's own discovery into the pool before this runs, so a
+ * runtime that answers `Unknown (<serial>)` is quarantined BY THAT OBSERVATION --
+ * which is the state in which every other consumer must read the pooled label as
+ * "no label". Reading it that way HERE would mean a teardown could never match
+ * the emulator by its pooled label at all, and the mandatory runtime
+ * confirmation that exists precisely for this case
+ * ({@link capturePooledAvdIdentity} -> {@link confirmPooledAvdIdentity}) would
+ * become unreachable: the teardown would instead fall through to the
+ * stopped-image inventory path, the failure the confirmation was built to
+ * prevent.
+ *
+ * So the destructive path matches on the quarantine-visible label and then makes
+ * the runtime name itself before the platform kill -- a strictly stronger gate
+ * than refusing on the quarantine flag would be
+ * ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
+ */
+function getBootedAndroidTeardownStableName(
+  device: BootedDevice,
+  devicePool: DevicePool | undefined,
+): string {
+  return getPooledAndroidEntryForIdentityCheck(device, devicePool)?.avdName ?? device.name;
 }
 
 // iOS `deleteDevice` targets are frequently expressed by name (the identifier
@@ -2948,7 +3024,6 @@ function matchesTeardownStableId(
   device: BootedDevice,
   stableId: string,
   devicePool: DevicePool | undefined,
-  allowQuarantinedPooledLabel: boolean,
 ): boolean {
   // The name-or-UDID fallback is an iOS-only concern (#6250 delete-by-name).
   // Branching explicitly on platform keeps a physical Android device whose
@@ -2959,7 +3034,7 @@ function matchesTeardownStableId(
     return matchesIosTeardownIdentity(device, stableId);
   }
   return isVirtualAndroidDevice(device)
-    ? getBootedAndroidStableName(device, devicePool, allowQuarantinedPooledLabel) === stableId
+    ? getBootedAndroidTeardownStableName(device, devicePool) === stableId
     : device.deviceId === stableId;
 }
 
@@ -3034,7 +3109,7 @@ function findMatchingBootedTeardownDevices(
   return discovery.devices.filter(
     (device) =>
       device.platform === args.target.platform &&
-      matchesTeardownStableId(device, args.target.stableId, devicePool, args.force === true),
+      matchesTeardownStableId(device, args.target.stableId, devicePool),
   );
 }
 
@@ -3045,7 +3120,7 @@ function createBootedTeardownTarget(
 ): { target?: TeardownResolvedTarget; conflict?: string; unsupported?: string } {
   const stableName =
     device.platform === "android"
-      ? getBootedAndroidStableName(device, devicePool, args.force === true)
+      ? getBootedAndroidTeardownStableName(device, devicePool)
       : device.name;
   if (args.target.stableName && args.target.stableName !== stableName) {
     return { conflict: "The requested stable name does not match the booted device identity." };
@@ -3256,11 +3331,25 @@ async function readTeardownBootedDiscovery(
     context.deadlineMs,
     detail,
     context.requestAbortSignal,
-    async () =>
-      await context.deviceManager.getBootedDevicesDetailed(context.args.target.platform, {
-        bypassAndroidDeviceListCache: true,
-        ...(skipAndroidNameEnrichment ? { skipAndroidNameEnrichment: true } : {}),
-      }),
+    async () => {
+      const discovery = await context.deviceManager.getBootedDevicesDetailed(
+        context.args.target.platform,
+        {
+          bypassAndroidDeviceListCache: true,
+          ...(skipAndroidNameEnrichment ? { skipAndroidNameEnrichment: true } : {}),
+        },
+      );
+      // FUNNEL 1: teardown reads pooled entries (`findAbsentTeardownPooledDevices`)
+      // against this observation (#6863 review).
+      await reconcileDiscoveryObservation(discovery.devices, "teardown-precondition", {
+        // Same exemption as the shutdown preflight: a `deleteDevice` cancelled
+        // by its own observation returns `operation_cancelled` while its
+        // accepted teardown carries on
+        // ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
+        excludeExecutionId: getShutdownInitiatingExecutionId(),
+      });
+      return discovery;
+    },
     context.timeoutMs,
   );
 }
@@ -4271,6 +4360,9 @@ async function validateRequestedAndroidSerialBeforeBoot(
   const discovery = await deviceUtils.getBootedDevicesDetailed("android", {
     bypassAndroidDeviceListCache: true,
   });
+  // FUNNEL 1: the post-boot recheck this defers to decides with pool/incarnation
+  // context, so the pool must have seen this observation (#6863 review).
+  await reconcileDiscoveryObservation(discovery.devices, "pre-boot-serial-validation");
   if (!discovery.succeededPlatforms.has("android")) {
     // Discovery was unavailable this sweep; a pair we cannot yet contradict is
     // deferred to the post-boot recheck rather than rejected on missing data.
@@ -5173,10 +5265,15 @@ async function resolveAndroidStartStableDeviceLifecycleTarget(
     deadlineMs,
     "Android booted-device identity discovery did not complete",
     signal,
-    async () =>
-      await deviceUtils.getBootedDevicesDetailed("android", {
+    async () => {
+      const discovery = await deviceUtils.getBootedDevicesDetailed("android", {
         bypassAndroidDeviceListCache: true,
-      }),
+      });
+      // FUNNEL 1: lifecycle coordination resolves the AVD behind a serial, which
+      // is exactly what the quarantine puts in doubt (#6863 review).
+      await reconcileDiscoveryObservation(discovery.devices, "android-start-lifecycle-target");
+      return discovery;
+    },
   );
   const bootedMatches = bootedDiscovery.devices.filter(
     (device) => device.platform === "android" && device.deviceId === deviceId,
@@ -5314,6 +5411,9 @@ export function registerDeviceTools() {
     let discoveryErrors: BootedDeviceDiscovery["discoveryErrors"];
     try {
       const discovery = await deviceManager.getBootedDevicesDetailed(platform);
+      // FUNNEL 1: listDevices publishes each entry's pool-derived label/epoch
+      // through the same join the booted-devices resource uses (#6863 review).
+      await reconcileDiscoveryObservation(discovery.devices, "listDevices");
       booted = discovery.devices;
       succeededPlatforms = discovery.succeededPlatforms;
       succeededSources = discovery.succeededSources;
@@ -6530,7 +6630,13 @@ export function registerDeviceTools() {
         totalDeadlineMs,
         operationSignal,
         "discovering an already-running exact device",
-        async () => await deviceManager.getBootedDevices(args.device.platform),
+        async () => {
+          const alreadyBootedDevices = await deviceManager.getBootedDevices(args.device.platform);
+          // FUNNEL 1: acquisition matches this observation against the pooled
+          // entry it is about to hand out (#6863 review).
+          await reconcileDiscoveryObservation(alreadyBootedDevices, "provisionDevice-exact");
+          return alreadyBootedDevices;
+        },
       );
       const exactBootedDevice =
         args.device.platform === "ios"

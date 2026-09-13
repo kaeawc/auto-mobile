@@ -1381,8 +1381,11 @@ describe("deleteDevice handler", () => {
     expect(body.state).toBe("destroyed");
     expect(manager.bootedDiscoveryOptions[0]?.skipAndroidNameEnrichment).toBe(true);
     // One scan is enough: the pool named the serial, so the name-aware fallback
-    // never has to run.
-    expect(manager.bootedDiscoveryOptions[1]?.skipAndroidNameEnrichment).not.toBe(true);
+    // never has to run. The second scan is the post-kill shutdown-confirmation
+    // discovery, which force also keeps serial-only (#6874 review thread
+    // PRRT_kwDOP-GF5M6h5LDF) -- an unforced discovery here is exactly the cost
+    // wedged peer consoles impose on a forced teardown's deadline.
+    expect(manager.bootedDiscoveryOptions[1]?.skipAndroidNameEnrichment).toBe(true);
     expect(manager.killedDevices.map((device) => device.deviceId)).toEqual(["emulator-5556"]);
   });
 

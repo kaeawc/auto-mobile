@@ -113,6 +113,33 @@ class SuccessfulKillDeviceManager extends FailingKillDeviceManager {
   }
 }
 
+/**
+ * A kill that succeeds, but whose emulator console has gone quiet: the first
+ * shutdown-confirmation discovery still reports the serial under the
+ * `Unknown (<serial>)` placeholder, and only the next one reports it gone. That
+ * first observation is what enters the identity quarantine.
+ */
+class PlaceholderThenGoneKillDeviceManager extends FailingKillDeviceManager {
+  override async killDevice(device: BootedDevice): Promise<void> {
+    this.killedDeviceIds.push(device.deviceId);
+    this.killedDeviceTargets.push(device);
+    this.setBootedDevices(device.platform, [
+      { platform: "android", name: `Unknown (${device.deviceId})`, deviceId: device.deviceId },
+    ]);
+  }
+
+  override async getBootedDevicesDetailed(
+    platform: SomePlatform,
+    options?: BootedDeviceDiscoveryOptions,
+  ): Promise<BootedDeviceDiscovery> {
+    const discovery = await super.getBootedDevicesDetailed(platform, options);
+    if (this.killedDeviceIds.length > 0) {
+      this.setBootedDevices(platform, []);
+    }
+    return discovery;
+  }
+}
+
 class ShutdownDiscoveryOptionsDeviceManager extends SuccessfulKillDeviceManager {
   readonly shutdownDiscoveryOptions: Array<BootedDeviceDiscoveryOptions | undefined> = [];
   private trackShutdownDiscovery = false;
@@ -1558,6 +1585,99 @@ describe("killDevice handler", () => {
     }
   });
 
+  // The shutdown-confirmation polls are themselves FUNNEL 1 discoveries, so a
+  // session-bound kill can be the FIRST path to see `Unknown (<serial>)` on its
+  // own target. Quarantine entry then cancels every execution indexed under the
+  // pooled session -- which, without an exemption, includes the very kill
+  // awaiting that reconciliation: it loses the `runWithinShutdownDeadline`
+  // signal race and reports failure for a shutdown that is in fact proceeding
+  // ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
+  test("keeps a kill that discovers the placeholder alive through quarantine entry", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const cancelledSessions: string[] = [];
+    const placeholderManager = new PlaceholderThenGoneKillDeviceManager();
+    manager = placeholderManager;
+    const deviceSessionRepository = new FakeDeviceSessionRepository();
+    const image: DeviceInfo = {
+      name: "Pixel_8_Old",
+      platform: "android",
+      deviceId: "emulator-5554",
+      isRunning: false,
+      source: "local",
+    };
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => placeholderManager,
+      notifyResourcesChanged: async () => {},
+      ensureCtrlProxyReady: async () => {},
+      clearInstalledAppsForDevice: async () => {},
+      timer,
+    });
+    sessionManager = new SessionManager(timer, deviceSessionRepository);
+    placeholderManager.setDeviceImages("android", [image]);
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      placeholderManager,
+      new DefaultRetryExecutor(timer),
+      deviceSessionRepository,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      // The production cancel seam, so quarantine entry really does reach the
+      // executions this test registered.
+      async (sessionId, reason, options) => {
+        cancelledSessions.push(sessionId);
+        return await executionTracker.cancelDeviceSessionExecutions(sessionId, reason, options);
+      },
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    await pool.assignMultipleDevices(["session-1"], 1_000, "android");
+    const initiatingKill = executionTracker.startExecution("killDevice", undefined, "session-1");
+    const competingExecution = executionTracker.startExecution("tapOn", undefined, "session-1");
+    const tool = ToolRegistry.getTool("killDevice");
+    if (!tool) {
+      throw new Error("killDevice not registered");
+    }
+
+    try {
+      await runWithToolSelectionContext(
+        {
+          execution: {
+            executionId: initiatingKill.id,
+            startTime: initiatingKill.startTime,
+          },
+        },
+        async () =>
+          await runWithAbortSignal(
+            initiatingKill.abortController.signal,
+            async () =>
+              await tool.handler(
+                { device: { name: image.name, platform: "android", deviceId: image.deviceId! } },
+                undefined,
+                initiatingKill.abortController.signal,
+              ),
+          ),
+      );
+
+      // The observation that quarantined the serial is this kill's own, so the
+      // kill survives it while the unrelated work on the session does not.
+      expect(cancelledSessions).toContain("session-1");
+      expect(initiatingKill.abortController.signal.aborted).toBe(false);
+      expect(competingExecution.abortController.signal.aborted).toBe(true);
+      expect(placeholderManager.killedDeviceIds).toEqual(["emulator-5554"]);
+    } finally {
+      executionTracker.endExecution(initiatingKill.id);
+      executionTracker.endExecution(competingExecution.id);
+    }
+  });
+
   test("bypasses the Android device-list cache while confirming shutdown", async () => {
     const timer = new FakeTimer();
     const cacheAwareManager = new ShutdownDiscoveryOptionsDeviceManager();
@@ -1604,6 +1724,67 @@ describe("killDevice handler", () => {
     expect(cacheAwareManager.shutdownDiscoveryOptions).toEqual(
       expect.arrayContaining([{ bypassAndroidDeviceListCache: true }]),
     );
+  });
+
+  // The review comment on #6874 (thread PRRT_kwDOP-GF5M6h5LDF): `force`
+  // reaches the platform kill, but `waitForDeviceShutdown`'s post-kill
+  // discovery still enriched every attached emulator with `emu avd name`
+  // sequentially, so wedged peer consoles could burn the whole teardown
+  // deadline confirming the kill even though the kill itself was forced.
+  // Forced shutdown confirmation must be serial-only, the same
+  // `skipAndroidNameEnrichment` the pre-kill target resolution already uses.
+  test("force keeps shutdown confirmation serial-only", async () => {
+    const timer = new FakeTimer();
+    const cacheAwareManager = new ShutdownDiscoveryOptionsDeviceManager();
+    manager = cacheAwareManager;
+    const deviceSessionRepository = new FakeDeviceSessionRepository();
+    const image: DeviceInfo = {
+      name: "Pixel 8",
+      platform: "android",
+      deviceId: "emulator-5554",
+      isRunning: false,
+      source: "local",
+    };
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => cacheAwareManager,
+      notifyResourcesChanged: async () => {},
+      ensureCtrlProxyReady: async () => {},
+      clearInstalledAppsForDevice: async () => {},
+      timer,
+    });
+    sessionManager = new SessionManager(timer, deviceSessionRepository);
+    cacheAwareManager.setDeviceImages("android", [image]);
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      cacheAwareManager,
+      new DefaultRetryExecutor(timer),
+      deviceSessionRepository,
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    await pool.assignMultipleDevices(["session-1"], 1_000, "android");
+    const tool = ToolRegistry.getTool("killDevice");
+    if (!tool) {
+      throw new Error("killDevice not registered");
+    }
+
+    cacheAwareManager.beginTrackingShutdownDiscovery();
+    await tool.handler({
+      device: { name: image.name, platform: "android", deviceId: image.deviceId! },
+      force: true,
+    });
+
+    expect(cacheAwareManager.shutdownDiscoveryOptions).not.toBeEmpty();
+    // The FIRST post-kill discovery -- the one `waitForDeviceShutdown` issues
+    // to confirm the target's own disappearance -- is the call a tight
+    // deadline with wedged peers can never reach past unforced. It must be
+    // serial-only.
+    expect(cacheAwareManager.shutdownDiscoveryOptions[0]).toEqual({
+      bypassAndroidDeviceListCache: true,
+      skipAndroidNameEnrichment: true,
+    });
   });
 
   test("waits for the runtime the Android kill preflight actually resolved", async () => {

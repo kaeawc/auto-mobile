@@ -6895,6 +6895,175 @@ describe("DevicePool", () => {
       expect(quarantined?.incarnation).toBe(incarnation);
     });
 
+    // The FUNNEL 1 caller can itself be a session-bound destructive call whose
+    // own discovery produced the placeholder. Cancelling it would abort the
+    // operation that is about to confirm-or-refuse on exactly this evidence, so
+    // the discovering execution is exempted while the rest of the session's work
+    // is still stopped ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888)
+    // review).
+    test("exempts the discovering execution from the quarantine cancellation", async () => {
+      const cancellations: { sessionId: string; excludeExecutionId?: string }[] = [];
+      devicePool = new DevicePool(
+        sessionManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        fakeAppsRepo,
+        fakeDeviceManager,
+        new DefaultRetryExecutor(fakeTimer),
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        async (sessionId, _reason, options) => {
+          cancellations.push({ sessionId, excludeExecutionId: options?.excludeExecutionId });
+          return 1;
+        },
+      );
+      await initializeLiveDevices([poolDevice("emulator-5554", "Pixel_8_API_35")]);
+      await devicePool.bindOrReuseDeviceSession(
+        "owner-session",
+        "emulator-5554",
+        "android",
+        androidImage,
+      );
+
+      await devicePool.reconcileDiscoveryObservation([unresolved("emulator-5554")], "test:kill", {
+        excludeExecutionId: "kill-execution",
+      });
+
+      expect(devicePool.isPooledIdentityUnresolved("emulator-5554")).toBe(true);
+      expect(cancellations).toEqual([
+        { sessionId: "owner-session", excludeExecutionId: "kill-execution" },
+      ]);
+    });
+
+    // Concurrent discovery calls finish out of order, so the observation a
+    // funnel folds in is not necessarily the newest one. A quarantine entered by
+    // the NEWEST evidence must not be lifted by an older listing that happened to
+    // land after it: the entry would go back to live — re-admitting tool
+    // execution and stream routing — while the newest evidence still says the
+    // runtime on that serial is unproven. The pool already orders mutable-name
+    // updates by `observedAt`; identity transitions are ordered the same way
+    // ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
+    const stamped = (device: BootedDevice, observedAt: number): BootedDevice => ({
+      ...device,
+      observedAt,
+    });
+
+    test("ignores a stale resolved observation that would lift a newer quarantine", async () => {
+      const device = poolDevice("emulator-5554", "Pixel_8_API_35");
+      await initializeLiveDevices([device]);
+      await devicePool.reconcileDiscoveryObservation(
+        [stamped(unresolved("emulator-5554"), 7)],
+        "test:newest",
+      );
+      expect(devicePool.isPooledIdentityUnresolved("emulator-5554")).toBe(true);
+
+      // The straggler: an older listing that read the AVD name before it became
+      // unreadable.
+      await devicePool.reconcileDiscoveryObservation([stamped(device, 5)], "test:straggler");
+
+      expect(devicePool.isPooledIdentityUnresolved("emulator-5554")).toBe(true);
+
+      // Genuinely newer evidence still lifts it.
+      await devicePool.reconcileDiscoveryObservation([stamped(device, 9)], "test:newer");
+
+      expect(devicePool.isPooledIdentityUnresolved("emulator-5554")).toBe(false);
+    });
+
+    // Re-observing the placeholder advances the evidence the lift is ordered
+    // against; otherwise a straggler newer than the FIRST placeholder but older
+    // than the latest one would still lift the quarantine.
+    test("advances the quarantine's evidence when the placeholder is seen again", async () => {
+      const device = poolDevice("emulator-5554", "Pixel_8_API_35");
+      await initializeLiveDevices([device]);
+      await devicePool.reconcileDiscoveryObservation(
+        [stamped(unresolved("emulator-5554"), 3)],
+        "test:first",
+      );
+      await devicePool.reconcileDiscoveryObservation(
+        [stamped(unresolved("emulator-5554"), 9)],
+        "test:latest",
+      );
+
+      await devicePool.reconcileDiscoveryObservation([stamped(device, 5)], "test:straggler");
+
+      expect(devicePool.isPooledIdentityUnresolved("emulator-5554")).toBe(true);
+    });
+
+    // The inverse of the stale-lift race: a delayed placeholder must not
+    // quarantine an entry whose identity a NEWER observation already resolved.
+    // Entering quarantine cancels the bound session's in-flight executions and
+    // blocks routing, so acting on stale evidence here is the more destructive
+    // half of the ordering bug
+    // ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
+    test("ignores a stale placeholder that would quarantine a newer resolved identity", async () => {
+      const device = poolDevice("emulator-5554", "Pixel_8_API_35");
+      await initializeLiveDevices([device]);
+
+      // The live path records the stamp of the newest resolved observation.
+      await devicePool.reconcileDiscoveryObservation([stamped(device, 9)], "test:resolved");
+
+      await devicePool.reconcileDiscoveryObservation(
+        [stamped(unresolved("emulator-5554"), 7)],
+        "test:straggler",
+      );
+
+      expect(devicePool.isPooledIdentityUnresolved("emulator-5554")).toBe(false);
+    });
+
+    // Same ordering rule for the disagreement shape: a delayed listing naming a
+    // different AVD is not evidence the serial was reused after the newer
+    // observation confirmed the pooled one.
+    test("ignores a stale disagreeing observation that would quarantine a newer identity", async () => {
+      const device = poolDevice("emulator-5554", "Pixel_8_API_35");
+      await initializeLiveDevices([device]);
+      await devicePool.reconcileDiscoveryObservation([stamped(device, 9)], "test:resolved");
+
+      await devicePool.reconcileDiscoveryObservation(
+        [stamped(poolDevice("emulator-5554", "Pixel_7_API_34"), 7)],
+        "test:straggler",
+      );
+
+      expect(devicePool.isPooledIdentityUnresolved("emulator-5554")).toBe(false);
+    });
+
+    // A placeholder that is genuinely newer than the last resolved observation
+    // still quarantines: the ordering rule withholds trust from STALE evidence
+    // only.
+    test("still quarantines on a placeholder newer than the last resolved observation", async () => {
+      const device = poolDevice("emulator-5554", "Pixel_8_API_35");
+      await initializeLiveDevices([device]);
+      await devicePool.reconcileDiscoveryObservation([stamped(device, 9)], "test:resolved");
+
+      await devicePool.reconcileDiscoveryObservation(
+        [stamped(unresolved("emulator-5554"), 11)],
+        "test:newer",
+      );
+
+      expect(devicePool.isPooledIdentityUnresolved("emulator-5554")).toBe(true);
+    });
+
+    // Unstamped observations (start-path snapshots, legacy callers and fakes)
+    // cannot be ordered at all, so they keep today's behaviour rather than
+    // wedging an entry in quarantine forever.
+    test("still lifts the quarantine for an observation with no ordering stamp", async () => {
+      const device = poolDevice("emulator-5554", "Pixel_8_API_35");
+      await initializeLiveDevices([device]);
+      await devicePool.reconcileDiscoveryObservation(
+        [stamped(unresolved("emulator-5554"), 7)],
+        "test:newest",
+      );
+
+      await devicePool.reconcileDiscoveryObservation([device], "test:unstamped");
+
+      expect(devicePool.isPooledIdentityUnresolved("emulator-5554")).toBe(false);
+    });
+
     test("never quarantines a handset, whose name is not its identity", async () => {
       const handset = createBootedDevice("R5CT10ABCDE", "android", "Pixel 8");
       await initializeLiveDevices([handset]);

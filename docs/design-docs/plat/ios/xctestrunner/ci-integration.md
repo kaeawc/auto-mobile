@@ -258,14 +258,28 @@ The `ios-xctest-runner-simulator-tests` job restores two cache layers before its
 `build-for-testing` invocation. It resolves the CtrlProxy package after restore, so a manifest
 change still fetches any newly introduced dependency before the cached DerivedData is reused:
 
-| Cache                     | Key                                                                      | What it stores                                                                                                                                                                                                                                                                                              |
-| ------------------------- | ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| SPM packages              | `macOS-spm-xctestrunner-26.5-<hash(Package.swift files)>`                | `~/Library/Caches/org.swift.swiftpm` and `~/.swiftpm/cache` (SwiftPM's global package/artifact cache); `~/.swiftpm` itself, including machine-specific `configuration/` and `security/` state, is deliberately excluded so a self-hosted runner's SwiftPM tree can never leak onto a hosted-runner fallback |
-| DerivedData intermediates | `macOS-derived-xctestrunner-26.5-<hash(CtrlProxy Swift/project inputs)>` | `/tmp/automobile-ctrl-proxy/Build` and `/tmp/automobile-ctrl-proxy/ModuleCache.noindex` build products/module cache; not `SourcePackages`                                                                                                                                                                   |
+| Cache                     | Key                                                              | What it stores                                                                                                                                                                                                                                                                                              |
+| ------------------------- | ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| SPM packages              | `macOS-spm-xctestrunner-26.5-<hash(Package.swift files)>`        | `~/Library/Caches/org.swift.swiftpm` and `~/.swiftpm/cache` (SwiftPM's global package/artifact cache); `~/.swiftpm` itself, including machine-specific `configuration/` and `security/` state, is deliberately excluded so a self-hosted runner's SwiftPM tree can never leak onto a hosted-runner fallback |
+| DerivedData intermediates | `macOS-derived-xctestrunner-26.5-<hash(CtrlProxy build inputs)>` | `/tmp/automobile-ctrl-proxy/Build` and `/tmp/automobile-ctrl-proxy/ModuleCache.noindex` build products/module cache; not `SourcePackages`                                                                                                                                                                   |
 
 The restore-key prefixes retain the `26.5` toolchain segment, so a different Xcode version never
 restores compiled artifacts from this lane. Source changes fall back to the prior matching-toolchain
 entry for incremental compilation.
+
+Because [`actions/cache` never updates an existing key](https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching#matching-a-cache-key),
+every DerivedData `hashFiles(...)` call — here and in the analogous Xcode-build, Playground, and
+nightly/merge sweep jobs — must cover every compiled, configuration, and resource input for the
+scoped project directory, not just `*.swift` sources and the project descriptor. Restricting the
+hash to Swift files means an Objective-C shim, an `.xcconfig`, `Info.plist`, an asset catalog, a
+font, or a storyboard/xib can change while the key still hits exactly, so the freshly rebuilt
+DerivedData for that changed input is never saved — every later run keeps restoring the stale
+build. Each key therefore hashes, scoped to that job's project directory (and any local Swift
+package directories it depends on): `*.swift`, `*.m`, `*.mm`, `*.h`, `*.c`, `*.cpp`, `*.xcconfig`,
+`*.plist`, `*.entitlements`, `*.storyboard`, `*.xib`, `*.xcassets/**`, `*.strings`, `*.ttf`,
+`*.otf`, `*.pbxproj`, `*.xcscheme`, `project.yml`, `Package.swift`, and `Package.resolved` —
+excluding `.build/`, `DerivedData/`, and `SourcePackages/` (already excluded by scoping to source
+directories, matching the SPM cache-path exclusions above).
 
 ## Required secrets
 

@@ -55,20 +55,26 @@ if ! vcs_base_exists "${base_ref}"; then
   exit 2
 fi
 
+set +e
+android_changes_output="$(vcs_changed_files_since_merge_base "${base_ref}" \
+  'android/**' \
+  'scripts/android/**' \
+  '.github/actions/android-emulator/**' \
+  '.github/actions/gradle-task-run/**' \
+  'scripts/local-dev/hot-reload.sh' \
+  '.github/workflows/android*.yml' \
+  '.github/workflows/pull_request.yml')"
+android_changes_status=$?
+set -e
+if [[ "${android_changes_status}" -ne 0 ]]; then
+  echo "error: failed to list Android changes since ${base_ref}" >&2
+  exit 2
+fi
+
 android_changes=()
 while IFS= read -r changed_file; do
   [[ -n "${changed_file}" ]] && android_changes+=("${changed_file}")
-done < <(
-  # shellcheck disable=SC2310 # Diff failure is surfaced by the caller's empty result gate.
-  vcs_changed_files_since_merge_base "${base_ref}" \
-    'android/**' \
-    'scripts/android/**' \
-    '.github/actions/android-emulator/**' \
-    '.github/actions/gradle-task-run/**' \
-    'scripts/local-dev/hot-reload.sh' \
-    '.github/workflows/android*.yml' \
-    '.github/workflows/pull_request.yml'
-)
+done <<< "${android_changes_output}"
 
 if [[ "${#android_changes[@]}" -eq 0 ]]; then
   echo "No Android-relevant changes since ${base_ref}; nothing to check."
@@ -80,7 +86,12 @@ for changed_file in "${android_changes[@]}"; do
   case "${changed_file}" in
     android/build.gradle.kts|android/settings.gradle.kts|android/gradle.properties|android/gradle/*)
       root_gradle_changed=true
-      break
+      ;;
+    android/**/build.gradle.kts)
+      if [[ ! -f "${changed_file}" ]]; then
+        root_gradle_changed=true
+        echo "Module build script removed: ${changed_file}; running configuration validation."
+      fi
       ;;
   esac
 done

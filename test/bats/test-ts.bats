@@ -33,6 +33,8 @@ write_junit_report() {
 
 setup() {
   STUB_BIN="$(mktemp -d)"
+  REAL_BUN="$(command -v bun)"
+  export REAL_BUN
   BUN_ARGS_FILE="$(mktemp)"
   export BUN_ARGS_FILE
   STUB_RECHECK_INDEX="$(mktemp)"
@@ -50,8 +52,11 @@ EOF
 #!/usr/bin/env bash
 printf '%b' "${TIMING_CHANGED_FILES:-}"
 EOF
-  cat > "$STUB_BIN/bun" <<'EOF'
+cat > "$STUB_BIN/bun" <<'EOF'
 #!/usr/bin/env bash
+if [[ "$1" == "run" && "$2" == "scripts/lib/junit-testcase-timings.ts" ]]; then
+  exec "$REAL_BUN" "$@"
+fi
 printf '%s\n' "$*" >> "$BUN_ARGS_FILE"
 # Same shape the real `bun test --reporter=junit` writes: `file=` lands on the
 # <testcase>, not only on the enclosing <testsuite>.
@@ -606,7 +611,7 @@ repeat_stub_times() {
   printf '%s' "$times"
 }
 
-@test "timing gate rechecks the worst files when a loaded runner reports many offenders" {
+@test "timing gate rechecks every loaded-runner offender when the budget allows it" {
   seed_loaded_runner_report 24
 
   run env \
@@ -618,16 +623,16 @@ repeat_stub_times() {
     STUB_RECHECK_TIMES="$(repeat_stub_times 0.010 24)" \
     bash "$TIMING_SCRIPT" "$BATS_TEST_TMPDIR/timings.xml"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Rechecking 8 file(s)"* ]]
-  [[ "$output" == *"16 file(s) over the 100ms budget were not rechecked"* ]]
+  [[ "$output" == *"Rechecking 24 file(s)"* ]]
   [[ "$output" != *"Test exceeded"* ]]
-  # Worst first: suite0..suite7 are rechecked three times each, suite8+ are not.
+  # Worst first, but no offender is deferred: all 24 files get three samples.
   [ "$(grep -c "suite0\.test\.ts" "$BUN_ARGS_FILE")" -eq 3 ]
   [ "$(grep -c "suite7\.test\.ts" "$BUN_ARGS_FILE")" -eq 3 ]
-  ! grep -q "suite8\.test\.ts" "$BUN_ARGS_FILE"
+  [ "$(grep -c "suite8\.test\.ts" "$BUN_ARGS_FILE")" -eq 3 ]
+  [ "$(grep -c "suite23\.test\.ts" "$BUN_ARGS_FILE")" -eq 3 ]
 }
 
-@test "timing gate still fails offenders the capped recheck reproduces in isolation" {
+@test "timing gate still fails offenders the recheck reproduces in isolation" {
   seed_loaded_runner_report 24
 
   run env \
@@ -642,38 +647,18 @@ repeat_stub_times() {
   [[ "$output" == *"Test exceeded 100ms: suite0.case (median 150.00ms of 3 isolated runs)"* ]]
 }
 
-@test "timing gate honours a configured recheck file cap" {
-  seed_loaded_runner_report 3
-
-  run env \
-    PATH="$STUB_BIN:$PATH" \
-    BUN_TEST_TIMING_BASE_REF=origin/main \
-    BUN_TEST_TIMING_REPORT_DIR="$report_dir" \
-    BUN_TEST_TIMING_RECHECK_MAX_FILES=1 \
-    TIMING_CHANGED_FILES='src/example.ts\n' \
-    STUB_RECHECK_CLASSNAME_FROM_FILE=1 \
-    STUB_RECHECK_TIMES="$(repeat_stub_times 0.010 3)" \
-    bash "$TIMING_SCRIPT" "$BATS_TEST_TMPDIR/timings.xml"
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"Rechecking 1 file(s)"* ]]
-  [[ "$output" == *"2 file(s) over the 100ms budget were not rechecked"* ]]
-  [[ "$output" == *"Budget not verified for suite1.case"* ]]
-  [ "$(grep -c "suite0\.test\.ts" "$BUN_ARGS_FILE")" -eq 3 ]
-  ! grep -q "suite1\.test\.ts" "$BUN_ARGS_FILE"
-}
-
-@test "timing gate rejects a non-positive recheck file cap" {
+@test "timing gate rejects a non-positive recheck budget" {
   seed_outlier_report
 
   run env \
     PATH="$STUB_BIN:$PATH" \
     BUN_TEST_TIMING_BASE_REF=origin/main \
     BUN_TEST_TIMING_REPORT_DIR="$report_dir" \
-    BUN_TEST_TIMING_RECHECK_MAX_FILES=0 \
+    BUN_TEST_TIMING_RECHECK_BUDGET_SECONDS=0 \
     TIMING_CHANGED_FILES='src/example.ts\n' \
     bash "$TIMING_SCRIPT" "$BATS_TEST_TMPDIR/timings.xml"
   [ "$status" -eq 2 ]
-  [[ "$output" == *"BUN_TEST_TIMING_RECHECK_MAX_FILES must be a positive integer"* ]]
+  [[ "$output" == *"BUN_TEST_TIMING_RECHECK_BUDGET_SECONDS must be a positive integer"* ]]
 }
 
 @test "timing gate fails an offender whose recheck reported no sample at all" {
@@ -770,9 +755,8 @@ repeat_stub_times() {
 }
 
 # An offender in a test file THIS change touched can be the regression the gate
-# exists to catch, and the PR's own diff bounds how many of those there are. It
-# must never be deferred behind the cap (review thread PRRT_kwDOP-GF5M6h5GCA on
-# PR #6922).
+# exists to catch. It must be rechecked before unchanged offenders even when its
+# first sample is ranked last.
 seed_changed_offender_report() {
   local index path seconds
   report_dir="$BATS_TEST_TMPDIR/unit-timing-reports"
@@ -792,7 +776,7 @@ seed_changed_offender_report() {
       printf '  </testsuite>\n'
     } >> "$report_dir/shard-0.xml"
   done
-  # Ranked LAST by first sample, so a cap of 1 would otherwise defer it.
+  # Ranked LAST by first sample, so ordering has to come from the changed-file pass.
   {
     printf '  <testsuite name="%s" file="%s" tests="1" failures="0" skipped="0" time="0">\n' \
       "$OFFENDER_FILE" "$OFFENDER_FILE"
@@ -803,61 +787,82 @@ seed_changed_offender_report() {
   } >> "$report_dir/shard-0.xml"
 }
 
-@test "timing gate rechecks a changed-file offender ranked past the cap" {
+@test "timing gate rechecks a changed-file offender first even when ranked last" {
   seed_changed_offender_report
 
   run env \
     PATH="$STUB_BIN:$PATH" \
     BUN_TEST_TIMING_BASE_REF=origin/main \
     BUN_TEST_TIMING_REPORT_DIR="$report_dir" \
-    BUN_TEST_TIMING_RECHECK_MAX_FILES=1 \
     TIMING_CHANGED_FILES="src/example.ts\n$OFFENDER_FILE\n" \
     STUB_RECHECK_CLASSNAME_FROM_FILE=1 \
     STUB_RECHECK_TIMES="0.150 0.150 0.150 0.010 0.010 0.010" \
     bash "$TIMING_SCRIPT" "$BATS_TEST_TMPDIR/timings.xml"
   [ "$status" -eq 1 ]
-  # Rechecked first and outside the cap, then failed on its isolated median.
+  # Rechecked first, then failed on its isolated median.
   [ "$(grep -c -- "$OFFENDER_FILE" "$BUN_ARGS_FILE")" -eq 3 ]
   [[ "$output" == *"Test exceeded 100ms: testLaneClassification.case (median 150.00ms of 3 isolated runs)"* ]]
-  # The cap still applies to the files this change did not touch.
+  # Unchanged offenders are still rechecked after it.
   [ "$(grep -c "suite0\.test\.ts" "$BUN_ARGS_FILE")" -eq 3 ]
-  ! grep -q "suite1\.test\.ts" "$BUN_ARGS_FILE"
-  [[ "$output" == *"2 file(s) over the 100ms budget were not rechecked"* ]]
+  [ "$(grep -c "suite1\.test\.ts" "$BUN_ARGS_FILE")" -eq 3 ]
+  [ "$(grep -c "suite2\.test\.ts" "$BUN_ARGS_FILE")" -eq 3 ]
 }
 
-@test "timing gate reports an unchanged offender beyond the cap as unverified and exits 0" {
+@test "timing gate fails closed when recheck time expires before all offenders are verified" {
   seed_changed_offender_report
 
   run env \
     PATH="$STUB_BIN:$PATH" \
     BUN_TEST_TIMING_BASE_REF=origin/main \
     BUN_TEST_TIMING_REPORT_DIR="$report_dir" \
-    BUN_TEST_TIMING_RECHECK_MAX_FILES=1 \
+    BUN_TEST_TIMING_RECHECK_BUDGET_SECONDS=1 \
+    BUN_TEST_TIMING_FAKE_ELAPSED_SECONDS=1 \
     TIMING_CHANGED_FILES="src/example.ts\n$OFFENDER_FILE\n" \
     STUB_RECHECK_CLASSNAME_FROM_FILE=1 \
-    STUB_RECHECK_TIMES="0.010 0.010 0.010 0.010 0.010 0.010" \
+    STUB_RECHECK_TIMES="0.010 0.010 0.010" \
     bash "$TIMING_SCRIPT" "$BATS_TEST_TMPDIR/timings.xml"
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"Budget not verified for suite1.case"* ]]
-  [[ "$output" == *"Budget not verified for suite2.case"* ]]
-  [[ "$output" != *"Test exceeded"* ]]
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Could not verify within the 1s recheck budget: suite0.case"* ]]
+  [[ "$output" == *"suite1.case"* ]]
+  [[ "$output" == *"BUN_TEST_TIMING_RECHECK_BUDGET_SECONDS"* ]]
 }
 
 # `08` and `010` are digit-only but invalid/8 in Bash arithmetic, which skipped
 # the recheck entirely and exited 0 (review thread PRRT_kwDOP-GF5M6h5GCD on
 # PR #6922).
-@test "timing gate rejects a recheck file cap with a leading zero" {
+@test "timing gate rejects a recheck budget with a leading zero" {
   seed_outlier_report
 
   run env \
     PATH="$STUB_BIN:$PATH" \
     BUN_TEST_TIMING_BASE_REF=origin/main \
     BUN_TEST_TIMING_REPORT_DIR="$report_dir" \
-    BUN_TEST_TIMING_RECHECK_MAX_FILES=08 \
+    BUN_TEST_TIMING_RECHECK_BUDGET_SECONDS=08 \
     TIMING_CHANGED_FILES='src/example.ts\n' \
     bash "$TIMING_SCRIPT" "$BATS_TEST_TMPDIR/timings.xml"
   [ "$status" -eq 2 ]
-  [[ "$output" == *"BUN_TEST_TIMING_RECHECK_MAX_FILES must be a positive integer"* ]]
+  [[ "$output" == *"BUN_TEST_TIMING_RECHECK_BUDGET_SECONDS must be a positive integer"* ]]
+}
+
+@test "timing gate catches a testcase whose title spans physical XML lines" {
+  report_dir="$BATS_TEST_TMPDIR/unit-timing-reports"
+  mkdir -p "$report_dir"
+  {
+    printf '<?xml version="1.0" encoding="UTF-8"?>\n'
+    printf '<testsuites><testsuite file="%s">\n' "$OFFENDER_FILE"
+    printf '  <testcase name="slow\ncase" classname="suite" time="0.200" file="%s"/>\n' "$OFFENDER_FILE"
+    printf '</testsuite></testsuites>\n'
+  } > "$report_dir/shard-0.xml"
+
+  run env \
+    PATH="$STUB_BIN:$PATH" \
+    BUN_TEST_TIMING_BASE_REF=origin/main \
+    BUN_TEST_TIMING_REPORT_DIR="$report_dir" \
+    TIMING_CHANGED_FILES='src/example.ts\n' \
+    bash "$TIMING_SCRIPT" "$BATS_TEST_TMPDIR/timings.xml"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"suite.slow"* ]]
+  [[ "$output" == *"case"* ]]
 }
 
 @test "timing gate rejects a recheck run count with a leading zero" {

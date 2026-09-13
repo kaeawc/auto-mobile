@@ -14,27 +14,12 @@
 # warm-up to that test, which is how #6837 measured 101.76ms for a property
 # that costs ~3ms once the runtime is warm.
 #
-# The recheck is bounded by capping how MANY files are re-run, worst first, not
-# by abandoning the recheck when many files are over. Co-tenant load lands on
-# dozens of unrelated suites at once, so "many offenders" is the noise signature
-# rather than a regression signal; a real regression still shows up among the
-# worst offenders and is failed on its isolated median. Files past the cap are
-# reported as unverified: this gate never fails a re-runnable test it has no
-# isolated evidence against.
-#
-# The cap is NOT allowed to hide the one thing this gate exists to catch. An
-# offender that lives in a test file THIS change touched can be the change's own
-# regression, and how many of those there are is bounded by the diff, not by the
-# runner's load. So offenders split into two populations:
-#
-#   * CHANGED test files  - rechecked first and OUTSIDE the cap, and failed
-#                           closed on their isolated median. Never deferred.
-#   * UNCHANGED test files - compete for the cap, worst first. Past it they are
-#                           reported as unverified and do not fail the gate:
-#                           they cannot be this change's regression.
-#
-# Without a base ref there is no diff, so every offender is in the second
-# population and the cap alone bounds the wall time.
+# Every re-runnable offender gets its isolated median: test files this change
+# touched go first, then every remaining file by worst first sample. This avoids
+# treating an unchanged file as safe when a source/runtime/shared-test change can
+# slow every unit test. Rechecking is wall-time bounded instead: if the recheck
+# budget expires before all queued files have complete medians, the gate fails
+# closed and identifies the offenders that need a larger budget.
 set -euo pipefail
 
 report_path="${1:-scratch/bun-test-report.xml}"
@@ -42,10 +27,7 @@ report_dir="${report_path%.xml}.d"
 recheck_dir="${report_path%.xml}.recheck.d"
 max_ms="${BUN_TEST_MAX_MS:-100}"
 recheck_runs="${BUN_TEST_TIMING_RECHECK_RUNS:-3}"
-# Wall-time ceiling on the recheck: at most this many distinct files in UNCHANGED
-# test files are re-run, worst offender first. Offenders past it are reported,
-# never failed. Offenders in changed test files ignore this cap entirely.
-recheck_max_files="${BUN_TEST_TIMING_RECHECK_MAX_FILES:-8}"
+recheck_budget_seconds="${BUN_TEST_TIMING_RECHECK_BUDGET_SECONDS:-600}"
 
 # Every one of these is used in Bash arithmetic, where a leading zero means
 # octal: `08` is an arithmetic error and `010` silently means eight. Digit-only
@@ -60,7 +42,7 @@ require_positive_int() {
 
 require_positive_int BUN_TEST_MAX_MS "$max_ms"
 require_positive_int BUN_TEST_TIMING_RECHECK_RUNS "$recheck_runs"
-require_positive_int BUN_TEST_TIMING_RECHECK_MAX_FILES "$recheck_max_files"
+require_positive_int BUN_TEST_TIMING_RECHECK_BUDGET_SECONDS "$recheck_budget_seconds"
 
 mkdir -p "$(dirname "$report_path")"
 
@@ -73,70 +55,12 @@ field_sep=$'\037'
 # occurrence ordinal of that name within the report, and the report it came from.
 # The ordinal keeps same-named tests in one file apart; the report id makes a
 # recheck sample count independent runs rather than rows.
-# shellcheck disable=SC2016 # awk program text: $0/$1 are awk fields, not shell.
-testcase_rows_awk='
-function attr(rec, key,    pattern, start, len) {
-  pattern = key "=\"[^\"]*\""
-  if (match(rec, pattern)) {
-    start = RSTART + length(key) + 2
-    len = RLENGTH - length(key) - 3
-    return substr(rec, start, len)
-  }
-  return ""
-}
-function decode_xml(value) {
-  gsub(/&quot;/, "\"", value)
-  gsub(/&apos;/, sprintf("%c", 39), value)
-  gsub(/&lt;/, "<", value)
-  gsub(/&gt;/, ">", value)
-  gsub(/&amp;/, sprintf("%c", 38), value)
-  return value
-}
-function sanitize(value) {
-  # Only the delimiter itself and record-splitting control characters are
-  # rewritten; a tab in a test title survives into its own field intact.
-  gsub(/\037/, " ", value)
-  gsub(/\r/, " ", value)
-  return value
-}
-FNR == 1 {
-  current_file = ""
-  split("", occurrences)
-}
-/<testsuite/ {
-  candidate = sanitize(decode_xml(attr($0, "file")))
-  if (candidate != "") {
-    current_file = candidate
-  }
-}
-/<testcase/ {
-  name = sanitize(decode_xml(attr($0, "name")))
-  time_str = attr($0, "time")
-  if (name == "" || time_str == "") {
-    next
-  }
-  classname = sanitize(decode_xml(attr($0, "classname")))
-  # Bun writes the source path on the <testcase> itself; only some releases also
-  # repeat it on the enclosing <testsuite>. Read the testcase attribute first and
-  # fall back to the one on the enclosing suite, so every real report stays
-  # re-runnable.
-  case_file = sanitize(decode_xml(attr($0, "file")))
-  test_file = (case_file != "") ? case_file : current_file
-  key = test_file SUBSEP classname SUBSEP name
-  occurrences[key] += 1
-  printf "%s%s%s%s%s%s%.6f%s%d%s%s\n", \
-    test_file, sep, classname, sep, name, sep, time_str * 1000.0, \
-    sep, occurrences[key], sep, FILENAME
-}
-'
-
 testcase_rows() {
-  awk -v sep="$field_sep" "$testcase_rows_awk" "$@"
+  bun run scripts/lib/junit-testcase-timings.ts "$@"
 }
 
-# Test files this change touches. An offender in one of these is never deferred
-# behind the recheck cap: it is the population this gate exists to catch, and
-# the diff bounds how many of them there can be.
+# Test files this change touches recheck first. Runtime inputs and shared test
+# support can affect every unit test, so all other offenders are also rechecked.
 changed_test_files=()
 
 if [[ -n "${BUN_TEST_TIMING_BASE_REF:-}" ]]; then
@@ -244,7 +168,7 @@ measured_rows="$recheck_dir/measured.tsv"
 offender_rows="$recheck_dir/offenders.tsv"
 recheck_rows="$recheck_dir/recheck.tsv"
 rechecked_list="$recheck_dir/rechecked-files.txt"
-deferred_list="$recheck_dir/deferred-files.txt"
+unverified_list="$recheck_dir/unverified-files.txt"
 changed_test_list="$recheck_dir/changed-test-files.txt"
 
 : > "$changed_test_list"
@@ -254,7 +178,7 @@ done
 
 # Report paths and `git diff` paths are both repository-relative here; tolerate a
 # leading "./" on the report side rather than silently treating a changed file as
-# unchanged (which would let the cap defer it).
+# unchanged (which would put it after the changed-file recheck pass).
 is_changed_test_file() {
   local candidate="${1#./}"
   [[ -s "$changed_test_list" ]] || return 1
@@ -294,14 +218,11 @@ done < <(
 
 : > "$recheck_rows"
 : > "$rechecked_list"
-: > "$deferred_list"
+: > "$unverified_list"
 recheck_files=()
 changed_offender_count=0
-capped_recheck_count=0
-deferred_count=0
 
-# Pass 1: offenders in test files this change touched. Always rechecked, first
-# and outside the cap, and failed closed on their isolated median.
+# Pass 1: offenders in test files this change touched. Recheck them first.
 for file in ${offender_files[@]+"${offender_files[@]}"}; do
   if [[ ! -f "$file" ]]; then
     # Nothing to re-run; the first sample stands for this file's offenders.
@@ -319,8 +240,7 @@ for file in ${offender_files[@]+"${offender_files[@]}"}; do
   fi
 done
 
-# Pass 2: offenders in test files this change did not touch. These compete for
-# the cap, worst first; past it they are reported, never failed.
+# Pass 2: every remaining re-runnable offender, worst first.
 for file in ${offender_files[@]+"${offender_files[@]}"}; do
   if [[ ! -f "$file" ]]; then
     continue
@@ -333,30 +253,42 @@ for file in ${offender_files[@]+"${offender_files[@]}"}; do
   if [[ "$changed_test_status" -eq 0 ]]; then
     continue
   fi
-  if [[ "$capped_recheck_count" -lt "$recheck_max_files" ]]; then
-    recheck_files+=("$file")
-    printf '%s\n' "$file" >> "$rechecked_list"
-    capped_recheck_count=$((capped_recheck_count + 1))
-  else
-    deferred_count=$((deferred_count + 1))
-    printf '%s\n' "$file" >> "$deferred_list"
-  fi
+  recheck_files+=("$file")
+  printf '%s\n' "$file" >> "$rechecked_list"
 done
 
 if [[ "${#recheck_files[@]}" -gt 0 ]]; then
   echo "Rechecking ${#recheck_files[@]} file(s) over the ${max_ms}ms budget: ${recheck_runs} isolated run(s) each, median enforced."
 fi
 if [[ "$changed_offender_count" -gt 0 ]]; then
-  echo "${changed_offender_count} of them are test file(s) this change touches: rechecked first, outside the ${recheck_max_files}-file cap, and failed on their isolated median."
+  echo "${changed_offender_count} of them are test file(s) this change touches and are rechecked first."
 fi
-if [[ "$deferred_count" -gt 0 ]]; then
-  echo "${deferred_count} file(s) over the ${max_ms}ms budget were not rechecked (recheck capped at ${recheck_max_files} file(s), worst first, among test files this change did NOT touch); reporting them as unverified rather than failing them without isolated evidence."
-fi
+
+recheck_started_at="$(date +%s)"
+elapsed_recheck_seconds() {
+  if [[ -n "${BUN_TEST_TIMING_FAKE_ELAPSED_SECONDS:-}" ]]; then
+    printf '%s\n' "$BUN_TEST_TIMING_FAKE_ELAPSED_SECONDS"
+  else
+    echo "$(( $(date +%s) - recheck_started_at ))"
+  fi
+}
 
 if [[ "${#recheck_files[@]}" -gt 0 ]]; then
   recheck_index=0
+  recheck_reports=()
   for file in "${recheck_files[@]}"; do
+    elapsed_seconds="$(elapsed_recheck_seconds)"
+    if [[ "$elapsed_seconds" -ge "$recheck_budget_seconds" ]]; then
+      printf '%s\n' "$file" >> "$unverified_list"
+      continue
+    fi
+    file_complete=true
     for ((run = 0; run < recheck_runs; run += 1)); do
+      elapsed_seconds="$(elapsed_recheck_seconds)"
+      if [[ "$elapsed_seconds" -ge "$recheck_budget_seconds" ]]; then
+        file_complete=false
+        break
+      fi
       recheck_report="$recheck_dir/recheck-${recheck_index}.xml"
       recheck_index=$((recheck_index + 1))
       # The whole file, so module load and JIT warm-up are amortized the way
@@ -372,17 +304,24 @@ if [[ "${#recheck_files[@]}" -gt 0 ]]; then
         echo "Recheck run ${run} of ${file} did not pass; measuring whatever it reported." >&2
       fi
       if [[ -f "$recheck_report" ]]; then
-        testcase_rows "$recheck_report" >> "$recheck_rows"
+        recheck_reports+=("$recheck_report")
       fi
     done
+    if [[ "$file_complete" != "true" ]]; then
+      printf '%s\n' "$file" >> "$unverified_list"
+    fi
   done
+  if [[ "${#recheck_reports[@]}" -gt 0 ]]; then
+    testcase_rows "${recheck_reports[@]}" > "$recheck_rows"
+  fi
 fi
 
 awk -F"$field_sep" \
   -v limit_ms="$max_ms" \
+  -v limit_budget="$recheck_budget_seconds" \
   -v recheck_file="$recheck_rows" \
   -v rechecked_file="$rechecked_list" \
-  -v deferred_file="$deferred_list" \
+  -v unverified_file="$unverified_list" \
   -v recheck_runs="$recheck_runs" '
 function median(key,    values, count, outer, inner, swap) {
   count = split(samples[key], values, ",")
@@ -401,7 +340,7 @@ function median(key,    values, count, outer, inner, swap) {
   return (values[count / 2] + values[count / 2 + 1]) / 2.0
 }
 FILENAME == rechecked_file { rechecked[$0] = 1; next }
-FILENAME == deferred_file { deferred[$0] = 1; next }
+FILENAME == unverified_file { unverified[$0] = 1; next }
 FILENAME == recheck_file {
   key = $1 SUBSEP $2 SUBSEP $3 SUBSEP $5
   # One sample per recheck PROCESS. Counting rows would let two same-named
@@ -418,6 +357,11 @@ FILENAME == recheck_file {
   label = ($2 != "" && $3 != "") ? $2 "." $3 : $3
   if ($5 + 0 > 1) {
     label = label " #" $5
+  }
+  if ($1 in unverified) {
+    printf "Could not verify within the %ds recheck budget: %s (first sample %.2fms). Raise BUN_TEST_TIMING_RECHECK_BUDGET_SECONDS to obtain an isolated median.\n", limit_budget, label, $4 > "/dev/stderr"
+    fail = 1
+    next
   }
   if (key in samples) {
     # A recheck run can die before the reporter writes this testcase, and a
@@ -443,17 +387,10 @@ FILENAME == recheck_file {
     fail = 1
     next
   }
-  if ($1 in deferred) {
-    # Bounded recheck, worst first, over files this change did not touch: without
-    # an isolated median this sample is not evidence of a regression by THIS
-    # change, so report it instead of failing on it.
-    printf "Budget not verified for %s (first sample %.2fms): the recheck was capped before reaching its file, which this change did not touch.\n", label, $4
-    next
-  }
   printf "Test exceeded %dms: %s (%.2fms)\n", limit_ms, label, $4 > "/dev/stderr"
   fail = 1
 }
 END {
   exit fail
 }
-' "$rechecked_list" "$deferred_list" "$recheck_rows" "$offender_rows"
+' "$rechecked_list" "$unverified_list" "$recheck_rows" "$offender_rows"

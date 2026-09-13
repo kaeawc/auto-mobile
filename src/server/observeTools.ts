@@ -557,8 +557,9 @@ const observeBaseSchema = withJsonSchemaOverride(
         .describe(
           "Output projection. 'skeleton' (default) returns a flat, actionable-only list " +
             "(elementId/label/bounds/affordances) in place of viewHierarchy/elements. Each skeleton " +
-            "elementId/label is directly usable " +
-            "as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+            "elementId/label is directly usable as a tapOn selector, except the collapsed keyboard " +
+            "row `<ime>` (drive it with inputText/sendKeys); " +
+            "re-request with raw/project:'full' to disambiguate.",
         ),
       skipBackStack: z.boolean().optional().describe("Skip back stack during waitFor polling"),
       scope: observeScopeSchema.optional(),

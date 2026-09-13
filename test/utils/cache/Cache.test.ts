@@ -412,7 +412,9 @@ describe("TTLCache", () => {
       };
       const cacheWithWallClock = new TTLCache<string, string>(wallClock, { ttlMs: 1_000 });
 
-      for (let i = 0; i < 1000; i++) cacheWithWallClock.set(`live-${i}`, "live");
+      for (let i = 0; i < 1000; i++) {
+        cacheWithWallClock.set(`live-${i}`, "live");
+      }
       cacheWithWallClock.set("live-first", "live");
       wallTime = 500; // a backwards Date.now() step before the next insert
       cacheWithWallClock.set("expired-second", "expired");

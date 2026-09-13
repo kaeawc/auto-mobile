@@ -346,8 +346,12 @@ export class TTLCache<K, V> implements Cache<K, V> {
         continue;
       }
       if (now - entry.createdAt < this.ttlMs) {
-        if (!fullScan) break;
-        if (entry.createdAt < previousLiveTimestamp) survivingDisorder = true;
+        if (!fullScan) {
+          break;
+        }
+        if (entry.createdAt < previousLiveTimestamp) {
+          survivingDisorder = true;
+        }
         previousLiveTimestamp = Math.max(previousLiveTimestamp, entry.createdAt);
         continue;
       }

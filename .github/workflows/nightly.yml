@@ -443,12 +443,7 @@ jobs:
         with:
           path: |
             ~/Library/Caches/org.swift.swiftpm
-            ios/screen-capture/.build
-            ios/network-filter/.build
-            ios/highlight-core/.build
-            ios/auto-mobile-sdk/.build
-            ios/control-proxy/.build
-            ios/XCTestRunner/.build
+            ~/.swiftpm
           key: ${{ runner.os }}-spm-nightly-swift-packages-${{ matrix.config.xcode }}-${{ hashFiles('Package.swift', 'ios/**/Package.swift') }}
           restore-keys: |
             ${{ runner.os }}-spm-nightly-swift-packages-${{ matrix.config.xcode }}-
@@ -535,7 +530,9 @@ jobs:
         uses: actions/cache@v5
         id: cache-xcode-spm
         with:
-          path: ~/Library/Caches/org.swift.swiftpm
+          path: |
+            ~/Library/Caches/org.swift.swiftpm
+            ~/.swiftpm
           key: ${{ runner.os }}-spm-nightly-xcode-build-${{ matrix.config.xcode }}-${{ hashFiles('Package.swift', 'ios/**/Package.swift') }}
           restore-keys: |
             ${{ runner.os }}-spm-nightly-xcode-build-${{ matrix.config.xcode }}-
@@ -544,7 +541,9 @@ jobs:
         uses: actions/cache@v5
         id: cache-xcode-derived-data
         with:
-          path: ${{ runner.temp }}/automobile-derived-data-nightly-xcode-${{ matrix.config.xcode }}
+          path: |
+            ${{ runner.temp }}/automobile-derived-data-nightly-xcode-${{ matrix.config.xcode }}/Build
+            ${{ runner.temp }}/automobile-derived-data-nightly-xcode-${{ matrix.config.xcode }}/ModuleCache.noindex
           key: ${{ runner.os }}-derived-nightly-xcode-build-${{ matrix.config.xcode }}-${{ hashFiles('ios/**/*.swift', 'ios/**/project.yml', 'ios/**/*.pbxproj') }}
           restore-keys: |
             ${{ runner.os }}-derived-nightly-xcode-build-${{ matrix.config.xcode }}-

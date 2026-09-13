@@ -258,10 +258,10 @@ The `ios-xctest-runner-simulator-tests` job restores two cache layers before its
 `build-for-testing` invocation. It resolves the CtrlProxy package after restore, so a manifest
 change still fetches any newly introduced dependency before the cached DerivedData is reused:
 
-| Cache                     | Key                                                                    | What it stores                                                         |
-| ------------------------- | ---------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| SPM packages              | `macOS-spm-xctestrunner-26.5-<hash(Package.swift files)>`             | SwiftPM's global package cache — avoids re-fetching resolved packages |
-| DerivedData intermediates | `macOS-derived-xctestrunner-26.5-<hash(CtrlProxy Swift/project inputs)>` | `/tmp/automobile-ctrl-proxy` build products and intermediates          |
+| Cache                     | Key                                                                      | What it stores                                                                                                                            |
+| ------------------------- | ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| SPM packages              | `macOS-spm-xctestrunner-26.5-<hash(Package.swift files)>`                | SwiftPM's global package cache — avoids re-fetching resolved packages                                                                     |
+| DerivedData intermediates | `macOS-derived-xctestrunner-26.5-<hash(CtrlProxy Swift/project inputs)>` | `/tmp/automobile-ctrl-proxy/Build` and `/tmp/automobile-ctrl-proxy/ModuleCache.noindex` build products/module cache; not `SourcePackages` |
 
 The restore-key prefixes retain the `26.5` toolchain segment, so a different Xcode version never
 restores compiled artifacts from this lane. Source changes fall back to the prior matching-toolchain

@@ -1703,7 +1703,7 @@ jobs:
         with:
           path: |
             ~/Library/Caches/org.swift.swiftpm
-            ios/control-proxy/.build
+            ~/.swiftpm
           key: ${{ runner.os }}-spm-swift-coverage-26.5-${{ hashFiles('Package.swift', 'ios/**/Package.swift') }}
           restore-keys: |
             ${{ runner.os }}-spm-swift-coverage-26.5-
@@ -1770,12 +1770,7 @@ jobs:
         with:
           path: |
             ~/Library/Caches/org.swift.swiftpm
-            ios/screen-capture/.build
-            ios/network-filter/.build
-            ios/highlight-core/.build
-            ios/auto-mobile-sdk/.build
-            ios/control-proxy/.build
-            ios/XCTestRunner/.build
+            ~/.swiftpm
           key: ${{ runner.os }}-spm-swift-packages-${{ matrix.config.xcode }}-${{ hashFiles('Package.swift', 'ios/**/Package.swift') }}
           restore-keys: |
             ${{ runner.os }}-spm-swift-packages-${{ matrix.config.xcode }}-
@@ -1862,7 +1857,9 @@ jobs:
         uses: actions/cache@v5
         id: cache-xcode-spm
         with:
-          path: ~/Library/Caches/org.swift.swiftpm
+          path: |
+            ~/Library/Caches/org.swift.swiftpm
+            ~/.swiftpm
           key: ${{ runner.os }}-spm-xcode-build-${{ matrix.project }}-${{ matrix.config.xcode }}-${{ hashFiles('Package.swift', 'ios/**/Package.swift') }}
           restore-keys: |
             ${{ runner.os }}-spm-xcode-build-${{ matrix.project }}-${{ matrix.config.xcode }}-
@@ -1871,7 +1868,9 @@ jobs:
         uses: actions/cache@v5
         id: cache-xcode-derived-data
         with:
-          path: ${{ runner.temp }}/automobile-derived-data-${{ matrix.project }}
+          path: |
+            ${{ runner.temp }}/automobile-derived-data-${{ matrix.project }}/Build
+            ${{ runner.temp }}/automobile-derived-data-${{ matrix.project }}/ModuleCache.noindex
           key: ${{ runner.os }}-derived-xcode-build-${{ matrix.project }}-${{ matrix.config.xcode }}-${{ hashFiles('ios/**/*.swift', 'ios/**/project.yml', 'ios/**/*.pbxproj') }}
           restore-keys: |
             ${{ runner.os }}-derived-xcode-build-${{ matrix.project }}-${{ matrix.config.xcode }}-
@@ -1937,7 +1936,9 @@ jobs:
         uses: actions/cache@v5
         id: cache-playground-spm
         with:
-          path: ~/Library/Caches/org.swift.swiftpm
+          path: |
+            ~/Library/Caches/org.swift.swiftpm
+            ~/.swiftpm
           key: ${{ runner.os }}-spm-playground-tests-${{ matrix.config.xcode }}-${{ hashFiles('Package.swift', 'ios/**/Package.swift') }}
           restore-keys: |
             ${{ runner.os }}-spm-playground-tests-${{ matrix.config.xcode }}-
@@ -1946,7 +1947,9 @@ jobs:
         uses: actions/cache@v5
         id: cache-playground-derived-data
         with:
-          path: ${{ runner.temp }}/automobile-derived-data-Playground
+          path: |
+            ${{ runner.temp }}/automobile-derived-data-Playground/Build
+            ${{ runner.temp }}/automobile-derived-data-Playground/ModuleCache.noindex
           key: ${{ runner.os }}-derived-playground-tests-${{ matrix.config.xcode }}-${{ hashFiles('ios/Playground/**/*.swift', 'ios/highlight-core/**/*.swift', 'ios/auto-mobile-sdk/**/*.swift', 'ios/Playground/**/project.yml', 'ios/Playground/**/*.pbxproj') }}
           restore-keys: |
             ${{ runner.os }}-derived-playground-tests-${{ matrix.config.xcode }}-
@@ -2019,7 +2022,9 @@ jobs:
         uses: actions/cache@v5
         id: cache-xctestrunner-spm
         with:
-          path: ~/Library/Caches/org.swift.swiftpm
+          path: |
+            ~/Library/Caches/org.swift.swiftpm
+            ~/.swiftpm
           key: ${{ runner.os }}-spm-xctestrunner-26.5-${{ hashFiles('Package.swift', 'ios/**/Package.swift') }}
           restore-keys: |
             ${{ runner.os }}-spm-xctestrunner-26.5-
@@ -2028,7 +2033,9 @@ jobs:
         uses: actions/cache@v5
         id: cache-xctestrunner-derived-data
         with:
-          path: /tmp/automobile-ctrl-proxy
+          path: |
+            /tmp/automobile-ctrl-proxy/Build
+            /tmp/automobile-ctrl-proxy/ModuleCache.noindex
           key: ${{ runner.os }}-derived-xctestrunner-26.5-${{ hashFiles('ios/control-proxy/**/*.swift', 'ios/control-proxy/**/project.yml', 'ios/control-proxy/**/*.pbxproj') }}
           restore-keys: |
             ${{ runner.os }}-derived-xctestrunner-26.5-
@@ -2274,7 +2281,7 @@ jobs:
         with:
           path: |
             ~/Library/Caches/org.swift.swiftpm
-            .build
+            ~/.swiftpm
           key: ${{ runner.os }}-spm-root-package-26.5-${{ hashFiles('Package.swift') }}
           restore-keys: |
             ${{ runner.os }}-spm-root-package-26.5-
@@ -3331,7 +3338,7 @@ jobs:
         with:
           path: |
             ~/Library/Caches/org.swift.swiftpm
-            ios/screen-capture/.build
+            ~/.swiftpm
           key: ${{ runner.os }}-spm-screen-capture-${{ steps.webrtc-xcode-version.outputs.version }}-${{ hashFiles('ios/screen-capture/Package.swift') }}
           restore-keys: |
             ${{ runner.os }}-spm-screen-capture-${{ steps.webrtc-xcode-version.outputs.version }}-

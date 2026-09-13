@@ -128,38 +128,25 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
       reason: "Diagnostics; reports what adb sees and reads no pool state.",
     },
 
-    // --- Per-device data resources: address a serial, publish no pooled identity
+    // --- Per-device data resources -----------------------------------------
+    // These are no longer exempt. "Publishes no pooled identity" confused not
+    // PUBLISHING a pooled label with not ACTING on a pooled identity: each of
+    // these resources resolved a serial and then read that runtime's
+    // preferences, databases, DataStore contents, app files, locale or shared
+    // storage. Eight near-identical `findBootedDevice` copies are now one
+    // reconciling resolver, so the funnel obligation is discharged once
+    // ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
+    "src/server/resourceDeviceResolver.ts": {
+      calls: 1,
+      reason:
+        "The one device resolution behind every device-addressed MCP resource read; reconciles " +
+        "before returning, so the read acts on a pooled identity the pool has folded in.",
+    },
     "src/server/appResources.ts": {
-      calls: 4,
-      reason: "Resolves a serial to read app data; publishes no pool epoch or pooled AVD label.",
-    },
-    "src/server/appFileService.ts": {
-      calls: 2,
-      reason: "Resolves a serial to read app files; publishes no pool epoch or pooled AVD label.",
-    },
-    "src/server/dataStoreResources.ts": {
-      calls: 2,
-      reason: "Resolves a serial to read DataStore contents; publishes no pooled identity.",
-    },
-    "src/server/databaseResources.ts": {
-      calls: 2,
-      reason: "Resolves a serial to read databases; publishes no pooled identity.",
-    },
-    "src/server/localizationResources.ts": {
-      calls: 2,
-      reason: "Resolves a serial to read locale state; publishes no pooled identity.",
-    },
-    "src/server/sharedStorageReadService.ts": {
-      calls: 2,
-      reason: "Resolves a serial to read shared storage; publishes no pooled identity.",
-    },
-    "src/server/storageCapabilityResources.ts": {
-      calls: 2,
-      reason: "Resolves a serial to report storage capabilities; publishes no pooled identity.",
-    },
-    "src/server/storageResources.ts": {
-      calls: 2,
-      reason: "Resolves a serial to read storage; publishes no pooled identity.",
+      calls: 1,
+      reason:
+        "Registry sync only: registers/unregisters a per-device resource URI per booted serial " +
+        "and reads no pool state. Its device-addressed reads go through resourceDeviceResolver.",
     },
   };
 
@@ -289,6 +276,7 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
       "src/server/bootedDeviceResources.ts",
       "src/server/deviceTools.ts",
       "src/daemon/webrtcStreamSocketServer.ts",
+      "src/server/resourceDeviceResolver.ts",
     ];
     for (const file of routed) {
       const source = blankComments(readFileSync(join(ROOT, file), "utf8"));

@@ -1,13 +1,28 @@
 import ts from "typescript";
 import { beforeAll, describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { readdirSync, readFileSync } from "node:fs";
+import { join, relative, sep } from "node:path";
 
 /**
- * FUNNEL 2 guard: every device-addressed operation at the daemon socket boundary
- * — with OR without a session — must pass the single admission gate
- * `DevicePool.assertDeviceActionable`, which refuses a serial whose pooled
- * identity is quarantined.
+ * FUNNEL 2 guard: every device-addressed operation — with OR without a session —
+ * must pass the single admission gate `DevicePool.assertDeviceActionable`, which
+ * refuses a serial whose pooled identity is quarantined.
+ *
+ * Coverage comes from the SEAM, not from the inventory below. Four review rounds
+ * of gating entry points one at a time each found another route that reached a
+ * device without crossing the one just gated — a sessionless tool call, a
+ * resource read, a stream resolver, a fan-out target. So the gate sits where
+ * every Android device-addressed operation converges: binding a serial to a
+ * device client, which is `AdbClientFactory.create(device)` and the memoizing
+ * `AndroidCtrlProxyClient.getInstance(device)`. Android-only is complete
+ * coverage rather than a gap, because `DevicePool.hasReusableSerial` restricts
+ * the quarantine to Android emulator serials
+ * ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
+ *
+ * The socket-handler inventory below is kept because those gates refuse EARLIER
+ * and with a purpose-specific message — before a capture source is created,
+ * before an observation is taken and acked with no frames — not because the seam
+ * needs them.
  *
  * The regression this pins: the quarantine was first enforced only at
  * `assertSessionReadyForAutomation`, which is keyed on a SESSION.
@@ -27,6 +42,20 @@ describe("device-addressed admission gate (issue #6863)", () => {
   const ROOT = join(import.meta.dir, "..", "..");
   const GATE = "assertDeviceActionable";
 
+  function walkSrc(dir: string = join(ROOT, "src"), files: string[] = []): string[] {
+    // withFileTypes, not a statSync per entry: one syscall for the whole
+    // directory instead of one per file across ~1000 files in src/.
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walkSrc(full, files);
+      } else if (entry.name.endsWith(".ts")) {
+        files.push(full);
+      }
+    }
+    return files;
+  }
+
   /**
    * Socket servers that accept device-addressed requests from clients. The
    * capture and recording servers are here because authorization is NOT this
@@ -36,6 +65,7 @@ describe("device-addressed admission gate (issue #6863)", () => {
    * ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
    */
   const SCANNED = [
+    "src/daemon/daemon.ts",
     "src/daemon/socketServer.ts",
     "src/daemon/deviceDataStreamSocketServer.ts",
     "src/daemon/videoStreamSocketServer.ts",
@@ -56,6 +86,13 @@ describe("device-addressed admission gate (issue #6863)", () => {
   }
 
   const GATED_HANDLERS: readonly Handler[] = [
+    {
+      file: "src/daemon/daemon.ts",
+      fn: "applyStorageSubscriptionRequest",
+      what:
+        "each target an all-device subscribe_storage expands to — the request names no serial, " +
+        "so the socket server's preflight cannot run",
+    },
     {
       file: "src/daemon/socketServer.ts",
       fn: "runTrackedDeviceInput",
@@ -260,6 +297,51 @@ describe("device-addressed admission gate (issue #6863)", () => {
       }
     }
     expect(bypassing).toEqual([]);
+  });
+
+  /**
+   * The seam itself: one gate, at the only place a serial becomes a device
+   * client. Pinned by source scan for the same reason as everything else here —
+   * "gate before you bind" is an ordering obligation no signature expresses.
+   */
+  test("the adb client factory gates every device-bound client", () => {
+    const factory = blankComments(
+      readFileSync(join(ROOT, "src/utils/android-cmdline-tools/AdbClientFactory.ts"), "utf8"),
+    );
+    expect(factory).toContain(`daemonDeviceAdmissionGate.${GATE}(device.deviceId`);
+    // ... and the escape hatch the quarantine's own machinery needs is a
+    // SEPARATE export, so reaching it is a deliberate act.
+    expect(factory).toMatch(/export const unadmittedAdbClientFactory: AdbClientFactory/);
+  });
+
+  test("the memoizing CtrlProxy client resolution gates too", () => {
+    // `getInstance` caches per serial, so a client built before the quarantine
+    // would be handed back without the factory seam being crossed again.
+    const client = blankComments(
+      readFileSync(join(ROOT, "src/features/observe/android/AndroidCtrlProxyClient.ts"), "utf8"),
+    );
+    const getInstance = client.slice(client.indexOf("public static getInstance("));
+    expect(getInstance.slice(0, getInstance.indexOf("\n  }\n"))).toContain(
+      `daemonDeviceAdmissionGate.${GATE}(device.deviceId`,
+    );
+  });
+
+  test("only the identity, lifecycle and teardown machinery is below the seam", () => {
+    // Discovery reading the AVD name on a quarantined serial is the only event
+    // that can LIFT the quarantine, and `emu kill` is how the pool settles a
+    // serial it can no longer identify. Everything else in src/ binds through
+    // the gated factory.
+    const users: string[] = [];
+    for (const file of walkSrc()) {
+      if (!readFileSync(file).includes("unadmittedAdbClientFactory")) {
+        continue;
+      }
+      users.push(relative(ROOT, file).split(sep).join("/"));
+    }
+    expect(users.sort()).toEqual([
+      "src/utils/android-cmdline-tools/AdbClientFactory.ts",
+      "src/utils/android-cmdline-tools/AndroidEmulatorClient.ts",
+    ]);
   });
 
   test("the scan actually recognises a bypassing handler", () => {

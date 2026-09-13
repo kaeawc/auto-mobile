@@ -255,6 +255,23 @@ export class DeviceSnapshotStore {
     }
   }
 
+  /**
+   * Immediate FILE names of `dirPath`, or null when the directory does not exist
+   * or cannot be read. Counterpart to {@link listSubdirectoryNames}: an AVD
+   * relocated through `<name>.ini` is present in the AVD home only as a registry
+   * file, so a subdirectory-only scan cannot see it at all (#6490 review).
+   */
+  async listFileNames(dirPath: string): Promise<string[] | null> {
+    try {
+      const entries = await fs.readdir(dirPath, { withFileTypes: true });
+      return entries.filter((entry) => entry.isFile()).map((entry) => entry.name);
+    } catch (error) {
+      // Same "unknown, not empty" distinction as getDirectorySize.
+      logger.debug(`Failed to list files of ${dirPath}: ${error}`);
+      return null;
+    }
+  }
+
   private async getFileSize(filePath: string): Promise<number> {
     try {
       const stats = await fs.stat(filePath);

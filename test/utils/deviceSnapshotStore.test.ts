@@ -232,5 +232,20 @@ describe("DeviceSnapshotStore", () => {
       ]);
       expect(await store.listSubdirectoryNames(path.join(testBasePath, "nope"))).toBeNull();
     });
+
+    it("lists only files, so a relocated AVD's `<name>.ini` registry is visible", async () => {
+      // Shaped like ~/.android/avd: one conventional AVD directory next to the
+      // registry file a relocated AVD leaves behind (#6490 review).
+      const avdHome = path.join(testBasePath, "avd-home");
+      await fs.mkdir(path.join(avdHome, "am-api34.avd"), { recursive: true });
+      await fs.writeFile(path.join(avdHome, "am-api34.ini"), "path=/x");
+      await fs.writeFile(path.join(avdHome, "am-relocated.ini"), "path=/y");
+
+      expect((await store.listFileNames(avdHome))?.sort()).toEqual([
+        "am-api34.ini",
+        "am-relocated.ini",
+      ]);
+      expect(await store.listFileNames(path.join(testBasePath, "nope"))).toBeNull();
+    });
   });
 });

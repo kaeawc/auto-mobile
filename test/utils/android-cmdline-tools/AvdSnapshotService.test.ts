@@ -18,6 +18,7 @@ class FakeDirectories {
   constructor(
     private readonly sizes: Record<string, number>,
     private readonly children: Record<string, string[]>,
+    private readonly files: Record<string, string[]> = {},
   ) {}
 
   async getDirectorySize(dirPath: string): Promise<number | null> {
@@ -26,6 +27,10 @@ class FakeDirectories {
 
   async listSubdirectoryNames(dirPath: string): Promise<string[] | null> {
     return this.children[dirPath] ?? null;
+  }
+
+  async listFileNames(dirPath: string): Promise<string[] | null> {
+    return this.files[dirPath] ?? null;
   }
 }
 
@@ -99,9 +104,10 @@ describe("AvdSnapshotService (#6490)", () => {
     known: string[],
     devices: BootedDevice[] = [],
     adb = recordingAdbFactory(execResult("OK")),
+    files: Record<string, string[]> = {},
   ) =>
     new AvdSnapshotService(
-      new FakeDirectories(sizes, children),
+      new FakeDirectories(sizes, children, files),
       new FakeAvdDirectories(new Set(known)),
       stubEmulator(devices),
       adb.factory,
@@ -137,6 +143,22 @@ describe("AvdSnapshotService (#6490)", () => {
     const sut = service({}, { [AVD_HOME]: ["am-api34.avd", "am-api36.avd", "snapshots"] }, []);
 
     expect(await sut.listKnownAvdNames()).toEqual(["am-api34", "am-api36"]);
+  });
+
+  test("an AVD relocated through `<name>.ini` is still enumerated (#6490 review)", async () => {
+    // A relocated AVD leaves only a registry FILE in the AVD home; its `.avd`
+    // directory lives elsewhere, so a subdirectory-only scan never sees it and
+    // the redirect-aware resolver is never even consulted.
+    const sut = service(
+      {},
+      { [AVD_HOME]: ["am-api34.avd"] },
+      [],
+      [],
+      recordingAdbFactory(execResult("OK")),
+      { [AVD_HOME]: ["am-api34.ini", "am-relocated.ini", "hardware-qemu.ini.lock", "README"] },
+    );
+
+    expect(await sut.listKnownAvdNames()).toEqual(["am-api34", "am-relocated"]);
   });
 
   test("a live emulator is found by AVD name, not by serial", async () => {

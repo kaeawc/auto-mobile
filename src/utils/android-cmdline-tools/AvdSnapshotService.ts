@@ -66,10 +66,11 @@ export interface AvdSnapshotOperations {
  */
 export type SnapshotDirectoryMeasurer = Pick<
   DeviceSnapshotStore,
-  "getDirectorySize" | "listSubdirectoryNames"
+  "getDirectorySize" | "listSubdirectoryNames" | "listFileNames"
 >;
 
 const AVD_DIRECTORY_SUFFIX = ".avd";
+const AVD_REGISTRY_SUFFIX = ".ini";
 
 export class AvdSnapshotService implements AvdSnapshotOperations {
   private readonly directories: SnapshotDirectoryMeasurer;
@@ -118,14 +119,26 @@ export class AvdSnapshotService implements AvdSnapshotOperations {
   }
 
   async listKnownAvdNames(): Promise<string[]> {
-    const names = await this.directories.listSubdirectoryNames(this.avdDirectories.getAvdHome());
-    if (!names) {
-      return [];
+    const avdHome = this.avdDirectories.getAvdHome();
+    // Two shapes live side by side in the AVD home. A conventional AVD is the
+    // `<name>.avd` DIRECTORY; an AVD relocated elsewhere leaves only the
+    // `<name>.ini` registry FILE behind, with its payload — snapshots included —
+    // on another disk. Scanning directories alone made relocated AVDs invisible,
+    // so the redirect-aware resolver this service exists to use was never even
+    // consulted for them (#6490 review). Both shapes can be present for the same
+    // AVD, hence the dedupe.
+    const names = new Set<string>();
+    for (const [entries, suffix] of [
+      [await this.directories.listSubdirectoryNames(avdHome), AVD_DIRECTORY_SUFFIX],
+      [await this.directories.listFileNames(avdHome), AVD_REGISTRY_SUFFIX],
+    ] as const) {
+      for (const entry of entries ?? []) {
+        if (entry.endsWith(suffix) && entry.length > suffix.length) {
+          names.add(entry.slice(0, -suffix.length));
+        }
+      }
     }
-    return names
-      .filter((name) => name.endsWith(AVD_DIRECTORY_SUFFIX))
-      .map((name) => name.slice(0, -AVD_DIRECTORY_SUFFIX.length))
-      .filter((name) => name.length > 0);
+    return Array.from(names);
   }
 
   async findLiveEmulatorSerial(avdName: string): Promise<string | null> {

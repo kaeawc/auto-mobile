@@ -109,4 +109,16 @@ describe("launchApp handler (registered handler wiring, #6868)", () => {
     expect(payload.alreadyForeground).toBeUndefined();
     expect(payload.message).toBe(`Launched app ${appId} (foreground verified)`);
   });
+
+  // The `alreadyForeground` marker is produced by the ANDROID path only — the iOS
+  // warm path still invokes simctl/devicectl and returns an ordinary success
+  // without it. A cross-platform tool description that promises the marker
+  // unqualified (and propagates that promise into the generated schema and docs)
+  // leaves an iOS client unable to tell the two cases apart.
+  test("the tool description qualifies the already-foreground contract as Android-only", () => {
+    const description = ToolRegistry.getTool("launchApp")?.description ?? "";
+
+    expect(description).toContain("alreadyForeground");
+    expect(description).toContain("Android");
+  });
 });

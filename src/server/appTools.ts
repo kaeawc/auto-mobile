@@ -919,7 +919,7 @@ export function registerAppTools() {
   // Register with the tool registry
   ToolRegistry.registerDeviceAware(
     "launchApp",
-    "Launch app by package name. An app that is already in the foreground returns success with alreadyForeground:true plus the observation, not an error.",
+    "Launch app by package name. On Android an app that is already in the foreground returns success with alreadyForeground:true plus the observation, not an error; iOS re-launches it and returns an ordinary success without that marker.",
     launchAppSchema,
     launchAppHandler,
     { defaultEnabled: true },

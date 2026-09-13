@@ -16,6 +16,11 @@ export interface LaunchAppResult extends BaseActionResult {
    * held before and after the call, so this is a success — the observation and
    * the response-level `verified`/`observedAppId` carry the proof — not an error
    * a client has to string-match to decide whether to continue.
+   *
+   * ANDROID ONLY: the iOS path re-launches through simctl/devicectl (the warm
+   * `activate()` fast path) without detecting the already-foreground case, so an
+   * iOS result never carries this marker — its absence is not evidence the app
+   * was backgrounded.
    */
   alreadyForeground?: boolean;
   /**

@@ -232,7 +232,7 @@ describe("InstallApp", () => {
 
     await installApp.execute(apkPath);
 
-    expect(await repo.getLatestVerification(device.deviceId)).toBe(0);
+    expect(await repo.getCacheVerifiedAt(device.deviceId)).toBe(0);
   });
 
   test("falls back to package diffing when aapt is unavailable", async () => {
@@ -319,7 +319,7 @@ describe("InstallApp", () => {
 
     expect(result.success).toBe(false);
     expect(result.warning).toContain("aapt2");
-    expect(await repo.getLatestVerification(device.deviceId)).toBe(1_000);
+    expect(await repo.getCacheVerifiedAt(device.deviceId)).toBe(1_000);
   });
 
   test("invalidates the cache before package discovery after a successful install", async () => {
@@ -368,7 +368,7 @@ describe("InstallApp", () => {
 
     await expect(installApp.execute(apkPath)).rejects.toThrow("ADB disconnected after install");
 
-    expect(await repo.getLatestVerification(device.deviceId)).toBe(0);
+    expect(await repo.getCacheVerifiedAt(device.deviceId)).toBe(0);
   });
 
   test("installs iOS .app on simulator via simctl and detects new bundle id", async () => {
@@ -402,7 +402,7 @@ describe("InstallApp", () => {
     expect(result.upgrade).toBe(false);
     expect(sequencedSimctl.wasMethodCalled("installApp")).toBe(true);
     expect(fakeHost.wasCommandExecuted("plutil")).toBe(false);
-    expect(await repo.getLatestVerification(iosSimulatorDevice.deviceId)).toBe(0);
+    expect(await repo.getCacheVerifiedAt(iosSimulatorDevice.deviceId)).toBe(0);
   });
 
   test("installs iOS .ipa on physical device via devicectl", async () => {
@@ -943,7 +943,7 @@ describe("InstallApp", () => {
     const result = await installApp.execute(apkPath);
 
     expect(result.success).toBe(false);
-    expect(await repo.getLatestVerification(device.deviceId)).toBe(0);
+    expect(await repo.getCacheVerifiedAt(device.deviceId)).toBe(0);
   });
 
   test("Android downgrade without a resolvable package name surfaces a clear error", async () => {

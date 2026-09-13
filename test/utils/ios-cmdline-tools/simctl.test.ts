@@ -1263,6 +1263,61 @@ describe("Simctl", function () {
       },
     );
 
+    test("a failed bypass refresh must not discard a shared flight that succeeded with newer data", async function () {
+      const timer = new FakeTimer();
+      let calls = 0;
+      let sharedResolve!: (value: ExecResult) => void;
+      let bypassReject!: (error: Error) => void;
+      mockExecAsync = async (_file, args) => {
+        if (args.join(" ") !== "simctl list devices --json") {
+          return createExecResult("", "");
+        }
+        calls++;
+        if (calls === 1) {
+          // The ordinary shared flight -- left pending so the bypass below can
+          // start concurrently.
+          return new Promise<ExecResult>((resolve) => {
+            sharedResolve = resolve;
+          });
+        }
+        if (calls === 2) {
+          // The bypass refresh -- also left pending so it can be failed AFTER
+          // the shared flight above has already resolved successfully.
+          return new Promise<ExecResult>((_resolve, reject) => {
+            bypassReject = reject;
+          });
+        }
+        throw new Error("simctl list devices exploded");
+      };
+      simctl = new Simctl(null, mockExecAsync, timer);
+
+      const shared = simctl.listSimulatorImages();
+      await waitForCondition(() => sharedResolve !== undefined, "shared listing");
+      const bypass = simctl
+        .listSimulatorImages(undefined, { bypassCache: true })
+        .catch((error: unknown) => error);
+      await waitForCondition(() => bypassReject !== undefined, "bypass listing");
+
+      // The shared flight succeeds with genuinely newer data while the bypass
+      // is still in flight.
+      sharedResolve(createExecResult(bootedListPayload("newer"), ""));
+      await expect(shared).resolves.toHaveLength(1);
+
+      // The bypass then fails -- it never produced an authoritative result, so
+      // it must not have superseded the shared flight's successful snapshot.
+      bypassReject(new Error("bypass discovery failed"));
+      expect(await bypass).toBeInstanceOf(Error);
+
+      // Expire the TTL cache so the next call re-invokes simctl and fails,
+      // forcing a fallback to the last-good snapshot -- which must be the
+      // shared flight's successful "newer" data, not stale/missing data
+      // discarded because of the bypass's failed attempt.
+      timer.advanceTime(6000);
+      const fallback = await simctl.listSimulatorImages();
+      expect(calls).toBe(3);
+      expect(fallback.map((device) => device.deviceId)).toEqual(["newer"]);
+    });
+
     test("an explicit bypass signal cancels the underlying discovery", async function () {
       let captured: AbortSignal | undefined;
       mockExecAsync = async (_file, args, _maxBuffer, signal) => {

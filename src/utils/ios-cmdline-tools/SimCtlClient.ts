@@ -1734,7 +1734,16 @@ export class SimCtlClient implements SimCtl {
     // — that request's failure-fallback behavior is not this caller's to
     // inherit. Run it standalone instead of sharing the coalescing slot below.
     if (options.bypassCache) {
-      SimCtlClient.deviceListGeneration++;
+      // Do NOT bump the generation here, before the bypass read has produced
+      // an authoritative result: a shared flight that started earlier and
+      // resolves successfully WHILE this bypass is still in flight must still
+      // be allowed to populate the cache/last-good snapshot. Bumping eagerly
+      // would discard that genuinely successful data solely because an
+      // unrelated, as-yet-unproven bypass happened to overlap it -- including
+      // when the bypass itself goes on to fail (issue #6576 follow-up). Only a
+      // bypass read that ITSELF succeeds is authoritative enough to supersede
+      // a concurrent shared flight, so the generation bump moves to
+      // runListSimulatorImages's success path below.
       SimCtlClient.inFlightDeviceList = null;
       return this.runListSimulatorImages(timeoutMs, { bypassCache: true, signal });
     }
@@ -1851,6 +1860,39 @@ export class SimCtlClient implements SimCtl {
     return devices;
   }
 
+  /**
+   * Write a successful listing to the cache/last-good snapshot. A bypass read
+   * always writes -- it is always the freshest, most authoritative result
+   * available, so there is no earlier-generation snapshot to defer to -- and
+   * bumps the generation AFTER writing (not before starting the read, see
+   * listSimulatorImages) so a concurrent shared flight that resolves
+   * successfully can still populate the cache while the bypass is in flight;
+   * only once this bypass itself succeeds does it supersede that shared
+   * flight for any later resolution (issue #6576 follow-up). A bypass that
+   * throws never reaches this write, so a sibling shared flight's success is
+   * preserved rather than discarded when the bypass fails. A shared (non-
+   * bypass) read only writes if its captured generation is still current: a
+   * create/delete (or explicit invalidation) that landed while it was in
+   * flight bumps the generation, and a snapshot captured under the OLD
+   * generation may already be obsolete, so writing it would resurrect
+   * pre-mutation data right after the mutation invalidated it.
+   */
+  private recordDeviceListSnapshot(
+    devices: DeviceInfo[],
+    options: { bypassCache?: boolean },
+    generation: number,
+  ): void {
+    if (!options.bypassCache && SimCtlClient.deviceListGeneration !== generation) {
+      return;
+    }
+    const timestamp = this.timer.now();
+    SimCtlClient.deviceListCache = devices.length ? { devices, timestamp } : null;
+    SimCtlClient.lastGoodDeviceList = { devices, timestamp };
+    if (options.bypassCache) {
+      SimCtlClient.deviceListGeneration++;
+    }
+  }
+
   private async runListSimulatorImages(
     timeoutMs: number | undefined,
     options: { bypassCache?: boolean; signal?: AbortSignal },
@@ -1862,18 +1904,7 @@ export class SimCtlClient implements SimCtl {
       const devices = options.bypassCache
         ? await this.listDevicesForBootedCheck(timeoutMs, options.signal)
         : await this.sharedDeviceList();
-      // A create/delete (or explicit invalidation) that landed while this fetch
-      // was in flight bumps the generation; a snapshot captured under the OLD
-      // generation may already be obsolete, so only a fetch that started under
-      // the CURRENT generation may populate the cache/last-good snapshot below
-      // (issue #6576) -- otherwise it would resurrect pre-mutation data right
-      // after the mutation invalidated it.
-      const stillCurrent = SimCtlClient.deviceListGeneration === generation;
-      if (stillCurrent) {
-        const timestamp = this.timer.now();
-        SimCtlClient.deviceListCache = devices.length ? { devices, timestamp } : null;
-        SimCtlClient.lastGoodDeviceList = { devices, timestamp };
-      }
+      this.recordDeviceListSnapshot(devices, options, generation);
       return devices;
     } catch (error) {
       options.signal?.throwIfAborted();

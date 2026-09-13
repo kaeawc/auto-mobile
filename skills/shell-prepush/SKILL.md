@@ -16,9 +16,11 @@ required CI jobs.
    applicable fast checks plus targeted BATS files.
 2. Run `bun run format` before pushing. A failed Check Formatting job also
    makes Fast Validation fail at its formatter gate.
-3. If `runtime-pins`, `sharp-matrix`, or `pin-runtime-deps.bats` fails while
-   `package.json` is unmodified, rebase onto current main. Do not hand-edit the
-   pins to mask a stale base.
+3. If `runtime-pins`, `sharp-matrix`, or `pin-runtime-deps.bats` fails and
+   `bun.lock` and/or `package.json` changed in the diff, run
+   `bun scripts/release/pin-runtime-deps.ts --write` and commit `package.json`,
+   `bun.lock`, and `scripts/release/runtime-graph.json`; otherwise rebase onto
+   current main and do not hand-edit pins to mask a stale base.
 4. Never run two `bats test/bats/` sweeps concurrently on one machine. The
    targeted BATS invocation from `prepush-shell.sh` is safe to run on its own.
 5. When an Actions API job log is empty, download the `fast-validation-logs`

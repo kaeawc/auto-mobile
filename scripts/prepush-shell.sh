@@ -142,6 +142,12 @@ for path in "${changed_files[@]}"; do
   esac
 
   case "${path}" in
+    *.sh)
+      add_check "shellcheck"
+      ;;
+  esac
+
+  case "${path}" in
     .githooks/*)
       if [[ -f "${path}" ]]; then
         hook_files+=("${path}")
@@ -174,6 +180,12 @@ for path in "${changed_files[@]}"; do
       add_check "sharp-matrix"
       add_check "bun-version-coherence"
       add_check "dependency-decisions"
+      ;;
+  esac
+
+  case "${path}" in
+    scripts/release/runtime-graph.json)
+      add_check "runtime-pins"
       ;;
   esac
 
@@ -237,6 +249,7 @@ if [[ "${#selected_checks[@]}" -gt 0 ]]; then
   checks_csv="$(IFS=,; echo "${selected_checks[*]}")"
   echo "Fast validation: ./scripts/all_fast_validate_checks.sh --only ${checks_csv}"
   set +e
+  export STDLIB_FIRST_BASE_REF="${BASE}"
   ./scripts/all_fast_validate_checks.sh --only "${checks_csv}"
   fast_validation_status=$?
   set -e

@@ -12,6 +12,7 @@ setup() {
   cat > "${TEST_ROOT}/scripts/all_fast_validate_checks.sh" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "${PREPUSH_FAST_LOG}"
+printf 'STDLIB_FIRST_BASE_REF=%s\n' "${STDLIB_FIRST_BASE_REF:-<unset>}" >> "${PREPUSH_FAST_LOG}"
 EOF
   chmod +x "${TEST_ROOT}/scripts/all_fast_validate_checks.sh"
 
@@ -87,6 +88,15 @@ commit_change() {
   grep -Fqx -- '--only shellcheck,shell-portability,shell-sete,stdlib-first' "${FAST_LOG}"
   ! grep -Fq -- 'mkdocs-nav' "${FAST_LOG}"
   grep -Fqx -- 'test/bats/example.bats' "${BATS_LOG}"
+}
+
+@test "a changed shell script outside scripts/ selects shellcheck without portability or sete" {
+  commit_change "demo/scripts/bad.sh" "#!/usr/bin/env bash"
+
+  run bash scripts/prepush-shell.sh --base base
+
+  [ "${status}" -eq 0 ]
+  grep -Fqx -- '--only shellcheck' "${FAST_LOG}"
 }
 
 @test "a changed package manifest selects dependency pin checks" {
@@ -199,6 +209,33 @@ commit_change() {
 
   [ "${status}" -eq 0 ]
   grep -Fqx -- '--only runtime-pins,sharp-matrix,bun-version-coherence,dependency-decisions,claude-plugin' "${FAST_LOG}"
+}
+
+@test "an explicit --base is propagated to dependency-decisions checks" {
+  commit_change "package.json" '{"name":"fixture"}'
+
+  run bash scripts/prepush-shell.sh --base base
+
+  [ "${status}" -eq 0 ]
+  grep -Fqx -- 'STDLIB_FIRST_BASE_REF=base' "${FAST_LOG}"
+}
+
+@test "a fallback-to-main base is propagated to dependency-decisions checks" {
+  commit_change "package.json" '{"name":"fixture"}'
+
+  run bash scripts/prepush-shell.sh
+
+  [ "${status}" -eq 0 ]
+  grep -Fqx -- 'STDLIB_FIRST_BASE_REF=main' "${FAST_LOG}"
+}
+
+@test "a runtime-graph.json change selects runtime pin validation" {
+  commit_change "scripts/release/runtime-graph.json" '{}'
+
+  run bash scripts/prepush-shell.sh --base base
+
+  [ "${status}" -eq 0 ]
+  grep -Fqx -- '--only runtime-pins,stdlib-first' "${FAST_LOG}"
 }
 
 @test "unmatched changes skip all work" {

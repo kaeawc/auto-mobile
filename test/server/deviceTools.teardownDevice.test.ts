@@ -1,7 +1,10 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, spyOn } from "bun:test";
 import { promises as fsPromises } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { IOSCtrlProxyManager } from "../../src/utils/IOSCtrlProxyManager";
+import { AndroidCtrlProxyManager } from "../../src/utils/CtrlProxyManager";
+import { PortManager } from "../../src/utils/PortManager";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -762,6 +765,55 @@ describe("deleteDevice handler", () => {
     expect(sessionManager.getSessionForDevice(device.deviceId!)).toBeNull();
   });
 
+  test.each([false, true])("evicts an absent cached iOS manager by name: %s", async (byName) => {
+    const device = {
+      platform: "ios" as const,
+      name: "Absent Simulator",
+      deviceId: "11111111-1111-1111-1111-111111111111",
+    };
+    const old = IOSCtrlProxyManager.getInstance(device);
+    const stop = spyOn(
+      old as unknown as { forceStopForShutdown: () => Promise<void> },
+      "forceStopForShutdown",
+    ).mockResolvedValue();
+    try {
+      const response = await teardownTool().handler(
+        request("ios", byName ? device.name : device.deviceId, device.name),
+      );
+      expect(responseBody(response).state).toBe("already_absent");
+      expect(stop).toHaveBeenCalledTimes(1);
+      expect(PortManager.getPort(device.deviceId)).toBeUndefined();
+      expect(IOSCtrlProxyManager.getInstance(device)).not.toBe(old);
+    } finally {
+      IOSCtrlProxyManager.resetInstances();
+      stop.mockRestore();
+    }
+  });
+
+  test.each([false, true])(
+    "evicts Android runtime managers for a stopped or absent AVD (absent: %s)",
+    async (absent) => {
+      const device = {
+        platform: "android" as const,
+        name: "Deleted_AVD",
+        deviceId: "emulator-5556",
+      };
+      const old = AndroidCtrlProxyManager.getInstance(device);
+      manager.setBootedDevices("android", []);
+      manager.setDeviceImages(
+        "android",
+        absent ? [] : [{ platform: "android", name: device.name, isRunning: false }],
+      );
+      try {
+        const response = await teardownTool().handler(request("android", device.name, device.name));
+        expect(responseBody(response).state).toBe(absent ? "already_absent" : "destroyed");
+        expect(AndroidCtrlProxyManager.getInstance(device)).not.toBe(old);
+      } finally {
+        AndroidCtrlProxyManager.resetInstances();
+      }
+    },
+  );
+
   test("reports already_absent only after a complete platform inventory finds no target", async () => {
     const response = await teardownTool().handler(request("ios", "IOS-DEVICE-1", "iPhone 16"));
     const body = responseBody(response);
@@ -852,6 +904,47 @@ describe("deleteDevice handler", () => {
     expect(responseBody(response).state).toBe("already_absent");
     expect(pool.getDevice(first.deviceId)).toBeNull();
     expect(pool.getDevice(second.deviceId)).toBeNull();
+  });
+
+  test("evicts an absent Android manager by its pooled runtime identity", async () => {
+    const timer = new FakeTimer();
+    const sessionManager = new SessionManager(timer, new FakeDeviceSessionRepository());
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      manager,
+      new DefaultRetryExecutor(timer),
+    );
+    const image: DeviceInfo = {
+      platform: "android",
+      name: "Pixel_8",
+      isRunning: false,
+    };
+    const pooledRuntime: BootedDevice = {
+      platform: "android",
+      name: "Unknown (emulator-5556)",
+      deviceId: "emulator-5556",
+    };
+    await pool.addDevice(pooledRuntime, image);
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    const staleManager = AndroidCtrlProxyManager.getInstance(pooledRuntime);
+    manager.setBootedDevices("android", []);
+    manager.setDeviceImages("android", []);
+
+    try {
+      expect(pool.getDevice(pooledRuntime.deviceId)?.avdName).toBe(image.name);
+      expect(AndroidCtrlProxyManager.getExistingInstance(pooledRuntime.deviceId)).toBe(
+        staleManager,
+      );
+      const response = await teardownTool().handler(request("android", image.name, image.name));
+
+      expect(responseBody(response).state).toBe("already_absent");
+      expect(AndroidCtrlProxyManager.getExistingInstance(pooledRuntime.deviceId)).toBeUndefined();
+    } finally {
+      AndroidCtrlProxyManager.resetInstances();
+    }
   });
 
   test("retires every stale pooled Android incarnation before deleting a stopped AVD", async () => {
@@ -988,10 +1081,13 @@ describe("deleteDevice handler", () => {
     manager.setBootedDevices("android", [booted]);
     manager.setDeviceImages("android", [image]);
 
+    const oldManager = AndroidCtrlProxyManager.getInstance(booted);
     const response = await teardownTool().handler(request("android", stableAvdName, stableAvdName));
     const body = responseBody(response);
 
     expect(body.state).toBe("destroyed");
+    expect(AndroidCtrlProxyManager.getInstance(booted)).not.toBe(oldManager);
+    AndroidCtrlProxyManager.resetInstances();
     expect(manager.wasMethodCalled("killDevice")).toBe(true);
     expect(manager.destroyRequests).toEqual([
       expect.objectContaining({
@@ -1362,6 +1458,113 @@ describe("deleteDevice handler", () => {
 
     releaseDestroy();
     await expect(start).rejects.toThrow(/not found/);
+  });
+
+  test("evicts the CtrlProxy manager after a timed-out destroy later succeeds", async () => {
+    const timer = new FakeTimer();
+    const device: DeviceInfo = {
+      platform: "ios",
+      name: "iPhone 16",
+      deviceId: "IOS-DEVICE-1",
+      isRunning: false,
+    };
+    const proxy = IOSCtrlProxyManager.getInstance(device);
+    const forceStop = spyOn(
+      proxy as unknown as { forceStopForShutdown: () => Promise<void> },
+      "forceStopForShutdown",
+    ).mockResolvedValue();
+    let releaseDestroy!: () => void;
+    const destroyStarted = new Promise<void>((resolve) => {
+      manager.destroyStarted = resolve;
+    });
+    manager.destroyGate = new Promise<void>((resolve) => {
+      releaseDestroy = resolve;
+    });
+    manager.setDeviceImages("ios", [device]);
+    registerDirectSessionDevice("late-destroy-session", device);
+    setDeviceToolsDependencies({ timer });
+
+    try {
+      const teardown = teardownTool().handler({
+        ...request("ios", device.deviceId!, device.name),
+        timeoutMs: 10,
+      });
+      await destroyStarted;
+      timer.advanceTime(10);
+
+      expect(responseBody(await teardown).failure).toEqual(
+        expect.objectContaining({ phase: "destroy", code: "operation_failed" }),
+      );
+      expect(IOSCtrlProxyManager.getInstance(device)).toBe(proxy);
+      expect(resolveDirectSessionDevice("late-destroy-session")).toBeDefined();
+
+      releaseDestroy();
+      for (let attempt = 0; attempt < 10; attempt++) {
+        await Promise.resolve();
+      }
+
+      expect(forceStop).toHaveBeenCalledTimes(1);
+      expect(PortManager.getPort(device.deviceId!)).toBeUndefined();
+      expect((IOSCtrlProxyManager as any).instances.get(device.deviceId)).toBeUndefined();
+      expect(resolveDirectSessionDevice("late-destroy-session")).toBeUndefined();
+    } finally {
+      forceStop.mockRestore();
+      IOSCtrlProxyManager.resetInstances();
+      PortManager.release(device.deviceId!);
+    }
+  });
+
+  test("does not evict the CtrlProxy manager after a timed-out destroy later rejects", async () => {
+    const timer = new FakeTimer();
+    const device: DeviceInfo = {
+      platform: "ios",
+      name: "iPhone 16",
+      deviceId: "IOS-DEVICE-1",
+      isRunning: false,
+    };
+    const proxy = IOSCtrlProxyManager.getInstance(device);
+    const forceStop = spyOn(
+      proxy as unknown as { forceStopForShutdown: () => Promise<void> },
+      "forceStopForShutdown",
+    ).mockResolvedValue();
+    let releaseDestroy!: () => void;
+    const destroyStarted = new Promise<void>((resolve) => {
+      manager.destroyStarted = resolve;
+    });
+    manager.destroyGate = new Promise<void>((resolve) => {
+      releaseDestroy = resolve;
+    });
+    manager.destroyError = new Error("destroy failed late");
+    manager.setDeviceImages("ios", [device]);
+    registerDirectSessionDevice("late-rejected-destroy-session", device);
+    setDeviceToolsDependencies({ timer });
+
+    try {
+      const teardown = teardownTool().handler({
+        ...request("ios", device.deviceId!, device.name),
+        timeoutMs: 10,
+      });
+      await destroyStarted;
+      timer.advanceTime(10);
+
+      expect(responseBody(await teardown).failure).toEqual(
+        expect.objectContaining({ phase: "destroy", code: "operation_failed" }),
+      );
+
+      releaseDestroy();
+      for (let attempt = 0; attempt < 10; attempt++) {
+        await Promise.resolve();
+      }
+
+      expect(forceStop).not.toHaveBeenCalled();
+      expect(PortManager.getPort(device.deviceId!)).toBeDefined();
+      expect(IOSCtrlProxyManager.getInstance(device)).toBe(proxy);
+      expect(resolveDirectSessionDevice("late-rejected-destroy-session")).toBeDefined();
+    } finally {
+      forceStop.mockRestore();
+      IOSCtrlProxyManager.resetInstances();
+      PortManager.release(device.deviceId!);
+    }
   });
 
   test("holds the resolved iOS stable target before a name-selected compatibility start boots", async () => {

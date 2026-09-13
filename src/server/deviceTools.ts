@@ -40,6 +40,7 @@ import { syncInstalledAppResources } from "./appResources";
 import { listActiveVideoRecordings, stopVideoRecording } from "./videoRecordingManager";
 import { stopSegmentedVideoRecordingsForDevice } from "./videoRecordingTools";
 import { IOSCtrlProxyManager } from "../utils/IOSCtrlProxyManager";
+import { AndroidCtrlProxyManager } from "../utils/CtrlProxyManager";
 import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
 import { logger } from "../utils/logger";
 import { createPerformanceTracker } from "../utils/PerformanceTracker";
@@ -2676,6 +2677,42 @@ async function readTeardownInventory(
   );
 }
 
+async function evictTeardownManagers(context: TeardownContext, runtimeId?: string): Promise<void> {
+  const { platform, stableId } = context.args.target;
+  if (platform === "ios") {
+    if (runtimeId) {
+      await IOSCtrlProxyManager.evict(runtimeId, context.dependencies.timer, context.deadlineMs);
+    } else {
+      await IOSCtrlProxyManager.evict(stableId, context.dependencies.timer, context.deadlineMs);
+      await IOSCtrlProxyManager.evictSimulatorByName(
+        stableId,
+        context.dependencies.timer,
+        context.deadlineMs,
+      );
+    }
+  } else {
+    AndroidCtrlProxyManager.evict(runtimeId ?? stableId, stableId);
+  }
+}
+
+async function finalizeTeardownEviction(
+  context: TeardownContext,
+  target: TeardownResolvedTarget,
+  androidManager: AndroidCtrlProxyManager | undefined,
+): Promise<void> {
+  unregisterDirectSessionsForStableIdentity(
+    target.device.platform,
+    target.device.platform === "android"
+      ? target.device.name
+      : (target.device.deviceId ?? context.args.target.stableId),
+  );
+  if (androidManager) {
+    AndroidCtrlProxyManager.evictInstance(androidManager);
+  } else {
+    await evictTeardownManagers(context, target.device.deviceId);
+  }
+}
+
 async function resolveAbsentTeardownTarget(
   context: TeardownContext,
   booted: BootedDeviceDiscovery,
@@ -2693,7 +2730,20 @@ async function resolveAbsentTeardownTarget(
       ),
     };
   }
+  const daemonState = DaemonState.getInstance();
+  const runtimeId = daemonState.isInitialized()
+    ? findAbsentTeardownPooledDevices(daemonState.getDevicePool(), context.args.target)[0]?.id
+    : undefined;
+  const androidManager =
+    context.args.target.platform === "android" && runtimeId
+      ? AndroidCtrlProxyManager.getExistingInstance(runtimeId)
+      : undefined;
   await retireAbsentTeardownOwnership(context);
+  if (androidManager) {
+    AndroidCtrlProxyManager.evictInstance(androidManager);
+  } else {
+    await evictTeardownManagers(context, runtimeId);
+  }
   unregisterDirectSessionsForStableIdentity(
     context.args.target.platform,
     context.args.target.stableId,
@@ -3022,6 +3072,7 @@ async function destroyTeardownTarget(
   target: TeardownResolvedTarget,
   retainStableLifecycleUntil: (operation: Promise<unknown>) => void,
   markDestructionStarted: () => void,
+  onLateSuccess: () => void,
 ): Promise<void> {
   const deadlineTarget: BootedDevice = {
     name: target.device.name,
@@ -3050,6 +3101,13 @@ async function destroyTeardownTarget(
   } catch (error) {
     if (destroy) {
       retainStableLifecycleUntil(destroy);
+      void destroy.then(
+        () => onLateSuccess(),
+        () => {
+          // A rejected late destroy did not remove the platform device, so no eviction is safe.
+          logger.debug("[DeviceTools] Late platform deletion rejected; retaining teardown state");
+        },
+      );
     }
     throw error;
   }
@@ -6959,6 +7017,7 @@ export function registerDeviceTools() {
     type TeardownState = {
       context: TeardownContext;
       target: TeardownResolvedTarget;
+      androidManager?: AndroidCtrlProxyManager;
       earlyResponse?: TeardownToolResponse;
     };
     try {
@@ -6991,7 +7050,14 @@ export function registerDeviceTools() {
             if ("response" in resolution) {
               return { response: resolution.response };
             }
-            return { target: { context, target: resolution.target } };
+            const runtime = resolution.target.wasBooted
+              ? resolution.target.bootedDevice
+              : undefined;
+            const androidManager =
+              runtime?.platform === "android"
+                ? AndroidCtrlProxyManager.getExistingInstance(runtime.deviceId)
+                : undefined;
+            return { target: { context, target: resolution.target, androidManager } };
           },
           stop: async (state, requestAbortSignal, retainLeaseUntil) => {
             const { context, target } = state;
@@ -7024,13 +7090,16 @@ export function registerDeviceTools() {
               return;
             }
             const { context, target } = state;
-            await destroyTeardownTarget(context, target, retainLeaseUntil, markDestructionStarted);
-            unregisterDirectSessionsForStableIdentity(
-              target.device.platform,
-              target.device.platform === "android"
-                ? target.device.name
-                : (target.device.deviceId ?? args.target.stableId),
+            await destroyTeardownTarget(
+              context,
+              target,
+              retainLeaseUntil,
+              markDestructionStarted,
+              () => {
+                void finalizeTeardownEviction(context, target, state.androidManager);
+              },
             );
+            await finalizeTeardownEviction(context, target, state.androidManager);
           },
           verify: async (state, stop) => {
             if (state.earlyResponse) {

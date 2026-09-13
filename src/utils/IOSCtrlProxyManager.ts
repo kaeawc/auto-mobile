@@ -463,6 +463,57 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   }
 
   /**
+   * Evict a single device's manager instance and its `PortManager` reservation.
+   * Call this from device teardown/destroy so a deleted-or-evicted device does
+   * not permanently retain a manager (and its two process supervisors) or a
+   * port reservation for the remainder of the daemon's lifetime (issue #6580).
+   * Safe to call for a device that was never constructed via `getInstance` —
+   * `PortManager.release` is a no-op when nothing is allocated for the id.
+   */
+  public static async evictSimulatorByName(
+    name: string,
+    timer: Timer = defaultTimer,
+    deadlineMs?: number,
+  ): Promise<void> {
+    const matching = [...IOSCtrlProxyManager.instances.entries()].filter(
+      ([, instance]) => instance.device.name === name && instance.isSimulator(),
+    );
+    await Promise.all(
+      matching.map(([deviceId, instance]) => {
+        if (IOSCtrlProxyManager.instances.get(deviceId) === instance) {
+          return IOSCtrlProxyManager.evict(deviceId, timer, deadlineMs);
+        }
+        return Promise.resolve();
+      }),
+    );
+  }
+
+  public static async evict(
+    deviceId: string,
+    timer: Timer = defaultTimer,
+    deadlineMs?: number,
+  ): Promise<void> {
+    const instance = IOSCtrlProxyManager.instances.get(deviceId);
+    if (instance) {
+      IOSCtrlProxyManager.instances.delete(deviceId);
+      try {
+        // Bound the force-stop the same way shutdownAll() does: a hung
+        // runner cleanup must not block the port release / map deletion
+        // below, which the caller's deleteDevice verification depends on
+        // (issue #6580).
+        await IOSCtrlProxyManager.forceStopWithinEvictionDeadline(instance, timer, deadlineMs);
+      } catch (error) {
+        logger.warn(
+          `[IOSCtrlProxy] Failed to stop instance ${deviceId} during eviction: ${errorMessage(error)}`,
+        );
+      }
+    }
+    if (!IOSCtrlProxyManager.instances.has(deviceId)) {
+      PortManager.release(deviceId);
+    }
+  }
+
+  /**
    * Stop all active instances (for shutdown)
    */
   public static async shutdownAll(timer: Timer = defaultTimer): Promise<void> {
@@ -527,6 +578,48 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       await Promise.race([
         instance.forceStopForShutdown(instance.timer.now() + SHUTDOWN_FORCE_STOP_TIMEOUT_MS),
         deadline,
+      ]);
+    } finally {
+      if (timeout) {
+        timer.clearTimeout(timeout);
+      }
+    }
+  }
+
+  private static async forceStopWithinEvictionDeadline(
+    instance: IOSCtrlProxyManager,
+    timer: Timer,
+    deadlineMs?: number,
+  ): Promise<void> {
+    if (deadlineMs === undefined) {
+      await IOSCtrlProxyManager.forceStopWithinShutdownDeadline(instance, timer);
+      return;
+    }
+
+    const now = timer.now();
+    const remainingMs = deadlineMs - now;
+    if (remainingMs <= 0) {
+      logger.debug(
+        `[IOSCtrlProxy] Eviction deadline already expired for ${instance.device.deviceId}; ` +
+          "starting force-stop without waiting",
+      );
+      void Promise.resolve(instance.forceStopForShutdown(deadlineMs)).catch((error) => {
+        logger.debug(
+          `[IOSCtrlProxy] Force-stop after an expired eviction deadline failed: ${error}`,
+        );
+      });
+      return;
+    }
+
+    const waitMs = Math.min(remainingMs, SHUTDOWN_FORCE_STOP_TIMEOUT_MS);
+    let timeout: NodeJS.Timeout | undefined;
+    const waitForDeadline = new Promise<void>((resolve) => {
+      timeout = timer.setTimeout(resolve, waitMs);
+    });
+    try {
+      await Promise.race([
+        instance.forceStopForShutdown(Math.min(deadlineMs, now + SHUTDOWN_FORCE_STOP_TIMEOUT_MS)),
+        waitForDeadline,
       ]);
     } finally {
       if (timeout) {

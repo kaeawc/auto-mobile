@@ -307,7 +307,10 @@ export class Daemon {
     options: DaemonOptions = {},
     installedAppsRepository?: InstalledAppsStore,
     timer: Timer = defaultTimer,
-    deviceSessionRepository: DeviceSessionRepository = new DeviceSessionRepository(),
+    deviceSessionRepository: DeviceSessionRepository = new DeviceSessionRepository(
+      undefined,
+      timer,
+    ),
     idGenerator: IdGenerator = defaultIdGenerator,
     databaseInitializer: DatabaseInitializer = new DefaultDatabaseInitializer(),
     startupFailureTracker: StartupFailureTracker = new DefaultStartupFailureTracker(),

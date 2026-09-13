@@ -66,6 +66,16 @@ standalone `{ "action": "clear" }` command clears the focused field. Execution
 stops on the first failure and returns compact command metadata plus the final
 observation without copying type-command text into the metadata.
 
+`inputText` reserves an error response for a failed text write. When the text
+lands but the optional `dismissKeyboard` cleanup cannot be confirmed, the
+response stays a success carrying `keyboardDismissed: false` and a
+`warnings: ["keyboard dismissal failed: ..."]` entry — so a client never has to
+parse prose to decide whether retyping would double the text. Inside
+`executePlan` those warnings are promoted to the response's own `warnings` list,
+each entry naming the `stepIndex`, `tool`, and (for multi-device plans) the
+`device` that reported it, so an ordinary plan does not have to opt into the
+`captureObserveSteps` debug trace to see them.
+
 `sendKeys` is the default text-input path on any AutoMobile release whose
 CtrlProxy artifacts are 0.0.68 or newer, which is the case for current releases.
 On older pinned releases `inputText` and `clearText` are default-enabled instead
@@ -84,7 +94,7 @@ or `--enable-tool sendKeys`.
 | Tool                                                                                             | What it does                                                                                                               |
 | ------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
 | 📱 <code>listApps</code>                                                                         | Lists installed apps with label and launchability (`device`, `type`, `search`, `profile`; default `type=launchable`).      |
-| 🚀 <code>launchApp</code>                                                                        | Launches an app by package name.                                                                                           |
+| 🚀 <code>launchApp</code>                                                                        | Launches an app by package name; on Android an app already in the foreground is a success flagged `alreadyForeground`.     |
 | ❌ <code>terminateApp</code>                                                                     | Terminates an app by package name.                                                                                         |
 | 💥 <code>crashApp</code>                                                                         | Intentionally crashes a running app through the platform crash path.                                                       |
 | 📦 <code>installApp</code>                                                                       | Installs an APK, app bundle, or IPA.                                                                                       |

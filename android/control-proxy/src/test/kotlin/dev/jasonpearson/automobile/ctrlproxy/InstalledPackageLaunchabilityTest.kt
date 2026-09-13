@@ -4,6 +4,7 @@ import android.content.ComponentName
 import android.content.Intent
 import android.content.IntentFilter
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -37,7 +38,7 @@ class InstalledPackageLaunchabilityTest {
 
     val launchable = launchablePackageNames(RuntimeEnvironment.getApplication().packageManager)
 
-    assertTrue(launchable.contains("com.example.launcherapp"))
+    assertTrue(launchable?.contains("com.example.launcherapp") == true)
   }
 
   @Test
@@ -46,6 +47,34 @@ class InstalledPackageLaunchabilityTest {
 
     val launchable = launchablePackageNames(RuntimeEnvironment.getApplication().packageManager)
 
-    assertFalse(launchable.contains("com.example.infoonly"))
+    assertFalse(launchable?.contains("com.example.infoonly") == true)
+  }
+
+  @Test
+  fun `returns unknown when the batched launcher query fails`() {
+    val launchable =
+      launchablePackageNames(RuntimeEnvironment.getApplication().packageManager) {
+        throw android.os.TransactionTooLargeException("large launcher response")
+      }
+
+    assertNull(launchable)
+  }
+
+  @Test
+  fun `unknown launchability produces null protocol records`() {
+    val launchablePackages =
+      launchablePackageNames(RuntimeEnvironment.getApplication().packageManager) {
+        throw android.os.TransactionTooLargeException("large launcher response")
+      }
+    val records =
+      listOf("com.example.first", "com.example.second").map { packageName ->
+        dev.jasonpearson.automobile.protocol.InstalledPackageRecord(
+          packageName = packageName,
+          isSystem = false,
+          launchable = launchablePackages?.contains(packageName),
+        )
+      }
+
+    assertTrue(records.all { it.launchable == null })
   }
 }

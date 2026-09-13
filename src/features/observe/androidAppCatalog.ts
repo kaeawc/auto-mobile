@@ -82,7 +82,7 @@ export function catalogFromPackageRecords(
     const label = normalizeLabel(record.label);
     catalog.set(record.packageName, {
       ...(label ? { label } : {}),
-      ...(record.launchable === undefined ? {} : { launchable: record.launchable }),
+      ...(record.launchable == null ? {} : { launchable: record.launchable }),
     });
   }
   return catalog;

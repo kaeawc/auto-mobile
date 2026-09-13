@@ -309,9 +309,9 @@ export interface InstalledPackageRecord {
   /**
    * Whether the package has a launchable entry point
    * (`PackageManager.getLaunchIntentForPackage` resolved). Optional for the
-   * same reason as `label`; `undefined` means "not reported", not "no".
+   * same reason as `label`; `undefined` or `null` means "not reported", not "no".
    */
-  launchable?: boolean;
+  launchable?: boolean | null;
 }
 
 export interface A11yInstalledPackagesResult extends BaseResult {

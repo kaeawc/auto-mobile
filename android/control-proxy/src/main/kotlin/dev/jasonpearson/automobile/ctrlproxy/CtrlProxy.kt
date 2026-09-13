@@ -5157,7 +5157,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             versionName = info.versionName,
             versionCode = versionCode,
             label = label,
-            launchable = launchablePackages.contains(info.packageName),
+            launchable = launchablePackages?.contains(info.packageName),
           )
         )
       }

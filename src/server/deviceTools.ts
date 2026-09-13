@@ -812,7 +812,7 @@ function androidSourceImageWithBootedMetadata(
     return undefined;
   }
   return {
-    ...sourceImage,
+    ...(sourceImage ?? admittedAndroidImage),
     name: sourceImage?.name ?? device.name,
     platform: "android",
     isRunning: true,

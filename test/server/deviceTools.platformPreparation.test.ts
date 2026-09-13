@@ -539,6 +539,47 @@ describe("platform device preparation tools", () => {
     expect(result).toMatchObject({ apiLevel: 36, osVersion: "16" });
   });
 
+  test("preserves all admitted Android metadata for a serial-targeted warm acquisition", async () => {
+    const emulator: BootedDevice = {
+      platform: "android",
+      name: "Pixel_9_API_36",
+      deviceId: "emulator-5562",
+    };
+    const admittedImage: DeviceInfo = {
+      platform: "android",
+      name: emulator.name,
+      isRunning: true,
+      deviceId: emulator.deviceId,
+      source: "local",
+      apiLevel: 36,
+      osVersion: "16",
+      formFactor: "phone",
+      screenWidth: 1080,
+      screenHeight: 2400,
+      screenDensity: 420,
+      capabilityInventory: {
+        schemaVersion: 1,
+        capabilities: [{ id: "android.hardware.nfc", state: "available", source: "avd_config" }],
+      },
+    };
+    sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      deviceUtils,
+      new DefaultRetryExecutor(timer),
+    );
+    await pool.addDevice(emulator, admittedImage);
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    deviceUtils.setBootedDevices("android", [emulator]);
+
+    await callTool("getAndroid", { deviceId: emulator.deviceId });
+
+    expect(pool.getDevice(emulator.deviceId)?.androidImage).toMatchObject(admittedImage);
+  });
+
   test("does not record an image for a serial-targeted externally booted emulator", async () => {
     const emulator: BootedDevice = {
       platform: "android",

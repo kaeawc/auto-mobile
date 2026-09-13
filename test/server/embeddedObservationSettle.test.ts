@@ -353,6 +353,89 @@ describe("settleEmbeddedObservationInResponse (#6866)", () => {
     expect(JSON.parse(response.content[0].text).observation.settled).toBe(false);
   });
 
+  test("a handler's own settled:true verdict is never downgraded", async () => {
+    // `systemTray({action: "tap"})` already polls for a changed hierarchy that
+    // stays structurally stable and publishes the verdict at the payload top
+    // level. It is not one of the classified action tools, so the gate would
+    // otherwise stamp `settled: false` onto the very capture that verdict
+    // describes -- two contradictory answers in one response.
+    const fake = new FakeObserveScreen();
+    const response = createStructuredToolResponse({
+      success: true,
+      message: "Tapped notification",
+      settled: true,
+      observation: obs(AIRPLANE_ROW_INFLATED, 10),
+    });
+    await settleEmbeddedObservationInResponse(response, {
+      name: "systemTray",
+      args: { action: "tap" },
+      internal: false,
+      createSettleObserve: () => settleFor(fake, new FakeTimer()),
+    });
+
+    expect((response.structuredContent as Record<string, any>).observation.settled).toBe(true);
+    expect(JSON.parse(response.content[0].text).observation.settled).toBe(true);
+    expect(fake.getExecuteCallCount()).toBe(0);
+  });
+
+  test("a handler's own settled:false verdict is not promoted either", async () => {
+    const fake = new FakeObserveScreen();
+    const response = createStructuredToolResponse({
+      success: true,
+      message: "Tapped notification; effect not yet settled",
+      settled: false,
+      observation: obs(AIRPLANE_ROW_INFLATED, 10),
+    });
+    await settleEmbeddedObservationInResponse(response, {
+      name: "systemTray",
+      args: { action: "tap" },
+      internal: false,
+      createSettleObserve: () => settleFor(fake, new FakeTimer()),
+    });
+
+    expect((response.structuredContent as Record<string, any>).observation.settled).toBe(false);
+  });
+
+  test("a handler verdict does not survive the gate ADOPTING a different capture", async () => {
+    // `openLink`'s waitFor can report `settled: true` about the capture IT took.
+    // Once the navigation gate replaces that capture with a later one, the
+    // verdict no longer describes the observation being handed back, so the
+    // gate's own answer is the only honest one.
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const fake = new FakeObserveScreen();
+    // A ticking clock: never two structurally-equal reads, so the gate times
+    // out unsettled while still adopting the newest trustworthy frame.
+    fake.setObserveResult((index) =>
+      obs(
+        {
+          class: "android.widget.TextView",
+          "resource-id": "android:id/clock",
+          text: `0:0${index}`,
+        },
+        20 + index * 10,
+      ),
+    );
+
+    const response = createStructuredToolResponse({
+      success: true,
+      settled: true,
+      observation: obs(AIRPLANE_ROW_HALF_INFLATED, 10),
+    });
+    await settleEmbeddedObservationInResponse(response, {
+      name: "openLink",
+      args: {},
+      internal: false,
+      createSettleObserve: () => settleFor(fake, timer),
+    });
+
+    const structured = response.structuredContent as Record<string, any>;
+    expect(structured.observation.settled).toBe(false);
+    expect(structured.observation.viewHierarchy.hierarchy.node["resource-id"]).toBe(
+      "android:id/clock",
+    );
+  });
+
   test("no embedded observation is a no-op", async () => {
     const fake = new FakeObserveScreen();
     const response = createStructuredToolResponse({ success: true });

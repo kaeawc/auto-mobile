@@ -231,6 +231,15 @@ export async function settleEmbeddedObservationInResponse(
   if (!observation || typeof observation !== "object" || Array.isArray(observation)) {
     return;
   }
+  // A handler that ran its OWN stability wait publishes the verdict at the
+  // payload top level (`systemTray({action: "tap"})` polls for a changed
+  // hierarchy that then stays structurally stable; `openLink`'s `waitFor` +
+  // `settled` does the same). That verdict describes the capture the handler is
+  // returning, and it is strictly better evidence than this gate's default
+  // `false` for an action class the gate does not recognise. Honour it rather
+  // than stamping a contradiction into the same response — but only while the
+  // observation it describes is still the one being handed back (see below).
+  const handlerSettled = view.payload.settled === true;
   if (view.payload.success === false) {
     // The action failed; re-observing would buy the client nothing and would
     // charge a settle budget to an error path. The capture it did return is
@@ -239,7 +248,7 @@ export async function settleEmbeddedObservationInResponse(
     // failed command but keeping its post-command observation).
     writeToolEnvelopePayload(view, {
       ...view.payload,
-      observation: { ...(observation as ObserveResult), settled: false },
+      observation: { ...(observation as ObserveResult), settled: handlerSettled },
     });
     return;
   }
@@ -263,8 +272,14 @@ export async function settleEmbeddedObservationInResponse(
       })
     : { observation: observation as ObserveResult, settled: false };
 
+  // The handler's verdict is about the capture the HANDLER took. Once the gate
+  // has adopted a later capture in its place, that verdict no longer describes
+  // the observation being returned, so only the gate's own answer is honest.
+  const settled =
+    outcome.settled || (handlerSettled && outcome.observation === (observation as ObserveResult));
+
   writeToolEnvelopePayload(view, {
     ...view.payload,
-    observation: { ...outcome.observation, settled: outcome.settled },
+    observation: { ...outcome.observation, settled },
   });
 }

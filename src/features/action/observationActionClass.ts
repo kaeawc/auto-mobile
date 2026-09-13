@@ -81,6 +81,14 @@ export function classifyObservationAction(
  * Whether an action of this class has its embedded observation gated on
  * hierarchy stability before it is handed to the client (issue #6866).
  *
+ * A tool the classifier does not recognise (`"unknown"`) is NOT thereby
+ * declared unsettled: a handler that ran its own stability wait —
+ * `systemTray({action: "tap"})` waits for a changed hierarchy to stay
+ * structurally stable — publishes `settled` at its payload top level, and
+ * `settleEmbeddedObservationInResponse` carries that verdict onto the embedded
+ * observation instead of overwriting it (#6890 review). Classification decides
+ * whether the gate RE-OBSERVES, not what the response may claim.
+ *
  * Only `"navigation"` is gated: those are the actions that replace the screen,
  * and a capture taken mid-inflation is the one that drops a not-yet-attached
  * child (the Settings `switchWidget` of #6257) and re-hashes its parent's

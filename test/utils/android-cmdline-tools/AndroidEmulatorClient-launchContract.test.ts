@@ -39,6 +39,7 @@ function createClient(
   hostPortAvailabilityChecker: HostPortAvailabilityChecker = {
     isAvailable: async () => true,
   },
+  avdName: string = "Pixel 9",
 ): AndroidEmulatorClient {
   const adbFactory: AdbClientFactory = {
     create: (): AdbExecutor => adb,
@@ -56,7 +57,7 @@ function createClient(
   (client as unknown as { ensureEmulatorPath: () => Promise<string> }).ensureEmulatorPath =
     async () => "emulator";
   (client as unknown as { listAvds: () => Promise<DeviceInfo[]> }).listAvds = async () => [
-    { name: "Pixel 9", platform: "android", isRunning: false },
+    { name: avdName, platform: "android", isRunning: false },
   ];
   (client as unknown as { isAvdRunning: () => Promise<boolean> }).isAvdRunning = async () => false;
   (client as unknown as { isAvdStarting: () => Promise<boolean> }).isAvdStarting = async () =>
@@ -218,7 +219,7 @@ describe("AndroidEmulatorClient launch contract", () => {
         return true;
       },
     };
-    const createSharedClient = () =>
+    const createSharedClient = (avdName: string) =>
       createClient(
         (_command, args) => {
           spawnedArgs.push(args);
@@ -230,13 +231,17 @@ describe("AndroidEmulatorClient launch contract", () => {
         },
         adb,
         hostPortAvailabilityChecker,
+        avdName,
       );
 
-    const firstLaunch = createSharedClient().startEmulator("Pixel 9");
+    // Distinct AVDs: two CONCURRENT launches of the SAME AVD are the duplicate
+    // this process now refuses outright (#6407), and the port-reservation race
+    // under test is about the ports, not the AVD label.
+    const firstLaunch = createSharedClient("Pixel 9").startEmulator("Pixel 9");
     while (firstPairProbeCount < 2) {
       await Promise.resolve();
     }
-    const secondLaunch = createSharedClient().startEmulator("Pixel 9");
+    const secondLaunch = createSharedClient("Pixel 9a").startEmulator("Pixel 9a");
     while (firstPairProbeCount < 4) {
       await Promise.resolve();
     }

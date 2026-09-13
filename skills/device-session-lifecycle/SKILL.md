@@ -212,6 +212,20 @@ distinguished by the result type (`AppendTextFailureSource`), never by inspectin
     client silently becomes an all-devices subscriber (privacy leak).
 14. UUIDs come only from the injected `IdGenerator` — never `randomUUID()`
     at call sites (#2663).
+15. **An in-flight AVD launch is first-class; the AVD-name label is not
+    evidence about liveness.** `AndroidEmulatorClient.startEmulator` claims the
+    AVD in a process-wide registry before it spawns and releases the claim in a
+    `finally`, so two launches of the same AVD in one process can never both
+    reach the spawn. After the spawn, the console-port reservation carries the
+    AVD identity: a listed `Unknown (emulator-NNNN)` whose serial matches a
+    reservation this process holds for that AVD counts as "already starting
+    here". A mid-boot emulator is unnamed for ~4s on a snapshot resume and for
+    minutes on a cold boot, and the `${os.tmpdir()}/avd/running/pid_*.ini`
+    advertisement (`RunningAvdAdvertisementReader`) does not exist at all on
+    macOS/Apple silicon — so it is a **secondary** signal only, never the guard.
+    The scan behind the guard uses `getBootedDevicesChecked`: an adb discovery
+    failure surfaces as an error and must never be read as "not running"
+    (#6407, child of #6371).
 
 ## 3. Recurring bug classes → where to look first
 

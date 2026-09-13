@@ -7333,6 +7333,10 @@ export function registerDeviceTools() {
       lifecycleCoordinator: deps.lifecycleCoordinator,
     });
     perf.startOperation("bootDevice");
+    const excludeDeviceNames =
+      args.platform === "android"
+        ? getStartDevicePool(DaemonState.getInstance())?.getRecoveringAndroidAvdNames()
+        : undefined;
     state.boot = await bootService.boot(
       {
         ...args,
@@ -7340,6 +7344,7 @@ export function registerDeviceTools() {
         timeoutMs: budgets.bootTimeoutMs,
         totalDeadlineMs: bootDeadlineMs,
         signal,
+        excludeDeviceNames,
       },
       progress ? { report: progress } : undefined,
     );

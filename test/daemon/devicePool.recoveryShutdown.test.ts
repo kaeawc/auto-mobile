@@ -268,7 +268,7 @@ test("detached ADB-reset ownership remains quarantined when emulator shutdown is
 test("ADB-reset recovery settles its incident when the deferred sweep runs", async () => {
   const { timer, sessions, manager, pool, captured } = await setup();
   try {
-    const cohort = await pool.detachAdbServerResetCohort([captured]);
+    await pool.detachAdbServerResetCohort([captured]);
     const incidentId = captured.adbServerResetIncidentId;
     if (!incidentId) {
       throw new Error("Expected ADB-reset incident to be recorded");
@@ -289,6 +289,50 @@ test("ADB-reset recovery settles its incident when the deferred sweep runs", asy
     timer.advanceTime(30_000);
     await pool.retryDueDeferredSessionRecoveries();
 
+    expect(pool.getRecoveringAndroidAvdNames().has(original.name)).toBe(false);
+    expect((await pool.waitForEmulatorLossIncident(incidentId, 0))?.recovery.outcome).toMatch(
+      /^(recovered|exhausted)$/,
+    );
+    let reservationReleased = false;
+    void pool.waitForAdbServerResetRecoveryMatchingName(original.name).then(() => {
+      reservationReleased = true;
+    });
+    await flush();
+    expect(reservationReleased).toBe(true);
+  } finally {
+    sessions.stopCleanupTimer();
+  }
+});
+
+test("ADB-reset recovery releases after its retry also has unconfirmed shutdown", async () => {
+  const { timer, sessions, manager, pool, captured } = await setup();
+  try {
+    const cohort = await pool.detachAdbServerResetCohort([captured]);
+    const incidentId = captured.adbServerResetIncidentId;
+    if (!incidentId) {
+      throw new Error("Expected ADB-reset incident to be recorded");
+    }
+    const firstRecovery = pool.recoverSessionBoundAndroidDeviceAfterAdbServerReset(
+      original.deviceId,
+      captured,
+    );
+    await manager.killAccepted.promise;
+    await flush();
+    timer.advanceTime(30_000);
+    expect(await firstRecovery).toBe(false);
+    expect(pool.isSessionRecoveryInFlight("session")).toBe(true);
+
+    timer.advanceTime(30_000);
+    const retry = pool.retryDueDeferredSessionRecoveries();
+    await flush();
+    timer.advanceTime(30_000);
+    await retry;
+
+    expect(sessions.getSession("session")).toBeNull();
+    expect(pool.isSessionRecoveryInFlight("session")).toBe(false);
+    expect(
+      (pool as unknown as DevicePoolRecoveryInternals).recoveringSessionLosses.has("session"),
+    ).toBe(false);
     expect((await pool.waitForEmulatorLossIncident(incidentId, 0))?.recovery.outcome).toMatch(
       /^(recovered|exhausted)$/,
     );

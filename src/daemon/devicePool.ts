@@ -2619,6 +2619,7 @@ export class DevicePool {
           loss.deviceId,
           loss.expectedDevice,
         );
+        await this.releaseAdbServerResetCohortReservations([loss.expectedDevice]);
       } else {
         await this.recoverSessionBoundAndroidDeviceAfterLoss(
           loss.deviceId,
@@ -2885,6 +2886,8 @@ export class DevicePool {
     session: Session,
     incidentId: string | undefined,
   ): Promise<SessionPreservingRecoveryResult> {
+    const deferredShutdowns =
+      this.recoveringSessionLosses.get(session.sessionId)?.deferredShutdowns ?? 0;
     let deferred = false;
     try {
       const recovered = await this.rebootDisconnectedAndroidDevice(device, incidentId, {
@@ -2903,7 +2906,10 @@ export class DevicePool {
       }
       return recovered ? "recovered" : "released";
     } catch (error) {
-      if (error instanceof UnconfirmedRecoveryShutdownError) {
+      if (
+        error instanceof UnconfirmedRecoveryShutdownError &&
+        deferredShutdowns < MAX_DEFERRED_RECOVERY_SHUTDOWNS
+      ) {
         this.adbServerResetQuarantinedSessions.add(session.sessionId);
         this.recoveringSessionLosses.set(session.sessionId, {
           deviceId: device.id,
@@ -2911,7 +2917,7 @@ export class DevicePool {
           incidentId,
           avdName: device.avdName,
           deferredUntil: this.timer.now() + UNCONFIRMED_RECOVERY_SHUTDOWN_COOLDOWN_MS,
-          deferredShutdowns: 0,
+          deferredShutdowns: deferredShutdowns + 1,
         });
         deferred = true;
         return "deferred";
@@ -3217,6 +3223,14 @@ export class DevicePool {
       return;
     }
     await this.waitForAdbServerResetReservations([reservation], signal);
+  }
+
+  /** Snapshot the Android AVDs whose preserved sessions still own startup recovery. */
+  getRecoveringAndroidAvdNames(): Set<string> {
+    return new Set([
+      ...this.recoveringAndroidImages.keys(),
+      ...this.adbServerResetRecoveryReservations.keys(),
+    ]);
   }
 
   /**

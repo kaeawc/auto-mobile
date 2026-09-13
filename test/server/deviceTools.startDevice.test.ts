@@ -338,6 +338,34 @@ describe("startDevice handler", () => {
     expect(fakeDeviceUtils.wasMethodCalled("startDevice")).toBe(true);
   });
 
+  it("does not select a recovering AVD for an unnamed Android start", async () => {
+    const timer = new FakeTimer();
+    daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      daemonSessionManager,
+      "daemon-session",
+      timer,
+      undefined,
+      fakeDeviceUtils,
+    );
+    const recoveringImage = { ...androidImage, name: "Pixel_10_API_35", osVersion: "15" };
+    const availableImage = { ...androidImage, name: "Pixel_9_API_34", osVersion: "14" };
+    (
+      pool as unknown as { recoveringAndroidImages: Map<string, DeviceInfo> }
+    ).recoveringAndroidImages.set(recoveringImage.name, recoveringImage);
+    DaemonState.getInstance().initialize(daemonSessionManager, pool);
+    fakeDeviceUtils.setDeviceImages("android", [recoveringImage, availableImage]);
+    setDeviceToolsDependencies({ deviceMatcherFactory: () => new DefaultDeviceMatcher() });
+
+    expect(pool.getRecoveringAndroidAvdNames()).toEqual(new Set([recoveringImage.name]));
+    const result = await callStartDevice({ platform: "android", preferRunning: false });
+
+    expect(result.name).toBe(availableImage.name);
+    expect(fakeDeviceUtils.getExecutedOperations()).not.toContain(
+      "startDevice:Pixel_10_API_35:180000",
+    );
+  });
+
   it("cold-boots when discovery supplies a transport ID after boot readiness", async () => {
     const timer = new FakeTimer();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());

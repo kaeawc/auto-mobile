@@ -88,7 +88,7 @@ if [[ -n "${BUN_TEST_TIMING_BASE_REF:-}" ]]; then
         ;;
     esac
     case "$file" in
-      src/*|package.json|bun.lock|bunfig.toml|scripts/test-ts.sh|scripts/validate-bun-test-timings.sh)
+      src/*|package.json|bun.lock|bunfig.toml|scripts/test-ts.sh|scripts/validate-bun-test-timings.sh|scripts/lib/junit-testcase-timings.ts)
         # Runtime inputs can change test loading, preloads, or scheduling for
         # every unit test even when no test file itself changed.
         affects_unit_tests=true

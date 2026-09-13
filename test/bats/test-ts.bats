@@ -442,6 +442,18 @@ run_lane() {
   grep -q -- "--parallel=3" "$BUN_ARGS_FILE"
 }
 
+@test "timing gate selects Bun-affected unit tests for testcase timing parser changes" {
+  run env \
+    PATH="$STUB_BIN:$PATH" \
+    BUN_TEST_TIMING_BASE_REF=origin/main \
+    TIMING_CHANGED_FILES='scripts/lib/junit-testcase-timings.ts\n' \
+    bash "$TIMING_SCRIPT" "$BATS_TEST_TMPDIR/timings.xml"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"measuring Bun-affected unit tests"* ]]
+  grep -q -- "--changed=origin/main" "$BUN_ARGS_FILE"
+  grep -q -- "--parallel=3" "$BUN_ARGS_FILE"
+}
+
 @test "timing gate reuses complete unit-lane reports for source changes" {
   report_dir="$BATS_TEST_TMPDIR/unit-timing-reports"
   mkdir -p "$report_dir"

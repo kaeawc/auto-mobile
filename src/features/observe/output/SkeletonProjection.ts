@@ -681,20 +681,50 @@ function imeMarker(el: Element): string | undefined {
 }
 
 /**
- * Identify the input-method window, if one is on screen (issue #6871). Only the
- * FIRST package seen wins, so a stray id from another package can never widen
- * the collapse beyond one keyboard.
+ * The IME package the capture itself vouches for: the control proxy's
+ * `automobile:imePackage` window extra, surfaced either as the capture-level
+ * keyboard identity or as per-element provenance. This is authoritative — the
+ * keycap resource-id family is only a guess (issue #6871).
+ */
+function authoritativeImePackage(elements: ObserveElements): string | undefined {
+  const captured = getCapturedKeyboard(elements)?.package;
+  if (captured) {
+    return captured;
+  }
+  for (const el of allElements(elements)) {
+    const inherited = getElementProvenance(el)?.keyboardPackage;
+    if (inherited) {
+      return inherited;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Identify the input-method window, if one is on screen (issue #6871).
+ *
+ * The package is chosen in a FIRST pass that prefers authoritative identity
+ * ({@link authoritativeImePackage}) and only falls back to the first `key_pos_*`
+ * resource-id package when the capture vouches for none. Otherwise an app
+ * control that happens to carry that id family (`com.app:id/key_pos_preview`)
+ * and is emitted before the real keyboard would lock the collapse onto the app:
+ * the row would be labelled with the wrong package while the real keycaps
+ * stayed exposed. A second pass then measures the group/span of the nodes that
+ * actually belong to that one package.
  */
 function detectImeWindow(elements: ObserveElements): ImeWindow | undefined {
-  let ime: ImeWindow | undefined;
+  const detected =
+    authoritativeImePackage(elements) ??
+    allElements(elements)
+      .map((el) => KEYCAP_ID_PATTERN.exec(deriveId(el) ?? "")?.[1])
+      .find((pkg) => pkg !== undefined);
+  if (!detected) {
+    return undefined;
+  }
+  const ime: ImeWindow = { package: detected, spanEnter: Infinity, spanExit: -Infinity };
   for (const el of allElements(elements)) {
-    const marker = imeMarker(el);
-    if (!marker) {
-      continue;
-    }
-    ime ??= { package: marker, spanEnter: Infinity, spanExit: -Infinity };
     const provenance = getElementProvenance(el);
-    if (marker !== ime.package || !provenance) {
+    if (imeMarker(el) !== ime.package || !provenance) {
       continue;
     }
     ime.group ??= provenance.group;

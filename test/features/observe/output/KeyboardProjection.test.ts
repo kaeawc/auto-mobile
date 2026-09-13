@@ -215,3 +215,69 @@ describe("IME window collapses to one skeleton node (#6871)", () => {
     ]);
   });
 });
+
+/**
+ * A decoy app control whose resource-id happens to match the `key_pos_*` keycap
+ * family, emitted BEFORE the real IME window. The fallback marker must never
+ * outrank the authoritative `automobile:imePackage` identity (issue #6871).
+ */
+function decoyKeycapObservation(): ObserveResult {
+  const viewHierarchy = {
+    hierarchy: {
+      node: {
+        $: {},
+        node: [
+          {
+            $: {
+              "resource-id": "com.app:id/key_pos_preview",
+              text: "Preview",
+              clickable: true,
+              bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+            },
+          },
+          {
+            $: { extras: { "automobile:imePackage": "com.real.ime" } },
+            node: [
+              {
+                $: {
+                  "resource-id": "com.real.ime:id/key_pos_0_0",
+                  text: "q",
+                  clickable: true,
+                  bounds: { left: 0, top: 600, right: 10, bottom: 640 },
+                },
+              },
+            ],
+          },
+        ],
+      },
+    },
+  };
+  return {
+    updatedAt: 1,
+    screenSize: { width: 100, height: 800 },
+    systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+    viewHierarchy,
+    elements: new DefaultObserveElementCollector().collect(viewHierarchy, "android"),
+  };
+}
+
+describe("IME identity precedence (#6871)", () => {
+  test("authoritative IME identity outranks an earlier key_pos_* app control", () => {
+    const result = sanitizeObserveResult(decoyKeycapObservation(), {
+      dropElements: true,
+      project: "skeleton",
+    });
+    const ids = result.skeleton!.map((entry) => entry.elementId);
+    // The decoy is an app control, not a keycap: it stays individually actionable.
+    expect(ids).toContain("com.app:id/key_pos_preview");
+    // The real keycap is folded, and the row is labelled with the REAL IME.
+    expect(ids).not.toContain("com.real.ime:id/key_pos_0_0");
+    expect(result.skeleton!.find((entry) => entry.elementId === "<ime>")).toEqual({
+      elementId: "<ime>",
+      label: "Keyboard (com.real.ime)",
+      bounds: [0, 600, 10, 640],
+      affordances: ["input"],
+    });
+    expect(result.keyboard).toEqual({ visible: true, package: "com.real.ime" });
+  });
+});

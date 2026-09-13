@@ -1,5 +1,4 @@
 import { ResourceRegistry, ResourceContent } from "./resourceRegistry";
-import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
 import { isIosSimulatorUdid } from "../utils/ios-cmdline-tools/iosDeviceType";
 import { serverConfig } from "../utils/ServerConfig";
 import { BootedDevice } from "../models";
@@ -10,6 +9,7 @@ import {
   type StorageCapabilityContext,
   type StorageDeviceType,
 } from "../features/storage/storageCapabilities";
+import { findBootedDeviceForResource } from "./resourceDeviceResolver";
 
 // Single RFC 6570 template; the optional {?appId} query variant matches both the
 // bare capabilities URI and the app-scoped form (issue #4933 ordering note: a
@@ -20,25 +20,7 @@ const STORAGE_CAPABILITIES_TEMPLATE = "automobile:devices/{deviceId}/storage/cap
  * Find a booted device by ID across both platforms.
  */
 async function findBootedDevice(deviceId: string): Promise<BootedDevice | null> {
-  try {
-    const manager = PlatformDeviceManagerFactory.getInstance();
-    const androidDevices = await manager.getBootedDevices("android");
-    const android = androidDevices.find((d) => d.deviceId === deviceId);
-    if (android) {
-      return android;
-    }
-    const iosDevices = await manager.getBootedDevices("ios");
-    const ios = iosDevices.find((d) => d.deviceId === deviceId);
-    if (ios) {
-      return ios;
-    }
-    return null;
-  } catch (error) {
-    // Best-effort discovery: an unavailable device manager is reported to the
-    // caller as "device not found" rather than surfaced as a capability fault.
-    logger.warn(`[StorageCapabilityResources] Failed to find device ${deviceId}: ${error}`);
-    return null;
-  }
+  return findBootedDeviceForResource(deviceId, "StorageCapabilityResources");
 }
 
 /**

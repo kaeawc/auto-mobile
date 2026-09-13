@@ -16,7 +16,6 @@ import {
 import { shellQuote } from "../utils/shellQuote";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
-import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
 import {
   buildSharedStorageResourceUri,
   type SharedStorageFileEntry,
@@ -27,6 +26,7 @@ import {
   normalizeSharedStorageNamespace,
   normalizeSharedStorageRelativePath,
 } from "./sharedStorageContract";
+import { findBootedDeviceForResource } from "./resourceDeviceResolver";
 
 const SHARED_STORAGE_MAX_BUFFER = 64 * 1024 * 1024;
 const NAMESPACE_MISSING_MARKER = "__AUTOMOBILE_NS_MISSING__";
@@ -79,12 +79,7 @@ export function createSharedStorageReadServiceForTesting(
 }
 
 async function findBootedDevice(deviceId: string): Promise<BootedDevice | null> {
-  const manager = PlatformDeviceManagerFactory.getInstance();
-  const devices = [
-    ...(await manager.getBootedDevices("android")),
-    ...(await manager.getBootedDevices("ios")),
-  ];
-  return devices.find((candidate) => candidate.deviceId === deviceId) ?? null;
+  return findBootedDeviceForResource(deviceId, "SharedStorageReadService");
 }
 
 class DefaultSharedStorageReadService implements SharedStorageReadService {

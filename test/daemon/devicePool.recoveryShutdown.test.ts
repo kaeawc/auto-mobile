@@ -13,7 +13,6 @@ const original: BootedDevice = {
   name: "Pixel_8_API_35",
   platform: "android",
   deviceId: "emulator-5554",
-  transportId: "1",
 };
 const image: DeviceInfo = {
   name: original.name,
@@ -28,7 +27,7 @@ class LaggingShutdownManager extends FakeDeviceManager {
   }
   override async startDevice(device: DeviceInfo): Promise<ChildProcess> {
     this.startedDevices.push(device);
-    this.bootedDevices = [{ ...original, deviceId: "emulator-5560", transportId: "2" }];
+    this.bootedDevices = [{ ...original, deviceId: "emulator-5560" }];
     return { pid: 0 } as ChildProcess;
   }
   override async waitForDeviceReady(): Promise<BootedDevice> {
@@ -172,7 +171,7 @@ test("a different AVD reusing the serial is preserved after shutdown", async () 
     );
     await manager.killAccepted.promise;
     await flush();
-    manager.bootedDevices = [{ ...original, name: "Pixel_9", transportId: "new" }];
+    manager.bootedDevices = [{ ...original, name: "Pixel_9" }];
     timer.advanceTime(1_000);
     expect(await recovery).toBe(true);
     expect(killCalls).toBe(1);

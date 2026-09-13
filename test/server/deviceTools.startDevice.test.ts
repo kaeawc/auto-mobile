@@ -350,7 +350,7 @@ describe("startDevice handler", () => {
     );
     DaemonState.getInstance().initialize(daemonSessionManager, pool);
 
-    const discoveredDevice = { ...androidDevice, transportId: "23" };
+    const discoveredDevice = { ...androidDevice };
     const coldBootImage = { ...androidImage, deviceId: androidDevice.deviceId };
     const childProcess = new FakeExitChildProcess();
     fakeDeviceUtils.setBootedDevices("android", [discoveredDevice]);
@@ -367,7 +367,6 @@ describe("startDevice handler", () => {
     expect(result.source).toBe("cold-boot");
     expect(result.sessionUuid).toBeDefined();
     expect(pool.getDevice(androidDevice.deviceId)).toMatchObject({
-      transportId: "23",
       sessionId: result.sessionUuid,
     });
     expect(childProcess.killed).toBe(false);
@@ -390,7 +389,7 @@ describe("startDevice handler", () => {
     );
     DaemonState.getInstance().initialize(daemonSessionManager, pool);
 
-    const discoveredDevice = { ...androidDevice, transportId: "23" };
+    const discoveredDevice = { ...androidDevice };
     const coldBootImage = { ...androidImage, deviceId: androidDevice.deviceId };
     const childProcess = new FakeExitChildProcess();
     fakeDeviceUtils.setBootedDevices("android", [discoveredDevice]);
@@ -607,21 +606,22 @@ describe("startDevice handler", () => {
       ...androidImage,
       deviceId: "emulator-5556",
     };
-    const unknownRuntimeDevice = {
-      ...androidDevice,
-      name: `Unknown (${androidDevice.deviceId})`,
-    };
-    fakeDeviceUtils.setBootedDevices("android", [unknownRuntimeDevice]);
-    await pool.initializeWithDevices([unknownRuntimeDevice]);
+    // The pooled entry carries a RESOLVED AVD name. An entry whose discovery name
+    // is the `Unknown (<serial>)` placeholder is quarantined and refused at
+    // assignment (#6863 review) — a different scenario, covered by "does not guess
+    // an AVD when an unknown Android runtime needs System UI recovery".
+    const pooledAnrDevice = { ...androidDevice };
+    fakeDeviceUtils.setBootedDevices("android", [pooledAnrDevice]);
+    await pool.initializeWithDevices([pooledAnrDevice]);
     await pool.bindOrReuseDeviceSession(
       "owner-session",
-      unknownRuntimeDevice.deviceId,
+      pooledAnrDevice.deviceId,
       "android",
       recoveryImage,
     );
     DaemonState.getInstance().initialize(daemonSessionManager, pool);
     fakeDeviceUtils.setDeviceImages("android", [recoveryImage]);
-    fakeMatcher.setBootedResult(unknownRuntimeDevice);
+    fakeMatcher.setBootedResult(pooledAnrDevice);
     fakeMatcher.setImageResult(recoveryImage);
     const originalKillDevice = fakeDeviceUtils.killDevice.bind(fakeDeviceUtils);
     fakeDeviceUtils.killDevice = async (device, options) => {
@@ -644,7 +644,7 @@ describe("startDevice handler", () => {
 
     expect(result.deviceId).toBe("emulator-5556");
     expect(result.sessionUuid).toBe("owner-session");
-    expect(fakeDeviceUtils.getExecutedOperations()).toContain("killDevice:Unknown (emulator-5554)");
+    expect(fakeDeviceUtils.getExecutedOperations()).toContain("killDevice:Pixel_7_API_34");
     expect(fakeDeviceUtils.getExecutedOperations()).toContain("startDevice:Pixel_7_API_34:360000");
     expect(pool.getDevice("emulator-5556")).toMatchObject({
       sessionId: "owner-session",
@@ -756,21 +756,22 @@ describe("startDevice handler", () => {
       ...androidImage,
       deviceId: "emulator-5556",
     };
-    const unknownRuntimeDevice = {
-      ...androidDevice,
-      name: `Unknown (${androidDevice.deviceId})`,
-    };
-    fakeDeviceUtils.setBootedDevices("android", [unknownRuntimeDevice]);
-    await pool.initializeWithDevices([unknownRuntimeDevice]);
+    // The pooled entry carries a RESOLVED AVD name. An entry whose discovery name
+    // is the `Unknown (<serial>)` placeholder is quarantined and refused at
+    // assignment (#6863 review) — a different scenario, covered by "does not guess
+    // an AVD when an unknown Android runtime needs System UI recovery".
+    const pooledAnrDevice = { ...androidDevice };
+    fakeDeviceUtils.setBootedDevices("android", [pooledAnrDevice]);
+    await pool.initializeWithDevices([pooledAnrDevice]);
     await pool.bindOrReuseDeviceSession(
       "owner-session",
-      unknownRuntimeDevice.deviceId,
+      pooledAnrDevice.deviceId,
       "android",
       recoveryImage,
     );
     DaemonState.getInstance().initialize(daemonSessionManager, pool);
     fakeDeviceUtils.setDeviceImages("android", [recoveryImage]);
-    fakeMatcher.setBootedResult(unknownRuntimeDevice);
+    fakeMatcher.setBootedResult(pooledAnrDevice);
     fakeMatcher.setImageResult(recoveryImage);
     const originalKillDevice = fakeDeviceUtils.killDevice.bind(fakeDeviceUtils);
     fakeDeviceUtils.killDevice = async (device, options) => {
@@ -815,14 +816,15 @@ describe("startDevice handler", () => {
       ...androidImage,
       deviceId: "emulator-5556",
     };
-    const unknownRuntimeDevice = {
-      ...androidDevice,
-      name: `Unknown (${androidDevice.deviceId})`,
-    };
-    fakeDeviceUtils.setBootedDevices("android", [unknownRuntimeDevice]);
-    await pool.initializeWithDevices([unknownRuntimeDevice]);
+    // The pooled entry carries a RESOLVED AVD name. An entry whose discovery name
+    // is the `Unknown (<serial>)` placeholder is quarantined and refused at
+    // assignment (#6863 review) — a different scenario, covered by "does not guess
+    // an AVD when an unknown Android runtime needs System UI recovery".
+    const pooledAnrDevice = { ...androidDevice };
+    fakeDeviceUtils.setBootedDevices("android", [pooledAnrDevice]);
+    await pool.initializeWithDevices([pooledAnrDevice]);
     const preservedSessionId = await pool.autolockDevice(
-      unknownRuntimeDevice.deviceId,
+      pooledAnrDevice.deviceId,
       "android",
       "mcp-client",
       recoveryImage,
@@ -830,7 +832,7 @@ describe("startDevice handler", () => {
     expect(preservedSessionId).toBeDefined();
     DaemonState.getInstance().initialize(daemonSessionManager, pool);
     fakeDeviceUtils.setDeviceImages("android", [recoveryImage]);
-    fakeMatcher.setBootedResult(unknownRuntimeDevice);
+    fakeMatcher.setBootedResult(pooledAnrDevice);
     fakeMatcher.setImageResult(recoveryImage);
     const originalKillDevice = fakeDeviceUtils.killDevice.bind(fakeDeviceUtils);
     fakeDeviceUtils.killDevice = async (device, options) => {
@@ -930,16 +932,17 @@ describe("startDevice handler", () => {
       ...androidImage,
       deviceId: "emulator-5556",
     };
-    const unknownRuntimeDevice = {
-      ...androidDevice,
-      name: `Unknown (${androidDevice.deviceId})`,
-    };
+    // The pooled entry carries a RESOLVED AVD name. An entry whose discovery name
+    // is the `Unknown (<serial>)` placeholder is quarantined and refused at
+    // assignment (#6863 review) — a different scenario, covered by "does not guess
+    // an AVD when an unknown Android runtime needs System UI recovery".
+    const pooledAnrDevice = { ...androidDevice };
     const replacementProcess = new FakeExitChildProcess();
-    fakeDeviceUtils.setBootedDevices("android", [unknownRuntimeDevice]);
-    await pool.initializeWithDevices([unknownRuntimeDevice]);
+    fakeDeviceUtils.setBootedDevices("android", [pooledAnrDevice]);
+    await pool.initializeWithDevices([pooledAnrDevice]);
     await pool.bindOrReuseDeviceSession(
       "owner-session",
-      unknownRuntimeDevice.deviceId,
+      pooledAnrDevice.deviceId,
       "android",
       recoveryImage,
     );
@@ -949,7 +952,7 @@ describe("startDevice handler", () => {
       recoveryImage.name,
       replacementProcess as unknown as ChildProcess,
     );
-    fakeMatcher.setBootedResult(unknownRuntimeDevice);
+    fakeMatcher.setBootedResult(pooledAnrDevice);
     fakeMatcher.setImageResult(recoveryImage);
     const originalKillDevice = fakeDeviceUtils.killDevice.bind(fakeDeviceUtils);
     fakeDeviceUtils.killDevice = async (device, options) => {
@@ -969,7 +972,7 @@ describe("startDevice handler", () => {
     );
 
     expect(replacementProcess.killed).toBe(true);
-    expect(pool.getDevice(unknownRuntimeDevice.deviceId)).toBeNull();
+    expect(pool.getDevice(pooledAnrDevice.deviceId)).toBeNull();
     expect(pool.getDevice(recoveryImage.deviceId!)).toBeNull();
     expect(pool.getIdleDevices()).toEqual([]);
     expect(daemonSessionManager.getSession("owner-session")).toBeNull();
@@ -994,16 +997,17 @@ describe("startDevice handler", () => {
       ...androidImage,
       deviceId: "emulator-5556",
     };
-    const unknownRuntimeDevice = {
-      ...androidDevice,
-      name: `Unknown (${androidDevice.deviceId})`,
-    };
+    // The pooled entry carries a RESOLVED AVD name. An entry whose discovery name
+    // is the `Unknown (<serial>)` placeholder is quarantined and refused at
+    // assignment (#6863 review) — a different scenario, covered by "does not guess
+    // an AVD when an unknown Android runtime needs System UI recovery".
+    const pooledAnrDevice = { ...androidDevice };
     const replacementProcess = new FakeExitChildProcess();
-    fakeDeviceUtils.setBootedDevices("android", [unknownRuntimeDevice]);
-    await pool.initializeWithDevices([unknownRuntimeDevice]);
+    fakeDeviceUtils.setBootedDevices("android", [pooledAnrDevice]);
+    await pool.initializeWithDevices([pooledAnrDevice]);
     await pool.bindOrReuseDeviceSession(
       "owner-session",
-      unknownRuntimeDevice.deviceId,
+      pooledAnrDevice.deviceId,
       "android",
       recoveryImage,
     );
@@ -1013,7 +1017,7 @@ describe("startDevice handler", () => {
       recoveryImage.name,
       replacementProcess as unknown as ChildProcess,
     );
-    fakeMatcher.setBootedResult(unknownRuntimeDevice);
+    fakeMatcher.setBootedResult(pooledAnrDevice);
     fakeMatcher.setImageResult(recoveryImage);
     const originalKillDevice = fakeDeviceUtils.killDevice.bind(fakeDeviceUtils);
     fakeDeviceUtils.killDevice = async (device, options) => {
@@ -1067,16 +1071,17 @@ describe("startDevice handler", () => {
       ...androidImage,
       deviceId: "emulator-5556",
     };
-    const unknownRuntimeDevice = {
-      ...androidDevice,
-      name: `Unknown (${androidDevice.deviceId})`,
-    };
+    // The pooled entry carries a RESOLVED AVD name. An entry whose discovery name
+    // is the `Unknown (<serial>)` placeholder is quarantined and refused at
+    // assignment (#6863 review) — a different scenario, covered by "does not guess
+    // an AVD when an unknown Android runtime needs System UI recovery".
+    const pooledAnrDevice = { ...androidDevice };
     const replacementProcess = new FakeExitChildProcess();
-    fakeDeviceUtils.setBootedDevices("android", [unknownRuntimeDevice]);
-    await pool.initializeWithDevices([unknownRuntimeDevice]);
+    fakeDeviceUtils.setBootedDevices("android", [pooledAnrDevice]);
+    await pool.initializeWithDevices([pooledAnrDevice]);
     await pool.bindOrReuseDeviceSession(
       "owner-session",
-      unknownRuntimeDevice.deviceId,
+      pooledAnrDevice.deviceId,
       "android",
       recoveryImage,
     );
@@ -1086,7 +1091,7 @@ describe("startDevice handler", () => {
       recoveryImage.name,
       replacementProcess as unknown as ChildProcess,
     );
-    fakeMatcher.setBootedResult(unknownRuntimeDevice);
+    fakeMatcher.setBootedResult(pooledAnrDevice);
     fakeMatcher.setImageResult(recoveryImage);
     const originalKillDevice = fakeDeviceUtils.killDevice.bind(fakeDeviceUtils);
     fakeDeviceUtils.killDevice = async (device, options) => {
@@ -1119,7 +1124,7 @@ describe("startDevice handler", () => {
     );
 
     expect(replacementProcess.killed).toBe(true);
-    expect(pool.getDevice(unknownRuntimeDevice.deviceId)).toBeNull();
+    expect(pool.getDevice(pooledAnrDevice.deviceId)).toBeNull();
     expect(pool.getDevice(recoveryImage.deviceId!)).toBeNull();
     expect(pool.getIdleDevices()).toEqual([]);
     expect(daemonSessionManager.getSession("owner-session")).toBeNull();
@@ -1145,16 +1150,17 @@ describe("startDevice handler", () => {
       ...androidImage,
       deviceId: "emulator-5556",
     };
-    const unknownRuntimeDevice = {
-      ...androidDevice,
-      name: `Unknown (${androidDevice.deviceId})`,
-    };
+    // The pooled entry carries a RESOLVED AVD name. An entry whose discovery name
+    // is the `Unknown (<serial>)` placeholder is quarantined and refused at
+    // assignment (#6863 review) — a different scenario, covered by "does not guess
+    // an AVD when an unknown Android runtime needs System UI recovery".
+    const pooledAnrDevice = { ...androidDevice };
     const replacementProcess = new FakeExitChildProcess();
-    fakeDeviceUtils.setBootedDevices("android", [unknownRuntimeDevice]);
-    await pool.initializeWithDevices([unknownRuntimeDevice]);
+    fakeDeviceUtils.setBootedDevices("android", [pooledAnrDevice]);
+    await pool.initializeWithDevices([pooledAnrDevice]);
     await pool.bindOrReuseDeviceSession(
       "owner-session",
-      unknownRuntimeDevice.deviceId,
+      pooledAnrDevice.deviceId,
       "android",
       recoveryImage,
     );
@@ -1164,7 +1170,7 @@ describe("startDevice handler", () => {
       recoveryImage.name,
       replacementProcess as unknown as ChildProcess,
     );
-    fakeMatcher.setBootedResult(unknownRuntimeDevice);
+    fakeMatcher.setBootedResult(pooledAnrDevice);
     fakeMatcher.setImageResult(recoveryImage);
     const originalKillDevice = fakeDeviceUtils.killDevice.bind(fakeDeviceUtils);
     fakeDeviceUtils.killDevice = async (device, options) => {
@@ -1206,16 +1212,17 @@ describe("startDevice handler", () => {
       ...androidImage,
       deviceId: "emulator-5556",
     };
-    const unknownRuntimeDevice = {
-      ...androidDevice,
-      name: `Unknown (${androidDevice.deviceId})`,
-    };
+    // The pooled entry carries a RESOLVED AVD name. An entry whose discovery name
+    // is the `Unknown (<serial>)` placeholder is quarantined and refused at
+    // assignment (#6863 review) — a different scenario, covered by "does not guess
+    // an AVD when an unknown Android runtime needs System UI recovery".
+    const pooledAnrDevice = { ...androidDevice };
     const replacementProcess = new FakeExitChildProcess();
-    fakeDeviceUtils.setBootedDevices("android", [unknownRuntimeDevice]);
-    await pool.initializeWithDevices([unknownRuntimeDevice]);
+    fakeDeviceUtils.setBootedDevices("android", [pooledAnrDevice]);
+    await pool.initializeWithDevices([pooledAnrDevice]);
     await pool.bindOrReuseDeviceSession(
       "owner-session",
-      unknownRuntimeDevice.deviceId,
+      pooledAnrDevice.deviceId,
       "android",
       recoveryImage,
     );
@@ -1225,7 +1232,7 @@ describe("startDevice handler", () => {
       recoveryImage.name,
       replacementProcess as unknown as ChildProcess,
     );
-    fakeMatcher.setBootedResult(unknownRuntimeDevice);
+    fakeMatcher.setBootedResult(pooledAnrDevice);
     fakeMatcher.setImageResult(recoveryImage);
     const originalKillDevice = fakeDeviceUtils.killDevice.bind(fakeDeviceUtils);
     fakeDeviceUtils.killDevice = async (device, options) => {
@@ -1934,7 +1941,6 @@ describe("startDevice handler", () => {
       platform: "android",
       name: "Pixel 8",
       deviceId: "R5CT123456A",
-      transportId: "42",
     };
     fakeDeviceUtils.setBootedDevices("android", [physicalDevice]);
     fakeDeviceUtils.getDeviceImagesDetailed = async () => ({

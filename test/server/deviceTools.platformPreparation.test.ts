@@ -22,7 +22,10 @@ import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { DeviceBootTimeoutError } from "../../src/utils/deviceBootService";
-import type { VirtualDeviceLifecycleCoordinator } from "../../src/utils/virtualDeviceLifecycleCoordinator";
+import type {
+  VirtualDeviceLifecycleCoordinator,
+  VirtualDeviceLifecycleLease,
+} from "../../src/utils/virtualDeviceLifecycleCoordinator";
 
 describe("platform device preparation tools", () => {
   let deviceUtils: FakeDeviceUtils;
@@ -800,6 +803,73 @@ describe("platform device preparation tools", () => {
       "pre-boot serial validation did not complete",
     );
     expect((failure as ActionableError).message).toContain("after 10ms");
+  });
+
+  test("drops a late pre-boot serial observation after the boot deadline releases its lease", async () => {
+    class SlowDiscovery extends FakeDeviceUtils {
+      override async getBootedDevicesDetailed(platform: "android" | "ios" | "either") {
+        const discovery = await super.getBootedDevicesDetailed(platform);
+        // The platform discovery ignored the coordinated abort long enough for
+        // the deadline to settle its caller before returning this observation.
+        timer.advanceTime(1_001);
+        return discovery;
+      }
+    }
+    const slow = new SlowDiscovery();
+    const emulator: BootedDevice = {
+      platform: "android",
+      name: "Pixel_9_API_36",
+      deviceId: "emulator-5554",
+    };
+    slow.setBootedDevices("android", [emulator]);
+    sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      slow,
+      new DefaultRetryExecutor(timer),
+    );
+    await pool.initializeWithDevices([emulator]);
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    const observations: Array<{ source: string }> = [];
+    const reconcile = pool.reconcileDiscoveryObservation.bind(pool);
+    pool.reconcileDiscoveryObservation = async (devices, source, options) => {
+      observations.push({ source });
+      await reconcile(devices, source, options);
+    };
+    let releases = 0;
+    const lease: VirtualDeviceLifecycleLease = {
+      signal: new AbortController().signal,
+      identity: { kind: "selector", platform: "android", selector: emulator.name },
+      bindCanonicalIdentity: async () => {},
+      transitionToTeardown: () => {},
+      release: () => {
+        releases++;
+      },
+    };
+    const lifecycleCoordinator: VirtualDeviceLifecycleCoordinator = {
+      reserve: async () => lease,
+    };
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => slow,
+      lifecycleCoordinator,
+    });
+
+    const failure = await callTool("getAndroid", {
+      avdName: emulator.name,
+      deviceId: emulator.deviceId,
+      bootTimeoutMs: 1_000,
+    }).catch((error: unknown) => error);
+    // Allow the losing discovery callback to finish after its deadline race.
+    for (let attempt = 0; attempt < 50; attempt++) {
+      await Promise.resolve();
+    }
+
+    expect(failure).toBeInstanceOf(Error);
+    expect(observations.some(({ source }) => source === "pre-boot-serial-validation")).toBe(false);
+    expect(releases).toBe(1);
   });
 
   test("waits for fuzzy legacy Android names that match a reserved AVD", async () => {

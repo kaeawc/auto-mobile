@@ -4148,10 +4148,19 @@ async function validateRequestedAndroidSerialBeforeBoot(
     bootDeadlineMs,
     "Android pre-boot serial validation did not complete",
     signal,
-    async () => {
+    async (signal) => {
       const discovery = await deviceUtils.getBootedDevicesDetailed("android", {
         bypassAndroidDeviceListCache: true,
       });
+      if (signal.aborted) {
+        // The deadline/abort already settled prepareDevice and released its
+        // lifecycle lease. Dropping this stale snapshot is safe: the post-boot
+        // recheck for the next acquisition will observe with current context.
+        logger.debug(
+          `[DeviceTools] Dropping stale pre-boot serial validation discovery after deadline/abort for avdName=${avdName}`,
+        );
+        return discovery;
+      }
       // FUNNEL 1: the post-boot recheck this defers to decides with pool/incarnation
       // context, so the pool must have seen this observation (#6863 review).
       await reconcileDiscoveryObservation(discovery.devices, "pre-boot-serial-validation");

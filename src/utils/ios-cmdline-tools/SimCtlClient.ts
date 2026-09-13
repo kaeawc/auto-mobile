@@ -1966,7 +1966,7 @@ export class SimCtlClient implements SimCtl {
     const observedAt = this.observationSequence.next();
 
     return devices
-      .filter((device) => device.isAvailable && device.state === "Booted" && device.deviceId)
+      .filter((device) => isDeviceAvailable(device) && device.state === "Booted" && device.deviceId)
       .map(
         (device) =>
           ({

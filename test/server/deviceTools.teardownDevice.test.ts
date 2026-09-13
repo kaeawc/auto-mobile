@@ -1300,6 +1300,59 @@ describe("deleteDevice handler", () => {
     ]);
   });
 
+  // A caller who stops waiting must not be told the TARGET could not be
+  // identified: cancellation says nothing about which AVD is on the serial, and
+  // `target_identity_unresolved` points the user at a manual `emu kill` for an
+  // action they themselves cancelled
+  // ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
+  test("reports a cancelled AVD probe as cancellation, not unresolved identity", async () => {
+    const timer = new FakeTimer();
+    const pooledAvdName = "Pixel_8_API_35";
+    const booted: BootedDevice = {
+      platform: "android",
+      name: "Unknown (emulator-5556)",
+      deviceId: "emulator-5556",
+    };
+    const image: DeviceInfo = { platform: "android", name: pooledAvdName, isRunning: true };
+    const sessionManager = new SessionManager(timer);
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      manager,
+      new DefaultRetryExecutor(timer),
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    await pool.addDevice(booted, image);
+    manager.setBootedDevices("android", [booted]);
+    manager.setDeviceImages("android", [image]);
+
+    const controller = new AbortController();
+    // Exactly what the default resolver does once the caller aborts: rethrow the
+    // abort reason rather than answering "no name".
+    setDeviceToolsDependencies({
+      resolveRunningAndroidAvdName: async (_device, _timeoutMs, signal) => {
+        controller.abort(new Error("deleteDevice caller stopped waiting"));
+        throw signal?.reason ?? new Error("deleteDevice caller stopped waiting");
+      },
+    });
+
+    const body = responseBody(
+      await teardownTool().handler(
+        request("android", pooledAvdName, pooledAvdName),
+        undefined,
+        controller.signal,
+      ),
+    );
+
+    expect(body.state).toBe("failed");
+    const failure = body.failure as Record<string, unknown>;
+    expect(failure.code).toBe("operation_cancelled");
+    expect(manager.killedDevices).toEqual([]);
+    expect(manager.destroyRequests).toEqual([]);
+  });
+
   test("rejects a stopped-image teardown when a running Android AVD name is unresolved", async () => {
     const booted: BootedDevice = {
       platform: "android",
@@ -1493,6 +1546,113 @@ describe("deleteDevice handler", () => {
     const response = await teardownTool().handler(request("android", device.name, device.name));
 
     expect(responseBody(response).state).toBe("failed");
+    expect(manager.destroyRequests).toEqual([]);
+  });
+
+  // AVD B has taken over the serial AVD A was pooled on, and discovery can only
+  // report `Unknown (<serial>)` for it. The pool quarantines its entry for that
+  // serial, so the cached label stops standing in for a resolved AVD name --
+  // which is what previously let a teardown of B miss the booted runtime, skip
+  // the unresolved-runtime guard on the strength of A's label, and destroy B's
+  // image through the STOPPED-image inventory path while B was running
+  // ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
+  test("refuses to delete an inventory image while the serial's runtime is unresolved", async () => {
+    const timer = new FakeTimer();
+    const pooledAvdName = "Pixel_8_API_35";
+    const reusedSerialRuntime: BootedDevice = {
+      platform: "android",
+      name: `Unknown (emulator-5556)`,
+      deviceId: "emulator-5556",
+    };
+    const pooledImage: DeviceInfo = {
+      platform: "android",
+      name: pooledAvdName,
+      isRunning: true,
+    };
+    const sessionManager = new SessionManager(timer);
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      manager,
+      new DefaultRetryExecutor(timer),
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    // The pool started AVD A on this serial and knows it by name.
+    await pool.addDevice(
+      { platform: "android", name: pooledAvdName, deviceId: "emulator-5556" },
+      pooledImage,
+    );
+    // A discovery sweep can no longer read a name off that serial.
+    manager.setBootedDevices("android", [reusedSerialRuntime]);
+    await pool.refreshDevices();
+    manager.setDeviceImages("android", [
+      pooledImage,
+      // AVD B looks stopped to the inventory, because the runtime on the serial
+      // could not name itself.
+      { platform: "android", name: "Pixel_7_API_34", isRunning: false },
+    ]);
+
+    const body = responseBody(
+      await teardownTool().handler(request("android", "Pixel_7_API_34", "Pixel_7_API_34")),
+    );
+
+    expect(body.state).toBe("failed");
+    expect(body.failure).toEqual(expect.objectContaining({ code: "target_identity_unresolved" }));
+    expect(manager.destroyRequests).toEqual([]);
+  });
+
+  // `force` skips the emulator-console probe, and this refusal is not a probe
+  // failure: no probe is even attempted here, because the pool's quarantine
+  // already withheld the label. There is no identifiable booted target at all,
+  // so "act on the serial as given" has no serial to act on — destroying the
+  // stopped image anyway would delete an image out from under a running
+  // emulator. `force` must leave this closed (#6864).
+  test("force does not delete an inventory image while the serial's runtime is unresolved", async () => {
+    const timer = new FakeTimer();
+    const pooledAvdName = "Pixel_8_API_35";
+    const reusedSerialRuntime: BootedDevice = {
+      platform: "android",
+      name: `Unknown (emulator-5556)`,
+      deviceId: "emulator-5556",
+    };
+    const pooledImage: DeviceInfo = {
+      platform: "android",
+      name: pooledAvdName,
+      isRunning: true,
+    };
+    const sessionManager = new SessionManager(timer);
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      manager,
+      new DefaultRetryExecutor(timer),
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    await pool.addDevice(
+      { platform: "android", name: pooledAvdName, deviceId: "emulator-5556" },
+      pooledImage,
+    );
+    manager.setBootedDevices("android", [reusedSerialRuntime]);
+    await pool.refreshDevices();
+    expect(pool.isPooledIdentityUnresolved("emulator-5556")).toBe(true);
+    manager.setDeviceImages("android", [
+      pooledImage,
+      { platform: "android", name: "Pixel_7_API_34", isRunning: false },
+    ]);
+
+    const body = responseBody(
+      await teardownTool().handler({
+        ...request("android", "Pixel_7_API_34", "Pixel_7_API_34"),
+        force: true,
+      }),
+    );
+
+    expect(body.state).toBe("failed");
+    expect(body.failure).toEqual(expect.objectContaining({ code: "target_identity_unresolved" }));
     expect(manager.destroyRequests).toEqual([]);
   });
 

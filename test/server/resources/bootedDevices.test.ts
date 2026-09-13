@@ -763,6 +763,63 @@ describe("MCP Booted Device Resources", () => {
       sessionManager.stopCleanupTimer();
     });
 
+    // Gating pool-derived fields one at a time leaves the ones resolved
+    // SEPARATELY by serial -- the session and the registry's epoch UUID --
+    // ungated, so the resource advertises the new runtime under the RETIRED
+    // epoch's UUID and the desktop subscribes to streams with it. On a mismatch
+    // the resource must attach no pool context at all
+    // ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
+    test("attaches no pool-derived context at all when the runtime disagrees", async function () {
+      const fakeTimer = new FakeTimer();
+      fakeTimer.enableAutoAdvance();
+      const sessionManager = new SessionManager(fakeTimer, new FakeDeviceSessionPersistence());
+      const { FakeInstalledAppsRepository } =
+        await import("../../fakes/FakeInstalledAppsRepository");
+      const devicePool = new DevicePool(
+        sessionManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        new FakeInstalledAppsRepository(),
+        fakeDeviceUtils,
+      );
+      fakeDeviceUtils.setBootedDevices("android", [mockAndroidDevice1]);
+      await devicePool.initializeWithDevices([mockAndroidDevice1]);
+      const sessionId = await devicePool.assignDeviceToSession("session-stale");
+      expect(sessionId).toBe(mockAndroidDevice1.deviceId);
+      const registry = new DeviceSessionRegistry(fakeTimer);
+      registry.onDeviceConnected({
+        deviceId: mockAndroidDevice1.deviceId,
+        platform: "android",
+        incarnation: 1,
+      });
+      DaemonState.getInstance().initialize(sessionManager, devicePool, registry);
+
+      // A different AVD now holds the serial; the pool has not refreshed yet.
+      fakeDeviceUtils.setBootedDevices("android", [
+        { ...mockAndroidDevice1, name: "Pixel_9_API_36" },
+      ]);
+
+      try {
+        const { client } = fixture.getContext();
+        const result = await client.readResource({ uri: "automobile:devices/booted" });
+        const data: BootedDevicesResourceContent = JSON.parse(result.contents[0].text!);
+        const entry = data.devices.find(
+          (device) => device.deviceId === mockAndroidDevice1.deviceId,
+        );
+
+        expect(entry).toBeDefined();
+        expect(entry?.deviceSessionUuid).toBeUndefined();
+        expect(entry?.session).toBeUndefined();
+        expect(entry?.poolStatus).toBeUndefined();
+        expect(entry?.assignedSession).toBeUndefined();
+        // Identity is built purely from discovery.
+        expect(entry?.identity?.stableId).toBe("Pixel_9_API_36");
+        expect(entry?.identity?.connectionId).toBe(mockAndroidDevice1.deviceId);
+      } finally {
+        sessionManager.stopCleanupTimer();
+      }
+    });
+
     // `Unknown (<serial>)` is the placeholder Android discovery emits when the
     // emulator console could not answer `avd name`. It asserts nothing, so it
     // is not agreement with the pooled entry: publishing that entry's epoch

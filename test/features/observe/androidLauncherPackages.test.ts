@@ -7,10 +7,35 @@ import {
 } from "../../../src/features/observe/androidLauncherPackages";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import type { ExecResult } from "../../../src/models";
 import { runWithAbortSignal } from "../../../src/utils/AbortContext";
 import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
 
 const RESOLVE_HOME_PATTERN = "resolve-activity";
+
+/**
+ * An adb executor whose resolve takes measurable device time, so a test can
+ * tell whether a cache entry is stamped before or after the command completes.
+ */
+class SlowResolveAdbExecutor extends FakeAdbExecutor {
+  constructor(
+    private readonly clock: FakeTimer,
+    private readonly elapsedMs: number,
+  ) {
+    super();
+  }
+
+  override async executeCommand(
+    command: string,
+    timeoutMs?: number,
+    maxBuffer?: number,
+    noRetry?: boolean,
+    signal?: AbortSignal,
+  ): Promise<ExecResult> {
+    this.clock.setCurrentTime(this.clock.now() + this.elapsedMs);
+    return await super.executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+  }
+}
 
 describe("androidLauncherPackages", () => {
   let fakeAdb: FakeAdbExecutor;
@@ -305,6 +330,34 @@ describe("androidLauncherPackages", () => {
       expect(
         fakeAdb.getExecutedCommands().filter((cmd) => cmd.includes(RESOLVE_HOME_PATTERN)).length,
       ).toBe(2);
+    });
+
+    // The TTL must measure the age of the ANSWER, not of the call that went
+    // looking for it. Stamping the entry with the pre-resolve clock makes a slow
+    // adb resolve produce an entry that is already expired by the time it is
+    // written, so the very next verification retry re-resolves and burns more of
+    // the caller's deadline ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863)
+    // review).
+    test("starts the untokened lifetime when the resolve completes, not when it began", async () => {
+      const fakeTimer = new FakeTimer();
+      fakeTimer.setCurrentTime(0);
+      const slowAdb = new SlowResolveAdbExecutor(fakeTimer, 1_900);
+      slowAdb.setCommandResponse(RESOLVE_HOME_PATTERN, {
+        stdout: "com.launcher.a/.Main",
+        stderr: "",
+      });
+
+      const first = await resolveConfiguredHomePackage(slowAdb, "device-1", fakeTimer);
+      // The resolve itself consumed 1,900ms, so the entry is 0ms old here and
+      // 1,100ms old at 3,000 -- inside the short untokened lifetime either way.
+      fakeTimer.setCurrentTime(3_000);
+      const second = await resolveConfiguredHomePackage(slowAdb, "device-1", fakeTimer);
+
+      expect(first).toBe("com.launcher.a");
+      expect(second).toBe("com.launcher.a");
+      expect(
+        slowAdb.getExecutedCommands().filter((cmd) => cmd.includes(RESOLVE_HOME_PATTERN)).length,
+      ).toBe(1);
     });
 
     test("keeps the full TTL once an epoch token IS available", async () => {

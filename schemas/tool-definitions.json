@@ -1000,7 +1000,7 @@
           "maximum": 890000
         },
         "force": {
-          "description": "Skip the emulator-console probe that confirms which AVD is running on this serial, and act on the serial as given. Use only when the console has wedged and the normal call refuses because the AVD name cannot be confirmed. This does not override the conflict check, it removes it: force means 'act on whatever emulator currently occupies this serial', including a different AVD that took the serial over. Android emulators only; accepted and ignored for iOS and physical devices.",
+          "description": "Skip the emulator-console probe that confirms which AVD is running on this serial, and act on the serial as given. Use only when the console has wedged and the normal call refuses because the AVD name cannot be confirmed. This does not override the conflict check, it removes it: force means 'act on whatever emulator currently occupies this serial', including a different AVD that took the serial over. It does NOT override the refusal raised when this daemon's pool entry for the serial was retired and replaced while the action was being prepared, nor deleteDevice's refusal to delete a stopped image while a booted emulator that cannot be identified at all is attached. Android emulators only; accepted and ignored for iOS and physical devices.",
           "default": false,
           "type": "boolean"
         }
@@ -2468,7 +2468,7 @@
           "additionalProperties": false
         },
         "force": {
-          "description": "Skip the emulator-console probe that confirms which AVD is running on this serial, and act on the serial as given. Use only when the console has wedged and the normal call refuses because the AVD name cannot be confirmed. This does not override the conflict check, it removes it: force means 'act on whatever emulator currently occupies this serial', including a different AVD that took the serial over. Android emulators only; accepted and ignored for iOS and physical devices.",
+          "description": "Skip the emulator-console probe that confirms which AVD is running on this serial, and act on the serial as given. Use only when the console has wedged and the normal call refuses because the AVD name cannot be confirmed. This does not override the conflict check, it removes it: force means 'act on whatever emulator currently occupies this serial', including a different AVD that took the serial over. It does NOT override the refusal raised when this daemon's pool entry for the serial was retired and replaced while the action was being prepared, nor deleteDevice's refusal to delete a stopped image while a booted emulator that cannot be identified at all is attached. Android emulators only; accepted and ignored for iOS and physical devices.",
           "default": false,
           "type": "boolean"
         }

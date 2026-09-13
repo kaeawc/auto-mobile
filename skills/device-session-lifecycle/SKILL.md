@@ -56,20 +56,50 @@ applies in all three places the name is read:
    refuses (`target_identity_unresolved`), naming `adb -s <serial> emu kill` as
    the manual escape. There is no fail-open branch by default. The tool-level
    escape for a client with no shell access is `force: true` on either tool
-   (#6864): it skips the probe entirely — no console call — logs at warn with
-   the serial and the pooled label it is declining to confirm, and still runs
-   the post-kill disappearance/incarnation confirmation unchanged. `force` does
-   not override the `conflict` refusal, it removes the evidence one is detected
-   from: with no probe there is no conflict to see, so `force` means "act on
-   whatever emulator currently occupies this serial". It is Android-emulator
-   only; on iOS or a handset there is no pooled AVD label, so the flag is
-   accepted and ignored.
+   (#6864): it skips the console probe and NOTHING else — logging at warn with
+   the serial and the pooled label it is declining to confirm, acting on the
+   caller's own target rather than substituting the unconfirmed label, and still
+   running the post-kill disappearance/incarnation confirmation unchanged.
+   `force` does not override the `conflict` refusal, it removes the evidence one
+   is detected from: with no probe there is no conflict to see, so `force` means
+   "act on whatever emulator currently occupies this serial". Three things it
+   deliberately does NOT clear: the `moved` refusal (the pool retired the
+   captured epoch while the action was being prepared — not a probe failure, and
+   the named target no longer exists, so re-resolve); `deleteDevice`'s
+   inventory-path refusal when a booted emulator on a QUARANTINED entry cannot be
+   identified at all (there is no serial to "act on as given", and destroying the
+   stopped image would delete it out from under a running emulator); and the
+   preflight refusal raised when the action's deadline is already spent. On the
+   KILL path a quarantined entry needs no bypass — the pool already withholds the
+   label, so no probe is attempted and the kill runs against the serial as given.
+   `force` is Android-emulator only; on iOS or a handset there is no pooled AVD
+   label, so the flag is accepted and ignored.
 3. **Publishing identity** (`DevicePool.describesPooledRuntime`, the booted-devices
    resource): the placeholder is not agreement, so the resource withholds BOTH
    the pooled epoch (`connectionId` falls back to the bare serial) and the
    pooled AVD label (`stableId` falls back to discovery's own name). The pool's
    internal `matchesRuntimeIdentity` still TOLERATES the placeholder so an
    unreadable console never evicts a live entry — tolerance is not agreement.
+
+**The pool state that carries the rule: `PooledDevice.identityUnresolved`.**
+When a discovery sweep observes the placeholder on a LIVE entry, the pool
+quarantines that entry instead of choosing between two wrong answers. The entry
+is kept — same session, same `incarnation` — but:
+
+- `selectAssignableIdleDevice` skips it;
+- `assertSessionReadyForAutomation` (the single choke point every tool execution
+  passes through) refuses, naming the serial and the pooled AVD label;
+- `describesPooledRuntime` reads the state, so the resource publishes no pool
+  context;
+- `deviceTools.getValidatedPooledAndroidAvdName` returns undefined, so no
+  destructive path can act on the cached label — including the stopped-image
+  inventory path in `deleteDevice`, which previously bypassed the
+  unresolved-runtime guard on the strength of that label.
+
+Leaving the quarantine is decided by the next discovery that READS a name: the
+pooled label (or the AVD this pool started) restores the entry unchanged, and a
+different name is a replacement — a fresh incarnation, the old session retired,
+exactly as an observed disappearance. Handsets never enter the state.
 
 **Documented blind spot**: a same-serial restart faster than one discovery
 interval never reaches the pool, so it reads as continuity. Every host-side
@@ -78,9 +108,26 @@ once before surfacing the error — see the append-helper cache in
 `src/daemon/socketServer.ts`), and any destructive action that would act on a
 pool-cached AVD name must re-resolve it from the runtime first
 (`AndroidEmulatorClient.resolveRunningAvdName`, used by killDevice/deleteDevice)
-and refuse when that re-resolution does not answer.
-Historical entries in `references/history.md` that reason about `transportId`
-(e.g. #5372) describe the pre-#6863 model; do not reintroduce the field.
+and refuse when that re-resolution does not answer — and that confirmation runs
+BEFORE the shutdown's preparation side effects (stopping recordings, closing the
+CtrlProxy singleton, detaching observers), so a refusal leaves a still-running
+device fully intact.
+
+**Self-heal on HELPER failure, never on a RUNNER verdict.** The two outcomes are
+distinguished by the result type (`AppendTextFailureSource`), never by inspecting
+`charsSent === 0`:
+
+- the helper itself failed (threw, transport error, stale cached helper) → evict,
+  rebuild once, retry. With a confirmed prefix the retry resumes the unconfirmed
+  SUFFIX and carries NO validator (the original validation was already spent and
+  the prefix has advanced the runner's frame epoch); with nothing confirmed it
+  retries the whole text WITH the original validator, because nothing was
+  validated-and-sent yet;
+- the RUNNER returned a verdict (`success: false`, e.g. a stale `frameContext`)
+  → surface it as-is. No rebuild, no replay: the helper worked, and replaying
+  would type into a UI the runner explicitly refused.
+  Historical entries in `references/history.md` that reason about `transportId`
+  (e.g. #5372) describe the pre-#6863 model; do not reintroduce the field.
 
 ## 2. Invariants (the contract every fix must preserve)
 

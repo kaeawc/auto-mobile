@@ -6,11 +6,13 @@ import { DevicePool } from "../../src/daemon/devicePool";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import {
+  defaultResolveRunningAndroidAvdName,
   killDeviceSchema,
   registerDeviceTools,
   resetDeviceToolsDependencies,
   setDeviceToolsDependencies,
 } from "../../src/server/deviceTools";
+import { ActionableError } from "../../src/models/ActionableError";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import {
   resetVideoRecordingManagerDependencies,
@@ -45,6 +47,8 @@ class FailingKillDeviceManager extends FakeDeviceUtils {
    * vacuously true. Assert against this instead.
    */
   readonly killedDeviceIds: string[] = [];
+  /** The full targets handed to the platform kill, so a test can assert the NAME it was given. */
+  readonly killedDeviceTargets: BootedDevice[] = [];
 
   constructor() {
     super();
@@ -63,6 +67,7 @@ class FailingKillDeviceManager extends FakeDeviceUtils {
 
   override async killDevice(device: BootedDevice): Promise<void> {
     this.killedDeviceIds.push(device.deviceId);
+    this.killedDeviceTargets.push(device);
     throw new Error("adb emu kill failed");
   }
 }
@@ -92,6 +97,7 @@ class DeadlineSpendingFakeTimer extends FakeTimer {
 class SuccessfulKillDeviceManager extends FailingKillDeviceManager {
   override async killDevice(device: BootedDevice): Promise<void> {
     this.killedDeviceIds.push(device.deviceId);
+    this.killedDeviceTargets.push(device);
     this.setBootedDevices(device.platform, []);
   }
 }
@@ -631,25 +637,6 @@ describe("killDevice handler", () => {
       expect(manager.killedDeviceIds).toEqual([]);
     });
 
-    // The probe borrows the kill's deadline. When that deadline is already spent
-    // by the time verification runs, there is no budget to probe with and no way
-    // to identify the target, so the refusal is immediate and the console is
-    // never contacted (#6863 review).
-    test("refuses without probing when the kill deadline is already spent", async () => {
-      manager = new SuccessfulKillDeviceManager();
-      const timer = new DeadlineSpendingFakeTimer();
-      setDeviceToolsDependencies({ deviceManagerFactory: () => manager, timer });
-      await poolWithUnknownRuntime(unknownEmulator, "Pixel_8_Old");
-      runtimeAvdNames.set("emulator-5554", "Pixel_8_Old");
-      timer.spendDeadlineOnNextRead();
-
-      await expect(killTool().handler({ device: unknownEmulator })).rejects.toThrow(
-        /did not answer/,
-      );
-      expect(runtimeAvdNameProbes).toEqual([]);
-      expect(manager.killedDeviceIds).toEqual([]);
-    });
-
     // The refusal is the DEFAULT, not the only behaviour: an explicit
     // `force: false` must read exactly like omitting the flag (#6864).
     test("refuses the kill when force is explicitly false", async () => {
@@ -680,6 +667,25 @@ describe("killDevice handler", () => {
       expect(manager.killedDeviceIds).toEqual(["emulator-5554"]);
     });
 
+    // Nothing was confirmed, so nothing may be substituted into the kill target.
+    // `AndroidEmulatorClient.killDevice` re-discovers the serial and refuses a
+    // target whose name differs from the discovered one, so rewriting the target
+    // to the unconfirmed pooled label would make the forced kill refuse itself
+    // on exactly the wedged console the flag exists for (#6864).
+    test("force hands the platform kill the caller's own target, not the pooled label", async () => {
+      manager = new SuccessfulKillDeviceManager();
+      setDeviceToolsDependencies({ deviceManagerFactory: () => manager });
+      await poolWithUnknownRuntime(unknownEmulator, "Pixel_8_Old");
+
+      await expect(
+        killTool().handler({ device: unknownEmulator, force: true }),
+      ).resolves.toBeDefined();
+
+      expect(manager.killedDeviceTargets.map((device) => device.name)).toEqual([
+        "Unknown (emulator-5554)",
+      ]);
+    });
+
     // `force` does not "override the conflict refusal" — it removes the only
     // evidence a conflict could ever be detected from. It means "kill whatever
     // is on this serial", including an AVD that took the serial over (#6864).
@@ -694,6 +700,184 @@ describe("killDevice handler", () => {
       ).resolves.toBeDefined();
       expect(runtimeAvdNameProbes).toEqual([]);
       expect(manager.killedDeviceIds).toEqual(["emulator-5554"]);
+    });
+
+    // A QUARANTINED entry is the wedged-console case the flag exists for: a
+    // discovery sweep read the placeholder off the serial, so the pool's label
+    // stops standing for the runtime and no probe is even attempted. `force`
+    // has nothing to skip here and must not turn that into a refusal — the kill
+    // still runs against the serial as given (#6864).
+    test("force kills an emulator whose pooled entry is quarantined", async () => {
+      manager = new SuccessfulKillDeviceManager();
+      setDeviceToolsDependencies({ deviceManagerFactory: () => manager });
+      const timer = new FakeTimer();
+      sessionManager = new SessionManager(timer, new FakeDeviceSessionRepository());
+      const pool = new DevicePool(
+        sessionManager,
+        "daemon-session",
+        timer,
+        new FakeInstalledAppsRepository(),
+        manager,
+        new DefaultRetryExecutor(timer),
+        new FakeDeviceSessionRepository(),
+      );
+      DaemonState.getInstance().initialize(sessionManager, pool);
+      // The pool started this AVD on the serial and knows it by name...
+      await pool.addDevice(
+        { platform: "android", name: "Pixel_8_Old", deviceId: "emulator-5554" },
+        { platform: "android", name: "Pixel_8_Old", isRunning: true },
+      );
+      // ...and then a discovery sweep could no longer read a name off it.
+      manager.setBootedDevices("android", [unknownEmulator]);
+      await pool.refreshDevices();
+      expect(pool.isPooledIdentityUnresolved("emulator-5554")).toBe(true);
+
+      await expect(
+        killTool().handler({ device: unknownEmulator, force: true }),
+      ).resolves.toBeDefined();
+      expect(runtimeAvdNameProbes).toEqual([]);
+      expect(manager.killedDeviceIds).toEqual(["emulator-5554"]);
+    });
+
+    // The probe borrows the kill's deadline. When that deadline is already spent
+    // by the time verification runs, there is no budget to probe with and no way
+    // to identify the target, so the refusal is immediate and the console is
+    // never contacted (#6863 review).
+    test("refuses without probing when the kill deadline is already spent", async () => {
+      manager = new SuccessfulKillDeviceManager();
+      const timer = new DeadlineSpendingFakeTimer();
+      setDeviceToolsDependencies({ deviceManagerFactory: () => manager, timer });
+      await poolWithUnknownRuntime(unknownEmulator, "Pixel_8_Old");
+      runtimeAvdNames.set("emulator-5554", "Pixel_8_Old");
+      timer.spendDeadlineOnNextRead();
+
+      await expect(killTool().handler({ device: unknownEmulator })).rejects.toThrow(
+        /did not answer/,
+      );
+      expect(runtimeAvdNameProbes).toEqual([]);
+      expect(manager.killedDeviceIds).toEqual([]);
+    });
+
+    // Confirming the runtime's AVD name and then killing under the
+    // `Unknown (<serial>)` placeholder throws the proof away:
+    // `AndroidEmulatorClient.killDevice` re-discovers the serial and refuses to
+    // kill when the discovered name differs from the target's. The verified
+    // name has to travel into the kill target
+    // ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
+    test("hands the CONFIRMED AVD name to the platform kill", async () => {
+      manager = new SuccessfulKillDeviceManager();
+      setDeviceToolsDependencies({ deviceManagerFactory: () => manager });
+      await poolWithUnknownRuntime(unknownEmulator, "Pixel_8_Old");
+      runtimeAvdNames.set("emulator-5554", "Pixel_8_Old");
+
+      await expect(killTool().handler({ device: unknownEmulator })).resolves.toBeDefined();
+
+      expect(manager.killedDeviceTargets.map((device) => device.name)).toEqual(["Pixel_8_Old"]);
+    });
+
+    // The shutdown reservation protects the CAPTURED pool entry from eviction,
+    // but it cannot stop the emulator behind the serial from going away and
+    // being replaced. Re-read the epoch at the confirm and refuse when a
+    // different incarnation now holds the serial
+    // ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
+    test("refuses when the pooled incarnation moves between preflight and the kill", async () => {
+      manager = new SuccessfulKillDeviceManager();
+      await poolWithUnknownRuntime(unknownEmulator, "Pixel_8_Old");
+      runtimeAvdNames.set("emulator-5554", "Pixel_8_Old");
+      const pool = DaemonState.getInstance().getDevicePool();
+      // The lifecycle reservation is taken after the preflight capture and
+      // before the confirm, which is the window a same-serial replacement lands
+      // in production.
+      class ReplacingLifecycleCoordinator extends InMemoryVirtualDeviceLifecycleCoordinator {
+        override async reserve(
+          identity: Parameters<InMemoryVirtualDeviceLifecycleCoordinator["reserve"]>[0],
+          options: Parameters<InMemoryVirtualDeviceLifecycleCoordinator["reserve"]>[1],
+        ) {
+          const pooled = pool.getDevice("emulator-5554");
+          if (pooled) {
+            pooled.incarnation += 1;
+          }
+          return await super.reserve(identity, options);
+        }
+      }
+      setDeviceToolsDependencies({
+        deviceManagerFactory: () => manager,
+        lifecycleCoordinator: new ReplacingLifecycleCoordinator(new FakeTimer()),
+      });
+
+      await expect(killTool().handler({ device: unknownEmulator })).rejects.toThrow(
+        /emulator-5554[\s\S]*Pixel_8_Old/,
+      );
+      expect(manager.killedDeviceIds).toEqual([]);
+    });
+
+    // `force` skips the console probe and nothing else. The `moved` refusal is
+    // not a probe failure: the pool RETIRED the captured epoch under this
+    // daemon's own eyes, so the target the caller named no longer exists and
+    // "act on the serial as given" would be acting on a device the caller never
+    // asked about. Re-resolving is the only correct response (#6864).
+    test("force does not bypass the refusal when the pooled incarnation moved", async () => {
+      manager = new SuccessfulKillDeviceManager();
+      await poolWithUnknownRuntime(unknownEmulator, "Pixel_8_Old");
+      const pool = DaemonState.getInstance().getDevicePool();
+      class ReplacingLifecycleCoordinator extends InMemoryVirtualDeviceLifecycleCoordinator {
+        override async reserve(
+          identity: Parameters<InMemoryVirtualDeviceLifecycleCoordinator["reserve"]>[0],
+          options: Parameters<InMemoryVirtualDeviceLifecycleCoordinator["reserve"]>[1],
+        ) {
+          const pooled = pool.getDevice("emulator-5554");
+          if (pooled) {
+            pooled.incarnation += 1;
+          }
+          return await super.reserve(identity, options);
+        }
+      }
+      setDeviceToolsDependencies({
+        deviceManagerFactory: () => manager,
+        lifecycleCoordinator: new ReplacingLifecycleCoordinator(new FakeTimer()),
+      });
+
+      await expect(killTool().handler({ device: unknownEmulator, force: true })).rejects.toThrow(
+        /emulator-5554[\s\S]*Pixel_8_Old/,
+      );
+      expect(manager.killedDeviceIds).toEqual([]);
+    });
+
+    // Cancellation is not evidence about the runtime's identity. Swallowing an
+    // abort into "unresolved" would make a caller who stopped waiting see an
+    // identity refusal naming a manual `emu kill` escape
+    // ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
+    test("the default AVD resolver rethrows caller cancellation instead of reporting unresolved", async () => {
+      const controller = new AbortController();
+      const reason = new ActionableError("Operation cancelled by the caller");
+      controller.abort(reason);
+
+      await expect(
+        defaultResolveRunningAndroidAvdName(unknownEmulator, 1_000, controller.signal),
+      ).rejects.toBe(reason);
+    });
+
+    test("killDevice surfaces a cancelled AVD probe instead of an identity refusal", async () => {
+      manager = new SuccessfulKillDeviceManager();
+      const reason = new ActionableError("Operation cancelled by the caller");
+      setDeviceToolsDependencies({
+        deviceManagerFactory: () => manager,
+        resolveRunningAndroidAvdName: async () => {
+          throw reason;
+        },
+      });
+      await poolWithUnknownRuntime(unknownEmulator, "Pixel_8_Old");
+
+      const rejection = await killTool()
+        .handler({ device: unknownEmulator })
+        .then(
+          () => undefined,
+          (error: unknown) => error,
+        );
+
+      expect(String(rejection)).toContain("cancelled");
+      expect(String(rejection)).not.toContain("did not answer");
+      expect(manager.killedDeviceIds).toEqual([]);
     });
 
     // A handset's name is `ro.product.model`, not an AVD, and two handsets of the
@@ -711,6 +895,65 @@ describe("killDevice handler", () => {
 
       await expect(killTool().handler({ device: handset })).resolves.toBeDefined();
       expect(runtimeAvdNameProbes).toEqual([]);
+    });
+
+    // The verifier is the LAST gate before anything destructive, but it used to
+    // sit downstream of `shutdownDevice`'s preparation: by the time it refused,
+    // recordings had been stopped, the Android CtrlProxy singleton had been
+    // closed and removed, and passive observers had been detached -- on a device
+    // that is still running and that the daemon just decided it may not touch.
+    // A refusal must leave that device exactly as it found it
+    // ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
+    test("leaves a still-running device fully intact when it refuses", async () => {
+      manager = new SuccessfulKillDeviceManager();
+      const stoppedRecordings: string[] = [];
+      const stoppedObserverDeviceIds: string[] = [];
+      await setVideoRecordingManagerDependencies({
+        videoRecorderService: {
+          // Records the call and then fails; the shutdown path logs and moves
+          // on, so what this test pins is whether the call happened at all.
+          stopRecording: async (recordingId: string) => {
+            stoppedRecordings.push(recordingId);
+            throw new Error("recording teardown unavailable");
+          },
+          listActiveRecordingIds: () => [],
+        } as never,
+        recordingRepository: {
+          // Only the shutdown path's per-device query answers with an active
+          // recording; the manager's own startup scan must stay empty.
+          listRecordings: async (filter?: { deviceId?: string }) =>
+            filter?.deviceId ? [{ recordingId: "recording-1" }] : [],
+          getRecording: async () => undefined,
+        } as never,
+        configRepository: {} as never,
+        highlightClient: {} as never,
+        timer: new FakeTimer(),
+        now: () => new Date(0),
+      });
+      setDeviceToolsDependencies({
+        deviceManagerFactory: () => manager,
+        stopAndroidObservers: async (target) => {
+          stoppedObserverDeviceIds.push(target.deviceId);
+        },
+      });
+      await poolWithUnknownRuntime(unknownEmulator, "Pixel_8_Old");
+      // A passive observation subscriber already owns the per-device singleton.
+      const activeObserver = AndroidCtrlProxyClient.getInstance(
+        { ...unknownEmulator },
+        new FakeAdbClientFactory(),
+      );
+      // The console does not answer, so the identity is never confirmed.
+
+      await expect(killTool().handler({ device: unknownEmulator })).rejects.toThrow(
+        /did not answer/,
+      );
+
+      expect(manager.killedDeviceIds).toEqual([]);
+      expect(stoppedRecordings).toEqual([]);
+      expect(stoppedObserverDeviceIds).toEqual([]);
+      expect(AndroidCtrlProxyClient.getExistingInstance(unknownEmulator.deviceId)).toBe(
+        activeObserver,
+      );
     });
   });
 

@@ -120,7 +120,12 @@ import { canonicalPixelsToPoints } from "./canonicalPixels";
 import { ActionableError, toActionableError } from "../models/ActionableError";
 import { getDeviceDataStreamServer } from "./deviceDataStreamSocketServer";
 import type { KeyValueType } from "../features/storage/storageTypes";
-import type { BootedDevice, ImeAction, ScreenScaleMetadata } from "../models";
+import type {
+  AppendTextFailureSource,
+  BootedDevice,
+  ImeAction,
+  ScreenScaleMetadata,
+} from "../models";
 import type { DeviceService } from "../features/observe/DeviceService";
 import { executionTracker } from "../server/executionTracker";
 import {
@@ -346,7 +351,18 @@ export interface AppendTextInput {
     timeoutMs?: number,
     beforeKeyEvent?: AppendKeyEventValidator,
     signal?: AbortSignal,
-  ): Promise<{ success: boolean; error?: string; charsSent?: number }>;
+  ): Promise<{
+    success: boolean;
+    error?: string;
+    charsSent?: number;
+    /**
+     * Who produced a failure -- see {@link AppendTextFailureSource}. Absent
+     * means the helper. The self-heal in
+     * {@link UnixSocketServer.executeAndroidAppendText} keys on this rather than
+     * on `charsSent === 0`, which cannot tell the two apart.
+     */
+    failureSource?: AppendTextFailureSource;
+  }>;
 }
 
 interface CachedAppendTextInput {
@@ -3922,21 +3938,60 @@ export class UnixSocketServer {
         ? undefined
         : () => this.validateAppendFrameContext(client, frameContext, deadline, totalTimeoutMs);
     const cached = this.getAppendTextInput(targetDevice);
-    const run = async (input: AppendTextInput, pending: string, timeoutMs: number) =>
+    const run = async (
+      input: AppendTextInput,
+      pending: string,
+      timeoutMs: number,
+      validate: typeof beforeKeyEvent,
+    ) =>
       signal
-        ? await input.appendText(pending, timeoutMs, beforeKeyEvent, signal)
-        : await input.appendText(pending, timeoutMs, beforeKeyEvent);
-    const result = await run(cached.input, text, appendTimeoutMs);
-    if (result.success || !cached.fromCache || signal?.aborted) {
+        ? await input.appendText(pending, timeoutMs, validate, signal)
+        : await input.appendText(pending, timeoutMs, validate);
+    const result = await run(cached.input, text, appendTimeoutMs, beforeKeyEvent);
+    if (
+      result.success ||
+      !cached.fromCache ||
+      signal?.aborted ||
+      // A verdict from the RUNNER is not evidence about the helper. The helper
+      // worked; the device-side answer was "no" (a stale `frameContext`, say).
+      // Rebuilding and replaying would type the whole string into a UI the
+      // runner explicitly refused, so the verdict is surfaced exactly as it came
+      // ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
+      result.failureSource === "runner"
+    ) {
       return result;
     }
-    // Self-heal: without an ADB transport id there is nothing that proves a
-    // cached helper still belongs to the device now on this serial, and a
-    // restart faster than one discovery interval leaves the pool incarnation
-    // unchanged. A failure is the first evidence either way, so drop the helper
-    // and give a freshly built one exactly one attempt before surfacing the
-    // error.
-    //
+    return await this.retryAppendTextWithRebuiltHelper(
+      targetDevice,
+      text,
+      result,
+      deadline,
+      beforeKeyEvent,
+      run,
+    );
+  }
+
+  /**
+   * Self-heal, for HELPER failures only: without an ADB transport id there is
+   * nothing that proves a cached helper still belongs to the device now on this
+   * serial, and a restart faster than one discovery interval leaves the pool
+   * incarnation unchanged. A helper failure is the first evidence either way, so
+   * drop the helper and give a freshly built one exactly one attempt before
+   * surfacing the error. A RUNNER verdict never reaches here.
+   */
+  private async retryAppendTextWithRebuiltHelper(
+    targetDevice: BootedDevice,
+    text: string,
+    result: Awaited<ReturnType<AppendTextInput["appendText"]>>,
+    deadline: number,
+    beforeKeyEvent: AppendKeyEventValidator | undefined,
+    run: (
+      input: AppendTextInput,
+      pending: string,
+      timeoutMs: number,
+      validate: AppendKeyEventValidator | undefined,
+    ) => Promise<Awaited<ReturnType<AppendTextInput["appendText"]>>>,
+  ): Promise<{ success: boolean; error?: string; charsSent?: number }> {
     // The retry resumes from the UNCONFIRMED SUFFIX only. `charsSent` is the
     // exact prefix the failed helper landed on the device, so replaying the whole
     // string would duplicate it ("AB" after "A" becomes "AAB", issue #3351). An
@@ -3956,7 +4011,20 @@ export class UnixSocketServer {
     if (retryTimeoutMs <= 0) {
       return result;
     }
-    const retry = await run(this.getAppendTextInput(targetDevice).input, pending, retryTimeoutMs);
+    // The validator travels with the retry only when NOTHING was confirmed:
+    // there, no key event landed, the original validation was never spent, and
+    // the rebuilt helper is starting the same append over. Once a prefix IS
+    // confirmed this is a RESUME of the same logical append -- the original call
+    // already validated `frameContext` before its first key event, and the
+    // confirmed prefix has since emitted TYPE_VIEW_TEXT_CHANGED, which advances
+    // the runner's frame epoch, so re-validating would reject a suffix that is
+    // safe to type ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
+    const retry = await run(
+      this.getAppendTextInput(targetDevice).input,
+      pending,
+      retryTimeoutMs,
+      confirmed === 0 ? beforeKeyEvent : undefined,
+    );
     // Progress accumulates across both helpers so the caller's retry boundary
     // stays an index into the ORIGINAL text; an ambiguous retry poisons the
     // whole count, so it reports no boundary at all.
@@ -3970,7 +4038,7 @@ export class UnixSocketServer {
     frameContext: string,
     deadline: number,
     totalTimeoutMs: number,
-  ): Promise<{ success: boolean; error?: string }> {
+  ): Promise<{ success: boolean; error?: string; failureSource?: AppendTextFailureSource }> {
     const validationTimeoutMs = deadline - this.timer.now();
     if (validationTimeoutMs <= 0) {
       return {
@@ -3986,6 +4054,10 @@ export class UnixSocketServer {
           error:
             validation.error ??
             "Frame context is stale or unavailable; observe a fresh frame before retrying",
+          // The runner answered, and the answer is "no". That is a verdict about
+          // the DEVICE, so the caller must not treat it as a stale helper and
+          // replay the text through a rebuilt one (#6863 review).
+          failureSource: "runner",
         };
   }
 

@@ -2096,9 +2096,17 @@ async function retireShutdownOwnership(
  *
  * Without a pooled capture that is the caller's own target. With one -- an
  * emulator whose discovered name is `Unknown (<serial>)` -- the captured epoch
- * is re-confirmed and the runtime is asked to name itself HERE, immediately
- * before the kill, and the kill runs under the name the runtime gave. Any
- * refusal throws: nothing destructive has run yet at this point.
+ * is re-confirmed and the runtime is asked to name itself, and the kill runs
+ * under the name the runtime gave.
+ *
+ * Called FIRST inside the shutdown's execute step, after the shutdown
+ * reservation (so the pool cannot evict the captured entry mid-check) but
+ * BEFORE any of the shutdown's preparation side effects. A refusal here is a
+ * statement that this daemon may not touch the device at all, so it must not
+ * arrive with the device's recordings already stopped, its CtrlProxy singleton
+ * closed and removed, and its passive observers detached -- those are not
+ * rolled back, and the device is still running
+ * ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
  */
 async function resolvePooledAvdKillTarget(
   dependencies: DeviceToolsDependencies,
@@ -2140,21 +2148,9 @@ async function killProcessAndRetireOwnership(
   ) => void,
   strictDeadline = false,
   timeoutMs = DEVICE_SHUTDOWN_TIMEOUT_MS,
-  pooledAvdCapture?: PooledAvdCapture,
+  killTarget: BootedDevice = device,
 ): Promise<string | undefined> {
   const deviceManager = dependencies.deviceManagerFactory();
-  // LAST thing before anything destructive: re-confirm the captured epoch and
-  // make the runtime name itself, then kill under the name it gave (#6863
-  // review). Ahead of `markIntentionalShutdown`, so a refusal leaves no marker
-  // behind on a device this daemon did not touch.
-  const killTarget = await resolvePooledAvdKillTarget(
-    dependencies,
-    device,
-    pooledAvdCapture,
-    devicePool,
-    shutdownDeadlineMs,
-    requestAbortSignal,
-  );
   if (device.platform === "android") {
     devicePool?.markIntentionalShutdown(device.deviceId);
   }
@@ -2328,6 +2324,15 @@ async function shutdownDevice(
         requestAbortSignal,
         retainReservationUntil: retainShutdownUntil,
       };
+      // Identity first: a refusal must leave a still-running device untouched.
+      const killTarget = await resolvePooledAvdKillTarget(
+        dependencies,
+        device,
+        pooledAvdCapture,
+        devicePool,
+        shutdownDeadlineMs,
+        requestAbortSignal,
+      );
       await stopVideoRecordingsBeforeShutdown(shutdownContext, perf);
       await stopIosCtrlProxyBeforeShutdown(shutdownContext, perf);
       const androidObserverState = await stopAndroidCtrlProxyBeforeShutdown(
@@ -2351,7 +2356,7 @@ async function shutdownDevice(
         },
         strictDeadline,
         timeoutMs,
-        pooledAvdCapture,
+        killTarget,
       );
 
       if (alreadyStoppedMessage !== undefined) {
@@ -2458,7 +2463,14 @@ function resolveKillDeviceStableTarget(
  *     under a fresh `incarnation`, so a surviving entry is the pool's statement
  *     that it has observed no boundary for this serial — the only continuity
  *     evidence left;
- *  3. that entry must carry an `avdName`, which the pool writes only from the
+ *  3. that entry must not be QUARANTINED. Once a discovery sweep observes the
+ *     `Unknown (<serial>)` placeholder on a live entry, the pool flags it
+ *     `identityUnresolved` (`DevicePool.isPooledIdentityUnresolved`) and its
+ *     label stops standing for the runtime: the serial may have been taken over
+ *     by a different AVD that simply cannot name itself either. Returning the
+ *     cached label there is what let a teardown of the NEW AVD miss the booted
+ *     runtime and fall through to the stopped-image inventory path;
+ *  4. that entry must carry an `avdName`, which the pool writes only from the
  *     AVD it itself started (`recordSourceAndroidAvd`), never from discovery.
  *
  * This is a best-effort LABEL, never proof of identity: a same-serial restart
@@ -2480,6 +2492,9 @@ function getValidatedPooledAndroidEntry(
   if (!isAndroidEmulatorSerial(device.deviceId)) {
     // A handset's name is `ro.product.model`, not an AVD; there is nothing to
     // substitute and nothing that would make a pooled label trustworthy.
+    return undefined;
+  }
+  if (devicePool?.isPooledIdentityUnresolved(device.deviceId)) {
     return undefined;
   }
   return devicePool?.getDevice(device.deviceId) ?? undefined;

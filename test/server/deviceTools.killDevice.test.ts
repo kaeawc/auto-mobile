@@ -674,24 +674,32 @@ describe("killDevice handler", () => {
 
     // The shutdown reservation protects the CAPTURED pool entry from eviction,
     // but it cannot stop the emulator behind the serial from going away and
-    // being replaced. Re-read the epoch immediately before the platform kill and
-    // refuse when a different incarnation now holds the serial
+    // being replaced. Re-read the epoch at the confirm and refuse when a
+    // different incarnation now holds the serial
     // ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
     test("refuses when the pooled incarnation moves between preflight and the kill", async () => {
       manager = new SuccessfulKillDeviceManager();
       await poolWithUnknownRuntime(unknownEmulator, "Pixel_8_Old");
       runtimeAvdNames.set("emulator-5554", "Pixel_8_Old");
       const pool = DaemonState.getInstance().getDevicePool();
-      setDeviceToolsDependencies({
-        deviceManagerFactory: () => manager,
-        // Runs immediately before the platform kill, which is where a
-        // same-serial replacement would land in production.
-        stopAndroidObservers: async () => {
+      // The lifecycle reservation is taken after the preflight capture and
+      // before the confirm, which is the window a same-serial replacement lands
+      // in production.
+      class ReplacingLifecycleCoordinator extends InMemoryVirtualDeviceLifecycleCoordinator {
+        override async reserve(
+          identity: Parameters<InMemoryVirtualDeviceLifecycleCoordinator["reserve"]>[0],
+          options: Parameters<InMemoryVirtualDeviceLifecycleCoordinator["reserve"]>[1],
+        ) {
           const pooled = pool.getDevice("emulator-5554");
           if (pooled) {
             pooled.incarnation += 1;
           }
-        },
+          return await super.reserve(identity, options);
+        }
+      }
+      setDeviceToolsDependencies({
+        deviceManagerFactory: () => manager,
+        lifecycleCoordinator: new ReplacingLifecycleCoordinator(new FakeTimer()),
       });
 
       await expect(killTool().handler({ device: unknownEmulator })).rejects.toThrow(
@@ -752,6 +760,65 @@ describe("killDevice handler", () => {
 
       await expect(killTool().handler({ device: handset })).resolves.toBeDefined();
       expect(runtimeAvdNameProbes).toEqual([]);
+    });
+
+    // The verifier is the LAST gate before anything destructive, but it used to
+    // sit downstream of `shutdownDevice`'s preparation: by the time it refused,
+    // recordings had been stopped, the Android CtrlProxy singleton had been
+    // closed and removed, and passive observers had been detached -- on a device
+    // that is still running and that the daemon just decided it may not touch.
+    // A refusal must leave that device exactly as it found it
+    // ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
+    test("leaves a still-running device fully intact when it refuses", async () => {
+      manager = new SuccessfulKillDeviceManager();
+      const stoppedRecordings: string[] = [];
+      const stoppedObserverDeviceIds: string[] = [];
+      await setVideoRecordingManagerDependencies({
+        videoRecorderService: {
+          // Records the call and then fails; the shutdown path logs and moves
+          // on, so what this test pins is whether the call happened at all.
+          stopRecording: async (recordingId: string) => {
+            stoppedRecordings.push(recordingId);
+            throw new Error("recording teardown unavailable");
+          },
+          listActiveRecordingIds: () => [],
+        } as never,
+        recordingRepository: {
+          // Only the shutdown path's per-device query answers with an active
+          // recording; the manager's own startup scan must stay empty.
+          listRecordings: async (filter?: { deviceId?: string }) =>
+            filter?.deviceId ? [{ recordingId: "recording-1" }] : [],
+          getRecording: async () => undefined,
+        } as never,
+        configRepository: {} as never,
+        highlightClient: {} as never,
+        timer: new FakeTimer(),
+        now: () => new Date(0),
+      });
+      setDeviceToolsDependencies({
+        deviceManagerFactory: () => manager,
+        stopAndroidObservers: async (target) => {
+          stoppedObserverDeviceIds.push(target.deviceId);
+        },
+      });
+      await poolWithUnknownRuntime(unknownEmulator, "Pixel_8_Old");
+      // A passive observation subscriber already owns the per-device singleton.
+      const activeObserver = AndroidCtrlProxyClient.getInstance(
+        { ...unknownEmulator },
+        new FakeAdbClientFactory(),
+      );
+      // The console does not answer, so the identity is never confirmed.
+
+      await expect(killTool().handler({ device: unknownEmulator })).rejects.toThrow(
+        /did not answer/,
+      );
+
+      expect(manager.killedDeviceIds).toEqual([]);
+      expect(stoppedRecordings).toEqual([]);
+      expect(stoppedObserverDeviceIds).toEqual([]);
+      expect(AndroidCtrlProxyClient.getExistingInstance(unknownEmulator.deviceId)).toBe(
+        activeObserver,
+      );
     });
   });
 

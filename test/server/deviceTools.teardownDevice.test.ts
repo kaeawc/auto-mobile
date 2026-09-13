@@ -1500,6 +1500,60 @@ describe("deleteDevice handler", () => {
     expect(manager.destroyRequests).toEqual([]);
   });
 
+  // AVD B has taken over the serial AVD A was pooled on, and discovery can only
+  // report `Unknown (<serial>)` for it. The pool quarantines its entry for that
+  // serial, so the cached label stops standing in for a resolved AVD name --
+  // which is what previously let a teardown of B miss the booted runtime, skip
+  // the unresolved-runtime guard on the strength of A's label, and destroy B's
+  // image through the STOPPED-image inventory path while B was running
+  // ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
+  test("refuses to delete an inventory image while the serial's runtime is unresolved", async () => {
+    const timer = new FakeTimer();
+    const pooledAvdName = "Pixel_8_API_35";
+    const reusedSerialRuntime: BootedDevice = {
+      platform: "android",
+      name: `Unknown (emulator-5556)`,
+      deviceId: "emulator-5556",
+    };
+    const pooledImage: DeviceInfo = {
+      platform: "android",
+      name: pooledAvdName,
+      isRunning: true,
+    };
+    const sessionManager = new SessionManager(timer);
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      manager,
+      new DefaultRetryExecutor(timer),
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    // The pool started AVD A on this serial and knows it by name.
+    await pool.addDevice(
+      { platform: "android", name: pooledAvdName, deviceId: "emulator-5556" },
+      pooledImage,
+    );
+    // A discovery sweep can no longer read a name off that serial.
+    manager.setBootedDevices("android", [reusedSerialRuntime]);
+    await pool.refreshDevices();
+    manager.setDeviceImages("android", [
+      pooledImage,
+      // AVD B looks stopped to the inventory, because the runtime on the serial
+      // could not name itself.
+      { platform: "android", name: "Pixel_7_API_34", isRunning: false },
+    ]);
+
+    const body = responseBody(
+      await teardownTool().handler(request("android", "Pixel_7_API_34", "Pixel_7_API_34")),
+    );
+
+    expect(body.state).toBe("failed");
+    expect(body.failure).toEqual(expect.objectContaining({ code: "target_identity_unresolved" }));
+    expect(manager.destroyRequests).toEqual([]);
+  });
+
   test("does not delete an AVD when stableId and stableName identify different targets", async () => {
     manager.setBootedDevices("android", [
       {

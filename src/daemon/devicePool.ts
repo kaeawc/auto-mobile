@@ -5827,6 +5827,11 @@ export class DevicePool {
    *    read. The tolerance is guarded by {@link isAndroidEmulatorSerial}
    *    because a handset's name is `ro.product.model`, which is not unique;
    *    handsets stay on strict name equality behind their unique serial.
+   *
+   * The placeholder tolerance exists ONLY to avoid that eviction. It is not
+   * agreement: {@link reconcilePooledIdentityResolution} quarantines the entry
+   * the moment a sweep tolerates one, and every consumer that would ACT on the
+   * pooled identity reads that state instead of this predicate.
    */
   private namesAgreeOnIdentity(
     pooled: PooledDevice,

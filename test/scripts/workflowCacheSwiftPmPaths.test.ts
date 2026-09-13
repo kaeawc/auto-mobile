@@ -31,10 +31,31 @@ function loadWorkflowCachePaths(workflowRelativePath: string) {
   return collectCachePaths(loadAllJobSteps(workflowRelativePath));
 }
 
+function globMatchesLiteral(segment: string, literal: string): boolean {
+  const opaqueSegment = segment.replace(/\$\{\{.*?\}\}/g, "<github-expression>");
+  const pattern = opaqueSegment
+    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    .replace(/\\\*/g, ".*")
+    .replace(/\\\?/g, ".");
+  return new RegExp(`^${pattern}$`).test(literal);
+}
+
 function collectForbiddenCachePaths(entries: string[]): string[] {
   return entries.filter((entry) => {
     const path = entry.replace(/\/+$/, "");
-    return path.split("/").some((segment) => segment === ".build" || segment === "SourcePackages");
+    const segments = path.split("/");
+    const hasForbiddenSwiftPmState =
+      segments[0] === "~" &&
+      segments[1] === ".swiftpm" &&
+      (segments.length === 2 ||
+        (segments.length >= 3 && (segments[2] === "configuration" || segments[2] === "security")));
+    return (
+      hasForbiddenSwiftPmState ||
+      segments.some(
+        (segment) =>
+          globMatchesLiteral(segment, ".build") || globMatchesLiteral(segment, "SourcePackages"),
+      )
+    );
   });
 }
 
@@ -75,6 +96,12 @@ jobs:
             ios/control-proxy/.build/workspace-state.json
             \${{ runner.temp }}/DerivedData/SourcePackages/**
             ios/x/.build/**
+            ios/**/.build*
+            \${{ runner.temp }}/DerivedData/SourcePackages*
+            ~/.swiftpm
+            ~/.swiftpm/security
+            ~/.swiftpm/configuration
+            ~/.swiftpm/cache
 `) as WorkflowDefinition;
 
     const { cacheStepCount, entries } = collectCachePaths(allJobSteps(workflow));
@@ -87,6 +114,11 @@ jobs:
       "ios/control-proxy/.build/workspace-state.json",
       "${{ runner.temp }}/DerivedData/SourcePackages/**",
       "ios/x/.build/**",
+      "ios/**/.build*",
+      "${{ runner.temp }}/DerivedData/SourcePackages*",
+      "~/.swiftpm",
+      "~/.swiftpm/security",
+      "~/.swiftpm/configuration",
     ]);
   });
 });

@@ -443,7 +443,7 @@ jobs:
         with:
           path: |
             ~/Library/Caches/org.swift.swiftpm
-            ~/.swiftpm
+            ~/.swiftpm/cache
           key: ${{ runner.os }}-spm-nightly-swift-packages-${{ matrix.config.xcode }}-${{ hashFiles('Package.swift', 'ios/**/Package.swift') }}
           restore-keys: |
             ${{ runner.os }}-spm-nightly-swift-packages-${{ matrix.config.xcode }}-
@@ -532,7 +532,7 @@ jobs:
         with:
           path: |
             ~/Library/Caches/org.swift.swiftpm
-            ~/.swiftpm
+            ~/.swiftpm/cache
           key: ${{ runner.os }}-spm-nightly-xcode-build-${{ matrix.config.xcode }}-${{ hashFiles('Package.swift', 'ios/**/Package.swift') }}
           restore-keys: |
             ${{ runner.os }}-spm-nightly-xcode-build-${{ matrix.config.xcode }}-

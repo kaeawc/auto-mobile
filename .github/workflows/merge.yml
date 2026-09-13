@@ -569,7 +569,7 @@ jobs:
         with:
           path: |
             ~/Library/Caches/org.swift.swiftpm
-            ~/.swiftpm
+            ~/.swiftpm/cache
           key: ${{ runner.os }}-spm-screen-capture-${{ steps.webrtc-xcode-version.outputs.version }}-${{ hashFiles('ios/screen-capture/Package.swift') }}
           restore-keys: |
             ${{ runner.os }}-spm-screen-capture-${{ steps.webrtc-xcode-version.outputs.version }}-
@@ -1012,7 +1012,7 @@ jobs:
         with:
           path: |
             ~/Library/Caches/org.swift.swiftpm
-            ~/.swiftpm
+            ~/.swiftpm/cache
           key: ${{ runner.os }}-spm-merge-swift-build-${{ matrix.config.xcode }}-${{ hashFiles('Package.swift', 'ios/**/Package.swift') }}
           restore-keys: |
             ${{ runner.os }}-spm-merge-swift-build-${{ matrix.config.xcode }}-
@@ -1084,7 +1084,7 @@ jobs:
         with:
           path: |
             ~/Library/Caches/org.swift.swiftpm
-            ~/.swiftpm
+            ~/.swiftpm/cache
           key: ${{ runner.os }}-spm-merge-swift-test-${{ matrix.config.xcode }}-${{ hashFiles('Package.swift', 'ios/**/Package.swift') }}
           restore-keys: |
             ${{ runner.os }}-spm-merge-swift-test-${{ matrix.config.xcode }}-
@@ -1146,7 +1146,7 @@ jobs:
         with:
           path: |
             ~/Library/Caches/org.swift.swiftpm
-            ~/.swiftpm
+            ~/.swiftpm/cache
           key: ${{ runner.os }}-spm-merge-xcode-build-${{ matrix.config.xcode }}-${{ hashFiles('Package.swift', 'ios/**/Package.swift') }}
           restore-keys: |
             ${{ runner.os }}-spm-merge-xcode-build-${{ matrix.config.xcode }}-
@@ -1641,7 +1641,7 @@ jobs:
         with:
           path: |
             ~/Library/Caches/org.swift.swiftpm
-            ~/.swiftpm
+            ~/.swiftpm/cache
           key: ${{ runner.os }}-spm-merge-swift-coverage-${{ steps.coverage-xcode-version.outputs.version }}-${{ hashFiles('Package.swift', 'ios/**/Package.swift') }}
           restore-keys: |
             ${{ runner.os }}-spm-merge-swift-coverage-${{ steps.coverage-xcode-version.outputs.version }}-

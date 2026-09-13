@@ -1706,7 +1706,7 @@ jobs:
         with:
           path: |
             ~/Library/Caches/org.swift.swiftpm
-            ~/.swiftpm
+            ~/.swiftpm/cache
           key: ${{ runner.os }}-spm-swift-coverage-26.5-${{ hashFiles('Package.swift', 'ios/**/Package.swift') }}
           restore-keys: |
             ${{ runner.os }}-spm-swift-coverage-26.5-
@@ -1774,7 +1774,7 @@ jobs:
         with:
           path: |
             ~/Library/Caches/org.swift.swiftpm
-            ~/.swiftpm
+            ~/.swiftpm/cache
           key: ${{ runner.os }}-spm-swift-packages-${{ matrix.config.xcode }}-${{ hashFiles('Package.swift', 'ios/**/Package.swift') }}
           restore-keys: |
             ${{ runner.os }}-spm-swift-packages-${{ matrix.config.xcode }}-
@@ -1864,7 +1864,7 @@ jobs:
         with:
           path: |
             ~/Library/Caches/org.swift.swiftpm
-            ~/.swiftpm
+            ~/.swiftpm/cache
           key: ${{ runner.os }}-spm-xcode-build-${{ matrix.project }}-${{ matrix.config.xcode }}-${{ hashFiles('Package.swift', 'ios/**/Package.swift') }}
           restore-keys: |
             ${{ runner.os }}-spm-xcode-build-${{ matrix.project }}-${{ matrix.config.xcode }}-
@@ -1943,7 +1943,7 @@ jobs:
         with:
           path: |
             ~/Library/Caches/org.swift.swiftpm
-            ~/.swiftpm
+            ~/.swiftpm/cache
           key: ${{ runner.os }}-spm-playground-tests-${{ matrix.config.xcode }}-${{ hashFiles('Package.swift', 'ios/**/Package.swift') }}
           restore-keys: |
             ${{ runner.os }}-spm-playground-tests-${{ matrix.config.xcode }}-
@@ -2031,7 +2031,7 @@ jobs:
         with:
           path: |
             ~/Library/Caches/org.swift.swiftpm
-            ~/.swiftpm
+            ~/.swiftpm/cache
           key: ${{ runner.os }}-spm-xctestrunner-26.5-${{ hashFiles('Package.swift', 'ios/**/Package.swift') }}
           restore-keys: |
             ${{ runner.os }}-spm-xctestrunner-26.5-
@@ -2288,7 +2288,7 @@ jobs:
         with:
           path: |
             ~/Library/Caches/org.swift.swiftpm
-            ~/.swiftpm
+            ~/.swiftpm/cache
           key: ${{ runner.os }}-spm-root-package-26.5-${{ hashFiles('Package.swift') }}
           restore-keys: |
             ${{ runner.os }}-spm-root-package-26.5-
@@ -3372,7 +3372,7 @@ jobs:
         with:
           path: |
             ~/Library/Caches/org.swift.swiftpm
-            ~/.swiftpm
+            ~/.swiftpm/cache
           key: ${{ runner.os }}-spm-screen-capture-${{ steps.webrtc-xcode-version.outputs.version }}-${{ hashFiles('ios/screen-capture/Package.swift') }}
           restore-keys: |
             ${{ runner.os }}-spm-screen-capture-${{ steps.webrtc-xcode-version.outputs.version }}-

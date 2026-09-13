@@ -3,6 +3,7 @@ import { SessionManager } from "../../../src/daemon/sessionManager";
 import { DevicePool } from "../../../src/daemon/devicePool";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../../fakes/FakeDeviceSessionPersistence";
+import { FakeDeviceManager } from "../../fakes/FakeDeviceManager";
 import { FakeInstalledAppsRepository } from "../../fakes/FakeInstalledAppsRepository";
 import { BootedDevice } from "../../../src/models";
 import { DefaultRetryExecutor } from "../../../src/utils/retry/RetryExecutor";
@@ -25,19 +26,25 @@ describe("Parallel Execution Across Multiple Devices", function () {
     fakeAppsRepo = new FakeInstalledAppsRepository();
     // Create a RetryExecutor that uses the fakeTimer so time advancement works correctly
     const retryExecutor = new DefaultRetryExecutor(fakeTimer);
+    const devices = [
+      createBootedDevice("device-1"),
+      createBootedDevice("device-2"),
+      createBootedDevice("device-3"),
+    ];
+    // An injected device manager, not the real one: a pooled Android entry is
+    // re-proved present against discovery before it is assigned, and the default
+    // manager would shell out to a real adb for that.
+    const fakeDeviceManager = new FakeDeviceManager();
+    fakeDeviceManager.bootedDevices = [...devices];
     devicePool = new DevicePool(
       sessionManager,
       "test-daemon-session-id",
       fakeTimer,
       fakeAppsRepo,
-      undefined,
+      fakeDeviceManager,
       retryExecutor,
     );
-    await devicePool.initializeWithDevices([
-      createBootedDevice("device-1"),
-      createBootedDevice("device-2"),
-      createBootedDevice("device-3"),
-    ]);
+    await devicePool.initializeWithDevices(devices);
   });
 
   afterEach(function () {

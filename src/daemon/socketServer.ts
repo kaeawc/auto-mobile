@@ -70,6 +70,7 @@ import { InputText, type AppendKeyEventValidator } from "../features/action/Inpu
 import { getCurrentBuildIdentity } from "./buildIdentity";
 import { DaemonState } from "./daemonState";
 import { DaemonStateAccess, handleDaemonRequest } from "./daemonRequestHandlers";
+import { deviceIncarnationToken } from "../utils/deviceIncarnation";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { type IdGenerator, defaultIdGenerator } from "../utils/IdGenerator";
 import type { FeatureFlagService } from "../features/featureFlags/FeatureFlagService";
@@ -119,7 +120,12 @@ import { canonicalPixelsToPoints } from "./canonicalPixels";
 import { ActionableError, toActionableError } from "../models/ActionableError";
 import { getDeviceDataStreamServer } from "./deviceDataStreamSocketServer";
 import type { KeyValueType } from "../features/storage/storageTypes";
-import type { BootedDevice, ImeAction, ScreenScaleMetadata } from "../models";
+import type {
+  AppendTextFailureSource,
+  BootedDevice,
+  ImeAction,
+  ScreenScaleMetadata,
+} from "../models";
 import type { DeviceService } from "../features/observe/DeviceService";
 import { executionTracker } from "../server/executionTracker";
 import {
@@ -345,12 +351,30 @@ export interface AppendTextInput {
     timeoutMs?: number,
     beforeKeyEvent?: AppendKeyEventValidator,
     signal?: AbortSignal,
-  ): Promise<{ success: boolean; error?: string; charsSent?: number }>;
+  ): Promise<{
+    success: boolean;
+    error?: string;
+    charsSent?: number;
+    /**
+     * Who produced a failure -- see {@link AppendTextFailureSource}. Absent
+     * means the helper. The self-heal in
+     * {@link UnixSocketServer.executeAndroidAppendText} keys on this rather than
+     * on `charsSent === 0`, which cannot tell the two apart.
+     */
+    failureSource?: AppendTextFailureSource;
+  }>;
 }
 
 interface CachedAppendTextInput {
   input: AppendTextInput;
-  transportId?: string;
+  /**
+   * Pool connection epoch this helper was built for (see
+   * `utils/deviceIncarnation.ts`). `undefined` means no pool could answer, in
+   * which case the entry is still reused -- {@link
+   * UnixSocketServer.evictDeviceInputCache} and the append self-heal are the
+   * safeguards, not a rebuild on every keystroke.
+   */
+  incarnationToken: string | undefined;
 }
 
 interface BoundMcpClient {
@@ -3913,10 +3937,100 @@ export class UnixSocketServer {
       frameContext === undefined
         ? undefined
         : () => this.validateAppendFrameContext(client, frameContext, deadline, totalTimeoutMs);
-    const input = this.getAppendTextInput(targetDevice);
-    return signal
-      ? await input.appendText(text, appendTimeoutMs, beforeKeyEvent, signal)
-      : await input.appendText(text, appendTimeoutMs, beforeKeyEvent);
+    const cached = this.getAppendTextInput(targetDevice);
+    const run = async (
+      input: AppendTextInput,
+      pending: string,
+      timeoutMs: number,
+      validate: typeof beforeKeyEvent,
+    ) =>
+      signal
+        ? await input.appendText(pending, timeoutMs, validate, signal)
+        : await input.appendText(pending, timeoutMs, validate);
+    const result = await run(cached.input, text, appendTimeoutMs, beforeKeyEvent);
+    if (
+      result.success ||
+      !cached.fromCache ||
+      signal?.aborted ||
+      // A verdict from the RUNNER is not evidence about the helper. The helper
+      // worked; the device-side answer was "no" (a stale `frameContext`, say).
+      // Rebuilding and replaying would type the whole string into a UI the
+      // runner explicitly refused, so the verdict is surfaced exactly as it came
+      // ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
+      result.failureSource === "runner"
+    ) {
+      return result;
+    }
+    return await this.retryAppendTextWithRebuiltHelper(
+      targetDevice,
+      text,
+      result,
+      deadline,
+      beforeKeyEvent,
+      run,
+    );
+  }
+
+  /**
+   * Self-heal, for HELPER failures only: without an ADB transport id there is
+   * nothing that proves a cached helper still belongs to the device now on this
+   * serial, and a restart faster than one discovery interval leaves the pool
+   * incarnation unchanged. A helper failure is the first evidence either way, so
+   * drop the helper and give a freshly built one exactly one attempt before
+   * surfacing the error. A RUNNER verdict never reaches here.
+   */
+  private async retryAppendTextWithRebuiltHelper(
+    targetDevice: BootedDevice,
+    text: string,
+    result: Awaited<ReturnType<AppendTextInput["appendText"]>>,
+    deadline: number,
+    beforeKeyEvent: AppendKeyEventValidator | undefined,
+    run: (
+      input: AppendTextInput,
+      pending: string,
+      timeoutMs: number,
+      validate: AppendKeyEventValidator | undefined,
+    ) => Promise<Awaited<ReturnType<AppendTextInput["appendText"]>>>,
+  ): Promise<{ success: boolean; error?: string; charsSent?: number }> {
+    // The retry resumes from the UNCONFIRMED SUFFIX only. `charsSent` is the
+    // exact prefix the failed helper landed on the device, so replaying the whole
+    // string would duplicate it ("AB" after "A" becomes "AAB", issue #3351). An
+    // ABSENT `charsSent` means the helper cannot say whether its in-flight key
+    // event landed (an adb timeout kills the host child, not Android's handling
+    // of the event), which makes every replay unsafe: surface the failure.
+    const confirmed = result.charsSent;
+    if (confirmed === undefined) {
+      return result;
+    }
+    const pending = text.slice(confirmed);
+    if (pending.length === 0) {
+      return result;
+    }
+    this.evictDeviceInputCache(targetDevice.deviceId);
+    const retryTimeoutMs = deadline - this.timer.now();
+    if (retryTimeoutMs <= 0) {
+      return result;
+    }
+    // The validator travels with the retry only when NOTHING was confirmed:
+    // there, no key event landed, the original validation was never spent, and
+    // the rebuilt helper is starting the same append over. Once a prefix IS
+    // confirmed this is a RESUME of the same logical append -- the original call
+    // already validated `frameContext` before its first key event, and the
+    // confirmed prefix has since emitted TYPE_VIEW_TEXT_CHANGED, which advances
+    // the runner's frame epoch, so re-validating would reject a suffix that is
+    // safe to type ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
+    const retry = await run(
+      this.getAppendTextInput(targetDevice).input,
+      pending,
+      retryTimeoutMs,
+      confirmed === 0 ? beforeKeyEvent : undefined,
+    );
+    // Progress accumulates across both helpers so the caller's retry boundary
+    // stays an index into the ORIGINAL text; an ambiguous retry poisons the
+    // whole count, so it reports no boundary at all.
+    return retry.charsSent === undefined
+      ? { success: retry.success, ...(retry.error !== undefined ? { error: retry.error } : {}) }
+      : { ...retry, charsSent: confirmed + retry.charsSent };
   }
 
   private async validateAppendFrameContext(
@@ -3924,7 +4038,7 @@ export class UnixSocketServer {
     frameContext: string,
     deadline: number,
     totalTimeoutMs: number,
-  ): Promise<{ success: boolean; error?: string }> {
+  ): Promise<{ success: boolean; error?: string; failureSource?: AppendTextFailureSource }> {
     const validationTimeoutMs = deadline - this.timer.now();
     if (validationTimeoutMs <= 0) {
       return {
@@ -3940,6 +4054,10 @@ export class UnixSocketServer {
           error:
             validation.error ??
             "Frame context is stale or unavailable; observe a fresh frame before retrying",
+          // The runner answered, and the answer is "no". That is a verdict about
+          // the DEVICE, so the caller must not treat it as a stale helper and
+          // replay the text through a rebuilt one (#6863 review).
+          failureSource: "runner",
         };
   }
 
@@ -4854,21 +4972,31 @@ export class UnixSocketServer {
     }
   }
 
-  /** Cached-per-device accessor for the append helper; see {@link appendTextInputs}. */
-  private getAppendTextInput(device: BootedDevice): AppendTextInput {
+  /**
+   * Cached-per-device accessor for the append helper; see
+   * {@link appendTextInputs}. Keyed on the pool's connection epoch so a
+   * same-serial reincarnation cannot inherit the previous device's probed API
+   * level. `fromCache` tells the caller whether a failure is worth retrying
+   * against a freshly built helper.
+   */
+  private getAppendTextInput(device: BootedDevice): {
+    input: AppendTextInput;
+    fromCache: boolean;
+  } {
+    const incarnationToken = deviceIncarnationToken(device.deviceId);
     const existing = this.appendTextInputs.get(device.deviceId);
-    if (existing?.transportId !== undefined && device.transportId === existing.transportId) {
-      return existing.input;
+    if (existing && existing.incarnationToken === incarnationToken) {
+      return { input: existing.input, fromCache: true };
     }
     if (existing) {
       logger.debug(
         `[UnixSocketServer] Rebuilding cached append helper for ${device.deviceId}: ` +
-          `ADB transport changed from ${existing.transportId} to ${device.transportId}`,
+          `pool incarnation changed from ${existing.incarnationToken} to ${incarnationToken}`,
       );
     }
     const created = this.appendTextFactory(device);
-    this.appendTextInputs.set(device.deviceId, { input: created, transportId: device.transportId });
-    return created;
+    this.appendTextInputs.set(device.deviceId, { input: created, incarnationToken });
+    return { input: created, fromCache: false };
   }
 
   /**

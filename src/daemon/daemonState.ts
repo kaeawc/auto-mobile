@@ -1,6 +1,7 @@
 import { SessionManager } from "./sessionManager";
 import { DevicePool } from "./devicePool";
 import { DeviceSessionRegistry } from "./deviceSessionRegistry";
+import { setDeviceIncarnationResolver } from "../utils/deviceIncarnation";
 
 export interface DaemonStateLike {
   isInitialized(): boolean;
@@ -50,6 +51,11 @@ export class DaemonState implements DaemonStateLike {
     this.sessionManager = sessionManager;
     this.devicePool = devicePool;
     this.deviceSessionRegistry = deviceSessionRegistry;
+    // The pool's incarnation counter is the only connection-epoch token in the
+    // identity model, and feature code caching per-device state must be able to
+    // read it without importing the daemon. Publish it here, where the live
+    // pool is known.
+    setDeviceIncarnationResolver((deviceId) => devicePool.getDeviceIncarnation(deviceId));
   }
 
   /**
@@ -100,5 +106,11 @@ export class DaemonState implements DaemonStateLike {
     this.sessionManager = null;
     this.devicePool = null;
     this.deviceSessionRegistry = null;
+    // The resolver {@link initialize} installed closes over the pool being
+    // retired here. Leaving it registered would keep that pool alive and keep
+    // answering direct-mode feature code with its epochs, so a per-device cache
+    // could hold state across the reset. Clearing it restores the no-daemon
+    // answer ("no epoch information") until the next initialize.
+    setDeviceIncarnationResolver(undefined);
   }
 }

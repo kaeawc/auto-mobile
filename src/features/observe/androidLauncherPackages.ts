@@ -77,13 +77,35 @@ const FALLBACK_LAUNCHER_PACKAGES: ReadonlySet<string> = new Set([
  */
 const RESOLVED_HOME_PACKAGE_TTL_MS = 30_000;
 
+/**
+ * How long a resolved HOME launcher package stays valid when NO connection
+ * epoch token is available (#6863 review). The 30-second TTL above is
+ * only safe because an incarnation change invalidates the entry; outside a
+ * daemon -- direct mode, or any caller with no pool to ask -- the token is
+ * always undefined, and two undefined tokens compare equal, so a same-serial
+ * reconnect or a reused emulator serial would be served the PREVIOUS
+ * runtime's launcher for the rest of the window and report a successful Home
+ * press as failed.
+ *
+ * Rather than bypass the cache entirely (which would re-query `cmd package
+ * resolve-activity` on every verification retry, several times per Home
+ * press), an untokened entry lives only long enough to serve the retries of
+ * the single verification that resolved it: a device swap needs the old
+ * device to disconnect and a new one to boot, which is orders of magnitude
+ * slower than this. `verifyAndroidHomeForeground` additionally evicts the
+ * entry whenever a verification fails, so even within this window a stale
+ * package self-heals on the next attempt.
+ */
+const UNTOKENED_RESOLVED_HOME_PACKAGE_TTL_MS = 2_000;
+
 interface ResolvedHomePackageCacheEntry {
   packageName: string;
   resolvedAtMs: number;
   /**
-   * The device CONNECTION EPOCH this entry was resolved under, e.g.
-   * `BootedDevice.transportId` -- undefined when the caller has no
-   * incarnation info to offer. Android serials are reused across connection
+   * The device CONNECTION EPOCH this entry was resolved under -- the device
+   * pool's `incarnation` counter, read through
+   * `utils/deviceIncarnation.ts`; undefined when no pool can answer (direct
+   * mode, or a caller with no incarnation info to offer). Android serials are reused across connection
    * epochs (see `daemon/deviceSessionRegistry.ts`; e.g. a fresh AVD taking
    * over `emulator-5554` within the TTL below), so keying this cache on
    * `deviceId` alone lets a same-serial reincarnation serve the PREVIOUS
@@ -125,11 +147,13 @@ function parseResolvedHomePackage(stdout: string): string | null {
 }
 
 /**
- * The cached package name, but only when it is still within
- * {@link RESOLVED_HOME_PACKAGE_TTL_MS} of `now` AND was resolved under the
- * same `incarnationToken`. Returns undefined for "no cache entry", "cache
- * entry expired", and "cache entry belongs to a superseded incarnation" --
- * the caller re-resolves in all three cases.
+ * The cached package name, but only when it is still within its lifetime
+ * ({@link RESOLVED_HOME_PACKAGE_TTL_MS}, or the much shorter
+ * {@link UNTOKENED_RESOLVED_HOME_PACKAGE_TTL_MS} when no epoch token is
+ * available) of `now` AND was resolved under the same `incarnationToken`.
+ * Returns undefined for "no cache entry", "cache entry expired", and "cache
+ * entry belongs to a superseded incarnation" -- the caller re-resolves in all
+ * three cases.
  */
 function freshCachedPackageName(
   cached: ResolvedHomePackageCacheEntry | undefined,
@@ -139,7 +163,13 @@ function freshCachedPackageName(
   if (cached === undefined || cached.incarnationToken !== incarnationToken) {
     return undefined;
   }
-  return now - cached.resolvedAtMs < RESOLVED_HOME_PACKAGE_TTL_MS ? cached.packageName : undefined;
+  // Without a token there is nothing to notice a reincarnation with, so the
+  // entry cannot be trusted for a full TTL.
+  const ttlMs =
+    incarnationToken === undefined
+      ? UNTOKENED_RESOLVED_HOME_PACKAGE_TTL_MS
+      : RESOLVED_HOME_PACKAGE_TTL_MS;
+  return now - cached.resolvedAtMs < ttlMs ? cached.packageName : undefined;
 }
 
 /**
@@ -150,12 +180,17 @@ function freshCachedPackageName(
  * must fall back to {@link isFallbackLauncherPackage} in that case.
  *
  * @param incarnationToken - A discriminator for the device's current
- *   connection epoch, e.g. `BootedDevice.transportId`. A cached entry
- *   resolved under a DIFFERENT token (same `deviceId`, new incarnation -- a
- *   reused Android serial such as `emulator-5554` picked up by a fresh AVD
- *   within the TTL) is treated as a cache miss and re-resolved, instead of
- *   serving the previous incarnation's launcher. Omit to keep the previous
- *   serial-only keying (e.g. callers with no incarnation info available).
+ *   connection epoch: the device pool's `incarnation` counter, stringified by
+ *   `deviceIncarnationToken`. A cached entry resolved under a DIFFERENT token
+ *   (same `deviceId`, new incarnation -- a reused Android serial such as
+ *   `emulator-5554` picked up by a fresh AVD within the TTL) is treated as a
+ *   cache miss and re-resolved, instead of serving the previous incarnation's
+ *   launcher. Omit when no incarnation info is available (direct mode, or a
+ *   caller with no pool to ask): the entry is then keyed on the serial alone
+ *   and, because nothing can notice a reincarnation, only lives for
+ *   {@link UNTOKENED_RESOLVED_HOME_PACKAGE_TTL_MS}. A restart faster than one
+ *   discovery interval leaves the incarnation unchanged, so this narrows the
+ *   window -- it does not close it.
  * @param timeoutMs - Optional remaining budget for the resolve command. When
  *   provided the ADB query is bounded to `min(RESOLVE_HOME_TIMEOUT_MS,
  *   timeoutMs)` so a caller spending a shrinking request deadline (e.g. home
@@ -203,7 +238,12 @@ export async function resolveConfiguredHomePackage(
     if (packageName) {
       resolvedHomePackageCache.set(deviceId, {
         packageName,
-        resolvedAtMs: now,
+        // Stamp the entry with the clock AFTER the resolve, never the `now`
+        // read before it: the TTL measures the age of this ANSWER. A resolve
+        // slower than the (short) untokened lifetime would otherwise write an
+        // entry that is already expired, so the next verification retry
+        // re-resolves and eats the caller's remaining deadline (#6863 review).
+        resolvedAtMs: timer.now(),
         incarnationToken,
       });
     }
@@ -247,9 +287,9 @@ export function isFallbackLauncherPackage(appId: string | null | undefined): boo
  * fallback launcher package otherwise.
  *
  * @param incarnationToken - Forwarded to {@link resolveConfiguredHomePackage}
- *   -- see its doc for why a device's connection-epoch discriminator (e.g.
- *   `BootedDevice.transportId`) must be supplied to avoid serving a reused
- *   serial's stale cached launcher.
+ *   -- see its doc for why a device's connection-epoch discriminator (the pool
+ *   incarnation, via `deviceIncarnationToken`) must be supplied to avoid
+ *   serving a reused serial's stale cached launcher.
  * @param timeoutMs - Optional remaining budget forwarded to
  *   {@link resolveConfiguredHomePackage} so the launcher lookup shares the
  *   caller's deadline instead of always taking the full resolve default.

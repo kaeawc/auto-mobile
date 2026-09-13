@@ -2930,4 +2930,55 @@ describe("DeviceDataStreamSocketServer", () => {
       });
     });
   });
+  // Stream routing while the pool cannot say WHICH AVD is on a serial (#6863
+  // review). The pooled entry keeps its session and its epoch, but a possible
+  // replacement's passive frames must not reach the previous AVD's subscribers —
+  // nor anyone else, since the serial they are attributed to is the only thing
+  // the daemon still knows about them.
+  describe("unresolved pooled identity", () => {
+    const frame = (text: string) =>
+      ({ hierarchy: { node: { $: { class: "Root", text } } } }) as any;
+
+    it("drops device-attributed frames while routing is suspended", () => {
+      const { socket } = server.simulateSubscription({ deviceId: "device-1" });
+      server.sessionResolver.quarantine("device-1");
+
+      server.pushHierarchyUpdate("device-1", frame("a"));
+
+      expect(socket.getWrittenMessages()).toHaveLength(0);
+    });
+
+    it("drops them for all-device subscribers too, not just the previous epoch's", () => {
+      const { socket } = server.simulateSubscription({ deviceId: "device-1" });
+      const all = server.simulateSubscription({});
+      server.sessionResolver.quarantine("device-1");
+
+      server.pushHierarchyUpdate("device-1", frame("a"));
+
+      expect(socket.getWrittenMessages()).toHaveLength(0);
+      expect(all.socket.getWrittenMessages()).toHaveLength(0);
+    });
+
+    it("keeps routing every other device's frames", () => {
+      const { socket } = server.simulateSubscription({ deviceId: "device-2" });
+      server.sessionResolver.quarantine("device-1");
+
+      server.pushHierarchyUpdate("device-2", frame("a"));
+
+      expect(socket.getWrittenMessages()).toHaveLength(1);
+    });
+
+    it("resumes routing under the same uuid once the quarantine lifts", () => {
+      const { socket } = server.simulateSubscription({ deviceId: "device-1" });
+      server.sessionResolver.quarantine("device-1");
+      server.pushHierarchyUpdate("device-1", frame("a"));
+
+      server.sessionResolver.resolveIdentity("device-1");
+      server.pushHierarchyUpdate("device-1", frame("b"));
+
+      const messages = socket.getWrittenMessages<{ type: string; deviceSessionUuid: string }>();
+      expect(messages).toHaveLength(1);
+      expect(messages[0].deviceSessionUuid).toBe(sessionUuidFor("device-1"));
+    });
+  });
 });

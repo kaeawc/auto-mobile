@@ -29,9 +29,132 @@ not found" = transport session, not pool session), #5411 (pool session
 rebind), the #5256 epic (epoch identity was missing entirely).
 
 `incarnation` (bumped only at pooled-entry **creation**) is the sole thing
-distinguishing "same serial, new boot" from "same device". Anything
-identity-sensitive must be keyed on it, with unknown `transportId` treated as
-wildcard (#5372 regression: strict compare broke every Android cold boot).
+distinguishing "same serial, new boot" from "same device", and since #6863 it
+is the ONLY epoch token in the model — the ADB transport id is gone from
+`BootedDevice`/`PooledDevice`, and discovery carries nothing else. Anything
+identity-sensitive must be keyed on the incarnation; runtime identity is
+validated by serial + platform + name, and a boundary is observed as
+**disappearance then reappearance** — the pool evicts an entry the moment
+discovery stops listing the serial and re-adds it under a fresh incarnation.
+
+**`Unknown (<serial>)` means "no information", uniformly.** It is the
+placeholder Android discovery emits when the emulator console did not answer
+`avd name`, and it is guarded by `isAndroidEmulatorSerial` (a handset's name is
+`ro.product.model`, so handsets keep serial-only identity). The same rule
+applies in all three places the name is read:
+
+1. **Comparing observations** (`deviceTools.isSameBootedDeviceIdentity` /
+   `isConfirmedDeviceReplacement`): never evidence of a replacement AND never
+   evidence of continuity — the two predicates are deliberately not each
+   other's negation. During shutdown, a still-listed serial whose name probe
+   stopped answering is the same device still present, so the wait runs on to
+   real absence; only a RESOLVED, different name declares a replacement.
+2. **Destructive actions** (`killDevice`, `deleteDevice`): the pooled AVD label
+   must be confirmed by the runtime (`AndroidEmulatorClient.resolveRunningAvdName`,
+   bounded by the CALLER's remaining teardown/kill deadline — never an
+   independent timer). A different name refuses; an unanswered probe also
+   refuses (`target_identity_unresolved`), naming `adb -s <serial> emu kill` as
+   the manual escape. There is no fail-open branch. A tool-level `force` option
+   for an emulator whose console is wedged is tracked as a separate follow-up.
+3. **Publishing identity** (`DevicePool.describesPooledRuntime`, the booted-devices
+   resource): the placeholder is not agreement, so the resource withholds BOTH
+   the pooled epoch (`connectionId` falls back to the bare serial) and the
+   pooled AVD label (`stableId` falls back to discovery's own name). The pool's
+   internal `matchesRuntimeIdentity` still TOLERATES the placeholder so an
+   unreadable console never evicts a live entry — tolerance is not agreement.
+
+**The pool state that carries the rule: `PooledDevice.identityUnresolved`.**
+When any discovery observes the placeholder on a LIVE entry — a refresh sweep or
+the liveness check an assignment runs itself — the pool quarantines that entry
+instead of choosing between two wrong answers. The entry
+is kept — same session, same `incarnation` — but:
+
+- **assignment** — the shared gate `ensurePooledDevicePresentForUse` reports it
+  as not assignable, so `selectAssignableIdleDevice` skips it AND the
+  exact-device paths (`bindOrReuseDeviceSession`, autolock, both via
+  `validateOrReloadIdlePooledDevice`) refuse with an error naming the serial.
+  This covers the entry the assignment's OWN liveness check just quarantined:
+  the operation that ENTERS the quarantine fails at assignment rather than
+  returning a session that then fails every tool;
+- **tool execution** — `assertSessionReadyForAutomation` (the single choke point
+  every tool execution passes through) refuses, naming the serial and the pooled
+  AVD label;
+- **publishing** — `describesPooledRuntime` reads the state, so the resource
+  publishes no pool context;
+- **destructive confirmation** — `deviceTools.getValidatedPooledAndroidAvdName`
+  returns undefined, so no destructive path can act on the cached label —
+  including the stopped-image inventory path in `deleteDevice`, which previously
+  bypassed the unresolved-runtime guard on the strength of that label. Dropping
+  the label is not enough for a KILL, because it also drops the confirmation the
+  label exists to trigger: a quarantined entry produces its own `quarantined`
+  capture kind whose runtime confirmation is MANDATORY (an unanswered console or
+  a differing name refuses), and `AndroidEmulatorClient.killDevice` refuses when
+  both the requested and the discovered name are the placeholder — two unknowns
+  are not an equality;
+- **in-flight work** — entering the quarantine cancels and drains the bound
+  session's already-registered executions through the injected
+  `cancelDeviceSessionExecutions` seam (the one the ADB-reset quarantine uses).
+  The admission gate only refuses LATER calls; an execution already in flight
+  keeps issuing serial-addressed operations. The session and the `incarnation`
+  survive — only the work is stopped;
+- **stream routing** — the daemon builds its `DeviceSessionResolver` over the
+  pool quarantine, so a quarantined serial has NO routing identity in either
+  direction (serial→uuid and uuid→serial), and each push server
+  (observation/hierarchy, telemetry, performance, failures) drops that serial's
+  device-attributed frames instead of broadcasting them to all-device
+  subscribers — logged once per quarantine, not once per frame. The registry
+  record is untouched underneath, so lifting the quarantine resumes the SAME
+  `deviceSessionUuid`; a replacement instead mints a new incarnation, whose uuid
+  routes while the retired one stays unresolvable.
+
+Leaving the quarantine is decided by the next discovery that READS a name: the
+pooled label (or the AVD this pool started) restores the entry unchanged, and a
+different name is a replacement — a fresh incarnation, the old session retired,
+exactly as an observed disappearance. Handsets never enter the state.
+
+**A disagreement only leaves the quarantine through the replacement actually
+installing.** `replacePooledDeviceForRuntimeIdentity` installs it by evicting the
+old incarnation, and `evictMissingPooledDevice` DEFERS eviction while killDevice
+holds a shutdown reservation — so the refresh reloads the very entry the
+discovered runtime disagrees with. Reconciling there would read the disagreeing
+name as proof of continuity; instead that entry is quarantined (and its metadata
+left alone) until the replacement installs. The rule in one line: the quarantine
+lifts on an identity MATCH, never on a differing name.
+
+**The teardown's own discovery is authoritative over the pool's label.** On the
+FIRST discovery after a different AVD takes a pooled serial, the pool has not
+quarantined anything yet and still holds the previous occupant's label.
+`deleteDevice`'s unresolved-runtime guard therefore reads its OWN observation,
+not `getValidatedPooledAndroidAvdName`: a booted emulator this discovery cannot
+name refuses the stopped-image inventory path outright.
+
+**Documented blind spot**: a same-serial restart faster than one discovery
+interval never reaches the pool, so it reads as continuity. Every host-side
+cache keyed on the epoch must therefore SELF-HEAL on failure (evict and rebuild
+once before surfacing the error — see the append-helper cache in
+`src/daemon/socketServer.ts`), and any destructive action that would act on a
+pool-cached AVD name must re-resolve it from the runtime first
+(`AndroidEmulatorClient.resolveRunningAvdName`, used by killDevice/deleteDevice)
+and refuse when that re-resolution does not answer — and that confirmation runs
+BEFORE the shutdown's preparation side effects (stopping recordings, closing the
+CtrlProxy singleton, detaching observers), so a refusal leaves a still-running
+device fully intact.
+
+**Self-heal on HELPER failure, never on a RUNNER verdict.** The two outcomes are
+distinguished by the result type (`AppendTextFailureSource`), never by inspecting
+`charsSent === 0`:
+
+- the helper itself failed (threw, transport error, stale cached helper) → evict,
+  rebuild once, retry. With a confirmed prefix the retry resumes the unconfirmed
+  SUFFIX and carries NO validator (the original validation was already spent and
+  the prefix has advanced the runner's frame epoch); with nothing confirmed it
+  retries the whole text WITH the original validator, because nothing was
+  validated-and-sent yet;
+- the RUNNER returned a verdict (`success: false`, e.g. a stale `frameContext`)
+  → surface it as-is. No rebuild, no replay: the helper worked, and replaying
+  would type into a UI the runner explicitly refused.
+  Historical entries in `references/history.md` that reason about `transportId`
+  (e.g. #5372) describe the pre-#6863 model; do not reintroduce the field.
 
 ## 2. Invariants (the contract every fix must preserve)
 
@@ -105,9 +228,9 @@ wildcard (#5372 regression: strict compare broke every Android cold boot).
    killDevice success on `adb emu kill` ack, install success on the wrong
    simulator. Smell: success derived from a command's ack, not from
    ground-truth polling. (#3334, #3393, #5294, #2387, #5237)
-4. **Identity by mutable key** — serial/UDID/transportId used where an
-   incarnation or epoch UUID belongs. Smell: `deviceId` in a map key for
-   anything longer-lived than one call. (#3393, #5267, #5369, epic #5256)
+4. **Identity by mutable key** — serial/UDID used where an incarnation or
+   epoch UUID belongs. Smell: `deviceId` in a map key for anything
+   longer-lived than one call. (#3393, #5267, #5369, epic #5256, #6863)
 5. **Heartbeat bookkeeping vs real liveness** — grace windows,
    `hasReceivedHeartbeat`, agent think-time gaps. Smell: expiry math with two
    clocks or two flags. (#2443, #5288, #5411)
@@ -239,10 +362,11 @@ comments. **A refactor that drops a comment silently drops an invariant.**
   `FakeTimer` auto-fires scheduled intervals when advanced a full period
   (don't also fire manually); `initializeWithDevices` is deliberately a
   silent pre-populate (no ready listeners).
-- **Known blind spot**: unit fakes can't represent live adb transport
-  population timing — #5369 shipped green through unit tests. Anything
-  touching pool runtime identity (`transportId`, incarnation matching on
-  real reconnects) needs a live-emulator check: `/manual-test` sweep, or
+- **Known blind spot**: unit fakes can't represent live adb reconnect timing —
+  #5369 shipped green through unit tests. Anything touching pool runtime
+  identity (incarnation boundaries, name matching on real reconnects, the
+  fast-restart case the pool cannot observe) needs a live-emulator check:
+  `/manual-test` sweep, or
   `--cli startDevice`/`killDevice` against a real emulator; with ≥2
   emulators, sanity-check returned `deviceId` against `adb emu avd name`.
 - Streaming changes (`deviceSessionUuid` stamping, subscription routing)

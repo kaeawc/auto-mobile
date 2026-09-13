@@ -16,6 +16,10 @@ import { defaultTimer } from "../../src/utils/SystemTimer";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { IOSCtrlProxyClient } from "../../src/features/observe/ios";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
+import {
+  deviceIncarnationToken,
+  setDeviceIncarnationResolver,
+} from "../../src/utils/deviceIncarnation";
 import { executionTracker } from "../../src/server/executionTracker";
 import { FakeTimer } from "../fakes/FakeTimer";
 import {
@@ -184,6 +188,7 @@ describe("UnixSocketServer input/typeText", () => {
     PlatformDeviceManagerFactory.reset();
     AndroidCtrlProxyClient.resetInstances();
     IOSCtrlProxyClient.resetInstances();
+    setDeviceIncarnationResolver(undefined);
   });
 
   test("routes Android text input through existing platform input infrastructure", async () => {
@@ -678,9 +683,7 @@ describe("UnixSocketServer input/typeText", () => {
       requestSetText,
       requestImeAction,
     })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
-    PlatformDeviceManagerFactory.setInstance(
-      createFakeDeviceManager([{ ...androidDevice, transportId: "1" }]),
-    );
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
     server = new UnixSocketServer(
       socketPath,
       "http://localhost:0/mcp",
@@ -730,9 +733,7 @@ describe("UnixSocketServer input/typeText", () => {
       requestSetText,
       requestImeAction,
     })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
-    PlatformDeviceManagerFactory.setInstance(
-      createFakeDeviceManager([{ ...androidDevice, transportId: "1" }]),
-    );
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
     server = new UnixSocketServer(
       socketPath,
       "http://localhost:0/mcp",
@@ -765,9 +766,7 @@ describe("UnixSocketServer input/typeText", () => {
   });
 
   test("evicts the cached append helper after a session MCP forward succeeds it in the device queue", async () => {
-    PlatformDeviceManagerFactory.setInstance(
-      createFakeDeviceManager([{ ...androidDevice, transportId: "1" }]),
-    );
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
     const sessions = new Map([
       ["session-a", createFakeSession("session-a", androidDevice.deviceId, "android")],
     ]);
@@ -897,17 +896,16 @@ describe("UnixSocketServer input/typeText", () => {
     expect(adb.probeCalls.length).toBe(2);
   });
 
-  test("re-probes append input when direct discovery reports a new connection incarnation", async () => {
+  test("re-probes append input when the pool reports a new connection incarnation", async () => {
     const requestSetText = mock(async () => ({ success: true, totalTimeMs: 1 }));
     const requestImeAction = mock(async () => ({ success: true, totalTimeMs: 1 }));
     AndroidCtrlProxyClient.getInstance = mock(() => ({
       requestSetText,
       requestImeAction,
     })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
-    let discoveredDevice = {
-      ...androidDevice,
-      transportId: "1",
-    } as BootedDevice;
+    const discoveredDevice = androidDevice;
+    let incarnation = 1;
+    setDeviceIncarnationResolver(() => incarnation);
     let bypassedAndroidDeviceListCache = false;
     PlatformDeviceManagerFactory.setInstance({
       getBootedDevicesDetailed: async (
@@ -949,10 +947,7 @@ describe("UnixSocketServer input/typeText", () => {
       );
 
     expect((await append()).success).toBe(true);
-    discoveredDevice = {
-      ...androidDevice,
-      transportId: "2",
-    } as BootedDevice;
+    incarnation = 2;
     expect((await append()).success).toBe(true);
 
     expect(factoryCalls).toBe(2);
@@ -960,14 +955,16 @@ describe("UnixSocketServer input/typeText", () => {
     expect(bypassedAndroidDeviceListCache).toBe(true);
   });
 
-  test("revalidates append transport identity after waiting behind same-device input", async () => {
+  test("revalidates append device identity after waiting behind same-device input", async () => {
     const requestSetText = mock(async () => ({ success: true, totalTimeMs: 1 }));
     const requestImeAction = mock(async () => ({ success: true, totalTimeMs: 1 }));
     AndroidCtrlProxyClient.getInstance = mock(() => ({
       requestSetText,
       requestImeAction,
     })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
-    let discoveredDevice = { ...androidDevice, transportId: "1" } as BootedDevice;
+    const discoveredDevice = androidDevice;
+    let incarnation = 1;
+    setDeviceIncarnationResolver(() => incarnation);
     let discoveryCalls = 0;
     PlatformDeviceManagerFactory.setInstance({
       getBootedDevicesDetailed: async () => {
@@ -992,12 +989,12 @@ describe("UnixSocketServer input/typeText", () => {
     const firstAppendStarted = new Promise<void>((resolve) => {
       signalFirstAppendStarted = resolve;
     });
-    const createdForTransportIds: Array<string | undefined> = [];
+    const createdForIncarnations: Array<string | undefined> = [];
     server.appendTextFactory = (device) => {
-      createdForTransportIds.push(device.transportId);
+      createdForIncarnations.push(deviceIncarnationToken(device.deviceId));
       return {
         appendText: async () => {
-          if (createdForTransportIds.length === 1) {
+          if (createdForIncarnations.length === 1) {
             signalFirstAppendStarted?.();
             await firstAppendReleased;
           }
@@ -1027,17 +1024,17 @@ describe("UnixSocketServer input/typeText", () => {
     expect(discoveryCalls).toBe(3);
 
     // The second request was resolved before the replacement, then waited in
-    // the same-device queue. Its queued revalidation must see the new transport.
-    discoveredDevice = { ...androidDevice, transportId: "2" } as BootedDevice;
+    // the same-device queue. Its queued revalidation must see the new epoch.
+    incarnation = 2;
     releaseFirstAppend?.();
 
     expect((await first).success).toBe(true);
     expect((await second).success).toBe(true);
-    expect(createdForTransportIds).toEqual(["1", "2"]);
+    expect(createdForIncarnations).toEqual(["1", "2"]);
     expect(discoveryCalls).toBe(4);
   });
 
-  test("does not reuse append input when direct discovery omits transport identity", async () => {
+  test("documented blind spot: with no pool incarnation the cached append helper is reused", async () => {
     const requestSetText = mock(async () => ({ success: true, totalTimeMs: 1 }));
     const requestImeAction = mock(async () => ({ success: true, totalTimeMs: 1 }));
     AndroidCtrlProxyClient.getInstance = mock(() => ({
@@ -1072,11 +1069,442 @@ describe("UnixSocketServer input/typeText", () => {
         1234,
       );
 
+    // Nothing in a discovery listing distinguishes one occupant of a reused
+    // serial from the next, so with no pool to name the epoch the helper is
+    // reused rather than rebuilt on every keystroke (#1099). The safeguards are
+    // `evictDeviceInputCache` on the pool's own lifecycle events and the
+    // append self-heal below, not this comparison.
     expect((await append()).success).toBe(true);
     expect((await append()).success).toBe(true);
 
+    expect(factoryCalls).toBe(1);
+    expect(adb.probeCalls.length).toBe(1);
+  });
+
+  test("rebuilds a cached append helper once when its first use fails", async () => {
+    const requestSetText = mock(async () => ({ success: true, totalTimeMs: 1 }));
+    const requestImeAction = mock(async () => ({ success: true, totalTimeMs: 1 }));
+    AndroidCtrlProxyClient.getInstance = mock(() => ({
+      requestSetText,
+      requestImeAction,
+    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
+    setDeviceIncarnationResolver(() => 7);
+    server = new UnixSocketServer(
+      socketPath,
+      "http://localhost:0/mcp",
+      createFakeDaemonState(),
+      fakeTimer,
+    );
+    let factoryCalls = 0;
+    server.appendTextFactory = () => {
+      factoryCalls++;
+      const call = factoryCalls;
+      return {
+        // charsSent: 0 is what the real helper reports when it fails before any
+        // key event lands, and it is the only failure shape whose whole string
+        // may be replayed (see the two tests below for the other two shapes).
+        appendText: async () =>
+          call === 1
+            ? { success: false, error: "stale helper", charsSent: 0 }
+            : { success: true, charsSent: 1 },
+      } as unknown as InputText;
+    };
+    await server.start();
+
+    const append = () =>
+      sendRequest(
+        socketPath,
+        "input/typeText",
+        {
+          platform: "android",
+          deviceId: "emulator-5554",
+          text: "A",
+          mode: "append",
+        },
+        1234,
+      );
+
+    // First call builds the helper and caches it; it is not "from cache", so
+    // its failure is surfaced as-is.
+    expect((await append()).success).toBe(false);
+    expect(factoryCalls).toBe(1);
+
+    // The second call takes the cached helper. There is no epoch change to
+    // detect a same-serial reincarnation, so the failure itself is the signal:
+    // evict, rebuild once, and the retry succeeds.
+    expect((await append()).success).toBe(true);
     expect(factoryCalls).toBe(2);
-    expect(adb.probeCalls.length).toBe(2);
+  });
+
+  // The self-heal rebuild must not re-type what already landed: `charsSent` is the
+  // confirmed prefix, so the rebuilt helper resumes from `text.slice(charsSent)`.
+  // Replaying the whole string would turn "AB" after "A" into "AAB" (issue #3351).
+  test("retries only the unconfirmed suffix after a cached helper appends part of the text", async () => {
+    const requestSetText = mock(async () => ({ success: true, totalTimeMs: 1 }));
+    const requestImeAction = mock(async () => ({ success: true, totalTimeMs: 1 }));
+    AndroidCtrlProxyClient.getInstance = mock(() => ({
+      requestSetText,
+      requestImeAction,
+    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
+    setDeviceIncarnationResolver(() => 7);
+    server = new UnixSocketServer(
+      socketPath,
+      "http://localhost:0/mcp",
+      createFakeDaemonState(),
+      fakeTimer,
+    );
+    // What the device's focused field would hold after these appends.
+    let deviceField = "";
+    const textsReceived: string[] = [];
+    let factoryCalls = 0;
+    server.appendTextFactory = () => {
+      factoryCalls++;
+      const helper = factoryCalls;
+      let helperCalls = 0;
+      return {
+        appendText: async (text: string) => {
+          helperCalls++;
+          textsReceived.push(text);
+          if (helper === 1 && helperCalls === 2) {
+            // The cached use dies halfway: two characters landed, the third did not.
+            deviceField += text.slice(0, 2);
+            return { success: false, error: "helper died mid-append", charsSent: 2 };
+          }
+          deviceField += text;
+          return { success: true, charsSent: text.length };
+        },
+      } as unknown as InputText;
+    };
+    await server.start();
+
+    const append = (text: string) =>
+      sendRequest(
+        socketPath,
+        "input/typeText",
+        { platform: "android", deviceId: "emulator-5554", text, mode: "append" },
+        1234,
+      );
+
+    // Warm the cache with a successful append so the next one is "from cache".
+    expect((await append("x")).success).toBe(true);
+    expect(factoryCalls).toBe(1);
+
+    const response = await append("ABCDE");
+
+    expect(response.success).toBe(true);
+    expect(factoryCalls).toBe(2);
+    // The rebuilt helper gets the suffix only...
+    expect(textsReceived).toEqual(["x", "ABCDE", "CDE"]);
+    // ...so every character reaches the device exactly once.
+    expect(deviceField).toBe("xABCDE");
+  });
+
+  // The self-heal retry resumes the SAME logical append: the original call
+  // already validated the frame context before its first key event, and the
+  // confirmed prefix has since emitted TYPE_VIEW_TEXT_CHANGED, which advances the
+  // runner's frame epoch. Re-running the validator on the rebuilt helper would
+  // therefore reject a suffix that is perfectly safe to type
+  // ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
+  test("does not re-validate the frame context when resuming a self-healed append", async () => {
+    let validationCalls = 0;
+    const validateFrameContext = mock(async () => {
+      validationCalls += 1;
+      // The confirmed prefix advanced the frame epoch, so any validation after
+      // the original append's own one is answered "stale".
+      return validationCalls > 2
+        ? { success: false, error: "Stale frame context; observe a fresh frame before retrying" }
+        : { success: true };
+    });
+    AndroidCtrlProxyClient.getInstance = mock(() => ({
+      validateFrameContext,
+      requestImeAction: mock(async () => ({ success: true, totalTimeMs: 1 })),
+    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
+    setDeviceIncarnationResolver(() => 7);
+    server = new UnixSocketServer(
+      socketPath,
+      "http://localhost:0/mcp",
+      createFakeDaemonState(),
+      fakeTimer,
+    );
+    (server as unknown as { requireCurrentFrameContext: () => void }).requireCurrentFrameContext =
+      () => {};
+    let deviceField = "";
+    const validatorsReceived: Array<unknown> = [];
+    let factoryCalls = 0;
+    server.appendTextFactory = () => {
+      factoryCalls++;
+      const helper = factoryCalls;
+      let helperCalls = 0;
+      return {
+        appendText: async (
+          text: string,
+          _timeoutMs: number,
+          beforeKeyEvent?: () => Promise<{ success: boolean; error?: string }>,
+        ) => {
+          helperCalls++;
+          validatorsReceived.push(beforeKeyEvent);
+          if (beforeKeyEvent) {
+            const validation = await beforeKeyEvent();
+            if (!validation.success) {
+              return { success: false, error: validation.error, charsSent: 0 };
+            }
+          }
+          if (helper === 1 && helperCalls === 2) {
+            deviceField += text.slice(0, 2);
+            return { success: false, error: "helper died mid-append", charsSent: 2 };
+          }
+          deviceField += text;
+          return { success: true, charsSent: text.length };
+        },
+      } as unknown as InputText;
+    };
+    await server.start();
+
+    const append = (text: string, frameContext: string) =>
+      sendRequest(
+        socketPath,
+        "input/typeText",
+        { platform: "android", deviceId: "emulator-5554", text, mode: "append", frameContext },
+        1234,
+      );
+
+    expect((await append("x", "epoch:1")).success).toBe(true);
+    expect(factoryCalls).toBe(1);
+
+    const response = await append("ABCDE", "epoch:2");
+
+    expect(response.success).toBe(true);
+    expect(factoryCalls).toBe(2);
+    // The rebuilt helper resumes the suffix with NO validator of its own.
+    expect(validatorsReceived).toHaveLength(3);
+    expect(validatorsReceived[2]).toBeUndefined();
+    // One validation per logical append; the retry adds none.
+    expect(validationCalls).toBe(2);
+    expect(deviceField).toBe("xABCDE");
+  });
+
+  // Two very different things can make a cached-helper append fail, and only one
+  // of them is evidence that the HELPER is stale. When the RUNNER answers with a
+  // verdict about the device -- a stale `frameContext`, say -- that verdict is
+  // about the device state, not about the helper: rebuilding and replaying would
+  // type into a UI the runner just refused. The verdict is surfaced as-is
+  // ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
+  test("surfaces a runner rejection instead of self-healing the helper", async () => {
+    const validateFrameContext = mock(async () => ({
+      success: false,
+      error: "Stale frame context; observe a fresh frame before retrying",
+    }));
+    AndroidCtrlProxyClient.getInstance = mock(() => ({
+      validateFrameContext,
+      requestImeAction: mock(async () => ({ success: true, totalTimeMs: 1 })),
+    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
+    setDeviceIncarnationResolver(() => 7);
+    server = new UnixSocketServer(
+      socketPath,
+      "http://localhost:0/mcp",
+      createFakeDaemonState(),
+      fakeTimer,
+    );
+    (server as unknown as { requireCurrentFrameContext: () => void }).requireCurrentFrameContext =
+      () => {};
+    let deviceField = "";
+    let factoryCalls = 0;
+    server.appendTextFactory = () => {
+      factoryCalls++;
+      return {
+        // Mirrors the real helper: a validator rejection becomes a failed append
+        // with zero characters sent, tagged as the RUNNER's verdict.
+        appendText: async (
+          text: string,
+          _timeoutMs: number,
+          beforeKeyEvent?: () => Promise<{
+            success: boolean;
+            error?: string;
+            failureSource?: "runner" | "helper";
+          }>,
+        ) => {
+          if (beforeKeyEvent) {
+            const validation = await beforeKeyEvent();
+            if (!validation.success) {
+              return {
+                success: false,
+                error: validation.error,
+                charsSent: 0,
+                failureSource: validation.failureSource,
+              };
+            }
+          }
+          deviceField += text;
+          return { success: true, charsSent: text.length };
+        },
+      } as unknown as InputText;
+    };
+    await server.start();
+
+    const append = (text: string, frameContext?: string) =>
+      sendRequest(
+        socketPath,
+        "input/typeText",
+        {
+          platform: "android",
+          deviceId: "emulator-5554",
+          text,
+          mode: "append",
+          ...(frameContext ? { frameContext } : {}),
+        },
+        1234,
+      );
+
+    // Warm the cache so the next append is "from cache" and self-heal eligible.
+    expect((await append("x")).success).toBe(true);
+    expect(factoryCalls).toBe(1);
+
+    const response = await append("AB", "epoch:1");
+
+    expect(response.success).toBe(false);
+    expect(String(response.error)).toContain("Stale frame context");
+    expect(response.charsSent).toBe(0);
+    // No rebuild and no replay: the device receives nothing after the warm-up.
+    expect(factoryCalls).toBe(1);
+    expect(deviceField).toBe("x");
+  });
+
+  // A HELPER failure with zero confirmed characters is the other shape: nothing
+  // was validated-and-sent, so the rebuilt helper starts the append over --
+  // including the original frame-context validation, which has not yet been
+  // spent on a key event that landed
+  // ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
+  test("replays the whole text WITH its validator when nothing was confirmed", async () => {
+    const validateFrameContext = mock(async () => ({ success: true }));
+    AndroidCtrlProxyClient.getInstance = mock(() => ({
+      validateFrameContext,
+      requestImeAction: mock(async () => ({ success: true, totalTimeMs: 1 })),
+    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
+    setDeviceIncarnationResolver(() => 7);
+    server = new UnixSocketServer(
+      socketPath,
+      "http://localhost:0/mcp",
+      createFakeDaemonState(),
+      fakeTimer,
+    );
+    (server as unknown as { requireCurrentFrameContext: () => void }).requireCurrentFrameContext =
+      () => {};
+    let deviceField = "";
+    const validatorsReceived: Array<unknown> = [];
+    let factoryCalls = 0;
+    server.appendTextFactory = () => {
+      factoryCalls++;
+      const helper = factoryCalls;
+      let helperCalls = 0;
+      return {
+        appendText: async (
+          text: string,
+          _timeoutMs: number,
+          beforeKeyEvent?: () => Promise<{ success: boolean; error?: string }>,
+        ) => {
+          helperCalls++;
+          validatorsReceived.push(beforeKeyEvent);
+          if (beforeKeyEvent) {
+            const validation = await beforeKeyEvent();
+            if (!validation.success) {
+              return { success: false, error: validation.error, charsSent: 0 };
+            }
+          }
+          if (helper === 1 && helperCalls === 2) {
+            // The helper itself dies before any key event lands.
+            return {
+              success: false,
+              error: "helper died before the first key event",
+              charsSent: 0,
+            };
+          }
+          deviceField += text;
+          return { success: true, charsSent: text.length };
+        },
+      } as unknown as InputText;
+    };
+    await server.start();
+
+    const append = (text: string, frameContext: string) =>
+      sendRequest(
+        socketPath,
+        "input/typeText",
+        { platform: "android", deviceId: "emulator-5554", text, mode: "append", frameContext },
+        1234,
+      );
+
+    expect((await append("x", "epoch:1")).success).toBe(true);
+    expect(factoryCalls).toBe(1);
+
+    const response = await append("ABC", "epoch:2");
+
+    expect(response.success).toBe(true);
+    expect(factoryCalls).toBe(2);
+    // The rebuilt helper retries the whole text, and it keeps the validator.
+    expect(validatorsReceived).toHaveLength(3);
+    expect(validatorsReceived[2]).toBeDefined();
+    expect(deviceField).toBe("xABC");
+  });
+
+  // An omitted `charsSent` means the helper cannot say whether the in-flight key
+  // event landed (an adb timeout kills the host child, not the device's handling
+  // of it). Replaying anything there can duplicate a character, so the failure is
+  // surfaced instead of self-healed.
+  test("does not replay an append whose confirmed prefix is unknown", async () => {
+    const requestSetText = mock(async () => ({ success: true, totalTimeMs: 1 }));
+    const requestImeAction = mock(async () => ({ success: true, totalTimeMs: 1 }));
+    AndroidCtrlProxyClient.getInstance = mock(() => ({
+      requestSetText,
+      requestImeAction,
+    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
+    setDeviceIncarnationResolver(() => 7);
+    server = new UnixSocketServer(
+      socketPath,
+      "http://localhost:0/mcp",
+      createFakeDaemonState(),
+      fakeTimer,
+    );
+    const textsReceived: string[] = [];
+    let factoryCalls = 0;
+    server.appendTextFactory = () => {
+      factoryCalls++;
+      let helperCalls = 0;
+      return {
+        appendText: async (text: string) => {
+          helperCalls++;
+          textsReceived.push(text);
+          return helperCalls === 1
+            ? { success: true, charsSent: text.length }
+            : { success: false, error: "append key event failed: timeout" };
+        },
+      } as unknown as InputText;
+    };
+    await server.start();
+
+    const append = (text: string) =>
+      sendRequest(
+        socketPath,
+        "input/typeText",
+        { platform: "android", deviceId: "emulator-5554", text, mode: "append" },
+        1234,
+      );
+
+    expect((await append("x")).success).toBe(true);
+
+    const response = await append("AB");
+
+    expect(response.success).toBe(false);
+    expect(String(response.error)).toContain("append key event failed");
+    expect(response.charsSent).toBeUndefined();
+    // No rebuild, no replay.
+    expect(factoryCalls).toBe(1);
+    expect(textsReceived).toEqual(["x", "AB"]);
   });
 
   // The client forwards every printable ASCII character, but uppercase and shifted

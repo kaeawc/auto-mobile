@@ -15,7 +15,11 @@ import type { Kysely } from "kysely";
 import { TELEMETRY_PUSH_SOCKET_CONFIG } from "./daemonFiles";
 import { truncateBodyText, boundStructuredField } from "../utils/truncateBodyText";
 import { buildNavigationNodeScreenshotUri } from "../utils/navigationResourceUri";
-import { type DeviceSessionResolver, nullDeviceSessionResolver } from "./deviceSessionResolver";
+import {
+  type DeviceSessionResolver,
+  nullDeviceSessionResolver,
+  SuspendedDeviceRoutingLog,
+} from "./deviceSessionResolver";
 
 /**
  * Opaque plain-text fields that the backfill fans out (limit=100) and that can
@@ -115,6 +119,7 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
   TelemetryEvent
 > {
   private deviceSessionResolver: DeviceSessionResolver = nullDeviceSessionResolver;
+  private readonly suspendedRoutingLog = new SuspendedDeviceRoutingLog();
 
   constructor(
     socketPath: string = getSocketPath(TELEMETRY_PUSH_SOCKET_CONFIG),
@@ -137,6 +142,18 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
   }
 
   pushTelemetryEvent(event: TelemetryEvent): void {
+    if (
+      event.deviceId &&
+      this.suspendedRoutingLog.shouldDropFrame(
+        this.deviceSessionResolver,
+        event.deviceId,
+        "TelemetryPush",
+      )
+    ) {
+      // Quarantined pooled identity: the serial is the event's only attribution
+      // and it is exactly what is in doubt, so nobody may receive it (#6863 review).
+      return;
+    }
     const stamped = this.stampDeviceSession(event);
     const sentCount = this.pushToSubscribers(stamped);
     if (sentCount > 0) {

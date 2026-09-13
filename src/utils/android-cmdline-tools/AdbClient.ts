@@ -1198,20 +1198,20 @@ export class AdbClient implements AdbExecutor {
     const devices = lines
       .filter((line) => line.trim().length > 0)
       .flatMap((line) => {
-        const [deviceId, state, ...details] = line.trim().split(/\s+/);
+        const [deviceId, state] = line.trim().split(/\s+/);
         if (!deviceId || state !== "device") {
           return [];
         }
-        const transportId = details
-          .find((detail) => detail.startsWith("transport_id:"))
-          ?.slice("transport_id:".length);
+        // `adb devices -l` also reports `transport_id:`, deliberately not read:
+        // it is a per-connection handle, and a device identity that carried it
+        // invited callers to treat "transport unchanged" as proof of an unbroken
+        // connection. The pool's `incarnation` is the one epoch token.
         return [
           {
             name: deviceId,
             platform: "android",
             deviceId,
             observedAt,
-            ...(transportId ? { transportId } : {}),
           } satisfies BootedDevice,
         ];
       });

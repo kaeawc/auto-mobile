@@ -18,7 +18,10 @@ import {
 } from "../../src/utils/KeepScreenAwakeManager";
 import { logger } from "../../src/utils/logger";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
+import type { DevicePool } from "../../src/daemon/devicePool";
+import type { BootedDevice } from "../../src/models";
 
 class FakeDeviceSessionRepository {
   readonly events: string[] = [];
@@ -60,6 +63,18 @@ interface DaemonSocketServerInternals {
     drainSessionReleaseNotifications(): Promise<void>;
     close(): Promise<void>;
   } | null;
+}
+
+/**
+ * Point a daemon-owned pool's discovery at a fake that lists exactly these
+ * devices. A pooled Android entry is re-proved present against discovery before
+ * it is handed out (handsets included), and the daemon builds its pool with the
+ * real device manager, which would shell out to adb.
+ */
+function stubPoolDiscovery(devicePool: DevicePool, devices: BootedDevice[]): void {
+  const deviceManager = new FakeDeviceManager();
+  deviceManager.bootedDevices = [...devices];
+  Object.assign(devicePool, { deviceManager });
 }
 
 describe("Daemon shutdown session release (issue #5303)", () => {
@@ -105,13 +120,11 @@ describe("Daemon shutdown session release (issue #5303)", () => {
     });
 
     try {
-      await devicePool.initializeWithDevices([
-        {
-          name: "Physical Android",
-          deviceId,
-          platform: "android",
-        },
-      ]);
+      const pooledDevices: BootedDevice[] = [
+        { name: "Physical Android", deviceId, platform: "android" },
+      ];
+      stubPoolDiscovery(devicePool, pooledDevices);
+      await devicePool.initializeWithDevices(pooledDevices);
       await devicePool.assignDeviceToSession(sessionId, "android");
       sessionManager.setKeepScreenAwake(sessionId, keepAwakeState);
       sessionManager.onSessionRelease((releasedSessionId, releasedDeviceId) => {
@@ -168,13 +181,11 @@ describe("Daemon shutdown session release (issue #5303)", () => {
     });
 
     try {
-      await devicePool.initializeWithDevices([
-        {
-          name: "Managed Android",
-          deviceId: "managed-physical-device",
-          platform: "android",
-        },
-      ]);
+      const pooledDevices: BootedDevice[] = [
+        { name: "Managed Android", deviceId: "managed-physical-device", platform: "android" },
+      ];
+      stubPoolDiscovery(devicePool, pooledDevices);
+      await devicePool.initializeWithDevices(pooledDevices);
       await devicePool.assignDeviceToSession("managed-adb-session", "android");
 
       await daemon.stop();
@@ -248,10 +259,12 @@ describe("Daemon shutdown session release (issue #5303)", () => {
     const loggerCloseSpy = spyOn(logger, "closeAfterFlush").mockResolvedValue(undefined);
 
     try {
-      await devicePool.initializeWithDevices([
+      const pooledDevices: BootedDevice[] = [
         { name: "Broken Android", deviceId: "broken-device", platform: "android" },
         { name: "Healthy Android", deviceId: "healthy-device", platform: "android" },
-      ]);
+      ];
+      stubPoolDiscovery(devicePool, pooledDevices);
+      await devicePool.initializeWithDevices(pooledDevices);
       await devicePool.assignDeviceToSession(brokenSessionId, "android");
       await devicePool.assignDeviceToSession(healthySessionId, "android");
       sessionManager.setKeepScreenAwake(brokenSessionId, {
@@ -663,13 +676,11 @@ describe("Daemon shutdown session release (issue #5303)", () => {
     const loggerCloseSpy = spyOn(logger, "closeAfterFlush").mockResolvedValue(undefined);
 
     try {
-      await devicePool.initializeWithDevices([
-        {
-          name: "Expired Android",
-          deviceId,
-          platform: "android",
-        },
-      ]);
+      const pooledDevices: BootedDevice[] = [
+        { name: "Expired Android", deviceId, platform: "android" },
+      ];
+      stubPoolDiscovery(devicePool, pooledDevices);
+      await devicePool.initializeWithDevices(pooledDevices);
       await devicePool.assignDeviceToSession(sessionId, "android");
       sessionManager.setKeepScreenAwake(sessionId, keepAwakeState);
       sessionManager.onSessionRelease((releasedSessionId) =>

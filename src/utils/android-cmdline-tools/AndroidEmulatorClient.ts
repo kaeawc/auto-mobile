@@ -1376,6 +1376,34 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     }
   }
 
+  /**
+   * Ask the RUNTIME on this serial which AVD it is (`emu avd name`, with the
+   * `ro.boot.qemu.avd_name` property as fallback).
+   *
+   * Public because identity now has no ADB transport id: a caller about to do
+   * something destructive to an emulator whose discovered name is
+   * `Unknown (<serial>)` must be able to re-resolve that name from the device
+   * itself rather than trust a host-side cache (#6863). Returns undefined when
+   * the runtime cannot answer inside `timeoutMs`.
+   */
+  async resolveRunningAvdName(
+    device: BootedDevice,
+    timeoutMs: number,
+    signal?: AbortSignal,
+  ): Promise<string | undefined> {
+    const { name } = await this.getRunningAVDName(device, timeoutMs, signal);
+    return name === "" ? undefined : name;
+  }
+
+  /**
+   * `infoTimeoutMs` is the TOTAL budget for naming this runtime, not a per-command
+   * allowance. The console probe and the `getprop` fallback run sequentially, so
+   * giving each its own full budget would let two stalled commands take twice the
+   * timeout the caller asked for -- and this resolver runs inside a destructive
+   * action that is already holding a lifecycle lease against a deadline (#6863
+   * review). They share one deadline; the fallback gets only what is left of it,
+   * and is skipped when nothing is.
+   */
   private async getRunningAVDName(
     device: BootedDevice,
     infoTimeoutMs: number,
@@ -1383,6 +1411,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
   ): Promise<{ name: string; diagnostic?: ReadinessDiagnostic }> {
     const deviceId = device.deviceId;
     const adbWithDevice = this.adbFactory.create(device);
+    const deadlineMs = this.timer.now() + infoTimeoutMs;
     let diagnostic: ReadinessDiagnostic | undefined;
     try {
       const result = await adbWithDevice.executeCommand(
@@ -1405,10 +1434,18 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       logger.debug(`Failed to get AVD name for ${deviceId}: ${error}`);
     }
 
+    const remainingMs = deadlineMs - this.timer.now();
+    if (remainingMs <= 0) {
+      logger.debug(
+        `AVD name resolution for ${deviceId} spent its ${infoTimeoutMs}ms budget on the console probe; skipping the property fallback`,
+      );
+      return { name: "", diagnostic };
+    }
+
     try {
       const result = await adbWithDevice.executeCommand(
         "shell getprop ro.boot.qemu.avd_name",
-        infoTimeoutMs,
+        remainingMs,
         undefined,
         true,
         signal,
@@ -2218,6 +2255,25 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     if (emulator.name !== device.name || emulator.platform !== device.platform) {
       throw new ActionableError(
         `Emulator '${device.deviceId}' identity changed before termination; refusing to kill its replacement.`,
+      );
+    }
+
+    // Two unknowns are not an equality. `Unknown (<serial>)` on either side is
+    // the absence of a name, so a request carrying the placeholder that meets a
+    // discovery carrying the placeholder has matched on nothing -- and the
+    // emulator answering on the serial now may be a replacement of the one the
+    // caller resolved. Callers that legitimately target an emulator whose
+    // console is mute resolve its AVD name first and put THAT in the target
+    // (`deviceTools.confirmPooledAvdIdentity`), so reaching here with two
+    // placeholders means no identity was ever established (#6863 review).
+    if (
+      this.isUnknownEmulatorName(device.name, device.deviceId) &&
+      this.isUnknownEmulatorName(emulator.name, emulator.deviceId)
+    ) {
+      throw new ActionableError(
+        `Refusing to kill '${device.deviceId}': the emulator could not name itself, so this ` +
+          "daemon cannot tell it apart from a replacement that took the serial. Resolve its AVD " +
+          `name and retry, or stop it by hand with \`adb -s ${device.deviceId} emu kill\`.`,
       );
     }
 

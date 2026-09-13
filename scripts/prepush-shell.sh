@@ -32,6 +32,9 @@ add_check() {
 add_bats_file() {
   local candidate="$1"
   local selected
+  if [[ ! -f "${candidate}" ]]; then
+    return 0
+  fi
   for selected in ${bats_files[@]+"${bats_files[@]}"}; do
     if [[ "${selected}" == "${candidate}" ]]; then
       return 0
@@ -175,6 +178,12 @@ for path in "${changed_files[@]}"; do
   esac
 
   case "${path}" in
+    package.json)
+      add_check "claude-plugin"
+      ;;
+  esac
+
+  case "${path}" in
     .github/actions/*.yml|.github/actions/*.yaml|.github/workflows/*.yml|.github/workflows/*.yaml|Dockerfile|scripts/local-dev/lib/deps.sh)
       add_check "bun-version-coherence"
       ;;
@@ -206,7 +215,9 @@ for path in "${changed_files[@]}"; do
 
   case "${path}" in
     test/bats/*.bats)
-      add_bats_file "${path}"
+      if [[ -f "${path}" ]]; then
+        add_bats_file "${path}"
+      fi
       ;;
   esac
 
@@ -253,7 +264,7 @@ for path in "${changed_files[@]}"; do
       basename="${path##*/}"
       stem="${basename%.*}"
       while IFS= read -r bats_file; do
-        if [[ -n "${bats_file}" ]]; then
+        if [[ -n "${bats_file}" && -f "${bats_file}" ]]; then
           add_bats_file "${bats_file}"
         fi
       done < <(grep -l -- "${stem}" test/bats/*.bats || true)

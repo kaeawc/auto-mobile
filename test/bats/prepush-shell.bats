@@ -18,6 +18,11 @@ EOF
   cat > "${STUB_DIR}/bats" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "${PREPUSH_BATS_LOG}"
+for bats_file in "$@"; do
+  if [[ ! -f "${bats_file}" ]]; then
+    exit 2
+  fi
+done
 EOF
   chmod +x "${STUB_DIR}/bats"
 
@@ -90,7 +95,17 @@ commit_change() {
   run bash scripts/prepush-shell.sh --base base
 
   [ "${status}" -eq 0 ]
+  grep -Fqx -- '--only runtime-pins,sharp-matrix,bun-version-coherence,dependency-decisions,claude-plugin' "${FAST_LOG}"
+}
+
+@test "a bun.lock-only change does not select the Claude plugin check" {
+  commit_change "bun.lock" 'lockfile fixture'
+
+  run bash scripts/prepush-shell.sh --base base
+
+  [ "${status}" -eq 0 ]
   grep -Fqx -- '--only runtime-pins,sharp-matrix,bun-version-coherence,dependency-decisions' "${FAST_LOG}"
+  ! grep -Fq -- 'claude-plugin' "${FAST_LOG}"
 }
 
 @test "a changed extensionless hook is shellchecked directly and selects shell checks" {
@@ -167,13 +182,23 @@ commit_change() {
   grep -Fqx -- 'test/bats/renamed-helper.bats' "${BATS_LOG}"
 }
 
+@test "a deleted BATS file is not passed to bats" {
+  git rm -q test/bats/renamed-helper.bats
+  git commit -qm "delete BATS helper"
+
+  run bash scripts/prepush-shell.sh --base base
+
+  [ "${status}" -eq 0 ]
+  [ ! -e "${BATS_LOG}" ] || ! grep -Fq -- 'renamed-helper.bats' "${BATS_LOG}"
+}
+
 @test "the default base falls back to main when origin/main is unavailable" {
   commit_change "package.json" '{"name":"fixture"}'
 
   run bash scripts/prepush-shell.sh
 
   [ "${status}" -eq 0 ]
-  grep -Fqx -- '--only runtime-pins,sharp-matrix,bun-version-coherence,dependency-decisions' "${FAST_LOG}"
+  grep -Fqx -- '--only runtime-pins,sharp-matrix,bun-version-coherence,dependency-decisions,claude-plugin' "${FAST_LOG}"
 }
 
 @test "unmatched changes skip all work" {

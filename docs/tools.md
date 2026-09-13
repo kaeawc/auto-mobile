@@ -251,13 +251,40 @@ The `deviceId` fields exist so the value that `listDevices` and the
 | 🎯 <code>accessibilityFocus</code> | Sets or clears Android TalkBack focus by resource ID, text, or content description. |
 | 🔀 <code>setToolEnabled</code>     | Enables or disables one exact AutoMobile tool for the current MCP session.          |
 
-On Android, compact observations fold captured soft-keyboard keys into a single
-`keyboard: { visible: true, package: "…" }` summary. Use `sendKeys` for text input
-and semantic keys, or `keyboard` to open or close it. `observe` with
-`project: "full"` or `raw: true` retains the individual keys. Folding requires
-a control-proxy build that supplies IME window identity; older builds retain
-their existing key output. An absent summary means no IME identity was captured,
+On Android, compact observations fold soft-keyboard keys into a single
+`keyboard: { visible: true, package: "…" }` summary plus at most one skeleton row:
+
+```
+<ime> | Keyboard (com.google.android.inputmethod.latin) | input
+```
+
+That row appears only when the IME exposed at least one bounded accessible
+descendant. A keyboard whose window carries no accessible keys — some IMEs
+expose none — is still announced by the `keyboard` summary, with no `<ime>` row,
+because a synthetic row must never claim a box it cannot measure. Treat the
+summary as the presence signal and the row as optional.
+
+`<ime>` is a marker, not a selector — use `sendKeys` for text input and semantic
+keys, or `keyboard` to open or close it. Everything the IME itself owns folds
+into that row, including its toolbar, emoji and clipboard affordances — Gboard
+gives those the same `key_pos_*` ids it gives letter keys
+(`key_pos_header_access_points_menu`, `key_pos_switch_to_symbol`), and many keys
+carry no resource-id at all, so nothing distinguishes them from a keycap. What
+stays individually actionable is framework chrome sharing the window: a control
+whose resource-id belongs to a DIFFERENT package than the IME, such as
+`android:id/input_method_nav_back`. `observe` with `project: "full"` or `raw: true` retains
+the individual keys. Keys are identified from the IME window identity a re-cut
+control proxy supplies, and otherwise from the `…:id/key_pos_*` keycap
+resource-id family, so the fold also applies on older proxy builds and on the
+`uiautomator dump` path. An absent summary means no IME identity was captured,
 not a confirmed hidden keyboard.
+
+A skeleton row omits `label` entirely when it has none — the key is never
+present with a placeholder value. A state-carrying container with no text of its
+own (the `switchWidget` of a Settings row, a scrollable fragment root) takes the
+label of its nearest labelled enclosing row, so a `checked` state is attributable
+to the setting it belongs to (`com.android.settings:id/switchWidget | Airplane
+mode | toggle checked=false`).
 
 For the observe → act → observe behavior behind interaction tools, see the
 [interaction loop](design-docs/mcp/interaction-loop.md). For per-session public

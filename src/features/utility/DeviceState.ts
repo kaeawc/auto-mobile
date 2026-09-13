@@ -274,7 +274,7 @@ export interface DeviceConnectivityState {
   airplaneMode?: boolean;
   /** `settings get global wifi_on` (1/2 on, 0/3 off — 2 and 3 are airplane-mode states). */
   wifiEnabled?: boolean;
-  /** `settings get global bluetooth_on`. */
+  /** `settings get global bluetooth_on` (1 on — 0 and 2 off, 2 being disabled BY airplane mode). */
   bluetoothEnabled?: boolean;
   /** `settings --user current get secure location_mode` != 0. */
   locationEnabled?: boolean;
@@ -820,8 +820,9 @@ interface ConnectivityReadSpec {
   /**
    * `boolean`: 1/0. `nonZero`: any non-zero integer is "on" (location_mode).
    * `wifi`: the four-state `wifi_on` encoding, including its airplane-mode states.
+   * `bluetooth`: the three-state `bluetooth_on` encoding, likewise.
    */
-  shape: "boolean" | "nonZero" | "wifi";
+  shape: "boolean" | "nonZero" | "wifi" | "bluetooth";
 }
 
 /**
@@ -836,7 +837,7 @@ interface ConnectivityReadSpec {
 const ANDROID_CONNECTIVITY_READS: readonly ConnectivityReadSpec[] = [
   { field: "airplaneMode", namespace: "global", key: "airplane_mode_on", shape: "boolean" },
   { field: "wifiEnabled", namespace: "global", key: "wifi_on", shape: "wifi" },
-  { field: "bluetoothEnabled", namespace: "global", key: "bluetooth_on", shape: "boolean" },
+  { field: "bluetoothEnabled", namespace: "global", key: "bluetooth_on", shape: "bluetooth" },
   { field: "locationEnabled", namespace: "secure", key: "location_mode", shape: "nonZero" },
 ];
 
@@ -925,6 +926,27 @@ function parseAndroidWifiSetting(raw: string | undefined): boolean | undefined {
 }
 
 /**
+ * `bluetooth_on` is NOT a flag either: AOSP's `BluetoothManagerService` persists
+ * three states — `0` (BLUETOOTH_OFF), `1` (BLUETOOTH_ON_BLUETOOTH) and `2`
+ * (BLUETOOTH_ON_AIRPLANE: the adapter was on, airplane mode turned it off, and
+ * it is to be restored when airplane mode ends). The adapter is OFF in state
+ * `2`, which is the common persisted state while airplane mode is on, so the
+ * strict 0/1 parser would blank `bluetoothEnabled` exactly then (#6872).
+ * Anything outside the three known states stays unreadable rather than coerced.
+ */
+function parseAndroidBluetoothSetting(raw: string | undefined): boolean | undefined {
+  switch (raw?.trim()) {
+    case "1":
+      return true;
+    case "0":
+    case "2":
+      return false;
+    default:
+      return undefined;
+  }
+}
+
+/**
  * `location_mode` is an integer tier, not a flag: `0` is off and every other
  * valid tier is on. A non-integer (`null`, empty, `3abc`) is unreadable.
  */
@@ -946,6 +968,8 @@ function decodeAndroidConnectivityValue(
       return parseAndroidBooleanSetting(raw);
     case "wifi":
       return parseAndroidWifiSetting(raw);
+    case "bluetooth":
+      return parseAndroidBluetoothSetting(raw);
     case "nonZero":
       return parseAndroidNonZeroSetting(raw);
   }

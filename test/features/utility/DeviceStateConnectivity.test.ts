@@ -173,6 +173,50 @@ describe("DeviceState connectivity toggles (issue #6872)", () => {
     }
   });
 
+  test("decodes the airplane-mode bluetooth_on state (2 = off, restored when airplane ends)", async () => {
+    // AOSP's BluetoothManagerService persists three states in
+    // Settings.Global.bluetooth_on: 0 BLUETOOTH_OFF, 1 BLUETOOTH_ON_BLUETOOTH,
+    // and 2 BLUETOOTH_ON_AIRPLANE - the adapter was on, airplane mode turned it
+    // off, and it is to be restored when airplane mode ends. The adapter is OFF
+    // in state 2, and a strict 0/1 read would blank bluetoothEnabled exactly
+    // during the common "airplane mode is on" state (#6872).
+    for (const [raw, expected] of [
+      ["0", false],
+      ["1", true],
+      ["2", false],
+    ] as const) {
+      const adbFactory = new FakeAdbClientFactory();
+      adbFactory
+        .getFakeClient()
+        .setCommandResult(
+          ANDROID_CONNECTIVITY_READ_COMMAND,
+          connectivityOutput({ airplaneMode: "1", bluetoothEnabled: raw }),
+        );
+
+      const result = await new DeviceState(androidDevice, { adbFactory }).getState([
+        "connectivity",
+      ]);
+
+      expect(result.connectivity?.bluetoothEnabled).toBe(expected);
+      expect(result.connectivity?.warning ?? "").not.toContain("bluetoothEnabled");
+    }
+  });
+
+  test("leaves a bluetooth_on value outside the known states undefined", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    adbFactory
+      .getFakeClient()
+      .setCommandResult(
+        ANDROID_CONNECTIVITY_READ_COMMAND,
+        connectivityOutput({ airplaneMode: "1", bluetoothEnabled: "3" }),
+      );
+
+    const result = await new DeviceState(androidDevice, { adbFactory }).getState(["connectivity"]);
+
+    expect(result.connectivity?.bluetoothEnabled).toBeUndefined();
+    expect(result.connectivity?.warning).toContain("bluetoothEnabled");
+  });
+
   test("leaves a wifi_on value outside the known states undefined", async () => {
     const adbFactory = new FakeAdbClientFactory();
     adbFactory

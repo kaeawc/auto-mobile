@@ -144,6 +144,7 @@ describe("DaemonManager stop", () => {
     socketPath: string,
     onLivenessCheck?: () => void,
     lockFilePath: string = join(tmpdir(), "unused-daemon-lock"),
+    processSignaler: DaemonProcessSignaler = new FakeDaemonProcessSignaler(),
   ): DaemonManager {
     const processFinder: DaemonProcessFinder & DaemonProcessLivenessChecker = {
       findDaemonProcesses: () => [],
@@ -160,6 +161,10 @@ describe("DaemonManager stop", () => {
       pidFilePath,
       socketPath,
       processFinder,
+      undefined,
+      undefined,
+      undefined,
+      processSignaler,
     );
   }
 
@@ -186,22 +191,29 @@ describe("DaemonManager stop", () => {
     timer.enableAutoAdvance();
     writeStopPidFile(pidFilePath, pid, socketPath);
     writeFileSync(socketPath, "socket");
-    const manager = createManagerForStop(livePids, timer, pidFilePath, socketPath);
-    const killSpy = spyOn(process, "kill").mockImplementation(() => true);
+    const signaler = new FakeDaemonProcessSignaler();
+    const manager = createManagerForStop(
+      livePids,
+      timer,
+      pidFilePath,
+      socketPath,
+      undefined,
+      undefined,
+      signaler,
+    );
 
     try {
       await expect(manager.stop(1_000)).rejects.toThrow(
         "Daemon process 4242 did not exit after SIGKILL",
       );
 
-      expect(killSpy.mock.calls.filter(([targetPid]) => targetPid === pid)).toEqual([
-        [pid, "SIGTERM"],
-        [pid, "SIGKILL"],
+      expect(signaler.signals).toEqual([
+        { pid, signal: "SIGTERM" },
+        { pid, signal: "SIGKILL" },
       ]);
       expect(existsSync(pidFilePath)).toBe(true);
       expect(existsSync(socketPath)).toBe(true);
     } finally {
-      killSpy.mockRestore();
       rmSync(directory, { recursive: true, force: true });
     }
   });
@@ -217,28 +229,34 @@ describe("DaemonManager stop", () => {
     timer.enableAutoAdvance();
     writeStopPidFile(pidFilePath, pid, socketPath);
     writeFileSync(socketPath, "socket");
-    const manager = createManagerForStop(livePids, timer, pidFilePath, socketPath, () => {
-      livenessChecks++;
-    });
-    const killSpy = spyOn(process, "kill").mockImplementation((_targetPid, signal) => {
+    const signaler = new FakeDaemonProcessSignaler((_targetPid, signal) => {
       if (signal === "SIGKILL") {
         livePids.delete(pid);
       }
-      return true;
     });
+    const manager = createManagerForStop(
+      livePids,
+      timer,
+      pidFilePath,
+      socketPath,
+      () => {
+        livenessChecks++;
+      },
+      undefined,
+      signaler,
+    );
 
     try {
       await expect(manager.stop(1_000)).resolves.toBeUndefined();
 
-      expect(killSpy.mock.calls.filter(([targetPid]) => targetPid === pid)).toEqual([
-        [pid, "SIGTERM"],
-        [pid, "SIGKILL"],
+      expect(signaler.signals).toEqual([
+        { pid, signal: "SIGTERM" },
+        { pid, signal: "SIGKILL" },
       ]);
       expect(livenessChecks).toBeGreaterThan(12);
       expect(existsSync(pidFilePath)).toBe(false);
       expect(existsSync(socketPath)).toBe(false);
     } finally {
-      killSpy.mockRestore();
       rmSync(directory, { recursive: true, force: true });
     }
   });
@@ -253,27 +271,33 @@ describe("DaemonManager stop", () => {
     timer.enableAutoAdvance();
     writeStopPidFile(pidFilePath, pid, socketPath);
     writeFileSync(socketPath, "socket");
-    const manager = createManagerForStop(livePids, timer, pidFilePath, socketPath);
-    const killSpy = spyOn(process, "kill").mockImplementation((_targetPid, signal) => {
+    const signaler = new FakeDaemonProcessSignaler((_targetPid, signal) => {
       if (signal === "SIGKILL") {
         timer.setTimeout(() => {
           livePids.delete(pid);
         }, 1_000);
       }
-      return true;
     });
+    const manager = createManagerForStop(
+      livePids,
+      timer,
+      pidFilePath,
+      socketPath,
+      undefined,
+      undefined,
+      signaler,
+    );
 
     try {
       await expect(manager.stop(1_000)).resolves.toBeUndefined();
 
-      expect(killSpy.mock.calls.filter(([targetPid]) => targetPid === pid)).toEqual([
-        [pid, "SIGTERM"],
-        [pid, "SIGKILL"],
+      expect(signaler.signals).toEqual([
+        { pid, signal: "SIGTERM" },
+        { pid, signal: "SIGKILL" },
       ]);
       expect(existsSync(pidFilePath)).toBe(false);
       expect(existsSync(socketPath)).toBe(false);
     } finally {
-      killSpy.mockRestore();
       rmSync(directory, { recursive: true, force: true });
     }
   });
@@ -305,6 +329,7 @@ describe("DaemonManager stop", () => {
     timer.enableAutoAdvance();
     writeStopPidFile(pidFilePath, pid, socketPath);
     writeFileSync(socketPath, "socket");
+    const signaler = new FakeDaemonProcessSignaler();
     const manager = createManagerForStop(
       livePids,
       timer,
@@ -312,21 +337,20 @@ describe("DaemonManager stop", () => {
       socketPath,
       undefined,
       lockFilePath,
+      signaler,
     );
-    const killSpy = spyOn(process, "kill").mockImplementation(() => true);
 
     try {
       await expect(manager.stop(1_000)).resolves.toBeUndefined();
 
       // No SIGTERM/SIGKILL was ever needed — status() already reported the
       // daemon as not running, so stop() never entered the kill path.
-      expect(killSpy).not.toHaveBeenCalled();
+      expect(signaler.signals).toEqual([]);
       expect(existsSync(pidFilePath)).toBe(false);
       // The socket is NOT unlinked by stop() — only the O_EXCL-locked bind may
       // do that, at the next daemon start.
       expect(existsSync(socketPath)).toBe(true);
     } finally {
-      killSpy.mockRestore();
       rmSync(directory, { recursive: true, force: true });
     }
   });
@@ -353,6 +377,7 @@ describe("DaemonManager stop", () => {
     // The winner's live socket — indistinguishable, by pathname alone, from an
     // ordinary stale socket inode.
     writeFileSync(socketPath, "live winner socket");
+    const signaler = new FakeDaemonProcessSignaler();
     const manager = createManagerForStop(
       livePids,
       timer,
@@ -360,19 +385,18 @@ describe("DaemonManager stop", () => {
       socketPath,
       undefined,
       lockFilePath,
+      signaler,
     );
-    const killSpy = spyOn(process, "kill").mockImplementation(() => true);
 
     try {
       await expect(manager.stop(1_000)).resolves.toBeUndefined();
 
-      expect(killSpy).not.toHaveBeenCalled();
+      expect(signaler.signals).toEqual([]);
       expect(existsSync(pidFilePath)).toBe(false);
       // The live winner's socket must survive — this is the brick #6140 exists
       // to prevent.
       expect(existsSync(socketPath)).toBe(true);
     } finally {
-      killSpy.mockRestore();
       rmSync(directory, { recursive: true, force: true });
     }
   });
@@ -398,6 +422,7 @@ describe("DaemonManager stop", () => {
     writeFileSync(socketPath, "socket");
 
     let livenessChecks = 0;
+    const signaler = new FakeDaemonProcessSignaler();
     const manager = createManagerForStop(
       livePids,
       timer,
@@ -415,20 +440,19 @@ describe("DaemonManager stop", () => {
         }
       },
       lockFilePath,
+      signaler,
     );
-    const killSpy = spyOn(process, "kill").mockImplementation(() => true);
 
     try {
       await expect(manager.stop(1_000)).resolves.toBeUndefined();
 
-      expect(killSpy).not.toHaveBeenCalled();
+      expect(signaler.signals).toEqual([]);
       // The winner's live PID record must survive intact.
       expect(existsSync(pidFilePath)).toBe(true);
       const survivingPidData = JSON.parse(readFileSync(pidFilePath, "utf-8")) as { pid: number };
       expect(survivingPidData.pid).toBe(winnerPid);
       expect(existsSync(socketPath)).toBe(true);
     } finally {
-      killSpy.mockRestore();
       rmSync(directory, { recursive: true, force: true });
     }
   });
@@ -451,6 +475,7 @@ describe("DaemonManager stop", () => {
 
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
+    const signaler = new FakeDaemonProcessSignaler();
     const manager = createManagerForStop(
       livePids,
       timer,
@@ -458,8 +483,8 @@ describe("DaemonManager stop", () => {
       socketPath,
       undefined,
       lockFilePath,
+      signaler,
     );
-    const killSpy = spyOn(process, "kill").mockImplementation(() => true);
 
     try {
       const start = timer.getCurrentTime();
@@ -468,13 +493,12 @@ describe("DaemonManager stop", () => {
       // hang waiting for the lock.
       expect(timer.getCurrentTime() - start).toBeLessThan(5_000);
 
-      expect(killSpy).not.toHaveBeenCalled();
+      expect(signaler.signals).toEqual([]);
       // Deletion was skipped — the stale PID file survives for the next
       // locked bind to reclaim, exactly like the socket already does.
       expect(existsSync(pidFilePath)).toBe(true);
       expect(existsSync(socketPath)).toBe(true);
     } finally {
-      killSpy.mockRestore();
       rmSync(directory, { recursive: true, force: true });
     }
   });
@@ -485,17 +509,24 @@ describe("DaemonManager stop", () => {
     const socketPath = join(directory, "daemon.sock");
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
-    const manager = createManagerForStop(new Set<number>(), timer, pidFilePath, socketPath);
-    const killSpy = spyOn(process, "kill").mockImplementation(() => true);
+    const signaler = new FakeDaemonProcessSignaler();
+    const manager = createManagerForStop(
+      new Set<number>(),
+      timer,
+      pidFilePath,
+      socketPath,
+      undefined,
+      undefined,
+      signaler,
+    );
 
     try {
       await expect(manager.stop(1_000)).resolves.toBeUndefined();
 
-      expect(killSpy).not.toHaveBeenCalled();
+      expect(signaler.signals).toEqual([]);
       expect(existsSync(pidFilePath)).toBe(false);
       expect(existsSync(socketPath)).toBe(false);
     } finally {
-      killSpy.mockRestore();
       rmSync(directory, { recursive: true, force: true });
     }
   });
@@ -2162,6 +2193,11 @@ describe("Daemon manager process detection", () => {
       isProcessRunning: (pid) => livePids.has(pid),
     };
     const signaler = new FakeDaemonProcessSignaler((pid, signal) => {
+      if (pid === recordedPid) {
+        // Preserve this test's existing process.kill assertions for the recorded daemon.
+        process.kill(pid, signal);
+        return;
+      }
       if (pid === crossNamespacePid && signal === "SIGKILL") {
         fakeTimer.setTimeout(() => {
           livePids.delete(pid);
@@ -2206,7 +2242,7 @@ describe("Daemon manager process detection", () => {
         [recordedPid, "SIGTERM"],
         [recordedPid, "SIGKILL"],
       ]);
-      expect(signaler.signals).toEqual([
+      expect(signaler.signals.filter(({ pid }) => pid === crossNamespacePid)).toEqual([
         { pid: crossNamespacePid, signal: "SIGTERM" },
         { pid: crossNamespacePid, signal: "SIGKILL" },
       ]);

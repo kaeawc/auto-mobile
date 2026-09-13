@@ -251,6 +251,41 @@ describe("TelemetryPushSocketServer", () => {
     await server.startFake();
   });
 
+  const telemetryEvent = (deviceId: string): TelemetryEvent => ({
+    category: "network",
+    timestamp: 1000,
+    deviceId,
+    sessionId: null,
+    data: { method: "GET", url: "/users", statusCode: 200, durationMs: 42 },
+  });
+
+  // The epoch survives the quarantine but is withheld, and the event is dropped
+  // rather than broadcast under a serial the pool can no longer tie to a runtime
+  // (#6863 review).
+  it("drops telemetry while the device's pooled identity is quarantined", () => {
+    const scoped = server.simulateSubscription({ deviceSessionUuid: "uuid-1" });
+    const all = server.simulateSubscription({});
+    resolver.quarantine("device-1");
+
+    server.pushTelemetryEvent(telemetryEvent("device-1"));
+
+    expect(scoped.socket.getWrittenMessages()).toHaveLength(0);
+    expect(all.socket.getWrittenMessages()).toHaveLength(0);
+  });
+
+  it("resumes telemetry delivery under the same uuid once the quarantine lifts", () => {
+    const { socket } = server.simulateSubscription({ deviceSessionUuid: "uuid-1" });
+    resolver.quarantine("device-1");
+    server.pushTelemetryEvent(telemetryEvent("device-1"));
+
+    resolver.resolveIdentity("device-1");
+    server.pushTelemetryEvent(telemetryEvent("device-1"));
+
+    const msgs = socket.getWrittenMessages<{ data?: TelemetryEvent }>();
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0].data?.deviceSessionUuid).toBe("uuid-1");
+  });
+
   it("tracks subscriber count correctly", () => {
     expect(server.getSubscriberCount()).toBe(0);
 

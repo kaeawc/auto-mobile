@@ -28,7 +28,6 @@ const original: BootedDevice = {
   name: "Pixel_8",
   platform: "android",
   deviceId: "emulator-5554",
-  transportId: "1",
 };
 
 function execResult(stdout: string) {
@@ -137,12 +136,12 @@ test("with two booted emulators each kill selects only its own serial", async ()
   const { factory, commands, timer } = recordingFactory(["emulator-5554", "emulator-5556"]);
   const client = new AndroidEmulatorClient(null, null, timer, factory);
 
-  await client.killDevice({ ...original, deviceId: "emulator-5554", transportId: "1" });
+  await client.killDevice({ ...original, deviceId: "emulator-5554" });
   expect(commands.filter((args) => args.slice(-2).join(" ") === "emu kill")).toEqual([
     ["-s", "emulator-5554", "emu", "kill"],
   ]);
 
-  await client.killDevice({ ...original, deviceId: "emulator-5556", transportId: "2" });
+  await client.killDevice({ ...original, deviceId: "emulator-5556" });
   expect(commands.filter((args) => args.slice(-2).join(" ") === "emu kill")).toEqual([
     ["-s", "emulator-5554", "emu", "kill"],
     ["-s", "emulator-5556", "emu", "kill"],
@@ -168,22 +167,37 @@ test("refuses a discovered replacement AVD on the expected serial", async () => 
   expectNoTransportOrRebootCommand(adb.getExecutedArgv());
 });
 
+// Two unknowns are not an equality. When the requested target's name is the
+// `Unknown (<serial>)` placeholder AND the fresh discovery reports the same
+// placeholder, the check above passes on nothing: neither side names an AVD, so
+// a replacement emulator that also cannot name itself would be killed under the
+// previous occupant's request
+// ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
+test("refuses when both the requested and the discovered name are the placeholder", async () => {
+  const placeholder: BootedDevice = {
+    ...original,
+    name: "Unknown (emulator-5554)",
+  };
+  const { client, adb } = fixture(placeholder);
+  await expect(client.killDevice(placeholder)).rejects.toThrow(/could not name itself/);
+  expect(adb.getExecutedCommands().some((command) => command.endsWith("emu kill"))).toBe(false);
+});
+
 test("refuses when the expected emulator is no longer running", async () => {
   const { client, adb } = fixture({ ...original, deviceId: "emulator-5556" });
   await expect(client.killDevice(original)).rejects.toThrow("is not running");
   expect(adb.getExecutedCommands().some((command) => command.endsWith("emu kill"))).toBe(false);
 });
 
-for (const observedTransport of ["2", undefined]) {
-  test(`a differing discovered transport id (${observedTransport}) no longer blocks the kill`, async () => {
-    // Transport ids are not part of the kill identity: serial + AVD name +
-    // platform are. A transport that moved (or was never reported) must not
-    // strand a teardown.
-    const { client, adb } = fixture({ ...original, transportId: observedTransport });
+test("an adb listing that still reports transport_id does not affect the kill identity", () => {
+  // `adb devices -l` keeps printing a `transport_id:` column; discovery no
+  // longer parses it, and the kill identity is serial + AVD name + platform.
+  const { client, adb } = fixture(original);
+  return (async () => {
     await expect(client.killDevice(original)).resolves.toMatchObject({
       deviceId: original.deviceId,
     });
     expect(adb.getExecutedCommands().some((command) => command.endsWith("emu kill"))).toBe(true);
     expectNoTransportOrRebootCommand(adb.getExecutedArgv());
-  });
-}
+  })();
+});

@@ -1546,14 +1546,14 @@ export class DaemonManager implements DaemonManagerLike {
 
     try {
       // Send SIGTERM for graceful shutdown
-      process.kill(pid, "SIGTERM");
+      this.processSignaler.signal(pid, "SIGTERM");
 
       // Wait for process to exit
       const stopped = await this.waitForStop(pid, timeout);
 
       if (!stopped) {
         stderrLog(`Daemon did not stop gracefully, sending SIGKILL...`);
-        process.kill(pid, "SIGKILL");
+        this.processSignaler.signal(pid, "SIGKILL");
 
         if (!(await this.waitForStop(pid, DAEMON_FORCED_STOP_TIMEOUT_MS))) {
           throw new Error(`Daemon process ${pid} did not exit after SIGKILL`);

@@ -212,6 +212,30 @@ describe("queryInstalledApps still honors type filters on the iOS simulator (#62
     expect(content.installedCount).toBe(2);
   });
 
+  test("a System simulator bundle with a hidden SpringBoard tag is excluded by the launchable default", async () => {
+    setListInstalledAppsFactoryForTests(() => ({
+      executeDetailedResult: async () => {
+        throw new Error("not exercised on iOS");
+      },
+      executeIosDetailedResult: async () => ({
+        apps: [
+          { bundleIdentifier: "com.example.myapp", ApplicationType: "User" },
+          {
+            bundleIdentifier: "com.apple.some.hidden.agent",
+            ApplicationType: "System",
+            SBAppTags: ["hidden"],
+          },
+        ],
+        successful: true,
+      }),
+    }));
+    invalidateInstalledAppsCache(simulatorDevice.deviceId);
+
+    const content = await queryInstalledApps({ deviceId: simulatorDevice.deviceId });
+
+    expect(content.devices[0].apps.map((app) => app.packageName)).toEqual(["com.example.myapp"]);
+  });
+
   test("reports an individually unclassified simulator app excluded by the launchable default", async () => {
     setListInstalledAppsFactoryForTests(() => ({
       executeDetailedResult: async () => {

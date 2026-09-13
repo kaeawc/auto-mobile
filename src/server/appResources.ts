@@ -347,6 +347,13 @@ function readIosRawApplicationType(app: Record<string, unknown>): string | undef
   return readIosAppField(app, IOS_APPLICATION_TYPE_KEYS);
 }
 
+function hasIosHiddenSpringBoardTag(app: Record<string, unknown>): boolean {
+  return (
+    Array.isArray(app.SBAppTags) &&
+    app.SBAppTags.some((tag) => typeof tag === "string" && tag.toLowerCase() === "hidden")
+  );
+}
+
 // Exported for tests: pure classification, no device/cache I/O (#6155).
 export function extractIosApplicationType(
   app: Record<string, unknown>,
@@ -395,6 +402,9 @@ export function isIosApplicationTypeUnclassified(
  */
 // Exported for tests: pure classification, no device/cache I/O (#6798).
 export function extractIosLaunchable(app: Record<string, unknown>): boolean | undefined {
+  if (hasIosHiddenSpringBoardTag(app)) {
+    return false;
+  }
   const raw = readIosRawApplicationType(app)?.toLowerCase();
   if (raw === "hidden") {
     return false;
@@ -1362,7 +1372,7 @@ export function registerAppResources(): void {
   ResourceRegistry.register(
     APPS_RESOURCE_URIS.BASE,
     "Installed Apps",
-    "List installed apps (with display label and launchability) across booted devices with optional query filters: type (launchable|user|system|all, default launchable), search, profile (deviceId required).",
+    "List installed apps across booted devices, with optional display label and launchability fields when reported by the platform or transport (label is typically omitted on Android without CtrlProxy label support; launchable is typically omitted for physical iOS/devicectl records), with optional query filters: type (launchable|user|system|all, default launchable), search, profile (deviceId required).",
     "application/json",
     () => getAppsQueryResource({}, APPS_RESOURCE_URIS.BASE),
   );
@@ -1370,7 +1380,7 @@ export function registerAppResources(): void {
   ResourceRegistry.registerTemplate(
     APPS_QUERY_TEMPLATE,
     "Installed Apps",
-    "List installed apps (with display label and launchability) across booted devices with optional query filters: type (launchable|user|system|all, default launchable), search, profile.",
+    "List installed apps across booted devices, with optional display label and launchability fields when reported by the platform or transport (label is typically omitted on Android without CtrlProxy label support; launchable is typically omitted for physical iOS/devicectl records), with optional query filters: type (launchable|user|system|all, default launchable), search, profile.",
     "application/json",
     async (params) => {
       try {

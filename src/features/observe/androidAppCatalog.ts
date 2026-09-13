@@ -125,12 +125,32 @@ export function mergeSystemAppCatalogEntry(
     app.label = entry.label;
   }
   if (entry?.launchable === undefined) {
+    if (app.launchableByUserId === undefined) {
+      return;
+    }
+  } else {
+    const byUserId = app.launchableByUserId ?? {};
+    byUserId[userId] = entry.launchable;
+    app.launchableByUserId = byUserId;
+  }
+
+  recomputeSystemAppLaunchability(app);
+}
+
+function recomputeSystemAppLaunchability(app: SystemAppCatalogTarget): void {
+  const byUserId = app.launchableByUserId;
+  if (!byUserId || Object.keys(byUserId).length === 0) {
     return;
   }
-  const byUserId = app.launchableByUserId ?? {};
-  byUserId[userId] = entry.launchable;
-  app.launchableByUserId = byUserId;
-  app.launchable = Object.values(byUserId).some((launchable) => launchable);
+  if (Object.values(byUserId).some((launchable) => launchable)) {
+    app.launchable = true;
+    return;
+  }
+  if (app.userIds === undefined || app.userIds.every((id) => Object.hasOwn(byUserId, id))) {
+    app.launchable = false;
+    return;
+  }
+  app.launchable = undefined;
 }
 
 /** The launchability fields {@link mergeSystemAppCatalogEntry} maintains. */
@@ -138,6 +158,7 @@ export interface SystemAppCatalogTarget {
   label?: string;
   launchable?: boolean;
   launchableByUserId?: Record<number, boolean>;
+  userIds?: number[];
 }
 
 /**

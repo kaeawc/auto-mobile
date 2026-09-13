@@ -125,6 +125,16 @@ describe("androidAppCatalog (#6798)", () => {
     expect(app.launchable).toBe(true);
   });
 
+  test("keeps launchability unknown when an installed user has no report", () => {
+    const app: SystemAppCatalogTarget = { userIds: [0, 10] };
+
+    mergeSystemAppCatalogEntry(app, 0, { launchable: false });
+    mergeSystemAppCatalogEntry(app, 10, undefined);
+
+    expect(app.launchableByUserId).toEqual({ 0: false });
+    expect(app.launchable).toBeUndefined();
+  });
+
   test("the launcher probe fills in a definite launchable for every known package", () => {
     const catalog: AndroidAppCatalog = new Map([["com.android.contacts", { label: "Contacts" }]]);
 

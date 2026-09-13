@@ -439,6 +439,37 @@ export abstract class PushSubscriptionSocketServer<TFilter, TPushData> extends B
   }
 
   /**
+   * Canonical validation for the `deviceSessionUuid` subscription key, shared by every
+   * push socket server. JSON parsing does not validate fields at runtime, so a bare cast
+   * lets a blank string or a non-string value become a filter that can never match an
+   * event while `handleSubscribe` still acks `success: true` — an inert subscription the
+   * client has no way to notice (#6676).
+   *
+   * Throws, so the `processLine` catch path answers with the standard
+   * `{ type: "error", success: false, error }` envelope and no subscription is created.
+   *
+   * @param value Raw value as it arrived on the wire.
+   * @returns The validated, whitespace-trimmed uuid, or null when the key is absent
+   *          (an all-device subscription).
+   */
+  protected parseDeviceSessionUuid(value: unknown): string | null {
+    if (value === undefined || value === null) {
+      return null;
+    }
+    if (typeof value !== "string") {
+      throw new Error("deviceSessionUuid must be a string or null");
+    }
+    const trimmed = value.trim();
+    if (trimmed.length === 0) {
+      throw new Error("deviceSessionUuid must not be blank");
+    }
+    // Return the trimmed key, never the raw one: filters compare by exact equality,
+    // so a padded `" uuid-a "` would ack success and then match nothing - the same
+    // inert subscription this validation exists to prevent (#6676).
+    return trimmed;
+  }
+
+  /**
    * Parse subscription filter from request.
    * Subclasses must implement this.
    */

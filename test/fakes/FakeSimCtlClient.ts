@@ -48,9 +48,19 @@ export class FakeSimCtlClient implements FakeSimCtlClientContract {
   private argvSequenceCursor = new Map<string, number>();
   private methodCalls = new Map<string, Array<Record<string, unknown>>>();
   private openSimulatorAppError: Error | null = null;
+  private simulatorAppHeadless = false;
 
   setOpenSimulatorAppError(error: Error | null): void {
     this.openSimulatorAppError = error;
+  }
+
+  /**
+   * When true, {@link openSimulatorApp} reports a headless no-op (no GUI
+   * launch performed) the way the real client does on a host with no Aqua
+   * session, instead of reporting a completed launch.
+   */
+  setSimulatorAppHeadless(headless: boolean): void {
+    this.simulatorAppHeadless = headless;
   }
 
   setDeviceInfo(udid: string, info: AppleDevice | null): void {
@@ -271,11 +281,12 @@ export class FakeSimCtlClient implements FakeSimCtlClientContract {
     this.recordCall("terminateApp", { bundleId, deviceId });
   }
 
-  async openSimulatorApp(udid?: string): Promise<void> {
+  async openSimulatorApp(udid?: string): Promise<boolean> {
     this.recordCall("openSimulatorApp", { udid });
     if (this.openSimulatorAppError) {
       throw this.openSimulatorAppError;
     }
+    return !this.simulatorAppHeadless;
   }
 
   private pushNotificationResult: { success: boolean; error?: string } = { success: true };

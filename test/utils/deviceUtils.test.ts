@@ -259,6 +259,35 @@ describe("MultiPlatformDeviceManager", () => {
     expect(receivedSignal).toBe(controller.signal);
   });
 
+  // AVD-name enrichment is sequential and budgets 2s per attached emulator, so
+  // a caller that has already decided not to establish an identity (`force`)
+  // must be able to ask for the attached list and nothing else -- otherwise a
+  // forced teardown spends its whole deadline inside discovery and never
+  // dispatches the kill it exists to dispatch
+  // ([#6874](https://github.com/kaeawc/auto-mobile/pull/6874) review).
+  test("forwards a serial-only Android scan to the emulator client", async () => {
+    const scans: Array<{ skipNameEnrichment?: boolean }> = [];
+    const emulator = {
+      getBootedDevicesChecked: async (
+        _onlyEmulators: boolean,
+        options: { bypassDeviceListCache?: boolean; skipNameEnrichment?: boolean },
+      ): Promise<BootedDevice[]> => {
+        scans.push({ skipNameEnrichment: options.skipNameEnrichment });
+        return [];
+      },
+    } as unknown as AndroidEmulatorClient;
+    const manager = new MultiPlatformDeviceManager(
+      new FakeAdbClient() as unknown as AdbClient,
+      {} as SimCtlClient,
+      emulator,
+    );
+
+    await manager.getBootedDevicesDetailed("android", { skipAndroidNameEnrichment: true });
+    await manager.getBootedDevicesDetailed("android");
+
+    expect(scans).toEqual([{ skipNameEnrichment: true }, { skipNameEnrichment: undefined }]);
+  });
+
   test("startDevice rejects a name-only iOS DeviceInfo instead of booting by name (#6414)", async () => {
     const fakeSimctl = {
       isAvailable: async () => true,

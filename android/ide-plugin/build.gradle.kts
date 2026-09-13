@@ -60,6 +60,15 @@ dependencies {
   }
 }
 
+private val verifyPluginRequested =
+  gradle.startParameter.taskNames.any { it.substringAfterLast(':').startsWith("verifyPlugin") }
+
+private val useRecommendedVerifierIdes =
+  providers
+    .gradleProperty("automobile.ide.verifierRecommendedIdes")
+    .map(String::toBoolean)
+    .getOrElse(verifyPluginRequested)
+
 intellijPlatform {
   pluginConfiguration {
     id.set("com.automobile.ide")
@@ -81,5 +90,16 @@ intellijPlatform {
     }
   }
 
-  pluginVerification { ides { recommended() } }
+  // `recommended()` asks JetBrains' product-releases data service
+  // (data.services.jetbrains.com) which IDE builds to verify against. The
+  // resulting dependency is wired into this project's resolution, so ANY task
+  // that resolves :ide-plugin:compileClasspath — `detekt` included — depended on
+  // DNS for a host it otherwise has no reason to reach, and a transient
+  // UnknownHostException reddened the unrelated Detekt job on main (#6880).
+  // Only a build that actually runs `verifyPlugin` needs the lookup, so it is
+  // off by default and enabled automatically when that task is requested.
+  // Force it either way with -Pautomobile.ide.verifierRecommendedIdes=<bool>.
+  if (useRecommendedVerifierIdes) {
+    pluginVerification { ides { recommended() } }
+  }
 }

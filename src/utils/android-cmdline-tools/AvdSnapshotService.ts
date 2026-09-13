@@ -186,7 +186,10 @@ export class AvdSnapshotService implements AvdSnapshotOperations {
     let result;
     try {
       result = await this.consoleBusyRegistry.runExclusive(deviceId, () =>
-        adb.executeCommand(command, timeoutMs),
+        adb.execute(command.split(" "), {
+          timeoutMs,
+          waitForProcessSettlementAfterAbort: true,
+        }),
       );
     } catch (error) {
       const reason = formatVmSnapshotExecutionError("delete", snapshotName, error);

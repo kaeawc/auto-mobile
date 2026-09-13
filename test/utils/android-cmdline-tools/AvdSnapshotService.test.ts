@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import * as path from "path";
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
+import type { AdbExecuteOptions } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import {
   AVD_SNAPSHOTS_DIRNAME,
   FileAvdConfigReader,
@@ -77,19 +78,24 @@ function stubEmulator(devices: BootedDevice[]) {
 
 function recordingAdbFactory(result: ExecResult | Error) {
   const commands: string[] = [];
+  const executeOptions: Array<AdbExecuteOptions | undefined> = [];
+  const execute = async (command: string, options?: AdbExecuteOptions): Promise<ExecResult> => {
+    commands.push(command);
+    executeOptions.push(options);
+    if (result instanceof Error) {
+      throw result;
+    }
+    return result;
+  };
   const factory: AdbClientFactory = {
     create: () =>
       ({
-        executeCommand: async (command: string) => {
-          commands.push(command);
-          if (result instanceof Error) {
-            throw result;
-          }
-          return result;
-        },
+        executeCommand: async (command: string) => execute(command),
+        execute: async (args: string[], options?: AdbExecuteOptions) =>
+          execute(args.join(" "), options),
       }) as never,
   };
-  return { factory, commands };
+  return { factory, commands, executeOptions };
 }
 
 function execResult(stdout: string): ExecResult {
@@ -242,6 +248,9 @@ describe("AvdSnapshotService (#6490)", () => {
 
     expect(await sut.deleteVmSnapshot("emulator-5556", "snap", 30000)).toEqual({ reclaimed: true });
     expect(adb.commands).toEqual(["emu avd snapshot del snap"]);
+    expect(adb.executeOptions).toEqual([
+      { timeoutMs: 30000, waitForProcessSettlementAfterAbort: true },
+    ]);
   });
 
   test("a snapshot that is already gone counts as reclaimed", async () => {

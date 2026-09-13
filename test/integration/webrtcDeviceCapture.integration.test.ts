@@ -9,6 +9,7 @@ import { promisify } from "node:util";
 import WebSocket from "ws";
 import { sendWebRtcStreamRequest } from "../../src/daemon/webrtcStreamClient";
 import { defaultTimer, type Timer } from "../../src/utils/SystemTimer";
+import { FakeTimer } from "../fakes/FakeTimer";
 import { waitFor, withDeadline } from "../helpers/abortableWaitFor";
 import {
   CaptureStageTimeline,
@@ -57,6 +58,9 @@ const TEARDOWN_HOOK_TIMEOUT_MS = 45_000;
 // the entire device lane (#5715).
 const REAL_IO_TIMEOUT_MS = 30_000;
 const CDP_COMMAND_TIMEOUT_MS = REAL_IO_TIMEOUT_MS;
+const DAEMON_START_RETRY_DELAY_MS = 2_000;
+const IOS_SIMULATOR_BOOT_DISCOVERY_TIMEOUT_MS = 10_000;
+const IOS_SIMULATOR_BOOT_DISCOVERY_POLL_MS = 250;
 
 interface ChromeTarget {
   type: string;
@@ -216,26 +220,65 @@ async function startWebRtcDaemon(
   daemonEnvironment: NodeJS.ProcessEnv,
   socketPath: string,
 ): Promise<void> {
-  // Keep the start command's own failure instead of fully swallowing it, so a
-  // daemon that never spawns is reported alongside the readiness timeout rather
-  // than surfacing only as a generic "socket did not become ready".
-  const startError = await execFileAsync("bun", ["dist/src/index.js", "--daemon", "start"], {
-    env: daemonEnvironment,
-    timeout: REAL_IO_TIMEOUT_MS,
-    killSignal: "SIGKILL",
-  })
-    .then(() => null)
-    .catch((error: unknown) => (error instanceof Error ? error : new Error(String(error))));
+  const firstStartError = await runWebRtcDaemonStart(daemonEnvironment);
+  const firstReadyError = await waitForWebRtcDaemonReady(socketPath);
+  if (!shouldRetryWebRtcDaemonStart({ startError: firstStartError, readyError: firstReadyError })) {
+    return;
+  }
+
+  await defaultTimer.sleep(DAEMON_START_RETRY_DELAY_MS);
+  const retryStartError = await runWebRtcDaemonStart(daemonEnvironment);
+  const retryReadyError = await waitForWebRtcDaemonReady(socketPath);
+  if (!retryReadyError) {
+    return;
+  }
+
+  const startError = retryStartError ?? firstStartError;
+  if (startError) {
+    throw new Error(
+      `${retryReadyError.message}; daemon start command failed: ${startError.message}`,
+    );
+  }
+  throw retryReadyError;
+}
+
+export function shouldRetryWebRtcDaemonStart({
+  startError,
+  readyError,
+}: {
+  startError: Error | null;
+  readyError: Error | null;
+}): boolean {
+  return startError !== null || readyError !== null;
+}
+
+async function runWebRtcDaemonStart(daemonEnvironment: NodeJS.ProcessEnv): Promise<Error | null> {
+  try {
+    await execFileAsync("bun", ["dist/src/index.js", "--daemon", "start"], {
+      env: daemonEnvironment,
+      timeout: REAL_IO_TIMEOUT_MS,
+      killSignal: "SIGKILL",
+    });
+    return null;
+  } catch (error) {
+    const startError = error instanceof Error ? error : new Error(String(error));
+    console.warn(
+      `[#6969] daemon start command failed; checking readiness before retry: ${startError}`,
+    );
+    return startError;
+  }
+}
+
+async function waitForWebRtcDaemonReady(socketPath: string): Promise<Error | null> {
   try {
     await waitForWebRtcStreamSocket(socketPath);
-  } catch (readyError) {
-    if (startError) {
-      throw new Error(
-        `${readyError instanceof Error ? readyError.message : String(readyError)}; ` +
-          `daemon start command failed: ${startError.message}`,
-      );
-    }
-    throw readyError;
+    return null;
+  } catch (error) {
+    const readyError = error instanceof Error ? error : new Error(String(error));
+    console.warn(
+      `[#6969] daemon stream socket was not ready; retrying daemon start once: ${readyError}`,
+    );
+    return readyError;
   }
 }
 
@@ -625,6 +668,100 @@ interface CaptureProfile {
   configuredFps: number | null;
 }
 
+interface SimulatorAppearanceClient {
+  getBootedSimulators(timeoutMs?: number): Promise<Array<{ deviceId: string }>>;
+  getDeviceInfo(deviceId: string): Promise<{ state: string } | null>;
+}
+
+interface WebRtcSimCtlClient extends SimulatorAppearanceClient {
+  getScreenSize(deviceId: string, timeoutMs?: number): Promise<CaptureDimensions>;
+}
+
+type SimCtlClientFactory = () => Promise<WebRtcSimCtlClient>;
+
+async function createSimCtlClient(): Promise<WebRtcSimCtlClient> {
+  const { SimCtlClient } = await import("../../src/utils/ios-cmdline-tools/SimCtlClient");
+  return new SimCtlClient();
+}
+
+export function isBootedSimulatorState(device: { state: string } | null): boolean {
+  return device?.state === "Booted";
+}
+
+export async function waitForBootedSimulatorUdid(
+  simctl: SimulatorAppearanceClient,
+  {
+    timeoutMs = IOS_SIMULATOR_BOOT_DISCOVERY_TIMEOUT_MS,
+    pollIntervalMs = IOS_SIMULATOR_BOOT_DISCOVERY_POLL_MS,
+    timer = defaultTimer,
+  }: {
+    timeoutMs?: number;
+    pollIntervalMs?: number;
+    timer?: Timer;
+  } = {},
+): Promise<string | undefined> {
+  const deadline = timer.now() + timeoutMs;
+  while (true) {
+    const remainingMs = deadline - timer.now();
+    const simulator = (await simctl.getBootedSimulators(Math.max(1, remainingMs)))[0];
+    if (simulator) {
+      const device = await simctl.getDeviceInfo(simulator.deviceId);
+      if (isBootedSimulatorState(device)) {
+        return simulator.deviceId;
+      }
+    }
+
+    if (timer.now() >= deadline) {
+      return undefined;
+    }
+    await timer.sleep(Math.min(pollIntervalMs, deadline - timer.now()));
+  }
+}
+
+async function setIosFixtureAppearance(
+  appearance: "light" | "dark",
+  {
+    signal,
+    timeoutMs = REAL_IO_TIMEOUT_MS,
+    timer = defaultTimer,
+    simctlFactory = createSimCtlClient,
+  }: {
+    signal?: AbortSignal;
+    timeoutMs?: number;
+    timer?: Timer;
+    simctlFactory?: SimCtlClientFactory;
+  } = {},
+): Promise<void> {
+  const deadline = timer.now() + timeoutMs;
+  try {
+    const simctl = await simctlFactory();
+    const udid = await waitForBootedSimulatorUdid(simctl, {
+      timeoutMs: Math.min(IOS_SIMULATOR_BOOT_DISCOVERY_TIMEOUT_MS, timeoutMs),
+      timer,
+    });
+    if (!udid) {
+      // Appearance is cosmetic; video-frame assertions remain the lane's contract.
+      console.warn(`[#6969] no Booted iOS simulator found for ${appearance} appearance fixture`);
+      return;
+    }
+
+    const remainingMs = deadline - timer.now();
+    if (remainingMs <= 0) {
+      // Appearance is cosmetic; video-frame assertions remain the lane's contract.
+      console.warn(`[#6969] iOS simulator appearance fixture timed out before simctl could run`);
+      return;
+    }
+    await execFileAsync("xcrun", ["simctl", "ui", udid, "appearance", appearance], {
+      timeout: remainingMs,
+      killSignal: "SIGKILL",
+      signal,
+    });
+  } catch (error) {
+    // Appearance is cosmetic; video-frame assertions remain the lane's contract.
+    console.warn(`[#6969] could not set iOS simulator ${appearance} appearance fixture: ${error}`);
+  }
+}
+
 /**
  * Capture profile recorded with the stage timings (#4343) so latency samples
  * from different runners can be compared like for like.
@@ -666,8 +803,7 @@ async function captureProfile(): Promise<CaptureProfile> {
     // Not a hand-rolled `simctl io enumerate` regex: the first "Pixel Size:" in
     // that output belongs to the CarPlay screen, so a naive match reports
     // 720x480 for every simulator. SimCtlClient gates on the integrated display.
-    const { SimCtlClient } = await import("../../src/utils/ios-cmdline-tools/SimCtlClient");
-    const screen = await new SimCtlClient().getScreenSize("booted", REAL_IO_TIMEOUT_MS);
+    const screen = await (await createSimCtlClient()).getScreenSize("booted", REAL_IO_TIMEOUT_MS);
     return { sourceSize: { width: screen.width, height: screen.height }, configuredFps };
   } catch (error) {
     // Diagnostic metadata only — a failed size query must not fail the lane.
@@ -695,11 +831,7 @@ async function launchFixture(signal?: AbortSignal): Promise<void> {
     // Simulator is already foregrounded by the workflow. Toggling appearance
     // yields the required visible fixture without a Settings-app launch, which
     // can wedge on macOS hosted runners.
-    await execFileAsync("xcrun", ["simctl", "ui", "booted", "appearance", "light"], {
-      timeout: REAL_IO_TIMEOUT_MS,
-      killSignal: "SIGKILL",
-      signal,
-    });
+    await setIosFixtureAppearance("light", { signal });
     return;
   }
   throw new Error("AUTOMOBILE_WEBRTC_DEVICE_PLATFORM must be android or ios");
@@ -719,15 +851,47 @@ async function changeFixture(signal?: AbortSignal): Promise<void> {
     return;
   }
   if (platform === "ios") {
-    await execFileAsync("xcrun", ["simctl", "ui", "booted", "appearance", "dark"], {
-      timeout: REAL_IO_TIMEOUT_MS,
-      killSignal: "SIGKILL",
-      signal,
-    });
+    await setIosFixtureAppearance("dark", { signal });
     return;
   }
   throw new Error("AUTOMOBILE_WEBRTC_DEVICE_PLATFORM must be android or ios");
 }
+
+describe("WHEP device capture helper logic", () => {
+  test("retries daemon start when either the command or readiness attempt fails", () => {
+    expect(shouldRetryWebRtcDaemonStart({ startError: null, readyError: null })).toBe(false);
+    expect(
+      shouldRetryWebRtcDaemonStart({ startError: new Error("start failed"), readyError: null }),
+    ).toBe(true);
+    expect(
+      shouldRetryWebRtcDaemonStart({
+        startError: null,
+        readyError: new Error("socket unavailable"),
+      }),
+    ).toBe(true);
+  });
+
+  test("waits through an empty or transitional simulator listing for a Booted UDID", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    let discoveryCalls = 0;
+    const states = ["Shutdown", "Booted"];
+    const simctl: SimulatorAppearanceClient = {
+      async getBootedSimulators() {
+        discoveryCalls++;
+        return discoveryCalls === 1 ? [] : [{ deviceId: "ios-simulator-udid" }];
+      },
+      async getDeviceInfo() {
+        return { state: states.shift() ?? "Booted" };
+      },
+    };
+
+    await expect(
+      waitForBootedSimulatorUdid(simctl, { timeoutMs: 1_000, pollIntervalMs: 10, timer }),
+    ).resolves.toBe("ios-simulator-udid");
+    expect(discoveryCalls).toBe(3);
+  });
+});
 
 afterEach(async () => {
   // Measured as its own phase and swallowed: a cosmetic restore must be
@@ -746,15 +910,15 @@ afterEach(async () => {
           });
         }
         if (platform === "ios") {
-          await execFileAsync("xcrun", ["simctl", "ui", "booted", "appearance", "light"], {
-            timeout: FIXTURE_RESTORE_TIMEOUT_MS,
-            killSignal: "SIGKILL",
-          });
+          await setIosFixtureAppearance("light", { timeoutMs: FIXTURE_RESTORE_TIMEOUT_MS });
         }
       },
       FIXTURE_RESTORE_TIMEOUT_MS,
     )
-    .catch(() => undefined);
+    .catch((error) => {
+      // Fixture restore is cosmetic; video-frame assertions remain the lane's contract.
+      console.warn(`[#4354] fixture restore failed after the capture assertion: ${error}`);
+    });
 }, TEARDOWN_HOOK_TIMEOUT_MS);
 
 // Poll cadences the stages are observed with. Each measurement carries up to

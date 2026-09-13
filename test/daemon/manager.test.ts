@@ -31,6 +31,7 @@ import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import type { DaemonClientLike } from "../../src/daemon/client";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { formatLockContent } from "../../src/utils/fileLock";
+import { logger } from "../../src/utils/logger";
 import {
   DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS,
   DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS,
@@ -666,6 +667,26 @@ class FakeDaemonProcessFinder implements DaemonProcessFinder, DaemonProcessLiven
   }
 }
 
+class TimeoutThenSuccessDaemonProcessFinder extends FakeDaemonProcessFinder {
+  public calls = 0;
+
+  constructor(
+    private readonly timeoutFailures: number,
+    records: DaemonProcessRecord[] = [],
+    livePids?: Set<number>,
+  ) {
+    super(records, livePids);
+  }
+
+  override findDaemonProcesses(): DaemonProcessRecord[] {
+    this.calls++;
+    if (this.calls <= this.timeoutFailures) {
+      throw new Error("spawnSync /bin/sh ETIMEDOUT");
+    }
+    return super.findDaemonProcesses();
+  }
+}
+
 class FakeDaemonProcessSignaler implements DaemonProcessSignaler {
   readonly signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
 
@@ -1157,6 +1178,87 @@ describe("Daemon manager process detection", () => {
     expect(() => manager.findAllDaemonProcesses()).toThrow(
       "Failed to inspect daemon process table: spawn ENOBUFS",
     );
+  });
+
+  test("retries a transient process-table timeout before starting the daemon", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "daemon-manager-process-table-timeout-test-"));
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const processFinder = new TimeoutThenSuccessDaemonProcessFinder(1);
+    let spawnCalls = 0;
+    const processSpawner: DaemonProcessSpawner = {
+      spawn: () => {
+        spawnCalls++;
+        return {
+          unref() {},
+          once() {
+            return this;
+          },
+          off() {
+            return this;
+          },
+        } as ChildProcess;
+      },
+    };
+
+    class TestDaemonManager extends DaemonManager {
+      override async status(): Promise<DaemonStatus> {
+        return { running: false };
+      }
+
+      override async waitForReady(): Promise<boolean> {
+        return true;
+      }
+    }
+
+    try {
+      const manager = new TestDaemonManager(
+        undefined,
+        undefined,
+        timer,
+        join(directory, "daemon.lock"),
+        join(directory, "daemon.pid"),
+        join(directory, "daemon.sock"),
+        processFinder,
+        processSpawner,
+      );
+
+      await expect(manager.start()).resolves.toBeUndefined();
+      expect(processFinder.calls).toBe(2);
+      expect(spawnCalls).toBe(1);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("degrades after persistent process-table timeouts during daemon start", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const processFinder = new TimeoutThenSuccessDaemonProcessFinder(Number.POSITIVE_INFINITY);
+    const manager = new DaemonManager(
+      undefined,
+      undefined,
+      timer,
+      undefined,
+      undefined,
+      undefined,
+      processFinder,
+    );
+    const warnSpy = spyOn(logger, "warn").mockImplementation(() => undefined);
+
+    try {
+      const findForStart = (
+        manager as unknown as {
+          findLiveDaemonProcessesForStart(): Promise<number[]>;
+        }
+      ).findLiveDaemonProcessesForStart.bind(manager);
+
+      await expect(findForStart()).resolves.toEqual([]);
+      expect(processFinder.calls).toBe(3);
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   test("start reuses a responsive live daemon when its PID record is unavailable", async () => {

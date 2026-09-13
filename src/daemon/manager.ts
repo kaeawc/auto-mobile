@@ -32,6 +32,8 @@ import {
   DAEMON_SHUTDOWN_TIMEOUT_MS,
   DAEMON_FORCED_STOP_TIMEOUT_MS,
   DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS,
+  DAEMON_START_PROCESS_TABLE_SCAN_MAX_ATTEMPTS,
+  DAEMON_START_PROCESS_TABLE_SCAN_RETRY_DELAYS_MS,
   DAEMON_PORT_AVAILABILITY_PROBE_TIMEOUT_MS,
   DAEMON_RESTART_HANDOFF_DELAY_MS,
   READINESS_PROBE_MAX_ATTEMPTS,
@@ -59,6 +61,8 @@ import {
 } from "./buildIdentity";
 import { DaemonState, type DaemonStateLike } from "./daemonState";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
+import { sequenceBackoff } from "../utils/Backoff";
+import { DefaultRetryExecutor, type RetryExecutor } from "../utils/retry/RetryExecutor";
 import {
   cleanupDaemonFiles,
   clearDaemonLaunchLogOwnerTombstoneSync,
@@ -601,6 +605,7 @@ export class DaemonManager implements DaemonManagerLike {
   private readonly processFinder: DaemonProcessFinder;
   private readonly processLivenessChecker: DaemonProcessLivenessChecker;
   private readonly processSignaler: DaemonProcessSignaler;
+  private readonly retryExecutor: RetryExecutor;
   private readonly portAvailabilityChecker: DaemonPortAvailabilityChecker;
   private readonly extractionCleaner: ExtractionCleaner;
   private readonly launcher: DaemonLauncher;
@@ -652,9 +657,11 @@ export class DaemonManager implements DaemonManagerLike {
     peerSocketReachability: DaemonSocketReachabilityLike | undefined = undefined,
     platformOverride: NodeJS.Platform = process.platform,
     portAvailabilityChecker: DaemonPortAvailabilityChecker = new NetDaemonPortAvailabilityChecker(),
+    retryExecutor: RetryExecutor = new DefaultRetryExecutor(timer),
   ) {
     this.platform = platformOverride;
     this.portAvailabilityChecker = portAvailabilityChecker;
+    this.retryExecutor = retryExecutor;
     this.startupLockOwnerToken = idGenerator.next();
     // Construct the reachability probe here (not in a field initializer) so its connect
     // timeout is bound to the injected timer — a field initializer would capture the
@@ -769,6 +776,36 @@ export class DaemonManager implements DaemonManagerLike {
    */
   findLiveDaemonProcesses(timeoutMs?: number): number[] {
     return this.findAllDaemonProcesses(timeoutMs).filter((pid) => this.isProcessRunning(pid));
+  }
+
+  /**
+   * Startup can still determine socket ownership through the PID/lock/readiness
+   * path when a loaded host times out while listing processes. Keep that narrowly
+   * scoped degradation out of the fail-closed lifecycle scans used elsewhere.
+   */
+  private async findLiveDaemonProcessesForStart(): Promise<number[]> {
+    const result = await this.retryExecutor.execute(async () => this.findLiveDaemonProcesses(), {
+      maxAttempts: DAEMON_START_PROCESS_TABLE_SCAN_MAX_ATTEMPTS,
+      delays: sequenceBackoff(DAEMON_START_PROCESS_TABLE_SCAN_RETRY_DELAYS_MS),
+      shouldRetry: (error) => error.message.includes("ETIMEDOUT"),
+    });
+
+    if (result.success) {
+      return result.value ?? [];
+    }
+
+    const error = result.error ?? new Error("Process-table inspection failed without an error");
+    if (!error.message.includes("ETIMEDOUT")) {
+      throw error;
+    }
+
+    // Socket readiness and the ownership record still protect startup when this
+    // best-effort host scan remains unavailable (issue #6969).
+    logger.warn(
+      `[DaemonManager] process-table inspection timed out during daemon start; proceeding with socket ownership checks: ${errorMessage(error)}`,
+      error,
+    );
+    return [];
   }
 
   private normalizeDaemonProcessRecords(records: DaemonProcessRecord[]): number[] {
@@ -936,7 +973,7 @@ export class DaemonManager implements DaemonManagerLike {
     // reaches the shared socket during a long-running tool call and races a
     // transient availability probe. Reuse a responsive daemon; require an
     // explicit restart for a live but unreachable process.
-    const liveDaemons = this.findLiveDaemonProcesses();
+    const liveDaemons = await this.findLiveDaemonProcessesForStart();
     if (liveDaemons.length > 0) {
       stderrLog(
         `Found ${liveDaemons.length} live auto-mobile daemon process(es) without a usable PID record; waiting for one to become ready...`,

@@ -226,10 +226,14 @@ function groupUnrecognizedKeys(flattenedIssues: FlattenedIssue[]): Map<string, U
     const reported = [...new Set(reports.flatMap((report) => report.keys))];
     const rejected = rejectedByEveryArm(reports, 0);
     const exclusive = mutuallyExclusiveKeys(reports, rejected);
+    // "provide exactly one" is only true of two or more keys the caller
+    // actually supplied. One key on its own is never a choice (PR #6882
+    // review).
+    const exclusiveKeys = reported.filter((name) => exclusive.has(name));
     merged.set(key, {
       intersection: reported.filter((name) => rejected.has(name)),
       reported,
-      exclusive: reported.filter((name) => exclusive.has(name)),
+      exclusive: exclusiveKeys.length > 1 ? exclusiveKeys : [],
     });
   }
   return merged;
@@ -258,17 +262,36 @@ function topLevelHint(
   path: ReadonlyArray<PropertyKey>,
   keys: ReadonlyArray<string>,
   siblingKeys: ReadonlySet<string>,
+  suppliedKeys: ReadonlySet<string>,
 ): string {
   if (path.length === 0 || siblingKeys.size === 0) {
     return "";
   }
   const owner = String(path[0]);
-  const promoted = keys.filter((name) => name !== owner && siblingKeys.has(name));
+  // A parameter the caller already supplied at the top level is not what they
+  // "meant" by the nested copy: the remedy is deleting the duplicate, not
+  // moving it to a key that is already there (PR #6882 review).
+  const promoted = keys.filter(
+    (name) => name !== owner && siblingKeys.has(name) && !suppliedKeys.has(name),
+  );
   if (promoted.length === 0) {
     return "";
   }
   const plural = promoted.length === 1 ? "parameter" : "parameters";
   return ` — did you mean the top-level ${quoteKeys(promoted)} ${plural}?`;
+}
+
+// The top-level keys the caller actually sent, read off the raw input rather
+// than the parsed output: validation failed, so there is no parsed output.
+function suppliedTopLevelKeys(rawInput: unknown): ReadonlySet<string> {
+  if (typeof rawInput !== "object" || rawInput === null || Array.isArray(rawInput)) {
+    return new Set<string>();
+  }
+  return new Set(
+    Object.entries(rawInput)
+      .filter(([, value]) => value !== undefined)
+      .map(([name]) => name),
+  );
 }
 
 interface ZodDefLike {
@@ -515,10 +538,11 @@ export function formatToolParamError(
   const selectedIssues = selectGenuineIssues(flattenedIssues, sawUnion, rawInput);
   const unrecognizedGroups = groupUnrecognizedKeys(flattenedIssues);
   const siblingKeys = topLevelSchemaKeys(schema);
+  const suppliedKeys = suppliedTopLevelKeys(rawInput);
 
   const renderer = (issue: ZodIssue, hintKeys?: ReadonlyArray<string>): string =>
     formatIssue(issue, toolName, rawInput) +
-    (hintKeys ? topLevelHint(issue.path, hintKeys, siblingKeys) : "");
+    (hintKeys ? topLevelHint(issue.path, hintKeys, siblingKeys, suppliedKeys) : "");
 
   // Union branches whose unrecognized-key sets did not intersect: every key is
   // accepted by some branch, so none is unknown. Held back, because a sibling
@@ -568,12 +592,20 @@ export function formatToolParamError(
       return [renderer(issue)];
     }
     if (group.intersection.length === 0) {
-      conflicts.push({
-        issue,
-        keys: group.reported,
-        unionId: entry.union.unionId,
-        path: pathOf(issue.path),
-      });
+      // An empty intersection is not by itself a conflict: an arm that reported
+      // a VALUE error instead of an unrecognized key never named the key at
+      // all, and that incomplete coverage empties the intersection too. Only
+      // keys the arms really cannot combine are a choice, so promoting the
+      // reported set invented "Mutually exclusive keys: \"text\"" for a single
+      // supplied key whose value was merely the wrong type (PR #6882 review).
+      if (group.exclusive.length > 0) {
+        conflicts.push({
+          issue,
+          keys: group.exclusive,
+          unionId: entry.union.unionId,
+          path: pathOf(issue.path),
+        });
+      }
       return [];
     }
     explanations.push({ unionId: entry.union.unionId, path: pathOf(issue.path) });

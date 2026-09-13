@@ -106,6 +106,30 @@ describe("actionable interaction schema errors", () => {
       expect(message).toContain("Accepted: elementId, testTag, text, accessibilityLink, textAny");
     });
 
+    // PR #6882 review: only the `text` arm reports a value error for
+    // `{ text: 123 }`; the other arms call `text` unrecognized. That partial
+    // coverage emptied the intersection, and promoting the reported set
+    // invented a conflict over the one selector key the caller supplied.
+    test("a bad value in the only selector key is not reported as a conflict", () => {
+      const message = parseSelector({ text: 123 });
+      expect(message).toContain("selector.text expected string, received number");
+      expect(message).not.toContain("Mutually exclusive");
+    });
+
+    // PR #6882 review: the caller already passed `index` at the top level, so
+    // the remedy is deleting the nested duplicate, not "did you mean".
+    test("does not point at a top-level parameter the caller already supplied", () => {
+      const input = { index: 0, selector: { elementId: "id", index: 1 } };
+      const result = tapOnSchema.safeParse(input);
+      expect(result.success).toBe(false);
+      if (result.success) {
+        throw new Error("expected invalid selector");
+      }
+      const message = formatToolParamError("tapOn", result.error, input, tapOnSchema);
+      expect(message).toContain('selector Unrecognized key: "index"');
+      expect(message).not.toContain("did you mean");
+    });
+
     test("the top-level hint is derived from the tool schema, not a fixed list", () => {
       const message = parseSelector({ elementId: "id", preTapStability: true });
       expect(message).toContain('did you mean the top-level "preTapStability" parameter?');

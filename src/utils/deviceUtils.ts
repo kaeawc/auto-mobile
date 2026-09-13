@@ -101,6 +101,12 @@ export interface DeviceImageDiscoveryOptions {
 export interface DeviceShutdownOptions {
   timeoutMs?: number;
   signal?: AbortSignal;
+  /**
+   * Act on whatever occupies the target's serial rather than comparing the
+   * requested AVD name against a fresh discovery (#6864). Android emulators
+   * only; iOS shutdown has no equivalent identity comparison to drop.
+   */
+  force?: boolean;
 }
 
 /** Bounds and cancels a platform representation deletion. */

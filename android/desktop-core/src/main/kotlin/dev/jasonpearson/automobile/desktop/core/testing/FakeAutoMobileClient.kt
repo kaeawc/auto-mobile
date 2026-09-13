@@ -74,6 +74,9 @@ class FakeAutoMobileClient : AutoMobileClient {
   var setActiveDeviceResult: SetActiveDeviceResult = SetActiveDeviceResult(success = true)
   var observeResult: ObserveResult = ObserveResult()
   var killDeviceResult: KillDeviceResult = KillDeviceResult(success = true)
+
+  /** The `force` flag of every killDevice call, in order (auto-mobile #6864). */
+  val killDeviceForceRequests: MutableList<Boolean> = mutableListOf()
   var getDaemonStatusResult: DaemonStatusResponse = DaemonStatusResponse()
   // When set, getDaemonStatus throws it instead of returning — models a wedged daemon whose
   // ide/status hang ceiling closed the socket, so the health probe reads UNHEALTHY (#6082).
@@ -352,8 +355,14 @@ class FakeAutoMobileClient : AutoMobileClient {
     return observeResult
   }
 
-  override fun killDevice(name: String, deviceId: String, platform: String): KillDeviceResult {
+  override fun killDevice(
+    name: String,
+    deviceId: String,
+    platform: String,
+    force: Boolean,
+  ): KillDeviceResult {
     calls.add("killDevice")
+    killDeviceForceRequests.add(force)
     return killDeviceResult
   }
 

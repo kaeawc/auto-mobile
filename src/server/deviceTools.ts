@@ -464,12 +464,28 @@ export const provisionDeviceSchema = withJsonSchemaOverride(
   },
 );
 
+// Wording shared by killDevice and deleteDevice so the two escape hatches cannot
+// drift apart in what they promise (#6864).
+const FORCE_SKIP_AVD_VERIFICATION_DESCRIPTION =
+  "Drop every AVD-name comparison on the way to the kill -- the emulator-console probe that " +
+  "confirms which AVD is running on this serial, and the platform kill's own check against a " +
+  "fresh discovery -- and act on whatever occupies the serial. Use only when the console has " +
+  "wedged and the normal call refuses because the AVD name cannot be confirmed. This does not " +
+  "override the conflict check, it removes it: force means 'act on whatever emulator currently " +
+  "occupies this serial', including a different AVD that took the serial over. It does NOT " +
+  "select a different serial, and a serial with nothing running on it still refuses. Nor does " +
+  "it override the refusal raised when this daemon's pool entry for the serial was retired and " +
+  "replaced while the action was being prepared, or deleteDevice's refusal to delete a stopped " +
+  "image while a booted emulator that cannot be identified at all is attached. Android " +
+  "emulators only; accepted and ignored for iOS and physical devices.";
+
 export const killDeviceSchema = z.object({
   device: z.object({
     name: z.string().describe("Device image name"),
     deviceId: z.string(),
     platform: platformSchema,
   }),
+  force: z.boolean().default(false).describe(FORCE_SKIP_AVD_VERIFICATION_DESCRIPTION),
 });
 
 const TEARDOWN_OPERATION_ID_JSON_SCHEMA_PATTERN =
@@ -514,6 +530,7 @@ export const teardownDeviceSchema = z
       .max(MAX_DEVICE_READY_TIMEOUT_MS)
       .optional()
       .describe("Total bounded teardown timeout in ms"),
+    force: z.boolean().default(false).describe(FORCE_SKIP_AVD_VERIFICATION_DESCRIPTION),
   })
   .strict();
 
@@ -654,6 +671,14 @@ export interface ProvisionDeviceArgs {
 
 export interface KillDeviceArgs {
   device: BootedDevice;
+  /**
+   * Drop the AVD-name comparisons on the way to the kill -- the kill-time
+   * emulator-console probe here, and the platform kill's own re-discovery check
+   * in `AndroidEmulatorClient.killDevice` -- and act on whatever occupies the
+   * serial (#6864). Defaults to false; see
+   * {@link FORCE_SKIP_AVD_VERIFICATION_DESCRIPTION}.
+   */
+  force?: boolean;
 }
 
 export interface TeardownDeviceArgs {
@@ -667,6 +692,14 @@ export interface TeardownDeviceArgs {
   mode: "destroy";
   verifyAbsence: true;
   timeoutMs?: number;
+  /**
+   * Drop the AVD-name comparisons on the way to the kill -- the kill-time
+   * emulator-console probe here, and the platform kill's own re-discovery check
+   * in `AndroidEmulatorClient.killDevice` -- and act on whatever occupies the
+   * serial (#6864). Defaults to false; see
+   * {@link FORCE_SKIP_AVD_VERIFICATION_DESCRIPTION}.
+   */
+  force?: boolean;
 }
 
 interface StableDeviceTarget {
@@ -1613,8 +1646,9 @@ async function waitForDeviceShutdown(
  * emulator console did not report a name, so it is never evidence of continuity
  * -- and, symmetrically, never evidence of a replacement (see
  * {@link isConfirmedDeviceReplacement}). This is the uniform rule for the
- * placeholder; a tool-level `force` escape hatch for callers that want to act
- * without resolved identity is tracked as a separate follow-up.
+ * placeholder, and the destructive tools' `force` escape hatch (#6864) does not
+ * soften it: `force` skips the kill-time console probe, it never makes the
+ * placeholder read as an identity here.
  */
 function isSameBootedDeviceIdentity(device: BootedDevice, candidate: BootedDevice): boolean {
   return (
@@ -2102,6 +2136,13 @@ async function retireShutdownOwnership(
  * is re-confirmed and the runtime is asked to name itself, and the kill runs
  * under the name the runtime gave.
  *
+ * Under `force` (#6864) the runtime is not asked, so there is no name to run
+ * under and the caller's target is used unchanged. That is not a detail:
+ * `AndroidEmulatorClient.killDevice` re-discovers the serial and refuses a
+ * target whose name differs from the discovered one, so substituting the
+ * unconfirmed pooled label here would make the forced kill refuse itself on
+ * exactly the wedged console the flag exists for.
+ *
  * Called FIRST inside the shutdown's execute step, after the shutdown
  * reservation (so the pool cannot evict the captured entry mid-check) but
  * BEFORE any of the shutdown's preparation side effects. A refusal here is a
@@ -2114,25 +2155,28 @@ async function retireShutdownOwnership(
 async function resolvePooledAvdKillTarget(
   dependencies: DeviceToolsDependencies,
   device: BootedDevice,
-  pooledAvdCapture: PooledAvdCapture | undefined,
+  pooledAvdIdentity: PooledAvdKillIdentity | undefined,
   devicePool: DevicePool | undefined,
   shutdownDeadlineMs: number,
   requestAbortSignal: AbortSignal | undefined,
 ): Promise<BootedDevice> {
-  if (!pooledAvdCapture) {
+  if (!pooledAvdIdentity?.capture) {
     return device;
   }
   const confirmation = await confirmPooledAvdIdentity(
     device,
-    pooledAvdCapture,
+    pooledAvdIdentity.capture,
     devicePool,
     dependencies.resolveRunningAndroidAvdName,
     { timer: dependencies.timer, deadlineMs: shutdownDeadlineMs, signal: requestAbortSignal },
+    pooledAvdIdentity.force,
   );
-  if ("refusal" in confirmation) {
+  if (confirmation.kind === "refusal") {
     throw new PooledAvdIdentityError(pooledAvdNameRefusalMessage(device, confirmation.refusal));
   }
-  return { ...device, name: confirmation.confirmedAvdName };
+  return confirmation.kind === "skipped"
+    ? device
+    : { ...device, name: confirmation.confirmedAvdName };
 }
 
 async function killProcessAndRetireOwnership(
@@ -2152,6 +2196,13 @@ async function killProcessAndRetireOwnership(
   strictDeadline = false,
   timeoutMs = DEVICE_SHUTDOWN_TIMEOUT_MS,
   killTarget: BootedDevice,
+  /**
+   * Required rather than defaulted: this is the one function that hands the
+   * caller's #6864 escape hatch to the platform kill, and a default here counts
+   * against the function's complexity ratchet for no benefit -- it has a single
+   * call site.
+   */
+  force: boolean,
 ): Promise<string | undefined> {
   const deviceManager = dependencies.deviceManagerFactory();
   if (device.platform === "android") {
@@ -2172,7 +2223,7 @@ async function killProcessAndRetireOwnership(
       requestAbortSignal,
       async (signal, timeoutMs) => {
         platformShutdown = deviceManager
-          .killDevice(killTarget, { signal, timeoutMs })
+          .killDevice(killTarget, { signal, timeoutMs, force })
           .finally(() => {
             platformShutdownSettled = true;
           });
@@ -2289,7 +2340,7 @@ async function shutdownDevice(
   strictDeadline = false,
   timeoutMs = DEVICE_SHUTDOWN_TIMEOUT_MS,
   retainLifecycleUntil?: (operation: Promise<unknown>) => void,
-  pooledAvdCapture?: PooledAvdCapture,
+  pooledAvdIdentity?: PooledAvdKillIdentity,
 ): Promise<ShutdownResult> {
   const perf = createPerformanceTracker(true);
   perf.serial(operationName);
@@ -2331,7 +2382,7 @@ async function shutdownDevice(
       const killTarget = await resolvePooledAvdKillTarget(
         dependencies,
         device,
-        pooledAvdCapture,
+        pooledAvdIdentity,
         devicePool,
         shutdownDeadlineMs,
         requestAbortSignal,
@@ -2360,6 +2411,7 @@ async function shutdownDevice(
         strictDeadline,
         timeoutMs,
         killTarget,
+        pooledAvdIdentity?.force ?? false,
       );
 
       if (alreadyStoppedMessage !== undefined) {
@@ -2601,6 +2653,36 @@ type PooledAvdCaptureResult =
   | { kind: "refusal"; refusal: PooledAvdNameRefusal };
 
 /**
+ * The kill-time identity check `shutdownDevice` must run, carried from the
+ * preflight that pinned it: the captured label + epoch, and whether the caller
+ * asked to skip the console probe (#6864).
+ *
+ * `force` rides WITH the capture rather than beside it because the two are one
+ * decision taken at one moment: whether this daemon is going to establish an
+ * identity for the serial before killing it. `capture` is absent where there is
+ * nothing to confirm -- an iOS target, a handset, an emulator that named itself
+ * -- but `force` still travels, because it also governs the PLATFORM kill's own
+ * name comparison ([#6874](https://github.com/kaeawc/auto-mobile/pull/6874)
+ * review).
+ */
+interface PooledAvdKillIdentity {
+  capture?: PooledAvdCapture;
+  force: boolean;
+}
+
+/**
+ * Outcome of the kill-time identity check.
+ *
+ * `skipped` is not `confirmed` with a different name: nothing was confirmed, so
+ * the caller must keep the target exactly as the caller gave it rather than
+ * rewrite it to a label no probe stood behind (#6864).
+ */
+type PooledAvdConfirmation =
+  | { kind: "confirmed"; confirmedAvdName: string }
+  | { kind: "skipped" }
+  | { kind: "refusal"; refusal: PooledAvdNameRefusal };
+
+/**
  * The capture a destructive action must carry into
  * {@link confirmPooledAvdIdentity}, for the two kinds that require the runtime
  * to name itself before the platform kill. `none` -- a runtime that named
@@ -2610,6 +2692,17 @@ function pooledAvdCaptureRequiringConfirmation(
   result: PooledAvdCaptureResult,
 ): PooledAvdCapture | undefined {
   return result.kind === "capture" || result.kind === "quarantined" ? result.capture : undefined;
+}
+
+/**
+ * The same capture, paired with the caller's `force` flag, in the shape
+ * `shutdownDevice` carries into its execute step (#6864).
+ */
+function pooledAvdKillIdentity(
+  result: PooledAvdCaptureResult,
+  force: boolean,
+): PooledAvdKillIdentity {
+  return { capture: pooledAvdCaptureRequiringConfirmation(result), force };
 }
 
 /**
@@ -2689,10 +2782,37 @@ function capturePooledAvdIdentity(
  *
  * There is no fail-open branch. `Unknown (<serial>)` means "no information", and
  * a probe that does not answer leaves it that way -- acting anyway would be
- * acting on a label this daemon cannot tie to the runtime. The cost is that an
- * emulator whose console has wedged is not killable through the tool; the
- * message names `adb -s <serial> emu kill` as the manual escape, and a
- * tool-level `force` option is tracked as a separate follow-up.
+ * acting on a label this daemon cannot tie to the runtime. The message names
+ * `adb -s <serial> emu kill` as the manual escape for a wedged console.
+ *
+ * `force` is the TOOL-level escape from that same dead end (#6864), for a client
+ * with no shell access. It skips the console probe and NOTHING else, which makes
+ * the shape of what it can and cannot clear exact:
+ *  - it does not override the `conflict` refusal, it removes the evidence a
+ *    conflict is detected from. With no probe there is nothing to compare, so
+ *    the whole contract becomes "kill whatever emulator currently occupies this
+ *    serial", including a different AVD that took the serial over. The caller is
+ *    told so at warn, naming the serial and the label being left unconfirmed;
+ *  - it does NOT clear the `moved` refusal above, which is checked first and is
+ *    not a probe failure at all: the pool RETIRED the captured epoch under this
+ *    daemon's own eyes, so the target the caller named no longer exists and
+ *    "act on the serial as given" would be acting on a target the caller never
+ *    asked about. Re-resolving is the only correct response;
+ *  - it does not reach the preflight refusal in {@link capturePooledAvdIdentity}
+ *    either. That one fires only when the action's deadline is ALREADY spent, in
+ *    which case nothing downstream of it can finish either.
+ *
+ * It DOES clear the mandatory confirmation a QUARANTINED capture otherwise
+ * carries. That case is the wedged-console kill this flag exists for: the pool
+ * cannot name the serial either, so the probe is still the only identity
+ * evidence there is -- and when it does not answer, the quarantined kill is
+ * exactly as stuck as the unquarantined one. Skipping it leaves the caller's own
+ * target (the `Unknown (<serial>)` placeholder) in place, which is what the
+ * serial-scoped `emu kill` needs.
+ *
+ * `force` never reaches here at all where there is no pooled label to skip
+ * verifying -- an iOS target, a handset, or an emulator that named itself --
+ * because none of those produce a capture. It is accepted and changes nothing.
  *
  * The probe is bounded by whichever is smaller, the verification ceiling or the
  * caller's REMAINING deadline: it runs inside a lifecycle lease that is already
@@ -2704,7 +2824,8 @@ async function confirmPooledAvdIdentity(
   devicePool: DevicePool | undefined,
   resolveRunningAvdName: DeviceToolsDependencies["resolveRunningAndroidAvdName"],
   budget: PooledAvdNameProbeBudget,
-): Promise<{ confirmedAvdName: string } | { refusal: PooledAvdNameRefusal }> {
+  force: boolean,
+): Promise<PooledAvdConfirmation> {
   const pooledAvdName = capture.avdName;
   const pooled = devicePool?.getDevice(device.deviceId);
   if (!pooled || pooled.incarnation !== capture.incarnation || pooled.avdName !== pooledAvdName) {
@@ -2712,7 +2833,17 @@ async function confirmPooledAvdIdentity(
       `[DeviceTools] The pool no longer holds incarnation ${capture.incarnation} of ` +
         `${device.deviceId} under AVD '${pooledAvdName}'; refusing the destructive action.`,
     );
-    return { refusal: { reason: "moved", pooledAvdName } };
+    return { kind: "refusal", refusal: { reason: "moved", pooledAvdName } };
+  }
+  if (force) {
+    logger.warn(
+      `[DeviceTools] force=true: skipping AVD-name verification for Android emulator ` +
+        `'${device.deviceId}', which this daemon has recorded as AVD '${pooledAvdName}'. ` +
+        "The emulator console was not asked which AVD is running there, so this acts on " +
+        `whatever now occupies '${device.deviceId}' -- including a different AVD that took ` +
+        "the serial over.",
+    );
+    return { kind: "skipped" };
   }
   if (capture.quarantined) {
     // Not an extra check, a louder one: for a quarantined entry the probe is the
@@ -2725,7 +2856,7 @@ async function confirmPooledAvdIdentity(
   }
   const remainingMs = budget.deadlineMs - budget.timer.now();
   if (remainingMs <= 0) {
-    return { refusal: { reason: "unresolved", pooledAvdName } };
+    return { kind: "refusal", refusal: { reason: "unresolved", pooledAvdName } };
   }
   const runtimeAvdName = await resolveRunningAvdName(
     device,
@@ -2737,11 +2868,11 @@ async function confirmPooledAvdIdentity(
       `[DeviceTools] Could not confirm that ${device.deviceId} is still AVD '${pooledAvdName}': ` +
         "the emulator console did not report a name.",
     );
-    return { refusal: { reason: "unresolved", pooledAvdName } };
+    return { kind: "refusal", refusal: { reason: "unresolved", pooledAvdName } };
   }
   return runtimeAvdName === pooledAvdName
-    ? { confirmedAvdName: runtimeAvdName }
-    : { refusal: { reason: "conflict", pooledAvdName, runtimeAvdName } };
+    ? { kind: "confirmed", confirmedAvdName: runtimeAvdName }
+    : { kind: "refusal", refusal: { reason: "conflict", pooledAvdName, runtimeAvdName } };
 }
 
 function pooledAvdNameRefusalMessage(device: BootedDevice, refusal: PooledAvdNameRefusal): string {
@@ -3014,12 +3145,29 @@ class ProvisionDeviceRollbackError extends ProvisionDeviceError {
   }
 }
 
-function teardownOperationFingerprint(args: TeardownDeviceArgs): string {
+// Exported for direct testing: a reused `operationId` is an idempotent replay
+// only when this string matches EXACTLY
+// (`DeviceTeardownOperationRepository.resolveExisting` compares the persisted
+// text), so the fingerprint's stability across daemon versions is a contract in
+// its own right.
+export function teardownOperationFingerprint(args: TeardownDeviceArgs): string {
   return stableStringify({
     target: args.target,
     mode: args.mode,
     verifyAbsence: args.verifyAbsence,
     timeoutMs: args.timeoutMs,
+    // A forced teardown is a materially different request from a verified one,
+    // so reusing an operationId across the two is a fingerprint mismatch rather
+    // than an idempotent replay of the other (#6864).
+    //
+    // Present ONLY when true. `stableStringify` is `JSON.stringify`, which drops
+    // `undefined` fields, so an unforced request still serializes to the exact
+    // bytes a pre-`force` daemon wrote. Spelling it `force: false` instead would
+    // make every teardown row persisted before the upgrade -- and still inside
+    // its five-minute result TTL when the daemon restarts -- fail to match the
+    // identical unforced retry, turning a replay into `operation_id_conflict`
+    // ([#6874](https://github.com/kaeawc/auto-mobile/pull/6874) review).
+    ...(args.force ? { force: true } : {}),
   });
 }
 
@@ -7483,7 +7631,7 @@ export function registerDeviceTools() {
         false,
         DEVICE_SHUTDOWN_TIMEOUT_MS,
         retainLifecycleUntil,
-        pooledAvdCaptureRequiringConfirmation(pooledAvdCapture),
+        pooledAvdKillIdentity(pooledAvdCapture, args.force ?? false),
       );
       return createKillDeviceResponse(args, result.timing, result.alreadyStoppedMessage);
     } finally {
@@ -7560,7 +7708,7 @@ export function registerDeviceTools() {
                 true,
                 context.timeoutMs,
                 retainLeaseUntil,
-                target.pooledAvdCapture,
+                { capture: target.pooledAvdCapture, force: args.force ?? false },
               );
               stop = stopped.alreadyStoppedMessage ? "not_required" : "accepted";
             } else {

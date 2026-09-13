@@ -266,4 +266,18 @@ class FakeAutoMobileClientTest {
     assertTrue(client.setActiveDevice("id", "android").success)
     assertTrue(client.updateService("id", "android").success)
   }
+
+  /**
+   * `force` defaults to false so every existing caller keeps the verified kill, and a caller that
+   * opts in is recorded so a test can prove it was forwarded (auto-mobile #6864).
+   */
+  @Test
+  fun `killDevice records the force flag and defaults it to false`() {
+    val client = FakeAutoMobileClient()
+
+    client.killDevice("name", "id", "android")
+    client.killDevice("name", "id", "android", force = true)
+
+    assertEquals(listOf(false, true), client.killDeviceForceRequests)
+  }
 }

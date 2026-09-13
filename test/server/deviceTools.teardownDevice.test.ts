@@ -27,7 +27,10 @@ import {
   registerDeviceTools,
   resetDeviceToolsDependencies,
   setDeviceToolsDependencies,
+  teardownDeviceSchema,
+  teardownOperationFingerprint,
 } from "../../src/server/deviceTools";
+import type { TeardownDeviceArgs } from "../../src/server/deviceTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { getInstalledAppsCacheWriteCoordinator } from "../../src/db/installedAppsCacheWriteCoordinator";
 import {
@@ -41,7 +44,11 @@ import {
   setSegmentedSessionTimer,
 } from "../../src/server/videoRecordingTools";
 import type { ProvisionDeviceOperationStore } from "../../src/db/provisionDeviceOperationRepository";
-import type { BootedDeviceDiscovery, DeviceDestroyOptions } from "../../src/utils/deviceUtils";
+import type {
+  BootedDeviceDiscovery,
+  DeviceDestroyOptions,
+  DeviceShutdownOptions,
+} from "../../src/utils/deviceUtils";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDeviceTeardownOperationStore } from "../fakes/FakeDeviceTeardownOperationStore";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
@@ -67,6 +74,14 @@ interface DestroyRequest {
 class TeardownDeviceManager extends FakeDeviceUtils {
   readonly destroyRequests: DestroyRequest[] = [];
   readonly killedDevices: BootedDevice[] = [];
+  /**
+   * The shutdown options each kill was given, so a test can assert that `force`
+   * REACHED the platform layer. On this path the target's name has already been
+   * rewritten to the pooled AVD label, which the platform kill would otherwise
+   * compare against a discovery that can only answer `Unknown (<serial>)`
+   * ([#6874](https://github.com/kaeawc/auto-mobile/pull/6874) review).
+   */
+  readonly killedDeviceOptions: Array<DeviceShutdownOptions | undefined> = [];
   destroyError?: Error;
   killError?: Error;
   replacementAfterKill?: BootedDevice;
@@ -97,8 +112,9 @@ class TeardownDeviceManager extends FakeDeviceUtils {
     return await super.getBootedDevicesDetailed(platform);
   }
 
-  override async killDevice(device: BootedDevice): Promise<void> {
+  override async killDevice(device: BootedDevice, options?: DeviceShutdownOptions): Promise<void> {
     this.killedDevices.push(device);
+    this.killedDeviceOptions.push(options);
     this.discoveriesSinceKill = 0;
     this.killStarted?.();
     await this.killGate;
@@ -1184,6 +1200,62 @@ describe("deleteDevice handler", () => {
     expect(manager.destroyRequests).toEqual([]);
   });
 
+  // The escape hatch for a wedged console (#6864): `force: true` skips the
+  // verification probe entirely, so a console that would never answer stops
+  // blocking the delete. The serial is acted on as given.
+  test("force skips the AVD name probe and tears the device down", async () => {
+    const timer = new FakeTimer();
+    const pooledAvdName = "Pixel_8_API_35";
+    const booted: BootedDevice = {
+      platform: "android",
+      name: "Unknown (emulator-5556)",
+      deviceId: "emulator-5556",
+    };
+    const image: DeviceInfo = {
+      platform: "android",
+      name: pooledAvdName,
+      isRunning: true,
+    };
+    const sessionManager = new SessionManager(timer);
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      manager,
+      new DefaultRetryExecutor(timer),
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    await pool.addDevice(booted, image);
+    manager.setBootedDevices("android", [booted]);
+    manager.setDeviceImages("android", [image]);
+    // The console is wedged: `runtimeAvdNames` has no answer for this serial.
+
+    const body = responseBody(
+      await teardownTool().handler({
+        ...request("android", pooledAvdName, pooledAvdName),
+        force: true,
+      }),
+    );
+
+    expect(body.state).toBe("destroyed");
+    expect(runtimeAvdNameProbes).toEqual([]);
+    expect(manager.wasMethodCalled("killDevice")).toBe(true);
+    // `createBootedTeardownTarget` has already rewritten the target's name to
+    // the pooled label, and the discovery inside the platform kill can only
+    // answer the placeholder. Without `force` travelling with it, the kill
+    // refuses the mismatch and the forced teardown fails in exactly the wedged
+    // console case the flag exists for
+    // ([#6874](https://github.com/kaeawc/auto-mobile/pull/6874) review).
+    expect(manager.killedDevices.map((device) => device.name)).toEqual([pooledAvdName]);
+    expect(manager.killedDeviceOptions.map((options) => options?.force)).toEqual([true]);
+    expect(manager.destroyRequests).toEqual([
+      expect.objectContaining({
+        device: expect.objectContaining({ platform: "android", name: pooledAvdName }),
+      }),
+    ]);
+  });
+
   // The probe runs inside a lifecycle lease that is already on a deadline, so it
   // must borrow that deadline instead of starting its own timer (#6863 review).
   test("bounds the AVD name probe by the caller's remaining teardown deadline", async () => {
@@ -1692,6 +1764,58 @@ describe("deleteDevice handler", () => {
 
     const body = responseBody(
       await teardownTool().handler(request("android", "Pixel_7_API_34", "Pixel_7_API_34")),
+    );
+
+    expect(body.state).toBe("failed");
+    expect(body.failure).toEqual(expect.objectContaining({ code: "target_identity_unresolved" }));
+    expect(manager.destroyRequests).toEqual([]);
+  });
+
+  // `force` is the escape from the kill path's console probe, and this refusal
+  // is not that probe: the teardown never reached a booted target at all, so
+  // "act on the serial as given" has no serial to act on. Destroying the
+  // STOPPED image anyway would delete an image out from under a running
+  // emulator, so `force` must leave this closed (#6864).
+  test("force does not delete an inventory image while the serial's runtime is unresolved", async () => {
+    const timer = new FakeTimer();
+    const pooledAvdName = "Pixel_8_API_35";
+    const reusedSerialRuntime: BootedDevice = {
+      platform: "android",
+      name: `Unknown (emulator-5556)`,
+      deviceId: "emulator-5556",
+    };
+    const pooledImage: DeviceInfo = {
+      platform: "android",
+      name: pooledAvdName,
+      isRunning: true,
+    };
+    const sessionManager = new SessionManager(timer);
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      manager,
+      new DefaultRetryExecutor(timer),
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    await pool.addDevice(
+      { platform: "android", name: pooledAvdName, deviceId: "emulator-5556" },
+      pooledImage,
+    );
+    manager.setBootedDevices("android", [reusedSerialRuntime]);
+    await pool.refreshDevices();
+    expect(pool.isPooledIdentityUnresolved("emulator-5556")).toBe(true);
+    manager.setDeviceImages("android", [
+      pooledImage,
+      { platform: "android", name: "Pixel_7_API_34", isRunning: false },
+    ]);
+
+    const body = responseBody(
+      await teardownTool().handler({
+        ...request("android", "Pixel_7_API_34", "Pixel_7_API_34"),
+        force: true,
+      }),
     );
 
     expect(body.state).toBe("failed");
@@ -2610,5 +2734,79 @@ describe("deleteDevice handler", () => {
       success: false,
       error: expect.stringContaining("simctl delete failed"),
     });
+  });
+});
+
+// The teardown idempotency key. A reused `operationId` is an idempotent replay
+// only when the request's fingerprint is byte-identical, so any NEW field in it
+// is a compatibility event: a teardown row written before the upgrade is still
+// within its five-minute TTL when the upgraded daemon comes back, and an
+// unforced retry that now serializes one extra field fails the exact-string
+// comparison in `DeviceTeardownOperationRepository.resolveExisting` and reports
+// `operation_id_conflict` instead of joining the original operation
+// ([#6874](https://github.com/kaeawc/auto-mobile/pull/6874) review).
+describe("deleteDevice operation fingerprint", () => {
+  const base: TeardownDeviceArgs = {
+    operationId: "11111111-1111-4111-8111-111111111111",
+    target: {
+      platform: "android",
+      isVirtual: true,
+      stableId: "Pixel_8_API_35",
+      stableName: "Pixel_8_API_35",
+    },
+    mode: "destroy",
+    verifyAbsence: true,
+    timeoutMs: 120_000,
+  };
+
+  // The literal a pre-`force` daemon wrote. Asserting against the string, not
+  // against another call of the same function, is the point: a fingerprint that
+  // merely agrees with itself would still have broken every in-flight row.
+  const LEGACY_FINGERPRINT =
+    '{"mode":"destroy","target":{"isVirtual":true,"platform":"android",' +
+    '"stableId":"Pixel_8_API_35","stableName":"Pixel_8_API_35"},' +
+    '"timeoutMs":120000,"verifyAbsence":true}';
+
+  test("an unforced teardown keeps the pre-force fingerprint byte-for-byte", () => {
+    expect(teardownOperationFingerprint(base)).toBe(LEGACY_FINGERPRINT);
+  });
+
+  test("an explicit force:false is the same request as omitting it", () => {
+    expect(teardownOperationFingerprint({ ...base, force: false })).toBe(LEGACY_FINGERPRINT);
+  });
+
+  // `force` still has to be PART of the identity when it is set: a forced
+  // teardown drops identity checks a verified one runs, so replaying one as the
+  // other would silently upgrade the caller's request.
+  test("a forced teardown is a different request from an unforced one", () => {
+    const forced = teardownOperationFingerprint({ ...base, force: true });
+    expect(forced).not.toBe(LEGACY_FINGERPRINT);
+    expect(forced).toContain('"force":true');
+  });
+
+  test("two forced teardowns of the same target agree", () => {
+    expect(teardownOperationFingerprint({ ...base, force: true })).toBe(
+      teardownOperationFingerprint({ ...base, force: true }),
+    );
+  });
+});
+
+// `teardownDeviceSchema` is `.strict()`, so `force` is unsendable until the
+// schema declares it (#6864).
+describe("deleteDevice input schema", () => {
+  const base = {
+    operationId: "35e6f783-b794-47b8-b8a1-8619677820f0",
+    target: { platform: "android" as const, isVirtual: true as const, stableId: "Pixel_8_API_35" },
+    mode: "destroy" as const,
+    verifyAbsence: true as const,
+  };
+
+  test("accepts force and defaults it to false when omitted", () => {
+    expect(teardownDeviceSchema.parse({ ...base, force: true }).force).toBe(true);
+    expect(teardownDeviceSchema.parse(base).force).toBe(false);
+  });
+
+  test("rejects a non-boolean force", () => {
+    expect(() => teardownDeviceSchema.parse({ ...base, force: "yes" })).toThrow();
   });
 });

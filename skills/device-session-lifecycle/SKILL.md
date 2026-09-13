@@ -54,8 +54,36 @@ applies in all three places the name is read:
    bounded by the CALLER's remaining teardown/kill deadline — never an
    independent timer). A different name refuses; an unanswered probe also
    refuses (`target_identity_unresolved`), naming `adb -s <serial> emu kill` as
-   the manual escape. There is no fail-open branch. A tool-level `force` option
-   for an emulator whose console is wedged is tracked as a separate follow-up.
+   the manual escape. There is no fail-open branch by default. The tool-level
+   escape for a client with no shell access is `force: true` on either tool
+   (#6864): it drops every AVD-NAME comparison on the path and nothing else —
+   logging at warn with the serial and the pooled label it is declining to
+   confirm, acting on the caller's own target rather than substituting the
+   unconfirmed label, and still running the post-kill
+   disappearance/incarnation confirmation unchanged. It has to travel all the
+   way down: `AndroidEmulatorClient.killDevice` re-discovers the serial and runs
+   its OWN name comparison, so `force` is threaded into the platform kill's
+   options and drops that comparison too (the pooled-label-vs-placeholder case on
+   the delete path, and the placeholder-vs-placeholder refusal on the kill path).
+   Serial selection is NOT part of what it drops: a serial with nothing running
+   on it still refuses.
+   `force` does not override the `conflict` refusal, it removes the evidence one
+   is detected from: with no probe there is no conflict to see, so `force` means
+   "act on whatever emulator currently occupies this serial". Three things it
+   deliberately does NOT clear: the `moved` refusal (the pool retired the
+   captured epoch while the action was being prepared — not a probe failure, and
+   the named target no longer exists, so re-resolve); `deleteDevice`'s
+   inventory-path refusal when a booted emulator on a QUARANTINED entry cannot be
+   identified at all (there is no serial to "act on as given", and destroying the
+   stopped image would delete it out from under a running emulator); and the
+   preflight refusal raised when the action's deadline is already spent. On the
+   KILL path a QUARANTINED entry — whose runtime confirmation is otherwise
+   mandatory — IS cleared by `force`: the pool cannot name the serial either, so
+   that probe is exactly as wedged there as anywhere else, and skipping it leaves
+   the caller's own `Unknown (<serial>)` target in place for the serial-scoped
+   kill.
+   `force` is Android-emulator only; on iOS or a handset there is no pooled AVD
+   label, so the flag is accepted and ignored.
 3. **Publishing identity** (`DevicePool.describesPooledRuntime`, the booted-devices
    resource): the placeholder is not agreement, so the resource withholds BOTH
    the pooled epoch (`connectionId` falls back to the bare serial) and the

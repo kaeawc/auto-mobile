@@ -998,6 +998,11 @@
           "type": "integer",
           "exclusiveMinimum": 0,
           "maximum": 890000
+        },
+        "force": {
+          "description": "Drop every AVD-name comparison on the way to the kill -- the emulator-console probe that confirms which AVD is running on this serial, and the platform kill's own check against a fresh discovery -- and act on whatever occupies the serial. Use only when the console has wedged and the normal call refuses because the AVD name cannot be confirmed. This does not override the conflict check, it removes it: force means 'act on whatever emulator currently occupies this serial', including a different AVD that took the serial over. It does NOT select a different serial, and a serial with nothing running on it still refuses. Nor does it override the refusal raised when this daemon's pool entry for the serial was retired and replaced while the action was being prepared, or deleteDevice's refusal to delete a stopped image while a booted emulator that cannot be identified at all is attached. Android emulators only; accepted and ignored for iOS and physical devices.",
+          "default": false,
+          "type": "boolean"
         }
       },
       "required": ["operationId", "target", "mode", "verifyAbsence"],
@@ -2461,6 +2466,11 @@
           },
           "required": ["name", "deviceId", "platform"],
           "additionalProperties": false
+        },
+        "force": {
+          "description": "Drop every AVD-name comparison on the way to the kill -- the emulator-console probe that confirms which AVD is running on this serial, and the platform kill's own check against a fresh discovery -- and act on whatever occupies the serial. Use only when the console has wedged and the normal call refuses because the AVD name cannot be confirmed. This does not override the conflict check, it removes it: force means 'act on whatever emulator currently occupies this serial', including a different AVD that took the serial over. It does NOT select a different serial, and a serial with nothing running on it still refuses. Nor does it override the refusal raised when this daemon's pool entry for the serial was retired and replaced while the action was being prepared, or deleteDevice's refusal to delete a stopped image while a booted emulator that cannot be identified at all is attached. Android emulators only; accepted and ignored for iOS and physical devices.",
+          "default": false,
+          "type": "boolean"
         }
       },
       "required": ["device"],

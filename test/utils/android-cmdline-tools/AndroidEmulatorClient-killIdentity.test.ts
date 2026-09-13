@@ -201,3 +201,63 @@ test("an adb listing that still reports transport_id does not affect the kill id
     expectNoTransportOrRebootCommand(adb.getExecutedArgv());
   })();
 });
+
+// `force` (#6864) carries the caller's "act on whatever occupies this serial"
+// contract down to the platform kill. It bypasses ONLY the duplicate name
+// comparison -- the deviceTools layer has already decided not to establish an
+// identity -- and leaves serial selection and the `emu kill` primitive exactly
+// as they are.
+test("force kills a discovered replacement AVD on the expected serial", async () => {
+  const { client, adb, factory } = fixture({ ...original, name: "Pixel_9" });
+  await expect(client.killDevice(original, { force: true })).resolves.toMatchObject({
+    deviceId: "emulator-5554",
+    name: "Pixel_9",
+  });
+  expect(adb.getExecutedCommands().some((command) => command.endsWith("emu kill"))).toBe(true);
+  expect(factory.getCalls().at(-1)?.device?.deviceId).toBe(original.deviceId);
+  expectNoTransportOrRebootCommand(adb.getExecutedArgv());
+});
+
+test("force kills when both the requested and the discovered name are the placeholder", async () => {
+  const placeholder: BootedDevice = {
+    ...original,
+    name: "Unknown (emulator-5554)",
+  };
+  const { client, adb } = fixture(placeholder);
+  await expect(client.killDevice(placeholder, { force: true })).resolves.toMatchObject({
+    deviceId: "emulator-5554",
+  });
+  expect(adb.getExecutedCommands().some((command) => command.endsWith("emu kill"))).toBe(true);
+});
+
+test("force kills when the request carries a pooled label the discovery cannot confirm", async () => {
+  // The teardown path rewrites the target's name to the pooled AVD label before
+  // the kill, so a wedged console produces label-vs-placeholder here.
+  const { client, adb } = fixture({ ...original, name: "Unknown (emulator-5554)" });
+  await expect(client.killDevice(original, { force: true })).resolves.toMatchObject({
+    deviceId: "emulator-5554",
+  });
+  expect(adb.getExecutedCommands().some((command) => command.endsWith("emu kill"))).toBe(true);
+});
+
+test("force still refuses when the expected emulator is no longer running", async () => {
+  // Serial selection is not an identity check: with nothing on the serial there
+  // is nothing for "kill whatever occupies this serial" to act on.
+  const { client, adb } = fixture({ ...original, deviceId: "emulator-5556" });
+  await expect(client.killDevice(original, { force: true })).rejects.toThrow("is not running");
+  expect(adb.getExecutedCommands().some((command) => command.endsWith("emu kill"))).toBe(false);
+});
+
+test("force does not cross platforms", async () => {
+  const { client, adb } = fixture(original);
+  await expect(
+    client.killDevice({ ...original, platform: "ios" } as BootedDevice, { force: true }),
+  ).rejects.toThrow("identity");
+  expect(adb.getExecutedCommands().some((command) => command.endsWith("emu kill"))).toBe(false);
+});
+
+test("an unforced kill is unchanged by the new option", async () => {
+  const { client, adb } = fixture({ ...original, name: "Pixel_9" });
+  await expect(client.killDevice(original, { force: false })).rejects.toThrow("identity");
+  expect(adb.getExecutedCommands().some((command) => command.endsWith("emu kill"))).toBe(false);
+});

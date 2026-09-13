@@ -118,6 +118,27 @@ describe("PerformancePushSocketServer", () => {
     await server.startFake();
   });
 
+  const performanceData = (deviceId: string): LivePerformanceData => ({
+    deviceId,
+    deviceSessionUuid: null,
+    packageName: "com.example.app",
+    timestamp: 1000,
+    nodeId: null,
+    screenName: null,
+    metrics: {
+      fps: 60,
+      frameTimeMs: 16,
+      jankFrames: 0,
+      touchLatencyMs: null,
+      ttffMs: null,
+      ttiMs: null,
+      cpuUsagePercent: null,
+      memoryUsageMb: null,
+    },
+    thresholds: DEFAULT_THRESHOLDS,
+    health: "healthy",
+  });
+
   it("tracks subscriber count correctly", () => {
     expect(server.getSubscriberCount()).toBe(0);
 
@@ -212,6 +233,33 @@ describe("PerformancePushSocketServer", () => {
 
     expect(msgs1).toHaveLength(1);
     expect(msgs2).toHaveLength(0);
+  });
+
+  // While the pool cannot say which AVD is on the serial, the entry's epoch is
+  // preserved but withheld: a possible replacement's metrics must not land on the
+  // previous AVD's pane, nor on an all-device one (#6863 review).
+  it("drops performance data while the device's pooled identity is quarantined", () => {
+    const scoped = server.simulateSubscription({ deviceSessionUuid: "uuid-1" });
+    const all = server.simulateSubscription({});
+    resolver.quarantine("device-1");
+
+    server.pushPerformanceData(performanceData("device-1"));
+
+    expect(scoped.socket.getWrittenMessages()).toHaveLength(0);
+    expect(all.socket.getWrittenMessages()).toHaveLength(0);
+  });
+
+  it("resumes performance delivery under the same uuid once the quarantine lifts", () => {
+    const { socket } = server.simulateSubscription({ deviceSessionUuid: "uuid-1" });
+    resolver.quarantine("device-1");
+    server.pushPerformanceData(performanceData("device-1"));
+
+    resolver.resolveIdentity("device-1");
+    server.pushPerformanceData(performanceData("device-1"));
+
+    const msgs = socket.getWrittenMessages<{ data?: LivePerformanceData }>();
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0].data?.deviceSessionUuid).toBe("uuid-1");
   });
 
   it("yields zero events to a stale/retired deviceSessionUuid filter (AC4)", async () => {

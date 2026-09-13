@@ -3,7 +3,11 @@ import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { PushSubscriptionSocketServer, getSocketPath } from "./socketServer/index";
 import type { FailureType, FailureSeverity } from "../server/failuresResources";
 import { FAILURES_PUSH_SOCKET_CONFIG } from "./daemonFiles";
-import { type DeviceSessionResolver, nullDeviceSessionResolver } from "./deviceSessionResolver";
+import {
+  type DeviceSessionResolver,
+  nullDeviceSessionResolver,
+  SuspendedDeviceRoutingLog,
+} from "./deviceSessionResolver";
 
 /**
  * Failure notification data pushed to clients.
@@ -61,6 +65,7 @@ export class FailuresPushSocketServer extends PushSubscriptionSocketServer<
   FailureNotificationPush
 > {
   private deviceSessionResolver: DeviceSessionResolver = nullDeviceSessionResolver;
+  private readonly suspendedRoutingLog = new SuspendedDeviceRoutingLog();
 
   constructor(
     socketPath: string = getSocketPath(FAILURES_PUSH_SOCKET_CONFIG),
@@ -80,6 +85,17 @@ export class FailuresPushSocketServer extends PushSubscriptionSocketServer<
    * the routing key reflects the device's current epoch.
    */
   pushFailure(data: FailureNotificationPush): void {
+    if (
+      data.deviceId &&
+      this.suspendedRoutingLog.shouldDropFrame(
+        this.deviceSessionResolver,
+        data.deviceId,
+        "FailuresPush",
+      )
+    ) {
+      // Quarantined pooled identity: see pushTelemetryEvent (#6863 review).
+      return;
+    }
     const deviceSessionUuid = data.deviceId
       ? this.deviceSessionResolver.resolveUuid(data.deviceId)
       : null;

@@ -22,6 +22,7 @@ import { readToolEnvelopePayload, writeToolEnvelopePayload } from "./toolEnvelop
 import { boundStructuredField, truncateBodyText } from "../utils/truncateBodyText";
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
+import { isDeviceSessionAcquisitionTool } from "./deviceSessionResult";
 
 /**
  * Read/write access to the per-session diff baseline — the "last observation
@@ -625,6 +626,7 @@ function pickObserveWaitMetadata(payload: Record<string, unknown>): Record<strin
  * failed would be a worse contract than the oversized payload it replaced.
  */
 const INLINE_RESIDUE_KEYS = ["success", "error", ...OBSERVE_WAIT_METADATA_KEYS] as const;
+const DEVICE_SESSION_RESIDUE_KEYS = ["sessionUuid", "sessionId"] as const;
 
 /**
  * Per-field cap on what a retained residue field may contribute (#6870).
@@ -633,7 +635,8 @@ const INLINE_RESIDUE_KEYS = ["success", "error", ...OBSERVE_WAIT_METADATA_KEYS] 
  * from being huge on its own: a stack trace lands in `error`, and a `countStable`
  * wait that never matched returns every candidate it saw. Copying such a field
  * back verbatim would blow the very ceiling the spill exists to enforce. At
- * {@link INLINE_RESIDUE_KEYS}.length (10) fields this caps the residue at ~40 KB,
+ * {@link INLINE_RESIDUE_KEYS}.length plus the two device-session fields caps the
+ * largest acquisition residue at ~48 KB,
  * comfortably inside {@link DEFAULT_OBSERVATION_INLINE_MAX_BYTES} once the
  * artifact envelope is added.
  */
@@ -645,12 +648,14 @@ const INLINE_RESIDUE_FIELD_LIMIT = 4 * 1024;
  * structure is replaced with the canonical `{ _truncated, bytes }` marker. The
  * complete value is always in the artifact the caller writes alongside this.
  */
-function pickInlineResidue(payload: Record<string, unknown>): Record<string, unknown> {
+function pickInlineResidue(
+  ctx: FinalizeToolResponseContext,
+  payload: Record<string, unknown>,
+): Record<string, unknown> {
   return Object.fromEntries(
-    INLINE_RESIDUE_KEYS.filter((key) => payload[key] !== undefined).map((key) => [
-      key,
-      boundResidueField(payload[key]),
-    ]),
+    inlineResidueKeys(ctx)
+      .filter((key) => payload[key] !== undefined)
+      .map((key) => [key, boundResidueField(payload[key])]),
   );
 }
 
@@ -667,13 +672,19 @@ function spillOversizedPayload(
   // included), so every spill path — this one and the observation-only one above
   // — produces the same complete artifact without per-call-site plumbing.
   const artifact = writeJsonArtifact(ctx, "ToolResponse", payload);
-  const spilled = { ...pickInlineResidue(payload), ...artifact };
+  const spilled = { ...pickInlineResidue(ctx, payload), ...artifact };
   // The per-field cap is counted in UTF-16 code units, so multi-byte text can
   // still serialize past the ceiling across every retained field. Fall back to
   // markers-only, whose size does not depend on the input at all.
   return exceedsInlineLimit(spilled, hasStructured)
-    ? { ...markerResidue(payload), ...artifact }
+    ? { ...markerResidue(ctx, payload), ...artifact }
     : spilled;
+}
+
+function inlineResidueKeys(ctx: FinalizeToolResponseContext): readonly string[] {
+  return isDeviceSessionAcquisitionTool(ctx.name)
+    ? [...INLINE_RESIDUE_KEYS, ...DEVICE_SESSION_RESIDUE_KEYS]
+    : INLINE_RESIDUE_KEYS;
 }
 
 /**
@@ -682,14 +693,19 @@ function spillOversizedPayload(
  * field COUNT rather than of the payload. Scalars (a `success` boolean, a
  * `polls` count) are the headline a client actually acts on and are always tiny.
  */
-function markerResidue(payload: Record<string, unknown>): Record<string, unknown> {
+function markerResidue(
+  ctx: FinalizeToolResponseContext,
+  payload: Record<string, unknown>,
+): Record<string, unknown> {
   return Object.fromEntries(
-    INLINE_RESIDUE_KEYS.filter((key) => payload[key] !== undefined).map((key) => [
-      key,
-      typeof payload[key] === "object" || typeof payload[key] === "string"
-        ? boundStructuredField(payload[key], false, 0)
-        : payload[key],
-    ]),
+    inlineResidueKeys(ctx)
+      .filter((key) => payload[key] !== undefined)
+      .map((key) => [
+        key,
+        typeof payload[key] === "object" || typeof payload[key] === "string"
+          ? boundStructuredField(payload[key], false, 0)
+          : payload[key],
+      ]),
   );
 }
 

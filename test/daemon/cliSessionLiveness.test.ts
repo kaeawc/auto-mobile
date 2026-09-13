@@ -101,6 +101,19 @@ describe("CLI-owned session liveness (#6870)", () => {
     expect(sessionManager.getSession("s1")!.heartbeatTimeoutMs).toBe(90_000);
   });
 
+  it("caps an oversized daemon-environment timeout when the caller supplies none", async () => {
+    process.env.AUTOMOBILE_CLI_SESSION_IDLE_TIMEOUT_MS = String(
+      MAX_CLI_SESSION_IDLE_TIMEOUT_MS * 2,
+    );
+    await sessionManager.createSession("s1", "emulator-5554", "android", 60_000);
+
+    sessionManager.adoptCliLivenessPolicy("s1");
+
+    expect(sessionManager.getSession("s1")!.heartbeatTimeoutMs).toBe(
+      MAX_CLI_SESSION_IDLE_TIMEOUT_MS,
+    );
+  });
+
   it("restoreHeartbeatLivenessPolicy puts the pre-adoption timeouts back", async () => {
     await sessionManager.createSession("s1", "emulator-5554", "android", 60_000, 7_000);
     sessionManager.adoptCliLivenessPolicy("s1");

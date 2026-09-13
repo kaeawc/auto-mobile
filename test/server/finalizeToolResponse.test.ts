@@ -13,6 +13,7 @@ import { GFXINFO_DUMP_MARKER } from "../../src/features/observe/output/ObserveRe
 import type { ObserveResult } from "../../src/models/ObserveResult";
 import { setElementProvenance } from "../../src/features/observe/output/elementProvenance";
 import { logger } from "../../src/utils/logger";
+import { getDeviceSessionIdFromResult } from "../../src/server/deviceSessionResult";
 
 /**
  * Build a minimal ObserveResult whose hierarchy carries trimmable attributes:
@@ -2094,6 +2095,23 @@ describe("finalizeToolResponse", () => {
 
       const payloadBytes = (finalized: any): number =>
         Buffer.byteLength(stringifyToolResponse(finalized.structuredContent), "utf8");
+
+      test("keeps a provisioned session UUID routable after spilling its oversized result", () => {
+        const writer = new FakeObservationArtifactWriter();
+        const sessionUuid = "provisioned-session-uuid";
+        const finalized = finalizeToolResponse(
+          createStructuredToolResponse({
+            success: true,
+            sessionUuid,
+            operationId: "o".repeat(DEFAULT_OBSERVATION_INLINE_MAX_BYTES + 1),
+          }),
+          { name: "provisionDevice", artifactMode: "oversized", artifactWriter: writer } as any,
+        );
+
+        expect(writer.writes).toHaveLength(1);
+        expect((finalized.structuredContent as any).sessionUuid).toBe(sessionUuid);
+        expect(getDeviceSessionIdFromResult({ content: finalized.content })).toBe(sessionUuid);
+      });
 
       // `observationDiff` sits at the top level of the served payload, outside
       // `observation`, so the size gate must measure it — and whatever the spill

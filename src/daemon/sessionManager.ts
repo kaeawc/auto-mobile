@@ -21,6 +21,7 @@ import {
 import { deviceReadinessRank, type DeviceReadinessLevel } from "../utils/DeviceSessionManager";
 import {
   getCliSessionIdleTimeoutMs as resolveCliSessionIdleTimeoutMs,
+  MAX_CLI_SESSION_IDLE_TIMEOUT_MS,
   sanitizeCliSessionIdleTimeoutMs as sanitizeRequestedCliIdleTimeoutMs,
 } from "./constants";
 
@@ -2814,7 +2815,8 @@ export class SessionManager {
     // value, and only an absent/unusable one falls back to this process's env
     // (issue #6870 review).
     const idleTimeoutMs =
-      sanitizeRequestedCliIdleTimeoutMs(requestedIdleTimeoutMs) ?? resolveCliSessionIdleTimeoutMs();
+      sanitizeRequestedCliIdleTimeoutMs(requestedIdleTimeoutMs) ??
+      Math.min(resolveCliSessionIdleTimeoutMs(), MAX_CLI_SESSION_IDLE_TIMEOUT_MS);
     if (session.livenessPolicy === "heartbeat") {
       // Remember the strict contract exactly once, so a long-lived owner taking
       // this UUID over can put the session back on it (issue #6870 review). A

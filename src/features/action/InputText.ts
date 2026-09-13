@@ -1,6 +1,7 @@
 import { errorMessage } from "../../utils/describeUnknownError";
 import { BaseVisualChange } from "./BaseVisualChange";
 import {
+  type AppendTextFailureSource,
   BootedDevice,
   ImeAction,
   KeyboardResult,
@@ -80,9 +81,17 @@ const defaultTargetFocuserFactory: TextInputTargetFocuserFactory = (device) => (
   },
 });
 
+/**
+ * Runs once, immediately before the append's FIRST key event, to confirm the
+ * device is still in the state the caller observed.
+ *
+ * A rejection carries a {@link AppendTextFailureSource} so the caller can tell a
+ * RUNNER verdict about the device apart from a host-side failure of the check
+ * itself; the append propagates it verbatim on the failed result.
+ */
 export type AppendKeyEventValidator = (
   timeoutMs?: number,
-) => Promise<{ success: boolean; error?: string }>;
+) => Promise<{ success: boolean; error?: string; failureSource?: AppendTextFailureSource }>;
 
 interface KeyboardCloser {
   close(signal?: AbortSignal): Promise<KeyboardResult>;
@@ -615,7 +624,7 @@ export class InputText extends BaseVisualChange {
     if (typed.error) {
       // A non-timeout failure leaves an exact confirmed prefix, while a timed-out
       // key event is ambiguous: Android may have accepted it before adb was killed.
-      return this.appendFailure(text, typed.error, typed.charsSent);
+      return this.appendFailure(text, typed.error, typed.charsSent, typed.failureSource);
     }
 
     // IME action before dismiss — see the a11y path for why (issue #5887).
@@ -705,7 +714,7 @@ export class InputText extends BaseVisualChange {
     timeoutMs: number | undefined,
     beforeKeyEvents?: AppendKeyEventValidator,
     signal?: AbortSignal,
-  ): Promise<{ charsSent?: number; error?: string }> {
+  ): Promise<{ charsSent?: number; error?: string; failureSource?: AppendTextFailureSource }> {
     let charsSent = 0;
     for (const plan of plans) {
       assertInputNotAborted(signal);
@@ -714,6 +723,7 @@ export class InputText extends BaseVisualChange {
         return { charsSent, error: this.appendBudgetExceeded(timeoutMs, "typing") };
       }
       let validationError: string | undefined;
+      let validationFailureSource: AppendTextFailureSource | undefined;
       const beforeDispatch =
         charsSent === 0 && beforeKeyEvents
           ? async (remainingTimeoutMs?: number) => {
@@ -724,6 +734,7 @@ export class InputText extends BaseVisualChange {
                   validationError =
                     validation.error ??
                     "Frame context is stale or unavailable; observe a fresh frame before retrying";
+                  validationFailureSource = validation.failureSource;
                 }
               } catch (error) {
                 const message = errorMessage(error);
@@ -753,7 +764,13 @@ export class InputText extends BaseVisualChange {
       } catch (error) {
         assertInputNotAborted(signal);
         if (validationError) {
-          return { charsSent, error: validationError };
+          return {
+            charsSent,
+            error: validationError,
+            ...(validationFailureSource !== undefined
+              ? { failureSource: validationFailureSource }
+              : {}),
+          };
         }
         const message = errorMessage(error);
         logger.warn(
@@ -832,6 +849,7 @@ export class InputText extends BaseVisualChange {
     text: string,
     error: string,
     charsSent?: number,
+    failureSource?: AppendTextFailureSource,
   ): SendTextResult & { method?: InputTextMode } {
     return {
       success: false,
@@ -839,6 +857,7 @@ export class InputText extends BaseVisualChange {
       error,
       method: "append",
       ...(charsSent !== undefined ? { charsSent } : {}),
+      ...(failureSource !== undefined ? { failureSource } : {}),
     };
   }
 

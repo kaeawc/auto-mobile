@@ -51,6 +51,9 @@ describe("ToolExecutionContext", () => {
       fakeAppsRepo,
       fakeDeviceManager,
     );
+    // Discovery has to list the pooled device: an idle Android entry is
+    // re-proved present before it is assigned, handsets included.
+    fakeDeviceManager.bootedDevices = [createBootedDevice("device-1")];
     await devicePool.initializeWithDevices([createBootedDevice("device-1")]);
     originalGetInstance = AndroidCtrlProxyManager.getInstance;
     originalClientGetInstance = AndroidCtrlProxyClient.getInstance;
@@ -1461,12 +1464,14 @@ describe("ToolExecutionContext", () => {
       async markReleased(): Promise<void> {},
       async markStaleActiveSessionsExpired(): Promise<void> {},
     });
+    const boundedDeviceManager = new FakeDeviceManager();
+    boundedDeviceManager.bootedDevices = [createBootedDevice("device-1")];
     const boundedPool = new DevicePool(
       boundedSessionManager,
       "test-daemon-session-id",
       boundedTimer,
       fakeAppsRepo,
-      new FakeDeviceManager(),
+      boundedDeviceManager,
     );
     await boundedPool.initializeWithDevices([createBootedDevice("device-1")]);
     let finishSetup!: () => void;

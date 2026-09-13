@@ -1583,6 +1583,19 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
       // collected and surfaced in the response rather than aborting the batch.
       const failures: string[] = [];
       for (const { deviceId, observation } of observations) {
+        // FUNNEL 2 for the all-device form, which names no serial for the gate
+        // above to preflight. `pushForDevice` drops a quarantined serial's frames
+        // because routing is suspended, so pushing here would deliver nothing and
+        // still ack success — the same false acknowledgement the device-specific
+        // form was fixed for
+        // ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
+        if (this.deviceSessionResolver.isRoutingSuspended(deviceId)) {
+          failures.push(
+            `Observation request failed for ${deviceId}: its pooled AVD identity is unresolved, ` +
+              "so there is no routing identity to attribute the hierarchy to",
+          );
+          continue;
+        }
         const hierarchy = observation.viewHierarchy;
         if (!hierarchy) {
           failures.push(this.describeMissingHierarchy(deviceId, observation));

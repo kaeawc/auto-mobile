@@ -221,6 +221,42 @@ describe("DeviceDataStreamSocketServer", () => {
       expect(msgs[0].error).toContain("emulator-5554");
     });
 
+    // An all-device request names no serial, so the gate above cannot preflight
+    // it — but the same false acknowledgement follows: `pushForDevice` drops a
+    // quarantined serial's hierarchy because routing is suspended, and the
+    // requester was told `success: true` with nothing delivered
+    // ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
+    it("reports the quarantined device of an all-device observation instead of acking success", async () => {
+      server.setOnObservationRequested(async () => [
+        requestedObservation("emulator-5554"),
+        requestedObservation("emulator-5556"),
+      ]);
+      const { socket } = server.simulateSubscription({ deviceId: null });
+      server.sessionResolver.quarantine("emulator-5554");
+
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({ id: "obs-all", command: "request_observation" }),
+      );
+
+      const msgs = socket.getWrittenMessages<{
+        id?: string;
+        type: string;
+        success?: boolean;
+        error?: string;
+        deviceId?: string;
+      }>();
+      // The healthy device still gets its hierarchy; the quarantined one is
+      // reported as a per-device failure rather than silently dropped.
+      const pushed = msgs.filter((message) => message.type === "hierarchy_update");
+      expect(pushed.map((message) => message.deviceId)).toEqual(["emulator-5556"]);
+      const ack = msgs[msgs.length - 1];
+      expect(ack.type).toBe("error");
+      expect(ack.success).toBe(false);
+      expect(ack.id).toBe("obs-all");
+      expect(ack.error).toContain("emulator-5554");
+    });
+
     it("forwards proven frame context and clears it when an explicit observation lacks provenance", async () => {
       server.setOnObservationRequested(async (request) => [
         requestedObservation(request.deviceId ?? "emulator-5554", "frame-A"),

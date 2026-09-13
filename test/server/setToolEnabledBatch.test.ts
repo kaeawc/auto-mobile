@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import Ajv2020 from "ajv/dist/2020";
 import { z } from "zod/v4";
 import {
   SessionToolSelectionService,
@@ -166,6 +167,29 @@ describe("setToolEnabled batch enable (#6869)", () => {
 
       expect(properties.toolName.enum).toEqual(["clearText", "imeAction", "inputText", "observe"]);
       expect(properties.toolNames.items.enum).toEqual(properties.toolName.enum);
+    });
+
+    test("advertises the exactly-one-name rule so a client cannot build a rejected call", () => {
+      const definition = ToolRegistry.getToolDefinitions().find(
+        (tool) => tool.name === SET_TOOL_ENABLED_TOOL_NAME,
+      )!;
+      const validate = new Ajv2020({ strict: false }).compile(definition.inputSchema);
+
+      expect(validate({ toolName: "inputText" })).toBe(true);
+      expect(validate({ toolNames: ["inputText"] })).toBe(true);
+      expect(validate({ toolName: "inputText", toolNames: ["clearText"] })).toBe(false);
+      expect(validate({ enabled: true })).toBe(false);
+    });
+
+    test("keeps the advertised setToolEnabled schema free of top-level combinators", () => {
+      const schema = ToolRegistry.getToolDefinitions().find(
+        (tool) => tool.name === SET_TOOL_ENABLED_TOOL_NAME,
+      )!.inputSchema as Record<string, unknown>;
+
+      expect(schema.anyOf).toBeUndefined();
+      expect(schema.oneOf).toBeUndefined();
+      expect(schema.allOf).toBeUndefined();
+      expect(schema.type).toBe("object");
     });
 
     test("still advertises sessionUuid as a top-level property", () => {

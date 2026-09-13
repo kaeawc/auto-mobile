@@ -9038,7 +9038,18 @@
           "minLength": 1
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "if": {
+        "required": ["toolName"]
+      },
+      "then": {
+        "not": {
+          "required": ["toolNames"]
+        }
+      },
+      "else": {
+        "required": ["toolNames"]
+      }
     }
   },
   {

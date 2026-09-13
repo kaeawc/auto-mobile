@@ -248,7 +248,9 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   }
 
   public static evict(deviceId: string, avdName?: string): void {
-    if (!avdName) {AndroidCtrlProxyManager.instances.delete(deviceId);}
+    if (!avdName) {
+      AndroidCtrlProxyManager.instances.delete(deviceId);
+    }
     if (avdName) {
       // The stopped AVD inventory lacks an ADB serial. The manager retains
       // the booted incarnation's name and runtime ID, including direct sessions.

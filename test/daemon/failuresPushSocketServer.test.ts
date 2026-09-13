@@ -142,4 +142,29 @@ describe("FailuresPushSocketServer device-session attribution (#5259)", () => {
     expect(msgs[0].data.deviceId).toBeNull();
     expect(msgs[0].data.deviceSessionUuid).toBeNull();
   });
+  // The pooled entry keeps its epoch while its AVD identity is unresolved, but a
+  // possible replacement's failures must not be attributed to the previous AVD —
+  // nor broadcast under a serial the pool can no longer tie to a runtime
+  // (#6863 review).
+  it("drops a failure for a device whose pooled identity is quarantined", () => {
+    const scoped = server.simulateSubscription({ deviceSessionUuid: "uuid-a" });
+    const all = server.simulateSubscription({ deviceSessionUuid: null });
+    resolver.quarantine("emulator-5554");
+
+    server.pushFailure(notification({ deviceId: "emulator-5554" }));
+
+    expect(pushed(scoped.socket)).toHaveLength(0);
+    expect(pushed(all.socket)).toHaveLength(0);
+  });
+
+  it("resumes failure delivery under the same uuid once the quarantine lifts", () => {
+    const { socket } = server.simulateSubscription({ deviceSessionUuid: "uuid-a" });
+    resolver.quarantine("emulator-5554");
+    server.pushFailure(notification({ occurrenceId: "occ-dropped", deviceId: "emulator-5554" }));
+
+    resolver.resolveIdentity("emulator-5554");
+    server.pushFailure(notification({ occurrenceId: "occ-kept", deviceId: "emulator-5554" }));
+
+    expect(pushed(socket).map((m) => m.data.occurrenceId)).toEqual(["occ-kept"]);
+  });
 });

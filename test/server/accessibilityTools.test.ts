@@ -1,10 +1,12 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   registerAccessibilityTools,
   accessibilitySchema,
 } from "../../src/server/accessibilityTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
+import { VoiceOverToggle } from "../../src/features/accessibility/VoiceOverToggle";
 import type { BootedDevice } from "../../src/models";
+import type { VoiceOverResult } from "../../src/models/AccessibilityResult";
 
 const ANDROID_DEVICE = {
   name: "a",
@@ -54,6 +56,37 @@ describe("accessibilityTools", () => {
       registerAccessibilityTools();
       await expect(accessibilityHandler()(IOS_DEVICE, { talkback: true })).rejects.toThrow(
         "TalkBack is not supported on iOS devices",
+      );
+    });
+  });
+
+  describe("VoiceOver unconfirmed toggle (#6496)", () => {
+    afterEach(() => {
+      // spyOn is restorable per-mock (unlike mock.module, which leaks across
+      // test files), so the real VoiceOverToggle.toggle is back in place for
+      // every other suite that constructs a real instance.
+      toggleSpy?.mockRestore();
+      toggleSpy = undefined;
+    });
+
+    let toggleSpy: ReturnType<typeof spyOn> | undefined;
+
+    // An unconfirmed toggle (applied:false with a reason, e.g. a CtrlProxy
+    // outage during confirmation polling) must surface as an actionable
+    // failure at the MCP boundary rather than a normal enabled:false
+    // response — otherwise the client can't distinguish "confirmed off"
+    // from "we don't actually know" (codex review on PR #6768).
+    test("throws with the reason when the toggle result is unconfirmed", async () => {
+      const unconfirmedResult: VoiceOverResult = {
+        supported: true,
+        applied: false,
+        reason: "VoiceOver state could not be confirmed within 10000ms",
+      };
+      toggleSpy = spyOn(VoiceOverToggle.prototype, "toggle").mockResolvedValue(unconfirmedResult);
+
+      registerAccessibilityTools();
+      await expect(accessibilityHandler()(IOS_DEVICE, { voiceover: false })).rejects.toThrow(
+        "VoiceOver state could not be confirmed within 10000ms",
       );
     });
   });

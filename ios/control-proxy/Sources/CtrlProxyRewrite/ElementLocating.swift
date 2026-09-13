@@ -42,4 +42,7 @@ public protocol ElementLocating: Sendable {
 
     /// Bundle id of the currently tracked foreground app, or `nil` if none has been set.
     var foregroundBundleId: String? { get }
+
+    /// Refresh foreground-app tracking before returning the current bundle id.
+    func refreshForegroundBundleId() -> String?
 }

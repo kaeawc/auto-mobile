@@ -12,13 +12,16 @@ import { createDefaultPlanExecutionLock, type PlanExecutionLock } from "./PlanEx
 import { SessionToolBinding } from "./SessionToolBinding";
 import { SessionReleaseBroadcaster } from "./sessionReleaseBroadcast";
 import { TerminalSessionError } from "../daemon/sessionManager";
-import { resolveDirectSessionDevice } from "./directSessionDeviceRegistry";
+import { resolveDirectSessionDevice, unregisterDirectSession } from "./directSessionDeviceRegistry";
 import {
   INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
   INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
   INTERNAL_EXECUTION_START_TIME_PARAM,
+  INTERNAL_EXECUTION_ID_PARAM,
   INTERNAL_LIVE_DEADLINE_KEY_PARAM,
+  INTERNAL_MCP_SESSION_PARAM,
   DAEMON_NON_FINITE_ENCODED_PARAM,
+  deleteInternalToolParams,
 } from "../daemon/constants";
 import {
   deviceLostErrorFromAbortSignal,
@@ -38,6 +41,31 @@ import {
 
 // Import the resource registry
 import { ResourceRegistry } from "./resourceRegistry";
+
+/**
+ * Fail a `getAndroid`/`getApple` call whose request was cancelled while its
+ * post-acquisition enrichment ran. The client discards this response, so the
+ * handler still fails the call — but it deliberately releases NOTHING in daemon
+ * mode. The pool publishes a minted autolock session to the MCP connection
+ * BEFORE enrichment runs (`DevicePool.autolockDevice` sets
+ * `mcpSessionAutolockMap` ahead of the return), so by the time this fires the
+ * session may already be resolved by a sibling acquisition or by any ordinary
+ * device tool on the same connection; an eager release here would strand that
+ * caller and idle the device underneath it. A session nobody actually picks up
+ * is collected by the `missing-first-heartbeat` reap in
+ * `src/daemon/sessionManager.ts` (grace before the first heartbeat, then
+ * `cleanupExpiredSessions`), which is the backstop this path relies on.
+ */
+function failCancelledAcquisition(acquiredSessionUuid: string): never {
+  if (!DaemonState.getInstance().isInitialized()) {
+    // Direct (non-daemon) mode has no SessionManager and no reap, and it has no
+    // reuse path either: `bindBootedDeviceSession` always mints a fresh UUID and
+    // registers a process-local mapping, so dropping that mapping needs no
+    // ownership information and can strand nobody.
+    unregisterDirectSession(acquiredSessionUuid);
+  }
+  throw new ActionableError("MCP request was cancelled during acquisition.");
+}
 
 async function awaitWithCancellation<T>(
   promise: Promise<T>,
@@ -94,6 +122,8 @@ import { registerAccessibilityFocusTools } from "./accessibilityFocusTools";
 import { registerNetworkTools } from "./networkTools";
 import { registerToolSelectionTools, SET_TOOL_ENABLED_TOOL_NAME } from "./toolSelectionTools";
 import {
+  DEVICE_SESSION_RECOVERY_PROMPT,
+  DEVICE_SESSION_RECOVERY_TOOLS,
   getDeviceSessionIdFromResult,
   isDeviceSessionAcquisitionTool,
 } from "./deviceSessionResult";
@@ -170,9 +200,6 @@ export interface McpServerOptions {
    */
   toolSelectionProfileRegistry?: ToolSelectionProfileRegistry;
 }
-
-const INTERNAL_MCP_SESSION_PARAM = "__mcpSessionId";
-const INTERNAL_EXECUTION_ID_PARAM = "__executionId";
 
 async function resolveDeviceLossOutcome(
   deviceLoss: DeviceLossOutcome,
@@ -252,15 +279,10 @@ function stripInternalToolParams(params: unknown): unknown {
   }
 
   const rest = { ...(params as Record<string, unknown>) };
-  delete rest[INTERNAL_MCP_SESSION_PARAM];
-  delete rest[INTERNAL_EXECUTION_ID_PARAM];
-  delete rest[INTERNAL_EXECUTION_START_TIME_PARAM];
-  delete rest[INTERNAL_MCP_REQUEST_TIMEOUT_PARAM];
-  delete rest[INTERNAL_MCP_REQUEST_DEADLINE_PARAM];
-  delete rest[INTERNAL_LIVE_DEADLINE_KEY_PARAM];
-  // Safety net: revival already strips this transport-provenance flag (#5863), but
-  // guard the tool boundary against any future path that sets it without reviving.
-  delete rest[DAEMON_NON_FINITE_ENCODED_PARAM];
+  // Strips DAEMON_NON_FINITE_ENCODED_PARAM too as a safety net: revival already
+  // removes that transport-provenance flag (#5863), but this guards the tool
+  // boundary against any future path that sets it without reviving.
+  deleteInternalToolParams(rest);
   return rest;
 }
 
@@ -572,7 +594,8 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     const requestMcpSessionId = daemonMode ? extractInternalMcpSessionId(toolParams) : undefined;
     const implicitAutolockMcpSessionId =
       requestMcpSessionId ?? (!daemonMode ? sessionId : undefined);
-    const routingSessionUuid = sessionToolBinding.effectiveSessionUuid(sessionId, toolParams);
+    let routingSessionUuid = sessionToolBinding.effectiveSessionUuid(sessionId, toolParams);
+    let resolvedImplicitAutolockSessionUuid: string | undefined;
     let connectionProfileUuid = sessionToolBinding.connectionToolSelectionProfileUuid(sessionId);
     const rawRequestedToolSelectionProfileUuid = (toolParams as Record<string, unknown>)
       .sessionUuid;
@@ -585,6 +608,63 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     const tool = ToolRegistry.getTool(name);
     if (!tool) {
       throw new ActionableError(`Unknown tool: ${name}`);
+    }
+
+    if (
+      (tool.requiresDevice && !isDeviceSessionAcquisitionTool(name)) ||
+      name === "setActiveDevice"
+    ) {
+      const daemonState = DaemonState.getInstance();
+      const rawArgs = toolParams as Record<string, unknown>;
+      if (
+        daemonState.isInitialized() &&
+        implicitAutolockMcpSessionId &&
+        !options.sessionContext?.initialSessionToolBinding &&
+        !rawArgs.sessionUuid &&
+        !rawArgs.device
+      ) {
+        // Loopback MCP clients are reused by execution scope, not by socket.
+        // Their local bindings are partial; only the pool owns all acquisitions.
+        const platform =
+          rawArgs.platform === "android" || rawArgs.platform === "ios"
+            ? rawArgs.platform
+            : undefined;
+        const deviceId = typeof rawArgs.deviceId === "string" ? rawArgs.deviceId : undefined;
+        routingSessionUuid = daemonState
+          .getDevicePool()
+          .resolveAutolockSessionForMcpSession(
+            implicitAutolockMcpSessionId,
+            platform,
+            undefined,
+            deviceId,
+          );
+        if (!routingSessionUuid && name === "setActiveDevice") {
+          routingSessionUuid = daemonState
+            .getDevicePool()
+            .resolveAutolockSessionForMcpSession(implicitAutolockMcpSessionId);
+        }
+        resolvedImplicitAutolockSessionUuid = routingSessionUuid;
+      } else {
+        routingSessionUuid = sessionToolBinding.resolveDeviceSessionUuid(
+          sessionId,
+          toolParams,
+          (id) => {
+            if (!DaemonState.getInstance().isInitialized()) {
+              return resolveDirectSessionDevice(id)?.device;
+            }
+            const manager = DaemonState.getInstance().getSessionManager();
+            const session = manager.getSession(id);
+            if (!session || !manager.isAdmittedForAutomation(session) || !session.assignedDevice) {
+              return undefined;
+            }
+            const device = DaemonState.getInstance()
+              .getDevicePool()
+              .getDevice(session.assignedDevice);
+            return device ? { deviceId: device.id, platform: device.platform } : undefined;
+          },
+          name === "setActiveDevice",
+        );
+      }
     }
 
     // #6069: enforce connection ownership on the DEVICE-routing path. If this
@@ -617,7 +697,8 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       if (
         boundDeviceSessionUuid &&
         explicitSessionUuid &&
-        explicitSessionUuid !== boundDeviceSessionUuid
+        explicitSessionUuid !== boundDeviceSessionUuid &&
+        !sessionToolBinding.ownsSession(sessionId, explicitSessionUuid)
       ) {
         throw new ActionableError(
           `MCP connection is bound to device session ${boundDeviceSessionUuid}; ` +
@@ -754,11 +835,22 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       executionSessionUuid,
       sessionId,
     );
+    if (resolvedImplicitAutolockSessionUuid) {
+      // Routing resolved before ToolRegistry, so retain its implicit-session
+      // tracking here without following later changes to the socket's default.
+      executionTracker.setResolvedAutolockSessionUuid(
+        execution.id,
+        resolvedImplicitAutolockSessionUuid,
+      );
+    }
     const requestSignal = combineAbortSignals(execution.abortController.signal, extra.signal);
     const handlerParams =
       parsedParams && typeof parsedParams === "object"
         ? {
             ...parsedParams,
+            ...(name === "setActiveDevice" && routingSessionUuid
+              ? { sessionUuid: routingSessionUuid }
+              : {}),
             ...(implicitAutolockMcpSessionId
               ? { [INTERNAL_MCP_SESSION_PARAM]: implicitAutolockMcpSessionId }
               : {}),
@@ -888,7 +980,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
             startTime: execution.startTime,
           });
       }
-      let result = await runWithAbortSignal(requestSignal, () =>
+      const runToolHandler = () =>
         runWithToolSelectionContext(
           {
             // A bound derived session may still target a sibling label. Resolve
@@ -910,12 +1002,11 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
               (name === "executePlan" ? getSessionToolSelectionService() : undefined),
           },
           () => tool.handler(handlerParams, progressCallback, requestSignal),
-        ),
-      );
+        );
+      let result = await runWithAbortSignal(requestSignal, runToolHandler);
       const acquiredSessionUuid = isDeviceSessionAcquisitionTool(name)
         ? getDeviceSessionIdFromResult(result)
         : undefined;
-      let acquisitionEnrichmentCancelled = false;
       // Evaluate the returned session directly: a seeded transport may retain
       // its old binding, and a concurrent acquisition may publish another one.
       // Reuse the same route/label union as tools/list without publishing yet.
@@ -924,6 +1015,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         !result?.isError &&
         acquiredSessionUuid
       ) {
+        let acquisitionEnrichmentCancelled = false;
         try {
           const listed = new Set(
             (
@@ -959,9 +1051,25 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
           // proxy can bind and heartbeat it even if optional discovery fails.
           logger.warn("[MCP] Could not enrich acquisition with gated tools", { tool: name, error });
         }
+        // Scoped to the acquisition enrichment on purpose. At the
+        // top level this ran for EVERY tool, so a cancellation landing while any
+        // handler was finishing discarded that handler's complete, correct
+        // result and replaced it with an error naming an acquisition the tool
+        // never performed. A non-acquisition tool keeps its result here; a
+        // genuine cancellation is still classified by the outer catch.
+        if (acquisitionEnrichmentCancelled || requestSignal?.aborted) {
+          failCancelledAcquisition(acquiredSessionUuid);
+        }
       }
-      if (acquisitionEnrichmentCancelled || requestSignal?.aborted) {
-        throw new ActionableError("MCP request was cancelled during acquisition.");
+      if (
+        name === "setActiveDevice" &&
+        !result?.isError &&
+        sessionToolBinding.bind(
+          sessionId,
+          getDeviceSessionIdFromResult(result) ?? routingSessionUuid,
+        )
+      ) {
+        ToolRegistry.notifyToolListChanged();
       }
       const isRecordingIdCleanup =
         name === "videoRecording" &&
@@ -989,10 +1097,16 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
           ? sessionForBinding !== null &&
             sessionForBinding !== undefined &&
             daemonSessionManager.isAdmittedForAutomation(sessionForBinding)
-          : resolveDirectSessionDevice(providedSessionUuid) !== undefined) &&
-        sessionToolBinding.bind(sessionId, providedSessionUuid)
+          : resolveDirectSessionDevice(providedSessionUuid) !== undefined)
       ) {
-        ToolRegistry.notifyToolListChanged();
+        if (sessionToolBinding.bind(sessionId, providedSessionUuid)) {
+          ToolRegistry.notifyToolListChanged();
+        }
+        if (tool.requiresDevice && daemonSessionManager && implicitAutolockMcpSessionId) {
+          await DaemonState.getInstance()
+            .getDevicePool()
+            .attachAutolockSessionToMcpSession(providedSessionUuid, implicitAutolockMcpSessionId);
+        }
       }
       // Wire-boundary output policy: strip the duplicated `structuredContent`
       // tree for no-schema tools unconditionally (issue #2759) and for schema
@@ -1034,13 +1148,13 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
             code: "session_ownership_lost",
             message:
               `Session ownership lost for ${error.sessionUuid}: ${error.release.releaseReason}. ` +
-              "Call getAndroid, getApple, or startDevice to acquire a new device session.",
+              DEVICE_SESSION_RECOVERY_PROMPT,
             sessionUuid: error.sessionUuid,
             reason: error.release.releaseReason,
             retryable: true,
             recovery: {
               action: "acquire_replacement_session",
-              tools: ["getAndroid", "getApple", "startDevice"],
+              tools: [...DEVICE_SESSION_RECOVERY_TOOLS],
             },
             release: error.release,
           },

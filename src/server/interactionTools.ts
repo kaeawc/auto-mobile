@@ -69,6 +69,7 @@ import { resolveSwipeDirection } from "../utils/swipeOnUtils";
 import { RecompositionTracker } from "../features/performance/RecompositionTracker";
 import {
   addDeviceTargetingToSchema,
+  appIdFieldAliases,
   platformSchema,
   withAppIdAliases,
   withCanonicalDiscriminatedUnionJsonSchema,
@@ -116,6 +117,8 @@ import {
   resetSystemTrayDependencies,
   getSystemTrayDependencies,
   waitForNotificationMatch,
+  listSystemTrayNotifications,
+  resolveUniqueTrayAppLabel,
   resolveSystemTrayAwaitTimeout,
   ensureSystemTrayOpen,
   ensureSystemTrayClosed,
@@ -576,9 +579,13 @@ const systemTrayNotificationSchema = z.object({
 
 const systemTraySchemaBase = z.object({
   action: z
-    .enum(["open", "close", "find", "tap", "dismiss", "clearAll"])
-    .describe("open/close/find/tap/dismiss/clearAll notification"),
-  notification: systemTrayNotificationSchema.optional().describe("Notification criteria to match"),
+    .enum(["open", "close", "list", "find", "tap", "dismiss", "clearAll"])
+    .describe("open/close/list/find/tap/dismiss/clearAll notification"),
+  notification: systemTrayNotificationSchema
+    .optional()
+    .describe(
+      "Notification criteria to match; list requires appId and scans up to three swipes on Android",
+    ),
   awaitTimeout: z
     .number()
     .optional()
@@ -590,36 +597,59 @@ const systemTraySchemaBase = z.object({
   ...responseShapeControlFields,
 });
 
-export const systemTraySchema = withAppIdAliases(
-  addDeviceTargetingToSchema(systemTraySchemaBase).superRefine((value, ctx) => {
-    const notification = value.notification ?? {};
+export const systemTraySchema = withJsonSchemaOverride(
+  withAppIdAliases(
+    addDeviceTargetingToSchema(systemTraySchemaBase).superRefine((value, ctx) => {
+      const notification = value.notification ?? {};
 
-    if (value.action === "open" || value.action === "close") {
-      return;
-    }
+      if (value.action === "open" || value.action === "close") {
+        return;
+      }
 
-    const hasCriteria = notification.title || notification.body || notification.appId;
-    if (!hasCriteria) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: `${value.action} requires at least one criterion under 'notification': notification: { title | body | appId }`,
-      });
-    }
+      const hasCriteria = notification.title || notification.body || notification.appId;
+      if (!hasCriteria) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `${value.action} requires at least one criterion under 'notification': notification: { title | body | appId }`,
+        });
+      }
 
-    if (value.action === "clearAll" && !notification.appId) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "clearAll action requires notification.appId",
-      });
-    }
+      if ((value.action === "clearAll" || value.action === "list") && !notification.appId) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `${value.action} action requires notification.appId`,
+        });
+      }
 
-    if (notification.tapActionLabel && value.action !== "tap") {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "notification.tapActionLabel is only valid for tap action",
-      });
-    }
-  }),
+      if (notification.tapActionLabel && value.action !== "tap") {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "notification.tapActionLabel is only valid for tap action",
+        });
+      }
+    }),
+  ),
+  (jsonSchema) => {
+    const notificationSchema = (jsonSchema.properties as Record<string, Record<string, unknown>>)
+      .notification;
+    const notificationProperties = notificationSchema.properties as Record<string, unknown>;
+    Object.assign(
+      notificationProperties,
+      Object.fromEntries(appIdFieldAliases.map((alias) => [alias, { type: "string" }])),
+    );
+    jsonSchema.if = { required: ["action"], properties: { action: { const: "list" } } };
+    jsonSchema.then = {
+      required: ["notification"],
+      properties: {
+        notification: {
+          anyOf: ["appId", ...appIdFieldAliases].map((field) => ({
+            required: [field],
+            properties: { [field]: { type: "string", minLength: 1 } },
+          })),
+        },
+      },
+    };
+  },
 );
 
 export const stopAppSchema = withAppIdAliases(
@@ -1630,6 +1660,51 @@ export function registerInteractionTools() {
         });
       }
 
+      if (args.action === "list") {
+        if (device.platform !== "android") {
+          throw new ActionableError("systemTray list is supported only on Android.");
+        }
+        const appId = args.notification?.appId;
+        if (!appId) {
+          throw new ActionableError("list action requires notification.appId");
+        }
+        signal?.throwIfAborted();
+        const inventory = await getSystemTrayDependencies()
+          .appInventoryFactory(device)
+          .executeDetailedResult(signal);
+        signal?.throwIfAborted();
+        if (!inventory.successful) {
+          throw new ActionableError(
+            "Cannot verify notification ownership because the installed-app inventory is incomplete.",
+          );
+        }
+        const appIds = [
+          ...new Set(
+            [...Object.values(inventory.apps.profiles).flat(), ...inventory.apps.system].map(
+              (app) => app.packageName,
+            ),
+          ),
+        ];
+        if (!appIds.includes(appId)) {
+          throw new ActionableError(`App ${appId} is not installed.`);
+        }
+        const label = await resolveUniqueTrayAppLabel(device, appId, appIds, signal);
+        const result = await listSystemTrayNotifications(
+          device,
+          appId,
+          label,
+          awaitTimeoutMs,
+          progress,
+          signal,
+        );
+        await captureSystemTrayTerminalEvidence(device, result.observation);
+        return createJSONToolResponse({
+          message: `Listed ${result.notifications.length} notifications for ${appId}`,
+          ...result,
+          success: true,
+        });
+      }
+
       const notification = args.notification ?? {};
       let appLabel: string | null = null;
       let appMatchTexts: string[] = [];
@@ -2066,7 +2141,7 @@ export function registerInteractionTools() {
 
   ToolRegistry.registerDeviceAware(
     "systemTray",
-    "System tray actions for notifications (open/close/find/tap/dismiss/clearAll)",
+    "System tray actions for notifications (open/close/list/find/tap/dismiss/clearAll)",
     systemTraySchema,
     systemTrayHandler,
     { defaultEnabled: false, supportsProgress: true },

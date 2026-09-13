@@ -29,6 +29,10 @@ import {
   withJsonSchemaOverride,
 } from "./toolSchemaHelpers";
 import { DaemonState } from "../daemon/daemonState";
+import {
+  registerDirectSessionDevice,
+  resolveDirectSessionDevice,
+} from "./directSessionDeviceRegistry";
 import type { SessionManager } from "../daemon/sessionManager";
 import {
   applyStateAfterBiometricCaptureFailure,
@@ -496,7 +500,28 @@ async function captureBiometricEnrollment(
 export function registerUtilityTools() {
   // Set active device handler
   const setActiveDeviceHandler = async (args: SetActiveDeviceArgs & { sessionUuid?: string }) => {
+    const mcpSessionId = (args as SetActiveDeviceArgs & { __mcpSessionId?: string }).__mcpSessionId;
+    let selectedAutolockSession: string | undefined;
     try {
+      if (mcpSessionId && DaemonState.getInstance().isInitialized()) {
+        const ownedSession = DaemonState.getInstance()
+          .getDevicePool()
+          .resolveAutolockSessionForMcpSession(
+            mcpSessionId,
+            args.platform,
+            undefined,
+            args.deviceId,
+          );
+        const targetSession =
+          ownedSession ??
+          DaemonState.getInstance()
+            .getDevicePool()
+            .resolveAutolockSessionForMcpSession(mcpSessionId);
+        args.sessionUuid ??= targetSession;
+        if (targetSession === args.sessionUuid) {
+          selectedAutolockSession = targetSession;
+        }
+      }
       if (args.sessionUuid && DaemonState.getInstance().isInitialized()) {
         // Session-scoped: bind the specific requested device to this session
         const sessionManager = DaemonState.getInstance().getSessionManager();
@@ -555,6 +580,9 @@ export function registerUtilityTools() {
           args.deviceId,
         );
         const resolvedPlatform = args.platform ?? readyDevice.platform;
+        if (args.sessionUuid && resolveDirectSessionDevice(args.sessionUuid)) {
+          registerDirectSessionDevice(args.sessionUuid, readyDevice);
+        }
 
         // When switching platforms, clear observation caches to prevent stale
         // data from the previous platform contaminating subsequent observe calls.
@@ -567,9 +595,15 @@ export function registerUtilityTools() {
         }
       }
 
+      if (selectedAutolockSession) {
+        await DaemonState.getInstance()
+          .getDevicePool()
+          .attachAutolockSessionToMcpSession(selectedAutolockSession, mcpSessionId);
+      }
       return createJSONToolResponse({
         message: `Active device set to '${args.deviceId}'`,
         deviceId: args.deviceId,
+        ...(args.sessionUuid ? { sessionUuid: args.sessionUuid } : {}),
       });
     } catch (error) {
       logger.error("Failed to set active device:", error);

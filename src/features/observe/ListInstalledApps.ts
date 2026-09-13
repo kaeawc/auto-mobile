@@ -126,8 +126,8 @@ export class ListInstalledApps {
    * List installed packages on Android grouped by user profile, with system apps deduped.
    * @returns Promise with grouped installed app details
    */
-  async executeDetailed(): Promise<InstalledAppsByProfile> {
-    return (await this.executeDetailedResult()).apps;
+  async executeDetailed(signal?: AbortSignal): Promise<InstalledAppsByProfile> {
+    return (await this.executeDetailedResult(signal)).apps;
   }
 
   /**
@@ -135,7 +135,8 @@ export class ListInstalledApps {
    * partial-user or command failures. Resource caches must not retain a
    * degraded fallback result.
    */
-  async executeDetailedResult(): Promise<InstalledAppsDetailedResult> {
+  async executeDetailedResult(signal?: AbortSignal): Promise<InstalledAppsDetailedResult> {
+    signal?.throwIfAborted();
     if (this.device.platform !== "android") {
       logger.warn("executeDetailed() is only supported on Android");
       return { apps: { profiles: {}, system: [] }, successful: false };
@@ -149,8 +150,9 @@ export class ListInstalledApps {
         }
       }
 
-      return await this.rebuildInstalledAppsCache();
+      return await this.rebuildInstalledAppsCache(signal);
     } catch (error) {
+      signal?.throwIfAborted();
       logger.warn("Failed to list installed apps with details:", error);
       return { apps: { profiles: {}, system: [] }, successful: false };
     }
@@ -308,7 +310,10 @@ export class ListInstalledApps {
     );
   }
 
-  private async rebuildInstalledAppsCache(): Promise<InstalledAppsDetailedResult> {
+  private async rebuildInstalledAppsCache(
+    signal?: AbortSignal,
+  ): Promise<InstalledAppsDetailedResult> {
+    signal?.throwIfAborted();
     const cacheGeneration = getInstalledAppsCacheWriteCoordinator().beginRebuild(
       this.device.deviceId,
     );
@@ -321,7 +326,8 @@ export class ListInstalledApps {
 
     // Get all users on the device
     logger.info("[ListInstalledApps] Getting list of users...");
-    const users = await this.adb.listUsers();
+    const users = await this.adb.listUsers(signal);
+    signal?.throwIfAborted();
     logger.info(
       `[ListInstalledApps] Found ${users.length} user(s): ${users.map((u) => `${u.userId}:${u.name}`).join(", ")}`,
     );
@@ -331,14 +337,20 @@ export class ListInstalledApps {
     }
 
     // Get the current foreground app
-    const foregroundApp = await this.adb.getForegroundApp();
+    const foregroundApp = await this.adb.getForegroundApp(signal);
+    signal?.throwIfAborted();
 
     // List packages for each user
     for (const user of users) {
       try {
+        signal?.throwIfAborted();
         logger.info(`[ListInstalledApps] Listing packages for user ${user.userId}...`);
 
-        const { userPackages, systemPackages } = await this.partitionPackagesForUser(user.userId);
+        const { userPackages, systemPackages } = await this.partitionPackagesForUser(
+          user.userId,
+          signal,
+        );
+        signal?.throwIfAborted();
 
         logger.info(
           `[ListInstalledApps] Found ${userPackages.length} user package(s) and ${systemPackages.length} system package(s) for user ${user.userId}`,
@@ -411,6 +423,7 @@ export class ListInstalledApps {
           }
         }
       } catch (error) {
+        signal?.throwIfAborted();
         hadUserErrors = true;
         logger.warn(`Failed to list packages for user ${user.userId}:`, error);
         // Continue with other users
@@ -464,11 +477,13 @@ export class ListInstalledApps {
   // (`--user N` for non-current user) fall back to ADB.
   private async partitionPackagesForUser(
     userId: number,
+    signal?: AbortSignal,
   ): Promise<{ userPackages: string[]; systemPackages: string[] }> {
     if (this.device.platform === "android") {
       try {
         const a11y = AndroidCtrlProxyClient.getInstance(this.device);
         const result = await a11y.requestInstalledPackages(true, undefined, 4000);
+        signal?.throwIfAborted();
         if (result.success && result.userId === userId) {
           const userPackages: string[] = [];
           const systemPackages: string[] = [];
@@ -485,8 +500,20 @@ export class ListInstalledApps {
     }
 
     const [allRes, systemRes] = await Promise.all([
-      this.adb.executeCommand(`shell pm list packages --user ${userId}`),
-      this.adb.executeCommand(`shell pm list packages -s --user ${userId}`),
+      this.adb.executeCommand(
+        `shell pm list packages --user ${userId}`,
+        undefined,
+        undefined,
+        undefined,
+        signal,
+      ),
+      this.adb.executeCommand(
+        `shell pm list packages -s --user ${userId}`,
+        undefined,
+        undefined,
+        undefined,
+        signal,
+      ),
     ]);
     const systemPackages = this.parsePackages(systemRes.stdout);
     const systemSet = new Set(systemPackages);

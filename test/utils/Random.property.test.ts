@@ -10,7 +10,25 @@ import { CryptoRandom } from "../../src/utils/Random";
 // in [0, 1) always lands on a valid index), so the outcome never flakes.
 const RUN_OPTIONS = { seed: 1_234_567, numRuns: 300 } as const;
 
-const nonEmptyArray = fc.array(fc.anything(), { minLength: 1, maxLength: 32 });
+// Index selection only depends on array length, but these values retain the
+// SameValueZero and object-identity cases without recursively generating data.
+const representativeObject = { kind: "object" };
+const representativeArray = ["array"];
+const representativeValue = fc.constantFrom<unknown>(
+  undefined,
+  null,
+  false,
+  true,
+  -1,
+  0,
+  1,
+  Number.NaN,
+  "",
+  "value",
+  representativeObject,
+  representativeArray,
+);
+const nonEmptyArray = fc.array(representativeValue, { minLength: 1, maxLength: 32 });
 
 describe("CryptoRandom (property-based)", () => {
   test("next() always returns a value in [0, 1)", () => {
@@ -34,7 +52,7 @@ describe("CryptoRandom (property-based)", () => {
   test("pick() from a single-element array returns that element", () => {
     fc.assert(
       // includes() uses SameValueZero so a NaN element still matches itself.
-      fc.property(fc.anything(), (only) => [only].includes(new CryptoRandom().pick([only]))),
+      fc.property(representativeValue, (only) => [only].includes(new CryptoRandom().pick([only]))),
       RUN_OPTIONS,
     );
   });

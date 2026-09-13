@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import type { Kysely } from "kysely";
+import { type Kysely, sql } from "kysely";
 import type { Database } from "../../src/db/types";
-import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
+import {
+  DeviceSessionRepository,
+  type DeviceSessionRecord,
+} from "../../src/db/deviceSessionRepository";
 import { logger } from "../../src/utils/logger";
 import { createTestDatabase } from "./testDbHelper";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -23,11 +26,13 @@ function clearAutolockEnv(): void {
 describe("DeviceSessionRepository", () => {
   let db: Kysely<Database>;
   let repo: DeviceSessionRepository;
+  let timer: FakeTimer;
 
   beforeEach(async () => {
     clearAutolockEnv();
     db = await createTestDatabase();
-    repo = new DeviceSessionRepository(db);
+    timer = new FakeTimer();
+    repo = new DeviceSessionRepository(db, timer);
   });
 
   afterEach(async () => {
@@ -376,6 +381,110 @@ describe("DeviceSessionRepository", () => {
     const row = await repo.getSession("session-default");
     expect(row).toBeDefined();
     expect(row!.status).toBe("active");
+  });
+
+  // Regression for #6464: `device_sessions` accumulates one row per device
+  // session for the life of the on-disk DB, with only status transitions
+  // (never a delete) applied to old rows. These tests prove the TTL-based
+  // prune wired into the real production write path (`upsertActiveSession`,
+  // called from `SessionManager.persistSession`) actually bounds the table.
+  describe("device_sessions retention (#6464)", () => {
+    const oneDayMs = 24 * 60 * 60 * 1000;
+
+    function makeRecord(overrides: Partial<DeviceSessionRecord> = {}): DeviceSessionRecord {
+      return {
+        sessionUuid: "placeholder",
+        deviceId: "emulator-5554",
+        platform: "android" as const,
+        createdAtMs: 0,
+        lastUsedAtMs: 0,
+        expiresAtMs: 60_000,
+        sessionTimeoutMs: 60_000,
+        heartbeatTimeoutMs: 60_000,
+        hasReceivedHeartbeat: false,
+        ...overrides,
+      };
+    }
+
+    test("uses current time when rebinding a session created before the retention window", async () => {
+      await repo.upsertActiveSession(makeRecord({ sessionUuid: "old" }));
+      await repo.markReleased("old", "released", oneDayMs, "explicit-release");
+      timer.advanceTime(10 * oneDayMs);
+      await repo.upsertActiveSession(makeRecord({ sessionUuid: "rebound", createdAtMs: 0 }));
+      expect(await repo.getSession("old")).toBeUndefined();
+      expect(await repo.getSession("rebound")).toBeDefined();
+    });
+
+    test("migrates an index on the session retention cutoff", async () => {
+      const columns = await sql<{ name: string }>`SELECT name
+        FROM pragma_index_info('idx_device_sessions_released_at_ms')`.execute(db);
+      expect(columns.rows).toEqual([{ name: "released_at_ms" }]);
+    });
+
+    test("upsertActiveSession prunes terminal-state rows past the retention window", async () => {
+      await repo.upsertActiveSession(makeRecord({ sessionUuid: "old-released" }));
+      await repo.markReleased("old-released", "released", 1 * oneDayMs, "explicit-release");
+
+      await repo.upsertActiveSession(makeRecord({ sessionUuid: "recent-released" }));
+      await repo.markReleased("recent-released", "released", 9 * oneDayMs, "explicit-release");
+
+      // A new session starting at day 10 triggers the prune — mirrors
+      // `DeviceTeardownOperationRepository.begin()`'s unconditional
+      // delete-before-write pattern. Cutoff = day 10 - 7 days = day 3, so the
+      // day-1 release is pruned and the day-9 release survives.
+      timer.advanceTime(10 * oneDayMs);
+      await repo.upsertActiveSession(
+        makeRecord({
+          sessionUuid: "new-session",
+          createdAtMs: 10 * oneDayMs,
+          lastUsedAtMs: 10 * oneDayMs,
+          expiresAtMs: 10 * oneDayMs + 60_000,
+        }),
+      );
+
+      expect(await repo.getSession("old-released")).toBeUndefined();
+      expect(await repo.getSession("recent-released")).toBeDefined();
+      expect(await repo.getSession("new-session")).toBeDefined();
+    });
+
+    test("keeps terminal-state rows when none are old enough", async () => {
+      await repo.upsertActiveSession(makeRecord({ sessionUuid: "session-1" }));
+      await repo.markReleased("session-1", "released", 2 * oneDayMs, "explicit-release");
+
+      // Cutoff = day 3 - 7 days = negative: nothing is old enough to prune.
+      timer.advanceTime(3 * oneDayMs);
+      await repo.upsertActiveSession(
+        makeRecord({
+          sessionUuid: "session-2",
+          createdAtMs: 3 * oneDayMs,
+          lastUsedAtMs: 3 * oneDayMs,
+          expiresAtMs: 3 * oneDayMs + 60_000,
+        }),
+      );
+
+      expect(await repo.getSession("session-1")).toBeDefined();
+    });
+
+    test("never prunes active (non-terminal) sessions regardless of age", async () => {
+      await repo.upsertActiveSession(makeRecord({ sessionUuid: "still-active" }));
+
+      // A far-future session start would prune any terminal row past the TTL,
+      // but "still-active" has `released_at_ms = null` and must survive.
+      timer.advanceTime(365 * oneDayMs);
+      await repo.upsertActiveSession(
+        makeRecord({
+          sessionUuid: "new-session",
+          createdAtMs: 365 * oneDayMs,
+          lastUsedAtMs: 365 * oneDayMs,
+          expiresAtMs: 365 * oneDayMs + 60_000,
+        }),
+      );
+
+      const stillActive = await repo.getSession("still-active");
+      expect(stillActive).toBeDefined();
+      expect(stillActive!.status).toBe("active");
+      expect(stillActive!.released_at_ms).toBeNull();
+    });
   });
 
   test("upsertActiveSession logs and propagates a write failure for session rollback", async () => {

@@ -1,5 +1,5 @@
 import type { Kysely } from "kysely";
-import { ensureMigrations, getDatabase } from "./database";
+import { getDatabase } from "./database";
 import type { DeviceSnapshotManifest, DeviceSnapshotMetadata, DeviceSnapshotType } from "../models";
 import type {
   Database,
@@ -96,12 +96,12 @@ export class DeviceSnapshotRepository {
     this.db = db ?? null;
   }
 
-  private async getDb(): Promise<Kysely<Database>> {
-    if (this.db) {
-      return this.db;
-    }
-    await ensureMigrations();
-    return getDatabase();
+  // Migration gating is owned by startup (ensureMigrations) plus the app dialect
+  // first-query gate (waitForMigrationsBeforeQuery, #6703); a repository helper
+  // must NOT await ensureMigrations itself. Resolve the injected executor, else
+  // the singleton, synchronously.
+  private getDb(): Kysely<Database> {
+    return this.db ?? getDatabase();
   }
 
   async insertSnapshot(record: DeviceSnapshotRecord): Promise<void> {

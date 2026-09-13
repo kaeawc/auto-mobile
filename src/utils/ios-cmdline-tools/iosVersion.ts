@@ -15,6 +15,27 @@ export function parseIosMajorVersion(version: string | undefined | null): number
 }
 
 /**
+ * Extract the dotted iOS version string (e.g. `"17.2"`) embedded in a
+ * CoreSimulator runtime identifier such as
+ * `com.apple.CoreSimulator.SimRuntime.iOS-17-2`. Returns `undefined` when the
+ * identifier carries no iOS version token.
+ *
+ * This is the single source of truth for runtime-identifier version parsing;
+ * SimCtlClient's `normalizeIosVersion` and DeviceCriteriaMatcher's
+ * `iosVersionFromRuntime` used to each hand-roll their own copy of this regex
+ * (#6372 follow-up).
+ */
+export function iosVersionStringFromRuntimeId(
+  runtimeId: string | undefined | null,
+): string | undefined {
+  if (!runtimeId) {
+    return undefined;
+  }
+  const match = runtimeId.match(/iOS[-_](\d+(?:[-_]\d+)*)/i);
+  return match ? match[1].replace(/[-_]/g, ".") : undefined;
+}
+
+/**
  * Resolve the major iOS version for a booted simulator `udid` from the JSON
  * emitted by `simctl list devices <udid> --json`. The payload groups devices by
  * runtime identifier (e.g. `com.apple.CoreSimulator.SimRuntime.iOS-18-6`), so we
@@ -42,12 +63,12 @@ export function iosMajorVersionFromSimctlListDevices(json: string, udid: string)
   const devices = (parsed as { devices?: Record<string, Array<{ udid?: string }>> }).devices ?? {};
   for (const [runtimeId, deviceList] of Object.entries(devices)) {
     if (Array.isArray(deviceList) && deviceList.some((device) => device?.udid === udid)) {
-      const match = runtimeId.match(/iOS[-_](\d+)/i);
+      const major = parseIosMajorVersion(iosVersionStringFromRuntimeId(runtimeId));
       // Keep scanning: a udid should appear under exactly one runtime, but if an
       // earlier-iterated runtime id carries no iOS version token, later runtimes
       // may still resolve it rather than short-circuiting to null.
-      if (match) {
-        return parseInt(match[1], 10);
+      if (major !== null) {
+        return major;
       }
     }
   }

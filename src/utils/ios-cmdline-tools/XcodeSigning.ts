@@ -8,8 +8,16 @@ import { logger } from "../logger";
 import { Xcodebuild, XcodebuildClient } from "./XcodebuildClient";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../workingDirectory";
 import { SecurityClient, type SecurityClientApi } from "./SecurityClient";
+import { defaultTimer, Timer } from "../SystemTimer";
+import { getAbortSignal } from "../AbortContext";
 
 type SigningStyle = "automatic" | "manual";
+
+// Bound on the xcodebuild availability probe inside detectTeamIdsFromXcode
+// (issue #6585): a stalled `xcodebuild -version` must never block callers
+// (e.g. physical-device CtrlProxy startup) indefinitely, regardless of
+// whether the underlying Xcodebuild dependency enforces its own timeout.
+const XCODEBUILD_AVAILABILITY_PROBE_TIMEOUT_MS = 10_000;
 
 interface SigningIdentity {
   name: string;
@@ -63,6 +71,7 @@ interface XcodeSigningDependencies {
   mkdir: (path: string) => Promise<void>;
   homedir: () => string;
   now: () => number;
+  timer?: Timer;
 }
 
 const plistParser = new Parser({
@@ -88,6 +97,7 @@ const createDefaultDependencies = (): XcodeSigningDependencies => ({
   mkdir: async (path) => fs.mkdir(path, { recursive: true }),
   homedir,
   now: () => Date.now(),
+  timer: defaultTimer,
 });
 
 const parsePlistValue = (node: PlistNode | undefined): unknown => {
@@ -309,11 +319,29 @@ export class XcodeSigningManager {
       join("ios", "control-proxy", "CtrlProxy.xcodeproj"),
     );
     try {
-      if (this.dependencies.platform() !== "darwin") {
-        const available = await this.dependencies.xcodebuild.isAvailable();
-        if (!available) {
-          return [];
-        }
+      const projectExists = await this.dependencies
+        .stat(projectPath)
+        .then(() => true)
+        .catch((statError: unknown) => {
+          // ENOENT (and ENOTDIR, when a path segment isn't a directory) mean
+          // "no project here" -- the expected shape for an installed
+          // (non-checkout) AutoMobile. Anything else (permissions, IO) is
+          // unexpected and worth a trace rather than a silent [] (#6585 P2).
+          const code = (statError as NodeJS.ErrnoException | undefined)?.code;
+          if (code !== "ENOENT" && code !== "ENOTDIR") {
+            logger.warn(
+              `[XcodeSigning] Unexpected error checking for Xcode project at ${projectPath}: ${errorMessage(statError)}`,
+            );
+          }
+          return false;
+        });
+      if (!projectExists) {
+        return [];
+      }
+
+      const available = await this.probeXcodebuildAvailability();
+      if (!available) {
+        return [];
       }
 
       const result = await this.dependencies.xcodebuild.executeCommand(
@@ -331,6 +359,50 @@ export class XcodeSigningManager {
     } catch (error) {
       logger.warn(`[XcodeSigning] Failed to detect team IDs: ${errorMessage(error)}`);
       return [];
+    }
+  }
+
+  /**
+   * Bound `xcodebuild.isAvailable()` with our own timer/abort race, on top of
+   * whatever timeout the injected dependency enforces internally. Callers
+   * (fakes in tests, or a future dependency implementation) cannot be relied
+   * on to bound themselves, and a stalled `xcodebuild -version` must never
+   * block `detectTeamIdsFromXcode` -- and by extension physical-device
+   * CtrlProxy startup -- indefinitely (issue #6585).
+   */
+  private async probeXcodebuildAvailability(): Promise<boolean> {
+    const timer = this.dependencies.timer ?? defaultTimer;
+    const controller = new AbortController();
+    const parent = getAbortSignal();
+    if (parent?.aborted) {
+      return false;
+    }
+    const signal = parent ? AbortSignal.any([parent, controller.signal]) : controller.signal;
+    let onAbort!: () => void;
+    const cancelled = new Promise<false>((resolve) => {
+      onAbort = () => resolve(false);
+      signal.addEventListener("abort", onAbort, { once: true });
+    });
+    const timeoutId = timer.setTimeout(
+      () => controller.abort(),
+      XCODEBUILD_AVAILABILITY_PROBE_TIMEOUT_MS,
+    );
+    try {
+      return await Promise.race([
+        this.dependencies.xcodebuild
+          .isAvailable({
+            timeoutMs: XCODEBUILD_AVAILABILITY_PROBE_TIMEOUT_MS,
+            signal,
+          })
+          .then(
+            (available) => available,
+            () => false,
+          ),
+        cancelled,
+      ]);
+    } finally {
+      timer.clearTimeout(timeoutId);
+      signal.removeEventListener("abort", onAbort);
     }
   }
 

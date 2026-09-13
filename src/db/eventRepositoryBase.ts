@@ -6,6 +6,7 @@ import {
   type EventRetentionState,
   type EventTableName,
 } from "./eventRetention";
+import { createAmortizedRetentionState } from "./retentionGate";
 
 export type { EventRetentionState, EventTableName } from "./eventRetention";
 
@@ -21,9 +22,7 @@ export function getDb(db?: Kysely<Database>): Kysely<Database> {
 }
 
 /** A fresh, isolated retention counter for one event repository. */
-export function createEventRetentionState(): EventRetentionState {
-  return { cleanupInProgress: false, insertsSinceCleanup: 0 };
-}
+export const createEventRetentionState: () => EventRetentionState = createAmortizedRetentionState;
 
 /**
  * Parameterized retention wrapper shared by the six event repositories, whose

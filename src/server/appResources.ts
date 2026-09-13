@@ -1047,7 +1047,6 @@ async function getAppMetadataResource(
     return cached.content;
   }
 
-  const cacheGeneration = getInstalledAppsCacheWriteCoordinator().beginRebuild(deviceId);
   const device = await findBootedDevice(deviceId);
   if (!device) {
     return {
@@ -1057,6 +1056,7 @@ async function getAppMetadataResource(
     };
   }
 
+  const cacheGeneration = getInstalledAppsCacheWriteCoordinator().beginRebuild(deviceId);
   try {
     const iosSource = device.platform === "ios" ? createIosMetadataSource(device) : null;
     const getMetadata = new GetAppMetadata(device, undefined, iosSource);

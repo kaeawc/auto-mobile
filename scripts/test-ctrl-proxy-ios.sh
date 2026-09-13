@@ -177,8 +177,16 @@ if [ "$HEALTH_RESPONSE" == "FAILED" ]; then
                 else
                     RUNNER_XCTESTRUN_FILE="$(dirname "${XCTESTRUN_FILE}")/automobile-runner-${BOOTED_SIMULATOR}.xctestrun"
                     cp "${XCTESTRUN_FILE}" "${RUNNER_XCTESTRUN_FILE}"
-                    plutil -replace "CtrlProxyUITests.EnvironmentVariables.CTRL_PROXY_IOS_PORT" -string "${PORT}" "${RUNNER_XCTESTRUN_FILE}"
-                    plutil -replace "CtrlProxyUITests.EnvironmentVariables.AUTOMOBILE_DEVICE_ID" -string "${BOOTED_SIMULATOR}" "${RUNNER_XCTESTRUN_FILE}"
+                    if ! plutil -replace "CtrlProxyUITests.EnvironmentVariables.CTRL_PROXY_IOS_PORT" -string "${PORT}" "${RUNNER_XCTESTRUN_FILE}" \
+                        || ! plutil -replace "CtrlProxyUITests.EnvironmentVariables.AUTOMOBILE_DEVICE_ID" -string "${BOOTED_SIMULATOR}" "${RUNNER_XCTESTRUN_FILE}"; then
+                        # plutil fails when the xctestrun does not carry the
+                        # top-level CtrlProxyUITests key it expects (e.g. a
+                        # FormatVersion 2 layout) — an unpatched xctestrun
+                        # silently launches the runner on the wrong port
+                        # (issue #2731), so this must be a hard failure.
+                        print_status 1 "Failed to patch runner xctestrun (CtrlProxyUITests.EnvironmentVariables keypath not found — FormatVersion 2 or unsupported xctestrun layout)"
+                        exit 1
+                    fi
 
                     print_info "Starting patched CtrlProxy iOS in background..."
 

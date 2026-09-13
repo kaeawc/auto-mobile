@@ -155,6 +155,7 @@ import {
   DAEMON_LAUNCH_CWD_ENV,
   safeProcessCwd,
   resolveStableDaemonWorkingDirectory,
+  normalizeCoreSimulatorDeviceSetPathEnv,
 } from "../utils/workingDirectory";
 import { resolveAssetVersion, resolvePinnedVersion } from "../constants/release";
 import {
@@ -306,7 +307,10 @@ export class Daemon {
     options: DaemonOptions = {},
     installedAppsRepository?: InstalledAppsStore,
     timer: Timer = defaultTimer,
-    deviceSessionRepository: DeviceSessionRepository = new DeviceSessionRepository(),
+    deviceSessionRepository: DeviceSessionRepository = new DeviceSessionRepository(
+      undefined,
+      timer,
+    ),
     idGenerator: IdGenerator = defaultIdGenerator,
     databaseInitializer: DatabaseInitializer = new DefaultDatabaseInitializer(),
     startupFailureTracker: StartupFailureTracker = new DefaultStartupFailureTracker(),
@@ -517,6 +521,8 @@ export class Daemon {
     logger.enableStdoutLogging();
     const stableWorkingDirectory = resolveStableDaemonWorkingDirectory();
     process.env[DAEMON_LAUNCH_CWD_ENV] ??= safeProcessCwd(stableWorkingDirectory);
+    // Keep simctl and direct TCC reads on the same device set after chdir (issue #6582).
+    normalizeCoreSimulatorDeviceSetPathEnv();
     process.chdir(stableWorkingDirectory);
 
     logger.info("Starting AutoMobile daemon...");
@@ -1225,7 +1231,14 @@ export class Daemon {
   }
 
   private setupDeviceSessionRouting(): void {
-    const resolver = createRegistryDeviceSessionResolver(this.deviceSessionRegistry);
+    // The pool's unresolved-identity quarantine is the second input: while it
+    // holds for a serial, the registry record stays put but the resolver withholds
+    // it in both directions and every push server drops that serial's frames, so a
+    // possible replacement AVD's passive events cannot reach the previous AVD's
+    // subscribers (#6863 review).
+    const resolver = createRegistryDeviceSessionResolver(this.deviceSessionRegistry, (deviceId) =>
+      this.devicePool.isPooledIdentityUnresolved(deviceId),
+    );
     const { deviceDataStream, performancePush, failuresPush, telemetryPush } =
       this.getDeviceSessionRoutingTargets();
     this.deviceDataStreamServer = deviceDataStream;

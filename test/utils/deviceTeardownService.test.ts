@@ -150,6 +150,46 @@ describe("DeviceTeardownService", () => {
     nextProvision.release();
   });
 
+  test("releases a transferred lease when the operation id is already accepted", async () => {
+    const timer = new FakeTimer();
+    const { coordinator, service } = createService(timer);
+    const workflow = {
+      resolve: async () => ({ target: "target" }) as const,
+      stop: async () => "accepted" as const,
+      destroy: async () => {},
+      verify: async () => ({ status: "destroyed" }) as TestResponse,
+      conflict: () => ({ status: "failed", phase: "precondition" }) as TestResponse,
+      failure: (phase: DeviceTeardownPhase) => ({ status: "failed", phase }) as TestResponse,
+      isFailure: (response: TestResponse) => response.status === "failed",
+    };
+    const request = {
+      operationId: "already-accepted-cleanup",
+      fingerprint: "fingerprint",
+      identity,
+      deadlineMs: 1_000,
+    };
+
+    await expect(service.teardown(request, workflow)).resolves.toEqual({ status: "destroyed" });
+    const transferred = await coordinator.reserve(
+      { kind: "stable", ...identity },
+      { operation: "provision", deadlineMs: 1_000 },
+    );
+
+    // The replayed operation never reaches `execute`, so nothing else holds a
+    // handle on the transferred reservation.
+    await expect(
+      service.teardown({ ...request, lifecycleLease: transferred }, workflow),
+    ).resolves.toEqual({ status: "destroyed" });
+
+    const nextProvision = coordinator.reserve(
+      { kind: "stable", ...identity },
+      { operation: "provision", deadlineMs: 2_000 },
+    );
+    timer.advanceTime(2_001);
+    await expect(nextProvision).resolves.toBeDefined();
+    (await nextProvision).release();
+  });
+
   test("uses a live teardown signal after another teardown preempts provisioning", async () => {
     const timer = new FakeTimer();
     const { coordinator, service } = createService(timer);

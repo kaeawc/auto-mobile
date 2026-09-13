@@ -9,6 +9,7 @@ import { outputLooksLikeShellFailure } from "../../utils/android-cmdline-tools/s
 import { logger } from "../../utils/logger";
 import { SimCtlClient, type SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
+import { isAndroidEmulatorSerial } from "../../utils/androidSerial";
 
 /**
  * The argv-shaped slice of the simctl client this feature needs. Routing
@@ -129,11 +130,6 @@ const IOS_DENSITY_UNSUPPORTED_ERROR =
   "display density.";
 
 const ANDROID_UNSUPPORTED_PLATFORM_ERROR = "Display configuration is only supported on Android.";
-
-/** Android emulators report an `emulator-<port>` serial; everything else is physical. */
-function isAndroidEmulatorSerial(deviceId: string): boolean {
-  return deviceId.startsWith("emulator-");
-}
 
 /**
  * Parse `settings get system font_scale`. An unset value ("null") means the

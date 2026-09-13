@@ -40,6 +40,7 @@ import { syncInstalledAppResources } from "./appResources";
 import { listActiveVideoRecordings, stopVideoRecording } from "./videoRecordingManager";
 import { stopSegmentedVideoRecordingsForDevice } from "./videoRecordingTools";
 import { IOSCtrlProxyManager } from "../utils/IOSCtrlProxyManager";
+import { AndroidCtrlProxyManager } from "../utils/CtrlProxyManager";
 import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
 import { logger } from "../utils/logger";
 import { createPerformanceTracker } from "../utils/PerformanceTracker";
@@ -51,10 +52,8 @@ import {
 } from "./toolSchemaHelpers";
 import { DefaultDeviceMatcher, type DeviceMatcher } from "../utils/deviceMatcher";
 import { DEVICE_POOL_MATCHING, isDevicePoolAutolockEnabled } from "../daemon/poolConfig";
-import {
-  INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
-  INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
-} from "../daemon/constants";
+import { deleteInternalToolParams } from "../daemon/constants";
+import { formatToolParamError } from "./toolParamError";
 import {
   DEVICE_CREATE_ENV_VAR,
   getDeviceCreationGate,
@@ -90,6 +89,7 @@ import {
 } from "./directSessionDeviceRegistry";
 import {
   createDefaultRunnerReadinessService,
+  RunnerReadinessError,
   type RunnerReadinessRequest,
   SystemUiAnrRecoveryRequiredError,
 } from "../utils/RunnerReadinessService";
@@ -124,6 +124,7 @@ import {
   ProvisionDeviceOperationRepository,
   ProvisionDeviceOperationConflictError,
   ProvisionDeviceOperationInProgressError,
+  ProvisionDeviceOperationSupersededError,
   type ProvisionDeviceOperationStore,
 } from "../db/provisionDeviceOperationRepository";
 import {
@@ -141,6 +142,7 @@ import {
 import { DeviceTeardownService, type DeviceTeardownPhase } from "../utils/deviceTeardownService";
 import { DeviceShutdownService } from "../utils/deviceShutdownService";
 import { hasMutableDisplayName } from "../utils/ios-cmdline-tools/iosDeviceType";
+import { isAndroidEmulatorSerial } from "../utils/androidSerial";
 import { classifyDisplayCutout, DISPLAY_CUTOUT_PREFERENCES } from "../utils/displayCutout";
 
 // Schema definitions
@@ -295,6 +297,14 @@ export const getAndroidSchema = devicePreparationTimeoutSchema
         path: ["avdName"],
       });
     }
+    // Both spellings are accepted together: `deviceId` takes a serial OR an
+    // image name, so `avdName: "Pixel_A"` + that AVD's running serial names ONE
+    // device and must not be rejected by the schema, which cannot know which
+    // serial an AVD is running on. The pair is validated after discovery
+    // instead (`validateRequestedAndroidSerial`), where a genuine disagreement
+    // is reported with the same machine-readable `identifier_conflict` code.
+    // Silently preferring `avdName` without that check would prepare a device
+    // the caller did not name — the worst failure mode for a device-identity API.
   });
 
 export const getAppleSchema = devicePreparationTimeoutSchema
@@ -321,6 +331,18 @@ export const getAppleSchema = devicePreparationTimeoutSchema
         code: "custom",
         message: "Provide udid or deviceId (the `deviceId` field of automobile:devices/booted/ios)",
         path: ["udid"],
+      });
+    }
+    // `deviceId` is an alias for `udid` on iOS, so two different values name
+    // two different simulators; resolving that to `udid` alone would prepare a
+    // device the caller did not name.
+    if (value.udid && value.deviceId && value.udid !== value.deviceId) {
+      ctx.addIssue({
+        code: "custom",
+        message:
+          `identifier_conflict: udid '${value.udid}' and deviceId '${value.deviceId}' are ` +
+          "different simulator UDIDs. Pass only the identifier you mean.",
+        path: ["deviceId"],
       });
     }
   });
@@ -447,7 +469,6 @@ export const killDeviceSchema = z.object({
     name: z.string().describe("Device image name"),
     deviceId: z.string(),
     platform: platformSchema,
-    transportId: z.string().optional(),
   }),
 });
 
@@ -513,6 +534,11 @@ const TEARDOWN_OPERATION_RESULT_TTL_MS = 5 * 60 * 1_000;
 // deadline, plus room afterward for idempotent replay before the row is pruned
 // (#6652).
 const PROVISION_DEVICE_OPERATION_TTL_MS = MAX_DEVICE_READY_TIMEOUT_MS + 15 * 60 * 1_000;
+
+// Terminal-but-retryable error code stamped on an operation row whose attempt
+// was rejected by an in-flight MCP session recovery. Distinct from a genuine
+// provisioning failure so the stored row says why the attempt never ran.
+const PROVISION_DEVICE_SESSION_RECOVERY_ERROR_CODE = "session_recovery_in_progress";
 
 function getShutdownInitiatingExecutionId(): string | undefined {
   return getToolSelectionContext()?.execution?.executionId;
@@ -650,6 +676,25 @@ interface StableDeviceTarget {
 
 type StableDeviceLifecycleTimeoutFactory = (detail: string) => Error;
 
+/**
+ * Shared deadline mapping for every lifecycle reservation, stable or selector:
+ * a coordinator rejection at or after the deadline is contention, so it must
+ * carry the caller's structured timeout error rather than surfacing as an
+ * opaque platform failure. Kept synchronous so callers add no extra await hop.
+ */
+function rethrowDeviceLifecycleReservationFailure(
+  error: unknown,
+  timer: Timer,
+  deadlineMs: number,
+  timeoutError: StableDeviceLifecycleTimeoutFactory,
+  timeoutDetail: string,
+): never {
+  if (timer.now() >= deadlineMs) {
+    throw timeoutError(timeoutDetail);
+  }
+  throw error;
+}
+
 async function reserveStableDeviceLifecycle(
   target: StableDeviceTarget,
   deadlineDevice: BootedDevice,
@@ -675,10 +720,13 @@ async function reserveStableDeviceLifecycle(
       },
     );
   } catch (error) {
-    if (timer.now() >= deadlineMs) {
-      throw timeoutError("waiting for stable device lifecycle reservation");
-    }
-    throw error;
+    rethrowDeviceLifecycleReservationFailure(
+      error,
+      timer,
+      deadlineMs,
+      timeoutError,
+      "waiting for stable device lifecycle reservation",
+    );
   }
 }
 
@@ -693,7 +741,6 @@ function deviceIdentityPayload(
       avdName: sourceImage?.platform === "android" ? sourceImage.name : device.name,
       adbSerial: device.deviceId,
       emulatorConsolePort: portMatch ? Number(portMatch[1]) : null,
-      adbTransportId: device.transportId ?? null,
     };
   }
 
@@ -732,12 +779,112 @@ export interface DeviceToolsDependencies {
   idGenerator: IdGenerator;
   timer: Timer;
   lifecycleCoordinator: VirtualDeviceLifecycleCoordinator;
+  /**
+   * Re-resolve an emulator's AVD name from the RUNTIME rather than from any
+   * host-side cache (`emu avd name`). Resolves to undefined when the emulator
+   * console cannot answer inside `timeoutMs`, which is the caller's REMAINING
+   * deadline, not an independent budget. See {@link confirmPooledAvdIdentity}.
+   */
+  resolveRunningAndroidAvdName: (
+    device: BootedDevice,
+    timeoutMs: number,
+    signal?: AbortSignal,
+  ) => Promise<string | undefined>;
 }
 
-const activeProvisionDeviceOperations = new Map<
-  string,
-  { fingerprint: string; promise: Promise<Record<string, unknown>> }
->();
+/**
+ * In-flight provisionDevice operations, keyed by idempotency key, so several
+ * callers of the same operationId share one lifecycle. `waiters` counts the
+ * callers still listening for the result: the shared `controller` is aborted
+ * when the LAST of them detaches, because past that point the lifecycle would
+ * otherwise keep booting a device and binding a session that no client owns.
+ * A caller that detaches while others are still waiting only detaches itself.
+ */
+interface ActiveProvisionDeviceOperation {
+  fingerprint: string;
+  promise: Promise<Record<string, unknown>>;
+  controller: AbortController;
+  waiters: number;
+}
+
+const activeProvisionDeviceOperations = new Map<string, ActiveProvisionDeviceOperation>();
+
+/**
+ * Detach one caller from a shared operation. Returns true when this was the
+ * last waiter and the still-running lifecycle was therefore cancelled.
+ */
+function releaseProvisionDeviceWaiter(
+  operationId: string,
+  operation: ActiveProvisionDeviceOperation,
+): boolean {
+  operation.waiters -= 1;
+  if (operation.waiters > 0) {
+    return false;
+  }
+  if (activeProvisionDeviceOperations.get(operationId) !== operation) {
+    // Already settled: its result is persisted and replayable, so there is
+    // nothing left to cancel.
+    return false;
+  }
+  // Retire the entry HERE, not when the abandoned promise finally settles: the
+  // caller is told `operationContinues: false`, so a retry arriving while the
+  // cancelled lifecycle is still unwinding must NOT join it (it would count as
+  // a waiter from zero and inherit the cancellation failure). Dropping the
+  // entry sends that retry through `executeProvisionDevice`, where the durable
+  // operation row is the authority on whether the prior attempt is still live.
+  // The settle handlers are identity-guarded, so this early delete is safe.
+  activeProvisionDeviceOperations.delete(operationId);
+  operation.controller.abort(
+    new ActionableError(
+      `provisionDevice operation '${operationId}' was cancelled: every caller waiting for it ` +
+        "disconnected",
+    ),
+  );
+  return true;
+}
+
+/**
+ * The CEILING on how long the runtime gets to name itself before a destructive
+ * action gives up on verification. Short on purpose: the caller is holding a
+ * lifecycle lease and a wedged console must not turn a kill into a hang. It is a
+ * ceiling and never a floor — the probe is bounded by whichever is smaller, this
+ * or the caller's remaining teardown/kill deadline, and an unanswered probe
+ * REFUSES the action (see {@link confirmPooledAvdIdentity}).
+ */
+const POOLED_AVD_NAME_VERIFICATION_TIMEOUT_MS = 3_000;
+
+/**
+ * Exported for tests only: the DEFAULT {@link
+ * DeviceToolsDependencies.resolveRunningAndroidAvdName}. Production callers
+ * reach it through `getDeviceToolsDependencies()`.
+ */
+export async function defaultResolveRunningAndroidAvdName(
+  device: BootedDevice,
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<string | undefined> {
+  try {
+    const { AndroidEmulatorClient } =
+      await import("../utils/android-cmdline-tools/AndroidEmulatorClient");
+    return await new AndroidEmulatorClient().resolveRunningAvdName(device, timeoutMs, signal);
+  } catch (error) {
+    if (signal?.aborted) {
+      // Cancellation is not evidence about the runtime's identity, and reporting
+      // it as "unresolved" would make killDevice raise an identity refusal --
+      // and deleteDevice answer `target_identity_unresolved` -- for an action the
+      // CALLER stopped. Propagate the cancellation instead (#6863 review).
+      throw signal.reason ?? error;
+    }
+    // An unreachable console is one of the three expected outcomes of this
+    // probe; "could not resolve" makes the caller REFUSE the destructive action,
+    // so this is a warn-and-report-unresolved, never a swallow that proceeds.
+    logger.warn(
+      `[DeviceTools] Could not re-resolve the AVD name for ${device.deviceId}: ${errorMessage(error)}`,
+      error,
+    );
+    return undefined;
+  }
+}
 
 async function defaultNotifyResourcesChanged(): Promise<void> {
   await notifyBootedDeviceResourcesUpdated();
@@ -781,15 +928,17 @@ async function defaultStopAndroidObservers(device: BootedDevice): Promise<void> 
 async function clearInstalledAppsAfterShutdown(
   dependencies: DeviceToolsDependencies,
   deviceId: string,
-): Promise<void> {
+): Promise<boolean> {
   try {
     await dependencies.clearInstalledAppsForDevice(deviceId);
+    return true;
   } catch (error) {
     // The device is already stopped; the next app verification refreshes stale cache rows.
     logger.warn(
       `[DeviceTools] Failed to clear installed apps for ${deviceId} after shutdown: ${error}`,
       error,
     );
+    return false;
   }
 }
 
@@ -937,12 +1086,7 @@ async function stopAndroidCtrlProxyBeforeShutdown(
   const observerState: AndroidObserverShutdownState = {
     hadActiveObserver: activeObserver !== null,
     boundSessionId: activeObserver?.getBoundSessionId() ?? null,
-    deviceIdentity: activeDeviceIdentity
-      ? {
-          ...activeDeviceIdentity,
-          transportId: activeDeviceIdentity.transportId ?? context.device.transportId,
-        }
-      : null,
+    deviceIdentity: activeDeviceIdentity ?? null,
   };
   let stop: Promise<void> | undefined;
   perf.startOperation("stopAndroidCtrlProxy");
@@ -977,10 +1121,15 @@ function shutdownTimeoutError(
   device: BootedDevice,
   detail: string,
   timeoutMs = DEVICE_SHUTDOWN_TIMEOUT_MS,
+  // Not every deadline-bounded phase is a device disappearing (System UI ANR
+  // recovery lists AVD images and issues a kill command under this same
+  // deadline), so callers can name their own phase. The "Timed out waiting for"
+  // prefix is load-bearing: `isShutdownTimeoutError` classifies on it.
+  phase = "to disappear",
 ): ActionableError {
   return new ActionableError(
     `Timed out waiting for ${device.platform} device '${device.name}' (${device.deviceId}) ` +
-      `to disappear after ${timeoutMs}ms: ${detail}. ` +
+      `${phase} after ${timeoutMs}ms: ${detail}. ` +
       "Verify the platform shutdown state and retry.",
   );
 }
@@ -1127,8 +1276,7 @@ async function revalidateReconnectedAndroidObserver(
     const reconnectedDevice = findDiscoveredDevice(discovery, device);
     return (
       reconnectedDevice !== undefined &&
-      observerState.deviceIdentity?.transportId !== undefined &&
-      reconnectedDevice.transportId !== undefined &&
+      observerState.deviceIdentity !== null &&
       isSameBootedDeviceIdentity(observerState.deviceIdentity, reconnectedDevice)
     );
   } catch (error) {
@@ -1171,8 +1319,7 @@ async function restoreAndroidObserverAfterCommandFailure(
     const survivingDevice = findDiscoveredDevice(discovery, device);
     if (
       survivingDevice &&
-      observerState.deviceIdentity?.transportId !== undefined &&
-      survivingDevice.transportId !== undefined &&
+      observerState.deviceIdentity !== null &&
       isSameBootedDeviceIdentity(observerState.deviceIdentity, survivingDevice)
     ) {
       const observer = AndroidCtrlProxyClient.getInstance(survivingDevice);
@@ -1278,11 +1425,16 @@ async function runWithinShutdownDeadline<T>(
   detail: string,
   requestAbortSignal: AbortSignal | undefined,
   operation: (signal: AbortSignal, timeoutMs: number) => Promise<T>,
-  timeoutMs = DEVICE_SHUTDOWN_TIMEOUT_MS,
+  timeoutMs?: number,
+  phase?: string,
 ): Promise<T> {
   const remainingMs = deadlineMs - timer.now();
+  // The wait is always `remainingMs`; `timeoutMs` only names the caller's own
+  // narrower budget for the message. Without one, quote the budget that
+  // actually elapsed rather than the unrelated default shutdown budget.
+  const reportedTimeoutMs = timeoutMs ?? Math.max(0, remainingMs);
   if (remainingMs <= 0) {
-    throw shutdownTimeoutError(device, detail, timeoutMs);
+    throw shutdownTimeoutError(device, detail, reportedTimeoutMs, phase);
   }
   const deadlineController = new AbortController();
   const signal = requestAbortSignal
@@ -1294,14 +1446,14 @@ async function runWithinShutdownDeadline<T>(
     timeout = timer.setTimeout(() => {
       timedOut = true;
       deadlineController.abort();
-      reject(shutdownTimeoutError(device, detail, timeoutMs));
+      reject(shutdownTimeoutError(device, detail, reportedTimeoutMs, phase));
     }, remainingMs);
   });
   const requestAbort = abortPromise(requestAbortSignal);
   const operationPromise = runWithAbortSignal(signal, () => operation(signal, remainingMs)).catch(
     (error) => {
       if (timedOut) {
-        throw shutdownTimeoutError(device, detail, timeoutMs);
+        throw shutdownTimeoutError(device, detail, reportedTimeoutMs, phase);
       }
       throw error;
     },
@@ -1428,7 +1580,7 @@ async function waitForDeviceShutdown(
     if (platformWasDiscovered && !matchingDevice) {
       return undefined;
     }
-    if (matchingDevice && !isSameBootedDeviceIdentity(device, matchingDevice)) {
+    if (matchingDevice && isConfirmedDeviceReplacement(device, matchingDevice)) {
       return matchingDevice;
     }
 
@@ -1443,18 +1595,75 @@ async function waitForDeviceShutdown(
   }
 }
 
+/**
+ * Whether two discovery observations are positive evidence of the same booted
+ * runtime -- the CONTINUITY question, asked by callers deciding whether to
+ * retain live state (an attached observer, a bound session).
+ *
+ * A discovery listing carries no connection-epoch token, so this is platform +
+ * serial + name and nothing more. An Android emulator serial is reused across
+ * boots, and its AVD name is what distinguishes one occupant of that serial
+ * from the next; a handset serial is globally unique, so its (non-unique)
+ * `ro.product.model` name can never conflate two handsets. The blind spot this
+ * leaves is deliberate: a same-serial restart of the SAME AVD between two
+ * observations reads as continuity, so callers relying on this must self-heal
+ * on failure rather than trust it as proof of an unbroken connection.
+ *
+ * An `Unknown (<serial>)` name is not an answer to this question. It means the
+ * emulator console did not report a name, so it is never evidence of continuity
+ * -- and, symmetrically, never evidence of a replacement (see
+ * {@link isConfirmedDeviceReplacement}). This is the uniform rule for the
+ * placeholder; a tool-level `force` escape hatch for callers that want to act
+ * without resolved identity is tracked as a separate follow-up.
+ */
 function isSameBootedDeviceIdentity(device: BootedDevice, candidate: BootedDevice): boolean {
+  return (
+    device.platform === candidate.platform &&
+    device.deviceId === candidate.deviceId &&
+    device.name === candidate.name &&
+    !hasUnresolvedEmulatorRuntimeName(device) &&
+    !hasUnresolvedEmulatorRuntimeName(candidate)
+  );
+}
+
+/**
+ * Whether a device rediscovered on a serial is positive evidence that a
+ * DIFFERENT runtime now holds it -- the REPLACEMENT question, asked by the
+ * shutdown wait before it stops waiting and rebuilds the pool around the
+ * newcomer.
+ *
+ * Only a RESOLVED, different name declares a replacement. While an emulator
+ * shuts down, `adb devices` can keep listing its serial after the console has
+ * stopped answering `avd name`, so the device that is still present gets
+ * labelled `Unknown (<serial>)`; classifying that as a replacement would end the
+ * shutdown wait before disappearance and retirement, releasing the session and
+ * rebuilding the pool around a device that is still going away (#6863 review).
+ *
+ * This is NOT the negation of {@link isSameBootedDeviceIdentity}: an unresolved
+ * name answers neither question, so both predicates return false for it.
+ */
+function isConfirmedDeviceReplacement(device: BootedDevice, candidate: BootedDevice): boolean {
   if (device.platform !== candidate.platform || device.deviceId !== candidate.deviceId) {
     return false;
   }
-  if (
-    device.platform === "android" &&
-    device.transportId !== undefined &&
-    candidate.transportId !== undefined
-  ) {
-    return device.transportId === candidate.transportId;
+  if (hasUnresolvedEmulatorRuntimeName(device) || hasUnresolvedEmulatorRuntimeName(candidate)) {
+    return false;
   }
-  return device.name === candidate.name;
+  return device.name !== candidate.name;
+}
+
+/**
+ * Whether this observation's name is the `Unknown (<serial>)` placeholder rather
+ * than a name read from the runtime. Guarded by {@link isAndroidEmulatorSerial}:
+ * a handset's name is `ro.product.model`, which is not unique and carries no
+ * identity anyway, so handsets keep serial-only identity.
+ */
+function hasUnresolvedEmulatorRuntimeName(device: BootedDevice): boolean {
+  return (
+    device.platform === "android" &&
+    isAndroidEmulatorSerial(device.deviceId) &&
+    isUnknownAndroidRuntimeName(device)
+  );
 }
 
 function findDiscoveredDevice(
@@ -1526,7 +1735,7 @@ async function findReplacementAfterSessionRelease(
   const replacement = findDiscoveredDevice(discovery, device);
   if (
     replacement &&
-    (device.platform === "ios" || !isSameBootedDeviceIdentity(device, replacement))
+    (device.platform === "ios" || isConfirmedDeviceReplacement(device, replacement))
   ) {
     return replacement;
   }
@@ -1885,6 +2094,47 @@ async function retireShutdownOwnership(
   }
 }
 
+/**
+ * Resolve the device the platform kill command is actually issued against.
+ *
+ * Without a pooled capture that is the caller's own target. With one -- an
+ * emulator whose discovered name is `Unknown (<serial>)` -- the captured epoch
+ * is re-confirmed and the runtime is asked to name itself, and the kill runs
+ * under the name the runtime gave.
+ *
+ * Called FIRST inside the shutdown's execute step, after the shutdown
+ * reservation (so the pool cannot evict the captured entry mid-check) but
+ * BEFORE any of the shutdown's preparation side effects. A refusal here is a
+ * statement that this daemon may not touch the device at all, so it must not
+ * arrive with the device's recordings already stopped, its CtrlProxy singleton
+ * closed and removed, and its passive observers detached -- those are not
+ * rolled back, and the device is still running
+ * ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
+ */
+async function resolvePooledAvdKillTarget(
+  dependencies: DeviceToolsDependencies,
+  device: BootedDevice,
+  pooledAvdCapture: PooledAvdCapture | undefined,
+  devicePool: DevicePool | undefined,
+  shutdownDeadlineMs: number,
+  requestAbortSignal: AbortSignal | undefined,
+): Promise<BootedDevice> {
+  if (!pooledAvdCapture) {
+    return device;
+  }
+  const confirmation = await confirmPooledAvdIdentity(
+    device,
+    pooledAvdCapture,
+    devicePool,
+    dependencies.resolveRunningAndroidAvdName,
+    { timer: dependencies.timer, deadlineMs: shutdownDeadlineMs, signal: requestAbortSignal },
+  );
+  if ("refusal" in confirmation) {
+    throw new PooledAvdIdentityError(pooledAvdNameRefusalMessage(device, confirmation.refusal));
+  }
+  return { ...device, name: confirmation.confirmedAvdName };
+}
+
 async function killProcessAndRetireOwnership(
   dependencies: DeviceToolsDependencies,
   device: BootedDevice,
@@ -1901,6 +2151,7 @@ async function killProcessAndRetireOwnership(
   ) => void,
   strictDeadline = false,
   timeoutMs = DEVICE_SHUTDOWN_TIMEOUT_MS,
+  killTarget: BootedDevice,
 ): Promise<string | undefined> {
   const deviceManager = dependencies.deviceManagerFactory();
   if (device.platform === "android") {
@@ -1920,9 +2171,11 @@ async function killProcessAndRetireOwnership(
       "platform shutdown command did not complete",
       requestAbortSignal,
       async (signal, timeoutMs) => {
-        platformShutdown = deviceManager.killDevice(device, { signal, timeoutMs }).finally(() => {
-          platformShutdownSettled = true;
-        });
+        platformShutdown = deviceManager
+          .killDevice(killTarget, { signal, timeoutMs })
+          .finally(() => {
+            platformShutdownSettled = true;
+          });
         return await platformShutdown;
       },
       timeoutMs,
@@ -2036,6 +2289,7 @@ async function shutdownDevice(
   strictDeadline = false,
   timeoutMs = DEVICE_SHUTDOWN_TIMEOUT_MS,
   retainLifecycleUntil?: (operation: Promise<unknown>) => void,
+  pooledAvdCapture?: PooledAvdCapture,
 ): Promise<ShutdownResult> {
   const perf = createPerformanceTracker(true);
   perf.serial(operationName);
@@ -2073,6 +2327,15 @@ async function shutdownDevice(
         requestAbortSignal,
         retainReservationUntil: retainShutdownUntil,
       };
+      // Identity first: a refusal must leave a still-running device untouched.
+      const killTarget = await resolvePooledAvdKillTarget(
+        dependencies,
+        device,
+        pooledAvdCapture,
+        devicePool,
+        shutdownDeadlineMs,
+        requestAbortSignal,
+      );
       await stopVideoRecordingsBeforeShutdown(shutdownContext, perf);
       await stopIosCtrlProxyBeforeShutdown(shutdownContext, perf);
       const androidObserverState = await stopAndroidCtrlProxyBeforeShutdown(
@@ -2096,6 +2359,7 @@ async function shutdownDevice(
         },
         strictDeadline,
         timeoutMs,
+        killTarget,
       );
 
       if (alreadyStoppedMessage !== undefined) {
@@ -2123,13 +2387,42 @@ async function shutdownDevice(
       await shutdownReservation?.release();
       unregisterDirectSessionsForDevice(device.deviceId);
 
+      const cleanup = clearInstalledAppsAfterShutdown(dependencies, device.deviceId);
+      const notification = cleanup.then(async (cacheCleared) => {
+        await notifyResourcesAfterShutdown(dependencies);
+        // Failed persistence must keep the dirty fence across device-ID reuse.
+        if (cacheCleared) {
+          const coordinator = getInstalledAppsCacheWriteCoordinator();
+          // Capture the expected generation AFTER the notification above, not
+          // before. For a device with a registered app resource,
+          // notifyResourcesAfterShutdown() -> syncInstalledAppResources()
+          // (src/server/appResources.ts) invalidates this same, already-gone
+          // device again as part of the SAME shutdown flow. Capturing the
+          // generation earlier meant that expected, self-triggered
+          // invalidation always advanced it past what releaseDevice's
+          // expected-generation guard held, so the guard always mismatched
+          // and release always no-opped -- leaking the exact per-device
+          // bookkeeping (#6704) this fix exists to release, for every killed
+          // device that had a registered app resource. beginRebuild() is a
+          // synchronous read here (the generation is already assigned), so
+          // there is no await between it and releaseDevice() below.
+          const generation = coordinator.beginRebuild(device.deviceId);
+          await coordinator.releaseDevice(device.deviceId, generation);
+        }
+      });
+      // Keep late cleanup visible to DB shutdown without blocking a later
+      // device teardown retry if resource notification never settles.
+      void getDbWriteBarrier().trackExisting(notification);
+
       await runPostShutdownStep(
         shutdownContext,
         perf,
         "cleanup",
         "installed-app cleanup did not complete",
         strictDeadline,
-        async () => await clearInstalledAppsAfterShutdown(dependencies, device.deviceId),
+        async () => {
+          await cleanup;
+        },
       );
       await runPostShutdownStep(
         shutdownContext,
@@ -2137,7 +2430,7 @@ async function shutdownDevice(
         "notifyResources",
         "resource notification did not complete",
         strictDeadline,
-        async () => await notifyResourcesAfterShutdown(dependencies),
+        async () => await notification,
       );
 
       perf.end();
@@ -2161,10 +2454,16 @@ type TeardownResolvedTarget =
       device: DeviceInfo;
       wasBooted: true;
       bootedDevice: BootedDevice;
+      /**
+       * The pooled AVD label + epoch captured at preflight, when this target was
+       * matched by a label the pool supplied rather than by a name the runtime
+       * gave. Re-confirmed immediately before the platform kill (#6863 review).
+       */
+      pooledAvdCapture?: PooledAvdCapture;
     };
 
 function isVirtualAndroidDevice(device: BootedDevice): boolean {
-  return device.platform === "android" && device.deviceId.startsWith("emulator-");
+  return device.platform === "android" && isAndroidEmulatorSerial(device.deviceId);
 }
 
 function resolveKillDeviceStableTarget(
@@ -2184,23 +2483,291 @@ function resolveKillDeviceStableTarget(
   return pooledAvdName ? { platform: "android", stableId: pooledAvdName } : undefined;
 }
 
+/**
+ * The AVD name the pool holds for an emulator whose runtime name could not be
+ * read (`Unknown (<serial>)`), or undefined when the pool cannot vouch for one.
+ *
+ * The rule, now that the identity model has no ADB transport id:
+ *  1. the serial must be an emulator serial (`isAndroidEmulatorSerial`) — a
+ *     handset's name is `ro.product.model` and there is no AVD to substitute;
+ *  2. the pool must still hold a LIVE entry for that serial. The pool evicts an
+ *     entry the moment discovery observes the serial disappear and re-adds it
+ *     under a fresh `incarnation`, so a surviving entry is the pool's statement
+ *     that it has observed no boundary for this serial — the only continuity
+ *     evidence left;
+ *  3. that entry must not be QUARANTINED. Once a discovery sweep observes the
+ *     `Unknown (<serial>)` placeholder on a live entry, the pool flags it
+ *     `identityUnresolved` (`DevicePool.isPooledIdentityUnresolved`) and its
+ *     label stops standing for the runtime: the serial may have been taken over
+ *     by a different AVD that simply cannot name itself either. Returning the
+ *     cached label there is what let a teardown of the NEW AVD miss the booted
+ *     runtime and fall through to the stopped-image inventory path. The one
+ *     caller that must still SEE a quarantined entry is the destructive
+ *     identity check, which reads it through
+ *     {@link getPooledAndroidEntryForIdentityCheck} and turns it into a
+ *     `quarantined` capture whose runtime confirmation is mandatory;
+ *  4. that entry must carry an `avdName`, which the pool writes only from the
+ *     AVD it itself started (`recordSourceAndroidAvd`), never from discovery.
+ *
+ * This is a best-effort LABEL, never proof of identity: a same-serial restart
+ * faster than one discovery interval never reaches the pool, so the cached name
+ * can belong to the previous occupant of the serial. Every DESTRUCTIVE caller
+ * (killDevice, deleteDevice) must therefore run {@link
+ * capturePooledAvdIdentity} at preflight and {@link confirmPooledAvdIdentity}
+ * immediately before the platform kill, which re-resolves the name from the
+ * runtime and fails closed on a mismatch -- and on a probe that does not
+ * answer.
+ */
+function getValidatedPooledAndroidEntry(
+  device: BootedDevice,
+  devicePool: DevicePool | undefined,
+): PooledDevice | undefined {
+  if (devicePool?.isPooledIdentityUnresolved(device.deviceId)) {
+    return undefined;
+  }
+  return getPooledAndroidEntryForIdentityCheck(device, devicePool);
+}
+
+/**
+ * The same lookup WITHOUT rule 3, for the one caller that must still see a
+ * QUARANTINED entry: the destructive identity check.
+ *
+ * Every other consumer reads a quarantined entry as "no label" and stops there,
+ * which is right for routing, publishing and matching. A kill cannot stop
+ * there: dropping the entry also dropped the CONFIRMATION the label exists to
+ * trigger, so the quarantined emulator fell back to the same unchecked path as
+ * a runtime that named itself and a sessionless `killDevice` carrying
+ * `Unknown (<serial>)` reached `AndroidEmulatorClient.killDevice` on nothing
+ * but that placeholder. Quarantine is the state in which the runtime MUST be
+ * made to name itself, so the check takes the entry and
+ * {@link capturePooledAvdIdentity} marks the capture `quarantined`
+ * ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
+ */
+function getPooledAndroidEntryForIdentityCheck(
+  device: BootedDevice,
+  devicePool: DevicePool | undefined,
+): PooledDevice | undefined {
+  if (device.platform !== "android" || !isUnknownAndroidRuntimeName(device)) {
+    return undefined;
+  }
+  if (!isAndroidEmulatorSerial(device.deviceId)) {
+    // A handset's name is `ro.product.model`, not an AVD; there is nothing to
+    // substitute and nothing that would make a pooled label trustworthy.
+    return undefined;
+  }
+  return devicePool?.getDevice(device.deviceId) ?? undefined;
+}
+
 function getValidatedPooledAndroidAvdName(
   device: BootedDevice,
   devicePool: DevicePool | undefined,
 ): string | undefined {
-  if (device.platform !== "android" || !isUnknownAndroidRuntimeName(device)) {
-    return undefined;
+  return getValidatedPooledAndroidEntry(device, devicePool)?.avdName;
+}
+
+type PooledAvdNameRefusal =
+  | { reason: "conflict"; pooledAvdName: string; runtimeAvdName: string }
+  | { reason: "unresolved"; pooledAvdName: string }
+  | { reason: "moved"; pooledAvdName: string };
+
+/**
+ * The pooled AVD label a destructive action would otherwise act on, pinned to
+ * the pool INCARNATION that label belongs to.
+ *
+ * Captured at PREFLIGHT and re-confirmed immediately before the platform kill.
+ * `reserveDeviceForShutdown` protects the captured entry from pool eviction,
+ * but it cannot stop the emulator behind the serial from disappearing and being
+ * replaced before discovery notices, so the epoch is re-read at the last
+ * possible moment and the runtime is asked to name itself there rather than at
+ * preflight (#6863 review).
+ */
+interface PooledAvdCapture {
+  avdName: string;
+  incarnation: number;
+  /**
+   * The pooled entry was QUARANTINED at capture time
+   * (`DevicePool.isPooledIdentityUnresolved`), so the label is not the pool's
+   * statement about the runtime -- it is only the last name this daemon saw on
+   * the serial. The confirmation is therefore mandatory rather than merely
+   * corroborating: without a name from the runtime there is no identity at all.
+   */
+  quarantined?: true;
+}
+
+type PooledAvdCaptureResult =
+  | { kind: "none" }
+  | { kind: "capture"; capture: PooledAvdCapture }
+  | { kind: "quarantined"; capture: PooledAvdCapture }
+  | { kind: "refusal"; refusal: PooledAvdNameRefusal };
+
+/**
+ * The capture a destructive action must carry into
+ * {@link confirmPooledAvdIdentity}, for the two kinds that require the runtime
+ * to name itself before the platform kill. `none` -- a runtime that named
+ * itself, and every physical handset -- carries nothing.
+ */
+function pooledAvdCaptureRequiringConfirmation(
+  result: PooledAvdCaptureResult,
+): PooledAvdCapture | undefined {
+  return result.kind === "capture" || result.kind === "quarantined" ? result.capture : undefined;
+}
+
+/**
+ * An identity refusal raised from inside the shutdown path. It is an
+ * {@link ActionableError} so it travels through `rethrowShutdownFailure`
+ * unwrapped, and its own type lets `deleteDevice` report it as
+ * `target_identity_unresolved` instead of a generic operation failure.
+ */
+class PooledAvdIdentityError extends ActionableError {}
+
+/**
+ * The caller's own deadline for the destructive action, which the verification
+ * probe borrows rather than starting a timer of its own.
+ */
+interface PooledAvdNameProbeBudget {
+  timer: Timer;
+  deadlineMs: number;
+  signal?: AbortSignal;
+}
+
+/**
+ * PREFLIGHT half of the identity check: pin the pooled label to its epoch.
+ *
+ * Returns `none` for every target whose name did NOT come from the pool -- a
+ * runtime that named itself, and every physical handset, because
+ * `ro.product.model` is not an AVD name and is not unique.
+ *
+ * A budget that is already spent refuses right here: with no time left the
+ * runtime can never be asked to name itself, so the label can never be tied to
+ * the emulator running on the serial, and refusing with the identity message is
+ * strictly more actionable than the shutdown timeout that would otherwise
+ * follow.
+ */
+function capturePooledAvdIdentity(
+  device: BootedDevice,
+  devicePool: DevicePool | undefined,
+  budget: PooledAvdNameProbeBudget,
+): PooledAvdCaptureResult {
+  const pooled = getPooledAndroidEntryForIdentityCheck(device, devicePool);
+  const avdName = pooled?.avdName;
+  if (!pooled || !avdName) {
+    return { kind: "none" };
   }
+  if (budget.deadlineMs - budget.timer.now() <= 0) {
+    return { kind: "refusal", refusal: { reason: "unresolved", pooledAvdName: avdName } };
+  }
+  const quarantined = devicePool?.isPooledIdentityUnresolved(device.deviceId) === true;
+  return quarantined
+    ? {
+        kind: "quarantined",
+        capture: { avdName, incarnation: pooled.incarnation, quarantined: true },
+      }
+    : { kind: "capture", capture: { avdName, incarnation: pooled.incarnation } };
+}
+
+/**
+ * KILL-TIME half of the identity check, run immediately before the platform
+ * kill on an emulator whose discovered name is `Unknown (<serial>)` and whose
+ * AVD name therefore comes from the pool -- including a pool entry that is
+ * QUARANTINED, where the label is not the pool's statement about the runtime
+ * and this probe is the only identity evidence there is.
+ *
+ * Two things must still hold:
+ *  - the pool must still hold the CAPTURED incarnation under that label. A new
+ *    incarnation means the serial was re-allocated while this shutdown was
+ *    being set up, so the captured label no longer describes the target;
+ *  - the runtime must name the SAME AVD. A different AVD can take over a reused
+ *    serial before discovery observes the previous one disappear, leaving the
+ *    pool holding the OLD label -- and a kill issued against that label would
+ *    stop the NEW emulator (#6863 review).
+ *
+ * Returns the CONFIRMED name so the caller can put it in the kill target:
+ * `AndroidEmulatorClient.killDevice` re-discovers the serial and refuses a
+ * target whose name differs from the discovered one, so handing it the
+ * `Unknown (<serial>)` placeholder would throw away the proof this probe just
+ * obtained.
+ *
+ * There is no fail-open branch. `Unknown (<serial>)` means "no information", and
+ * a probe that does not answer leaves it that way -- acting anyway would be
+ * acting on a label this daemon cannot tie to the runtime. The cost is that an
+ * emulator whose console has wedged is not killable through the tool; the
+ * message names `adb -s <serial> emu kill` as the manual escape, and a
+ * tool-level `force` option is tracked as a separate follow-up.
+ *
+ * The probe is bounded by whichever is smaller, the verification ceiling or the
+ * caller's REMAINING deadline: it runs inside a lifecycle lease that is already
+ * on the clock, so it must never start an independent timer that can outlast it.
+ */
+async function confirmPooledAvdIdentity(
+  device: BootedDevice,
+  capture: PooledAvdCapture,
+  devicePool: DevicePool | undefined,
+  resolveRunningAvdName: DeviceToolsDependencies["resolveRunningAndroidAvdName"],
+  budget: PooledAvdNameProbeBudget,
+): Promise<{ confirmedAvdName: string } | { refusal: PooledAvdNameRefusal }> {
+  const pooledAvdName = capture.avdName;
   const pooled = devicePool?.getDevice(device.deviceId);
-  if (
-    !pooled?.avdName ||
-    !pooled.transportId ||
-    !device.transportId ||
-    pooled.transportId !== device.transportId
-  ) {
-    return undefined;
+  if (!pooled || pooled.incarnation !== capture.incarnation || pooled.avdName !== pooledAvdName) {
+    logger.warn(
+      `[DeviceTools] The pool no longer holds incarnation ${capture.incarnation} of ` +
+        `${device.deviceId} under AVD '${pooledAvdName}'; refusing the destructive action.`,
+    );
+    return { refusal: { reason: "moved", pooledAvdName } };
   }
-  return pooled.avdName;
+  if (capture.quarantined) {
+    // Not an extra check, a louder one: for a quarantined entry the probe is the
+    // ONLY identity evidence there is, and a refusal here is the fail-closed
+    // outcome rather than a surprising one (#6863 review).
+    logger.warn(
+      `[DeviceTools] The pooled identity of ${device.deviceId} is quarantined; the runtime must ` +
+        `name itself before this action may act on '${pooledAvdName}'.`,
+    );
+  }
+  const remainingMs = budget.deadlineMs - budget.timer.now();
+  if (remainingMs <= 0) {
+    return { refusal: { reason: "unresolved", pooledAvdName } };
+  }
+  const runtimeAvdName = await resolveRunningAvdName(
+    device,
+    Math.min(POOLED_AVD_NAME_VERIFICATION_TIMEOUT_MS, remainingMs),
+    budget.signal,
+  );
+  if (runtimeAvdName === undefined) {
+    logger.warn(
+      `[DeviceTools] Could not confirm that ${device.deviceId} is still AVD '${pooledAvdName}': ` +
+        "the emulator console did not report a name.",
+    );
+    return { refusal: { reason: "unresolved", pooledAvdName } };
+  }
+  return runtimeAvdName === pooledAvdName
+    ? { confirmedAvdName: runtimeAvdName }
+    : { refusal: { reason: "conflict", pooledAvdName, runtimeAvdName } };
+}
+
+function pooledAvdNameRefusalMessage(device: BootedDevice, refusal: PooledAvdNameRefusal): string {
+  if (refusal.reason === "moved") {
+    return (
+      `Refusing to act on Android emulator '${device.deviceId}': this daemon had it recorded as ` +
+      `AVD '${refusal.pooledAvdName}', but that connection epoch was retired while this action ` +
+      "was being prepared, so the emulator now on that serial is a different run. Re-resolve " +
+      "the target and retry."
+    );
+  }
+  if (refusal.reason === "conflict") {
+    return (
+      `Refusing to act on Android emulator '${device.deviceId}': this daemon has it recorded as ` +
+      `AVD '${refusal.pooledAvdName}', but the emulator now running on that serial reports ` +
+      `AVD '${refusal.runtimeAvdName}'. The serial was reused by a different AVD; re-resolve ` +
+      "the target and retry."
+    );
+  }
+  return (
+    `Refusing to act on Android emulator '${device.deviceId}': this daemon has it recorded as ` +
+    `AVD '${refusal.pooledAvdName}', but the emulator console on that serial did not answer, so ` +
+    "the AVD actually running there could not be confirmed. Acting on the recorded name could " +
+    "stop a different emulator that took the serial. Resolve the target and retry, or stop it " +
+    `by hand with \`adb -s ${device.deviceId} emu kill\`.`
+  );
 }
 
 function getBootedAndroidStableName(
@@ -2538,6 +3105,42 @@ async function readTeardownInventory(
   );
 }
 
+async function evictTeardownManagers(context: TeardownContext, runtimeId?: string): Promise<void> {
+  const { platform, stableId } = context.args.target;
+  if (platform === "ios") {
+    if (runtimeId) {
+      await IOSCtrlProxyManager.evict(runtimeId, context.dependencies.timer, context.deadlineMs);
+    } else {
+      await IOSCtrlProxyManager.evict(stableId, context.dependencies.timer, context.deadlineMs);
+      await IOSCtrlProxyManager.evictSimulatorByName(
+        stableId,
+        context.dependencies.timer,
+        context.deadlineMs,
+      );
+    }
+  } else {
+    AndroidCtrlProxyManager.evict(runtimeId ?? stableId, stableId);
+  }
+}
+
+async function finalizeTeardownEviction(
+  context: TeardownContext,
+  target: TeardownResolvedTarget,
+  androidManager: AndroidCtrlProxyManager | undefined,
+): Promise<void> {
+  unregisterDirectSessionsForStableIdentity(
+    target.device.platform,
+    target.device.platform === "android"
+      ? target.device.name
+      : (target.device.deviceId ?? context.args.target.stableId),
+  );
+  if (androidManager) {
+    AndroidCtrlProxyManager.evictInstance(androidManager);
+  } else {
+    await evictTeardownManagers(context, target.device.deviceId);
+  }
+}
+
 async function resolveAbsentTeardownTarget(
   context: TeardownContext,
   booted: BootedDeviceDiscovery,
@@ -2555,7 +3158,20 @@ async function resolveAbsentTeardownTarget(
       ),
     };
   }
+  const daemonState = DaemonState.getInstance();
+  const runtimeId = daemonState.isInitialized()
+    ? findAbsentTeardownPooledDevices(daemonState.getDevicePool(), context.args.target)[0]?.id
+    : undefined;
+  const androidManager =
+    context.args.target.platform === "android" && runtimeId
+      ? AndroidCtrlProxyManager.getExistingInstance(runtimeId)
+      : undefined;
   await retireAbsentTeardownOwnership(context);
+  if (androidManager) {
+    AndroidCtrlProxyManager.evictInstance(androidManager);
+  } else {
+    await evictTeardownManagers(context, runtimeId);
+  }
   unregisterDirectSessionsForStableIdentity(
     context.args.target.platform,
     context.args.target.stableId,
@@ -2695,6 +3311,33 @@ async function resolveTeardownTarget(context: TeardownContext): Promise<Teardown
   }
   const daemonState = DaemonState.getInstance();
   const devicePool = daemonState.isInitialized() ? daemonState.getDevicePool() : undefined;
+  // A booted emulator only matches this teardown by its POOLED AVD name when its
+  // runtime name is unknown. Pin that label to its epoch here; the runtime is
+  // made to confirm it immediately before the stop's platform kill, which is
+  // also where `createBootedTeardownTarget` has already rewritten the target's
+  // name to the pooled label (#6863 review).
+  const [matchedBootedCandidate] = findMatchingBootedTeardownDevices(
+    booted,
+    context.args,
+    devicePool,
+  );
+  const pooledAvdCapture: PooledAvdCaptureResult = matchedBootedCandidate
+    ? capturePooledAvdIdentity(matchedBootedCandidate, devicePool, {
+        timer: context.dependencies.timer,
+        deadlineMs: context.deadlineMs,
+        signal: context.requestAbortSignal,
+      })
+    : { kind: "none" };
+  if (matchedBootedCandidate && pooledAvdCapture.kind === "refusal") {
+    return {
+      response: createTeardownFailureResponse(
+        context.args,
+        "precondition",
+        "target_identity_unresolved",
+        pooledAvdNameRefusalMessage(matchedBootedCandidate, pooledAvdCapture.refusal),
+      ),
+    };
+  }
   const bootedTarget = findBootedTeardownTarget(booted, context.args, devicePool);
   if (bootedTarget.conflict) {
     return {
@@ -2717,14 +3360,31 @@ async function resolveTeardownTarget(context: TeardownContext): Promise<Teardown
     };
   }
   if (bootedTarget.target) {
-    return await finalizeIosNameResolvedTeardownTarget(context, bootedTarget.target);
+    const captureRequiringConfirmation = pooledAvdCaptureRequiringConfirmation(pooledAvdCapture);
+    const resolvedTarget: TeardownResolvedTarget =
+      bootedTarget.target.wasBooted && captureRequiringConfirmation
+        ? { ...bootedTarget.target, pooledAvdCapture: captureRequiringConfirmation }
+        : bootedTarget.target;
+    return await finalizeIosNameResolvedTeardownTarget(context, resolvedTarget);
   }
+  // Nothing booted matched this teardown, so the next step is the STOPPED-image
+  // inventory path -- and a booted emulator that could not name itself may be
+  // the very AVD whose image is about to be destroyed.
+  //
+  // The question is answered from THIS discovery, not from the pool. The pool's
+  // quarantine encodes exactly this observation, but only from the sweep that
+  // FOLLOWS it: on the first discovery after a different AVD takes a pooled
+  // serial, the pool still holds the previous occupant's label and reading it
+  // here would treat the placeholder as resolved -- which is what let a
+  // teardown of the new AVD miss the booted runtime and destroy its image while
+  // it was running. The teardown's own observation is the newer evidence of the
+  // two, so it decides ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863)
+  // review).
   const unresolvedAndroidRuntime = booted.devices.find(
     (device) =>
       device.platform === "android" &&
       isVirtualAndroidDevice(device) &&
-      isUnknownAndroidRuntimeName(device) &&
-      !getValidatedPooledAndroidAvdName(device, devicePool),
+      isUnknownAndroidRuntimeName(device),
   );
   if (unresolvedAndroidRuntime) {
     return {
@@ -2806,7 +3466,6 @@ async function retireTeardownPooledOwnership(
     platform: expectedPooledDevice.platform,
     name,
     deviceId: expectedPooledDevice.id,
-    ...(expectedPooledDevice.transportId ? { transportId: expectedPooledDevice.transportId } : {}),
   };
   try {
     await stopVideoRecordingsBeforeShutdown(
@@ -2884,6 +3543,7 @@ async function destroyTeardownTarget(
   target: TeardownResolvedTarget,
   retainStableLifecycleUntil: (operation: Promise<unknown>) => void,
   markDestructionStarted: () => void,
+  onLateSuccess: () => void,
 ): Promise<void> {
   const deadlineTarget: BootedDevice = {
     name: target.device.name,
@@ -2912,6 +3572,13 @@ async function destroyTeardownTarget(
   } catch (error) {
     if (destroy) {
       retainStableLifecycleUntil(destroy);
+      void destroy.then(
+        () => onLateSuccess(),
+        () => {
+          // A rejected late destroy did not remove the platform device, so no eviction is safe.
+          logger.debug("[DeviceTools] Late platform deletion rejected; retaining teardown state");
+        },
+      );
     }
     throw error;
   }
@@ -3039,6 +3706,7 @@ function getDeviceToolsDependencies(): DeviceToolsDependencies {
       idGenerator: defaultIdGenerator,
       timer: defaultTimer,
       lifecycleCoordinator: getVirtualDeviceLifecycleCoordinator(),
+      resolveRunningAndroidAvdName: defaultResolveRunningAndroidAvdName,
     };
   }
   return moduleDependencies;
@@ -3096,6 +3764,8 @@ export function setDeviceToolsDependencies(deps: Partial<DeviceToolsDependencies
     idGenerator: deps.idGenerator ?? currentDeps.idGenerator,
     timer: deps.timer ?? currentDeps.timer,
     lifecycleCoordinator: resolveDeviceToolsLifecycleCoordinator(deps, currentDeps),
+    resolveRunningAndroidAvdName:
+      deps.resolveRunningAndroidAvdName ?? currentDeps.resolveRunningAndroidAvdName,
   };
 }
 
@@ -3125,7 +3795,10 @@ function resolveRunnerReadinessTimeoutMs(args: StartDeviceArgs): number {
   );
 }
 
-function provisionDeviceFingerprint(args: ProvisionDeviceArgs): string {
+// Exported for property-based testing: the idempotency-key fingerprint is the
+// contract that decides whether a reused operationId is the SAME request, so its
+// determinism and field sensitivity are worth exercising directly.
+export function provisionDeviceFingerprint(args: ProvisionDeviceArgs): string {
   return createHash("sha256")
     .update(
       stableStringify({
@@ -3143,11 +3816,12 @@ function parseProvisionDeviceArgs(input: ProvisionDeviceArgs): ProvisionDeviceAr
   const __mcpSessionId = input.__mcpSessionId;
   const __mcpRequestDeadlineMs = input.__mcpRequestDeadlineMs;
   const publicInput: Record<string, unknown> = { ...input };
-  delete publicInput.__mcpSessionId;
-  delete publicInput.__executionId;
-  delete publicInput.__executionStartTime;
-  delete publicInput[INTERNAL_MCP_REQUEST_TIMEOUT_PARAM];
-  delete publicInput[INTERNAL_MCP_REQUEST_DEADLINE_PARAM];
+  // `provisionDeviceSchema` is `.strict()`, so EVERY internal param the daemon
+  // may inject has to go before re-parsing -- hence the canonical shared list
+  // rather than a hand-maintained copy that silently falls behind (a missing
+  // `__mcpLiveDeadlineKey` made this tool unusable for any caller sending a
+  // progress token).
+  deleteInternalToolParams(publicInput);
   const parsed = provisionDeviceSchema.parse(publicInput);
   return {
     ...parsed,
@@ -3158,7 +3832,10 @@ function parseProvisionDeviceArgs(input: ProvisionDeviceArgs): ProvisionDeviceAr
   };
 }
 
-function provisionDeviceDeadlineMs(
+// Exported for property-based testing: the absolute deadline arithmetic clamps
+// the requested budget against the transport deadline minus reserved rollback
+// time, and those clamping invariants are worth exercising directly.
+export function provisionDeviceDeadlineMs(
   args: ProvisionDeviceArgs,
   timer: Pick<Timer, "now">,
   reserveRollbackTime: boolean,
@@ -3262,6 +3939,18 @@ async function waitForSharedOperation<T>(
   }
 }
 
+/**
+ * Distinguish "the caller went away" from a provisioning failure.
+ * `waitForSharedOperation` rejects with the caller signal's own reason, which
+ * is a `DOMException(AbortError)` unless the caller supplied one.
+ */
+function isProvisionDeviceCallerAbort(error: unknown, signal: AbortSignal | undefined): boolean {
+  if (signal?.aborted && error === signal.reason) {
+    return true;
+  }
+  return error instanceof DOMException && error.name === "AbortError";
+}
+
 function createProvisionDeviceResponse(result: Record<string, unknown>) {
   const device = result.device as { name: string; platform: string };
   const resources = result.resources as DeviceResourceConfigurationResult | undefined;
@@ -3281,6 +3970,26 @@ function createProvisionDeviceResponse(result: Record<string, unknown>) {
   };
 }
 
+/**
+ * True when the running device resolved for `args.deviceId` is not the device
+ * the caller named. On Android `deviceId` doubles as an AVD image name (see
+ * `getAndroidSchema`), so a serial that necessarily differs from the requested
+ * string is still the requested device when the AVD name matches.
+ */
+export function isMismatchedBootedDeviceId(
+  args: StartDeviceArgs,
+  device: BootedDevice,
+  sourceImage: DeviceInfo | undefined,
+): boolean {
+  if (!args.deviceId || device.deviceId === args.deviceId) {
+    return false;
+  }
+  return !(
+    device.platform === "android" &&
+    (device.name === args.deviceId || sourceImage?.name === args.deviceId)
+  );
+}
+
 function validateBootIdentity(
   args: StartDeviceArgs,
   device: BootedDevice,
@@ -3295,7 +4004,7 @@ function validateBootIdentity(
         "phase=pool-match: resolved platform differs from requested platform",
     );
   }
-  if (source === "booted" && args.deviceId && device.deviceId !== args.deviceId) {
+  if (source === "booted" && isMismatchedBootedDeviceId(args, device, sourceImage)) {
     throw new ActionableError(
       `startDevice identity mismatch: requested=[${requested}] resolved=[${resolved}] ` +
         "phase=pool-match: running device ID differs from the requested device ID",
@@ -3313,6 +4022,89 @@ function validateBootIdentity(
         "iOS runtime UDID differs from the selected simulator UDID",
     );
   }
+}
+
+/**
+ * getAndroid accepts `avdName` and `deviceId` together (see `getAndroidSchema`).
+ * `deviceId` is a serial OR an image name, so the pair identifies one device
+ * whenever the resolved device carries the requested serial — or is that image.
+ * Anything else is a genuine `identifier_conflict`, reportable only here,
+ * because the mapping from AVD name to serial is not known until discovery.
+ */
+/**
+ * Reject a contradictory `avdName` + serial-shaped `deviceId` pair BEFORE any
+ * boot. `validateRequestedAndroidSerial` is the post-boot authority, but by the
+ * time it runs a stopped AVD has already been cold-booted and then killed just
+ * to report the conflict (Codex thread on #6833). When the `deviceId` is a
+ * running-emulator serial, the device it names is knowable from one discovery
+ * sweep without booting anything, so the mismatch can be reported up front.
+ *
+ * This fires only for the serial-shaped case: a non-serial `deviceId` is an AVD
+ * image name, whose mapping is not known until discovery, so it stays the
+ * post-boot recheck's job. Anything ambiguous — discovery unavailable this
+ * sweep, or a running device whose runtime name is still `Unknown (<serial>)` —
+ * likewise defers, so this check only ever rejects a pair it can positively
+ * contradict.
+ */
+async function validateRequestedAndroidSerialBeforeBoot(
+  pair: { avdName: string; deviceId: string } | undefined,
+  deviceUtils: PlatformDeviceManager,
+): Promise<void> {
+  if (!pair) {
+    return;
+  }
+  const { avdName, deviceId } = pair;
+  if (!avdName || !isAndroidEmulatorSerial(deviceId) || avdName === deviceId) {
+    return;
+  }
+  const discovery = await deviceUtils.getBootedDevicesDetailed("android", {
+    bypassAndroidDeviceListCache: true,
+  });
+  if (!discovery.succeededPlatforms.has("android")) {
+    // Discovery was unavailable this sweep; a pair we cannot yet contradict is
+    // deferred to the post-boot recheck rather than rejected on missing data.
+    return;
+  }
+  const running = discovery.devices.find(
+    (device) => device.platform === "android" && device.deviceId === deviceId,
+  );
+  if (running && isUnknownAndroidRuntimeName(running)) {
+    // The serial is running but its AVD name is not resolvable yet; the
+    // post-boot recheck decides with pool/incarnation context.
+    return;
+  }
+  if (running && running.name === avdName) {
+    return;
+  }
+  throw new ActionableError(
+    `identifier_conflict: avdName '${avdName}' and deviceId '${deviceId}' name ` +
+      `different devices — '${deviceId}' ` +
+      (running ? `is running AVD '${running.name}'` : "is not running") +
+      `. Pass only the identifier you mean.`,
+  );
+}
+
+export function validateRequestedAndroidSerial(
+  pair: { avdName: string; deviceId: string } | undefined,
+  device: BootedDevice,
+  sourceImage: DeviceInfo | undefined,
+): void {
+  if (!pair) {
+    return;
+  }
+  const requested = pair.deviceId;
+  if (
+    device.deviceId === requested ||
+    device.name === requested ||
+    sourceImage?.name === requested
+  ) {
+    return;
+  }
+  throw new ActionableError(
+    `identifier_conflict: avdName '${pair.avdName}' resolved to ` +
+      `${device.name} (${device.deviceId}), which is not the requested deviceId ` +
+      `'${requested}'. Pass only the identifier you mean.`,
+  );
 }
 
 function validatePooledDeviceMapping(device: BootedDevice, requestedIdentity: string): void {
@@ -3339,6 +4131,16 @@ function validatePooledDeviceMapping(device: BootedDevice, requestedIdentity: st
   }
 }
 
+const COLD_BOOT_SETTLEMENT_GRACE_MS = 1_000;
+
+/**
+ * Collects the process-exit settlements of cold boots this request cancelled but
+ * never owned. `prepareDevice` defers its lifecycle-lease release onto every one
+ * of them, so an AVD's stable key is not handed to the next request while an
+ * emulator this one only signalled is still running.
+ */
+type ColdBootSettlementCollector = (settlement: Promise<void> | undefined) => void;
+
 function cancelUnownedColdBoot(boot: DeviceBootResult | undefined): Promise<void> | undefined {
   if (boot?.source !== "cold-boot" || !boot.processHandle) {
     return undefined;
@@ -3353,23 +4155,88 @@ function cancelUnownedColdBoot(boot: DeviceBootResult | undefined): Promise<void
     );
     return undefined;
   }
-  const processSettlement =
-    typeof boot.processHandle.once !== "function" ||
-    boot.processHandle.exitCode !== null ||
-    boot.processHandle.signalCode !== null
-      ? Promise.resolve()
-      : new Promise<void>((resolve) => {
-          boot.processHandle?.once("exit", () => resolve());
-        });
+  const processHandle = boot.processHandle;
+  const alreadySettled =
+    typeof processHandle.once !== "function" ||
+    processHandle.exitCode !== null ||
+    processHandle.signalCode !== null;
+  const processSettlement = alreadySettled
+    ? Promise.resolve()
+    : new Promise<void>((resolve) => {
+        processHandle.once("exit", () => resolve());
+      });
   try {
-    boot.processHandle.kill();
+    processHandle.kill();
   } catch (error) {
     logger.warn(
       `[DeviceTools] Failed to cancel unowned cold boot ${boot.device.deviceId}: ${error}`,
       error,
     );
   }
-  return processSettlement;
+  if (alreadySettled) {
+    return processSettlement;
+  }
+  return awaitColdBootSettlement(processSettlement, processHandle, boot.device.deviceId);
+}
+
+/**
+ * An emulator that ignores SIGTERM never emits `exit`, so an unbounded wait on
+ * its settlement strands every resource whose release is deferred onto it (the
+ * lifecycle lease above all). Bound the wait with the injected timer, escalate
+ * to SIGKILL, and let the caller proceed either way.
+ */
+async function awaitColdBootSettlement(
+  processSettlement: Promise<void>,
+  processHandle: NonNullable<DeviceBootResult["processHandle"]>,
+  deviceId: string,
+): Promise<void> {
+  const timer = getDeviceToolsDependencies().timer;
+  if (await raceColdBootExit(processSettlement, timer)) {
+    return;
+  }
+  logger.warn(
+    `[DeviceTools] Unowned cold boot ${deviceId} did not exit within ` +
+      `${COLD_BOOT_SETTLEMENT_GRACE_MS}ms; escalating to SIGKILL`,
+  );
+  try {
+    processHandle.kill("SIGKILL");
+  } catch (error) {
+    // Best effort: the child may have died between the race and here, and the
+    // caller must not stay blocked on the escalation either.
+    logger.debug(`[DeviceTools] SIGKILL for cold boot ${deviceId} failed: ${error}`);
+  }
+  // `kill()` only requests signal delivery: the emulator is still running — and
+  // still holding its AVD's lock files — until it emits `exit`. Resolving here
+  // would hand the stable key to the next request mid-shutdown, so wait for the
+  // real exit, bounded by one more grace so the release can never be stranded.
+  if (!(await raceColdBootExit(processSettlement, timer))) {
+    logger.warn(
+      `[DeviceTools] Unowned cold boot ${deviceId} did not exit within ` +
+        `${COLD_BOOT_SETTLEMENT_GRACE_MS}ms of SIGKILL; releasing its deferred ` +
+        "resources anyway",
+    );
+  }
+}
+
+/**
+ * Waits for `settlement`, bounded by one `COLD_BOOT_SETTLEMENT_GRACE_MS` grace
+ * on the injected timer. Resolves true when the process settled first, false
+ * when the grace expired.
+ */
+async function raceColdBootExit(settlement: Promise<void>, timer: Timer): Promise<boolean> {
+  let timeoutHandle: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      settlement.then(() => true),
+      new Promise<boolean>((resolve) => {
+        timeoutHandle = timer.setTimeout(() => resolve(false), COLD_BOOT_SETTLEMENT_GRACE_MS);
+      }),
+    ]);
+  } finally {
+    if (timeoutHandle) {
+      timer.clearTimeout(timeoutHandle);
+    }
+  }
 }
 
 function clearColdBootShutdownMarker(source: "booted" | "cold-boot", deviceId: string): void {
@@ -3415,6 +4282,8 @@ async function resolveSystemUiRecoveryImage(
     "System UI recovery image lookup did not complete",
     signal,
     async () => await deviceManager.listDeviceImages("android"),
+    undefined,
+    "to resolve its AVD image for System UI ANR recovery",
   );
   const image = images.find(
     (candidate) => candidate.platform === "android" && candidate.name === avdName,
@@ -3438,6 +4307,7 @@ async function rebootAndroidAfterSystemUiAnr(
   signal: AbortSignal | undefined,
   progress: { report: ProgressCallback } | undefined,
   recoveryAutolockClient: { mcpSessionId?: string; expectedSessionId?: string } | undefined,
+  collectColdBootSettlement: ColdBootSettlementCollector,
   publishReplacementReadinessMarker?: (replacement: BootedDevice) => void,
 ): Promise<{
   boot: DeviceBootResult;
@@ -3487,6 +4357,7 @@ async function rebootAndroidAfterSystemUiAnr(
       progress,
     );
     const adoptedReplacementBoot = replacementBoot;
+    assertSystemUiAnrReplacementIdentity(adoptedReplacementBoot, sourceImage);
     const handoff = await handoffSystemUiAnrReplacement(
       devicePool,
       shutdownReservation,
@@ -3504,6 +4375,7 @@ async function rebootAndroidAfterSystemUiAnr(
           devicePool,
           handoff?.replacementDevice,
           adoptedReplacementBoot,
+          collectColdBootSettlement,
         ),
       validatePreservedSession: handoff?.validatePreservedSession,
       releaseRecoveryRouteLease: shutdownReservation?.releaseRecoveryRouteLease,
@@ -3512,7 +4384,7 @@ async function rebootAndroidAfterSystemUiAnr(
     // The pool rolls an adopted replacement back before rejecting its handoff,
     // so any replacement still in scope here is safe to cancel as an unowned
     // cold boot.
-    void cancelUnownedColdBoot(replacementBoot);
+    collectColdBootSettlement(cancelUnownedColdBoot(replacementBoot));
     try {
       await cleanUpFailedSystemUiAnrRecovery(
         devicePool,
@@ -3570,6 +4442,8 @@ async function shutdownAndroidForSystemUiAnr(
     signal,
     async (shutdownSignal, timeoutMs) =>
       await deviceManager.killDevice(device, { signal: shutdownSignal, timeoutMs }),
+    undefined,
+    "to accept its System UI ANR recovery shutdown command",
   );
   await waitForDeviceShutdown(
     deviceManager,
@@ -3593,6 +4467,12 @@ async function bootSystemUiAnrReplacement(
       ...args,
       deviceId: undefined,
       name: sourceImage.name,
+      // Recovery already resolved this exact AVD image by name, so the boot must
+      // reuse that resolution. Without `matchExactName` the request falls back to
+      // `DeviceMatcher.matchDeviceImage`, whose name test is a case-insensitive
+      // *substring* match under the LATEST strategy: a System UI ANR on `Pixel_7`
+      // would kill `Pixel_7` and cold-boot `Pixel_7_API_35` instead.
+      matchExactName: true,
       preferRunning: false,
       totalDeadlineMs,
       signal,
@@ -3600,6 +4480,22 @@ async function bootSystemUiAnrReplacement(
     progress,
   );
   return { ...replacement, sourceImage };
+}
+
+function assertSystemUiAnrReplacementIdentity(
+  replacementBoot: DeviceBootResult,
+  sourceImage: DeviceInfo,
+): void {
+  if (replacementBoot.device.name === sourceImage.name) {
+    return;
+  }
+  // The pool enforces the same rule in `assertSystemUiAnrReplacement`, but only
+  // once the handoff is attempted. Failing here keeps a mismatched runtime out of
+  // the pool and lets the caller's catch cancel it as an unowned cold boot.
+  throw new ActionableError(
+    `System UI recovery must replace Android AVD '${sourceImage.name}' with the same runtime, ` +
+      `but booted '${replacementBoot.device.name}' (${replacementBoot.device.deviceId}).`,
+  );
 }
 
 async function handoffSystemUiAnrReplacement(
@@ -3648,6 +4544,7 @@ async function retireSystemUiAnrReplacement(
   devicePool: DevicePool | undefined,
   expectedReplacement: PooledDevice | undefined,
   replacementBoot: DeviceBootResult,
+  collectColdBootSettlement: ColdBootSettlementCollector,
 ): Promise<void> {
   try {
     if (expectedReplacement) {
@@ -3656,7 +4553,9 @@ async function retireSystemUiAnrReplacement(
   } finally {
     // Retiring the pool entry drops its process tracking, allowing the existing
     // cold-boot cleanup to terminate this recovered emulator deterministically.
-    void cancelUnownedColdBoot(replacementBoot);
+    // The settlement is handed back so the AVD's lifecycle lease is released only
+    // once this emulator has actually exited, exactly as the cold-boot path does.
+    collectColdBootSettlement(cancelUnownedColdBoot(replacementBoot));
   }
 }
 
@@ -3802,6 +4701,7 @@ interface StartDeviceRunnerReadinessInput {
   ensureCtrlProxyReady: (request: RunnerReadinessRequest) => Promise<void>;
   releaseReadinessReservations: DeviceReadinessReservation[];
   publishRecoveredReadinessMarker?: (device: BootedDevice) => void;
+  collectColdBootSettlement: ColdBootSettlementCollector;
 }
 
 async function prepareStartDeviceRunnerReadiness(
@@ -3845,11 +4745,93 @@ function getStartDevicePool(daemonState: DaemonState): DevicePool | undefined {
   return daemonState.isInitialized() ? daemonState.getDevicePool() : undefined;
 }
 
+/**
+ * A `deviceId`-targeted acquisition owns exactly one AVD, so it must not take the
+ * wildcard startup lease: `androidStartupRequestMatchesAvd` short-circuits on a
+ * missing name, which makes `detachAdbServerResetCohort` defer *every* cohort and
+ * the DisconnectMonitor skip its entire iteration for the minutes the lease is
+ * held. The pool already knows a running serial's AVD name, and an AVD image name
+ * (the other spelling `deviceId` accepts) resolves against the image listing.
+ * Returning `undefined` falls back to the wildcard, which is correct only when the
+ * identifier names neither a pooled serial nor a known image, or the request is
+ * criteria-only, where any AVD really may still be picked.
+ */
+async function resolveAndroidStartupLeaseAvdName(
+  args: StartDeviceArgs,
+  budgets: { androidAvdName?: string },
+  devicePool: DevicePool,
+  deviceUtils: PlatformDeviceManager,
+  bootDeadlineMs: number,
+  timer: Timer,
+  signal: AbortSignal | undefined,
+): Promise<string | undefined> {
+  if (budgets.androidAvdName !== undefined) {
+    return budgets.androidAvdName;
+  }
+  if (!args.deviceId) {
+    return undefined;
+  }
+  const pooled = devicePool.getDevice(args.deviceId);
+  if (pooled) {
+    return pooled.avdName;
+  }
+  // Not a running serial: on Android `deviceId` doubles as an AVD image name
+  // (see `getAndroidSchema`), and the pool is keyed by serial, so an image that
+  // is not running yet is unknown to it. Name the lease after the image rather
+  // than taking the wildcard, which would make this exact acquisition wait on —
+  // and defer — every unrelated reset cohort.
+  return await resolveAndroidStartupLeaseImageName(
+    args.deviceId,
+    deviceUtils,
+    bootDeadlineMs,
+    timer,
+    signal,
+  );
+}
+
+/**
+ * The requested identifier when it names a known, bounded-listing AVD image;
+ * `undefined` when it names none, which keeps the wildcard lease for genuinely
+ * unresolvable requests. A failed listing also falls back to the wildcard: the
+ * lease is a coordination hint, and failing the acquisition over an optional
+ * lookup would be worse than a briefly over-broad lease.
+ */
+async function resolveAndroidStartupLeaseImageName(
+  deviceId: string,
+  deviceUtils: PlatformDeviceManager,
+  bootDeadlineMs: number,
+  timer: Timer,
+  signal: AbortSignal | undefined,
+): Promise<string | undefined> {
+  try {
+    const images = await runWithinShutdownDeadline(
+      { name: deviceId, platform: "android", deviceId },
+      timer,
+      bootDeadlineMs,
+      "Android AVD image lookup for the startup lease did not complete",
+      signal,
+      async () => await deviceUtils.listDeviceImages("android"),
+      undefined,
+      "to name its Android startup lease",
+    );
+    return images.some((image) => image.platform === "android" && image.name === deviceId)
+      ? deviceId
+      : undefined;
+  } catch (error) {
+    logger.warn(
+      `[DeviceTools] Could not resolve AVD image '${deviceId}' for the startup lease: ${errorMessage(error)}`,
+      error,
+    );
+    return undefined;
+  }
+}
+
 async function reserveAndroidStartupLease(
   args: StartDeviceArgs,
   budgets: { androidAvdName?: string },
   bootDeadlineMs: number,
   timer: Timer,
+  deviceUtils: PlatformDeviceManager,
   signal?: AbortSignal,
 ): Promise<(() => Promise<void>) | undefined> {
   if (args.platform !== "android") {
@@ -3859,8 +4841,18 @@ async function reserveAndroidStartupLease(
   if (!devicePool) {
     return undefined;
   }
+  const exactAvdName = await resolveAndroidStartupLeaseAvdName(
+    args,
+    budgets,
+    devicePool,
+    deviceUtils,
+    bootDeadlineMs,
+    timer,
+    signal,
+  );
+  // Read after the resolution above so the wait reflects the budget it left.
   const remainingMs = bootDeadlineMs - timer.now();
-  const requestedName = budgets.androidAvdName ?? args.name;
+  const requestedName = exactAvdName ?? args.name;
   if (remainingMs <= 0) {
     throw new ActionableError(
       `Timed out waiting for Android AVD reset recovery${requestedName ? ` of '${requestedName}'` : ""}`,
@@ -3884,7 +4876,7 @@ async function reserveAndroidStartupLease(
   try {
     return await devicePool.reserveAndroidStartupLease(
       requestedName,
-      budgets.androidAvdName !== undefined,
+      exactAvdName !== undefined,
       timeoutController.signal,
     );
   } finally {
@@ -3925,6 +4917,7 @@ function createSystemUiAnrRebooter(
       input.signal,
       input.progress ? { report: input.progress } : undefined,
       recoveryAutolockClient,
+      input.collectColdBootSettlement,
       (replacement) => input.publishRecoveredReadinessMarker?.(replacement),
     );
 }
@@ -4161,7 +5154,23 @@ export function registerDeviceTools() {
     _progress?: ProgressCallback,
     signal?: AbortSignal,
   ) => {
-    const args = parseProvisionDeviceArgs(input);
+    let args: ProvisionDeviceArgs;
+    try {
+      args = parseProvisionDeviceArgs(input);
+    } catch (error) {
+      // The MCP boundary already validated the caller's arguments; a failure
+      // here means the re-parse rejected something the boundary let through
+      // (an internal param, or a genuinely malformed public argument on a
+      // non-MCP call path). Either way the caller gets a structured, coded
+      // error instead of a raw ZodError escaping the tool.
+      const message = `Invalid parameters for tool provisionDevice: ${formatToolParamError(
+        "provisionDevice",
+        error,
+        input,
+      )}`;
+      logger.warn(`[DeviceTools] ${message}`, error);
+      return createToolErrorResponse("invalid_arguments", message);
+    }
     const fingerprint = provisionDeviceFingerprint(args);
     const active = activeProvisionDeviceOperations.get(args.operationId);
     if (active) {
@@ -4171,16 +5180,19 @@ export function registerDeviceTools() {
           `operationId '${args.operationId}' is already running with a different provisionDevice request.`,
         );
       }
-      try {
-        return createProvisionDeviceResponse(await waitForSharedOperation(active.promise, signal));
-      } catch (error) {
-        return provisionDeviceErrorResponse(error);
-      }
+      active.waiters += 1;
+      return await awaitSharedProvisionDeviceOperation(args, active, signal);
     }
 
     const sharedController = new AbortController();
     const promise = executeProvisionDevice(args, fingerprint, sharedController.signal);
-    activeProvisionDeviceOperations.set(args.operationId, { fingerprint, promise });
+    const operation: ActiveProvisionDeviceOperation = {
+      fingerprint,
+      promise,
+      controller: sharedController,
+      waiters: 1,
+    };
+    activeProvisionDeviceOperations.set(args.operationId, operation);
     void promise.then(
       () => {
         if (activeProvisionDeviceOperations.get(args.operationId)?.promise === promise) {
@@ -4193,12 +5205,49 @@ export function registerDeviceTools() {
         }
       },
     );
+    return await awaitSharedProvisionDeviceOperation(args, operation, signal);
+  };
+
+  async function awaitSharedProvisionDeviceOperation(
+    args: ProvisionDeviceArgs,
+    operation: ActiveProvisionDeviceOperation,
+    signal: AbortSignal | undefined,
+  ) {
     try {
-      return createProvisionDeviceResponse(await waitForSharedOperation(promise, signal));
+      const result = await waitForSharedOperation(operation.promise, signal);
+      releaseProvisionDeviceWaiter(args.operationId, operation);
+      return createProvisionDeviceResponse(result);
     } catch (error) {
+      const cancelledOperation = releaseProvisionDeviceWaiter(args.operationId, operation);
+      if (isProvisionDeviceCallerAbort(error, signal)) {
+        // The caller went away, which is not a provisioning failure: report it
+        // with a code of its own, and say whether the operation is still
+        // running (so the caller can collect the result by re-issuing the same
+        // operationId) or was cancelled with it.
+        logger.warn(
+          `[DeviceTools] provisionDevice ${args.operationId} caller cancelled the request ` +
+            `(operation ${cancelledOperation ? "cancelled" : "still running"}): ` +
+            `${errorMessage(error)}`,
+          error,
+        );
+        return createToolErrorResponse(
+          "request_cancelled",
+          cancelledOperation
+            ? `provisionDevice request for operationId '${args.operationId}' was cancelled by ` +
+                "the caller; no other caller was waiting, so the operation was cancelled too."
+            : `provisionDevice request for operationId '${args.operationId}' was cancelled by ` +
+                "the caller; the operation is still running and its result can be collected by " +
+                "re-issuing the same operationId.",
+          { operationId: args.operationId, operationContinues: !cancelledOperation },
+        );
+      }
+      logger.warn(
+        `[DeviceTools] provisionDevice ${args.operationId} failed: ${errorMessage(error)}`,
+        error,
+      );
       return provisionDeviceErrorResponse(error);
     }
-  };
+  }
 
   async function executeProvisionDevice(
     args: ProvisionDeviceArgs,
@@ -4208,9 +5257,24 @@ export function registerDeviceTools() {
     const deps = getDeviceToolsDependencies();
     const store = deps.provisionDeviceOperationStoreFactory();
     const nowMs = deps.timer.now();
+    // Fence for every write this attempt makes to the operation row: an
+    // attempt that is superseded (its row reclaimed by a retry or by the
+    // expiry sweep) must not stamp its result over the attempt that replaced
+    // it.
+    const attemptId = deps.idGenerator.next();
+    // ONE absolute deadline for the whole request, anchored here and sliced
+    // across every phase below. A replay runs up to three phases (waiting for
+    // the stable-device lifecycle lease, revalidating the live session, then
+    // re-running the lifecycle); computing a fresh `timer.now() + timeoutMs`
+    // per phase re-granted the budget already burned by the previous one, so
+    // one request could occupy ~3x its own timeoutMs -- past the operation
+    // row's TTL and past the daemon's queued-request deadline, which only the
+    // `reserveRollbackTime` form respects.
+    const totalDeadlineMs = provisionDeviceDeadlineMs(args, deps.timer, true);
     const operation = await store.begin(
       args.operationId,
       fingerprint,
+      attemptId,
       nowMs,
       nowMs + PROVISION_DEVICE_OPERATION_TTL_MS,
     );
@@ -4225,12 +5289,22 @@ export function registerDeviceTools() {
     try {
       if (
         !operation.started &&
-        (await canReplayCompletedProvisionDeviceOperation(args, deps, operation.result, signal))
+        (await canReplayCompletedProvisionDeviceOperation(
+          args,
+          deps,
+          operation.result,
+          totalDeadlineMs,
+          signal,
+        ))
       ) {
         const replayResult = backfillProvisionDeviceCutout(args, operation.result);
-        if (args.resources || replayResult !== operation.result) {
-          await completeProvisionDeviceOperation(store, args.operationId, replayResult);
-        }
+        // Unconditionally, even when the persisted result is byte-for-byte what
+        // we are about to return: begin() moved this row to the EXCLUSIVE
+        // non-terminal `replaying` status, so returning without completing it
+        // would leave the claim held and make every later identical call report
+        // operation_in_progress until the row's TTL (~30m) expires. Re-storing
+        // an identical result is harmless; leaving the claim open is not.
+        await completeProvisionDeviceOperation(store, args.operationId, attemptId, replayResult);
         return replayResult;
       }
       if (!operation.started) {
@@ -4243,11 +5317,12 @@ export function registerDeviceTools() {
           args,
           deps,
           operation.reconcileExistingConfiguration,
-          () => store.markDeviceCreationStarted(args.operationId),
+          () => markProvisionDeviceCreationStarted(store, args.operationId, attemptId),
+          totalDeadlineMs,
           signal,
         );
         const refreshed = preserveProvisionDeviceOwnership(operation.result, rebound);
-        await completeProvisionDeviceOperation(store, args.operationId, refreshed);
+        await completeProvisionDeviceOperation(store, args.operationId, attemptId, refreshed);
         return refreshed;
       }
 
@@ -4255,17 +5330,44 @@ export function registerDeviceTools() {
         args,
         deps,
         operation.reconcileExistingConfiguration,
-        () => store.markDeviceCreationStarted(args.operationId),
+        () => markProvisionDeviceCreationStarted(store, args.operationId, attemptId),
+        totalDeadlineMs,
         signal,
       );
-      await completeProvisionDeviceOperation(store, args.operationId, result);
+      await completeProvisionDeviceOperation(store, args.operationId, attemptId, result);
       return result;
     } catch (error) {
       if (error instanceof McpSessionRecoveryInProgressError) {
+        // Transient by construction ("cannot remap until recovery finishes"),
+        // so the client is told to retry. A retry only works if this attempt's
+        // row is terminal: an admitted attempt owns a "running" row, and
+        // leaving it running would make every retry report
+        // operation_in_progress for the whole operation TTL (~30m) with
+        // nothing executing. A replay (started === false) owns an exclusive
+        // "replaying" row, so it must be failed too or every retry would report
+        // operation_in_progress for the rest of the TTL; store.fail() reverts a
+        // replaying row to "succeeded" with its result intact, so this cannot
+        // destroy a valid completed result.
+        logger.warn(
+          `[DeviceTools] provisionDevice ${args.operationId} deferred by MCP session ` +
+            `recovery: ${errorMessage(error)}`,
+          error,
+        );
+        await store.fail(
+          args.operationId,
+          attemptId,
+          PROVISION_DEVICE_SESSION_RECOVERY_ERROR_CODE,
+          errorMessage(error),
+        );
+        throw error;
+      }
+      if (error instanceof ProvisionDeviceOperationSupersededError) {
+        // The row belongs to a newer attempt now; stamping this attempt's
+        // failure on it would fail an operation that is still running.
         throw error;
       }
       const provisionError = toProvisionDeviceError(args, error);
-      await store.fail(args.operationId, provisionError.code, provisionError.message, {
+      await store.fail(args.operationId, attemptId, provisionError.code, provisionError.message, {
         clearCreationStarted:
           error instanceof ProvisionDeviceRollbackError && error.cleanup.status === "succeeded",
       });
@@ -4330,6 +5432,7 @@ export function registerDeviceTools() {
     args: ProvisionDeviceArgs,
     deps: DeviceToolsDependencies,
     result: Record<string, unknown>,
+    totalDeadlineMs: number,
     signal: AbortSignal | undefined,
   ): Promise<VirtualDeviceLifecycleLease | undefined> {
     const device = getPersistedProvisionDevice(result);
@@ -4337,7 +5440,6 @@ export function registerDeviceTools() {
     if (!device || !stableId) {
       return undefined;
     }
-    const totalDeadlineMs = provisionDeviceDeadlineMs(args, deps.timer, false);
     return await reserveStableDeviceLifecycle(
       { platform: device.platform, stableId },
       {
@@ -4362,9 +5464,16 @@ export function registerDeviceTools() {
     args: ProvisionDeviceArgs,
     deps: DeviceToolsDependencies,
     result: Record<string, unknown>,
+    totalDeadlineMs: number,
     signal: AbortSignal | undefined,
   ): Promise<boolean> {
-    const replayLease = await reserveProvisionDeviceReplayLifecycle(args, deps, result, signal);
+    const replayLease = await reserveProvisionDeviceReplayLifecycle(
+      args,
+      deps,
+      result,
+      totalDeadlineMs,
+      signal,
+    );
     const replaySignal = replayLease
       ? signal
         ? AbortSignal.any([signal, replayLease.signal])
@@ -4372,7 +5481,8 @@ export function registerDeviceTools() {
       : signal;
     try {
       return (
-        !args.boot || (await revalidateProvisionDeviceReplay(args, deps, result, replaySignal))
+        !args.boot ||
+        (await revalidateProvisionDeviceReplay(args, deps, result, totalDeadlineMs, replaySignal))
       );
     } finally {
       replayLease?.release();
@@ -4383,6 +5493,7 @@ export function registerDeviceTools() {
     args: ProvisionDeviceArgs,
     deps: DeviceToolsDependencies,
     result: Record<string, unknown>,
+    totalDeadlineMs: number,
     signal: AbortSignal | undefined,
   ): Promise<boolean> {
     const liveSession = getLiveProvisionDeviceSession(result);
@@ -4397,7 +5508,6 @@ export function registerDeviceTools() {
     return await trackDeviceAcquisitionReadiness(
       deviceReadinessLockKey(liveSession.device.platform, liveSession.device.deviceId),
       async () => {
-        const totalDeadlineMs = provisionDeviceDeadlineMs(args, deps.timer, false);
         if (args.resources) {
           result.resources = await applyProvisionDeviceResources(
             args,
@@ -4446,10 +5556,17 @@ export function registerDeviceTools() {
     args: ProvisionDeviceArgs,
     deps: DeviceToolsDependencies,
     result: Record<string, unknown>,
+    totalDeadlineMs: number,
     signal: AbortSignal | undefined,
   ): Promise<boolean> {
     try {
-      return await revalidateLiveProvisionDeviceSession(args, deps, result, signal);
+      return await revalidateLiveProvisionDeviceSession(
+        args,
+        deps,
+        result,
+        totalDeadlineMs,
+        signal,
+      );
     } catch (error) {
       // A transport routing conflict does not invalidate the healthy device session.
       if (error instanceof McpSessionRecoveryInProgressError) {
@@ -4530,13 +5647,42 @@ export function registerDeviceTools() {
   async function completeProvisionDeviceOperation(
     store: ProvisionDeviceOperationStore,
     operationId: string,
+    attemptId: string,
     result: Record<string, unknown>,
   ): Promise<void> {
     try {
-      await store.complete(operationId, result);
+      if (!(await store.complete(operationId, attemptId, result))) {
+        throw new ProvisionDeviceOperationSupersededError(operationId);
+      }
     } catch (error) {
-      await releaseProvisionDeviceSession(result, "provision-device-persistence-failed");
+      const superseded = error instanceof ProvisionDeviceOperationSupersededError;
+      logger.warn(
+        `[DeviceTools] provisionDevice ${operationId} could not persist its result: ` +
+          `${errorMessage(error)}`,
+        error,
+      );
+      await releaseProvisionDeviceSession(
+        result,
+        superseded
+          ? "provision-device-operation-superseded"
+          : "provision-device-persistence-failed",
+      );
       throw error;
+    }
+  }
+
+  /**
+   * Record that this attempt is about to create the device. A false return
+   * means the row was taken over by a newer attempt, so this one must abort
+   * before creating anything rather than provisioning behind its replacement.
+   */
+  async function markProvisionDeviceCreationStarted(
+    store: ProvisionDeviceOperationStore,
+    operationId: string,
+    attemptId: string,
+  ): Promise<void> {
+    if (!(await store.markDeviceCreationStarted(operationId, attemptId))) {
+      throw new ProvisionDeviceOperationSupersededError(operationId);
     }
   }
 
@@ -4574,14 +5720,23 @@ export function registerDeviceTools() {
     }
   }
 
+  /**
+   * Creation ownership accumulates across the attempts of one operation. The
+   * first attempt's `created` must survive a rebind that merely re-adopts the
+   * device it created, and a rebind that genuinely re-created a device that
+   * disappeared between attempts must claim ownership instead of inheriting the
+   * first attempt's `adopted` — a caller that only deletes what AutoMobile
+   * created would otherwise leak it.
+   */
   function preserveProvisionDeviceOwnership(
     persisted: Record<string, unknown>,
     refreshed: Record<string, unknown>,
   ): Record<string, unknown> {
+    const created = persisted.created === true || refreshed.created === true;
     return {
       ...refreshed,
-      created: persisted.created,
-      adopted: persisted.adopted,
+      created,
+      adopted: !created,
     };
   }
 
@@ -4589,8 +5744,14 @@ export function registerDeviceTools() {
     if (error instanceof ProvisionDeviceError) {
       return error;
     }
+    // A readiness phase that ran out of budget is a purely time-based failure:
+    // report it as `timeout` so a controller that retries timeouts but treats
+    // `platform_command_failed` as terminal does not give up on it.
+    const isDeadlineFailure =
+      error instanceof DeviceBootTimeoutError ||
+      (error instanceof RunnerReadinessError && error.deadlineExhausted);
     return new ProvisionDeviceError(
-      error instanceof DeviceBootTimeoutError ? "timeout" : "platform_command_failed",
+      isDeadlineFailure ? "timeout" : "platform_command_failed",
       `Failed to provision ${args.device.platform} device '${args.device.name}': ${errorMessage(error)}`,
     );
   }
@@ -4736,6 +5897,12 @@ export function registerDeviceTools() {
         provisionDeviceCleanupResult(cleanupArgs, response),
       );
     } catch (error) {
+      // A rollback failure summarizes to a one-line message in the response, so
+      // the daemon log is the only forensic record of what actually went wrong.
+      logger.warn(
+        `[DeviceTools] provisionDevice rollback teardown failed for '${cleanupArgs.target.stableId}': ${errorMessage(error)}`,
+        error,
+      );
       return new ProvisionDeviceRollbackError(provisionFailure, {
         status: "failed",
         operationId: cleanupArgs.operationId,
@@ -4755,24 +5922,87 @@ export function registerDeviceTools() {
     }
   }
 
+  /**
+   * The exact-identity filter shared by iOS lifecycle reservation and rollback:
+   * a simulator only matches when its name, runtime and device type all match
+   * the request, preferring an available one over an unavailable duplicate.
+   */
+  function findExactIosProvisionDeviceCandidate(
+    args: ProvisionDeviceArgs,
+    devices: DeviceInfo[],
+  ): DeviceInfo | undefined {
+    const spec = args.device.spec;
+    const candidates = devices.filter(
+      (device) =>
+        device.platform === "ios" &&
+        device.name === args.device.name &&
+        device.deviceId &&
+        device.runtime === spec.runtime &&
+        device.deviceType === spec.deviceType,
+    );
+    return candidates.find((device) => device.isAvailable !== false) ?? candidates[0];
+  }
+
+  /**
+   * Rollback target for an iOS simulator created before provisioning failed.
+   * `onBeforeCreate` only fires once the provisioner has established that no
+   * matching simulator existed, so a match found now is the one this operation
+   * created — the iOS equivalent of Android's name-keyed fallback target.
+   */
+  async function resolveCreatedIosProvisionDeviceRollbackTarget(
+    args: ProvisionDeviceArgs,
+    deviceManager: PlatformDeviceManager,
+  ): Promise<DeviceInfo | undefined> {
+    try {
+      const discovery = await deviceManager.getDeviceImagesDetailed("ios", {
+        bypassIosDeviceListCache: true,
+      });
+      if (!discovery.succeededPlatforms.has("ios")) {
+        logger.warn(
+          `[DeviceTools] Cannot roll back iOS simulator '${args.device.name}': identity discovery did not complete.`,
+        );
+        return undefined;
+      }
+      return findExactIosProvisionDeviceCandidate(args, discovery.devices);
+    } catch (error) {
+      logger.warn(
+        `[DeviceTools] Failed to resolve the iOS rollback target for '${args.device.name}': ${errorMessage(error)}`,
+        error,
+      );
+      return undefined;
+    }
+  }
+
   async function rethrowFailedProvisionDeviceLifecycle(
     args: ProvisionDeviceArgs,
     deps: DeviceToolsDependencies,
+    deviceManager: PlatformDeviceManager,
     provisioned: Awaited<ReturnType<ExactDeviceProvisioner["provision"]>> | undefined,
     creationStarted: boolean,
     takeLifecycleLease: () => VirtualDeviceLifecycleLease | undefined,
     error: unknown,
+    unownedColdBootSettlement: Promise<void> | undefined,
   ): Promise<never> {
+    if (error instanceof McpSessionRecoveryInProgressError) {
+      // A transport routing conflict does not invalidate the healthy device
+      // session, so it must reach `executeProvisionDevice`'s guard with its
+      // identity intact instead of being wrapped into a rollback error after
+      // destroying the device it never invalidated.
+      throw error;
+    }
     const createdDevice =
       provisioned?.created || creationStarted
         ? (provisioned?.device ??
           (args.device.platform === "android"
             ? { name: args.device.name, platform: "android", isRunning: false }
-            : undefined))
+            : await resolveCreatedIosProvisionDeviceRollbackTarget(args, deviceManager)))
         : undefined;
     if (!createdDevice) {
       throw error;
     }
+    // A destructive teardown of this AVD must not race the emulator process the
+    // failed attempt is still killing.
+    await unownedColdBootSettlement;
     throw await cleanupFailedProvisionDevice(
       args,
       deps,
@@ -4805,20 +6035,43 @@ export function registerDeviceTools() {
         `Cannot provision iOS device '${args.device.name}' because simulator identity discovery did not complete.`,
       );
     }
-    const spec = args.device.spec;
-    const candidates = discovery.devices.filter(
-      (device) =>
-        device.platform === "ios" &&
-        device.name === args.device.name &&
-        device.deviceId &&
-        device.runtime === spec.runtime &&
-        device.deviceType === spec.deviceType,
-    );
-    const existing = candidates.find((device) => device.isAvailable !== false) ?? candidates[0];
+    const existing = findExactIosProvisionDeviceCandidate(args, discovery.devices);
     if (!existing?.deviceId) {
       return undefined;
     }
     return await reserveIosProvisionDeviceLifecycle(args, deps, existing, totalDeadlineMs, signal);
+  }
+
+  /**
+   * Reserve a not-yet-created iOS simulator by name. This is the one provision
+   * reservation with no stable identity to key on, so it maps a post-deadline
+   * coordinator rejection to the same `ProvisionDeviceError("timeout")` the
+   * stable paths raise instead of leaking an opaque platform failure.
+   */
+  async function reserveIosSelectorProvisionDeviceLifecycle(
+    args: ProvisionDeviceArgs,
+    deps: DeviceToolsDependencies,
+    totalDeadlineMs: number,
+    signal: AbortSignal | undefined,
+  ): Promise<VirtualDeviceLifecycleLease> {
+    try {
+      return await deps.lifecycleCoordinator.reserve(
+        { kind: "selector", platform: "ios", selector: args.device.name },
+        { operation: "provision", deadlineMs: totalDeadlineMs, signal },
+      );
+    } catch (error) {
+      rethrowDeviceLifecycleReservationFailure(
+        error,
+        deps.timer,
+        totalDeadlineMs,
+        (detail) =>
+          new ProvisionDeviceError(
+            "timeout",
+            `Timed out provisioning ios device '${args.device.name}': ${detail}.`,
+          ),
+        "waiting for the device lifecycle reservation",
+      );
+    }
   }
 
   async function reserveIosProvisionDeviceLifecycle(
@@ -4860,15 +6113,16 @@ export function registerDeviceTools() {
     deps: DeviceToolsDependencies,
     reconcileExistingConfiguration: boolean,
     markDeviceCreationStarted: () => Promise<void>,
+    totalDeadlineMs: number,
     signal: AbortSignal | undefined,
   ): Promise<Record<string, unknown>> {
     const perf = createPerformanceTracker(true);
     perf.serial("provisionDevice");
-    const totalDeadlineMs = provisionDeviceDeadlineMs(args, deps.timer, true);
     const deviceManager = deps.deviceManagerFactory();
     let lifecycleLease: VirtualDeviceLifecycleLease | undefined;
     let provisioned: Awaited<ReturnType<ExactDeviceProvisioner["provision"]>> | undefined;
     let creationStarted = reconcileExistingConfiguration;
+    const bootState: { unownedColdBootSettlement?: Promise<void> } = {};
     try {
       if (args.device.platform === "android") {
         lifecycleLease = await reserveStableDeviceLifecycle(
@@ -4897,9 +6151,11 @@ export function registerDeviceTools() {
           totalDeadlineMs,
           signal,
         );
-        lifecycleLease ??= await deps.lifecycleCoordinator.reserve(
-          { kind: "selector", platform: "ios", selector: args.device.name },
-          { operation: "provision", deadlineMs: totalDeadlineMs, signal },
+        lifecycleLease ??= await reserveIosSelectorProvisionDeviceLifecycle(
+          args,
+          deps,
+          totalDeadlineMs,
+          signal,
         );
       }
       const deviceCreationGate = deps.deviceCreationGateFactory();
@@ -4935,9 +6191,19 @@ export function registerDeviceTools() {
         totalDeadlineMs,
         lifecycleLease,
         signal,
+        bootState,
       );
       if (provisioned.created || booted.source === "cold-boot") {
-        await deps.notifyResourcesChanged();
+        // Session and pool ownership are already committed by
+        // `bootExactProvisionedDevice`. A best-effort resource notification is
+        // safe to swallow here: failing it must neither turn that committed
+        // success into destructive rollback nor strand the bound session.
+        void deps.notifyResourcesChanged().catch((error: unknown) => {
+          logger.warn(
+            `[DeviceTools] Failed to notify resource changes after provisioning ${args.device.platform} device '${args.device.name}': ${errorMessage(error)}`,
+            error,
+          );
+        });
       }
       perf.end();
       return buildProvisionDeviceResult(args, provisioned, createdByOperation, perf, booted);
@@ -4946,6 +6212,7 @@ export function registerDeviceTools() {
       return await rethrowFailedProvisionDeviceLifecycle(
         args,
         deps,
+        deviceManager,
         provisioned,
         creationStarted,
         () => {
@@ -4954,9 +6221,24 @@ export function registerDeviceTools() {
           return rollbackLease;
         },
         error,
+        bootState.unownedColdBootSettlement,
       );
     } finally {
-      lifecycleLease?.release();
+      if (bootState.unownedColdBootSettlement) {
+        // Release exactly once whatever the settlement does -- `finally`
+        // guarantees the lease is not stranded if it completes by rejecting
+        // (mirrors `prepareDevice`'s deferred release).
+        void bootState.unownedColdBootSettlement
+          .finally(() => lifecycleLease?.release())
+          .catch((error: unknown) => {
+            logger.warn(
+              `[DeviceTools] Deferred lifecycle lease release failed: ${errorMessage(error)}`,
+              error,
+            );
+          });
+      } else {
+        lifecycleLease?.release();
+      }
     }
   }
 
@@ -5005,6 +6287,9 @@ export function registerDeviceTools() {
     totalDeadlineMs: number,
     lifecycleLease: VirtualDeviceLifecycleLease,
     signal: AbortSignal | undefined,
+    // Carries the cold-boot cancellation settlement back to the caller so the
+    // AVD lifecycle lease is not released while the emulator is still exiting.
+    bootState: { unownedColdBootSettlement?: Promise<void> },
   ): Promise<{
     device: BootedDevice;
     sessionId: string;
@@ -5025,7 +6310,7 @@ export function registerDeviceTools() {
     });
     let boot: DeviceBootResult | undefined;
     let ownershipTransferred = false;
-    let releaseReadinessReservation: (() => Promise<void>) | undefined;
+    let readinessReservation: DeviceReadinessReservation | undefined;
     let resources: DeviceResourceConfigurationResult | undefined;
     try {
       const alreadyBooted = await runProvisionDeviceWithinDeadline(
@@ -5050,13 +6335,24 @@ export function registerDeviceTools() {
         );
       }
       perf.startOperation("bootDevice");
+      // Boot and automation readiness share one provision budget. Reserve the
+      // readiness slice up front, the way `applyProvisionDeviceResources` does,
+      // so a slow cold boot cannot consume the whole deadline and leave CtrlProxy
+      // setup with a millisecond ("readiness budget exhausted before setup lock").
+      // The slice is capped at half the remaining budget so a short request still
+      // gets a usable boot window; no budget is inflated.
+      const readinessShareMs = Math.min(
+        Math.max(0, totalDeadlineMs - deps.timer.now()) / 2,
+        args.readiness === "automation"
+          ? serverConfig.getRunnerReadinessTimeoutMs()
+          : START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
+      );
       boot = await bootService.boot({
         operationName: "provisionDevice",
         platform: args.device.platform,
         deviceId:
           exactBootedDevice?.deviceId ?? provisioned.device.deviceId ?? provisioned.device.name,
-        timeoutMs: Math.max(1, totalDeadlineMs - deps.timer.now()),
-        totalDeadlineMs,
+        totalDeadlineMs: totalDeadlineMs - readinessShareMs,
         signal: operationSignal,
       });
       perf.endOperation("bootDevice");
@@ -5067,20 +6363,20 @@ export function registerDeviceTools() {
         );
       }
       validatePooledDeviceMapping(boot.device, requestedIdentity);
-      releaseReadinessReservation = await runProvisionDeviceWithinDeadline(
+      readinessReservation = await runProvisionDeviceWithinDeadline(
         deps.timer,
         totalDeadlineMs,
         operationSignal,
         "reserving device readiness",
         async (reservationSignal) => {
-          const release = await reserveProvisionDeviceReadiness(boot!.device);
+          const reservation = await reserveProvisionDeviceReadiness(args, boot!);
           if (reservationSignal.aborted) {
-            void release?.().catch((error) =>
+            void reservation?.().catch((error) =>
               logger.warn(`Late provision reservation release failed: ${error}`),
             );
             reservationSignal.throwIfAborted();
           }
-          return release;
+          return reservation;
         },
       );
       clearColdBootShutdownMarker(boot.source, boot.device.deviceId);
@@ -5124,7 +6420,9 @@ export function registerDeviceTools() {
                 },
                 provisioned.device,
                 boot!.processHandle,
-                undefined,
+                // Our own stable-name readiness reservation must not deny our
+                // own bind when the pooled incarnation changed during readiness.
+                readinessReservation ? new Set([readinessReservation.owner]) : undefined,
                 undefined,
                 resolveProvisionDeviceAchievedReadiness(args.readiness),
               ),
@@ -5140,15 +6438,17 @@ export function registerDeviceTools() {
       };
     } catch (error) {
       if (!ownershipTransferred) {
-        void cancelUnownedColdBoot(boot);
+        bootState.unownedColdBootSettlement = cancelUnownedColdBoot(boot);
       }
       throw error;
     } finally {
-      releaseProvisionReadiness(releaseReadinessReservation);
+      releaseProvisionReadiness(readinessReservation);
     }
   }
 
-  function releaseProvisionReadiness(releaseReservation: (() => Promise<void>) | undefined): void {
+  function releaseProvisionReadiness(
+    releaseReservation: DeviceReadinessReservation | undefined,
+  ): void {
     // Session ownership is already committed on success. A delayed mutex-backed
     // reservation release must neither turn that success into destructive rollback
     // nor replace the original failure. Keep the balanced release queued.
@@ -5198,13 +6498,26 @@ export function registerDeviceTools() {
   }
 
   async function reserveProvisionDeviceReadiness(
-    device: BootedDevice,
-  ): Promise<(() => Promise<void>) | undefined> {
+    args: ProvisionDeviceArgs,
+    boot: DeviceBootResult,
+  ): Promise<DeviceReadinessReservation | undefined> {
     const daemonState = DaemonState.getInstance();
     if (!daemonState.isInitialized()) {
       return undefined;
     }
-    return await daemonState.getDevicePool().reserveDeviceForReadiness(device.deviceId, device);
+    // Reserving may reboot the device during readiness recovery, and the
+    // readiness that follows resets the shared per-device CtrlProxy manager and
+    // rewrites resource settings. Prove this client owns the device first, the
+    // same way `reserveInitialDeviceForReadiness` does for startDevice.
+    return await daemonState
+      .getDevicePool()
+      .reserveDeviceForReadiness(
+        boot.device.deviceId,
+        boot.device,
+        boot.sourceImage?.name ?? boot.device.name,
+        undefined,
+        isDevicePoolAutolockEnabled() ? { mcpSessionId: args.__mcpSessionId } : undefined,
+      );
   }
 
   async function ensureProvisionDeviceReadiness(
@@ -5284,6 +6597,9 @@ export function registerDeviceTools() {
     if (error instanceof ProvisionDeviceOperationInProgressError) {
       return createToolErrorResponse("operation_in_progress", error.message);
     }
+    if (error instanceof ProvisionDeviceOperationSupersededError) {
+      return createToolErrorResponse("operation_superseded", error.message);
+    }
     return createToolErrorResponse("platform_command_failed", errorMessage(error));
   }
 
@@ -5294,10 +6610,31 @@ export function registerDeviceTools() {
     operationName: string;
     androidAvdName?: string;
     stableTarget?: StableDeviceTarget;
+    /** getAndroid's `avdName` + `deviceId` pair, validated after discovery. */
+    requestedAndroidIdentifierPair?: { avdName: string; deviceId: string };
   };
+
+  /**
+   * Acquisition-phase timeout. `reserveStableDeviceLifecycle` defaults to the
+   * killDevice-shaped `shutdownTimeoutError`, which on a start path reports the
+   * device as failing to *disappear*, quotes `DEVICE_SHUTDOWN_TIMEOUT_MS`
+   * instead of the caller's budget, and tells the user to verify the shutdown
+   * state. Mirror the phase-labeled style `DeviceBootService` already emits.
+   */
+  const acquisitionLifecycleTimeoutError = (
+    budgets: DevicePreparationBudgets,
+    describedTarget: string,
+    detail: string,
+  ): ActionableError =>
+    new ActionableError(
+      `${budgets.operationName} timeout exhausted while ${detail}; ` +
+        `budgetMs=${budgets.bootTimeoutMs + budgets.automationReadyTimeoutMs}; ` +
+        `target=${describedTarget}; origin=virtualDeviceLifecycleCoordinator`,
+    );
 
   const reserveStartStableDeviceLifecycle = async (
     stableTarget: StableDeviceTarget | undefined,
+    budgets: DevicePreparationBudgets,
     timer: Timer,
     deadlineMs: number,
     signal: AbortSignal | undefined,
@@ -5316,7 +6653,12 @@ export function registerDeviceTools() {
       timer,
       deadlineMs,
       signal,
-      undefined,
+      (detail) =>
+        acquisitionLifecycleTimeoutError(
+          budgets,
+          `${stableTarget.platform}:${stableTarget.stableId}`,
+          detail,
+        ),
       "start",
       coordinator,
     );
@@ -5382,6 +6724,39 @@ export function registerDeviceTools() {
     return { platform: "ios", stableId: match.deviceId };
   };
 
+  const reserveStartSelectorDeviceLifecycle = async (
+    args: StartDeviceArgs,
+    budgets: DevicePreparationBudgets,
+    deps: DeviceToolsDependencies,
+    signal: AbortSignal | undefined,
+  ): Promise<VirtualDeviceLifecycleLease> => {
+    const selector = stableStringify({
+      deviceId: args.deviceId,
+      name: args.name,
+      minOsVersion: args.minOsVersion,
+      maxOsVersion: args.maxOsVersion,
+      formFactor: args.formFactor,
+      screenSize: args.screenSize,
+    });
+    try {
+      return await deps.lifecycleCoordinator.reserve(
+        { kind: "selector", platform: args.platform, selector },
+        { operation: "start", deadlineMs: budgets.automationDeadlineMs, signal },
+      );
+    } catch (error) {
+      // Same acquisition-phase labeling as the stable-identity path above; the
+      // selector fallback had no deadline attribution at all.
+      if (deps.timer.now() >= budgets.automationDeadlineMs) {
+        throw acquisitionLifecycleTimeoutError(
+          budgets,
+          `${args.platform}:${selector}`,
+          "waiting for selector device lifecycle reservation",
+        );
+      }
+      throw error;
+    }
+  };
+
   const reserveStartDeviceLifecycleReservations = async (
     args: StartDeviceArgs,
     budgets: DevicePreparationBudgets,
@@ -5402,6 +6777,7 @@ export function registerDeviceTools() {
         budgets,
         bootDeadlineMs,
         deps.timer,
+        deviceUtils,
         signal,
       );
       const stableTarget = await resolveStartStableDeviceLifecycleTarget(
@@ -5415,26 +6791,12 @@ export function registerDeviceTools() {
       lifecycleLease =
         (await reserveStartStableDeviceLifecycle(
           stableTarget,
+          budgets,
           deps.timer,
           budgets.automationDeadlineMs,
           signal,
           deps.lifecycleCoordinator,
-        )) ??
-        (await deps.lifecycleCoordinator.reserve(
-          {
-            kind: "selector",
-            platform: args.platform,
-            selector: stableStringify({
-              deviceId: args.deviceId,
-              name: args.name,
-              minOsVersion: args.minOsVersion,
-              maxOsVersion: args.maxOsVersion,
-              formFactor: args.formFactor,
-              screenSize: args.screenSize,
-            }),
-          },
-          { operation: "start", deadlineMs: budgets.automationDeadlineMs, signal },
-        ));
+        )) ?? (await reserveStartSelectorDeviceLifecycle(args, budgets, deps, signal));
       if (stableTarget?.platform === "ios" && args.name && !args.deviceId) {
         const revalidatedTarget = await resolveStartStableDeviceLifecycleTarget(
           args,
@@ -5474,7 +6836,13 @@ export function registerDeviceTools() {
     perf: ReturnType<typeof createPerformanceTracker>,
     releaseReadinessReservations: DeviceReadinessReservation[],
     lifecycleLease: VirtualDeviceLifecycleLease,
-    state: { boot: DeviceBootResult | undefined; ownershipTransferred: boolean },
+    state: {
+      boot: DeviceBootResult | undefined;
+      ownershipTransferred: boolean;
+      // Every unowned cold boot this request cancelled, recovery included. The
+      // lifecycle lease is released only once all of them have settled.
+      coldBootSettlements: Promise<void>[];
+    },
   ) => {
     const bootService = new DeviceBootService({
       deviceManager: deviceUtils,
@@ -5499,6 +6867,11 @@ export function registerDeviceTools() {
     );
     perf.endOperation("bootDevice");
     validateBootIdentity(args, state.boot.device, state.boot.source, state.boot.sourceImage);
+    validateRequestedAndroidSerial(
+      budgets.requestedAndroidIdentifierPair,
+      state.boot.device,
+      state.boot.sourceImage,
+    );
     validatePooledDeviceMapping(state.boot.device, requestedIdentity);
     // A warm AVD has no cold-boot source image, but its explicit getAndroid
     // identifier is still the stable identity needed for later recovery.
@@ -5564,6 +6937,11 @@ export function registerDeviceTools() {
             acquisitionReadinessKey,
             deviceReadinessLockKey(replacement.platform, replacement.deviceId),
           ),
+        collectColdBootSettlement: (settlement) => {
+          if (settlement) {
+            state.coldBootSettlements.push(settlement);
+          }
+        },
       });
       try {
         state.boot = readinessResult.boot;
@@ -5590,8 +6968,11 @@ export function registerDeviceTools() {
         );
         // Recovery must revalidate the caller through the same autolock path;
         // a preserved UUID alone is not proof that this client owns the session.
+        // Read the flag once so the reuse decision below cannot disagree with
+        // the readiness recording that follows it.
+        const autolockEnabled = isDevicePoolAutolockEnabled();
         const boundSessionId =
-          readinessResult.preservedSessionId && !isDevicePoolAutolockEnabled()
+          readinessResult.preservedSessionId && !autolockEnabled
             ? readinessResult.preservedSessionId
             : await bindBootedDeviceSession(
                 state.boot.device,
@@ -5604,7 +6985,7 @@ export function registerDeviceTools() {
                 new Set(releaseReadinessReservations.map((reservation) => reservation.owner)),
                 verifiedWarmAndroidAvdIdentity,
               );
-        if (readinessResult.preservedSessionId) {
+        if (readinessResult.preservedSessionId && !autolockEnabled) {
           // #6227 round 7: without autolock, System UI ANR recovery bypasses
           // `bindBootedDeviceSession` (and therefore its own
           // `recordAcquiredSessionReadiness` call) entirely when a preserved
@@ -5618,6 +6999,10 @@ export function registerDeviceTools() {
           // freshly-bound branch. Recording it here closes the gap where a
           // recovered session's readiness cache stayed `undefined` and the first
           // `automationReady` tool after recovery redundantly re-ran setup.
+          // WITH autolock the branch above went through `bindBootedDeviceSession`
+          // instead, and `autolockDevice` already recorded readiness for the
+          // session it returned — which need not be `preservedSessionId`, so
+          // recording it here would bump an unrelated session's expiry.
           recordAcquiredSessionReadiness(
             daemonState,
             readinessResult.preservedSessionId,
@@ -5631,7 +7016,18 @@ export function registerDeviceTools() {
     });
     state.ownershipTransferred = true;
 
-    await notifyResourcesAfterDeviceBoot(state.boot, perf, deps.notifyResourcesChanged);
+    try {
+      await notifyResourcesAfterDeviceBoot(state.boot, perf, deps.notifyResourcesChanged);
+    } catch (error) {
+      // Best-effort: the acquisition is already committed (session bound, pooled
+      // device busy), so failing on an advisory resource notification would
+      // strand a session UUID the caller never receives. The shutdown path
+      // treats the same notification as fire-and-forget.
+      logger.warn(
+        `[DeviceTools] Resource notification after device boot failed: ${errorMessage(error)}`,
+        error,
+      );
+    }
     return await buildBootedResponse(
       state.boot.device,
       state.boot.source,
@@ -5655,17 +7051,28 @@ export function registerDeviceTools() {
     const deviceMatcher = deps.deviceMatcherFactory();
     const bootDeadlineMs = deps.timer.now() + budgets.bootTimeoutMs;
     const requestedIdentity = describeStartDeviceRequest(args);
-    const state: { boot: DeviceBootResult | undefined; ownershipTransferred: boolean } = {
+    const state: {
+      boot: DeviceBootResult | undefined;
+      ownershipTransferred: boolean;
+      // Every unowned cold boot this request cancelled, recovery included. The
+      // lifecycle lease is released only once all of them have settled.
+      coldBootSettlements: Promise<void>[];
+    } = {
       boot: undefined,
       ownershipTransferred: false,
+      coldBootSettlements: [],
     };
     const releaseReadinessReservations: DeviceReadinessReservation[] = [];
     let lifecycleReservations:
       | Awaited<ReturnType<typeof reserveStartDeviceLifecycleReservations>>
       | undefined;
-    let unownedColdBootSettlement: Promise<void> | undefined;
-
     try {
+      // Reject a contradictory getAndroid avdName + serial pair before booting,
+      // so a stopped AVD is not cold-booted and killed just to report it.
+      await validateRequestedAndroidSerialBeforeBoot(
+        budgets.requestedAndroidIdentifierPair,
+        deviceUtils,
+      );
       lifecycleReservations = await reserveStartDeviceLifecycleReservations(
         args,
         budgets,
@@ -5700,7 +7107,10 @@ export function registerDeviceTools() {
     } catch (error) {
       perf.end();
       if (!state.ownershipTransferred) {
-        unownedColdBootSettlement = cancelUnownedColdBoot(state.boot);
+        const settlement = cancelUnownedColdBoot(state.boot);
+        if (settlement) {
+          state.coldBootSettlements.push(settlement);
+        }
       }
       if (error instanceof ActionableError) {
         throw error;
@@ -5710,8 +7120,21 @@ export function registerDeviceTools() {
       for (const releaseReservation of releaseReadinessReservations.reverse()) {
         await releaseReservation();
       }
-      if (unownedColdBootSettlement) {
-        void unownedColdBootSettlement.then(() => lifecycleReservations?.lifecycleLease.release());
+      if (state.coldBootSettlements.length > 0) {
+        // Release exactly once whatever the settlements do — the bounded wait in
+        // `cancelUnownedColdBoot` guarantees each completes, and `finally`
+        // guarantees the lease is not stranded if one completes by rejecting.
+        // A System UI ANR replacement retired mid-recovery settles here too, so
+        // the AVD's key cannot be handed to the next request while the emulator
+        // this one only signalled is still running.
+        void Promise.allSettled(state.coldBootSettlements)
+          .finally(() => lifecycleReservations?.lifecycleLease.release())
+          .catch((error: unknown) => {
+            logger.warn(
+              `[DeviceTools] Deferred lifecycle lease release failed: ${errorMessage(error)}`,
+              error,
+            );
+          });
       } else {
         lifecycleReservations?.lifecycleLease.release();
       }
@@ -5805,6 +7228,14 @@ export function registerDeviceTools() {
           ? {
               androidAvdName: args.avdName,
               stableTarget: { platform: "android", stableId: args.avdName },
+              ...(args.deviceId
+                ? {
+                    requestedAndroidIdentifierPair: {
+                      avdName: args.avdName,
+                      deviceId: args.deviceId,
+                    },
+                  }
+                : {}),
             }
           : {}),
       },
@@ -6002,6 +7433,19 @@ export function registerDeviceTools() {
     const deadlineMs = deps.timer.now() + DEVICE_SHUTDOWN_TIMEOUT_MS;
     const daemonState = DaemonState.getInstance();
     const devicePool = daemonState.isInitialized() ? daemonState.getDevicePool() : undefined;
+    // Preflight: if this target's AVD name comes from the pool rather than from
+    // the runtime, pin the label to its epoch. The runtime is made to confirm it
+    // immediately before the platform kill, not here (#6863 review).
+    const pooledAvdCapture = capturePooledAvdIdentity(args.device, devicePool, {
+      timer: deps.timer,
+      deadlineMs,
+      signal: requestAbortSignal,
+    });
+    if (pooledAvdCapture.kind === "refusal") {
+      throw new PooledAvdIdentityError(
+        pooledAvdNameRefusalMessage(args.device, pooledAvdCapture.refusal),
+      );
+    }
     const stableTarget = resolveKillDeviceStableTarget(args.device, devicePool);
     const lifecycleLease = stableTarget
       ? await reserveStableDeviceLifecycle(
@@ -6039,6 +7483,7 @@ export function registerDeviceTools() {
         false,
         DEVICE_SHUTDOWN_TIMEOUT_MS,
         retainLifecycleUntil,
+        pooledAvdCaptureRequiringConfirmation(pooledAvdCapture),
       );
       return createKillDeviceResponse(args, result.timing, result.alreadyStoppedMessage);
     } finally {
@@ -6060,6 +7505,7 @@ export function registerDeviceTools() {
     type TeardownState = {
       context: TeardownContext;
       target: TeardownResolvedTarget;
+      androidManager?: AndroidCtrlProxyManager;
       earlyResponse?: TeardownToolResponse;
     };
     try {
@@ -6092,7 +7538,14 @@ export function registerDeviceTools() {
             if ("response" in resolution) {
               return { response: resolution.response };
             }
-            return { target: { context, target: resolution.target } };
+            const runtime = resolution.target.wasBooted
+              ? resolution.target.bootedDevice
+              : undefined;
+            const androidManager =
+              runtime?.platform === "android"
+                ? AndroidCtrlProxyManager.getExistingInstance(runtime.deviceId)
+                : undefined;
+            return { target: { context, target: resolution.target, androidManager } };
           },
           stop: async (state, requestAbortSignal, retainLeaseUntil) => {
             const { context, target } = state;
@@ -6107,6 +7560,7 @@ export function registerDeviceTools() {
                 true,
                 context.timeoutMs,
                 retainLeaseUntil,
+                target.pooledAvdCapture,
               );
               stop = stopped.alreadyStoppedMessage ? "not_required" : "accepted";
             } else {
@@ -6125,13 +7579,16 @@ export function registerDeviceTools() {
               return;
             }
             const { context, target } = state;
-            await destroyTeardownTarget(context, target, retainLeaseUntil, markDestructionStarted);
-            unregisterDirectSessionsForStableIdentity(
-              target.device.platform,
-              target.device.platform === "android"
-                ? target.device.name
-                : (target.device.deviceId ?? args.target.stableId),
+            await destroyTeardownTarget(
+              context,
+              target,
+              retainLeaseUntil,
+              markDestructionStarted,
+              () => {
+                void finalizeTeardownEviction(context, target, state.androidManager);
+              },
             );
+            await finalizeTeardownEviction(context, target, state.androidManager);
           },
           verify: async (state, stop) => {
             if (state.earlyResponse) {
@@ -6165,7 +7622,12 @@ export function registerDeviceTools() {
             return createTeardownFailureResponse(
               args,
               phase,
-              "operation_failed",
+              // The last-moment identity check refuses a target this daemon
+              // cannot tie to the runtime; that is an identity outcome, not a
+              // generic operation failure (#6863 review).
+              effectiveError instanceof PooledAvdIdentityError
+                ? "target_identity_unresolved"
+                : "operation_failed",
               String(effectiveError instanceof Error ? effectiveError.message : effectiveError),
               state?.target.device,
             );

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import { ProgressCallback, RegisteredTool, ToolRegistry } from "../../src/server/toolRegistry";
 import { INTERNAL_NO_DIFF_PARAM } from "../../src/server/internalToolCall";
+import { INTERNAL_LIVE_DEADLINE_KEY_PARAM } from "../../src/daemon/constants";
 import { ActionableError } from "../../src/models/ActionableError";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 
@@ -214,6 +215,72 @@ describe("ToolRegistry.callInternal (#3108)", () => {
       (ToolRegistry as any).navigationToolCallRecorder = originalRecorder;
       (ToolRegistry as any).toolCallRepository = originalRepository;
     }
+  });
+
+  // Inherited plan metadata must never become an own property with value
+  // `undefined`: a `.strict()` tool schema (getAndroid/getApple/provisionDevice)
+  // counts such a key as unrecognized and rejects the step outright.
+  describe("inherited plan-request metadata", () => {
+    test("omits absent parent metadata instead of writing undefined keys", async () => {
+      registerCapturingTool("clipboard");
+
+      await runWithToolSelectionContext({ planRequest: {} }, () =>
+        ToolRegistry.callInternal("clipboard", { text: "Go" }, undefined, undefined, {
+          forPlan: true,
+        }),
+      );
+
+      expect(captured).toHaveLength(1);
+      const keys = Object.keys(captured[0].args);
+      expect(keys).not.toContain(INTERNAL_LIVE_DEADLINE_KEY_PARAM);
+      expect(keys).not.toContain("__mcpRequestDeadlineMs");
+      expect(keys).not.toContain("__mcpRequestTimeoutMs");
+      expect(keys).not.toContain("__executionStartTime");
+      // Concretely: a strict step schema must still accept these args.
+      const strict = z.object({ text: z.string(), [INTERNAL_NO_DIFF_PARAM]: z.boolean() }).strict();
+      expect(() => strict.parse(captured[0].args)).not.toThrow();
+    });
+
+    test("forwards parent metadata that is present", async () => {
+      registerCapturingTool("clipboard");
+
+      await runWithToolSelectionContext(
+        {
+          planRequest: {
+            deadlineMs: 10,
+            timeoutMs: 20,
+            startTime: 30,
+            liveDeadlineKey: "live-key",
+          },
+        },
+        () =>
+          ToolRegistry.callInternal("clipboard", { text: "Go" }, undefined, undefined, {
+            forPlan: true,
+          }),
+      );
+
+      expect(captured[0].args[INTERNAL_LIVE_DEADLINE_KEY_PARAM]).toBe("live-key");
+      expect(captured[0].args.__mcpRequestDeadlineMs).toBe(10);
+      expect(captured[0].args.__mcpRequestTimeoutMs).toBe(20);
+      expect(captured[0].args.__executionStartTime).toBe(30);
+    });
+
+    test("an absent parent value still strips a plan-supplied key", async () => {
+      registerCapturingTool("clipboard");
+
+      await runWithToolSelectionContext({ planRequest: { timeoutMs: 20 } }, () =>
+        ToolRegistry.callInternal(
+          "clipboard",
+          { text: "Go", [INTERNAL_LIVE_DEADLINE_KEY_PARAM]: "forged-key" },
+          undefined,
+          undefined,
+          { forPlan: true },
+        ),
+      );
+
+      expect(Object.keys(captured[0].args)).not.toContain(INTERNAL_LIVE_DEADLINE_KEY_PARAM);
+      expect(captured[0].args.__mcpRequestTimeoutMs).toBe(20);
+    });
   });
 
   test("AC3: throws ActionableError when the tool name is unresolved", async () => {

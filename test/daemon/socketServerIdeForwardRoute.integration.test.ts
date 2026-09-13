@@ -1,3 +1,5 @@
+import { DAEMON_BOUND_SESSION_PARAM } from "../../src/daemon/constants";
+import { SessionToolBinding } from "../../src/server/SessionToolBinding";
 import { describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
@@ -150,5 +152,69 @@ describe("UnixSocketServer ide/getNavigationGraph cross-session routing", () => 
 
     expect(resolved.clientKey).toBe(`socket:${socketSessionId}:session:session-a`);
     expect(resolved.sessionUuid).toBe("session-a");
+  });
+});
+
+describe("tools/call selector forwarding", () => {
+  test.each([{ platform: "ios" }, { platform: "ios", deviceId: "iphone" }])(
+    "does not seed an implicit selector from the socket's previous binding: %j",
+    (args) => {
+      const server = createServer();
+      bindSocketToSessionA(server, "socket-A");
+      const resolved = route(
+        server,
+        { id: "selector", method: "tools/call", params: { name: "observe", arguments: args } },
+        "socket-A",
+      );
+      expect(resolved.sessionUuid).toBeUndefined();
+      const forwarded = (server as any).withSocketSessionAutolockKey(args, "socket-A", 1000);
+      expect(forwarded.sessionUuid).toBeUndefined();
+      expect(forwarded.__mcpSessionId).toBe("socket-A");
+    },
+  );
+
+  test("a pinned proxy's injected UUID keeps the bound transport", () => {
+    const server = createServer();
+    bindSocketToSessionA(server, "socket-A");
+    const args = {
+      platform: "ios",
+      deviceId: "iphone",
+      sessionUuid: "session-a",
+      [DAEMON_BOUND_SESSION_PARAM]: "session-a",
+    };
+    const resolved = route(
+      server,
+      { id: "pinned", method: "tools/call", params: { name: "observe", arguments: args } },
+      "socket-A",
+    );
+    expect(resolved.sessionUuid).toBe("session-a");
+    const forwarded = (server as any).withSocketSessionAutolockKey(args, "socket-A", 1000);
+    const binding = new SessionToolBinding(resolved.sessionUuid);
+    expect(() =>
+      binding.resolveDeviceSessionUuid(undefined, forwarded, () => ({
+        deviceId: "device-1",
+        platform: "android",
+      })),
+    ).toThrow("does not match");
+  });
+
+  test("preserves an explicit UUID matching the prior binding over a conflicting platform", () => {
+    const server = createServer();
+    bindSocketToSessionA(server, "socket-A");
+    const args = { sessionUuid: "session-a", platform: "ios" };
+    const resolved = route(
+      server,
+      { id: "explicit", method: "tools/call", params: { name: "observe", arguments: args } },
+      "socket-A",
+    );
+    const forwarded = (server as any).withSocketSessionAutolockKey(args, "socket-A", 1000);
+    const binding = new SessionToolBinding(resolved.sessionUuid);
+    expect(forwarded.sessionUuid).toBe("session-a");
+    expect(
+      binding.resolveDeviceSessionUuid(undefined, forwarded, () => ({
+        deviceId: "device-1",
+        platform: "android",
+      })),
+    ).toBe("session-a");
   });
 });

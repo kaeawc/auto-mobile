@@ -259,6 +259,90 @@ describe("MultiPlatformDeviceManager", () => {
     expect(receivedSignal).toBe(controller.signal);
   });
 
+  test("startDevice rejects a name-only iOS DeviceInfo instead of booting by name (#6414)", async () => {
+    const fakeSimctl = {
+      isAvailable: async () => true,
+      getBootedSimulators: async () => [],
+      isSimulatorRunning: async () => false,
+      startSimulator: async () => {
+        throw new Error("simctl bootstatus must not run for a name-only iOS target");
+      },
+    } as unknown as SimCtlClient;
+    const manager = new MultiPlatformDeviceManager(
+      new FakeAdbClient() as unknown as AdbClient,
+      fakeSimctl,
+      null,
+    );
+    const device: DeviceInfo = {
+      name: "iPhone 17 Pro",
+      platform: "ios",
+      isRunning: false,
+    };
+
+    await expect(manager.startDevice(device)).rejects.toThrow(
+      /iPhone 17 Pro.*UDID|UDID.*iPhone 17 Pro/,
+    );
+  });
+
+  test("startDevice validates a missing UDID before probing simctl running-state, even when a same-named simulator is already booted (#6414)", async () => {
+    let runningStateProbed = false;
+    const fakeSimctl = {
+      isAvailable: async () => true,
+      getBootedSimulators: async () => {
+        runningStateProbed = true;
+        return [];
+      },
+      // An already-booted simulator that happens to share the target's name:
+      // pre-fix, this made isDeviceImageRunning() return true and the caller
+      // observed "already running" instead of the missing-UDID error.
+      isSimulatorRunning: async () => {
+        runningStateProbed = true;
+        return true;
+      },
+      startSimulator: async () => {
+        throw new Error("simctl bootstatus must not run for a name-only iOS target");
+      },
+    } as unknown as SimCtlClient;
+    const manager = new MultiPlatformDeviceManager(
+      new FakeAdbClient() as unknown as AdbClient,
+      fakeSimctl,
+      null,
+    );
+    const device: DeviceInfo = {
+      name: "iPhone 17 Pro",
+      platform: "ios",
+      isRunning: false,
+    };
+
+    await expect(manager.startDevice(device)).rejects.toThrow(
+      /iPhone 17 Pro.*UDID|UDID.*iPhone 17 Pro/,
+    );
+    expect(runningStateProbed).toBe(false);
+  });
+
+  test("waitForDeviceReady rejects a name-only iOS DeviceInfo instead of polling bootstatus by name (#6414)", async () => {
+    const fakeSimctl = {
+      isAvailable: async () => true,
+      waitForSimulatorReady: async () => {
+        throw new Error("simctl bootstatus must not run for a name-only iOS target");
+      },
+    } as unknown as SimCtlClient;
+    const manager = new MultiPlatformDeviceManager(
+      new FakeAdbClient() as unknown as AdbClient,
+      fakeSimctl,
+      {} as unknown as AndroidEmulatorClient,
+    );
+    const device: DeviceInfo = {
+      name: "iPhone 17 Pro",
+      platform: "ios",
+      isRunning: false,
+    };
+
+    await expect(manager.waitForDeviceReady(device)).rejects.toThrow(
+      /iPhone 17 Pro.*UDID|UDID.*iPhone 17 Pro/,
+    );
+  });
+
   test("isDeviceImageRunning uses UDID when present for iOS", async () => {
     const fakeSimctl = {
       isAvailable: async () => true,
@@ -390,6 +474,7 @@ describe("MultiPlatformDeviceManager", () => {
       } as unknown as SimCtlClient;
       const fakeEmulator = {
         listAvds: async () => [androidImage],
+        getBootedDevices: async () => [],
       } as unknown as AndroidEmulatorClient;
 
       const manager = new MultiPlatformDeviceManager(
@@ -420,6 +505,7 @@ describe("MultiPlatformDeviceManager", () => {
       } as unknown as SimCtlClient;
       const fakeEmulator = {
         listAvds: async () => [androidImage],
+        getBootedDevices: async () => [],
       } as unknown as AndroidEmulatorClient;
 
       const manager = new MultiPlatformDeviceManager(
@@ -432,6 +518,96 @@ describe("MultiPlatformDeviceManager", () => {
 
       expect(devices).toEqual([androidImage]);
     });
+  });
+
+  test("listDeviceImages(android) reports isRunning for the booted emulator, like iOS", async () => {
+    // Issue #6850: the Android image listing hardcoded isRunning:false even for
+    // the emulator being driven, while iOS reports its booted state correctly.
+    const runningImage: DeviceInfo = { name: "Pixel_8", platform: "android", isRunning: false };
+    const idleImage: DeviceInfo = { name: "Pixel_Tablet", platform: "android", isRunning: false };
+    const fakeEmulator = {
+      listAvds: async () => [runningImage, idleImage],
+      getBootedDevices: async (): Promise<BootedDevice[]> => [
+        { name: "Pixel_8", platform: "android", deviceId: "emulator-5554", source: "local" },
+      ],
+    } as unknown as AndroidEmulatorClient;
+
+    const manager = new MultiPlatformDeviceManager(
+      new FakeAdbClient() as unknown as AdbClient,
+      undefined,
+      fakeEmulator,
+    );
+
+    const devices = await manager.listDeviceImages("android");
+
+    expect(devices).toEqual([
+      { name: "Pixel_8", platform: "android", isRunning: true },
+      { name: "Pixel_Tablet", platform: "android", isRunning: false },
+    ]);
+  });
+
+  test("listDeviceImages(android) degrades to isRunning:false when booted discovery fails", async () => {
+    const image: DeviceInfo = { name: "Pixel_8", platform: "android", isRunning: false };
+    const fakeEmulator = {
+      listAvds: async () => [image],
+      // getBootedDevices already swallows discovery failures to an empty list;
+      // the listing must still succeed rather than fail on a missing boot scan.
+      getBootedDevices: async (): Promise<BootedDevice[]> => [],
+    } as unknown as AndroidEmulatorClient;
+
+    const manager = new MultiPlatformDeviceManager(
+      new FakeAdbClient() as unknown as AdbClient,
+      undefined,
+      fakeEmulator,
+    );
+
+    await expect(manager.listDeviceImages("android")).resolves.toEqual([
+      { name: "Pixel_8", platform: "android", isRunning: false },
+    ]);
+  });
+
+  test("listDeviceImages(android) ignores a physical handset whose model matches an AVD name", async () => {
+    // getBootedDevices also reports physical handsets, whose `name` is
+    // ro.product.model. A handset that happens to be modelled "Pixel_8" must not
+    // mark the like-named AVD running, or bootMatchedImage() hands back the
+    // handset instead of booting the AVD (issue #6850 review).
+    const image: DeviceInfo = { name: "Pixel_8", platform: "android", isRunning: false };
+    const fakeEmulator = {
+      listAvds: async () => [image],
+      getBootedDevices: async (): Promise<BootedDevice[]> => [
+        { name: "Pixel_8", platform: "android", deviceId: "39081FDJH00QZQ", source: "local" },
+      ],
+    } as unknown as AndroidEmulatorClient;
+
+    const manager = new MultiPlatformDeviceManager(
+      new FakeAdbClient() as unknown as AdbClient,
+      undefined,
+      fakeEmulator,
+    );
+
+    await expect(manager.listDeviceImages("android")).resolves.toEqual([
+      { name: "Pixel_8", platform: "android", isRunning: false },
+    ]);
+  });
+
+  test("listDeviceImages(android) still reports the AVD running for an emulator-NNNN serial", async () => {
+    const image: DeviceInfo = { name: "Pixel_8", platform: "android", isRunning: false };
+    const fakeEmulator = {
+      listAvds: async () => [image],
+      getBootedDevices: async (): Promise<BootedDevice[]> => [
+        { name: "Pixel_8", platform: "android", deviceId: "emulator-5554", source: "local" },
+      ],
+    } as unknown as AndroidEmulatorClient;
+
+    const manager = new MultiPlatformDeviceManager(
+      new FakeAdbClient() as unknown as AdbClient,
+      undefined,
+      fakeEmulator,
+    );
+
+    await expect(manager.listDeviceImages("android")).resolves.toEqual([
+      { name: "Pixel_8", platform: "android", isRunning: true },
+    ]);
   });
 
   test("listDeviceImages(ios) surfaces iOS image discovery failures", async () => {

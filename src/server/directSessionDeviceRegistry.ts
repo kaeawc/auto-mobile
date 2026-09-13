@@ -22,6 +22,17 @@ export function resolveDirectSessionDevice(sessionUuid: string): DirectSessionDe
     : undefined;
 }
 
+/**
+ * Drop one session's mapping. Used when an acquisition that minted `sessionUuid`
+ * is cancelled in direct (non-daemon) mode, where there is no SessionManager to
+ * release through and this registry is the only thing keeping the cancelled
+ * UUID resolvable.
+ */
+export function unregisterDirectSession(sessionUuid: string): void {
+  sessions.delete(sessionUuid);
+  incarnations.delete(sessionUuid);
+}
+
 export function unregisterDirectSessionsForDevice(deviceId: string): void {
   for (const [sessionUuid, device] of sessions) {
     if (device.deviceId === deviceId) {

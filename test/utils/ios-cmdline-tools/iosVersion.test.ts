@@ -3,6 +3,7 @@ import {
   parseIosMajorVersion,
   iosMajorVersionFromSimctlListDevices,
   iosMajorVersionFromDevicectlDetails,
+  iosVersionStringFromRuntimeId,
 } from "../../../src/utils/ios-cmdline-tools/iosVersion";
 
 describe("parseIosMajorVersion", () => {
@@ -127,6 +128,44 @@ describe("iosMajorVersionFromSimctlListDevices", () => {
       },
     });
     expect(iosMajorVersionFromSimctlListDevices(multi, udid)).toBe(18);
+  });
+});
+
+describe("iosVersionStringFromRuntimeId", () => {
+  test("extracts the dotted version from a hyphenated runtime id", () => {
+    expect(iosVersionStringFromRuntimeId("com.apple.CoreSimulator.SimRuntime.iOS-17-2")).toBe(
+      "17.2",
+    );
+  });
+
+  test("extracts the dotted version from an underscore-separated runtime id", () => {
+    expect(iosVersionStringFromRuntimeId("com.apple.CoreSimulator.SimRuntime.iOS_18_0")).toBe(
+      "18.0",
+    );
+  });
+
+  test("returns undefined for a non-iOS runtime id", () => {
+    expect(
+      iosVersionStringFromRuntimeId("com.apple.CoreSimulator.SimRuntime.watchOS-11-0"),
+    ).toBeUndefined();
+  });
+
+  test("returns undefined for missing input", () => {
+    expect(iosVersionStringFromRuntimeId(undefined)).toBeUndefined();
+    expect(iosVersionStringFromRuntimeId(null)).toBeUndefined();
+    expect(iosVersionStringFromRuntimeId("")).toBeUndefined();
+  });
+
+  // Regression guard for the divergence between the three call sites that used
+  // to hand-roll this regex independently: SimCtlClient's normalizeIosVersion
+  // and DeviceCriteriaMatcher's iosVersionFromRuntime matched only case-sensitive
+  // "iOS", while this module's own iosMajorVersionFromSimctlListDevices matched
+  // case-insensitively. A differently-cased beta runtime id would silently
+  // resolve a version in one call site and not the other (#6372 follow-up).
+  test("matches case-insensitively, unlike the old SimCtlClient/DeviceCriteriaMatcher copies", () => {
+    expect(iosVersionStringFromRuntimeId("com.apple.CoreSimulator.SimRuntime.IOS-18-0")).toBe(
+      "18.0",
+    );
   });
 });
 

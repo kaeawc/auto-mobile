@@ -18,6 +18,7 @@ import {
   iosNotifyutilRegisteredSetReadPostCommand,
   parseNotifyutilState,
 } from "../../utils/ios-cmdline-tools/notifyutil";
+import { isAndroidEmulatorSerial } from "../../utils/androidSerial";
 
 export type DoNotDisturbMode = "off" | "none" | "priority" | "alarms";
 
@@ -356,11 +357,6 @@ const ANDROID_PHYSICAL_NETWORK_CONDITION_UNSUPPORTED_ERROR =
   "console (`adb emu network ...`), which physical devices do not expose. On a physical device " +
   "the radios can only be toggled fully on/off (svc data/wifi, privileged). Use an emulator or a " +
   "host-side proxy for degraded-network testing.";
-
-/** Android emulators report an `emulator-<port>` serial; everything else is physical. */
-function isAndroidEmulatorSerial(deviceId: string): boolean {
-  return deviceId.startsWith("emulator-");
-}
 
 /**
  * The emulator console answers `OK` on success and `KO: <reason>` on failure —

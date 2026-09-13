@@ -202,6 +202,9 @@ final class CommandHandler: CommandHandling {
             case let .setNetworkErrorSimulation(payload):
                 return await handleSetNetworkErrorSimulation(payload, startTime: startTime)
 
+            case let .getSdkCapabilities(payload):
+                return await handleGetSdkCapabilities(payload, startTime: startTime)
+
             // Database commands
             case let .executeSql(payload):
                 return await handleExecuteSql(payload, startTime: startTime)
@@ -263,7 +266,11 @@ final class CommandHandler: CommandHandling {
     )
         async -> SetNetworkMockRulesResponse
     {
-        let succeeded = await sdkHierarchyClient?.setMockRules(request.rules) ?? false
+        let succeeded = if await sdkServerInfoForTrackedForegroundApp() != nil {
+            await sdkHierarchyClient?.setMockRules(request.rules) ?? false
+        } else {
+            false
+        }
         return SetNetworkMockRulesResponse(
             requestId: request.requestId,
             ok: succeeded,
@@ -283,7 +290,11 @@ final class CommandHandler: CommandHandling {
             limit: request.limit,
             expiresAtEpochMs: request.expiresAtEpochMs
         )
-        let succeeded = await sdkHierarchyClient?.setNetworkErrorSimulation(config) ?? false
+        let succeeded = if await sdkServerInfoForTrackedForegroundApp() != nil {
+            await sdkHierarchyClient?.setNetworkErrorSimulation(config) ?? false
+        } else {
+            false
+        }
         return SetNetworkErrorSimulationResponse(
             requestId: request.requestId,
             ok: succeeded,
@@ -297,10 +308,43 @@ final class CommandHandler: CommandHandling {
     )
         async -> SetNetworkFaultRulesResponse
     {
-        let succeeded = await sdkHierarchyClient?.setNetworkFaultRules(request.rules) ?? false
+        let succeeded = if await sdkServerInfoForTrackedForegroundApp() != nil {
+            await sdkHierarchyClient?.setNetworkFaultRules(request.rules) ?? false
+        } else {
+            false
+        }
         return SetNetworkFaultRulesResponse(
             requestId: request.requestId,
             ok: succeeded,
+            totalTimeMs: totalTimeMs(from: startTime)
+        )
+    }
+
+    private func handleGetSdkCapabilities(
+        _ request: RequestEnvelope,
+        startTime: Date
+    )
+        async -> SdkCapabilitiesResponse
+    {
+        guard let serverInfo = await sdkServerInfoForTrackedForegroundApp() else {
+            return SdkCapabilitiesResponse(
+                requestId: request.requestId,
+                available: false,
+                bundleId: nil,
+                capabilities: [],
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        }
+
+        var capabilities = SdkCapability.allCases
+        if !serverInfo.capabilities.contains("network-fault-rules") {
+            capabilities.removeAll { $0 == .networkFaultRules }
+        }
+        return SdkCapabilitiesResponse(
+            requestId: request.requestId,
+            available: true,
+            bundleId: normalizedBundleId(serverInfo.bundleId),
+            capabilities: capabilities.map(\.rawValue),
             totalTimeMs: totalTimeMs(from: startTime)
         )
     }
@@ -417,10 +461,19 @@ final class CommandHandler: CommandHandling {
     }
 
     private func sdkServerMatchesTrackedForegroundApp() async -> Bool {
-        guard let foregroundBundleId = normalizedBundleId(await elementLocator.foregroundBundleId) else {
-            return false
+        await sdkServerInfoForTrackedForegroundApp() != nil
+    }
+
+    private func sdkServerInfoForTrackedForegroundApp() async -> SdkHierarchyServerInfo? {
+        guard let foregroundBundleId = normalizedBundleId(await elementLocator.refreshForegroundBundleId()) else {
+            return nil
         }
-        return await sdkServerMatchesForegroundBundleId(foregroundBundleId)
+        guard let serverInfo = await sdkHierarchyClient?.fetchServerInfo(),
+              normalizedBundleId(serverInfo.bundleId) == foregroundBundleId
+        else {
+            return nil
+        }
+        return serverInfo
     }
 
     private func sdkHierarchy(_ sdkHierarchy: SdkViewHierarchy, matches foregroundBundleId: String) -> Bool {
@@ -949,7 +1002,11 @@ final class CommandHandler: CommandHandling {
         // XCUITest's `.link` query cannot (issue #5560). A resolved center is tapped
         // directly; otherwise fall back to the XCUITest `.link` path, which still throws
         // cleanly (never a false success) when nothing matches.
-        let fresh = await sdkHierarchyClient?.fetchFreshHierarchy()
+        let fresh: SdkViewHierarchy? = if await sdkServerMatchesTrackedForegroundApp() {
+            await sdkHierarchyClient?.fetchFreshHierarchy()
+        } else {
+            nil
+        }
         if let coordinate = SemanticLinkActivation.coordinate(
             in: fresh,
             ownerResourceId: request.ownerResourceId,
@@ -1748,6 +1805,14 @@ final class CommandHandler: CommandHandling {
     private func validateDatabaseAppId(_ appId: String?) async throws {
         guard let requestedAppId = normalizedBundleId(appId) else {
             throw CommandError.missingParameter("appId")
+        }
+
+        guard let foregroundAppId = normalizedBundleId(await elementLocator.refreshForegroundBundleId()),
+              foregroundAppId == requestedAppId
+        else {
+            throw CommandError.executionFailed(
+                "Database inspection requires requested appId \(requestedAppId) to be the foreground app"
+            )
         }
 
         guard let serverAppId = normalizedBundleId(await sdkHierarchyClient?.fetchServerInfo()?.bundleId) else {

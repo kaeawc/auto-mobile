@@ -3,6 +3,7 @@ import type { Database } from "./types";
 import type { EVENT_TABLES } from "./eventTables";
 import { getDatabase } from "./database";
 import { logger } from "../utils/logger";
+import { runAmortizedRetentionGate, type AmortizedRetentionState } from "./retentionGate";
 
 export const RETENTION_MAX_ROWS = 10_000;
 
@@ -13,10 +14,8 @@ export const CLEANUP_CHECK_INTERVAL = 256;
 
 export type EventTableName = (typeof EVENT_TABLES)[number];
 
-export interface EventRetentionState {
-  cleanupInProgress: boolean;
-  insertsSinceCleanup: number;
-}
+/** @deprecated Alias of the shared {@link AmortizedRetentionState} (#6702). */
+export type EventRetentionState = AmortizedRetentionState;
 
 export async function pruneEventTableByCount(
   db: Kysely<Database> | undefined,
@@ -29,62 +28,54 @@ export async function pruneEventTableByCount(
   // every `checkInterval` rows rather than every `checkInterval` batches.
   inserted: number = 1,
 ): Promise<void> {
-  // The counter is bumped synchronously on every call, so retention still fires
-  // deterministically every N inserts without putting a scan on the hot path.
-  state.insertsSinceCleanup += inserted;
-  if (state.insertsSinceCleanup < checkInterval) {
-    return;
-  }
+  // The counter/guard state machine is shared with rowCapRetention.ts (#6702);
+  // this wrapper owns only the event-specific cleanup body and its
+  // logging-and-swallowing error policy (CLAUDE.md convention #2).
+  await runAmortizedRetentionGate(
+    state,
+    async () => {
+      try {
+        const resolvedDb = db ?? (getDatabase() as unknown as Kysely<Database>);
+        const count = await resolvedDb
+          .selectFrom(table)
+          .select(resolvedDb.fn.countAll().as("count"))
+          .executeTakeFirstOrThrow();
 
-  // Only reset the counter once we've committed to running the cleanup body.
-  // If a cleanup is already in progress, leave the counter at-or-above
-  // `checkInterval` so the very next insert re-checks this gate instead of
-  // silently re-arming a fresh `checkInterval`-insert countdown (#6657).
-  if (state.cleanupInProgress) {
-    return;
-  }
-  state.insertsSinceCleanup = 0;
-  state.cleanupInProgress = true;
-  try {
-    const resolvedDb = db ?? (getDatabase() as unknown as Kysely<Database>);
-    const count = await resolvedDb
-      .selectFrom(table)
-      .select(resolvedDb.fn.countAll().as("count"))
-      .executeTakeFirstOrThrow();
+        if (Number(count.count) > maxRows) {
+          // Canonical retention idiom (#3137): pick the Nth-newest row as the
+          // threshold (offset maxRows - 1) and delete everything strictly older,
+          // breaking cutoff-timestamp ties on the monotonic `id`. This trims to
+          // *exactly* maxRows rows and deterministically prunes same-timestamp rows,
+          // unlike the prior `offset(maxRows)` + `timestamp < cutoff` form, which
+          // retained maxRows + 1 rows and could never remove rows equal to the
+          // cutoff timestamp (a burst of same-millisecond events at the cutoff could
+          // retain more than maxRows).
+          const threshold = await resolvedDb
+            .selectFrom(table)
+            .select(["id", "timestamp"])
+            .orderBy("timestamp", "desc")
+            .orderBy("id", "desc")
+            .limit(1)
+            .offset(maxRows - 1)
+            .executeTakeFirst();
 
-    if (Number(count.count) > maxRows) {
-      // Canonical retention idiom (#3137): pick the Nth-newest row as the
-      // threshold (offset maxRows - 1) and delete everything strictly older,
-      // breaking cutoff-timestamp ties on the monotonic `id`. This trims to
-      // *exactly* maxRows rows and deterministically prunes same-timestamp rows,
-      // unlike the prior `offset(maxRows)` + `timestamp < cutoff` form, which
-      // retained maxRows + 1 rows and could never remove rows equal to the
-      // cutoff timestamp (a burst of same-millisecond events at the cutoff could
-      // retain more than maxRows).
-      const threshold = await resolvedDb
-        .selectFrom(table)
-        .select(["id", "timestamp"])
-        .orderBy("timestamp", "desc")
-        .orderBy("id", "desc")
-        .limit(1)
-        .offset(maxRows - 1)
-        .executeTakeFirst();
-
-      if (threshold) {
-        await resolvedDb
-          .deleteFrom(table)
-          .where((eb) =>
-            eb.or([
-              eb("timestamp", "<", threshold.timestamp),
-              eb.and([eb("timestamp", "=", threshold.timestamp), eb("id", "<", threshold.id)]),
-            ]),
-          )
-          .execute();
+          if (threshold) {
+            await resolvedDb
+              .deleteFrom(table)
+              .where((eb) =>
+                eb.or([
+                  eb("timestamp", "<", threshold.timestamp),
+                  eb.and([eb("timestamp", "=", threshold.timestamp), eb("id", "<", threshold.id)]),
+                ]),
+              )
+              .execute();
+          }
+        }
+      } catch (error) {
+        logger.warn(`${table} retention cleanup failed: ${error}`, error);
       }
-    }
-  } catch (error) {
-    logger.warn(`${table} retention cleanup failed: ${error}`, error);
-  } finally {
-    state.cleanupInProgress = false;
-  }
+    },
+    checkInterval,
+    inserted,
+  );
 }

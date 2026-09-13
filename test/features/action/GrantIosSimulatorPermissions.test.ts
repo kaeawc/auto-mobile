@@ -317,6 +317,44 @@ describe("IosSimulatorPermissions", () => {
     });
   });
 
+  test("queries the siri permission via the single canonical TCC-service vocabulary (#6372 dedup)", async () => {
+    // IosSimulatorPermissions and SimulatorTccSqliteClient used to keep their own
+    // copies of the permission<->kTCCService mapping. This exercises a permission
+    // near the end of the table so a re-introduced private, out-of-sync copy
+    // (missing "siri", say) would show up as an unresolved raw service string
+    // instead of the "siri" permission name.
+    const tccReader: TccPermissionReader = {
+      readPermissions: async () => [
+        {
+          service: "kTCCServiceSiri",
+          client: "com.example.app",
+          auth_value: 2,
+          allowed: null,
+          prompt_count: null,
+        },
+      ],
+    };
+    const action = new IosSimulatorPermissions(simulatorDevice, new FakeSimCtlClient(), tccReader);
+
+    const result = await action.getPermissions("com.example.app", ["siri"]);
+
+    expect(result.permissions).toEqual([
+      {
+        permission: "siri",
+        service: "kTCCServiceSiri",
+        state: "granted",
+        authValue: 2,
+        raw: {
+          service: "kTCCServiceSiri",
+          client: "com.example.app",
+          auth_value: 2,
+          allowed: null,
+          prompt_count: null,
+        },
+      },
+    ]);
+  });
+
   test("keeps the legacy injected sqlite reader constructor available", async () => {
     const sqlite = new FakeSqliteCommandExecutor();
     const reader = new SqliteTccPermissionReader(sqlite, "/Users/tester");

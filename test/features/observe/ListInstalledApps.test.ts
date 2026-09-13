@@ -42,6 +42,22 @@ describe("ListInstalledApps", function () {
   });
 
   describe("execute", function () {
+    test("passes cancellation into the live Android inventory rebuild", async function () {
+      const controller = new AbortController();
+      let listUsersSignal: AbortSignal | undefined;
+      const originalListUsers = fakeAdb.listUsers.bind(fakeAdb);
+      fakeAdb.listUsers = async (signal?: AbortSignal) => {
+        listUsersSignal = signal;
+        return originalListUsers(signal);
+      };
+      fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 13, running: true }]);
+      fakeAdb.setCommandResponse("shell pm list packages --user 0", { stdout: "", stderr: "" });
+      fakeAdb.setCommandResponse("shell pm list packages -s --user 0", { stdout: "", stderr: "" });
+
+      await listInstalledApps.executeDetailedResult(controller.signal);
+
+      expect(listUsersSignal).toBe(controller.signal);
+    });
     test("should list all installed packages", async function () {
       // Set up single user with packages
       fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 13, running: true }]);

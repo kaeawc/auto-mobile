@@ -131,6 +131,9 @@ export interface WebSocketMessage {
   id?: number;
   supportedCommands?: string[];
   supportedFeatures?: string[];
+  available?: boolean;
+  bundleId?: string;
+  capabilities?: string[];
   data?: XCTestHierarchy;
   performanceData?: CtrlProxyPerformanceSnapshot;
   format?: string;

@@ -173,6 +173,33 @@
   [[ "$output" == *'git tag "$TAG" "$EXPECTED_RELEASE_COMMIT"'* ]]
 }
 
+@test "prepare-release builds the notarized Network Filter probe with both provisioning profiles" {
+  wiring_requires_yq
+  local workflow=".github/workflows/build-network-filter-probe.yml"
+
+  run yq -r '.on.workflow_call.secrets | keys[]' "$workflow"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"MACOS_NETWORK_FILTER_CONTROLLER_PROFILE_BASE64"* ]]
+  [[ "$output" == *"MACOS_NETWORK_FILTER_PROVIDER_PROFILE_BASE64"* ]]
+
+  run yq -r '.jobs.build.steps[] | select(.name == "Build, sign, and notarize Network Filter identity probe") | .run' "$workflow"
+  [ "$status" -eq 0 ]
+  [ "$output" = "./scripts/ios/build-network-filter-probe.sh signed" ]
+
+  run yq -r '.jobs."build-candidate-network-filter-identity-probe".uses' .github/workflows/prepare-release.yml
+  [ "$status" -eq 0 ]
+  [ "$output" = "./.github/workflows/build-network-filter-probe.yml" ]
+
+  run yq -r '.jobs."build-candidate-network-filter-identity-probe".secrets | keys[]' .github/workflows/prepare-release.yml
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"MACOS_NETWORK_FILTER_CONTROLLER_PROFILE_BASE64"* ]]
+  [[ "$output" == *"MACOS_NETWORK_FILTER_PROVIDER_PROFILE_BASE64"* ]]
+
+  run yq -r '.jobs."verify-prepared-release".needs[]' .github/workflows/prepare-release.yml
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"build-candidate-network-filter-identity-probe"* ]]
+}
+
 @test "prepare-release keeps intermediate version commits on a run-scoped staging ref (#4686)" {
   wiring_requires_yq
   local workflow=".github/workflows/prepare-release.yml"

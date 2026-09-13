@@ -99,6 +99,25 @@ export class DefaultIosVoiceOverDetector implements IIosVoiceOverDetector {
   }
 
   /**
+   * Tri-state probe for toggle-confirmation consumers (#6496): resolves to
+   * the confirmed boolean state, or `null` when the probe is indeterminate
+   * (timeout, error, or an unsuccessful CtrlProxy response). Unlike
+   * {@link isVoiceOverEnabled}, this does NOT coalesce `null` into `false` —
+   * a poll loop confirming a `toggle(false)` needs to distinguish "confirmed
+   * off" from "unreadable" so an unreadable probe cannot coincidentally match
+   * the target state and short-circuit the confirmation window.
+   */
+  async resolveState(
+    deviceId: string,
+    client: IOSCtrlProxy,
+    featureFlags?: FeatureFlagService,
+    timeoutMs?: number,
+    signal?: AbortSignal,
+  ): Promise<boolean | null> {
+    return this.resolveVoiceOverState(deviceId, client, featureFlags, timeoutMs, signal);
+  }
+
+  /**
    * Resolves the current VoiceOver state, applying feature-flag overrides
    * and the detection cache. Returns `null` when the underlying probe is
    * indeterminate (timeout, error, or an unsuccessful CtrlProxy response) —

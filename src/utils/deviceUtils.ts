@@ -14,6 +14,7 @@ import type { DiscoverySource } from "./discoverySource";
 import { AndroidEmulatorClient } from "./android-cmdline-tools/AndroidEmulatorClient";
 import { deleteAvd } from "./android-cmdline-tools/avdmanager";
 import { logger } from "./logger";
+import { isAndroidEmulatorSerial } from "./androidSerial";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "./deviceTimeouts";
 import { getAbortSignal, runWithAbortSignal } from "./AbortContext";
 import { defaultTimer, type Timer } from "./SystemTimer";
@@ -423,16 +424,42 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
   async listDeviceImages(platform: SomePlatform): Promise<DeviceInfo[]> {
     switch (platform) {
       case "android":
-        return this.emulator.listAvds();
+        return this.listAndroidDeviceImages();
       case "ios":
         return this.listIosDeviceImagesIfAvailable({ swallowDiscoveryErrors: false });
       case "either":
-        const emulators = await this.emulator.listAvds();
+        const emulators = await this.listAndroidDeviceImages();
         const simulators = await this.listIosDeviceImagesIfAvailable({
           swallowDiscoveryErrors: true,
         });
         return [...emulators, ...simulators];
     }
+  }
+
+  /**
+   * List Android AVD images with live isRunning state. `listAvds` reports every
+   * AVD as isRunning:false; the iOS listing already reports its booted state
+   * from simctl, so this overlays the booted-emulator scan to keep the two
+   * platforms' image listings symmetric (issue #6850). `getBootedDevices`
+   * swallows discovery failures to an empty list, so a scan failure degrades to
+   * isRunning:false rather than failing the listing.
+   *
+   * Only `emulator-<port>` serials may contribute to the overlay: the booted
+   * scan also reports physical handsets, whose `name` is ro.product.model, and
+   * a handset modelled like an AVD would otherwise mark that AVD running and
+   * let bootMatchedImage() hand back the handset instead of booting the AVD.
+   */
+  private async listAndroidDeviceImages(): Promise<DeviceInfo[]> {
+    const [images, bootedDevices] = await Promise.all([
+      this.emulator.listAvds(),
+      this.emulator.getBootedDevices(),
+    ]);
+    const runningAvdNames = new Set(
+      bootedDevices
+        .filter((device) => isAndroidEmulatorSerial(device.deviceId))
+        .map((device) => device.name),
+    );
+    return images.map((image) => ({ ...image, isRunning: runningAvdNames.has(image.name) }));
   }
 
   /**
@@ -672,6 +699,17 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     device: DeviceInfo,
     timeoutMs: number = DEFAULT_DEVICE_READY_TIMEOUT_MS,
   ): Promise<ChildProcess | null> {
+    // Validate the UDID before any simctl running-state probe: a slow/hung
+    // 'simctl list' would otherwise burn the boot budget, and an already-booted
+    // same-named simulator would make isDeviceImageRunning() return true and
+    // mask this guard behind an "already running" error (#6414).
+    if (device.platform === "ios" && !device.deviceId) {
+      throw new ActionableError(
+        `Cannot boot iOS simulator '${device.name}' without a simulator UDID: ` +
+          `a name-only target cannot be verified against 'simctl' state after boot`,
+      );
+    }
+
     const isRunning = await this.isDeviceImageRunning(device);
     if (isRunning) {
       throw new ActionableError(`${device.platform} device '${device.name}' is already running`);
@@ -687,7 +725,13 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
           })
         ).process;
       case "ios":
-        return this.simctl.startSimulator(device.deviceId ?? device.name, timeoutMs);
+        if (!device.deviceId) {
+          throw new ActionableError(
+            `Cannot boot iOS simulator '${device.name}' without a simulator UDID: ` +
+              `a name-only target cannot be verified against 'simctl' state after boot`,
+          );
+        }
+        return this.simctl.startSimulator(device.deviceId, timeoutMs);
       default:
         throw new ActionableError("Unknown platform");
     }
@@ -804,11 +848,17 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
           signal,
         );
       case "ios":
+        if (!device.deviceId) {
+          throw new ActionableError(
+            `Cannot wait for iOS simulator '${device.name}' without a simulator UDID: ` +
+              `a name-only target cannot be verified against 'simctl' state after boot`,
+          );
+        }
         // A connected physical device has no simulator lifecycle: `simctl
         // bootstatus` cannot answer for its UDID, and discovery already proved
         // it reachable. Treat successful discovery as readiness rather than
         // shelling out to a tool that would only fail (issue #5620).
-        if (device.deviceId && isIosPhysicalUdid(device.deviceId)) {
+        if (isIosPhysicalUdid(device.deviceId)) {
           return {
             name: device.name,
             platform: "ios",
@@ -822,7 +872,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
         // `startSimulator` has already run `bootstatus -b`. Signal that so the
         // wait doesn't redundantly repeat the full boot-readiness wait; the
         // already-running path (no childProcess) still performs it.
-        return this.simctl.waitForSimulatorReady(device.deviceId ?? device.name, timeoutMs, {
+        return this.simctl.waitForSimulatorReady(device.deviceId, timeoutMs, {
           assumeBooted: Boolean(childProcess),
         });
       default:

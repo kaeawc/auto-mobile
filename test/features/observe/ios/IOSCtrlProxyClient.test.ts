@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { IOSCtrlProxyClient, CtrlProxyHierarchy } from "../../../../src/features/observe/ios";
 import {
   IOS_RUNNER_FEATURE_FLAGS,
@@ -19,6 +19,7 @@ import { FakeScreenshotBackoffScheduler } from "../../../../src/features/observe
 import type { DeviceConnectionLostNotifier } from "../../../../src/features/observe/DeviceConnectionLostNotifier";
 import { FakeIosSdkEventIngestor } from "../../../fakes/FakeIosSdkEventIngestor";
 import { loadCoordinateMappingVectors } from "../../../parity/coordinateMappingGoldenVectors";
+import { logger } from "../../../../src/utils/logger";
 
 describe("iOS runner feature release sequencing", () => {
   test("does not require an unreleased handshake from the immutable 0.0.66 IPA", () => {
@@ -160,6 +161,67 @@ describe("IOSCtrlProxyClient", function () {
     }
   };
 
+  const flushMicrotasks = async (iterations: number = 5): Promise<void> => {
+    for (let i = 0; i < iterations; i += 1) {
+      await Promise.resolve();
+    }
+  };
+
+  const respondToSdkCapabilityQuery = async (
+    socket: CapturingWebSocket,
+    available: boolean,
+    bundleId?: string,
+    minimumQueryCount: number = 1,
+  ): Promise<Record<string, unknown>> => {
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      const requests = socket.sentMessages
+        .map((message) => JSON.parse(message))
+        .filter((payload) => payload.type === "get_sdk_capabilities");
+      const request = requests.at(-1);
+      if (request && requests.length >= minimumQueryCount) {
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "sdk_capabilities_result",
+            requestId: request.requestId,
+            success: true,
+            available,
+            bundleId,
+            capabilities: available
+              ? [
+                  "hierarchy",
+                  "network_mocking",
+                  "network_error_simulation",
+                  "database",
+                  "highlight",
+                ]
+              : [],
+            totalTimeMs: 1,
+          }),
+        );
+        await flushMicrotasks();
+        return request;
+      }
+      await Promise.resolve();
+    }
+    throw new Error("SDK capability query was not sent");
+  };
+
+  const waitForMessageType = async (
+    socket: CapturingWebSocket,
+    type: string,
+  ): Promise<Record<string, unknown>> => {
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const message = socket.sentMessages
+        .map((payload) => JSON.parse(payload))
+        .find((payload) => payload.type === type);
+      if (message) {
+        return message;
+      }
+      await Promise.resolve();
+    }
+    throw new Error(`${type} was not sent`);
+  };
+
   describe("connection lifecycle", function () {
     test("cancels screenshot backoff when the connection closes", function () {
       const scheduler = new FakeScreenshotBackoffScheduler();
@@ -285,10 +347,10 @@ describe("IOSCtrlProxyClient", function () {
       expect(backoffStarts).toBe(1);
     });
 
-    test("syncs network mock rules when the connection (re)establishes", function () {
+    test("does not issue SDK-backed syncs when the foreground app has no SDK server", async function () {
       serverConfig.setNetworkMockableEnabled(true);
       const state = NetworkState.getInstance();
-      const mock = state.addMock({
+      state.addMock({
         host: "api\\.example\\.com",
         path: "/v1/items",
         method: "GET",
@@ -299,120 +361,281 @@ describe("IOSCtrlProxyClient", function () {
         responseBody: '{"ok":true}',
         contentType: "application/json",
       });
-      const sentMessages: string[] = [];
-
-      (ctrlProxyClient as any).sendMessage = (message: string) => {
-        sentMessages.push(message);
-        return true;
-      };
-      (ctrlProxyClient as any).startSdkEventPolling = () => {
-        /* no-op */
-      };
-      (ctrlProxyClient as any).startScreenshotBackoff = () => {
-        /* no-op */
-      };
-
-      (ctrlProxyClient as any).onConnectionEstablished();
-
-      expect(sentMessages).toHaveLength(2);
-      expect(sentMessages.map((message) => JSON.parse(message).type)).toEqual([
-        "set_network_mock_rules",
-        "set_network_error_simulation",
-      ]);
-      expect(JSON.parse(sentMessages[0])).toEqual({
-        type: "set_network_mock_rules",
-        rules: [
-          {
-            mockId: mock.mockId,
-            host: "api\\.example\\.com",
-            path: "/v1/items",
-            method: "GET",
-            limit: 3,
-            remaining: 3,
-            statusCode: 201,
-            responseHeaders: { "X-Test": "yes" },
-            responseBody: '{"ok":true}',
-            contentType: "application/json",
-          },
-        ],
-      });
-      expect(JSON.parse(sentMessages[1])).toEqual({
-        type: "set_network_error_simulation",
-        enabled: false,
-      });
-    });
-
-    test("clears stale network error simulation when the connection (re)establishes without an active simulation", function () {
-      const sentMessages: string[] = [];
-
-      (ctrlProxyClient as any).sendMessage = (message: string) => {
-        sentMessages.push(message);
-        return true;
-      };
-      (ctrlProxyClient as any).startSdkEventPolling = () => {
-        /* no-op */
-      };
-      (ctrlProxyClient as any).startScreenshotBackoff = () => {
-        /* no-op */
-      };
-
-      (ctrlProxyClient as any).onConnectionEstablished();
-
-      expect(sentMessages).toHaveLength(1);
-      expect(JSON.parse(sentMessages[0])).toEqual({
-        type: "set_network_error_simulation",
-        enabled: false,
-      });
-    });
-
-    test("does not sync network error simulation to stale runners without command support", function () {
-      const sentMessages: string[] = [];
-
-      (ctrlProxyClient as any).supportedCommands = new Set(["set_network_mock_rules"]);
-      (ctrlProxyClient as any).sendMessage = (message: string) => {
-        sentMessages.push(message);
-        return true;
-      };
-      (ctrlProxyClient as any).startSdkEventPolling = () => {
-        /* no-op */
-      };
-      (ctrlProxyClient as any).startScreenshotBackoff = () => {
-        /* no-op */
-      };
-
-      (ctrlProxyClient as any).onConnectionEstablished();
-
-      expect(sentMessages.map((message) => JSON.parse(message).type)).not.toContain(
-        "set_network_error_simulation",
+      const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+      const errorSpy = spyOn(logger, "error").mockImplementation(() => {});
+      const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer,
       );
+
+      try {
+        await testClient.ensureConnected();
+        const socket = (await waitForSocket(getSocket)) as CapturingWebSocket;
+        await waitForSocketOpen(socket);
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "connected",
+            supportedCommands: [
+              "get_sdk_capabilities",
+              "set_network_mock_rules",
+              "set_network_error_simulation",
+              "request_hierarchy",
+            ],
+          }),
+        );
+        await respondToSdkCapabilityQuery(socket, false);
+        const result = await testClient.setNetworkErrorSimulation({
+          enabled: false,
+          errorType: null,
+          limit: null,
+          expiresAtEpochMs: null,
+        });
+
+        const sentTypes = socket.sentMessages.map((message) => JSON.parse(message).type);
+        expect(result.success).toBe(false);
+        expect(sentTypes.filter((type) => type === "get_sdk_capabilities")).toHaveLength(1);
+        expect(sentTypes).not.toContain("set_network_mock_rules");
+        expect(sentTypes).not.toContain("set_network_error_simulation");
+        expect(warnSpy).not.toHaveBeenCalled();
+        expect(errorSpy).not.toHaveBeenCalled();
+      } finally {
+        warnSpy.mockRestore();
+        errorSpy.mockRestore();
+        await testClient.close();
+      }
     });
 
-    test("syncs active network error simulation when the connection (re)establishes", function () {
+    test("syncs SDK-backed state after capability detection", async function () {
+      serverConfig.setNetworkMockableEnabled(true);
       const state = NetworkState.getInstance();
       state.startSimulation("tlsFailure", 20, 4);
-      const sentMessages: string[] = [];
-
-      (ctrlProxyClient as any).sendMessage = (message: string) => {
-        sentMessages.push(message);
-        return true;
-      };
-      (ctrlProxyClient as any).startSdkEventPolling = () => {
-        /* no-op */
-      };
-      (ctrlProxyClient as any).startScreenshotBackoff = () => {
-        /* no-op */
-      };
-
-      (ctrlProxyClient as any).onConnectionEstablished();
-
-      expect(sentMessages).toHaveLength(1);
-      expect(JSON.parse(sentMessages[0])).toEqual({
-        type: "set_network_error_simulation",
-        enabled: true,
-        errorType: "tlsFailure",
-        limit: 4,
-        expiresAtEpochMs: expect.any(Number),
+      state.addMock({
+        host: "api\\.example\\.com",
+        path: "/v1/items",
+        method: "GET",
+        limit: 3,
+        remaining: 3,
+        statusCode: 201,
+        responseHeaders: { "X-Test": "yes" },
+        responseBody: '{"ok":true}',
+        contentType: "application/json",
       });
+      const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer,
+      );
+
+      try {
+        await testClient.ensureConnected();
+        const socket = (await waitForSocket(getSocket)) as CapturingWebSocket;
+        await waitForSocketOpen(socket);
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "connected",
+            supportedCommands: [
+              "get_sdk_capabilities",
+              "set_network_mock_rules",
+              "set_network_error_simulation",
+            ],
+          }),
+        );
+        await respondToSdkCapabilityQuery(socket, true, "com.example.sdk");
+
+        const sync = socket.sentMessages.map((message) => JSON.parse(message));
+        expect(sync).toContainEqual({
+          type: "set_network_error_simulation",
+          enabled: true,
+          errorType: "tlsFailure",
+          limit: 4,
+          expiresAtEpochMs: expect.any(Number),
+        });
+        expect(sync).toContainEqual({
+          type: "set_network_mock_rules",
+          rules: [
+            {
+              mockId: "mock-1",
+              host: "api\\.example\\.com",
+              path: "/v1/items",
+              method: "GET",
+              limit: 3,
+              remaining: 3,
+              statusCode: 201,
+              responseHeaders: { "X-Test": "yes" },
+              responseBody: '{"ok":true}',
+              contentType: "application/json",
+            },
+          ],
+        });
+      } finally {
+        await testClient.close();
+      }
+    });
+
+    test("syncs mock rules for legacy runners that advertise the command", async function () {
+      serverConfig.setNetworkMockableEnabled(true);
+      const state = NetworkState.getInstance();
+      state.addMock({
+        host: "api\\.example\\.com",
+        path: "/v1/items",
+        method: "GET",
+        limit: 1,
+        remaining: 1,
+        statusCode: 200,
+        responseHeaders: {},
+        responseBody: "{}",
+        contentType: "application/json",
+      });
+      state.startSimulation("timeout", 10, 2);
+      const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer,
+      );
+
+      try {
+        await testClient.ensureConnected();
+        const socket = (await waitForSocket(getSocket)) as CapturingWebSocket;
+        await waitForSocketOpen(socket);
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "connected",
+            supportedCommands: ["set_network_mock_rules", "set_network_error_simulation"],
+          }),
+        );
+
+        await waitForMessageType(socket, "set_network_mock_rules");
+        const errorSimulation = await waitForMessageType(socket, "set_network_error_simulation");
+        expect(errorSimulation).toMatchObject({
+          enabled: true,
+          errorType: "timeout",
+          limit: 2,
+        });
+      } finally {
+        await testClient.close();
+      }
+    });
+
+    test("retries an SDK capability query after a transient failure", async function () {
+      const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer,
+      );
+
+      try {
+        await testClient.ensureConnected();
+        const socket = (await waitForSocket(getSocket)) as CapturingWebSocket;
+        await waitForSocketOpen(socket);
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "connected",
+            supportedCommands: ["get_sdk_capabilities", "add_highlight"],
+          }),
+        );
+        const firstRequest = await waitForMessageType(socket, "get_sdk_capabilities");
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "sdk_capabilities_result",
+            requestId: firstRequest.requestId,
+            success: false,
+            available: false,
+            capabilities: [],
+            totalTimeMs: 1,
+          }),
+        );
+        await flushMicrotasks();
+
+        const capabilityPromise = (testClient as any).ensureSdkCapability("highlight");
+        await respondToSdkCapabilityQuery(socket, true, "com.example.sdk", 2);
+
+        expect(await capabilityPromise).toBe(true);
+      } finally {
+        await testClient.close();
+      }
+    });
+
+    test("rechecks an unavailable SDK after the negative capability cache expires", async function () {
+      const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer,
+      );
+
+      try {
+        await testClient.ensureConnected();
+        const socket = (await waitForSocket(getSocket)) as CapturingWebSocket;
+        await waitForSocketOpen(socket);
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "connected",
+            supportedCommands: ["get_sdk_capabilities"],
+          }),
+        );
+        await respondToSdkCapabilityQuery(socket, false);
+        fakeTimer.advanceTime(5000);
+
+        const capabilityPromise = (testClient as any).ensureSdkCapability("highlight");
+        await respondToSdkCapabilityQuery(socket, false, undefined, 2);
+
+        expect(await capabilityPromise).toBe(false);
+      } finally {
+        await testClient.close();
+      }
+    });
+
+    test("keeps generic hierarchy requests independent of SDK availability", async function () {
+      const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer,
+      );
+
+      try {
+        await testClient.ensureConnected();
+        const socket = (await waitForSocket(getSocket)) as CapturingWebSocket;
+        await waitForSocketOpen(socket);
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "connected",
+            supportedCommands: ["request_hierarchy"],
+          }),
+        );
+
+        const hierarchyPromise = testClient.requestHierarchySync(undefined, false, undefined, 1000);
+        const hierarchyRequest = await waitForMessageType(socket, "request_hierarchy_if_stale");
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "hierarchy_update",
+            requestId: hierarchyRequest.requestId,
+            data: {
+              updatedAt: 1,
+              packageName: "com.apple.springboard",
+              hierarchy: { text: "Home" },
+            },
+          }),
+        );
+
+        expect((await hierarchyPromise)?.hierarchy.packageName).toBe("com.apple.springboard");
+        expect(socket.sentMessages.map((message) => JSON.parse(message).type)).not.toContain(
+          "get_sdk_capabilities",
+        );
+      } finally {
+        await testClient.close();
+      }
     });
   });
 
@@ -435,9 +658,10 @@ describe("IOSCtrlProxyClient", function () {
         socket!.simulateMessage(
           JSON.stringify({
             type: "connected",
-            supportedCommands: ["set_network_error_simulation"],
+            supportedCommands: ["get_sdk_capabilities", "set_network_error_simulation"],
           }),
         );
+        await respondToSdkCapabilityQuery(socket!, true, "com.example.sdk");
 
         const resultPromise = testClient.setNetworkErrorSimulation({
           enabled: true,
@@ -456,7 +680,7 @@ describe("IOSCtrlProxyClient", function () {
           ) {
             break;
           }
-          await new Promise((resolve) => setImmediate(resolve));
+          await Promise.resolve();
         }
         const sentMessage = socket!.sentMessages
           .map((message) => JSON.parse(message))
@@ -523,8 +747,178 @@ describe("IOSCtrlProxyClient", function () {
 
         expect(result.success).toBe(false);
         expect(result.totalTimeMs).toBe(0);
-        expect(result.error).toContain("does not support set_network_error_simulation");
+        expect(result.error).toContain("does not expose the AutoMobile SDK capability");
         expect(commandPayloads(socket!)).toHaveLength(0);
+      } finally {
+        await testClient.close();
+      }
+    });
+
+    test("preserves explicit SDK operations on released runners without negotiation", async function () {
+      const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer,
+      );
+
+      try {
+        await testClient.ensureConnected();
+        const socket = (await waitForSocket(getSocket)) as CapturingWebSocket;
+        await waitForSocketOpen(socket);
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "connected",
+            supportedCommands: ["set_network_error_simulation"],
+          }),
+        );
+
+        const resultPromise = testClient.setNetworkErrorSimulation({ enabled: false });
+        let explicitRequest: Record<string, unknown> | undefined;
+        for (let attempt = 0; attempt < 10; attempt += 1) {
+          explicitRequest = socket.sentMessages
+            .map((message) => JSON.parse(message))
+            .find(
+              (message) =>
+                message.type === "set_network_error_simulation" && message.requestId !== undefined,
+            );
+          if (explicitRequest) {
+            break;
+          }
+          await Promise.resolve();
+        }
+        expect(explicitRequest).toBeDefined();
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "set_network_error_simulation_result",
+            requestId: explicitRequest?.requestId,
+            ok: true,
+            totalTimeMs: 2,
+          }),
+        );
+
+        expect((await resultPromise).success).toBe(true);
+      } finally {
+        await testClient.close();
+      }
+    });
+  });
+
+  describe("SDK capability transitions", function () {
+    test("refreshes capabilities and syncs simulation after launching an SDK-enabled app", async function () {
+      NetworkState.getInstance().startSimulation("timeout", 20, 2);
+      const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer,
+      );
+
+      try {
+        await testClient.ensureConnected();
+        const socket = (await waitForSocket(getSocket)) as CapturingWebSocket;
+        await waitForSocketOpen(socket);
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "connected",
+            supportedCommands: [
+              "get_sdk_capabilities",
+              "request_launch_app",
+              "set_network_error_simulation",
+            ],
+          }),
+        );
+        await respondToSdkCapabilityQuery(socket, false);
+
+        const launchPromise = testClient.requestLaunchApp("com.example.sdk");
+        await flushMicrotasks();
+        const launchRequest = socket.sentMessages
+          .map((message) => JSON.parse(message))
+          .find((payload) => payload.type === "request_launch_app");
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "launch_app_result",
+            requestId: launchRequest.requestId,
+            success: true,
+            totalTimeMs: 3,
+          }),
+        );
+        await flushMicrotasks();
+        await respondToSdkCapabilityQuery(socket, true, "com.example.sdk", 2);
+
+        expect((await launchPromise).success).toBe(true);
+        expect(socket.sentMessages.map((message) => JSON.parse(message))).toContainEqual({
+          type: "set_network_error_simulation",
+          enabled: true,
+          errorType: "timeout",
+          limit: 2,
+          expiresAtEpochMs: expect.any(Number),
+        });
+      } finally {
+        await testClient.close();
+      }
+    });
+
+    test("ignores a stale available result after the app transitions to SpringBoard", async function () {
+      const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer,
+      );
+
+      try {
+        await testClient.ensureConnected();
+        const socket = (await waitForSocket(getSocket)) as CapturingWebSocket;
+        await waitForSocketOpen(socket);
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "connected",
+            supportedCommands: [
+              "get_sdk_capabilities",
+              "request_press_home",
+              "set_network_error_simulation",
+            ],
+          }),
+        );
+        await flushMicrotasks();
+        const capabilityRequest = socket.sentMessages
+          .map((message) => JSON.parse(message))
+          .find((payload) => payload.type === "get_sdk_capabilities");
+
+        const homePromise = testClient.requestPressHome();
+        await flushMicrotasks();
+        const homeRequest = socket.sentMessages
+          .map((message) => JSON.parse(message))
+          .find((payload) => payload.type === "request_press_home");
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "press_home_result",
+            requestId: homeRequest.requestId,
+            success: true,
+            totalTimeMs: 2,
+          }),
+        );
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "sdk_capabilities_result",
+            requestId: capabilityRequest.requestId,
+            success: true,
+            available: true,
+            bundleId: "com.example.previous",
+            capabilities: ["network_error_simulation"],
+            totalTimeMs: 1,
+          }),
+        );
+
+        expect((await homePromise).success).toBe(true);
+        await flushMicrotasks();
+        expect(socket.sentMessages.map((message) => JSON.parse(message).type)).not.toContain(
+          "set_network_error_simulation",
+        );
       } finally {
         await testClient.close();
       }
@@ -1024,6 +1418,11 @@ describe("IOSCtrlProxyClient", function () {
       };
 
       try {
+        (testClient as any).sdkCapabilities = {
+          bundleId: "com.example.sdk",
+          capabilities: new Set(["highlight"]),
+        };
+        (testClient as any).sdkCapabilitiesKnown = true;
         const requestPromise = testClient.requestAddHighlight("highlight-1", shape, 2000);
         const socket = await waitForSocket(getSocket);
         expect(socket).not.toBeNull();
@@ -1085,13 +1484,20 @@ describe("IOSCtrlProxyClient", function () {
       };
 
       try {
+        (testClient as any).sdkCapabilities = {
+          bundleId: "com.example.sdk",
+          capabilities: new Set(["highlight"]),
+        };
+        (testClient as any).sdkCapabilitiesKnown = true;
         const requestPromise = testClient.requestAddHighlight("highlight-1", shape, 2000);
         const socket = await waitForSocket(getSocket);
         expect(socket).not.toBeNull();
         await waitForSocketOpen(socket);
         await waitForSentMessages(socket, 1);
 
-        const payload = commandPayloads(socket!)[0];
+        const payload = commandPayloads(socket!).find(
+          (message) => message.type === "add_highlight",
+        );
         socket!.simulateMessage(
           JSON.stringify({
             type: "highlight_response",

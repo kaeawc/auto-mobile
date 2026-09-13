@@ -2,6 +2,8 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import type { BootedDevice, ExecResult } from "../../models";
 import {
   SimulatorTccSqliteClient,
+  permissionForTccService,
+  tccServiceForPermission,
   type TccPermissionReader,
 } from "../../utils/ios-cmdline-tools/SimulatorTccSqliteClient";
 import type { HostCommandExecutor } from "../../utils/HostCommandExecutor";
@@ -86,22 +88,6 @@ export class SqliteTccPermissionReader extends SimulatorTccSqliteClient {
   }
 }
 
-const TCC_SERVICE_BY_PERMISSION = new Map<string, string>([
-  ["calendar", "kTCCServiceCalendar"],
-  ["camera", "kTCCServiceCamera"],
-  ["contacts", "kTCCServiceAddressBook"],
-  ["contacts-limited", "kTCCServiceAddressBook"],
-  ["location", "kTCCServiceLocationWhenInUse"],
-  ["location-always", "kTCCServiceLocationAlways"],
-  ["media-library", "kTCCServiceMediaLibrary"],
-  ["microphone", "kTCCServiceMicrophone"],
-  ["motion", "kTCCServiceMotion"],
-  ["photos", "kTCCServicePhotos"],
-  ["photos-add", "kTCCServicePhotosAdd"],
-  ["reminders", "kTCCServiceReminders"],
-  ["siri", "kTCCServiceSiri"],
-]);
-
 export function isIosSimulatorDevice(device: BootedDevice): boolean {
   return isIosSimulatorUdid(device.deviceId);
 }
@@ -110,21 +96,6 @@ export function normalizePermissions(permissions: string[] | undefined): string[
   return (permissions ?? [])
     .map((permission) => permission.trim())
     .filter((permission) => permission.length > 0);
-}
-
-function tccServiceForPermission(permission: string): string {
-  return permission.startsWith("kTCCService")
-    ? permission
-    : (TCC_SERVICE_BY_PERMISSION.get(permission) ?? permission);
-}
-
-function permissionForTccService(service: string): string {
-  for (const [permission, tccService] of TCC_SERVICE_BY_PERMISSION) {
-    if (tccService === service) {
-      return permission;
-    }
-  }
-  return service;
 }
 
 function stateFromAuthValue(

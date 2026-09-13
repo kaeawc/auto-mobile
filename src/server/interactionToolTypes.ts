@@ -37,7 +37,7 @@ export interface SystemTrayNotificationArgs {
 }
 
 export interface SystemTrayArgs {
-  action: "open" | "close" | "find" | "tap" | "dismiss" | "clearAll";
+  action: "open" | "close" | "list" | "find" | "tap" | "dismiss" | "clearAll";
   notification?: SystemTrayNotificationArgs;
   awaitTimeout?: number;
   platform?: Platform;

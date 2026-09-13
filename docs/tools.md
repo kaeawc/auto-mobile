@@ -249,9 +249,14 @@ On Android, compact observations fold soft-keyboard keys into a single
 ```
 
 `<ime>` is a marker, not a selector — use `sendKeys` for text input and semantic
-keys, or `keyboard` to open or close it. Genuinely non-keycap affordances that
-share the IME window (for example `android:id/input_method_nav_back`) stay
-individually actionable. `observe` with `project: "full"` or `raw: true` retains
+keys, or `keyboard` to open or close it. Everything the IME itself owns folds
+into that row, including its toolbar, emoji and clipboard affordances — Gboard
+gives those the same `key_pos_*` ids it gives letter keys
+(`key_pos_header_access_points_menu`, `key_pos_switch_to_symbol`), and many keys
+carry no resource-id at all, so nothing distinguishes them from a keycap. What
+stays individually actionable is framework chrome sharing the window: a control
+whose resource-id belongs to a DIFFERENT package than the IME, such as
+`android:id/input_method_nav_back`. `observe` with `project: "full"` or `raw: true` retains
 the individual keys. Keys are identified from the IME window identity a re-cut
 control proxy supplies, and otherwise from the `…:id/key_pos_*` keycap
 resource-id family, so the fold also applies on older proxy builds and on the

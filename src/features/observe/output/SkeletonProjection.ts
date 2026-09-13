@@ -817,6 +817,15 @@ function isImeMember(el: Element, ime: ImeWindow): boolean {
  * whose resource-id belongs to a DIFFERENT package than the IME is framework
  * chrome sharing the window — `android:id/input_method_nav_back` is the one the
  * dogfood loop named — and stays individually actionable (issue #6871).
+ *
+ * Package equality is deliberately the whole test for the IME's own nodes. The
+ * IME's toolbar/emoji/clipboard affordances are NOT separable from its keys:
+ * the captured Gboard fixtures give them the very same keycap id family
+ * (`key_pos_header_access_points_menu`, `key_pos_switch_to_symbol`,
+ * `key_pos_ime_action`), and the majority of keys carry no resource-id at all,
+ * so any narrower key test would re-expose the ~40-row flood #6871 exists to
+ * remove while still folding the toolbar. Driving the keyboard is `inputText` /
+ * `sendKeys`, never a tap inside its window, so one row is the honest shape.
  */
 function isImeKeycap(el: Element, ime: ImeWindow | undefined): boolean {
   if (!ime || !isImeMember(el, ime)) {

@@ -431,3 +431,34 @@ describe("fallback keycap corroboration (#6871)", () => {
     expect(result.keyboard).toEqual({ visible: true, package: "com.app" });
   });
 });
+
+describe("IME-owned affordances fold with the keys (#6871)", () => {
+  test("a same-package toolbar control inside the IME window is not kept out", () => {
+    const source = keyboardFloodObservation();
+    // Gboard's toolbar/emoji/clipboard affordances carry the SAME keycap id
+    // family as its letter keys, so they are not separable from a key — and the
+    // supported way to drive the keyboard is `inputText` / `sendKeys` anyway.
+    source.viewHierarchy!.hierarchy.node!.node![1].node!.push({
+      $: {
+        "resource-id": "com.google.android.inputmethod.latin:id/key_pos_header_access_points_menu",
+        "content-desc": "Toolbar",
+        clickable: true,
+        bounds: { left: 0, top: 590, right: 40, bottom: 600 },
+      },
+    });
+    source.elements = new DefaultObserveElementCollector().collect(
+      source.viewHierarchy!,
+      "android",
+    );
+    const ids = sanitizeObserveResult(source, {
+      dropElements: true,
+      project: "skeleton",
+    }).skeleton!.map((entry) => entry.elementId);
+    expect(ids).not.toContain(
+      "com.google.android.inputmethod.latin:id/key_pos_header_access_points_menu",
+    );
+    expect(ids).toContain("<ime>");
+    // Framework chrome from another package still stays individually actionable.
+    expect(ids).toContain("android:id/input_method_nav_back");
+  });
+});

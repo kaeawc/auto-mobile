@@ -11,6 +11,7 @@ import {
   registerObservationResources,
   resetSessionScreenshotResourceDependencies,
   resetScreenshotFileSystem,
+  resetLatestObservationBindings,
   setSessionScreenshotResourceDependencies,
   setScreenshotFileSystem,
 } from "../../src/server/observationResources";
@@ -70,9 +71,9 @@ function readTemplate(uri: string, context: ResourceReadContext = { sessionUuid 
   return template.handler(params);
 }
 
-function readLatestScreenshot() {
+function readLatestScreenshot(context?: ResourceReadContext) {
   registerObservationResources();
-  return ResourceRegistry.getResource(RESOURCE_URIS.LATEST_SCREENSHOT)!.handler();
+  return ResourceRegistry.getResource(RESOURCE_URIS.LATEST_SCREENSHOT)!.handler(context);
 }
 
 const imageFixtures = [
@@ -582,11 +583,12 @@ describe("unscoped latest observation resources", () => {
     resetScreenshotStateStore();
     resetScreenshotFileSystem();
     ScreenshotJobTracker.resetTimer();
+    resetLatestObservationBindings();
   });
 
-  function readLatestObservation() {
+  function readLatestObservation(context?: ResourceReadContext) {
     registerObservationResources();
-    return ResourceRegistry.getResource(RESOURCE_URIS.LATEST_OBSERVATION)!.handler();
+    return ResourceRegistry.getResource(RESOURCE_URIS.LATEST_OBSERVATION)!.handler(context);
   }
 
   async function cacheObservationFor(device: BootedDevice, marker: string): Promise<void> {
@@ -689,6 +691,115 @@ describe("unscoped latest observation resources", () => {
 
     expect(JSON.parse(observation.text!).viewHierarchy).toBe("device-a-hierarchy");
     expect(screenshot.mimeType).toBe("image/png");
+    expect(readPaths).toEqual(["/tmp/device-a.png"]);
+  });
+
+  test("serves the screenshot of the observation the hierarchy read already returned", async () => {
+    // Both devices have a landed screenshot; device B owns the latest observation.
+    await cacheObservationFor(deviceA, "device-a-hierarchy");
+    getScreenshotStateStore().update(deviceA.deviceId, "/tmp/device-a.png");
+    cacheTimer.advanceTime(1);
+    await cacheObservationFor(deviceB, "device-b-hierarchy");
+    getScreenshotStateStore().update(deviceB.deviceId, "/tmp/device-b.png");
+
+    const readPaths: string[] = [];
+    setScreenshotFileSystem({
+      stat: async () => ({ isFile: () => true }),
+      readFile: async (path) => {
+        readPaths.push(path);
+        return Buffer.from("89504e470d0a1a0a", "hex");
+      },
+    });
+
+    const context: ResourceReadContext = { sessionUuid: "client-1" };
+    const observation = await readLatestObservation(context);
+    expect(JSON.parse(observation.text!).viewHierarchy).toBe("device-b-hierarchy");
+
+    // Device A completes an observation in between the client's two reads, so a
+    // second global "most recent" lookup would now resolve to device A.
+    cacheTimer.advanceTime(1);
+    await cacheObservationFor(deviceA, "device-a-hierarchy-2");
+    getScreenshotStateStore().update(deviceA.deviceId, "/tmp/device-a-2.png");
+
+    const screenshot = await readLatestScreenshot(context);
+
+    expect(screenshot.mimeType).toBe("image/png");
+    expect(readPaths).toEqual(["/tmp/device-b.png"]);
+  });
+
+  test("keeps each client bound to the observation its own hierarchy read returned", async () => {
+    await cacheObservationFor(deviceA, "device-a-hierarchy");
+    getScreenshotStateStore().update(deviceA.deviceId, "/tmp/device-a.png");
+
+    const readPaths: string[] = [];
+    setScreenshotFileSystem({
+      stat: async () => ({ isFile: () => true }),
+      readFile: async (path) => {
+        readPaths.push(path);
+        return Buffer.from("89504e470d0a1a0a", "hex");
+      },
+    });
+
+    const clientOne: ResourceReadContext = { sessionUuid: "client-1" };
+    const clientTwo: ResourceReadContext = { sessionUuid: "client-2" };
+    await readLatestObservation(clientOne);
+
+    cacheTimer.advanceTime(1);
+    await cacheObservationFor(deviceB, "device-b-hierarchy");
+    getScreenshotStateStore().update(deviceB.deviceId, "/tmp/device-b.png");
+    await readLatestObservation(clientTwo);
+
+    await readLatestScreenshot(clientOne);
+    await readLatestScreenshot(clientTwo);
+
+    expect(readPaths).toEqual(["/tmp/device-a.png", "/tmp/device-b.png"]);
+  });
+
+  test("falls back to the globally latest observation when no hierarchy was read", async () => {
+    await cacheObservationFor(deviceA, "device-a-hierarchy");
+    getScreenshotStateStore().update(deviceA.deviceId, "/tmp/device-a.png");
+    cacheTimer.advanceTime(1);
+    await cacheObservationFor(deviceB, "device-b-hierarchy");
+    getScreenshotStateStore().update(deviceB.deviceId, "/tmp/device-b.png");
+
+    const readPaths: string[] = [];
+    setScreenshotFileSystem({
+      stat: async () => ({ isFile: () => true }),
+      readFile: async (path) => {
+        readPaths.push(path);
+        return Buffer.from("89504e470d0a1a0a", "hex");
+      },
+    });
+
+    await readLatestScreenshot({ sessionUuid: "client-1" });
+
+    expect(readPaths).toEqual(["/tmp/device-b.png"]);
+  });
+
+  test("drops a binding whose device no longer has a cached observation", async () => {
+    await cacheObservationFor(deviceB, "device-b-hierarchy");
+    getScreenshotStateStore().update(deviceB.deviceId, "/tmp/device-b.png");
+
+    const readPaths: string[] = [];
+    setScreenshotFileSystem({
+      stat: async () => ({ isFile: () => true }),
+      readFile: async (path) => {
+        readPaths.push(path);
+        return Buffer.from("89504e470d0a1a0a", "hex");
+      },
+    });
+
+    const context: ResourceReadContext = { sessionUuid: "client-1" };
+    await readLatestObservation(context);
+
+    // Device B's cache is invalidated, and device A becomes the latest observation.
+    cacheStore.clear(deviceB.deviceId);
+    cacheTimer.advanceTime(1);
+    await cacheObservationFor(deviceA, "device-a-hierarchy");
+    getScreenshotStateStore().update(deviceA.deviceId, "/tmp/device-a.png");
+
+    await readLatestScreenshot(context);
+
     expect(readPaths).toEqual(["/tmp/device-a.png"]);
   });
 });

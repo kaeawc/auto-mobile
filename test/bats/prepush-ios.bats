@@ -5,6 +5,7 @@ setup() {
   mock_bin="${BATS_TEST_TMPDIR}/bin"
   command_log="${BATS_TEST_TMPDIR}/commands.log"
   mkdir -p "${mock_bin}"
+  export PREPUSH_IOS_MOCK_REPO_ROOT="${repo_root}"
 
   for tool in swiftformat swiftlint swift git; do
     cat > "${mock_bin}/${tool}" <<'MOCK'
@@ -17,11 +18,42 @@ if [[ ${PREPUSH_IOS_FAIL_TOOL:-} == $(basename "$0") ]]; then
   exit "${PREPUSH_IOS_FAIL_CODE:-1}"
 fi
 if [[ $(basename "$0") == git ]]; then
-  echo "ios/XCTestRunner/Sources/XCTestRunnerTests/AutoMobileVersionTests.swift"
+  if [[ $* == *"--show-toplevel"* ]]; then
+    echo "${PREPUSH_IOS_MOCK_REPO_ROOT}"
+  elif [[ $* == *"rev-parse --verify"* ]]; then
+    :
+  else
+    echo "ios/XCTestRunner/Sources/XCTestRunnerTests/AutoMobileVersionTests.swift"
+  fi
 fi
 MOCK
     chmod +x "${mock_bin}/${tool}"
   done
+}
+
+create_real_git_fixture() {
+  fixture_root="${BATS_TEST_TMPDIR}/fixture-${BATS_TEST_NUMBER}"
+  fixture_bin="${BATS_TEST_TMPDIR}/fixture-bin-${BATS_TEST_NUMBER}"
+  mkdir -p "${fixture_root}/scripts/swiftformat" "${fixture_root}/ios/XCTestRunner" "${fixture_root}/ios/Nested" "${fixture_bin}"
+  cp "${repo_root}/scripts/prepush-ios.sh" "${fixture_root}/scripts/prepush-ios.sh"
+  cp "${repo_root}/scripts/swiftformat/swiftformat_version.sh" "${fixture_root}/scripts/swiftformat/swiftformat_version.sh"
+  for tool in swiftformat swiftlint swift; do
+    cp "${mock_bin}/${tool}" "${fixture_bin}/${tool}"
+  done
+
+  git -C "${fixture_root}" init -q
+  git -C "${fixture_root}" config user.email test@example.com
+  git -C "${fixture_root}" config user.name Bats
+  printf '%s\n' 'struct Foo {}' > "${fixture_root}/ios/Foo.swift"
+  git -C "${fixture_root}" add .
+  git -C "${fixture_root}" commit -qm base
+  fixture_base_ref="$(git -C "${fixture_root}" rev-parse HEAD)"
+}
+
+commit_changed_swift_file() {
+  printf '%s\n' 'struct Bar {}' > "${fixture_root}/ios/Nested/Bar.swift"
+  git -C "${fixture_root}" add ios/Nested/Bar.swift
+  git -C "${fixture_root}" commit -qm changed
 }
 
 @test "prints usage without invoking tools" {
@@ -57,4 +89,48 @@ MOCK
   [ "$status" -eq 0 ]
   [[ "$output" == *"swiftlint lint"* ]]
   [[ "$output" != *"swift build"* ]]
+}
+
+@test "finds a changed Swift file when invoked from a nested directory" {
+  create_real_git_fixture
+  commit_changed_swift_file
+
+  run bash -c 'cd "$1" && env PATH="$2:$PATH" PREPUSH_IOS_BASE_REF="$3" PREPUSH_IOS_COMMAND_LOG="$4" bash "$5/scripts/prepush-ios.sh"' \
+    bash "${fixture_root}/ios/Nested" "${fixture_bin}" "${fixture_base_ref}" "${command_log}" "${fixture_root}"
+
+  [ "$status" -eq 0 ]
+  run cat "${command_log}"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"swiftformat --lint ${fixture_root}/ios/Nested/Bar.swift"* ]]
+  [[ "$output" == *"swiftlint lint --config ${fixture_root}/.swiftlint.yml --path ${fixture_root}/ios/Nested/Bar.swift"* ]]
+  [[ "$output" != *"No changed Swift files"* ]]
+}
+
+@test "exits non-zero when the base ref does not exist" {
+  create_real_git_fixture
+
+  run env PATH="${fixture_bin}:${PATH}" PREPUSH_IOS_BASE_REF=refs/does/not/exist-at-all-xyz \
+    PREPUSH_IOS_COMMAND_LOG="${command_log}" bash "${fixture_root}/scripts/prepush-ios.sh"
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"base ref"* ]]
+  [[ "$output" == *"refs/does/not/exist-at-all-xyz"* ]]
+}
+
+@test "exits non-zero when not inside a git checkout" {
+  outside_root="$(mktemp -d /tmp/prepush-ios-not-git.XXXXXX)"
+  outside_bin="${BATS_TEST_TMPDIR}/outside-bin-${BATS_TEST_NUMBER}"
+  mkdir -p "${outside_root}/scripts/swiftformat" "${outside_root}/ios/XCTestRunner"
+  mkdir -p "${outside_bin}"
+  cp "${repo_root}/scripts/prepush-ios.sh" "${outside_root}/scripts/prepush-ios.sh"
+  cp "${repo_root}/scripts/swiftformat/swiftformat_version.sh" "${outside_root}/scripts/swiftformat/swiftformat_version.sh"
+  for tool in swiftformat swiftlint swift; do
+    cp "${mock_bin}/${tool}" "${outside_bin}/${tool}"
+  done
+
+  run env PATH="${outside_bin}:${PATH}" PREPUSH_IOS_COMMAND_LOG="${command_log}" \
+    bash "${outside_root}/scripts/prepush-ios.sh"
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"not inside a git checkout"* ]]
 }

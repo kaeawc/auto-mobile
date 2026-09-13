@@ -110,6 +110,22 @@ describe("actionable interaction schema errors", () => {
       expect(message).toContain('did you mean the top-level "preTapStability" parameter?');
     });
 
+    // PR #6882 review: the held-back conflict clause was dropped whenever ANY
+    // other field rendered an error, even an unrelated one — the caller fixed
+    // `duration`, retried, and only then learned the selector was still invalid.
+    // A conflict is explained only by another issue from the SAME union.
+    test("an unrelated field error does not hide the selector conflict", () => {
+      const input = { selector: { text: "a", elementId: "b" }, duration: "bad" };
+      const result = tapOnSchema.safeParse(input);
+      expect(result.success).toBe(false);
+      if (result.success) {
+        throw new Error("expected invalid input");
+      }
+      const message = formatToolParamError("tapOn", result.error, input, tapOnSchema);
+      expect(message).toContain("duration expected number, received string");
+      expect(message).toContain("provide exactly one");
+    });
+
     test("without the schema no top-level hint is invented", () => {
       const input = { selector: { elementId: "id", index: 0 } };
       const result = tapOnSchema.safeParse(input);

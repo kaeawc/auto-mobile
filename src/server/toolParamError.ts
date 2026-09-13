@@ -450,12 +450,20 @@ export function formatToolParamError(
     (hintKeys ? topLevelHint(issue.path, hintKeys, siblingKeys) : "");
 
   // Union branches whose unrecognized-key sets did not intersect: every key is
-  // accepted by some branch, so none is unknown. Held back and only emitted when
-  // nothing else explains the failure (#6867).
-  const conflicts: Array<{ issue: UnrecognizedKeysIssue; keys: string[] }> = [];
+  // accepted by some branch, so none is unknown. Held back, because a sibling
+  // issue from the SAME union usually says the same thing in better words —
+  // but only that union's own issues can explain it. An unrelated field's error
+  // (a bad `duration` beside a conflicting `selector`) leaves the conflict
+  // unexplained, and dropping it there hid a still-invalid selector until the
+  // caller retried (#6867, PR review).
+  const conflicts: Array<{ issue: UnrecognizedKeysIssue; keys: string[]; unionId: number }> = [];
+  const explainedUnions = new Set<number>();
   const render = (entry: FlattenedIssue): string | undefined => {
     const { issue } = entry;
     if (!entry.union || !isUnrecognizedKeys(issue)) {
+      if (entry.union) {
+        explainedUnions.add(entry.union.unionId);
+      }
       return renderer(issue);
     }
     const group = unrecognizedGroups.get(coverageKey(entry.union.unionId, issue.path));
@@ -463,9 +471,10 @@ export function formatToolParamError(
       return renderer(issue);
     }
     if (group.intersection.length === 0) {
-      conflicts.push({ issue, keys: group.reported });
+      conflicts.push({ issue, keys: group.reported, unionId: entry.union.unionId });
       return undefined;
     }
+    explainedUnions.add(entry.union.unionId);
     const keys = group.intersection;
     return renderer(withMergedKeys(issue, keys, unrecognizedKeysMessage(keys)), keys);
   };
@@ -473,10 +482,15 @@ export function formatToolParamError(
   // Dedupe formatted messages: union expansion repeats the same real issue once
   // per branch that carries the field.
   const rendered = selectedIssues.map(render).filter((line) => line !== undefined);
-  const fallback = conflicts.map(({ issue, keys }) =>
-    renderer(withMergedKeys(issue, keys, mutuallyExclusiveMessage(keys)), keys),
-  );
-  const issues = [...new Set(rendered.length > 0 ? rendered : fallback)];
+  // A union is "explained" only once one of its own issues rendered a line, so
+  // when nothing rendered at all every conflict is unexplained and still emitted
+  // — the pre-existing fallback, now reached by the same rule.
+  const fallback = conflicts
+    .filter(({ unionId }) => !explainedUnions.has(unionId))
+    .map(({ issue, keys }) =>
+      renderer(withMergedKeys(issue, keys, mutuallyExclusiveMessage(keys)), keys),
+    );
+  const issues = [...new Set([...rendered, ...fallback])];
 
   const hints: string[] = [];
   if (toolName === "swipeOn" || toolName === "tapOn") {

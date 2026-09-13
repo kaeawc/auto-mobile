@@ -14,6 +14,9 @@ printf '%s %s\n' "$(basename "$0")" "$*" >> "${PREPUSH_IOS_COMMAND_LOG}"
 if [[ $(basename "$0") == swiftformat && ${1:-} == --version ]]; then
   echo "0.54.6"
 fi
+if [[ $(basename "$0") == swiftlint && ${1:-} == version ]]; then
+  echo "0.57.0"
+fi
 if [[ ${PREPUSH_IOS_FAIL_TOOL:-} == $(basename "$0") ]]; then
   exit "${PREPUSH_IOS_FAIL_CODE:-1}"
 fi
@@ -22,11 +25,20 @@ if [[ $(basename "$0") == git ]]; then
     echo "${PREPUSH_IOS_MOCK_REPO_ROOT}"
   elif [[ $* == *"rev-parse --verify"* ]]; then
     :
+  elif [[ $* == *"--name-only -z"* ]]; then
+    printf '%s\0' "ios/XCTestRunner/Sources/XCTestRunnerTests/AutoMobileVersionTests.swift"
   else
     echo "ios/XCTestRunner/Sources/XCTestRunnerTests/AutoMobileVersionTests.swift"
   fi
 fi
-if [[ $(basename "$0") == swift && ${1:-} == test ]]; then
+if [[ $(basename "$0") == swift && ${1:-} == test && ${2:-} == list ]]; then
+  if [[ ${PREPUSH_IOS_SWIFT_TEST_LIST_DENYLIST_ONLY:-} == 1 ]]; then
+    echo "XCTestRunnerTests.RemindersAddPlanTests/testExample"
+  else
+    echo "XCTestRunnerTests.AutoMobileVersionTests/testExample"
+    echo "XCTestRunnerTests.NewFeatureTests/testExample"
+  fi
+elif [[ $(basename "$0") == swift && ${1:-} == test ]]; then
   if [[ ${PREPUSH_IOS_SWIFT_TEST_ZERO:-} == 1 ]]; then
     echo "Executed 0 tests, with 0 failures (0 unexpected)"
   else
@@ -41,9 +53,10 @@ MOCK
 create_real_git_fixture() {
   fixture_root="${BATS_TEST_TMPDIR}/fixture-${BATS_TEST_NUMBER}"
   fixture_bin="${BATS_TEST_TMPDIR}/fixture-bin-${BATS_TEST_NUMBER}"
-  mkdir -p "${fixture_root}/scripts/swiftformat" "${fixture_root}/scripts/ios" "${fixture_root}/ios/XCTestRunner" "${fixture_root}/ios/Nested" "${fixture_bin}"
+  mkdir -p "${fixture_root}/scripts/swiftformat" "${fixture_root}/scripts/swiftlint" "${fixture_root}/scripts/ios" "${fixture_root}/ios/XCTestRunner" "${fixture_root}/ios/Nested" "${fixture_bin}"
   cp "${repo_root}/scripts/prepush-ios.sh" "${fixture_root}/scripts/prepush-ios.sh"
   cp "${repo_root}/scripts/swiftformat/swiftformat_version.sh" "${fixture_root}/scripts/swiftformat/swiftformat_version.sh"
+  cp "${repo_root}/scripts/swiftlint/swiftlint_version.sh" "${fixture_root}/scripts/swiftlint/swiftlint_version.sh"
   cp "${repo_root}/scripts/ios/swift_test_counts.sh" "${fixture_root}/scripts/ios/swift_test_counts.sh"
   for tool in swiftformat swiftlint swift; do
     cp "${mock_bin}/${tool}" "${fixture_bin}/${tool}"
@@ -90,6 +103,7 @@ commit_changed_swift_file() {
 @test "returns the first tool failure without running later checks" {
   run env PATH="${mock_bin}:${PATH}" PREPUSH_IOS_COMMAND_LOG="${command_log}" \
     PREPUSH_IOS_FAIL_TOOL=swiftlint PREPUSH_IOS_FAIL_CODE=17 \
+    PREPUSH_IOS_SKIP_SWIFTLINT_VERSION_CHECK=1 \
     bash "${repo_root}/scripts/prepush-ios.sh"
 
   [ "$status" -eq 17 ]
@@ -121,6 +135,41 @@ commit_changed_swift_file() {
   [[ "$output" == *"swiftformat --lint ${fixture_root}/ios/Nested/Bar.swift"* ]]
   [[ "$output" == *"swiftlint lint --config ${fixture_root}/.swiftlint.yml --path ${fixture_root}/ios/Nested/Bar.swift"* ]]
   [[ "$output" != *"No changed Swift files"* ]]
+}
+
+@test "finds a changed Swift file with a non-ASCII filename" {
+  create_real_git_fixture
+  printf '%s\n' 'struct Cafe {}' > "${fixture_root}/ios/Nested/Café.swift"
+  git -C "${fixture_root}" add "ios/Nested/Café.swift"
+  git -C "${fixture_root}" commit -qm changed-non-ascii
+
+  run env PATH="${fixture_bin}:$PATH" PREPUSH_IOS_BASE_REF="${fixture_base_ref}" \
+    PREPUSH_IOS_COMMAND_LOG="${command_log}" bash "${fixture_root}/scripts/prepush-ios.sh"
+
+  [ "$status" -eq 0 ]
+  run cat "${command_log}"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"swiftformat --lint ${fixture_root}/ios/Nested/Café.swift"* ]]
+}
+
+@test "derives the XCTestRunner filter from swift test list" {
+  run env PATH="${mock_bin}:$PATH" PREPUSH_IOS_COMMAND_LOG="${command_log}" \
+    bash "${repo_root}/scripts/prepush-ios.sh"
+
+  [ "$status" -eq 0 ]
+  run grep 'swift test -Xswiftc -warnings-as-errors --filter' "${command_log}"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"NewFeatureTests"* ]]
+}
+
+@test "fails when swift test list has only simulator-dependent classes" {
+  run env PATH="${mock_bin}:$PATH" PREPUSH_IOS_COMMAND_LOG="${command_log}" \
+    PREPUSH_IOS_SWIFT_TEST_LIST_DENYLIST_ONLY=1 bash "${repo_root}/scripts/prepush-ios.sh"
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"no simulator-free XCTestRunnerTests classes"* ]]
+  run grep 'swift test -Xswiftc -warnings-as-errors --filter' "${command_log}"
+  [ "$status" -ne 0 ]
 }
 
 @test "exits non-zero when the base ref does not exist" {

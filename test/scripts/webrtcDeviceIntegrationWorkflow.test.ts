@@ -98,11 +98,17 @@ describe("#4308 device WebRTC integration workflow", () => {
       "detect-changes",
       "build-android-control-proxy",
     ]);
-    expect(pullRequest.jobs?.["ios-device-webrtc"]?.needs).toBe("detect-changes");
+    expect(pullRequest.jobs?.["ios-device-webrtc"]?.needs).toEqual([
+      "detect-changes",
+      "fast-validation",
+    ]);
+    const pullRequestConditions = {
+      "android-device-webrtc": "needs.detect-changes.outputs.webrtc_should_run == 'true'",
+      "ios-device-webrtc":
+        "needs.detect-changes.outputs.webrtc_should_run == 'true' && needs.fast-validation.result == 'success'",
+    } as const;
     for (const jobId of DEVICE_JOB_IDS) {
-      expect(pullRequest.jobs?.[jobId]?.if).toBe(
-        "needs.detect-changes.outputs.webrtc_should_run == 'true'",
-      );
+      expect(pullRequest.jobs?.[jobId]?.if).toBe(pullRequestConditions[jobId]);
       expect(merge.jobs?.[jobId]?.needs).toBe(
         jobId === "android-device-webrtc" ? "build-android-control-proxy" : undefined,
       );

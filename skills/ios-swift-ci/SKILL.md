@@ -23,7 +23,7 @@ WHEP, or `XCTestRunner Simulator Tests` failures.
    used serially. Never share a simulator between parallel jobs/runners.
 6. Recognize this week's known simulator signatures: five-minute CtrlProxy UI
    test timeout; CtrlProxy surviving forced teardown; video recording `simctl
-   list` state timeout; hierarchy UI test over 90 seconds. Gather new evidence
+list` state timeout; hierarchy UI test over 90 seconds. Gather new evidence
    before treating any of them as the same bug.
 7. For a Swift change, run `scripts/prepush-ios.sh`. It checks the pinned
    SwiftFormat 0.54.6, SwiftLint's error rules, `swift build` in XCTestRunner,

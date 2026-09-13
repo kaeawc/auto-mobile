@@ -264,7 +264,8 @@ function sameAndroidSpecification(
       ([key, value]) =>
         key === "memoryMb" ||
         value === undefined ||
-        config?.hardware?.[key as keyof AndroidAvdConfiguration] === value,
+        ((key !== "gpuMode" || config?.gpuEnabled === true) &&
+          config?.hardware?.[key as keyof AndroidAvdConfiguration] === value),
     )
   );
 }

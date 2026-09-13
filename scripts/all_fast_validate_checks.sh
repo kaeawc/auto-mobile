@@ -34,6 +34,7 @@ add_check() {
 }
 
 add_check "ktfmt" "ONLY_TOUCHED_FILES=${KTFMT_ONLY_TOUCHED_FILES:-true} \"$PROJECT_ROOT/scripts/ktfmt/validate_ktfmt.sh\"" "format,kotlin" "Validate Kotlin formatting"
+add_check "node-format" "bun --cwd \"$PROJECT_ROOT\" run format:check" "format,typescript" "Check Node TypeScript formatting"
 add_check "yaml" "bun \"$PROJECT_ROOT/scripts/validate-yaml.ts\"" "config,yaml" "Validate test plan YAML files"
 add_check "schema-copy-drift" "bun \"$PROJECT_ROOT/scripts/check-schema-copy-drift.ts\"" "config,schema" "Detect drift between the canonical and Android copies of test-plan.schema.json"
 add_check "bun-version-coherence" "bun \"$PROJECT_ROOT/scripts/check-bun-version-coherence.ts\"" "config,dependencies" "Keep Bun versions aligned across package, workflows, Docker, and local development"

@@ -109,6 +109,21 @@ bun test --bail        # Stop on first failure (no cache)
 bun test <file>        # Run specific test file (no cache)
 ```
 
+## Node Pre-push Gate
+
+Before pushing Node/TypeScript changes, run `bash scripts/prepush-node.sh`.
+Use `bash scripts/prepush-node.sh --changed` for the faster affected-unit-test
+loop; formatting, typecheck, and lint intentionally remain full repository
+gates. `oxlint`'s actual exit code is authoritative: Error-level rules such as
+`eqeqeq` are enforced directly by oxlint, not its warning-only ratchet, and
+diffing warnings does not satisfy the gate. Before asking for a merge, fetch
+`origin/main`, confirm the branch contains it, and re-run local gates.
+
+Known Node-lane flakes this week: a 100ms unit timing overage on a loaded Linux
+runner may be rerun rather than “fixed” when its isolated recheck is clean. Do
+not treat repeated cross-platform failures as a flake; refresh against main and
+identify the shared failure first.
+
 ## Toolchain: TypeScript 7 (tsgo) + oxlint + oxfmt
 
 Linting/type-checking/formatting run on the Oxc/TypeScript-7 toolchain, not

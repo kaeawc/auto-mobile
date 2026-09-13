@@ -812,9 +812,25 @@ export class InputText extends BaseVisualChange {
    * first, so when the keyboard is already closed it short-circuits without a Back.
    */
   private async dismissKeyboardEpilogue(signal?: AbortSignal): Promise<KeyboardDismissalOutcome> {
-    const keyboardResult = await this.keyboardCloserFactory(this.device, this.adbFactory).close(
-      signal,
-    );
+    let keyboardResult: KeyboardResult;
+    try {
+      keyboardResult = await this.keyboardCloserFactory(this.device, this.adbFactory).close(signal);
+    } catch (error) {
+      // A closer that THROWS (hierarchy read blew up, KEYCODE_BACK command
+      // failed) is the same outcome as one reporting `success:false`: the text
+      // write has already landed, so this stays a warning rather than escaping
+      // into execute()'s outer catch and becoming a `success:false` a caller
+      // might answer by re-typing text that is already on screen (issue #6868).
+      // Cancellation is not an epilogue failure — assertInputNotAborted rethrows
+      // the abort reason (e.g. DeviceLostError) before the warning shape wins.
+      assertInputNotAborted(signal);
+      const message = errorMessage(error);
+      logger.warn(`[InputText] keyboard dismissal threw: ${message}`, error);
+      return withEpilogueWarning<KeyboardDismissalOutcome>(
+        { keyboardDismissed: false },
+        `keyboard dismissal failed: ${message}`,
+      );
+    }
     assertInputNotAborted(signal);
     if (keyboardResult.success) {
       return { keyboardDismissed: true };

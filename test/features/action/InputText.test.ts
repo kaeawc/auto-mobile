@@ -1232,6 +1232,59 @@ describe("InputText", () => {
     expect(result.warnings).toEqual(["keyboard dismissal failed: Keyboard state unavailable"]);
   });
 
+  // A REJECTING closer is the same outcome as a closer that reports
+  // `success:false`: the text already landed, so a dismissal epilogue that throws
+  // (hierarchy read blew up, KEYCODE_BACK failed) must degrade to the warning
+  // shape too, not escape into `execute()`'s outer catch and hand the caller a
+  // `success:false` they might answer by re-typing text that is already there.
+  test("a11y warns instead of failing when the keyboard closer rejects", async () => {
+    const factory = new FakeAdbClientFactory();
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory, () => ({
+      close: async () => {
+        throw new Error("KEYCODE_BACK failed");
+      },
+    }));
+
+    stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
+
+    const result = await testInputText(inputText).executeAndroidTextInput("hello", undefined, true);
+
+    expect(result.success).toBe(true);
+    expect(result.error).toBeUndefined();
+    expect(result.keyboardDismissed).toBe(false);
+    expect(result.warnings).toEqual(["keyboard dismissal failed: KEYCODE_BACK failed"]);
+  });
+
+  // Cancellation is NOT a best-effort epilogue failure: a closer that rejects
+  // because the device went away must still cancel the call.
+  test("a rejecting keyboard closer still propagates cancellation", async () => {
+    const controller = new AbortController();
+    const deviceLoss = new DeviceLostError(
+      androidDevice.deviceId,
+      `device-disconnected:${androidDevice.deviceId}`,
+    );
+    const factory = new FakeAdbClientFactory();
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory, () => ({
+      close: async () => {
+        controller.abort(deviceLoss);
+        throw new Error("closer aborted");
+      },
+    }));
+
+    stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
+
+    await expect(
+      testInputText(inputText).executeAndroidTextInput(
+        "hello",
+        undefined,
+        true,
+        "a11y",
+        undefined,
+        controller.signal,
+      ),
+    ).rejects.toBe(deviceLoss);
+  });
+
   // A failed TEXT WRITE is still a real error — `isError` stays reserved for it.
   test("a failed setText stays a failure even with dismissKeyboard requested", async () => {
     const factory = new FakeAdbClientFactory();

@@ -224,7 +224,7 @@ test("detached ADB-reset ownership remains quarantined when emulator shutdown is
   }
 });
 
-test("ordinary session recovery preserves quarantined ownership after unconfirmed shutdown", async () => {
+test("ordinary session recovery retries after its deferred shutdown cooldown", async () => {
   const { timer, sessions, manager, pool, captured } = await setup();
   try {
     const recovery = pool.recoverSessionBoundAndroidDeviceAfterLoss(
@@ -240,6 +240,84 @@ test("ordinary session recovery preserves quarantined ownership after unconfirme
     expect(sessions.getSession("session")?.assignedDevice).toBe(original.deviceId);
     expect(pool.getDevice(original.deviceId)).toBe(captured);
     expect(pool.isSessionRecoveryInFlight("session")).toBe(true);
+
+    manager.bootedDevices = [];
+    expect(
+      await pool.recoverSessionBoundAndroidDeviceAfterLoss(original.deviceId, undefined, captured),
+    ).toBe("deferred");
+    expect(manager.startedDevices).toHaveLength(0);
+
+    timer.advanceTime(30_000);
+    expect(
+      await pool.recoverSessionBoundAndroidDeviceAfterLoss(original.deviceId, undefined, captured),
+    ).toBe("recovered");
+    expect(manager.startedDevices).toHaveLength(1);
+    expect(pool.isSessionRecoveryInFlight("session")).toBe(false);
+  } finally {
+    sessions.stopCleanupTimer();
+  }
+});
+
+test("ordinary session recovery releases after its retry also has unconfirmed shutdown", async () => {
+  const { timer, sessions, manager, pool, captured } = await setup();
+  try {
+    const firstRecovery = pool.recoverSessionBoundAndroidDeviceAfterLoss(
+      original.deviceId,
+      undefined,
+      captured,
+    );
+    await manager.killAccepted.promise;
+    await flush();
+    timer.advanceTime(30_000);
+    expect(await firstRecovery).toBe("deferred");
+
+    timer.advanceTime(30_000);
+    const retry = pool.recoverSessionBoundAndroidDeviceAfterLoss(
+      original.deviceId,
+      undefined,
+      captured,
+    );
+    await flush();
+    timer.advanceTime(30_000);
+    expect(await retry).toBe("released");
+    expect(sessions.getSession("session")).toBeNull();
+    expect(pool.isSessionRecoveryInFlight("session")).toBe(false);
+  } finally {
+    sessions.stopCleanupTimer();
+  }
+});
+
+test("deferred ordinary recovery keeps its AVD unavailable to a new startup lease", async () => {
+  const { timer, sessions, manager, pool, captured } = await setup();
+  try {
+    const recovery = pool.recoverSessionBoundAndroidDeviceAfterLoss(
+      original.deviceId,
+      undefined,
+      captured,
+    );
+    await manager.killAccepted.promise;
+    await flush();
+    timer.advanceTime(30_000);
+    expect(await recovery).toBe("deferred");
+
+    let releaseLease: (() => Promise<void>) | undefined;
+    const lease = pool.reserveAndroidStartupLease(original.name, true).then((release) => {
+      releaseLease = release;
+    });
+    await flush();
+    expect(releaseLease).toBeUndefined();
+
+    manager.bootedDevices = [];
+    timer.advanceTime(30_000);
+    expect(
+      await pool.recoverSessionBoundAndroidDeviceAfterLoss(original.deviceId, undefined, captured),
+    ).toBe("recovered");
+    expect(releaseLease).toBeUndefined();
+
+    timer.advanceTime(30_000);
+    await lease;
+    expect(releaseLease).toBeDefined();
+    await releaseLease?.();
   } finally {
     sessions.stopCleanupTimer();
   }

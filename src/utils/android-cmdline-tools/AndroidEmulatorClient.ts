@@ -577,6 +577,14 @@ export class AndroidEmulatorClient implements AndroidEmulator {
    * reservation once the process has spawned.
    */
   private static readonly inFlightAvdLaunches = new Set<string>();
+  /**
+   * AVD name of every launch child this process spawned WITHOUT a console-port
+   * reservation. A reservation-less spawn happens whenever the pre-launch
+   * device snapshot came back incomplete, and it leaves the AVD with no serial
+   * to correlate against the scan, so the live child itself is the only
+   * evidence that this AVD is already coming up (#6407).
+   */
+  private static readonly unreservedLaunchAvdNames = new Map<ChildProcess, string>();
   private static terminalReservationGeneration = 0;
   private static hostPortAvailabilityCheckerForTesting: HostPortAvailabilityChecker | undefined;
   private readonly launchErrors = new WeakMap<ChildProcess, ActionableError>();
@@ -634,6 +642,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     AndroidEmulatorClient.pendingLaunchDeviceIds.clear();
     AndroidEmulatorClient.terminalReservedDeviceIds.clear();
     AndroidEmulatorClient.inFlightAvdLaunches.clear();
+    AndroidEmulatorClient.unreservedLaunchAvdNames.clear();
     AndroidEmulatorClient.terminalReservationGeneration = 0;
   }
 
@@ -1687,6 +1696,12 @@ export class AndroidEmulatorClient implements AndroidEmulator {
         );
         return true;
       }
+      if (this.hasLiveUnreservedLaunch(avdName)) {
+        logger.info(
+          `AVD '${avdName}' is already starting (this process holds a live launch for it that adb has not named yet) - waiting for it to be ready`,
+        );
+        return true;
+      }
       if (await this.isAvdStarting(avdName)) {
         logger.info(`AVD '${avdName}' is already starting - waiting for it to be ready`);
         return true;
@@ -1845,6 +1860,8 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       perf.endOperation("spawnEmulator");
       if (reservedEmulator) {
         this.recordReservedEmulatorDeviceId(child, reservedEmulator);
+      } else {
+        AndroidEmulatorClient.unreservedLaunchAvdNames.set(child, avdName);
       }
       onSpawn?.(child);
 
@@ -2265,7 +2282,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
 
       child.on("exit", (code, signal) => {
         this.timer.clearTimeout(startupTimeout);
-        this.releaseReservedEmulatorDeviceId(child);
+        this.releaseLaunchChild(child);
         childTerminationObserved = true;
         exitCode = code;
         exitSignal = signal;
@@ -2288,7 +2305,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
 
       child.on("close", (code, signal) => {
         this.timer.clearTimeout(startupTimeout);
-        this.releaseReservedEmulatorDeviceId(child);
+        this.releaseLaunchChild(child);
         clearExitDrainTimeout();
         childTerminationObserved = true;
         exitCode ??= code;
@@ -2694,6 +2711,39 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       }
     }
     return undefined;
+  }
+
+  /**
+   * Whether this process still holds a live launch child for `avdName` that
+   * reserved no console port.
+   *
+   * The name-level in-flight claim is released as soon as startup validation
+   * resolves off the first emulator output marker, seconds before adb lists the
+   * runtime. With a reservation, `findLiveReservationAwaitingAdb` covers that
+   * gap; without one there is no serial to correlate, so the running child is
+   * the claim. Callers reach this only after the scan failed to show the AVD by
+   * name, and an exited child is both pruned here and ignored, so a missed
+   * `exit` event cannot block later launches of the AVD forever.
+   */
+  private hasLiveUnreservedLaunch(avdName: string): boolean {
+    let live = false;
+    for (const [child, launchedAvdName] of [...AndroidEmulatorClient.unreservedLaunchAvdNames]) {
+      if (!isLaunchChildAlive(child)) {
+        AndroidEmulatorClient.unreservedLaunchAvdNames.delete(child);
+        continue;
+      }
+      live ||= launchedAvdName === avdName;
+    }
+    return live;
+  }
+
+  /** Drop every launch-guard record this process holds for an exited child. */
+  private releaseLaunchChild(childProcess?: ChildProcess | null): void {
+    if (!childProcess) {
+      return;
+    }
+    AndroidEmulatorClient.unreservedLaunchAvdNames.delete(childProcess);
+    this.releaseReservedEmulatorDeviceId(childProcess);
   }
 
   private recordReservedEmulatorDeviceId(

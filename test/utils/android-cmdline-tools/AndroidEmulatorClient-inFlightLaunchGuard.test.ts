@@ -37,6 +37,15 @@ class ScriptedAdbExecutor extends FakeAdbExecutor {
     return this.owner.currentDevices();
   }
 
+  async getDeviceStates(): Promise<Array<{ deviceId: string; state: string }>> {
+    if (this.owner.deviceStatesError) {
+      throw this.owner.deviceStatesError;
+    }
+    return this.owner
+      .currentDevices()
+      .map((device) => ({ deviceId: device.deviceId, state: "device" }));
+  }
+
   async executeCommand(command: string): Promise<ExecResult> {
     // No emulator answers `avd name` here: every listed emulator resolves to the
     // `Unknown (<serial>)` placeholder, which is the mid-boot window itself.
@@ -47,6 +56,7 @@ class ScriptedAdbExecutor extends FakeAdbExecutor {
 class ScriptedAdbClientFactory implements AdbClientFactory {
   devices: BootedDevice[] = [];
   scanError: Error | undefined;
+  deviceStatesError: Error | undefined;
 
   create(): AdbExecutor {
     return new ScriptedAdbExecutor(this);
@@ -234,6 +244,48 @@ describe("AndroidEmulatorClient duplicate-launch guard (#6407)", () => {
 
     expect(second).toBeNull();
     expect(harness.spawnedArgs).toHaveLength(1);
+  });
+
+  test("does not spawn while a live launch that reserved no port has not reached ADB", async () => {
+    const harness = createHarness();
+    // The raw `getDeviceStates` probe fails after the device scan succeeded, so
+    // the pre-launch snapshot is incomplete and the launch reserves no console
+    // port at all. Child liveness is then the only evidence of this AVD.
+    harness.adbFactory.deviceStatesError = new Error("adb: protocol fault");
+
+    const firstLaunch = harness.client.startEmulator(AVD);
+    await harness.spawnedAtLeast(1);
+    completeStartupValidation(harness.children[0]);
+    await firstLaunch;
+
+    expect(harness.spawnedArgs[0]).not.toContain("-port");
+    expect(harness.adbFactory.devices).toHaveLength(0);
+
+    const second = await adoptPathWithin(
+      harness.client.startEmulator(AVD),
+      "the second startEmulator did not take the adopt path",
+    );
+
+    expect(second).toBeNull();
+    expect(harness.spawnedArgs).toHaveLength(1);
+  });
+
+  test("an unreserved launch whose child has exited stops blocking later launches", async () => {
+    const harness = createHarness();
+    harness.adbFactory.deviceStatesError = new Error("adb: protocol fault");
+
+    const firstLaunch = harness.client.startEmulator(AVD);
+    await harness.spawnedAtLeast(1);
+    completeStartupValidation(harness.children[0]);
+    await firstLaunch;
+    harness.children[0].emit("exit", 0, null);
+
+    const second = harness.client.startEmulator(AVD);
+    await harness.spawnedAtLeast(2);
+    completeStartupValidation(harness.children[1]);
+
+    expect(await second).toBe(harness.children[1]);
+    expect(harness.spawnedArgs).toHaveLength(2);
   });
 
   test("a reservation whose child has exited stops blocking later launches", async () => {

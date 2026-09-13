@@ -465,6 +465,39 @@ final class XCTestRunnerTests: XCTestCase {
             )
         }
     }
+
+    /// `setUpWithError()` deliberately performs NO daemon or simulator I/O: it resolves
+    /// configuration and constructs the executor, nothing more — so it succeeds against a daemon
+    /// socket path that does not exist. Device-pool readiness is checked where it can act on the
+    /// answer: `AutoMobilePlanExecutor.execute()` preflights the daemon through
+    /// `AutoMobileDaemonEnsuring`, `DevicePool` refreshes/provisions and waits for an idle device at
+    /// allocation time, and a suite that wants an upfront fail-fast does it in `setUpAutoMobile()`
+    /// via `SimulatorDetection` + `DaemonManager` (see `RemindersIntegrationBase`). The old in-class
+    /// `ensureDevicePoolReady()` preflight (issue #6627) — dead since its call site was dropped —
+    /// was removed rather than rewired: its once-per-process fail-fast on any non-idle booted device
+    /// would break the concurrent workers and multi-device plans the pool is built to queue behind.
+    func testSetUpWithErrorDoesNotContactDaemonOrSimulator() throws {
+        let testCase = DevicePoolPreflightProbeTestCase()
+
+        XCTAssertNoThrow(try testCase.setUpWithError())
+        XCTAssertNoThrow(try testCase.tearDownWithError())
+    }
+}
+
+/// Probe subclass for `testSetUpWithErrorDoesNotContactDaemonOrSimulator`, pinned to a socket path
+/// that cannot exist so any connection attempt during setup would surface as a thrown error.
+private final class DevicePoolPreflightProbeTestCase: AutoMobileTestCase {
+    override var planPath: String {
+        return "probe-plan.yaml"
+    }
+
+    override var daemonSocketPath: String {
+        return "/nonexistent/auto-mobile-device-pool-probe.sock"
+    }
+
+    override var daemonRepoRoot: String? {
+        return nil
+    }
 }
 
 private struct FakePlanLoader: AutoMobilePlanLoading {

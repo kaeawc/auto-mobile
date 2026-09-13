@@ -21,6 +21,7 @@ import {
 import {
   crashAppSchema,
   installAppSchema,
+  listAppsSchema,
   packageNameSchema,
   terminateAppSchema,
   uninstallAppSchema,
@@ -79,7 +80,11 @@ const strictCases: StrictCase[] = [
   { name: "pinchOn", schema: pinchOnSchema, valid: { direction: "in" } },
   { name: "inputText", schema: inputTextSchema, valid: { text: "hello" } },
   // #6613: app tools (appId-alias preprocessed)
-  { name: "listApps/appId", schema: packageNameSchema, valid: { appId: "com.example.app" } },
+  { name: "packageNameSchema", schema: packageNameSchema, valid: { appId: "com.example.app" } },
+  // The schema `listApps` actually registers. `appId` is NOT one of its
+  // filters, so `listApps({ appId })` must fail loudly rather than return an
+  // unfiltered listing.
+  { name: "listApps", schema: listAppsSchema, valid: { type: "user" } },
   { name: "terminateApp", schema: terminateAppSchema, valid: { appId: "com.example.app" } },
   { name: "crashApp", schema: crashAppSchema, valid: { appId: "com.example.app" } },
   { name: "installApp", schema: installAppSchema, valid: { artifactPath: "/tmp/app.apk" } },
@@ -135,6 +140,19 @@ describe("issues #6712/#6613: object-shaped tool inputs reject undeclared argume
   test("app-tool appId aliases still normalize under strict mode", () => {
     const parsed = terminateAppSchema.parse({ packageName: "com.example.app" });
     expect(parsed.appId).toBe("com.example.app");
+  });
+
+  test("listApps rejects an appId filter it does not support", () => {
+    // `appId` is a documented alias elsewhere in appTools, but listApps filters
+    // by `search`, not by app id. Before #6613 the key was silently stripped and
+    // the caller got the whole unfiltered listing back.
+    const result = listAppsSchema.safeParse({ type: "user", appId: "com.example.app" });
+    expect(result.success).toBe(false);
+  });
+
+  test("listApps still parses every filter it does declare", () => {
+    const parsed = listAppsSchema.parse({ type: "all", search: "example", profile: 10 });
+    expect(parsed).toMatchObject({ type: "all", search: "example", profile: 10 });
   });
 
   test("biometricAuth keeps its errorCode refinement under strict mode", () => {

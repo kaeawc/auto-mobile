@@ -527,32 +527,38 @@ export const resetKeychainSchema = withAppIdAliases(
   ),
 );
 
+// #6613: `listApps` advertises `additionalProperties: false` in tools/list, so
+// its runtime schema must reject undeclared arguments too. Without `.strict()`
+// a call such as `listApps({ appId: "com.example" })` had the unsupported
+// filter silently dropped and returned the full unfiltered listing.
 export const listAppsSchema = addDeviceTargetingToSchema(
-  z.object({
-    type: z
-      .enum(["user", "system", "all"])
-      .optional()
-      .describe(
-        "Filter by app type. Defaults to 'user', EXCEPT on a physical iOS device where " +
-          "user/system classification is unavailable (devicectl reports no such signal there): " +
-          "on such a device an omitted type returns every app (reported as 'all'), and an " +
-          "explicit 'user' or 'system' filter is rejected rather than silently honored.",
-      ),
-    search: z
-      .string()
-      .optional()
-      .describe(
-        "Filter by a case-insensitive substring of the package name/bundle id. Also matches " +
-          "the app's display name where the platform reports one (iOS only today — Android's " +
-          "listing does not include app labels).",
-      ),
-    profile: z
-      .number()
-      .int()
-      .min(0)
-      .optional()
-      .describe("Filter to apps visible to this user profile id."),
-  }),
+  z
+    .object({
+      type: z
+        .enum(["user", "system", "all"])
+        .optional()
+        .describe(
+          "Filter by app type. Defaults to 'user', EXCEPT on a physical iOS device where " +
+            "user/system classification is unavailable (devicectl reports no such signal there): " +
+            "on such a device an omitted type returns every app (reported as 'all'), and an " +
+            "explicit 'user' or 'system' filter is rejected rather than silently honored.",
+        ),
+      search: z
+        .string()
+        .optional()
+        .describe(
+          "Filter by a case-insensitive substring of the package name/bundle id. Also matches " +
+            "the app's display name where the platform reports one (iOS only today — Android's " +
+            "listing does not include app labels).",
+        ),
+      profile: z
+        .number()
+        .int()
+        .min(0)
+        .optional()
+        .describe("Filter to apps visible to this user profile id."),
+    })
+    .strict(),
 );
 
 export interface ListAppsArgs {

@@ -28,7 +28,9 @@ import {
   resetDeviceToolsDependencies,
   setDeviceToolsDependencies,
   teardownDeviceSchema,
+  teardownOperationFingerprint,
 } from "../../src/server/deviceTools";
+import type { TeardownDeviceArgs } from "../../src/server/deviceTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { getInstalledAppsCacheWriteCoordinator } from "../../src/db/installedAppsCacheWriteCoordinator";
 import {
@@ -2732,6 +2734,60 @@ describe("deleteDevice handler", () => {
       success: false,
       error: expect.stringContaining("simctl delete failed"),
     });
+  });
+});
+
+// The teardown idempotency key. A reused `operationId` is an idempotent replay
+// only when the request's fingerprint is byte-identical, so any NEW field in it
+// is a compatibility event: a teardown row written before the upgrade is still
+// within its five-minute TTL when the upgraded daemon comes back, and an
+// unforced retry that now serializes one extra field fails the exact-string
+// comparison in `DeviceTeardownOperationRepository.resolveExisting` and reports
+// `operation_id_conflict` instead of joining the original operation
+// ([#6874](https://github.com/kaeawc/auto-mobile/pull/6874) review).
+describe("deleteDevice operation fingerprint", () => {
+  const base: TeardownDeviceArgs = {
+    operationId: "11111111-1111-4111-8111-111111111111",
+    target: {
+      platform: "android",
+      isVirtual: true,
+      stableId: "Pixel_8_API_35",
+      stableName: "Pixel_8_API_35",
+    },
+    mode: "destroy",
+    verifyAbsence: true,
+    timeoutMs: 120_000,
+  };
+
+  // The literal a pre-`force` daemon wrote. Asserting against the string, not
+  // against another call of the same function, is the point: a fingerprint that
+  // merely agrees with itself would still have broken every in-flight row.
+  const LEGACY_FINGERPRINT =
+    '{"mode":"destroy","target":{"isVirtual":true,"platform":"android",' +
+    '"stableId":"Pixel_8_API_35","stableName":"Pixel_8_API_35"},' +
+    '"timeoutMs":120000,"verifyAbsence":true}';
+
+  test("an unforced teardown keeps the pre-force fingerprint byte-for-byte", () => {
+    expect(teardownOperationFingerprint(base)).toBe(LEGACY_FINGERPRINT);
+  });
+
+  test("an explicit force:false is the same request as omitting it", () => {
+    expect(teardownOperationFingerprint({ ...base, force: false })).toBe(LEGACY_FINGERPRINT);
+  });
+
+  // `force` still has to be PART of the identity when it is set: a forced
+  // teardown drops identity checks a verified one runs, so replaying one as the
+  // other would silently upgrade the caller's request.
+  test("a forced teardown is a different request from an unforced one", () => {
+    const forced = teardownOperationFingerprint({ ...base, force: true });
+    expect(forced).not.toBe(LEGACY_FINGERPRINT);
+    expect(forced).toContain('"force":true');
+  });
+
+  test("two forced teardowns of the same target agree", () => {
+    expect(teardownOperationFingerprint({ ...base, force: true })).toBe(
+      teardownOperationFingerprint({ ...base, force: true }),
+    );
   });
 });
 

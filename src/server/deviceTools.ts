@@ -3133,7 +3133,12 @@ class ProvisionDeviceRollbackError extends ProvisionDeviceError {
   }
 }
 
-function teardownOperationFingerprint(args: TeardownDeviceArgs): string {
+// Exported for direct testing: a reused `operationId` is an idempotent replay
+// only when this string matches EXACTLY
+// (`DeviceTeardownOperationRepository.resolveExisting` compares the persisted
+// text), so the fingerprint's stability across daemon versions is a contract in
+// its own right.
+export function teardownOperationFingerprint(args: TeardownDeviceArgs): string {
   return stableStringify({
     target: args.target,
     mode: args.mode,
@@ -3142,7 +3147,15 @@ function teardownOperationFingerprint(args: TeardownDeviceArgs): string {
     // A forced teardown is a materially different request from a verified one,
     // so reusing an operationId across the two is a fingerprint mismatch rather
     // than an idempotent replay of the other (#6864).
-    force: args.force ?? false,
+    //
+    // Present ONLY when true. `stableStringify` is `JSON.stringify`, which drops
+    // `undefined` fields, so an unforced request still serializes to the exact
+    // bytes a pre-`force` daemon wrote. Spelling it `force: false` instead would
+    // make every teardown row persisted before the upgrade -- and still inside
+    // its five-minute result TTL when the daemon restarts -- fail to match the
+    // identical unforced retry, turning a replay into `operation_id_conflict`
+    // ([#6874](https://github.com/kaeawc/auto-mobile/pull/6874) review).
+    ...(args.force ? { force: true } : {}),
   });
 }
 

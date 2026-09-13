@@ -33,6 +33,10 @@ interface Harness {
   setStates(states: string[]): void;
   /** Make the next `bootstatus` invocation reject. */
   failBootStatusWith(error: Error | null): void;
+  /** Queue successive `bootstatus` rejections, one per invocation. */
+  queueBootStatusFailures(errors: Array<Error | null>): void;
+  /** Make the next N `list devices --json` invocations reject with `error`. */
+  failListDevicesWith(error: Error, times?: number): void;
 }
 
 /**
@@ -47,6 +51,8 @@ function createHarness(bootOptions: SimCtlBootOptions): Harness {
   const timer = new FakeTimer();
   let states = ["Shutdown"];
   let bootStatusFailures: Array<Error | null> = [];
+  let listDevicesFailuresRemaining = 0;
+  let listDevicesFailure: Error | null = null;
   const nextState = (): string => (states.length > 1 ? states.shift()! : states[0]);
 
   const execAsync = async (
@@ -77,6 +83,10 @@ function createHarness(bootOptions: SimCtlBootOptions): Harness {
       return createExecResult("Device already booted. Status=4294967295", "");
     }
     if (command === "xcrun simctl list devices --json") {
+      if (listDevicesFailuresRemaining > 0) {
+        listDevicesFailuresRemaining--;
+        throw listDevicesFailure;
+      }
       return createExecResult(
         JSON.stringify({
           devices: {
@@ -119,6 +129,13 @@ function createHarness(bootOptions: SimCtlBootOptions): Harness {
     failBootStatusWith: (error) => {
       bootStatusFailures = [error];
     },
+    queueBootStatusFailures: (errors) => {
+      bootStatusFailures = [...errors];
+    },
+    failListDevicesWith: (error, times = 1) => {
+      listDevicesFailure = error;
+      listDevicesFailuresRemaining = times;
+    },
   };
 }
 
@@ -139,6 +156,15 @@ function coreSimulator405Error(stderr: string = ALREADY_BOOTED_405): Error {
     code: 1,
     stderr,
   });
+}
+
+function coreSimulator405ErrorForState(state: string): Error {
+  return coreSimulator405Error(
+    "Device boot failed\n" +
+      "An error was encountered processing the command " +
+      "(domain=com.apple.CoreSimulator.SimError, code=405): " +
+      `Unable to boot device in current state: ${state}`,
+  );
 }
 
 const commandTimeouts = (harness: Harness, command: string): boolean[] =>
@@ -1029,9 +1055,36 @@ describe("SimCtlClient boot self-verification", () => {
     expect(harness.timer.getSleepCallCount()).toBe(0);
   });
 
+  // Issue #6411: CoreSimulator also emits the 405 with the domain/code appended
+  // *inline after* the reported state ("...current state: Booted (domain=...,
+  // code=405)"). A greedy state capture folded that trailing clause into the
+  // reported state, so it no longer equalled "Booted" and the already-booted
+  // simulator was rethrown instead of accepted.
+  test("accepts a CoreSimulator 405 whose domain/code is appended inline after the state", async () => {
+    const harness = createHarness({ maxAttempts: 2, retryBackoffMs: 10 });
+    harness.setStates(["Booted"]);
+    harness.failBootStatusWith(
+      coreSimulator405Error(
+        "Unable to boot device in current state: Booted " +
+          "(domain=com.apple.CoreSimulator.SimError, code=405)",
+      ),
+    );
+
+    const handle = await harness.timer.resolvePromise(harness.simctl.startSimulator(UDID, 5000));
+
+    expect(handle).toBeDefined();
+    expect(bootstatusCalls(harness.calls).length).toBe(1);
+    expect(shutdownCalls(harness.calls).length).toBe(0);
+    expect(harness.timer.getSleepCallCount()).toBe(0);
+  });
+
   test("retries a contradictory CoreSimulator 405 response when the simulator is not Booted", async () => {
     const harness = createHarness({ maxAttempts: 2, retryBackoffMs: 10 });
-    harness.setStates(["Shutdown", "Booted"]);
+    // The verification read after the 405 sees the genuine wedge (Shutdown);
+    // the post-shutdown settle poll observes one in-flight transition
+    // (Shutting Down, requiring the backoff) before Shutdown settles; the
+    // retried bootstatus then sees the device Booted.
+    harness.setStates(["Shutdown", "Shutting Down", "Shutdown", "Booted"]);
     harness.failBootStatusWith(coreSimulator405Error());
 
     const handle = await harness.timer.resolvePromise(harness.simctl.startSimulator(UDID, 5000));
@@ -1085,8 +1138,10 @@ describe("SimCtlClient boot self-verification", () => {
   test("retries a wedged boot after a shutdown and a backoff, then succeeds", async () => {
     const harness = createHarness({ maxAttempts: 2, retryBackoffMs: 2000 });
 
-    // First verification sees the wedge; the retry sees a real boot.
-    harness.setStates(["Shutdown", "Booted"]);
+    // First verification sees the wedge; the post-shutdown settle poll
+    // observes the in-flight transition (requiring the backoff) before the
+    // device settles; the retry then sees a real boot.
+    harness.setStates(["Shutdown", "Shutting Down", "Booted"]);
 
     const handle = await harness.timer.resolvePromise(harness.simctl.startSimulator(UDID, 5000));
 
@@ -1103,12 +1158,21 @@ describe("SimCtlClient boot self-verification", () => {
     await harness.timer.resolvePromise(harness.simctl.startSimulator(UDID, 5000));
 
     expect(commandTimeouts(harness, `xcrun simctl bootstatus ${UDID} -b`)).toEqual([true, true]);
-    expect(commandTimeouts(harness, "xcrun simctl list devices --json")).toEqual([true, true]);
+    // 3 reads: the post-bootstatus-1 verification, the post-shutdown settle
+    // poll, and the post-bootstatus-2 verification.
+    expect(commandTimeouts(harness, "xcrun simctl list devices --json")).toEqual([
+      true,
+      true,
+      true,
+    ]);
     expect(commandTimeouts(harness, `xcrun simctl shutdown ${UDID}`)).toEqual([true]);
   });
 
   test("caps the complete retry sequence at the caller timeout", async () => {
     const harness = createHarness({ maxAttempts: 3, retryBackoffMs: 10_000 });
+    // Never settles, so the post-shutdown poll keeps sleeping (bounded by the
+    // deadline) instead of ever re-issuing bootstatus.
+    harness.setStates(["Shutting Down"]);
     const boot = harness.simctl.startSimulator(UDID, 5000).then(
       () => null,
       (error: unknown) => error,
@@ -1130,6 +1194,18 @@ describe("SimCtlClient boot self-verification", () => {
 
   test("stops after the bounded attempt count and reports the observed state", async () => {
     const harness = createHarness({ maxAttempts: 3, retryBackoffMs: 25 });
+    // Each of the 2 retry shutdowns is followed by one in-flight transition
+    // (requiring the backoff) before settling back to Shutdown; the device
+    // never reaches Booted, so all 3 attempts are consumed.
+    harness.setStates([
+      "Shutdown",
+      "Shutting Down",
+      "Shutdown",
+      "Shutdown",
+      "Shutting Down",
+      "Shutdown",
+      "Shutdown",
+    ]);
 
     const error = await harness.timer.resolvePromise(
       harness.simctl.startSimulator(UDID, 5000).then(
@@ -1188,7 +1264,11 @@ describe("SimCtlClient boot self-verification", () => {
     expect(bootstatusCalls(harness.calls).length).toBe(2);
     expect(shutdownCalls(harness.calls).length).toBe(1);
     expect(commandTimeouts(harness, `xcrun simctl bootstatus ${UDID} -b`)).toEqual([true, true]);
+    // 4 reads: the post-bootstatus-1 verification, the post-shutdown settle
+    // poll, the post-bootstatus-2 verification, and the post-boot metadata
+    // resolution (resolveReadySimulator).
     expect(commandTimeouts(harness, "xcrun simctl list devices --json")).toEqual([
+      true,
       true,
       true,
       true,
@@ -1333,5 +1413,137 @@ describe("SimCtlClient boot self-verification", () => {
     expect(readyError).toBeInstanceOf(ActionableError);
     expect((bootError as Error).message).toContain(availabilityError);
     expect((readyError as Error).message).toContain(availabilityError);
+  });
+
+  // Issue #6411: `readSimulatorState` used to collapse "device absent from
+  // the listing" and "the listing itself failed" into the same `undefined`,
+  // so a single transient `simctl list devices --json` hiccup at the end of
+  // an otherwise healthy boot looked identical to "not Booted" and tore the
+  // simulator back down.
+  test("does not shut down a healthy simulator when a single state read fails transiently", async () => {
+    const harness = createHarness({ maxAttempts: 2, retryBackoffMs: 10 });
+    harness.setStates(["Booted"]);
+    harness.failListDevicesWith(new Error("simctl list devices --json timed out"), 1);
+
+    const handle = await harness.timer.resolvePromise(harness.simctl.startSimulator(UDID, 5000));
+
+    expect(handle).toBeDefined();
+    expect(bootstatusCalls(harness.calls).length).toBe(1);
+    expect(shutdownCalls(harness.calls).length).toBe(0);
+  });
+
+  // Issue #6411: a boot deadline long enough to survive more than one
+  // transient read failure must not be treated as an unrecoverable "unknown
+  // state" — it keeps retrying the read itself within the deadline.
+  test("retries an unreadable state repeatedly within the deadline without shutting down", async () => {
+    const harness = createHarness({ maxAttempts: 2, retryBackoffMs: 10 });
+    harness.setStates(["Booted"]);
+    harness.failListDevicesWith(new Error("simctl list devices --json timed out"), 3);
+
+    const handle = await harness.timer.resolvePromise(harness.simctl.startSimulator(UDID, 5000));
+
+    expect(handle).toBeDefined();
+    expect(bootstatusCalls(harness.calls).length).toBe(1);
+    expect(shutdownCalls(harness.calls).length).toBe(0);
+  });
+
+  // Issue #6411: `isAlreadyBootedCoreSimulator405` only tolerated the literal
+  // "current state: Booted" 405. Widened so a mid-transition rejection (e.g.
+  // a prior retry's own `shutdown` not having settled yet) is recognized and
+  // waited out instead of rethrown, which previously aborted the whole boot
+  // without spending a retry.
+  test("polls for settlement and retries within the same attempt on a mid-transition CoreSimulator 405", async () => {
+    const harness = createHarness({ maxAttempts: 2, retryBackoffMs: 15 });
+    harness.queueBootStatusFailures([coreSimulator405ErrorForState("Shutting Down")]);
+    harness.setStates(["Shutting Down", "Booted"]);
+
+    const handle = await harness.timer.resolvePromise(harness.simctl.startSimulator(UDID, 5000));
+
+    expect(handle).toBeDefined();
+    // bootstatus is re-issued once the transition settles, but this does not
+    // burn a shutdown-and-retry cycle: no shutdown is ever issued.
+    expect(bootstatusCalls(harness.calls).length).toBe(2);
+    expect(shutdownCalls(harness.calls).length).toBe(0);
+    expect(harness.timer.getSleepHistory()).toEqual([15, 15]);
+  });
+
+  // Issue #6411: `Booting` must be tolerated the same way as `Shutting Down`.
+  test("polls for settlement on a Booting mid-transition CoreSimulator 405", async () => {
+    const harness = createHarness({ maxAttempts: 2, retryBackoffMs: 15 });
+    harness.queueBootStatusFailures([coreSimulator405ErrorForState("Booting")]);
+    harness.setStates(["Booting", "Booted"]);
+
+    const handle = await harness.timer.resolvePromise(harness.simctl.startSimulator(UDID, 5000));
+
+    expect(handle).toBeDefined();
+    expect(bootstatusCalls(harness.calls).length).toBe(2);
+    expect(shutdownCalls(harness.calls).length).toBe(0);
+  });
+
+  // Issue #6411: a reported current state the loop has no recovery for (not
+  // Booted and not a recognized mid-transition state) must still rethrow
+  // rather than loop or silently proceed.
+  test("rethrows a CoreSimulator 405 reporting a state with no known recovery", async () => {
+    const harness = createHarness({ maxAttempts: 2, retryBackoffMs: 10 });
+    const error = coreSimulator405ErrorForState("Creating");
+    harness.failBootStatusWith(error);
+
+    await expect(harness.simctl.startSimulator(UDID, 5000)).rejects.toBe(error);
+    expect(shutdownCalls(harness.calls).length).toBe(1);
+  });
+  test("backs off repeated transition errors even when discovery is already settled", async () => {
+    const harness = createHarness({ maxAttempts: 1, retryBackoffMs: 0 });
+    harness.queueBootStatusFailures([
+      coreSimulator405ErrorForState("Shutting Down"),
+      coreSimulator405ErrorForState("Shutting Down"),
+    ]);
+    harness.setStates(["Shutdown", "Shutdown", "Booted"]);
+    await harness.timer.resolvePromise(harness.simctl.startSimulator(UDID, 5000));
+    expect(bootstatusCalls(harness.calls)).toHaveLength(3);
+    expect(harness.timer.getSleepHistory()).toEqual([250, 250]);
+  });
+
+  test("cancellation during a discovery retry releases the boot lease without more reads", async () => {
+    const harness = createHarness({ maxAttempts: 1, retryBackoffMs: 0 });
+    harness.failListDevicesWith(new Error("discovery unavailable"), 100);
+    const controller = new AbortController();
+    const outcome = runWithAbortSignal(controller.signal, () =>
+      harness.simctl.startSimulator(UDID, 120000),
+    ).catch((error: unknown) => error);
+    for (let turn = 0; turn < 100; turn++) {
+      await Promise.resolve();
+    }
+    expect(harness.timer.getPendingTimeouts()).toContain(250);
+    const reason = new Error("request cancelled during discovery");
+    controller.abort(reason);
+    expect(await outcome).toBe(reason);
+    expect(harness.timer.getPendingTimeoutCount()).toBe(0);
+    expect(harness.calls.filter((call) => call.includes("list devices"))).toHaveLength(1);
+    expect(shutdownCalls(harness.calls)).toHaveLength(1);
+    expect(harness.timer.now()).toBe(0);
+    harness.failListDevicesWith(new Error("unused"), 0);
+    harness.setStates(["Booted"]);
+    await harness.simctl.startSimulator(UDID, 5000);
+  });
+  test("persistent discovery failures stop at the boot deadline", async () => {
+    const harness = createHarness({ maxAttempts: 1, retryBackoffMs: 0 });
+    harness.failListDevicesWith(new Error("discovery unavailable"), 100);
+    const outcome = harness.simctl.startSimulator(UDID, 1000).catch((error: unknown) => error);
+    expect(await harness.timer.resolvePromise(outcome)).toBeInstanceOf(Error);
+    expect(harness.timer.now()).toBe(1000);
+    expect(
+      harness.calls.filter((call) => call.includes("list devices")).length,
+    ).toBeLessThanOrEqual(4);
+    expect(shutdownCalls(harness.calls)).toHaveLength(1);
+  });
+
+  test("zero configured backoff still bounds transition polling by the deadline", async () => {
+    const harness = createHarness({ maxAttempts: 1, retryBackoffMs: 0 });
+    harness.failBootStatusWith(coreSimulator405ErrorForState("Booting"));
+    harness.setStates(["Booting"]);
+    const outcome = harness.simctl.startSimulator(UDID, 1000).catch((error: unknown) => error);
+    expect(await harness.timer.resolvePromise(outcome)).toBeInstanceOf(Error);
+    expect(harness.timer.now()).toBe(1000);
+    expect(harness.timer.getSleepHistory().every((delay) => delay > 0)).toBe(true);
   });
 });

@@ -927,15 +927,17 @@ async function defaultStopAndroidObservers(device: BootedDevice): Promise<void> 
 async function clearInstalledAppsAfterShutdown(
   dependencies: DeviceToolsDependencies,
   deviceId: string,
-): Promise<void> {
+): Promise<boolean> {
   try {
     await dependencies.clearInstalledAppsForDevice(deviceId);
+    return true;
   } catch (error) {
     // The device is already stopped; the next app verification refreshes stale cache rows.
     logger.warn(
       `[DeviceTools] Failed to clear installed apps for ${deviceId} after shutdown: ${error}`,
       error,
     );
+    return false;
   }
 }
 
@@ -2384,13 +2386,42 @@ async function shutdownDevice(
       await shutdownReservation?.release();
       unregisterDirectSessionsForDevice(device.deviceId);
 
+      const cleanup = clearInstalledAppsAfterShutdown(dependencies, device.deviceId);
+      const notification = cleanup.then(async (cacheCleared) => {
+        await notifyResourcesAfterShutdown(dependencies);
+        // Failed persistence must keep the dirty fence across device-ID reuse.
+        if (cacheCleared) {
+          const coordinator = getInstalledAppsCacheWriteCoordinator();
+          // Capture the expected generation AFTER the notification above, not
+          // before. For a device with a registered app resource,
+          // notifyResourcesAfterShutdown() -> syncInstalledAppResources()
+          // (src/server/appResources.ts) invalidates this same, already-gone
+          // device again as part of the SAME shutdown flow. Capturing the
+          // generation earlier meant that expected, self-triggered
+          // invalidation always advanced it past what releaseDevice's
+          // expected-generation guard held, so the guard always mismatched
+          // and release always no-opped -- leaking the exact per-device
+          // bookkeeping (#6704) this fix exists to release, for every killed
+          // device that had a registered app resource. beginRebuild() is a
+          // synchronous read here (the generation is already assigned), so
+          // there is no await between it and releaseDevice() below.
+          const generation = coordinator.beginRebuild(device.deviceId);
+          await coordinator.releaseDevice(device.deviceId, generation);
+        }
+      });
+      // Keep late cleanup visible to DB shutdown without blocking a later
+      // device teardown retry if resource notification never settles.
+      void getDbWriteBarrier().trackExisting(notification);
+
       await runPostShutdownStep(
         shutdownContext,
         perf,
         "cleanup",
         "installed-app cleanup did not complete",
         strictDeadline,
-        async () => await clearInstalledAppsAfterShutdown(dependencies, device.deviceId),
+        async () => {
+          await cleanup;
+        },
       );
       await runPostShutdownStep(
         shutdownContext,
@@ -2398,7 +2429,7 @@ async function shutdownDevice(
         "notifyResources",
         "resource notification did not complete",
         strictDeadline,
-        async () => await notifyResourcesAfterShutdown(dependencies),
+        async () => await notification,
       );
 
       perf.end();

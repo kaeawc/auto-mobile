@@ -1,7 +1,7 @@
 import type { Kysely } from "kysely";
 import type { AppearanceConfig, DeviceSnapshotConfig, VideoRecordingConfig } from "../models";
 import { logger, type Logger } from "../utils/logger";
-import { ensureMigrations, getDatabase } from "./database";
+import { getDatabase } from "./database";
 import type { Database } from "./types";
 
 const CONFIG_KEY = "global";
@@ -58,12 +58,12 @@ export class KeyedJsonConfigRepository<TConfig> implements ConfigRepository<TCon
     this.logger = options.logger ?? logger;
   }
 
-  private async getDb(): Promise<Kysely<Database>> {
-    if (this.db) {
-      return this.db;
-    }
-    await ensureMigrations();
-    return getDatabase();
+  // Migration gating is owned by startup (ensureMigrations) plus the app dialect
+  // first-query gate (waitForMigrationsBeforeQuery, #6703); a repository helper
+  // must NOT await ensureMigrations itself. Resolve the injected executor, else
+  // the singleton, synchronously.
+  private getDb(): Kysely<Database> {
+    return this.db ?? getDatabase();
   }
 
   async getConfig(): Promise<TConfig | null> {

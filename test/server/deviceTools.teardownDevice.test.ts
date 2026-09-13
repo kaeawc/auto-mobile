@@ -26,6 +26,7 @@ import {
   setDeviceToolsDependencies,
 } from "../../src/server/deviceTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
+import { getInstalledAppsCacheWriteCoordinator } from "../../src/db/installedAppsCacheWriteCoordinator";
 import {
   resetVideoRecordingManagerDependencies,
   setVideoRecordingManagerDependencies,
@@ -1996,6 +1997,11 @@ describe("deleteDevice handler", () => {
   });
 
   test("returns by the teardown deadline when post-stop cleanup does not settle", async () => {
+    const coordinator = getInstalledAppsCacheWriteCoordinator();
+    let finishCleanup!: () => void;
+    const pendingCleanup = new Promise<void>((resolve) => {
+      finishCleanup = resolve;
+    });
     const timer = new FakeTimer();
     const device: BootedDevice = {
       platform: "ios",
@@ -2010,8 +2016,9 @@ describe("deleteDevice handler", () => {
       clearInstalledAppsForDevice: async () => {
         cleanupCalls++;
         if (cleanupCalls === 1) {
-          await new Promise<void>(() => {});
+          await pendingCleanup;
         }
+        await coordinator.invalidate(device.deviceId, async () => undefined);
       },
     });
 
@@ -2036,6 +2043,68 @@ describe("deleteDevice handler", () => {
     const retry = responseBody(await teardownTool().handler(args));
     expect(retry.state).toBe("destroyed");
     expect(manager.destroyRequests).toHaveLength(1);
+    finishCleanup();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(coordinator.isDirty(device.deviceId)).toBe(false);
+  });
+
+  test("releases per-device installed-apps bookkeeping when the shutdown notification itself re-invalidates the device (#6704)", async () => {
+    // Reproduces the Codex P1 finding on PR #6765: a normally killed device
+    // with a registered app resource gets invalidated TWICE during its own
+    // shutdown teardown — once by clearInstalledAppsForDevice, and again by
+    // defaultNotifyResourcesChanged()'s syncInstalledAppResources(), whose
+    // disappeared-device branch (src/server/appResources.ts) invalidates the
+    // same device because it vanished from the booted-device list. If the
+    // expected generation passed to releaseDevice is captured BEFORE that
+    // second, self-triggered invalidation, releaseDevice's expected-generation
+    // guard always mismatches and the release always no-ops — leaking the
+    // exact per-device bookkeeping (#6704) this PR exists to fix, for every
+    // killed device that has a registered app resource.
+    const coordinator = getInstalledAppsCacheWriteCoordinator();
+    const device: BootedDevice = {
+      platform: "ios",
+      name: "iPhone 16",
+      deviceId: "IOS-DEVICE-REGISTERED-RESOURCE",
+    };
+    manager.setBootedDevices("ios", [device]);
+    manager.setDeviceImages("ios", [{ ...device, isRunning: true }]);
+    // syncInstalledAppResources() (src/server/appResources.ts) only
+    // invalidates a disappeared device ONCE: its first pass unregisters the
+    // device's app resource, so a later pass -- e.g. the teardown tool's own
+    // separate post-verification notification -- finds nothing left to
+    // invalidate. Mirror that one-shot semantics rather than invalidating on
+    // every call.
+    let alreadyInvalidatedByNotification = false;
+    setDeviceToolsDependencies({
+      clearInstalledAppsForDevice: async (deviceId: string) => {
+        await coordinator.invalidate(deviceId, async () => undefined);
+      },
+      notifyResourcesChanged: async () => {
+        if (alreadyInvalidatedByNotification) {
+          return;
+        }
+        alreadyInvalidatedByNotification = true;
+        // Mirrors appResources.ts's disappeared-device branch: by the time
+        // this runs the device is already gone from the booted-device list,
+        // so syncInstalledAppResources() invalidates it again as part of the
+        // SAME shutdown's resource-change notification.
+        await coordinator.invalidate(device.deviceId, async () => undefined);
+      },
+    });
+
+    const body = responseBody(
+      await teardownTool().handler(request("ios", device.deviceId, device.name)),
+    );
+    expect(body.state).toBe("destroyed");
+
+    // The teardown's post-shutdown cleanup/notification chain is tracked via
+    // the DB write barrier rather than awaited inline; give it a few turns
+    // to settle.
+    for (let i = 0; i < 3; i++) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+
+    expect(coordinator.isDirty(device.deviceId)).toBe(false);
   });
 
   test("holds the stable lifecycle lease until a late shutdown command settles", async () => {

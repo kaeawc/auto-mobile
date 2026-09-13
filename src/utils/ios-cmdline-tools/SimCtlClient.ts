@@ -30,6 +30,13 @@ import { iosSimulatorCapabilityInventory } from "../../features/device-control/v
 
 const COMMAND_SETTLEMENT_GRACE_MS = 1_000;
 const SIMCTL_AVAILABILITY_PROBE_TIMEOUT_MS = 10_000;
+/**
+ * Backoff between retried `simctl list devices --json` reads when boot
+ * verification cannot trust a single failed read (issue #6411). Small and
+ * fixed: the read itself is cheap, so this only needs to avoid hammering a
+ * wedged `simctl`, not model a real device-state transition.
+ */
+const STATE_READ_RETRY_BACKOFF_MS = 250;
 
 export interface AppleDevice {
   udid: string;
@@ -315,7 +322,7 @@ export interface SimCtl {
 // `preserveError: true` keeps the raw execFile rejection intact: the seam's
 // default `wrapCommandError` path returns a fresh Error copying only `.name`,
 // but CoreSimulator-405 boot recovery (issue #3938 / #4092) branches on the
-// original error's `.code`/`.stderr` via `isAlreadyBootedCoreSimulator405`.
+// original error's `.code`/`.stderr` via `parseAlreadyBootedCoreSimulator405State`.
 //
 // The AbortSignal is forwarded so that when a caller's timeout aborts, Node kills
 // the child process (SIGTERM) instead of leaving it booting orphaned (issue
@@ -461,9 +468,26 @@ function isDeviceAvailable(device: { isAvailable?: boolean }): boolean {
   return device.isAvailable !== false;
 }
 
-function isAlreadyBootedCoreSimulator405(error: unknown, udid: string): boolean {
+// The state capture is non-greedy and stops at either an inline
+// " (domain=...)" clause or end of line, because CoreSimulator emits the
+// domain/code both *before* the sentence ("...(domain=..., code=405): Unable
+// to boot device in current state: Booted") and *appended inline after* the
+// state ("...current state: Booted (domain=..., code=405)"). A greedy capture
+// folded that trailing clause into the state, so it no longer equalled the bare
+// state token (e.g. "Booted") and the rejection was misclassified (issue #6411).
+const CORE_SIMULATOR_405_CURRENT_STATE_PATTERN =
+  /Unable to boot device in current state: (.+?)(?:\s*\(domain=|\s*$)/m;
+
+/**
+ * Parse the current-state CoreSimulator 405 rejection (`Unable to boot
+ * device in current state: <state>`) out of a `bootstatus` failure, or
+ * `undefined` if the error is not that specific, structured CoreSimulator
+ * error. Widened from a single literal (`Booted`) so `bootAndVerify` can
+ * branch per reported state (issue #6411) rather than only tolerating one.
+ */
+function parseAlreadyBootedCoreSimulator405State(error: unknown, udid: string): string | undefined {
   if (!isIosSimulatorUdid(udid) || !(error instanceof Error)) {
-    return false;
+    return undefined;
   }
 
   const execError = error as NodeJS.ErrnoException & { stderr?: unknown };
@@ -474,12 +498,16 @@ function isAlreadyBootedCoreSimulator405(error: unknown, udid: string): boolean 
         ? execError.stderr.toString()
         : "";
 
-  return (
-    typeof execError.code === "number" &&
-    execError.code !== 0 &&
-    stderr.includes("domain=com.apple.CoreSimulator.SimError, code=405") &&
-    stderr.includes("Unable to boot device in current state: Booted")
-  );
+  if (
+    typeof execError.code !== "number" ||
+    execError.code === 0 ||
+    !stderr.includes("domain=com.apple.CoreSimulator.SimError, code=405")
+  ) {
+    return undefined;
+  }
+
+  const match = CORE_SIMULATOR_405_CURRENT_STATE_PATTERN.exec(stderr);
+  return match?.[1]?.trim();
 }
 
 /**
@@ -1270,22 +1298,20 @@ export class SimCtlClient implements SimCtl {
           this.remainingBootTimeoutMs(udid, deadlineMs),
         );
       } catch (error) {
-        // CoreSimulator can transiently reject bootstatus with error 405 while
-        // reporting the requested simulator is already Booted. Verify its state
-        // before deciding whether the command failure is actionable.
-        if (!isAlreadyBootedCoreSimulator405(error, udid)) {
-          throw error;
+        if (await this.handleBootstatusRejection(error, udid, deadlineMs, retryBackoffMs)) {
+          // A mid-transition 405 was waited out; re-issue bootstatus within
+          // this same attempt rather than burning a retry (issue #6411).
+          attempt--;
+          continue;
         }
-        logger.debug(
-          `[iOS] bootstatus returned expected CoreSimulator error 405 for ${udid}; verifying simulator state: ${error}`,
-        );
         bootstatusReportedAlreadyBooted = true;
       }
 
-      const state = await this.readSimulatorState(
-        udid,
-        this.remainingBootTimeoutMs(udid, deadlineMs),
-      );
+      // A failed or absent state read is not evidence of a failed boot — it
+      // means discovery itself is unreliable right now. Retry the read (bounded
+      // by the deadline) rather than treating "unknown" the same as "not
+      // Booted" and tearing a possibly-healthy simulator back down (#6411).
+      const state = await this.readSimulatorStateRetrying(udid, deadlineMs);
       if (state === "Booted") {
         return;
       }
@@ -1308,9 +1334,11 @@ export class SimCtlClient implements SimCtl {
         } catch (error) {
           logger.debug(`[iOS] shutdown before boot retry failed for ${udid}: ${error}`);
         }
-        await this.timer.sleep(
-          Math.min(retryBackoffMs, this.remainingBootTimeoutMs(udid, deadlineMs)),
-        );
+        // Wait for the shutdown to actually take hold before re-issuing
+        // bootstatus, instead of a fixed sleep: `simctl shutdown` returns before
+        // the device leaves `Shutting Down`, and re-booting into that in-flight
+        // transition is what produces the very 405 handled above (#6411).
+        await this.waitForSimulatorSettled(udid, deadlineMs, retryBackoffMs);
       }
     }
 
@@ -1319,6 +1347,103 @@ export class SimCtlClient implements SimCtl {
         "The simulator is likely wedged. Try 'xcrun simctl shutdown all' (or erase the device with " +
         `'xcrun simctl erase ${udid}') and start it again.`,
     );
+  }
+
+  /**
+   * Classify a `bootstatus` rejection for {@link bootAndVerify}. CoreSimulator
+   * can transiently reject `bootstatus` with a structured "current state" 405.
+   * Parse the state it reported and branch: `Booted` contradicts the failure
+   * (the caller should verify state itself); `Booting`/`Shutting Down` means a
+   * prior retry's transition (e.g. our own `shutdown`) has not settled yet, so
+   * this waits for it before returning; any other reported state — or an error
+   * that isn't this structured 405 at all — is not one this loop knows how to
+   * recover from and is rethrown (issue #6411).
+   *
+   * @returns `true` when the caller should re-issue `bootstatus` within the
+   *          same attempt (a mid-transition rejection was waited out); `false`
+   *          when the caller should proceed to verify state (a contradictory
+   *          "already Booted" 405).
+   */
+  private async handleBootstatusRejection(
+    error: unknown,
+    udid: string,
+    deadlineMs: number,
+    retryBackoffMs: number,
+  ): Promise<boolean> {
+    const reportedState = parseAlreadyBootedCoreSimulator405State(error, udid);
+    if (reportedState === undefined) {
+      throw error;
+    }
+    if (reportedState === "Booting" || reportedState === "Shutting Down") {
+      logger.debug(
+        `[iOS] bootstatus rejected ${udid} mid-transition (${reportedState}); ` +
+          `polling for settlement before re-issuing bootstatus: ${error}`,
+      );
+      await this.waitForSimulatorSettled(udid, deadlineMs, retryBackoffMs);
+      await this.waitForBootRetry(udid, retryBackoffMs || STATE_READ_RETRY_BACKOFF_MS, deadlineMs);
+      return true;
+    }
+    if (reportedState !== "Booted") {
+      throw error;
+    }
+    logger.debug(
+      `[iOS] bootstatus returned expected CoreSimulator error 405 for ${udid}; verifying simulator state: ${error}`,
+    );
+    return false;
+  }
+
+  /**
+   * Poll device state (through {@link readSimulatorStateRetrying}, so a
+   * transient discovery failure does not abort the wait) until it is no
+   * longer mid-transition (`Booting` / `Shutting Down`), or the boot deadline
+   * is exhausted. Used both before re-issuing `bootstatus` after a retry
+   * shutdown and after a mid-transition CoreSimulator 405 rejection (#6411).
+   */
+  private async waitForSimulatorSettled(
+    udid: string,
+    deadlineMs: number,
+    pollIntervalMs: number,
+  ): Promise<void> {
+    for (;;) {
+      const state = await this.readSimulatorStateRetrying(udid, deadlineMs);
+      if (state !== "Booting" && state !== "Shutting Down") {
+        return;
+      }
+      await this.waitForBootRetry(udid, pollIntervalMs || STATE_READ_RETRY_BACKOFF_MS, deadlineMs);
+    }
+  }
+
+  private async waitForBootRetry(udid: string, delayMs: number, deadlineMs: number): Promise<void> {
+    const boundedDelayMs = Math.min(delayMs, this.remainingBootTimeoutMs(udid, deadlineMs));
+    const signal = getAbortSignal();
+    if (!signal) {
+      await this.timer.sleep(boundedDelayMs);
+      return;
+    }
+    let onAbort: (() => void) | undefined;
+    let delayHandle: NodeJS.Timeout | undefined;
+    try {
+      await Promise.race([
+        new Promise<void>((resolve) => {
+          delayHandle = this.timer.setTimeout(resolve, boundedDelayMs);
+        }),
+        new Promise<never>((_resolve, reject) => {
+          onAbort = () => reject(signal.reason);
+          signal.addEventListener("abort", onAbort, { once: true });
+          if (signal.aborted) {
+            onAbort();
+          }
+        }),
+      ]);
+      signal.throwIfAborted();
+    } finally {
+      if (delayHandle) {
+        this.timer.clearTimeout(delayHandle);
+      }
+      if (onAbort) {
+        signal.removeEventListener("abort", onAbort);
+      }
+    }
   }
 
   private bootDeadline(timeoutMs: number): number {
@@ -1335,6 +1460,7 @@ export class SimCtlClient implements SimCtl {
    * either) is waiting on it (issue #6413).
    */
   private remainingBootTimeoutMs(udid: string, deadlineMs: number): number {
+    getAbortSignal()?.throwIfAborted();
     const remainingMs = deadlineMs - this.timer.now();
     if (remainingMs <= 0) {
       throw new ActionableError(
@@ -1434,24 +1560,48 @@ export class SimCtlClient implements SimCtl {
    * Read the current CoreSimulator state for a device, bypassing the device
    * list cache so boot verification never trusts a stale snapshot.
    * @returns the state string (e.g. "Booted", "Shutdown"), or undefined when
-   *          the device is absent or discovery failed.
+   *          the device is absent from the listing.
+   * @throws when discovery itself fails (e.g. `simctl list devices --json`
+   *         times out or its output cannot be parsed) — a failed read is not
+   *         evidence of a failed boot, so callers must not conflate the two
+   *         (issue #6411). {@link readSimulatorStateRetrying} is the retrying
+   *         wrapper boot verification should use instead of calling this
+   *         directly.
    */
   private async readSimulatorState(udid: string, timeoutMs: number): Promise<string | undefined> {
-    try {
-      const simulatorList = await this.listSimulators(timeoutMs);
-      for (const runtimeDevices of Object.values(simulatorList.devices)) {
-        const match = runtimeDevices.find((device) => device.udid === udid);
-        if (match) {
-          return match.state;
-        }
+    const simulatorList = await this.listSimulators(timeoutMs);
+    for (const runtimeDevices of Object.values(simulatorList.devices)) {
+      const match = runtimeDevices.find((device) => device.udid === udid);
+      if (match) {
+        return match.state;
       }
-      return undefined;
-    } catch (error) {
-      logger.warn(
-        `[iOS] Could not read simulator state for ${udid}: ${errorMessage(error)}`,
-        error,
-      );
-      return undefined;
+    }
+    return undefined;
+  }
+
+  /**
+   * {@link readSimulatorState}, retrying a discovery failure (bounded by the
+   * boot deadline) instead of surfacing it. A `simctl list devices --json`
+   * timeout/parse hiccup is transient and unrelated to whether the simulator
+   * actually booted, so boot verification retries the *read* here rather than
+   * treating "could not tell" as "not Booted" and tearing the device down
+   * (issue #6411).
+   */
+  private async readSimulatorStateRetrying(
+    udid: string,
+    deadlineMs: number,
+  ): Promise<string | undefined> {
+    for (;;) {
+      try {
+        return await this.readSimulatorState(udid, this.remainingBootTimeoutMs(udid, deadlineMs));
+      } catch (error) {
+        // Expected to happen occasionally (a transient simctl hiccup); safe to
+        // retry within the boot deadline rather than surfacing immediately.
+        logger.debug(
+          `[iOS] Could not read simulator state for ${udid}; retrying within the boot deadline: ${errorMessage(error)}`,
+        );
+        await this.waitForBootRetry(udid, STATE_READ_RETRY_BACKOFF_MS, deadlineMs);
+      }
     }
   }
 

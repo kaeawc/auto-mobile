@@ -4,6 +4,7 @@ import { logger } from "../logger";
 import { readFileAsync, readdirAsync } from "../io";
 import { Timer, defaultTimer } from "../SystemTimer";
 import { PerceptualHasher } from "./PerceptualHasher";
+import { isScreenshotFile } from "./screenshotFormats";
 
 export class ScreenshotCache {
   // In-memory screenshot cache with LRU eviction
@@ -100,7 +101,7 @@ export class ScreenshotCache {
 
       const files = await readdirAsync(cacheDir);
       const screenshotFiles = files
-        .filter((file) => file.endsWith(".png") || file.endsWith(".webp"))
+        .filter((file) => isScreenshotFile(file))
         .map((file) => path.join(cacheDir, file));
 
       logger.debug(`Found ${screenshotFiles.length} screenshot files in ${cacheDir}`);

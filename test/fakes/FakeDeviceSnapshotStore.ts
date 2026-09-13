@@ -9,6 +9,8 @@ type DeviceSnapshotStoreContract = Pick<
   | "generateSnapshotName"
   | "snapshotDirectoryExists"
   | "getSnapshotSizeBytes"
+  | "getDirectorySize"
+  | "listSubdirectoryNames"
   | "deleteSnapshotData"
   | "replaceSnapshotData"
 >;
@@ -67,6 +69,19 @@ export class FakeDeviceSnapshotStore implements DeviceSnapshotStoreContract {
 
   async getSnapshotSizeBytes(snapshotName: string): Promise<number> {
     return this.sizes.get(snapshotName) ?? 0;
+  }
+
+  /**
+   * Directory primitives (#6490). Unit tests never touch a real filesystem, so
+   * an arbitrary path is "unknown" here — in-AVD payloads are modelled by
+   * FakeAvdSnapshotService instead.
+   */
+  async getDirectorySize(_dirPath: string): Promise<number | null> {
+    return null;
+  }
+
+  async listSubdirectoryNames(_dirPath: string): Promise<string[] | null> {
+    return null;
   }
 
   async replaceSnapshotData<T>(

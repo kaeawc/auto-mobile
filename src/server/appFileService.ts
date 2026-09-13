@@ -34,7 +34,6 @@ import type { AdbExecutor } from "../utils/android-cmdline-tools/interfaces/AdbE
 import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
 import { isIosSimulatorUdid } from "../utils/ios-cmdline-tools/iosDeviceType";
 import { shellQuote } from "../utils/shellQuote";
-import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
 import { logger } from "../utils/logger";
 import { prepareFileSource } from "./fileSourcePreparation";
 import { getSharedStorageService, type SharedStorageService } from "./sharedStorageService";
@@ -42,6 +41,7 @@ import {
   SimctlIosSimulatorMediaClient,
   type IosSimulatorMediaClient,
 } from "./iosSimulatorMediaClient";
+import { findBootedDeviceForResource } from "./resourceDeviceResolver";
 
 export type PutAppFileRequest = Omit<PutAppFileArgs, "device"> & {
   device: BootedDevice;
@@ -1038,12 +1038,7 @@ class IosSimulatorAppFileProvider
 }
 
 async function findBootedDevice(deviceId: string): Promise<BootedDevice> {
-  const manager = PlatformDeviceManagerFactory.getInstance();
-  const devices = [
-    ...(await manager.getBootedDevices("android")),
-    ...(await manager.getBootedDevices("ios")),
-  ];
-  const device = devices.find((candidate) => candidate.deviceId === deviceId);
+  const device = await findBootedDeviceForResource(deviceId, "AppFileService");
   if (!device) {
     throw new ActionableError(`Device not found or not booted: ${deviceId}`);
   }

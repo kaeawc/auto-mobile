@@ -2,6 +2,7 @@ import { DaemonRequest } from "./types";
 import { DeviceLabelMap, Session, type SessionReleaseSnapshot } from "./sessionManager";
 import type { DeviceRecoveryEligibility, DeviceRecoveryPolicy, PooledDevice } from "./devicePool";
 import type { DeviceSessionRecord } from "./deviceSessionRegistry";
+import type { BootedDevice } from "../models";
 import { DAEMON_HEARTBEAT_METHOD, DAEMON_LIST_DEVICE_SESSIONS_METHOD } from "./constants";
 
 /** Socket endpoint clients may query before sending optional newer parameters. */
@@ -39,6 +40,14 @@ export interface DaemonStateAccess {
     getRecoveryPolicy?(): DeviceRecoveryPolicy;
     getRecoveryEligibility?(deviceId: string): DeviceRecoveryEligibility;
     assertSessionReadyForAutomation?(sessionId: string): void;
+    /**
+     * FUNNEL 2 — the device-addressed admission gate. Optional only so the
+     * daemon-state fakes in older suites keep compiling; the real pool always
+     * has it ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
+     */
+    assertDeviceActionable?(deviceId: string, purpose: string): void;
+    /** FUNNEL 1 — fold a discovery observation into pooled identity. */
+    reconcileDiscoveryObservation?(devices: readonly BootedDevice[], source: string): Promise<void>;
     resolveAutolockSessionForMcpSession?(
       mcpSessionId: string | undefined,
       platform?: "android" | "ios",

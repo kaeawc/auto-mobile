@@ -11,38 +11,50 @@ import { Platform } from "../models";
 import { addDeviceTargetingToSchema, platformSchema } from "./toolSchemaHelpers";
 
 // Schema definitions
+// #6712: `.strict()` on each of these — the advertised schemas already said
+// `additionalProperties: false`, but a plain z.object silently DROPPED an
+// undeclared caller argument at runtime. Defaults (`platform`) are unaffected.
 export const navigateToSchema = addDeviceTargetingToSchema(
-  z.object({
-    targetScreen: z.string().describe("Target screen name"),
-    platform: platformSchema.default("android"),
-  }),
+  z
+    .object({
+      targetScreen: z.string().describe("Target screen name"),
+      platform: platformSchema.default("android"),
+    })
+    .strict(),
 );
 
 export const getNavigationGraphSchema = addDeviceTargetingToSchema(
-  z.object({
-    platform: platformSchema.default("android"),
-    appId: z
-      .string()
-      .optional()
-      .describe("Scope the graph to this app id instead of the device's current foreground app"),
-  }),
+  z
+    .object({
+      platform: platformSchema.default("android"),
+      appId: z
+        .string()
+        .optional()
+        .describe("Scope the graph to this app id instead of the device's current foreground app"),
+    })
+    .strict(),
 );
 
 export const exploreSchema = addDeviceTargetingToSchema(
-  z.object({
-    maxInteractions: z.number().optional().describe("Max interactions (default: 50)"),
-    timeoutMs: z.number().optional().describe("Timeout ms (default: 300000)"),
-    strategy: z
-      .enum(["breadth-first", "depth-first", "weighted"])
-      .optional()
-      .describe("Strategy (default: weighted)"),
-    resetToHome: z.boolean().optional().describe("Reset to home periodically (default: false)"),
-    resetInterval: z.number().optional().describe("Reset interval (default: 15)"),
-    mode: z.enum(["discover", "validate", "hybrid"]).optional().describe("Mode (default: hybrid)"),
-    packageName: z.string().optional().describe("Package to limit exploration"),
-    dryRun: z.boolean().optional().describe("Dry run (no interactions)"),
-    platform: platformSchema.default("android"),
-  }),
+  z
+    .object({
+      maxInteractions: z.number().optional().describe("Max interactions (default: 50)"),
+      timeoutMs: z.number().optional().describe("Timeout ms (default: 300000)"),
+      strategy: z
+        .enum(["breadth-first", "depth-first", "weighted"])
+        .optional()
+        .describe("Strategy (default: weighted)"),
+      resetToHome: z.boolean().optional().describe("Reset to home periodically (default: false)"),
+      resetInterval: z.number().optional().describe("Reset interval (default: 15)"),
+      mode: z
+        .enum(["discover", "validate", "hybrid"])
+        .optional()
+        .describe("Mode (default: hybrid)"),
+      packageName: z.string().optional().describe("Package to limit exploration"),
+      dryRun: z.boolean().optional().describe("Dry run (no interactions)"),
+      platform: platformSchema.default("android"),
+    })
+    .strict(),
 );
 
 // Export interfaces for type safety

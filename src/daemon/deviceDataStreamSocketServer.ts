@@ -1442,19 +1442,6 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     return this.parseClampedIntervalMs(value, MIN_HIERARCHY_INTERVAL_MS, MAX_HIERARCHY_INTERVAL_MS);
   }
 
-  private parseDeviceSessionUuid(value: unknown): string | null {
-    if (value === undefined || value === null) {
-      return null;
-    }
-    if (typeof value !== "string") {
-      throw new Error("deviceSessionUuid must be a string or null");
-    }
-    if (value.trim().length === 0) {
-      throw new Error("deviceSessionUuid must not be blank");
-    }
-    return value;
-  }
-
   private parseClampedIntervalMs(
     value: unknown,
     minIntervalMs: number,

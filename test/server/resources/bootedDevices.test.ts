@@ -866,6 +866,52 @@ describe("MCP Booted Device Resources", () => {
       sessionManager.stopCleanupTimer();
     });
 
+    // Withholding this read's OWN output is not enough: the pool flag is what the
+    // admission gate, the destructive-confirmation path and every stream resolver
+    // consult, so a resource read that is the FIRST discovery to see the
+    // placeholder has to fold its observation into the pool. Otherwise the bound
+    // session keeps passing `assertSessionReadyForAutomation` until an unrelated
+    // allocation or refresh happens to reconcile
+    // ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
+    test("quarantines the pooled entry when the resource read is the first to see the placeholder", async function () {
+      const fakeTimer = new FakeTimer();
+      fakeTimer.enableAutoAdvance();
+      const sessionManager = new SessionManager(fakeTimer, new FakeDeviceSessionPersistence());
+      const { FakeInstalledAppsRepository } =
+        await import("../../fakes/FakeInstalledAppsRepository");
+      const devicePool = new DevicePool(
+        sessionManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        new FakeInstalledAppsRepository(),
+        fakeDeviceUtils,
+      );
+      fakeDeviceUtils.setBootedDevices("android", [mockAndroidDevice1]);
+      await devicePool.initializeWithDevices([mockAndroidDevice1]);
+      const assigned = await devicePool.assignDeviceToSession("session-owner");
+      expect(assigned).toBe(mockAndroidDevice1.deviceId);
+      DaemonState.getInstance().initialize(sessionManager, devicePool);
+      expect(() => devicePool.assertSessionReadyForAutomation("session-owner")).not.toThrow();
+
+      // The emulator console has gone quiet; this read is the only discovery.
+      fakeDeviceUtils.setBootedDevices("android", [
+        { ...mockAndroidDevice1, name: `Unknown (${mockAndroidDevice1.deviceId})` },
+      ]);
+
+      try {
+        const { client } = fixture.getContext();
+        await client.readResource({ uri: "automobile:devices/booted" });
+
+        expect(devicePool.isPooledIdentityUnresolved(mockAndroidDevice1.deviceId)).toBe(true);
+        // The session survives, but its next tool call is refused.
+        expect(() => devicePool.assertSessionReadyForAutomation("session-owner")).toThrow(
+          /identity is unresolved/,
+        );
+      } finally {
+        sessionManager.stopCleanupTimer();
+      }
+    });
+
     test("exposes the registry epoch UUID for each live device", async function () {
       fakeDeviceUtils.setBootedDevices("android", [mockAndroidDevice1]);
 

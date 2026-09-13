@@ -2870,6 +2870,8 @@ export class UnixSocketServer {
         const bootedDevices = await PlatformDeviceManagerFactory.getInstance().getBootedDevices(
           args.platform,
         );
+        // FUNNEL 1: reconcile before addressing the serial.
+        await this.reconcileDiscoveryObservation(bootedDevices, "socket:ide/updateService");
         const targetDevice = bootedDevices.find((d) => d.deviceId === args.deviceId);
         if (!targetDevice) {
           throw new Error(`Device not found: ${args.deviceId}`);
@@ -3033,6 +3035,8 @@ export class UnixSocketServer {
     }
     const bootedDevices =
       await PlatformDeviceManagerFactory.getInstance().getBootedDevices(platform);
+    // FUNNEL 1: reconcile before addressing the serial.
+    await this.reconcileDiscoveryObservation(bootedDevices, "socket:ide/keyValueMutation");
     const targetDevice = bootedDevices.find((d) => d.deviceId === deviceId);
     if (!targetDevice) {
       throw new Error(`Device not found: ${deviceId}`);
@@ -4493,6 +4497,22 @@ export class UnixSocketServer {
     );
   }
 
+  /**
+   * FUNNEL 1 for this socket server: fold a discovery observation into pooled
+   * identity before anything here joins it to pool state. See
+   * `DevicePool.reconcileDiscoveryObservation`. A no-op in direct mode, where
+   * there is no pool.
+   */
+  private async reconcileDiscoveryObservation(
+    devices: readonly BootedDevice[],
+    source: string,
+  ): Promise<void> {
+    if (!this.daemonState.isInitialized()) {
+      return;
+    }
+    await this.daemonState.getDevicePool().reconcileDiscoveryObservation?.(devices, source);
+  }
+
   private async runTrackedDeviceInput<T>(
     toolName: string,
     targetDevice: BootedDevice,
@@ -4535,6 +4555,10 @@ export class UnixSocketServer {
         bypassAndroidDeviceListCache,
       },
     );
+    // FUNNEL 1: the target this resolves is handed straight to the device-addressed
+    // admission gate, which reads pool state — so the pool must have seen this
+    // observation first (#6863 review).
+    await this.reconcileDiscoveryObservation(discovery.devices, `socket:${action}`);
     if (!discovery.succeededPlatforms.has(platform)) {
       throw new Error(`Unable to discover booted ${platform} devices for ${action}`);
     }

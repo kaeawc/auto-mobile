@@ -1724,6 +1724,12 @@ export class Daemon {
           }
 
           const discovery = await deviceManager.getBootedDevicesDetailed("either");
+          // FUNNEL 1: this sweep joins the observation to `getAllDevices()` by
+          // serial below, so the pool must fold it in first (#6863 review).
+          await this.devicePool.reconcileDiscoveryObservation(
+            discovery.devices,
+            "disconnect-monitor",
+          );
           const bootedDevices = discovery.devices;
           const succeededPlatforms = discovery.succeededPlatforms;
           const bootedDeviceIds = new Set(bootedDevices.map((device) => device.deviceId));

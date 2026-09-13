@@ -64,6 +64,7 @@ import {
   type DeviceProvisioner,
 } from "../utils/deviceProvisioning";
 import { DaemonState } from "../daemon/daemonState";
+import { reconcileDiscoveryObservation } from "../daemon/discoveryReconcile";
 import type { DeviceReadinessLevel } from "../utils/DeviceSessionManager";
 import type { DevicePool, DeviceReadinessReservation, PooledDevice } from "../daemon/devicePool";
 import { McpSessionRecoveryInProgressError } from "../daemon/devicePool";
@@ -1518,10 +1519,16 @@ async function getShutdownDiscovery(
     deadlineMs,
     "platform discovery did not complete",
     requestAbortSignal ?? getAbortSignal(),
-    async () =>
-      await deviceManager.getBootedDevicesDetailed(device.platform, {
+    async () => {
+      const discovery = await deviceManager.getBootedDevicesDetailed(device.platform, {
         bypassAndroidDeviceListCache: true,
-      }),
+      });
+      // FUNNEL 1: the kill/teardown preflight decides whether the pooled AVD
+      // label may be acted on destructively, so the pool must see this
+      // observation before that decision (#6863 review).
+      await reconcileDiscoveryObservation(discovery.devices, "shutdown-preflight");
+      return discovery;
+    },
     timeoutMs,
   );
 }
@@ -2777,6 +2784,33 @@ function getBootedAndroidStableName(
   return getValidatedPooledAndroidAvdName(device, devicePool) ?? device.name;
 }
 
+/**
+ * The same stable name for the DESTRUCTIVE path, which sees through the
+ * quarantine.
+ *
+ * FUNNEL 1 folds a teardown's own discovery into the pool before this runs, so a
+ * runtime that answers `Unknown (<serial>)` is quarantined BY THAT OBSERVATION --
+ * which is the state in which every other consumer must read the pooled label as
+ * "no label". Reading it that way HERE would mean a teardown could never match
+ * the emulator by its pooled label at all, and the mandatory runtime
+ * confirmation that exists precisely for this case
+ * ({@link capturePooledAvdIdentity} -> {@link confirmPooledAvdIdentity}) would
+ * become unreachable: the teardown would instead fall through to the
+ * stopped-image inventory path, the failure the confirmation was built to
+ * prevent.
+ *
+ * So the destructive path matches on the quarantine-visible label and then makes
+ * the runtime name itself before the platform kill -- a strictly stronger gate
+ * than refusing on the quarantine flag would be
+ * ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
+ */
+function getBootedAndroidTeardownStableName(
+  device: BootedDevice,
+  devicePool: DevicePool | undefined,
+): string {
+  return getPooledAndroidEntryForIdentityCheck(device, devicePool)?.avdName ?? device.name;
+}
+
 // iOS `deleteDevice` targets are frequently expressed by name (the identifier
 // `provisionDevice` echoes back), not by UDID. Matching only on `deviceId`
 // leaves a name-based lookup unresolved even though the simulator is present,
@@ -2801,7 +2835,7 @@ function matchesTeardownStableId(
     return matchesIosTeardownIdentity(device, stableId);
   }
   return isVirtualAndroidDevice(device)
-    ? getBootedAndroidStableName(device, devicePool) === stableId
+    ? getBootedAndroidTeardownStableName(device, devicePool) === stableId
     : device.deviceId === stableId;
 }
 
@@ -2886,7 +2920,9 @@ function createBootedTeardownTarget(
   devicePool: DevicePool | undefined,
 ): { target?: TeardownResolvedTarget; conflict?: string; unsupported?: string } {
   const stableName =
-    device.platform === "android" ? getBootedAndroidStableName(device, devicePool) : device.name;
+    device.platform === "android"
+      ? getBootedAndroidTeardownStableName(device, devicePool)
+      : device.name;
   if (args.target.stableName && args.target.stableName !== stableName) {
     return { conflict: "The requested stable name does not match the booted device identity." };
   }
@@ -3078,10 +3114,16 @@ async function readTeardownBootedDiscovery(
     context.deadlineMs,
     detail,
     context.requestAbortSignal,
-    async () =>
-      await context.deviceManager.getBootedDevicesDetailed(context.args.target.platform, {
-        bypassAndroidDeviceListCache: true,
-      }),
+    async () => {
+      const discovery = await context.deviceManager.getBootedDevicesDetailed(
+        context.args.target.platform,
+        { bypassAndroidDeviceListCache: true },
+      );
+      // FUNNEL 1: teardown reads pooled entries (`findAbsentTeardownPooledDevices`)
+      // against this observation (#6863 review).
+      await reconcileDiscoveryObservation(discovery.devices, "teardown-precondition");
+      return discovery;
+    },
     context.timeoutMs,
   );
 }
@@ -4060,6 +4102,9 @@ async function validateRequestedAndroidSerialBeforeBoot(
   const discovery = await deviceUtils.getBootedDevicesDetailed("android", {
     bypassAndroidDeviceListCache: true,
   });
+  // FUNNEL 1: the post-boot recheck this defers to decides with pool/incarnation
+  // context, so the pool must have seen this observation (#6863 review).
+  await reconcileDiscoveryObservation(discovery.devices, "pre-boot-serial-validation");
   if (!discovery.succeededPlatforms.has("android")) {
     // Discovery was unavailable this sweep; a pair we cannot yet contradict is
     // deferred to the post-boot recheck rather than rejected on missing data.
@@ -4962,10 +5007,15 @@ async function resolveAndroidStartStableDeviceLifecycleTarget(
     deadlineMs,
     "Android booted-device identity discovery did not complete",
     signal,
-    async () =>
-      await deviceUtils.getBootedDevicesDetailed("android", {
+    async () => {
+      const discovery = await deviceUtils.getBootedDevicesDetailed("android", {
         bypassAndroidDeviceListCache: true,
-      }),
+      });
+      // FUNNEL 1: lifecycle coordination resolves the AVD behind a serial, which
+      // is exactly what the quarantine puts in doubt (#6863 review).
+      await reconcileDiscoveryObservation(discovery.devices, "android-start-lifecycle-target");
+      return discovery;
+    },
   );
   const bootedMatches = bootedDiscovery.devices.filter(
     (device) => device.platform === "android" && device.deviceId === deviceId,
@@ -5103,6 +5153,9 @@ export function registerDeviceTools() {
     let discoveryErrors: BootedDeviceDiscovery["discoveryErrors"];
     try {
       const discovery = await deviceManager.getBootedDevicesDetailed(platform);
+      // FUNNEL 1: listDevices publishes each entry's pool-derived label/epoch
+      // through the same join the booted-devices resource uses (#6863 review).
+      await reconcileDiscoveryObservation(discovery.devices, "listDevices");
       booted = discovery.devices;
       succeededPlatforms = discovery.succeededPlatforms;
       succeededSources = discovery.succeededSources;
@@ -6318,7 +6371,13 @@ export function registerDeviceTools() {
         totalDeadlineMs,
         operationSignal,
         "discovering an already-running exact device",
-        async () => await deviceManager.getBootedDevices(args.device.platform),
+        async () => {
+          const alreadyBootedDevices = await deviceManager.getBootedDevices(args.device.platform);
+          // FUNNEL 1: acquisition matches this observation against the pooled
+          // entry it is about to hand out (#6863 review).
+          await reconcileDiscoveryObservation(alreadyBootedDevices, "provisionDevice-exact");
+          return alreadyBootedDevices;
+        },
       );
       const exactBootedDevice =
         args.device.platform === "ios"

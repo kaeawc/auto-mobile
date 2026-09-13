@@ -551,6 +551,13 @@ async function discoverBootedDevicesForPlatform(
   try {
     const discovery =
       await PlatformDeviceManagerFactory.getInstance().getBootedDevicesDetailed(platform);
+    // FUNNEL 1: fold this observation into the pool BEFORE any of it is joined to
+    // pooled identity below. This read can be the first discovery to see the
+    // `Unknown (<serial>)` placeholder, and withholding only its own output would
+    // leave the pool -- and therefore the admission gate and every stream
+    // resolver -- still trusting the stale label
+    // ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
+    await devicePool?.reconcileDiscoveryObservation(discovery.devices, "booted-devices-resource");
     const complete = discovery.succeededSources
       ? sourcesForPlatform(platform).every((source) => discovery.succeededSources!.has(source))
       : discovery.succeededPlatforms.has(platform);

@@ -649,6 +649,13 @@ export interface ObserveDiff {
    */
   freshness?: ObserveResult["freshness"];
   /**
+   * Why the accessibility audit did not run for this capture (issue #6926).
+   * Populated by the `finalizeToolResponse` call site from the post-action
+   * observation, not by {@link diffObserveResult}, so clients receive the
+   * same capture-provenance metadata in full and diff modes.
+   */
+  accessibilityAuditSkipped?: ObserveResult["accessibilityAuditSkipped"];
+  /**
    * Why the captured hierarchy is incomplete — the same top-level field a
    * skeleton-projected full observation carries (issue #6601). A diff REPLACES
    * the projected observation, so without this the provenance the projection

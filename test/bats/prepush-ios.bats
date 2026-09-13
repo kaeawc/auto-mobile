@@ -17,6 +17,10 @@ fi
 if [[ $(basename "$0") == swiftlint && ${1:-} == version ]]; then
   echo "0.57.0"
 fi
+if [[ $(basename "$0") == swiftlint && " $* " == *" --path "* ]]; then
+  echo "mock swiftlint: unsupported flag --path" >&2
+  exit 2
+fi
 if [[ ${PREPUSH_IOS_FAIL_TOOL:-} == $(basename "$0") ]]; then
   exit "${PREPUSH_IOS_FAIL_CODE:-1}"
 fi
@@ -34,6 +38,9 @@ fi
 if [[ $(basename "$0") == swift && ${1:-} == test && ${2:-} == list ]]; then
   if [[ ${PREPUSH_IOS_SWIFT_TEST_LIST_DENYLIST_ONLY:-} == 1 ]]; then
     echo "XCTestRunnerTests.RemindersAddPlanTests/testExample"
+  elif [[ ${PREPUSH_IOS_SWIFT_TEST_LIST_NON_ASCII:-} == 1 ]]; then
+    echo "XCTestRunnerTests.CaféTests/testExample"
+    echo "XCTestRunnerTests.PlainTests/testExample"
   else
     echo "XCTestRunnerTests.AutoMobileVersionTests/testExample"
     echo "XCTestRunnerTests.NewFeatureTests/testExample"
@@ -54,6 +61,7 @@ create_real_git_fixture() {
   fixture_root="${BATS_TEST_TMPDIR}/fixture-${BATS_TEST_NUMBER}"
   fixture_bin="${BATS_TEST_TMPDIR}/fixture-bin-${BATS_TEST_NUMBER}"
   mkdir -p "${fixture_root}/scripts/swiftformat" "${fixture_root}/scripts/swiftlint" "${fixture_root}/scripts/ios" "${fixture_root}/ios/XCTestRunner" "${fixture_root}/ios/Nested" "${fixture_bin}"
+  fixture_root="$(cd "${fixture_root}" && pwd -P)"
   cp "${repo_root}/scripts/prepush-ios.sh" "${fixture_root}/scripts/prepush-ios.sh"
   cp "${repo_root}/scripts/swiftformat/swiftformat_version.sh" "${fixture_root}/scripts/swiftformat/swiftformat_version.sh"
   cp "${repo_root}/scripts/swiftlint/swiftlint_version.sh" "${fixture_root}/scripts/swiftlint/swiftlint_version.sh"
@@ -94,8 +102,8 @@ commit_changed_swift_file() {
   run cat "${command_log}"
   [ "$status" -eq 0 ]
   [[ "$output" == *"swiftformat --version"* ]]
-  [[ "$output" == *"swiftformat --lint ${repo_root}/ios/XCTestRunner/Sources/XCTestRunnerTests/AutoMobileVersionTests.swift"* ]]
-  [[ "$output" == *"swiftlint lint --config ${repo_root}/.swiftlint.yml --path ${repo_root}/ios/XCTestRunner/Sources/XCTestRunnerTests/AutoMobileVersionTests.swift"* ]]
+  [[ "$output" == *"swiftformat --lint --config ${repo_root}/.swiftformat ${repo_root}/ios/XCTestRunner/Sources/XCTestRunnerTests/AutoMobileVersionTests.swift"* ]]
+  [[ "$output" == *"swiftlint lint --config ${repo_root}/.swiftlint.yml ${repo_root}/ios/XCTestRunner/Sources/XCTestRunnerTests/AutoMobileVersionTests.swift"* ]]
   [[ "$output" == *"swift build"* ]]
   [[ "$output" == *"swift test -Xswiftc -warnings-as-errors --filter"* ]]
 }
@@ -132,8 +140,8 @@ commit_changed_swift_file() {
   [ "$status" -eq 0 ]
   run cat "${command_log}"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"swiftformat --lint ${fixture_root}/ios/Nested/Bar.swift"* ]]
-  [[ "$output" == *"swiftlint lint --config ${fixture_root}/.swiftlint.yml --path ${fixture_root}/ios/Nested/Bar.swift"* ]]
+  [[ "$output" == *"swiftformat --lint --config ${fixture_root}/.swiftformat ${fixture_root}/ios/Nested/Bar.swift"* ]]
+  [[ "$output" == *"swiftlint lint --config ${fixture_root}/.swiftlint.yml ${fixture_root}/ios/Nested/Bar.swift"* ]]
   [[ "$output" != *"No changed Swift files"* ]]
 }
 
@@ -149,7 +157,7 @@ commit_changed_swift_file() {
   [ "$status" -eq 0 ]
   run cat "${command_log}"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"swiftformat --lint ${fixture_root}/ios/Nested/Café.swift"* ]]
+  [[ "$output" == *"swiftformat --lint --config ${fixture_root}/.swiftformat ${fixture_root}/ios/Nested/Café.swift"* ]]
 }
 
 @test "derives the XCTestRunner filter from swift test list" {
@@ -160,6 +168,17 @@ commit_changed_swift_file() {
   run grep 'swift test -Xswiftc -warnings-as-errors --filter' "${command_log}"
   [ "$status" -eq 0 ]
   [[ "$output" == *"NewFeatureTests"* ]]
+}
+
+@test "includes non-ASCII XCTestRunner class names in the filter" {
+  run env PATH="${mock_bin}:$PATH" PREPUSH_IOS_COMMAND_LOG="${command_log}" \
+    PREPUSH_IOS_SWIFT_TEST_LIST_NON_ASCII=1 bash "${repo_root}/scripts/prepush-ios.sh"
+
+  [ "$status" -eq 0 ]
+  run grep 'swift test -Xswiftc -warnings-as-errors --filter' "${command_log}"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"CaféTests"* ]]
+  [[ "$output" == *"PlainTests"* ]]
 }
 
 @test "fails when swift test list has only simulator-dependent classes" {

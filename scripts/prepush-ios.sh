@@ -73,13 +73,13 @@ fi
 if [[ ${#swift_files[@]} -eq 0 ]]; then
   echo "No changed Swift files relative to ${base_ref}; skipping SwiftFormat and SwiftLint."
 else
-  swiftformat --lint ${swift_files[@]+"${swift_files[@]}"}
+  swiftformat --lint --config "${repo_root}/.swiftformat" ${swift_files[@]+"${swift_files[@]}"}
   if [[ -z "${PREPUSH_IOS_SKIP_SWIFTLINT_VERSION_CHECK:-}" ]]; then
     require_pinned_swiftlint_version
   fi
   # .swiftlint.yml marks force_unwrapping and force_try as errors, matching CI.
   for swift_file in ${swift_files[@]+"${swift_files[@]}"}; do
-    swiftlint lint --config "${project_root}/.swiftlint.yml" --path "${swift_file}"
+    swiftlint lint --config "${project_root}/.swiftlint.yml" "${swift_file}"
   done
 fi
 
@@ -126,7 +126,7 @@ while IFS= read -r test_class; do
     fi
   fi
 done < <(
-  printf '%s\n' "${swift_test_list_output}" | sed -n 's/^XCTestRunnerTests\.\([A-Za-z0-9_]*\)\/.*/\1/p'
+  printf '%s\n' "${swift_test_list_output}" | sed -n 's/^XCTestRunnerTests\.\([^/]*\)\/.*/\1/p'
 )
 
 if [[ ${#test_classes[@]} -eq 0 ]]; then

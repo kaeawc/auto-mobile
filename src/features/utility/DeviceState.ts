@@ -19,6 +19,7 @@ import {
   parseNotifyutilState,
 } from "../../utils/ios-cmdline-tools/notifyutil";
 import { isAndroidEmulatorSerial } from "../../utils/androidSerial";
+import { shellQuote } from "../../utils/shellQuote";
 
 export type DoNotDisturbMode = "off" | "none" | "priority" | "alarms";
 
@@ -260,11 +261,37 @@ export interface SetNetworkConditionInput {
   expiresInSeconds?: number;
 }
 
+/**
+ * Device-level connectivity toggles (issue #6872). Each field is
+ * `boolean | undefined`: `undefined` means "could not be read" — the key is
+ * absent on this API level, the value did not parse, or the read failed — and is
+ * never conflated with `false`. A single unreadable key never throws and never
+ * fails its siblings; it is recorded in `rawValues`/`warning` instead.
+ */
+export interface DeviceConnectivityState {
+  supported: boolean;
+  /** `settings get global airplane_mode_on`. */
+  airplaneMode?: boolean;
+  /** `settings get global wifi_on`. */
+  wifiEnabled?: boolean;
+  /** `settings get global bluetooth_on`. */
+  bluetoothEnabled?: boolean;
+  /** `settings get secure location_mode` != 0. */
+  locationEnabled?: boolean;
+  method?: "android_settings_batch";
+  /** Verbatim per-field values, so an unparsed key stays diagnosable. */
+  rawValues?: Partial<Record<DeviceConnectivityField, string>>;
+  /** Names the keys that could not be read, when at least one other could. */
+  warning?: string;
+  error?: string;
+}
+
 export interface DeviceStateResult {
   success: boolean;
   deviceId: string;
   platform: "android" | "ios";
   doNotDisturb?: DoNotDisturbState;
+  connectivity?: DeviceConnectivityState;
   biometrics?: BiometricEnrollmentState;
   networkCondition?: NetworkConditionState;
   error?: string;
@@ -280,6 +307,55 @@ export interface SetDeviceStateInput {
   };
   networkCondition?: SetNetworkConditionInput;
 }
+
+/**
+ * Every field `getState` can read back.
+ *
+ * `connectivity` is in the DEFAULT selection (see {@link DEFAULT_DEVICE_STATE_FIELDS}):
+ * the whole point of issue #6872 is that a bare `getDeviceState {}` must be able
+ * to answer "is Airplane mode already on?" before a client flips it.
+ */
+export const DEVICE_STATE_READABLE_FIELDS = [
+  "doNotDisturb",
+  "connectivity",
+  "biometrics",
+  "networkCondition",
+] as const;
+
+export type DeviceStateField = (typeof DEVICE_STATE_READABLE_FIELDS)[number];
+
+/**
+ * Every field `setState` can write. The invariant of issue #6872 — anything
+ * `setDeviceState` can write, `getDeviceState` should read back — is that this
+ * list is a SUBSET of {@link DEVICE_STATE_READABLE_FIELDS}; a unit test pins it,
+ * so adding a writable field without its read is a build-time failure, not a
+ * client-visible gap.
+ */
+export const DEVICE_STATE_WRITABLE_FIELDS = [
+  "doNotDisturb",
+  "biometrics",
+  "networkCondition",
+] as const;
+
+/** What `getState()` reads when the caller names no fields. */
+export const DEFAULT_DEVICE_STATE_FIELDS: readonly DeviceStateField[] = Object.freeze([
+  "doNotDisturb",
+  "connectivity",
+]);
+
+/** The per-field states a single `getState` call actually read. */
+interface SelectedDeviceStates {
+  doNotDisturb?: DoNotDisturbState;
+  connectivity?: DeviceConnectivityState;
+  biometrics?: BiometricEnrollmentState;
+  networkCondition?: NetworkConditionState;
+}
+
+/**
+ * Any one of those. Every member carries `supported` and an optional `error`,
+ * which is all the success/error aggregation in `getState` needs.
+ */
+type SelectedDeviceState = NonNullable<SelectedDeviceStates[keyof SelectedDeviceStates]>;
 
 interface IosSimulatorClient {
   executeCommand(command: string, timeoutMs?: number): Promise<ExecResult>;
@@ -726,6 +802,122 @@ function modeForInput(input: SetDeviceStateInput["doNotDisturb"]): DoNotDisturbM
   return input?.enabled === false ? "off" : "none";
 }
 
+export type DeviceConnectivityField =
+  | "airplaneMode"
+  | "wifiEnabled"
+  | "bluetoothEnabled"
+  | "locationEnabled";
+
+interface ConnectivityReadSpec {
+  field: DeviceConnectivityField;
+  namespace: "global" | "secure";
+  key: string;
+  /** `boolean`: 1/0. `nonZero`: any non-zero integer is "on" (location_mode). */
+  shape: "boolean" | "nonZero";
+}
+
+/**
+ * The four device-level toggles read back for issue #6872, in report order.
+ *
+ * `location_mode` is deprecated as a WRITE target since API 31 but is still
+ * readable on every supported API level (the platform derives it from the
+ * enabled location providers), and it is the only single key that answers
+ * "is location on at all" — `0` is off, `1`/`2`/`3` are the sensors/battery-saving/
+ * high-accuracy tiers, all of which mean on.
+ */
+const ANDROID_CONNECTIVITY_READS: readonly ConnectivityReadSpec[] = [
+  { field: "airplaneMode", namespace: "global", key: "airplane_mode_on", shape: "boolean" },
+  { field: "wifiEnabled", namespace: "global", key: "wifi_on", shape: "boolean" },
+  { field: "bluetoothEnabled", namespace: "global", key: "bluetooth_on", shape: "boolean" },
+  { field: "locationEnabled", namespace: "secure", key: "location_mode", shape: "nonZero" },
+];
+
+/**
+ * ONE adb invocation for all four toggles instead of four round-trips: the
+ * device shell runs every `settings get` and labels each answer `<field>=<raw>`,
+ * so the response is positionally independent — a key that errors simply yields
+ * an empty value rather than shifting every later line onto the wrong field.
+ *
+ * `2>/dev/null` keeps a per-key failure off the combined stream, so one missing
+ * key cannot trip the shared shell-failure heuristic and fail the whole read.
+ * Every interpolated value is a compile-time constant from
+ * {@link ANDROID_CONNECTIVITY_READS} — no caller input reaches the device shell.
+ *
+ * Exported so tests script the exact command rather than re-deriving it.
+ */
+export const ANDROID_CONNECTIVITY_READ_COMMAND = `shell sh -c ${shellQuote(
+  ANDROID_CONNECTIVITY_READS.map(
+    (read) => `echo "${read.field}=$(settings get ${read.namespace} ${read.key} 2>/dev/null)"`,
+  ).join("; "),
+)}`;
+
+/**
+ * Airplane mode is not settable — nor readable — on an iOS simulator: there is
+ * no simctl verb for the radios, and `simctl status_bar override` only paints
+ * the status bar without touching any real connectivity state. Wi-Fi and
+ * Bluetooth on a simulator are the HOST's, not the device's, so reporting them
+ * would be a confident falsehood about the device under test. Physical iOS
+ * exposes no public API for any of the four either.
+ */
+const IOS_CONNECTIVITY_UNSUPPORTED_ERROR =
+  "Device connectivity toggles cannot be read on iOS: Airplane mode, Wi-Fi, Bluetooth and " +
+  "Location have no simctl or devicectl read verb. A simulator shares the host's network stack " +
+  "(so its Wi-Fi/Bluetooth state is the Mac's, not the device's), and `simctl status_bar " +
+  "override` only paints the status bar without changing real connectivity. Read these from " +
+  "Settings on the device instead.";
+
+/**
+ * `settings get` prints the literal `null` for an absent key, and the batched
+ * script prints an empty value for a key whose read failed. Anything that is not
+ * exactly `1` or `0` is unreadable — never coerced — so `undefined` always means
+ * "unknown" and `false` always means "the device said 0".
+ */
+function parseAndroidBooleanSetting(raw: string | undefined): boolean | undefined {
+  switch (raw?.trim()) {
+    case "1":
+      return true;
+    case "0":
+      return false;
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * `location_mode` is an integer tier, not a flag: `0` is off and every other
+ * valid tier is on. A non-integer (`null`, empty, `3abc`) is unreadable.
+ */
+function parseAndroidNonZeroSetting(raw: string | undefined): boolean | undefined {
+  const value = raw?.trim();
+  if (value === undefined || !/^-?\d+$/.test(value)) {
+    return undefined;
+  }
+  return Number.parseInt(value, 10) !== 0;
+}
+
+/**
+ * Split the batched `<field>=<raw>` output into raw values keyed by field.
+ * Unknown labels and unlabeled lines are ignored, so a device that prepends
+ * noise (a warning banner) cannot misalign the parse.
+ */
+export function parseAndroidConnectivityOutput(
+  stdout: string,
+): Partial<Record<DeviceConnectivityField, string>> {
+  const known = new Set<string>(ANDROID_CONNECTIVITY_READS.map((read) => read.field));
+  const raw: Partial<Record<DeviceConnectivityField, string>> = {};
+  for (const line of stdout.split("\n")) {
+    const separator = line.indexOf("=");
+    if (separator <= 0) {
+      continue;
+    }
+    const field = line.slice(0, separator).trim();
+    if (known.has(field)) {
+      raw[field as DeviceConnectivityField] = line.slice(separator + 1).trim();
+    }
+  }
+  return raw;
+}
+
 export const EMPTY_STATE_SELECTION_ERROR = "At least one device state field must be included";
 
 /** True when a `setState` call carries no device-state field to apply. */
@@ -760,7 +952,7 @@ export class DeviceState {
   }
 
   async getState(
-    include: ("doNotDisturb" | "biometrics" | "networkCondition")[] = ["doNotDisturb"],
+    include: readonly DeviceStateField[] = DEFAULT_DEVICE_STATE_FIELDS,
   ): Promise<DeviceStateResult> {
     // An empty selection would otherwise read nothing and report success.
     if (include.length === 0) {
@@ -771,18 +963,9 @@ export class DeviceState {
         error: EMPTY_STATE_SELECTION_ERROR,
       };
     }
-    const doNotDisturb = include.includes("doNotDisturb")
-      ? await this.readDoNotDisturb()
-      : undefined;
-    const biometrics = include.includes("biometrics")
-      ? await this.getBiometricEnrollmentState()
-      : undefined;
-    const networkCondition = include.includes("networkCondition")
-      ? await this.readNetworkCondition()
-      : undefined;
-    const requestedStates = [doNotDisturb, biometrics, networkCondition].filter(
-      (state): state is DoNotDisturbState | BiometricEnrollmentState | NetworkConditionState =>
-        state !== undefined,
+    const selected = await this.readSelectedStates(include);
+    const requestedStates = Object.values(selected).filter(
+      (state): state is SelectedDeviceState => state !== undefined,
     );
     const error = requestedStates.find((state) => state.error)?.error;
 
@@ -790,10 +973,28 @@ export class DeviceState {
       success: requestedStates.every((state) => state.supported && !state.error),
       deviceId: this.device.deviceId,
       platform: this.device.platform,
-      ...(doNotDisturb ? { doNotDisturb } : {}),
-      ...(biometrics ? { biometrics } : {}),
-      ...(networkCondition ? { networkCondition } : {}),
+      ...selected,
       ...(error ? { error } : {}),
+    };
+  }
+
+  /**
+   * Read exactly the selected fields, in report order. Kept separate from
+   * `getState` so the selection branching does not compound with the
+   * success/error aggregation in one function.
+   */
+  private async readSelectedStates(
+    include: readonly DeviceStateField[],
+  ): Promise<SelectedDeviceStates> {
+    return {
+      ...(include.includes("doNotDisturb") ? { doNotDisturb: await this.readDoNotDisturb() } : {}),
+      ...(include.includes("connectivity") ? { connectivity: await this.readConnectivity() } : {}),
+      ...(include.includes("biometrics")
+        ? { biometrics: await this.getBiometricEnrollmentState() }
+        : {}),
+      ...(include.includes("networkCondition")
+        ? { networkCondition: await this.readNetworkCondition() }
+        : {}),
     };
   }
 
@@ -945,6 +1146,80 @@ export class DeviceState {
     return this.device.platform === "android"
       ? this.getAndroidDoNotDisturb()
       : this.getIosDoNotDisturb();
+  }
+
+  /** Platform dispatch for reading the device-level connectivity toggles. */
+  private async readConnectivity(): Promise<DeviceConnectivityState> {
+    return this.device.platform === "android"
+      ? this.getAndroidConnectivity()
+      : { supported: false, error: IOS_CONNECTIVITY_UNSUPPORTED_ERROR };
+  }
+
+  /**
+   * Read airplane/Wi-Fi/Bluetooth/location in a single adb round-trip
+   * (issue #6872). Failure policy, per field:
+   * - one key absent or malformed -> that field is `undefined`, siblings keep
+   *   their values, and the unreadable names go into `warning`;
+   * - NOTHING parsed -> an `error`, because the device answered nothing usable
+   *   and silently reporting four `undefined`s would look like a clean read;
+   * - the command threw -> an `error` carrying the underlying message.
+   */
+  private async getAndroidConnectivity(): Promise<DeviceConnectivityState> {
+    let stdout: string;
+    try {
+      const adb = this.adbFactory.create(this.device);
+      const result = await adb.executeCommand(
+        ANDROID_CONNECTIVITY_READ_COMMAND,
+        undefined,
+        undefined,
+        true,
+      );
+      stdout = result.stdout ?? "";
+    } catch (error) {
+      // Strategy 2: log, then return a typed failure — the tool reports the
+      // error to the client instead of throwing out of a read-only state dump.
+      logger.warn(`[DeviceState] connectivity read failed: ${errorMessage(error)}`, error);
+      return {
+        supported: true,
+        method: "android_settings_batch",
+        error: errorMessage(error),
+      };
+    }
+
+    const rawValues = parseAndroidConnectivityOutput(stdout);
+    const parsed: Partial<Record<DeviceConnectivityField, boolean>> = {};
+    const unreadable: DeviceConnectivityField[] = [];
+    for (const read of ANDROID_CONNECTIVITY_READS) {
+      const value =
+        read.shape === "boolean"
+          ? parseAndroidBooleanSetting(rawValues[read.field])
+          : parseAndroidNonZeroSetting(rawValues[read.field]);
+      if (value === undefined) {
+        unreadable.push(read.field);
+      } else {
+        parsed[read.field] = value;
+      }
+    }
+
+    const base = {
+      supported: true as const,
+      method: "android_settings_batch" as const,
+      ...parsed,
+      ...(Object.keys(rawValues).length > 0 ? { rawValues } : {}),
+    };
+    if (unreadable.length === ANDROID_CONNECTIVITY_READS.length) {
+      return {
+        ...base,
+        error: `Could not read any Android connectivity toggles (${unreadable.join(", ")}).`,
+      };
+    }
+    if (unreadable.length > 0) {
+      return {
+        ...base,
+        warning: `Could not read: ${unreadable.join(", ")}. Absent or unparsable on this device.`,
+      };
+    }
+    return base;
   }
 
   /** Platform dispatch for writing Do Not Disturb. */

@@ -53,7 +53,9 @@ describe("DeviceState", () => {
     client.setCommandResult("shell settings get global zen_mode", "2\n");
 
     const deviceState = new DeviceState(androidDevice, { adbFactory });
-    const result = await deviceState.getState();
+    // Narrowed to doNotDisturb: the default selection also reads the
+    // connectivity toggles (issue #6872), which this fixture does not script.
+    const result = await deviceState.getState(["doNotDisturb"]);
 
     expect(result.success).toBe(true);
     expect(result.doNotDisturb).toMatchObject({

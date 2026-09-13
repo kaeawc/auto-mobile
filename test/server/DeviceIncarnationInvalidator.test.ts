@@ -1,7 +1,9 @@
-import { describe, expect, test, spyOn } from "bun:test";
-import { DefaultDeviceIncarnationInvalidator } from "../../src/server/DeviceIncarnationInvalidator";
+import { describe, expect, test } from "bun:test";
+import {
+  DefaultDeviceIncarnationInvalidator,
+  type CtrlProxyClientLifecycle,
+} from "../../src/server/DeviceIncarnationInvalidator";
 import type { DeviceWindowCacheInvalidator } from "../../src/features/action/TerminateApp";
-import { AndroidCtrlProxyClient } from "../../src/features/observe/android/AndroidCtrlProxyClient";
 import { PerDeviceInstalledAppsCacheWriteCoordinator } from "../../src/db/installedAppsCacheWriteCoordinator";
 import type { BootedDevice } from "../../src/models";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
@@ -14,7 +16,7 @@ const ANDROID_DEVICE: BootedDevice = {
 };
 
 describe("DefaultDeviceIncarnationInvalidator", () => {
-  test("clears window state, evicts CtrlProxy, and marks installed apps stale", async () => {
+  test("clears window state, closes and evicts CtrlProxy, and marks installed apps stale", async () => {
     let windowInvalidations = 0;
     const windowCacheInvalidator: DeviceWindowCacheInvalidator = {
       invalidate: () => {
@@ -30,23 +32,37 @@ describe("DefaultDeviceIncarnationInvalidator", () => {
       123,
     );
     const barrier = new FakeDbWriteBarrier();
-    const removeInstance = spyOn(AndroidCtrlProxyClient, "removeInstance");
+    const calls: string[] = [];
+    const markDeviceStale = installedApps.markDeviceStale.bind(installedApps);
+    installedApps.markDeviceStale = async (deviceId) => {
+      calls.push(`db:${deviceId}`);
+      await markDeviceStale(deviceId);
+    };
+    const ctrlProxyLifecycle: CtrlProxyClientLifecycle = {
+      closeAndRemove: async (deviceId) => {
+        calls.push(`ctrlproxy:${deviceId}`);
+      },
+    };
     const invalidator = new DefaultDeviceIncarnationInvalidator(
       windowCacheInvalidator,
       installedApps,
       new PerDeviceInstalledAppsCacheWriteCoordinator(() => barrier),
       barrier,
+      (deviceId) => {
+        calls.push(`resource-cache:${deviceId}`);
+      },
+      ctrlProxyLifecycle,
     );
 
-    try {
-      await invalidator.invalidate(ANDROID_DEVICE);
+    await invalidator.invalidate(ANDROID_DEVICE);
 
-      expect(windowInvalidations).toBe(1);
-      expect(removeInstance).toHaveBeenCalledWith(ANDROID_DEVICE.deviceId);
-      expect(barrier.trackCalls).toBe(1);
-      expect(await installedApps.getLatestVerification(ANDROID_DEVICE.deviceId)).toBe(0);
-    } finally {
-      removeInstance.mockRestore();
-    }
+    expect(windowInvalidations).toBe(1);
+    expect(calls).toEqual([
+      `ctrlproxy:${ANDROID_DEVICE.deviceId}`,
+      `db:${ANDROID_DEVICE.deviceId}`,
+      `resource-cache:${ANDROID_DEVICE.deviceId}`,
+    ]);
+    expect(barrier.trackCalls).toBe(1);
+    expect(await installedApps.getCacheVerifiedAt(ANDROID_DEVICE.deviceId)).toBe(0);
   });
 });

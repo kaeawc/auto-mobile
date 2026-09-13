@@ -1492,21 +1492,35 @@ export async function restoreDeviceSnapshot(
     const vmSnapshotTimeoutMs = args.vmSnapshotTimeoutMs ?? baseConfig.vmSnapshotTimeoutMs;
 
     const restoreProvider = createRestoreProvider(device, timer, snapshotStore);
-    const result = await restoreProvider.restore({
-      snapshotName: record.snapshotName,
-      manifest: record.manifest,
-      useVmSnapshot,
-      vmSnapshotTimeoutMs,
-    });
-
-    if (
-      device.platform === "android" &&
-      device.deviceId.startsWith("emulator-") &&
-      record.manifest.snapshotType === "vm" &&
-      useVmSnapshot
-    ) {
+    let invalidated = false;
+    const invalidateOnce = async (): Promise<void> => {
+      if (
+        invalidated ||
+        device.platform !== "android" ||
+        !device.deviceId.startsWith("emulator-") ||
+        record.manifest.snapshotType !== "vm" ||
+        !useVmSnapshot
+      ) {
+        return;
+      }
+      invalidated = true;
       await deviceIncarnationInvalidator.invalidate(device);
+    };
+
+    let result: RestoreSnapshotResult;
+    try {
+      result = await restoreProvider.restore({
+        snapshotName: record.snapshotName,
+        manifest: record.manifest,
+        useVmSnapshot,
+        vmSnapshotTimeoutMs,
+        onVmSnapshotLoaded: invalidateOnce,
+      });
+    } catch (error) {
+      await invalidateOnce();
+      throw error;
     }
+    await invalidateOnce();
 
     const timestamp = now().toISOString();
     await snapshotRepository.touchSnapshot(record.snapshotName, timestamp);

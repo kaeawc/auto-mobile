@@ -10,6 +10,7 @@ import {
 } from "../db/installedAppsCacheWriteCoordinator";
 import { getDbWriteBarrier, type DbWriteBarrier } from "../db/dbWriteBarrier";
 import { InstalledAppsRepository, type InstalledAppsStore } from "../db/installedAppsRepository";
+import { invalidateInstalledAppsCache } from "./appResources";
 
 /**
  * Invalidates host-side state that belongs to one physical incarnation of a
@@ -20,6 +21,21 @@ export interface DeviceIncarnationInvalidator {
   invalidate(device: BootedDevice): Promise<void>;
 }
 
+export interface CtrlProxyClientLifecycle {
+  closeAndRemove(deviceId: string): Promise<void>;
+}
+
+const defaultCtrlProxyClientLifecycle: CtrlProxyClientLifecycle = {
+  async closeAndRemove(deviceId: string): Promise<void> {
+    const client = AndroidCtrlProxyClient.getExistingInstance(deviceId);
+    try {
+      await client?.close();
+    } finally {
+      AndroidCtrlProxyClient.removeInstance(deviceId);
+    }
+  },
+};
+
 /** Default Android VM-restore invalidation for CtrlProxy, observe, and apps caches. */
 export class DefaultDeviceIncarnationInvalidator implements DeviceIncarnationInvalidator {
   constructor(
@@ -27,6 +43,10 @@ export class DefaultDeviceIncarnationInvalidator implements DeviceIncarnationInv
     private readonly installedAppsRepository: InstalledAppsStore = new InstalledAppsRepository(),
     private readonly installedAppsCoordinator: InstalledAppsCacheWriteCoordinator = getInstalledAppsCacheWriteCoordinator(),
     private readonly dbWriteBarrier: DbWriteBarrier = getDbWriteBarrier(),
+    private readonly invalidateAppsCache: (
+      deviceId?: string,
+    ) => void = invalidateInstalledAppsCache,
+    private readonly ctrlProxyLifecycle: CtrlProxyClientLifecycle = defaultCtrlProxyClientLifecycle,
   ) {}
 
   async invalidate(device: BootedDevice): Promise<void> {
@@ -38,11 +58,12 @@ export class DefaultDeviceIncarnationInvalidator implements DeviceIncarnationInv
     // invalidator, then evict the stronger per-serial singleton so its forward
     // and guest-side helper state cannot survive a whole-VM restore.
     this.windowCacheInvalidator.invalidate(device);
-    AndroidCtrlProxyClient.removeInstance(device.deviceId);
+    await this.ctrlProxyLifecycle.closeAndRemove(device.deviceId);
     await this.installedAppsCoordinator.invalidate(device.deviceId, () =>
       this.dbWriteBarrier
         .track(() => this.installedAppsRepository.markDeviceStale(device.deviceId))
         .then(() => undefined),
     );
+    this.invalidateAppsCache(device.deviceId);
   }
 }

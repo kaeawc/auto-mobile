@@ -42,6 +42,7 @@ export interface RestoreSnapshotArgs {
   manifest: DeviceSnapshotManifest;
   useVmSnapshot?: boolean;
   vmSnapshotTimeoutMs?: number; // Timeout in milliseconds for emulator VM snapshot commands (default: 30000ms)
+  onVmSnapshotLoaded?: () => Promise<void> | void;
 }
 
 export interface RestoreSnapshotResult {
@@ -120,7 +121,13 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
   }
 
   private async executeAndroid(args: RestoreSnapshotArgs): Promise<RestoreSnapshotResult> {
-    const { snapshotName, manifest, useVmSnapshot = true, vmSnapshotTimeoutMs = 30000 } = args;
+    const {
+      snapshotName,
+      manifest,
+      useVmSnapshot = true,
+      vmSnapshotTimeoutMs = 30000,
+      onVmSnapshotLoaded,
+    } = args;
 
     logger.info(
       `Restoring snapshot '${snapshotName}' (type: ${manifest.snapshotType}) to device ${this.device.deviceId}`,
@@ -138,7 +145,7 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
     const shouldUseVmSnapshot = useVmSnapshot && manifest.snapshotType === "vm" && isEmulator;
 
     if (shouldUseVmSnapshot) {
-      await this.restoreVmSnapshot(snapshotName, manifest, vmSnapshotTimeoutMs);
+      await this.restoreVmSnapshot(snapshotName, manifest, vmSnapshotTimeoutMs, onVmSnapshotLoaded);
     } else {
       await this.restoreSettingsSnapshot(manifest);
     }
@@ -158,6 +165,7 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
     snapshotName: string,
     manifest: DeviceSnapshotManifest,
     vmSnapshotTimeoutMs: number,
+    onVmSnapshotLoaded?: () => Promise<void> | void,
   ): Promise<void> {
     logger.info(`Restoring VM snapshot for emulator ${this.device.deviceId}`);
 
@@ -179,6 +187,7 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
       }
 
       logger.info(`VM snapshot restored successfully`);
+      await onVmSnapshotLoaded?.();
 
       await this.emulator.waitForEmulatorReady(
         manifest.deviceName,
@@ -191,10 +200,10 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
     } catch (error) {
       const message = errorMessage(error);
       logger.error(`Failed to restore VM snapshot: ${message}`);
-      throw toActionableError(
-        error,
-        `Failed to restore VM snapshot '${snapshotName}' on device ${this.device.deviceId}`,
-      );
+      const context = `Failed to restore VM snapshot '${snapshotName}' on device ${this.device.deviceId}`;
+      throw error instanceof ActionableError
+        ? new ActionableError(`${context}: ${error.message}`, { cause: error })
+        : toActionableError(error, context);
     }
   }
 

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { RestoreSnapshot } from "../../../src/features/action/RestoreSnapshot";
-import { BootedDevice, DeviceSnapshotManifest } from "../../../src/models";
+import { ActionableError, BootedDevice, DeviceSnapshotManifest } from "../../../src/models";
 import { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { AndroidEmulatorClient } from "../../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
@@ -163,6 +163,41 @@ describe("RestoreSnapshot", () => {
       fakeAdb.setCommandResult(`emu avd snapshot load ${snapshotName}`, "OK");
       const notReadyEmulator = {
         waitForEmulatorReady: async () => {
+          throw new ActionableError("timed out waiting for boot completion");
+        },
+      } as AndroidEmulatorClient;
+      const restoring = new RestoreSnapshot(
+        device,
+        fakeAdbFactory,
+        notReadyEmulator,
+        fakeTimer,
+        store,
+      );
+
+      const restoringPromise = restoring.execute({ snapshotName, manifest, useVmSnapshot: true });
+      await expect(restoringPromise).rejects.toThrow(
+        `snapshot '${snapshotName}' on device ${device.deviceId}`,
+      );
+      await expect(restoringPromise).rejects.toThrow("timed out waiting for boot completion");
+    });
+
+    it("notifies after loading a VM snapshot before readiness fails", async () => {
+      const snapshotName = "test-vm-readiness-callback";
+      const manifest: DeviceSnapshotManifest = {
+        snapshotName,
+        timestamp: new Date().toISOString(),
+        deviceId: device.deviceId,
+        deviceName: device.name,
+        platform: "android",
+        snapshotType: "vm",
+        includeAppData: true,
+        includeSettings: false,
+      };
+      const calls: string[] = [];
+      fakeAdb.setCommandResult(`emu avd snapshot load ${snapshotName}`, "OK");
+      const notReadyEmulator = {
+        waitForEmulatorReady: async () => {
+          calls.push("ready");
           throw new Error("timed out waiting for boot completion");
         },
       } as AndroidEmulatorClient;
@@ -175,8 +210,17 @@ describe("RestoreSnapshot", () => {
       );
 
       await expect(
-        restoring.execute({ snapshotName, manifest, useVmSnapshot: true }),
-      ).rejects.toThrow(`snapshot '${snapshotName}' on device ${device.deviceId}`);
+        restoring.execute({
+          snapshotName,
+          manifest,
+          useVmSnapshot: true,
+          onVmSnapshotLoaded: () => {
+            calls.push("loaded");
+          },
+        }),
+      ).rejects.toThrow("timed out waiting for boot completion");
+
+      expect(calls).toEqual(["loaded", "ready"]);
     });
 
     it("should throw error when VM snapshot load fails with KO in stdout", async () => {

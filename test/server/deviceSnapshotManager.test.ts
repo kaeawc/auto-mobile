@@ -481,6 +481,60 @@ describe("deviceSnapshotManager", () => {
     expect(calls).toEqual(["restore", "invalidate"]);
   });
 
+  test("restoreDeviceSnapshot invalidates after VM load when readiness fails", async () => {
+    const vmDevice: BootedDevice = {
+      ...TEST_DEVICE,
+      deviceId: "emulator-5554",
+      name: "Pixel_9_Pro",
+    };
+    const manifest: DeviceSnapshotManifest = {
+      snapshotName: "vm-readiness-failure",
+      timestamp: new Date(0).toISOString(),
+      deviceId: vmDevice.deviceId,
+      deviceName: vmDevice.name,
+      platform: "android",
+      snapshotType: "vm",
+      includeAppData: true,
+      includeSettings: false,
+    };
+    const calls: string[] = [];
+
+    await repository.insertSnapshot({
+      snapshotName: manifest.snapshotName,
+      deviceId: manifest.deviceId,
+      deviceName: manifest.deviceName,
+      platform: manifest.platform,
+      snapshotType: manifest.snapshotType,
+      includeAppData: manifest.includeAppData,
+      includeSettings: manifest.includeSettings,
+      createdAt: manifest.timestamp,
+      lastAccessedAt: manifest.timestamp,
+      sizeBytes: 0,
+      manifest,
+    });
+    await setDeviceSnapshotManagerDependencies({
+      createRestoreProvider: () => ({
+        restore: async (args) => {
+          calls.push("restore");
+          await args.onVmSnapshotLoaded?.();
+          throw new Error("emulator readiness failed");
+        },
+      }),
+      deviceIncarnationInvalidator: {
+        invalidate: async (invalidatedDevice) => {
+          expect(invalidatedDevice).toBe(vmDevice);
+          calls.push("invalidate");
+        },
+      },
+    });
+
+    await expect(
+      restoreDeviceSnapshot(vmDevice, { snapshotName: manifest.snapshotName, useVmSnapshot: true }),
+    ).rejects.toThrow("emulator readiness failed");
+
+    expect(calls).toEqual(["restore", "invalidate"]);
+  });
+
   test("restoreDeviceSnapshot does not invalidate a settings-only Android restore", async () => {
     const manifest: DeviceSnapshotManifest = {
       snapshotName: "settings-restore",

@@ -1250,9 +1250,39 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
    * Stop CtrlProxy
    */
   public async stop(deadline?: number): Promise<void> {
+    this.beginStop();
+    if (!this.useRemoteRunner()) {
+      await this.cancelAndAwaitSharedStart();
+    }
+    await this.stopTrackedService(deadline);
+  }
+
+  private beginStop(): void {
     logger.info("[IOSCtrlProxy] Stopping CtrlProxy");
     this.isStopping = true;
+    this.processSupervisor.stop();
+  }
 
+  private async cancelAndAwaitSharedStart(): Promise<void> {
+    const sharedStart = this.sharedStart;
+    if (!sharedStart || sharedStart.completed) {
+      return;
+    }
+    if (!sharedStart.teardownCommitted && !sharedStart.controller.signal.aborted) {
+      sharedStart.controller.abort(new Error("iOS CtrlProxy startup was cancelled by stop()"));
+    }
+    try {
+      await sharedStart.completion;
+    } catch (error) {
+      // A startup rejection is expected after stop cancels it; teardown below owns the runner.
+      logger.debug(`[IOSCtrlProxy] In-flight startup settled during stop: ${errorMessage(error)}`);
+    }
+  }
+
+  private async stopTrackedService(deadline?: number): Promise<void> {
+    // startInternal() may have reset this flag or restarted supervision before its
+    // completion settled. Reassert teardown state after the shared-start barrier.
+    this.isStopping = true;
     this.processSupervisor.stop();
 
     const retiringController = this.runnerAbortController;
@@ -1596,7 +1626,10 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   }
 
   private async restartDeviceProcessAfterHostPortCollision(): Promise<void> {
-    await this.stop();
+    // This replacement runs inside startInternal()'s shared completion, so it must
+    // not wait for that same completion through public stop() or it would deadlock.
+    this.beginStop();
+    await this.stopTrackedService();
     this.isStopping = false;
     await this.startOnDevice();
   }

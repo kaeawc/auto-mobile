@@ -29,6 +29,7 @@ import type {
 import type { DaemonStateLike } from "../../src/daemon/daemonState";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import type { DaemonClientLike } from "../../src/daemon/client";
+import { ActionableError } from "../../src/models";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { formatLockContent } from "../../src/utils/fileLock";
 import { logger } from "../../src/utils/logger";
@@ -687,6 +688,21 @@ class TimeoutThenSuccessDaemonProcessFinder extends FakeDaemonProcessFinder {
   }
 }
 
+class DeadlineBoundTimeoutDaemonProcessFinder extends FakeDaemonProcessFinder {
+  public readonly scanTimeouts: number[] = [];
+
+  constructor(private readonly timer: FakeTimer) {
+    super([]);
+  }
+
+  override findDaemonProcesses(timeoutMs?: number): DaemonProcessRecord[] {
+    const timeout = timeoutMs ?? DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS;
+    this.scanTimeouts.push(timeout);
+    this.timer.advanceTime(timeout);
+    throw new Error("spawnSync /bin/sh ETIMEDOUT");
+  }
+}
+
 class FakeDaemonProcessSignaler implements DaemonProcessSignaler {
   readonly signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
 
@@ -1235,6 +1251,7 @@ describe("Daemon manager process detection", () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const processFinder = new TimeoutThenSuccessDaemonProcessFinder(Number.POSITIVE_INFINITY);
+    const portChecker = new FakeDaemonPortAvailabilityChecker(true);
     const manager = new DaemonManager(
       undefined,
       undefined,
@@ -1243,21 +1260,130 @@ describe("Daemon manager process detection", () => {
       undefined,
       undefined,
       processFinder,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      portChecker,
     );
     const warnSpy = spyOn(logger, "warn").mockImplementation(() => undefined);
 
     try {
       const findForStart = (
         manager as unknown as {
-          findLiveDaemonProcessesForStart(): Promise<number[]>;
+          findLiveDaemonProcessesForStart(
+            options: DaemonOptions,
+            startDeadline: number,
+          ): Promise<number[]>;
         }
       ).findLiveDaemonProcessesForStart.bind(manager);
 
-      await expect(findForStart()).resolves.toEqual([]);
+      await expect(findForStart({}, timer.now() + DAEMON_STARTUP_TIMEOUT_MS)).resolves.toEqual([]);
       expect(processFinder.calls).toBe(3);
+      expect(portChecker.checkedPorts).toEqual([3000]);
       expect(warnSpy).toHaveBeenCalledTimes(1);
     } finally {
       warnSpy.mockRestore();
+    }
+  });
+
+  test("fails closed after persistent process-table timeouts when the canonical port is bound", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const processFinder = new TimeoutThenSuccessDaemonProcessFinder(Number.POSITIVE_INFINITY);
+    const portChecker = new FakeDaemonPortAvailabilityChecker(false);
+    const manager = new DaemonManager(
+      undefined,
+      undefined,
+      timer,
+      undefined,
+      undefined,
+      undefined,
+      processFinder,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      portChecker,
+    );
+
+    const findForStart = (
+      manager as unknown as {
+        findLiveDaemonProcessesForStart(
+          options: DaemonOptions,
+          startDeadline: number,
+        ): Promise<number[]>;
+      }
+    ).findLiveDaemonProcessesForStart.bind(manager);
+
+    let caught: unknown;
+    try {
+      await findForStart({}, timer.now() + DAEMON_STARTUP_TIMEOUT_MS);
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(ActionableError);
+    expect((caught as Error).message).toContain("Failed to inspect daemon process table");
+    expect((caught as Error).message).toContain("Port 3000");
+    expect(processFinder.calls).toBe(3);
+    expect(portChecker.checkedPorts).toEqual([3000]);
+  });
+
+  test("charges process-table retries and launch wait to one daemon startup deadline", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "daemon-manager-start-deadline-test-"));
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const processFinder = new DeadlineBoundTimeoutDaemonProcessFinder(timer);
+    const portChecker = new FakeDaemonPortAvailabilityChecker(true);
+    const launcher = new DaemonLauncher({ entryScript: "daemon-entry.ts", timer });
+    const launchSpy = spyOn(launcher, "launchAndWait").mockImplementation(async (request) => {
+      await timer.sleep(request.timeoutMs);
+      throw new ActionableError("Daemon launch timed out within the startup deadline");
+    });
+
+    class TestDaemonManager extends DaemonManager {
+      override async status(): Promise<DaemonStatus> {
+        return { running: false };
+      }
+    }
+
+    const manager = new TestDaemonManager(
+      undefined,
+      undefined,
+      timer,
+      join(directory, "daemon.lock"),
+      join(directory, "daemon.pid"),
+      join(directory, "daemon.sock"),
+      processFinder,
+      undefined,
+      undefined,
+      launcher,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      portChecker,
+    );
+
+    try {
+      await expect(manager.start()).rejects.toBeInstanceOf(ActionableError);
+      expect(launchSpy).toHaveBeenCalledTimes(1);
+      expect(processFinder.scanTimeouts).toEqual([
+        DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS,
+        DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS,
+        DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS,
+      ]);
+      expect(timer.now()).toBeLessThanOrEqual(DAEMON_STARTUP_TIMEOUT_MS);
+      expect(launchSpy.mock.calls[0]?.[0].timeoutMs).toBeLessThan(DAEMON_STARTUP_TIMEOUT_MS);
+    } finally {
+      launchSpy.mockRestore();
+      rmSync(directory, { recursive: true, force: true });
     }
   });
 

@@ -783,12 +783,45 @@ export class DaemonManager implements DaemonManagerLike {
    * path when a loaded host times out while listing processes. Keep that narrowly
    * scoped degradation out of the fail-closed lifecycle scans used elsewhere.
    */
-  private async findLiveDaemonProcessesForStart(): Promise<number[]> {
-    const result = await this.retryExecutor.execute(async () => this.findLiveDaemonProcesses(), {
-      maxAttempts: DAEMON_START_PROCESS_TABLE_SCAN_MAX_ATTEMPTS,
-      delays: sequenceBackoff(DAEMON_START_PROCESS_TABLE_SCAN_RETRY_DELAYS_MS),
-      shouldRetry: (error) => error.message.includes("ETIMEDOUT"),
-    });
+  private async findLiveDaemonProcessesForStart(
+    options: DaemonOptions,
+    startDeadline: number,
+  ): Promise<number[]> {
+    const scanBudget = this.remainingTime(startDeadline);
+    if (scanBudget <= 0) {
+      throw new ActionableError(
+        "Daemon startup deadline elapsed before process-table inspection could complete; refusing to launch a daemon after the client deadline.",
+      );
+    }
+
+    // RetryExecutor already owns the retry/backoff policy. Limit each scan and
+    // each one of its existing sequence-backoff delays to time still available
+    // under this start request rather than beginning an independent timeout window.
+    const scanBackoff = sequenceBackoff(DAEMON_START_PROCESS_TABLE_SCAN_RETRY_DELAYS_MS);
+    const result = await this.retryExecutor.execute(
+      async () => {
+        const remaining = this.remainingTime(startDeadline);
+        if (remaining <= 0) {
+          throw new Error("Process-table inspection ETIMEDOUT before daemon startup deadline");
+        }
+        return this.findLiveDaemonProcesses(
+          Math.min(DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS, remaining),
+        );
+      },
+      {
+        maxAttempts: DAEMON_START_PROCESS_TABLE_SCAN_MAX_ATTEMPTS,
+        delays: (attempt) =>
+          Math.min(scanBackoff.delayForAttempt(attempt), this.remainingTime(startDeadline)),
+        shouldRetry: (error) =>
+          error.message.includes("ETIMEDOUT") && this.remainingTime(startDeadline) > 0,
+      },
+    );
+
+    if (this.remainingTime(startDeadline) <= 0) {
+      throw new ActionableError(
+        "Daemon startup deadline elapsed during process-table inspection; refusing to launch a daemon after the client deadline.",
+      );
+    }
 
     if (result.success) {
       return result.value ?? [];
@@ -799,8 +832,21 @@ export class DaemonManager implements DaemonManagerLike {
       throw error;
     }
 
-    // Socket readiness and the ownership record still protect startup when this
-    // best-effort host scan remains unavailable (issue #6969).
+    // A process-table scan can miss a daemon in another PID/socket namespace.
+    // Before this start-specific degradation proceeds, atomically prove its
+    // canonical port is bindable so a second daemon cannot silently take a
+    // fallback port beside that live owner.
+    const port = options.port ?? DEFAULT_DAEMON_PORT;
+    const host = options.host ?? "127.0.0.1";
+    if (!(await this.portAvailabilityChecker.isPortFree(port, host))) {
+      throw new ActionableError(
+        `${errorMessage(error)}. Port ${port} on ${host} ` +
+          "is still in use; a live AutoMobile daemon likely holds it. Refusing to start a second daemon on a fallback port.",
+      );
+    }
+
+    // The canonical port is free, so socket readiness and the ownership record
+    // still protect startup while this best-effort host scan remains unavailable.
     logger.warn(
       `[DaemonManager] process-table inspection timed out during daemon start; proceeding with socket ownership checks: ${errorMessage(error)}`,
       error,
@@ -973,7 +1019,7 @@ export class DaemonManager implements DaemonManagerLike {
     // reaches the shared socket during a long-running tool call and races a
     // transient availability probe. Reuse a responsive daemon; require an
     // explicit restart for a live but unreachable process.
-    const liveDaemons = await this.findLiveDaemonProcessesForStart();
+    const liveDaemons = await this.findLiveDaemonProcessesForStart(options, startDeadline);
     if (liveDaemons.length > 0) {
       stderrLog(
         `Found ${liveDaemons.length} live auto-mobile daemon process(es) without a usable PID record; waiting for one to become ready...`,
@@ -1006,6 +1052,13 @@ export class DaemonManager implements DaemonManagerLike {
     // this manager cannot prove stale. The child uses the shared bind guard to
     // reclaim only a socket with an unreachable listener and a positively-dead
     // recorded owner; it publishes its own early PID record before that bind.
+
+    const launchBudget = this.remainingTime(startDeadline);
+    if (launchBudget <= 0) {
+      throw new ActionableError(
+        "Daemon startup deadline elapsed before launch; refusing to start a daemon after the client deadline.",
+      );
+    }
 
     stderrLog("Starting AutoMobile daemon...");
 
@@ -1080,7 +1133,7 @@ export class DaemonManager implements DaemonManagerLike {
               env: childEnv,
             },
             onSpawn: logSink === "stderr" || logSink === "both" ? relayDaemonStderr : undefined,
-            timeoutMs: DAEMON_STARTUP_TIMEOUT_MS,
+            timeoutMs: launchBudget,
             waitForReady: (timeoutMs, signal) => this.waitForReady(timeoutMs, signal),
             isReadyForLaunchedProcess: (pid, timeoutMs, signal) =>
               this.isLaunchedProcessReady(pid, timeoutMs, signal),

@@ -9,7 +9,6 @@ import { promisify } from "node:util";
 import WebSocket from "ws";
 import { sendWebRtcStreamRequest } from "../../src/daemon/webrtcStreamClient";
 import { defaultTimer, type Timer } from "../../src/utils/SystemTimer";
-import { FakeTimer } from "../fakes/FakeTimer";
 import { waitFor, withDeadline } from "../helpers/abortableWaitFor";
 import {
   CaptureStageTimeline,
@@ -24,6 +23,11 @@ import {
   type EgressSample,
   type KeyframeRecoverySample,
 } from "../helpers/captureStageTimeline";
+import {
+  shouldRetryWebRtcDaemonStart,
+  waitForBootedSimulatorUdid,
+  type SimulatorAppearanceClient,
+} from "./helpers/webrtcDeviceCaptureHelpers";
 
 const execFileAsync = promisify(execFile);
 const runIntegration = process.env.AUTOMOBILE_WEBRTC_DEVICE_INTEGRATION === "1";
@@ -59,8 +63,6 @@ const TEARDOWN_HOOK_TIMEOUT_MS = 45_000;
 const REAL_IO_TIMEOUT_MS = 30_000;
 const CDP_COMMAND_TIMEOUT_MS = REAL_IO_TIMEOUT_MS;
 const DAEMON_START_RETRY_DELAY_MS = 2_000;
-const IOS_SIMULATOR_BOOT_DISCOVERY_TIMEOUT_MS = 10_000;
-const IOS_SIMULATOR_BOOT_DISCOVERY_POLL_MS = 250;
 
 interface ChromeTarget {
   type: string;
@@ -240,16 +242,6 @@ async function startWebRtcDaemon(
     );
   }
   throw retryReadyError;
-}
-
-export function shouldRetryWebRtcDaemonStart({
-  startError,
-  readyError,
-}: {
-  startError: Error | null;
-  readyError: Error | null;
-}): boolean {
-  return startError !== null || readyError !== null;
 }
 
 async function runWebRtcDaemonStart(daemonEnvironment: NodeJS.ProcessEnv): Promise<Error | null> {
@@ -668,11 +660,6 @@ interface CaptureProfile {
   configuredFps: number | null;
 }
 
-interface SimulatorAppearanceClient {
-  getBootedSimulators(timeoutMs?: number): Promise<Array<{ deviceId: string }>>;
-  getDeviceInfo(deviceId: string): Promise<{ state: string } | null>;
-}
-
 interface WebRtcSimCtlClient extends SimulatorAppearanceClient {
   getScreenSize(deviceId: string, timeoutMs?: number): Promise<CaptureDimensions>;
 }
@@ -682,40 +669,6 @@ type SimCtlClientFactory = () => Promise<WebRtcSimCtlClient>;
 async function createSimCtlClient(): Promise<WebRtcSimCtlClient> {
   const { SimCtlClient } = await import("../../src/utils/ios-cmdline-tools/SimCtlClient");
   return new SimCtlClient();
-}
-
-export function isBootedSimulatorState(device: { state: string } | null): boolean {
-  return device?.state === "Booted";
-}
-
-export async function waitForBootedSimulatorUdid(
-  simctl: SimulatorAppearanceClient,
-  {
-    timeoutMs = IOS_SIMULATOR_BOOT_DISCOVERY_TIMEOUT_MS,
-    pollIntervalMs = IOS_SIMULATOR_BOOT_DISCOVERY_POLL_MS,
-    timer = defaultTimer,
-  }: {
-    timeoutMs?: number;
-    pollIntervalMs?: number;
-    timer?: Timer;
-  } = {},
-): Promise<string | undefined> {
-  const deadline = timer.now() + timeoutMs;
-  while (true) {
-    const remainingMs = deadline - timer.now();
-    const simulator = (await simctl.getBootedSimulators(Math.max(1, remainingMs)))[0];
-    if (simulator) {
-      const device = await simctl.getDeviceInfo(simulator.deviceId);
-      if (isBootedSimulatorState(device)) {
-        return simulator.deviceId;
-      }
-    }
-
-    if (timer.now() >= deadline) {
-      return undefined;
-    }
-    await timer.sleep(Math.min(pollIntervalMs, deadline - timer.now()));
-  }
 }
 
 async function setIosFixtureAppearance(
@@ -733,34 +686,43 @@ async function setIosFixtureAppearance(
   } = {},
 ): Promise<void> {
   const deadline = timer.now() + timeoutMs;
-  try {
-    const simctl = await simctlFactory();
-    const udid = await waitForBootedSimulatorUdid(simctl, {
-      timeoutMs: Math.min(IOS_SIMULATOR_BOOT_DISCOVERY_TIMEOUT_MS, timeoutMs),
-      timer,
-    });
-    if (!udid) {
-      // Appearance is cosmetic; video-frame assertions remain the lane's contract.
-      console.warn(`[#6969] no Booted iOS simulator found for ${appearance} appearance fixture`);
-      return;
-    }
-
-    const remainingMs = deadline - timer.now();
-    if (remainingMs <= 0) {
-      // Appearance is cosmetic; video-frame assertions remain the lane's contract.
-      console.warn(`[#6969] iOS simulator appearance fixture timed out before simctl could run`);
-      return;
-    }
-    await execFileAsync("xcrun", ["simctl", "ui", udid, "appearance", appearance], {
-      timeout: remainingMs,
-      killSignal: "SIGKILL",
-      signal,
-    });
-  } catch (error) {
-    // Appearance is cosmetic; video-frame assertions remain the lane's contract.
-    console.warn(`[#6969] could not set iOS simulator ${appearance} appearance fixture: ${error}`);
+  const simctl = await simctlFactory();
+  const udid = await waitForBootedSimulatorUdid(simctl, {
+    timeoutMs: Math.min(10_000, timeoutMs),
+    timer,
+  });
+  if (!udid) {
+    // No simulator exists to update, so this cosmetic fixture change has no target.
+    console.warn(`[#6969] no Booted iOS simulator found for ${appearance} appearance fixture`);
+    return;
   }
+
+  const remainingMs = deadline - timer.now();
+  if (remainingMs <= 0) {
+    // No simctl command has run, so this cosmetic fixture change cannot be applied.
+    console.warn(`[#6969] iOS simulator appearance fixture timed out before simctl could run`);
+    return;
+  }
+  await execFileAsync("xcrun", ["simctl", "ui", udid, "appearance", appearance], {
+    timeout: remainingMs,
+    killSignal: "SIGKILL",
+    signal,
+  });
 }
+
+describe("WHEP iOS fixture setup", () => {
+  test("propagates simulator-client setup failures", async () => {
+    const setupError = new Error("simctl client initialization failed");
+
+    await expect(
+      setIosFixtureAppearance("light", {
+        simctlFactory: async () => {
+          throw setupError;
+        },
+      }),
+    ).rejects.toBe(setupError);
+  });
+});
 
 /**
  * Capture profile recorded with the stage timings (#4343) so latency samples
@@ -856,70 +818,6 @@ async function changeFixture(signal?: AbortSignal): Promise<void> {
   }
   throw new Error("AUTOMOBILE_WEBRTC_DEVICE_PLATFORM must be android or ios");
 }
-
-describe("WHEP device capture helper logic", () => {
-  test("retries daemon start when either the command or readiness attempt fails", () => {
-    expect(shouldRetryWebRtcDaemonStart({ startError: null, readyError: null })).toBe(false);
-    expect(
-      shouldRetryWebRtcDaemonStart({ startError: new Error("start failed"), readyError: null }),
-    ).toBe(true);
-    expect(
-      shouldRetryWebRtcDaemonStart({
-        startError: null,
-        readyError: new Error("socket unavailable"),
-      }),
-    ).toBe(true);
-  });
-
-  test("waits through an empty or transitional simulator listing for a Booted UDID", async () => {
-    const timer = new FakeTimer();
-    timer.enableAutoAdvance();
-    let discoveryCalls = 0;
-    const states = ["Shutdown", "Booted"];
-    const simctl: SimulatorAppearanceClient = {
-      async getBootedSimulators() {
-        discoveryCalls++;
-        return discoveryCalls === 1 ? [] : [{ deviceId: "ios-simulator-udid" }];
-      },
-      async getDeviceInfo() {
-        return { state: states.shift() ?? "Booted" };
-      },
-    };
-
-    await expect(
-      waitForBootedSimulatorUdid(simctl, { timeoutMs: 1_000, pollIntervalMs: 10, timer }),
-    ).resolves.toBe("ios-simulator-udid");
-    expect(discoveryCalls).toBe(3);
-  });
-});
-
-afterEach(async () => {
-  // Measured as its own phase and swallowed: a cosmetic restore must be
-  // attributable from the artifact (#4354) but must never fail an otherwise
-  // passing run. The explicit hook timeout keeps bun's 5s default from firing;
-  // the subprocess timeout kills a wedged simctl/adb before the budget is hit.
-  await timeline
-    .runPhase(
-      "fixtureRestore",
-      async () => {
-        if (platform === "android") {
-          const id = androidDeviceId();
-          await execFileAsync("adb", ["-s", id, "shell", "cmd", "uimode", "night", "no"], {
-            timeout: FIXTURE_RESTORE_TIMEOUT_MS,
-            killSignal: "SIGKILL",
-          });
-        }
-        if (platform === "ios") {
-          await setIosFixtureAppearance("light", { timeoutMs: FIXTURE_RESTORE_TIMEOUT_MS });
-        }
-      },
-      FIXTURE_RESTORE_TIMEOUT_MS,
-    )
-    .catch((error) => {
-      // Fixture restore is cosmetic; video-frame assertions remain the lane's contract.
-      console.warn(`[#4354] fixture restore failed after the capture assertion: ${error}`);
-    });
-}, TEARDOWN_HOOK_TIMEOUT_MS);
 
 // Poll cadences the stages are observed with. Each measurement carries up to
 // its interval as positive bias, so the record reports them rather than leaving
@@ -1021,6 +919,35 @@ function startStreamLeaseHeartbeat(
 }
 
 describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => {
+  afterEach(async () => {
+    // Measured as its own phase and handled only after runPhase records a
+    // failed/timedOut status: a cosmetic restore must not fail an otherwise
+    // passing run, but its real fixture failures must remain attributable.
+    // The explicit hook timeout keeps bun's 5s default from firing; the
+    // subprocess timeout kills a wedged simctl/adb before the budget is hit.
+    await timeline
+      .runPhase(
+        "fixtureRestore",
+        async () => {
+          if (platform === "android") {
+            const id = androidDeviceId();
+            await execFileAsync("adb", ["-s", id, "shell", "cmd", "uimode", "night", "no"], {
+              timeout: FIXTURE_RESTORE_TIMEOUT_MS,
+              killSignal: "SIGKILL",
+            });
+          }
+          if (platform === "ios") {
+            await setIosFixtureAppearance("light", { timeoutMs: FIXTURE_RESTORE_TIMEOUT_MS });
+          }
+        },
+        FIXTURE_RESTORE_TIMEOUT_MS,
+      )
+      .catch((error) => {
+        // Fixture restore is cosmetic; video-frame assertions remain the lane's contract.
+        console.warn(`[#4354] fixture restore failed after the capture assertion: ${error}`);
+      });
+  }, TEARDOWN_HOOK_TIMEOUT_MS);
+
   afterAll(async () => {
     const cleanup = pendingPipelineTeardown;
     let cleanupError: unknown;

@@ -1,4 +1,5 @@
 import { promises as fs } from "fs";
+import type { Dirent } from "fs";
 import * as path from "path";
 import * as os from "os";
 import { logger } from "./logger";
@@ -200,29 +201,70 @@ export class DeviceSnapshotStore {
 
   async getSnapshotSizeBytes(snapshotName: string, options?: SnapshotPathOptions): Promise<number> {
     const snapshotPath = this.getSnapshotPathWithOptions(snapshotName, options);
-    return this.getDirectorySize(snapshotPath);
+    // An archive directory that was never written is genuinely empty, so 0 is
+    // the honest answer here. Only the *emulator-owned* payload (which lives
+    // outside this store) distinguishes "empty" from "unknown" — see
+    // AvdSnapshotService (#6490).
+    return (await this.getDirectorySize(snapshotPath)) ?? 0;
   }
 
-  private async getDirectorySize(dirPath: string): Promise<number> {
-    let size = 0;
-
+  /**
+   * Recursive on-disk size of `dirPath`, or null when the directory does not
+   * exist or cannot be read. Public and path-taking so callers measuring
+   * directories this store does not own — notably the emulator-owned
+   * `<avd>.avd/snapshots/<name>` payload of a VM snapshot — go through the same
+   * filesystem seam the archive does, and so "not found" stays distinguishable
+   * from "zero bytes" (#6490).
+   */
+  async getDirectorySize(dirPath: string): Promise<number | null> {
+    let entries: Dirent[];
     try {
-      const entries = await fs.readdir(dirPath, { withFileTypes: true });
-
-      for (const entry of entries) {
-        const fullPath = path.join(dirPath, entry.name);
-
-        if (entry.isDirectory()) {
-          size += await this.getDirectorySize(fullPath);
-        } else {
-          const stats = await fs.stat(fullPath);
-          size += stats.size;
-        }
-      }
+      entries = await fs.readdir(dirPath, { withFileTypes: true });
     } catch (error) {
+      // A missing/unreadable directory is "unknown size", not "0 bytes"; the
+      // caller decides how to record that.
       logger.debug(`Failed to get directory size for ${dirPath}: ${error}`);
+      return null;
     }
 
+    let size = 0;
+    for (const entry of entries) {
+      const fullPath = path.join(dirPath, entry.name);
+      if (entry.isDirectory()) {
+        size += (await this.getDirectorySize(fullPath)) ?? 0;
+      } else {
+        size += await this.getFileSize(fullPath);
+      }
+    }
     return size;
+  }
+
+  /**
+   * Immediate subdirectory names of `dirPath`, or null when the directory does
+   * not exist or cannot be read. Same seam as {@link getDirectorySize}; used to
+   * enumerate in-AVD snapshot directories for orphan reporting (#6490).
+   */
+  async listSubdirectoryNames(dirPath: string): Promise<string[] | null> {
+    try {
+      const entries = await fs.readdir(dirPath, { withFileTypes: true });
+      return entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name);
+    } catch (error) {
+      // Same "unknown, not empty" distinction as getDirectorySize.
+      logger.debug(`Failed to list subdirectories of ${dirPath}: ${error}`);
+      return null;
+    }
+  }
+
+  private async getFileSize(filePath: string): Promise<number> {
+    try {
+      const stats = await fs.stat(filePath);
+      return stats.size;
+    } catch (error) {
+      // A file that vanished between readdir and stat (an emulator still
+      // writing its snapshot, a concurrent delete) contributes nothing; the
+      // rest of the directory is still worth measuring.
+      logger.debug(`Failed to stat ${filePath} while measuring a directory: ${error}`);
+      return 0;
+    }
   }
 }

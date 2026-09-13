@@ -1,0 +1,92 @@
+import type {
+  AvdSnapshotDirectoryEntry,
+  AvdSnapshotOperations,
+  VmSnapshotReclaimOutcome,
+} from "../../src/utils/android-cmdline-tools/AvdSnapshotService";
+
+export interface FakeVmDeleteCall {
+  deviceId: string;
+  snapshotName: string;
+  timeoutMs: number;
+}
+
+/**
+ * In-memory stand-in for the emulator-side half of VM snapshot accounting:
+ * the in-AVD `snapshots/<name>` directories and the emulator-console delete.
+ * Nothing here touches the filesystem or adb.
+ */
+export class FakeAvdSnapshotService implements AvdSnapshotOperations {
+  /** avdName -> snapshotName -> size in bytes (null = present but unmeasurable). */
+  private readonly avdSnapshots = new Map<string, Map<string, number | null>>();
+  private readonly liveSerials = new Map<string, string>();
+  private readonly deleteCalls: FakeVmDeleteCall[] = [];
+  private deleteFailureReason: string | null = null;
+
+  setVmSnapshot(avdName: string, snapshotName: string, sizeBytes: number | null): void {
+    const byName = this.avdSnapshots.get(avdName) ?? new Map<string, number | null>();
+    byName.set(snapshotName, sizeBytes);
+    this.avdSnapshots.set(avdName, byName);
+  }
+
+  setLiveEmulator(avdName: string, deviceId: string | null): void {
+    if (deviceId === null) {
+      this.liveSerials.delete(avdName);
+      return;
+    }
+    this.liveSerials.set(avdName, deviceId);
+  }
+
+  failNextDeletesWith(reason: string | null): void {
+    this.deleteFailureReason = reason;
+  }
+
+  getDeleteCalls(): FakeVmDeleteCall[] {
+    return [...this.deleteCalls];
+  }
+
+  hasVmSnapshot(avdName: string, snapshotName: string): boolean {
+    return this.avdSnapshots.get(avdName)?.has(snapshotName) ?? false;
+  }
+
+  async measureVmSnapshotBytes(avdName: string, snapshotName: string): Promise<number | null> {
+    const byName = this.avdSnapshots.get(avdName);
+    if (!byName || !byName.has(snapshotName)) {
+      return null;
+    }
+    return byName.get(snapshotName) ?? null;
+  }
+
+  async listAvdSnapshotDirectories(avdName: string): Promise<AvdSnapshotDirectoryEntry[]> {
+    const byName = this.avdSnapshots.get(avdName);
+    if (!byName) {
+      return [];
+    }
+    return Array.from(byName.entries()).map(([snapshotName, sizeBytes]) => ({
+      snapshotName,
+      sizeBytes,
+    }));
+  }
+
+  async listKnownAvdNames(): Promise<string[]> {
+    return Array.from(this.avdSnapshots.keys());
+  }
+
+  async findLiveEmulatorSerial(avdName: string): Promise<string | null> {
+    return this.liveSerials.get(avdName) ?? null;
+  }
+
+  async deleteVmSnapshot(
+    deviceId: string,
+    snapshotName: string,
+    timeoutMs: number,
+  ): Promise<VmSnapshotReclaimOutcome> {
+    this.deleteCalls.push({ deviceId, snapshotName, timeoutMs });
+    if (this.deleteFailureReason) {
+      return { reclaimed: false, reason: this.deleteFailureReason };
+    }
+    for (const byName of this.avdSnapshots.values()) {
+      byName.delete(snapshotName);
+    }
+    return { reclaimed: true };
+  }
+}

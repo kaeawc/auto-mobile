@@ -37,6 +37,24 @@ export interface AvdConfigReader {
 }
 
 /**
+ * The AVD-home half of {@link FileAvdConfigReader}, exposed on its own so
+ * callers that need the `<avd>.avd` directory itself (rather than its
+ * `config.ini`) reuse the same resolution — conventional path, `<avd>.ini`
+ * registry redirect, ANDROID_AVD_HOME / ANDROID_EMULATOR_HOME / ANDROID_SDK_HOME
+ * — instead of re-deriving it. Introduced for in-AVD snapshot accounting
+ * (#6490).
+ */
+export interface AvdDirectoryResolver {
+  /** Directory holding `<avd>.ini` / `<avd>.avd` entries. */
+  getAvdHome(): string;
+  /** Absolute path to `<avd>.avd`, or null when the AVD is not on this host. */
+  resolveAvdDirectory(avdName: string): Promise<string | null>;
+}
+
+/** Name of the snapshots subdirectory the emulator writes inside `<avd>.avd`. */
+export const AVD_SNAPSHOTS_DIRNAME = "snapshots";
+
+/**
  * Maps Android API levels to version strings.
  * Only includes levels where the mapping is well-established.
  */
@@ -162,7 +180,7 @@ export function resolveAndroidAvdHome(
 /**
  * Reads AVD config.ini files from the AVD home directory.
  */
-export class FileAvdConfigReader implements AvdConfigReader {
+export class FileAvdConfigReader implements AvdConfigReader, AvdDirectoryResolver {
   private readFileFn: (path: string, encoding: string) => Promise<string>;
   private existsFn: (path: string) => boolean;
   private avdHome: string;
@@ -196,6 +214,25 @@ export class FileAvdConfigReader implements AvdConfigReader {
         (avdHomeEnv ? dirname(this.avdHome) : configHome);
   }
 
+  getAvdHome(): string {
+    return this.avdHome;
+  }
+
+  /**
+   * Resolve `<avd>.avd` the same way {@link readConfig} resolves its
+   * `config.ini`: the `<avd>.ini` registry redirect first (an AVD relocated
+   * off the AVD home), then the conventional `<avdHome>/<avd>.avd` (#6490).
+   */
+  async resolveAvdDirectory(avdName: string): Promise<string | null> {
+    const path = require("path");
+    const registryDirectory = await this.resolveRegistryAvdDirectory(avdName);
+    if (registryDirectory) {
+      return registryDirectory;
+    }
+    const conventional = path.join(this.avdHome, `${avdName}.avd`);
+    return this.existsFn(conventional) ? conventional : null;
+  }
+
   async readConfig(avdName: string): Promise<AvdConfig | null> {
     const path = require("path");
     const conventionalConfigPath = path.join(this.avdHome, `${avdName}.avd`, "config.ini");
@@ -220,17 +257,31 @@ export class FileAvdConfigReader implements AvdConfigReader {
 
   private async resolveRegistryConfigPath(avdName: string): Promise<string | null> {
     const path = require("path");
+    const candidates = await this.registryDirectoryCandidates(avdName);
+    return (
+      candidates
+        .map((directory) => path.join(directory, "config.ini"))
+        .find((candidate: string) => this.existsFn(candidate)) ?? null
+    );
+  }
+
+  private async resolveRegistryAvdDirectory(avdName: string): Promise<string | null> {
+    const candidates = await this.registryDirectoryCandidates(avdName);
+    return candidates.find((candidate) => this.existsFn(candidate)) ?? null;
+  }
+
+  private async registryDirectoryCandidates(avdName: string): Promise<string[]> {
+    const path = require("path");
     const registryPath = path.join(this.avdHome, `${avdName}.ini`);
     if (!this.existsFn(registryPath)) {
-      return null;
+      return [];
     }
     try {
       const registry = parseKeyValueProperties(await this.readFileFn(registryPath, "utf-8"));
-      const candidates = registryConfigCandidates(registry, this.configHome);
-      return candidates.find((candidate) => this.existsFn(candidate)) ?? null;
+      return registryDirectoryCandidates(registry, this.configHome);
     } catch (error) {
       logger.warn(`Failed to read AVD registry for ${avdName}: ${error}`);
-      return null;
+      return [];
     }
   }
 }
@@ -266,19 +317,18 @@ function parseKeyValueProperties(content: string): Map<string, string> {
   return props;
 }
 
-function registryConfigCandidates(props: Map<string, string>, configHome: string): string[] {
+function registryDirectoryCandidates(props: Map<string, string>, configHome: string): string[] {
   const path = require("path");
   const candidates: string[] = [];
   const absolutePath = props.get("path");
   if (absolutePath && path.isAbsolute(absolutePath)) {
-    candidates.push(path.join(absolutePath, "config.ini"));
+    candidates.push(absolutePath);
   }
 
   const relativePath = props.get("path.rel");
   if (relativePath && !path.isAbsolute(relativePath)) {
     const relativeBase = path.resolve(configHome);
-    const resolvedDirectory = path.resolve(relativeBase, relativePath);
-    candidates.push(path.join(resolvedDirectory, "config.ini"));
+    candidates.push(path.resolve(relativeBase, relativePath));
   }
   return candidates;
 }

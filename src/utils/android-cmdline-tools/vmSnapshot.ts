@@ -1,12 +1,33 @@
 import { ExecResult } from "../../models";
 
-type VmSnapshotAction = "save" | "load";
+export type VmSnapshotAction = "save" | "load" | "delete";
 
 const OK_TOKEN = /\bOK\b/;
 const KO_TOKEN = /\bKO\b/;
 
+// The emulator console spells deletion `del`, not `delete` — `save`/`load` are
+// spelled the same either way. Keep the wire verb here and the human-readable
+// action word in the messages below, so error text stays readable (#6490).
+const VM_SNAPSHOT_CONSOLE_VERBS: Record<VmSnapshotAction, string> = {
+  save: "save",
+  load: "load",
+  delete: "del",
+};
+
 export function buildVmSnapshotCommand(action: VmSnapshotAction, snapshotName: string): string {
-  return `emu avd snapshot ${action} ${snapshotName}`;
+  return `emu avd snapshot ${VM_SNAPSHOT_CONSOLE_VERBS[action]} ${snapshotName}`;
+}
+
+/** Marker appended by {@link buildVmSnapshotErrorMessage} for an absent snapshot. */
+const MISSING_SNAPSHOT_MARKER = "snapshot not found";
+
+/**
+ * True when a failed `delete` means the in-AVD snapshot was already gone.
+ * Reclaim treats that as success: the bytes the caller wanted freed are freed
+ * (#6490).
+ */
+export function isMissingVmSnapshotError(errorMessage: string | undefined): boolean {
+  return (errorMessage ?? "").includes(MISSING_SNAPSHOT_MARKER);
 }
 
 export function evaluateVmSnapshotResult(
@@ -75,7 +96,7 @@ function buildVmSnapshotErrorMessage(
     lower.includes("snapshot") &&
     (lower.includes("not found") || lower.includes("does not exist"))
   ) {
-    return `${base}: snapshot not found (${cleaned})`;
+    return `${base}: ${MISSING_SNAPSHOT_MARKER} (${cleaned})`;
   }
 
   return `${base}: ${cleaned}`;

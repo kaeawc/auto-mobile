@@ -607,6 +607,11 @@ export interface DeviceSnapshotsTable {
   created_at: string;
   last_accessed_at: string;
   size_bytes: number;
+  /** 1 when the recorded size is a placeholder because the payload could not be measured (#6490). */
+  size_unknown: Generated<number>;
+  /** 1 when the in-AVD VM snapshot still needs deleting on a live emulator (#6490). */
+  pending_reclaim: Generated<number>;
+  pending_reclaim_reason: string | null;
   manifest_json: string;
 }
 

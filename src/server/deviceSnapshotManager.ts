@@ -33,6 +33,11 @@ import type {
   SnapshotRestoreProvider,
 } from "../utils/interfaces/SnapshotProvider";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import {
+  AVD_DEFAULT_BOOT_SNAPSHOT,
+  AvdSnapshotService,
+  type AvdSnapshotOperations,
+} from "../utils/android-cmdline-tools/AvdSnapshotService";
 import { logger } from "../utils/logger";
 
 interface DeviceSnapshotCaptureArgs {
@@ -60,12 +65,30 @@ interface SnapshotArchiveEvictionResult {
   evictedSnapshotNames: string[];
   currentSizeBytes: number;
   maxSizeBytes: number;
+  /** Rows whose size could not be measured: not budgeted, but not hidden either (#6490). */
+  unsizedCount: number;
+}
+
+/** An in-AVD snapshot directory with no archive row behind it (#6490). */
+export interface OrphanedAvdSnapshot {
+  avdName: string;
+  snapshotName: string;
+  sizeBytes: number | null;
+}
+
+export interface OrphanedAvdSnapshotSummary {
+  count: number;
+  totalSizeBytes: number;
+  unsizedCount: number;
+  entries: OrphanedAvdSnapshot[];
 }
 
 interface DeviceSnapshotManagerDependencies {
   snapshotRepository: DeviceSnapshotRepository;
   configRepository: ConfigRepository<DeviceSnapshotConfig>;
   snapshotStore: DeviceSnapshotStore;
+  /** Emulator-owned side of a VM snapshot: its in-AVD size and its console delete (#6490). */
+  avdSnapshots: AvdSnapshotOperations;
   timer: Timer;
   now: () => Date;
   createCaptureProvider: (
@@ -169,6 +192,7 @@ async function getDeviceSnapshotDependencies(): Promise<DeviceSnapshotManagerDep
       snapshotRepository: new DeviceSnapshotRepository(),
       configRepository: createDeviceSnapshotConfigRepository(),
       snapshotStore: new DeviceSnapshotStore(),
+      avdSnapshots: new AvdSnapshotService(new DeviceSnapshotStore()),
       timer: defaultTimer,
       now: () => new Date(),
       createCaptureProvider: (device, timer, store) => {
@@ -191,6 +215,7 @@ export async function setDeviceSnapshotManagerDependencies(
     snapshotRepository: deps.snapshotRepository ?? current.snapshotRepository,
     configRepository: deps.configRepository ?? current.configRepository,
     snapshotStore: deps.snapshotStore ?? current.snapshotStore,
+    avdSnapshots: deps.avdSnapshots ?? current.avdSnapshots,
     timer: deps.timer ?? current.timer,
     now: deps.now ?? current.now,
     createCaptureProvider: deps.createCaptureProvider ?? current.createCaptureProvider,
@@ -229,7 +254,12 @@ function mergeConfigInput(
   };
 }
 
-function formatSnapshotSize(bytes: number): string {
+function formatSnapshotSize(bytes: number | null): string {
+  // Distinct from "0 B": the payload exists but could not be located/measured,
+  // so reporting a number here would be a lie the budget then acts on (#6490).
+  if (bytes === null) {
+    return "unknown";
+  }
   if (bytes <= 0) {
     return "0 B";
   }
@@ -253,7 +283,48 @@ function buildArchiveEntry(record: DeviceSnapshotRecord): Record<string, unknown
     lastAccessedAt: record.lastAccessedAt,
     sizeBytes: record.sizeBytes,
     sizeLabel: formatSnapshotSize(record.sizeBytes),
+    ...(record.pendingReclaim
+      ? {
+          pendingReclaim: true,
+          ...(record.pendingReclaimReason === undefined
+            ? {}
+            : { pendingReclaimReason: record.pendingReclaimReason }),
+        }
+      : {}),
   };
+}
+
+/** True for a record whose payload lives inside the AVD rather than the archive store. */
+function isVmSnapshotRecord(record: { platform: string; snapshotType: string }): boolean {
+  return record.platform === "android" && record.snapshotType === "vm";
+}
+
+/**
+ * Size a freshly captured (or legacy-imported) snapshot at the location that
+ * actually holds its bytes: the AVD's `snapshots/<name>` directory for a VM
+ * snapshot, the archive directory for everything else. Returns null when a VM
+ * payload cannot be located — recorded as unknown, never as 0 (#6490).
+ */
+async function resolveSnapshotSizeBytes(
+  snapshotName: string,
+  manifest: DeviceSnapshotManifest,
+  snapshotStore: DeviceSnapshotStore,
+  avdSnapshots: AvdSnapshotOperations,
+  pathOptions: SnapshotPathOptions | undefined,
+): Promise<number | null> {
+  if (!isVmSnapshotRecord(manifest)) {
+    return snapshotStore.getSnapshotSizeBytes(snapshotName, pathOptions);
+  }
+
+  // For an Android emulator capture the manifest's deviceName IS the AVD name.
+  const sizeBytes = await avdSnapshots.measureVmSnapshotBytes(manifest.deviceName, snapshotName);
+  if (sizeBytes === null) {
+    logger.warn(
+      `[DeviceSnapshot] Could not measure the in-AVD payload of VM snapshot ` +
+        `'${snapshotName}' for AVD '${manifest.deviceName}'; recording its size as unknown`,
+    );
+  }
+  return sizeBytes;
 }
 
 // Validates the shape of a manifest read back from disk. Shared by every
@@ -459,7 +530,14 @@ async function importLegacySnapshot(
   now: () => Date,
   pathOptions?: SnapshotPathOptions,
 ): Promise<DeviceSnapshotRecord | null> {
-  const sizeBytes = await snapshotStore.getSnapshotSizeBytes(snapshotName, pathOptions);
+  const { avdSnapshots } = await getDeviceSnapshotDependencies();
+  const sizeBytes = await resolveSnapshotSizeBytes(
+    snapshotName,
+    manifest,
+    snapshotStore,
+    avdSnapshots,
+    pathOptions,
+  );
   const fallbackTimestamp = now().toISOString();
   const createdAt = resolveLegacyTimestamp(manifest.timestamp, fallbackTimestamp);
 
@@ -772,7 +850,71 @@ function assertSnapshotNameWritable(snapshotName: string): void {
   }
 }
 
-async function deleteDeviceSnapshotRecord(record: DeviceSnapshotRecord): Promise<boolean> {
+/**
+ * Reclaim the emulator-owned payload of a `vm` record before its row goes away.
+ *
+ * Deleting the row and the (empty) archive directory reclaims nothing for a VM
+ * snapshot: the gigabytes live in `<avd>.avd/snapshots/<name>` and only the
+ * emulator console can remove them. When the emulator is live we issue that
+ * delete; when it is not, we keep the row and flag it instead, so the reference
+ * survives for {@link sweepPendingVmSnapshotReclaims} rather than being dropped
+ * "for free" while the bytes stay on disk (#6490).
+ *
+ * Returns true when the caller may proceed to delete the row.
+ */
+async function reclaimVmSnapshotPayload(
+  record: DeviceSnapshotRecord,
+  vmSnapshotTimeoutMs: number,
+): Promise<boolean> {
+  const { snapshotRepository, avdSnapshots } = await getDeviceSnapshotDependencies();
+  const avdName = record.deviceName;
+
+  const serial = await avdSnapshots.findLiveEmulatorSerial(avdName);
+  const outcome = serial
+    ? await avdSnapshots.deleteVmSnapshot(serial, record.snapshotName, vmSnapshotTimeoutMs)
+    : {
+        reclaimed: false,
+        reason: `emulator for AVD '${avdName}' is not running; in-AVD snapshot left in place`,
+      };
+
+  if (outcome.reclaimed) {
+    return true;
+  }
+
+  logger.warn(
+    `[DeviceSnapshot] Could not reclaim the in-AVD payload of VM snapshot ` +
+      `'${record.snapshotName}': ${outcome.reason}. Keeping the record so the reclaim ` +
+      "can be completed when that emulator is next seen live.",
+  );
+  await snapshotRepository.updateSnapshot(record.snapshotName, {
+    pendingReclaim: true,
+    pendingReclaimReason: outcome.reason,
+  });
+  return false;
+}
+
+async function deleteDeviceSnapshotRecord(
+  record: DeviceSnapshotRecord,
+  vmSnapshotTimeoutMs: number,
+): Promise<boolean> {
+  if (
+    isVmSnapshotRecord(record) &&
+    !(await reclaimVmSnapshotPayload(record, vmSnapshotTimeoutMs))
+  ) {
+    // Row kept and flagged; leave its archive data alone so the record stays a
+    // faithful reference to the in-AVD snapshot that is still there.
+    return false;
+  }
+  return removeSnapshotArchiveAndRow(record);
+}
+
+/**
+ * Drop a snapshot's archive-store data and its row. Split from
+ * {@link deleteDeviceSnapshotRecord} so a caller that has ALREADY reclaimed the
+ * in-AVD payload (the pending-reclaim sweep) does not issue a second console
+ * delete for the same snapshot (#6490).
+ */
+async function removeSnapshotArchiveAndRow(record: DeviceSnapshotRecord): Promise<boolean> {
   const { snapshotRepository, snapshotStore } = await getDeviceSnapshotDependencies();
   const pathOptions = getSnapshotPathOptions({
     platform: record.platform,
@@ -816,17 +958,31 @@ async function enforceDeviceSnapshotArchiveLimit(
   return withArchiveBudgetLock(async () => {
     const maxSizeBytes = Math.max(0, Math.floor(maxArchiveSizeMb * 1024 * 1024));
     const { snapshotRepository } = await getDeviceSnapshotDependencies();
+    const { vmSnapshotTimeoutMs } = await getDeviceSnapshotConfig();
     const snapshots = await snapshotRepository.listSnapshots({
       orderByLastAccessed: "asc",
     });
 
-    let currentSizeBytes = snapshots.reduce((sum, snapshot) => sum + snapshot.sizeBytes, 0);
+    // An unmeasured row contributes nothing to the budget (guessing a number
+    // would evict against a fiction) but is counted and reported, so "the
+    // archive looks small" can never again quietly mean "we never measured it"
+    // (#6490).
+    let currentSizeBytes = snapshots.reduce((sum, snapshot) => sum + (snapshot.sizeBytes ?? 0), 0);
+    const unsizedCount = snapshots.filter((snapshot) => snapshot.sizeBytes === null).length;
+
+    if (unsizedCount > 0) {
+      logger.warn(
+        `[DeviceSnapshot] ${unsizedCount} snapshot record(s) have an unknown size and are ` +
+          "excluded from the archive budget",
+      );
+    }
 
     if (maxSizeBytes === 0 || currentSizeBytes <= maxSizeBytes) {
       return {
         evictedSnapshotNames: [],
         currentSizeBytes,
         maxSizeBytes,
+        unsizedCount,
       };
     }
 
@@ -838,10 +994,10 @@ async function enforceDeviceSnapshotArchiveLimit(
       }
 
       try {
-        const deleted = await deleteDeviceSnapshotRecord(snapshot);
+        const deleted = await deleteDeviceSnapshotRecord(snapshot, vmSnapshotTimeoutMs);
         if (deleted) {
           evictedSnapshotNames.push(snapshot.snapshotName);
-          currentSizeBytes -= snapshot.sizeBytes;
+          currentSizeBytes -= snapshot.sizeBytes ?? 0;
         }
       } catch (error) {
         logger.warn(`[DeviceSnapshot] Failed to evict snapshot ${snapshot.snapshotName}: ${error}`);
@@ -862,8 +1018,72 @@ async function enforceDeviceSnapshotArchiveLimit(
       evictedSnapshotNames,
       currentSizeBytes,
       maxSizeBytes,
+      unsizedCount,
     };
   });
+}
+
+/**
+ * Finish any VM-snapshot reclaim that was stranded by an offline emulator, for
+ * the AVD `device` is running. Best-effort and deliberately cheap: it only fires
+ * for a live Android emulator, reads just the flagged rows for that AVD, and
+ * never enumerates devices of its own (the caller already holds a live one).
+ *
+ * A row reaches this state only after eviction decided to drop it, so completing
+ * the console delete also completes the eviction: the record goes away with the
+ * bytes (#6490).
+ */
+export async function sweepPendingVmSnapshotReclaims(device: BootedDevice): Promise<string[]> {
+  if (device.platform !== "android" || !device.deviceId.startsWith("emulator-") || !device.name) {
+    return [];
+  }
+
+  const { snapshotRepository, avdSnapshots } = await getDeviceSnapshotDependencies();
+
+  let pending: DeviceSnapshotRecord[];
+  try {
+    pending = await snapshotRepository.listSnapshots({ pendingReclaim: true, snapshotType: "vm" });
+  } catch (error) {
+    // Best-effort background cleanup must never fail the operation that hosted
+    // it; the next capture retries (CLAUDE.md strategy 2).
+    logger.warn(`[DeviceSnapshot] Failed to read pending VM snapshot reclaims: ${error}`, error);
+    return [];
+  }
+
+  const reclaimed: string[] = [];
+  const { vmSnapshotTimeoutMs } = await getDeviceSnapshotConfig();
+
+  for (const record of pending.filter((candidate) => candidate.deviceName === device.name)) {
+    const outcome = await avdSnapshots.deleteVmSnapshot(
+      device.deviceId,
+      record.snapshotName,
+      vmSnapshotTimeoutMs,
+    );
+    if (!outcome.reclaimed) {
+      logger.warn(
+        `[DeviceSnapshot] Pending reclaim of VM snapshot '${record.snapshotName}' still ` +
+          `incomplete: ${outcome.reason}`,
+      );
+      continue;
+    }
+
+    // The in-AVD payload is gone, so finish the eviction the offline emulator
+    // interrupted: archive data and row both go. No second console delete.
+    const deleted = await removeSnapshotArchiveAndRow(record);
+    if (deleted) {
+      reclaimed.push(record.snapshotName);
+    }
+  }
+
+  if (reclaimed.length > 0) {
+    logger.info(
+      `[DeviceSnapshot] Completed ${reclaimed.length} pending VM snapshot reclaim(s) for ` +
+        `AVD '${device.name}'`,
+    );
+    await notifySnapshotResources();
+  }
+
+  return reclaimed;
 }
 
 export async function getDeviceSnapshotConfig(): Promise<DeviceSnapshotConfig> {
@@ -906,10 +1126,15 @@ export async function captureDeviceSnapshot(
   result: CaptureSnapshotResult;
   evictedSnapshotNames: string[];
 }> {
-  const { snapshotRepository, snapshotStore, timer, createCaptureProvider } =
+  const { snapshotRepository, snapshotStore, avdSnapshots, timer, createCaptureProvider } =
     await getDeviceSnapshotDependencies();
 
   const baseConfig = await getDeviceSnapshotConfig();
+
+  // Cheapest possible hook for finishing reclaims that an offline emulator
+  // blocked: this device is live and we already know its AVD, so the sweep is
+  // one filtered row read plus one console delete per stranded snapshot (#6490).
+  await sweepPendingVmSnapshotReclaims(device);
   const snapshotName = args.snapshotName ?? snapshotStore.generateSnapshotName(device.name);
   // Reject a traversal/absolute name before any filesystem operation or capture
   // command can act on it (issue #5705).
@@ -951,7 +1176,13 @@ export async function captureDeviceSnapshot(
         appBundleIds: args.appBundleIds,
       });
 
-      const sizeBytes = await snapshotStore.getSnapshotSizeBytes(snapshotName, pathOptions);
+      const sizeBytes = await resolveSnapshotSizeBytes(
+        snapshotName,
+        captured.manifest,
+        snapshotStore,
+        avdSnapshots,
+        pathOptions,
+      );
       const timestamp = captured.manifest.timestamp;
 
       await snapshotRepository.insertSnapshot({
@@ -1019,10 +1250,57 @@ export async function restoreDeviceSnapshot(
   return { result, manifest: record.manifest };
 }
 
+/**
+ * Enumerate `<avd>.avd/snapshots/*` for every AVD on this host and report the
+ * directories no record accounts for.
+ *
+ * Report only — an orphan may predate AutoMobile, or be a user-made snapshot
+ * someone relies on, so nothing here deletes. The field found nine such
+ * directories holding 17.3 GB with no way to even see them (#6490); removing one
+ * is a deliberate manual step (see docs/using/test-prep-tools.md).
+ */
+async function summarizeOrphanedAvdSnapshots(
+  knownSnapshotNames: Set<string>,
+): Promise<OrphanedAvdSnapshotSummary> {
+  const { avdSnapshots } = await getDeviceSnapshotDependencies();
+
+  const entries: OrphanedAvdSnapshot[] = [];
+  try {
+    for (const avdName of await avdSnapshots.listKnownAvdNames()) {
+      const directories = await avdSnapshots.listAvdSnapshotDirectories(avdName);
+      entries.push(
+        ...directories
+          // default_boot is the emulator's own quick-boot state, not a stranded
+          // AutoMobile capture — never report it as an orphan.
+          .filter(
+            (entry) =>
+              entry.snapshotName !== AVD_DEFAULT_BOOT_SNAPSHOT &&
+              !knownSnapshotNames.has(entry.snapshotName),
+          )
+          .map((entry) => ({ avdName, ...entry })),
+      );
+    }
+  } catch (error) {
+    // Orphan reporting is diagnostic garnish on the archive listing; a failure
+    // to scan must not fail the listing itself (CLAUDE.md strategy 2).
+    logger.warn(`[DeviceSnapshot] Failed to scan for orphaned in-AVD snapshots: ${error}`, error);
+  }
+
+  return {
+    count: entries.length,
+    totalSizeBytes: entries.reduce((sum, entry) => sum + (entry.sizeBytes ?? 0), 0),
+    unsizedCount: entries.filter((entry) => entry.sizeBytes === null).length,
+    entries,
+  };
+}
+
 export async function listDeviceSnapshots(): Promise<{
   snapshots: Array<Record<string, unknown>>;
   count: number;
   totalSizeBytes: number;
+  unsizedCount: number;
+  pendingReclaimCount: number;
+  orphanedAvdSnapshots: OrphanedAvdSnapshotSummary;
 }> {
   const { snapshotRepository, snapshotStore, now } = await getDeviceSnapshotDependencies();
   const initialRecords = await snapshotRepository.listSnapshots({
@@ -1040,11 +1318,17 @@ export async function listDeviceSnapshots(): Promise<{
     : initialRecords;
 
   const snapshots = records.map(buildArchiveEntry);
-  const totalSizeBytes = records.reduce((sum, snapshot) => sum + snapshot.sizeBytes, 0);
+  const totalSizeBytes = records.reduce((sum, snapshot) => sum + (snapshot.sizeBytes ?? 0), 0);
+  const orphanedAvdSnapshots = await summarizeOrphanedAvdSnapshots(
+    new Set(records.map((record) => record.snapshotName)),
+  );
 
   return {
     snapshots,
     count: snapshots.length,
     totalSizeBytes,
+    unsizedCount: records.filter((record) => record.sizeBytes === null).length,
+    pendingReclaimCount: records.filter((record) => record.pendingReclaim).length,
+    orphanedAvdSnapshots,
   };
 }

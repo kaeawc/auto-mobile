@@ -95,6 +95,22 @@ export interface DeviceSnapshotMetadata {
   includeSettings: boolean;
   createdAt: string;
   lastAccessedAt: string;
-  sizeBytes: number;
+  /**
+   * On-disk cost of the snapshot, or null when it could not be measured.
+   *
+   * A `vm` snapshot's payload lives inside the AVD (`<avd>.avd/snapshots/<name>`),
+   * not in the archive store, so measuring the archive directory reported 0 for
+   * every VM record and the archive budget never moved. It is measured at its
+   * real location now; when that location cannot be resolved the size is
+   * recorded as unknown (null) rather than a silent 0 (#6490).
+   */
+  sizeBytes: number | null;
+  /**
+   * True when the in-AVD payload still needs deleting through the emulator
+   * console — the emulator was offline when the row was due for eviction, so the
+   * row is kept as the reference a later session uses to finish the job (#6490).
+   */
+  pendingReclaim?: boolean;
+  pendingReclaimReason?: string;
   manifest: DeviceSnapshotManifest;
 }

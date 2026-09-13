@@ -684,23 +684,55 @@ export const setAppPermissionsHandler = async (
 };
 
 /**
- * Says which filter was applied and how many apps it hid. The previous message
- * reported only the surviving count, so a default-filtered listing looked like
- * the device's whole inventory and a client had to guess that `type` had other
- * values (#6798).
+ * Says which filters were applied and how many apps they hid. The previous
+ * message reported only the surviving count, so a default-filtered listing
+ * looked like the device's whole inventory and a client had to guess that `type`
+ * had other values (#6798). `search` and `profile` narrow the result too, so the
+ * hidden count is attributed to every active filter and the `type:"all"` advice
+ * is offered only when `type` is the one that actually hid something — advising
+ * it after `type:"all", search:"contacts"` would name an already-active filter
+ * that cannot restore anything (#6798 review).
  */
 export function describeListAppsResult(
   deviceId: string,
-  content: Pick<AppsQueryResourceContent, "totalCount" | "installedCount" | "query">,
+  content: Pick<
+    AppsQueryResourceContent,
+    "totalCount" | "installedCount" | "query" | "launchabilityUnknownProfiles"
+  >,
 ): string {
   const found = `Found ${content.totalCount} app(s) on ${deviceId}`;
+  const unknownProfiles = content.launchabilityUnknownProfiles ?? [];
+  const unknownNote =
+    unknownProfiles.length > 0
+      ? ` (launchability is unknown for profile(s) ${unknownProfiles.join(", ")}, so the ` +
+        "launchable filter could not judge their apps)"
+      : "";
   const hidden = content.installedCount - content.totalCount;
   if (hidden <= 0) {
-    return found;
+    return `${found}${unknownNote}`;
   }
+
+  const effectiveType = content.query.type ?? "launchable";
+  const typeNarrowed = effectiveType !== "all";
+  const activeFilters: string[] = [];
+  if (typeNarrowed) {
+    activeFilters.push(`type=${effectiveType}`);
+  }
+  if (content.query.search) {
+    activeFilters.push(`search="${content.query.search}"`);
+  }
+  if (content.query.profile !== undefined) {
+    activeFilters.push(`profile=${content.query.profile}`);
+  }
+
+  const filterClause = activeFilters.length > 0 ? `${activeFilters.join(", ")}; ` : "";
+  // Only actionable when type is the sole narrowing filter: otherwise the
+  // remaining filters would still hide those packages.
+  const advice =
+    typeNarrowed && activeFilters.length === 1 ? ' — pass type:"all" to include them' : "";
   return (
-    `${found} (type=${content.query.type ?? "launchable"}; ${hidden} of ${content.installedCount} ` +
-    'installed package(s) hidden — pass type:"all" to include them)'
+    `${found} (${filterClause}${hidden} of ${content.installedCount} installed package(s) hidden ` +
+    `by the active filter(s)${advice})${unknownNote}`
   );
 }
 

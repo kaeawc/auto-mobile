@@ -126,6 +126,18 @@ interface BootedDeviceInfo {
    * Consumed by the desktop workspace to gate the contextual Unlock control (issue #4694).
    */
   locked?: boolean;
+  /**
+   * Set when the pool holds this serial under an IDENTITY QUARANTINE: the serial
+   * resolves, but which AVD answers on it does not.
+   *
+   * Published rather than inferred from the absent pool context, because the two
+   * are not the same fact: an entry can carry no pool context simply because the
+   * pool never held the serial. This one says the daemon HAD an identity for it
+   * and can no longer tie it to the runtime — which is also why this entry is
+   * built from discovery alone and carries no probed service status or lock
+   * state ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
+   */
+  identityUnresolved?: boolean;
 }
 
 // Resource content schema
@@ -563,14 +575,17 @@ async function discoverBootedDevicesForPlatform(
       : discovery.succeededPlatforms.has(platform);
     return {
       devices: discovery.devices.map((device) =>
-        toBootedDeviceInfo(
-          device,
-          resolvePoolDeviceContext(
-            devicePool,
+        withIdentityQuarantineMarker(
+          toBootedDeviceInfo(
             device,
-            sessionInfoByDeviceId,
-            resolveDeviceSessionUuid,
+            resolvePoolDeviceContext(
+              devicePool,
+              device,
+              sessionInfoByDeviceId,
+              resolveDeviceSessionUuid,
+            ),
           ),
+          devicePool,
         ),
       ),
       succeededPlatforms: complete ? new Set([platform]) : new Set(),
@@ -669,6 +684,33 @@ function readDaemonDeviceContext(): DaemonDeviceContext {
   return { devicePool, poolStatus, sessionInfoByDeviceId, resolveDeviceSessionUuid };
 }
 
+/**
+ * Stamp the entry when the reconciliation this request just performed left the
+ * serial under an identity quarantine, so consumers see WHY it carries nothing
+ * but discovery identity.
+ */
+function withIdentityQuarantineMarker(
+  device: BootedDeviceInfo,
+  devicePool: DevicePool | null,
+): BootedDeviceInfo {
+  if (devicePool?.isPooledIdentityUnresolved(device.deviceId) !== true) {
+    return device;
+  }
+  return { ...device, identityUnresolved: true };
+}
+
+/**
+ * Whether this entry may be PROBED. A quarantined serial is exactly the one the
+ * daemon must not address: FUNNEL 2 refuses every device-addressed operation on
+ * it, and an enrichment probe is one — package/service queries and
+ * `adb dumpsys window policy` issued against whichever runtime now owns the
+ * serial. Skipping is what the published `identityUnresolved` marker then
+ * explains ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
+ */
+function isProbeableDevice(device: BootedDeviceInfo): boolean {
+  return device.identityUnresolved !== true;
+}
+
 async function enrichDeviceServiceStatuses(devices: BootedDeviceInfo[]): Promise<void> {
   if (!serviceStatusEnabled) {
     return;
@@ -677,6 +719,9 @@ async function enrichDeviceServiceStatuses(devices: BootedDeviceInfo[]): Promise
   const SERVICE_STATUS_TIMEOUT_MS = 5000;
   const serviceStatusResults = await Promise.allSettled(
     devices.map(async (device) => {
+      if (!isProbeableDevice(device)) {
+        return undefined;
+      }
       try {
         return await Promise.race([
           queryDeviceServiceStatus(device),
@@ -747,11 +792,13 @@ async function enrichDeviceLockStates(devices: BootedDeviceInfo[]): Promise<void
   }
 
   const lockResults = await Promise.allSettled(
-    devices.map((device) =>
-      probeDeviceLock(
-        { name: device.name, platform: device.platform, deviceId: device.deviceId },
-        lockProbe,
-      ),
+    devices.map(async (device) =>
+      isProbeableDevice(device)
+        ? await probeDeviceLock(
+            { name: device.name, platform: device.platform, deviceId: device.deviceId },
+            lockProbe,
+          )
+        : undefined,
     ),
   );
 

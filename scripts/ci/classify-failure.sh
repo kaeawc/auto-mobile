@@ -81,7 +81,8 @@ advisory_only_gate() {
       ;;
     WebRTC)
       [[ -n "$failures" ]] \
-        && grep -Eq '^(WebRTC Publisher Integration|Android Device Capture to WHEP|iOS Device Capture to WHEP)' <<< "$failures"
+        && grep -Eq '^(Android Device Capture to WHEP|iOS Device Capture to WHEP)' <<< "$failures" \
+        && ! grep -Eq '^WebRTC Publisher Integration' <<< "$failures"
       ;;
     *) return 1 ;;
   esac
@@ -111,7 +112,14 @@ fetch_job_log() {
 }
 
 fetch_artifact_logs() {
-  local artifacts artifact_id artifact_file artifact_text=''
+  local job_name="$1"
+  local matrix_suffix artifact_name artifacts artifact_id artifact_file artifact_text=''
+  if [[ ! "$job_name" =~ \(([^\(\)]*)\)$ ]]; then
+    return 0
+  fi
+  matrix_suffix="$(lowercase "${BASH_REMATCH[1]}")"
+  matrix_suffix="${matrix_suffix// /-}"
+  artifact_name="mcp-build-test-logs-${matrix_suffix}"
   if ! artifacts="$(gh api "repos/${REPO}/actions/runs/${run_id}/artifacts" 2>/dev/null)"; then
     return 0
   fi
@@ -123,7 +131,7 @@ fetch_artifact_logs() {
     fi
     rm -f "$artifact_file"
   done < <(
-    jq -r '.artifacts[]? | select((.name // "") | startswith("mcp-build-test-logs-")) | .id' <<< "$artifacts"
+    jq -r --arg artifact_name "$artifact_name" '.artifacts[]? | select(.name == $artifact_name) | .id' <<< "$artifacts"
   )
   printf '%s' "$artifact_text"
 }
@@ -142,7 +150,7 @@ while IFS=$'\t' read -r job_id job_name steps; do
   fi
   log_text="$(fetch_job_log "$job_id")"
   if [[ -z "$log_text" ]]; then
-    log_text="$(fetch_artifact_logs)"
+    log_text="$(fetch_artifact_logs "$job_name")"
   fi
 
   # shellcheck disable=SC2310 # A non-match is expected classifier control flow.

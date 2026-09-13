@@ -3623,9 +3623,9 @@ jobs:
         run: |
           declare -A hard_results=(
             [detect-changes]="${{ needs.detect-changes.result }}"
+            [webrtc-integration-test]="${{ needs.webrtc-integration-test.result }}"
           )
           declare -A advisory_results=(
-            [webrtc-integration-test]="${{ needs.webrtc-integration-test.result }}"
             [android-device-webrtc]="${{ needs.android-device-webrtc.result }}"
             [ios-device-webrtc]="${{ needs.ios-device-webrtc.result }}"
           )

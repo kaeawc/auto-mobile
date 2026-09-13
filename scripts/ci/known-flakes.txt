@@ -15,6 +15,7 @@ Run Playground Automobile Emulator*|*readiness phase exceeded the remaining dead
 Run Playground Automobile Emulator*|*is not available in the device pool*|RERUN-DONT-FIX|Android emulator boot or AVD flake, non-required, rerun
 Run Playground Automobile Emulator*|*sys.boot_completed is not 1*|RERUN-DONT-FIX|Android emulator boot or AVD flake, non-required, rerun
 Run Playground Automobile Emulator*|*timeout exhausted while waiting for device boot readiness*|RERUN-DONT-FIX|Android emulator boot or AVD flake, non-required, rerun
+Node Unit Timing Budget*|*test exceeded 100ms*median*isolated runs*|INVESTIGATE|isolated recheck confirms this is not a loaded-runner artifact; a real regression survived the bounded median recheck, fix the test or source and do not just rerun
 Node Unit Timing Budget*|*test exceeded 100ms*|RERUN-DONT-FIX|loaded-runner 100ms unit-budget flap, non-required, rerun
 Node Unit Timing Budget*|*exceed the 100ms budget*|RERUN-DONT-FIX|loaded-runner 100ms unit-budget flap, non-required, rerun
 Node Unit Timing Budget*|*recheck produced*|RERUN-DONT-FIX|loaded-runner 100ms unit-budget flap, non-required, rerun

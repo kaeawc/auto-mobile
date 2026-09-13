@@ -124,7 +124,7 @@ wiring_requires_yq() {
 }
 
 @test "advisory roll-ups warn without weakening their hard dependencies" {
-  local ios android node webrtc node_hard_results node_advisory_results
+  local ios android node webrtc node_hard_results node_advisory_results webrtc_hard_results webrtc_advisory_results
   ios="$(job_block ios-gate)"
   android="$(job_block android-gate)"
   node="$(job_block node-tests-gate)"
@@ -147,8 +147,15 @@ wiring_requires_yq() {
   [[ "$node_hard_results" == *'[node-unit-tests]'* ]]
   [[ "$node" == *'[node-host-integration-tests]'* ]]
   [[ "$node_advisory_results" == *'[node-unit-timing-budget]'* ]]
+  webrtc_hard_results="${webrtc#*declare -A hard_results=(}"
+  webrtc_hard_results="${webrtc_hard_results%%$'\n          )'*}"
+  webrtc_advisory_results="${webrtc#*declare -A advisory_results=(}"
+  webrtc_advisory_results="${webrtc_advisory_results%%$'\n          )'*}"
   [[ "$webrtc" == *'[detect-changes]'* ]]
-  [[ "$webrtc" == *'[android-device-webrtc]'* ]]
+  [[ "$webrtc_hard_results" == *'[webrtc-integration-test]'* ]]
+  [[ "$webrtc_advisory_results" == *'[android-device-webrtc]'* ]]
+  [[ "$webrtc_advisory_results" == *'[ios-device-webrtc]'* ]]
+  [[ "$webrtc_advisory_results" != *'[webrtc-integration-test]'* ]]
 }
 
 @test "portable PR matrices leave macOS coverage to nightly" {

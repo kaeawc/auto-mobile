@@ -22,3 +22,11 @@ teardown() {
   [[ "$output" == *"$FIXTURE"* ]]
   [[ "$output" == *"Pinned runtime graph: skipped"* ]]
 }
+
+@test "fails when the integration base ref cannot be resolved" {
+  run env AUTOMOBILE_INTEGRATION_TEST_BASE_REF=definitely-no-such-ref bash "$SCRIPT"
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Revision 'definitely-no-such-ref' does not exist"* ]]
+  [[ "$output" != *"no changed test/**/*.integration.test.ts files"* ]]
+}

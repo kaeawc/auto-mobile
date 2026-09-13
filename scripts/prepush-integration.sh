@@ -12,14 +12,9 @@ source "$ROOT/scripts/lib/file-selection.sh"
 
 base_ref="${AUTOMOBILE_INTEGRATION_TEST_BASE_REF:-origin/main}"
 
-changed_files() {
-  {
-    collect_changed_since_sha "$ROOT" "$base_ref" '.*'
-    collect_touched_files "$ROOT" '.*'
-  } | sort -u
-}
-
-changed="$(changed_files)"
+changed_since_base="$(collect_changed_since_sha "$ROOT" "$base_ref" '.*')"
+touched_files="$(collect_touched_files "$ROOT" '.*')"
+changed="$(printf '%s\n%s\n' "$changed_since_base" "$touched_files" | sort -u)"
 integration_files=()
 runtime_graph_changed=false
 

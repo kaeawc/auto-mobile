@@ -32,6 +32,11 @@ case "$1 $2" in
       */check-runs/12/annotations|*/check-runs/13/annotations|*/check-runs/14/annotations) printf '[]\n' ;;
       */check-runs/15/annotations|*/check-runs/16/annotations|*/check-runs/17/annotations) printf '[]\n' ;;
       */actions/jobs/6/logs) printf 'readiness phase exceeded the remaining deadline\n' ;;
+      */actions/jobs/18/logs) printf 'Test exceeded 100ms: some/test.ts > some test (median 142.31ms of 3 isolated runs)\n' ;;
+      */actions/jobs/19/logs|*/actions/jobs/20/logs) : ;;
+      */actions/runs/*/artifacts) printf '%s\n' '{"artifacts":[{"id":101,"name":"mcp-build-test-logs-windows-latest"},{"id":102,"name":"mcp-build-test-logs-ubuntu-latest"}]}' ;;
+      */actions/artifacts/101/zip) printf 'sharp: Could not load the sharp module\n' ;;
+      */actions/artifacts/102/zip) printf 'ordinary ubuntu log text\n' ;;
       */actions/jobs/12/logs|*/actions/jobs/13/logs|*/actions/jobs/14/logs|*/actions/jobs/15/logs|*/actions/jobs/16/logs|*/actions/jobs/17/logs) printf 'integration fixture failure\n' ;;
       *) printf '[]\n' ;;
     esac
@@ -92,11 +97,46 @@ JSON
   [[ "$output" != *"RERUN-DONT-FIX"* ]]
 }
 
+@test "scopes fallback artifacts to each failed job matrix suffix" {
+  fixture="$BATS_TEST_TMPDIR/matrix-artifact-run.json"
+  cat > "$fixture" <<'JSON'
+{
+  "headBranch": "dependabot/npm_and_yarn/sharp-0.35.4",
+  "jobs": [
+    {"databaseId": 19, "name": "Node Unit Tests (windows-latest)", "conclusion": "failure", "steps": [{"name": "Run unit lane", "conclusion": "failure"}]},
+    {"databaseId": 20, "name": "Node Unit Tests (ubuntu-latest)", "conclusion": "failure", "steps": [{"name": "Run unit lane", "conclusion": "failure"}]}
+  ]
+}
+JSON
+
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" bash "$SCRIPT" 790
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Node Unit Tests (windows-latest) → Run unit lane → none → KNOWN-NONFIX"* ]]
+  [[ "$output" == *"Node Unit Tests (ubuntu-latest) → Run unit lane → none → UNKNOWN"* ]]
+}
+
 @test "classifies an advisory timing-budget log flake and its red aggregator without annotations" {
   run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$FIXTURE" bash "$SCRIPT" 123
   [ "$status" -eq 0 ]
   [[ "$output" == *"Node Unit Timing Budget → Enforce 100ms budget for changed unit tests → none → RERUN-DONT-FIX"* ]]
   [[ "$output" == *"Node Tests → Check results → none → CHECK-UPSTREAM-FIRST"* ]]
+}
+
+@test "investigates a timing-budget breach retained by isolated median rechecks" {
+  fixture="$BATS_TEST_TMPDIR/timing-budget-median-run.json"
+  cat > "$fixture" <<'JSON'
+{
+  "headBranch": "work/timing-budget-median",
+  "jobs": [
+    {"databaseId": 18, "name": "Node Unit Timing Budget", "conclusion": "failure", "steps": [{"name": "Enforce 100ms budget for changed unit tests", "conclusion": "failure"}]}
+  ]
+}
+JSON
+
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" bash "$SCRIPT" 125
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Node Unit Timing Budget → Enforce 100ms budget for changed unit tests → none → INVESTIGATE"* ]]
+  [[ "$output" != *"Node Unit Timing Budget"*"RERUN-DONT-FIX"* ]]
 }
 
 @test "does not classify a plain XCTest assertion as a rerun flake" {
@@ -204,7 +244,7 @@ JSON
   [[ "$output" != *"iOS → Check results → none → CHECK-UPSTREAM-FIRST"* ]]
 }
 
-@test "marks WebRTC upstream-only when publisher and iOS capture fail" {
+@test "does not mark WebRTC upstream-only when the publisher lane fails" {
   fixture="$BATS_TEST_TMPDIR/webrtc-advisory-run.json"
   cat > "$fixture" <<'JSON'
 {
@@ -218,6 +258,24 @@ JSON
 JSON
 
   run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" bash "$SCRIPT" 324
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"WebRTC → Check results → none → UNKNOWN — no signature match, investigate"* ]]
+  [[ "$output" != *"WebRTC → Check results → none → CHECK-UPSTREAM-FIRST"* ]]
+}
+
+@test "marks WebRTC upstream-only when only an iOS capture lane fails" {
+  fixture="$BATS_TEST_TMPDIR/webrtc-ios-advisory-run.json"
+  cat > "$fixture" <<'JSON'
+{
+  "headBranch": "work/webrtc-capture",
+  "jobs": [
+    {"databaseId": 16, "name": "iOS Device Capture to WHEP", "conclusion": "failure", "steps": [{"name": "Run iOS capture", "conclusion": "failure"}]},
+    {"databaseId": 17, "name": "WebRTC", "conclusion": "failure", "steps": [{"name": "Check results", "conclusion": "failure"}]}
+  ]
+}
+JSON
+
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" bash "$SCRIPT" 325
   [ "$status" -eq 0 ]
   [[ "$output" == *"WebRTC → Check results → none → CHECK-UPSTREAM-FIRST"* ]]
 }

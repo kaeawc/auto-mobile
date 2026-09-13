@@ -1414,13 +1414,22 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     AndroidCtrlProxyClient.instances.delete(deviceId);
   }
 
+  /** Remove only the singleton captured before asynchronous incarnation cleanup began. */
+  public static removeInstanceIfCurrent(deviceId: string, instance: AndroidCtrlProxyClient): void {
+    if (AndroidCtrlProxyClient.getExistingInstance(deviceId) === instance) {
+      AndroidCtrlProxyClient.removeInstance(deviceId);
+    }
+  }
+
   /** Close the old guest connection and remove its serial singleton. */
   public static async invalidateForDeviceIncarnation(deviceId: string): Promise<void> {
     const client = AndroidCtrlProxyClient.getExistingInstance(deviceId);
     try {
       await client?.close();
     } finally {
-      AndroidCtrlProxyClient.removeInstance(deviceId);
+      if (client) {
+        AndroidCtrlProxyClient.removeInstanceIfCurrent(deviceId, client);
+      }
     }
   }
 

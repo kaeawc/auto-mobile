@@ -999,12 +999,14 @@ export function createInstalledAppsDeviceIncarnationListener(
   coordinator: InstalledAppsCacheWriteCoordinator = getInstalledAppsCacheWriteCoordinator(),
   barrier: DbWriteBarrier = getDbWriteBarrier(),
   invalidateCache: (deviceId: string) => void = invalidateInstalledAppsCache,
+  notifyResourcesUpdated: (deviceId: string) => Promise<void> = notifyInstalledAppResourceUpdated,
 ): DeviceIncarnationListener {
   return {
     name: "installed-apps",
     onDeviceIncarnationChanged: async (deviceId) => {
       // Dirty the in-process cache before the best-effort persistence write.
       invalidateCache(deviceId);
+      await notifyResourcesUpdated(deviceId);
       await coordinator.invalidate(
         deviceId,
         async () =>

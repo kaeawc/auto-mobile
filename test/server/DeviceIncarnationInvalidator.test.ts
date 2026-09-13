@@ -102,4 +102,55 @@ describe("DefaultDeviceIncarnationInvalidator", () => {
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("installed-apps"), expect.any(Error));
     warn.mockRestore();
   });
+
+  test("prepares recording cleanup before a VM load", async () => {
+    const calls: string[] = [];
+    const invalidator = new DefaultDeviceIncarnationInvalidator([
+      {
+        name: "recordings",
+        onDeviceIncarnationChanged: () => {},
+        prepareForIncarnationChange: async () => {
+          calls.push("recordings");
+        },
+      } as DeviceIncarnationListener & {
+        prepareForIncarnationChange(deviceId: string): Promise<void>;
+      },
+    ]);
+
+    const preparation = invalidator as DefaultDeviceIncarnationInvalidator & {
+      prepareForIncarnationChange(device: BootedDevice): Promise<void>;
+    };
+    await preparation.prepareForIncarnationChange(ANDROID_DEVICE);
+
+    expect(calls).toEqual(["recordings"]);
+  });
+
+  test("notifies installed-app resource subscribers after clearing incarnation caches", async () => {
+    const installedApps = new FakeInstalledAppsRepository();
+    const barrier = new FakeDbWriteBarrier();
+    const calls: string[] = [];
+    const createListener = createInstalledAppsDeviceIncarnationListener as unknown as (
+      repository: FakeInstalledAppsRepository,
+      coordinator: PerDeviceInstalledAppsCacheWriteCoordinator,
+      barrier: FakeDbWriteBarrier,
+      invalidateCache: (deviceId: string) => void,
+      notifyResourcesUpdated: (deviceId: string) => Promise<void>,
+    ) => DeviceIncarnationListener;
+    const listener = createListener(
+      installedApps,
+      new PerDeviceInstalledAppsCacheWriteCoordinator(() => barrier),
+      barrier,
+      (deviceId) => calls.push(`clear:${deviceId}`),
+      async (deviceId) => {
+        calls.push(`notify:${deviceId}`);
+      },
+    );
+
+    await listener.onDeviceIncarnationChanged(ANDROID_DEVICE.deviceId);
+
+    expect(calls).toEqual([
+      `clear:${ANDROID_DEVICE.deviceId}`,
+      `notify:${ANDROID_DEVICE.deviceId}`,
+    ]);
+  });
 });

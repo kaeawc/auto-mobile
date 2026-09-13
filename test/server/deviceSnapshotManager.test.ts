@@ -464,11 +464,15 @@ describe("deviceSnapshotManager", () => {
     await setDeviceSnapshotManagerDependencies({
       createRestoreProvider: () => ({
         restore: async (args) => {
+          await args.onBeforeVmSnapshotLoad?.();
           calls.push("restore");
           return { snapshotType: args.manifest.snapshotType, restoredAt: manifest.timestamp };
         },
       }),
       deviceIncarnationInvalidator: {
+        prepareForIncarnationChange: async () => {
+          calls.push("prepare");
+        },
         invalidate: async (invalidatedDevice) => {
           expect(invalidatedDevice).toBe(vmDevice);
           calls.push("invalidate");
@@ -478,7 +482,7 @@ describe("deviceSnapshotManager", () => {
 
     await restoreDeviceSnapshot(vmDevice, { snapshotName: manifest.snapshotName });
 
-    expect(calls).toEqual(["restore", "invalidate"]);
+    expect(calls).toEqual(["prepare", "restore", "invalidate"]);
   });
 
   test("restoreDeviceSnapshot invalidates after VM load when readiness fails", async () => {
@@ -521,6 +525,7 @@ describe("deviceSnapshotManager", () => {
         },
       }),
       deviceIncarnationInvalidator: {
+        prepareForIncarnationChange: async () => {},
         invalidate: async (invalidatedDevice) => {
           expect(invalidatedDevice).toBe(vmDevice);
           calls.push("invalidate");
@@ -533,6 +538,61 @@ describe("deviceSnapshotManager", () => {
     ).rejects.toThrow("emulator readiness failed");
 
     expect(calls).toEqual(["restore", "invalidate"]);
+  });
+
+  test("restoreDeviceSnapshot retains the live incarnation after a definitive pre-load rejection", async () => {
+    const vmDevice: BootedDevice = {
+      ...TEST_DEVICE,
+      deviceId: "emulator-5554",
+      name: "Pixel_9_Pro",
+    };
+    const manifest: DeviceSnapshotManifest = {
+      snapshotName: "vm-definitive-rejection",
+      timestamp: new Date(0).toISOString(),
+      deviceId: vmDevice.deviceId,
+      deviceName: vmDevice.name,
+      platform: "android",
+      snapshotType: "vm",
+      includeAppData: true,
+      includeSettings: false,
+    };
+    let invalidations = 0;
+    const rejection = Object.assign(new Error("console rejected load"), {
+      isDefinitiveVmSnapshotLoadFailure: true,
+    });
+
+    await repository.insertSnapshot({
+      snapshotName: manifest.snapshotName,
+      deviceId: manifest.deviceId,
+      deviceName: manifest.deviceName,
+      platform: manifest.platform,
+      snapshotType: manifest.snapshotType,
+      includeAppData: manifest.includeAppData,
+      includeSettings: manifest.includeSettings,
+      createdAt: manifest.timestamp,
+      lastAccessedAt: manifest.timestamp,
+      sizeBytes: 0,
+      manifest,
+    });
+    await setDeviceSnapshotManagerDependencies({
+      createRestoreProvider: () => ({
+        restore: async () => {
+          throw rejection;
+        },
+      }),
+      deviceIncarnationInvalidator: {
+        prepareForIncarnationChange: async () => {},
+        invalidate: async () => {
+          invalidations++;
+        },
+      },
+    });
+
+    await expect(
+      restoreDeviceSnapshot(vmDevice, { snapshotName: manifest.snapshotName, useVmSnapshot: true }),
+    ).rejects.toThrow(rejection.message);
+
+    expect(invalidations).toBe(0);
   });
 
   test("restoreDeviceSnapshot does not invalidate a settings-only Android restore", async () => {
@@ -563,6 +623,7 @@ describe("deviceSnapshotManager", () => {
     });
     await setDeviceSnapshotManagerDependencies({
       deviceIncarnationInvalidator: {
+        prepareForIncarnationChange: async () => {},
         invalidate: async () => {
           invalidated = true;
         },

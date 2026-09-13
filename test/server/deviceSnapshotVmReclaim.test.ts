@@ -90,6 +90,7 @@ describe("deviceSnapshotManager VM snapshot sizing and reclaim (#6490)", () => {
         }),
       }),
       deviceIncarnationInvalidator: {
+        prepareForIncarnationChange: async () => undefined,
         invalidate: async () => undefined,
       },
     });
@@ -699,6 +700,7 @@ describe("reclaim never races a same-name capture (#6490 review)", () => {
         },
       }),
       deviceIncarnationInvalidator: {
+        prepareForIncarnationChange: async () => undefined,
         invalidate: async () => undefined,
       },
     });

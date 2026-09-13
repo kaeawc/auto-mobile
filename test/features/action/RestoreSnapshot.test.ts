@@ -21,6 +21,7 @@ describe("RestoreSnapshot", () => {
     timeoutMs: number | undefined;
     childProcess: null | undefined;
     targetDeviceId: string | undefined;
+    options: { skipWakeAndUnlock?: boolean } | undefined;
   }>;
   let restoreSnapshot: RestoreSnapshot;
   let store: DeviceSnapshotStore;
@@ -47,8 +48,10 @@ describe("RestoreSnapshot", () => {
         timeoutMs?: number,
         childProcess?: null,
         targetDeviceId?: string,
+        _signal?: AbortSignal,
+        options?: { skipWakeAndUnlock?: boolean },
       ) => {
-        emulatorReadinessCalls.push({ avdName, timeoutMs, childProcess, targetDeviceId });
+        emulatorReadinessCalls.push({ avdName, timeoutMs, childProcess, targetDeviceId, options });
         return device;
       },
     } as AndroidEmulatorClient;
@@ -112,6 +115,7 @@ describe("RestoreSnapshot", () => {
           timeoutMs: 30000,
           childProcess: null,
           targetDeviceId: device.deviceId,
+          options: { skipWakeAndUnlock: true },
         },
       ]);
       expect(fakeTimer.wasSleepCalled(2000)).toBe(false);
@@ -146,6 +150,33 @@ describe("RestoreSnapshot", () => {
           useVmSnapshot: true,
         }),
       ).rejects.toThrow("Failed to restore VM snapshot");
+    });
+
+    it("marks a definitive console rejection so callers retain the live incarnation", async () => {
+      const snapshotName = "test-vm-definitive-failure";
+      const manifest: DeviceSnapshotManifest = {
+        snapshotName,
+        timestamp: new Date().toISOString(),
+        deviceId: device.deviceId,
+        deviceName: device.name,
+        platform: "android",
+        snapshotType: "vm",
+        includeAppData: true,
+        includeSettings: false,
+      };
+      fakeAdb.setCommandResult(`emu avd snapshot load ${snapshotName}`, "", "KO: rejected");
+
+      const error = await restoreSnapshot
+        .execute({ snapshotName, manifest, useVmSnapshot: true })
+        .then(
+          () => null,
+          (failure: unknown) => failure,
+        );
+
+      expect(
+        (error as { isDefinitiveVmSnapshotLoadFailure?: boolean })
+          .isDefinitiveVmSnapshotLoadFailure,
+      ).toBe(true);
     });
 
     it("surfaces readiness failures with the snapshot and device identity", async () => {

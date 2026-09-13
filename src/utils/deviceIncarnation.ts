@@ -21,6 +21,12 @@ export type DeviceIncarnationBumper = (deviceId: string) => boolean;
 /** One owner of state keyed by a device serial. */
 export interface DeviceIncarnationListener {
   readonly name: string;
+  /**
+   * Quiesce host state while the current guest is still alive. VM snapshot
+   * loading rewinds guest processes, so owners such as screen recording must
+   * stop them before the console load command rather than after it completes.
+   */
+  prepareForIncarnationChange?(deviceId: string): Promise<void> | void;
   onDeviceIncarnationChanged(deviceId: string): Promise<void> | void;
 }
 

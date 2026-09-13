@@ -7,6 +7,7 @@ import {
   DeviceSnapshotConfig,
   DeviceSnapshotConfigInput,
   DeviceSnapshotManifest,
+  toActionableError,
 } from "../models";
 import {
   DeviceSnapshotRepository,
@@ -1492,7 +1493,22 @@ export async function restoreDeviceSnapshot(
     const vmSnapshotTimeoutMs = args.vmSnapshotTimeoutMs ?? baseConfig.vmSnapshotTimeoutMs;
 
     const restoreProvider = createRestoreProvider(device, timer, snapshotStore);
+    let prepared = false;
     let invalidated = false;
+    let loaded = false;
+    const prepareOnce = async (): Promise<void> => {
+      if (
+        prepared ||
+        device.platform !== "android" ||
+        !device.deviceId.startsWith("emulator-") ||
+        record.manifest.snapshotType !== "vm" ||
+        !useVmSnapshot
+      ) {
+        return;
+      }
+      prepared = true;
+      await deviceIncarnationInvalidator.prepareForIncarnationChange(device);
+    };
     const invalidateOnce = async (): Promise<void> => {
       if (
         invalidated ||
@@ -1506,6 +1522,10 @@ export async function restoreDeviceSnapshot(
       invalidated = true;
       await deviceIncarnationInvalidator.invalidate(device);
     };
+    const invalidateAfterLoad = async (): Promise<void> => {
+      loaded = true;
+      await invalidateOnce();
+    };
 
     let result: RestoreSnapshotResult;
     try {
@@ -1514,11 +1534,18 @@ export async function restoreDeviceSnapshot(
         manifest: record.manifest,
         useVmSnapshot,
         vmSnapshotTimeoutMs,
-        onVmSnapshotLoaded: invalidateOnce,
+        onBeforeVmSnapshotLoad: prepareOnce,
+        onVmSnapshotLoaded: invalidateAfterLoad,
       });
     } catch (error) {
-      await invalidateOnce();
-      throw error;
+      const definitivePreLoadFailure =
+        error instanceof Error &&
+        (error as { isDefinitiveVmSnapshotLoadFailure?: boolean })
+          .isDefinitiveVmSnapshotLoadFailure === true;
+      if (loaded || !definitivePreLoadFailure) {
+        await invalidateOnce();
+      }
+      throw toActionableError(error, `Failed to restore snapshot '${record.snapshotName}'`);
     }
     await invalidateOnce();
 

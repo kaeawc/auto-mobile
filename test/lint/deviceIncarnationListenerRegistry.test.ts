@@ -11,6 +11,7 @@ describe("VM restore incarnation listener registry", () => {
       "ctrlproxy-manager": "src/utils/CtrlProxyManager.ts",
       "observe-window-cache": "src/features/action/TerminateApp.ts",
       "installed-apps": "src/server/appResources.ts",
+      recordings: "src/server/videoRecordingIncarnationListener.ts",
       "performance-monitoring": "src/features/performance/PerformanceMonitor.ts",
       "session-readiness": "src/daemon/daemonState.ts",
     };

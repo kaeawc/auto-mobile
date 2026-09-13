@@ -16,7 +16,10 @@ export interface HeartbeatSessionSource {
   cleanupExpiredSessions(): void;
 }
 
-type SessionHeartbeatReleaseReason = "missing-first-heartbeat" | "heartbeat-timeout";
+type SessionHeartbeatReleaseReason =
+  | "missing-first-heartbeat"
+  | "heartbeat-timeout"
+  | "cli-idle-timeout";
 
 export interface SessionHeartbeatMonitorConfig {
   /** How often to scan for stale sessions. Default: 10s. */
@@ -133,6 +136,22 @@ export class SessionHeartbeatMonitor {
         continue;
       }
       const timeoutMs = session.heartbeatTimeoutMs ?? this.defaultHeartbeatTimeoutMs;
+      // A CLI-owned session (issue #6870) is judged on wall-clock idleness, not
+      // on the 10 s heartbeat contract: the `--cli` process that owns it exits
+      // between calls, so there is nobody to heartbeat and a missing first
+      // heartbeat says nothing about abandonment. Its `heartbeatTimeoutMs` was
+      // widened to the CLI idle timeout when it adopted the policy.
+      if (session.livenessPolicy === "cli-idle") {
+        const idleSince = session.lastHeartbeat ?? session.lastUsedAt;
+        if (now - idleSince > timeoutMs) {
+          const reason = "cli-idle-timeout";
+          logger.warn(
+            `Session ${session.sessionId} idle past the CLI idle timeout, cancelling (reason=${reason})`,
+          );
+          await this.reap(session.sessionId, reason);
+        }
+        continue;
+      }
       if (!session.hasReceivedHeartbeat) {
         const lastHeartbeat = session.lastHeartbeat ?? session.lastUsedAt;
         if (session.heartbeatTimeoutSource === "default") {

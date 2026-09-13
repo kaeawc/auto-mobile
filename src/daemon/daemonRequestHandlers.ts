@@ -2,7 +2,11 @@ import { DaemonRequest } from "./types";
 import { DeviceLabelMap, Session, type SessionReleaseSnapshot } from "./sessionManager";
 import type { DeviceRecoveryEligibility, DeviceRecoveryPolicy, PooledDevice } from "./devicePool";
 import type { DeviceSessionRecord } from "./deviceSessionRegistry";
-import { DAEMON_HEARTBEAT_METHOD, DAEMON_LIST_DEVICE_SESSIONS_METHOD } from "./constants";
+import {
+  CLI_SESSION_LIVENESS_POLICY,
+  DAEMON_HEARTBEAT_METHOD,
+  DAEMON_LIST_DEVICE_SESSIONS_METHOD,
+} from "./constants";
 
 /** Socket endpoint clients may query before sending optional newer parameters. */
 export const DAEMON_CAPABILITIES_METHOD = "daemon/capabilities";
@@ -23,6 +27,8 @@ export interface DaemonStateAccess {
     getSession(sessionId: string): Session | null;
     getTerminalReleaseSnapshot?(sessionId: string): SessionReleaseSnapshot | undefined;
     recordHeartbeat?(sessionId: string): void;
+    /** Opt a one-shot `--cli`-owned session out of the heartbeat contract (#6870). */
+    adoptCliLivenessPolicy?(sessionId: string): boolean;
     getSessionForDevice?(deviceId: string): string | null;
     getDeviceLabels(sessionId: string): DeviceLabelMap | undefined;
     releaseSession(sessionId: string): Promise<string | null>;
@@ -94,7 +100,10 @@ export async function handleDaemonRequest(
 
   switch (request.method) {
     case DAEMON_HEARTBEAT_METHOD: {
-      const sessionId = (request.params as { sessionId?: string } | undefined)?.sessionId;
+      const heartbeatParams = request.params as
+        | { sessionId?: string; livenessPolicy?: string }
+        | undefined;
+      const sessionId = heartbeatParams?.sessionId;
       if (!sessionId) {
         return {
           success: false,
@@ -107,6 +116,14 @@ export async function handleDaemonRequest(
           success: false,
           error: `Session not found: ${sessionId}`,
         };
+      }
+      // A one-shot `--cli` client declares itself here (issue #6870) so the
+      // daemon stops holding its session to the 10 s heartbeat contract no
+      // one-shot process can keep. Any other client omits the field and keeps
+      // the strict contract exactly as before.
+      if (heartbeatParams?.livenessPolicy === CLI_SESSION_LIVENESS_POLICY) {
+        manager.adoptCliLivenessPolicy?.(sessionId);
+        return { success: true, result: { sessionId, livenessPolicy: "cli-idle" } };
       }
       manager.recordHeartbeat?.(sessionId);
       return { success: true, result: { sessionId } };

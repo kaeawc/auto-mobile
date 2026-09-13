@@ -41,6 +41,7 @@ describe("runCliCommand never requests progress relay (issue #6222 reopen)", () 
         calls.push(args);
         return { success: true, fields: [], totalAttempts: 0 };
       },
+      adoptCliSessionLiveness: async (): Promise<string | undefined> => undefined,
       close: async (): Promise<void> => {
         // no-op fake
       },

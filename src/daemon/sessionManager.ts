@@ -131,7 +131,21 @@ export interface Session {
   heartbeatTimeoutMs: number; // Heartbeat timeout for this session
   heartbeatTimeoutSource: "default" | "custom"; // Whether the heartbeat timeout was defaulted or explicitly provided
   hasReceivedHeartbeat: boolean; // Whether any heartbeat has been received
+  livenessPolicy: SessionLivenessPolicy; // How this session's liveness is judged (#6870)
 }
+
+/**
+ * How the heartbeat monitor judges a session's liveness (issue #6870).
+ *
+ * - `heartbeat` (the default): the strict contract a long-lived stdio/HTTP MCP
+ *   client can keep — a first heartbeat within the pre-first-heartbeat grace,
+ *   then one every `heartbeatTimeoutMs` (10 s by default).
+ * - `cli-idle`: the contract a one-shot `--cli` process can keep. Each
+ *   invocation connects, runs one tool and exits, so between calls nobody is
+ *   heartbeating; the session is instead reaped only after a wall-clock idle
+ *   period measured in minutes, and never for a missing first heartbeat.
+ */
+export type SessionLivenessPolicy = "heartbeat" | "cli-idle";
 
 /**
  * Session Manager
@@ -265,6 +279,7 @@ const EXPIRY_RELEASE_REASONS = new Set([
   "cleanup-expired",
   "missing-first-heartbeat",
   "heartbeat-timeout",
+  "cli-idle-timeout",
 ]);
 
 class UnissuedSessionError extends ActionableError {}
@@ -273,6 +288,7 @@ function isTerminalReleaseReason(releaseReason: string): boolean {
   return (
     releaseReason === "missing-first-heartbeat" ||
     releaseReason === "heartbeat-timeout" ||
+    releaseReason === "cli-idle-timeout" ||
     releaseReason === "device-killed" ||
     releaseReason === "session-creation-cancelled" ||
     releaseReason.startsWith("device-disconnected:")
@@ -287,6 +303,26 @@ export function getDefaultSessionHeartbeatTimeoutMs(): number {
   return Number.isFinite(parsed) && parsed > 0
     ? parsed
     : SessionManager.DEFAULT_HEARTBEAT_TIMEOUT_MS;
+}
+
+/**
+ * Default wall-clock idle timeout for a CLI-owned session (issue #6870).
+ *
+ * Ten minutes, deliberately measured in minutes rather than the 10 s heartbeat
+ * timeout: the gap between two `--cli` invocations is an agent reading the
+ * previous result and choosing the next call, which routinely exceeds 10 s.
+ * Each invocation refreshes the clock (activity and the CLI's own heartbeat
+ * both stamp `lastHeartbeat`), so only a genuinely abandoned session expires.
+ */
+export const DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS = 10 * 60 * 1000;
+
+/** The configured {@link DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS}, env-overridable. */
+export function getCliSessionIdleTimeoutMs(): number {
+  const rawValue =
+    process.env.AUTOMOBILE_CLI_SESSION_IDLE_TIMEOUT_MS ??
+    process.env.AUTO_MOBILE_CLI_SESSION_IDLE_TIMEOUT_MS;
+  const parsed = rawValue ? Number.parseInt(rawValue, 10) : NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS;
 }
 
 /** Default grace before a never-heartbeated default-policy session is reaped. */
@@ -580,6 +616,9 @@ export class SessionManager {
       heartbeatTimeoutMs: heartbeatTimeoutMs ?? getDefaultSessionHeartbeatTimeoutMs(),
       heartbeatTimeoutSource,
       hasReceivedHeartbeat: false,
+      // Strict by default: only a client that declares itself one-shot (`--cli`,
+      // via `adoptCliLivenessPolicy`) is exempted from the heartbeat contract.
+      livenessPolicy: "heartbeat",
     };
 
     const creation: PendingSessionCreation = { promise: this.persistAndPublishSession(session) };
@@ -2740,6 +2779,31 @@ export class SessionManager {
       .catch((error) =>
         logger.warn(`[SessionManager] Failed to record session activity: ${error}`),
       );
+  }
+
+  /**
+   * Move a session onto the CLI liveness policy and record a heartbeat (#6870).
+   *
+   * Called when a one-shot `--cli` process declares ownership of the session it
+   * just minted or joined. From here on the heartbeat monitor stops applying the
+   * 10 s contract (which no one-shot process can keep between invocations) and
+   * reaps the session only after {@link getCliSessionIdleTimeoutMs} of wall-clock
+   * idleness. Returns false when the session is unknown — the CLI's declaration
+   * is best-effort and must never fail the tool call that carried it.
+   */
+  adoptCliLivenessPolicy(sessionId: string): boolean {
+    const session = this.getSession(sessionId);
+    if (!session) {
+      logger.warn(`Cannot adopt CLI liveness policy for session ${sessionId}: not found`);
+      return false;
+    }
+    session.livenessPolicy = "cli-idle";
+    session.heartbeatTimeoutMs = getCliSessionIdleTimeoutMs();
+    this.recordHeartbeat(sessionId);
+    logger.debug(
+      `Session ${sessionId} adopted the CLI liveness policy (idle timeout ${session.heartbeatTimeoutMs}ms)`,
+    );
+    return true;
   }
 
   /**

@@ -24,6 +24,8 @@ import {
   DAEMON_RELEASED_SESSION_PARAM,
   DAEMON_SHUTDOWN_TIMEOUT_MS,
   DAEMON_RESTART_HANDOFF_TIMEOUT_MS,
+  DAEMON_HEARTBEAT_METHOD,
+  CLI_SESSION_LIVENESS_POLICY,
 } from "./constants";
 import {
   PROGRESS_NOTIFICATION_METHOD,
@@ -2435,6 +2437,44 @@ export class DaemonMcpProxy {
       logger.debug(
         `[DaemonMcpProxy] Initial bound-session heartbeat failed: ${errorMessage(error)}`,
       );
+    }
+  }
+
+  /**
+   * Declare this connection's bound device session CLI-owned (issue #6870).
+   *
+   * A `--cli` invocation is a one-shot process: it connects, runs one tool and
+   * exits, so the recurring keeper above dies with it and the daemon reaps the
+   * session after the 10 s heartbeat timeout — roughly the time an agent spends
+   * reading the previous result. Sending one heartbeat that also carries
+   * {@link CLI_SESSION_LIVENESS_POLICY} records ownership AND moves the session
+   * onto a wall-clock idle timeout measured in minutes, so the next invocation
+   * still finds it. Returns the declared session uuid, or undefined when there
+   * was nothing to declare.
+   *
+   * Long-lived clients (stdio/HTTP MCP) never call this and keep the strict
+   * contract: their keeper can hold it.
+   */
+  async adoptCliSessionLiveness(): Promise<string | undefined> {
+    const sessionUuid = this.boundSessionUuid;
+    if (!sessionUuid || this.terminalBoundSession || this.closing || !this.client) {
+      return undefined;
+    }
+    try {
+      await this.client.callDaemonMethod(DAEMON_HEARTBEAT_METHOD, {
+        sessionId: sessionUuid,
+        livenessPolicy: CLI_SESSION_LIVENESS_POLICY,
+      });
+      return sessionUuid;
+    } catch (error) {
+      // Best-effort: the tool call already succeeded and its result is the
+      // caller's answer. A failed declaration only means the next invocation may
+      // have to re-acquire, which is the pre-#6870 behaviour — never a reason to
+      // fail the invocation that just ran.
+      logger.debug(
+        `[DaemonMcpProxy] CLI session liveness declaration failed: ${errorMessage(error)}`,
+      );
+      return undefined;
     }
   }
 

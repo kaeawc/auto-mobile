@@ -386,6 +386,20 @@ export const DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD = "daemon/subscribe-notificat
 export const DAEMON_HEARTBEAT_METHOD = "daemon/heartbeat";
 
 /**
+ * Optional `daemon/heartbeat` parameter value declaring that the heartbeating
+ * client is a one-shot `--cli` process (issue #6870).
+ *
+ * A `--cli` invocation is its own process: it connects, runs one tool, and
+ * exits, so it structurally cannot keep the 10 s heartbeat liveness contract
+ * between an agent's calls. Sending
+ * `{ sessionId, livenessPolicy: CLI_SESSION_LIVENESS_POLICY }` records the
+ * heartbeat AND moves the session onto the wall-clock CLI idle timeout
+ * (minutes, see `getCliSessionIdleTimeoutMs`). Sessions owned by long-lived
+ * stdio/HTTP MCP clients never send it and keep the strict contract.
+ */
+export const CLI_SESSION_LIVENESS_POLICY = "cli";
+
+/**
  * Control-socket method returning the current `deviceId (serial/UDID) ↔
  * deviceSessionUuid` map from the daemon's `DeviceSessionRegistry`. Lets a
  * stream consumer resolve a serial to its stable connection-epoch identity

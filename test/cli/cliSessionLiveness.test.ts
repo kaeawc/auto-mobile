@@ -1,0 +1,230 @@
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import {
+  runCliCommand,
+  setDaemonProxyFactoryForTesting,
+  resetDaemonProxyFactoryForTesting,
+} from "../../src/cli";
+import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
+import { DaemonClient } from "../../src/daemon/client";
+import { SessionManager } from "../../src/daemon/sessionManager";
+import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
+import {
+  CLI_SESSION_LIVENESS_POLICY,
+  DAEMON_HEARTBEAT_METHOD,
+  DAEMON_VERSION,
+} from "../../src/daemon/constants";
+import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
+import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
+import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
+
+const ENV_KEYS = [
+  "AUTOMOBILE_SESSION_HEARTBEAT_CHECK_INTERVAL_MS",
+  "AUTO_MOBILE_SESSION_HEARTBEAT_CHECK_INTERVAL_MS",
+  "AUTOMOBILE_SESSION_HEARTBEAT_INITIAL_GRACE_MS",
+  "AUTO_MOBILE_SESSION_HEARTBEAT_INITIAL_GRACE_MS",
+  "AUTOMOBILE_SESSION_PRE_FIRST_HEARTBEAT_GRACE_MS",
+  "AUTO_MOBILE_SESSION_PRE_FIRST_HEARTBEAT_GRACE_MS",
+  "AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS",
+  "AUTO_MOBILE_SESSION_HEARTBEAT_TIMEOUT_MS",
+  "AUTOMOBILE_CLI_SESSION_IDLE_TIMEOUT_MS",
+  "AUTO_MOBILE_CLI_SESSION_IDLE_TIMEOUT_MS",
+] as const;
+
+function clearEnv(): void {
+  for (const key of ENV_KEYS) {
+    delete process.env[key];
+  }
+}
+
+function matchingDaemonManager(): FakeDaemonManager {
+  const manager = new FakeDaemonManager();
+  manager.statusResult = { ...manager.statusResult, version: DAEMON_VERSION };
+  return manager;
+}
+
+function deviceStartResult(sessionUuid: string): {
+  content: Array<{ type: string; text: string }>;
+} {
+  return { content: [{ type: "text", text: JSON.stringify({ sessionUuid }) }] };
+}
+
+/**
+ * Issue #6870: a `--cli` invocation is a one-shot process. It cannot hold the
+ * 10 s heartbeat contract across an agent's think-time, so it declares its
+ * session CLI-owned before exiting and the daemon switches that session to a
+ * wall-clock idle timeout.
+ */
+describe("--cli declares its session CLI-owned (#6870)", () => {
+  let timer: FakeTimer;
+  let sessionManager: SessionManager;
+  let isAvailableSpy: ReturnType<typeof spyOn> | null;
+
+  beforeEach(() => {
+    clearEnv();
+    timer = new FakeTimer();
+    sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+  });
+
+  afterEach(() => {
+    sessionManager.stopCleanupTimer();
+    isAvailableSpy?.mockRestore();
+    isAvailableSpy = null;
+    resetDaemonProxyFactoryForTesting();
+    clearEnv();
+  });
+
+  const proxyOver = (client: FakeDaemonClient): DaemonMcpProxy =>
+    new DaemonMcpProxy({
+      clientFactory: () => client,
+      daemonManager: matchingDaemonManager(),
+      autoStartDaemon: false,
+      timer,
+    });
+
+  test("adoptCliSessionLiveness declares the policy for a result-minted session", async () => {
+    const client = new FakeDaemonClient({
+      toolResultFor: (name) => (name === "getAndroid" ? deviceStartResult("minted") : undefined),
+      onCallDaemonMethod: async (method, params) => {
+        if (method === DAEMON_HEARTBEAT_METHOD && typeof params.sessionId === "string") {
+          if (params.livenessPolicy === CLI_SESSION_LIVENESS_POLICY) {
+            sessionManager.adoptCliLivenessPolicy(params.sessionId);
+          } else {
+            sessionManager.recordHeartbeat(params.sessionId);
+          }
+        }
+      },
+    });
+    await sessionManager.createSession("minted", "emulator-5554", "android", 30 * 60_000);
+    const proxy = proxyOver(client);
+
+    try {
+      await proxy.callTool("getAndroid", {});
+      expect(await proxy.adoptCliSessionLiveness()).toBe("minted");
+    } finally {
+      await proxy.close();
+    }
+
+    expect(
+      client.callDaemonMethodCalls.filter(
+        (call) =>
+          call.method === DAEMON_HEARTBEAT_METHOD &&
+          call.params.livenessPolicy === CLI_SESSION_LIVENESS_POLICY,
+      ),
+    ).toHaveLength(1);
+    expect(sessionManager.getSession("minted")?.livenessPolicy).toBe("cli-idle");
+  });
+
+  test("the declared session outlives the think-time that reaps a heartbeat session", async () => {
+    const client = new FakeDaemonClient({
+      toolResultFor: (name) => (name === "getAndroid" ? deviceStartResult("minted") : undefined),
+      onCallDaemonMethod: async (method, params) => {
+        if (method === DAEMON_HEARTBEAT_METHOD && typeof params.sessionId === "string") {
+          if (params.livenessPolicy === CLI_SESSION_LIVENESS_POLICY) {
+            sessionManager.adoptCliLivenessPolicy(params.sessionId);
+          } else {
+            sessionManager.recordHeartbeat(params.sessionId);
+          }
+        }
+      },
+    });
+    await sessionManager.createSession("minted", "emulator-5554", "android", 30 * 60_000);
+    const reaped: Array<{ sessionId: string; reason: string }> = [];
+    const monitor = new SessionHeartbeatMonitor(
+      sessionManager,
+      () => false,
+      async (sessionId, reason) => {
+        reaped.push({ sessionId, reason });
+      },
+      timer,
+    );
+    const proxy = proxyOver(client);
+    try {
+      await proxy.callTool("getAndroid", {});
+      await proxy.adoptCliSessionLiveness();
+    } finally {
+      // The `--cli` process exits: no client is left to heartbeat.
+      await proxy.close();
+    }
+
+    timer.advanceTime(12_367);
+    await monitor.tick();
+
+    expect(reaped).toEqual([]);
+    expect(sessionManager.getSession("minted")).not.toBeNull();
+  });
+
+  test("adoptCliSessionLiveness is a no-op with no bound session", async () => {
+    const client = new FakeDaemonClient();
+    const proxy = proxyOver(client);
+    try {
+      await proxy.callTool("listDevices", {});
+      expect(await proxy.adoptCliSessionLiveness()).toBeUndefined();
+    } finally {
+      await proxy.close();
+    }
+    expect(client.callDaemonMethodCalls.map((call) => call.method)).not.toContain(
+      DAEMON_HEARTBEAT_METHOD,
+    );
+  });
+
+  test("a failed declaration never fails the CLI invocation", async () => {
+    const client = new FakeDaemonClient({
+      toolResultFor: (name) => (name === "getAndroid" ? deviceStartResult("minted") : undefined),
+      onCallDaemonMethod: (method, params) => {
+        if (method === DAEMON_HEARTBEAT_METHOD && params.livenessPolicy) {
+          throw new Error("daemon went away");
+        }
+      },
+    });
+    const proxy = proxyOver(client);
+    try {
+      await proxy.callTool("getAndroid", {});
+      expect(await proxy.adoptCliSessionLiveness()).toBeUndefined();
+    } finally {
+      await proxy.close();
+    }
+  });
+
+  test("runCliCommand declares the policy once per invocation", async () => {
+    const declarations: number[] = [];
+    setDaemonProxyFactoryForTesting((): any => ({
+      callTool: async (): Promise<any> => ({ success: true }),
+      adoptCliSessionLiveness: async (): Promise<string | undefined> => {
+        declarations.push(1);
+        return "session-abc";
+      },
+      close: async (): Promise<void> => {},
+    }));
+
+    await runCliCommand(["--session-uuid", "session-abc", "observe"]);
+
+    expect(declarations).toHaveLength(1);
+  });
+
+  test("runCliCommand still declares the policy when the tool call throws", async () => {
+    const declarations: number[] = [];
+    setDaemonProxyFactoryForTesting((): any => ({
+      callTool: async (): Promise<any> => {
+        throw new Error("tool blew up");
+      },
+      adoptCliSessionLiveness: async (): Promise<string | undefined> => {
+        declarations.push(1);
+        return undefined;
+      },
+      close: async (): Promise<void> => {},
+    }));
+
+    const exitSpy = spyOn(process, "exit").mockImplementation((() => undefined) as never);
+    const errorSpy = spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await runCliCommand(["--session-uuid", "session-abc", "observe"]);
+    } finally {
+      errorSpy.mockRestore();
+      exitSpy.mockRestore();
+    }
+
+    expect(declarations).toHaveLength(1);
+  });
+});

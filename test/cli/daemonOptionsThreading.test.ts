@@ -32,6 +32,7 @@ describe("runCliCommand daemon-option threading (issue #4247)", () => {
       constructedWith.push(config.daemonOptions);
       return {
         callTool: async (): Promise<any> => ({ success: true }),
+        adoptCliSessionLiveness: async (): Promise<string | undefined> => undefined,
         close: async (): Promise<void> => {
           // no-op fake
         },

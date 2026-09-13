@@ -47,6 +47,18 @@ Use `listDevices` to inspect them and `setActiveDevice` to select one. For
 repeatable CLI calls, associate calls with the session UUID returned when you
 acquire a device and pass it with `--session-uuid`.
 
+## How long does a device session survive between `--cli` calls?
+
+Ten minutes of idleness by default. Each `--cli` invocation is a separate
+process, so it cannot keep the periodic heartbeat a long-running MCP connection
+sends; instead it tells the daemon that the session it acquired or used is
+CLI-owned, and the daemon holds that session on a wall-clock idle timeout that
+every later `--cli` call refreshes. Tune it with
+`AUTOMOBILE_CLI_SESSION_IDLE_TIMEOUT_MS` — see
+[environment variables](using/environment-variables.md). After the idle timeout
+the session is released and the id is spent: acquire a new one with `getAndroid`
+or `getApple`.
+
 ## My MCP client cannot see AutoMobile. What should I do?
 
 Run the installer again and select the intended client and configuration scope,

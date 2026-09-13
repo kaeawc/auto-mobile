@@ -297,6 +297,7 @@ function formatSnapshotSize(bytes: number | null): string {
 function buildArchiveEntry(record: DeviceSnapshotRecord): Record<string, unknown> {
   return {
     snapshotName: record.snapshotName,
+    restorable: !record.pendingReclaim,
     deviceId: record.deviceId,
     deviceName: record.deviceName,
     platform: record.platform,
@@ -413,7 +414,10 @@ async function recordFailedVmSnapshotReclaim(
   const timestamp = now().toISOString();
   try {
     const existing = await snapshotRepository.getSnapshot(snapshotName);
-    if (existing && existing.deviceId !== device.deviceId) {
+    if (
+      existing &&
+      (existing.deviceId !== device.deviceId || existing.deviceName !== device.name)
+    ) {
       logger.warn(
         `[DeviceSnapshot] Same-named capture '${snapshotName}' failed on AVD '${device.name}' ` +
           `(${device.deviceId}); preserving the existing row for AVD '${existing.deviceName}' ` +
@@ -1640,6 +1644,12 @@ export async function restoreDeviceSnapshot(
     }
     if (!record) {
       throw new ActionableError(`Snapshot '${args.snapshotName}' not found`);
+    }
+    if (record.pendingReclaim) {
+      const reason = record.pendingReclaimReason ? `: ${record.pendingReclaimReason}` : "";
+      throw new ActionableError(
+        `Snapshot '${record.snapshotName}' is awaiting reclaim after a failed capture${reason}`,
+      );
     }
 
     const baseConfig = await getDeviceSnapshotConfig();

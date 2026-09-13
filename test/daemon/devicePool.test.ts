@@ -6979,6 +6979,24 @@ describe("DevicePool", () => {
       expect(devicePool.isPooledIdentityUnresolved("emulator-5554")).toBe(true);
     });
 
+    test("retains an existing quarantine when a later failed AVD-name probe recorded the console busy", async () => {
+      const device = poolDevice("emulator-5554", "Pixel_8_API_35");
+      await initializeLiveDevices([device]);
+
+      await devicePool.reconcileDiscoveryObservation(
+        [{ ...unresolved("emulator-5554"), consoleBusyDuringProbe: false }],
+        "test:idle-probe",
+      );
+      expect(devicePool.isPooledIdentityUnresolved("emulator-5554")).toBe(true);
+
+      await devicePool.reconcileDiscoveryObservation(
+        [{ ...unresolved("emulator-5554"), consoleBusyDuringProbe: true }],
+        "test:busy-probe",
+      );
+
+      expect(devicePool.isPooledIdentityUnresolved("emulator-5554")).toBe(true);
+    });
+
     // The FUNNEL 1 caller can itself be a session-bound destructive call whose
     // own discovery produced the placeholder. Cancelling it would abort the
     // operation that is about to confirm-or-refuse on exactly this evidence, so

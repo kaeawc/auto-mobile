@@ -172,6 +172,40 @@ describe("AndroidEmulatorClient.getBootedDevicesChecked", () => {
     });
   });
 
+  test("records console busy state when an empty AVD-name probe falls through to an empty property", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setDevices([
+      {
+        name: "ignored",
+        platform: "android",
+        deviceId: "emulator-5554",
+      } satisfies BootedDevice,
+    ]);
+    adb.setCommandResponse("emu avd name", execResult(" \n"));
+    adb.setCommandResponse("shell getprop ro.boot.qemu.avd_name", execResult("\n"));
+    const consoleBusy = new FakeEmulatorConsoleBusyRegistry();
+    consoleBusy.setBusy("emulator-5554", true);
+    const client = new AndroidEmulatorClient(
+      null,
+      null,
+      new FakeTimer(),
+      new FakeAdbClientFactory(adb),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      consoleBusy,
+    );
+
+    const [discovered] = await client.getBootedDevicesChecked();
+
+    expect(discovered).toMatchObject({
+      name: "Unknown (emulator-5554)",
+      consoleBusyDuringProbe: true,
+    });
+  });
+
   test("records console activity that completed while the failed AVD-name probe was in flight", async () => {
     const adb = new DeferredAvdNameAdbExecutor();
     adb.setDevices([

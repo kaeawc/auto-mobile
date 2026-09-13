@@ -6370,6 +6370,12 @@ export class DevicePool {
       );
       return;
     }
+    if (this.hasUnresolvedEmulatorName(discovered)) {
+      logger.debug(
+        `[DevicePool] Retaining ${pooled.id}: discovery observation has no AVD identity evidence`,
+      );
+      return;
+    }
     // The resolved name is the newest identity evidence for this entry whether or
     // not it is quarantined; recording it on the LIVE path too is what lets a
     // later straggler be recognised as stale before it quarantines anything.

@@ -14,24 +14,41 @@ export AUTOMOBILE_DATA_DIR="${AUTOMOBILE_DATA_DIR:-$ROOT/scratch/prepush-node-da
 export AUTOMOBILE_LOG_DIR="${AUTOMOBILE_LOG_DIR:-$ROOT/scratch/prepush-node-logs}"
 
 changed_mode=0
-if [[ "${1:-}" == "--changed" ]]; then
-  changed_mode=1
-  shift
-elif [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-  cat <<'EOF'
-Usage: scripts/prepush-node.sh [--changed]
+timing_requested=0
+while [[ "$#" -gt 0 ]]; do
+  case "$1" in
+    --changed)
+      changed_mode=1
+      ;;
+    --timing)
+      timing_requested=1
+      ;;
+    --help | -h)
+      cat <<'EOF'
+Usage: scripts/prepush-node.sh [--changed] [--timing]
 
 Run the Node pull-request gates in fail-fast order. --changed uses the
 repository's affected-unit-test runner; format, typecheck, and lint remain
 full because their repository-wide baselines and boundaries have no safe
-changed-file mode.
+changed-file mode. --timing forces the unit timing budget gate on every OS.
 EOF
-  exit 0
-fi
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      exit 2
+      ;;
+  esac
+  shift
+done
 
-if [[ "$#" -ne 0 ]]; then
-  echo "Unknown option: $1" >&2
-  exit 2
+runner_os="${RUNNER_OS:-}"
+if [[ -z "$runner_os" ]]; then
+  case "$(uname -s 2> /dev/null || true)" in
+    Darwin) runner_os="macOS" ;;
+    MINGW* | MSYS* | CYGWIN*) runner_os="Windows" ;;
+    *) runner_os="$(uname -s 2> /dev/null || echo unknown)" ;;
+  esac
 fi
 
 gate_names=()
@@ -85,28 +102,34 @@ run_gate "format check" bun run format:check
 run_gate "typecheck" bun run typecheck
 run_gate "lint" bun run lint
 run_gate "repository lint tests" bun test test/lint/
+run_gate "image runtime smoke" bun run test:image:bun
 
 unit_mode="unit"
 if [[ "$changed_mode" -eq 1 ]]; then
   unit_mode="changed"
   echo "Using changed unit-test selection against origin/main."
 fi
-run_gate "${unit_mode} unit tests" env \
-  AUTOMOBILE_TEST_MODE=true \
-  AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=720 \
-  AUTOMOBILE_UNIT_JUNIT_DIR=scratch/timing-unit-reports \
-  bash scripts/test-ts.sh "$unit_mode"
-if [[ "$changed_mode" -eq 1 ]]; then
-  # The timing gate owns affected-test selection in this mode. Do not give it
-  # the earlier changed-only JUnit report as though it were a complete lane.
-  run_gate "unit timing budget" env \
-    BUN_TEST_TIMING_BASE_REF=origin/main \
-    bash scripts/validate-bun-test-timings.sh
+unit_env=(env AUTOMOBILE_TEST_MODE=true AUTOMOBILE_UNIT_JUNIT_DIR=scratch/timing-unit-reports)
+if [[ "$runner_os" != "Windows" ]]; then
+  unit_env=(env AUTOMOBILE_TEST_MODE=true AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=720 AUTOMOBILE_UNIT_JUNIT_DIR=scratch/timing-unit-reports)
+fi
+run_gate "${unit_mode} unit tests" "${unit_env[@]}" bash scripts/test-ts.sh "$unit_mode"
+
+if [[ "$timing_requested" -eq 1 || ( "$runner_os" != "macOS" && "$runner_os" != "Windows" ) ]]; then
+  if [[ "$changed_mode" -eq 1 ]]; then
+    # The timing gate owns affected-test selection in this mode. Do not give it
+    # the earlier changed-only JUnit report as though it were a complete lane.
+    run_gate "unit timing budget" env \
+      BUN_TEST_TIMING_BASE_REF=origin/main \
+      bash scripts/validate-bun-test-timings.sh
+  else
+    run_gate "unit timing budget" env \
+      BUN_TEST_TIMING_BASE_REF=origin/main \
+      BUN_TEST_TIMING_REPORT_DIR=scratch/timing-unit-reports \
+      bash scripts/validate-bun-test-timings.sh
+  fi
 else
-  run_gate "unit timing budget" env \
-    BUN_TEST_TIMING_BASE_REF=origin/main \
-    BUN_TEST_TIMING_REPORT_DIR=scratch/timing-unit-reports \
-    bash scripts/validate-bun-test-timings.sh
+  echo "Skipping unit timing budget gate on ${runner_os}; CI only runs it on Linux. Pass --timing to force it locally."
 fi
 
 print_summary

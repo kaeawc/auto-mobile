@@ -742,3 +742,67 @@ describe("settle poll cost (#6890 review)", () => {
     expect(options.every((option) => option.skipAccessibilityAudit === true)).toBe(true);
   });
 });
+
+describe("handler settle verdicts skip the generic gate (#6890 review)", () => {
+  test("a handler's own settled:false also skips the navigation gate", async () => {
+    // `openLink` runs its own integrated `waitFor` settle and publishes the
+    // verdict at the payload top level. When that wait TIMES OUT it publishes
+    // `settled: false` -- still a verdict about this capture. Running the
+    // generic gate on top of it would re-observe, possibly adopt a later frame,
+    // and stamp `observation.settled: true` underneath the payload-level
+    // `settled: false`, with the handler's wait metadata now describing a
+    // capture that is no longer there.
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const fake = new FakeObserveScreen();
+    fake.setObserveSequence([obs(AIRPLANE_ROW_INFLATED, 20), obs(AIRPLANE_ROW_INFLATED, 30)]);
+
+    const handlerObservation = obs(AIRPLANE_ROW_HALF_INFLATED, 10);
+    const response = createStructuredToolResponse({
+      success: true,
+      settled: false,
+      awaitTimeout: true,
+      observation: handlerObservation,
+    });
+    await settleEmbeddedObservationInResponse(response, {
+      name: "openLink",
+      args: {},
+      internal: false,
+      createSettleObserve: () => settleFor(fake, timer),
+    });
+
+    const structured = response.structuredContent as Record<string, any>;
+    expect(fake.getExecuteCallCount()).toBe(0);
+    expect(structured.settled).toBe(false);
+    expect(structured.observation.settled).toBe(false);
+    // The handler's own capture is what is handed back, untouched.
+    expect(structured.observation.viewHierarchy.hierarchy.node["resource-id"]).toBe(
+      "android:id/list_container",
+    );
+    expect(JSON.parse(response.content[0].text).observation.settled).toBe(false);
+  });
+
+  test("a handler verdict is still absent when the payload's settled is not a boolean", async () => {
+    // Only a real boolean is a verdict. A payload that carries no `settled`
+    // (every ordinary action tool) must still be gated.
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const fake = new FakeObserveScreen();
+    fake.setObserveSequence([obs(AIRPLANE_ROW_INFLATED, 20), obs(AIRPLANE_ROW_INFLATED, 30)]);
+
+    const response = createStructuredToolResponse({
+      success: true,
+      action: "tap",
+      observation: obs(AIRPLANE_ROW_HALF_INFLATED, 10),
+    });
+    await settleEmbeddedObservationInResponse(response, {
+      name: "tapOn",
+      args: {},
+      internal: false,
+      createSettleObserve: () => settleFor(fake, timer),
+    });
+
+    expect(fake.getExecuteCallCount()).toBeGreaterThan(0);
+    expect((response.structuredContent as Record<string, any>).observation.settled).toBe(true);
+  });
+});

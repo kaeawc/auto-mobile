@@ -300,6 +300,19 @@ function readEmbeddedObservation(payload: Record<string, unknown>): ObserveResul
 }
 
 /**
+ * The handler's OWN stability verdict for the capture it is returning, or
+ * `undefined` when it published none.
+ *
+ * Only a real boolean counts. The absence of `settled` is what every ordinary
+ * action tool's payload looks like, and a non-boolean value is not a verdict
+ * either — both must still be gated, rather than being read as a quiet
+ * `false` that this gate would then feel free to overturn.
+ */
+function readHandlerSettledVerdict(payload: Record<string, unknown>): boolean | undefined {
+  return typeof payload.settled === "boolean" ? payload.settled : undefined;
+}
+
+/**
  * Apply {@link settleEmbeddedObservation} to a completed action-tool envelope
  * in place, stamping `observation.settled` so a client can tell a
  * stability-checked capture from an unchecked one without guessing (issue
@@ -333,7 +346,7 @@ export async function settleEmbeddedObservationInResponse(
   // returning, and it is strictly better evidence than this gate's default
   // `false` for an action class the gate does not recognise. Honour it rather
   // than stamping a contradiction into the same response.
-  const handlerSettled = view.payload.settled === true;
+  const handlerSettled = readHandlerSettledVerdict(view.payload);
   if (view.payload.success === false) {
     // The action failed; re-observing would buy the client nothing and would
     // charge a settle budget to an error path. The capture it did return is
@@ -342,25 +355,37 @@ export async function settleEmbeddedObservationInResponse(
     // failed command but keeping its post-command observation).
     writeToolEnvelopePayload(view, {
       ...view.payload,
-      observation: { ...observation, settled: handlerSettled },
+      observation: { ...observation, settled: handlerSettled ?? false },
     });
     return;
   }
 
-  if (handlerSettled) {
-    // The handler's own gate already proved THIS capture stable, so there is
-    // nothing left for this one to establish. Running it anyway would spend a
-    // second settle budget on a screen that is done moving, and on a screen
-    // that never reaches structural stability (a ticking clock) it would time
-    // out, adopt a later frame, and stamp `observation.settled: false`
-    // underneath the payload-level `settled: true` the handler published —
-    // one response carrying two contradictory verdicts, with wait metadata
-    // describing a capture that is no longer there. A handler verdict is never
-    // downgraded (#6890 review), and the coherent way to honour that is to
-    // leave the capture it describes in place.
+  if (handlerSettled !== undefined) {
+    // The handler already ran a stability wait against THIS capture, so there
+    // is nothing left for this gate to establish — whichever way that wait
+    // came out.
+    //
+    // `true`: running the gate anyway would spend a second settle budget on a
+    // screen that is done moving, and on a screen that never reaches
+    // structural stability (a ticking clock) it would time out, adopt a later
+    // frame, and stamp `observation.settled: false` underneath the
+    // payload-level `settled: true` the handler published.
+    //
+    // `false` (the handler's wait TIMED OUT — `openLink`'s integrated settle):
+    // the same gate would re-observe and, if the screen happened to stabilise
+    // inside its own one-second window, REPLACE the capture and stamp
+    // `observation.settled: true` underneath the payload-level `settled:
+    // false`, while the handler's wait metadata (`awaitedElement`,
+    // `awaitDuration`, `awaitTimeout`) still describes the capture that is no
+    // longer there.
+    //
+    // Either way that is one response carrying two contradictory verdicts. A
+    // handler verdict is never downgraded — and never silently overturned
+    // upward either (#6890 review); the coherent way to honour it is to leave
+    // the capture it describes in place and publish it verbatim.
     writeToolEnvelopePayload(view, {
       ...view.payload,
-      observation: { ...observation, settled: true },
+      observation: { ...observation, settled: handlerSettled },
     });
     return;
   }

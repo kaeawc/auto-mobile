@@ -30,6 +30,31 @@ export interface IosVoiceOverDetector {
   ): Promise<boolean>;
 
   /**
+   * Tri-state probe for consumers that must distinguish a confirmed state
+   * from an unreadable one — e.g. a toggle-confirmation poll loop that needs
+   * to keep polling on `null` rather than treating it as a coincidental match
+   * for whichever boolean it collapses to (issue #6496).
+   *
+   * Resolves to:
+   * - `true` for a confirmed-enabled probe
+   * - `false` for a confirmed-disabled probe
+   * - `null` when the probe is indeterminate (timeout, error, or an
+   *   unsuccessful CtrlProxy response) — callers decide how to treat that.
+   *
+   * @param deviceId - The device identifier (for caching)
+   * @param client - CtrlProxy service for executing the detection command
+   * @param featureFlags - Feature flag service for override support (optional)
+   * @returns Promise resolving to the confirmed boolean state, or null when indeterminate
+   */
+  resolveState(
+    deviceId: string,
+    client: IOSCtrlProxy,
+    featureFlags?: FeatureFlagService,
+    timeoutMs?: number,
+    signal?: AbortSignal,
+  ): Promise<boolean | null>;
+
+  /**
    * Fail-safe variant for consumers that must choose between a plain
    * coordinate touch and a VoiceOver activation gesture (tapOn/tapAny only).
    *

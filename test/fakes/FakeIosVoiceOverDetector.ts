@@ -9,6 +9,8 @@ import type { FeatureFlagService } from "../../src/features/featureFlags/Feature
 export class FakeIosVoiceOverDetector implements IosVoiceOverDetector {
   private voiceOverEnabled: boolean = false;
   private readonly voiceOverEnabledResults: boolean[] = [];
+  private readonly resolvedStateResults: Array<boolean | null> = [];
+  private persistentResolvedState: boolean | null | undefined;
   private callCount: number = 0;
   private invalidatedDevices: string[] = [];
 
@@ -27,6 +29,19 @@ export class FakeIosVoiceOverDetector implements IosVoiceOverDetector {
   /** Configure successive detection results, falling back to the configured state when exhausted. */
   enqueueVoiceOverEnabledResults(...results: boolean[]): void {
     this.voiceOverEnabledResults.push(...results);
+  }
+
+  /** Configure successive tri-state probe results for `resolveState`. */
+  enqueueResolvedStateResults(...results: Array<boolean | null>): void {
+    this.resolvedStateResults.push(...results);
+  }
+
+  /**
+   * Configure the tri-state result returned after queued outcomes are consumed.
+   * Passing `null` models a persistently unreadable CtrlProxy probe.
+   */
+  setPersistentResolvedState(result: boolean | null | undefined): void {
+    this.persistentResolvedState = result;
   }
 
   /**
@@ -49,6 +64,8 @@ export class FakeIosVoiceOverDetector implements IosVoiceOverDetector {
   reset(): void {
     this.voiceOverEnabled = false;
     this.voiceOverEnabledResults.length = 0;
+    this.resolvedStateResults.length = 0;
+    this.persistentResolvedState = undefined;
     this.callCount = 0;
     this.invalidatedDevices = [];
     this.isVoiceOverEnabledFeatureFlagsArgs.length = 0;
@@ -87,6 +104,33 @@ export class FakeIosVoiceOverDetector implements IosVoiceOverDetector {
     this.isVoiceOverEnabledFeatureFlagsArgs.push(featureFlags);
     this.isVoiceOverEnabledTimeoutMsArgs.push(timeoutMs);
     return this.voiceOverEnabledResults.shift() ?? this.voiceOverEnabled;
+  }
+
+  /**
+   * Fake tri-state variant. Tests can enqueue an indeterminate `null` probe
+   * independently from the boolean queue used by the legacy detector methods.
+   */
+  async resolveState(
+    _deviceId: string,
+    _client: IOSCtrlProxy,
+    featureFlags?: FeatureFlagService,
+    timeoutMs?: number,
+    _signal?: AbortSignal,
+  ): Promise<boolean | null> {
+    this.callCount++;
+    this.isVoiceOverEnabledFeatureFlagsArgs.push(featureFlags);
+    this.isVoiceOverEnabledTimeoutMsArgs.push(timeoutMs);
+    if (this.resolvedStateResults.length > 0) {
+      return this.resolvedStateResults.shift()!;
+    }
+    const queuedLegacyResult = this.voiceOverEnabledResults.shift();
+    if (queuedLegacyResult !== undefined) {
+      return queuedLegacyResult;
+    }
+    if (this.persistentResolvedState !== undefined) {
+      return this.persistentResolvedState;
+    }
+    return this.voiceOverEnabled;
   }
 
   invalidateCache(deviceId: string): void {

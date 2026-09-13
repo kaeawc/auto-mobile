@@ -956,6 +956,34 @@ describe("Simctl", function () {
       expect(timer.now()).toBe(0);
     });
 
+    test("getBootedSimulatorsChecked keeps a Booted simulator whose isAvailable field is omitted", async function () {
+      const timer = new FakeTimer();
+      mockExecAsync = async (file: string, args: string[]): Promise<ExecResult> => {
+        if (file === "xcrun" && args.join(" ") === "simctl list devices --json") {
+          return createExecResult(
+            simulatorListPayload([
+              // No `isAvailable` key at all: simctl omits it on some Xcode
+              // versions, and the shared convention treats only an explicit
+              // `false` as unavailable (issue #6902).
+              { udid: "omitted-availability-udid", name: "iPhone 17", state: "Booted" },
+              {
+                udid: "explicitly-unavailable-udid",
+                name: "iPhone 17 Pro",
+                state: "Booted",
+                isAvailable: false,
+              },
+            ]),
+            "",
+          );
+        }
+        return createExecResult("", "");
+      };
+      simctl = new Simctl(null, mockExecAsync, timer);
+
+      const booted = await simctl.getBootedSimulatorsChecked();
+      expect(booted.map((device) => device.deviceId)).toEqual(["omitted-availability-udid"]);
+    });
+
     test("getBootedSimulatorsChecked reuses a fresh listSimulatorImages cache within the TTL", async function () {
       const timer = new FakeTimer();
       let listCalls = 0;

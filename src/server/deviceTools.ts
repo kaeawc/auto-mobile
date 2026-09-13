@@ -672,8 +672,11 @@ export interface ProvisionDeviceArgs {
 export interface KillDeviceArgs {
   device: BootedDevice;
   /**
-   * Skip the kill-time emulator-console probe and act on the serial as given
-   * (#6864). Defaults to false; see {@link FORCE_SKIP_AVD_VERIFICATION_DESCRIPTION}.
+   * Drop the AVD-name comparisons on the way to the kill -- the kill-time
+   * emulator-console probe here, and the platform kill's own re-discovery check
+   * in `AndroidEmulatorClient.killDevice` -- and act on whatever occupies the
+   * serial (#6864). Defaults to false; see
+   * {@link FORCE_SKIP_AVD_VERIFICATION_DESCRIPTION}.
    */
   force?: boolean;
 }
@@ -690,8 +693,11 @@ export interface TeardownDeviceArgs {
   verifyAbsence: true;
   timeoutMs?: number;
   /**
-   * Skip the kill-time emulator-console probe and act on the serial as given
-   * (#6864). Defaults to false; see {@link FORCE_SKIP_AVD_VERIFICATION_DESCRIPTION}.
+   * Drop the AVD-name comparisons on the way to the kill -- the kill-time
+   * emulator-console probe here, and the platform kill's own re-discovery check
+   * in `AndroidEmulatorClient.killDevice` -- and act on whatever occupies the
+   * serial (#6864). Defaults to false; see
+   * {@link FORCE_SKIP_AVD_VERIFICATION_DESCRIPTION}.
    */
   force?: boolean;
 }

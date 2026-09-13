@@ -365,3 +365,69 @@ describe("IME window membership (#6871)", () => {
     ]);
   });
 });
+
+/**
+ * An app screen with NO keyboard at all, whose single control happens to carry
+ * the `key_pos_*` resource-id prefix. Nothing here is authoritative, so the
+ * fallback marker is the only evidence — and one borrowed id is not a keyboard
+ * (issue #6871).
+ */
+function loneDecoyKeycapObservation(): ObserveResult {
+  const viewHierarchy = {
+    hierarchy: {
+      node: {
+        $: {},
+        node: [
+          {
+            $: {
+              "resource-id": "com.app:id/key_pos_preview",
+              text: "Preview",
+              clickable: true,
+              bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+            },
+          },
+          {
+            $: {
+              "resource-id": "com.app:id/save",
+              text: "Save",
+              clickable: true,
+              bounds: { left: 0, top: 100, right: 100, bottom: 150 },
+            },
+          },
+        ],
+      },
+    },
+  };
+  return {
+    updatedAt: 1,
+    screenSize: { width: 100, height: 800 },
+    systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+    viewHierarchy,
+    elements: new DefaultObserveElementCollector().collect(viewHierarchy, "android"),
+  };
+}
+
+describe("fallback keycap corroboration (#6871)", () => {
+  test("a lone key_pos_* app control never invents a keyboard", () => {
+    const result = sanitizeObserveResult(loneDecoyKeycapObservation(), {
+      dropElements: true,
+      project: "skeleton",
+    });
+    const ids = result.skeleton!.map((entry) => entry.elementId);
+    expect(ids).toEqual(["com.app:id/key_pos_preview", "com.app:id/save"]);
+    expect(ids).not.toContain("<ime>");
+    expect(result.keyboard).toBeUndefined();
+  });
+
+  test("two distinct keycaps from one package still fold without the extra", () => {
+    const source = loneDecoyKeycapObservation();
+    source.viewHierarchy!.hierarchy.node!.node![1].$["resource-id"] = "com.app:id/key_pos_0_1";
+    source.elements = new DefaultObserveElementCollector().collect(
+      source.viewHierarchy!,
+      "android",
+    );
+    const result = sanitizeObserveResult(source, { dropElements: true, project: "skeleton" });
+    expect(result.skeleton!.map((entry) => entry.elementId)).toEqual(["<ime>"]);
+    expect(result.keyboard).toEqual({ visible: true, package: "com.app" });
+  });
+});

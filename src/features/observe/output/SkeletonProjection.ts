@@ -635,17 +635,40 @@ function collapseSystemUiBlock(nonActionable: SkeletonAccumulator[]): SkeletonAc
 const IME_ELEMENT_ID = "<ime>";
 
 /**
- * The `…:id/key_pos_<row>_<col>` resource-id family every AOSP/Gboard-derived
- * IME gives its keycaps. This is the FALLBACK identification path (issue
- * #6871): the authoritative one is `ElementProvenance.keyboardPackage`, which
- * the collector inherits from the control proxy's `automobile:imePackage`
- * window extra — but that extra only exists on a re-cut control proxy, so on an
- * older on-device build (and on the `uiautomator dump` path) the ~40 keycaps
- * still reached the skeleton. The capture group is the IME's own package, which
- * is also what distinguishes a keycap from the framework chrome that shares the
- * window (`android:id/input_method_nav_back`).
+ * The `…:id/key_pos_*` resource-id family every AOSP/Gboard-derived IME gives
+ * its keycaps. The suffix is NOT a `<row>_<col>` grid coordinate — the captured
+ * Gboard fixtures under `test/fixtures/observe/diff/` carry `key_pos_shift`,
+ * `key_pos_space`, `key_pos_del`, `key_pos_ime_action` and
+ * `key_pos_header_access_points_menu` alongside positional ones — so the prefix
+ * is all that can be matched, and corroboration has to come from
+ * {@link MIN_FALLBACK_KEYCAPS} rather than from the suffix shape.
+ *
+ * This is the FALLBACK identification path (issue #6871): the authoritative one
+ * is `ElementProvenance.keyboardPackage`, which the collector inherits from the
+ * control proxy's `automobile:imePackage` window extra — but that extra only
+ * exists on a re-cut control proxy, so on an older on-device build (and on the
+ * `uiautomator dump` path) the ~40 keycaps still reached the skeleton. The
+ * capture group is the IME's own package, which is also what distinguishes a
+ * keycap from the framework chrome that shares the window
+ * (`android:id/input_method_nav_back`).
  */
 const KEYCAP_ID_PATTERN = /^([A-Za-z0-9_.]+):id\/key_pos_/;
+
+/**
+ * How many DISTINCT `key_pos_*` resource-ids one package must own before the
+ * fallback path is willing to call it a keyboard (issue #6871).
+ *
+ * Without this fence a single app control that merely borrows the prefix
+ * (`com.app:id/key_pos_preview`) was conclusive evidence on a screen with no
+ * keyboard at all: its own row was folded away, `keyboard` announced
+ * `{ visible: true, package: "com.app" }`, and a synthetic `<ime>` row appeared
+ * for a keyboard that was never up. Nothing authoritative exists on that path to
+ * override the false marker, so the corroboration has to come from the markers
+ * themselves — a keyboard is a grid of keys and always presents many, while a
+ * borrowed prefix is one node. Two is the smallest threshold that rejects the
+ * lone decoy; the real captures carry eight or more.
+ */
+const MIN_FALLBACK_KEYCAPS = 2;
 
 /** Every collected element, in the category order the projection consumes them. */
 function allElements(elements: ObserveElements): Element[] {
@@ -701,23 +724,47 @@ function authoritativeImePackage(elements: ObserveElements): string | undefined 
 }
 
 /**
+ * The first package that owns at least {@link MIN_FALLBACK_KEYCAPS} distinct
+ * `key_pos_*` resource-ids, in collection order (issue #6871).
+ *
+ * Distinct ids, not node count: the same element can reach this through more
+ * than one category of {@link allElements}, and a repeated id is one marker
+ * seen twice, not two keys.
+ */
+function corroboratedKeycapPackage(elements: ObserveElements): string | undefined {
+  const keycapIdsByPackage = new Map<string, Set<string>>();
+  for (const el of allElements(elements)) {
+    const id = deriveId(el) ?? "";
+    const pkg = KEYCAP_ID_PATTERN.exec(id)?.[1];
+    if (pkg === undefined) {
+      continue;
+    }
+    const ids = keycapIdsByPackage.get(pkg) ?? new Set<string>();
+    ids.add(id);
+    keycapIdsByPackage.set(pkg, ids);
+  }
+  for (const [pkg, ids] of keycapIdsByPackage) {
+    if (ids.size >= MIN_FALLBACK_KEYCAPS) {
+      return pkg;
+    }
+  }
+  return undefined;
+}
+
+/**
  * Identify the input-method window, if one is on screen (issue #6871).
  *
  * The package is chosen in a FIRST pass that prefers authoritative identity
- * ({@link authoritativeImePackage}) and only falls back to the first `key_pos_*`
- * resource-id package when the capture vouches for none. Otherwise an app
- * control that happens to carry that id family (`com.app:id/key_pos_preview`)
- * and is emitted before the real keyboard would lock the collapse onto the app:
- * the row would be labelled with the wrong package while the real keycaps
- * stayed exposed. A second pass then measures the group/span of the nodes that
- * actually belong to that one package.
+ * ({@link authoritativeImePackage}) and only falls back to
+ * {@link corroboratedKeycapPackage} when the capture vouches for none.
+ * Otherwise an app control that happens to carry that id family
+ * (`com.app:id/key_pos_preview`) and is emitted before the real keyboard would
+ * lock the collapse onto the app: the row would be labelled with the wrong
+ * package while the real keycaps stayed exposed. A second pass then measures the
+ * group/span of the nodes that actually belong to that one package.
  */
 function detectImeWindow(elements: ObserveElements): ImeWindow | undefined {
-  const detected =
-    authoritativeImePackage(elements) ??
-    allElements(elements)
-      .map((el) => KEYCAP_ID_PATTERN.exec(deriveId(el) ?? "")?.[1])
-      .find((pkg) => pkg !== undefined);
+  const detected = authoritativeImePackage(elements) ?? corroboratedKeycapPackage(elements);
   if (!detected) {
     return undefined;
   }

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
 import {
   screenshotDeviceToken,
   screenshotFileBelongsToDevice,
@@ -50,5 +51,21 @@ describe("screenshotFileBelongsToDevice", function () {
 
   test("returns undefined for names outside the canonical shape", function () {
     expect(screenshotFileDeviceToken("screenshot.png")).toBeUndefined();
+  });
+
+  test("round-trips an injected unique id that contains underscores", function () {
+    const uniqueId = new CountingIdGenerator("capture_run").next();
+    const fileName = screenshotFileName(1234, "emulator-5554", uniqueId, "png");
+
+    expect(screenshotFileDeviceToken(fileName)).toBe(screenshotDeviceToken("emulator-5554"));
+    expect(screenshotFileBelongsToDevice(fileName, "emulator-5554")).toBe(true);
+  });
+
+  test("rejects a name whose timestamp segment is not numeric", function () {
+    expect(screenshotFileDeviceToken("screenshot_notatimestamp_token_id.png")).toBeUndefined();
+  });
+
+  test("rejects a name that stops before the unique id segment", function () {
+    expect(screenshotFileDeviceToken("screenshot_1234_token.png")).toBeUndefined();
   });
 });

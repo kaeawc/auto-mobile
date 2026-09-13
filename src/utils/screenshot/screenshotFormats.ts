@@ -64,7 +64,9 @@ export function screenshotDeviceToken(deviceId: string): string {
 
 /**
  * Canonical screenshot file name: `screenshot_<timestamp>_<device>_<unique>.<ext>`.
- * `uniqueId` comes from the injected `IdGenerator`, so it never contains `_`.
+ * `uniqueId` comes from the injected `IdGenerator` and may itself contain `_`
+ * (e.g. `new CountingIdGenerator("capture_run")`), so it is always the last
+ * segment and the parser must not assume a fixed component count (#6913).
  */
 export function screenshotFileName(
   timestamp: number,
@@ -81,11 +83,11 @@ export function screenshotFileName(
  */
 export function screenshotFileDeviceToken(fileName: string): string | undefined {
   const withoutExtension = fileName.replace(/\.[^.]*$/, "");
-  const parts = withoutExtension.split("_");
-  if (parts.length !== 4 || parts[0] !== "screenshot") {
-    return undefined;
-  }
-  return parts[2];
+  // Anchored on the fixed prefix, timestamp and device fields: the device token
+  // is `[A-Za-z0-9-]` by construction, so it cannot swallow the `_` that starts
+  // the unique-id tail, and the tail may contain any number of underscores.
+  const match = /^screenshot_\d+_([A-Za-z0-9-]+)_.+$/.exec(withoutExtension);
+  return match?.[1];
 }
 
 /** True when a screenshot file name identifies a capture from `deviceId`. */

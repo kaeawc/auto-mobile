@@ -15,8 +15,15 @@ const OTHER_UDID = "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE";
 function resetSimctlState(): void {
   const simctlClass = SimCtlClient as unknown as {
     simulatorBoots: Map<string, unknown>;
+    inFlightDeviceList: Promise<unknown[]> | null;
   };
   simctlClass.simulatorBoots.clear();
+  // Drop any still-pending shared listing a previous test left behind (e.g. one
+  // whose mock only settles on an abort that never fired within that test's own
+  // FakeTimer). Without this a later test's caller-independent coalesced read
+  // (see SimCtlClient.listSimulatorImages, issue #6576) would silently join that
+  // orphaned promise and hang forever awaiting a timer no one is driving.
+  simctlClass.inFlightDeviceList = null;
   SimCtlClient.invalidateDeviceListCache();
 }
 
@@ -548,9 +555,11 @@ describe("SimCtlClient boot self-verification", () => {
           : createExecResult(JSON.stringify({ devices: {} }), ""),
     );
 
-    await expect(harness.createClient().bootSimulator(UDID)).rejects.toThrow(
+    const client = harness.createClient();
+    await expect(client.bootSimulator(UDID)).rejects.toThrow(
       `Failed to boot iOS simulator ${UDID}`,
     );
+    expect(await client.getBootedSimulatorsChecked()).toEqual([]);
     expect(harness.lifecycleCalls).toEqual(["bootstatus-1", "shutdown"]);
   });
 
@@ -900,9 +909,9 @@ describe("SimCtlClient boot self-verification", () => {
 
     harness.timer.advanceTime(100);
 
-    await expect(readiness).rejects.toThrow(
-      "Command timed out after 100ms: xcrun simctl list devices --json",
-    );
+    // Authoritative readiness metadata uses a fresh, owned read, so the
+    // caller deadline must stop its discovery process and release the lease.
+    await expect(readiness).rejects.toThrow("Command timed out after 100ms");
     expect(metadataSignal?.aborted).toBe(true);
     await expect(harness.createClient().startSimulator(UDID, 5_000)).resolves.toBeDefined();
     expect(harness.shutdownInvocations()).toBe(0);
@@ -1273,6 +1282,40 @@ describe("SimCtlClient boot self-verification", () => {
       true,
       true,
     ]);
+  });
+
+  test("bootSimulator registration does not trust a stale pre-boot cache entry", async () => {
+    const harness = createHarness({ maxAttempts: 1, retryBackoffMs: 10 });
+
+    // Seed a fresh (within-TTL) cache entry as if an earlier, unrelated caller
+    // listed devices moments before this boot began, while the device was
+    // still Shutdown.
+    (
+      SimCtlClient as unknown as {
+        deviceListCache: { devices: unknown[]; timestamp: number } | null;
+      }
+    ).deviceListCache = {
+      devices: [
+        {
+          name: "iPhone 17",
+          platform: "ios",
+          deviceId: UDID,
+          isRunning: false,
+          state: "Shutdown",
+          isAvailable: true,
+        },
+      ],
+      timestamp: harness.timer.now(),
+    };
+    harness.setStates(["Booted"]);
+
+    // Without the fix, resolveRegisteredBootSimulator's getBootedSimulatorsChecked
+    // would still see the stale "Shutdown" cache entry (well within its TTL) and
+    // falsely report the boot as failed even though bootAndVerify's bypassCache
+    // read just observed "Booted".
+    const device = await harness.timer.resolvePromise(harness.simctl.bootSimulator(UDID));
+
+    expect(device.deviceId).toBe(UDID);
   });
 
   test("waitForSimulatorReady rejects a wedged boot instead of returning a device", async () => {

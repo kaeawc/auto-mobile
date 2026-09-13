@@ -1577,41 +1577,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
         throw new Error("Observation request did not capture any devices");
       }
 
-      // Push valid hierarchies independently so that, for all-device requests,
-      // healthy devices still receive a refresh even when another device has no
-      // hierarchy (e.g. accessibility/CtrlProxy unavailable). Failures are
-      // collected and surfaced in the response rather than aborting the batch.
-      const failures: string[] = [];
-      for (const { deviceId, observation } of observations) {
-        // FUNNEL 2 for the all-device form, which names no serial for the gate
-        // above to preflight. `pushForDevice` drops a quarantined serial's frames
-        // because routing is suspended, so pushing here would deliver nothing and
-        // still ack success — the same false acknowledgement the device-specific
-        // form was fixed for
-        // ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
-        if (this.deviceSessionResolver.isRoutingSuspended(deviceId)) {
-          failures.push(
-            `Observation request failed for ${deviceId}: its pooled AVD identity is unresolved, ` +
-              "so there is no routing identity to attribute the hierarchy to",
-          );
-          continue;
-        }
-        const hierarchy = observation.viewHierarchy;
-        if (!hierarchy) {
-          failures.push(this.describeMissingHierarchy(deviceId, observation));
-          continue;
-        }
-        if (
-          (this.frameContextGenerations.get(deviceId) ?? 0) !==
-          (frameContextGenerationsAtStart.get(deviceId) ?? 0)
-        ) {
-          logger.debug(
-            `[DeviceDataStream] Skipped stale explicit observation for ${deviceId}; a newer hierarchy arrived`,
-          );
-          continue;
-        }
-        this.pushHierarchyUpdate(deviceId, hierarchy, hierarchy.frameContext);
-      }
+      const failures = this.pushObservedHierarchies(observations, frameContextGenerationsAtStart);
 
       if (failures.length > 0) {
         // Healthy devices already received their hierarchy_update pushes above;
@@ -1642,6 +1608,51 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
       };
       this.sendJson(socket, errorResponse);
     }
+  }
+
+  /**
+   * Push each observed hierarchy independently and return the per-device
+   * failures, so that for an all-device request a healthy device still receives
+   * its refresh even when another device produced nothing. Failures are surfaced
+   * in the response rather than aborting the batch.
+   *
+   * A device whose pooled identity is quarantined is one of those failures: FUNNEL
+   * 2 cannot preflight an all-device request, which names no serial, and
+   * `pushForDevice` would drop that serial's frames because routing is suspended —
+   * delivering nothing while the requester is acknowledged `success: true`, the
+   * same false acknowledgement the device-specific form was fixed for
+   * ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
+   */
+  private pushObservedHierarchies(
+    observations: readonly RequestedObservation[],
+    frameContextGenerationsAtStart: ReadonlyMap<string, number>,
+  ): string[] {
+    const failures: string[] = [];
+    for (const { deviceId, observation } of observations) {
+      if (this.deviceSessionResolver.isRoutingSuspended(deviceId)) {
+        failures.push(
+          `Observation request failed for ${deviceId}: its pooled AVD identity is unresolved, ` +
+            "so there is no routing identity to attribute the hierarchy to",
+        );
+        continue;
+      }
+      const hierarchy = observation.viewHierarchy;
+      if (!hierarchy) {
+        failures.push(this.describeMissingHierarchy(deviceId, observation));
+        continue;
+      }
+      if (
+        (this.frameContextGenerations.get(deviceId) ?? 0) !==
+        (frameContextGenerationsAtStart.get(deviceId) ?? 0)
+      ) {
+        logger.debug(
+          `[DeviceDataStream] Skipped stale explicit observation for ${deviceId}; a newer hierarchy arrived`,
+        );
+        continue;
+      }
+      this.pushHierarchyUpdate(deviceId, hierarchy, hierarchy.frameContext);
+    }
+    return failures;
   }
 
   private describeMissingHierarchy(deviceId: string, observation: ObserveResult): string {

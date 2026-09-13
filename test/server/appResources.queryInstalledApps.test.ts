@@ -211,6 +211,52 @@ describe("queryInstalledApps still honors type filters on the iOS simulator (#62
     expect(content.devices[0].apps.map((app) => app.packageName)).toEqual(["com.example.myapp"]);
     expect(content.installedCount).toBe(2);
   });
+
+  test("reports an individually unclassified simulator app excluded by the launchable default", async () => {
+    setListInstalledAppsFactoryForTests(() => ({
+      executeDetailedResult: async () => {
+        throw new Error("not exercised on iOS");
+      },
+      executeIosDetailedResult: async () => ({
+        apps: [
+          { bundleIdentifier: "com.example.launchable", ApplicationType: "User" },
+          { bundleIdentifier: "com.apple.mobilesafari", ApplicationType: "System" },
+          { bundleIdentifier: "com.example.incomplete" },
+        ],
+        successful: true,
+      }),
+    }));
+    invalidateInstalledAppsCache(simulatorDevice.deviceId);
+
+    const content = await queryInstalledApps({ deviceId: simulatorDevice.deviceId });
+
+    expect(content.query.type).toBe("launchable");
+    expect(content.devices[0].apps.map((app) => app.packageName)).toEqual([
+      "com.example.launchable",
+      "com.apple.mobilesafari",
+    ]);
+    expect(content.launchabilityUnknownApps).toEqual(["com.example.incomplete"]);
+  });
+
+  test("does not report individually unknown launchability when type is all", async () => {
+    setListInstalledAppsFactoryForTests(() => ({
+      executeDetailedResult: async () => {
+        throw new Error("not exercised on iOS");
+      },
+      executeIosDetailedResult: async () => ({
+        apps: [
+          { bundleIdentifier: "com.example.launchable", ApplicationType: "User" },
+          { bundleIdentifier: "com.example.incomplete" },
+        ],
+        successful: true,
+      }),
+    }));
+    invalidateInstalledAppsCache(simulatorDevice.deviceId);
+
+    const content = await queryInstalledApps({ deviceId: simulatorDevice.deviceId, type: "all" });
+
+    expect(content.launchabilityUnknownApps).toBeUndefined();
+  });
 });
 
 describe("queryInstalledApps launchable default on Android (#6798)", () => {

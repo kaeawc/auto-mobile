@@ -3,6 +3,10 @@ package dev.jasonpearson.automobile.ctrlproxy
 import android.content.ComponentName
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.ActivityInfo
+import android.content.pm.ApplicationInfo
+import android.content.pm.PackageInfo
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -32,13 +36,76 @@ class InstalledPackageLaunchabilityTest {
     )
   }
 
+  private fun installPackageWithLauncherLabel(
+    packageName: String,
+    applicationLabel: String,
+    launcherLabel: String?,
+  ): ApplicationInfo {
+    val applicationInfo =
+      ApplicationInfo().apply {
+        this.packageName = packageName
+        nonLocalizedLabel = applicationLabel
+      }
+    val shadow = shadowOf(RuntimeEnvironment.getApplication().packageManager)
+    shadow.addPackage(
+      PackageInfo().apply {
+        this.packageName = packageName
+        this.applicationInfo = applicationInfo
+      }
+    )
+    if (launcherLabel != null) {
+      val component = ComponentName(packageName, "$packageName.EntryActivity")
+      shadow.addOrUpdateActivity(
+        ActivityInfo().apply {
+          this.packageName = packageName
+          this.applicationInfo = applicationInfo
+          nonLocalizedLabel = launcherLabel
+          name = component.className
+        }
+      )
+      shadow.addIntentFilterForActivity(
+        component,
+        IntentFilter(Intent.ACTION_MAIN).apply { addCategory(Intent.CATEGORY_LAUNCHER) },
+      )
+    }
+    return applicationInfo
+  }
+
+  @Test
+  fun `uses a MAIN LAUNCHER activity label ahead of the application label`() {
+    val packageName = "com.example.widget"
+    val applicationInfo = installPackageWithLauncherLabel(packageName, "Example Corp", "Widget")
+    val packageManager = RuntimeEnvironment.getApplication().packageManager
+
+    val launchable = launchablePackageNames(packageManager)
+
+    assertEquals(
+      "Widget",
+      preferredInstalledPackageLabel(packageName, applicationInfo, launchable, packageManager),
+    )
+  }
+
+  @Test
+  fun `falls back to an application label when a package has no MAIN LAUNCHER activity`() {
+    val packageName = "com.example.background"
+    val applicationInfo = installPackageWithLauncherLabel(packageName, "Example Corp", null)
+    val packageManager = RuntimeEnvironment.getApplication().packageManager
+
+    val launchable = launchablePackageNames(packageManager)
+
+    assertEquals(
+      "Example Corp",
+      preferredInstalledPackageLabel(packageName, applicationInfo, launchable, packageManager),
+    )
+  }
+
   @Test
   fun `reports a package with a MAIN LAUNCHER activity as launchable`() {
     installActivity("com.example.launcherapp", Intent.CATEGORY_LAUNCHER)
 
     val launchable = launchablePackageNames(RuntimeEnvironment.getApplication().packageManager)
 
-    assertTrue(launchable?.contains("com.example.launcherapp") == true)
+    assertTrue(launchable?.packageNames?.contains("com.example.launcherapp") == true)
   }
 
   @Test
@@ -47,7 +114,7 @@ class InstalledPackageLaunchabilityTest {
 
     val launchable = launchablePackageNames(RuntimeEnvironment.getApplication().packageManager)
 
-    assertFalse(launchable?.contains("com.example.infoonly") == true)
+    assertFalse(launchable?.packageNames?.contains("com.example.infoonly") == true)
   }
 
   @Test
@@ -71,7 +138,7 @@ class InstalledPackageLaunchabilityTest {
         dev.jasonpearson.automobile.protocol.InstalledPackageRecord(
           packageName = packageName,
           isSystem = false,
-          launchable = launchablePackages?.contains(packageName),
+          launchable = launchablePackages?.packageNames?.contains(packageName),
         )
       }
 

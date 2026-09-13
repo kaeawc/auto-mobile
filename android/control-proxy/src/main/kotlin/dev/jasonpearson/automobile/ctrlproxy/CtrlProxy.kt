@@ -5141,15 +5141,15 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         val versionCode =
           if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) info.longVersionCode
           else @Suppress("DEPRECATION") info.versionCode.toLong()
-        // Why here: `listApps` has to answer "which package is Contacts?", and a
-        // label is a resource id no adb shell surface resolves. PackageManager is
-        // already open for this pass, so this stays inside the ONE round-trip the
-        // listing already costs (#6798). Best-effort: a package being removed
-        // mid-enumeration throws, and one bad package must not fail the listing.
+        // The same batched MAIN/LAUNCHER query that establishes launchability also carries the
+        // label shown by launchers. Its helper falls back safely when an app disappears mid-list.
         val label =
-          info.applicationInfo?.let { appInfo ->
-            runCatching { packageManager.getApplicationLabel(appInfo).toString() }.getOrNull()
-          }
+          preferredInstalledPackageLabel(
+            info.packageName,
+            info.applicationInfo,
+            launchablePackages,
+            packageManager,
+          )
         records.add(
           dev.jasonpearson.automobile.protocol.InstalledPackageRecord(
             packageName = info.packageName,
@@ -5157,7 +5157,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             versionName = info.versionName,
             versionCode = versionCode,
             label = label,
-            launchable = launchablePackages?.contains(info.packageName),
+            launchable = launchablePackages?.packageNames?.contains(info.packageName),
           )
         )
       }

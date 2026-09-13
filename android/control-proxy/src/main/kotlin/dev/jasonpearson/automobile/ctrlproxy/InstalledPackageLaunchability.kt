@@ -7,8 +7,14 @@ import android.util.Log
 
 private const val TAG = "InstalledPackageLaunchability"
 
+internal data class LaunchablePackages(
+  val packageNames: Set<String>,
+  val launcherActivityLabels: Map<String, CharSequence>,
+)
+
 /**
- * Package names owning at least one MAIN/LAUNCHER activity for the current user.
+ * Packages owning at least one MAIN/LAUNCHER activity for the current user, with their launcher
+ * activity labels where PackageManager can resolve them.
  *
  * Why not `getLaunchIntentForPackage`: it resolves `CATEGORY_INFO` before `CATEGORY_LAUNCHER`, so a
  * package that declares MAIN/INFO and no launcher entry still yields an intent. The adb fallback
@@ -26,7 +32,7 @@ private const val TAG = "InstalledPackageLaunchability"
 internal fun launchablePackageNames(
   packageManager: PackageManager,
   queryIntentActivities: ((Intent) -> List<android.content.pm.ResolveInfo>)? = null,
-): Set<String>? {
+): LaunchablePackages? {
   val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
   val resolved = runCatching {
     if (queryIntentActivities != null) {
@@ -45,5 +51,38 @@ internal fun launchablePackageNames(
     )
     return null
   }
-  return resolved.getOrThrow().mapNotNull { it.activityInfo?.packageName }.toSet()
+  val packageNames = mutableSetOf<String>()
+  val launcherActivityLabels = mutableMapOf<String, CharSequence>()
+  for (resolveInfo in resolved.getOrThrow()) {
+    val packageName = resolveInfo.activityInfo?.packageName ?: continue
+    packageNames.add(packageName)
+    runCatching { resolveInfo.loadLabel(packageManager) }
+      .onFailure {
+        // Safe to swallow: the application label remains a best-effort fallback for this package.
+        Log.d(TAG, "Unable to resolve launcher activity label for $packageName", it)
+      }
+      .getOrNull()
+      ?.let { launcherActivityLabels.putIfAbsent(packageName, it) }
+  }
+  return LaunchablePackages(packageNames, launcherActivityLabels)
+}
+
+/** Uses the launcher-visible label when available, then falls back to the application label. */
+internal fun preferredInstalledPackageLabel(
+  packageName: String,
+  applicationInfo: android.content.pm.ApplicationInfo?,
+  launchablePackages: LaunchablePackages?,
+  packageManager: PackageManager,
+): String? {
+  launchablePackages?.launcherActivityLabels?.get(packageName)?.let {
+    return it.toString()
+  }
+  return applicationInfo?.let { appInfo ->
+    runCatching { packageManager.getApplicationLabel(appInfo).toString() }
+      .onFailure {
+        // Safe to swallow: one disappearing package must not fail the whole installed-app listing.
+        Log.d(TAG, "Unable to resolve application label for $packageName", it)
+      }
+      .getOrNull()
+  }
 }

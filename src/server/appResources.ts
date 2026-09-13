@@ -116,6 +116,13 @@ export interface AppsQueryResourceContent {
    * them keeps a device-wide query from dropping them silently (#6798 review).
    */
   launchabilityUnknownProfiles?: number[];
+  /**
+   * Apps matching this query's profile and search filters whose launchability
+   * was not reported. Present only when non-empty: the `launchable` filter
+   * excludes them until they are proven launchable rather than silently
+   * presenting missing metadata as a negative answer (#6798 review).
+   */
+  launchabilityUnknownApps?: string[];
 }
 
 // Resource content schema
@@ -826,6 +833,16 @@ export function launchabilityForProfile(
   return app.launchableByUserId[profile];
 }
 
+// Exported for tests: keeps the existing profile and search predicates authoritative.
+export function launchabilityUnknownApps(
+  queryApps: AppsQueryAppInfo[],
+  options: AppsQueryOptions,
+): string[] {
+  return filterAppsByQuery(queryApps, { ...options, type: "all" })
+    .filter((app) => launchabilityForProfile(app, options.profile) === undefined)
+    .map((app) => app.packageName);
+}
+
 function matchesAppsQueryType(
   app: AppsQueryAppInfo,
   effectiveType: AppsQueryType,
@@ -913,6 +930,7 @@ export async function queryInstalledApps(
   const effectiveOptions: AppsQueryOptions = { ...options, type: effectiveType };
 
   const apps = filterAppsByQuery(cacheEntry.queryApps, effectiveOptions);
+  const unknownApps = launchabilityUnknownApps(cacheEntry.queryApps, effectiveOptions);
   const deviceEntries: AppsQueryDeviceContent[] = [
     {
       deviceId: device.deviceId,
@@ -944,6 +962,9 @@ export async function queryInstalledApps(
     devices: deviceEntries,
     ...(effectiveType === "launchable" && unknownProfiles.length > 0
       ? { launchabilityUnknownProfiles: unknownProfiles }
+      : {}),
+    ...(effectiveType === "launchable" && unknownApps.length > 0
+      ? { launchabilityUnknownApps: unknownApps }
       : {}),
   };
 }

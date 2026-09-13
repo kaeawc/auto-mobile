@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
-import { ToolRegistry } from "../../src/server/toolRegistry";
+import { DefaultAfterToolCallHandler, ToolRegistry } from "../../src/server/toolRegistry";
 import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -31,6 +31,7 @@ describe("ToolRegistry observe lastHierarchy cache repair (#2758)", () => {
 
   let fakeDeviceSessionManager: FakeDeviceSessionManager;
   let originalDeviceSessionManager: unknown;
+  let originalAfterToolCall: unknown;
   let daemonSessionManager: SessionManager | undefined;
 
   function makeObserveResult(): ObserveResult {
@@ -85,6 +86,16 @@ describe("ToolRegistry observe lastHierarchy cache repair (#2758)", () => {
     fakeDeviceSessionManager = new FakeDeviceSessionManager();
     originalDeviceSessionManager = (ToolRegistry as any).deviceSessionManager;
     (ToolRegistry as any).deviceSessionManager = fakeDeviceSessionManager;
+    // #6866: the after-tool-call pipeline now settles a navigation-class action's
+    // embedded observation against the DEVICE before finalizing. These tests drive
+    // stub handlers with canned observations against a fake device, so swap in a
+    // settle factory that resolves no delegate — the gate then leaves the stub's
+    // observation exactly as the handler built it, which is what they assert on.
+    originalAfterToolCall = (ToolRegistry as any).afterToolCall;
+    (ToolRegistry as any).afterToolCall = new DefaultAfterToolCallHandler(
+      undefined,
+      () => undefined,
+    );
     process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
     // #6227: `setupAutolockedSession` creates its session directly via
     // `DevicePool.autolockDevice` (bypassing the `deviceTools.ts` acquisition
@@ -96,6 +107,7 @@ describe("ToolRegistry observe lastHierarchy cache repair (#2758)", () => {
 
   afterEach(() => {
     (ToolRegistry as any).deviceSessionManager = originalDeviceSessionManager;
+    (ToolRegistry as any).afterToolCall = originalAfterToolCall;
     ToolRegistry.clearTools();
     DaemonState.getInstance().reset();
     daemonSessionManager?.stopCleanupTimer();

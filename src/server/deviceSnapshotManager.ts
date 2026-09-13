@@ -99,6 +99,8 @@ type VmRetentionEvictionOutcome =
   | "failed"
   | "removed-concurrently";
 
+const VM_RETENTION_RETRY_DELAY_MS = 100;
+
 /** An in-AVD snapshot directory with no archive row behind it (#6490). */
 export interface OrphanedAvdSnapshot {
   avdName: string;
@@ -1278,9 +1280,10 @@ async function evictOldestVmRetentionCandidate(
       if (current?.pendingReclaim) {
         return "deferred";
       }
-      // A pending-reclaim sweep can remove this row while its name lock makes
-      // this eviction attempt non-exclusive (#6960); do not count it twice.
-      if (!current) {
+      // A pending-reclaim sweep can remove this row, or a same-name capture on
+      // another AVD can replace it, while this eviction attempt is non-exclusive
+      // (#6960); do not count a stale candidate twice.
+      if (!current || current.deviceName !== candidate.deviceName) {
         state.snapshots = state.snapshots.filter(
           (record) => record.snapshotName !== candidate.snapshotName,
         );
@@ -1373,6 +1376,33 @@ function reportVmRetentionEvictions(
   );
 }
 
+async function scheduleVmRetentionRetry(
+  deviceName: string,
+  config: DeviceSnapshotConfig,
+  state: VmRetentionState,
+  currentSizeBytes: number,
+  maxSizeBytes: number,
+): Promise<void> {
+  const remainsOverLimit =
+    state.snapshots.length > config.maxVmSnapshotsPerAvd ||
+    (config.maxVmArchiveSizeMb !== undefined && currentSizeBytes > maxSizeBytes);
+  if (state.failedNames.size === 0 || !remainsOverLimit) {
+    return;
+  }
+
+  const { timer } = await getDeviceSnapshotDependencies();
+  timer.setTimeout(() => {
+    void enforceVmSnapshotRetentionForDevice(deviceName, config).catch((error) => {
+      // This is a best-effort retry; its failure cannot affect the completed operation.
+      logger.warn(
+        `[DeviceSnapshot] Deferred VM retention retry for AVD '${deviceName}' failed: ` +
+          errorMessage(error),
+        error,
+      );
+    });
+  }, VM_RETENTION_RETRY_DELAY_MS);
+}
+
 async function enforceVmSnapshotRetentionForDevice(
   deviceName: string,
   config: DeviceSnapshotConfig,
@@ -1422,6 +1452,7 @@ async function enforceVmSnapshotRetentionForDevice(
     if (state.evictedSnapshotNames.length > 0) {
       await notifySnapshotResources();
     }
+    await scheduleVmRetentionRetry(deviceName, config, state, currentSizeBytes, maxSizeBytes);
 
     return {
       evictedSnapshotNames: state.evictedSnapshotNames,
@@ -1669,6 +1700,7 @@ async function enforceCapturedSnapshotRetention(
       // The emulator-console deletion did not complete, so its payload and row
       // deliberately remain linked for a later reclaim rather than lying that
       // this rejected capture was rolled back.
+      await notifySnapshotResources();
       throw new ActionableError(
         `Snapshot '${result.snapshotName}' exceeds maxVmArchiveSizeMb but its VM payload could ` +
           "not be reclaimed; it remains tracked for a later reclaim",
@@ -1729,8 +1761,10 @@ export async function captureDeviceSnapshot(
   let overwroteExistingSnapshot = false;
   const result = await withSnapshotNameLock(snapshotName, async () => {
     // Read while holding the same-name lifecycle lock so this records whether
-    // this capture is replacing an existing row before its upsert destroys it.
-    overwroteExistingSnapshot = (await snapshotRepository.getSnapshot(snapshotName)) !== null;
+    // this capture is replacing this AVD's existing row before its upsert destroys it.
+    const previousRecord = await snapshotRepository.getSnapshot(snapshotName);
+    overwroteExistingSnapshot =
+      previousRecord !== null && previousRecord.deviceName === device.name;
     // Held under the name lock, before anything writes: the upsert below is
     // what destroys another AVD's pending-reclaim reference (#6490 review).
     await reclaimSupersededPendingVmSnapshot(
@@ -1786,10 +1820,17 @@ export async function captureDeviceSnapshot(
 
   // Both passes run after the name lock: budget/reclaim uses a try-lock on
   // individual records, while the VM pass explicitly protects this capture.
+  const currentConfig = await getDeviceSnapshotConfig();
+  const retentionConfig: DeviceSnapshotConfig = {
+    ...mergedConfig,
+    maxVmSnapshotsPerAvd: currentConfig.maxVmSnapshotsPerAvd,
+    maxArchiveSizeMb: currentConfig.maxArchiveSizeMb,
+    maxVmArchiveSizeMb: currentConfig.maxVmArchiveSizeMb,
+  };
   const evictedSnapshotNames = await enforceCapturedSnapshotRetention(
     result,
     device,
-    mergedConfig,
+    retentionConfig,
     overwroteExistingSnapshot,
   );
   await notifySnapshotResources();

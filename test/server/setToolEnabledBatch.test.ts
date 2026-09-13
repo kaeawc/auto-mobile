@@ -24,7 +24,12 @@ import {
 
 class FakeRepository implements SessionToolSelectionRepository {
   readonly rows = new Map<string, Map<string, boolean>>();
+  /** Every (sessionUuid, toolName, enabled) the repository was asked to persist. */
   readonly writes: Array<[string, string, boolean]> = [];
+  /** Each batch as the repository received it — one entry per transactional write. */
+  readonly batches: Array<Array<[string, string, boolean]>> = [];
+  /** When set, `setMany` rejects with it AFTER staging nothing (see #6886 review). */
+  failBatchWith: Error | undefined;
 
   async list(sessionUuid: string): Promise<Map<string, boolean>> {
     return new Map(this.rows.get(sessionUuid) ?? []);
@@ -32,8 +37,27 @@ class FakeRepository implements SessionToolSelectionRepository {
 
   async set(sessionUuid: string, toolName: string, enabled: boolean): Promise<void> {
     this.writes.push([sessionUuid, toolName, enabled]);
+    this.batches.push([[sessionUuid, toolName, enabled]]);
     const values = this.rows.get(sessionUuid) ?? new Map<string, boolean>();
     values.set(toolName, enabled);
+    this.rows.set(sessionUuid, values);
+  }
+
+  async setMany(
+    sessionUuid: string,
+    entries: ReadonlyArray<{ toolName: string; enabled: boolean }>,
+  ): Promise<void> {
+    if (this.failBatchWith) {
+      throw this.failBatchWith;
+    }
+    const values = this.rows.get(sessionUuid) ?? new Map<string, boolean>();
+    this.batches.push(
+      entries.map((entry) => {
+        this.writes.push([sessionUuid, entry.toolName, entry.enabled]);
+        values.set(entry.toolName, entry.enabled);
+        return [sessionUuid, entry.toolName, entry.enabled] as [string, string, boolean];
+      }),
+    );
     this.rows.set(sessionUuid, values);
   }
 
@@ -136,6 +160,44 @@ describe("setToolEnabled batch enable (#6869)", () => {
     await expect(callSetToolEnabled({ toolName: "notATool" })).rejects.toThrow(
       "Tool 'notATool' is not user-configurable.",
     );
+  });
+
+  // #6886 review — the advertised all-or-nothing contract has to survive a write
+  // failure too, not just an unknown name. One repository operation per batch is
+  // what makes that true: SQLite wraps it in a transaction, so a rejection can
+  // never leave a prefix of the list applied, and two concurrent batches cannot
+  // interleave into a state neither asked for.
+  test("persists the whole batch through a single repository operation", async () => {
+    await callSetToolEnabled({ toolNames: ["inputText", "clearText", "imeAction"] });
+
+    expect(repository.batches).toEqual([
+      [
+        [SESSION_UUID, "inputText", true],
+        [SESSION_UUID, "clearText", true],
+        [SESSION_UUID, "imeAction", true],
+      ],
+    ]);
+  });
+
+  test("leaves nothing applied and does not renotify when the batch write fails", async () => {
+    let notifications = 0;
+    const restoreNotify = ToolRegistry.notifyToolListChanged.bind(ToolRegistry);
+    ToolRegistry.notifyToolListChanged = () => {
+      notifications += 1;
+    };
+    repository.failBatchWith = new Error("selection storage unavailable");
+
+    try {
+      await expect(callSetToolEnabled({ toolNames: ["inputText", "clearText"] })).rejects.toThrow(
+        "selection storage unavailable",
+      );
+    } finally {
+      ToolRegistry.notifyToolListChanged = restoreNotify;
+    }
+
+    expect(repository.writes).toEqual([]);
+    expect(repository.rows.get(SESSION_UUID)).toBeUndefined();
+    expect(notifications).toBe(0);
   });
 
   test("applies a repeated name once", async () => {

@@ -17,7 +17,7 @@ export { SET_TOOL_ENABLED_TOOL_NAME } from "../features/toolSelection/toolSelect
  */
 export type ToolSelectionServiceLike =
   | (Pick<SessionToolSelectionService, "isEnabled"> &
-      Partial<Pick<SessionToolSelectionService, "setEnabled">>)
+      Partial<Pick<SessionToolSelectionService, "setEnabled" | "setEnabledMany">>)
   | undefined;
 
 /**
@@ -131,7 +131,8 @@ export function assertUserConfigurableToolNames(toolNames: readonly string[]): v
 
 function resolveSelectionService(
   service: ToolSelectionServiceLike,
-): Pick<SessionToolSelectionService, "isEnabled" | "setEnabled"> {
+): Pick<SessionToolSelectionService, "isEnabled" | "setEnabled"> &
+  Partial<Pick<SessionToolSelectionService, "setEnabledMany">> {
   if (service && !service.setEnabled) {
     throw new ActionableError(
       "This MCP server's injected tool-selection service is read-only and cannot update tools.",
@@ -140,13 +141,21 @@ function resolveSelectionService(
   return (service ?? getSessionToolSelectionService()) as Pick<
     SessionToolSelectionService,
     "isEnabled" | "setEnabled"
-  >;
+  > &
+    Partial<Pick<SessionToolSelectionService, "setEnabledMany">>;
 }
 
 /**
  * Persist one enable/disable decision for every requested name. Names are
  * validated and the service is resolved up front, so nothing is written unless
  * the whole request is applicable; duplicates collapse to one write.
+ *
+ * The writes themselves go through `setEnabledMany`, one repository operation
+ * for the whole batch (a transaction in SQLite), so the advertised
+ * all-or-nothing contract also survives a mid-batch STORAGE failure and a
+ * concurrent batch for the same session — not just an unknown name (#6886
+ * review). A narrower injected service that only offers `setEnabled` keeps the
+ * per-name loop; only tests inject one.
  */
 export async function applyToolSelection(
   service: ToolSelectionServiceLike,
@@ -157,6 +166,10 @@ export async function applyToolSelection(
   const requested = [...new Set(toolNames)];
   assertUserConfigurableToolNames(requested);
   const resolved = resolveSelectionService(service);
+  if (resolved.setEnabledMany) {
+    await resolved.setEnabledMany(sessionUuid, requested, enabled);
+    return requested;
+  }
   for (const toolName of requested) {
     await resolved.setEnabled(sessionUuid, toolName, enabled);
   }

@@ -34,7 +34,7 @@ class DeviceResourceParserTest {
                   "source": "local",
                   "isVirtual": true,
                   "status": "booted",
-                  "identity": { "stableId": "Pixel_8", "connectionId": "transport-1" }
+                  "identity": { "stableId": "Pixel_8", "connectionId": "emulator-5554#3" }
               }
           ]
       }
@@ -47,6 +47,10 @@ class DeviceResourceParserTest {
     assertEquals(true, result.sourceObservations["ios-simulator"]?.observationComplete)
     assertEquals(false, result.sourceObservations["ios-physical"]?.observationComplete)
     assertEquals("Pixel_8", result.devices.single().identity?.stableId)
+    // The connection epoch is what distinguishes one occupant of a reused
+    // serial from the next, so a parser regression that drops or mangles it
+    // must not pass on the stableId assertion alone.
+    assertEquals("emulator-5554#3", result.devices.single().identity?.connectionId)
     assertEquals(1, result.totalCount)
     assertEquals(1, result.androidCount)
     assertEquals(0, result.iosCount)

@@ -9,7 +9,11 @@ import {
 } from "./socketServer/index";
 import type { ObserveResult, Platform, ViewHierarchyResult } from "../models";
 import type { StorageChangedEvent } from "../features/storage/storageTypes";
-import { type DeviceSessionResolver, nullDeviceSessionResolver } from "./deviceSessionResolver";
+import {
+  type DeviceSessionResolver,
+  nullDeviceSessionResolver,
+  SuspendedDeviceRoutingLog,
+} from "./deviceSessionResolver";
 import type { DeviceSessionRecord } from "./deviceSessionRegistry";
 import { DEVICE_DATA_STREAM_SOCKET_CONFIG } from "./daemonFiles";
 import type { ScreenshotMetadata } from "../features/observe/ScreenshotMetadata";
@@ -363,6 +367,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     return this.currentFrameContexts.get(deviceId);
   }
   private deviceSessionResolver: DeviceSessionResolver = nullDeviceSessionResolver;
+  private readonly suspendedRoutingLog = new SuspendedDeviceRoutingLog();
   private onSubscriberConnected: OnSubscriberConnectedCallback | null = null;
   private onScreenshotCadenceChanged: OnScreenshotCadenceChangedCallback | null = null;
   private onHierarchyCadenceChanged: OnHierarchyCadenceChangedCallback | null = null;
@@ -404,11 +409,30 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
   }
 
   /**
+   * Whether frames attributed to this serial must be dropped because the pool's
+   * entry for it is quarantined — see
+   * {@link DeviceSessionResolver.isRoutingSuspended}. Logged once per quarantine,
+   * not once per frame.
+   */
+  private isDeviceRoutingSuspended(deviceId: string): boolean {
+    return this.suspendedRoutingLog.shouldDropFrame(
+      this.deviceSessionResolver,
+      deviceId,
+      "DeviceDataStream",
+    );
+  }
+
+  /**
    * Stamp a device-attributed frame with the live `deviceSessionUuid` for its
    * serial and push it, routing on that uuid. A serial with no live epoch resolves
-   * to `null`, reaching only all-device subscribers.
+   * to `null`, reaching only all-device subscribers; a serial whose pooled identity
+   * is quarantined reaches nobody, because the serial is the only attribution the
+   * frame has and it is exactly what is in doubt (#6863 review).
    */
   private pushForDevice(deviceId: string, message: DeviceDataStreamMessage): number {
+    if (this.isDeviceRoutingSuspended(deviceId)) {
+      return 0;
+    }
     const deviceSessionUuid = this.deviceSessionResolver.resolveUuid(deviceId);
     return this.pushToSubscribers({
       message: { ...message, deviceSessionUuid },
@@ -624,6 +648,9 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     navigationGraph: NavigationGraphStreamData,
     deviceId: string | null,
   ): void {
+    if (deviceId !== null && this.isDeviceRoutingSuspended(deviceId)) {
+      return;
+    }
     const deviceSessionUuid = deviceId ? this.deviceSessionResolver.resolveUuid(deviceId) : null;
     const message: DeviceDataStreamMessage = {
       type: "navigation_update",

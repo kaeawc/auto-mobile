@@ -566,12 +566,13 @@ export function setListInstalledAppsFactoryForTests(
 async function fetchAppsForDevice(
   device: BootedDevice,
   timer: Timer = defaultTimer,
+  signal?: AbortSignal,
 ): Promise<FetchedAppsCacheEntry> {
   const listInstalledApps = listInstalledAppsFactory(device);
   const lastUpdated = new Date().toISOString();
 
   if (device.platform === "android") {
-    const result = await listInstalledApps.executeDetailedResult();
+    const result = await listInstalledApps.executeDetailedResult(signal);
     const { userApps, queryApps } = normalizeAndroidApps(result.apps);
     const foregroundApp = queryApps.find((app) => app.foreground)?.packageName ?? null;
     const message = getAndroidAppsMessage(device.deviceId);
@@ -691,6 +692,7 @@ function launchabilityUnknownProfiles(queryApps: AppsQueryAppInfo[]): number[] {
 async function ensureAppsCacheEntry(
   deviceId: string,
   timer: Timer = defaultTimer,
+  signal?: AbortSignal,
 ): Promise<AppsCacheEntry | null> {
   const cached = appCacheByDeviceId.get(deviceId);
   if (cached && cached.expiresAt > timer.now()) {
@@ -702,8 +704,9 @@ async function ensureAppsCacheEntry(
     return null;
   }
 
+  signal?.throwIfAborted();
   const cacheGeneration = getInstalledAppsCacheWriteCoordinator().beginRebuild(deviceId);
-  const result = await fetchAppsForDevice(device, timer);
+  const result = await fetchAppsForDevice(device, timer, signal);
   if (
     result.cacheable &&
     (device.platform !== "android" || !getInstalledAppsCacheWriteCoordinator().isDirty(deviceId))
@@ -922,9 +925,10 @@ async function getAppsQueryDevice(options: AppsQueryOptions): Promise<BootedDevi
  */
 export async function queryInstalledApps(
   options: AppsQueryOptions,
+  signal?: AbortSignal,
 ): Promise<AppsQueryResourceContent> {
   const device = await getAppsQueryDevice(options);
-  const cacheEntry = await ensureAppsCacheEntry(device.deviceId);
+  const cacheEntry = await ensureAppsCacheEntry(device.deviceId, defaultTimer, signal);
   if (!cacheEntry) {
     throw new Error(`Device not found or not booted: ${device.deviceId}`);
   }

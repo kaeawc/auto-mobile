@@ -61,6 +61,27 @@ describe("queryInstalledApps honest-failure contract (#6155)", () => {
     expect(content.observationComplete).toBe(true);
     expect(content.totalCount).toBe(0);
   });
+
+  test("forwards cancellation to Android catalog enrichment", async () => {
+    const controller = new AbortController();
+    let capturedSignal: AbortSignal | undefined;
+    setListInstalledAppsFactoryForTests(() => ({
+      executeDetailedResult: async (signal) => {
+        capturedSignal = signal;
+        controller.abort();
+        signal?.throwIfAborted();
+        return { apps: { profiles: {}, system: [] }, successful: true };
+      },
+      executeIosDetailedResult: async () => {
+        throw new Error("not exercised on android");
+      },
+    }));
+
+    await expect(
+      queryInstalledApps({ deviceId: device.deviceId }, controller.signal),
+    ).rejects.toThrow(/abort/i);
+    expect(capturedSignal).toBe(controller.signal);
+  });
 });
 
 describe("queryInstalledApps rejects an unsupported type filter on a physical iOS device (#6216 review, round 5)", () => {

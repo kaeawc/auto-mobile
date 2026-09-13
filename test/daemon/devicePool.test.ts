@@ -6698,6 +6698,72 @@ describe("DevicePool", () => {
       expect(devicePool.getDevice("emulator-5554")?.sessionId).toBeNull();
     });
 
+    // The quarantine can be ENTERED by the assignment-time liveness check itself,
+    // with no refresh sweep in between. The operation that enters it must fail at
+    // assignment rather than hand back a session that then fails every tool
+    // (#6863 review).
+    test("does not assign an emulator the assignment-time liveness check just quarantined", async () => {
+      await initializeLiveDevices([
+        poolDevice("emulator-5554", "Pixel_8_API_35"),
+        poolDevice("emulator-5556", "Pixel_7_API_34"),
+      ]);
+      // No refresh: the placeholder is what the assignment's own discovery reads.
+      fakeDeviceManager.bootedDevices = [
+        unresolved("emulator-5554"),
+        poolDevice("emulator-5556", "Pixel_7_API_34"),
+      ];
+
+      const assigned = await devicePool.assignDeviceToSession("session-1");
+
+      expect(devicePool.isPooledIdentityUnresolved("emulator-5554")).toBe(true);
+      expect(assigned).toBe("emulator-5556");
+      expect(devicePool.getDevice("emulator-5554")?.sessionId).toBeNull();
+    });
+
+    test("assigns the entry again once a later sweep resolves the name", async () => {
+      const device = poolDevice("emulator-5554", "Pixel_8_API_35");
+      await initializeLiveDevices([device]);
+      await refreshWith([unresolved("emulator-5554")]);
+      expect(devicePool.isPooledIdentityUnresolved("emulator-5554")).toBe(true);
+
+      await refreshWith([device]);
+      const assigned = await devicePool.assignDeviceToSession("session-1");
+
+      expect(assigned).toBe("emulator-5554");
+    });
+
+    test("refuses an exact bind whose liveness check finds an unresolved identity", async () => {
+      const device = poolDevice("emulator-5554", "Pixel_8_API_35");
+      await initializeLiveDevices([device]);
+      fakeDeviceManager.bootedDevices = [unresolved("emulator-5554")];
+
+      await expect(
+        devicePool.bindOrReuseDeviceSession("session-1", "emulator-5554", "android", androidImage),
+      ).rejects.toThrow(/emulator-5554[\s\S]*identity is unresolved/);
+      expect(devicePool.getDevice("emulator-5554")?.sessionId).toBeNull();
+    });
+
+    test("refuses an autolock whose liveness check finds an unresolved identity", async () => {
+      const originalAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+      process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
+      try {
+        const device = poolDevice("emulator-5554", "Pixel_8_API_35");
+        await initializeLiveDevices([device]);
+        fakeDeviceManager.bootedDevices = [unresolved("emulator-5554")];
+
+        await expect(
+          devicePool.autolockDevice("emulator-5554", "android", "mcp-session-1"),
+        ).rejects.toThrow(/emulator-5554[\s\S]*identity is unresolved/);
+        expect(devicePool.getDevice("emulator-5554")?.sessionId).toBeNull();
+      } finally {
+        if (originalAutolock === undefined) {
+          delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+        } else {
+          process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = originalAutolock;
+        }
+      }
+    });
+
     test("refuses tool execution for a session bound to an unresolved emulator", async () => {
       const device = poolDevice("emulator-5554", "Pixel_8_API_35");
       fakeDeviceManager.bootedDevices = [device];

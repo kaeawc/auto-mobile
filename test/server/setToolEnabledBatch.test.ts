@@ -67,16 +67,20 @@ class FakeRepository implements SessionToolSelectionRepository {
 }
 
 const SESSION_UUID = "session-6869";
+const PROFILE_UUID = "connection-profile-6869";
 
 describe("setToolEnabled batch enable (#6869)", () => {
   let repository: FakeRepository;
   let service: SessionToolSelectionService;
 
-  const callSetToolEnabled = async (args: Record<string, unknown>): Promise<any> => {
+  const callSetToolEnabled = async (
+    args: Record<string, unknown>,
+    context: { toolSelectionProfileUuid?: string } = {},
+  ): Promise<any> => {
     const tool = ToolRegistry.getTool(SET_TOOL_ENABLED_TOOL_NAME)!;
     const parsed = tool.schema.parse(args);
     return await runWithToolSelectionContext(
-      { routingSessionUuid: SESSION_UUID, sessionToolSelectionService: service },
+      { routingSessionUuid: SESSION_UUID, sessionToolSelectionService: service, ...context },
       () => tool.handler(parsed),
     );
   };
@@ -146,6 +150,40 @@ describe("setToolEnabled batch enable (#6869)", () => {
 
     expect(payload.enabled).toBe(false);
     expect(payload.enabledTools).toEqual([]);
+  });
+
+  // #6886 review — `tools/list` and the call gate resolve a tool against the
+  // UNION of the connection profile and the routing session, so reporting
+  // `enabledTools` from the updated UUID alone omitted tools that stay callable.
+  // A sessionless update after `getAndroid({ enableTools: ["inputText"] })` is
+  // exactly that case: the write lands on the connection profile while the grant
+  // lives on the routing session.
+  test("reports the union of the connection profile and the routing session", async () => {
+    await service.setEnabled(SESSION_UUID, "inputText", true);
+
+    const payload = payloadOf(
+      await callSetToolEnabled(
+        { toolNames: ["clearText"] },
+        { toolSelectionProfileUuid: PROFILE_UUID },
+      ),
+    );
+
+    expect(payload.sessionUuid).toBe(PROFILE_UUID);
+    expect(payload.enabledTools).toEqual(["clearText", "inputText", "observe"]);
+  });
+
+  test("reports a tool either side enables, matching the call gate's union", async () => {
+    await service.setEnabled(SESSION_UUID, "imeAction", true);
+
+    const payload = payloadOf(
+      await callSetToolEnabled(
+        { toolNames: ["imeAction"], enabled: false },
+        { toolSelectionProfileUuid: PROFILE_UUID },
+      ),
+    );
+
+    // The routing session still grants it, so the call gate still admits it.
+    expect(payload.enabledTools).toContain("imeAction");
   });
 
   test("rejects an unknown name before writing anything (all-or-nothing)", async () => {

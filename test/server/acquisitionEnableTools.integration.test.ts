@@ -116,6 +116,27 @@ describe("acquisition-time enableTools (#6869)", () => {
     });
   }
 
+  // #6886 review — `tools/list` and the call gate resolve a tool against the
+  // UNION of the connection profile and the routing session. provisionDevice's
+  // freshly minted session carries no override for a capability the caller
+  // enabled earlier on its connection profile, so reporting `enabledTools` from
+  // the minted UUID alone omitted tools that stay callable.
+  test("provisionDevice reports capabilities the connection profile enabled too", async () => {
+    registerAcquisition("provisionDevice");
+    // A sessionless setToolEnabled is exactly the connection-profile update.
+    await fixture!.client.request(
+      {
+        method: "tools/call",
+        params: { name: "setToolEnabled", arguments: { toolName: "inputText" } },
+      },
+      z.any(),
+    );
+
+    const { payload } = await acquire("provisionDevice", {});
+
+    expect(payload.enabledTools).toContain("inputText");
+  });
+
   test("provisionDevice enables the requested tools and reports enabledTools", async () => {
     registerAcquisition("provisionDevice");
 

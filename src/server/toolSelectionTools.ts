@@ -3,6 +3,7 @@ import type { SessionToolSelectionService } from "../features/toolSelection/Sess
 import { SET_TOOL_ENABLED_TOOL_NAME } from "../features/toolSelection/toolSelectionControl";
 import { getSessionToolSelectionService } from "../features/toolSelection/SessionToolSelectionService";
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
+import { isToolEnabledForAnySession } from "../features/toolSelection/toolSelectionPolicy";
 import { ActionableError } from "../models";
 import { withJsonSchemaOverride } from "./toolSchemaHelpers";
 import { createJSONToolResponse } from "../utils/toolUtils";
@@ -177,20 +178,36 @@ export async function applyToolSelection(
 }
 
 /**
- * The user-configurable tools currently enabled for `sessionUuid` — the exact
+ * The user-configurable tools currently enabled for a caller — the exact
  * complement of the `gatedTools` array the acquisition tools already return, so
  * a caller can confirm the resulting capability set in one look (#6869).
+ *
+ * Resolution runs through the SAME profile-and-routing union `tools/list` and
+ * the `tools/call` gate apply (#6886 review). Reporting the updated UUID alone
+ * omitted every tool that is enabled on the other half of that union but stays
+ * callable — a capability granted at acquisition when a later sessionless
+ * update writes to the connection profile, and a connection-profile grant when
+ * a freshly minted session (provisionDevice) carries no override of its own.
+ * Derived `${base}:${label}` device-label sessions stay a discovery-only
+ * refinement: only `tools/list` knows the caller's label map.
  */
 export async function listEnabledToolNames(
   service: ToolSelectionServiceLike,
-  sessionUuid: string,
+  sessionUuids: ReadonlyArray<string | undefined>,
+  connectionProfileUuid?: string,
 ): Promise<string[]> {
   const resolved = service ?? getSessionToolSelectionService();
   const names = await Promise.all(
     ToolRegistry.getAllTools()
       .filter((tool) => ToolRegistry.isUserConfigurableTool(tool.name))
       .map(async (tool) =>
-        (await resolved.isEnabled(sessionUuid, tool.name, tool.defaultEnabled ?? true))
+        (await isToolEnabledForAnySession(
+          tool.name,
+          tool.defaultEnabled ?? true,
+          sessionUuids,
+          resolved,
+          connectionProfileUuid,
+        ))
           ? tool.name
           : undefined,
       ),
@@ -224,7 +241,11 @@ export function registerToolSelectionTools(): void {
         // echoes the applied `toolNames` instead (#6869).
         ...(args.toolNames ? { toolNames: requested } : { toolName: args.toolName }),
         enabled,
-        enabledTools: await listEnabledToolNames(context?.sessionToolSelectionService, sessionUuid),
+        enabledTools: await listEnabledToolNames(
+          context?.sessionToolSelectionService,
+          [sessionUuid, context?.routingSessionUuid],
+          context?.toolSelectionProfileUuid,
+        ),
       });
     },
     { defaultEnabled: true },

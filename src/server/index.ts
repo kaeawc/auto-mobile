@@ -126,6 +126,7 @@ async function enrichProvisionDeviceResult<
   sessionUuid: string | undefined,
   service: McpServerOptions["sessionToolSelectionService"],
   enableTools: readonly string[],
+  connectionProfileUuid: string | undefined,
 ): Promise<T> {
   if (toolName !== "provisionDevice" || result?.isError || !sessionUuid) {
     return result;
@@ -133,7 +134,11 @@ async function enrichProvisionDeviceResult<
   try {
     await applyAcquisitionToolSelection(service, sessionUuid, enableTools);
     return enrichAcquisitionResult(result, {
-      enabledTools: await listEnabledToolNames(service, sessionUuid),
+      // The connection profile is the other half of the union `tools/list` and
+      // the call gate apply, and the session this call just minted carries no
+      // override of its own — so a capability enabled on the profile is
+      // callable and belongs in this report (#6886 review).
+      enabledTools: await listEnabledToolNames(service, [sessionUuid], connectionProfileUuid),
     });
   } catch (error) {
     logger.warn("[MCP] Could not enrich provisionDevice with enabled tools", { error });
@@ -1174,6 +1179,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         acquiredSessionUuid,
         options.sessionToolSelectionService,
         requestedEnableTools,
+        connectionProfileUuid,
       );
       if (
         name === "setActiveDevice" &&

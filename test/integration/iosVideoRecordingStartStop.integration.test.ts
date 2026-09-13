@@ -225,6 +225,7 @@ describeIntegration("iOS videoRecording start-stop integration", () => {
       let sessionUuid: string | undefined;
       let sessionHeartbeat: SessionOwnershipHeartbeat | undefined;
       let stopped = false;
+      let bodyFailed = false;
 
       try {
         const deviceId = process.env.AUTOMOBILE_IOS_VIDEO_RECORDING_DEVICE_ID;
@@ -307,6 +308,7 @@ describeIntegration("iOS videoRecording start-stop integration", () => {
         expect(video.stream.codec_type).toBe("video");
         expect(video.duration).toBeGreaterThan(0);
       } catch (error) {
+        bodyFailed = true;
         let cleanupError: string | undefined;
         if (recordingId && sessionUuid && !stopped) {
           try {
@@ -344,9 +346,18 @@ describeIntegration("iOS videoRecording start-stop integration", () => {
       } finally {
         const heartbeatCleanupError = await sessionHeartbeat?.stop();
         if (heartbeatCleanupError) {
-          console.warn(
-            `iOS recording session heartbeat cleanup failed: ${heartbeatCleanupError.message}`,
-          );
+          if (bodyFailed) {
+            // The body already threw; surface the primary failure and log this
+            // as supporting context rather than masking it with a second throw.
+            console.warn(
+              `iOS recording session heartbeat cleanup failed: ${heartbeatCleanupError.message}`,
+            );
+          } else {
+            throw new Error(
+              `iOS recording session heartbeat failed to stay alive during recording: ${heartbeatCleanupError.message}`,
+              { cause: heartbeatCleanupError },
+            );
+          }
         }
       }
     },

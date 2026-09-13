@@ -80,6 +80,9 @@ export async function startSessionOwnershipHeartbeat(
       stopped = true;
       activeAbortController?.abort();
       const settled = await heartbeat.stop();
+      if (failure) {
+        return failure;
+      }
       return settled
         ? null
         : new Error("session ownership heartbeat did not settle before cleanup timeout");

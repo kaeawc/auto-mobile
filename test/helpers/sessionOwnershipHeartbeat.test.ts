@@ -68,4 +68,41 @@ describe("startSessionOwnershipHeartbeat", () => {
     expect(await heartbeat.stop()).toBeNull();
     expect(inFlightSignal!.aborted).toBe(true);
   });
+
+  test("returns a renewal failure discovered after the last health assertion", async () => {
+    const timer = new FakeTimer();
+    let renewal = 0;
+    const heartbeat = await startSessionOwnershipHeartbeat({
+      intervalMs: 2_000,
+      timer,
+      renew: async () => {
+        renewal++;
+        if (renewal === 2) {
+          throw new Error("daemon heartbeat rejected mid-recording");
+        }
+      },
+    });
+
+    heartbeat.assertHealthy();
+    // Renewal 2 fires and rejects here, after the last assertHealthy() call a
+    // caller would make before starting a long-running CLI step.
+    await timer.advanceTimeAsync(2_000);
+
+    const stopError = await heartbeat.stop();
+    expect(stopError?.message).toContain("daemon heartbeat rejected mid-recording");
+  });
+
+  test("returns null from a keeper that never fails", async () => {
+    const timer = new FakeTimer();
+    const heartbeat = await startSessionOwnershipHeartbeat({
+      intervalMs: 2_000,
+      timer,
+      renew: async () => {},
+    });
+
+    heartbeat.assertHealthy();
+    await timer.advanceTimeAsync(2_000);
+
+    expect(await heartbeat.stop()).toBeNull();
+  });
 });

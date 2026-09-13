@@ -85,12 +85,10 @@ fi
 
 cd "${project_root}/ios/XCTestRunner"
 swift build
-# These Reminders plans exercise the live Simulator app; observation integration
-# records daemon data. All therefore require a live daemon or Simulator and remain CI-only.
+# RemindersAddPlanTests extends RemindersIntegrationBase, which requires a
+# booted Simulator and a live daemon, so it remains excluded from this run.
 SIMULATOR_DEPENDENT_TEST_CLASSES=(
   RemindersAddPlanTests
-  RemindersLaunchPlanTests
-  XCTestObservationIntegrationTests
 )
 
 swift_test_list_status=0

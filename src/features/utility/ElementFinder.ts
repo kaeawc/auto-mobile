@@ -5,7 +5,7 @@ import type { ElementParser } from "../../utils/interfaces/ElementParser";
 import type { TextMatcher } from "../../utils/interfaces/TextMatcher";
 import type { ElementFinder } from "../../utils/interfaces/ElementFinder";
 import { DefaultElementParser } from "./ElementParser";
-import { DefaultTextMatcher, normalizeQuotes } from "./TextMatcher";
+import { DefaultTextMatcher } from "./TextMatcher";
 import { ANDROID_INPUT_CLASSES, isClickableElementProperties } from "../../utils/elementProperties";
 import {
   STABLE_VIEW_ID_HASH_LENGTH,
@@ -254,9 +254,18 @@ export class DefaultElementFinder implements ElementFinder {
     });
   }
 
+  /**
+   * Bucket every matching node into exact vs partial matches.
+   *
+   * `isExactMatch` MUST be derived from the same `caseSensitive` flag that
+   * built `matchesText` - a raw `===` here would re-derive a second,
+   * inconsistent notion of "exact" and demote a case-differing full match to
+   * "partial", where it is discarded outright whenever any unrelated
+   * exact-case match exists in scope (issue #6607).
+   */
   private collectTextMatchesInRoots(
     rootNodes: ViewHierarchyNode[],
-    text: string,
+    isExactMatch: (input?: string) => boolean,
     matchesText: (input?: string) => boolean,
     sortByArea: boolean = true,
   ): { exactMatches: Element[]; partialMatches: Element[] } {
@@ -279,7 +288,7 @@ export class DefaultElementFinder implements ElementFinder {
           logger.debug("[Element] Matches text property");
           const parsedNode = this.parser.parseNodeBounds(node);
           if (parsedNode) {
-            if (normalizeQuotes(nodeProperties.text) === normalizeQuotes(text)) {
+            if (isExactMatch(nodeProperties.text)) {
               exactMatches.push(parsedNode);
             } else {
               partialMatches.push(parsedNode);
@@ -293,7 +302,7 @@ export class DefaultElementFinder implements ElementFinder {
           logger.debug("[Element] Matches content-desc property");
           const parsedNode = this.parser.parseNodeBounds(node);
           if (parsedNode) {
-            if (normalizeQuotes(nodeProperties["content-desc"]) === normalizeQuotes(text)) {
+            if (isExactMatch(nodeProperties["content-desc"])) {
               exactMatches.push(parsedNode);
             } else {
               partialMatches.push(parsedNode);
@@ -307,9 +316,7 @@ export class DefaultElementFinder implements ElementFinder {
           logger.debug("[Element] Matches ios-accessibility-label property");
           const parsedNode = this.parser.parseNodeBounds(node);
           if (parsedNode) {
-            if (
-              normalizeQuotes(nodeProperties["ios-accessibility-label"]) === normalizeQuotes(text)
-            ) {
+            if (isExactMatch(nodeProperties["ios-accessibility-label"])) {
               exactMatches.push(parsedNode);
             } else {
               partialMatches.push(parsedNode);
@@ -721,6 +728,9 @@ export class DefaultElementFinder implements ElementFinder {
     }
 
     const matchesText = this.textMatcher.createTextMatcher(text, partialMatch, caseSensitive);
+    // Same primitive, `partialMatch` forced off: exactness is judged with the
+    // caller's own case sensitivity rather than a raw `===` (issue #6607).
+    const isExactMatch = this.textMatcher.createTextMatcher(text, false, caseSensitive);
     const containerNode = container
       ? this.findContainerNodeInternal(viewHierarchy, container)
       : null;
@@ -738,14 +748,19 @@ export class DefaultElementFinder implements ElementFinder {
 
     if (containerNode) {
       return selectMatches(
-        this.collectTextMatchesInRoots([containerNode], text, matchesText, !preserveTraversalOrder),
+        this.collectTextMatchesInRoots(
+          [containerNode],
+          isExactMatch,
+          matchesText,
+          !preserveTraversalOrder,
+        ),
       );
     }
 
     const rootNodes = this.parser.extractRootNodes(viewHierarchy);
     const mainMatches = this.collectTextMatchesInRoots(
       rootNodes,
-      text,
+      isExactMatch,
       matchesText,
       !preserveTraversalOrder,
     );
@@ -760,7 +775,7 @@ export class DefaultElementFinder implements ElementFinder {
     const windowMatches = windowRootGroups.map((windowRoots) => {
       return this.collectTextMatchesInRoots(
         windowRoots,
-        text,
+        isExactMatch,
         matchesText,
         !preserveTraversalOrder,
       );

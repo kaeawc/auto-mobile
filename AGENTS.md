@@ -21,7 +21,7 @@ Bun TypeScript MCP server providing Android & iOS device automation capabilities
 - Local validation scripts live under `scripts/` and should almost always be written in bash with shellcheck validation
 - Before adding a helper, parser, or dependency, search `src/`, `scripts/lib/`, `package.json`, and the runtime standard library. Prefer the standard library, then an existing direct dependency, then an existing repository helper, then a small tested helper. Do not parse JSON, YAML, XML, or TypeScript with line regexes when a structured parser or typed module contract exists. For new packages, state which built-in and installed alternatives were checked. Preserve injected interfaces/FakeTimer seams where tests need deterministic control.
 - Always use interfaces & fakes & FakeTimer to decouple implementations and keep tests extremely fast and non-flaky
-- Unit tests should pass in 100ms or less. Do not assume that a failing test can be allowed to fail.
+- Unit tests should pass in 100ms or less. Do not assume that a failing test can be allowed to fail. CI enforces this per test from the JUnit reporter's time (which excludes `beforeAll`); a test over budget is re-run in isolation and only its MEDIAN is failed, so a genuine breach must be fixed in the test, never by raising `BUN_TEST_MAX_MS`.
 - For Swift, prefer an existing standard-library or Foundation API before adding an extension, helper, or package. Use `URLComponents` plus `URLQueryItem` for query values and `Codable` for AutoMobile-owned stable schemas. Keep `JSONSerialization` only at documented dynamic/bridge boundaries. A convenience dependency requires a stated platform-API gap, deployment-target check, and tests using interfaces/fakes.
 - For TypeScript changes, prefer the JavaScript/Node standard library, then an existing AutoMobile seam, before adding a local generic helper or direct dependency. Keep time, randomness, I/O, concurrency, and process access injectable when tests need control; justify any new direct dependency in `docs/decisions/`.
 - For Kotlin changes, check the Kotlin stdlib, JDK/AndroidX, the module's existing dependencies, and dependency-compatible AutoMobile modules before adding a helper, wrapper, `*Util` file, or dependency. Prefer the narrowest existing solution; keep one-off helpers private and adjacent to their consumer. Extract shared code only for two or more real consumers, and state any intentional exception (semantics, performance, API level, compatibility, testability, or readability) in the PR summary.
@@ -65,6 +65,21 @@ bun test --bail        # Stop on first failure
 bun test <file>        # Run specific test file
 bun run turbo:validate # Run local Turbo lint/build/test
 ```
+
+## Node Pre-push Gate
+
+Before pushing Node/TypeScript changes, run `bash scripts/prepush-node.sh`.
+Use `bash scripts/prepush-node.sh --changed` for the faster affected-unit-test
+loop; formatting, typecheck, and lint intentionally remain full repository
+gates. `oxlint`'s actual exit code is authoritative: Error-level rules such as
+`eqeqeq` are enforced directly by oxlint, not its warning-only ratchet, and
+diffing warnings does not satisfy the gate. Before asking for a merge, fetch
+`origin/main`, confirm the branch contains it, and re-run local gates.
+
+Known Node-lane flakes this week: a 100ms unit timing overage on a loaded Linux
+runner may be rerun rather than “fixed” when its isolated recheck is clean. Do
+not treat repeated cross-platform failures as a flake; refresh against main and
+identify the shared failure first.
 
 `turbo` is a local dependency and may not be on the shell `PATH`. Do not run
 bare `turbo ...`; use the `package.json` scripts such as `bun run
@@ -191,3 +206,4 @@ plain `git` stays fine for read-only queries (`git log`, `git diff`, `gh`).
 - auto-mobile-code-review: AutoMobile-specific code review of a PR or current diff — check the PR's real CI, merge and base state first, then run diff-sized review lenses (two fixed, one generated) over runtime behavior and delivery/enforcement, grounding findings in file:line. Never posts to GitHub. Path: `skills/auto-mobile-code-review/SKILL.md`.
 - manual-test: Run one manual-test iteration from a start point (commit, milestone, or date) — rebuild all components, restart the daemon with the right flags, and verify closed issues / merged PRs actually fix bugs or deliver specced features on current HEAD by exercising tool calls on an Android emulator and iOS simulator. Path: `skills/manual-test/SKILL.md`.
 - device-session-lifecycle: Hunt, fix, and prevent device session lifecycle bugs — startDevice/killDevice, session UUIDs, boot readiness, daemon start/stop/restart, session expiry/release, pool state races, and flaky lifecycle tests. Path: `skills/device-session-lifecycle/SKILL.md`.
+- node-prepush: Run the Node pre-push gate before pushing Node/TypeScript changes, and rerun verified Node CI flakes rather than speculatively changing tests. Path: `skills/node-prepush/SKILL.md`.

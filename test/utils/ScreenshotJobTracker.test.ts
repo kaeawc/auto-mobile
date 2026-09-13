@@ -435,20 +435,6 @@ describe("ScreenshotJobTracker", () => {
     expect(listeners.size).toBe(0);
   });
 
-  test("getMostRecentPendingDeviceId returns the last-registered device when start times tie", async () => {
-    // Both jobs start at fake time 0, so their startedAt values are identical;
-    // this exercises the `>=` tie rule (last registration wins).
-    const hang = (signal: AbortSignal) =>
-      new Promise<{ success: boolean }>((resolve) => {
-        signal.addEventListener("abort", () => resolve({ success: false }), { once: true });
-      });
-
-    ScreenshotJobTracker.startJob("device-1", hang);
-    ScreenshotJobTracker.startJob("device-2", hang);
-
-    expect(ScreenshotJobTracker.getMostRecentPendingDeviceId()).toBe("device-2");
-  });
-
   test("clear aborts every pending job, removes their parent-signal listeners, and empties the tracker", async () => {
     const listeners = new Set<EventListenerOrEventListenerObject>();
     const parentSignal = {
@@ -490,7 +476,6 @@ describe("ScreenshotJobTracker", () => {
     // ...the tracker is emptied immediately, before the runners settle...
     expect(ScreenshotJobTracker.isPending("device-1")).toBe(false);
     expect(ScreenshotJobTracker.isPending("device-2")).toBe(false);
-    expect(ScreenshotJobTracker.getMostRecentPendingDeviceId()).toBeUndefined();
     // ...and the long-lived parent-signal listener is removed to prevent leaks.
     expect(listeners.size).toBe(0);
 

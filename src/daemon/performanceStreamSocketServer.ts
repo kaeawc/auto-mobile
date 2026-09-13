@@ -6,49 +6,20 @@ import {
   PerformanceStreamSocketResponse,
 } from "./performanceStreamSocketTypes";
 import { PERFORMANCE_STREAM_SOCKET_CONFIG } from "./daemonFiles";
+import {
+  normalizeStreamLimit,
+  normalizeStreamSinceId,
+  normalizeStreamTimestampIso,
+} from "./streamQueryNormalizers";
 
 const DEFAULT_LIMIT = 200;
-const auditRepository = new PerformanceAuditRepository();
 
-const normalizeTimestamp = (value: unknown, label: string): string | undefined => {
-  if (value === undefined || value === null) {
-    return undefined;
-  }
-  if (typeof value !== "string" && typeof value !== "number") {
-    throw new Error(`Invalid ${label}: ${String(value)}`);
-  }
-  const raw = typeof value === "string" ? value.trim() : value;
-  if (raw === "") {
-    return undefined;
-  }
-  const date = new Date(raw);
-  if (Number.isNaN(date.getTime())) {
-    throw new Error(`Invalid ${label}: ${String(value)}`);
-  }
-  return date.toISOString();
-};
-
-const normalizeLimit = (value: unknown): number => {
-  if (value === undefined || value === null) {
-    return DEFAULT_LIMIT;
-  }
-  const parsed = typeof value === "number" ? value : Number(value);
-  if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed <= 0) {
-    throw new Error(`Invalid limit: ${String(value)}`);
-  }
-  return parsed;
-};
-
-const normalizeSinceId = (value: unknown): number | undefined => {
-  if (value === undefined || value === null) {
-    return undefined;
-  }
-  const parsed = typeof value === "number" ? value : Number(value);
-  if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed < 0) {
-    throw new Error(`Invalid sinceId: ${String(value)}`);
-  }
-  return parsed;
-};
+/**
+ * Narrow view of {@link PerformanceAuditRepository} — exactly the query method the
+ * handler calls. Injected via the constructor so tests can exercise the request
+ * handler with a fake and never resolve the real file-backed database (issue #3067).
+ */
+export type PerformanceStreamRepository = Pick<PerformanceAuditRepository, "listResultsSince">;
 
 /**
  * Socket server for performance stream polling.
@@ -58,11 +29,15 @@ export class PerformanceStreamSocketServer extends RequestResponseSocketServer<
   PerformanceStreamSocketRequest,
   PerformanceStreamSocketResponse
 > {
+  private readonly auditRepository: PerformanceStreamRepository;
+
   constructor(
     socketPath: string = getSocketPath(PERFORMANCE_STREAM_SOCKET_CONFIG),
     timer: Timer = defaultTimer,
+    auditRepository: PerformanceStreamRepository = new PerformanceAuditRepository(),
   ) {
     super(socketPath, timer, "PerformanceStream");
+    this.auditRepository = auditRepository;
   }
 
   protected async handleRequest(
@@ -72,13 +47,13 @@ export class PerformanceStreamSocketServer extends RequestResponseSocketServer<
       throw new Error(`Unsupported performance stream command: ${String(request.command)}`);
     }
 
-    const startTime = normalizeTimestamp(request.startTime, "startTime");
-    const endTime = normalizeTimestamp(request.endTime, "endTime");
-    const sinceTimestamp = normalizeTimestamp(request.sinceTimestamp, "sinceTimestamp");
-    const sinceId = normalizeSinceId(request.sinceId);
-    const limit = normalizeLimit(request.limit);
+    const startTime = normalizeStreamTimestampIso(request.startTime, "startTime");
+    const endTime = normalizeStreamTimestampIso(request.endTime, "endTime");
+    const sinceTimestamp = normalizeStreamTimestampIso(request.sinceTimestamp, "sinceTimestamp");
+    const sinceId = normalizeStreamSinceId(request.sinceId);
+    const limit = normalizeStreamLimit(request.limit, DEFAULT_LIMIT);
 
-    const results = await auditRepository.listResultsSince({
+    const results = await this.auditRepository.listResultsSince({
       startTime,
       endTime,
       limit,

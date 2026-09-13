@@ -67,6 +67,27 @@ interface BootedDeviceScan {
   diagnostics: ReadinessDiagnostic[];
 }
 
+interface BootedDeviceScanOptions {
+  bypassDeviceListCache?: boolean;
+  /**
+   * List what is attached and stop there: no `emu avd name`, no
+   * `getprop ro.boot.qemu.avd_name`, no `getprop ro.product.model`. Every
+   * emulator comes back under the `Unknown (<serial>)` placeholder and every
+   * handset under its serial (or a name already cached), which is exactly what
+   * those names mean today when the runtime declines to answer.
+   *
+   * Enrichment is sequential and budgets 2s per attached device, so with
+   * several wedged consoles it alone outlasts a destructive action's whole
+   * deadline. A caller that has ALREADY decided not to establish an identity --
+   * `force` (#6864) -- must not pay for names it has committed to ignore, or
+   * the escape hatch times out inside discovery and never dispatches the kill
+   * it exists to dispatch
+   * ([#6874](https://github.com/kaeawc/auto-mobile/pull/6874) review). Nothing
+   * that still compares names may set this.
+   */
+  skipNameEnrichment?: boolean;
+}
+
 type TargetReadinessState = "absent" | "offline" | "not-ready";
 
 interface OfflineTracker {
@@ -191,11 +212,15 @@ export interface AndroidEmulator {
   /**
    * Request termination of the expected running emulator.
    * @param device - The device to kill
+   * @param options - `force` drops the AVD-name comparison against the fresh
+   *   discovery, for a caller that has already decided to act on whatever
+   *   occupies the serial (#6864). Serial selection is not part of that: a
+   *   serial with nothing on it still refuses.
    * @returns The checked target after ADB accepts termination; callers confirm disappearance.
    */
   killDevice(
     device: BootedDevice,
-    options?: { timeoutMs?: number; signal?: AbortSignal },
+    options?: { timeoutMs?: number; signal?: AbortSignal; force?: boolean },
   ): Promise<BootedDevice>;
 
   /**
@@ -1380,7 +1405,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
    */
   async getBootedDevices(
     onlyEmulators: boolean = false,
-    options: { bypassDeviceListCache?: boolean } = {},
+    options: BootedDeviceScanOptions = {},
   ): Promise<BootedDevice[]> {
     try {
       return await this.getBootedDevicesChecked(onlyEmulators, options);
@@ -1487,7 +1512,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
    */
   async getBootedDevicesChecked(
     onlyEmulators: boolean = false,
-    options: { bypassDeviceListCache?: boolean } = {},
+    options: BootedDeviceScanOptions = {},
     signal?: AbortSignal,
   ): Promise<BootedDevice[]> {
     return (await this.getBootedDevicesWithDiagnostics(onlyEmulators, options, signal)).devices;
@@ -1495,7 +1520,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
 
   private async getBootedDevicesWithDiagnostics(
     onlyEmulators: boolean = false,
-    options: { bypassDeviceListCache?: boolean } = {},
+    options: BootedDeviceScanOptions = {},
     signal?: AbortSignal,
   ): Promise<BootedDeviceScan> {
     const perf = createGlobalPerformanceTracker();
@@ -1519,7 +1544,9 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       perf.startOperation("avdNameResolution");
       for (const device of emulatorDevices) {
         const deviceId = device.deviceId;
-        const avdName = await this.getRunningAVDName(device, infoTimeoutMs, signal);
+        const avdName = options.skipNameEnrichment
+          ? { name: "", diagnostic: undefined }
+          : await this.getRunningAVDName(device, infoTimeoutMs, signal);
         if (avdName.diagnostic) {
           diagnostics.push(avdName.diagnostic);
         }
@@ -1534,39 +1561,14 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       }
 
       for (const device of physicalDevices) {
-        let deviceName = device.deviceId; // Default fallback
-
-        const cachedModel = this.modelNameCache.get(device.deviceId);
-        if (cachedModel) {
-          deviceName = cachedModel;
-          logger.debug(`Got model name for ${device.deviceId}: "${cachedModel}" (cached)`);
-        } else {
-          try {
-            const adbWithDevice = this.adbFactory.create(device);
-            const result = await adbWithDevice.executeCommand(
-              "shell getprop ro.product.model",
-              infoTimeoutMs,
-              undefined,
-              true,
-              signal,
-            );
-            const modelName = result.stdout.trim();
-
-            if (modelName && modelName !== "unknown" && modelName.length > 0) {
-              deviceName = modelName;
-              this.modelNameCache.set(device.deviceId, modelName);
-              logger.debug(`Got model name for ${device.deviceId}: "${modelName}"`);
-            } else {
-              logger.debug(`No model name found for ${device.deviceId}, using device ID`);
-            }
-          } catch (error) {
-            logger.debug(`Failed to get model name for ${device.deviceId}: ${error}`);
-          }
-        }
-
         runningDevices.push({
           ...device,
-          name: deviceName,
+          name: await this.resolvePhysicalDeviceName(
+            device,
+            infoTimeoutMs,
+            options.skipNameEnrichment === true,
+            signal,
+          ),
           platform: "android",
           deviceId: device.deviceId,
           source: "local",
@@ -1575,6 +1577,52 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       perf.endOperation("avdNameResolution");
 
       return { devices: runningDevices, diagnostics };
+    }
+  }
+
+  /**
+   * A handset's display name is `ro.product.model`, cached per serial because a
+   * handset cannot change model under a fixed serial. The serial is the
+   * fallback: the model is a label, never an identity, so failing to read it
+   * costs nothing but a nicer name.
+   */
+  private async resolvePhysicalDeviceName(
+    device: BootedDevice,
+    infoTimeoutMs: number,
+    skipNameEnrichment: boolean,
+    signal?: AbortSignal,
+  ): Promise<string> {
+    const cachedModel = this.modelNameCache.get(device.deviceId);
+    if (cachedModel) {
+      logger.debug(`Got model name for ${device.deviceId}: "${cachedModel}" (cached)`);
+      return cachedModel;
+    }
+    if (skipNameEnrichment) {
+      logger.debug(`Serial-only scan: not asking ${device.deviceId} for its model name`);
+      return device.deviceId;
+    }
+    try {
+      const adbWithDevice = this.adbFactory.create(device);
+      const result = await adbWithDevice.executeCommand(
+        "shell getprop ro.product.model",
+        infoTimeoutMs,
+        undefined,
+        true,
+        signal,
+      );
+      const modelName = result.stdout.trim();
+      if (!modelName || modelName === "unknown") {
+        logger.debug(`No model name found for ${device.deviceId}, using device ID`);
+        return device.deviceId;
+      }
+      this.modelNameCache.set(device.deviceId, modelName);
+      logger.debug(`Got model name for ${device.deviceId}: "${modelName}"`);
+      return modelName;
+    } catch (error) {
+      // A missing model name is cosmetic: the serial already identifies the
+      // handset, so discovery continues under it.
+      logger.debug(`Failed to get model name for ${device.deviceId}: ${error}`);
+      return device.deviceId;
     }
   }
 
@@ -2339,16 +2387,27 @@ export class AndroidEmulatorClient implements AndroidEmulator {
   /**
    * Request termination of the expected running emulator.
    * @param device - The device to kill
+   * @param options - `force` drops the AVD-name comparison below AND the
+   *   discovery that feeds it (#6864).
    * @returns The checked target after ADB accepts termination; callers confirm disappearance.
    */
   async killDevice(
     device: BootedDevice,
-    options: { timeoutMs?: number; signal?: AbortSignal } = {},
+    options: { timeoutMs?: number; signal?: AbortSignal; force?: boolean } = {},
   ): Promise<BootedDevice> {
+    // Under `force` the rediscovery below is serial-only. Dropping the name
+    // comparison alone was not enough: enrichment runs BEFORE the comparison
+    // and probes every attached emulator sequentially at 2s apiece, so three
+    // wedged consoles spend 6s of a 5s forced teardown deadline inside the
+    // discovery and `emu kill` is never dispatched. Since `force` has already
+    // committed to killing whatever occupies this serial, every one of those
+    // names is read and then discarded
+    // ([#6874](https://github.com/kaeawc/auto-mobile/pull/6874) review).
     const runningEmulators = await this.getBootedDevicesChecked(
       false,
       {
         bypassDeviceListCache: true,
+        skipNameEnrichment: options.force === true,
       },
       options.signal,
     );
@@ -2358,28 +2417,54 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       throw new ActionableError(`Emulator '${device.name}' is not running`);
     }
 
-    if (emulator.name !== device.name || emulator.platform !== device.platform) {
+    if (emulator.platform !== device.platform) {
       throw new ActionableError(
         `Emulator '${device.deviceId}' identity changed before termination; refusing to kill its replacement.`,
       );
     }
 
-    // Two unknowns are not an equality. `Unknown (<serial>)` on either side is
-    // the absence of a name, so a request carrying the placeholder that meets a
-    // discovery carrying the placeholder has matched on nothing -- and the
-    // emulator answering on the serial now may be a replacement of the one the
-    // caller resolved. Callers that legitimately target an emulator whose
-    // console is mute resolve its AVD name first and put THAT in the target
-    // (`deviceTools.confirmPooledAvdIdentity`), so reaching here with two
-    // placeholders means no identity was ever established (#6863 review).
-    if (
-      this.isUnknownEmulatorName(device.name, device.deviceId) &&
-      this.isUnknownEmulatorName(emulator.name, emulator.deviceId)
-    ) {
-      throw new ActionableError(
-        `Refusing to kill '${device.deviceId}': the emulator could not name itself, so this ` +
-          "daemon cannot tell it apart from a replacement that took the serial. Resolve its AVD " +
-          `name and retry, or stop it by hand with \`adb -s ${device.deviceId} emu kill\`.`,
+    // `force` is the caller's decision, taken one layer up, to act on whatever
+    // occupies this serial (#6864). It drops exactly the two NAME comparisons
+    // below and nothing else: the serial selection above still has to find a
+    // running emulator, and the termination primitive is unchanged.
+    //
+    // Dropping them is what makes the flag work at all. `deviceTools` reaches
+    // here having deliberately NOT established an identity -- either skipping
+    // the emulator-console probe whose wedging is the whole reason force
+    // exists, or carrying the pooled AVD label no probe stood behind -- so a
+    // second comparison against the same unanswerable discovery can only refuse
+    // the forced kill on the caller's behalf a second time
+    // ([#6874](https://github.com/kaeawc/auto-mobile/pull/6874) review).
+    if (!options.force) {
+      if (emulator.name !== device.name) {
+        throw new ActionableError(
+          `Emulator '${device.deviceId}' identity changed before termination; refusing to kill its replacement.`,
+        );
+      }
+
+      // Two unknowns are not an equality. `Unknown (<serial>)` on either side is
+      // the absence of a name, so a request carrying the placeholder that meets a
+      // discovery carrying the placeholder has matched on nothing -- and the
+      // emulator answering on the serial now may be a replacement of the one the
+      // caller resolved. Callers that legitimately target an emulator whose
+      // console is mute resolve its AVD name first and put THAT in the target
+      // (`deviceTools.confirmPooledAvdIdentity`), so reaching here with two
+      // placeholders means no identity was ever established (#6863 review).
+      if (
+        this.isUnknownEmulatorName(device.name, device.deviceId) &&
+        this.isUnknownEmulatorName(emulator.name, emulator.deviceId)
+      ) {
+        throw new ActionableError(
+          `Refusing to kill '${device.deviceId}': the emulator could not name itself, so this ` +
+            "daemon cannot tell it apart from a replacement that took the serial. Resolve its AVD " +
+            `name and retry, or stop it by hand with \`adb -s ${device.deviceId} emu kill\`.`,
+        );
+      }
+    } else {
+      logger.warn(
+        `[AndroidEmulatorClient] force=true: killing whatever occupies '${device.deviceId}' ` +
+          `without asking the runtime to name itself and without comparing the requested AVD ` +
+          `name '${device.name}' against the discovery.`,
       );
     }
 

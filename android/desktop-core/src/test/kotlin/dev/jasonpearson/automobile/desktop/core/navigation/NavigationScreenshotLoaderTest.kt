@@ -426,7 +426,8 @@ class FakeAutoMobileClient : AutoMobileClient {
 
   override fun observe(platform: String) = notImplemented()
 
-  override fun killDevice(name: String, deviceId: String, platform: String) = notImplemented()
+  override fun killDevice(name: String, deviceId: String, platform: String, force: Boolean) =
+    notImplemented()
 
   override fun getDaemonStatus() = notImplemented()
 

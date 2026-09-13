@@ -2103,7 +2103,9 @@ export class DaemonMcpProxy {
       (id) => id !== this.terminalBoundSession?.sessionUuid && id !== this.boundSessionUuid,
     );
     if (this.boundSessionUuid) {
-      retained.push(this.boundSessionUuid);
+      // Restoration uses the first "if-absent" attachment as the fresh socket's
+      // default, so the current binding must precede older owned sessions.
+      retained.unshift(this.boundSessionUuid);
     }
     return retained.length ? { ...args, [DAEMON_OWNED_SESSIONS_PARAM]: retained } : args;
   }

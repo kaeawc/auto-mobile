@@ -1664,6 +1664,21 @@ export async function rotateHandler(
   }
 }
 
+// An empty list is only honest when every rendered row could be attributed;
+// otherwise say how many rows stayed unreadable so "0" is not mistaken for
+// "this app has no notifications" (#6875).
+function formatTrayListMessage(
+  appId: string,
+  result: { notifications: unknown[]; unattributedRows: number },
+): string {
+  const listed = `Listed ${result.notifications.length} notifications for ${appId}`;
+  if (result.unattributedRows === 0) {
+    return listed;
+  }
+  const rows = result.unattributedRows === 1 ? "row" : "rows";
+  return `${listed} (${result.unattributedRows} shade ${rows} carry no app header and could not be correlated to ${appId})`;
+}
+
 // ============================================================================
 // Tool Registration
 // ============================================================================
@@ -1749,7 +1764,7 @@ export function registerInteractionTools() {
         );
         await captureSystemTrayTerminalEvidence(device, result.observation);
         return createJSONToolResponse({
-          message: `Listed ${result.notifications.length} notifications for ${appId}`,
+          message: formatTrayListMessage(appId, result),
           ...result,
           success: true,
         });

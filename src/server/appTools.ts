@@ -340,11 +340,19 @@ export function buildLaunchAppResponse(appId: string, result: LaunchAppResult) {
 }
 
 // Schema definitions
+// #6613: these app schemas advertised `additionalProperties: false` but were
+// not `.strict()`, so an undeclared caller argument (e.g. `installApp{userId}`,
+// which this tool does not support) was silently dropped and the call ran
+// against the auto-detected user instead of failing. `withAppIdAliases` runs its
+// `z.preprocess` alias normalization before these schemas parse, so documented
+// aliases still work under strict mode (same precedent as launchApp).
 export const packageNameSchema = withAppIdAliases(
   addDeviceTargetingToSchema(
-    z.object({
-      appId: z.string(),
-    }),
+    z
+      .object({
+        appId: z.string(),
+      })
+      .strict(),
   ),
 );
 
@@ -353,18 +361,22 @@ export const packageNameSchema = withAppIdAliases(
 // observation defaults to the compact skeleton, opt-out-able via raw/project.
 export const terminateAppSchema = withAppIdAliases(
   addDeviceTargetingToSchema(
-    z.object({
-      appId: z.string(),
-      ...responseShapeControlFields,
-    }),
+    z
+      .object({
+        appId: z.string(),
+        ...responseShapeControlFields,
+      })
+      .strict(),
   ),
 );
 
 export const crashAppSchema = withAppIdAliases(
   addDeviceTargetingToSchema(
-    z.object({
-      appId: z.string().trim().min(1),
-    }),
+    z
+      .object({
+        appId: z.string().trim().min(1),
+      })
+      .strict(),
   ),
 );
 
@@ -411,20 +423,24 @@ export const launchAppSchema = withAppIdAliases(
 );
 
 export const installAppSchema = addDeviceTargetingToSchema(
-  z.object({
-    artifactPath: z.string().describe("App artifact path (.apk, .app, or .ipa)"),
-  }),
+  z
+    .object({
+      artifactPath: z.string().describe("App artifact path (.apk, .app, or .ipa)"),
+    })
+    .strict(),
 );
 
 export const uninstallAppSchema = withAppIdAliases(
   addDeviceTargetingToSchema(
-    z.object({
-      appId: z.string(),
-      keepData: z
-        .boolean()
-        .optional()
-        .describe("Keep app data after uninstall (Android only, default false)"),
-    }),
+    z
+      .object({
+        appId: z.string(),
+        keepData: z
+          .boolean()
+          .optional()
+          .describe("Keep app data after uninstall (Android only, default false)"),
+      })
+      .strict(),
   ),
 );
 
@@ -560,32 +576,38 @@ export const resetKeychainSchema = withAppIdAliases(
   ),
 );
 
+// #6613: `listApps` advertises `additionalProperties: false` in tools/list, so
+// its runtime schema must reject undeclared arguments too. Without `.strict()`
+// a call such as `listApps({ appId: "com.example" })` had the unsupported
+// filter silently dropped and returned the full unfiltered listing.
 export const listAppsSchema = addDeviceTargetingToSchema(
-  z.object({
-    type: z
-      .enum(["user", "system", "all"])
-      .optional()
-      .describe(
-        "Filter by app type. Defaults to 'user', EXCEPT on a physical iOS device where " +
-          "user/system classification is unavailable (devicectl reports no such signal there): " +
-          "on such a device an omitted type returns every app (reported as 'all'), and an " +
-          "explicit 'user' or 'system' filter is rejected rather than silently honored.",
-      ),
-    search: z
-      .string()
-      .optional()
-      .describe(
-        "Filter by a case-insensitive substring of the package name/bundle id. Also matches " +
-          "the app's display name where the platform reports one (iOS only today — Android's " +
-          "listing does not include app labels).",
-      ),
-    profile: z
-      .number()
-      .int()
-      .min(0)
-      .optional()
-      .describe("Filter to apps visible to this user profile id."),
-  }),
+  z
+    .object({
+      type: z
+        .enum(["user", "system", "all"])
+        .optional()
+        .describe(
+          "Filter by app type. Defaults to 'user', EXCEPT on a physical iOS device where " +
+            "user/system classification is unavailable (devicectl reports no such signal there): " +
+            "on such a device an omitted type returns every app (reported as 'all'), and an " +
+            "explicit 'user' or 'system' filter is rejected rather than silently honored.",
+        ),
+      search: z
+        .string()
+        .optional()
+        .describe(
+          "Filter by a case-insensitive substring of the package name/bundle id. Also matches " +
+            "the app's display name where the platform reports one (iOS only today — Android's " +
+            "listing does not include app labels).",
+        ),
+      profile: z
+        .number()
+        .int()
+        .min(0)
+        .optional()
+        .describe("Filter to apps visible to this user profile id."),
+    })
+    .strict(),
 );
 
 export interface ListAppsArgs {

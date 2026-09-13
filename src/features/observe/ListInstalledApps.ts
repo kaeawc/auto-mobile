@@ -237,7 +237,7 @@ export class ListInstalledApps {
 
     try {
       if (this.cacheEnabled) {
-        const cachedApps = await this.getCachedInstalledApps(options);
+        const cachedApps = await this.getCachedInstalledApps(signal, options);
         if (cachedApps) {
           return { apps: cachedApps, successful: true };
         }
@@ -304,6 +304,7 @@ export class ListInstalledApps {
   }
 
   private async getCachedInstalledApps(
+    signal?: AbortSignal,
     options: DetailedListingOptions = {},
   ): Promise<InstalledAppsByProfile | null> {
     if (getInstalledAppsCacheWriteCoordinator().isDirty(this.device.deviceId)) {
@@ -328,8 +329,9 @@ export class ListInstalledApps {
     }
 
     const foregroundApp =
-      this.device.platform === "android" ? await this.adb.getForegroundApp() : null;
-    const users = await this.getAndroidUsersForCache();
+      this.device.platform === "android" ? await this.adb.getForegroundApp(signal) : null;
+    const users = await this.getAndroidUsersForCache(signal);
+    signal?.throwIfAborted();
     // Labels and launchability are deliberately NOT persisted: they are device
     // state (a locale change relabels every app, an update can add or remove a
     // launcher entry) and re-reading them costs one WebSocket round-trip plus at
@@ -337,7 +339,7 @@ export class ListInstalledApps {
     // "which package is Contacts?" as well as a live one does (#6798).
     const catalogByUser: AndroidAppCatalogByUser = options.namesOnly
       ? new Map()
-      : await this.readAndroidAppCatalog(cachedRows);
+      : await this.readAndroidAppCatalog(cachedRows, signal);
     logger.info(
       `[ListInstalledApps] Using cached installed apps list (age ${cacheAgeMs}ms, rows ${cachedRows.length})`,
     );
@@ -350,13 +352,23 @@ export class ListInstalledApps {
    * cached profile — and any package that pass did not mention — still gets one
    * batched adb probe. The cost stays proportional to the number of profiles
    * rather than packages (#6798).
+   *
+   * Cancellable at every step: the CtrlProxy request alone can take four
+   * seconds and each profile then costs its own sequential adb probe, so a
+   * caller that already cancelled must not keep driving device I/O (#6924
+   * review).
    */
-  private async readAndroidAppCatalog(rows: DbInstalledApp[]): Promise<AndroidAppCatalogByUser> {
+  private async readAndroidAppCatalog(
+    rows: DbInstalledApp[],
+    signal?: AbortSignal,
+  ): Promise<AndroidAppCatalogByUser> {
     const catalogByUser: AndroidAppCatalogByUser = new Map();
     if (this.device.platform !== "android") {
       return catalogByUser;
     }
-    const proxy = await this.fetchCtrlProxyPackages();
+    signal?.throwIfAborted();
+    const proxy = await this.fetchCtrlProxyPackages(signal);
+    signal?.throwIfAborted();
     if (proxy) {
       catalogByUser.set(proxy.userId, catalogFromPackageRecords(proxy.packages));
     }
@@ -373,7 +385,8 @@ export class ListInstalledApps {
         catalogByUser.set(userId, catalog);
       }
       if (needsLauncherProbe(catalog, packageNames)) {
-        await this.topUpLaunchability(catalog, packageNames, userId);
+        signal?.throwIfAborted();
+        await this.topUpLaunchability(catalog, packageNames, userId, signal);
       }
     }
     return catalogByUser;
@@ -457,12 +470,12 @@ export class ListInstalledApps {
     return installedApps;
   }
 
-  private async getAndroidUsersForCache(): Promise<AndroidUser[]> {
+  private async getAndroidUsersForCache(signal?: AbortSignal): Promise<AndroidUser[]> {
     if (this.device.platform !== "android") {
       return [];
     }
     try {
-      return await this.adb.listUsers();
+      return await this.adb.listUsers(signal);
     } catch (error) {
       logger.warn("[ListInstalledApps] Failed to refresh user metadata for cached apps", error);
       return [];

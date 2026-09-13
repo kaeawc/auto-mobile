@@ -628,6 +628,86 @@ describe("ListInstalledApps", function () {
     });
   });
 
+  describe("cancellation of the cached-catalog enrichment (#6924 review)", function () {
+    const LAUNCHER_PROBE_USER_0 =
+      "shell cmd package query-activities --brief --user 0 " +
+      "-a android.intent.action.MAIN -c android.intent.category.LAUNCHER";
+
+    async function seedFreshCache(): Promise<{
+      repo: FakeInstalledAppsRepository;
+      timer: FakeTimer;
+    }> {
+      const repo = new FakeInstalledAppsRepository();
+      const timer = new FakeTimer();
+      timer.advanceTime(1000);
+      const now = timer.now();
+      await repo.replaceInstalledApps(mockDevice.deviceId, [
+        {
+          device_id: mockDevice.deviceId,
+          user_id: 0,
+          package_name: "com.example.myapp",
+          is_system: 0,
+          installed_at: now,
+          last_verified_at: now,
+          profile_type: "primary",
+        },
+      ]);
+      fakeAdb.setCommandResponse(LAUNCHER_PROBE_USER_0, {
+        stdout: "com.example.myapp/.Main\n",
+        stderr: "",
+      });
+      return { repo, timer };
+    }
+
+    test("forwards the caller's signal into the CtrlProxy request", async function () {
+      const controller = new AbortController();
+      let captured: AbortSignal | undefined;
+      const source: AndroidInstalledPackageSource = {
+        async requestInstalledPackages(signal?: AbortSignal) {
+          captured = signal;
+          return null;
+        },
+      };
+      const { repo, timer } = await seedFreshCache();
+
+      const cached = new ListInstalledApps(mockDevice, new FakeAdbClientFactory(fakeAdb), null, {
+        cacheEnabled: true,
+        installedAppsRepository: repo,
+        timer,
+        installedPackageSource: source,
+      });
+      await cached.executeDetailed(controller.signal);
+
+      expect(captured).toBe(controller.signal);
+    });
+
+    test("a cancellation during the CtrlProxy request stops before the per-profile probes", async function () {
+      // The warm-cache enrichment costs a 4s CtrlProxy request plus one
+      // sequential probe per profile. A caller that cancelled mid-request must
+      // not keep issuing device I/O for a tool call nobody is waiting on.
+      const controller = new AbortController();
+      const source: AndroidInstalledPackageSource = {
+        async requestInstalledPackages() {
+          controller.abort();
+          return null;
+        },
+      };
+      const { repo, timer } = await seedFreshCache();
+
+      const cached = new ListInstalledApps(mockDevice, new FakeAdbClientFactory(fakeAdb), null, {
+        cacheEnabled: true,
+        installedAppsRepository: repo,
+        timer,
+        installedPackageSource: source,
+      });
+
+      await expect(cached.executeDetailedResult(controller.signal)).rejects.toThrow(/abort/i);
+      expect(
+        fakeAdb.getExecutedCommands().filter((command) => command.includes("query-activities")),
+      ).toHaveLength(0);
+    });
+  });
+
   describe("cache", function () {
     test("lists iOS bundle IDs live after an out-of-band app change", async function () {
       const iosDevice: BootedDevice = {

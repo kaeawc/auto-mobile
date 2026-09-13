@@ -149,7 +149,7 @@ describe("proxy binds and heartbeats a result-minted device session (issue #5689
       });
       expect(client.callToolCalls.at(-1)?.params).toMatchObject({
         platform: "android",
-        __autoMobileOwnedSessionUuids: ["android-session", "ios-session"],
+        __autoMobileOwnedSessionUuids: ["ios-session", "android-session"],
       });
       expect(client.callToolCalls.at(-1)?.params).not.toHaveProperty("sessionUuid");
       await proxy.callTool("observe", { platform: "ios", sessionUuid: "android-session" });

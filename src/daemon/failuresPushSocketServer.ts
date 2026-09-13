@@ -111,7 +111,9 @@ export class FailuresPushSocketServer extends PushSubscriptionSocketServer<
     return {
       type: (request.type as FailureType) ?? null,
       severity: (request.severity as FailureSeverity) ?? null,
-      deviceSessionUuid: (request.deviceSessionUuid as string) ?? null,
+      // Validated, not cast: a blank/non-string key would otherwise become a filter that
+      // matches nothing while the subscribe call still acks success (#6676).
+      deviceSessionUuid: this.parseDeviceSessionUuid(request.deviceSessionUuid),
     };
   }
 

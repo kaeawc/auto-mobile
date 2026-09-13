@@ -1116,7 +1116,9 @@ class FakeSimCtl implements SimCtl {
     return { width: 390, height: 844 };
   }
   async setAppearance(): Promise<void> {}
-  async openSimulatorApp(): Promise<void> {}
+  async openSimulatorApp(): Promise<boolean> {
+    return true;
+  }
   async pushNotification(): Promise<{ success: boolean; error?: string }> {
     return { success: true };
   }

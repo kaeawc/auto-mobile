@@ -18,6 +18,7 @@ import {
   DAEMON_VERSION_RESTART_COOLDOWN_MS,
   DAEMON_BOUND_SESSION_REPLAY_TTL_MS,
   DAEMON_TOOL_SELECTION_PROFILE_PARAM,
+  DAEMON_OWNED_SESSIONS_PARAM,
   DAEMON_STARTUP_TIMEOUT_MS,
   DAEMON_RESTART_HANDOFF_DELAY_MS,
   DAEMON_RESTART_HANDOFF_TIMEOUT_MS,
@@ -120,6 +121,39 @@ class ScriptedDaemonClient implements DaemonClientLike {
 }
 
 describe("DaemonMcpProxy", () => {
+  test("restores the current owned session before older sessions after reconnect", async () => {
+    const mintingResult = (sessionUuid: string) => ({
+      content: [{ type: "text", text: JSON.stringify({ sessionId: sessionUuid }) }],
+    });
+    const fakeClient = new FakeDaemonClient({
+      toolResultFor: (toolName) =>
+        toolName === "getAndroid" ? mintingResult("session-a") : mintingResult("session-b"),
+    });
+    const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+    const proxy = new DaemonMcpProxy({
+      clientFactory: () => fakeClient,
+      daemonManager: matchingDaemonManager(),
+      autoStartDaemon: false,
+    });
+
+    try {
+      await proxy.callTool("getAndroid", {});
+      await proxy.callTool("getApple", {});
+      await proxy.callTool("setActiveDevice", { deviceId: "free-device-c" });
+
+      expect(fakeClient.callToolCalls.at(-1)).toEqual({
+        toolName: "setActiveDevice",
+        params: {
+          deviceId: "free-device-c",
+          [DAEMON_OWNED_SESSIONS_PARAM]: ["session-b", "session-a"],
+        },
+      });
+    } finally {
+      isAvailableSpy.mockRestore();
+      await proxy.close();
+    }
+  });
+
   describe("connection management", () => {
     test("connects to daemon on first request", async () => {
       const fakeClient = new FakeDaemonClient({

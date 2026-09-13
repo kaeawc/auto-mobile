@@ -11,7 +11,8 @@ usage() {
 Usage: run-gradle-with-retry.sh -- ./gradlew <tasks> [flags...]
 
 Runs a Gradle command and retries once by default when the failure looks like
-transient Maven or Gradle plugin repository resolution trouble.
+transient Maven or Gradle plugin repository resolution trouble, including DNS
+name-resolution failures reaching those hosts.
 USAGE
 }
 
@@ -58,7 +59,7 @@ is_retryable_gradle_failure() {
 
   retryable_pattern=$(
     cat <<'PATTERN'
-Could not resolve plugin artifact|Plugin \[id: .* was not found|Could not resolve all files for configuration|Could not GET|Could not HEAD|Read timed out|Connection timed out|Connection reset|SocketTimeoutException|ConnectTimeoutException|502 Bad Gateway|503 Service Unavailable|504 Gateway Timeout|Received status code 5[0-9][0-9]|Remote host terminated the handshake|Premature EOF
+Could not resolve plugin artifact|Plugin \[id: .* was not found|Could not resolve all files for configuration|Could not resolve all dependencies for configuration|Could not resolve all artifacts for configuration|Could not GET|Could not HEAD|Read timed out|Connection timed out|Connection reset|SocketTimeoutException|ConnectTimeoutException|502 Bad Gateway|503 Service Unavailable|504 Gateway Timeout|Received status code 5[0-9][0-9]|Remote host terminated the handshake|Premature EOF|UnknownHostException|Temporary failure in name resolution|Name or service not known|nodename nor servname provided|No such host is known
 PATTERN
   )
 

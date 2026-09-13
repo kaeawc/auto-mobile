@@ -163,8 +163,10 @@ public final class StreamableHTTPMCPClient: AutoMobileMCPClient, @unchecked Send
 
     /// Picks the frame whose JSON-RPC `id` matches the request just sent, so interleaved
     /// notifications and unrelated responses on the same stream are skipped. A frame carrying an
-    /// `error` with no matching id (JSON-RPC allows a null id on parse errors) is the fallback, so a
-    /// server error still surfaces as `serverError` rather than an opaque decode failure.
+    /// `error` whose id is absent or null (JSON-RPC allows that on parse errors, which the server
+    /// cannot attribute to a request) is the fallback, so such an error still surfaces as
+    /// `serverError` rather than an opaque decode failure. Errors carrying another concrete id
+    /// belong to a different request and are skipped.
     private static func decodeEventStream(_ data: Data, id: Int64) throws -> [String: Any] {
         var errorFrame: [String: Any]?
         for event in SSEEventParser.parse(data) {
@@ -176,7 +178,7 @@ public final class StreamableHTTPMCPClient: AutoMobileMCPClient, @unchecked Send
             if matchesRequestId(object["id"], id: id) {
                 return object
             }
-            if errorFrame == nil, object["error"] != nil {
+            if errorFrame == nil, object["error"] != nil, isAbsentOrNullId(object["id"]) {
                 errorFrame = object
             }
         }
@@ -186,6 +188,13 @@ public final class StreamableHTTPMCPClient: AutoMobileMCPClient, @unchecked Send
         throw MCPClientError.invalidResponse(
             "No SSE frame matched request id \(id), got: \(bodyPreview(data))"
         )
+    }
+
+    /// JSON-RPC allows a null (or, from some servers, omitted) id on errors the server could not
+    /// attribute to a request — those are the only errors safe to adopt as this request's failure.
+    /// An error carrying another concrete id belongs to a different request and is skipped.
+    private static func isAbsentOrNullId(_ value: Any?) -> Bool {
+        value == nil || value is NSNull
     }
 
     private static func matchesRequestId(_ value: Any?, id: Int64) -> Bool {

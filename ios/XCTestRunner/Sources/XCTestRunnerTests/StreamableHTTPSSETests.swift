@@ -150,6 +150,40 @@ final class StreamableHTTPSSETests: XCTestCase {
         }
     }
 
+    /// An error belonging to a different request must not fail this one: the fallback is only for
+    /// JSON-RPC errors whose id is absent or null.
+    func testErrorFrameForAnotherRequestIdIsIgnored() throws {
+        StubURLProtocol.enqueue([
+            .eventStream(
+                "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":99,"
+                    + "\"error\":{\"code\":-32000,\"message\":\"stale boom\"}}\n\n"
+            ),
+        ])
+        let client = try makeClient()
+
+        XCTAssertThrowsError(try client.initialize(timeout: 5)) { error in
+            guard case let .invalidResponse(message)? = error as? MCPClientError else {
+                XCTFail("Expected MCPClientError.invalidResponse, got \(error)")
+                return
+            }
+            XCTAssertTrue(message.contains("No SSE frame matched request id 1"), message)
+        }
+    }
+
+    func testErrorFrameWithNullIdSurfacesServerError() throws {
+        StubURLProtocol.enqueue([
+            .eventStream(
+                "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":null,"
+                    + "\"error\":{\"code\":-32700,\"message\":\"parse error\"}}\n\n"
+            ),
+        ])
+        let client = try makeClient()
+
+        XCTAssertThrowsError(try client.initialize(timeout: 5)) { error in
+            XCTAssertEqual(error as? MCPClientError, .serverError("parse error"))
+        }
+    }
+
     func testMalformedSSEFrameThrowsInvalidResponse() throws {
         StubURLProtocol.enqueue([
             .eventStream("event: message\ndata: not-json-at-all\n\n"),

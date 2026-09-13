@@ -107,6 +107,24 @@ describe("DefaultAfterToolCallHandler embedded-observation settle (#6866)", () =
     expect(fake.getExecuteCallCount()).toBe(0);
   });
 
+  test("a failed action's observation is stamped settled:false without re-observing", async () => {
+    const timer = new FakeTimer();
+    const fake = new FakeObserveScreen();
+    fake.setObserveResult(obs("Airplane mode", 20));
+
+    const response = createStructuredToolResponse({
+      success: false,
+      error: "command failed",
+      observation: obs("Airplane mode", 10),
+    });
+
+    const result = await runAfterToolCall(handlerWith(fake), "tapOn", response, timer);
+    const payload = JSON.parse(result.finalizedResponse.content[0].text);
+
+    expect(payload.observation.settled).toBe(false);
+    expect(fake.getExecuteCallCount()).toBe(0);
+  });
+
   test("the `observe` tool owns its own settle and is never re-observed here", async () => {
     const timer = new FakeTimer();
     const fake = new FakeObserveScreen();

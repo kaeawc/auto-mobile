@@ -1006,15 +1006,19 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
     // session hierarchy cache, the diff baseline and the skeleton projection all
     // read it — so every downstream consumer sees the settled screen. In-place,
     // scroll and unknown classes are untouched and keep their current latency.
-    if (toolSuccess) {
-      await settleEmbeddedObservationInResponse(response, {
-        name,
-        args: typeof args === "object" && args !== null ? args : undefined,
-        internal: internalCall,
-        signal,
-        createSettleObserve: () => (device ? this.createSettleObserve(device, timer) : undefined),
-      });
-    }
+    //
+    // Invoked unconditionally, including for `success: false`: the helper owns
+    // that distinction and short-circuits a failed action to a plain
+    // `settled: false` stamp WITHOUT re-observing, so guarding on the tool's
+    // success here only made that stamp unreachable and left a failed action's
+    // observation carrying no stability verdict at all.
+    await settleEmbeddedObservationInResponse(response, {
+      name,
+      args: typeof args === "object" && args !== null ? args : undefined,
+      internal: internalCall,
+      signal,
+      createSettleObserve: () => (device ? this.createSettleObserve(device, timer) : undefined),
+    });
 
     const durationMs = timer.now() - toolStartMs;
 

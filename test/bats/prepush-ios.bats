@@ -26,6 +26,13 @@ if [[ $(basename "$0") == git ]]; then
     echo "ios/XCTestRunner/Sources/XCTestRunnerTests/AutoMobileVersionTests.swift"
   fi
 fi
+if [[ $(basename "$0") == swift && ${1:-} == test ]]; then
+  if [[ ${PREPUSH_IOS_SWIFT_TEST_ZERO:-} == 1 ]]; then
+    echo "Executed 0 tests, with 0 failures (0 unexpected)"
+  else
+    echo "Executed 1 test, with 0 failures (0 unexpected)"
+  fi
+fi
 MOCK
     chmod +x "${mock_bin}/${tool}"
   done
@@ -34,9 +41,10 @@ MOCK
 create_real_git_fixture() {
   fixture_root="${BATS_TEST_TMPDIR}/fixture-${BATS_TEST_NUMBER}"
   fixture_bin="${BATS_TEST_TMPDIR}/fixture-bin-${BATS_TEST_NUMBER}"
-  mkdir -p "${fixture_root}/scripts/swiftformat" "${fixture_root}/ios/XCTestRunner" "${fixture_root}/ios/Nested" "${fixture_bin}"
+  mkdir -p "${fixture_root}/scripts/swiftformat" "${fixture_root}/scripts/ios" "${fixture_root}/ios/XCTestRunner" "${fixture_root}/ios/Nested" "${fixture_bin}"
   cp "${repo_root}/scripts/prepush-ios.sh" "${fixture_root}/scripts/prepush-ios.sh"
   cp "${repo_root}/scripts/swiftformat/swiftformat_version.sh" "${fixture_root}/scripts/swiftformat/swiftformat_version.sh"
+  cp "${repo_root}/scripts/ios/swift_test_counts.sh" "${fixture_root}/scripts/ios/swift_test_counts.sh"
   for tool in swiftformat swiftlint swift; do
     cp "${mock_bin}/${tool}" "${fixture_bin}/${tool}"
   done
@@ -91,6 +99,15 @@ commit_changed_swift_file() {
   [[ "$output" != *"swift build"* ]]
 }
 
+@test "fails when the XCTestRunner filter executes zero tests" {
+  run env PATH="${mock_bin}:${PATH}" PREPUSH_IOS_COMMAND_LOG="${command_log}" \
+    PREPUSH_IOS_SWIFT_TEST_ZERO=1 bash "${repo_root}/scripts/prepush-ios.sh"
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"executed 0 tests"* ]]
+  [[ "$output" == *"XCTestRunnerTests filter"* ]]
+}
+
 @test "finds a changed Swift file when invoked from a nested directory" {
   create_real_git_fixture
   commit_changed_swift_file
@@ -120,10 +137,11 @@ commit_changed_swift_file() {
 @test "exits non-zero when not inside a git checkout" {
   outside_root="$(mktemp -d /tmp/prepush-ios-not-git.XXXXXX)"
   outside_bin="${BATS_TEST_TMPDIR}/outside-bin-${BATS_TEST_NUMBER}"
-  mkdir -p "${outside_root}/scripts/swiftformat" "${outside_root}/ios/XCTestRunner"
+  mkdir -p "${outside_root}/scripts/swiftformat" "${outside_root}/scripts/ios" "${outside_root}/ios/XCTestRunner"
   mkdir -p "${outside_bin}"
   cp "${repo_root}/scripts/prepush-ios.sh" "${outside_root}/scripts/prepush-ios.sh"
   cp "${repo_root}/scripts/swiftformat/swiftformat_version.sh" "${outside_root}/scripts/swiftformat/swiftformat_version.sh"
+  cp "${repo_root}/scripts/ios/swift_test_counts.sh" "${outside_root}/scripts/ios/swift_test_counts.sh"
   for tool in swiftformat swiftlint swift; do
     cp "${mock_bin}/${tool}" "${outside_bin}/${tool}"
   done

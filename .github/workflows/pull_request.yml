@@ -1842,8 +1842,8 @@ jobs:
   ios-playground-tests:
     name: "iOS Playground Tests (${{ matrix.config.name }})"
     runs-on: ${{ matrix.config.runner }}
-    needs: detect-changes
-    if: needs.detect-changes.outputs.ios_should_run == 'true' && needs.detect-changes.outputs.ios_changed != 'true'
+    needs: [detect-changes, fast-validation]
+    if: needs.detect-changes.outputs.ios_should_run == 'true' && needs.detect-changes.outputs.ios_changed != 'true' && needs.fast-validation.result == 'success'
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -2122,8 +2122,8 @@ jobs:
     # Pull-request YAML must remain off self-hosted runners. The root manifest
     # needs the Swift 6.3 toolchain from Xcode 26.5.
     runs-on: macos-26
-    needs: detect-changes
-    if: needs.detect-changes.outputs.ios_should_run == 'true'
+    needs: [detect-changes, fast-validation]
+    if: needs.detect-changes.outputs.ios_should_run == 'true' && needs.fast-validation.result == 'success'
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6

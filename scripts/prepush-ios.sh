@@ -32,6 +32,8 @@ fi
 
 # shellcheck source=scripts/swiftformat/swiftformat_version.sh disable=SC1091
 source "${project_root}/scripts/swiftformat/swiftformat_version.sh"
+# shellcheck source=scripts/ios/swift_test_counts.sh disable=SC1091
+source "${project_root}/scripts/ios/swift_test_counts.sh"
 
 require_pinned_swiftformat_version
 
@@ -73,5 +75,20 @@ cd "${project_root}/ios/XCTestRunner"
 swift build
 # These XCTestRunnerTests are pure Swift/package tests. Reminders and observation
 # integration tests require a live daemon or Simulator and remain CI-only.
-swift test -Xswiftc -warnings-as-errors \
-  --filter 'XCTestRunnerTests\.(AutoMobileEnvironmentSocketPathTests|AutoMobileVersionTests|MCPEndpointTests|RecoveryExecutorTests|RecoveryConfigAndModelTests|TachikomaPlanRecoveryHandlerTests|PlanRecoverySecretRedactionTests|PlanMetadataSecretParametersParsingTests|SecretRedactionTests|RunBlockingBoundTests|RemindersPlanContentTests|TestTimingCacheTests|WireContractGoldenTests|XCTestRunnerTests)'
+if test_output="$(swift test -Xswiftc -warnings-as-errors \
+  --filter 'XCTestRunnerTests\.(AutoMobileEnvironmentSocketPathTests|AutoMobileVersionTests|MCPEndpointTests|RecoveryExecutorTests|RecoveryConfigAndModelTests|TachikomaPlanRecoveryHandlerTests|PlanRecoverySecretRedactionTests|PlanMetadataSecretParametersParsingTests|SecretRedactionTests|RunBlockingBoundTests|RemindersPlanContentTests|TestTimingCacheTests|WireContractGoldenTests|XCTestRunnerTests)' \
+  2>&1)"; then
+  test_rc=0
+else
+  test_rc=$?
+fi
+echo "${test_output}"
+executed_test_count "${test_output}"
+
+if [[ ${test_rc} -ne 0 ]]; then
+  exit "${test_rc}"
+fi
+if [[ ${EXECUTED_TESTS} -eq 0 ]]; then
+  echo "prepush-ios.sh: XCTestRunnerTests filter executed 0 tests; check the --filter expression" >&2
+  exit 1
+fi

@@ -106,6 +106,24 @@ describe("deviceSnapshotManager VM snapshot sizing and reclaim (#6490)", () => {
     expect(record?.sizeBytes).toBe(2 * 1024 * MB);
   });
 
+  test("a capture that is itself over budget is evicted, not silently kept", async () => {
+    // The eviction pass used to run INSIDE the capture's name lock, so it always
+    // skipped the row that capture had just written. A single VM snapshot larger
+    // than the whole budget — routine at the 100 MB default — therefore left the
+    // archive permanently over its limit with nothing to retry it (#6490 review).
+    await updateDeviceSnapshotConfig({ maxArchiveSizeMb: 1 });
+    store.queueGeneratedName("vm-oversized");
+
+    const { evictedSnapshotNames } = await captureDeviceSnapshot(EMULATOR, {});
+
+    expect(evictedSnapshotNames).toEqual(["vm-oversized"]);
+    expect(await repository.getSnapshot("vm-oversized")).toBeNull();
+    expect(avdSnapshots.getDeleteCalls().map((call) => call.snapshotName)).toEqual([
+      "vm-oversized",
+    ]);
+    expect(avdSnapshots.hasVmSnapshot(AVD_NAME, "vm-oversized")).toBe(false);
+  });
+
   test("a vm capture whose AVD directory cannot be found records an unknown size, never 0", async () => {
     store.queueGeneratedName("vm-unsized");
     await setDeviceSnapshotManagerDependencies({

@@ -1297,7 +1297,7 @@ export async function captureDeviceSnapshot(
   // Serialize same-name captures so concurrent requests can't race; overwrite
   // the on-disk data atomically (clean replace, prior data restored on failure);
   // the repository upsert replaces the record rather than duplicating it (#5713).
-  return withSnapshotNameLock(snapshotName, async () => {
+  const result = await withSnapshotNameLock(snapshotName, async () => {
     // Held under the name lock, before anything writes: the upsert below is
     // what destroys another AVD's pending-reclaim reference (#6490 review).
     await reclaimSupersededPendingVmSnapshot(
@@ -1307,48 +1307,60 @@ export async function captureDeviceSnapshot(
     );
     const captureProvider = createCaptureProvider(device, timer, snapshotStore);
 
-    const result = await snapshotStore.replaceSnapshotData(snapshotName, pathOptions, async () => {
-      const captured = await captureProvider.capture({
-        snapshotName,
-        includeAppData: mergedConfig.includeAppData,
-        includeSettings: mergedConfig.includeSettings,
-        useVmSnapshot: mergedConfig.useVmSnapshot,
-        strictBackupMode: mergedConfig.strictBackupMode,
-        vmSnapshotTimeoutMs: mergedConfig.vmSnapshotTimeoutMs,
-        appBundleIds: args.appBundleIds,
-      });
+    const captureResult = await snapshotStore.replaceSnapshotData(
+      snapshotName,
+      pathOptions,
+      async () => {
+        const captured = await captureProvider.capture({
+          snapshotName,
+          includeAppData: mergedConfig.includeAppData,
+          includeSettings: mergedConfig.includeSettings,
+          useVmSnapshot: mergedConfig.useVmSnapshot,
+          strictBackupMode: mergedConfig.strictBackupMode,
+          vmSnapshotTimeoutMs: mergedConfig.vmSnapshotTimeoutMs,
+          appBundleIds: args.appBundleIds,
+        });
 
-      const sizeBytes = await resolveSnapshotSizeBytes(
-        snapshotName,
-        captured.manifest,
-        snapshotStore,
-        avdSnapshots,
-        pathOptions,
-      );
-      const timestamp = captured.manifest.timestamp;
+        const sizeBytes = await resolveSnapshotSizeBytes(
+          snapshotName,
+          captured.manifest,
+          snapshotStore,
+          avdSnapshots,
+          pathOptions,
+        );
+        const timestamp = captured.manifest.timestamp;
 
-      await snapshotRepository.insertSnapshot({
-        snapshotName: captured.snapshotName,
-        deviceId: captured.manifest.deviceId,
-        deviceName: captured.manifest.deviceName,
-        platform: captured.manifest.platform,
-        snapshotType: captured.manifest.snapshotType,
-        includeAppData: captured.manifest.includeAppData,
-        includeSettings: captured.manifest.includeSettings,
-        createdAt: timestamp,
-        lastAccessedAt: timestamp,
-        sizeBytes,
-        manifest: captured.manifest,
-      });
+        await snapshotRepository.insertSnapshot({
+          snapshotName: captured.snapshotName,
+          deviceId: captured.manifest.deviceId,
+          deviceName: captured.manifest.deviceName,
+          platform: captured.manifest.platform,
+          snapshotType: captured.manifest.snapshotType,
+          includeAppData: captured.manifest.includeAppData,
+          includeSettings: captured.manifest.includeSettings,
+          createdAt: timestamp,
+          lastAccessedAt: timestamp,
+          sizeBytes,
+          manifest: captured.manifest,
+        });
 
-      return captured;
-    });
+        return captured;
+      },
+    );
 
-    const eviction = await enforceDeviceSnapshotArchiveLimit(mergedConfig.maxArchiveSizeMb);
-    await notifySnapshotResources();
-
-    return { result, evictedSnapshotNames: eviction.evictedSnapshotNames };
+    return captureResult;
   });
+
+  // Enforced only AFTER the name lock is released. Eviction TRIES that lock and
+  // skips any row whose name is held, so running the pass inside the lock made
+  // the just-captured row permanently unevictable by its own capture. A single
+  // VM snapshot bigger than the whole budget — routine at the 100 MB default —
+  // then left the archive over its limit with no automatic retry until some
+  // later capture or config update happened along (#6490 review).
+  const eviction = await enforceDeviceSnapshotArchiveLimit(mergedConfig.maxArchiveSizeMb);
+  await notifySnapshotResources();
+
+  return { result, evictedSnapshotNames: eviction.evictedSnapshotNames };
 }
 
 export async function restoreDeviceSnapshot(

@@ -696,7 +696,7 @@
                 "description": "Optional device state fields to read",
                 "items": {
                   "type": "string",
-                  "enum": ["doNotDisturb", "biometrics", "networkCondition"]
+                  "enum": ["doNotDisturb", "connectivity", "biometrics", "networkCondition"]
                 }
               }
             }
@@ -1494,7 +1494,7 @@
           "minItems": 1,
           "items": {
             "type": "string",
-            "enum": ["doNotDisturb", "biometrics", "networkCondition"]
+            "enum": ["doNotDisturb", "connectivity", "biometrics", "networkCondition"]
           },
           "description": "Optional device state fields to read"
         }

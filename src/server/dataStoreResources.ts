@@ -1,5 +1,4 @@
 import { ResourceRegistry, ResourceContent, getRequestedResourceUri } from "./resourceRegistry";
-import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { serverConfig } from "../utils/ServerConfig";
@@ -16,6 +15,7 @@ import {
   dataStoreInspectionDisabledReason,
   isSharedPreferencesInspectionDisabledError,
 } from "../features/storage/AndroidSharedPreferencesKeyValueFile";
+import { findBootedDeviceForResource } from "./resourceDeviceResolver";
 
 /**
  * MCP resources that project delivered Android Jetpack DataStore reads into the
@@ -101,25 +101,7 @@ function generateHash(data: unknown): string {
  * Find a booted device by ID across both platforms.
  */
 async function findBootedDevice(deviceId: string): Promise<BootedDevice | null> {
-  try {
-    const manager = PlatformDeviceManagerFactory.getInstance();
-    const androidDevices = await manager.getBootedDevices("android");
-    const android = androidDevices.find((d) => d.deviceId === deviceId);
-    if (android) {
-      return android;
-    }
-    const iosDevices = await manager.getBootedDevices("ios");
-    const ios = iosDevices.find((d) => d.deviceId === deviceId);
-    if (ios) {
-      return ios;
-    }
-    return null;
-  } catch (error) {
-    // Best-effort discovery: an unavailable device manager surfaces as
-    // "device not found" rather than a resource fault.
-    logger.warn(`[DataStoreResources] Failed to find device ${deviceId}: ${error}`);
-    return null;
-  }
+  return findBootedDeviceForResource(deviceId, "DataStoreResources");
 }
 
 function buildStoresUri(deviceId: string, packageName: string, adapterName: string): string {

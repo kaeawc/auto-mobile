@@ -157,7 +157,13 @@ describe("getAndroidSchema (property-based)", () => {
   // The base object is `.strict()` and `.extend()` preserves that, so any key
   // outside the schema fails the parse regardless of an otherwise-valid body.
   test("rejects any unknown key (strict object)", () => {
-    const reserved = new Set(["avdName", "deviceId", "bootTimeoutMs", "automationReadyTimeoutMs"]);
+    const reserved = new Set([
+      "avdName",
+      "deviceId",
+      "bootTimeoutMs",
+      "automationReadyTimeoutMs",
+      "enableTools",
+    ]);
     fc.assert(
       fc.property(
         nonEmptyIdentifier,
@@ -166,6 +172,37 @@ describe("getAndroidSchema (property-based)", () => {
         (avdName, extraKey, extraValue) => {
           const result = getAndroidSchema.safeParse({ avdName, [extraKey]: extraValue });
           return !result.success;
+        },
+      ),
+      RUN_OPTIONS,
+    );
+  });
+
+  // #6869 — `enableTools` declares the session's capabilities at acquisition.
+  // Non-empty array of non-empty strings; the names themselves are checked
+  // against the tool registry in src/server/index.ts, not by the schema.
+  test("accepts a non-empty enableTools array of non-empty names", () => {
+    fc.assert(
+      fc.property(
+        nonEmptyIdentifier,
+        fc.array(fc.string({ minLength: 1, maxLength: 16 }), { minLength: 1, maxLength: 8 }),
+        (avdName, enableTools) => {
+          const result = getAndroidSchema.safeParse({ avdName, enableTools });
+          return result.success && result.data.enableTools?.length === enableTools.length;
+        },
+      ),
+      RUN_OPTIONS,
+    );
+  });
+
+  test("rejects an empty enableTools array and any empty name in it", () => {
+    fc.assert(
+      fc.property(
+        nonEmptyIdentifier,
+        fc.array(fc.string({ maxLength: 8 }), { minLength: 0, maxLength: 4 }),
+        (avdName, names) => {
+          const expected = names.length > 0 && names.every((name) => name.length > 0);
+          return getAndroidSchema.safeParse({ avdName, enableTools: names }).success === expected;
         },
       ),
       RUN_OPTIONS,

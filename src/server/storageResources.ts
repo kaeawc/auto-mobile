@@ -1,11 +1,11 @@
 import { ResourceRegistry, ResourceContent, getRequestedResourceUri } from "./resourceRegistry";
-import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { BootedDevice } from "../models";
 import { logger } from "../utils/logger";
 import type { PreferenceFile, KeyValueEntry } from "../features/storage/storageTypes";
+import { findBootedDeviceForResource } from "./resourceDeviceResolver";
 
 // Resource URI templates
 const STORAGE_RESOURCE_TEMPLATES = {
@@ -54,27 +54,7 @@ function generateHash(data: unknown): string {
  * Find a booted device by ID across both platforms
  */
 async function findBootedDevice(deviceId: string): Promise<BootedDevice | null> {
-  try {
-    const manager = PlatformDeviceManagerFactory.getInstance();
-    // Try Android first
-    const androidDevices = await manager.getBootedDevices("android");
-    const android = androidDevices.find((d) => d.deviceId === deviceId);
-    if (android) {
-      return android;
-    }
-
-    // Try iOS
-    const iosDevices = await manager.getBootedDevices("ios");
-    const ios = iosDevices.find((d) => d.deviceId === deviceId);
-    if (ios) {
-      return ios;
-    }
-
-    return null;
-  } catch (error) {
-    logger.warn(`[StorageResources] Failed to find device ${deviceId}: ${error}`);
-    return null;
-  }
+  return findBootedDeviceForResource(deviceId, "StorageResources");
 }
 
 /**

@@ -1,7 +1,23 @@
+/** One tool's enable/disable decision inside a batch write. */
+export interface SessionToolSelectionEntry {
+  toolName: string;
+  enabled: boolean;
+}
+
 /** Persistent per-session overrides keyed by exact MCP tool name. */
 export interface SessionToolSelectionRepository {
   list(sessionUuid: string): Promise<Map<string, boolean>>;
   set(sessionUuid: string, toolName: string, enabled: boolean): Promise<void>;
+  /**
+   * Persist a whole batch atomically — either every entry lands or none does
+   * (#6886 review). Optional: a repository that cannot offer that (an in-memory
+   * test double) is written one entry at a time by the service instead. The
+   * production SQLite repository implements it with a transaction, which is what
+   * makes `setToolEnabled { toolNames: [...] }`'s advertised all-or-nothing
+   * contract hold against a mid-batch write failure and against a concurrent
+   * enable/disable batch for the same session.
+   */
+  setMany?(sessionUuid: string, entries: readonly SessionToolSelectionEntry[]): Promise<void>;
   deleteSession(sessionUuid: string): Promise<void>;
 }
 
@@ -36,6 +52,25 @@ export class SessionToolSelectionService {
 
   async setEnabled(sessionUuid: string, toolName: string, enabled: boolean): Promise<void> {
     await this.repository.set(sessionUuid, toolName, enabled);
+  }
+
+  /**
+   * Apply one enable/disable decision to every name as a single write, so a
+   * rejection can never leave a prefix of the batch applied (#6886 review).
+   */
+  async setEnabledMany(
+    sessionUuid: string,
+    toolNames: readonly string[],
+    enabled: boolean,
+  ): Promise<void> {
+    const entries = toolNames.map((toolName) => ({ toolName, enabled }));
+    if (this.repository.setMany) {
+      await this.repository.setMany(sessionUuid, entries);
+      return;
+    }
+    for (const entry of entries) {
+      await this.repository.set(sessionUuid, entry.toolName, entry.enabled);
+    }
   }
 
   async deleteSession(sessionUuid: string): Promise<void> {

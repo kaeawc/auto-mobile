@@ -25,7 +25,10 @@ import type {
 } from "../../src/daemon/webrtcStreamSocketTypes";
 import type { BootedDevice } from "../../src/models";
 import { ActionableError } from "../../src/models";
-import type { DeviceAdmissionGate } from "../../src/daemon/deviceAdmissionGate";
+import {
+  permissiveDeviceAdmissionGate,
+  type DeviceAdmissionGate,
+} from "../../src/daemon/deviceAdmissionGate";
 import { WebRtcPublisher, WhipClient } from "../../src/features/webrtc";
 import type {
   AndroidH264Source,
@@ -88,7 +91,9 @@ class TestableServer extends WebRtcStreamSocketServer {
   constructor(
     deps: WebRtcStreamSocketServerDependencies,
     authenticator: StreamSocketAuthenticator = allowAllAuthenticator,
-    admissionGate?: DeviceAdmissionGate,
+    // Explicit rather than defaulted: the real default consults the running
+    // daemon's pool, which another suite in this process may have initialized.
+    admissionGate: DeviceAdmissionGate = permissiveDeviceAdmissionGate,
   ) {
     super("/fake/webrtc-stream.sock", new FakeTimer(), deps, authenticator, admissionGate);
   }

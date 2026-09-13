@@ -17,7 +17,10 @@ import {
 } from "../../src/daemon/streamSocketAuth";
 import { CODEC_ID_H264 } from "../../src/daemon/videoStreamFraming";
 import { SIMULATOR_FPS_DEFAULT } from "../../src/features/screen-stream/IOSScreenCaptureHelper";
-import type { DeviceAdmissionGate } from "../../src/daemon/deviceAdmissionGate";
+import {
+  permissiveDeviceAdmissionGate,
+  type DeviceAdmissionGate,
+} from "../../src/daemon/deviceAdmissionGate";
 import { ActionableError } from "../../src/models";
 import { WEBRTC_IOS_SIMULATOR_FPS_DEFAULT } from "../../src/features/webrtc/webrtcStreamingConfig";
 
@@ -131,7 +134,9 @@ async function startHarness(
     socketPath,
     options.timer ?? defaultTimer,
     options.authenticator ?? allowAllAuthenticator,
-    options.admissionGate,
+    // Explicit rather than defaulted: the real default consults the running
+    // daemon's pool, which another suite in this process may have initialized.
+    options.admissionGate ?? permissiveDeviceAdmissionGate,
   );
   await server.start();
 

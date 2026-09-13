@@ -15,6 +15,7 @@ import { PortManager } from "../../src/utils/PortManager";
 import { IOSCtrlProxyBuilder } from "../../src/utils/IOSCtrlProxyBuilder";
 import { IOSCtrlProxyProcessClient } from "../../src/utils/ios/IOSCtrlProxyProcessClient";
 import { logger } from "../../src/utils/logger";
+import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import type { Xcodebuild } from "../../src/utils/ios-cmdline-tools/XcodebuildClient";
 import type { DeviceAppManager } from "../../src/utils/ios-cmdline-tools/DeviceAppManager";
 import { parsePlist } from "../../src/utils/ios-cmdline-tools/XctestrunPlist";
@@ -1614,7 +1615,15 @@ describe("IOSCtrlProxyManager", function () {
         undefined,
         fakeExecutor,
       );
-      (manager as unknown as { xcTestProcessId: number }).xcTestProcessId = 912345;
+      // Startup may publish its PID while tunnel shutdown yields.
+      const internal = manager as unknown as {
+        xcTestProcessId: number | null;
+        stopIproxyTunnel: () => Promise<void>;
+      };
+      internal.stopIproxyTunnel = async () => {
+        await Promise.resolve();
+        internal.xcTestProcessId = 912345;
+      };
 
       const ownedRunner = ownRunnerProcess(912345);
       const otherDeviceRunner: FakeListeningProcess = {
@@ -1688,6 +1697,87 @@ describe("IOSCtrlProxyManager", function () {
       expect(fakeExecutor.wasCommandExecuted("kill -TERM -- -912348")).toBe(false);
       expect(fakeExecutor.wasCommandExecuted("kill -TERM 912348")).toBe(false);
       expect(recycledProcess.alive).toBe(true);
+    });
+
+    test("stop() cancels and awaits a local startup before retiring its published runner", async function () {
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        physicalDevice,
+        fakeTimer,
+        createFakeBuilder(),
+        fakeExecutor,
+      );
+      const startupEntered = deferred();
+      const releaseStartup = deferred();
+      const tunnelStopEntered = deferred();
+      const releaseTunnelStop = deferred();
+      const runner = new FakeChildProcess(fakeTimer);
+      runner.pid = 912349;
+      const runnerController = new AbortController();
+      const terminatedPids: number[] = [];
+      let sharedStartupSignal: AbortSignal | undefined;
+      const internal = manager as unknown as {
+        sharedStart: { controller: AbortController } | null;
+        runnerAbortController: AbortController | null;
+        xcTestProcessId: number | null;
+        xcTestProcess: FakeChildProcess | null;
+        processClient: IOSCtrlProxyProcessClient;
+        awaitStartupOrphanRunnerReap: () => Promise<void>;
+        isCtrlProxyProcessAlive: () => Promise<boolean>;
+        isRunning: () => Promise<boolean>;
+        startOnDevice: () => Promise<void>;
+        waitForHealthEndpoint: (start: { controller: AbortController }) => Promise<boolean>;
+        completeHealthStartup: () => Promise<void>;
+        stopIproxyTunnel: () => Promise<void>;
+        isOwnRunnerProcessAlive: () => Promise<boolean>;
+      };
+      internal.awaitStartupOrphanRunnerReap = async () => {};
+      internal.isCtrlProxyProcessAlive = async () => false;
+      internal.isRunning = async () => false;
+      internal.startOnDevice = async () => {
+        sharedStartupSignal = internal.sharedStart?.controller.signal;
+        startupEntered.resolve();
+        await releaseStartup.promise;
+        internal.runnerAbortController = runnerController;
+        internal.xcTestProcessId = runner.pid!;
+        internal.xcTestProcess = runner;
+      };
+      internal.waitForHealthEndpoint = async (start) => {
+        start.controller.signal.throwIfAborted();
+        return true;
+      };
+      internal.completeHealthStartup = async () => {};
+      internal.stopIproxyTunnel = async () => {
+        tunnelStopEntered.resolve();
+        await releaseTunnelStop.promise;
+      };
+      internal.isOwnRunnerProcessAlive = async () => true;
+      internal.processClient.terminateProcessTree = async (pid) => {
+        terminatedPids.push(pid);
+      };
+
+      const startOutcome = manager.start().then(
+        () => "resolved" as const,
+        (error: unknown) => error,
+      );
+      await startupEntered.promise;
+
+      const stopOutcome = manager.stop().then(
+        () => "resolved" as const,
+        (error: unknown) => error,
+      );
+      const startupWasCancelledBeforePublication = sharedStartupSignal?.aborted;
+      releaseStartup.resolve();
+      await tunnelStopEntered.promise;
+      releaseTunnelStop.resolve();
+      const [startResult, stopResult] = await Promise.all([startOutcome, stopOutcome]);
+
+      expect(startupWasCancelledBeforePublication).toBe(true);
+      expect(startResult).toBeInstanceOf(Error);
+      expect(stopResult).toBe("resolved");
+      expect(terminatedPids).toEqual([runner.pid]);
+      expect(runnerController.signal.aborted).toBe(true);
+      expect(internal.xcTestProcessId).toBeNull();
+      expect(internal.xcTestProcess).toBeNull();
     });
 
     test("start() waits for an own runner then terminates it if it never becomes healthy (#2834)", async function () {
@@ -3101,6 +3191,68 @@ describe("IOSCtrlProxyManager", function () {
         expect(
           Object.keys(spawn.options?.env ?? {}).some((key) => key.startsWith("SIMCTL_CHILD_")),
         ).toBe(false);
+      } finally {
+        PortManager.setPortAvailabilityCheckerForTesting(null);
+      }
+    });
+
+    test("startOnSimulator() gives the resident runner its own process signal, not the ambient request signal (issue #6410)", async function () {
+      // The runner is a shared, long-lived resident process serving every session
+      // targeting this device. Binding its OS-level kill to whichever MCP
+      // request happened to start it would let an unrelated request cancellation
+      // SIGTERM a runner that is already healthy and serving other work.
+      PortManager.setPortAvailabilityCheckerForTesting({
+        isPortAvailable: (port: number) => port !== 8765,
+      });
+      try {
+        const fakeBuilder = {
+          getXctestrunPath: async () => "/tmp/test.xctestrun",
+          getRunnerBinaryPath: async () => null,
+          verifyRunnerBinaryBeforeLaunch: async () => {},
+          writeRunnerEnvironment: fakeWriteRunnerEnvironment,
+        } as unknown as import("../../src/utils/IOSCtrlProxyBuilder").IOSCtrlProxyBuilder;
+        const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+          testDevice,
+          fakeTimer,
+          fakeBuilder,
+          fakeExecutor,
+        );
+
+        const ambientRequestController = new AbortController();
+        await runWithAbortSignal(ambientRequestController.signal, () =>
+          (manager as unknown as { startOnSimulator: () => Promise<void> }).startOnSimulator(),
+        );
+
+        const spawn = fakeExecutor.getSpawnedProcesses()[0];
+        expect(spawn.options?.signal).toBeDefined();
+        expect(spawn.options?.signal).not.toBe(ambientRequestController.signal);
+
+        // Cancelling the ambient request that started the runner must not reach
+        // the runner's own lifecycle controller.
+        ambientRequestController.abort();
+        expect(spawn.options?.signal?.aborted).toBe(false);
+
+        const tracked = manager as unknown as {
+          xcTestProcessId: number | null;
+          processClient: IOSCtrlProxyProcessClient;
+        };
+        const pid = tracked.xcTestProcessId!;
+        (
+          manager as unknown as { isOwnRunnerProcessAlive: () => Promise<boolean> }
+        ).isOwnRunnerProcessAlive = async () => true;
+        let terminated = false;
+        tracked.processClient.terminateProcessTree = async (target) => {
+          expect(target).toBe(pid);
+          expect(spawn.options?.signal?.aborted).toBe(false);
+          terminated = true;
+        };
+        spawn.options?.signal?.addEventListener("abort", () => {
+          expect(terminated).toBe(true);
+          tracked.xcTestProcessId = null;
+        });
+        await manager.stop();
+        expect(terminated).toBe(true);
+        expect(spawn.options?.signal?.aborted).toBe(true);
       } finally {
         PortManager.setPortAvailabilityCheckerForTesting(null);
       }

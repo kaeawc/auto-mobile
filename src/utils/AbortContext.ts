@@ -42,6 +42,18 @@ export const getAbortSignal = (): AbortSignal | undefined => {
  *
  * Returns `undefined` when neither an explicit nor an ambient signal exists, so
  * callers can forward the result straight through without a null-guard.
+ *
+ * This convention — and the `signal ?? getAbortSignal()` default it backs —
+ * is for SHORT-LIVED reads that should die with the request that issued them.
+ * It does not cover a process meant to OUTLIVE the request that started it
+ * (e.g. a shared, long-lived resident runner serving many later requests):
+ * for that case, binding the OS-level kill to the ambient request signal would
+ * let an unrelated request cancellation tear down a process still serving
+ * other work. See `XcodebuildClient.startStreaming`'s process-signal argument
+ * and `IOSCtrlProxyManager`'s `runnerAbortController` (issue #6410) for the
+ * pattern that case uses instead: the resident process's OS-level kill wiring
+ * is bound only to a signal its owner explicitly supplies, never to the
+ * ambient default.
  */
 export const combineWithAmbientAbort = (signal?: AbortSignal): AbortSignal | undefined => {
   const ambient = getAbortSignal();

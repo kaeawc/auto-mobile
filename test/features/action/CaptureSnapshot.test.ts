@@ -257,6 +257,23 @@ describe("CaptureSnapshot", () => {
       expect((failure as Record<string, unknown>)[VM_SNAPSHOT_SAVE_DISPATCHED]).toBe(true);
     });
 
+    it("does not mark a failed capture when its VM save never dispatches", async () => {
+      const snapshotName = "test-vm-pre-dispatch-failure";
+      fakeAdb.setPreDispatchError(
+        `emu avd snapshot save ${snapshotName}`,
+        new Error("adb executable not found"),
+      );
+
+      const failure = await captureSnapshot
+        .execute({ snapshotName, includeSettings: false, useVmSnapshot: true })
+        .then(
+          () => new Error("expected the VM snapshot save to fail"),
+          (error: unknown) => error,
+        );
+
+      expect((failure as Record<string, unknown>)[VM_SNAPSHOT_SAVE_DISPATCHED]).toBeUndefined();
+    });
+
     it("should pass VM snapshot timeout to adb command", async () => {
       const snapshotName = "test-vm-timeout";
       const vmSnapshotTimeoutMs = 12000;

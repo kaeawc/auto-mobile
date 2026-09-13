@@ -6166,7 +6166,10 @@ export class DevicePool {
    */
   private async reconcileObservedPooledIdentity(
     pooled: PooledDevice,
-    device: Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">,
+    device: Pick<
+      BootedDevice,
+      "deviceId" | "name" | "platform" | "observedAt" | "consoleBusyDuringProbe"
+    >,
     options: DiscoveryReconcileOptions = {},
   ): Promise<void> {
     if (this.matchesRuntimeIdentity(pooled, device)) {
@@ -6345,7 +6348,10 @@ export class DevicePool {
    */
   private async reconcilePooledIdentityResolution(
     pooled: PooledDevice,
-    discovered: Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">,
+    discovered: Pick<
+      BootedDevice,
+      "deviceId" | "name" | "platform" | "observedAt" | "consoleBusyDuringProbe"
+    >,
     options: DiscoveryReconcileOptions = {},
   ): Promise<void> {
     if (options.namesResolved === false) {
@@ -6380,12 +6386,12 @@ export class DevicePool {
 
   private shouldQuarantineUnresolvedEmulatorName(
     pooled: PooledDevice,
-    discovered: Pick<BootedDevice, "deviceId" | "name" | "platform">,
+    discovered: Pick<BootedDevice, "deviceId" | "name" | "platform" | "consoleBusyDuringProbe">,
   ): boolean {
     if (!this.hasUnresolvedEmulatorName(discovered)) {
       return false;
     }
-    if (!this.consoleBusyRegistry.isBusy(pooled.id)) {
+    if (!discovered.consoleBusyDuringProbe) {
       return true;
     }
     // `adb devices` already proved this serial is present. A daemon-owned VM

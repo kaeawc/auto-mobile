@@ -4,6 +4,7 @@ import type { BootedDevice } from "../../../src/models";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeEmulatorConsoleBusyRegistry } from "../../fakes/FakeEmulatorConsoleBusyRegistry";
 import type { AdbExecuteOptions } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 
 function execResult(stdout: string) {
@@ -101,6 +102,39 @@ describe("AndroidEmulatorClient.getBootedDevicesChecked", () => {
         source: "local",
       },
     ]);
+  });
+
+  test("records console busy state when the failed AVD-name probe runs", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setDevices([
+      {
+        name: "ignored",
+        platform: "android",
+        deviceId: "emulator-5554",
+      } satisfies BootedDevice,
+    ]);
+    adb.setCommandError("emu avd name", new Error("emulator console unavailable"));
+    const consoleBusy = new FakeEmulatorConsoleBusyRegistry();
+    consoleBusy.setBusy("emulator-5554", true);
+    const client = new AndroidEmulatorClient(
+      null,
+      null,
+      new FakeTimer(),
+      new FakeAdbClientFactory(adb),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      consoleBusy,
+    );
+
+    const [discovered] = await client.getBootedDevicesChecked();
+
+    expect(discovered).toMatchObject({
+      name: "Unknown (emulator-5554)",
+      consoleBusyDuringProbe: true,
+    });
   });
 
   test("bypasses the device-list cache only when terminating", async () => {

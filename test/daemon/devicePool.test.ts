@@ -6896,7 +6896,7 @@ describe("DevicePool", () => {
       expect(quarantined?.incarnation).toBe(incarnation);
     });
 
-    test("keeps an in-flight console-exclusive capture live when its AVD-name probe times out", async () => {
+    test("keeps a capture live when its failed AVD-name probe recorded the console busy", async () => {
       const cancellations: { sessionId: string; reason: string }[] = [];
       const consoleBusy = new FakeEmulatorConsoleBusyRegistry();
       devicePool = new DevicePool(
@@ -6931,12 +6931,52 @@ describe("DevicePool", () => {
         androidImage,
       );
 
-      consoleBusy.setBusy("emulator-5554", true);
-      await devicePool.reconcileDiscoveryObservation([unresolved("emulator-5554")], "test:capture");
+      const discovered = {
+        ...unresolved("emulator-5554"),
+        consoleBusyDuringProbe: true,
+      };
+      // The save settled after discovery finished but before this reconciliation.
+      consoleBusy.setBusy("emulator-5554", false);
+      await devicePool.reconcileDiscoveryObservation([discovered], "test:capture");
 
       expect(cancellations).toEqual([]);
       expect(devicePool.isPooledIdentityUnresolved("emulator-5554")).toBe(false);
       expect(devicePool.getDevice("emulator-5554")?.sessionId).toBe("owner-session");
+    });
+
+    test("quarantines a failed AVD-name probe that recorded the console idle", async () => {
+      const consoleBusy = new FakeEmulatorConsoleBusyRegistry();
+      devicePool = new DevicePool(
+        sessionManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        fakeAppsRepo,
+        fakeDeviceManager,
+        new DefaultRetryExecutor(fakeTimer),
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        consoleBusy,
+      );
+      const device = poolDevice("emulator-5554", "Pixel_8_API_35");
+      await initializeLiveDevices([device]);
+      // A later operation can be busy, but it did not cause THIS failed probe.
+      consoleBusy.setBusy("emulator-5554", true);
+
+      await devicePool.reconcileDiscoveryObservation(
+        [{ ...unresolved("emulator-5554"), consoleBusyDuringProbe: false }],
+        "test:idle-probe",
+      );
+
+      expect(devicePool.isPooledIdentityUnresolved("emulator-5554")).toBe(true);
     });
 
     // The FUNNEL 1 caller can itself be a session-bound destructive call whose

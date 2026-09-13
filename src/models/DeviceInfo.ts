@@ -37,6 +37,8 @@ export interface BootedDevice {
    * stamp.
    */
   observedAt?: number;
+  /** Point-in-time console state captured when the AVD-name probe failed, not live status. */
+  consoleBusyDuringProbe?: boolean;
   source?: "local";
   iosVersion?: string;
   apiLevel?: number;

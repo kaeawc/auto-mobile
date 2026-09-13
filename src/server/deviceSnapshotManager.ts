@@ -367,7 +367,7 @@ async function recordFailedVmSnapshotReclaim(
   avdSnapshots: AvdSnapshotOperations,
   now: () => Date,
   error: unknown,
-): Promise<void> {
+): Promise<boolean> {
   const reason = `VM snapshot save was dispatched but capture failed: ${errorMessage(error)}`;
   let sizeBytes: number | null = null;
   try {
@@ -410,12 +410,14 @@ async function recordFailedVmSnapshotReclaim(
       `[DeviceSnapshot] Recorded pending reclaim for orphaned VM snapshot '${snapshotName}' ` +
         `on AVD '${device.name}': ${reason}`,
     );
+    return true;
   } catch (recordError) {
     logger.warn(
       `[DeviceSnapshot] Failed to record pending reclaim for orphaned VM snapshot '${snapshotName}' ` +
         `on AVD '${device.name}': ${errorMessage(recordError)}`,
       recordError,
     );
+    return false;
   }
 }
 
@@ -1511,7 +1513,7 @@ export async function captureDeviceSnapshot(
         device.deviceId.startsWith("emulator-") &&
         wasVmSnapshotSaveDispatched(error)
       ) {
-        await recordFailedVmSnapshotReclaim(
+        const recordedPendingReclaim = await recordFailedVmSnapshotReclaim(
           device,
           snapshotName,
           mergedConfig.includeSettings,
@@ -1520,6 +1522,9 @@ export async function captureDeviceSnapshot(
           now,
           error,
         );
+        if (recordedPendingReclaim) {
+          await notifySnapshotResources();
+        }
       }
       throw error;
     }

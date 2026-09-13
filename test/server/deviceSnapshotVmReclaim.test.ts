@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { SubscribeRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { BootedDevice, DeviceSnapshotConfig, DeviceSnapshotManifest } from "../../src/models";
 import {
   captureDeviceSnapshot,
@@ -13,6 +15,29 @@ import { FakeDeviceSnapshotRepository } from "../fakes/FakeDeviceSnapshotReposit
 import { FakeDeviceSnapshotConfigRepository } from "../fakes/FakeDeviceSnapshotConfigRepository";
 import { FakeDeviceSnapshotStore } from "../fakes/FakeDeviceSnapshotStore";
 import { FakeAvdSnapshotService, fakeAvdSnapshotPath } from "../fakes/FakeAvdSnapshotService";
+import { ResourceRegistry } from "../../src/server/resourceRegistry";
+import { DEVICE_SNAPSHOT_RESOURCE_URIS } from "../../src/server/deviceSnapshotResourceUris";
+import { VM_SNAPSHOT_SAVE_DISPATCHED } from "../../src/features/action/CaptureSnapshot";
+
+class FakeUnderlyingServer {
+  notifications: Array<{ method: string; params?: unknown }> = [];
+  handlersBySchema = new Map<unknown, (request: unknown, extra?: unknown) => Promise<unknown>>();
+
+  setRequestHandler(
+    schema: unknown,
+    handler: (request: unknown, extra?: unknown) => Promise<unknown>,
+  ): void {
+    this.handlersBySchema.set(schema, handler);
+  }
+
+  async notification(payload: { method: string; params?: unknown }): Promise<void> {
+    this.notifications.push(payload);
+  }
+}
+
+class FakeMcpServer {
+  server = new FakeUnderlyingServer();
+}
 
 const AVD_NAME = "am-api36-ga-arm64";
 const EMULATOR: BootedDevice = {
@@ -53,6 +78,7 @@ describe("deviceSnapshotManager VM snapshot sizing and reclaim (#6490)", () => {
   };
 
   beforeEach(async () => {
+    ResourceRegistry.clearServersForTesting();
     fakeTimer = new FakeTimer();
     repository = new FakeDeviceSnapshotRepository();
     configRepository = new FakeDeviceSnapshotConfigRepository();
@@ -97,6 +123,7 @@ describe("deviceSnapshotManager VM snapshot sizing and reclaim (#6490)", () => {
   });
 
   afterEach(() => {
+    ResourceRegistry.clearServersForTesting();
     resetDeviceSnapshotManagerDependencies();
   });
 
@@ -108,6 +135,44 @@ describe("deviceSnapshotManager VM snapshot sizing and reclaim (#6490)", () => {
     const record = await repository.getSnapshot("vm-1");
     expect(record?.snapshotType).toBe("vm");
     expect(record?.sizeBytes).toBe(2 * 1024 * MB);
+  });
+
+  test("notifies archive subscribers when a dispatched VM save persists a pending reclaim", async () => {
+    const server = new FakeMcpServer();
+    ResourceRegistry.registerWithServer(server as unknown as McpServer);
+    ResourceRegistry.register(
+      DEVICE_SNAPSHOT_RESOURCE_URIS.ARCHIVE,
+      "Device Snapshot Archive",
+      "Snapshot archive test resource",
+      "application/json",
+      async () => ({ uri: DEVICE_SNAPSHOT_RESOURCE_URIS.ARCHIVE, text: "{}" }),
+    );
+    const subscribe = server.server.handlersBySchema.get(SubscribeRequestSchema);
+    expect(subscribe).toBeDefined();
+    await subscribe!({ params: { uri: DEVICE_SNAPSHOT_RESOURCE_URIS.ARCHIVE } });
+
+    await setDeviceSnapshotManagerDependencies({
+      createCaptureProvider: () => ({
+        capture: async () => {
+          const failure = new Error("emulator went offline");
+          Object.assign(failure, { [VM_SNAPSHOT_SAVE_DISPATCHED]: true });
+          throw failure;
+        },
+      }),
+    });
+
+    try {
+      await expect(
+        captureDeviceSnapshot(EMULATOR, { snapshotName: "vm-dispatched-failure" }),
+      ).rejects.toThrow("emulator went offline");
+
+      expect(server.server.notifications).toContainEqual({
+        method: "notifications/resources/updated",
+        params: { uri: DEVICE_SNAPSHOT_RESOURCE_URIS.ARCHIVE },
+      });
+    } finally {
+      ResourceRegistry.unregister(DEVICE_SNAPSHOT_RESOURCE_URIS.ARCHIVE);
+    }
   });
 
   test("a capture that is itself over budget is evicted, not silently kept", async () => {

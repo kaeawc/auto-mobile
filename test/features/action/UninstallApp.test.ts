@@ -82,7 +82,7 @@ describe("UninstallApp (iOS simulator)", () => {
     expect(result.packageName).toBe("com.example.app");
     expect(fakeUninstaller.calls[0]?.isSimulator).toBe(true);
     expect(fakeSimctl.wasMethodCalled("terminateApp")).toBe(true);
-    expect(await repo.getLatestVerification(iosSimDevice.deviceId)).toBe(0);
+    expect(await repo.getCacheVerifiedAt(iosSimDevice.deviceId)).toBe(0);
   });
 
   test("returns success when app is not installed", async () => {
@@ -261,7 +261,7 @@ describe("UninstallApp (Android)", () => {
 
     await uninstall.execute("com.example.app");
 
-    expect(await repo.getLatestVerification(androidDevice.deviceId)).toBe(0);
+    expect(await repo.getCacheVerifiedAt(androidDevice.deviceId)).toBe(0);
   });
 
   test("invalidates the cache before post-uninstall verification", async () => {
@@ -294,7 +294,7 @@ describe("UninstallApp (Android)", () => {
     const result = await uninstall.execute("com.example.app");
 
     expect(result.success).toBe(false);
-    expect(await repo.getLatestVerification(androidDevice.deviceId)).toBe(0);
+    expect(await repo.getCacheVerifiedAt(androidDevice.deviceId)).toBe(0);
   });
 
   test("emits pm uninstall -k when keepData is requested", async () => {
@@ -535,7 +535,7 @@ describe("UninstallApp (Android)", () => {
     expect(result.success).toBe(true);
     expect(result.wasInstalled).toBe(false);
     expect(fakeAdb.wasCommandExecuted("force-stop")).toBe(false);
-    expect(await repo.getLatestVerification(androidDevice.deviceId)).toBe(1_000);
+    expect(await repo.getCacheVerifiedAt(androidDevice.deviceId)).toBe(1_000);
   });
 
   test("detects work profile user", async () => {

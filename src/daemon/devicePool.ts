@@ -7109,6 +7109,16 @@ export class DevicePool {
     return this.devices.get(deviceId)?.incarnation;
   }
 
+  /** Advance the epoch for an already pooled device after a VM restore. */
+  bumpDeviceIncarnation(deviceId: string): boolean {
+    const device = this.devices.get(deviceId);
+    if (!device) {
+      return false;
+    }
+    device.incarnation = this.nextDeviceIncarnation();
+    return true;
+  }
+
   /**
    * Get device assigned to session
    */

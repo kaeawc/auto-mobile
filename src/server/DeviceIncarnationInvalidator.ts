@@ -1,22 +1,21 @@
 import type { BootedDevice } from "../models";
+import { logger } from "../utils/logger";
 import {
-  DefaultDeviceWindowCacheInvalidator,
-  type DeviceWindowCacheInvalidator,
-} from "../features/action/TerminateApp";
-import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
-import {
-  getInstalledAppsCacheWriteCoordinator,
-  type InstalledAppsCacheWriteCoordinator,
-} from "../db/installedAppsCacheWriteCoordinator";
-import { getDbWriteBarrier, type DbWriteBarrier } from "../db/dbWriteBarrier";
-import { InstalledAppsRepository, type InstalledAppsStore } from "../db/installedAppsRepository";
-import { invalidateInstalledAppsCache } from "./appResources";
+  advanceDeviceIncarnation,
+  getDeviceIncarnationListeners,
+  type DeviceIncarnationListener,
+} from "../utils/deviceIncarnation";
 
-/**
- * Invalidates host-side state that belongs to one physical incarnation of a
- * device serial. A VM snapshot restore reverts the whole Android guest while
- * retaining its serial, so callers must invoke this before reusing that state.
- */
+// Loading these state owners installs their module-init listeners before the
+// default invalidator snapshots the registry. Keep ownership local to each
+// module; this funnel deliberately knows only the listener contract.
+import "../features/action/TerminateApp";
+import "../features/observe/android/AndroidCtrlProxyClient";
+import "../features/performance/PerformanceMonitor";
+import "../utils/CtrlProxyManager";
+import "./appResources";
+
+/** Invalidates host-side state that belongs to one physical device incarnation. */
 export interface DeviceIncarnationInvalidator {
   invalidate(device: BootedDevice): Promise<void>;
 }
@@ -25,45 +24,36 @@ export interface CtrlProxyClientLifecycle {
   closeAndRemove(deviceId: string): Promise<void>;
 }
 
-const defaultCtrlProxyClientLifecycle: CtrlProxyClientLifecycle = {
-  async closeAndRemove(deviceId: string): Promise<void> {
-    const client = AndroidCtrlProxyClient.getExistingInstance(deviceId);
-    try {
-      await client?.close();
-    } finally {
-      AndroidCtrlProxyClient.removeInstance(deviceId);
-    }
-  },
-};
-
-/** Default Android VM-restore invalidation for CtrlProxy, observe, and apps caches. */
+/**
+ * The single VM-restore funnel. Each listener is independently best-effort:
+ * the guest has already reverted, so a host-cache persistence failure must not
+ * report the irreversible restore as failed to the caller.
+ */
 export class DefaultDeviceIncarnationInvalidator implements DeviceIncarnationInvalidator {
-  constructor(
-    private readonly windowCacheInvalidator: DeviceWindowCacheInvalidator = new DefaultDeviceWindowCacheInvalidator(),
-    private readonly installedAppsRepository: InstalledAppsStore = new InstalledAppsRepository(),
-    private readonly installedAppsCoordinator: InstalledAppsCacheWriteCoordinator = getInstalledAppsCacheWriteCoordinator(),
-    private readonly dbWriteBarrier: DbWriteBarrier = getDbWriteBarrier(),
-    private readonly invalidateAppsCache: (
-      deviceId?: string,
-    ) => void = invalidateInstalledAppsCache,
-    private readonly ctrlProxyLifecycle: CtrlProxyClientLifecycle = defaultCtrlProxyClientLifecycle,
-  ) {}
+  constructor(private readonly listeners?: readonly DeviceIncarnationListener[]) {}
 
   async invalidate(device: BootedDevice): Promise<void> {
     if (device.platform !== "android") {
       return;
     }
 
-    // First clear the hierarchy and observe caches through the established
-    // invalidator, then evict the stronger per-serial singleton so its forward
-    // and guest-side helper state cannot survive a whole-VM restore.
-    this.windowCacheInvalidator.invalidate(device);
-    await this.ctrlProxyLifecycle.closeAndRemove(device.deviceId);
-    await this.installedAppsCoordinator.invalidate(device.deviceId, () =>
-      this.dbWriteBarrier
-        .track(() => this.installedAppsRepository.markDeviceStale(device.deviceId))
-        .then(() => undefined),
+    advanceDeviceIncarnation(device.deviceId);
+    const listeners = this.listeners ?? getDeviceIncarnationListeners();
+    const results = await Promise.allSettled(
+      listeners.map(async (listener) => {
+        await listener.onDeviceIncarnationChanged(device.deviceId);
+        return listener.name;
+      }),
     );
-    this.invalidateAppsCache(device.deviceId);
+    for (let index = 0; index < results.length; index++) {
+      const result = results[index];
+      if (result.status === "rejected") {
+        // Safe to continue: the VM restore already completed and each owner is independently fenced.
+        logger.warn(
+          `[DeviceIncarnationInvalidator] Failed to invalidate ${listeners[index].name}`,
+          result.reason,
+        );
+      }
+    }
   }
 }

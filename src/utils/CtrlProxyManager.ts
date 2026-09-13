@@ -7,6 +7,7 @@ import {
 } from "./android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "./android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "./logger";
+import { registerDeviceIncarnationListener } from "./deviceIncarnation";
 import * as fs from "fs/promises";
 import type { Dirent } from "fs";
 import * as path from "path";
@@ -260,6 +261,12 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         }
       }
     }
+  }
+
+  /** Drop every serial-scoped readiness cache after a guest snapshot restore. */
+  public static invalidateForDeviceIncarnation(deviceId: string): void {
+    AndroidCtrlProxyManager.getExistingInstance(deviceId)?.resetSetupState();
+    AndroidCtrlProxyManager.evict(deviceId);
   }
 
   /**
@@ -2201,3 +2208,9 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     return Boolean(skipEnv && (skipEnv === "1" || skipEnv.toLowerCase() === "true"));
   }
 }
+
+registerDeviceIncarnationListener({
+  name: "ctrlproxy-manager",
+  onDeviceIncarnationChanged: (deviceId) =>
+    AndroidCtrlProxyManager.invalidateForDeviceIncarnation(deviceId),
+});

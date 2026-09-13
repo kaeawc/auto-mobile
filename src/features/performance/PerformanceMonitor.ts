@@ -26,6 +26,7 @@ import {
 import { SimCtlClient, SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { execFile } from "child_process";
 import { promisify } from "util";
+import { registerDeviceIncarnationListener } from "../../utils/deviceIncarnation";
 
 const defaultExecFileAsync = promisify(execFile);
 
@@ -321,6 +322,36 @@ export class PerformanceMonitor {
       this.frameMetricsStore.clear(deviceId);
       logger.info(`[PerformanceMonitor] Stopped monitoring ${deviceId}`);
     }
+  }
+
+  /**
+   * Fence samples already collecting for the prior guest and clear their
+   * baselines while retaining the opt-in monitoring subscription.
+   */
+  resetDeviceState(deviceId: string): void {
+    const monitored = this.monitoredDevices.get(deviceId);
+    if (monitored) {
+      this.monitoredDevices.set(deviceId, {
+        ...monitored,
+        monitoringGeneration: monitored.monitoringGeneration + 1,
+        lastFastTick: 0,
+        lastMediumTick: 0,
+        lastSlowTick: 0,
+        cachedCpu: null,
+        cachedMemory: null,
+        cachedMemoryBreakdown: null,
+        cachedFps: null,
+        cachedFrameTime: null,
+        cachedTouchLatency: null,
+        prevJankCounters: null,
+        cachedPid: null,
+        previousCpuSample: null,
+        gfxPrimed: false,
+        previousMetricHealth: {},
+      });
+    }
+    this.perfWindowBuffer.clear(deviceId);
+    this.frameMetricsStore.clear(deviceId);
   }
 
   /**
@@ -1306,3 +1337,8 @@ export function _resetPerformanceMonitor(): void {
   }
   monitorInstance = null;
 }
+
+registerDeviceIncarnationListener({
+  name: "performance-monitoring",
+  onDeviceIncarnationChanged: (deviceId) => getPerformanceMonitor().resetDeviceState(deviceId),
+});

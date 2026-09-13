@@ -98,6 +98,7 @@ import { serverConfig } from "../../../utils/ServerConfig";
 import { TelemetryRecorder } from "../../telemetry/TelemetryRecorder";
 import { getPerformanceMonitor } from "../../performance/PerformanceMonitor";
 import { getSdkFrameMetricsStore } from "../../performance/SdkFrameMetricsStore";
+import { registerDeviceIncarnationListener } from "../../../utils/deviceIncarnation";
 import type { StackTraceElement } from "../../../server/failuresResources";
 import { NetworkState } from "../../../server/NetworkState";
 import { buildNetworkMockRules } from "../../../server/networkMockRules";
@@ -1411,6 +1412,25 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
    */
   public static removeInstance(deviceId: string): void {
     AndroidCtrlProxyClient.instances.delete(deviceId);
+  }
+
+  /** Remove only the singleton captured before asynchronous incarnation cleanup began. */
+  public static removeInstanceIfCurrent(deviceId: string, instance: AndroidCtrlProxyClient): void {
+    if (AndroidCtrlProxyClient.getExistingInstance(deviceId) === instance) {
+      AndroidCtrlProxyClient.removeInstance(deviceId);
+    }
+  }
+
+  /** Close the old guest connection and remove its serial singleton. */
+  public static async invalidateForDeviceIncarnation(deviceId: string): Promise<void> {
+    const client = AndroidCtrlProxyClient.getExistingInstance(deviceId);
+    try {
+      await client?.close();
+    } finally {
+      if (client) {
+        AndroidCtrlProxyClient.removeInstanceIfCurrent(deviceId, client);
+      }
+    }
   }
 
   /**
@@ -5129,3 +5149,9 @@ function compactifyNode(node: AccessibilityNode): Record<string, unknown> {
   }
   return compact;
 }
+
+registerDeviceIncarnationListener({
+  name: "ctrlproxy-client",
+  onDeviceIncarnationChanged: async (deviceId) =>
+    await AndroidCtrlProxyClient.invalidateForDeviceIncarnation(deviceId),
+});

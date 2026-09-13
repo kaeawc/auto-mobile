@@ -418,6 +418,28 @@ describe("ToolExecutionContext", () => {
     expect(sessionManager.getDeviceReadiness("session-1")).toBe("automationReady");
   });
 
+  test("reruns automation readiness after a VM restore resets the session marker", async () => {
+    let setupCalls = 0;
+    AndroidCtrlProxyManager.getInstance = () =>
+      ({
+        resetSetupState: () => {},
+        setup: async () => {
+          setupCalls += 1;
+          return { success: true, message: "ok" };
+        },
+      }) as any;
+    AndroidCtrlProxyClient.getInstance = (() => ({
+      waitForConnection: async () => true,
+      close: async () => {},
+    })) as any;
+
+    await createToolExecutionContext("restore-session", sessionManager, devicePool, sessionOptions);
+    sessionManager.resetDeviceReadinessForDevice("device-1");
+    await createToolExecutionContext("restore-session", sessionManager, devicePool, sessionOptions);
+
+    expect(setupCalls).toBe(2);
+  });
+
   test("does not redundantly re-run setup for a booted tool after an automationReady session (#6227)", async () => {
     let setupCalls = 0;
     AndroidCtrlProxyManager.getInstance = () =>

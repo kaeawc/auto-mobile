@@ -1600,20 +1600,14 @@ export class SimCtlClient implements SimCtl {
    *         directly.
    */
   private async readSimulatorState(udid: string, timeoutMs: number): Promise<string | undefined> {
-    try {
-      // `bypassCache: true` because a failed verification always falls through
-      // to a stale last-good snapshot instead of throwing (issue #6576), which
-      // would defeat the "never trust a stale snapshot" contract this method
-      // promises boot verification.
-      const devices = await this.listSimulatorImages(timeoutMs, { bypassCache: true });
-      return devices.find((device) => device.deviceId === udid)?.state;
-    } catch (error) {
-      logger.warn(
-        `[iOS] Could not read simulator state for ${udid}: ${errorMessage(error)}`,
-        error,
-      );
-      return undefined;
-    }
+    // `bypassCache: true` because a stale cached/last-good snapshot would defeat
+    // the "never trust a stale snapshot" contract this method promises boot
+    // verification (issue #6576); a bypassCache read always throws on discovery
+    // failure rather than falling back, so that failure propagates to
+    // {@link readSimulatorStateRetrying} for its own retry-vs-surface decision
+    // (issue #6411) instead of being swallowed here.
+    const devices = await this.listSimulatorImages(timeoutMs, { bypassCache: true });
+    return devices.find((device) => device.deviceId === udid)?.state;
   }
 
   /**

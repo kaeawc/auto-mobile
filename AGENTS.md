@@ -19,6 +19,10 @@ Bun TypeScript MCP server providing Android & iOS device automation capabilities
 - After implementation changes, run relevant validation commands
 - Write terminal output to `scratch/` when not visible
 - Local validation scripts live under `scripts/` and should almost always be written in bash with shellcheck validation
+- Run `scripts/prepush-android.sh` from the repository root before pushing changes under `android/`; its scoped Detekt pass is a smoke check, not a substitute for the full-tree CI Detekt job.
+- For Playground/JUnit-runner emulator CI red, inspect `.github/actions/android-emulator` boot diagnostics first: no runner-health means an infra/runner-health question, while booted tests that fail are a regression.
+- Copy `android/local.properties` from a working checkout into each new Android worktree; it is gitignored and required for Gradle SDK resolution.
+- Ktfmt normalizes `runCatching{}.getOrNull()` to `runCatching {}.getOrNull()` once; write the spaced form and do not mistake that first rewrite for a non-idempotent formatter.
 - Before adding a helper, parser, or dependency, search `src/`, `scripts/lib/`, `package.json`, and the runtime standard library. Prefer the standard library, then an existing direct dependency, then an existing repository helper, then a small tested helper. Do not parse JSON, YAML, XML, or TypeScript with line regexes when a structured parser or typed module contract exists. For new packages, state which built-in and installed alternatives were checked. Preserve injected interfaces/FakeTimer seams where tests need deterministic control.
 - Always use interfaces & fakes & FakeTimer to decouple implementations and keep tests extremely fast and non-flaky
 - Unit tests should pass in 100ms or less. Do not assume that a failing test can be allowed to fail.
@@ -173,6 +177,7 @@ plain `git` stays fine for read-only queries (`git log`, `git diff`, `gh`).
 - github-cli: Use `gh` for PRs, issues, checks, and repo metadata. Path: `skills/github-cli/SKILL.md`.
 - android-gradlew: Run Android tasks via `android/gradlew`. Path: `skills/android-gradlew/SKILL.md`.
 - bun-tasks: Use `package.json` scripts with Bun. Path: `skills/bun-tasks/SKILL.md`.
+- prepush-android: Run the Android pre-push smoke check and triage emulator boot diagnostics. Path: `skills/prepush-android/SKILL.md`.
 
 ### Workflow Skills
 

@@ -174,8 +174,21 @@ runs:
       working-directory: ${{ inputs.working-directory }}
       run: |
         export AUTOMOBILE_EMULATOR_ARGS='["-no-snapshot-save","-no-window","-gpu","swiftshader_indirect","-noaudio","-no-boot-anim","-camera-back","none"]'
+        export AUTOMOBILE_BOOT_PROGRESS=true
+        export AUTOMOBILE_EMULATOR_DIAGNOSTICS_DIR="${{ github.workspace }}/android-emulator-diagnostics/attempt-1"
         "${{ github.workspace }}/scripts/android/boot-emulator.sh" --avd-name "${{ inputs.avd-name }}"
         "${{ github.workspace }}/scripts/android/run-emulator-tests.sh" "${{ inputs.accessibility-apk-path }}" "${{ inputs.script }}"
+
+    # Runner-health timeouts are the remaining sampled flake class. Keep the
+    # existing bounded retry, but make its first failure inspectable before it
+    # consumes another boot budget (Android CI analysis, 2026-09-13).
+    - name: Surface Emulator Diagnostics Before Retry
+      if: steps.emulator-attempt-1.outcome == 'failure'
+      shell: ${{ inputs.shell }}
+      run: |
+        diagnostics_dir="${{ github.workspace }}/android-emulator-diagnostics/attempt-1"
+        echo "First emulator attempt failed; captured diagnostics follow:"
+        find "$diagnostics_dir" -maxdepth 1 -type f -print -exec sed -n '1,160p' {} \; 2>/dev/null || true
 
     - name: Boot and test Emulator (Retry)
       id: emulator-attempt-2
@@ -184,6 +197,8 @@ runs:
       working-directory: ${{ inputs.working-directory }}
       run: |
         export AUTOMOBILE_EMULATOR_ARGS='["-no-snapshot-save","-no-window","-gpu","swiftshader_indirect","-noaudio","-no-boot-anim","-camera-back","none"]'
+        export AUTOMOBILE_BOOT_PROGRESS=true
+        export AUTOMOBILE_EMULATOR_DIAGNOSTICS_DIR="${{ github.workspace }}/android-emulator-diagnostics/attempt-2"
         "${{ github.workspace }}/scripts/android/boot-emulator.sh" --avd-name "${{ inputs.avd-name }}"
         "${{ github.workspace }}/scripts/android/run-emulator-tests.sh" "${{ inputs.accessibility-apk-path }}" "${{ inputs.script }}"
 
@@ -201,3 +216,13 @@ runs:
           echo "✗ Emulator tests failed after retry"
           exit 1
         fi
+
+    - name: Upload Emulator Diagnostics
+      if: always() && steps.emulator-attempt-1.outcome == 'failure'
+      continue-on-error: true
+      uses: actions/upload-artifact@v6
+      with:
+        name: android-emulator-diagnostics-${{ github.job }}
+        path: android-emulator-diagnostics/
+        if-no-files-found: ignore
+        retention-days: 7

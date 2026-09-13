@@ -263,10 +263,11 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
     expect(sessionManager.getSession("shared")!.livenessPolicy).toBe("cli-idle");
   });
 
-  test("heartbeats after the declaration keep the CLI marker", async () => {
+  test("heartbeats after the declaration retain the CLI marker and idle-timeout override", async () => {
     // The keeper is still running when the declaration lands; a tick racing
     // process exit must not restore the strict contract the invocation just
     // opted out of (#6870 review).
+    process.env.AUTOMOBILE_CLI_SESSION_IDLE_TIMEOUT_MS = "120000";
     const client = new FakeDaemonClient({
       toolResultFor: (name) => (name === "getAndroid" ? deviceStartResult("shared") : undefined),
       onCallDaemonMethod: async (method, params) => {
@@ -288,15 +289,19 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
     try {
       await proxy.callTool("getAndroid", {});
       await proxy.adoptCliSessionLiveness();
-      await timer.advanceTimeAsync(1_000);
+      await timer.advanceTimeAsync(2_000);
     } finally {
       await proxy.close();
     }
 
-    const lastHeartbeat = client.callDaemonMethodCalls
-      .filter((call) => call.method === DAEMON_HEARTBEAT_METHOD)
-      .at(-1);
-    expect(lastHeartbeat?.params.livenessPolicy).toBe(CLI_SESSION_LIVENESS_POLICY);
+    const heartbeats = client.callDaemonMethodCalls.filter(
+      (call) => call.method === DAEMON_HEARTBEAT_METHOD,
+    );
+    const cliHeartbeats = heartbeats.filter(
+      (call) => call.params.livenessPolicy === CLI_SESSION_LIVENESS_POLICY,
+    );
+    expect(cliHeartbeats).toHaveLength(3);
+    expect(cliHeartbeats.every((call) => call.params.idleTimeoutMs === 120_000)).toBe(true);
     expect(sessionManager.getSession("shared")!.livenessPolicy).toBe("cli-idle");
   });
 

@@ -382,6 +382,31 @@ describe("CLI-owned session liveness (#6870)", () => {
       expect(session.preCliLiveness).toBeUndefined();
     });
 
+    it("restores strict liveness when an unmarked Desktop heartbeat follows CLI adoption", async () => {
+      await sessionManager.createSession("s1", "emulator-5554", "android", 60_000, 7_000);
+      sessionManager.adoptCliLivenessPolicy("s1", 120_000);
+      expect(sessionManager.getSession("s1")!.livenessPolicy).toBe("cli-idle");
+
+      const response = await handleDaemonRequest(
+        {
+          id: "1",
+          type: "daemon_request",
+          method: DAEMON_HEARTBEAT_METHOD,
+          params: { sessionId: "s1" },
+        },
+        stateFor(sessionManager),
+      );
+
+      expect(response.success).toBe(true);
+      expect(response.result?.livenessPolicy).toBe(HEARTBEAT_SESSION_LIVENESS_POLICY);
+      const session = sessionManager.getSession("s1")!;
+      expect(session.livenessPolicy).toBe("heartbeat");
+      expect(session.heartbeatTimeoutMs).toBe(7_000);
+      expect(session.heartbeatTimeoutSource).toBe("custom");
+      expect(session.sessionTimeoutMs).toBe(60_000);
+      expect(session.expiresAt).toBe(timer.now() + 60_000);
+    });
+
     it("reaps a taken-over session on the strict timeout again", async () => {
       await sessionManager.createSession("cli", "emulator-5554", "android", 30 * 60_000);
       sessionManager.adoptCliLivenessPolicy("cli");

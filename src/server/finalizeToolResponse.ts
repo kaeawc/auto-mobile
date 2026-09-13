@@ -11,6 +11,7 @@ import {
   buildObserveScopeConfig,
 } from "../features/observe/output/ObserveScopeExperiments";
 import type { ObserveScopeInput } from "../models/ObserveScope";
+import { z } from "zod/v4";
 import { capLayoutWarnings } from "../features/observe/audits/SafeAreaAuditor";
 import {
   classifyObservationAction,
@@ -251,6 +252,11 @@ function resolveDiffTruncationReasons(
  */
 export interface FinalizeToolResponseContext {
   name: string;
+  /**
+   * Registered tool output contract. Required top-level object fields remain in
+   * a bounded inline residue when the complete response spills to an artifact.
+   */
+  outputSchema?: unknown;
   args?: Record<string, unknown>;
   sessionUuid?: string;
   baselineStore?: ObservationBaselineStore;
@@ -707,9 +713,44 @@ function spillOversizedPayload(
 }
 
 function inlineResidueKeys(ctx: FinalizeToolResponseContext): readonly string[] {
-  return isDeviceSessionAcquisitionTool(ctx.name)
+  const fixedKeys = isDeviceSessionAcquisitionTool(ctx.name)
     ? [...INLINE_RESIDUE_KEYS, ...DEVICE_SESSION_RESIDUE_KEYS]
     : INLINE_RESIDUE_KEYS;
+  return [...new Set([...fixedKeys, ...requiredOutputSchemaKeys(ctx.outputSchema)])];
+}
+
+/**
+ * Finds required top-level fields on an output Zod object without treating an
+ * absent or non-object schema as an error. Zod v4 keeps `.passthrough()` and
+ * refinements on ZodObject itself; pipes and transparent wrappers may instead
+ * expose their output or unwrapped schema separately.
+ */
+function requiredOutputSchemaKeys(schema: unknown): readonly string[] {
+  const objectSchema = unwrapOutputObjectSchema(schema);
+  if (!objectSchema) {
+    return [];
+  }
+  return Object.entries(objectSchema.shape)
+    .filter(([, fieldSchema]) => !fieldSchema.isOptional())
+    .map(([key]) => key);
+}
+
+function unwrapOutputObjectSchema(schema: unknown): z.ZodObject | undefined {
+  let candidate = schema;
+  const seen = new Set<unknown>();
+  while (candidate && typeof candidate === "object" && !seen.has(candidate)) {
+    seen.add(candidate);
+    if (candidate instanceof z.ZodObject) {
+      return candidate;
+    }
+    if (candidate instanceof z.ZodPipe) {
+      candidate = candidate.out;
+      continue;
+    }
+    const unwrap = (candidate as { unwrap?: unknown }).unwrap;
+    candidate = typeof unwrap === "function" ? unwrap.call(candidate) : undefined;
+  }
+  return undefined;
 }
 
 /**

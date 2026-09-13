@@ -185,6 +185,57 @@ describe("TakeScreenshot", function () {
     });
   });
 
+  describe("Android cancellation", function () {
+    test("abandons an in-flight CtrlProxy screenshot as soon as the signal aborts", async function () {
+      const androidDevice: BootedDevice = {
+        name: "test-device",
+        platform: "android",
+        deviceId: "android-cancel-device",
+        source: "local",
+      };
+      const controller = new AbortController();
+      const originalGetInstance = AndroidCtrlProxyClient.getInstance;
+      let finishScreenshot: (() => void) | undefined;
+      let requestScreenshotCalls = 0;
+      AndroidCtrlProxyClient.getInstance = (() => ({
+        requestScreenshot: () =>
+          new Promise((resolve) => {
+            requestScreenshotCalls++;
+            // Stands in for the client's own 10s timeout: it never settles
+            // within the test, so only the abort can end the wait.
+            finishScreenshot = () => resolve({ success: false, error: "too late" });
+          }),
+      })) as typeof AndroidCtrlProxyClient.getInstance;
+
+      try {
+        const screenshot = new TakeScreenshot(
+          androidDevice,
+          new FakeAdbClientFactory(new FakeAdbExecutor()),
+        );
+        // No format => the default CtrlProxy path.
+        const resultPromise = screenshot.execute({}, controller.signal);
+        await Promise.resolve();
+        controller.abort();
+
+        const stillPending = (async () => {
+          for (let i = 0; i < 50; i++) {
+            await Promise.resolve();
+          }
+          return "still-pending" as const;
+        })();
+
+        const outcome = await Promise.race([resultPromise, stillPending]);
+
+        expect(requestScreenshotCalls).toBe(1);
+        expect(outcome).toEqual({ success: false, error: OPERATION_CANCELLED_MESSAGE });
+        finishScreenshot?.();
+        await resultPromise;
+      } finally {
+        AndroidCtrlProxyClient.getInstance = originalGetInstance;
+      }
+    });
+  });
+
   describe("iOS cancellation", function () {
     test("does not let a reconnect hold an expired screenshot request open", async function () {
       const iosDevice: BootedDevice = {

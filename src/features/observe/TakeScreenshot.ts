@@ -58,10 +58,11 @@ function replaceScreenshotExtension(filePath: string, extension: string): string
 }
 
 /**
- * Let a caller-owned deadline end an automatic screenshot even while iOS is
- * reconnecting or auto-setting up CtrlProxy. Those operations do not accept a
- * cancellation signal, but the result must never keep an already-expired MCP
- * request alive or dispatch a follow-up capture after its deadline.
+ * Let a caller-owned deadline end an automatic screenshot even while a platform
+ * is reconnecting, auto-setting up CtrlProxy, or waiting out a CtrlProxy request
+ * timeout. Those operations do not accept a cancellation signal, but the result
+ * must never keep an already-expired MCP request alive or dispatch a follow-up
+ * capture after its deadline.
  */
 async function awaitWhileRequestIsLive<T>(operation: Promise<T>, signal?: AbortSignal): Promise<T> {
   throwIfAborted(signal);
@@ -325,7 +326,21 @@ export class TakeScreenshot implements ScreenshotService {
     signal?: AbortSignal,
   ): Promise<ScreenshotResult> {
     const client = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
-    const result = await client.requestScreenshot(10000);
+    let result: CtrlProxyScreenshotResult;
+    try {
+      // The client's own 10s timeout is unaware of the signal, so race it
+      // against the abort the way the iOS path does - otherwise a cancelled
+      // capture still blocks the caller for the full request timeout.
+      result = await awaitWhileRequestIsLive(client.requestScreenshot(10000), signal);
+    } catch (error) {
+      // An abort is the caller's own cancellation, not a capture failure: report
+      // it as cancelled instead of falling back to the slower ADB path.
+      if (signal?.aborted) {
+        logger.debug(`[SCREENSHOT] Android CtrlProxy capture cancelled: ${errorMessage(error)}`);
+        return { success: false, error: OPERATION_CANCELLED_MESSAGE };
+      }
+      throw error;
+    }
     if (signal?.aborted) {
       return { success: false, error: OPERATION_CANCELLED_MESSAGE };
     }

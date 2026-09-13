@@ -294,3 +294,31 @@ describe("filterAppsByQuery launchable default (#6798)", () => {
     expect(filterAppsByQuery(launchableApps, { type: "all", search: "my app" })).toEqual([myApp]);
   });
 });
+
+describe("filterAppsByQuery per-profile launchability (#6798 review)", () => {
+  // A launcher activity can be disabled for the owner and enabled in a work
+  // profile, so a deduplicated system app carries launchability per user id.
+  const contacts: AppsQueryAppInfo = {
+    packageName: "com.android.contacts",
+    type: "system",
+    userIds: [0, 10],
+    foreground: false,
+    recent: false,
+    label: "Contacts",
+    launchable: true,
+    launchableByUserId: { 0: false, 10: true },
+  };
+
+  test("type=launchable with a profile consults that profile's launchability", () => {
+    expect(filterAppsByQuery([contacts], { type: "launchable", profile: 10 })).toEqual([contacts]);
+    expect(filterAppsByQuery([contacts], { type: "launchable", profile: 0 })).toEqual([]);
+  });
+
+  test("without a profile the scalar 'launches for at least one user' still applies", () => {
+    expect(filterAppsByQuery([contacts], { type: "launchable" })).toEqual([contacts]);
+  });
+
+  test("a profile with no reported launchability is not treated as launchable", () => {
+    expect(filterAppsByQuery([contacts], { type: "launchable", profile: 11 })).toEqual([]);
+  });
+});

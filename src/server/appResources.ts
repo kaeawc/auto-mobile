@@ -75,10 +75,17 @@ export interface AppsQueryAppInfo {
    */
   label?: string;
   /**
-   * Whether the app has a launchable entry point. `undefined` means "not
-   * reported", never "no" (#6798).
+   * Whether the app has a launchable entry point. For a deduplicated Android
+   * system app this summarizes "launches for at least one of `userIds`".
+   * `undefined` means "not reported", never "no" (#6798).
    */
   launchable?: boolean;
+  /**
+   * Launchability per Android user id, where it was reported. A launcher
+   * activity can be disabled for the owner and enabled in a work profile, so a
+   * profile-scoped query reads this rather than the scalar (#6798 review).
+   */
+  launchableByUserId?: Record<number, boolean>;
 }
 
 interface AppsQueryDeviceContent {
@@ -102,6 +109,13 @@ export interface AppsQueryResourceContent {
   deviceCount: number;
   lastUpdated: string;
   devices: AppsQueryDeviceContent[];
+  /**
+   * Android user ids whose apps carried no launchability signal at all (their
+   * launcher probe failed while another profile's succeeded). Present only when
+   * non-empty: the `launchable` filter cannot judge those profiles, so naming
+   * them keeps a device-wide query from dropping them silently (#6798 review).
+   */
+  launchabilityUnknownProfiles?: number[];
 }
 
 // Resource content schema
@@ -155,6 +169,13 @@ interface AppsCacheEntry {
    * cannot be applied honestly and degrades to "user" (#6798).
    */
   launchabilityUnknown?: boolean;
+  /**
+   * The subset of profiles for which that is true. A launcher probe is issued
+   * per Android user, so one can fail while another succeeds; a device-wide
+   * boolean would then report the failed profile's apps as "not launchable"
+   * (#6798 review).
+   */
+  launchabilityUnknownProfiles?: number[];
 }
 
 const APPS_CACHE_TTL_MS = 60000;
@@ -213,6 +234,7 @@ function toQuerySystemApp(app: SystemInstalledApp): AppsQueryAppInfo {
     recent: app.recent,
     ...(app.label ? { label: app.label } : {}),
     ...(app.launchable === undefined ? {} : { launchable: app.launchable }),
+    ...(app.launchableByUserId === undefined ? {} : { launchableByUserId: app.launchableByUserId }),
   };
 }
 
@@ -533,6 +555,7 @@ async function fetchAppsForDevice(
     const foregroundApp = queryApps.find((app) => app.foreground)?.packageName ?? null;
     const message = getAndroidAppsMessage(device.deviceId);
     const launchabilityUnknown = isLaunchabilityUnknown(queryApps);
+    const unknownProfiles = launchabilityUnknownProfiles(queryApps);
 
     return {
       cacheable: result.successful,
@@ -549,6 +572,7 @@ async function fetchAppsForDevice(
         appsByPackage: buildAppsByPackage(userApps),
         queryApps,
         launchabilityUnknown,
+        launchabilityUnknownProfiles: unknownProfiles,
       },
     };
   }
@@ -596,6 +620,7 @@ async function fetchAppsForDevice(
       queryApps,
       iosTypeClassificationUnreliable,
       launchabilityUnknown: isLaunchabilityUnknown(queryApps),
+      launchabilityUnknownProfiles: launchabilityUnknownProfiles(queryApps),
     },
   };
 }
@@ -609,6 +634,37 @@ async function fetchAppsForDevice(
  */
 function isLaunchabilityUnknown(queryApps: AppsQueryAppInfo[]): boolean {
   return queryApps.length > 0 && queryApps.every((app) => app.launchable === undefined);
+}
+
+/** The profiles an app belongs to: its own user for a user app, every user it is installed for otherwise. */
+function profilesForQueryApp(app: AppsQueryAppInfo): number[] {
+  if (app.type === "user") {
+    return app.userId === undefined ? [] : [app.userId];
+  }
+  return app.userIds ?? [];
+}
+
+/**
+ * Profiles that reported apps but no launchability for any of them. The launcher
+ * probe runs once per Android user, so a work profile's probe can fail while the
+ * owner's succeeds — and the device-wide `every` check would then call
+ * launchability "known" and quietly report every work-profile app as
+ * unlaunchable (#6798 review).
+ */
+function launchabilityUnknownProfiles(queryApps: AppsQueryAppInfo[]): number[] {
+  const known = new Set<number>();
+  const seen = new Set<number>();
+  for (const app of queryApps) {
+    for (const profile of profilesForQueryApp(app)) {
+      seen.add(profile);
+      if (launchabilityForProfile(app, profile) !== undefined) {
+        known.add(profile);
+      }
+    }
+  }
+  return Array.from(seen)
+    .filter((profile) => !known.has(profile))
+    .sort((a, b) => a - b);
 }
 
 async function ensureAppsCacheEntry(
@@ -748,17 +804,37 @@ export function filterAppsByQuery(
 
   return apps.filter(
     (app) =>
-      matchesAppsQueryType(app, effectiveType) &&
+      matchesAppsQueryType(app, effectiveType, options.profile) &&
       matchesAppsQueryProfile(app, options.profile) &&
       matchesAppsQuerySearch(app, searchTerm),
   );
 }
 
-function matchesAppsQueryType(app: AppsQueryAppInfo, effectiveType: AppsQueryType): boolean {
+/**
+ * Launchability as it applies to one profile, or to the app as a whole when no
+ * profile was requested. A deduplicated system app can launch in a work profile
+ * and not for the owner, so a profile-scoped query must read that profile's
+ * value rather than the "launches somewhere" scalar (#6798 review).
+ */
+export function launchabilityForProfile(
+  app: AppsQueryAppInfo,
+  profile: number | undefined,
+): boolean | undefined {
+  if (profile === undefined || app.launchableByUserId === undefined) {
+    return app.launchable;
+  }
+  return app.launchableByUserId[profile];
+}
+
+function matchesAppsQueryType(
+  app: AppsQueryAppInfo,
+  effectiveType: AppsQueryType,
+  profile: number | undefined,
+): boolean {
   if (effectiveType === "launchable") {
     // Strictly `=== true`: an app whose launchability was never reported is not
     // evidence that it launches.
-    return app.launchable === true;
+    return launchabilityForProfile(app, profile) === true;
   }
   return effectiveType === "all" || app.type === effectiveType;
 }
@@ -832,44 +908,8 @@ export async function queryInstalledApps(
       `Failed to list installed apps for device ${device.deviceId}: the app-listing command did not complete successfully`,
     );
   }
-  // An EXPLICIT type=system/type=user filter on a physical iOS device with no
-  // reliable classification signal must not silently return an empty (or
-  // over-inclusive) result — that reads as "no system apps exist" rather than
-  // "we can't tell". type=all is unaffected (#6216 review, round 5).
-  if (
-    options.type !== undefined &&
-    options.type !== "all" &&
-    cacheEntry.iosTypeClassificationUnreliable
-  ) {
-    throw new Error(
-      `Cannot filter by type=${options.type} for device ${device.deviceId}: iOS user/system ` +
-        "app classification is not available on this transport (physical device via devicectl). " +
-        "Use type=all (or omit type) to list every app.",
-    );
-  }
-  // An OMITTED type on such a device is the more common case, and must not be
-  // silently defaulted to "user" either: `--include-all-apps` is passed
-  // unconditionally when listing a physical device (DeviceAppManager), so the
-  // cached apps already include system records, and every unclassified one
-  // was defaulted to "user" (extractIosApplicationType). Applying the normal
-  // "user" default filter here would therefore let system apps straight
-  // through while the response still claimed `query.type: "user"` — exactly
-  // the over-inclusive-but-mislabeled result Codex flagged (#6216 review,
-  // round 6). Report the effective type as "all" (the truthful description
-  // of what this transport can actually filter) and skip the "user" default
-  // filter, rather than rejecting the common omitted-type call outright.
-  // An explicit type=launchable against a device that reported no launchability
-  // signal at all would return an empty list that reads as "nothing on this
-  // device can be launched". Reject it the same way an unclassifiable
-  // type=user/type=system is rejected (#6798).
-  if (options.type === "launchable" && cacheEntry.launchabilityUnknown) {
-    throw new Error(
-      `Cannot filter by type=launchable for device ${device.deviceId}: no launchability signal ` +
-        "is available (the on-device AutoMobile SDK predates the field and the `cmd package " +
-        "query-activities` probe did not answer). Use type=user, type=system or type=all.",
-    );
-  }
-  const effectiveType = resolveEffectiveAppsQueryType(options.type, cacheEntry);
+  assertRequestedTypeIsAnswerable(device.deviceId, options, cacheEntry);
+  const effectiveType = resolveEffectiveAppsQueryType(options.type, cacheEntry, options.profile);
   const effectiveOptions: AppsQueryOptions = { ...options, type: effectiveType };
 
   const apps = filterAppsByQuery(cacheEntry.queryApps, effectiveOptions);
@@ -888,6 +928,12 @@ export async function queryInstalledApps(
     ? new Date().toISOString()
     : new Date(parsed).toISOString();
 
+  // Only the profiles this query could actually have returned are worth naming,
+  // and only when the applied filter depends on launchability.
+  const unknownProfiles = (cacheEntry.launchabilityUnknownProfiles ?? []).filter(
+    (unknownProfile) => options.profile === undefined || options.profile === unknownProfile,
+  );
+
   return {
     query: effectiveOptions,
     observationComplete: cacheEntry.content.observationComplete,
@@ -896,7 +942,68 @@ export async function queryInstalledApps(
     deviceCount: 1,
     lastUpdated,
     devices: deviceEntries,
+    ...(effectiveType === "launchable" && unknownProfiles.length > 0
+      ? { launchabilityUnknownProfiles: unknownProfiles }
+      : {}),
   };
+}
+
+/**
+ * Rejects an explicit `type` the cached listing cannot answer honestly.
+ *
+ * An EXPLICIT type=system/type=user filter on a physical iOS device with no
+ * reliable classification signal must not silently return an empty (or
+ * over-inclusive) result — that reads as "no system apps exist" rather than
+ * "we can't tell". type=all is unaffected (#6216 review, round 5).
+ *
+ * An OMITTED type on such a device is the more common case, and must not be
+  // silently defaulted to "user" either: `--include-all-apps` is passed
+  // unconditionally when listing a physical device (DeviceAppManager), so the
+  // cached apps already include system records, and every unclassified one
+  // was defaulted to "user" (extractIosApplicationType). Applying the normal
+  // "user" default filter here would therefore let system apps straight
+  // through while the response still claimed `query.type: "user"` — exactly
+  // the over-inclusive-but-mislabeled result Codex flagged (#6216 review,
+  // round 6). Report the effective type as "all" (the truthful description
+  // of what this transport can actually filter) and skip the "user" default
+ * filter, rather than rejecting the common omitted-type call outright.
+ *
+ * An explicit type=launchable against a device that reported no launchability
+ * signal at all would return an empty list that reads as "nothing on this
+ * device can be launched". Reject it the same way an unclassifiable
+ * type=user/type=system is rejected (#6798). The same reasoning applies per
+ * profile: the launcher probe runs once per Android user, so an explicit
+ * type=launchable scoped to a profile whose probe failed must be rejected
+ * rather than answered with an authoritative-looking empty list (#6798 review).
+ */
+function assertRequestedTypeIsAnswerable(
+  deviceId: string,
+  options: AppsQueryOptions,
+  cacheEntry: AppsCacheEntry,
+): void {
+  if (
+    options.type !== undefined &&
+    options.type !== "all" &&
+    cacheEntry.iosTypeClassificationUnreliable
+  ) {
+    throw new Error(
+      `Cannot filter by type=${options.type} for device ${deviceId}: iOS user/system ` +
+        "app classification is not available on this transport (physical device via devicectl). " +
+        "Use type=all (or omit type) to list every app.",
+    );
+  }
+  if (
+    options.type === "launchable" &&
+    isLaunchabilityUnknownForQuery(cacheEntry, options.profile)
+  ) {
+    throw new Error(
+      `Cannot filter by type=launchable for device ${deviceId}${
+        options.profile === undefined ? "" : ` profile ${options.profile}`
+      }: no launchability signal is available (the on-device AutoMobile SDK predates the field ` +
+        "and the `cmd package query-activities` probe did not answer). Use type=user, type=system " +
+        "or type=all.",
+    );
+  }
 }
 
 /**
@@ -911,6 +1018,7 @@ export async function queryInstalledApps(
 function resolveEffectiveAppsQueryType(
   requested: AppsQueryType | undefined,
   cacheEntry: AppsCacheEntry,
+  profile: number | undefined,
 ): AppsQueryType {
   if (requested !== undefined) {
     return requested;
@@ -918,7 +1026,22 @@ function resolveEffectiveAppsQueryType(
   if (cacheEntry.iosTypeClassificationUnreliable) {
     return "all";
   }
-  return cacheEntry.launchabilityUnknown ? "user" : "launchable";
+  return isLaunchabilityUnknownForQuery(cacheEntry, profile) ? "user" : "launchable";
+}
+
+/**
+ * Whether the `launchable` filter can be applied honestly to what this query
+ * asks for: the whole device when no profile was named, otherwise just that
+ * profile (#6798 review).
+ */
+function isLaunchabilityUnknownForQuery(
+  cacheEntry: AppsCacheEntry,
+  profile: number | undefined,
+): boolean {
+  if (profile === undefined) {
+    return cacheEntry.launchabilityUnknown === true;
+  }
+  return cacheEntry.launchabilityUnknownProfiles?.includes(profile) === true;
 }
 
 async function getAppsQueryResource(

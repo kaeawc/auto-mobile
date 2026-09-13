@@ -328,3 +328,135 @@ describe("queryInstalledApps launchable default on Android (#6798)", () => {
     ).rejects.toThrow(/no launchability signal/);
   });
 });
+
+describe("queryInstalledApps per-profile launchability (#6798 review)", () => {
+  const androidDevice: BootedDevice = {
+    deviceId: "emulator-5560",
+    name: "Pixel 6 API 33",
+    platform: "android",
+  };
+
+  beforeEach(() => {
+    const fakeDeviceUtils = new FakeDeviceUtils();
+    fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
+    fakeDeviceUtils.setBootedDevices("ios", []);
+    PlatformDeviceManagerFactory.setInstance(fakeDeviceUtils);
+  });
+
+  afterEach(() => {
+    setListInstalledAppsFactoryForTests(null);
+    PlatformDeviceManagerFactory.setInstance(null);
+    invalidateInstalledAppsCache(androidDevice.deviceId);
+  });
+
+  /**
+   * User 0's launcher probe answered; the work profile's did not, so its apps
+   * carry no launchability at all.
+   */
+  function setPartiallyProbedProfiles() {
+    setListInstalledAppsFactoryForTests(() => ({
+      executeDetailedResult: async () => ({
+        apps: {
+          profiles: {
+            0: [
+              {
+                packageName: "com.example.myapp",
+                userId: 0,
+                profileType: "primary" as const,
+                foreground: false,
+                recent: false,
+                label: "My App",
+                launchable: true,
+              },
+            ],
+            10: [
+              {
+                packageName: "com.example.work",
+                userId: 10,
+                profileType: "managed" as const,
+                foreground: false,
+                recent: false,
+              },
+            ],
+          },
+          system: [],
+        } as never,
+        successful: true,
+      }),
+      executeIosDetailedResult: async () => {
+        throw new Error("not exercised on android");
+      },
+    }));
+  }
+
+  test("an explicit type=launchable is rejected for a profile with no launchability signal", async () => {
+    setPartiallyProbedProfiles();
+
+    await expect(
+      queryInstalledApps({ deviceId: androidDevice.deviceId, type: "launchable", profile: 10 }),
+    ).rejects.toThrow(/no launchability signal/);
+  });
+
+  test("a probed profile still answers an explicit type=launchable", async () => {
+    setPartiallyProbedProfiles();
+
+    const content = await queryInstalledApps({
+      deviceId: androidDevice.deviceId,
+      type: "launchable",
+      profile: 0,
+    });
+
+    expect(content.devices[0].apps.map((app) => app.packageName)).toEqual(["com.example.myapp"]);
+  });
+
+  test("an omitted type degrades to user for an unprobed profile rather than emptying it", async () => {
+    setPartiallyProbedProfiles();
+
+    const content = await queryInstalledApps({ deviceId: androidDevice.deviceId, profile: 10 });
+
+    expect(content.query.type).toBe("user");
+    expect(content.devices[0].apps.map((app) => app.packageName)).toEqual(["com.example.work"]);
+  });
+
+  test("a profile-less query names the profiles whose launchability is unknown", async () => {
+    setPartiallyProbedProfiles();
+
+    const content = await queryInstalledApps({ deviceId: androidDevice.deviceId });
+
+    // The launchable default still applies device-wide, but the profiles it
+    // could not judge are reported instead of being silently dropped.
+    expect(content.query.type).toBe("launchable");
+    expect(content.launchabilityUnknownProfiles).toEqual([10]);
+    expect(content.devices[0].apps.map((app) => app.packageName)).toEqual(["com.example.myapp"]);
+  });
+
+  test("a fully probed device reports no unknown profiles", async () => {
+    setListInstalledAppsFactoryForTests(() => ({
+      executeDetailedResult: async () => ({
+        apps: {
+          profiles: {
+            0: [
+              {
+                packageName: "com.example.myapp",
+                userId: 0,
+                profileType: "primary" as const,
+                foreground: false,
+                recent: false,
+                launchable: true,
+              },
+            ],
+          },
+          system: [],
+        } as never,
+        successful: true,
+      }),
+      executeIosDetailedResult: async () => {
+        throw new Error("not exercised on android");
+      },
+    }));
+
+    const content = await queryInstalledApps({ deviceId: androidDevice.deviceId });
+
+    expect(content.launchabilityUnknownProfiles).toBeUndefined();
+  });
+});

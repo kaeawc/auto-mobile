@@ -38,6 +38,7 @@ import {
   AvdSnapshotService,
   type AvdSnapshotOperations,
 } from "../utils/android-cmdline-tools/AvdSnapshotService";
+import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
 
 interface DeviceSnapshotCaptureArgs {
@@ -1024,6 +1025,58 @@ function isReservedScopeSegment(snapshotName: string): boolean {
   return snapshotName === "android" || snapshotName === "ios";
 }
 
+/**
+ * Re-measure every `vm` row whose size is unknown, at the location that holds
+ * its bytes, and persist what it finds.
+ *
+ * An upgraded archive is full of such rows: the pre-change capture path sized a
+ * `vm` record by measuring the archive directory, which holds none of its bytes,
+ * so the migration flags them unsized rather than trusting that number. Nothing
+ * re-imports a row that already exists, so without this pass those payloads
+ * would stay outside the budget for the life of the archive (#6891 review).
+ *
+ * A payload that STILL cannot be located stays unknown — a fabricated 0 is
+ * exactly the lie this whole change exists to stop. A failed write leaves the
+ * record unsized for this pass too, so the value the eviction loop compares
+ * against is always the value on disk (CLAUDE.md strategy 2).
+ */
+async function remeasureUnsizedVmSnapshots(
+  records: DeviceSnapshotRecord[],
+): Promise<DeviceSnapshotRecord[]> {
+  const { snapshotRepository, avdSnapshots } = await getDeviceSnapshotDependencies();
+  const measured: DeviceSnapshotRecord[] = [];
+
+  for (const record of records) {
+    if (record.sizeBytes !== null || !isVmSnapshotRecord(record)) {
+      measured.push(record);
+      continue;
+    }
+
+    const sizeBytes = await avdSnapshots.measureVmSnapshotBytes(
+      record.deviceName,
+      record.snapshotName,
+    );
+    if (sizeBytes === null) {
+      measured.push(record);
+      continue;
+    }
+
+    try {
+      await snapshotRepository.updateSnapshot(record.snapshotName, { sizeBytes });
+      measured.push({ ...record, sizeBytes });
+    } catch (error) {
+      logger.warn(
+        `[DeviceSnapshot] Failed to record the re-measured size of VM snapshot ` +
+          `'${record.snapshotName}': ${errorMessage(error)}`,
+        error,
+      );
+      measured.push(record);
+    }
+  }
+
+  return measured;
+}
+
 async function enforceDeviceSnapshotArchiveLimit(
   maxArchiveSizeMb: number,
 ): Promise<SnapshotArchiveEvictionResult> {
@@ -1036,9 +1089,11 @@ async function enforceDeviceSnapshotArchiveLimit(
     const maxSizeBytes = Math.max(0, Math.floor(maxArchiveSizeMb * 1024 * 1024));
     const { snapshotRepository } = await getDeviceSnapshotDependencies();
     const { vmSnapshotTimeoutMs } = await getDeviceSnapshotConfig();
-    const snapshots = await snapshotRepository.listSnapshots({
-      orderByLastAccessed: "asc",
-    });
+    const snapshots = await remeasureUnsizedVmSnapshots(
+      await snapshotRepository.listSnapshots({
+        orderByLastAccessed: "asc",
+      }),
+    );
 
     // An unmeasured row contributes nothing to the budget (guessing a number
     // would evict against a fiction) but is counted and reported, so "the

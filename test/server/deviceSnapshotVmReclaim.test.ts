@@ -185,6 +185,63 @@ describe("deviceSnapshotManager VM snapshot sizing and reclaim (#6490)", () => {
     expect(await repository.getSnapshot("vm-new")).not.toBeNull();
   });
 
+  describe("a row left unsized is re-measured before the budget is enforced (#6891 review)", () => {
+    // The upgrade migration flags every pre-change Android `vm` row unsized,
+    // because the size it carries was measured at the archive directory and
+    // describes none of its bytes. Nothing re-imports a row that already exists,
+    // so unless enforcement re-measures it the payload stays outside the budget
+    // forever while the archive reports it as unknown.
+    async function seedUnsizedVmRow(sizeOnDisk: number | null): Promise<void> {
+      const timestamp = new Date(1000).toISOString();
+      if (sizeOnDisk !== null) {
+        avdSnapshots.setVmSnapshot(AVD_NAME, "vm-legacy", sizeOnDisk);
+      }
+      await repository.insertSnapshot({
+        snapshotName: "vm-legacy",
+        deviceId: EMULATOR.deviceId,
+        deviceName: AVD_NAME,
+        platform: "android",
+        snapshotType: "vm",
+        includeAppData: true,
+        includeSettings: false,
+        createdAt: timestamp,
+        lastAccessedAt: timestamp,
+        sizeBytes: null,
+        manifest: vmManifest("vm-legacy", timestamp),
+      });
+    }
+
+    test("the re-measured size is persisted and stops being reported as unsized", async () => {
+      await seedUnsizedVmRow(2 * 1024 * MB);
+
+      await updateDeviceSnapshotConfig({ maxArchiveSizeMb: 8 * 1024 });
+
+      expect((await repository.getSnapshot("vm-legacy"))?.sizeBytes).toBe(2 * 1024 * MB);
+      const listed = await listDeviceSnapshots();
+      expect(listed.unsizedCount).toBe(0);
+      expect(listed.totalSizeBytes).toBe(2 * 1024 * MB);
+    });
+
+    test("a re-measured row over the budget is evicted instead of hiding behind an unknown size", async () => {
+      await seedUnsizedVmRow(2 * 1024 * MB);
+
+      const { evictedSnapshotNames } = await updateDeviceSnapshotConfig({ maxArchiveSizeMb: 1024 });
+
+      expect(evictedSnapshotNames).toEqual(["vm-legacy"]);
+      expect(await repository.getSnapshot("vm-legacy")).toBeNull();
+      expect(avdSnapshots.hasVmSnapshot(AVD_NAME, "vm-legacy")).toBe(false);
+    });
+
+    test("a payload that still cannot be located stays unknown rather than becoming a fabricated 0", async () => {
+      await seedUnsizedVmRow(null);
+
+      await updateDeviceSnapshotConfig({ maxArchiveSizeMb: 1024 });
+
+      expect((await repository.getSnapshot("vm-legacy"))?.sizeBytes).toBeNull();
+      expect((await listDeviceSnapshots()).unsizedCount).toBe(1);
+    });
+  });
+
   test("an offline emulator marks the row pending reclaim instead of losing the reference", async () => {
     const timestamp = new Date(1000).toISOString();
     avdSnapshots.setVmSnapshot(AVD_NAME, "vm-offline", 2 * 1024 * MB);

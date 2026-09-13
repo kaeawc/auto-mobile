@@ -1,4 +1,4 @@
-import type { Kysely } from "kysely";
+import { sql, type Kysely } from "kysely";
 
 /**
  * VM snapshot accounting and reclaim (issue #6490, parent #6371).
@@ -22,6 +22,15 @@ import type { Kysely } from "kysely";
  * repaired the schema by hand (#6490 review). SQLite itself is perfectly happy
  * to roll DDL back, so one explicit transaction makes the trio all-or-nothing.
  * `down()` gets the same treatment for the same reason.
+ *
+ * Existing Android `vm` rows are BACKFILLED as unsized in the same transaction.
+ * A pre-change build sized a `vm` record by measuring the archive directory,
+ * which holds none of its bytes, so every upgraded row carries a number
+ * (normally 0) that describes nothing. Nothing re-imports a row that already
+ * exists, so defaulting them to "size known" would keep multi-gigabyte in-AVD
+ * payloads outside the budget forever while the archive reported zero unsized
+ * records; flagged unknown, they are re-measured at their real location before
+ * the next budget pass (#6891 review).
  */
 export async function up(db: Kysely<unknown>): Promise<void> {
   await db.transaction().execute(async (trx) => {
@@ -37,6 +46,11 @@ export async function up(db: Kysely<unknown>): Promise<void> {
       .alterTable("device_snapshots")
       .addColumn("pending_reclaim_reason", "text")
       .execute();
+    await sql`
+      UPDATE device_snapshots
+      SET size_unknown = 1
+      WHERE platform = 'android' AND snapshot_type = 'vm'
+    `.execute(trx);
   });
 }
 

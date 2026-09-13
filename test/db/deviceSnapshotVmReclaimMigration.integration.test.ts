@@ -36,6 +36,8 @@ describe("device snapshot VM reclaim migration (#6490)", () => {
     await db.schema
       .createTable("device_snapshots")
       .addColumn("snapshot_name", "text", (column) => column.primaryKey())
+      .addColumn("platform", "text", (column) => column.notNull())
+      .addColumn("snapshot_type", "text", (column) => column.notNull())
       .addColumn("size_bytes", "integer", (column) => column.notNull().defaultTo(0))
       .execute();
   });
@@ -52,10 +54,15 @@ describe("device snapshot VM reclaim migration (#6490)", () => {
     );
   });
 
-  test("existing rows default to sized and not pending, so nothing is retroactively flagged", async () => {
+  test("existing non-vm rows stay sized and not pending, so nothing is retroactively flagged", async () => {
     await db
       .insertInto("device_snapshots" as never)
-      .values({ snapshot_name: "legacy", size_bytes: 4096 } as never)
+      .values({
+        snapshot_name: "legacy",
+        platform: "android",
+        snapshot_type: "full",
+        size_bytes: 4096,
+      } as never)
       .execute();
 
     await runMigrations(db, { provider: provider(), env: {} });
@@ -72,6 +79,34 @@ describe("device snapshot VM reclaim migration (#6490)", () => {
       pending_reclaim: 0,
       pending_reclaim_reason: null,
     });
+  });
+
+  test("existing android vm rows are backfilled as unsized, not as a known zero", async () => {
+    // A pre-change build measured a `vm` record at the ARCHIVE directory, which
+    // holds none of its bytes, so every upgraded vm row carries a size (normally
+    // 0) that describes nothing. Nothing re-imports a row that already exists,
+    // so leaving it "known" would keep multi-gigabyte in-AVD payloads outside
+    // the budget forever while the archive reported zero unsized records
+    // (#6891 review).
+    await db
+      .insertInto("device_snapshots" as never)
+      .values({
+        snapshot_name: "legacy-vm",
+        platform: "android",
+        snapshot_type: "vm",
+        size_bytes: 0,
+      } as never)
+      .execute();
+
+    await runMigrations(db, { provider: provider(), env: {} });
+
+    expect(
+      await db
+        .selectFrom("device_snapshots" as never)
+        .selectAll()
+        .where("snapshot_name" as never, "=", "legacy-vm")
+        .executeTakeFirst(),
+    ).toMatchObject({ size_bytes: 0, size_unknown: 1, pending_reclaim: 0 });
   });
 
   test("a mid-migration failure leaves no half-applied columns behind", async () => {

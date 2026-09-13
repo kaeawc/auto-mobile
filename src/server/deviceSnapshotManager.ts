@@ -106,16 +106,19 @@ interface DeviceSnapshotManagerDependencies {
 let moduleDependencies: DeviceSnapshotManagerDependencies | null = null;
 const LEGACY_MANIFEST_FILENAME = "manifest.json";
 
-// Serializes captures per snapshot name within this process. Two concurrent
-// same-name captures must not interleave their filesystem writes or race the
-// record upsert; running them one-after-another makes the outcome deterministic
-// (last writer wins) and closes the historical check-then-create TOCTOU window
-// (issue #5713). The daemon is single-process, so an in-process promise chain is
-// sufficient — cross-process coordination is out of scope.
-const captureLocks = new Map<string, Promise<unknown>>();
+// Serializes the LIFECYCLE of one snapshot name within this process: captures,
+// restores, and reclaim all take this lock. Two concurrent same-name captures
+// must not interleave their filesystem writes or race the record upsert; running
+// them one-after-another makes the outcome deterministic (last writer wins) and
+// closes the historical check-then-create TOCTOU window (issue #5713). A restore
+// holds it too, because the emulator-owned payload it is loading must not be
+// console-deleted out from under it by a concurrent budget pass (#6490 review).
+// The daemon is single-process, so an in-process promise chain is sufficient —
+// cross-process coordination is out of scope.
+const snapshotNameLocks = new Map<string, Promise<unknown>>();
 
 // Serializes the archive byte-budget eviction pass across ALL names and devices.
-// Captures on different names/devices take different (per-name) capture locks, so
+// Captures on different names/devices take different (per-name) lifecycle locks, so
 // their eviction passes would otherwise interleave against the same table and the
 // same budget: each reads the same up-front list and running total, then both
 // delete least-recently-accessed rows, and a pass that gets `deleted === false`
@@ -124,7 +127,7 @@ const captureLocks = new Map<string, Promise<unknown>>();
 // Running the whole pass under one lock keyed on a CONSTANT makes passes QUEUE,
 // so each pass's up-front list/total read is accurate for its own duration. This
 // narrows rather than widens what is held: capture work stays parallel; only the
-// budget arithmetic is one-at-a-time. A separate map (not captureLocks) is used so
+// budget arithmetic is one-at-a-time. A separate map (not snapshotNameLocks) is used so
 // a snapshot whose name happens to equal the key can't serialize against it.
 const archiveBudgetLocks = new Map<string, Promise<unknown>>();
 const ARCHIVE_BUDGET_LOCK_KEY = "archive-budget";
@@ -154,13 +157,14 @@ function withSerializedLock<T>(
   return run;
 }
 
-function withCaptureLock<T>(snapshotName: string, task: () => Promise<T>): Promise<T> {
-  return withSerializedLock(captureLocks, snapshotName, task);
+function withSnapshotNameLock<T>(snapshotName: string, task: () => Promise<T>): Promise<T> {
+  return withSerializedLock(snapshotNameLocks, snapshotName, task);
 }
 
-// A capture holds its per-NAME capture lock while awaiting this DISTINCT
-// constant-keyed lock; the budget lock is a leaf (nothing acquired here awaits a
-// capture lock), so there is no re-entrancy and no deadlock.
+// Nothing that holds a per-NAME lifecycle lock awaits this DISTINCT
+// constant-keyed lock, and nothing holding this one ever AWAITS a name lock
+// (eviction only TRIES it — see withExclusiveSnapshotRecord), so there is no
+// re-entrancy and no deadlock in either direction.
 function withArchiveBudgetLock<T>(task: () => Promise<T>): Promise<T> {
   return withSerializedLock(archiveBudgetLocks, ARCHIVE_BUDGET_LOCK_KEY, task);
 }
@@ -225,7 +229,7 @@ export async function setDeviceSnapshotManagerDependencies(
 
 export function resetDeviceSnapshotManagerDependencies(): void {
   moduleDependencies = null;
-  captureLocks.clear();
+  snapshotNameLocks.clear();
   archiveBudgetLocks.clear();
 }
 
@@ -829,7 +833,7 @@ function assertSnapshotNameWritable(snapshotName: string): void {
   // A pre-existing snapshot of the same name is intentionally NOT rejected:
   // re-capturing an existing name overwrites it (issue #5713). The overwrite is
   // made atomic by DeviceSnapshotStore.replaceSnapshotData plus the per-name
-  // capture lock, and the record is replaced (not duplicated) by the repository
+  // name lock, and the record is replaced (not duplicated) by the repository
   // upsert — so the old check-then-create existence probe (a TOCTOU window) is
   // gone.
   if (isReservedScopeSegment(snapshotName)) {
@@ -928,24 +932,28 @@ function isSameSnapshotRecord(a: DeviceSnapshotRecord, b: DeviceSnapshotRecord):
  * the row describing — the payload that capture had just reported as a success
  * (#6490 review).
  *
- * The capture lock is TRIED, never awaited: eviction holds the archive budget
- * lock, which must stay a leaf (a capture holds its name lock while waiting for
- * the budget lock, so waiting the other way round would deadlock). `Map.has` and
- * the `Map.set` inside `withCaptureLock` both run synchronously in the same job,
- * so a capture that starts afterwards queues behind this task instead of
- * overlapping it.
+ * A restore is the same hazard from the other side: it holds the name lock while
+ * awaiting the emulator, so the payload being loaded cannot be console-deleted
+ * mid-load (#6490 review).
+ *
+ * The name lock is TRIED, never awaited, so this stays non-blocking while the
+ * archive budget lock is held and no ordering between the two can deadlock.
+ * `Map.has` and the `Map.set` inside `withSnapshotNameLock` both run
+ * synchronously in the same job, so a capture or restore that starts afterwards
+ * queues behind this task instead of overlapping it.
  */
 async function withExclusiveSnapshotRecord<T>(
   record: DeviceSnapshotRecord,
   task: () => Promise<T>,
 ): Promise<T | typeof SNAPSHOT_RECORD_SUPERSEDED> {
-  if (captureLocks.has(record.snapshotName)) {
+  if (snapshotNameLocks.has(record.snapshotName)) {
     logger.debug(
-      `[DeviceSnapshot] Skipping reclaim of '${record.snapshotName}': a capture of that name is in flight`,
+      `[DeviceSnapshot] Skipping reclaim of '${record.snapshotName}': a capture or restore of ` +
+        "that name is in flight",
     );
     return SNAPSHOT_RECORD_SUPERSEDED;
   }
-  return withCaptureLock(record.snapshotName, async () => {
+  return withSnapshotNameLock(record.snapshotName, async () => {
     const { snapshotRepository } = await getDeviceSnapshotDependencies();
     const current = await snapshotRepository.getSnapshot(record.snapshotName);
     if (!current || !isSameSnapshotRecord(current, record)) {
@@ -1124,7 +1132,7 @@ export async function sweepPendingVmSnapshotReclaims(device: BootedDevice): Prom
 
   for (const record of pending.filter((candidate) => candidate.deviceName === device.name)) {
     // Same per-name exclusivity as eviction: this sweep runs BEFORE the caller
-    // takes its own capture lock, so it can try (never await) the lock here.
+    // takes its own name lock, so it can try (never await) the lock here.
     const swept = await withExclusiveSnapshotRecord(record, async () => {
       const outcome = await avdSnapshots.deleteVmSnapshot(
         device.deviceId,
@@ -1289,8 +1297,8 @@ export async function captureDeviceSnapshot(
   // Serialize same-name captures so concurrent requests can't race; overwrite
   // the on-disk data atomically (clean replace, prior data restored on failure);
   // the repository upsert replaces the record rather than duplicating it (#5713).
-  return withCaptureLock(snapshotName, async () => {
-    // Held under the capture lock, before anything writes: the upsert below is
+  return withSnapshotNameLock(snapshotName, async () => {
+    // Held under the name lock, before anything writes: the upsert below is
     // what destroys another AVD's pending-reclaim reference (#6490 review).
     await reclaimSupersededPendingVmSnapshot(
       snapshotName,
@@ -1357,31 +1365,45 @@ export async function restoreDeviceSnapshot(
   // manifest read resolves a path from it (issue #5705).
   assertSafeSnapshotName(args.snapshotName);
 
-  let record = await snapshotRepository.getSnapshot(args.snapshotName);
-  if (!record) {
-    record = await hydrateLegacySnapshot(args.snapshotName, snapshotStore, snapshotRepository, now);
-  }
-  if (!record) {
-    throw new ActionableError(`Snapshot '${args.snapshotName}' not found`);
-  }
+  // Lookup, restore, and touch run under the per-name lifecycle lock. A VM
+  // restore awaits the emulator for as long as loading a multi-gigabyte snapshot
+  // takes, and reclaim is destructive: without this, a concurrent config update
+  // or another capture's budget pass could console-delete the very in-AVD
+  // payload being loaded and drop the row describing it, while the restore still
+  // reported success (#6490 review). Eviction only TRIES this lock, so a pass
+  // that arrives mid-restore skips the row rather than blocking on it.
+  return withSnapshotNameLock(args.snapshotName, async () => {
+    let record = await snapshotRepository.getSnapshot(args.snapshotName);
+    if (!record) {
+      record = await hydrateLegacySnapshot(
+        args.snapshotName,
+        snapshotStore,
+        snapshotRepository,
+        now,
+      );
+    }
+    if (!record) {
+      throw new ActionableError(`Snapshot '${args.snapshotName}' not found`);
+    }
 
-  const baseConfig = await getDeviceSnapshotConfig();
-  const useVmSnapshot = args.useVmSnapshot ?? baseConfig.useVmSnapshot;
-  const vmSnapshotTimeoutMs = args.vmSnapshotTimeoutMs ?? baseConfig.vmSnapshotTimeoutMs;
+    const baseConfig = await getDeviceSnapshotConfig();
+    const useVmSnapshot = args.useVmSnapshot ?? baseConfig.useVmSnapshot;
+    const vmSnapshotTimeoutMs = args.vmSnapshotTimeoutMs ?? baseConfig.vmSnapshotTimeoutMs;
 
-  const restoreProvider = createRestoreProvider(device, timer, snapshotStore);
-  const result = await restoreProvider.restore({
-    snapshotName: record.snapshotName,
-    manifest: record.manifest,
-    useVmSnapshot,
-    vmSnapshotTimeoutMs,
+    const restoreProvider = createRestoreProvider(device, timer, snapshotStore);
+    const result = await restoreProvider.restore({
+      snapshotName: record.snapshotName,
+      manifest: record.manifest,
+      useVmSnapshot,
+      vmSnapshotTimeoutMs,
+    });
+
+    const timestamp = now().toISOString();
+    await snapshotRepository.touchSnapshot(record.snapshotName, timestamp);
+    await notifySnapshotResources();
+
+    return { result, manifest: record.manifest };
   });
-
-  const timestamp = now().toISOString();
-  await snapshotRepository.touchSnapshot(record.snapshotName, timestamp);
-  await notifySnapshotResources();
-
-  return { result, manifest: record.manifest };
 }
 
 /**

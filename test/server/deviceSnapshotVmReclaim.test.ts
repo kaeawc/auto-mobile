@@ -4,6 +4,7 @@ import {
   captureDeviceSnapshot,
   listDeviceSnapshots,
   resetDeviceSnapshotManagerDependencies,
+  restoreDeviceSnapshot,
   setDeviceSnapshotManagerDependencies,
   updateDeviceSnapshotConfig,
 } from "../../src/server/deviceSnapshotManager";
@@ -504,6 +505,49 @@ describe("reclaim never races a same-name capture (#6490 review)", () => {
     const survivor = await repository.getSnapshot("vm-inflight");
     expect(survivor?.sizeBytes).toBe(4 * 1024 * MB_LOCAL);
     expect(avdSnapshots.hasVmSnapshot(AVD_NAME, "vm-inflight")).toBe(true);
+  });
+
+  test("eviction leaves alone a snapshot that is being restored", async () => {
+    await seed("vm-restoring", 1000);
+    await seed("vm-idle", 2000);
+
+    // A restore reads its row, then awaits the provider for as long as the
+    // emulator takes to load the VM state. Reclaim must not run inside that
+    // window: the in-AVD payload being loaded would be console-deleted and its
+    // row dropped while the restore still reports success (#6490 review).
+    let releaseRestore = (): void => {};
+    const restoreGate = new Promise<void>((resolve) => {
+      releaseRestore = resolve;
+    });
+    let restoreReachedGate = (): void => {};
+    const atGate = new Promise<void>((resolve) => {
+      restoreReachedGate = resolve;
+    });
+    await setDeviceSnapshotManagerDependencies({
+      createRestoreProvider: () => ({
+        restore: async (args) => {
+          restoreReachedGate();
+          await restoreGate;
+          return {
+            snapshotType: args.manifest.snapshotType,
+            restoredAt: new Date(fakeTimer.now()).toISOString(),
+          };
+        },
+      }),
+    });
+
+    const restoring = restoreDeviceSnapshot(EMULATOR, { snapshotName: "vm-restoring" });
+    await atGate;
+
+    const { evictedSnapshotNames } = await updateDeviceSnapshotConfig({ maxArchiveSizeMb: 1 });
+
+    releaseRestore();
+    await restoring;
+
+    expect(evictedSnapshotNames).toEqual(["vm-idle"]);
+    expect(avdSnapshots.getDeleteCalls().map((call) => call.snapshotName)).toEqual(["vm-idle"]);
+    expect(await repository.getSnapshot("vm-restoring")).not.toBeNull();
+    expect(avdSnapshots.hasVmSnapshot(AVD_NAME, "vm-restoring")).toBe(true);
   });
 
   test("eviction re-checks that the selected record is still the current one", async () => {

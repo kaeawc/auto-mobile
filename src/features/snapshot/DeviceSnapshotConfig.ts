@@ -6,6 +6,11 @@ export const DEFAULT_DEVICE_SNAPSHOT_CONFIG: DeviceSnapshotConfig = {
   useVmSnapshot: true,
   strictBackupMode: false,
   vmSnapshotTimeoutMs: 30000,
+  maxVmSnapshotsPerAvd: 3,
+  // Real Android VM snapshots routinely measure around 2 GB. A MB-scale
+  // default would reject every capture, while a huge one would not guard
+  // storage, so count retention is the default guardrail; this is opt-in.
+  maxVmArchiveSizeMb: undefined,
   maxArchiveSizeMb: 100,
 };
 
@@ -46,6 +51,25 @@ function parsePositiveNumber(
   return result > 0 ? result : fallback;
 }
 
+function parseOptionalPositiveNumber(
+  value: number | string | undefined,
+  allowFloat: boolean,
+): number | undefined {
+  if (value === undefined || value === null || value === "") {
+    return undefined;
+  }
+
+  const parsed = typeof value === "string" ? Number(value) : value;
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return undefined;
+  }
+
+  // Keep the required-field parser's rounding-before-final-positivity contract:
+  // a positive fractional integer field that rounds to zero is not valid.
+  const result = allowFloat ? parsed : Math.round(parsed);
+  return result > 0 ? result : undefined;
+}
+
 export function parseDeviceSnapshotConfig(
   input: DeviceSnapshotConfigInput | null | undefined,
 ): DeviceSnapshotConfig {
@@ -73,6 +97,12 @@ export function parseDeviceSnapshotConfig(
       DEFAULT_DEVICE_SNAPSHOT_CONFIG.vmSnapshotTimeoutMs,
       false,
     ),
+    maxVmSnapshotsPerAvd: parsePositiveNumber(
+      safeInput.maxVmSnapshotsPerAvd,
+      DEFAULT_DEVICE_SNAPSHOT_CONFIG.maxVmSnapshotsPerAvd,
+      false,
+    ),
+    maxVmArchiveSizeMb: parseOptionalPositiveNumber(safeInput.maxVmArchiveSizeMb, true),
     maxArchiveSizeMb: parsePositiveNumber(
       safeInput.maxArchiveSizeMb,
       DEFAULT_DEVICE_SNAPSHOT_CONFIG.maxArchiveSizeMb,

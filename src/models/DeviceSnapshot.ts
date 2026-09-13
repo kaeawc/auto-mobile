@@ -73,6 +73,15 @@ export interface DeviceSnapshotConfig {
   useVmSnapshot: boolean;
   strictBackupMode: boolean;
   vmSnapshotTimeoutMs: number;
+  /** Maximum VM snapshots retained for each stable Android AVD name. */
+  maxVmSnapshotsPerAvd: number;
+  /**
+   * Optional additional byte ceiling for VM snapshots per AVD. A real Android
+   * VM snapshot is routinely about 2 GB, so a MB-scale default would either
+   * reject every capture or be meaningless; count retention is the guardrail.
+   */
+  maxVmArchiveSizeMb?: number;
+  /** Byte budget for non-VM (adb, app_data, simctl) archive records only. */
   maxArchiveSizeMb: number;
 }
 
@@ -82,6 +91,8 @@ export interface DeviceSnapshotConfigInput {
   useVmSnapshot?: boolean | string;
   strictBackupMode?: boolean | string;
   vmSnapshotTimeoutMs?: number | string;
+  maxVmSnapshotsPerAvd?: number | string;
+  maxVmArchiveSizeMb?: number | string;
   maxArchiveSizeMb?: number | string;
 }
 

@@ -56,7 +56,7 @@ describe("deviceSnapshotResources", () => {
     await resetDeviceSnapshotManagerDependencies();
   });
 
-  test("getSnapshotArchive returns the snapshots/count/totalSizeBytes/maxArchiveSizeMb envelope", async () => {
+  test("getSnapshotArchive returns the snapshots/count/retention envelope", async () => {
     const repository = new FakeDeviceSnapshotRepository();
     await repository.insertSnapshot(makeRecord());
     await repository.insertSnapshot(makeRecord({ snapshotName: "snapshot-2", sizeBytes: 2048 }));
@@ -78,6 +78,8 @@ describe("deviceSnapshotResources", () => {
     expect(parsed.count).toBe(2);
     expect(parsed.totalSizeBytes).toBe(3072);
     expect(parsed.maxArchiveSizeMb).toBe(500);
+    expect(parsed.maxVmSnapshotsPerAvd).toBe(3);
+    expect(parsed.maxVmArchiveSizeMb).toBeNull();
     expect(Array.isArray(parsed.snapshots)).toBe(true);
     expect((parsed.snapshots as unknown[]).length).toBe(2);
   });

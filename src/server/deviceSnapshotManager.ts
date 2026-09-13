@@ -44,6 +44,7 @@ import {
   type AvdSnapshotOperations,
 } from "../utils/android-cmdline-tools/AvdSnapshotService";
 import { errorMessage } from "../utils/describeUnknownError";
+import { exponentialBackoff, type BackoffPolicy } from "../utils/Backoff";
 import { logger } from "../utils/logger";
 import {
   DefaultDeviceIncarnationInvalidator,
@@ -79,6 +80,30 @@ interface SnapshotArchiveEvictionResult {
   unsizedCount: number;
 }
 
+interface VmSnapshotRetentionResult extends SnapshotArchiveEvictionResult {
+  cannotFitExcluded: boolean;
+  excludedSnapshotMissing: boolean;
+  excludedSnapshotRecord: DeviceSnapshotRecord | null;
+  excludedSnapshotSizeBytes: number | null;
+  countEvictedSnapshotNames: string[];
+  byteEvictedSnapshotNames: string[];
+}
+
+interface VmRetentionState {
+  snapshots: DeviceSnapshotRecord[];
+  evictedSnapshotNames: string[];
+  countEvictedSnapshotNames: string[];
+  byteEvictedSnapshotNames: string[];
+  failedNames: Set<string>;
+}
+
+type VmRetentionEvictionOutcome =
+  | "evicted"
+  | "deferred"
+  | "no-candidate"
+  | "failed"
+  | "removed-concurrently";
+
 /** An in-AVD snapshot directory with no archive row behind it (#6490). */
 export interface OrphanedAvdSnapshot {
   avdName: string;
@@ -106,6 +131,7 @@ interface DeviceSnapshotManagerDependencies {
   /** Emulator-owned side of a VM snapshot: its in-AVD size and its console delete (#6490). */
   avdSnapshots: AvdSnapshotOperations;
   timer: Timer;
+  vmRetentionRetryBackoff: BackoffPolicy;
   now: () => Date;
   createCaptureProvider: (
     device: BootedDevice,
@@ -148,6 +174,61 @@ const snapshotNameLocks = new Map<string, Promise<unknown>>();
 // a snapshot whose name happens to equal the key can't serialize against it.
 const archiveBudgetLocks = new Map<string, Promise<unknown>>();
 const ARCHIVE_BUDGET_LOCK_KEY = "archive-budget";
+const vmRetentionLocks = new Map<string, Promise<unknown>>();
+const protectedVmRetentionSnapshotNames = new Map<string, Set<string>>();
+const vmRetentionRetryAttempts = new Map<string, number>();
+
+function protectVmRetentionSnapshot(deviceName: string, snapshotName: string): void {
+  const protectedNames = protectedVmRetentionSnapshotNames.get(deviceName) ?? new Set<string>();
+  protectedNames.add(snapshotName);
+  protectedVmRetentionSnapshotNames.set(deviceName, protectedNames);
+}
+
+function unprotectVmRetentionSnapshot(deviceName: string, snapshotName: string): void {
+  const protectedNames = protectedVmRetentionSnapshotNames.get(deviceName);
+  if (!protectedNames) {
+    return;
+  }
+  protectedNames.delete(snapshotName);
+  if (protectedNames.size === 0) {
+    protectedVmRetentionSnapshotNames.delete(deviceName);
+  }
+}
+
+function getProtectedVmRetentionSnapshotNames(deviceName: string): Set<string> {
+  return new Set(protectedVmRetentionSnapshotNames.get(deviceName));
+}
+
+function getVmRetentionProtectedSnapshotNames(
+  deviceName: string,
+  excludeFromEviction: string | undefined,
+): Set<string> {
+  const protectedNames = getProtectedVmRetentionSnapshotNames(deviceName);
+  if (excludeFromEviction !== undefined) {
+    protectedNames.add(excludeFromEviction);
+  }
+  return protectedNames;
+}
+
+async function withVmRetentionSnapshotProtection<T>(
+  device: BootedDevice,
+  snapshotName: string,
+  useVmSnapshot: boolean,
+  task: () => Promise<T>,
+): Promise<T> {
+  if (
+    !(device.platform === "android" && device.deviceId.startsWith("emulator-") && useVmSnapshot)
+  ) {
+    return task();
+  }
+
+  protectVmRetentionSnapshot(device.name, snapshotName);
+  try {
+    return await task();
+  } finally {
+    unprotectVmRetentionSnapshot(device.name, snapshotName);
+  }
+}
 
 // Shared serialization primitive: run `task` after any prior holder of `key`
 // settles, keeping a promise-chain tail in `locks` and dropping the entry once
@@ -186,6 +267,10 @@ function withArchiveBudgetLock<T>(task: () => Promise<T>): Promise<T> {
   return withSerializedLock(archiveBudgetLocks, ARCHIVE_BUDGET_LOCK_KEY, task);
 }
 
+function withVmRetentionLock<T>(deviceName: string, task: () => Promise<T>): Promise<T> {
+  return withSerializedLock(vmRetentionLocks, deviceName, task);
+}
+
 function getSnapshotPathOptions(context: {
   platform?: string;
   deviceId?: string;
@@ -215,6 +300,7 @@ async function getDeviceSnapshotDependencies(): Promise<DeviceSnapshotManagerDep
       snapshotStore: new DeviceSnapshotStore(),
       avdSnapshots: new AvdSnapshotService(new DeviceSnapshotStore()),
       timer: defaultTimer,
+      vmRetentionRetryBackoff: exponentialBackoff({ initialDelayMs: 100, maxDelayMs: 5000 }),
       now: () => new Date(),
       createCaptureProvider: (device, timer, store) => {
         return new CaptureSnapshot(device, undefined, undefined, timer, store);
@@ -239,6 +325,7 @@ export async function setDeviceSnapshotManagerDependencies(
     snapshotStore: deps.snapshotStore ?? current.snapshotStore,
     avdSnapshots: deps.avdSnapshots ?? current.avdSnapshots,
     timer: deps.timer ?? current.timer,
+    vmRetentionRetryBackoff: deps.vmRetentionRetryBackoff ?? current.vmRetentionRetryBackoff,
     now: deps.now ?? current.now,
     createCaptureProvider: deps.createCaptureProvider ?? current.createCaptureProvider,
     createRestoreProvider: deps.createRestoreProvider ?? current.createRestoreProvider,
@@ -251,6 +338,9 @@ export function resetDeviceSnapshotManagerDependencies(): void {
   moduleDependencies = null;
   snapshotNameLocks.clear();
   archiveBudgetLocks.clear();
+  vmRetentionLocks.clear();
+  protectedVmRetentionSnapshotNames.clear();
+  vmRetentionRetryAttempts.clear();
 }
 
 function configToInput(config: DeviceSnapshotConfig): DeviceSnapshotConfigInput {
@@ -260,6 +350,8 @@ function configToInput(config: DeviceSnapshotConfig): DeviceSnapshotConfigInput 
     useVmSnapshot: config.useVmSnapshot,
     strictBackupMode: config.strictBackupMode,
     vmSnapshotTimeoutMs: config.vmSnapshotTimeoutMs,
+    maxVmSnapshotsPerAvd: config.maxVmSnapshotsPerAvd,
+    maxVmArchiveSizeMb: config.maxVmArchiveSizeMb,
     maxArchiveSizeMb: config.maxArchiveSizeMb,
   };
 }
@@ -274,6 +366,8 @@ function mergeConfigInput(
     useVmSnapshot: overrides.useVmSnapshot ?? base.useVmSnapshot,
     strictBackupMode: overrides.strictBackupMode ?? base.strictBackupMode,
     vmSnapshotTimeoutMs: overrides.vmSnapshotTimeoutMs ?? base.vmSnapshotTimeoutMs,
+    maxVmSnapshotsPerAvd: overrides.maxVmSnapshotsPerAvd ?? base.maxVmSnapshotsPerAvd,
+    maxVmArchiveSizeMb: overrides.maxVmArchiveSizeMb ?? base.maxVmArchiveSizeMb,
     maxArchiveSizeMb: overrides.maxArchiveSizeMb ?? base.maxArchiveSizeMb,
   };
 }
@@ -1238,7 +1332,7 @@ async function remeasureUnsizedVmSnapshots(
   return measured;
 }
 
-async function enforceDeviceSnapshotArchiveLimit(
+async function enforceAppDataArchiveLimit(
   maxArchiveSizeMb: number,
 ): Promise<SnapshotArchiveEvictionResult> {
   // The entire pass — list read, running total, and delete loop — runs under one
@@ -1250,11 +1344,12 @@ async function enforceDeviceSnapshotArchiveLimit(
     const maxSizeBytes = Math.max(0, Math.floor(maxArchiveSizeMb * 1024 * 1024));
     const { snapshotRepository } = await getDeviceSnapshotDependencies();
     const { vmSnapshotTimeoutMs } = await getDeviceSnapshotConfig();
-    const snapshots = await remeasureUnsizedVmSnapshots(
-      await snapshotRepository.listSnapshots({
-        orderByLastAccessed: "asc",
-      }),
-    );
+    // VM payloads live in the AVD and have their own per-AVD retention pass.
+    // All remaining snapshot types live in the archive store and retain the
+    // historical shared byte budget unchanged.
+    const snapshots = (
+      await snapshotRepository.listSnapshots({ orderByLastAccessed: "asc" })
+    ).filter((snapshot) => snapshot.snapshotType !== "vm");
 
     // An unmeasured row contributes nothing to the budget (guessing a number
     // would evict against a fiction) but is counted and reported, so "the
@@ -1266,7 +1361,7 @@ async function enforceDeviceSnapshotArchiveLimit(
     if (unsizedCount > 0) {
       logger.warn(
         `[DeviceSnapshot] ${unsizedCount} snapshot record(s) have an unknown size and are ` +
-          "excluded from the archive budget",
+          "excluded from the non-VM archive budget",
       );
     }
 
@@ -1299,11 +1394,16 @@ async function enforceDeviceSnapshotArchiveLimit(
 
     if (currentSizeBytes > maxSizeBytes) {
       logger.warn(
-        `[DeviceSnapshot] Archive size ${currentSizeBytes} bytes still exceeds limit ${maxSizeBytes} bytes after eviction`,
+        `[DeviceSnapshot] Non-VM archive size ${currentSizeBytes} bytes still exceeds limit ` +
+          `${maxSizeBytes} bytes after eviction`,
       );
     }
 
     if (evictedSnapshotNames.length > 0) {
+      logger.warn(
+        `[DeviceSnapshot] Evicted ${evictedSnapshotNames.length} snapshot(s) under the app_data ` +
+          `byte budget (maxArchiveSizeMb=${maxArchiveSizeMb}): ${evictedSnapshotNames.join(", ")}`,
+      );
       await notifySnapshotResources();
     }
 
@@ -1314,6 +1414,287 @@ async function enforceDeviceSnapshotArchiveLimit(
       unsizedCount,
     };
   });
+}
+
+function vmRetentionMaxSizeBytes(config: DeviceSnapshotConfig): number {
+  if (config.maxVmArchiveSizeMb === undefined) {
+    return Number.POSITIVE_INFINITY;
+  }
+  return Math.max(0, Math.floor(config.maxVmArchiveSizeMb * 1024 * 1024));
+}
+
+function vmRetentionCurrentSizeBytes(state: VmRetentionState): number {
+  return state.snapshots.reduce((sum, record) => sum + (record.sizeBytes ?? 0), 0);
+}
+
+function cannotFitVmRetentionExcluded(
+  record: DeviceSnapshotRecord | undefined,
+  config: DeviceSnapshotConfig,
+  maxSizeBytes: number,
+): boolean {
+  return (
+    record !== undefined &&
+    config.maxVmArchiveSizeMb !== undefined &&
+    (record.sizeBytes ?? 0) > maxSizeBytes
+  );
+}
+
+function findVmRetentionCandidate(
+  state: VmRetentionState,
+  protectedSnapshotNames: ReadonlySet<string>,
+): DeviceSnapshotRecord | undefined {
+  return state.snapshots.find(
+    (record) =>
+      !protectedSnapshotNames.has(record.snapshotName) &&
+      !state.failedNames.has(record.snapshotName),
+  );
+}
+
+async function evictOldestVmRetentionCandidate(
+  state: VmRetentionState,
+  config: DeviceSnapshotConfig,
+  protectedSnapshotNames: ReadonlySet<string>,
+  reason: "count" | "byte",
+): Promise<VmRetentionEvictionOutcome> {
+  const candidate = findVmRetentionCandidate(state, protectedSnapshotNames);
+  if (!candidate) {
+    return "no-candidate";
+  }
+
+  try {
+    if (!(await deleteDeviceSnapshotRecord(candidate, config.vmSnapshotTimeoutMs))) {
+      // A VM row is deliberately retained and marked pending when its emulator
+      // is offline. Continuing would mark newer records pending too, even
+      // though retention needs only this oldest reclaim to be scheduled.
+      const { snapshotRepository } = await getDeviceSnapshotDependencies();
+      const current = await snapshotRepository.getSnapshot(candidate.snapshotName);
+      if (current?.pendingReclaim) {
+        return "deferred";
+      }
+      // A pending-reclaim sweep can remove this row, or a same-name capture on
+      // another AVD can replace it, while this eviction attempt is non-exclusive
+      // (#6960); do not count a stale candidate twice.
+      if (!current || current.deviceName !== candidate.deviceName) {
+        state.snapshots = state.snapshots.filter(
+          (record) => record.snapshotName !== candidate.snapshotName,
+        );
+        return "removed-concurrently";
+      }
+      // A busy lifecycle lock or superseded row also produces `false`, but
+      // neither is a deferred emulator reclaim. Keep searching for another
+      // eligible candidate as the pre-existing retention contract requires.
+      state.failedNames.add(candidate.snapshotName);
+      return "failed";
+    }
+    state.snapshots = state.snapshots.filter(
+      (record) => record.snapshotName !== candidate.snapshotName,
+    );
+    state.evictedSnapshotNames.push(candidate.snapshotName);
+    (reason === "count" ? state.countEvictedSnapshotNames : state.byteEvictedSnapshotNames).push(
+      candidate.snapshotName,
+    );
+    return "evicted";
+  } catch (error) {
+    // A single reclaim failure must not abort retention for other records.
+    logger.warn(`[DeviceSnapshot] Failed to evict snapshot ${candidate.snapshotName}: ${error}`);
+    state.failedNames.add(candidate.snapshotName);
+    return "failed";
+  }
+}
+
+async function createVmRetentionState(deviceName: string): Promise<VmRetentionState> {
+  const { snapshotRepository } = await getDeviceSnapshotDependencies();
+  const snapshots = await remeasureUnsizedVmSnapshots(
+    (await snapshotRepository.listSnapshots({ snapshotType: "vm" })).filter(
+      (record) => record.deviceName === deviceName && !record.pendingReclaim,
+    ),
+  );
+  snapshots.sort((a, b) => a.lastAccessedAt.localeCompare(b.lastAccessedAt));
+  return {
+    snapshots,
+    evictedSnapshotNames: [],
+    countEvictedSnapshotNames: [],
+    byteEvictedSnapshotNames: [],
+    failedNames: new Set(),
+  };
+}
+
+async function applyVmRetention(
+  state: VmRetentionState,
+  config: DeviceSnapshotConfig,
+  protectedSnapshotNames: ReadonlySet<string>,
+  maxSizeBytes: number,
+): Promise<void> {
+  while (state.snapshots.length > config.maxVmSnapshotsPerAvd) {
+    const outcome = await evictOldestVmRetentionCandidate(
+      state,
+      config,
+      protectedSnapshotNames,
+      "count",
+    );
+    if (outcome === "deferred" || outcome === "no-candidate") {
+      return;
+    }
+  }
+  while (vmRetentionCurrentSizeBytes(state) > maxSizeBytes) {
+    const outcome = await evictOldestVmRetentionCandidate(
+      state,
+      config,
+      protectedSnapshotNames,
+      "byte",
+    );
+    if (outcome === "deferred" || outcome === "no-candidate") {
+      return;
+    }
+  }
+}
+
+function reportVmRetentionEvictions(
+  state: VmRetentionState,
+  deviceName: string,
+  config: DeviceSnapshotConfig,
+): void {
+  if (state.evictedSnapshotNames.length === 0) {
+    return;
+  }
+  logger.warn(
+    `[DeviceSnapshot] Evicted ${state.evictedSnapshotNames.length} VM snapshot(s) for AVD ` +
+      `'${deviceName}': ${state.countEvictedSnapshotNames.length} by the per-AVD count retention ` +
+      `(maxVmSnapshotsPerAvd=${config.maxVmSnapshotsPerAvd}), ` +
+      `${state.byteEvictedSnapshotNames.length} by the VM byte budget ` +
+      `(maxVmArchiveSizeMb=${config.maxVmArchiveSizeMb ?? "unlimited"}): ` +
+      state.evictedSnapshotNames.join(", "),
+  );
+}
+
+async function scheduleVmRetentionRetry(
+  deviceName: string,
+  config: DeviceSnapshotConfig,
+  state: VmRetentionState,
+  currentSizeBytes: number,
+  maxSizeBytes: number,
+  excludeFromEviction: string | undefined,
+): Promise<void> {
+  const remainsOverLimit =
+    state.snapshots.length > config.maxVmSnapshotsPerAvd ||
+    (config.maxVmArchiveSizeMb !== undefined && currentSizeBytes > maxSizeBytes);
+  if (state.failedNames.size === 0 || !remainsOverLimit) {
+    vmRetentionRetryAttempts.delete(deviceName);
+    return;
+  }
+
+  const { timer, vmRetentionRetryBackoff } = await getDeviceSnapshotDependencies();
+  const attempt = (vmRetentionRetryAttempts.get(deviceName) ?? 0) + 1;
+  vmRetentionRetryAttempts.set(deviceName, attempt);
+  timer.setTimeout(() => {
+    void getDeviceSnapshotConfig()
+      .then((freshConfig) =>
+        enforceVmSnapshotRetentionForDevice(deviceName, freshConfig, { excludeFromEviction }),
+      )
+      .catch((error) => {
+        // This is a best-effort retry; its failure cannot affect the completed operation.
+        logger.warn(
+          `[DeviceSnapshot] Deferred VM retention retry for AVD '${deviceName}' failed: ` +
+            errorMessage(error),
+          error,
+        );
+      });
+  }, vmRetentionRetryBackoff.delayForAttempt(attempt));
+}
+
+async function enforceVmSnapshotRetentionForDevice(
+  deviceName: string,
+  config: DeviceSnapshotConfig,
+  options: { excludeFromEviction?: string } = {},
+): Promise<VmSnapshotRetentionResult> {
+  return withVmRetentionLock(deviceName, async () => {
+    const state = await createVmRetentionState(deviceName);
+    const protectedSnapshotNames = getVmRetentionProtectedSnapshotNames(
+      deviceName,
+      options.excludeFromEviction,
+    );
+    const maxSizeBytes = vmRetentionMaxSizeBytes(config);
+    const unsizedCount = state.snapshots.filter((record) => record.sizeBytes === null).length;
+    if (unsizedCount > 0) {
+      logger.warn(
+        `[DeviceSnapshot] ${unsizedCount} VM snapshot record(s) have an unknown size and are ` +
+          "excluded from the VM retention byte budget",
+      );
+    }
+
+    const excludedBeforeEviction = options.excludeFromEviction
+      ? state.snapshots.find((record) => record.snapshotName === options.excludeFromEviction)
+      : undefined;
+    const cannotFitExcluded = cannotFitVmRetentionExcluded(
+      excludedBeforeEviction,
+      config,
+      maxSizeBytes,
+    );
+
+    // A protected capture that cannot fit by itself cannot make the budget
+    // compliant. Do not evict unrelated older snapshots before its caller
+    // reports (and handles) that rejection.
+    if (!cannotFitExcluded) {
+      await applyVmRetention(state, config, protectedSnapshotNames, maxSizeBytes);
+    }
+
+    const excluded = options.excludeFromEviction
+      ? state.snapshots.find((record) => record.snapshotName === options.excludeFromEviction)
+      : undefined;
+    const excludedSnapshotMissing =
+      options.excludeFromEviction !== undefined && excluded === undefined;
+    const currentSizeBytes = vmRetentionCurrentSizeBytes(state);
+
+    if (config.maxVmArchiveSizeMb !== undefined && currentSizeBytes > maxSizeBytes) {
+      logger.warn(
+        `[DeviceSnapshot] VM snapshots for AVD '${deviceName}' total ${currentSizeBytes} bytes still ` +
+          `exceed limit ${maxSizeBytes} bytes after retention`,
+      );
+    }
+    reportVmRetentionEvictions(state, deviceName, config);
+    if (state.evictedSnapshotNames.length > 0) {
+      await notifySnapshotResources();
+    }
+    await scheduleVmRetentionRetry(
+      deviceName,
+      config,
+      state,
+      currentSizeBytes,
+      maxSizeBytes,
+      options.excludeFromEviction,
+    );
+
+    return {
+      evictedSnapshotNames: state.evictedSnapshotNames,
+      currentSizeBytes,
+      maxSizeBytes,
+      unsizedCount,
+      cannotFitExcluded,
+      excludedSnapshotMissing,
+      excludedSnapshotRecord: excluded ?? null,
+      excludedSnapshotSizeBytes: excluded?.sizeBytes ?? null,
+      countEvictedSnapshotNames: state.countEvictedSnapshotNames,
+      byteEvictedSnapshotNames: state.byteEvictedSnapshotNames,
+    };
+  });
+}
+
+async function enforceVmSnapshotRetentionForAllDevices(
+  config: DeviceSnapshotConfig,
+): Promise<SnapshotArchiveEvictionResult> {
+  const { snapshotRepository } = await getDeviceSnapshotDependencies();
+  const records = await snapshotRepository.listSnapshots({ snapshotType: "vm" });
+  const deviceNames = [...new Set(records.map((record) => record.deviceName))];
+  const results = await Promise.all(
+    deviceNames.map((deviceName) => enforceVmSnapshotRetentionForDevice(deviceName, config)),
+  );
+  return {
+    evictedSnapshotNames: results.flatMap((result) => result.evictedSnapshotNames),
+    currentSizeBytes: results.reduce((sum, result) => sum + result.currentSizeBytes, 0),
+    maxSizeBytes:
+      config.maxVmArchiveSizeMb === undefined ? 0 : config.maxVmArchiveSizeMb * 1024 * 1024,
+    unsizedCount: results.reduce((sum, result) => sum + result.unsizedCount, 0),
+  };
 }
 
 /**
@@ -1457,8 +1838,17 @@ export async function updateDeviceSnapshotConfig(
   if (update === null) {
     await configRepository.clearConfig();
     const defaults = parseDeviceSnapshotConfig(serverConfig.getDeviceSnapshotDefaults());
-    const eviction = await enforceDeviceSnapshotArchiveLimit(defaults.maxArchiveSizeMb);
-    return { config: defaults, evictedSnapshotNames: eviction.evictedSnapshotNames };
+    const [appDataEviction, vmEviction] = await Promise.all([
+      enforceAppDataArchiveLimit(defaults.maxArchiveSizeMb),
+      enforceVmSnapshotRetentionForAllDevices(defaults),
+    ]);
+    return {
+      config: defaults,
+      evictedSnapshotNames: [
+        ...appDataEviction.evictedSnapshotNames,
+        ...vmEviction.evictedSnapshotNames,
+      ],
+    };
   }
 
   const current = await getDeviceSnapshotConfig();
@@ -1466,8 +1856,73 @@ export async function updateDeviceSnapshotConfig(
   const nextConfig = parseDeviceSnapshotConfig(mergedInput);
   await configRepository.setConfig(nextConfig);
 
-  const eviction = await enforceDeviceSnapshotArchiveLimit(nextConfig.maxArchiveSizeMb);
-  return { config: nextConfig, evictedSnapshotNames: eviction.evictedSnapshotNames };
+  const [appDataEviction, vmEviction] = await Promise.all([
+    enforceAppDataArchiveLimit(nextConfig.maxArchiveSizeMb),
+    enforceVmSnapshotRetentionForAllDevices(nextConfig),
+  ]);
+  return {
+    config: nextConfig,
+    evictedSnapshotNames: [
+      ...appDataEviction.evictedSnapshotNames,
+      ...vmEviction.evictedSnapshotNames,
+    ],
+  };
+}
+
+async function enforceCapturedSnapshotRetention(
+  result: CaptureSnapshotResult,
+  device: BootedDevice,
+  config: DeviceSnapshotConfig,
+  overwroteExistingSnapshot: boolean,
+): Promise<string[]> {
+  const appDataEviction = await enforceAppDataArchiveLimit(config.maxArchiveSizeMb);
+  if (result.manifest.snapshotType !== "vm") {
+    return appDataEviction.evictedSnapshotNames;
+  }
+
+  const vmEviction = await enforceVmSnapshotRetentionForDevice(device.name, config, {
+    excludeFromEviction: result.snapshotName,
+  });
+  if (vmEviction.excludedSnapshotMissing) {
+    throw new ActionableError(
+      `Snapshot '${result.snapshotName}' was removed by a concurrent VM retention sweep before ` +
+        "capture could complete; capture did not succeed",
+    );
+  }
+  if (!vmEviction.cannotFitExcluded) {
+    return [...appDataEviction.evictedSnapshotNames, ...vmEviction.evictedSnapshotNames];
+  }
+
+  if (overwroteExistingSnapshot) {
+    await notifySnapshotResources();
+    throw new ActionableError(
+      `Snapshot '${result.snapshotName}' recapture exceeds the configured maxVmArchiveSizeMb ` +
+        `budget for AVD '${device.name}'. The emulator's destructive snapshot save already ` +
+        "irreversibly overwrote the prior payload under this name, so the new oversized capture " +
+        "was kept rather than deleting the only remaining usable snapshot.",
+    );
+  }
+
+  const record = vmEviction.excludedSnapshotRecord;
+  if (record) {
+    const deleted = await deleteDeviceSnapshotRecord(record, config.vmSnapshotTimeoutMs);
+    if (!deleted) {
+      // The emulator-console deletion did not complete, so its payload and row
+      // deliberately remain linked for a later reclaim rather than lying that
+      // this rejected capture was rolled back.
+      await notifySnapshotResources();
+      throw new ActionableError(
+        `Snapshot '${result.snapshotName}' exceeds maxVmArchiveSizeMb but its VM payload could ` +
+          "not be reclaimed; it remains tracked for a later reclaim",
+      );
+    }
+  }
+  const maxSizeBytes = Math.floor((config.maxVmArchiveSizeMb ?? 0) * 1024 * 1024);
+  throw new ActionableError(
+    `Snapshot '${result.snapshotName}' could not be captured because its VM payload ` +
+      `(${vmEviction.excludedSnapshotSizeBytes ?? "unknown"} bytes) exceeds the configured ` +
+      `maxVmArchiveSizeMb budget for AVD '${device.name}' (${maxSizeBytes} bytes)`,
+  );
 }
 
 export async function captureDeviceSnapshot(
@@ -1513,96 +1968,120 @@ export async function captureDeviceSnapshot(
   // Serialize same-name captures so concurrent requests can't race; overwrite
   // the on-disk data atomically (clean replace, prior data restored on failure);
   // the repository upsert replaces the record rather than duplicating it (#5713).
-  const result = await withSnapshotNameLock(snapshotName, async () => {
-    // Held under the name lock, before anything writes: the upsert below is
-    // what destroys another AVD's pending-reclaim reference (#6490 review).
-    await reclaimSupersededPendingVmSnapshot(
-      snapshotName,
-      device.name,
-      mergedConfig.vmSnapshotTimeoutMs,
-    );
-    const captureProvider = createCaptureProvider(device, timer, snapshotStore);
-
-    let captureResult: CaptureSnapshotResult;
-    let vmSnapshotWasCaptured = false;
-    try {
-      captureResult = await snapshotStore.replaceSnapshotData(
-        snapshotName,
-        pathOptions,
-        async () => {
-          const captured = await captureProvider.capture({
-            snapshotName,
-            includeAppData: mergedConfig.includeAppData,
-            includeSettings: mergedConfig.includeSettings,
-            useVmSnapshot: mergedConfig.useVmSnapshot,
-            strictBackupMode: mergedConfig.strictBackupMode,
-            vmSnapshotTimeoutMs: mergedConfig.vmSnapshotTimeoutMs,
-            appBundleIds: args.appBundleIds,
-          });
-          vmSnapshotWasCaptured = captured.manifest.snapshotType === "vm";
-
-          const sizeBytes = await resolveSnapshotSizeBytes(
-            snapshotName,
-            captured.manifest,
-            snapshotStore,
-            avdSnapshots,
-            pathOptions,
-          );
-          const timestamp = captured.manifest.timestamp;
-
-          await snapshotRepository.insertSnapshot({
-            snapshotName: captured.snapshotName,
-            deviceId: captured.manifest.deviceId,
-            deviceName: captured.manifest.deviceName,
-            platform: captured.manifest.platform,
-            snapshotType: captured.manifest.snapshotType,
-            includeAppData: captured.manifest.includeAppData,
-            includeSettings: captured.manifest.includeSettings,
-            createdAt: timestamp,
-            lastAccessedAt: timestamp,
-            sizeBytes,
-            manifest: captured.manifest,
-          });
-
-          return captured;
-        },
-      );
-    } catch (error) {
-      if (
-        device.platform === "android" &&
-        device.deviceId.startsWith("emulator-") &&
-        (wasVmSnapshotSaveDispatched(error) || vmSnapshotWasCaptured)
-      ) {
-        const recordedPendingReclaim = await recordFailedVmSnapshotReclaim(
-          device,
+  return withVmRetentionSnapshotProtection(
+    device,
+    snapshotName,
+    mergedConfig.useVmSnapshot,
+    async () => {
+      let overwroteExistingSnapshot = false;
+      const result = await withSnapshotNameLock(snapshotName, async () => {
+        // Read while holding the same-name lifecycle lock so this records whether
+        // this capture is replacing this AVD's existing row before its upsert destroys it.
+        const previousRecord = await snapshotRepository.getSnapshot(snapshotName);
+        overwroteExistingSnapshot =
+          previousRecord !== null && previousRecord.deviceName === device.name;
+        // Held under the name lock, before anything writes: the upsert below is
+        // what destroys another AVD's pending-reclaim reference (#6490 review).
+        await reclaimSupersededPendingVmSnapshot(
           snapshotName,
-          mergedConfig.includeSettings,
-          snapshotRepository,
-          avdSnapshots,
+          device.name,
           mergedConfig.vmSnapshotTimeoutMs,
-          now,
-          error,
         );
-        if (recordedPendingReclaim) {
-          await notifySnapshotResources();
+        const captureProvider = createCaptureProvider(device, timer, snapshotStore);
+
+        let captureResult: CaptureSnapshotResult;
+        let vmSnapshotWasCaptured = false;
+        try {
+          captureResult = await snapshotStore.replaceSnapshotData(
+            snapshotName,
+            pathOptions,
+            async () => {
+              const captured = await captureProvider.capture({
+                snapshotName,
+                includeAppData: mergedConfig.includeAppData,
+                includeSettings: mergedConfig.includeSettings,
+                useVmSnapshot: mergedConfig.useVmSnapshot,
+                strictBackupMode: mergedConfig.strictBackupMode,
+                vmSnapshotTimeoutMs: mergedConfig.vmSnapshotTimeoutMs,
+                appBundleIds: args.appBundleIds,
+              });
+              vmSnapshotWasCaptured = captured.manifest.snapshotType === "vm";
+
+              const sizeBytes = await resolveSnapshotSizeBytes(
+                snapshotName,
+                captured.manifest,
+                snapshotStore,
+                avdSnapshots,
+                pathOptions,
+              );
+              const timestamp = captured.manifest.timestamp;
+
+              await snapshotRepository.insertSnapshot({
+                snapshotName: captured.snapshotName,
+                deviceId: captured.manifest.deviceId,
+                deviceName: captured.manifest.deviceName,
+                platform: captured.manifest.platform,
+                snapshotType: captured.manifest.snapshotType,
+                includeAppData: captured.manifest.includeAppData,
+                includeSettings: captured.manifest.includeSettings,
+                createdAt: timestamp,
+                lastAccessedAt: timestamp,
+                sizeBytes,
+                manifest: captured.manifest,
+              });
+
+              return captured;
+            },
+          );
+        } catch (error) {
+          if (
+            device.platform === "android" &&
+            device.deviceId.startsWith("emulator-") &&
+            (wasVmSnapshotSaveDispatched(error) || vmSnapshotWasCaptured)
+          ) {
+            const recordedPendingReclaim = await recordFailedVmSnapshotReclaim(
+              device,
+              snapshotName,
+              mergedConfig.includeSettings,
+              snapshotRepository,
+              avdSnapshots,
+              mergedConfig.vmSnapshotTimeoutMs,
+              now,
+              error,
+            );
+            if (recordedPendingReclaim) {
+              await notifySnapshotResources();
+            }
+          }
+          throw error;
         }
-      }
-      throw error;
-    }
 
-    return captureResult;
-  });
+        return captureResult;
+      });
 
-  // Enforced only AFTER the name lock is released. Eviction TRIES that lock and
-  // skips any row whose name is held, so running the pass inside the lock made
-  // the just-captured row permanently unevictable by its own capture. A single
-  // VM snapshot bigger than the whole budget — routine at the 100 MB default —
-  // then left the archive over its limit with no automatic retry until some
-  // later capture or config update happened along (#6490 review).
-  const eviction = await enforceDeviceSnapshotArchiveLimit(mergedConfig.maxArchiveSizeMb);
-  await notifySnapshotResources();
+      // Both passes run after the name lock: budget/reclaim uses a try-lock on
+      // individual records, while the VM pass explicitly protects this capture.
+      const currentConfig = await getDeviceSnapshotConfig();
+      const retentionConfig: DeviceSnapshotConfig = {
+        ...mergedConfig,
+        maxVmSnapshotsPerAvd: currentConfig.maxVmSnapshotsPerAvd,
+        maxArchiveSizeMb: currentConfig.maxArchiveSizeMb,
+        maxVmArchiveSizeMb: currentConfig.maxVmArchiveSizeMb,
+      };
+      const evictedSnapshotNames = await enforceCapturedSnapshotRetention(
+        result,
+        device,
+        retentionConfig,
+        overwroteExistingSnapshot,
+      );
+      await notifySnapshotResources();
 
-  return { result, evictedSnapshotNames: eviction.evictedSnapshotNames };
+      return {
+        result,
+        evictedSnapshotNames,
+      };
+    },
+  );
 }
 
 export async function restoreDeviceSnapshot(

@@ -72,6 +72,8 @@ describe("config manager default repositories", () => {
       useVmSnapshot: false,
       strictBackupMode: true,
       vmSnapshotTimeoutMs: 34000,
+      maxVmSnapshotsPerAvd: 4,
+      maxVmArchiveSizeMb: 2048,
       maxArchiveSizeMb: 12,
     };
     await seedConfig("device_snapshot_configs", config);

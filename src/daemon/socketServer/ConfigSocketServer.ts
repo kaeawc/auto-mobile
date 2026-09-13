@@ -107,8 +107,8 @@ export class ConfigSocketServer<
         };
       }
       case "config/set": {
-        // Authorize before the mutation: lowering maxArchiveSizeMb here triggers
-        // global archive eviction, so a cross-session request must be rejected
+        // Authorize before the mutation: lowering a retention setting here can
+        // trigger global archive eviction, so a cross-session request must be rejected
         // first (issue #4752).
         this.authenticator?.authorize({ sessionUuid: request.sessionUuid });
         if (!request.params || !("config" in request.params)) {

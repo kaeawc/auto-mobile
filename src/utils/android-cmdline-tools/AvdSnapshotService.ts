@@ -14,6 +14,10 @@ import {
   formatVmSnapshotExecutionError,
   isMissingVmSnapshotError,
 } from "./vmSnapshot";
+import {
+  defaultEmulatorConsoleBusyRegistry,
+  type EmulatorConsoleBusyRegistry,
+} from "./EmulatorConsoleBusyRegistry";
 
 /**
  * The emulator's own boot snapshot. It is never an AutoMobile capture, so the
@@ -91,6 +95,7 @@ export class AvdSnapshotService implements AvdSnapshotOperations {
     avdDirectories: AvdDirectoryResolver = new FileAvdConfigReader(),
     emulator: AndroidEmulator = new AndroidEmulatorClient(),
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
+    private readonly consoleBusyRegistry: EmulatorConsoleBusyRegistry = defaultEmulatorConsoleBusyRegistry,
   ) {
     this.directories = directories;
     this.avdDirectories = avdDirectories;
@@ -180,7 +185,9 @@ export class AvdSnapshotService implements AvdSnapshotOperations {
 
     let result;
     try {
-      result = await adb.executeCommand(command, timeoutMs);
+      result = await this.consoleBusyRegistry.runExclusive(deviceId, () =>
+        adb.executeCommand(command, timeoutMs),
+      );
     } catch (error) {
       const reason = formatVmSnapshotExecutionError("delete", snapshotName, error);
       logger.warn(`[AvdSnapshot] ${reason}`, error);

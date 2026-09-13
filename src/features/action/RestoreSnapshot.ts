@@ -36,6 +36,10 @@ import * as path from "path";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { AndroidCtrlProxyClient } from "../observe/android/AndroidCtrlProxyClient";
 import type { SettingsNamespace } from "../observe/android";
+import {
+  defaultEmulatorConsoleBusyRegistry,
+  type EmulatorConsoleBusyRegistry,
+} from "../../utils/android-cmdline-tools/EmulatorConsoleBusyRegistry";
 
 export interface RestoreSnapshotArgs {
   snapshotName: string;
@@ -74,6 +78,7 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
     timer: Timer = defaultTimer,
     store: DeviceSnapshotStore = new DeviceSnapshotStore(),
     simctl?: SimCtlClient,
+    private readonly consoleBusyRegistry: EmulatorConsoleBusyRegistry = defaultEmulatorConsoleBusyRegistry,
   ) {
     this.device = device;
     this.adb = adbFactory.create(device);
@@ -187,7 +192,9 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
 
       let result;
       try {
-        result = await this.adb.executeCommand(loadCommand, vmSnapshotTimeoutMs);
+        result = await this.consoleBusyRegistry.runExclusive(this.device.deviceId, () =>
+          this.adb.executeCommand(loadCommand, vmSnapshotTimeoutMs),
+        );
       } catch (error) {
         throw new Error(formatVmSnapshotExecutionError("load", snapshotName, error));
       }

@@ -27,7 +27,11 @@ import { parseDeviceSnapshotConfig } from "../features/snapshot";
 import { serverConfig } from "../utils/ServerConfig";
 import { ResourceRegistry } from "./resourceRegistry";
 import { DEVICE_SNAPSHOT_RESOURCE_URIS } from "./deviceSnapshotResourceUris";
-import { CaptureSnapshot, type CaptureSnapshotResult } from "../features/action/CaptureSnapshot";
+import {
+  CaptureSnapshot,
+  type CaptureSnapshotResult,
+  VM_SNAPSHOT_SAVE_DISPATCHED,
+} from "../features/action/CaptureSnapshot";
 import { RestoreSnapshot, type RestoreSnapshotResult } from "../features/action/RestoreSnapshot";
 import type {
   SnapshotCaptureProvider,
@@ -345,6 +349,74 @@ async function resolveSnapshotSizeBytes(
     );
   }
   return sizeBytes;
+}
+
+function wasVmSnapshotSaveDispatched(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    (error as Record<string, unknown>)[VM_SNAPSHOT_SAVE_DISPATCHED] === true
+  );
+}
+
+async function recordFailedVmSnapshotReclaim(
+  device: BootedDevice,
+  snapshotName: string,
+  includeSettings: boolean,
+  snapshotRepository: DeviceSnapshotRepository,
+  avdSnapshots: AvdSnapshotOperations,
+  now: () => Date,
+  error: unknown,
+): Promise<void> {
+  const reason = `VM snapshot save was dispatched but capture failed: ${errorMessage(error)}`;
+  let sizeBytes: number | null = null;
+  try {
+    sizeBytes = await avdSnapshots.measureVmSnapshotBytes(device.name, snapshotName);
+  } catch (measureError) {
+    logger.warn(
+      `[DeviceSnapshot] Failed to measure orphaned VM snapshot '${snapshotName}' on AVD ` +
+        `'${device.name}': ${errorMessage(measureError)}`,
+      measureError,
+    );
+  }
+
+  const timestamp = now().toISOString();
+  try {
+    await snapshotRepository.insertSnapshot({
+      snapshotName,
+      deviceId: device.deviceId,
+      deviceName: device.name,
+      platform: "android",
+      snapshotType: "vm",
+      includeAppData: true,
+      includeSettings,
+      createdAt: timestamp,
+      lastAccessedAt: timestamp,
+      sizeBytes,
+      pendingReclaim: true,
+      pendingReclaimReason: reason,
+      manifest: {
+        snapshotName,
+        timestamp,
+        deviceId: device.deviceId,
+        deviceName: device.name,
+        platform: "android",
+        snapshotType: "vm",
+        includeAppData: true,
+        includeSettings,
+      },
+    });
+    logger.warn(
+      `[DeviceSnapshot] Recorded pending reclaim for orphaned VM snapshot '${snapshotName}' ` +
+        `on AVD '${device.name}': ${reason}`,
+    );
+  } catch (recordError) {
+    logger.warn(
+      `[DeviceSnapshot] Failed to record pending reclaim for orphaned VM snapshot '${snapshotName}' ` +
+        `on AVD '${device.name}': ${errorMessage(recordError)}`,
+      recordError,
+    );
+  }
 }
 
 // Validates the shape of a manifest read back from disk. Shared by every
@@ -1345,7 +1417,7 @@ export async function captureDeviceSnapshot(
   result: CaptureSnapshotResult;
   evictedSnapshotNames: string[];
 }> {
-  const { snapshotRepository, snapshotStore, avdSnapshots, timer, createCaptureProvider } =
+  const { snapshotRepository, snapshotStore, avdSnapshots, timer, now, createCaptureProvider } =
     await getDeviceSnapshotDependencies();
 
   const baseConfig = await getDeviceSnapshotConfig();
@@ -1391,46 +1463,66 @@ export async function captureDeviceSnapshot(
     );
     const captureProvider = createCaptureProvider(device, timer, snapshotStore);
 
-    const captureResult = await snapshotStore.replaceSnapshotData(
-      snapshotName,
-      pathOptions,
-      async () => {
-        const captured = await captureProvider.capture({
-          snapshotName,
-          includeAppData: mergedConfig.includeAppData,
-          includeSettings: mergedConfig.includeSettings,
-          useVmSnapshot: mergedConfig.useVmSnapshot,
-          strictBackupMode: mergedConfig.strictBackupMode,
-          vmSnapshotTimeoutMs: mergedConfig.vmSnapshotTimeoutMs,
-          appBundleIds: args.appBundleIds,
-        });
+    let captureResult: CaptureSnapshotResult;
+    try {
+      captureResult = await snapshotStore.replaceSnapshotData(
+        snapshotName,
+        pathOptions,
+        async () => {
+          const captured = await captureProvider.capture({
+            snapshotName,
+            includeAppData: mergedConfig.includeAppData,
+            includeSettings: mergedConfig.includeSettings,
+            useVmSnapshot: mergedConfig.useVmSnapshot,
+            strictBackupMode: mergedConfig.strictBackupMode,
+            vmSnapshotTimeoutMs: mergedConfig.vmSnapshotTimeoutMs,
+            appBundleIds: args.appBundleIds,
+          });
 
-        const sizeBytes = await resolveSnapshotSizeBytes(
+          const sizeBytes = await resolveSnapshotSizeBytes(
+            snapshotName,
+            captured.manifest,
+            snapshotStore,
+            avdSnapshots,
+            pathOptions,
+          );
+          const timestamp = captured.manifest.timestamp;
+
+          await snapshotRepository.insertSnapshot({
+            snapshotName: captured.snapshotName,
+            deviceId: captured.manifest.deviceId,
+            deviceName: captured.manifest.deviceName,
+            platform: captured.manifest.platform,
+            snapshotType: captured.manifest.snapshotType,
+            includeAppData: captured.manifest.includeAppData,
+            includeSettings: captured.manifest.includeSettings,
+            createdAt: timestamp,
+            lastAccessedAt: timestamp,
+            sizeBytes,
+            manifest: captured.manifest,
+          });
+
+          return captured;
+        },
+      );
+    } catch (error) {
+      if (
+        device.platform === "android" &&
+        device.deviceId.startsWith("emulator-") &&
+        wasVmSnapshotSaveDispatched(error)
+      ) {
+        await recordFailedVmSnapshotReclaim(
+          device,
           snapshotName,
-          captured.manifest,
-          snapshotStore,
+          mergedConfig.includeSettings,
+          snapshotRepository,
           avdSnapshots,
-          pathOptions,
+          now,
+          error,
         );
-        const timestamp = captured.manifest.timestamp;
-
-        await snapshotRepository.insertSnapshot({
-          snapshotName: captured.snapshotName,
-          deviceId: captured.manifest.deviceId,
-          deviceName: captured.manifest.deviceName,
-          platform: captured.manifest.platform,
-          snapshotType: captured.manifest.snapshotType,
-          includeAppData: captured.manifest.includeAppData,
-          includeSettings: captured.manifest.includeSettings,
-          createdAt: timestamp,
-          lastAccessedAt: timestamp,
-          sizeBytes,
-          manifest: captured.manifest,
-        });
-
-        return captured;
-      },
-    );
+      }
+      throw error;
+    }
 
     return captureResult;
   });

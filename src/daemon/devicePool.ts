@@ -33,6 +33,10 @@ import { hasMutableDisplayName, isIosPhysicalUdid } from "../utils/ios-cmdline-t
 import { isAndroidEmulatorSerial } from "../utils/androidSerial";
 import { didSourceSucceedForDevice, type DiscoverySource } from "../utils/discoverySource";
 import { consolePortFromSerial } from "../utils/android-cmdline-tools/EmulatorConsoleClient";
+import {
+  defaultEmulatorConsoleBusyRegistry,
+  type EmulatorConsoleBusyRegistry,
+} from "../utils/android-cmdline-tools/EmulatorConsoleBusyRegistry";
 import { getInstalledAppsCacheWriteCoordinator } from "../db/installedAppsCacheWriteCoordinator";
 import { getDbWriteBarrier } from "../db/dbWriteBarrier";
 import { getAbortSignal, runWithAbortSignal, throwIfRequestAborted } from "../utils/AbortContext";
@@ -75,6 +79,12 @@ function resolveLifecycleCoordinator(
   coordinator: VirtualDeviceLifecycleCoordinator | undefined,
 ): VirtualDeviceLifecycleCoordinator {
   return coordinator ?? getVirtualDeviceLifecycleCoordinator();
+}
+
+function resolveConsoleBusyRegistry(
+  registry: EmulatorConsoleBusyRegistry | undefined,
+): EmulatorConsoleBusyRegistry {
+  return registry ?? defaultEmulatorConsoleBusyRegistry;
 }
 
 /**
@@ -646,6 +656,7 @@ export class DevicePool {
   private readonly DEVICE_WAIT_TIMEOUT_MS = 60000; // 60 seconds max wait
   private readonly DEVICE_WAIT_INTERVAL_MS = 1000; // Check every 1 second
   private readonly lifecycleCoordinator: VirtualDeviceLifecycleCoordinator;
+  private readonly consoleBusyRegistry: EmulatorConsoleBusyRegistry;
 
   constructor(
     sessionManager: SessionManager,
@@ -670,11 +681,13 @@ export class DevicePool {
     cancelDeviceSessionExecutions?: DeviceSessionExecutionCanceller,
     idGenerator: IdGenerator = defaultIdGenerator,
     lifecycleCoordinator?: VirtualDeviceLifecycleCoordinator,
+    consoleBusyRegistry?: EmulatorConsoleBusyRegistry,
   ) {
     this.sessionManager = sessionManager;
     this.daemonSessionId = daemonSessionId;
     this.timer = timer;
     this.idGenerator = idGenerator;
+    this.consoleBusyRegistry = resolveConsoleBusyRegistry(consoleBusyRegistry);
     this.installedAppsRepository = installedAppsRepository ?? new InstalledAppsRepository();
     this.deviceManager = deviceManager;
     this.retryExecutor = retryExecutor;
@@ -6341,7 +6354,7 @@ export class DevicePool {
     if (!this.hasReusableSerial(pooled) || this.isStaleIdentityObservation(pooled, discovered)) {
       return;
     }
-    if (this.hasUnresolvedEmulatorName(discovered)) {
+    if (this.shouldQuarantineUnresolvedEmulatorName(pooled, discovered)) {
       await this.enterPooledIdentityQuarantine(
         pooled,
         "discovery could not read the AVD name, so the pooled identity " +
@@ -6363,6 +6376,26 @@ export class DevicePool {
       `[DevicePool] Lifting the identity quarantine on ${pooled.id}: discovery read ` +
         `'${discovered.name}'`,
     );
+  }
+
+  private shouldQuarantineUnresolvedEmulatorName(
+    pooled: PooledDevice,
+    discovered: Pick<BootedDevice, "deviceId" | "name" | "platform">,
+  ): boolean {
+    if (!this.hasUnresolvedEmulatorName(discovered)) {
+      return false;
+    }
+    if (!this.consoleBusyRegistry.isBusy(pooled.id)) {
+      return true;
+    }
+    // `adb devices` already proved this serial is present. A daemon-owned VM
+    // snapshot command monopolizes the emulator console, so its timed-out
+    // `emu avd name` probe supplies no identity evidence (#6961).
+    logger.debug(
+      `[DevicePool] Retaining ${pooled.id}: discovery could not read its AVD name while ` +
+        "a console-exclusive operation is in flight",
+    );
+    return false;
   }
 
   /**

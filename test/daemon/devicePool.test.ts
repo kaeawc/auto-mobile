@@ -26,6 +26,7 @@ import {
 } from "../../src/daemon/emulatorLossIncident";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../src/utils/virtualDeviceLifecycleCoordinator";
+import { FakeEmulatorConsoleBusyRegistry } from "../fakes/FakeEmulatorConsoleBusyRegistry";
 
 async function withProcessPlatform<T>(platform: NodeJS.Platform, fn: () => Promise<T>): Promise<T> {
   const original = process.platform;
@@ -6893,6 +6894,49 @@ describe("DevicePool", () => {
       const quarantined = devicePool.getDevice("emulator-5554");
       expect(quarantined?.sessionId).toBe("owner-session");
       expect(quarantined?.incarnation).toBe(incarnation);
+    });
+
+    test("keeps an in-flight console-exclusive capture live when its AVD-name probe times out", async () => {
+      const cancellations: { sessionId: string; reason: string }[] = [];
+      const consoleBusy = new FakeEmulatorConsoleBusyRegistry();
+      devicePool = new DevicePool(
+        sessionManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        fakeAppsRepo,
+        fakeDeviceManager,
+        new DefaultRetryExecutor(fakeTimer),
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        async (sessionId, reason) => {
+          cancellations.push({ sessionId, reason });
+          return 1;
+        },
+        undefined,
+        undefined,
+        consoleBusy,
+      );
+      const device = poolDevice("emulator-5554", "Pixel_8_API_35");
+      await initializeLiveDevices([device]);
+      await devicePool.bindOrReuseDeviceSession(
+        "owner-session",
+        "emulator-5554",
+        "android",
+        androidImage,
+      );
+
+      consoleBusy.setBusy("emulator-5554", true);
+      await devicePool.reconcileDiscoveryObservation([unresolved("emulator-5554")], "test:capture");
+
+      expect(cancellations).toEqual([]);
+      expect(devicePool.isPooledIdentityUnresolved("emulator-5554")).toBe(false);
+      expect(devicePool.getDevice("emulator-5554")?.sessionId).toBe("owner-session");
     });
 
     // The FUNNEL 1 caller can itself be a session-bound destructive call whose

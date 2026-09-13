@@ -5,20 +5,28 @@ import { ActionableError, BootedDevice } from "../models";
 import { createJSONToolResponse } from "../utils/toolUtils";
 import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
 
+// #6712: the advertised `additionalProperties: false` was not enforced at
+// runtime — a plain z.object silently DROPPED an undeclared caller argument.
+// `.strict()` closes that gap, matching launchApp/tapOn (#6154) and the
+// preference tools (#6348).
 export const phoneCallSchema = addDeviceTargetingToSchema(
-  z.object({
-    action: z
-      .enum(["call", "accept", "cancel", "busy", "hold"])
-      .describe("call/accept/cancel/busy/hold; hold needs no phoneNumber"),
-    phoneNumber: z.string().optional().describe("Phone number; required except for hold"),
-  }),
+  z
+    .object({
+      action: z
+        .enum(["call", "accept", "cancel", "busy", "hold"])
+        .describe("call/accept/cancel/busy/hold; hold needs no phoneNumber"),
+      phoneNumber: z.string().optional().describe("Phone number; required except for hold"),
+    })
+    .strict(),
 );
 
 export const sendSmsSchema = addDeviceTargetingToSchema(
-  z.object({
-    phoneNumber: z.string().describe("Sender phone number"),
-    message: z.string().describe("SMS body; max 1024 chars, no newlines/NUL"),
-  }),
+  z
+    .object({
+      phoneNumber: z.string().describe("Sender phone number"),
+      message: z.string().describe("SMS body; max 1024 chars, no newlines/NUL"),
+    })
+    .strict(),
 );
 
 export interface PhoneCallArgs extends PhoneCallOptions {}

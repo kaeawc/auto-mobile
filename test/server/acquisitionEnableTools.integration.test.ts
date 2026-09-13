@@ -6,6 +6,15 @@ import {
   enableToolsSchemaField,
   registerToolSelectionTools,
 } from "../../src/server/toolSelectionTools";
+import { getStructuredField, type StructuredToolResponse } from "../../src/utils/toolUtils";
+
+/** The server-computed fields an acquisition envelope carries (#6869, #6886). */
+type AcquisitionPayload = {
+  sessionUuid?: string;
+  gatedTools?: string[];
+  enabledTools?: string[];
+  enableToolsError?: string;
+};
 
 /**
  * #6869 — a client had to acquire a device, read `gatedTools`, and then spend
@@ -17,15 +26,19 @@ import {
 describe("acquisition-time enableTools (#6869)", () => {
   let fixture: McpTestFixture | undefined;
 
-  const registerAcquisition = (name: string) => {
+  const registerAcquisition = (
+    name: string,
+    handler: () => Promise<Record<string, unknown>> = async () => ({
+      content: [{ type: "text", text: JSON.stringify({ sessionUuid: "acquired-session" }) }],
+    }),
+    options: Record<string, unknown> = {},
+  ) => {
     ToolRegistry.register(
       name,
       "acquire",
       z.object({ enableTools: enableToolsSchemaField }),
-      async () => ({
-        content: [{ type: "text", text: JSON.stringify({ sessionUuid: "acquired-session" }) }],
-      }),
-      { defaultEnabled: true },
+      handler,
+      { defaultEnabled: true, ...options },
     );
     ToolRegistry.register("inputText", "input", z.object({}), async () => ({ content: [] }), {
       defaultEnabled: false,
@@ -40,11 +53,32 @@ describe("acquisition-time enableTools (#6869)", () => {
   };
 
   const acquire = async (name: string, args: Record<string, unknown>) => {
-    const response = await fixture!.client.request(
-      { method: "tools/call", params: { name, arguments: args } },
-      z.any(),
-    );
-    return { response, payload: JSON.parse(response.content[0].text) };
+    // Typed so `structuredContent` is read through getStructuredField (#2907)
+    // rather than off the envelope. `client.request` with `z.any()` returns the
+    // raw envelope, so this is a widening assignment, not a cast.
+    const response: StructuredToolResponse<AcquisitionPayload> & { isError?: boolean } =
+      await fixture!.client.request(
+        { method: "tools/call", params: { name, arguments: args } },
+        z.any(),
+      );
+    return {
+      response,
+      payload: JSON.parse(response.content[0].text) as AcquisitionPayload,
+    };
+  };
+
+  const withFailingSelectionWrites = async () => {
+    await fixture?.teardown();
+    fixture = new McpTestFixture({
+      sessionToolSelectionService: {
+        isEnabled: async (_sessionUuid, _toolName, declaredDefault) => declaredDefault,
+        setEnabled: async () => {
+          throw new Error("selection storage unavailable");
+        },
+      },
+    });
+    await fixture.setup();
+    ToolRegistry.clearTools();
   };
 
   beforeEach(async () => {
@@ -145,20 +179,6 @@ describe("acquisition-time enableTools (#6869)", () => {
    * has to be stated in the response instead of inferred.
    */
   describe("a failed capability write", () => {
-    const withFailingSelectionWrites = async () => {
-      await fixture?.teardown();
-      fixture = new McpTestFixture({
-        sessionToolSelectionService: {
-          isEnabled: async (_sessionUuid, _toolName, declaredDefault) => declaredDefault,
-          setEnabled: async () => {
-            throw new Error("selection storage unavailable");
-          },
-        },
-      });
-      await fixture.setup();
-      ToolRegistry.clearTools();
-    };
-
     for (const acquisition of ["getAndroid", "getApple"] as const) {
       test(`${acquisition} reports the failure and keeps the minted session`, async () => {
         await withFailingSelectionWrites();
@@ -190,6 +210,91 @@ describe("acquisition-time enableTools (#6869)", () => {
       const { payload } = await acquire("getAndroid", { enableTools: ["inputText"] });
 
       expect(payload.enableToolsError).toBeUndefined();
+    });
+  });
+
+  /**
+   * #6886 review — when optional resource configuration fails, provisionDevice
+   * deliberately returns `isError: true` ALONGSIDE a usable `sessionUuid`
+   * (`createProvisionDeviceResponse` in `src/server/deviceTools.ts`), and the
+   * daemon proxy binds that retained session. Skipping the grant on `isError`
+   * therefore left the caller bound to a live session with none of the declared
+   * capabilities and nothing in the envelope saying so.
+   */
+  describe("a retained session on an error result", () => {
+    const registerResourceFailureProvision = () =>
+      registerAcquisition(
+        "provisionDevice",
+        async () => ({
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                sessionUuid: "acquired-session",
+                success: false,
+                message: "requested resource configuration was not fully applied",
+              }),
+            },
+          ],
+          structuredContent: { sessionUuid: "acquired-session", success: false },
+          isError: true,
+          // Declaring an output schema keeps `structuredContent` past the
+          // wire-boundary strip (#2759), so the enrichment can be asserted on
+          // BOTH halves of the envelope, as provisionDevice itself carries it.
+        }),
+        { outputSchema: z.looseObject({ sessionUuid: z.string() }) },
+      );
+
+    test("provisionDevice still grants enableTools when resources failed", async () => {
+      registerResourceFailureProvision();
+
+      const { response, payload } = await acquire("provisionDevice", {
+        enableTools: ["inputText"],
+      });
+
+      expect(response.isError).toBe(true);
+      expect(payload.sessionUuid).toBe("acquired-session");
+      expect(payload.enabledTools).toEqual(["inputText", "observe", "provisionDevice"]);
+      expect(getStructuredField(response, "enabledTools")).toEqual([
+        "inputText",
+        "observe",
+        "provisionDevice",
+      ]);
+      expect((await fixture!.client.listTools()).tools.map((tool) => tool.name)).toContain(
+        "inputText",
+      );
+    });
+
+    test("provisionDevice reports enableToolsError on the error envelope", async () => {
+      await withFailingSelectionWrites();
+      registerResourceFailureProvision();
+
+      const { response, payload } = await acquire("provisionDevice", {
+        enableTools: ["inputText"],
+      });
+
+      expect(response.isError).toBe(true);
+      expect(payload.sessionUuid).toBe("acquired-session");
+      expect(payload.enableToolsError).toContain("selection storage unavailable");
+      expect(getStructuredField(response, "enableToolsError")).toContain(
+        "selection storage unavailable",
+      );
+      expect(payload.enabledTools).not.toContain("inputText");
+    });
+
+    test("a failed acquisition that mints no session grants nothing", async () => {
+      registerAcquisition("provisionDevice", async () => ({
+        content: [{ type: "text", text: JSON.stringify({ message: "no device available" }) }],
+        isError: true,
+      }));
+
+      const { payload } = await acquire("provisionDevice", { enableTools: ["inputText"] });
+
+      expect(payload.enabledTools).toBeUndefined();
+      expect(payload.enableToolsError).toBeUndefined();
+      expect((await fixture!.client.listTools()).tools.map((tool) => tool.name)).not.toContain(
+        "inputText",
+      );
     });
   });
 

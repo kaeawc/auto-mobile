@@ -153,9 +153,18 @@ function withCapabilityDeclarationFailure<
  * fails a cancelled acquisition, neither of which is part of provisionDevice's
  * existing contract. The device is provisioned and the session minted by the
  * time this runs, so a failed capability report must not discard either.
+ *
+ * The RETAINED session — not `isError` — is what makes this an acquisition
+ * (#6886 review). When optional resource configuration fails, provisionDevice
+ * deliberately returns `isError: true` alongside a usable `sessionUuid`
+ * (`createProvisionDeviceResponse` in `src/server/deviceTools.ts`), and
+ * `DaemonMcpProxy` binds that session; gating on `isError` left the caller
+ * bound to a live session with none of its declared capabilities and neither
+ * `enabledTools` nor `enableToolsError` to say so. A truly failed acquisition
+ * mints nothing, so `!sessionUuid` still grants nothing.
  */
 async function enrichProvisionDeviceResult<
-  T extends { content: Array<{ type: string; text?: string }>; isError?: boolean },
+  T extends { content: Array<{ type: string; text?: string }> },
 >(
   toolName: string,
   result: T,
@@ -164,7 +173,7 @@ async function enrichProvisionDeviceResult<
   enableTools: readonly string[],
   connectionProfileUuid: string | undefined,
 ): Promise<T> {
-  if (toolName !== "provisionDevice" || result?.isError || !sessionUuid) {
+  if (toolName !== "provisionDevice" || !sessionUuid) {
     return result;
   }
   const failure = await applyAcquisitionToolSelection(service, sessionUuid, enableTools);

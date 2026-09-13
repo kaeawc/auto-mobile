@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { EventEmitter } from "events";
-import { DeviceSessionManager } from "../../src/utils/DeviceSessionManager";
+import {
+  DeviceSessionManager,
+  SIMULATOR_APP_OPEN_GATE_TTL_MS,
+} from "../../src/utils/DeviceSessionManager";
 import { IOSCtrlProxyManager } from "../../src/utils/IOSCtrlProxyManager";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
@@ -922,6 +925,44 @@ describe("DeviceSessionManager iOS openSimulatorApp", () => {
 
     await manager.verifyIosDevice("ios-sim-1");
     expect(fakeSimctl.getMethodCalls("openSimulatorApp")).toHaveLength(3);
+  });
+
+  // A GUI launch must not latch for the process lifetime: the daemon outlives
+  // the Aqua session, so a logout (or a user quitting Simulator.app) leaves the
+  // GUI closed with nothing left to reopen it. The gate expires after
+  // SIMULATOR_APP_OPEN_GATE_TTL_MS so GUI -> headless -> GUI transitions reach
+  // SimCtlClient's own headless-session probe again (PR #6830 review).
+  test("should re-probe openSimulatorApp once the GUI-launch gate expires", async () => {
+    const fakeSimctl = new FakeSimCtlClient();
+    fakeSimctl.setDeviceInfo("ios-sim-1", {
+      udid: "ios-sim-1",
+      name: "iPhone 15",
+      state: "Booted",
+      isAvailable: true,
+    });
+    const timer = new FakeTimer();
+
+    const manager = DeviceSessionManager.createInstance(
+      buildIosProvider(fakeAdb, fakeDeviceUtils, fakeSimctl),
+      undefined,
+      { timer },
+    );
+
+    await manager.verifyIosDevice("ios-sim-1");
+    expect(fakeSimctl.getMethodCalls("openSimulatorApp")).toHaveLength(1);
+
+    // Still inside the gate: no re-probe.
+    timer.advanceTime(SIMULATOR_APP_OPEN_GATE_TTL_MS - 1);
+    await manager.verifyIosDevice("ios-sim-1");
+    expect(fakeSimctl.getMethodCalls("openSimulatorApp")).toHaveLength(1);
+
+    // Gate expired: re-probe, and the fresh launch re-arms it.
+    timer.advanceTime(1);
+    await manager.verifyIosDevice("ios-sim-1");
+    expect(fakeSimctl.getMethodCalls("openSimulatorApp")).toHaveLength(2);
+
+    await manager.verifyIosDevice("ios-sim-1");
+    expect(fakeSimctl.getMethodCalls("openSimulatorApp")).toHaveLength(2);
   });
 });
 

@@ -287,7 +287,27 @@ export interface DeviceSessionManagerOptions {
    */
   runnerProvisionTimeoutMs?: number;
   lifecycleCoordinator?: VirtualDeviceLifecycleCoordinator;
+  /**
+   * Clock for this manager's own TTL gates (currently the Simulator.app
+   * GUI-launch gate). Separate from {@link runnerReadinessTimer} so a test can
+   * drive the gate deterministically without perturbing readiness deadlines.
+   */
+  timer?: Timer;
 }
+
+/**
+ * How long a successful Simulator.app GUI launch suppresses further launch
+ * attempts on the session path.
+ *
+ * The daemon outlives the Aqua login session, so latching the launch for the
+ * process lifetime means a logout (or the user simply quitting Simulator.app)
+ * leaves the GUI closed with nothing left to reopen it. Expiring the gate ties
+ * it to GUI-session liveness instead: after the TTL the next verification calls
+ * `openSimulatorApp()` again, which is a cheap no-op activation when Simulator
+ * is already running and re-consults SimCtlClient's own 30s headless-session
+ * probe when it is not (#6372).
+ */
+export const SIMULATOR_APP_OPEN_GATE_TTL_MS = 30_000;
 
 export class DeviceSessionManager implements DeviceSessionManager {
   private currentDevice: BootedDevice | undefined;
@@ -302,7 +322,11 @@ export class DeviceSessionManager implements DeviceSessionManager {
   private readonly runnerProvisionTimeoutMs: number | undefined;
   private readonly lifecycleCoordinator: VirtualDeviceLifecycleCoordinator;
   private _adb: AdbExecutor | undefined;
-  private simulatorAppOpened = false;
+  private readonly timer: Timer;
+  // Injected-clock timestamp of the last successful Simulator.app GUI launch
+  // (undefined = never launched). Gates re-launch for
+  // SIMULATOR_APP_OPEN_GATE_TTL_MS rather than for the process lifetime.
+  private simulatorAppOpenedAtMs: number | undefined;
 
   // Track devices that have push update listeners registered
   private static pushUpdateListenersRegistered: Set<string> = new Set();
@@ -315,6 +339,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
     this.provider = provider;
     this.adbFactory = adbFactory;
     this.runnerReadinessTimer = options.runnerReadinessTimer ?? defaultTimer;
+    this.timer = options.timer ?? defaultTimer;
     this.runnerReadinessTimeoutMs = options.runnerReadinessTimeoutMs;
     this.runnerProvisionTimeoutMs = options.runnerProvisionTimeoutMs;
     this.lifecycleCoordinator =
@@ -381,6 +406,44 @@ export class DeviceSessionManager implements DeviceSessionManager {
    */
   public getCurrentPlatform(): Platform | undefined {
     return this.currentPlatform;
+  }
+
+  /**
+   * Whether the session path should attempt a Simulator.app GUI launch.
+   *
+   * True until a launch succeeds, and true again once that launch is older than
+   * {@link SIMULATOR_APP_OPEN_GATE_TTL_MS} so a GUI -> headless -> GUI
+   * transition (logout/login, or the user quitting Simulator.app) can reopen
+   * the GUI instead of being suppressed for the daemon's lifetime.
+   */
+  private shouldOpenSimulatorApp(): boolean {
+    if (this.simulatorAppOpenedAtMs === undefined) {
+      return true;
+    }
+    const age = this.timer.now() - this.simulatorAppOpenedAtMs;
+    // A backwards clock reads as an expired gate: re-probing is cheap, staying
+    // latched on a bogus timestamp is not.
+    return age < 0 || age >= SIMULATOR_APP_OPEN_GATE_TTL_MS;
+  }
+
+  /**
+   * Open Simulator.app for a booted simulator unless the GUI-launch gate is
+   * still armed. Only an actual GUI launch arms it: a headless host skips the
+   * launch and reports false, and arming there would leave Simulator.app
+   * unopened even after the host gains an Aqua session (#6372).
+   */
+  private async ensureSimulatorAppOpen(): Promise<void> {
+    if (!this.shouldOpenSimulatorApp()) {
+      return;
+    }
+    try {
+      const opened = await this.simctl!.openSimulatorApp();
+      this.simulatorAppOpenedAtMs = opened ? this.timer.now() : undefined;
+    } catch (err) {
+      // Best-effort convenience: the booted simulator and CtrlProxy work
+      // without the GUI, so a failed launch must not fail the verification.
+      logger.warn(`[DeviceSessionManager] Failed to open Simulator.app: ${err}`);
+    }
   }
 
   /**
@@ -911,17 +974,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
       return;
     }
 
-    if (!this.simulatorAppOpened) {
-      try {
-        // Only latch on an actual GUI launch. A headless host skips the launch
-        // and reports false; latching there would leave Simulator.app unopened
-        // for the process lifetime even after the host gains an Aqua session,
-        // and would keep the session path from ever re-probing (#6372).
-        this.simulatorAppOpened = await this.simctl!.openSimulatorApp();
-      } catch (err) {
-        logger.warn(`[DeviceSessionManager] Failed to open Simulator.app: ${err}`);
-      }
-    }
+    await this.ensureSimulatorAppOpen();
 
     // Create a device object for the CtrlProxy iOS clients
     const device: BootedDevice = {

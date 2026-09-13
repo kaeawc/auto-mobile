@@ -267,4 +267,24 @@ describe("AndroidEmulatorClient listAvds", () => {
       },
     ]);
   });
+
+  test("includes the configured Android API level in the AVD listing", async () => {
+    const configReader: AvdConfigReader = {
+      async readConfig() {
+        return { apiLevel: 34 };
+      },
+    };
+    const execAsync = async (_command: string): Promise<ExecResult> =>
+      createExecResult("Pixel_9\\n");
+    const client = new AndroidEmulatorClient(
+      execAsync,
+      null,
+      new FakeTimer(),
+      undefined,
+      configReader,
+    );
+    (client as any).ensureEmulatorPath = async () => "emulator";
+
+    await expect(client.listAvds()).resolves.toMatchObject([{ apiLevel: 34 }]);
+  });
 });

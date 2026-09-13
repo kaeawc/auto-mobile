@@ -177,6 +177,28 @@ describe("platform device preparation tools", () => {
     });
   });
 
+  test("getAndroid reports Android API and release metadata from its selected AVD image", async () => {
+    const emulator: BootedDevice = {
+      platform: "android",
+      name: "Pixel_9_API_36",
+      deviceId: "emulator-5562",
+    };
+    const image = {
+      platform: "android" as const,
+      name: emulator.name,
+      isRunning: true,
+      apiLevel: 36,
+      osVersion: "16",
+    };
+    deviceUtils.setDeviceImages("android", [image]);
+    deviceUtils.setBootedDevices("android", [emulator]);
+    matcher.setBootedResult(emulator);
+
+    const result = await callTool("getAndroid", { avdName: emulator.name });
+
+    expect(result.deviceIdentity).toMatchObject({ apiLevel: 36, osVersion: "16" });
+  });
+
   test("getApple accepts only a simulator UDID and returns its simulator identity", async () => {
     const simulator: DeviceInfo = {
       platform: "ios",
@@ -530,6 +552,106 @@ describe("platform device preparation tools", () => {
       avdName: emulator.name,
       androidImage: { name: emulator.name, platform: "android" },
     });
+  });
+
+  test("preserves admitted Android metadata for a serial-targeted warm acquisition", async () => {
+    const emulator: BootedDevice = {
+      platform: "android",
+      name: "Pixel_9_API_36",
+      deviceId: "emulator-5562",
+    };
+    const admittedImage: DeviceInfo = {
+      platform: "android",
+      name: emulator.name,
+      isRunning: true,
+      apiLevel: 36,
+      osVersion: "16",
+    };
+    sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      deviceUtils,
+      new DefaultRetryExecutor(timer),
+    );
+    await pool.addDevice(emulator, admittedImage);
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    deviceUtils.setBootedDevices("android", [emulator]);
+
+    const result = await callTool("getAndroid", { deviceId: emulator.deviceId });
+
+    expect(pool.getDevice(emulator.deviceId)?.androidImage).toMatchObject({
+      apiLevel: 36,
+      osVersion: "16",
+    });
+    expect(result).toMatchObject({ apiLevel: 36, osVersion: "16" });
+  });
+
+  test("preserves all admitted Android metadata for a serial-targeted warm acquisition", async () => {
+    const emulator: BootedDevice = {
+      platform: "android",
+      name: "Pixel_9_API_36",
+      deviceId: "emulator-5562",
+    };
+    const admittedImage: DeviceInfo = {
+      platform: "android",
+      name: emulator.name,
+      isRunning: true,
+      deviceId: emulator.deviceId,
+      source: "local",
+      apiLevel: 36,
+      osVersion: "16",
+      formFactor: "phone",
+      screenWidth: 1080,
+      screenHeight: 2400,
+      screenDensity: 420,
+      capabilityInventory: {
+        schemaVersion: 1,
+        capabilities: [{ id: "android.hardware.nfc", state: "available", source: "avd_config" }],
+      },
+    };
+    sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      deviceUtils,
+      new DefaultRetryExecutor(timer),
+    );
+    await pool.addDevice(emulator, admittedImage);
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    deviceUtils.setBootedDevices("android", [emulator]);
+
+    await callTool("getAndroid", { deviceId: emulator.deviceId });
+
+    expect(pool.getDevice(emulator.deviceId)?.androidImage).toMatchObject(admittedImage);
+  });
+
+  test("does not record an image for a serial-targeted externally booted emulator", async () => {
+    const emulator: BootedDevice = {
+      platform: "android",
+      name: "Pixel_9_API_36",
+      deviceId: "emulator-5562",
+    };
+    sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      deviceUtils,
+      new DefaultRetryExecutor(timer),
+    );
+    await pool.addDevice(emulator);
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    deviceUtils.setBootedDevices("android", [emulator]);
+
+    await callTool("getAndroid", { deviceId: emulator.deviceId });
+
+    expect(pool.getDevice(emulator.deviceId)?.androidImage).toBeUndefined();
   });
 
   test("still returns the bound session when post-boot resource notification fails", async () => {

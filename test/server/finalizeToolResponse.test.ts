@@ -314,6 +314,26 @@ describe("finalizeToolResponse", () => {
     });
   });
 
+  // A default `observe` projects to the skeleton, which deletes `viewHierarchy`
+  // — the only carrier of the hierarchy's truncation provenance (issue #6601
+  // review PRRT_kwDOP-GF5M6h4sDi). The finalized default response must still
+  // say the tree was capped, or the agent reads a short list as a complete one.
+  test("a default observe response keeps the hierarchy truncation reasons", () => {
+    const obs = makeObserveResult();
+    obs.viewHierarchy!.truncationReasons = ["max_children[com.example:id/root kept 64 of 70]"];
+
+    const finalized = finalizeToolResponse(createStructuredToolResponse(obs), {
+      name: "observe",
+    });
+
+    const payload = finalized.structuredContent as ObserveResult;
+    expect(payload.viewHierarchy).toBeUndefined();
+    expect(payload.truncationReasons).toEqual(["max_children[com.example:id/root kept 64 of 70]"]);
+    expect(JSON.parse(finalized.content[0].text).truncationReasons).toEqual([
+      "max_children[com.example:id/root kept 64 of 70]",
+    ]);
+  });
+
   test("EC4: elements are kept only when the include-elements gate is enabled", () => {
     // Elements are dropped by default now; `--observe-result-include-elements`
     // opts back in. project:"full" keeps the headline hierarchy so `elements`
@@ -943,6 +963,89 @@ describe("finalizeToolResponse", () => {
       const parsed = JSON.parse(finalized.content[0].text);
       expect(parsed.observation.activeWindow).toEqual(obsSc.activeWindow);
       expect(parsed.observation.freshness).toEqual(obsSc.freshness);
+    });
+
+    // A diff REPLACES the projected observation, so the truncation provenance
+    // the skeleton projection lifts to the top level (issue #6601) is dropped
+    // with it — review thread PRRT_kwDOP-GF5M6h4v0N on PR #6912. The agent then
+    // reads a capped skeleton as a complete one.
+    test("a diffed observation carries the hierarchy truncation reasons (issue #6601)", () => {
+      const { store } = makeStore();
+      const reasons = ["max_children[com.example:id/root kept 64 of 70]"];
+      const capped = (): ObserveResult => {
+        const observation = sameScreenObserve();
+        observation.viewHierarchy!.truncationReasons = [...reasons];
+        return observation;
+      };
+
+      finalizeToolResponse(createStructuredToolResponse(capped()), {
+        name: "observe",
+        sessionUuid: "s1",
+        baselineStore: store,
+      });
+
+      const next = capped();
+      (next.viewHierarchy!.hierarchy.node as any).node[0].checked = "true";
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: next }),
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
+      );
+
+      const obsSc = (finalized.structuredContent as any).observation;
+      expect(obsSc.isDiff).toBe(true);
+      expect(obsSc.truncationReasons).toEqual(reasons);
+
+      // Text mirror agrees.
+      const parsed = JSON.parse(finalized.content[0].text);
+      expect(parsed.observation.truncationReasons).toEqual(reasons);
+    });
+
+    test("a diffed observation under project:'full' still carries the truncation reasons (issue #6601)", () => {
+      const { store } = makeStore();
+      const reasons = ["max_nodes"];
+      const capped = (): ObserveResult => {
+        const observation = sameScreenObserve();
+        observation.viewHierarchy!.truncationReasons = [...reasons];
+        return observation;
+      };
+
+      finalizeToolResponse(createStructuredToolResponse(capped()), {
+        name: "observe",
+        sessionUuid: "s1",
+        baselineStore: store,
+      });
+
+      const next = capped();
+      (next.viewHierarchy!.hierarchy.node as any).node[0].checked = "true";
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: next }),
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store, args: { project: "full" } },
+      );
+
+      const obsSc = (finalized.structuredContent as any).observation;
+      expect(obsSc.isDiff).toBe(true);
+      expect(obsSc.truncationReasons).toEqual(reasons);
+    });
+
+    test("a diffed observation of an untruncated hierarchy carries no truncationReasons", () => {
+      const { store } = makeStore();
+      finalizeToolResponse(createStructuredToolResponse(sameScreenObserve()), {
+        name: "observe",
+        sessionUuid: "s1",
+        baselineStore: store,
+      });
+
+      const next = sameScreenObserve();
+      (next.viewHierarchy!.hierarchy.node as any).node[0].checked = "true";
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: next }),
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
+      );
+
+      const obsSc = (finalized.structuredContent as any).observation;
+      expect(obsSc.isDiff).toBe(true);
+      expect(obsSc.truncationReasons).toBeUndefined();
+      expect("truncationReasons" in JSON.parse(finalized.content[0].text).observation).toBe(false);
     });
 
     test("a diffed observation carries a usable `skeleton` even under raw:true / project:'full' (PR #6242 review PRRT_kwDOP-GF5M6fq3iK)", () => {

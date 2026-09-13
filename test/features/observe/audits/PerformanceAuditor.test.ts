@@ -689,6 +689,54 @@ describe("deriveTouchLatencyPoint truncated hierarchy (#6167 follow-up)", () => 
   });
 });
 
+/**
+ * Issue #6601 review: `max_children[...]` is a HOST OUTPUT cap, not a capture
+ * failure. `filterViewHierarchy` trims the rendered payload while
+ * `prepareHierarchyForResponse` attaches the uncapped raw hierarchy, and
+ * `collectInteractiveObstacles` traverses that raw carrier — so the obstacle map
+ * is complete and touch-latency must still be measured. Only device-side reasons
+ * (`max_nodes`, `max_depth`, `cancelled`) mean the capture itself is partial.
+ */
+describe("deriveTouchLatencyPoint host output caps vs capture fidelity (#6601 review)", () => {
+  const appWindow = { left: 0, top: 0, right: 1080, bottom: 1920 };
+  const outputCap = "max_children[com.example:id/list kept 64 of 200]";
+
+  test("does not skip touch-latency for a host-side max_children output cap", () => {
+    const result = makeResult({
+      viewHierarchy: { hierarchy: {} as any, truncationReasons: [outputCap] } as any,
+      elements: { clickable: [], scrollable: [], text: [], media: [] },
+    });
+
+    const decision = deriveTouchLatencyPoint(appWindow, result);
+    expect(decision.skipTouchLatency).toBe(false);
+    expect(decision.touchPoint).toBeDefined();
+  });
+
+  test("isHierarchyReliableForTapProbe stays true for an output cap alone", () => {
+    const result = makeResult({
+      viewHierarchy: { hierarchy: {} as any, truncationReasons: [outputCap] } as any,
+      elements: { clickable: [], scrollable: [], text: [], media: [] },
+    });
+
+    expect(isHierarchyReliableForTapProbe(appWindow, result)).toBe(true);
+  });
+
+  // The output cap must not MASK a real device-side truncation riding alongside.
+  test("still skips when a device-side reason rides alongside the output cap", () => {
+    const result = makeResult({
+      viewHierarchy: {
+        hierarchy: {} as any,
+        truncationReasons: [outputCap, "max_nodes"],
+      } as any,
+      elements: { clickable: [], scrollable: [], text: [], media: [] },
+    });
+
+    const decision = deriveTouchLatencyPoint(appWindow, result);
+    expect(decision.skipTouchLatency).toBe(true);
+    expect(decision.touchPoint).toBeUndefined();
+  });
+});
+
 describe("isHierarchyReliableForTapProbe / deriveTouchLatencyPoint unverified capture (#6167 follow-up)", () => {
   const appWindow = { left: 0, top: 0, right: 1080, bottom: 1920 };
 

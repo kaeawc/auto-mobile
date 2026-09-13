@@ -9,6 +9,7 @@ import {
   observeResultSchema,
   tapOnResultSchema,
   toolOutputArtifactMetadataSchema,
+  viewHierarchyResultSchema,
 } from "../../src/server/toolOutputSchemas";
 
 /**
@@ -304,6 +305,57 @@ describe("observationOutputSchema: discriminated union of full observation vs di
     };
     expect(() => observationOutputSchema.parse(artifact)).not.toThrow();
     expect(() => toolOutputArtifactMetadataSchema.parse(artifact)).not.toThrow();
+  });
+});
+
+describe("observationSummarySchema: truncation reasons (#6601)", () => {
+  test("declares and preserves truncation reasons on a full action observation", () => {
+    const full = {
+      activeWindow: { appId: "com.example" },
+      truncationReasons: ["max_children[root] kept 10 of 12"],
+    };
+
+    const parsed = observationSummarySchema.parse(full);
+    expect(parsed.truncationReasons).toEqual(full.truncationReasons);
+
+    const json = toJSONSchema(observationSummarySchema) as Record<string, any>;
+    expect(json.properties.truncationReasons).toBeDefined();
+    expect(json.required ?? []).not.toContain("truncationReasons");
+  });
+
+  test("declares nested hierarchy truncation reasons on full/raw action observations", () => {
+    const full = {
+      activeWindow: { appId: "com.example" },
+      viewHierarchy: {
+        hierarchy: { node: { bounds: [0, 0, 100, 50] } },
+        truncationReasons: ["max_children[root] kept 10 of 12"],
+      },
+    };
+
+    const parsed = observationOutputSchema.parse(full);
+    expect(parsed.viewHierarchy?.truncationReasons).toEqual(full.viewHierarchy.truncationReasons);
+
+    const json = toJSONSchema(observationSummarySchema) as Record<string, any>;
+    const viewHierarchy = json.properties.viewHierarchy as Record<string, any>;
+    const viewHierarchySchema = viewHierarchy.$ref
+      ? (json.$defs[viewHierarchy.$ref.replace("#/$defs/", "")] as Record<string, any>)
+      : viewHierarchy;
+    expect(viewHierarchySchema.properties.truncationReasons).toBeDefined();
+  });
+});
+
+describe("viewHierarchyResultSchema: nested truncation reasons (#6601)", () => {
+  test("declares and preserves truncation reasons on a full/raw hierarchy", () => {
+    const viewHierarchy = {
+      truncationReasons: ["max_children[root] kept 10 of 12"],
+    };
+
+    const parsed = viewHierarchyResultSchema.parse(viewHierarchy);
+    expect(parsed.truncationReasons).toEqual(viewHierarchy.truncationReasons);
+
+    const json = toJSONSchema(viewHierarchyResultSchema) as Record<string, any>;
+    expect(json.properties.truncationReasons).toBeDefined();
+    expect(json.required ?? []).not.toContain("truncationReasons");
   });
 });
 

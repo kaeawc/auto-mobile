@@ -778,8 +778,7 @@ function androidDeviceIdentityPayload(
 ): Record<string, unknown> {
   const portMatch = /^emulator-(\d+)$/.exec(device.deviceId);
   const androidImage = sourceImage?.platform === "android" ? sourceImage : undefined;
-  const apiLevel = device.apiLevel ?? androidImage?.apiLevel;
-  const osVersion = device.osVersion ?? androidImage?.osVersion;
+  const { apiLevel, osVersion } = androidBootedMetadata(device, sourceImage);
   return {
     platform: "android",
     avdName: androidImage?.name ?? device.name,
@@ -790,6 +789,17 @@ function androidDeviceIdentityPayload(
   };
 }
 
+function androidBootedMetadata(
+  device: BootedDevice,
+  sourceImage: DeviceInfo | undefined,
+): Pick<DeviceInfo, "apiLevel" | "osVersion"> {
+  const androidImage = sourceImage?.platform === "android" ? sourceImage : undefined;
+  return {
+    apiLevel: device.apiLevel ?? androidImage?.apiLevel,
+    osVersion: device.osVersion ?? androidImage?.osVersion,
+  };
+}
+
 function androidSourceImageWithBootedMetadata(
   device: BootedDevice,
   sourceImage: DeviceInfo | undefined,
@@ -797,6 +807,9 @@ function androidSourceImageWithBootedMetadata(
 ): DeviceInfo | undefined {
   if (device.platform !== "android") {
     return sourceImage;
+  }
+  if (!sourceImage && !admittedAndroidImage) {
+    return undefined;
   }
   return {
     ...sourceImage,
@@ -7557,13 +7570,15 @@ export function registerDeviceTools() {
   ) {
     perf.end();
     const timing = perf.getTimings();
+    const androidMetadata =
+      device.platform === "android" ? androidBootedMetadata(device, sourceImage) : undefined;
 
     const result: StartDeviceResult = {
       deviceId: device.deviceId,
       name: device.name,
       platform: device.platform,
-      apiLevel: device.apiLevel,
-      osVersion: device.osVersion ?? device.iosVersion,
+      apiLevel: androidMetadata?.apiLevel ?? device.apiLevel,
+      osVersion: androidMetadata?.osVersion ?? device.osVersion ?? device.iosVersion,
       formFactor: device.formFactor,
       screenSize:
         device.screenWidth && device.screenHeight

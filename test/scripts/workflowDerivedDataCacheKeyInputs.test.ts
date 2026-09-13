@@ -47,6 +47,17 @@ const REQUIRED_PROJECT_DESCRIPTOR_EXTENSIONS = [".pbxproj", "project.yml"];
 // / needlessly volatile across otherwise-identical source trees.
 const FORBIDDEN_HASH_SEGMENTS = [".build", "SourcePackages", "DerivedData"];
 
+const REQUIRED_SCOPES_BY_JOB_ID: Record<string, readonly string[]> = {
+  "ios-xcode-build": ["ios/"],
+  "ios-playground-tests": [
+    "ios/Playground/",
+    ["ios/", "highlight-core/"].join(""),
+    "ios/auto-mobile-sdk/",
+  ],
+  "ios-xctest-runner-simulator-tests": ["ios/control-proxy/"],
+  "ios-xcode-build-sweep": ["ios/"],
+};
+
 function isDerivedDataCacheStep(step: WorkflowStep): boolean {
   if (typeof step.uses !== "string" || !step.uses.startsWith("actions/cache")) {
     return false;
@@ -63,35 +74,39 @@ function extractHashFilesPatterns(key: string): string[] {
   return [...call[1].matchAll(/'([^']*)'/g)].map((match) => match[1]);
 }
 
-function validateDerivedDataCacheKeyPatterns(patterns: string[]): string[] {
+function validateDerivedDataCacheKeyPatterns(patterns: string[], jobId: string): string[] {
   const violations: string[] = [];
-  const scopes = new Set(
+  const scopesFromPatterns = new Set(
     patterns
       .filter((pattern) => pattern.includes("**"))
       .map((pattern) => pattern.slice(0, pattern.indexOf("**"))),
   );
+  const requiredScopes = REQUIRED_SCOPES_BY_JOB_ID[jobId] ?? [];
+  const scopes = new Set([...requiredScopes, ...scopesFromPatterns]);
   if (scopes.size === 0) {
     scopes.add("");
   }
 
   for (const scope of scopes) {
+    if (!scopesFromPatterns.has(scope) && requiredScopes.includes(scope)) {
+      violations.push(`job '${jobId}' cache key missing required scope '${scope}'`);
+    }
+
     for (const extension of REQUIRED_EXTENSIONS) {
       const expectedSuffix =
         extension === ".xcassets"
-          ? ".xcassets/**"
+          ? "*.xcassets/**"
           : extension.startsWith(".")
             ? `*${extension}`
             : extension;
-      if (
-        !patterns.some((pattern) => pattern.startsWith(scope) && pattern.endsWith(expectedSuffix))
-      ) {
+      if (!patterns.includes(`${scope}**/${expectedSuffix}`)) {
         violations.push(`scope '${scope}' does not hash '${expectedSuffix}' inputs`);
       }
     }
 
     if (
       !REQUIRED_PROJECT_DESCRIPTOR_EXTENSIONS.some((suffix) =>
-        patterns.some((pattern) => pattern.startsWith(scope) && pattern.endsWith(suffix)),
+        patterns.includes(`${scope}**/${suffix.startsWith(".") ? `*${suffix}` : suffix}`),
       )
     ) {
       violations.push(
@@ -137,7 +152,7 @@ describe("DerivedData cache keys hash every build input", () => {
         ).toBeGreaterThan(0);
 
         expect(
-          validateDerivedDataCacheKeyPatterns(patterns),
+          validateDerivedDataCacheKeyPatterns(patterns, jobId),
           `${workflow}/${jobId}: ${patterns.join(", ")}`,
         ).toEqual([]);
       }
@@ -161,7 +176,41 @@ test("DerivedData cache guard checks every required input in every directory sco
   }
   patterns.push("ios/auto-mobile-sdk/**/*.pbxproj");
 
-  expect(validateDerivedDataCacheKeyPatterns(patterns)).toContain(
+  expect(validateDerivedDataCacheKeyPatterns(patterns, "ios-playground-tests")).toContain(
     "scope 'ios/auto-mobile-sdk/' does not hash '*.xcprivacy' inputs",
+  );
+});
+
+test("DerivedData cache guard detects a required scope with no patterns", () => {
+  const patterns = REQUIRED_EXTENSIONS.map((extension) => {
+    const suffix =
+      extension === ".xcassets"
+        ? "*.xcassets/**"
+        : extension.startsWith(".")
+          ? `*${extension}`
+          : extension;
+    return `ios/Playground/**/${suffix}`;
+  });
+
+  expect(validateDerivedDataCacheKeyPatterns(patterns, "ios-playground-tests")).toContain(
+    "job 'ios-playground-tests' cache key missing required scope 'ios/auto-mobile-sdk/'",
+  );
+});
+
+test("DerivedData cache guard rejects narrowed filename globs", () => {
+  const patterns = REQUIRED_EXTENSIONS.map((extension) => {
+    const suffix =
+      extension === ".xcassets"
+        ? "*.xcassets/**"
+        : extension.startsWith(".")
+          ? `*${extension}`
+          : extension;
+    return `ios/Playground/**/${suffix}`;
+  });
+  const swiftPatternIndex = patterns.indexOf("ios/Playground/**/*.swift");
+  patterns[swiftPatternIndex] = "ios/Playground/**/Generated*.swift";
+
+  expect(validateDerivedDataCacheKeyPatterns(patterns, "ios-playground-tests")).toContain(
+    "scope 'ios/Playground/' does not hash '*.swift' inputs",
   );
 });

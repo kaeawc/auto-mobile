@@ -39,6 +39,19 @@ export interface ObservePollOptions {
    * burn its whole budget instead of settling promptly.
    */
   initialMinTimestampMs?: number;
+  /**
+   * Skip the performance audit on every poll (issue #6890 review).
+   *
+   * Polls already skip the screenshot and the accessibility audit because they
+   * are intermediate state, but the performance audit is the expensive one: it
+   * drives up to three synthetic touches plus ADB/database work that honours
+   * none of this loop's budget, so on a short-budget loop it both perturbs the
+   * screen being observed and corrupts its own measurement. Off by default so
+   * the long-budget public `waitFor`/`observe` paths keep today's behaviour;
+   * the embedded-observation settle gate (#6866), which runs after EVERY
+   * navigation action on a one-second budget, opts in.
+   */
+  skipPerformanceAudit?: boolean;
 }
 
 export interface ObservePollOutcome {
@@ -184,6 +197,7 @@ export async function pollObserveUntil(
       // automatic evidence capture it once after this loop completes.
       skipScreenshot: true,
       skipAccessibilityAudit: true,
+      skipPerformanceAudit: options.skipPerformanceAudit,
     });
     polls++;
     throwIfAborted(options.signal);

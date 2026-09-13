@@ -438,7 +438,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -618,7 +618,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -1243,7 +1243,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -1473,6 +1473,34 @@
           },
           "required": ["executionTimeMs", "steps"],
           "additionalProperties": false
+        },
+        "warnings": {
+          "description": "Best-effort warnings from steps that still succeeded",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "stepIndex": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "tool": {
+                "type": "string"
+              },
+              "device": {
+                "type": "string"
+              },
+              "warnings": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": ["stepIndex", "tool", "warnings"],
+            "additionalProperties": false
+          }
         }
       },
       "required": ["success", "executedSteps", "totalSteps"],
@@ -1620,6 +1648,98 @@
           "description": "Booted device serial, e.g. emulator-5554 (the `deviceId` field of automobile:devices/booted/android), or a defined AVD image name, which is cold-booted by name. Prefer avdName to boot or coordinate a named AVD.",
           "type": "string",
           "minLength": 1
+        },
+        "enableTools": {
+          "description": "Exact case-sensitive AutoMobile tool names to enable for the session this call mints, applied before the response is built so the returned enabledTools/gatedTools reflect them. An unknown or non-configurable name rejects the call before any device work starts.",
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "enum": [
+              "accessibility",
+              "accessibilityFocus",
+              "biometricAuth",
+              "changeLocalization",
+              "clearKeyValueFile",
+              "clearMockNetwork",
+              "clearText",
+              "clipboard",
+              "crashApp",
+              "debugSearch",
+              "deleteDevice",
+              "deviceSnapshot",
+              "displayConfig",
+              "dragAndDrop",
+              "executePlan",
+              "explore",
+              "exportPlan",
+              "getAndroid",
+              "getAppPermissions",
+              "getApple",
+              "getDataStore",
+              "getDeepLinks",
+              "getDeviceState",
+              "getIosSimulatorCapabilities",
+              "getNavigationGraph",
+              "getNetworkGraph",
+              "getNotificationPolicy",
+              "getPreference",
+              "highlight",
+              "homeScreen",
+              "identifyInteractions",
+              "imeAction",
+              "inputText",
+              "installApp",
+              "keyboard",
+              "killDevice",
+              "launchApp",
+              "listApps",
+              "listDataStores",
+              "listDeviceImages",
+              "listDevices",
+              "mockNetwork",
+              "navigateTo",
+              "network",
+              "observe",
+              "openLink",
+              "phoneCall",
+              "pinchOn",
+              "postNotification",
+              "pressButton",
+              "provisionDevice",
+              "putAppFile",
+              "recentApps",
+              "recordSteps",
+              "removeKeyValue",
+              "resetKeychain",
+              "rotate",
+              "selectAllText",
+              "sendKeys",
+              "sendSms",
+              "setActiveDevice",
+              "setAppPermissions",
+              "setDeviceResources",
+              "setDeviceState",
+              "setKeyValue",
+              "setNotificationPolicy",
+              "setPreference",
+              "setUIState",
+              "shake",
+              "sqlQuery",
+              "stageSharedStorage",
+              "stageSharedStorageFixtures",
+              "startTestRecording",
+              "swipeOn",
+              "systemTray",
+              "tapAny",
+              "tapOn",
+              "terminateApp",
+              "uninstallApp",
+              "videoRecording",
+              "wakeAndUnlock"
+            ]
+          }
         }
       },
       "additionalProperties": false
@@ -1653,6 +1773,98 @@
           "description": "Booted device identifier (the `deviceId` field of automobile:devices/booted/ios); alias for udid",
           "type": "string",
           "minLength": 1
+        },
+        "enableTools": {
+          "description": "Exact case-sensitive AutoMobile tool names to enable for the session this call mints, applied before the response is built so the returned enabledTools/gatedTools reflect them. An unknown or non-configurable name rejects the call before any device work starts.",
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "enum": [
+              "accessibility",
+              "accessibilityFocus",
+              "biometricAuth",
+              "changeLocalization",
+              "clearKeyValueFile",
+              "clearMockNetwork",
+              "clearText",
+              "clipboard",
+              "crashApp",
+              "debugSearch",
+              "deleteDevice",
+              "deviceSnapshot",
+              "displayConfig",
+              "dragAndDrop",
+              "executePlan",
+              "explore",
+              "exportPlan",
+              "getAndroid",
+              "getAppPermissions",
+              "getApple",
+              "getDataStore",
+              "getDeepLinks",
+              "getDeviceState",
+              "getIosSimulatorCapabilities",
+              "getNavigationGraph",
+              "getNetworkGraph",
+              "getNotificationPolicy",
+              "getPreference",
+              "highlight",
+              "homeScreen",
+              "identifyInteractions",
+              "imeAction",
+              "inputText",
+              "installApp",
+              "keyboard",
+              "killDevice",
+              "launchApp",
+              "listApps",
+              "listDataStores",
+              "listDeviceImages",
+              "listDevices",
+              "mockNetwork",
+              "navigateTo",
+              "network",
+              "observe",
+              "openLink",
+              "phoneCall",
+              "pinchOn",
+              "postNotification",
+              "pressButton",
+              "provisionDevice",
+              "putAppFile",
+              "recentApps",
+              "recordSteps",
+              "removeKeyValue",
+              "resetKeychain",
+              "rotate",
+              "selectAllText",
+              "sendKeys",
+              "sendSms",
+              "setActiveDevice",
+              "setAppPermissions",
+              "setDeviceResources",
+              "setDeviceState",
+              "setKeyValue",
+              "setNotificationPolicy",
+              "setPreference",
+              "setUIState",
+              "shake",
+              "sqlQuery",
+              "stageSharedStorage",
+              "stageSharedStorageFixtures",
+              "startTestRecording",
+              "swipeOn",
+              "systemTray",
+              "tapAny",
+              "tapOn",
+              "terminateApp",
+              "uninstallApp",
+              "videoRecording",
+              "wakeAndUnlock"
+            ]
+          }
         }
       },
       "additionalProperties": false
@@ -1766,18 +1978,18 @@
   },
   {
     "name": "getDeviceState",
-    "description": "Read device-level state such as Do Not Disturb, iOS Simulator biometric enrollment, and device-wide network condition",
+    "description": "Read device-level state: Do Not Disturb, the connectivity toggles (airplaneMode, wifiEnabled, bluetoothEnabled, locationEnabled), iOS Simulator biometric enrollment, and device-wide network condition. Use it as the idempotency oracle before flipping a toggle — a bare call returns doNotDisturb + connectivity, so you can check whether Airplane mode is already on instead of inferring it from the status bar. Each connectivity field is true/false, or omitted when the device could not answer (the key is absent on this API level, or the value did not parse) — omitted never means off. Android only: iOS reports connectivity unsupported, because Airplane mode / Wi-Fi / Bluetooth / Location have no simctl or devicectl read verb and a simulator shares the host's network stack.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "include": {
-          "description": "State fields to read; supports doNotDisturb, biometrics, and networkCondition",
+          "description": "State fields to read; supports doNotDisturb, connectivity, biometrics, and networkCondition. Defaults to doNotDisturb + connectivity, so a bare call answers whether Airplane mode / Wi-Fi / Bluetooth / Location are already on.",
           "minItems": 1,
           "type": "array",
           "items": {
             "type": "string",
-            "enum": ["doNotDisturb", "biometrics", "networkCondition"]
+            "enum": ["doNotDisturb", "connectivity", "biometrics", "networkCondition"]
           }
         },
         "platform": {
@@ -2131,7 +2343,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -2243,7 +2455,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -2265,7 +2477,7 @@
   },
   {
     "name": "inputText",
-    "description": "Input text. The optional mode field is Android-only and ignored on iOS.",
+    "description": "Input text. The optional mode field is Android-only and ignored on iOS. If the text lands but the optional keyboard dismissal fails, the response stays a success with keyboardDismissed:false and a warnings entry.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -2354,7 +2566,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -2469,7 +2681,7 @@
   },
   {
     "name": "launchApp",
-    "description": "Launch app by package name",
+    "description": "Launch app by package name. On Android an app that is already in the foreground returns success with alreadyForeground:true plus the observation, not an error; iOS re-launches it and returns an ordinary success without that marker.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -2490,7 +2702,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -3052,7 +3264,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Output projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) in place of viewHierarchy/elements. Each skeleton elementId/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "description": "Output projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) in place of viewHierarchy/elements. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -6826,7 +7038,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -6987,7 +7199,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -7114,7 +7326,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -7456,12 +7668,111 @@
           "type": "integer",
           "exclusiveMinimum": 0,
           "maximum": 830000
+        },
+        "enableTools": {
+          "description": "Exact case-sensitive AutoMobile tool names to enable for the session this call mints, applied before the response is built so the returned enabledTools/gatedTools reflect them. An unknown or non-configurable name rejects the call before any device work starts. Requires boot=true.",
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "enum": [
+              "accessibility",
+              "accessibilityFocus",
+              "biometricAuth",
+              "changeLocalization",
+              "clearKeyValueFile",
+              "clearMockNetwork",
+              "clearText",
+              "clipboard",
+              "crashApp",
+              "debugSearch",
+              "deleteDevice",
+              "deviceSnapshot",
+              "displayConfig",
+              "dragAndDrop",
+              "executePlan",
+              "explore",
+              "exportPlan",
+              "getAndroid",
+              "getAppPermissions",
+              "getApple",
+              "getDataStore",
+              "getDeepLinks",
+              "getDeviceState",
+              "getIosSimulatorCapabilities",
+              "getNavigationGraph",
+              "getNetworkGraph",
+              "getNotificationPolicy",
+              "getPreference",
+              "highlight",
+              "homeScreen",
+              "identifyInteractions",
+              "imeAction",
+              "inputText",
+              "installApp",
+              "keyboard",
+              "killDevice",
+              "launchApp",
+              "listApps",
+              "listDataStores",
+              "listDeviceImages",
+              "listDevices",
+              "mockNetwork",
+              "navigateTo",
+              "network",
+              "observe",
+              "openLink",
+              "phoneCall",
+              "pinchOn",
+              "postNotification",
+              "pressButton",
+              "provisionDevice",
+              "putAppFile",
+              "recentApps",
+              "recordSteps",
+              "removeKeyValue",
+              "resetKeychain",
+              "rotate",
+              "selectAllText",
+              "sendKeys",
+              "sendSms",
+              "setActiveDevice",
+              "setAppPermissions",
+              "setDeviceResources",
+              "setDeviceState",
+              "setKeyValue",
+              "setNotificationPolicy",
+              "setPreference",
+              "setUIState",
+              "shake",
+              "sqlQuery",
+              "stageSharedStorage",
+              "stageSharedStorageFixtures",
+              "startTestRecording",
+              "swipeOn",
+              "systemTray",
+              "tapAny",
+              "tapOn",
+              "terminateApp",
+              "uninstallApp",
+              "videoRecording",
+              "wakeAndUnlock"
+            ]
+          }
         }
       },
       "required": ["operationId", "device"],
       "additionalProperties": false,
       "if": {
-        "required": ["resources"]
+        "anyOf": [
+          {
+            "required": ["resources"]
+          },
+          {
+            "required": ["enableTools"]
+          }
+        ]
       },
       "then": {
         "properties": {
@@ -7635,7 +7946,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -7818,7 +8129,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -7854,7 +8165,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -8036,7 +8347,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -8815,13 +9126,13 @@
   },
   {
     "name": "setToolEnabled",
-    "description": "Enable or disable one exact AutoMobile tool for this MCP session.",
+    "description": "Enable or disable AutoMobile tools for this MCP session: one exact name via toolName, or a whole batch in one call via toolNames. Returns the resulting enabled set.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "toolName": {
-          "description": "Exact case-sensitive AutoMobile tool name to enable or disable. The listed choices include optional tools absent from tools/list until enabled.",
+          "description": "Exact case-sensitive AutoMobile tool name to enable or disable. The listed choices include optional tools absent from tools/list until enabled. Provide either toolName or toolNames.",
           "type": "string",
           "minLength": 1,
           "enum": [
@@ -8908,8 +9219,100 @@
             "wakeAndUnlock"
           ]
         },
+        "toolNames": {
+          "description": "Exact case-sensitive AutoMobile tool names to enable or disable in ONE call, applied all-or-nothing: an unknown or non-configurable name rejects the whole request before anything is written. Provide either toolName or toolNames.",
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "enum": [
+              "accessibility",
+              "accessibilityFocus",
+              "biometricAuth",
+              "changeLocalization",
+              "clearKeyValueFile",
+              "clearMockNetwork",
+              "clearText",
+              "clipboard",
+              "crashApp",
+              "debugSearch",
+              "deleteDevice",
+              "deviceSnapshot",
+              "displayConfig",
+              "dragAndDrop",
+              "executePlan",
+              "explore",
+              "exportPlan",
+              "getAndroid",
+              "getAppPermissions",
+              "getApple",
+              "getDataStore",
+              "getDeepLinks",
+              "getDeviceState",
+              "getIosSimulatorCapabilities",
+              "getNavigationGraph",
+              "getNetworkGraph",
+              "getNotificationPolicy",
+              "getPreference",
+              "highlight",
+              "homeScreen",
+              "identifyInteractions",
+              "imeAction",
+              "inputText",
+              "installApp",
+              "keyboard",
+              "killDevice",
+              "launchApp",
+              "listApps",
+              "listDataStores",
+              "listDeviceImages",
+              "listDevices",
+              "mockNetwork",
+              "navigateTo",
+              "network",
+              "observe",
+              "openLink",
+              "phoneCall",
+              "pinchOn",
+              "postNotification",
+              "pressButton",
+              "provisionDevice",
+              "putAppFile",
+              "recentApps",
+              "recordSteps",
+              "removeKeyValue",
+              "resetKeychain",
+              "rotate",
+              "selectAllText",
+              "sendKeys",
+              "sendSms",
+              "setActiveDevice",
+              "setAppPermissions",
+              "setDeviceResources",
+              "setDeviceState",
+              "setKeyValue",
+              "setNotificationPolicy",
+              "setPreference",
+              "setUIState",
+              "shake",
+              "sqlQuery",
+              "stageSharedStorage",
+              "stageSharedStorageFixtures",
+              "startTestRecording",
+              "swipeOn",
+              "systemTray",
+              "tapAny",
+              "tapOn",
+              "terminateApp",
+              "uninstallApp",
+              "videoRecording",
+              "wakeAndUnlock"
+            ]
+          }
+        },
         "enabled": {
-          "description": "Whether to enable the tool (default: true).",
+          "description": "Whether to enable the tools (default: true).",
           "default": true,
           "type": "boolean"
         },
@@ -8919,8 +9322,18 @@
           "minLength": 1
         }
       },
-      "required": ["toolName"],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "if": {
+        "required": ["toolName"]
+      },
+      "then": {
+        "not": {
+          "required": ["toolNames"]
+        }
+      },
+      "else": {
+        "required": ["toolNames"]
+      }
     }
   },
   {
@@ -9082,7 +9495,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -9420,7 +9833,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -9542,7 +9955,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -9822,7 +10235,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -10003,7 +10416,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -10622,6 +11035,10 @@
                   },
                   "required": ["isFresh"],
                   "additionalProperties": {}
+                },
+                "settled": {
+                  "description": "Same name/meaning as a full observation's `settled` (issue #6866): whether the observation this diff was computed from passed the hierarchy-stability gate. Populated from the post-action observation, not by `diffObserveResult` itself, so a diff-mode client has the same accessor as a full-mode one.",
+                  "type": "boolean"
                 },
                 "added": {
                   "type": "array",
@@ -11411,6 +11828,10 @@
                   },
                   "required": ["platform", "source", "confidence", "key", "components"],
                   "additionalProperties": {}
+                },
+                "settled": {
+                  "description": "Whether this observation passed the hierarchy-stability gate (issue #6866): two consecutive structurally-equal captures. `false` means the bound expired, the action was not navigation-class, or the action failed — in every case the capture was never confirmed stable. Stamped on every embedded action observation.",
+                  "type": "boolean"
                 }
               },
               "additionalProperties": {}
@@ -12203,7 +12624,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },

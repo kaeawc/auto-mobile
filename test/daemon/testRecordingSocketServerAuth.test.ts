@@ -3,6 +3,7 @@ import { TestRecordingSocketServer } from "../../src/daemon/testRecordingSocketS
 import type { StreamSocketAuthenticator } from "../../src/daemon/streamSocketAuth";
 import type { TestRecordingCommand } from "../../src/daemon/testRecordingSocketTypes";
 import { ActionableError } from "../../src/models";
+import type { DeviceAdmissionGate } from "../../src/daemon/deviceAdmissionGate";
 
 /**
  * The socket server's handleRequest is protected; a thin subclass exposes it so
@@ -27,6 +28,42 @@ function recordingAuthenticator(
     },
   };
 }
+
+/**
+ * FUNNEL 2: a serial whose pooled AVD identity is quarantined is refused, and
+ * the refusal must come BEFORE any device work — authorization alone cannot
+ * carry it, because the quarantine deliberately preserves the owning session
+ * ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
+ */
+function quarantineGate(deviceId: string): DeviceAdmissionGate {
+  return {
+    assertDeviceActionable: (candidate, purpose) => {
+      if (candidate === deviceId) {
+        throw new ActionableError(`Refusing ${purpose} on device '${candidate}'`);
+      }
+    },
+  };
+}
+
+describe("TestRecordingSocketServer device admission (issue #6863)", () => {
+  test("refuses a start on a quarantined serial before any device work", async () => {
+    const calls: Array<{ sessionUuid?: string; deviceId?: string }> = [];
+    const server = new TestableServer(
+      undefined,
+      undefined,
+      recordingAuthenticator(calls),
+      quarantineGate("emu-1"),
+    );
+    await expect(
+      server.invoke({
+        command: "start",
+        sessionUuid: "live",
+        deviceId: "emu-1",
+        platform: "android",
+      }),
+    ).rejects.toThrow(/Refusing to start a test recording on device 'emu-1'/);
+  });
+});
 
 describe("TestRecordingSocketServer authorization (issue #4752)", () => {
   test("rejects a start from an unauthenticated caller before any device work", async () => {

@@ -1,4 +1,5 @@
 import type { DeviceSessionResolver } from "../../src/daemon/deviceSessionResolver";
+import { ActionableError } from "../../src/models/ActionableError";
 
 /**
  * In-memory {@link DeviceSessionResolver} for unit tests. Seed live serial↔uuid
@@ -62,5 +63,14 @@ export class FakeDeviceSessionResolver implements DeviceSessionResolver {
 
   isRoutingSuspended(deviceId: string): boolean {
     return this.quarantined.has(deviceId);
+  }
+
+  assertDeviceActionable(deviceId: string, purpose: string): void {
+    if (!this.quarantined.has(deviceId)) {
+      return;
+    }
+    throw new ActionableError(
+      `Refusing ${purpose} on device '${deviceId}': its identity is unresolved.`,
+    );
   }
 }

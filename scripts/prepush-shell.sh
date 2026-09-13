@@ -117,12 +117,21 @@ if [[ "${merge_base_status}" -ne 0 ]]; then
   exit "${merge_base_status}"
 fi
 
+set +e
+changed_files_output="$(git diff --no-renames --name-only "${merge_base}" HEAD)"
+changed_files_status=$?
+set -e
+if [[ "${changed_files_status}" -ne 0 ]]; then
+  echo "Failed to list changed files between '${merge_base}' and HEAD." >&2
+  exit "${changed_files_status}"
+fi
+
 changed_files=()
 while IFS= read -r path; do
   if [[ -n "${path}" ]]; then
     changed_files+=("${path}")
   fi
-done < <(git diff --no-renames --name-only "${merge_base}" HEAD)
+done <<< "${changed_files_output}"
 
 if [[ "${#changed_files[@]}" -eq 0 ]]; then
   echo "No changed files since merge-base with ${BASE}; nothing to validate."
@@ -204,6 +213,15 @@ for path in "${changed_files[@]}"; do
   case "${path}" in
     scripts/*)
       add_check "stdlib-first"
+      ;;
+  esac
+
+  case "${path}" in
+    scripts/shellcheck/sete-baseline.txt)
+      add_check "shell-sete"
+      ;;
+    scripts/github/uv.lock|scripts/github/pyproject.toml)
+      add_check "github-python-lock"
       ;;
   esac
 

@@ -7,6 +7,7 @@ setup() {
   FAST_LOG="${TEST_ROOT}/fast.log"
   BATS_LOG="${TEST_ROOT}/bats.log"
   SHELLCHECK_LOG="${TEST_ROOT}/shellcheck.log"
+  REAL_GIT="$(command -v git)"
   mkdir -p "${TEST_ROOT}/scripts" "${TEST_ROOT}/test/bats" "${STUB_DIR}"
 
   cat > "${TEST_ROOT}/scripts/all_fast_validate_checks.sh" <<'EOF'
@@ -37,12 +38,23 @@ exit "${PREPUSH_SHELLCHECK_STATUS:-0}"
 EOF
   chmod +x "${STUB_DIR}/shellcheck"
 
+  cat > "${STUB_DIR}/git" <<'EOF'
+#!/usr/bin/env bash
+if [[ "${PREPUSH_GIT_DIFF_FAIL:-}" == "1" && "$#" -ge 5 && "$1" == "diff" && "$2" == "--no-renames" && "$3" == "--name-only" && "${!#}" == "HEAD" ]]; then
+  printf '%s\n' "simulated git diff failure" >&2
+  exit 17
+fi
+exec "${PREPUSH_REAL_GIT}" "$@"
+EOF
+  chmod +x "${STUB_DIR}/git"
+
   cp "${REPO_ROOT}/scripts/prepush-shell.sh" "${TEST_ROOT}/scripts/prepush-shell.sh"
   chmod +x "${TEST_ROOT}/scripts/prepush-shell.sh"
 
   export PREPUSH_FAST_LOG="${FAST_LOG}"
   export PREPUSH_BATS_LOG="${BATS_LOG}"
   export PREPUSH_SHELLCHECK_LOG="${SHELLCHECK_LOG}"
+  export PREPUSH_REAL_GIT="${REAL_GIT}"
   export PATH="${STUB_DIR}:${PATH}"
   export GIT_CONFIG_GLOBAL=/dev/null
   export GIT_CONFIG_SYSTEM=/dev/null
@@ -88,6 +100,25 @@ commit_change() {
   grep -Fqx -- '--only shellcheck,shell-portability,shell-sete,stdlib-first' "${FAST_LOG}"
   ! grep -Fq -- 'mkdocs-nav' "${FAST_LOG}"
   grep -Fqx -- 'test/bats/example.bats' "${BATS_LOG}"
+}
+
+@test "a changed sete baseline selects shell-sete" {
+  commit_change "scripts/shellcheck/sete-baseline.txt" "baseline fixture"
+
+  run bash scripts/prepush-shell.sh --base base
+
+  [ "${status}" -eq 0 ]
+  grep -Fqx -- '--only stdlib-first,shell-sete' "${FAST_LOG}"
+}
+
+@test "changed GitHub Python lock inputs select github-python-lock" {
+  commit_change "scripts/github/uv.lock" "lock fixture"
+  commit_change "scripts/github/pyproject.toml" '[project]'
+
+  run bash scripts/prepush-shell.sh --base base
+
+  [ "${status}" -eq 0 ]
+  grep -Fqx -- '--only stdlib-first,github-python-lock' "${FAST_LOG}"
 }
 
 @test "a changed shell script outside scripts/ selects shellcheck without portability or sete" {
@@ -261,4 +292,15 @@ commit_change() {
 
   [ "${status}" -ne 0 ]
   [[ "${output}" == *"Base ref 'missing-base' does not resolve"* ]]
+}
+
+@test "a failed changed-file diff aborts before nothing-to-validate" {
+  commit_change "src/example.ts" "export const fixture = true;"
+  export PREPUSH_GIT_DIFF_FAIL=1
+
+  run bash scripts/prepush-shell.sh --base base
+
+  [ "${status}" -ne 0 ]
+  [[ "${output}" == *"Failed to list changed files between"* ]]
+  [[ "${output}" != *"nothing to validate"* ]]
 }

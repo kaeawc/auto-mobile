@@ -120,12 +120,8 @@ public final class StreamableHTTPMCPClient: AutoMobileMCPClient, @unchecked Send
             request.setValue(sessionId, forHTTPHeaderField: "MCP-Session-Id")
         }
 
-        let responseData = try performRequest(request: request, timeout: timeout)
-
-        let jsonObject = try JSONSerialization.jsonObject(with: responseData, options: [])
-        guard let response = jsonObject as? [String: Any] else {
-            throw MCPClientError.invalidResponse("Expected JSON object response")
-        }
+        let body = try performRequest(request: request, timeout: timeout)
+        let response = try Self.decodeResponse(body, id: id)
 
         if let error = response["error"] as? [String: Any] {
             let message = error["message"] as? String ?? "Unknown MCP error"
@@ -138,7 +134,85 @@ public final class StreamableHTTPMCPClient: AutoMobileMCPClient, @unchecked Send
         return result
     }
 
-    private func performRequest(request: URLRequest, timeout: TimeInterval) throws -> Data {
+    /// The response half of the transport this client advertises: every content type listed in the
+    /// `Accept` header above has a decoder path here (#6633). The daemon builds its transport without
+    /// `enableJsonResponse`, so the JSON-RPC response arrives as SSE frames; JSON stays supported in
+    /// case a server opts into JSON mode.
+    private static func decodeResponse(_ body: HTTPResponseBody, id: Int64) throws -> [String: Any] {
+        guard isEventStream(body.contentType) else {
+            return try decodeJSONObject(body.data)
+        }
+        return try decodeEventStream(body.data, id: id)
+    }
+
+    private static func isEventStream(_ contentType: String?) -> Bool {
+        guard let contentType = contentType else {
+            return false
+        }
+        return contentType.trimmingCharacters(in: .whitespaces).lowercased().hasPrefix("text/event-stream")
+    }
+
+    private static func decodeJSONObject(_ data: Data) throws -> [String: Any] {
+        guard let object = try? JSONSerialization.jsonObject(with: data, options: []),
+              let response = object as? [String: Any]
+        else {
+            throw MCPClientError.invalidResponse("Expected JSON object response, got: \(bodyPreview(data))")
+        }
+        return response
+    }
+
+    /// Picks the frame whose JSON-RPC `id` matches the request just sent, so interleaved
+    /// notifications and unrelated responses on the same stream are skipped. A frame carrying an
+    /// `error` with no matching id (JSON-RPC allows a null id on parse errors) is the fallback, so a
+    /// server error still surfaces as `serverError` rather than an opaque decode failure.
+    private static func decodeEventStream(_ data: Data, id: Int64) throws -> [String: Any] {
+        var errorFrame: [String: Any]?
+        for event in SSEEventParser.parse(data) {
+            guard let payload = try? JSONSerialization.jsonObject(with: Data(event.data.utf8), options: []),
+                  let object = payload as? [String: Any]
+            else {
+                continue
+            }
+            if matchesRequestId(object["id"], id: id) {
+                return object
+            }
+            if errorFrame == nil, object["error"] != nil {
+                errorFrame = object
+            }
+        }
+        if let errorFrame = errorFrame {
+            return errorFrame
+        }
+        throw MCPClientError.invalidResponse(
+            "No SSE frame matched request id \(id), got: \(bodyPreview(data))"
+        )
+    }
+
+    private static func matchesRequestId(_ value: Any?, id: Int64) -> Bool {
+        switch value {
+        case let number as NSNumber:
+            return number.int64Value == id
+        case let string as String:
+            return string == String(id)
+        default:
+            return false
+        }
+    }
+
+    /// Bounded, single-line body excerpt for `invalidResponse` messages, per the structured-error
+    /// convention — the raw Cocoa decoding error used to escape instead.
+    private static func bodyPreview(_ data: Data, limit: Int = 200) -> String {
+        let slice = data.prefix(limit)
+        guard let text = String(data: slice, encoding: .utf8) else {
+            return "<non-UTF8 body, \(data.count) bytes>"
+        }
+        let escaped = text
+            .replacingOccurrences(of: "\r", with: "\\r")
+            .replacingOccurrences(of: "\n", with: "\\n")
+        return data.count > limit ? "\(escaped)…" : escaped
+    }
+
+    private func performRequest(request: URLRequest, timeout: TimeInterval) throws -> HTTPResponseBody {
         let semaphore = DispatchSemaphore(value: 0)
         let box = HTTPResultBox()
 
@@ -168,7 +242,10 @@ public final class StreamableHTTPMCPClient: AutoMobileMCPClient, @unchecked Send
                 box.result = .failure(MCPClientError.invalidResponse("Empty response body"))
                 return
             }
-            box.result = .success(data)
+            box.result = .success(HTTPResponseBody(
+                data: data,
+                contentType: httpResponse.value(forHTTPHeaderField: "Content-Type")
+            ))
         }
         task.resume()
 
@@ -179,8 +256,8 @@ public final class StreamableHTTPMCPClient: AutoMobileMCPClient, @unchecked Send
         }
 
         switch box.result {
-        case let .success(data):
-            return data
+        case let .success(body):
+            return body
         case let .failure(error):
             throw error
         case .none:
@@ -226,8 +303,14 @@ public final class StreamableHTTPMCPClient: AutoMobileMCPClient, @unchecked Send
     }
 }
 
+/// A buffered HTTP response body plus the `Content-Type` that decides how to decode it.
+struct HTTPResponseBody: Sendable {
+    let data: Data
+    let contentType: String?
+}
+
 /// Thread-crossing result slot for the `URLSession` completion handler. `@unchecked Sendable`: the
 /// handler writes it before `signal()`, read only after a successful `wait()` — semaphore-ordered.
 private final class HTTPResultBox: @unchecked Sendable {
-    var result: Result<Data, Error>?
+    var result: Result<HTTPResponseBody, Error>?
 }

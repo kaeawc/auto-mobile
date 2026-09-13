@@ -2148,7 +2148,7 @@ async function killProcessAndRetireOwnership(
   ) => void,
   strictDeadline = false,
   timeoutMs = DEVICE_SHUTDOWN_TIMEOUT_MS,
-  killTarget: BootedDevice = device,
+  killTarget: BootedDevice,
 ): Promise<string | undefined> {
   const deviceManager = dependencies.deviceManagerFactory();
   if (device.platform === "android") {

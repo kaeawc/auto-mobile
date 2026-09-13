@@ -109,25 +109,69 @@ describe("InstalledAppsRepository", () => {
     expect(apps).toHaveLength(0);
   });
 
-  test("getLatestVerification returns max last_verified_at", async () => {
+  test("getCacheVerifiedAt returns the oldest last_verified_at on the device", async () => {
     await repo.upsertInstalledApp("device-1", 0, "com.app1", false, 1000);
     await repo.upsertInstalledApp("device-1", 0, "com.app2", false, 2000);
 
-    const latest = await repo.getLatestVerification("device-1");
-    expect(latest).toBe(2000);
+    const verifiedAt = await repo.getCacheVerifiedAt("device-1");
+    expect(verifiedAt).toBe(1000);
   });
 
-  test("getLatestVerification returns null for unknown device", async () => {
-    const latest = await repo.getLatestVerification("unknown");
-    expect(latest).toBeNull();
+  test("getCacheVerifiedAt returns null for unknown device", async () => {
+    const verifiedAt = await repo.getCacheVerifiedAt("unknown");
+    expect(verifiedAt).toBeNull();
   });
 
-  test("getLatestVerificationForProfile filters by userId", async () => {
+  test("getCacheVerifiedAt is not refreshed by a single-row package-event write", async () => {
+    // A full rebuild stamps every row with the same verification time.
+    const rebuiltAt = 1000;
+    await repo.replaceInstalledApps("device-1", [
+      {
+        device_id: "device-1",
+        user_id: 0,
+        package_name: "com.app1",
+        is_system: 0,
+        installed_at: rebuiltAt,
+        last_verified_at: rebuiltAt,
+      },
+      {
+        device_id: "device-1",
+        user_id: 0,
+        package_name: "com.app2",
+        is_system: 0,
+        installed_at: rebuiltAt,
+        last_verified_at: rebuiltAt,
+      },
+    ]);
+
+    // One CtrlProxy package-added broadcast touches exactly one row, hours later.
+    await repo.upsertInstalledApp("device-1", 0, "com.app2", false, rebuiltAt + 3_600_000);
+
+    // The other rows are still only verified as of the rebuild, so the device's
+    // cache must not appear to have been verified an hour later (issue #6639).
+    expect(await repo.getCacheVerifiedAt("device-1")).toBe(rebuiltAt);
+  });
+
+  test("getCacheVerifiedAt ignores other devices", async () => {
+    await repo.upsertInstalledApp("device-1", 0, "com.app1", false, 5000);
+    await repo.upsertInstalledApp("device-2", 0, "com.app2", false, 1000);
+
+    expect(await repo.getCacheVerifiedAt("device-1")).toBe(5000);
+  });
+
+  test("getProfileCacheVerifiedAt returns the profile's oldest row", async () => {
     await repo.upsertInstalledApp("device-1", 0, "com.app1", false, 1000);
-    await repo.upsertInstalledApp("device-1", 10, "com.app2", false, 3000);
+    await repo.upsertInstalledApp("device-1", 0, "com.app2", false, 4000);
+    await repo.upsertInstalledApp("device-1", 10, "com.app3", false, 3000);
 
-    const latest = await repo.getLatestVerificationForProfile("device-1", 0);
-    expect(latest).toBe(1000);
+    expect(await repo.getProfileCacheVerifiedAt("device-1", 0)).toBe(1000);
+    expect(await repo.getProfileCacheVerifiedAt("device-1", 10)).toBe(3000);
+  });
+
+  test("getProfileCacheVerifiedAt returns null for an unknown profile", async () => {
+    await repo.upsertInstalledApp("device-1", 0, "com.app1", false, 1000);
+
+    expect(await repo.getProfileCacheVerifiedAt("device-1", 11)).toBeNull();
   });
 
   test("markDeviceStale sets last_verified_at to 0 for all apps on device", async () => {

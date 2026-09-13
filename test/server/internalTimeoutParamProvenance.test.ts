@@ -15,9 +15,12 @@ import { createStructuredToolResponse, getStructuredField } from "../../src/util
 import {
   INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
   INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
+  INTERNAL_LIVE_DEADLINE_KEY_PARAM,
+  INTERNAL_TOOL_PARAM_NAMES,
 } from "../../src/daemon/constants";
 
 const TOOL = "__internal_timeout_provenance_probe_6222__";
+const STRICT_TOOL = "__internal_strip_strict_probe_6917__";
 
 describe("internal `__mcpRequestTimeoutMs` provenance (issue #6222 P1 review)", () => {
   beforeAll(() => {
@@ -29,8 +32,9 @@ describe("internal `__mcpRequestTimeoutMs` provenance (issue #6222 P1 review)", 
       // (including a caller-forged `__mcpRequestTimeoutMs`) during
       // `tool.schema.parse()`. The reattachment this test targets happens
       // AFTER that parse, straight onto `handlerParams`, so it is exercised
-      // regardless of schema shape -- passthrough would conflate that with
-      // an unrelated pre-existing gap in `stripInternalToolParams`'s guard.
+      // regardless of schema shape. The complementary gap in
+      // `stripInternalToolParams`'s early-return guard is covered by
+      // STRICT_TOOL below (#6917 review, PRRT_kwDOP-GF5M6h40fK).
       z.object({}),
       async (args: unknown) => {
         const received = (args as Record<string, unknown>)[INTERNAL_MCP_REQUEST_TIMEOUT_PARAM];
@@ -51,10 +55,26 @@ describe("internal `__mcpRequestTimeoutMs` provenance (issue #6222 P1 review)", 
         }),
       },
     );
+
+    // #6917 review (PRRT_kwDOP-GF5M6h40fK): a STRICT input schema, like the
+    // ones #6712 tightened (`getNavigationGraphSchema` et al). Every internal
+    // param must be stripped before this parse -- the daemon's
+    // `ide/getNavigationGraph` route forwards `__mcpRequestTimeoutMs` as the
+    // ONLY internal marker, so a strip guard that ignores the timeout/deadline
+    // keys leaves it on the arguments and the parse fails with
+    // "Unrecognized key" before the handler ever runs.
+    ToolRegistry.register(
+      STRICT_TOOL,
+      "probe tool whose input schema rejects undeclared arguments",
+      z.object({ appId: z.string().optional() }).strict(),
+      async () => createStructuredToolResponse({ success: true }),
+      { outputSchema: z.object({ success: z.boolean() }) },
+    );
   });
 
   afterAll(() => {
     (ToolRegistry as unknown as { tools: Map<string, unknown> }).tools.delete(TOOL);
+    (ToolRegistry as unknown as { tools: Map<string, unknown> }).tools.delete(STRICT_TOOL);
   });
 
   describe("daemonMode: false (direct, non-daemon server)", () => {
@@ -127,6 +147,42 @@ describe("internal `__mcpRequestTimeoutMs` provenance (issue #6222 P1 review)", 
       });
 
       expect(getStructuredField(result, "receivedDeadlineMs")).toBe(98_765);
+    });
+
+    // Each of these is forwarded alone by at least one daemon route --
+    // `ide/getNavigationGraph` sends only `__mcpRequestTimeoutMs` -- so the
+    // strip must not depend on a session/execution marker riding along.
+    for (const internalParam of [
+      INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
+      INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
+      INTERNAL_LIVE_DEADLINE_KEY_PARAM,
+    ]) {
+      test(`${internalParam} alone is stripped before a strict input schema parses`, async () => {
+        const { client } = fixture.getContext();
+        const result = await client.callTool({
+          name: STRICT_TOOL,
+          arguments: {
+            [internalParam]:
+              internalParam === INTERNAL_LIVE_DEADLINE_KEY_PARAM ? "live-key" : 12_345,
+          },
+        });
+
+        expect(result.isError ?? false).toBe(false);
+        expect(getStructuredField(result, "success")).toBe(true);
+      });
+    }
+
+    test("every canonical internal param is stripped before a strict schema parses", async () => {
+      const { client } = fixture.getContext();
+      const args: Record<string, unknown> = { appId: "com.example" };
+      for (const internalParam of INTERNAL_TOOL_PARAM_NAMES) {
+        args[internalParam] = internalParam === INTERNAL_LIVE_DEADLINE_KEY_PARAM ? "live-key" : 1;
+      }
+
+      const result = await client.callTool({ name: STRICT_TOOL, arguments: args });
+
+      expect(result.isError ?? false).toBe(false);
+      expect(getStructuredField(result, "success")).toBe(true);
     });
   });
 });

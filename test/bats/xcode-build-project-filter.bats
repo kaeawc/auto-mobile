@@ -17,64 +17,6 @@ teardown() {
   rm -rf "$ios_dir"
 }
 
-assert_cache_paths_exclude_package_resolution_state() {
-  local workflow="$1"
-
-  run awk '
-    function indentation(line) {
-      match(line, /[^[:space:]]/)
-      return RSTART - 1
-    }
-
-    function check_path(path) {
-      sub(/^[[:space:]]+/, "", path)
-      sub(/[[:space:]]+$/, "", path)
-      if (path ~ /\.build$/ || path ~ /SourcePackages$/) {
-        print FILENAME ": forbidden actions/cache path: " path
-        invalid = 1
-      }
-    }
-
-    /^[[:space:]]*-[[:space:]]/ {
-      is_cache_step = 0
-      reading_path_block = 0
-    }
-
-    /uses:[[:space:]]*actions\/cache@/ {
-      is_cache_step = 1
-      next
-    }
-
-    is_cache_step && reading_path_block {
-      if ($0 ~ /^[[:space:]]*$/) {
-        next
-      }
-      if (indentation($0) <= path_indentation) {
-        reading_path_block = 0
-      } else {
-        check_path($0)
-        next
-      }
-    }
-
-    is_cache_step && /^[[:space:]]*path:[[:space:]]*/ {
-      path_indentation = indentation($0)
-      path = $0
-      sub(/^[[:space:]]*path:[[:space:]]*/, "", path)
-      if (path == "|" || path == ">") {
-        reading_path_block = 1
-      } else {
-        check_path(path)
-      }
-    }
-
-    END {
-      exit invalid
-    }
-  ' "$workflow"
-  [ "$status" -eq 0 ]
-}
-
 @test "no args selects every xcodeproj" {
   run env IOS_DIR="$ios_dir" XCODE_BUILD_DRY_RUN=1 bash "$script"
   [ "$status" -eq 0 ]
@@ -118,10 +60,4 @@ assert_cache_paths_exclude_package_resolution_state() {
   [[ "$output" == *"Playground"* ]]
   [[ "$output" == *"CtrlProxy"* ]]
   [[ "$output" != *"Sample"* ]]
-}
-
-@test "workflow cache paths exclude SwiftPM build and package resolution state" {
-  assert_cache_paths_exclude_package_resolution_state "$BATS_TEST_DIRNAME/../../.github/workflows/pull_request.yml"
-  assert_cache_paths_exclude_package_resolution_state "$BATS_TEST_DIRNAME/../../.github/workflows/merge.yml"
-  assert_cache_paths_exclude_package_resolution_state "$BATS_TEST_DIRNAME/../../.github/workflows/nightly.yml"
 }

@@ -63,6 +63,12 @@ export const parseDumpsysNotificationRecords = (output: string): DumpsysNotifica
     if (!extra) {
       continue;
     }
+    // An extras value the row could never render is not evidence: hierarchy
+    // extraction drops empty strings, so keeping an empty `android.text` would
+    // leave the record permanently unmatchable (#6875).
+    if (extra[2].trim().length === 0) {
+      continue;
+    }
     if (TITLE_EXTRAS.includes(extra[1])) {
       current.titles.push(extra[2]);
     } else if (BODY_EXTRAS.includes(extra[1])) {

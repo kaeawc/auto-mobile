@@ -154,6 +154,23 @@ describe("dumpsys notification records", () => {
     ).toBe("com.google.android.apps.wellbeing");
   });
 
+  test("drops empty extras values so a title-only row stays matchable", () => {
+    // `android.text=String ()` is an empty body; hierarchy extraction never
+    // emits empty strings, so keeping it would make the record unmatchable.
+    const records = parseDumpsysNotificationRecords(
+      dump(
+        "    NotificationRecord(0x1: pkg=com.example.app user=UserHandle{0} id=0 tag=null key=0|com.example.app|0|null|10100)",
+        "      extras={",
+        "        android.title=String (Sync finished)",
+        "        android.text=String ()",
+        "        android.subText=String (   )",
+        "      }",
+      ),
+    );
+    expect(records).toEqual([{ pkg: "com.example.app", titles: ["Sync finished"], bodies: [] }]);
+    expect(attributeRowByDumpsys(records, new Set(["Sync finished"]))).toBe("com.example.app");
+  });
+
   test("does not attribute a row to a record that carries no readable content", () => {
     expect(
       attributeRowByDumpsys(

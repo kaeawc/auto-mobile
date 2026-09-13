@@ -12,7 +12,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSnapshotRepository } from "../fakes/FakeDeviceSnapshotRepository";
 import { FakeDeviceSnapshotConfigRepository } from "../fakes/FakeDeviceSnapshotConfigRepository";
 import { FakeDeviceSnapshotStore } from "../fakes/FakeDeviceSnapshotStore";
-import { FakeAvdSnapshotService } from "../fakes/FakeAvdSnapshotService";
+import { FakeAvdSnapshotService, fakeAvdSnapshotPath } from "../fakes/FakeAvdSnapshotService";
 
 const AVD_NAME = "am-api36-ga-arm64";
 const EMULATOR: BootedDevice = {
@@ -423,8 +423,16 @@ describe("deviceSnapshotManager VM snapshot sizing and reclaim (#6490)", () => {
 
       expect(avdSnapshots.hasVmSnapshot(OTHER_AVD, "shared")).toBe(true);
       const listed = await listDeviceSnapshots();
+      // The entry carries the directory the scanner actually resolved, so the
+      // documented manual cleanup targets that path rather than assuming the
+      // conventional one (#6891 review).
       expect(listed.orphanedAvdSnapshots.entries).toEqual([
-        { avdName: OTHER_AVD, snapshotName: "shared", sizeBytes: 2 * 1024 * MB },
+        {
+          avdName: OTHER_AVD,
+          snapshotName: "shared",
+          directoryPath: fakeAvdSnapshotPath(OTHER_AVD, "shared"),
+          sizeBytes: 2 * 1024 * MB,
+        },
       ]);
     });
   });
@@ -523,7 +531,12 @@ describe("orphan accounting is keyed by AVD and record type (#6891 review)", () 
     const listed = await listDeviceSnapshots();
 
     expect(listed.orphanedAvdSnapshots.entries).toEqual([
-      { avdName: OTHER_AVD, snapshotName: "shared", sizeBytes: 3 * 1024 * MB },
+      {
+        avdName: OTHER_AVD,
+        snapshotName: "shared",
+        directoryPath: fakeAvdSnapshotPath(OTHER_AVD, "shared"),
+        sizeBytes: 3 * 1024 * MB,
+      },
     ]);
   });
 

@@ -155,8 +155,47 @@ describe("AvdSnapshotService (#6490)", () => {
     );
 
     expect(await sut.listAvdSnapshotDirectories("am-api34")).toEqual([
-      { snapshotName: "default_boot", sizeBytes: 10 },
-      { snapshotName: "sweepSnap", sizeBytes: 20 },
+      {
+        snapshotName: "default_boot",
+        directoryPath: avdSnapshotPath("am-api34", "default_boot"),
+        sizeBytes: 10,
+      },
+      {
+        snapshotName: "sweepSnap",
+        directoryPath: avdSnapshotPath("am-api34", "sweepSnap"),
+        sizeBytes: 20,
+      },
+    ]);
+  });
+
+  test("a relocated AVD reports where its snapshots ACTUALLY are (#6891 review)", async () => {
+    // The documented manual cleanup used to name the conventional
+    // `~/.android/avd/<avd>.avd/snapshots/<name>` path. For an AVD moved by
+    // ANDROID_AVD_HOME or an `<avd>.ini` redirect that path is not the directory
+    // this scanner measured, so following the docs left the reported orphan in
+    // place — and operated on some stale directory instead.
+    const relocated = path.join("/Volumes", "big-disk", "avds", "am-relocated.avd");
+    const snapshotsRoot = path.join(relocated, AVD_SNAPSHOTS_DIRNAME);
+    const sut = new AvdSnapshotService(
+      new FakeDirectories(
+        { [path.join(snapshotsRoot, "sweepSnap")]: 20 },
+        { [snapshotsRoot]: ["sweepSnap"] },
+      ),
+      {
+        getAvdHome: () => AVD_HOME,
+        resolveAvdDirectory: async (avdName: string) =>
+          avdName === "am-relocated" ? relocated : null,
+      },
+      stubEmulator([]),
+      recordingAdbFactory(execResult("OK")).factory,
+    );
+
+    expect(await sut.listAvdSnapshotDirectories("am-relocated")).toEqual([
+      {
+        snapshotName: "sweepSnap",
+        directoryPath: path.join(snapshotsRoot, "sweepSnap"),
+        sizeBytes: 20,
+      },
     ]);
   });
 

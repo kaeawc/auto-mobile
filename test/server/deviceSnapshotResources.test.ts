@@ -11,7 +11,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSnapshotRepository } from "../fakes/FakeDeviceSnapshotRepository";
 import { FakeDeviceSnapshotConfigRepository } from "../fakes/FakeDeviceSnapshotConfigRepository";
 import { FakeDeviceSnapshotStore } from "../fakes/FakeDeviceSnapshotStore";
-import { FakeAvdSnapshotService } from "../fakes/FakeAvdSnapshotService";
+import { FakeAvdSnapshotService, fakeAvdSnapshotPath } from "../fakes/FakeAvdSnapshotService";
 
 function makeRecord(overrides: Partial<DeviceSnapshotRecord> = {}): DeviceSnapshotRecord {
   return {
@@ -142,6 +142,7 @@ describe("deviceSnapshotResources", () => {
         {
           avdName: "am-api34",
           snapshotName: "emulator-5554_2026-08-11_23-05-15-803Z",
+          directoryPath: fakeAvdSnapshotPath("am-api34", "emulator-5554_2026-08-11_23-05-15-803Z"),
           sizeBytes: 17_300,
         },
       ],

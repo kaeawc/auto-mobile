@@ -125,17 +125,24 @@ AutoMobile never deletes them automatically: an orphan may predate AutoMobile or
 be a snapshot someone made by hand. The emulator's own `default_boot` quick-boot
 state is excluded from the report entirely.
 
+Each entry reports `avdName`, `snapshotName`, `sizeBytes` and `directoryPath`.
+**Use `directoryPath`** for anything that touches the filesystem: it is the
+directory the scan actually measured. `ANDROID_AVD_HOME` (and an `<avd>.ini`
+registry file redirecting to a relocated AVD) move an AVD off the conventional
+`~/.android/avd/<avd>.avd` path, so that path is not reliably where the bytes
+are.
+
 To remove one yourself, with the AVD's emulator running:
 
 ```bash
 adb -s <serial> emu avd snapshot del <snapshot-name>
 ```
 
-With the emulator stopped, delete the directory directly:
+With the emulator stopped, delete the reported directory directly:
 
 ```bash
-rm -rf ~/.android/avd/<avd>.avd/snapshots/<snapshot-name>
+rm -rf "<directoryPath>"
 ```
 
-Check what is there first with
-`du -sh ~/.android/avd/<avd>.avd/snapshots/*`.
+Check what is there first with `du -sh "<directoryPath>"`, or list every in-AVD
+snapshot of one AVD with `du -sh "$(dirname "<directoryPath>")"/*`.

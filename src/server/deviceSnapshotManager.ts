@@ -74,6 +74,12 @@ interface SnapshotArchiveEvictionResult {
 export interface OrphanedAvdSnapshot {
   avdName: string;
   snapshotName: string;
+  /**
+   * The directory the scan resolved, so manual cleanup can target it verbatim.
+   * ANDROID_AVD_HOME and an `<avd>.ini` redirect both move an AVD off the
+   * conventional `~/.android/avd/<avd>.avd` path (#6891 review).
+   */
+  directoryPath: string;
   sizeBytes: number | null;
 }
 

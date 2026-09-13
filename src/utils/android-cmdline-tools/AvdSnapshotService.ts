@@ -24,6 +24,14 @@ export const AVD_DEFAULT_BOOT_SNAPSHOT = "default_boot";
 
 export interface AvdSnapshotDirectoryEntry {
   snapshotName: string;
+  /**
+   * The directory this entry was measured at, as resolved — which is NOT always
+   * `~/.android/avd/<avd>.avd/snapshots/<name>`. ANDROID_AVD_HOME and an
+   * `<avd>.ini` redirect both move it, so reporting the conventional path sent
+   * anyone following the manual-cleanup instructions at a directory the scanner
+   * never looked in (#6891 review).
+   */
+  directoryPath: string;
   /** null when the directory exists but its size could not be measured. */
   sizeBytes: number | null;
 }
@@ -110,9 +118,11 @@ export class AvdSnapshotService implements AvdSnapshotOperations {
 
     const entries: AvdSnapshotDirectoryEntry[] = [];
     for (const snapshotName of names) {
+      const directoryPath = path.join(snapshotsRoot, snapshotName);
       entries.push({
         snapshotName,
-        sizeBytes: await this.directories.getDirectorySize(path.join(snapshotsRoot, snapshotName)),
+        directoryPath,
+        sizeBytes: await this.directories.getDirectorySize(directoryPath),
       });
     }
     return entries;

@@ -1,8 +1,21 @@
+import * as path from "path";
+import { AVD_SNAPSHOTS_DIRNAME } from "../../src/utils/android-cmdline-tools/AvdConfigReader";
 import type {
   AvdSnapshotDirectoryEntry,
   AvdSnapshotOperations,
   VmSnapshotReclaimOutcome,
 } from "../../src/utils/android-cmdline-tools/AvdSnapshotService";
+
+/**
+ * Where this fake pretends the AVD home is. Built with `path.join` so the
+ * expectations it feeds tests match production on Windows too (#6490 review).
+ */
+export const FAKE_AVD_HOME = path.join("/home", "tester", ".android", "avd");
+
+/** `<avd>.avd/snapshots/<name>` under {@link FAKE_AVD_HOME}. */
+export function fakeAvdSnapshotPath(avdName: string, snapshotName: string): string {
+  return path.join(FAKE_AVD_HOME, `${avdName}.avd`, AVD_SNAPSHOTS_DIRNAME, snapshotName);
+}
 
 export interface FakeVmDeleteCall {
   deviceId: string;
@@ -63,6 +76,7 @@ export class FakeAvdSnapshotService implements AvdSnapshotOperations {
     }
     return Array.from(byName.entries()).map(([snapshotName, sizeBytes]) => ({
       snapshotName,
+      directoryPath: fakeAvdSnapshotPath(avdName, snapshotName),
       sizeBytes,
     }));
   }

@@ -57,7 +57,7 @@ swift_files=()
 while IFS= read -r -d '' relative_path; do
   [[ -n "${relative_path}" ]] && swift_files+=("${project_root}/${relative_path}")
 done < <(
-  git -C "${repo_root}" diff --name-only -z --diff-filter=ACMR "${base_ref}...HEAD" -- 'ios/**/*.swift' \
+  git -C "${repo_root}" diff --name-only -z --diff-filter=ACMR "${base_ref}...HEAD" -- 'ios/**/*.swift' 'ios/*.swift' \
     || printf '%s' "$?" > "${git_diff_status_file}"
 )
 
@@ -128,7 +128,7 @@ while IFS= read -r test_class; do
 done < <(
   printf '%s\n' "${swift_test_list_output}" | sed -n \
     -e 's/^XCTestRunnerTests\.\([^/]*\)\/.*/\1/p' \
-    -e 's/^XCTestRunnerTests\.\([^/()]*\)()$/\1/p'
+    -e 's/^XCTestRunnerTests\.\([^/(]*\)(.*)$/\1/p'
 )
 
 if [[ ${#test_classes[@]} -eq 0 ]]; then

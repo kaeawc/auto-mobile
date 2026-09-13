@@ -38,6 +38,9 @@ fi
 if [[ $(basename "$0") == swift && ${1:-} == test && ${2:-} == list ]]; then
   if [[ ${PREPUSH_IOS_SWIFT_TEST_LIST_DENYLIST_ONLY:-} == 1 ]]; then
     echo "XCTestRunnerTests.RemindersAddPlanTests/testExample"
+  elif [[ ${PREPUSH_IOS_SWIFT_TEST_LIST_PARAMETERIZED_TOP_LEVEL:-} == 1 ]]; then
+    echo "XCTestRunnerTests.plain()"
+    echo "XCTestRunnerTests.param(_:)"
   elif [[ ${PREPUSH_IOS_SWIFT_TEST_LIST_BUILD_NOISE:-} == 1 ]]; then
     echo "Building for debugging..."
     echo "XCTestRunnerTests.AutoMobileVersionTests/testExample"
@@ -155,6 +158,24 @@ commit_changed_swift_file() {
   [[ "$output" != *"No changed Swift files"* ]]
 }
 
+@test "finds changed Swift files directly under ios and in nested directories" {
+  create_real_git_fixture
+  printf '%s\n' 'struct ChangedFoo {}' > "${fixture_root}/ios/Foo.swift"
+  printf '%s\n' 'struct Bar {}' > "${fixture_root}/ios/Nested/Bar.swift"
+  git -C "${fixture_root}" add ios/Foo.swift ios/Nested/Bar.swift
+  git -C "${fixture_root}" commit -qm changed-top-level-and-nested
+
+  run env PATH="${fixture_bin}:$PATH" PREPUSH_IOS_BASE_REF="${fixture_base_ref}" \
+    PREPUSH_IOS_COMMAND_LOG="${command_log}" bash "${fixture_root}/scripts/prepush-ios.sh"
+
+  [ "$status" -eq 0 ]
+  run cat "${command_log}"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"swiftformat --lint --config ${fixture_root}/.swiftformat ${fixture_root}/ios/Foo.swift ${fixture_root}/ios/Nested/Bar.swift"* ]]
+  [[ "$output" == *"swiftlint lint --config ${fixture_root}/.swiftlint.yml ${fixture_root}/ios/Foo.swift"* ]]
+  [[ "$output" == *"swiftlint lint --config ${fixture_root}/.swiftlint.yml ${fixture_root}/ios/Nested/Bar.swift"* ]]
+}
+
 @test "finds a changed Swift file with a non-ASCII filename" {
   create_real_git_fixture
   printf '%s\n' 'struct Cafe {}' > "${fixture_root}/ios/Nested/Café.swift"
@@ -222,6 +243,18 @@ commit_changed_swift_file() {
   run grep 'swift test -Xswiftc -warnings-as-errors --filter' "${command_log}"
   [ "$status" -eq 0 ]
   [[ "$output" == *"soloTopLevelExample"* ]]
+}
+
+@test "includes parameterized top-level Swift Testing tests in the filter" {
+  run env PATH="${mock_bin}:$PATH" PREPUSH_IOS_COMMAND_LOG="${command_log}" \
+    PREPUSH_IOS_SWIFT_TEST_LIST_PARAMETERIZED_TOP_LEVEL=1 bash "${repo_root}/scripts/prepush-ios.sh"
+
+  [ "$status" -eq 0 ]
+  run grep 'swift test -Xswiftc -warnings-as-errors --filter' "${command_log}"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"plain"* ]]
+  [[ "$output" == *"param"* ]]
+  [[ "$output" != *"param(_:)"* ]]
 }
 
 @test "fails when swift test list has only simulator-dependent classes" {

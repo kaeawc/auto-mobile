@@ -111,7 +111,7 @@ export class JsonToolOutputArtifactWriter implements ObservationArtifactWriter {
       this.fileSystem.assertWritableDirectory(this.outputDirectory);
       this.pruneOldArtifacts();
 
-      const content = stringifyToolResponse(input.data);
+      const content = input.serialized ?? stringifyToolResponse(input.data);
       const filename = `${Math.trunc(this.timer.now())}-${safeFilenameSegment(input.tool)}-${safeFilenameSegment(this.idGenerator.next())}.json`;
       const artifactPath = path.join(this.outputDirectory, filename);
       this.fileSystem.writeFileExclusive(artifactPath, content, 0o600);

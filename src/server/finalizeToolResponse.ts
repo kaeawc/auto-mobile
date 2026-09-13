@@ -55,6 +55,15 @@ export interface ObservationArtifactWriteInput {
   tool: string;
   payload: ObservationArtifactPayload;
   data: unknown;
+  /**
+   * Exact bytes to persist, when the caller has already serialized `data` and
+   * the default serializer would not round-trip it. `stringifyToolResponse`
+   * drops every property named `extras` — a wire-size saving for the inline
+   * observation payload — so a caller advertising its artifact as the COMPLETE
+   * result (the CLI spill, #6870) supplies its own rendering here. `data` stays
+   * the source of truth for callers that do not.
+   */
+  serialized?: string;
 }
 
 export interface ObservationArtifactWriter {

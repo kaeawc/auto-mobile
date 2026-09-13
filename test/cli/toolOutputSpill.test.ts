@@ -11,6 +11,14 @@ import {
   setCliOutputSinksForTesting,
   setDaemonProxyFactoryForTesting,
 } from "../../src/cli";
+import path from "node:path";
+import {
+  JsonToolOutputArtifactWriter,
+  type ToolOutputArtifactFileSystem,
+} from "../../src/server/toolOutputArtifactWriter";
+import { ToolOutputArtifactLedger } from "../../src/server/toolOutputArtifactLedger";
+import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
+import { FakeTimer } from "../fakes/FakeTimer";
 import type {
   ObservationArtifactMetadata,
   ObservationArtifactWriteInput,
@@ -168,5 +176,76 @@ describe("CLI tool output never emits truncated JSON (#6870)", () => {
 
     expect(parsed.truncated).toBe(true);
     expect(parsed.reason).toBeTruthy();
+  });
+});
+
+/**
+ * Issue #6870 follow-up: `stringifyToolResponse` drops every property named
+ * `extras` — an observation-specific token saving for the daemon's inline wire
+ * payload. The CLI spill is not that wire payload: it is advertised as the
+ * COMPLETE result, and the payload reaching it has already been finalized. A
+ * response that fits the daemon's compact 64 KiB ceiling can still exceed the
+ * CLI's pretty-printed one (`content` duplicates `structuredContent`), so the
+ * spilled artifact must carry exactly what the inline rendering would have.
+ */
+describe("spilled CLI artifacts carry the exact result (#6870)", () => {
+  class RecordingFileSystem implements ToolOutputArtifactFileSystem {
+    writes: Array<{ path: string; content: string }> = [];
+    ensureDirectory(): void {}
+    assertWritableDirectory(): void {}
+    writeFileExclusive(filePath: string, content: string): void {
+      this.writes.push({ path: filePath, content });
+    }
+    listFiles(): [] {
+      return [];
+    }
+    deleteFile(): void {}
+  }
+
+  test("preserves properties named extras in the spilled artifact", () => {
+    const fileSystem = new RecordingFileSystem();
+    const timer = new FakeTimer();
+    timer.setCurrentTime(1234);
+    const writer = new JsonToolOutputArtifactWriter({
+      outputDirectory: path.resolve("/tmp/auto-mobile-cli-spill"),
+      fileSystem,
+      idGenerator: new FakeIdGenerator(["id-1"]),
+      timer,
+      ledger: new ToolOutputArtifactLedger(),
+    });
+    const result = {
+      success: true,
+      elements: [{ text: "Submit", extras: { accessibilityRole: "button" } }],
+      filler: "x".repeat(CLI_OUTPUT_INLINE_MAX_BYTES),
+    };
+
+    const rendered = renderCliToolOutput(result, { tool: "observe", artifactWriter: writer });
+
+    expect(JSON.parse(rendered).truncated).toBe(false);
+    expect(fileSystem.writes).toHaveLength(1);
+    const spilled = JSON.parse(fileSystem.writes[0].content);
+    expect(spilled).toEqual(result);
+    expect(spilled.elements[0].extras).toEqual({ accessibilityRole: "button" });
+  });
+
+  test("reports the spilled artifact's own byte count", () => {
+    const fileSystem = new RecordingFileSystem();
+    const timer = new FakeTimer();
+    timer.setCurrentTime(1234);
+    const writer = new JsonToolOutputArtifactWriter({
+      outputDirectory: path.resolve("/tmp/auto-mobile-cli-spill"),
+      fileSystem,
+      idGenerator: new FakeIdGenerator(["id-2"]),
+      timer,
+      ledger: new ToolOutputArtifactLedger(),
+    });
+
+    const rendered = renderCliToolOutput(oversizedResult(), {
+      tool: "observe",
+      artifactWriter: writer,
+    });
+
+    const parsed = JSON.parse(rendered);
+    expect(parsed.artifact.bytes).toBe(Buffer.byteLength(fileSystem.writes[0].content, "utf8"));
   });
 });

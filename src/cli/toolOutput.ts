@@ -84,6 +84,12 @@ export function renderCliToolOutput(result: unknown, options: CliToolOutputOptio
       tool: options.tool,
       payload: CLI_TOOL_RESULT_ARTIFACT_PAYLOAD,
       data: result,
+      // Spill the rendering we already built, not a re-serialization: the
+      // writer's default serializer strips every `extras` property (a saving
+      // for the daemon's inline wire payload), and this artifact is advertised
+      // as the complete result, so it must round-trip what would have been
+      // printed inline (#6870).
+      serialized: text,
     });
     return JSON.stringify(
       {

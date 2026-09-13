@@ -203,22 +203,39 @@ export interface PooledDevice {
    * emulator on a transient console read) and it is not evidence of continuity
    * either, so the entry is neither evicted nor trusted: session and
    * `incarnation` are preserved, and everything that would ACT on or ROUTE BY the
-   * pooled identity is withheld until a resolved name settles it — see
-   * {@link DevicePool.reconcilePooledIdentityResolution}.
+   * pooled identity is withheld until a resolved name settles it.
    *
-   * The transitions, all of them:
+   * TWO FUNNELS carry this state, so no consumer decides for itself and review
+   * has no per-site gating to find:
    *
-   * - **enter** — any discovery (a refresh sweep, or the liveness check an
-   *   assignment runs itself) observes the placeholder on a live entry. Entering
-   *   also CANCELS AND DRAINS the bound session's in-flight executions through
-   *   the injected `cancelDeviceSessionExecutions` seam
-   *   ({@link DevicePool.enterPooledIdentityQuarantine}): the admission gate only
-   *   refuses LATER calls, while an execution already registered keeps issuing
+   * - **FUNNEL 1 — {@link DevicePool.reconcileDiscoveryObservation}.** The ONE way
+   *   an observation ENTERS or LEAVES the quarantine. Every path that discovers
+   *   Android devices and then consults pooled identity folds its observation in
+   *   there first — the refresh sweep and the assignment-time liveness check from
+   *   inside the pool, and the disconnect monitor, the booted-devices resource,
+   *   `listDevices`, the shutdown/kill preflight, the teardown precondition,
+   *   pre-boot serial validation, the Android start lifecycle target,
+   *   `provisionDevice`'s exact-boot discovery and the socket server's
+   *   input-target and `ide/*` routes from outside it. Guarded by
+   *   `test/lint/deviceDiscoveryReconcileFunnel.test.ts`.
+   * - **FUNNEL 2 — {@link DevicePool.assertDeviceActionable}.** The ONE gate every
+   *   device-addressed operation at the daemon boundary passes, with or without a
+   *   session. Guarded by `test/lint/deviceAddressedAdmissionGate.test.ts`.
+   *
+   * The transitions, all of them, applied by
+   * {@link DevicePool.reconcileObservedPooledIdentity}:
+   *
+   * - **enter** — the observation is the placeholder. Entering also CANCELS AND
+   *   DRAINS the bound session's in-flight executions through the injected
+   *   `cancelDeviceSessionExecutions` seam
+   *   ({@link DevicePool.enterPooledIdentityQuarantine}): FUNNEL 2 only refuses
+   *   LATER calls, while an execution already registered keeps issuing
    *   serial-addressed operations. The session and the `incarnation` survive;
    *   only the work in flight is stopped.
-   * - **enter** — a resolved name DISAGREES but the replacement could not be
-   *   installed, because `evictMissingPooledDevice` defers eviction while
-   *   killDevice holds a shutdown reservation
+   * - **enter** — a resolved name DISAGREES and the replacement it calls for
+   *   cannot be installed: either `evictMissingPooledDevice` is deferring eviction
+   *   while killDevice holds a shutdown reservation, or the observation arrived
+   *   through FUNNEL 1 from a path that does not own pool membership
    *   ({@link DevicePool.quarantineDisagreeingPooledIdentity}).
    * - **leave, restored** — a resolved name MATCHES. Same entry, same session,
    *   same `incarnation`.
@@ -234,23 +251,29 @@ export interface PooledDevice {
    *    entry as not assignable, including one the assignment's OWN liveness check
    *    just quarantined, so idle selection skips it and the exact-device paths
    *    (`bindOrReuseDeviceSession`, autolock) refuse by serial.
-   * 2. **Tool execution** — {@link DevicePool.assertSessionReadyForAutomation},
-   *    the one choke point every tool passes through, refuses a session bound to
-   *    the serial.
+   * 2. **Tool execution** — FUNNEL 2.
+   *    {@link DevicePool.assertSessionReadyForAutomation} is one of its callers,
+   *    not a second gate: a session addresses its device by serial, so it is just
+   *    the session-keyed spelling of a device-addressed operation.
    * 3. **Publishing** — {@link DevicePool.describesPooledRuntime} reads it, so the
    *    booted-devices resource publishes neither the pooled epoch nor the pooled
-   *    AVD label.
+   *    AVD label. It is also FUNNEL 1's idempotence check: an observation that
+   *    already describes the pooled runtime changes nothing.
    * 4. **Destructive confirmation** — `deviceTools.getValidatedPooledAndroidAvdName`
    *    returns undefined, so no kill/delete path can act on the cached label.
    *    The kill does not merely drop the label: a quarantined entry produces a
    *    `quarantined` capture whose runtime confirmation is MANDATORY (the
    *    emulator console must name itself; an unanswered probe or a differing
    *    name refuses), because dropping the label also dropped the confirmation
-   *    it exists to trigger.
+   *    it exists to trigger. That confirmation is why the teardown path MATCHES
+   *    through the quarantine (`getBootedAndroidTeardownStableName`) rather than
+   *    refusing on it — a strictly stronger gate than the flag.
    * 5. **Stream routing** — the daemon's `DeviceSessionResolver` withholds the
    *    serial↔uuid mapping in both directions and every push server drops that
    *    serial's frames, so a possible replacement's passive events cannot reach
-   *    the previous AVD's subscribers.
+   *    the previous AVD's subscribers. The resolver also exposes FUNNEL 2, so a
+   *    push server can REFUSE a device-addressed request (`request_observation`)
+   *    instead of serving it into that routing black hole.
    */
   identityUnresolved?: boolean;
 }

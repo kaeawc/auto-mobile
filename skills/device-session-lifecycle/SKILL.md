@@ -64,9 +64,8 @@ applies in all three places the name is read:
    unreadable console never evicts a live entry — tolerance is not agreement.
 
 **The pool state that carries the rule: `PooledDevice.identityUnresolved`.**
-When any discovery observes the placeholder on a LIVE entry — a refresh sweep or
-the liveness check an assignment runs itself — the pool quarantines that entry
-instead of choosing between two wrong answers. The entry
+When any discovery observes the placeholder on a LIVE entry, the pool quarantines
+that entry instead of choosing between two wrong answers. The entry
 is kept — same session, same `incarnation` — but:
 
 - **assignment** — the shared gate `ensurePooledDevicePresentForUse` reports it
@@ -76,9 +75,9 @@ is kept — same session, same `incarnation` — but:
   This covers the entry the assignment's OWN liveness check just quarantined:
   the operation that ENTERS the quarantine fails at assignment rather than
   returning a session that then fails every tool;
-- **tool execution** — `assertSessionReadyForAutomation` (the single choke point
-  every tool execution passes through) refuses, naming the serial and the pooled
-  AVD label;
+- **tool execution** — FUNNEL 2, `DevicePool.assertDeviceActionable`, refuses,
+  naming the serial and the pooled AVD label. `assertSessionReadyForAutomation`
+  is one CALLER of it, not the gate itself;
 - **publishing** — `describesPooledRuntime` reads the state, so the resource
   publishes no pool context;
 - **destructive confirmation** — `deviceTools.getValidatedPooledAndroidAvdName`
@@ -107,6 +106,37 @@ is kept — same session, same `incarnation` — but:
   `deviceSessionUuid`; a replacement instead mints a new incarnation, whose uuid
   routes while the retired one stays unresolvable.
 
+**Two funnels enforce this structurally — there is no per-site gating left.**
+
+- **FUNNEL 1, `DevicePool.reconcileDiscoveryObservation(devices, source)`.** Every
+  path that discovers Android devices and then consults pooled identity folds its
+  observation in here FIRST: the refresh sweep and the assignment-time liveness
+  check (inside the pool), and — through the `daemon/discoveryReconcile.ts`
+  wrapper or the socket server's own private helper — the disconnect monitor, the
+  booted-devices resource, `listDevices`, the shutdown/kill preflight, the
+  teardown precondition, pre-boot serial validation, the Android start lifecycle
+  target, `provisionDevice`'s exact-boot discovery, and the socket server's
+  input-target and `ide/*` routes. It is idempotent (an observation that already
+  `describesPooledRuntime` is a no-op), takes no lock, and changes no pool
+  MEMBERSHIP: a disagreement reaching it is quarantined and left for the paths
+  that own allocation to settle. Before it, a read that was the first to see the
+  placeholder withheld only its OWN output while the pool went on trusting the
+  stale label.
+- **FUNNEL 2, `DevicePool.assertDeviceActionable(deviceId, purpose)`.** Every
+  device-addressed operation at the daemon boundary passes it, WITH OR WITHOUT a
+  session: `assertSessionReadyForAutomation` (the session spelling),
+  `runTrackedDeviceInput` ahead of its sessionless early return (tap, swipe,
+  typeText, button, key, gestures), `request_observation` in the device-data
+  stream server (which refuses BEFORE observing, instead of acking `success:
+true` after pushing zero frames), and the `ide/*` device-addressed routes. The
+  stream server reaches it through the `DeviceSessionResolver` it already holds.
+
+The enforcement is two lint tests, not review attention:
+`test/lint/deviceDiscoveryReconcileFunnel.test.ts` inventories every discovery
+call site in `src/` with a count and a reason and fails on a new one, and
+`test/lint/deviceAddressedAdmissionGate.test.ts` fails on a device-addressed
+socket handler that does not reach the gate.
+
 Leaving the quarantine is decided by the next discovery that READS a name: the
 pooled label (or the AVD this pool started) restores the entry unchanged, and a
 different name is a replacement — a fresh incarnation, the old session retired,
@@ -121,12 +151,16 @@ name as proof of continuity; instead that entry is quarantined (and its metadata
 left alone) until the replacement installs. The rule in one line: the quarantine
 lifts on an identity MATCH, never on a differing name.
 
-**The teardown's own discovery is authoritative over the pool's label.** On the
-FIRST discovery after a different AVD takes a pooled serial, the pool has not
-quarantined anything yet and still holds the previous occupant's label.
-`deleteDevice`'s unresolved-runtime guard therefore reads its OWN observation,
-not `getValidatedPooledAndroidAvdName`: a booted emulator this discovery cannot
-name refuses the stopped-image inventory path outright.
+**The teardown's own discovery is authoritative over the pool's label.** Its
+observation now reaches the pool through FUNNEL 1 before anything reads pool
+state, so the entry is quarantined by that very observation. `deleteDevice`'s
+unresolved-runtime guard still reads its OWN observation rather than
+`getValidatedPooledAndroidAvdName`: a booted emulator this discovery cannot name
+refuses the stopped-image inventory path outright. The destructive path is the
+one consumer that MATCHES through the quarantine
+(`getBootedAndroidTeardownStableName`), because refusing there would make the
+mandatory runtime confirmation — a strictly stronger gate — unreachable and drop
+the teardown back onto the inventory path it exists to prevent.
 
 **Documented blind spot**: a same-serial restart faster than one discovery
 interval never reaches the pool, so it reads as continuity. Every host-side

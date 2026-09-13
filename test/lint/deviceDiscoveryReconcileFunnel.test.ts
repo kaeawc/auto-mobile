@@ -115,6 +115,11 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
         "Boot-progress polling for a device being created; there is no pooled entry yet, and the " +
         "caller (deviceTools) reconciles its own post-boot discovery.",
     },
+    "src/utils/android-cmdline-tools/AvdSnapshotService.ts": {
+      calls: 1,
+      reason:
+        "Snapshot reclaim only checks whether an AVD is live before console deletion; it reads no pool state.",
+    },
     "src/features/observe/ios/IOSCtrlProxyClient.ts": {
       calls: 1,
       reason: "iOS only — simulator UDIDs are never reused, so there is no identity to reconcile.",

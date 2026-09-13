@@ -446,3 +446,47 @@ describe("settleEmbeddedObservation adoption guard (#6866)", () => {
     );
   });
 });
+
+describe("settleEmbeddedObservation stale-state clearing (#6866)", () => {
+  test("screen state the settled capture no longer reports does not survive", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const fake = new FakeObserveScreen();
+    // ObserveScreen re-derives these from EVERY hierarchy and writes `undefined`
+    // when the destination has no focused node / no chooser — exactly the shape
+    // the settle poll hands back here.
+    const settledFrame = {
+      ...obs(AIRPLANE_ROW_INFLATED, 20),
+      focusedElement: undefined,
+      accessibilityFocusedElement: undefined,
+      intentChooserDetected: undefined,
+      notificationPermissionDetected: undefined,
+    } as ObserveResult;
+    fake.setObserveSequence([settledFrame, { ...settledFrame, updatedAt: 30 } as ObserveResult]);
+
+    const captured = obs(AIRPLANE_ROW_HALF_INFLATED, 10);
+    (captured as any).focusedElement = { text: "Search", bounds: { left: 0, top: 0 } };
+    (captured as any).accessibilityFocusedElement = { text: "Search" };
+    (captured as any).intentChooserDetected = true;
+    (captured as any).notificationPermissionDetected = true;
+    (captured as any).error = "partial hierarchy";
+    (captured as any).errors = [{ phase: "hierarchy", message: "partial hierarchy" }];
+    // ...while genuinely action-authored metadata still has to survive.
+    (captured as any).gfxMetrics = { totalFrames: 12 };
+
+    const outcome = await settleEmbeddedObservation({
+      actionClass: "navigation",
+      observation: captured,
+      settleObserve: settleFor(fake, timer),
+    });
+
+    expect(outcome.settled).toBe(true);
+    expect("focusedElement" in outcome.observation).toBe(false);
+    expect("accessibilityFocusedElement" in outcome.observation).toBe(false);
+    expect("intentChooserDetected" in outcome.observation).toBe(false);
+    expect("notificationPermissionDetected" in outcome.observation).toBe(false);
+    expect("error" in outcome.observation).toBe(false);
+    expect("errors" in outcome.observation).toBe(false);
+    expect((outcome.observation as any).gfxMetrics).toEqual({ totalFrames: 12 });
+  });
+});

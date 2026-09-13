@@ -100,6 +100,25 @@ export async function settleEmbeddedObservation(
 }
 
 /**
+ * Screen state `ObserveScreen` re-derives from EVERY hierarchy capture, and
+ * legitimately leaves UNSET when the screen no longer has it: there is no
+ * focused node, no chooser dialog, no capture error. Because it is absent rather
+ * than `undefined`-valued on the settled capture, a plain spread would carry the
+ * PREVIOUS screen's value through — an `inputText` submit returning the settled
+ * destination hierarchy together with the origin screen's `focusedElement`. Each
+ * of these is owned by the capture, never by the action, so the settled capture
+ * gets the only vote.
+ */
+const HIERARCHY_DERIVED_OBSERVATION_STATE = [
+  "focusedElement",
+  "accessibilityFocusedElement",
+  "intentChooserDetected",
+  "notificationPermissionDetected",
+  "error",
+  "errors",
+] as const;
+
+/**
  * Fold the settled capture over the action's own, so the fresh hierarchy wins
  * while metadata only the ACTION could attach survives.
  *
@@ -108,8 +127,9 @@ export async function settleEmbeddedObservation(
  * `perfTiming`, `selectedElements` and the rest are written onto the capture by
  * the action pipeline AFTER the observe. Replacing the observation wholesale
  * would silently drop them. Every key the settled capture actually defines wins,
- * so nothing stale from the half-inflated read survives — an `ObserveScreen`
- * field is either produced on both captures or on neither.
+ * plus {@link HIERARCHY_DERIVED_OBSERVATION_STATE} is cleared when the settled
+ * capture does not report it, so no screen state from the half-inflated read
+ * outlives the tree it described.
  */
 function mergeActionMetadata(
   actionObservation: ObserveResult,
@@ -118,7 +138,13 @@ function mergeActionMetadata(
   const defined = Object.fromEntries(
     Object.entries(settledObservation).filter(([, value]) => value !== undefined),
   );
-  return { ...actionObservation, ...defined };
+  const merged: ObserveResult = { ...actionObservation, ...defined };
+  for (const field of HIERARCHY_DERIVED_OBSERVATION_STATE) {
+    if (defined[field] === undefined) {
+      delete merged[field];
+    }
+  }
+  return merged;
 }
 
 function hasUsableHierarchy(observation: ObserveResult): boolean {

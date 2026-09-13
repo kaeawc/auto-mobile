@@ -37,6 +37,39 @@ const connectivityOutput = (values: {
   ].join("\n")}\n`;
 
 describe("DeviceState connectivity toggles (issue #6872)", () => {
+  // `secure` settings are per-user; `global` settings are device-wide. Reading
+  // `location_mode` unscoped answers user 0 even when the foreground user is a
+  // secondary one, so it would contradict the Settings UI the app under test sees.
+  test("scopes the per-user secure read to the foreground user", () => {
+    expect(ANDROID_CONNECTIVITY_READ_COMMAND).toContain(
+      "settings --user current get secure location_mode",
+    );
+    expect(ANDROID_CONNECTIVITY_READ_COMMAND).toContain("settings get global airplane_mode_on");
+    expect(ANDROID_CONNECTIVITY_READ_COMMAND).not.toContain("--user current get global");
+  });
+
+  test("reports the foreground user's location state on a secondary user", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    const client = adbFactory.getFakeClient();
+    // The device is on user 10, whose location is on; user 0's is off.
+    client.setCommandResult(
+      ANDROID_CONNECTIVITY_READ_COMMAND,
+      connectivityOutput({
+        airplaneMode: "0",
+        wifiEnabled: "1",
+        bluetoothEnabled: "0",
+        locationEnabled: "3",
+      }),
+    );
+
+    const result = await new DeviceState(androidDevice, { adbFactory }).getState(["connectivity"]);
+
+    expect(result.connectivity?.locationEnabled).toBe(true);
+    const executed = client.getAllCommands();
+    expect(executed).toHaveLength(1);
+    expect(executed[0]).toContain("settings --user current get secure location_mode");
+  });
+
   test("reads airplane/wifi/bluetooth/location in ONE adb invocation", async () => {
     const adbFactory = new FakeAdbClientFactory();
     const client = adbFactory.getFakeClient();

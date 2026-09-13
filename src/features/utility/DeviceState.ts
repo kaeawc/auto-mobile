@@ -276,7 +276,7 @@ export interface DeviceConnectivityState {
   wifiEnabled?: boolean;
   /** `settings get global bluetooth_on`. */
   bluetoothEnabled?: boolean;
-  /** `settings get secure location_mode` != 0. */
+  /** `settings --user current get secure location_mode` != 0. */
   locationEnabled?: boolean;
   method?: "android_settings_batch";
   /** Verbatim per-field values, so an unparsed key stays diagnosable. */
@@ -810,6 +810,11 @@ export type DeviceConnectivityField =
 
 interface ConnectivityReadSpec {
   field: DeviceConnectivityField;
+  /**
+   * `global` is device-wide; `secure` is PER-USER, so its read must name the
+   * user or it answers user 0 while the app under test runs as another
+   * (see the `settings --user` reads in `src/doctor/checks/automobile.ts`).
+   */
   namespace: "global" | "secure";
   key: string;
   /**
@@ -848,9 +853,20 @@ const ANDROID_CONNECTIVITY_READS: readonly ConnectivityReadSpec[] = [
  *
  * Exported so tests script the exact command rather than re-deriving it.
  */
+/**
+ * `settings` resolves `current` to the foreground user at read time, so the
+ * command stays a compile-time constant while still following user switches —
+ * no extra `am get-current-user` round-trip, and no stale user id.
+ * Device-wide `global` keys are deliberately left unscoped.
+ */
+const settingsCommand = (read: ConnectivityReadSpec): string =>
+  read.namespace === "global"
+    ? `settings get global ${read.key}`
+    : `settings --user current get ${read.namespace} ${read.key}`;
+
 export const ANDROID_CONNECTIVITY_READ_COMMAND = `shell sh -c ${shellQuote(
   ANDROID_CONNECTIVITY_READS.map(
-    (read) => `echo "${read.field}=$(settings get ${read.namespace} ${read.key} 2>/dev/null)"`,
+    (read) => `echo "${read.field}=$(${settingsCommand(read)} 2>/dev/null)"`,
   ).join("; "),
 )}`;
 

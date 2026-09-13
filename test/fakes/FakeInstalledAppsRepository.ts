@@ -4,32 +4,34 @@ import type { InstalledApp as DbInstalledApp, NewInstalledApp } from "../../src/
 export class FakeInstalledAppsRepository implements InstalledAppsStore {
   private rows: DbInstalledApp[] = [];
 
-  async getLatestVerification(deviceId: string): Promise<number | null> {
-    let latest: number | null = null;
+  // Mirrors the repository's MIN semantics: freshness describes the whole
+  // cached row set, not its most recently touched row (issue #6639).
+  async getCacheVerifiedAt(deviceId: string): Promise<number | null> {
+    let oldest: number | null = null;
     for (const row of this.rows) {
       if (row.device_id !== deviceId) {
         continue;
       }
       const value = Number(row.last_verified_at);
-      if (latest === null || value > latest) {
-        latest = value;
+      if (oldest === null || value < oldest) {
+        oldest = value;
       }
     }
-    return latest;
+    return oldest;
   }
 
-  async getLatestVerificationForProfile(deviceId: string, userId: number): Promise<number | null> {
-    let latest: number | null = null;
+  async getProfileCacheVerifiedAt(deviceId: string, userId: number): Promise<number | null> {
+    let oldest: number | null = null;
     for (const row of this.rows) {
       if (row.device_id !== deviceId || row.user_id !== userId) {
         continue;
       }
       const value = Number(row.last_verified_at);
-      if (latest === null || value > latest) {
-        latest = value;
+      if (oldest === null || value < oldest) {
+        oldest = value;
       }
     }
-    return latest;
+    return oldest;
   }
 
   async listInstalledApps(deviceId: string): Promise<DbInstalledApp[]> {

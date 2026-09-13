@@ -972,6 +972,40 @@ describe("sanitizeObserveResult", () => {
       expect(JSON.stringify(observe)).toBe(before);
     });
 
+    // Truncation provenance must survive the projection that deletes the tree
+    // (issue #6601 review PRRT_kwDOP-GF5M6h4sDi). The skeleton is derived from
+    // the already-capped elements, so without lifting the reasons out of
+    // `viewHierarchy` the default observe silently omits rows past a cap and an
+    // agent reads "not present" for an element that is.
+    test("skeleton projection lifts viewHierarchy.truncationReasons to the top level", () => {
+      const { observe } = loadAndroidHomeObserve();
+      observe.viewHierarchy!.truncationReasons = ["max_children[node kept 64 of 70]"];
+
+      const out = sanitizeObserveResult(observe, { dropElements: false, project: "skeleton" });
+
+      expect(out.viewHierarchy).toBeUndefined();
+      expect(out.truncationReasons).toEqual(["max_children[node kept 64 of 70]"]);
+    });
+
+    test("skeleton projection omits truncationReasons when the hierarchy was complete", () => {
+      const { observe } = loadAndroidHomeObserve();
+      delete observe.viewHierarchy!.truncationReasons;
+
+      const out = sanitizeObserveResult(observe, { dropElements: false, project: "skeleton" });
+
+      expect(out.truncationReasons).toBeUndefined();
+    });
+
+    test("project 'full' leaves truncationReasons on the hierarchy, unduplicated", () => {
+      const { observe } = loadAndroidHomeObserve();
+      observe.viewHierarchy!.truncationReasons = ["max_nodes"];
+
+      const out = sanitizeObserveResult(observe, { dropElements: false, project: "full" });
+
+      expect(out.viewHierarchy?.truncationReasons).toEqual(["max_nodes"]);
+      expect(out.truncationReasons).toBeUndefined();
+    });
+
     test("hoists the exact-fill descendant through the JSON-clone boundary (#5881)", () => {
       // The collector tags each element with non-enumerable Symbol ancestry
       // provenance (#5881). `sanitizeObserveResult` JSON-clones its input before

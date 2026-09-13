@@ -164,6 +164,10 @@ export function sanitizeObserveResult(
  * emitted copy. A hierarchy-less observation (capture failure) yields an empty
  * skeleton and no `context` — still a valid, if empty, projection.
  *
+ * Any `viewHierarchy.truncationReasons` are lifted to the payload top level
+ * first (issue #6601), so a projection that removes the tree still tells the
+ * caller the rows it does list may be incomplete.
+ *
  * `source` is the pre-clone `obs`: its elements still carry the non-enumerable
  * ancestry provenance (issue #5881) that the `sanitizeObserveResult` JSON clone
  * strips from `out`. The projection reads but never mutates them, so the "input
@@ -183,6 +187,18 @@ function projectSkeletonOnto(out: ObserveResult, source: ObserveResult): void {
     out.context = context;
   } else {
     delete out.context;
+  }
+  // Lift the hierarchy's truncation provenance before the tree that carries it
+  // is dropped (issue #6601). The skeleton is projected from elements that were
+  // already capped (per-node child cap, or a device-side `max_nodes`/`max_depth`
+  // stop), so without this the default projection reports a short list with no
+  // hint that rows are missing — exactly the silent false negative
+  // `truncationReasons` exists to prevent. `layoutWarnings` / `performanceAudit`
+  // are deliberately advisory and dropped here; this is not advisory, it is the
+  // completeness contract of the rows the skeleton does list.
+  const truncationReasons = out.viewHierarchy?.truncationReasons;
+  if (truncationReasons && truncationReasons.length > 0) {
+    out.truncationReasons = [...truncationReasons];
   }
   delete out.viewHierarchy;
   delete out.elements;

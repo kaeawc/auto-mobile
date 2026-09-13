@@ -859,6 +859,17 @@ export const observeResultSchema = z
       })
       .optional(),
     viewHierarchy: viewHierarchyResultSchema.optional(),
+    truncationReasons: z
+      .array(z.string())
+      .optional()
+      .describe(
+        "Why the captured hierarchy is incomplete (issue #6601), lifted out of " +
+          "`viewHierarchy` by the skeleton projection that removes it. Present only " +
+          "when rows were dropped — a device-side stop (max_nodes, max_depth) or the " +
+          "per-node child cap (max_children[<node> kept N of M]). When present, " +
+          "`skeleton`/`context` are a subset of the screen: an element missing from " +
+          "them is not evidence it is absent.",
+      ),
     skeleton: z.array(skeletonElementSchema).optional(),
     context: z
       .array(skeletonElementSchema)

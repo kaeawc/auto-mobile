@@ -314,6 +314,26 @@ describe("finalizeToolResponse", () => {
     });
   });
 
+  // A default `observe` projects to the skeleton, which deletes `viewHierarchy`
+  // — the only carrier of the hierarchy's truncation provenance (issue #6601
+  // review PRRT_kwDOP-GF5M6h4sDi). The finalized default response must still
+  // say the tree was capped, or the agent reads a short list as a complete one.
+  test("a default observe response keeps the hierarchy truncation reasons", () => {
+    const obs = makeObserveResult();
+    obs.viewHierarchy!.truncationReasons = ["max_children[com.example:id/root kept 64 of 70]"];
+
+    const finalized = finalizeToolResponse(createStructuredToolResponse(obs), {
+      name: "observe",
+    });
+
+    const payload = finalized.structuredContent as ObserveResult;
+    expect(payload.viewHierarchy).toBeUndefined();
+    expect(payload.truncationReasons).toEqual(["max_children[com.example:id/root kept 64 of 70]"]);
+    expect(JSON.parse(finalized.content[0].text).truncationReasons).toEqual([
+      "max_children[com.example:id/root kept 64 of 70]",
+    ]);
+  });
+
   test("EC4: elements are kept only when the include-elements gate is enabled", () => {
     // Elements are dropped by default now; `--observe-result-include-elements`
     // opts back in. project:"full" keeps the headline hierarchy so `elements`

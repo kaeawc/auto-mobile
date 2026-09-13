@@ -24,7 +24,7 @@ import {
 import { PlistClient, type PlistReader } from "./PlistClient";
 import { inferIosFormFactor, isIosSimulatorUdid } from "./iosDeviceType";
 import { iosVersionStringFromRuntimeId } from "./iosVersion";
-import { getAbortSignal } from "../AbortContext";
+import { getAbortSignal, runWithAbortSignal } from "../AbortContext";
 import { Mutex } from "async-mutex";
 import { iosSimulatorCapabilityInventory } from "../../features/device-control/virtualDeviceCapabilities";
 
@@ -175,7 +175,7 @@ export interface SimCtl {
    */
   listSimulatorImages(
     timeoutMs?: number,
-    options?: { bypassCache?: boolean },
+    options?: { bypassCache?: boolean; signal?: AbortSignal },
   ): Promise<DeviceInfo[]>;
 
   /**
@@ -573,6 +573,31 @@ export class SimCtlClient implements SimCtl {
   // Static cache for device list
   private static deviceListCache: { devices: DeviceInfo[]; timestamp: number } | null = null;
   private static readonly DEVICE_LIST_CACHE_TTL = 5000; // 5 seconds
+  // Last-known-good device list, retained past a failed listing so a transient
+  // `simctl` error degrades to a stale-but-usable snapshot instead of throwing
+  // (issue #6576), mirroring DevicectlDeviceLister.lastGood.
+  private static lastGoodDeviceList: { devices: DeviceInfo[]; timestamp: number } | null = null;
+  private static readonly LAST_GOOD_DEVICE_LIST_RETENTION_MS = 60_000;
+  // Concurrent cold/expired-cache callers share one `simctl list devices`
+  // invocation rather than each spawning their own process (issue #6576).
+  private static inFlightDeviceList: Promise<DeviceInfo[]> | null = null;
+  // Ceiling on the SHARED `simctl list devices` invocation behind
+  // inFlightDeviceList. Deliberately NOT any individual caller's timeoutMs --
+  // that would let one bounded/aborted caller cut the read short (or, before
+  // this fix, extend it) for every other waiter sharing the same promise.
+  // Mirrors DevicectlDeviceLister.DEVICE_LIST_TIMEOUT_MS; each waiter instead
+  // races the shared result against its OWN deadline/signal (issue #6576).
+  private static readonly SHARED_DEVICE_LIST_TIMEOUT_MS = 15_000;
+  // Invalidation epoch. A listing started in an older epoch must not
+  // repopulate the cache/last-good snapshot after a create/delete/reset.
+  private static deviceListGeneration = 0;
+  // Physical listing order is distinct from invalidation. Only successful
+  // reads advance the recorded sequence, so a failed newer refresh does not
+  // discard an older flight's usable result; once a newer read succeeds, an
+  // older completion cannot overwrite it.
+  private static deviceListRequestSequence = 0;
+  private static recordedDeviceListRequestSequence = 0;
+  private static inFlightDeviceListRequestSequence: number | null = null;
   private static readonly simulatorBoots = new Map<string, SimulatorBootState>();
 
   /**
@@ -885,7 +910,11 @@ export class SimCtlClient implements SimCtl {
       }
       if (lease.state.lastBootSucceeded) {
         const simulatorStillBooted = (
-          await this.getBootedSimulatorsChecked(this.remainingBootTimeoutMs(udid, deadlineMs))
+          await this.getBootedSimulatorsChecked(
+            this.remainingBootTimeoutMs(udid, deadlineMs),
+            undefined,
+            { bypassCache: true },
+          )
         ).some((simulator) => simulator.deviceId === udid);
         if (simulatorStillBooted) {
           throw new ActionableError(`iOS simulator ${udid} is already running`);
@@ -1050,7 +1079,11 @@ export class SimCtlClient implements SimCtl {
       }
       if (priorBootSucceeded && adoptPriorSuccess) {
         const simulatorStillBooted = (
-          await this.getBootedSimulatorsChecked(this.remainingBootTimeoutMs(udid, deadlineMs))
+          await this.getBootedSimulatorsChecked(
+            this.remainingBootTimeoutMs(udid, deadlineMs),
+            undefined,
+            { bypassCache: true },
+          )
         ).some((simulator) => simulator.deviceId === udid);
         if (simulatorStillBooted) {
           return await adoptPriorSuccess();
@@ -1164,6 +1197,7 @@ export class SimCtlClient implements SimCtl {
       // Cleanup must not inherit the already-aborted request signal.
       const cleanupSignal = new AbortController().signal;
       await this.executeCommandArgs(["shutdown", udid], 10_000, cleanupSignal);
+      SimCtlClient.invalidateDeviceListCache();
     } catch (error) {
       logger.warn(`[iOS] Failed to shut down simulator ${udid} after unsuccessful start: ${error}`);
     }
@@ -1197,6 +1231,7 @@ export class SimCtlClient implements SimCtl {
         signal,
         true,
       );
+      SimCtlClient.invalidateDeviceListCache();
       lease.state.lastBootSucceeded = false;
       lease.state.ownerToken = undefined;
     } finally {
@@ -1569,14 +1604,14 @@ export class SimCtlClient implements SimCtl {
    *         directly.
    */
   private async readSimulatorState(udid: string, timeoutMs: number): Promise<string | undefined> {
-    const simulatorList = await this.listSimulators(timeoutMs);
-    for (const runtimeDevices of Object.values(simulatorList.devices)) {
-      const match = runtimeDevices.find((device) => device.udid === udid);
-      if (match) {
-        return match.state;
-      }
-    }
-    return undefined;
+    // `bypassCache: true` because a stale cached/last-good snapshot would defeat
+    // the "never trust a stale snapshot" contract this method promises boot
+    // verification (issue #6576); a bypassCache read always throws on discovery
+    // failure rather than falling back, so that failure propagates to
+    // {@link readSimulatorStateRetrying} for its own retry-vs-surface decision
+    // (issue #6411) instead of being swallowed here.
+    const devices = await this.listSimulatorImages(timeoutMs, { bypassCache: true });
+    return devices.find((device) => device.deviceId === udid)?.state;
   }
 
   /**
@@ -1651,6 +1686,11 @@ export class SimCtlClient implements SimCtl {
   private async resolveReadySimulator(udid: string, timeoutMs?: number): Promise<BootedDevice> {
     const perf = createGlobalPerformanceTracker();
     perf.startOperation("deviceLookup");
+    // findBootedSimulator always issues its own unshared `simctl list
+    // devices` read (never listSimulatorImages()'s TTL cache), and is shared
+    // with resolveRegisteredBootSimulator (issue #6412) so both boot-
+    // completion paths agree on the same booted device and neither trusts a
+    // stale cached snapshot (issue #6576).
     const simulator = await this.findBootedSimulator(udid, timeoutMs);
     perf.endOperation("deviceLookup");
 
@@ -1675,8 +1715,14 @@ export class SimCtlClient implements SimCtl {
    */
   async listSimulatorImages(
     timeoutMs?: number,
-    options: { bypassCache?: boolean } = {},
+    options: { bypassCache?: boolean; signal?: AbortSignal } = {},
   ): Promise<DeviceInfo[]> {
+    // An already-aborted caller must fail even on a cache hit below -- a cached
+    // "success" for a request the caller has already given up on is silently
+    // wrong (issue #6576).
+    const signal = options.signal ?? getAbortSignal();
+    signal?.throwIfAborted();
+
     // Check cache first
     if (!options.bypassCache && SimCtlClient.deviceListCache) {
       const cacheAge = this.timer.now() - SimCtlClient.deviceListCache.timestamp;
@@ -1686,56 +1732,190 @@ export class SimCtlClient implements SimCtl {
       }
     }
 
-    logger.debug("Getting list of iOS simulators");
+    // A caller that explicitly bypassed the cache wants a read that is
+    // provably fresh (e.g. boot verification via readSimulatorState), so it
+    // must not join an in-flight request some other caller's options started
+    // — that request's failure-fallback behavior is not this caller's to
+    // inherit. Run it standalone instead of sharing the coalescing slot below.
+    if (options.bypassCache) {
+      return this.runListSimulatorImages(timeoutMs, { bypassCache: true, signal });
+    }
+
+    return this.raceOwnDeadline(this.runListSimulatorImages(undefined, {}), timeoutMs, signal);
+  }
+
+  private sharedDeviceList(): Promise<DeviceInfo[]> {
+    if (!SimCtlClient.inFlightDeviceList) {
+      const generation = SimCtlClient.deviceListGeneration;
+      const requestSequence = ++SimCtlClient.deviceListRequestSequence;
+      const flight = runWithAbortSignal(undefined, () =>
+        this.listDevicesForBootedCheck(SimCtlClient.SHARED_DEVICE_LIST_TIMEOUT_MS, undefined),
+      )
+        .then((devices) => {
+          this.recordDeviceListSnapshot(devices, generation, requestSequence);
+          return devices;
+        })
+        .finally(() => {
+          if (SimCtlClient.inFlightDeviceList === flight) {
+            SimCtlClient.inFlightDeviceList = null;
+            SimCtlClient.inFlightDeviceListRequestSequence = null;
+          }
+        });
+      SimCtlClient.inFlightDeviceList = flight;
+      SimCtlClient.inFlightDeviceListRequestSequence = requestSequence;
+    }
+    return SimCtlClient.inFlightDeviceList;
+  }
+
+  /**
+   * Await a listing shared with other callers (`SimCtlClient.inFlightDeviceList`)
+   * but bound ONLY by THIS caller's own timeout/signal. Losing that race must
+   * not cancel the shared fetch or affect any other waiter racing the same
+   * promise (issue #6576) -- unlike `executeCommandArgv`'s timeout, this never
+   * aborts the underlying process, since other callers may still need it.
+   */
+  private async raceOwnDeadline(
+    shared: Promise<DeviceInfo[]>,
+    timeoutMs: number | undefined,
+    signal: AbortSignal | undefined,
+  ): Promise<DeviceInfo[]> {
+    signal?.throwIfAborted();
+    if (timeoutMs === undefined && !signal) {
+      return shared;
+    }
+
+    let timeoutHandle: NodeJS.Timeout | undefined;
+    let abortListener: (() => void) | undefined;
+    const contenders: Array<Promise<DeviceInfo[]>> = [shared];
+    if (timeoutMs !== undefined) {
+      contenders.push(
+        new Promise<never>((_resolve, reject) => {
+          timeoutHandle = this.timer.setTimeout(() => {
+            reject(new Error(`Timed out waiting for iOS simulator listing after ${timeoutMs}ms`));
+          }, timeoutMs);
+        }),
+      );
+    }
+    if (signal) {
+      contenders.push(
+        new Promise<never>((_resolve, reject) => {
+          abortListener = () =>
+            reject(signal.reason ?? new ActionableError("iOS simulator listing aborted"));
+          signal.addEventListener("abort", abortListener, { once: true });
+        }),
+      );
+    }
 
     try {
-      const simulatorList = await this.listSimulators(timeoutMs);
-      const devices: DeviceInfo[] = [];
+      return await Promise.race(contenders);
+    } finally {
+      if (timeoutHandle) {
+        this.timer.clearTimeout(timeoutHandle);
+      }
+      if (signal && abortListener) {
+        signal.removeEventListener("abort", abortListener);
+      }
+    }
+  }
 
-      // Extract all devices from all runtime versions
-      for (const [runtimeId, runtimeDevices] of Object.entries(simulatorList.devices)) {
-        for (const device of runtimeDevices) {
-          logger.debug(
-            `Found iOS simulator: ${device.name} (${device.udid}) state=${device.state}`,
-          );
-          const iosVersion = normalizeIosVersion(runtimeId, device.os_version);
-          devices.push({
-            name: device.name,
-            platform: "ios",
-            deviceId: device.udid,
-            isRunning: device.state === "Booted",
-            state: device.state,
+  /** Map a raw `simctl list devices --json` payload into sorted {@link DeviceInfo} records. */
+  private static mapSimulatorListToDeviceInfos(simulatorList: SimulatorList): DeviceInfo[] {
+    const devices: DeviceInfo[] = [];
+    for (const [runtimeId, runtimeDevices] of Object.entries(simulatorList.devices)) {
+      for (const device of runtimeDevices) {
+        logger.debug(`Found iOS simulator: ${device.name} (${device.udid}) state=${device.state}`);
+        const iosVersion = normalizeIosVersion(runtimeId, device.os_version);
+        devices.push({
+          name: device.name,
+          platform: "ios",
+          deviceId: device.udid,
+          isRunning: device.state === "Booted",
+          state: device.state,
+          isAvailable: device.isAvailable,
+          availabilityError: device.availabilityError,
+          iosVersion,
+          osVersion: iosVersion,
+          formFactor: inferIosFormFactor(device.deviceTypeIdentifier),
+          deviceType: device.deviceTypeIdentifier,
+          runtime: runtimeId,
+          model: device.model,
+          architecture: device.architecture,
+          capabilityInventory: iosSimulatorCapabilityInventory({
             isAvailable: device.isAvailable,
             availabilityError: device.availabilityError,
-            iosVersion,
-            osVersion: iosVersion,
-            formFactor: inferIosFormFactor(device.deviceTypeIdentifier),
-            deviceType: device.deviceTypeIdentifier,
             runtime: runtimeId,
-            model: device.model,
-            architecture: device.architecture,
-            capabilityInventory: iosSimulatorCapabilityInventory({
-              isAvailable: device.isAvailable,
-              availabilityError: device.availabilityError,
-              runtime: runtimeId,
-            }),
-          } as DeviceInfo);
-        }
+          }),
+        } as DeviceInfo);
       }
+    }
+    devices.sort((a, b) => (a.deviceId || "").localeCompare(b.deviceId || ""));
+    return devices;
+  }
 
-      devices.sort((a, b) => (a.deviceId || "").localeCompare(b.deviceId || ""));
-      if (devices.length > 0) {
-        SimCtlClient.deviceListCache = {
-          devices,
-          timestamp: this.timer.now(),
-        };
-      } else {
-        SimCtlClient.deviceListCache = null;
+  /** Write a successful physical listing unless invalidation or a newer success superseded it. */
+  private recordDeviceListSnapshot(
+    devices: DeviceInfo[],
+    generation: number,
+    requestSequence: number,
+  ): boolean {
+    if (
+      SimCtlClient.deviceListGeneration !== generation ||
+      requestSequence < SimCtlClient.recordedDeviceListRequestSequence
+    ) {
+      return false;
+    }
+    const timestamp = this.timer.now();
+    SimCtlClient.deviceListCache = devices.length ? { devices, timestamp } : null;
+    SimCtlClient.lastGoodDeviceList = { devices, timestamp };
+    SimCtlClient.recordedDeviceListRequestSequence = requestSequence;
+    return true;
+  }
+
+  private async runListSimulatorImages(
+    timeoutMs: number | undefined,
+    options: { bypassCache?: boolean; signal?: AbortSignal },
+  ): Promise<DeviceInfo[]> {
+    logger.debug("Getting list of iOS simulators");
+    const generation = SimCtlClient.deviceListGeneration;
+    const requestSequence = options.bypassCache
+      ? ++SimCtlClient.deviceListRequestSequence
+      : undefined;
+
+    try {
+      const devices = options.bypassCache
+        ? await this.listDevicesForBootedCheck(timeoutMs, options.signal)
+        : await this.sharedDeviceList();
+      if (
+        requestSequence !== undefined &&
+        this.recordDeviceListSnapshot(devices, generation, requestSequence) &&
+        SimCtlClient.inFlightDeviceListRequestSequence !== null &&
+        SimCtlClient.inFlightDeviceListRequestSequence < requestSequence
+      ) {
+        SimCtlClient.inFlightDeviceList = null;
+        SimCtlClient.inFlightDeviceListRequestSequence = null;
       }
       return devices;
     } catch (error) {
-      SimCtlClient.deviceListCache = null;
+      options.signal?.throwIfAborted();
       const detail = errorMessage(error);
+
+      // A caller that explicitly requested a fresh read (e.g. boot
+      // verification via readSimulatorState) must never be handed a stale
+      // snapshot in place of the failure it asked to observe. Everyone else
+      // gets the last-good snapshot within its retention window, mirroring
+      // DevicectlDeviceLister.lastGood (issue #6576).
+      const lastGood = SimCtlClient.lastGoodDeviceList;
+      if (
+        !options.bypassCache &&
+        lastGood &&
+        this.timer.now() - lastGood.timestamp < SimCtlClient.LAST_GOOD_DEVICE_LIST_RETENTION_MS
+      ) {
+        logger.warn(
+          `Failed to get iOS devices: ${detail}. Falling back to last-good simulator list (age: ${this.timer.now() - lastGood.timestamp}ms).`,
+        );
+        return lastGood.devices;
+      }
+
       logger.warn(`Failed to get iOS devices: ${detail}`);
       throw new ActionableError(`Failed to list iOS simulator devices: ${detail}`);
     }
@@ -1759,36 +1939,56 @@ export class SimCtlClient implements SimCtl {
    * Like {@link getBootedSimulators} but rethrows discovery failures instead of
    * swallowing them into an empty list. Callers that must distinguish "no
    * simulators are booted" from "simctl discovery failed" should use this.
+   *
+   * Reuses fresh cached discovery or the shared raw listing. Each waiter retains
+   * its own cancellation/deadline, and checked discovery propagates raw errors
+   * instead of returning the UI listing's last-good fallback.
    */
   async getBootedSimulatorsChecked(
     timeoutMs?: number,
     signal?: AbortSignal,
+    options: { bypassCache?: boolean } = {},
   ): Promise<BootedDevice[]> {
-    const simulatorList = await this.listSimulators(timeoutMs, signal);
-    logger.debug(`Found simulator list: ${simulatorList}`);
+    // An already-aborted caller must fail even on a cache hit below -- a cached
+    // "success" for a request the caller has already given up on is silently
+    // wrong (issue #6576).
+    signal ??= getAbortSignal();
+    signal?.throwIfAborted();
+    const cached = SimCtlClient.deviceListCache;
+    const devices =
+      !options.bypassCache &&
+      cached &&
+      this.timer.now() - cached.timestamp < SimCtlClient.DEVICE_LIST_CACHE_TTL
+        ? cached.devices
+        : options.bypassCache
+          ? await this.listDevicesForBootedCheck(timeoutMs, signal)
+          : await this.raceOwnDeadline(this.sharedDeviceList(), timeoutMs, signal);
     const observedAt = this.observationSequence.next();
-    const bootedDevices: BootedDevice[] = [];
 
-    // Extract booted devices from all runtime versions
-    for (const [runtimeId, runtimeDevices] of Object.entries(simulatorList.devices)) {
-      for (const device of runtimeDevices) {
-        if (isDeviceAvailable(device) && device.state === "Booted") {
-          const iosVersion = normalizeIosVersion(runtimeId, device.os_version);
-          bootedDevices.push({
+    return devices
+      .filter((device) => device.isAvailable && device.state === "Booted" && device.deviceId)
+      .map(
+        (device) =>
+          ({
             name: device.name,
             platform: "ios",
-            deviceId: device.udid,
+            deviceId: device.deviceId,
             observedAt,
-            iosVersion,
-            osVersion: iosVersion,
-            formFactor: inferIosFormFactor(device.deviceTypeIdentifier),
-          } as BootedDevice);
-        }
-      }
-    }
+            iosVersion: device.iosVersion,
+            osVersion: device.osVersion,
+            formFactor: device.formFactor,
+          }) as BootedDevice,
+      )
+      .sort((a, b) => a.deviceId.localeCompare(b.deviceId));
+  }
 
-    bootedDevices.sort((a, b) => a.deviceId.localeCompare(b.deviceId));
-    return bootedDevices;
+  /** Cold-cache path for {@link getBootedSimulatorsChecked}: the raw discovery primitive. */
+  private async listDevicesForBootedCheck(
+    timeoutMs: number | undefined,
+    signal: AbortSignal | undefined,
+  ): Promise<DeviceInfo[]> {
+    const simulatorList = await this.listSimulators(timeoutMs, signal);
+    return SimCtlClient.mapSimulatorListToDeviceInfos(simulatorList);
   }
 
   /**
@@ -1798,14 +1998,22 @@ export class SimCtlClient implements SimCtl {
    */
   async getDeviceInfo(udid: string): Promise<AppleDevice | null> {
     try {
-      const simulatorList = await this.listSimulators();
-
-      // Search for the device in all runtime versions
-      for (const [runtimeId, runtimeDevices] of Object.entries(simulatorList.devices)) {
-        const device = runtimeDevices.find((d) => d.udid === udid);
-        if (device) {
-          return { ...device, runtime: runtimeId };
-        }
+      // Routes through listSimulatorImages so this shares the cached/coalesced
+      // listing instead of always spawning a fresh `simctl` process (issue #6576).
+      const device = (await this.listSimulatorImages()).find((d) => d.deviceId === udid);
+      if (device) {
+        return {
+          udid: device.deviceId ?? udid,
+          name: device.name,
+          state: device.state ?? "",
+          isAvailable: device.isAvailable ?? false,
+          availabilityError: device.availabilityError,
+          deviceTypeIdentifier: device.deviceType,
+          runtime: device.runtime,
+          model: device.model,
+          os_version: device.osVersion,
+          architecture: device.architecture,
+        };
       }
 
       return null;
@@ -1860,6 +2068,12 @@ export class SimCtlClient implements SimCtl {
     // Shares findBootedSimulator with resolveReadySimulator (issue #6412) so
     // this session auto-start path and the explicit startSimulator +
     // waitForSimulatorReady path agree on the same booted device.
+    //
+    // findBootedSimulator always issues its own unshared `simctl list
+    // devices` read (it calls listSimulators() directly, never
+    // listSimulatorImages()'s TTL cache), so it is already immune to the
+    // stale-cache risk bypassCache guards against elsewhere (issue #6576):
+    // there is no cached snapshot here to trust in the first place.
     const device = await this.findBootedSimulator(
       udid,
       this.remainingBootTimeoutMs(udid, deadlineMs),
@@ -1975,9 +2189,23 @@ export class SimCtlClient implements SimCtl {
     return simulatorUdid;
   }
 
-  /** Drop the shared device-list snapshot so the next list re-reads simctl. */
+  /**
+   * Drop the shared device-list snapshot so the next list re-reads simctl.
+   * Also drops the last-good fallback: a caller invalidating the cache knows
+   * something changed (a device was created/deleted, or a test is resetting
+   * state), so a subsequent transient failure must not resurrect the
+   * pre-invalidation snapshot as if it were still trustworthy (issue #6576).
+   *
+   * Also bumps `deviceListGeneration` so an in-flight listing that was already
+   * running when this invalidation fires cannot repopulate the cache with the
+   * obsolete snapshot it captured before the mutation (issue #6576).
+   */
   static invalidateDeviceListCache(): void {
     SimCtlClient.deviceListCache = null;
+    SimCtlClient.lastGoodDeviceList = null;
+    SimCtlClient.inFlightDeviceList = null;
+    SimCtlClient.inFlightDeviceListRequestSequence = null;
+    SimCtlClient.deviceListGeneration++;
   }
 
   /**

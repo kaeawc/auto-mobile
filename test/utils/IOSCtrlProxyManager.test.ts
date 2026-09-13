@@ -313,7 +313,10 @@ describe("IOSCtrlProxyManager", function () {
         const executor = new FakeProcessExecutor();
         const processes: FakeListeningProcess[] = [42, 43].map((pid) => ({
           pid,
-          ppid: pid === 42 ? 1 : 42,
+          // The tracked runner (42) is parented by this daemon so the #6579
+          // ownership re-verification in forceStopForShutdown recognizes it as
+          // ours; 43 is its child.
+          ppid: pid === 42 ? process.pid : 42,
           port: 8765,
           command: `xcodebuild CtrlProxy -destination id=${testDevice.deviceId}`,
           alive: true,
@@ -1911,6 +1914,144 @@ describe("IOSCtrlProxyManager", function () {
       expect(runnerController.signal.aborted).toBe(true);
       expect(internal.xcTestProcessId).toBeNull();
       expect(internal.xcTestProcess).toBeNull();
+    });
+
+    test("forceStopForShutdown does not signal a recycled tracked PID that is no longer our runner (#6579)", async function () {
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        fakeTimer,
+        undefined,
+        fakeExecutor,
+      );
+      (manager as unknown as { xcTestProcessId: number }).xcTestProcessId = 912349;
+      const foreignProcess: FakeListeningProcess = {
+        pid: 912349,
+        port: 8998,
+        command: "/usr/sbin/some-other-daemons-runner --serve",
+        alive: true,
+        ignoreTerm: true,
+        ignoreKill: true,
+      };
+      installListeningProcessFakes(fakeExecutor, [foreignProcess]);
+
+      // Only relevant if the fix regresses: an unfixed forceStopForShutdown would
+      // attempt terminateProcessTree against this never-dying foreign process,
+      // whose waitForExit retry loop sleeps via the timer.
+      fakeTimer.enableAutoAdvance();
+      await (
+        manager as unknown as { forceStopForShutdown(deadline: number): Promise<void> }
+      ).forceStopForShutdown(fakeTimer.now() + 5000);
+
+      expect(fakeExecutor.wasCommandExecuted("kill -TERM -- -912349")).toBe(false);
+      expect(fakeExecutor.wasCommandExecuted("kill -TERM 912349")).toBe(false);
+      expect(fakeExecutor.wasCommandExecuted("kill -KILL -- -912349")).toBe(false);
+      expect(foreignProcess.alive).toBe(true);
+    });
+
+    test("forceStopForShutdown does not signal another daemon runner for the same device", async function () {
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        fakeTimer,
+        undefined,
+        fakeExecutor,
+      );
+      (manager as unknown as { xcTestProcessId: number }).xcTestProcessId = 912349;
+      const foreignProcess: FakeListeningProcess = {
+        pid: 912349,
+        port: 8998,
+        command: ownRunnerProcess(912349).command,
+        ppid: process.pid + 1,
+        alive: true,
+        ignoreTerm: true,
+        ignoreKill: true,
+      };
+      installListeningProcessFakes(fakeExecutor, [foreignProcess]);
+
+      // Only relevant if the fix regresses: an unfixed forceStopForShutdown would
+      // attempt terminateProcessTree against this never-dying foreign process,
+      // whose waitForExit retry loop sleeps via the timer.
+      fakeTimer.enableAutoAdvance();
+      await (
+        manager as unknown as { forceStopForShutdown(deadline: number): Promise<void> }
+      ).forceStopForShutdown(fakeTimer.now() + 5000);
+
+      expect(fakeExecutor.wasCommandExecuted("kill -TERM -- -912349")).toBe(false);
+      expect(fakeExecutor.wasCommandExecuted("kill -TERM 912349")).toBe(false);
+      expect(fakeExecutor.wasCommandExecuted("kill -KILL -- -912349")).toBe(false);
+      expect(foreignProcess.alive).toBe(true);
+    });
+
+    test.each(["error", "timeout"])(
+      "keeps an inconclusive ownership %s separate from mismatch",
+      async function (mode) {
+        const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+          testDevice,
+          fakeTimer,
+          undefined,
+          fakeExecutor,
+        );
+        fakeExecutor.setCommandHandler("ps -p", async () => {
+          if (mode === "error") {
+            throw new Error("temporary ps failure");
+          }
+          return new Promise<ReturnType<typeof createExecResult>>(() => {});
+        });
+        const result = (
+          manager as unknown as {
+            isRunnerStillOwnedWithinShutdownDeadline: (pid: number) => Promise<boolean>;
+          }
+        ).isRunnerStillOwnedWithinShutdownDeadline(912350);
+        expect(await fakeTimer.resolvePromise(result)).toBe(true);
+        expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
+      },
+    );
+    test("forceStopForShutdown still tree-kills a re-verified owned runner (#6579)", async function () {
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        fakeTimer,
+        undefined,
+        fakeExecutor,
+      );
+      (manager as unknown as { xcTestProcessId: number }).xcTestProcessId = 912350;
+      const ownedRunner = { ...ownRunnerProcess(912350), ppid: process.pid };
+      installListeningProcessFakes(fakeExecutor, [ownedRunner]);
+
+      await (
+        manager as unknown as { forceStopForShutdown(deadline: number): Promise<void> }
+      ).forceStopForShutdown(fakeTimer.now() + 5000);
+
+      // forceStopForShutdown drives terminateProcessTree with skipGraceful, so a
+      // re-verified owned runner is signaled straight with SIGKILL (no SIGTERM).
+      expect(fakeExecutor.wasCommandExecuted("kill -KILL -- -912350")).toBe(true);
+      expect(ownedRunner.alive).toBe(false);
+    });
+
+    test("forceStopForShutdown kills a surviving owned process group after its root exits (#6579)", async function () {
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        fakeTimer,
+        undefined,
+        fakeExecutor,
+      );
+      const runnerPid = 912351;
+      (manager as unknown as { xcTestProcessId: number }).xcTestProcessId = runnerPid;
+      const exitedRunner = { ...ownRunnerProcess(runnerPid), alive: false };
+      const survivingChild: FakeListeningProcess = {
+        pid: 912352,
+        port: 8765,
+        command: "CtrlProxyUITests-Runner",
+        alive: true,
+        ppid: 1,
+        pgid: runnerPid,
+      };
+      installListeningProcessFakes(fakeExecutor, [exitedRunner, survivingChild]);
+
+      await (
+        manager as unknown as { forceStopForShutdown(deadline: number): Promise<void> }
+      ).forceStopForShutdown(250);
+
+      expect(fakeExecutor.wasCommandExecuted(`kill -KILL -- -${runnerPid}`)).toBe(true);
+      expect(survivingChild.alive).toBe(false);
     });
 
     test("start() waits for an own runner then terminates it if it never becomes healthy (#2834)", async function () {

@@ -65,7 +65,7 @@ export function formatCommandError(error: unknown, options: CommandErrorFormatOp
 }
 
 export function wrapCommandError(error: unknown, options: CommandErrorFormatOptions): Error {
-  const wrapped = new Error(formatCommandError(error, options));
+  const wrapped = new Error(formatCommandError(error, options), { cause: error });
   if (error instanceof Error) {
     wrapped.name = error.name;
   }

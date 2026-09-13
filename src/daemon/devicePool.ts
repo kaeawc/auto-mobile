@@ -5909,6 +5909,44 @@ export class DevicePool {
   }
 
   /**
+   * FUNNEL 2 — the ONE admission gate every device-addressed operation at the
+   * daemon boundary passes, with or without a session.
+   *
+   * Refuses a serial whose pooled identity is QUARANTINED: the serial resolves,
+   * but which AVD answers on it does not, so any action addressed to it would be
+   * acting on a label the pool can no longer tie to the runtime.
+   *
+   * `purpose` completes the refusal ("Refusing `<purpose>` on device '<serial>'"),
+   * so a tap, an observation and a stored-value mutation are all refused in the
+   * same words with the same two facts: the serial, and the label the daemon can
+   * no longer tie to it.
+   *
+   * This exists because the quarantine was first enforced only at
+   * {@link assertSessionReadyForAutomation}, which is keyed on a SESSION. An
+   * explicit-`deviceId` request against an idle quarantined emulator has no
+   * session, so it bypassed the gate entirely and executed against whatever now
+   * answers on the serial. `assertSessionReadyForAutomation` is now one caller of
+   * this gate rather than the gate itself
+   * ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
+   *
+   * A serial with no pool entry passes: the quarantine is a statement about a
+   * pooled entry, and refusing an unpooled serial would break direct-mode and
+   * pre-allocation paths that legitimately address a device the pool never held.
+   *
+   * Enforced by `test/lint/deviceAddressedAdmissionGate.test.ts`, which fails on a
+   * device-addressed socket handler that does not reach this gate.
+   */
+  assertDeviceActionable(deviceId: string, purpose: string): void {
+    const pooled = this.devices.get(deviceId);
+    if (pooled?.identityUnresolved !== true) {
+      return;
+    }
+    throw new ActionableError(
+      this.describeUnresolvedPooledIdentity(pooled, `Refusing ${purpose} on device`),
+    );
+  }
+
+  /**
    * The single wording for every refusal the quarantine produces, so assignment,
    * tool execution and their tests all name the same two facts: the serial, and
    * the label the daemon can no longer tie to the runtime on it.
@@ -6938,15 +6976,11 @@ export class DevicePool {
     // session; execution cancellation only happens later in retirement, so this
     // is the gate that closes that window (see #5494, follow-up to #5452/#5491).
     const assignedDeviceId = this.sessionManager.getSession(sessionId)?.assignedDevice;
-    // The one choke point every tool execution passes through, so the
-    // unresolved-identity quarantine is enforced here rather than per tool: the
-    // session addresses its device BY SERIAL, and while the quarantine holds the
-    // pool cannot say which AVD answers on that serial (#6863 review).
-    const quarantined = assignedDeviceId ? this.devices.get(assignedDeviceId) : undefined;
-    if (quarantined?.identityUnresolved) {
-      throw new ActionableError(
-        this.describeUnresolvedPooledIdentity(quarantined, "Refusing to run on device"),
-      );
+    // The session addresses its device BY SERIAL, so this path is just the
+    // session-keyed spelling of a device-addressed operation and goes through
+    // FUNNEL 2 like every other one (#6863 review).
+    if (assignedDeviceId) {
+      this.assertDeviceActionable(assignedDeviceId, "to run");
     }
     if (assignedDeviceId && this.isDeviceUnderShutdown(assignedDeviceId)) {
       throw new ActionableError(

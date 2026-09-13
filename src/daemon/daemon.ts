@@ -1236,8 +1236,9 @@ export class Daemon {
     // it in both directions and every push server drops that serial's frames, so a
     // possible replacement AVD's passive events cannot reach the previous AVD's
     // subscribers (#6863 review).
-    const resolver = createRegistryDeviceSessionResolver(this.deviceSessionRegistry, (deviceId) =>
-      this.devicePool.isPooledIdentityUnresolved(deviceId),
+    const resolver = createRegistryDeviceSessionResolver(
+      this.deviceSessionRegistry,
+      this.devicePool,
     );
     const { deviceDataStream, performancePush, failuresPush, telemetryPush } =
       this.getDeviceSessionRoutingTargets();

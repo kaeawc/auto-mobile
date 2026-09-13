@@ -1527,6 +1527,15 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     }
 
     try {
+      // FUNNEL 2, BEFORE observing. A device-specific request names the serial,
+      // and the quarantine is precisely the pool's inability to say which runtime
+      // answers on it. Without this the handler observed the unknown runtime,
+      // `pushForDevice` then dropped every frame because routing is suspended,
+      // and the requester was acknowledged `success: true` with no hierarchy
+      // ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
+      if (request.deviceId !== undefined) {
+        this.deviceSessionResolver.assertDeviceActionable(request.deviceId, "to observe");
+      }
       const frameContextGenerationsAtStart = new Map(this.frameContextGenerations);
       const observations = await this.requestObservationWithTimeout({
         deviceId: request.deviceId ?? null,

@@ -40,6 +40,12 @@ export interface DaemonStateAccess {
     getRecoveryPolicy?(): DeviceRecoveryPolicy;
     getRecoveryEligibility?(deviceId: string): DeviceRecoveryEligibility;
     assertSessionReadyForAutomation?(sessionId: string): void;
+    /**
+     * FUNNEL 2 — the device-addressed admission gate. Optional only so the
+     * daemon-state fakes in older suites keep compiling; the real pool always
+     * has it ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
+     */
+    assertDeviceActionable?(deviceId: string, purpose: string): void;
     /** FUNNEL 1 — fold a discovery observation into pooled identity. */
     reconcileDiscoveryObservation?(devices: readonly BootedDevice[], source: string): Promise<void>;
     resolveAutolockSessionForMcpSession?(

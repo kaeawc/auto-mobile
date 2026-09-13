@@ -183,6 +183,44 @@ describe("DeviceDataStreamSocketServer", () => {
       expect(msgs[1].success).toBe(true);
     });
 
+    // The device-addressed admission gate (`DevicePool.assertDeviceActionable`,
+    // reached here through the resolver) must refuse BEFORE the serial-addressed
+    // observation runs. Without it the handler observed the unknown runtime,
+    // `pushForDevice` then dropped every frame because routing is suspended, and
+    // the requester was acknowledged with `success: true` and no hierarchy
+    // ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
+    it("rejects an explicit observation while the pooled identity is quarantined", async () => {
+      let observed = false;
+      server.setOnObservationRequested(async (request) => {
+        observed = true;
+        return [requestedObservation(request.deviceId ?? "emulator-5554")];
+      });
+      const { socket } = server.simulateSubscription({ deviceId: "emulator-5554" });
+      server.sessionResolver.quarantine("emulator-5554");
+
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({
+          id: "obs-quarantined",
+          command: "request_observation",
+          deviceId: "emulator-5554",
+        }),
+      );
+
+      expect(observed).toBe(false);
+      const msgs = socket.getWrittenMessages<{
+        id?: string;
+        type: string;
+        success?: boolean;
+        error?: string;
+      }>();
+      expect(msgs).toHaveLength(1);
+      expect(msgs[0].type).toBe("error");
+      expect(msgs[0].success).toBe(false);
+      expect(msgs[0].id).toBe("obs-quarantined");
+      expect(msgs[0].error).toContain("emulator-5554");
+    });
+
     it("forwards proven frame context and clears it when an explicit observation lacks provenance", async () => {
       server.setOnObservationRequested(async (request) => [
         requestedObservation(request.deviceId ?? "emulator-5554", "frame-A"),

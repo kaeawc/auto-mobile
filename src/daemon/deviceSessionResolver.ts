@@ -31,6 +31,14 @@ export interface DeviceSessionResolver {
    * in doubt (#6863 review).
    */
   isRoutingSuspended(deviceId: string): boolean;
+  /**
+   * FUNNEL 2, reached through the resolver a push server already holds: refuse a
+   * device-addressed REQUEST whose serial is quarantined, rather than serving it
+   * and silently dropping every frame it produces. Delegates to
+   * `DevicePool.assertDeviceActionable`, so the refusal is the same one the tool
+   * layer raises ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
+   */
+  assertDeviceActionable(deviceId: string, purpose: string): void;
 }
 
 /**
@@ -43,23 +51,38 @@ export const nullDeviceSessionResolver: DeviceSessionResolver = {
   resolveUuid: () => null,
   resolveDeviceId: () => null,
   isRoutingSuspended: () => false,
+  assertDeviceActionable: () => {},
 };
 
 /**
  * Adapt a {@link DeviceSessionRegistry} to the narrow {@link DeviceSessionResolver}
  * contract.
  *
- * `isIdentityQuarantined` is the pool's `identityUnresolved` state
- * (`DevicePool.isPooledIdentityUnresolved`). While it holds for a serial, BOTH
- * directions withhold the routing identity — the registry record is untouched, so
- * a lifted quarantine resumes the same epoch — and every device-attributed frame
- * for that serial is dropped by its push server. Omitted (direct mode, tests) means
- * nothing is ever quarantined.
+ * `identityGate` is the device pool. Its `isPooledIdentityUnresolved` is the
+ * `identityUnresolved` state: while it holds for a serial, BOTH directions
+ * withhold the routing identity — the registry record is untouched, so a lifted
+ * quarantine resumes the same epoch — and every device-attributed frame for that
+ * serial is dropped by its push server. Its `assertDeviceActionable` is FUNNEL 2,
+ * so a push server can REFUSE a device-addressed request instead of serving it
+ * into a routing black hole. Omitted (direct mode, tests) means nothing is ever
+ * quarantined.
  */
+export interface DeviceIdentityGate {
+  isPooledIdentityUnresolved(deviceId: string): boolean;
+  assertDeviceActionable(deviceId: string, purpose: string): void;
+}
+
+const permissiveIdentityGate: DeviceIdentityGate = {
+  isPooledIdentityUnresolved: () => false,
+  assertDeviceActionable: () => {},
+};
+
 export function createRegistryDeviceSessionResolver(
   registry: DeviceSessionRegistry,
-  isIdentityQuarantined: (deviceId: string) => boolean = () => false,
+  identityGate: DeviceIdentityGate = permissiveIdentityGate,
 ): DeviceSessionResolver {
+  const isIdentityQuarantined = (deviceId: string): boolean =>
+    identityGate.isPooledIdentityUnresolved(deviceId);
   const resolveUuid = (deviceId: string): string | null =>
     isIdentityQuarantined(deviceId)
       ? null
@@ -73,7 +96,9 @@ export function createRegistryDeviceSessionResolver(
       }
       return deviceId;
     },
-    isRoutingSuspended: (deviceId: string) => isIdentityQuarantined(deviceId),
+    isRoutingSuspended: isIdentityQuarantined,
+    assertDeviceActionable: (deviceId: string, purpose: string) =>
+      identityGate.assertDeviceActionable(deviceId, purpose),
   };
 }
 

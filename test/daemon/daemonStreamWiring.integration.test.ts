@@ -26,6 +26,7 @@ interface RoutingTargets {
 }
 
 interface DaemonStreamInternals {
+  devicePool: { isPooledIdentityUnresolved(deviceId: string): boolean };
   observationStreamHealth: {
     isHealthy(): boolean;
     recover(): Promise<void>;
@@ -170,6 +171,50 @@ describe("Daemon stream wiring", () => {
       expect(replacementStream.observationCallbackInstalled).toBe(true);
       expect(replacementStream.navigationRequestCallbackInstalled).toBe(true);
       expect(replacementStream.storageSubscriptionCallbackInstalled).toBe(true);
+    } finally {
+      daemon.getSessionManager().stopCleanupTimer();
+    }
+  });
+
+  // The resolver handed to every push server reads the POOL's quarantine, not just
+  // the registry, so a serial whose AVD identity is unresolved has no routing
+  // identity in either direction while the epoch itself is preserved (#6863 review).
+  test("withholds routing identity for a pool-quarantined serial", async () => {
+    const timer = new FakeTimer();
+    const db = await createTestDatabase();
+    const daemon = new Daemon(
+      {},
+      undefined,
+      timer,
+      new DeviceSessionRepository(db),
+      new CountingIdGenerator("device-session"),
+    );
+    const internals = daemon as unknown as DaemonStreamInternals;
+    const stream = new FakeDeviceDataStreamServer();
+    internals.getDeviceSessionRoutingTargets = () => targets(stream);
+    let quarantined = false;
+    internals.devicePool.isPooledIdentityUnresolved = (deviceId: string) =>
+      quarantined && deviceId === "emulator-5554";
+
+    try {
+      internals.setupDeviceSessionRouting();
+      const record = internals.deviceSessionRegistry.onDeviceConnected({
+        deviceId: "emulator-5554",
+        platform: "android",
+        incarnation: 1,
+      });
+      expect(stream.resolver?.resolveUuid("emulator-5554")).toBe(record.deviceSessionUuid);
+
+      quarantined = true;
+
+      expect(stream.resolver?.resolveUuid("emulator-5554")).toBeNull();
+      expect(stream.resolver?.resolveDeviceId(record.deviceSessionUuid)).toBeNull();
+      expect(stream.resolver?.isRoutingSuspended("emulator-5554")).toBe(true);
+
+      quarantined = false;
+
+      // The epoch was preserved underneath, so routing resumes on the SAME uuid.
+      expect(stream.resolver?.resolveUuid("emulator-5554")).toBe(record.deviceSessionUuid);
     } finally {
       daemon.getSessionManager().stopCleanupTimer();
     }

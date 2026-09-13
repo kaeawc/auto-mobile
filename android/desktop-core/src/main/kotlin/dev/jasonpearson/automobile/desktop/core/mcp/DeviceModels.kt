@@ -23,8 +23,9 @@ data class BootedDevicesResponse(
 @Serializable
 data class DeviceIdentity(
   val stableId: String,
+  // Key for one connection epoch of the device: `<deviceId>#<incarnation>` when the daemon's pool
+  // knows the incarnation, otherwise the bare serial, which carries no epoch information.
   val connectionId: String,
-  val transportId: String? = null,
 )
 
 @Serializable

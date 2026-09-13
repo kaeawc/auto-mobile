@@ -2,7 +2,11 @@ import { logger } from "../utils/logger";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { PushSubscriptionSocketServer, getSocketPath } from "./socketServer/index";
 import { PERFORMANCE_PUSH_SOCKET_CONFIG } from "./daemonFiles";
-import { type DeviceSessionResolver, nullDeviceSessionResolver } from "./deviceSessionResolver";
+import {
+  type DeviceSessionResolver,
+  nullDeviceSessionResolver,
+  SuspendedDeviceRoutingLog,
+} from "./deviceSessionResolver";
 
 /**
  * Performance thresholds for health status calculation
@@ -107,6 +111,7 @@ export class PerformancePushSocketServer extends PushSubscriptionSocketServer<
   LivePerformanceData
 > {
   private deviceSessionResolver: DeviceSessionResolver = nullDeviceSessionResolver;
+  private readonly suspendedRoutingLog = new SuspendedDeviceRoutingLog();
 
   constructor(
     socketPath: string = getSocketPath(PERFORMANCE_PUSH_SOCKET_CONFIG),
@@ -126,6 +131,17 @@ export class PerformancePushSocketServer extends PushSubscriptionSocketServer<
    * current epoch regardless of what the caller supplied.
    */
   pushPerformanceData(data: LivePerformanceData): void {
+    if (
+      data.deviceId &&
+      this.suspendedRoutingLog.shouldDropFrame(
+        this.deviceSessionResolver,
+        data.deviceId,
+        "PerformancePush",
+      )
+    ) {
+      // Quarantined pooled identity: see pushTelemetryEvent (#6863 review).
+      return;
+    }
     const deviceSessionUuid = data.deviceId
       ? this.deviceSessionResolver.resolveUuid(data.deviceId)
       : null;

@@ -5,6 +5,9 @@ import { ActionableError, BootedDevice, SomePlatform, type ViewHierarchyResult }
 import { NavigationGraphManager } from "../features/navigation/NavigationGraphManager";
 import { UIStateExtractor } from "../features/navigation/UIStateExtractor";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
+import { RealSettleObserve } from "../features/observe/SettleObserve";
+import type { SettleObserve } from "../features/observe/interfaces/SettleObserve";
+import { settleEmbeddedObservationInResponse } from "./embeddedObservationSettle";
 import { serverConfig } from "../utils/ServerConfig";
 import { MemoryAudit } from "../features/memory/MemoryAudit";
 import { TelemetryRecorder } from "../features/telemetry/TelemetryRecorder";
@@ -937,6 +940,16 @@ function unwrapToolResponse(response: any): any {
   }
 }
 
+/**
+ * Build the settle delegate the embedded-observation stability gate (#6866)
+ * re-observes with. Injected so tests drive the gate on a FakeObserveScreen +
+ * FakeTimer instead of a device.
+ */
+export type SettleObserveFactory = (
+  device: BootedDevice,
+  timer: Timer,
+) => SettleObserve | undefined;
+
 export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
   constructor(
     private readonly createArtifactWriter: ObservationArtifactWriterFactory = (
@@ -944,6 +957,8 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
       timer,
       retention,
     ) => new JsonToolOutputArtifactWriter({ outputDirectory, timer, retention }),
+    private readonly createSettleObserve: SettleObserveFactory = (device, timer) =>
+      new RealSettleObserve(new RealObserveScreen(device), timer),
   ) {}
 
   async handle(input: AfterToolCallInput): Promise<AfterToolCallResult> {
@@ -951,6 +966,7 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
       name,
       args,
       internalCall,
+      device,
       response,
       sessionUuid,
       shouldResolveDevice,
@@ -980,6 +996,24 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
         callerTimedOut: signal?.aborted ?? false,
       });
       logger[resultLog.level](resultLog.message);
+    }
+
+    // Issue #6866: a navigation-class action's embedded observation can be
+    // captured before the destination screen finishes inflating, so the client's
+    // first look misses a not-yet-attached child (the Settings `switchWidget`)
+    // and the parent row's content-derived `s2-…` id changes on the next
+    // observe. Gate that capture on hierarchy stability HERE — before the
+    // session hierarchy cache, the diff baseline and the skeleton projection all
+    // read it — so every downstream consumer sees the settled screen. In-place,
+    // scroll and unknown classes are untouched and keep their current latency.
+    if (toolSuccess) {
+      await settleEmbeddedObservationInResponse(response, {
+        name,
+        args: typeof args === "object" && args !== null ? args : undefined,
+        internal: internalCall,
+        signal,
+        createSettleObserve: () => (device ? this.createSettleObserve(device, timer) : undefined),
+      });
     }
 
     const durationMs = timer.now() - toolStartMs;

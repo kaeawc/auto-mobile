@@ -298,7 +298,17 @@ export interface ObserveResult {
   /** Whether a declarative waitFor condition matched. */
   matched?: boolean;
 
-  /** Whether a whole-screen declarative waitFor stable condition settled. */
+  /**
+   * Whether this observation passed a hierarchy-stability check.
+   *
+   * Two producers, one meaning ("two consecutive structurally-equal
+   * hierarchies"):
+   *  - `observe(waitFor: {for: "stable"})` — the standalone whole-screen settle.
+   *  - The embedded-observation gate on a navigation-class action (issue #6866),
+   *    which stamps every action observation so a client can tell a
+   *    stability-checked capture from an unchecked one. `false` means the bound
+   *    expired, or the action was not navigation-class and was never gated.
+   */
   settled?: boolean;
 
   /** True if a declarative waitFor condition or stability wait timed out. */

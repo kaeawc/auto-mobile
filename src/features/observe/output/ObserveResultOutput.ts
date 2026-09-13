@@ -632,6 +632,14 @@ export interface ObserveDiff {
    * no single accessor for "is this capture fresh" across full and diff modes.
    */
   freshness?: ObserveResult["freshness"];
+  /**
+   * Whether the observation this diff was computed from passed the
+   * embedded-observation stability gate (issue #6866). Populated by the
+   * `finalizeToolResponse` call site from the post-action observation, not by
+   * {@link diffObserveResult} — without it a diff-mode client could not tell a
+   * settled capture from a half-inflated one.
+   */
+  settled?: boolean;
   added: ObserveDiffNode[];
   removed: ObserveDiffNode[];
   changed: ObserveDiffNodeChange[];

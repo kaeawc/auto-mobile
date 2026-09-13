@@ -14,6 +14,19 @@ export interface SettleOptions {
   stableReads?: number;
   /** Cancellation signal, checked before each poll and after each observation. */
   signal?: AbortSignal;
+  /**
+   * Device-clock seed for the poll's entering reference, forwarded verbatim to
+   * {@link pollObserveUntil}'s `initialMinTimestampMs` (issue #6866). Supply the
+   * device-authored `updatedAt` of a capture the caller ALREADY holds — e.g. an
+   * action tool's post-action observation — so the settle loop must read
+   * strictly past it and can neither re-serve that same capture nor treat it as
+   * one of the two consecutive stable reads. Omit it for the standalone
+   * `observe(waitFor: {for: "stable"})` path, which has no prior capture.
+   *
+   * Never pass a host-clock value: a device clock trailing the daemon (#5377)
+   * would reject every genuinely fresh capture and burn the whole budget.
+   */
+  initialMinTimestampMs?: number;
 }
 
 /**

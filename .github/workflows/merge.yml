@@ -558,14 +558,34 @@ jobs:
 
       - uses: ./.github/actions/setup-auto-mobile-npm-package
 
+      - name: "Record Xcode version"
+        id: webrtc-xcode-version
+        shell: bash
+        run: echo "version=$(xcodebuild -version | awk '/^Xcode / { print $2; exit }')" >> "$GITHUB_OUTPUT"
+
+      - name: "Cache iOS capture Swift package dependencies"
+        uses: actions/cache@v4
+        id: cache-webrtc-spm
+        with:
+          path: |
+            ~/Library/Caches/org.swift.swiftpm
+            ios/screen-capture/.build
+          key: ${{ runner.os }}-spm-screen-capture-${{ steps.webrtc-xcode-version.outputs.version }}-${{ hashFiles('ios/screen-capture/Package.swift') }}
+          restore-keys: |
+            ${{ runner.os }}-spm-screen-capture-${{ steps.webrtc-xcode-version.outputs.version }}-
+
       - name: "Ensure iOS Simulator runtime"
         uses: ./.github/actions/ensure-ios-simulator-runtime
 
       - name: "Build iOS capture prerequisites"
         run: |
+          echo "Swift cache hit: ${{ steps.cache-webrtc-spm.outputs.cache-hit }}"
           brew list ffmpeg >/dev/null 2>&1 || brew install ffmpeg
           test -x "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" || brew install --cask google-chrome
+          (cd ios/screen-capture && swift package resolve)
+          SECONDS=0
           (cd ios/screen-capture && swift build)
+          echo "build took ${SECONDS}s"
 
       - name: "Boot and activate iOS Simulator"
         run: |
@@ -986,6 +1006,22 @@ jobs:
         with:
           xcode-version: ${{ matrix.config.xcode }}
 
+      - name: "Cache Swift package dependencies"
+        uses: actions/cache@v4
+        id: cache-swift-packages
+        with:
+          path: |
+            ~/Library/Caches/org.swift.swiftpm
+            ios/screen-capture/.build
+            ios/network-filter/.build
+            ios/highlight-core/.build
+            ios/auto-mobile-sdk/.build
+            ios/control-proxy/.build
+            ios/XCTestRunner/.build
+          key: ${{ runner.os }}-spm-merge-swift-build-${{ matrix.config.xcode }}-${{ hashFiles('Package.swift', 'ios/**/Package.swift') }}
+          restore-keys: |
+            ${{ runner.os }}-spm-merge-swift-build-${{ matrix.config.xcode }}-
+
       - name: "Install macOS Developer ID certificate"
         if: ${{ env.MACOS_SIGNING_ENABLED == 'true' }}
         env:
@@ -1002,6 +1038,13 @@ jobs:
           IOS_KEYCHAIN_PASSWORD: ${{ secrets.IOS_KEYCHAIN_PASSWORD }}
         run: ./scripts/ios/setup-signing-keychain.sh
 
+      - name: "Resolve Swift package dependencies"
+        shell: bash
+        run: |
+          for package in ios/screen-capture ios/network-filter ios/highlight-core ios/auto-mobile-sdk ios/control-proxy ios/XCTestRunner; do
+            (cd "${package}" && swift package resolve)
+          done
+
       - name: "Build Swift Packages"
         env:
           MACOS_SIGNING_ENABLED: ${{ env.MACOS_SIGNING_ENABLED }}
@@ -1012,7 +1055,11 @@ jobs:
           IOS_SIGNING_IDENTITY: ${{ secrets.IOS_SIGNING_IDENTITY }}
           IOS_SIGNING_TEAM_ID: ${{ secrets.IOS_SIGNING_TEAM_ID }}
           IOS_SIGNING_STRICT: ${{ env.IOS_SIGNING_ENABLED }}
-        run: ./scripts/ios/swift-build.sh
+        run: |
+          echo "Swift cache hit: ${{ steps.cache-swift-packages.outputs.cache-hit }}"
+          SECONDS=0
+          ./scripts/ios/swift-build.sh
+          echo "build took ${SECONDS}s"
 
   ios-swift-test:
     name: "Test Swift Packages (${{ matrix.config.name }})"
@@ -1036,8 +1083,35 @@ jobs:
         with:
           xcode-version: ${{ matrix.config.xcode }}
 
+      - name: "Cache Swift package dependencies"
+        uses: actions/cache@v4
+        id: cache-swift-packages
+        with:
+          path: |
+            ~/Library/Caches/org.swift.swiftpm
+            ios/screen-capture/.build
+            ios/network-filter/.build
+            ios/highlight-core/.build
+            ios/auto-mobile-sdk/.build
+            ios/control-proxy/.build
+            ios/XCTestRunner/.build
+          key: ${{ runner.os }}-spm-merge-swift-test-${{ matrix.config.xcode }}-${{ hashFiles('Package.swift', 'ios/**/Package.swift') }}
+          restore-keys: |
+            ${{ runner.os }}-spm-merge-swift-test-${{ matrix.config.xcode }}-
+
+      - name: "Resolve Swift package dependencies"
+        shell: bash
+        run: |
+          for package in ios/screen-capture ios/network-filter ios/highlight-core ios/auto-mobile-sdk ios/control-proxy ios/XCTestRunner; do
+            (cd "${package}" && swift package resolve)
+          done
+
       - name: "Test Swift Packages"
-        run: ./scripts/ios/swift-test.sh
+        run: |
+          echo "Swift cache hit: ${{ steps.cache-swift-packages.outputs.cache-hit }}"
+          SECONDS=0
+          ./scripts/ios/swift-test.sh
+          echo "build took ${SECONDS}s"
 
   ios-xcodegen:
     name: "Generate Xcode Projects"
@@ -1076,6 +1150,24 @@ jobs:
         with:
           xcode-version: ${{ matrix.config.xcode }}
 
+      - name: "Cache Xcode Swift package dependencies"
+        uses: actions/cache@v4
+        id: cache-xcode-spm
+        with:
+          path: ~/Library/Caches/org.swift.swiftpm
+          key: ${{ runner.os }}-spm-merge-xcode-build-${{ matrix.config.xcode }}-${{ hashFiles('Package.swift', 'ios/**/Package.swift') }}
+          restore-keys: |
+            ${{ runner.os }}-spm-merge-xcode-build-${{ matrix.config.xcode }}-
+
+      - name: "Cache Xcode DerivedData"
+        uses: actions/cache@v4
+        id: cache-xcode-derived-data
+        with:
+          path: ${{ runner.temp }}/automobile-derived-data-merge-xcode-build
+          key: ${{ runner.os }}-derived-merge-xcode-build-${{ matrix.config.xcode }}-${{ hashFiles('ios/**/*.swift', 'ios/**/project.yml', 'ios/**/*.pbxproj') }}
+          restore-keys: |
+            ${{ runner.os }}-derived-merge-xcode-build-${{ matrix.config.xcode }}-
+
       - name: "Ensure iOS Simulator runtime"
         uses: ./.github/actions/ensure-ios-simulator-runtime
 
@@ -1085,8 +1177,22 @@ jobs:
       - name: "Generate Xcode Projects"
         run: ./scripts/ios/xcodegen-generate.sh
 
+      - name: "Resolve Xcode project Swift package dependencies"
+        shell: bash
+        run: |
+          for package in ios/highlight-core ios/auto-mobile-sdk ios/control-proxy; do
+            (cd "${package}" && swift package resolve)
+          done
+
       - name: "Build Xcode Projects"
-        run: ./scripts/ios/xcode-build.sh
+        env:
+          AUTOMOBILE_XCODE_DERIVED_DATA: "${{ runner.temp }}/automobile-derived-data-merge-xcode-build"
+        run: |
+          echo "Swift package cache hit: ${{ steps.cache-xcode-spm.outputs.cache-hit }}"
+          echo "DerivedData cache hit: ${{ steps.cache-xcode-derived-data.outputs.cache-hit }}"
+          SECONDS=0
+          ./scripts/ios/xcode-build.sh
+          echo "build took ${SECONDS}s"
 
   # =============================================================================
   # Android Build and Test Jobs
@@ -1530,8 +1636,31 @@ jobs:
         with:
           lfs: false
 
+      - name: "Record Xcode version"
+        id: coverage-xcode-version
+        shell: bash
+        run: echo "version=$(xcodebuild -version | awk '/^Xcode / { print $2; exit }')" >> "$GITHUB_OUTPUT"
+
+      - name: "Cache Swift coverage dependencies"
+        uses: actions/cache@v4
+        id: cache-swift-coverage
+        with:
+          path: |
+            ~/Library/Caches/org.swift.swiftpm
+            ios/control-proxy/.build
+          key: ${{ runner.os }}-spm-merge-swift-coverage-${{ steps.coverage-xcode-version.outputs.version }}-${{ hashFiles('Package.swift', 'ios/**/Package.swift') }}
+          restore-keys: |
+            ${{ runner.os }}-spm-merge-swift-coverage-${{ steps.coverage-xcode-version.outputs.version }}-
+
+      - name: "Resolve Swift coverage dependencies"
+        run: (cd ios/control-proxy && swift package resolve)
+
       - name: "Generate Swift Coverage Badge"
-        run: bash scripts/coverage/generate-swift-coverage.sh
+        run: |
+          echo "Swift cache hit: ${{ steps.cache-swift-coverage.outputs.cache-hit }}"
+          SECONDS=0
+          bash scripts/coverage/generate-swift-coverage.sh
+          echo "build took ${SECONDS}s"
 
       - name: "Upload Swift Coverage Badge"
         uses: actions/upload-artifact@v6

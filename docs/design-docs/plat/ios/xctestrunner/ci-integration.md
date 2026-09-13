@@ -254,15 +254,18 @@ and `testDebugUnitTest --tests '*.automobiletest.*'` runs the AutoMobile tests.
 
 ## Caching strategy
 
-The `build-for-testing` job uses two cache layers that the `automobile-tests` job benefits from
-indirectly through the artifact:
+The `ios-xctest-runner-simulator-tests` job restores two cache layers before its
+`build-for-testing` invocation. It resolves the CtrlProxy package after restore, so a manifest
+change still fetches any newly introduced dependency before the cached DerivedData is reused:
 
-| Cache                     | Key                                                       | What it stores                                                         |
-| ------------------------- | --------------------------------------------------------- | ---------------------------------------------------------------------- |
-| SPM packages              | `runner-xcode<ver>-spm-<hash(project.yml)>`               | Alamofire, XCTestRunner, etc. — avoids re-cloning                      |
-| DerivedData intermediates | `runner-xcode<ver>-intermediates-<hash(sources+configs)>` | Compiled `.o` and `.swiftmodule` files — makes incremental builds fast |
+| Cache                     | Key                                                                    | What it stores                                                         |
+| ------------------------- | ---------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| SPM packages              | `macOS-spm-xctestrunner-26.5-<hash(Package.swift files)>`             | SwiftPM's global package cache — avoids re-fetching resolved packages |
+| DerivedData intermediates | `macOS-derived-xctestrunner-26.5-<hash(CtrlProxy Swift/project inputs)>` | `/tmp/automobile-ctrl-proxy` build products and intermediates          |
 
-Both caches are keyed so a clean rebuild only triggers when sources actually change.
+The restore-key prefixes retain the `26.5` toolchain segment, so a different Xcode version never
+restores compiled artifacts from this lane. Source changes fall back to the prior matching-toolchain
+entry for incremental compilation.
 
 ## Required secrets
 

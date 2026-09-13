@@ -84,14 +84,54 @@ export function catalogFromPackageRecords(
   return catalog;
 }
 
-/** True when no record carried a launchability signal, so the adb probe earns its round-trip. */
-export function needsLauncherProbe(catalog: AndroidAppCatalog): boolean {
-  for (const entry of catalog.values()) {
-    if (entry.launchable !== undefined) {
-      return false;
+/**
+ * True when at least one of `packageNames` still has no launchability signal, so
+ * the adb probe earns its round-trip. Checked against the packages actually
+ * being listed rather than the catalog as a whole: CtrlProxy answers for the
+ * service user only, so a work-profile package set can be entirely uncovered by
+ * a catalog that nonetheless carries booleans for another user (#6798 review).
+ */
+export function needsLauncherProbe(
+  catalog: AndroidAppCatalog,
+  packageNames: Iterable<string>,
+): boolean {
+  for (const packageName of packageNames) {
+    if (catalog.get(packageName)?.launchable === undefined) {
+      return true;
     }
   }
-  return true;
+  return false;
+}
+
+/**
+ * Fold one user's catalog entry into a deduplicated system app. Launchability is
+ * per user (an activity can be disabled for the owner and enabled in a work
+ * profile), so it is kept per user id; the scalar `launchable` stays as the
+ * "launches for at least one of this app's users" summary that a profile-less
+ * query filters on (#6798 review).
+ */
+export function mergeSystemAppCatalogEntry(
+  app: SystemAppCatalogTarget,
+  userId: number,
+  entry: AndroidAppCatalogEntry | undefined,
+): void {
+  if (entry?.label && !app.label) {
+    app.label = entry.label;
+  }
+  if (entry?.launchable === undefined) {
+    return;
+  }
+  const byUserId = app.launchableByUserId ?? {};
+  byUserId[userId] = entry.launchable;
+  app.launchableByUserId = byUserId;
+  app.launchable = Object.values(byUserId).some((launchable) => launchable);
+}
+
+/** The launchability fields {@link mergeSystemAppCatalogEntry} maintains. */
+export interface SystemAppCatalogTarget {
+  label?: string;
+  launchable?: boolean;
+  launchableByUserId?: Record<number, boolean>;
 }
 
 /**

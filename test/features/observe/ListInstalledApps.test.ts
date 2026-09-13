@@ -8,6 +8,22 @@ import { FakeInstalledAppsRepository } from "../../fakes/FakeInstalledAppsReposi
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeSimctl } from "../../fakes/FakeSimctl";
 import { getInstalledAppsCacheWriteCoordinator } from "../../../src/db/installedAppsCacheWriteCoordinator";
+import type {
+  AndroidInstalledPackages,
+  AndroidInstalledPackageSource,
+} from "../../../src/features/observe/ListInstalledApps";
+
+/**
+ * Stands in for the on-device accessibility service: one canned
+ * `installed_packages` answer, tagged with the user it describes.
+ */
+class FakeInstalledPackageSource implements AndroidInstalledPackageSource {
+  constructor(private readonly result: AndroidInstalledPackages | null) {}
+
+  async requestInstalledPackages(): Promise<AndroidInstalledPackages | null> {
+    return this.result;
+  }
+}
 
 class FailsFirstInstalledAppsReplaceRepository extends FakeInstalledAppsRepository {
   private failNextReplace = true;
@@ -426,6 +442,189 @@ describe("ListInstalledApps", function () {
       expect(result.profiles[0]).toHaveLength(1);
       expect(result.profiles[0][0].launchable).toBeUndefined();
       expect(result.system.every((app) => app.launchable === undefined)).toBe(true);
+    });
+  });
+
+  describe("multi-profile launchability (#6798 review)", function () {
+    const workUsers: AndroidUser[] = [
+      { userId: 0, name: "Owner", flags: 13, running: true },
+      { userId: 10, name: "Work", flags: 32, running: true },
+    ];
+    const LAUNCHER_PROBE_USER_0 =
+      "shell cmd package query-activities --brief --user 0 " +
+      "-a android.intent.action.MAIN -c android.intent.category.LAUNCHER";
+    const LAUNCHER_PROBE_USER_10 =
+      "shell cmd package query-activities --brief --user 10 " +
+      "-a android.intent.action.MAIN -c android.intent.category.LAUNCHER";
+
+    test("probes cached profiles the CtrlProxy pass did not cover", async function () {
+      // CtrlProxy's PackageManager runs as the service user, so its records
+      // answer for user 0 only. A work profile must still be probed instead of
+      // being left launchable-less because user 0's records looked complete.
+      const repo = new FakeInstalledAppsRepository();
+      const timer = new FakeTimer();
+      timer.advanceTime(1000);
+      const now = timer.now();
+      await repo.replaceInstalledApps(mockDevice.deviceId, [
+        {
+          device_id: mockDevice.deviceId,
+          user_id: 0,
+          package_name: "com.example.myapp",
+          is_system: 0,
+          installed_at: now,
+          last_verified_at: now,
+          profile_type: "primary",
+        },
+        {
+          device_id: mockDevice.deviceId,
+          user_id: 10,
+          package_name: "com.example.work",
+          is_system: 0,
+          installed_at: now,
+          last_verified_at: now,
+          profile_type: "managed",
+        },
+      ]);
+      fakeAdb.setUsers(workUsers);
+      fakeAdb.setCommandResponse(LAUNCHER_PROBE_USER_10, {
+        stdout: "com.example.work/.Main\n",
+        stderr: "",
+      });
+
+      const cached = new ListInstalledApps(mockDevice, new FakeAdbClientFactory(fakeAdb), null, {
+        cacheEnabled: true,
+        installedAppsRepository: repo,
+        timer,
+        installedPackageSource: new FakeInstalledPackageSource({
+          userId: 0,
+          packages: [
+            {
+              packageName: "com.example.myapp",
+              isSystem: false,
+              label: "My App",
+              launchable: true,
+            },
+          ],
+        }),
+      });
+      const result = await cached.executeDetailed();
+
+      expect(result.profiles[0][0].launchable).toBe(true);
+      expect(result.profiles[0][0].label).toBe("My App");
+      expect(result.profiles[10][0].launchable).toBe(true);
+      // User 0 was answered by CtrlProxy, so only the uncovered profile costs a
+      // round-trip.
+      expect(
+        fakeAdb.getExecutedCommands().filter((command) => command.includes("query-activities")),
+      ).toEqual([LAUNCHER_PROBE_USER_10]);
+    });
+
+    test("probes cached packages the CtrlProxy catalog did not mention", async function () {
+      const repo = new FakeInstalledAppsRepository();
+      const timer = new FakeTimer();
+      timer.advanceTime(1000);
+      const now = timer.now();
+      await repo.replaceInstalledApps(mockDevice.deviceId, [
+        {
+          device_id: mockDevice.deviceId,
+          user_id: 0,
+          package_name: "com.example.myapp",
+          is_system: 0,
+          installed_at: now,
+          last_verified_at: now,
+          profile_type: "primary",
+        },
+        {
+          device_id: mockDevice.deviceId,
+          user_id: 0,
+          package_name: "com.example.other",
+          is_system: 0,
+          installed_at: now,
+          last_verified_at: now,
+          profile_type: "primary",
+        },
+      ]);
+      fakeAdb.setCommandResponse(LAUNCHER_PROBE_USER_0, {
+        stdout: "com.example.myapp/.Main\n",
+        stderr: "",
+      });
+
+      const cached = new ListInstalledApps(mockDevice, new FakeAdbClientFactory(fakeAdb), null, {
+        cacheEnabled: true,
+        installedAppsRepository: repo,
+        timer,
+        installedPackageSource: new FakeInstalledPackageSource({
+          userId: 0,
+          packages: [{ packageName: "com.example.myapp", isSystem: false, launchable: true }],
+        }),
+      });
+      const result = await cached.executeDetailed();
+
+      const other = result.profiles[0].find((app) => app.packageName === "com.example.other");
+      expect(other?.launchable).toBe(false);
+    });
+
+    test("keeps a system app's launchability per user rather than per package", async function () {
+      fakeAdb.setUsers(workUsers);
+      for (const userId of [0, 10]) {
+        fakeAdb.setCommandResponse(`shell pm list packages --user ${userId}`, {
+          stdout: "package:com.android.contacts\n",
+          stderr: "",
+        });
+        fakeAdb.setCommandResponse(`shell pm list packages -s --user ${userId}`, {
+          stdout: "package:com.android.contacts\n",
+          stderr: "",
+        });
+      }
+      // Disabled for the owner, enabled in the work profile.
+      fakeAdb.setCommandResponse(LAUNCHER_PROBE_USER_0, { stdout: "", stderr: "" });
+      fakeAdb.setCommandResponse(LAUNCHER_PROBE_USER_10, {
+        stdout: "com.android.contacts/.activities.PeopleActivity\n",
+        stderr: "",
+      });
+
+      const result = await listInstalledApps.executeDetailed();
+
+      const contacts = result.system.find((app) => app.packageName === "com.android.contacts");
+      expect(contacts?.launchableByUserId).toEqual({ 0: false, 10: true });
+      // The package launches somewhere, so the deduped scalar stays true.
+      expect(contacts?.launchable).toBe(true);
+    });
+
+    test("keeps per-user system launchability for cached rows too", async function () {
+      const repo = new FakeInstalledAppsRepository();
+      const timer = new FakeTimer();
+      timer.advanceTime(1000);
+      const now = timer.now();
+      await repo.replaceInstalledApps(
+        mockDevice.deviceId,
+        [0, 10].map((userId) => ({
+          device_id: mockDevice.deviceId,
+          user_id: userId,
+          package_name: "com.android.contacts",
+          is_system: 1 as const,
+          installed_at: now,
+          last_verified_at: now,
+          profile_type: userId === 0 ? ("primary" as const) : ("managed" as const),
+        })),
+      );
+      fakeAdb.setUsers(workUsers);
+      fakeAdb.setCommandResponse(LAUNCHER_PROBE_USER_0, { stdout: "", stderr: "" });
+      fakeAdb.setCommandResponse(LAUNCHER_PROBE_USER_10, {
+        stdout: "com.android.contacts/.activities.PeopleActivity\n",
+        stderr: "",
+      });
+
+      const cached = new ListInstalledApps(mockDevice, new FakeAdbClientFactory(fakeAdb), null, {
+        cacheEnabled: true,
+        installedAppsRepository: repo,
+        timer,
+        installedPackageSource: new FakeInstalledPackageSource(null),
+      });
+      const result = await cached.executeDetailed();
+
+      expect(result.system[0].launchableByUserId).toEqual({ 0: false, 10: true });
+      expect(result.system[0].launchable).toBe(true);
     });
   });
 

@@ -30,10 +30,15 @@ import {
   applyLauncherPackages,
   catalogFromPackageRecords,
   launcherActivitiesCommand,
+  mergeSystemAppCatalogEntry,
   needsLauncherProbe,
   parseLauncherPackages,
   type AndroidAppCatalog,
+  type AndroidAppCatalogEntry,
 } from "./androidAppCatalog";
+
+/** Label + launchability per Android user id; launchability is a per-user fact. */
+type AndroidAppCatalogByUser = Map<number, AndroidAppCatalog>;
 
 const INSTALLED_APPS_CACHE_TTL_MS = 5 * 60 * 1000;
 
@@ -56,6 +61,45 @@ export interface IosInstalledAppsDetailedResult {
  */
 export interface IosPhysicalAppLister {
   listInstalledApps(deviceUdid: string): Promise<IosInstalledAppRecord[]>;
+}
+
+/** One CtrlProxy `installed_packages` answer, tagged with the user it describes. */
+export interface AndroidInstalledPackages {
+  userId: number;
+  packages: InstalledPackageRecord[];
+}
+
+/**
+ * CtrlProxy package-listing seam, narrowed to the single call this feature
+ * makes. Lets a test drive the "CtrlProxy answered for user N" path — including
+ * the multi-profile case where it answers for one user only — without standing
+ * up an accessibility-service connection.
+ */
+export interface AndroidInstalledPackageSource {
+  requestInstalledPackages(signal?: AbortSignal): Promise<AndroidInstalledPackages | null>;
+}
+
+/** Production source: one request against the on-device accessibility service. */
+class CtrlProxyInstalledPackageSource implements AndroidInstalledPackageSource {
+  constructor(private readonly device: BootedDevice) {}
+
+  async requestInstalledPackages(signal?: AbortSignal): Promise<AndroidInstalledPackages | null> {
+    try {
+      const a11y = AndroidCtrlProxyClient.getInstance(this.device);
+      const result = await a11y.requestInstalledPackages(true, undefined, 4000);
+      signal?.throwIfAborted();
+      if (result.success) {
+        return { userId: result.userId, packages: result.packages };
+      }
+    } catch (error) {
+      // Expected whenever CtrlProxy is not installed or not connected; the ADB
+      // path is the supported fallback, not an error case.
+      logger.debug(
+        `[ListInstalledApps] WebSocket package list failed, falling back to ADB: ${error}`,
+      );
+    }
+    return null;
+  }
 }
 
 export interface DetailedListingOptions {
@@ -91,6 +135,7 @@ interface ListInstalledAppsOptions {
   installedAppsRepository?: InstalledAppsStore;
   timer?: Timer;
   iosPhysicalAppLister?: IosPhysicalAppLister;
+  installedPackageSource?: AndroidInstalledPackageSource;
 }
 
 export class ListInstalledApps {
@@ -101,6 +146,7 @@ export class ListInstalledApps {
   private cacheEnabled: boolean;
   private timer: Timer;
   private iosPhysicalAppLister: IosPhysicalAppLister | null;
+  private installedPackageSource: AndroidInstalledPackageSource;
   /**
    * Create an ListInstalledApps instance
    * @param device - Device to run ADB commands against
@@ -123,6 +169,8 @@ export class ListInstalledApps {
     this.cacheEnabled = options.cacheEnabled ?? defaultCacheEnabled;
     this.timer = options.timer ?? defaultTimer;
     this.iosPhysicalAppLister = options.iosPhysicalAppLister ?? null;
+    this.installedPackageSource =
+      options.installedPackageSource ?? new CtrlProxyInstalledPackageSource(device);
   }
 
   /**
@@ -287,28 +335,30 @@ export class ListInstalledApps {
     // launcher entry) and re-reading them costs one WebSocket round-trip plus at
     // most one batched adb command. Re-read them so a cached listing answers
     // "which package is Contacts?" as well as a live one does (#6798).
-    const catalog: AndroidAppCatalog = options.namesOnly
+    const catalogByUser: AndroidAppCatalogByUser = options.namesOnly
       ? new Map()
       : await this.readAndroidAppCatalog(cachedRows);
     logger.info(
       `[ListInstalledApps] Using cached installed apps list (age ${cacheAgeMs}ms, rows ${cachedRows.length})`,
     );
-    return this.buildInstalledAppsFromRows(cachedRows, foregroundApp, users, catalog);
+    return this.buildInstalledAppsFromRows(cachedRows, foregroundApp, users, catalogByUser);
   }
 
   /**
-   * Labels + launchability for cached rows. Scoped to the user the CtrlProxy
-   * service runs as, plus one batched adb probe per distinct cached user id, so
-   * the cost stays proportional to the number of profiles rather than packages.
+   * Labels + launchability for cached rows, per user. The CtrlProxy pass answers
+   * for the user its accessibility service runs as and no other, so every other
+   * cached profile — and any package that pass did not mention — still gets one
+   * batched adb probe. The cost stays proportional to the number of profiles
+   * rather than packages (#6798).
    */
-  private async readAndroidAppCatalog(rows: DbInstalledApp[]): Promise<AndroidAppCatalog> {
+  private async readAndroidAppCatalog(rows: DbInstalledApp[]): Promise<AndroidAppCatalogByUser> {
+    const catalogByUser: AndroidAppCatalogByUser = new Map();
     if (this.device.platform !== "android") {
-      return new Map();
+      return catalogByUser;
     }
-    const records = await this.fetchCtrlProxyPackages(undefined);
-    const catalog: AndroidAppCatalog = records ? catalogFromPackageRecords(records) : new Map();
-    if (!needsLauncherProbe(catalog)) {
-      return catalog;
+    const proxy = await this.fetchCtrlProxyPackages();
+    if (proxy) {
+      catalogByUser.set(proxy.userId, catalogFromPackageRecords(proxy.packages));
     }
     const packagesByUser = new Map<number, string[]>();
     for (const row of rows) {
@@ -317,41 +367,66 @@ export class ListInstalledApps {
       packagesByUser.set(row.user_id, packages);
     }
     for (const [userId, packageNames] of packagesByUser) {
-      await this.topUpLaunchability(catalog, packageNames, userId);
+      let catalog = catalogByUser.get(userId);
+      if (!catalog) {
+        catalog = new Map();
+        catalogByUser.set(userId, catalog);
+      }
+      if (needsLauncherProbe(catalog, packageNames)) {
+        await this.topUpLaunchability(catalog, packageNames, userId);
+      }
     }
-    return catalog;
+    return catalogByUser;
   }
 
   /**
    * One `installed_packages` request against the on-device accessibility
-   * service, or null when it is unavailable / answering for another user.
+   * service, or null when it is unavailable. The result carries the user it
+   * describes — PackageManager runs as the service user, so it answers for that
+   * user only and every other profile still needs its own probe (#6798).
    */
   private async fetchCtrlProxyPackages(
-    userId: number | undefined,
     signal?: AbortSignal,
-  ): Promise<InstalledPackageRecord[] | null> {
-    try {
-      const a11y = AndroidCtrlProxyClient.getInstance(this.device);
-      const result = await a11y.requestInstalledPackages(true, undefined, 4000);
-      signal?.throwIfAborted();
-      if (result.success && (userId === undefined || result.userId === userId)) {
-        return result.packages;
+  ): Promise<AndroidInstalledPackages | null> {
+    return this.installedPackageSource.requestInstalledPackages(signal);
+  }
+
+  /**
+   * Fold one user's view of a system package into the deduplicated entry. Shared
+   * by the live and cached paths so both merge user ids, foreground state and
+   * per-user launchability the same way (#6798 review).
+   */
+  private upsertSystemApp(
+    systemAppsMap: Map<string, SystemInstalledApp>,
+    packageName: string,
+    userId: number,
+    isForeground: boolean,
+    entry: AndroidAppCatalogEntry | undefined,
+  ): void {
+    const existing = systemAppsMap.get(packageName);
+    if (existing) {
+      if (!existing.userIds.includes(userId)) {
+        existing.userIds.push(userId);
       }
-    } catch (error) {
-      // Expected whenever CtrlProxy is not installed or not connected; the ADB
-      // path below is the supported fallback, not an error case.
-      logger.debug(
-        `[ListInstalledApps] WebSocket package list failed, falling back to ADB: ${error}`,
-      );
+      existing.foreground = existing.foreground || isForeground;
+      mergeSystemAppCatalogEntry(existing, userId, entry);
+      return;
     }
-    return null;
+    const systemApp: SystemInstalledApp = {
+      packageName,
+      userIds: [userId],
+      foreground: isForeground,
+      recent: false, // TODO: Implement recent app detection
+    };
+    mergeSystemAppCatalogEntry(systemApp, userId, entry);
+    systemAppsMap.set(packageName, systemApp);
   }
 
   private buildInstalledAppsFromRows(
     rows: DbInstalledApp[],
     foregroundApp: { packageName: string; userId: number } | null,
     users: AndroidUser[] = [],
-    catalog: AndroidAppCatalog = new Map(),
+    catalogByUser: AndroidAppCatalogByUser = new Map(),
   ): InstalledAppsByProfile {
     const installedApps: InstalledAppsByProfile = { profiles: {}, system: [] };
     const systemAppsMap = new Map<string, SystemInstalledApp>();
@@ -362,22 +437,9 @@ export class ListInstalledApps {
         foregroundApp.packageName === row.package_name &&
         foregroundApp.userId === row.user_id;
 
+      const entry = catalogByUser.get(row.user_id)?.get(row.package_name);
       if (row.is_system) {
-        const existing = systemAppsMap.get(row.package_name);
-        if (existing) {
-          if (!existing.userIds.includes(row.user_id)) {
-            existing.userIds.push(row.user_id);
-          }
-          existing.foreground = existing.foreground || isForeground;
-        } else {
-          systemAppsMap.set(row.package_name, {
-            packageName: row.package_name,
-            userIds: [row.user_id],
-            foreground: isForeground,
-            recent: false,
-            ...catalog.get(row.package_name),
-          });
-        }
+        this.upsertSystemApp(systemAppsMap, row.package_name, row.user_id, isForeground, entry);
       } else {
         installedApps.profiles[row.user_id] = installedApps.profiles[row.user_id] || [];
         installedApps.profiles[row.user_id].push({
@@ -386,7 +448,7 @@ export class ListInstalledApps {
           profileType: this.profileTypeForUser(row.user_id, users, row.profile_type ?? undefined),
           foreground: isForeground,
           recent: false,
-          ...catalog.get(row.package_name),
+          ...entry,
         });
       }
     }
@@ -587,22 +649,13 @@ export class ListInstalledApps {
     catalog: AndroidAppCatalog,
   ): void {
     for (const packageName of packageNames) {
-      const isForeground = this.isForegroundFor(accumulator, packageName, user.userId);
-      const existing = accumulator.systemAppsMap.get(packageName);
-      if (existing) {
-        if (!existing.userIds.includes(user.userId)) {
-          existing.userIds.push(user.userId);
-        }
-        existing.foreground = existing.foreground || isForeground;
-      } else {
-        accumulator.systemAppsMap.set(packageName, {
-          packageName,
-          userIds: [user.userId],
-          foreground: isForeground,
-          recent: false, // TODO: Implement recent app detection
-          ...catalog.get(packageName),
-        });
-      }
+      this.upsertSystemApp(
+        accumulator.systemAppsMap,
+        packageName,
+        user.userId,
+        this.isForegroundFor(accumulator, packageName, user.userId),
+        catalog.get(packageName),
+      );
       this.recordCacheEntry(accumulator, user, packageName, 1);
     }
   }
@@ -615,7 +668,8 @@ export class ListInstalledApps {
     options: DetailedListingOptions = {},
   ): Promise<PartitionedPackages> {
     if (this.device.platform === "android") {
-      const records = await this.fetchCtrlProxyPackages(userId, signal);
+      const proxy = await this.fetchCtrlProxyPackages(signal);
+      const records = proxy && proxy.userId === userId ? proxy.packages : null;
       if (records) {
         const userPackages: string[] = [];
         const systemPackages: string[] = [];
@@ -629,13 +683,9 @@ export class ListInstalledApps {
         const catalog = options.namesOnly
           ? (new Map() as AndroidAppCatalog)
           : catalogFromPackageRecords(records);
-        if (!options.namesOnly && needsLauncherProbe(catalog)) {
-          await this.topUpLaunchability(
-            catalog,
-            [...userPackages, ...systemPackages],
-            userId,
-            signal,
-          );
+        const listedPackages = [...userPackages, ...systemPackages];
+        if (!options.namesOnly && needsLauncherProbe(catalog, listedPackages)) {
+          await this.topUpLaunchability(catalog, listedPackages, userId, signal);
         }
         return { userPackages, systemPackages, catalog };
       }

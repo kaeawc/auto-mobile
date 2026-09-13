@@ -81,11 +81,20 @@ export interface SystemInstalledApp {
   label?: string;
 
   /**
-   * Whether the package exposes a MAIN/LAUNCHER entry point, i.e. whether
-   * `launchApp` can do anything with it. `undefined` means "not reported"
-   * (the launcher probe was unavailable), never "no" (issue #6798).
+   * Whether the package exposes a MAIN/LAUNCHER entry point for AT LEAST ONE of
+   * `userIds`. `undefined` means "not reported" (the launcher probe was
+   * unavailable), never "no" (issue #6798).
    */
   launchable?: boolean;
+
+  /**
+   * Launchability per Android user id, for the users where it was reported. A
+   * launcher activity can be disabled for the owner and enabled in a work
+   * profile, so a deduplicated system app cannot carry a single scalar without
+   * misreporting one of its profiles (#6798 review). A user id absent from this
+   * map had no launchability signal.
+   */
+  launchableByUserId?: Record<number, boolean>;
 }
 
 /**

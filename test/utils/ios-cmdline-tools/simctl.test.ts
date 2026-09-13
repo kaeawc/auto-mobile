@@ -1758,6 +1758,20 @@ describe("Simctl", function () {
       });
     }
 
+    // The return value is the session path's only signal that the GUI launch
+    // actually happened: DeviceSessionManager latches a process-lifetime
+    // "already opened" flag on it, and latching on a headless no-op would make
+    // this client's cache TTL unreachable from that path (PR #6830 review).
+    test("reports whether the Simulator GUI launch was actually performed", async function () {
+      simctl = new Simctl(null, recordingExec("Aqua"), new FakeTimer(), "darwin");
+      expect(await simctl.openSimulatorApp()).toBe(true);
+
+      calls = [];
+      simctl = new Simctl(null, recordingExec("System"), new FakeTimer(), "darwin");
+      expect(await simctl.openSimulatorApp()).toBe(false);
+      expect(openCalls()).toHaveLength(0);
+    });
+
     test("caches the headless detection so launchctl is probed at most once", async function () {
       simctl = new Simctl(null, recordingExec("Aqua"), new FakeTimer(), "darwin");
       await simctl.openSimulatorApp();

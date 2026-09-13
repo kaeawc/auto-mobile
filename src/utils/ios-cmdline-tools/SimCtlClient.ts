@@ -299,8 +299,12 @@ export interface SimCtl {
    * Open Simulator.app. If udid is provided, focuses that specific device window.
    * With multiple simulators booted, this ensures the right device is visible.
    * @param udid - Optional device UDID to focus
+   * @returns true if the GUI launch was performed, false if it was skipped
+   *   because this host has no Aqua session. Callers that memoize "Simulator
+   *   is up" must only do so on true — a headless skip left nothing running,
+   *   and a later call may find a GUI session (issue #6372).
    */
-  openSimulatorApp(udid?: string, signal?: AbortSignal): Promise<void>;
+  openSimulatorApp(udid?: string, signal?: AbortSignal): Promise<boolean>;
 
   /**
    * Deliver a simulated remote push notification to a booted simulator.
@@ -998,7 +1002,9 @@ export class SimCtlClient implements SimCtl {
         reject(new Error(`Timed out opening Simulator.app for ${udid}`));
       }, remainingMs);
     });
-    const contenders: Array<Promise<void>> = [
+    // The launch/skip outcome is irrelevant here: this path only focuses the
+    // window of an already-booted simulator.
+    const contenders: Array<Promise<unknown>> = [
       this.openSimulatorApp(udid, operationSignal),
       timeout,
     ];
@@ -2524,14 +2530,14 @@ export class SimCtlClient implements SimCtl {
     }
   }
 
-  async openSimulatorApp(udid?: string, signal?: AbortSignal): Promise<void> {
+  async openSimulatorApp(udid?: string, signal?: AbortSignal): Promise<boolean> {
     // On a headless macOS host (no Aqua GUI session, e.g. a launchd daemon or
     // SSH context) `open -a Simulator` fails with OSLaunchdErrorDomain Code=125
     // after a slow retry, wasting wall-clock against the daemon-start budget.
     // The booted simulator + CtrlProxy work without the GUI, so skip the launch.
     if (await this.isHeadlessSession(signal)) {
       logger.debug("Skipping open -a Simulator: headless session (no Aqua GUI)");
-      return;
+      return false;
     }
 
     // Ensure Simulator.app is open (creates windows for all booted devices)
@@ -2554,6 +2560,8 @@ export class SimCtlClient implements SimCtl {
         logger.debug(`[iOS] Could not activate Simulator.app for ${udid}: ${error}`);
       }
     }
+
+    return true;
   }
 
   /**

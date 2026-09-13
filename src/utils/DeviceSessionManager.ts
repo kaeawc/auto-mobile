@@ -913,8 +913,11 @@ export class DeviceSessionManager implements DeviceSessionManager {
 
     if (!this.simulatorAppOpened) {
       try {
-        await this.simctl!.openSimulatorApp();
-        this.simulatorAppOpened = true;
+        // Only latch on an actual GUI launch. A headless host skips the launch
+        // and reports false; latching there would leave Simulator.app unopened
+        // for the process lifetime even after the host gains an Aqua session,
+        // and would keep the session path from ever re-probing (#6372).
+        this.simulatorAppOpened = await this.simctl!.openSimulatorApp();
       } catch (err) {
         logger.warn(`[DeviceSessionManager] Failed to open Simulator.app: ${err}`);
       }

@@ -640,10 +640,7 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
   // client always gets complete, parseable JSON plus a pointer to the rest.
   const boundedCandidate = sanitizedPayload ?? payload;
   if (ctx.artifactWriter && !ctx.internal && exceedsInlineLimit(boundedCandidate)) {
-    sanitizedPayload = {
-      ...pickInlineResidue(boundedCandidate),
-      ...writeJsonArtifact(ctx, "ToolResponse", boundedCandidate),
-    };
+    sanitizedPayload = spillOversizedPayload(ctx, boundedCandidate);
   }
 
   if (!sanitizedPayload) {
@@ -705,6 +702,39 @@ function pickInlineResidue(payload: Record<string, unknown>): Record<string, unk
     INLINE_RESIDUE_KEYS.filter((key) => payload[key] !== undefined).map((key) => [
       key,
       boundResidueField(payload[key]),
+    ]),
+  );
+}
+
+/**
+ * Replace an over-ceiling payload with its artifact pointer plus a bounded
+ * residue of the headline fields.
+ */
+function spillOversizedPayload(
+  ctx: FinalizeToolResponseContext,
+  payload: Record<string, unknown>,
+): Record<string, unknown> {
+  const artifact = writeJsonArtifact(ctx, "ToolResponse", payload);
+  const spilled = { ...pickInlineResidue(payload), ...artifact };
+  // The per-field cap is counted in UTF-16 code units, so multi-byte text can
+  // still serialize past the ceiling across every retained field. Fall back to
+  // markers-only, whose size does not depend on the input at all.
+  return exceedsInlineLimit(spilled) ? { ...markerResidue(payload), ...artifact } : spilled;
+}
+
+/**
+ * The last-resort residue: every non-scalar field replaced with the
+ * `{ _truncated, bytes }` marker, so the inline size is a fixed function of the
+ * field COUNT rather than of the payload. Scalars (a `success` boolean, a
+ * `polls` count) are the headline a client actually acts on and are always tiny.
+ */
+function markerResidue(payload: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    INLINE_RESIDUE_KEYS.filter((key) => payload[key] !== undefined).map((key) => [
+      key,
+      typeof payload[key] === "object" || typeof payload[key] === "string"
+        ? boundStructuredField(payload[key], false, 0)
+        : payload[key],
     ]),
   );
 }

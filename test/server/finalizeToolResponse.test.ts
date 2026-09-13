@@ -2203,6 +2203,35 @@ describe("finalizeToolResponse", () => {
         expect(payloadBytes(finalized)).toBeLessThanOrEqual(DEFAULT_OBSERVATION_INLINE_MAX_BYTES);
       });
 
+      // A per-field cap counted in UTF-16 code units is not a byte cap: three
+      // bytes per unit of CJK/emoji text, times every retained field, is still
+      // multiples of the ceiling. The bound has to hold on the serialized bytes.
+      test("stays under the ceiling for multi-byte retained fields", () => {
+        const writer = new FakeObservationArtifactWriter();
+        const huge = "\u6f22".repeat(70_000);
+        const finalized = finalizeToolResponse(
+          createStructuredToolResponse({
+            success: false,
+            error: huge,
+            awaitedElement: huge,
+            awaitDuration: huge,
+            awaitTimeout: huge,
+            matched: huge,
+            settled: huge,
+            timedOut: huge,
+            polls: huge,
+            waitMs: huge,
+            matchedElement: huge,
+            candidates: [huge],
+          }),
+          oversizedCtx(writer),
+        );
+
+        const structured = finalized.structuredContent as any;
+        expect(payloadBytes(finalized)).toBeLessThanOrEqual(DEFAULT_OBSERVATION_INLINE_MAX_BYTES);
+        expect(structured.artifact).toMatchObject({ format: "json", tool: "tapOn" });
+      });
+
       test("keeps a small error and candidate list verbatim", () => {
         const writer = new FakeObservationArtifactWriter();
         const finalized = finalizeToolResponse(

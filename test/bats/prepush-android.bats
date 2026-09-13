@@ -192,3 +192,48 @@ SCRIPT
   grep -qx ':source:compileKotlin' "${invocations_file}"
   grep -qx ':destination:compileKotlin' "${invocations_file}"
 }
+
+@test "validates both modules when ripgrep is unavailable for a cross-module Kotlin rename" {
+  fixture_repo="$(cd "$(mktemp -d)" && pwd -P)"
+  invocations_file="$(mktemp)"
+  export GIT_CONFIG_GLOBAL=/dev/null
+  export GIT_CONFIG_SYSTEM=/dev/null
+
+  mkdir -p "${fixture_repo}/android/source/src/main/kotlin" "${fixture_repo}/android/destination/src/main/kotlin" "${fixture_repo}/fake-bin"
+  copy_prepush_fixture
+  cat > "${fixture_repo}/scripts/ktfmt/validate_ktfmt.sh" <<'SCRIPT'
+#!/usr/bin/env bash
+exit 0
+SCRIPT
+  cat > "${fixture_repo}/android/gradlew" <<'SCRIPT'
+#!/usr/bin/env bash
+printf '%s\n' "$@" >> "${GRADLEW_INVOCATIONS_FILE}"
+SCRIPT
+  cat > "${fixture_repo}/fake-bin/rg" <<'SCRIPT'
+#!/usr/bin/env bash
+echo "rg: command not found" >&2
+exit 127
+SCRIPT
+  chmod +x "${fixture_repo}/android/gradlew" "${fixture_repo}/fake-bin/rg"
+  printf '%s\n' 'plugins {}' > "${fixture_repo}/android/source/build.gradle.kts"
+  printf '%s\n' 'plugins {}' > "${fixture_repo}/android/destination/build.gradle.kts"
+  printf '%s\n' 'class Moved' > "${fixture_repo}/android/source/src/main/kotlin/Moved.kt"
+
+  cd "${fixture_repo}"
+  git init -q
+  git config user.email t@t.t
+  git config user.name t
+  git config commit.gpgsign false
+  git add -A
+  git commit -qm "initial modules"
+  base_sha="$(git rev-parse HEAD)"
+  git mv android/source/src/main/kotlin/Moved.kt android/destination/src/main/kotlin/Moved.kt
+  git commit -qm "move Kotlin source"
+
+  run env PATH="${fixture_repo}/fake-bin:${PATH}" ANDROID_PREPUSH_BASE_REF="${base_sha}" \
+    GRADLEW_INVOCATIONS_FILE="${invocations_file}" bash "${fixture_repo}/${SCRIPT}"
+
+  [ "$status" -eq 0 ]
+  grep -qx ':source:compileKotlin' "${invocations_file}"
+  grep -qx ':destination:compileKotlin' "${invocations_file}"
+}

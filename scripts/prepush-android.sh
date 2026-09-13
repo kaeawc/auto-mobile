@@ -93,7 +93,7 @@ validate_root_gradle_configuration() {
 kotlin_changes=()
 while IFS= read -r changed_file; do
   [[ -n "${changed_file}" ]] && kotlin_changes+=("${changed_file}")
-done < <(printf '%s\n' "${android_changes[@]+"${android_changes[@]}"}" | rg '^android/.*\.(kt|kts)$' || true)
+done < <(printf '%s\n' "${android_changes[@]+"${android_changes[@]}"}" | grep -E '^android/.*\.(kt|kts)$' || true)
 if [[ "${#kotlin_changes[@]}" -eq 0 ]]; then
   if [[ "${root_gradle_changed}" == "true" ]]; then
     validate_root_gradle_configuration
@@ -154,7 +154,7 @@ for module_path in "${modules[@]+"${modules[@]}"}"; do
     compile_tasks+=("${module_path}:compileKotlin")
   else
     detekt_tasks+=("${module_path}:detekt")
-    if rg -q 'alias\(libs\.plugins\.android\.(application|library)\)' "${module_dir}/build.gradle.kts"; then
+    if grep -Eq 'alias\(libs\.plugins\.android\.(application|library)\)' "${module_dir}/build.gradle.kts"; then
       compile_tasks+=("${module_path}:compileDebugKotlin")
     else
       compile_tasks+=("${module_path}:compileKotlin")

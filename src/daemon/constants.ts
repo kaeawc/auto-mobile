@@ -400,6 +400,65 @@ export const DAEMON_HEARTBEAT_METHOD = "daemon/heartbeat";
 export const CLI_SESSION_LIVENESS_POLICY = "cli";
 
 /**
+ * Optional `daemon/heartbeat` parameter value declaring that the heartbeating
+ * client is a long-lived stdio/HTTP MCP proxy that CAN keep the strict 10 s
+ * contract (issue #6870 review).
+ *
+ * Adoption of {@link CLI_SESSION_LIVENESS_POLICY} is sticky: it widens the
+ * session's timeouts to the CLI idle window. If a long-lived proxy later owns
+ * that same session UUID, an unmarked heartbeat would only stamp
+ * `lastHeartbeat` and leave the minutes-long window in place, so the session
+ * would keep holding its device for the whole idle window after that client
+ * disconnects. Proxy heartbeats therefore declare `heartbeat` explicitly and
+ * the daemon restores the session's pre-adoption (strict) timeouts.
+ */
+export const HEARTBEAT_SESSION_LIVENESS_POLICY = "heartbeat";
+
+/**
+ * Default wall-clock idle timeout for a CLI-owned session (issue #6870).
+ *
+ * Ten minutes, deliberately measured in minutes rather than the 10 s heartbeat
+ * timeout: the gap between two `--cli` invocations is an agent reading the
+ * previous result and choosing the next call, which routinely exceeds 10 s.
+ * Each invocation refreshes the clock (activity and the CLI's own heartbeat
+ * both stamp `lastHeartbeat`), so only a genuinely abandoned session expires.
+ */
+export const DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS = 10 * 60 * 1000;
+
+/**
+ * Ceiling applied to a CLI idle timeout the daemon did not resolve itself
+ * (issue #6870 review).
+ *
+ * The `--cli` process sends its own resolved
+ * `AUTOMOBILE_CLI_SESSION_IDLE_TIMEOUT_MS` with the adoption request, because a
+ * CLI invocation reuses a running daemon and cannot otherwise change what that
+ * daemon's process environment resolved at startup. Since the value now comes
+ * off the wire, bound it: a client must not be able to pin a device for an
+ * unbounded stretch by declaring an absurd idle window.
+ */
+export const MAX_CLI_SESSION_IDLE_TIMEOUT_MS = 60 * 60 * 1000;
+
+/** The configured {@link DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS}, env-overridable. */
+export function getCliSessionIdleTimeoutMs(): number {
+  const rawValue =
+    process.env.AUTOMOBILE_CLI_SESSION_IDLE_TIMEOUT_MS ??
+    process.env.AUTO_MOBILE_CLI_SESSION_IDLE_TIMEOUT_MS;
+  const parsed = rawValue ? Number.parseInt(rawValue, 10) : NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS;
+}
+
+/**
+ * Validate a client-supplied CLI idle timeout, or return undefined when it is
+ * absent/unusable so the daemon falls back to its own resolution.
+ */
+export function sanitizeCliSessionIdleTimeoutMs(requestedMs: unknown): number | undefined {
+  if (typeof requestedMs !== "number" || !Number.isFinite(requestedMs) || requestedMs <= 0) {
+    return undefined;
+  }
+  return Math.min(Math.floor(requestedMs), MAX_CLI_SESSION_IDLE_TIMEOUT_MS);
+}
+
+/**
  * Control-socket method returning the current `deviceId (serial/UDID) ↔
  * deviceSessionUuid` map from the daemon's `DeviceSessionRegistry`. Lets a
  * stream consumer resolve a serial to its stable connection-epoch identity

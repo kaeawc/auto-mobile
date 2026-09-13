@@ -26,6 +26,8 @@ import {
   DAEMON_RESTART_HANDOFF_TIMEOUT_MS,
   DAEMON_HEARTBEAT_METHOD,
   CLI_SESSION_LIVENESS_POLICY,
+  HEARTBEAT_SESSION_LIVENESS_POLICY,
+  getCliSessionIdleTimeoutMs,
 } from "./constants";
 import {
   PROGRESS_NOTIFICATION_METHOD,
@@ -686,6 +688,14 @@ export class DaemonMcpProxy {
    * heartbeat.
    */
   private heartbeatKeeperStarted = false;
+  /**
+   * Whether this connection already declared its bound session CLI-owned
+   * (issue #6870 review). Once declared, this proxy's remaining heartbeats must
+   * keep carrying the CLI marker: an ordinary heartbeat now restores the strict
+   * contract on the daemon, and a keeper tick racing process exit would undo the
+   * declaration the invocation just made.
+   */
+  private cliSessionLivenessDeclared = false;
   private readonly buildIdentity: BuildIdentity;
   private readonly clientVersion: string;
   private readonly clientAssetVersion: string | null;
@@ -2418,7 +2428,10 @@ export class DaemonMcpProxy {
       return;
     }
     try {
-      await this.client.callDaemonMethod("daemon/heartbeat", { sessionId: sessionUuid });
+      await this.client.callDaemonMethod(
+        DAEMON_HEARTBEAT_METHOD,
+        this.boundSessionHeartbeatParams(sessionUuid),
+      );
       if (this.boundSessionUuid === sessionUuid && !this.terminalBoundSession) {
         this.boundSessionUuidAt = this.timer.now();
       }
@@ -2462,9 +2475,17 @@ export class DaemonMcpProxy {
       return undefined;
     }
     try {
+      // Declare before the round-trip: a keeper tick that fires while this call
+      // is in flight must already carry the CLI marker, or it would land after
+      // the declaration and restore the strict contract.
+      this.cliSessionLivenessDeclared = true;
       await this.client.callDaemonMethod(DAEMON_HEARTBEAT_METHOD, {
         sessionId: sessionUuid,
         livenessPolicy: CLI_SESSION_LIVENESS_POLICY,
+        // The daemon resolved its own env at startup and this invocation reuses
+        // it, so the override only reaches the daemon by travelling with the
+        // declaration (issue #6870 review). The daemon re-validates and bounds it.
+        idleTimeoutMs: getCliSessionIdleTimeoutMs(),
       });
       return sessionUuid;
     } catch (error) {
@@ -2487,6 +2508,27 @@ export class DaemonMcpProxy {
     }
   }
 
+  /**
+   * Parameters for an ordinary (non-declaring) bound-session heartbeat.
+   *
+   * A long-lived stdio/HTTP proxy declares `heartbeat` so the daemon restores
+   * the strict contract on a session a previous `--cli` invocation widened
+   * (issue #6870 review). Once THIS proxy has declared the session CLI-owned,
+   * its own remaining heartbeats keep the CLI marker instead, so a keeper tick
+   * racing process exit cannot undo the declaration.
+   */
+  private boundSessionHeartbeatParams(sessionUuid: string): {
+    sessionId: string;
+    livenessPolicy: string;
+  } {
+    return {
+      sessionId: sessionUuid,
+      livenessPolicy: this.cliSessionLivenessDeclared
+        ? CLI_SESSION_LIVENESS_POLICY
+        : HEARTBEAT_SESSION_LIVENESS_POLICY,
+    };
+  }
+
   private async sendBoundSessionHeartbeat(): Promise<void> {
     const sessionUuid = this.boundSessionUuid;
     if (!sessionUuid || this.terminalBoundSession || this.closing) {
@@ -2494,7 +2536,11 @@ export class DaemonMcpProxy {
     }
     try {
       await this.withRecoverableReconnect(
-        () => this.client!.callDaemonMethod("daemon/heartbeat", { sessionId: sessionUuid }),
+        () =>
+          this.client!.callDaemonMethod(
+            DAEMON_HEARTBEAT_METHOD,
+            this.boundSessionHeartbeatParams(sessionUuid),
+          ),
         sessionUuid,
       );
     } catch (error) {

@@ -12,7 +12,9 @@ import {
   CLI_SESSION_LIVENESS_POLICY,
   DAEMON_HEARTBEAT_METHOD,
   DAEMON_VERSION,
+  HEARTBEAT_SESSION_LIVENESS_POLICY,
 } from "../../src/daemon/constants";
+import { handleDaemonRequest } from "../../src/daemon/daemonRequestHandlers";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -41,6 +43,20 @@ function matchingDaemonManager(): FakeDaemonManager {
   const manager = new FakeDaemonManager();
   manager.statusResult = { ...manager.statusResult, version: DAEMON_VERSION };
   return manager;
+}
+
+/** Minimal daemon state so a fake client can answer through the real handler. */
+function daemonStateFor(manager: SessionManager): any {
+  return {
+    isInitialized: () => true,
+    getSessionManager: () => manager,
+    getDevicePool: () => ({
+      refreshDevices: async () => 0,
+      getStats: () => ({ total: 0, idle: 0, assigned: 0, error: 0 }),
+      releaseDevice: async () => {},
+    }),
+    getDeviceSessionRegistry: () => ({ list: () => [] }),
+  };
 }
 
 function deviceStartResult(sessionUuid: string): {
@@ -153,6 +169,165 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
 
     expect(reaped).toEqual([]);
     expect(sessionManager.getSession("minted")).not.toBeNull();
+  });
+
+  test("ordinary bound-session heartbeats declare the strict policy", async () => {
+    const client = new FakeDaemonClient({
+      toolResultFor: (name) => (name === "getAndroid" ? deviceStartResult("minted") : undefined),
+    });
+    const proxy = proxyOver(client);
+    try {
+      await proxy.callTool("getAndroid", {});
+    } finally {
+      await proxy.close();
+    }
+
+    const heartbeats = client.callDaemonMethodCalls.filter(
+      (call) => call.method === DAEMON_HEARTBEAT_METHOD,
+    );
+    expect(heartbeats.length).toBeGreaterThan(0);
+    for (const heartbeat of heartbeats) {
+      expect(heartbeat.params.livenessPolicy).toBe(HEARTBEAT_SESSION_LIVENESS_POLICY);
+    }
+  });
+
+  test("a long-lived client takes a CLI-adopted session back to the strict contract", async () => {
+    // CLI → proxy takeover (#6870 review): a previous one-shot invocation left
+    // this session on the minutes-long idle window. A long-lived stdio/HTTP
+    // client now owns the UUID and CAN keep the 10 s contract, so its ordinary
+    // heartbeats must restore it — otherwise the session holds its device for
+    // the whole idle window after that client disconnects.
+    const client = new FakeDaemonClient({
+      toolResultFor: (name) => (name === "getAndroid" ? deviceStartResult("shared") : undefined),
+      onCallDaemonMethod: async (method, params) => {
+        await handleDaemonRequest(
+          { id: "1", type: "daemon_request", method, params },
+          daemonStateFor(sessionManager),
+        );
+      },
+    });
+    await sessionManager.createSession("shared", "emulator-5554", "android", 30 * 60_000);
+    sessionManager.adoptCliLivenessPolicy("shared");
+    expect(sessionManager.getSession("shared")!.livenessPolicy).toBe("cli-idle");
+
+    const proxy = proxyOver(client);
+    try {
+      await proxy.callTool("getAndroid", {});
+    } finally {
+      await proxy.close();
+    }
+
+    const session = sessionManager.getSession("shared")!;
+    expect(session.livenessPolicy).toBe("heartbeat");
+    expect(session.heartbeatTimeoutMs).toBe(SessionManager.DEFAULT_HEARTBEAT_TIMEOUT_MS);
+
+    // ... and the restored session is reaped on the strict timeout once that
+    // long-lived client is gone, instead of squatting the device for minutes.
+    const reaped: Array<{ sessionId: string; reason: string }> = [];
+    const monitor = new SessionHeartbeatMonitor(
+      sessionManager,
+      () => false,
+      async (sessionId, reason) => {
+        reaped.push({ sessionId, reason });
+      },
+      timer,
+    );
+    timer.advanceTime(12_367);
+    await monitor.tick();
+    expect(reaped).toEqual([{ sessionId: "shared", reason: "heartbeat-timeout" }]);
+  });
+
+  test("a CLI touch of a proxy-owned session re-adopts the CLI policy", async () => {
+    // proxy → CLI touch, the other direction: the restore above must not make
+    // the CLI declaration unable to win back the session it is about to own.
+    const client = new FakeDaemonClient({
+      toolResultFor: (name) => (name === "getAndroid" ? deviceStartResult("shared") : undefined),
+      onCallDaemonMethod: async (method, params) => {
+        await handleDaemonRequest(
+          { id: "1", type: "daemon_request", method, params },
+          daemonStateFor(sessionManager),
+        );
+      },
+    });
+    await sessionManager.createSession("shared", "emulator-5554", "android", 30 * 60_000);
+    const proxy = proxyOver(client);
+
+    try {
+      await proxy.callTool("getAndroid", {});
+      expect(sessionManager.getSession("shared")!.livenessPolicy).toBe("heartbeat");
+      expect(await proxy.adoptCliSessionLiveness()).toBe("shared");
+    } finally {
+      await proxy.close();
+    }
+
+    expect(sessionManager.getSession("shared")!.livenessPolicy).toBe("cli-idle");
+  });
+
+  test("heartbeats after the declaration keep the CLI marker", async () => {
+    // The keeper is still running when the declaration lands; a tick racing
+    // process exit must not restore the strict contract the invocation just
+    // opted out of (#6870 review).
+    const client = new FakeDaemonClient({
+      toolResultFor: (name) => (name === "getAndroid" ? deviceStartResult("shared") : undefined),
+      onCallDaemonMethod: async (method, params) => {
+        await handleDaemonRequest(
+          { id: "1", type: "daemon_request", method, params },
+          daemonStateFor(sessionManager),
+        );
+      },
+    });
+    await sessionManager.createSession("shared", "emulator-5554", "android", 30 * 60_000);
+    const proxy = new DaemonMcpProxy({
+      clientFactory: () => client,
+      daemonManager: matchingDaemonManager(),
+      autoStartDaemon: false,
+      timer,
+      heartbeatIntervalMs: 1_000,
+    });
+
+    try {
+      await proxy.callTool("getAndroid", {});
+      await proxy.adoptCliSessionLiveness();
+      await timer.advanceTimeAsync(1_000);
+    } finally {
+      await proxy.close();
+    }
+
+    const lastHeartbeat = client.callDaemonMethodCalls
+      .filter((call) => call.method === DAEMON_HEARTBEAT_METHOD)
+      .at(-1);
+    expect(lastHeartbeat?.params.livenessPolicy).toBe(CLI_SESSION_LIVENESS_POLICY);
+    expect(sessionManager.getSession("shared")!.livenessPolicy).toBe("cli-idle");
+  });
+
+  test("the declaration carries this invocation's idle-timeout override", async () => {
+    // The daemon resolved its own env at startup and this invocation reuses it,
+    // so the override only takes effect if it travels on the wire (#6870 review).
+    process.env.AUTOMOBILE_CLI_SESSION_IDLE_TIMEOUT_MS = "120000";
+    const client = new FakeDaemonClient({
+      toolResultFor: (name) => (name === "getAndroid" ? deviceStartResult("shared") : undefined),
+      onCallDaemonMethod: async (method, params) => {
+        await handleDaemonRequest(
+          { id: "1", type: "daemon_request", method, params },
+          daemonStateFor(sessionManager),
+        );
+      },
+    });
+    await sessionManager.createSession("shared", "emulator-5554", "android", 30 * 60_000);
+    const proxy = proxyOver(client);
+
+    try {
+      await proxy.callTool("getAndroid", {});
+      await proxy.adoptCliSessionLiveness();
+    } finally {
+      await proxy.close();
+    }
+
+    const declaration = client.callDaemonMethodCalls.find(
+      (call) => call.params.livenessPolicy === CLI_SESSION_LIVENESS_POLICY,
+    );
+    expect(declaration?.params.idleTimeoutMs).toBe(120_000);
+    expect(sessionManager.getSession("shared")!.heartbeatTimeoutMs).toBe(120_000);
   });
 
   test("adoptCliSessionLiveness is a no-op with no bound session", async () => {

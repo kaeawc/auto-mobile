@@ -14,6 +14,7 @@ import { describe, expect, test } from "bun:test";
 import { CtrlProxyHierarchy } from "../../../../src/features/observe/android/CtrlProxyHierarchy";
 import type { HierarchyDelegateContext } from "../../../../src/features/observe/android/types";
 import { RequestManager } from "../../../../src/utils/RequestManager";
+import { defaultTimer } from "../../../../src/utils/SystemTimer";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 
 interface Harness {
@@ -50,14 +51,18 @@ function createHangingConnectHarness(): Harness {
   return { hierarchy: new CtrlProxyHierarchy(context), connectStarted };
 }
 
-/** Fail loudly instead of hanging to the suite timeout when the fence is gone. */
+/**
+ * Fail loudly instead of hanging to the suite timeout when the fence is gone.
+ * A real timer deliberately: what is under test is a read that must not
+ * outlive a REAL-clock bound, and the harness drives no fake clock forward.
+ */
 async function withinBound<T>(operation: Promise<T>): Promise<T> {
-  let timeout: ReturnType<typeof setTimeout> | undefined;
+  let timeout: NodeJS.Timeout | undefined;
   try {
     return await Promise.race([
       operation,
       new Promise<never>((_resolve, reject) => {
-        timeout = setTimeout(
+        timeout = defaultTimer.setTimeout(
           () => reject(new Error("read outlived the caller's abort signal")),
           500,
         );
@@ -65,7 +70,7 @@ async function withinBound<T>(operation: Promise<T>): Promise<T> {
     ]);
   } finally {
     if (timeout) {
-      clearTimeout(timeout);
+      defaultTimer.clearTimeout(timeout);
     }
   }
 }

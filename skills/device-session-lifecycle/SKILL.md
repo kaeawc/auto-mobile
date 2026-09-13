@@ -63,6 +63,26 @@ applies in all three places the name is read:
    internal `matchesRuntimeIdentity` still TOLERATES the placeholder so an
    unreadable console never evicts a live entry — tolerance is not agreement.
 
+**The pool state that carries the rule: `PooledDevice.identityUnresolved`.**
+When a discovery sweep observes the placeholder on a LIVE entry, the pool
+quarantines that entry instead of choosing between two wrong answers. The entry
+is kept — same session, same `incarnation` — but:
+
+- `selectAssignableIdleDevice` skips it;
+- `assertSessionReadyForAutomation` (the single choke point every tool execution
+  passes through) refuses, naming the serial and the pooled AVD label;
+- `describesPooledRuntime` reads the state, so the resource publishes no pool
+  context;
+- `deviceTools.getValidatedPooledAndroidAvdName` returns undefined, so no
+  destructive path can act on the cached label — including the stopped-image
+  inventory path in `deleteDevice`, which previously bypassed the
+  unresolved-runtime guard on the strength of that label.
+
+Leaving the quarantine is decided by the next discovery that READS a name: the
+pooled label (or the AVD this pool started) restores the entry unchanged, and a
+different name is a replacement — a fresh incarnation, the old session retired,
+exactly as an observed disappearance. Handsets never enter the state.
+
 **Documented blind spot**: a same-serial restart faster than one discovery
 interval never reaches the pool, so it reads as continuity. Every host-side
 cache keyed on the epoch must therefore SELF-HEAL on failure (evict and rebuild
@@ -70,9 +90,26 @@ once before surfacing the error — see the append-helper cache in
 `src/daemon/socketServer.ts`), and any destructive action that would act on a
 pool-cached AVD name must re-resolve it from the runtime first
 (`AndroidEmulatorClient.resolveRunningAvdName`, used by killDevice/deleteDevice)
-and refuse when that re-resolution does not answer.
-Historical entries in `references/history.md` that reason about `transportId`
-(e.g. #5372) describe the pre-#6863 model; do not reintroduce the field.
+and refuse when that re-resolution does not answer — and that confirmation runs
+BEFORE the shutdown's preparation side effects (stopping recordings, closing the
+CtrlProxy singleton, detaching observers), so a refusal leaves a still-running
+device fully intact.
+
+**Self-heal on HELPER failure, never on a RUNNER verdict.** The two outcomes are
+distinguished by the result type (`AppendTextFailureSource`), never by inspecting
+`charsSent === 0`:
+
+- the helper itself failed (threw, transport error, stale cached helper) → evict,
+  rebuild once, retry. With a confirmed prefix the retry resumes the unconfirmed
+  SUFFIX and carries NO validator (the original validation was already spent and
+  the prefix has advanced the runner's frame epoch); with nothing confirmed it
+  retries the whole text WITH the original validator, because nothing was
+  validated-and-sent yet;
+- the RUNNER returned a verdict (`success: false`, e.g. a stale `frameContext`)
+  → surface it as-is. No rebuild, no replay: the helper worked, and replaying
+  would type into a UI the runner explicitly refused.
+  Historical entries in `references/history.md` that reason about `transportId`
+  (e.g. #5372) describe the pre-#6863 model; do not reintroduce the field.
 
 ## 2. Invariants (the contract every fix must preserve)
 

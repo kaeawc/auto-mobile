@@ -866,6 +866,109 @@ describe("MCP Booted Device Resources", () => {
       sessionManager.stopCleanupTimer();
     });
 
+    // Withholding this read's OWN output is not enough: the pool flag is what the
+    // admission gate, the destructive-confirmation path and every stream resolver
+    // consult, so a resource read that is the FIRST discovery to see the
+    // placeholder has to fold its observation into the pool. Otherwise the bound
+    // session keeps passing `assertSessionReadyForAutomation` until an unrelated
+    // allocation or refresh happens to reconcile
+    // ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
+    test("quarantines the pooled entry when the resource read is the first to see the placeholder", async function () {
+      const fakeTimer = new FakeTimer();
+      fakeTimer.enableAutoAdvance();
+      const sessionManager = new SessionManager(fakeTimer, new FakeDeviceSessionPersistence());
+      const { FakeInstalledAppsRepository } =
+        await import("../../fakes/FakeInstalledAppsRepository");
+      const devicePool = new DevicePool(
+        sessionManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        new FakeInstalledAppsRepository(),
+        fakeDeviceUtils,
+      );
+      fakeDeviceUtils.setBootedDevices("android", [mockAndroidDevice1]);
+      await devicePool.initializeWithDevices([mockAndroidDevice1]);
+      const assigned = await devicePool.assignDeviceToSession("session-owner");
+      expect(assigned).toBe(mockAndroidDevice1.deviceId);
+      DaemonState.getInstance().initialize(sessionManager, devicePool);
+      expect(() => devicePool.assertSessionReadyForAutomation("session-owner")).not.toThrow();
+
+      // The emulator console has gone quiet; this read is the only discovery.
+      fakeDeviceUtils.setBootedDevices("android", [
+        { ...mockAndroidDevice1, name: `Unknown (${mockAndroidDevice1.deviceId})` },
+      ]);
+
+      try {
+        const { client } = fixture.getContext();
+        await client.readResource({ uri: "automobile:devices/booted" });
+
+        expect(devicePool.isPooledIdentityUnresolved(mockAndroidDevice1.deviceId)).toBe(true);
+        // The session survives, but its next tool call is refused.
+        expect(() => devicePool.assertSessionReadyForAutomation("session-owner")).toThrow(
+          /identity is unresolved/,
+        );
+      } finally {
+        sessionManager.stopCleanupTimer();
+      }
+    });
+
+    // Entering the quarantine is not the end of this request: the same read then
+    // enriched every discovered entry, issuing package/service queries and
+    // `adb dumpsys window policy` against whichever runtime now owns the serial.
+    // A serial the pool can no longer identify is exactly the one not to probe,
+    // so it is skipped and published with discovery-only identity plus an
+    // explicit marker saying why
+    // ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
+    test("skips enrichment for a serial this read just quarantined", async function () {
+      const fakeTimer = new FakeTimer();
+      fakeTimer.enableAutoAdvance();
+      const sessionManager = new SessionManager(fakeTimer, new FakeDeviceSessionPersistence());
+      const { FakeInstalledAppsRepository } =
+        await import("../../fakes/FakeInstalledAppsRepository");
+      const devicePool = new DevicePool(
+        sessionManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        new FakeInstalledAppsRepository(),
+        fakeDeviceUtils,
+      );
+      fakeDeviceUtils.setBootedDevices("android", [mockAndroidDevice1, mockAndroidDevice2]);
+      await devicePool.initializeWithDevices([mockAndroidDevice1, mockAndroidDevice2]);
+      DaemonState.getInstance().initialize(sessionManager, devicePool);
+      const lockProbes: string[] = [];
+      setDeviceLockProbe(async (device) => {
+        lockProbes.push(device.deviceId);
+        return true;
+      });
+
+      // Only the first emulator's console has gone quiet.
+      fakeDeviceUtils.setBootedDevices("android", [
+        { ...mockAndroidDevice1, name: `Unknown (${mockAndroidDevice1.deviceId})` },
+        mockAndroidDevice2,
+      ]);
+
+      try {
+        const { client } = fixture.getContext();
+        const result = await client.readResource({ uri: "automobile:devices/booted" });
+        const data: BootedDevicesResourceContent = JSON.parse(result.contents[0].text!);
+        const quarantined = data.devices.find(
+          (entry) => entry.deviceId === mockAndroidDevice1.deviceId,
+        );
+        const healthy = data.devices.find(
+          (entry) => entry.deviceId === mockAndroidDevice2.deviceId,
+        );
+
+        expect(devicePool.isPooledIdentityUnresolved(mockAndroidDevice1.deviceId)).toBe(true);
+        expect(lockProbes).toEqual([mockAndroidDevice2.deviceId]);
+        expect(quarantined?.identityUnresolved).toBe(true);
+        expect(quarantined?.locked).toBeUndefined();
+        expect(healthy?.identityUnresolved).toBeUndefined();
+        expect(healthy?.locked).toBe(true);
+      } finally {
+        sessionManager.stopCleanupTimer();
+      }
+    });
+
     test("exposes the registry epoch UUID for each live device", async function () {
       fakeDeviceUtils.setBootedDevices("android", [mockAndroidDevice1]);
 

@@ -93,6 +93,41 @@ describe("UnixSocketServer input/tap", () => {
     expect(createMcpClient).not.toHaveBeenCalled();
   });
 
+  // The quarantine used to be enforced only through `assertSessionReadyForAutomation`,
+  // which `runTrackedDeviceInput` reaches ONLY when the serial has a bound session —
+  // so an idle quarantined emulator still took explicit-device input. Every
+  // device-addressed operation now passes `DevicePool.assertDeviceActionable`, with
+  // or without a session ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863)
+  // review).
+  test("refuses a sessionless tap on a serial whose pooled identity is quarantined", async () => {
+    const requestTapCoordinates = mock(async () => ({ success: true }));
+    AndroidCtrlProxyClient.getInstance = mock(() => ({
+      requestTapCoordinates,
+    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
+    server = new UnixSocketServer(
+      socketPath,
+      "http://localhost:0/mcp",
+      // No sessions at all: the serial is idle, which is exactly the case the
+      // session-keyed gate could not see.
+      createFakeDaemonState(new Map(), new Map(), new Set(["emulator-5554"])),
+      fakeTimer,
+    );
+    await server.start();
+
+    const response = await sendRequest(socketPath, "input/tap", {
+      platform: "android",
+      deviceId: "emulator-5554",
+      x: 12.5,
+      y: 34.25,
+    });
+
+    expect(response.success).toBe(false);
+    expect(response.error).toContain("emulator-5554");
+    expect(response.error).toContain("identity is unresolved");
+    expect(requestTapCoordinates).not.toHaveBeenCalled();
+  });
+
   test("rejects Android tap coordinates outside known canonical pixel bounds", async () => {
     const requestTapCoordinates = mock(async () => ({ success: true }));
     AndroidCtrlProxyClient.getInstance = mock(() => ({

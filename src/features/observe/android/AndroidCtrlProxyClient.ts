@@ -118,6 +118,7 @@ import {
   observationStreamDeviceConnectionLostNotifier,
   type DeviceConnectionLostNotifier,
 } from "../DeviceConnectionLostNotifier";
+import { daemonDeviceAdmissionGate } from "../../../daemon/deviceAdmissionGate";
 import type { SetTextOptions } from "../DeviceService";
 import type { CtrlProxyClient } from "../interfaces/CtrlProxyClient";
 import { RetryExecutor, defaultRetryExecutor } from "../../../utils/retry/RetryExecutor";
@@ -1201,6 +1202,9 @@ class NoOpCtrlProxyForwardLease implements CtrlProxyForwardLease {
  * Client for interacting with the AutoMobile Accessibility Service via WebSocket.
  * Uses singleton pattern per device to maintain persistent WebSocket connection.
  */
+/** Completes the FUNNEL 2 refusal: "Refusing `<purpose>` on device '<serial>'". */
+const CTRL_PROXY_CLIENT_PURPOSE = "to drive the device through CtrlProxy";
+
 export class AndroidCtrlProxyClient extends DeviceServiceClient implements AndroidCtrlProxy {
   private static readonly DEFAULT_HIERARCHY_BROADCAST_INTERVAL_MS = 250;
 
@@ -1370,11 +1374,19 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   /**
    * Get singleton instance for a device
    */
+  /**
+   * FUNNEL 2, alongside `AdbClientFactory`: this is the OTHER Android
+   * device-client resolution, and it MEMOIZES, so a client built before the
+   * quarantine would otherwise be handed straight back and keep driving whichever
+   * runtime now answers on the serial without the factory seam ever being crossed
+   * again ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
+   */
   public static getInstance(
     device: BootedDevice,
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
   ): AndroidCtrlProxyClient {
     requireBootedDevice(device, "AndroidCtrlProxyClient.getInstance");
+    daemonDeviceAdmissionGate.assertDeviceActionable(device.deviceId, CTRL_PROXY_CLIENT_PURPOSE);
     const deviceId = device.deviceId;
     if (!AndroidCtrlProxyClient.instances.has(deviceId)) {
       logger.debug(`[CTRL_PROXY] Creating singleton for device: ${deviceId}`);

@@ -111,22 +111,39 @@ async function applyAcquisitionToolSelection(
   service: McpServerOptions["sessionToolSelectionService"],
   sessionUuid: string,
   enableTools: readonly string[],
-): Promise<string | undefined> {
+): Promise<CapabilityDeclarationFailure> {
   if (enableTools.length === 0) {
-    return undefined;
+    return {};
   }
   try {
     await applyToolSelection(service, sessionUuid, enableTools, true);
     ToolRegistry.notifyToolListChanged();
-    return undefined;
+    return {};
   } catch (error) {
-    const message =
+    const enableToolsError =
       `Could not enable ${enableTools.join(", ")} for session ${sessionUuid}: ` +
       `${errorMessage(error)}. The device session is usable; re-declare the ` +
       `capabilities with ${SET_TOOL_ENABLED_TOOL_NAME}.`;
-    logger.warn(`[MCP] ${message}`, error);
-    return message;
+    logger.warn(`[MCP] ${enableToolsError}`, error);
+    return { enableToolsError };
   }
+}
+
+/**
+ * The response field that states a lost `enableTools` declaration — empty when
+ * the declaration landed, so it can always be spread into an enrichment.
+ */
+type CapabilityDeclarationFailure = { enableToolsError?: string };
+
+/**
+ * Report a lost capability declaration on its own, for the path where the
+ * optional enabled/gated report could not be built either (#6886 review). A
+ * successful declaration leaves the result untouched.
+ */
+function withCapabilityDeclarationFailure<
+  T extends { content: Array<{ type: string; text?: string }> },
+>(result: T, failure: CapabilityDeclarationFailure): T {
+  return failure.enableToolsError ? enrichAcquisitionResult(result, failure) : result;
 }
 
 /**
@@ -150,8 +167,7 @@ async function enrichProvisionDeviceResult<
   if (toolName !== "provisionDevice" || result?.isError || !sessionUuid) {
     return result;
   }
-  const enableToolsError = await applyAcquisitionToolSelection(service, sessionUuid, enableTools);
-  const failureField = enableToolsError ? { enableToolsError } : {};
+  const failure = await applyAcquisitionToolSelection(service, sessionUuid, enableTools);
   try {
     return enrichAcquisitionResult(result, {
       // The connection profile is the other half of the union `tools/list` and
@@ -159,13 +175,13 @@ async function enrichProvisionDeviceResult<
       // override of its own — so a capability enabled on the profile is
       // callable and belongs in this report (#6886 review).
       enabledTools: await listEnabledToolNames(service, [sessionUuid], connectionProfileUuid),
-      ...failureField,
+      ...failure,
     });
   } catch (error) {
     logger.warn("[MCP] Could not enrich provisionDevice with enabled tools", { error });
     // A failed capability declaration still has to reach the caller even when
     // the optional enabled-set report cannot be built (#6886 review).
-    return enableToolsError ? enrichAcquisitionResult(result, failureField) : result;
+    return withCapabilityDeclarationFailure(result, failure);
   }
 }
 
@@ -1162,12 +1178,11 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         // reported as `enableToolsError` rather than swallowed by the enrichment
         // catch below, which made a lost declaration look like a plain success —
         // while still never stranding the session the handler just minted.
-        const enableToolsError = await applyAcquisitionToolSelection(
+        const capabilityFailure = await applyAcquisitionToolSelection(
           options.sessionToolSelectionService,
           acquiredSessionUuid,
           requestedEnableTools,
         );
-        const failureField = enableToolsError ? { enableToolsError } : {};
         try {
           const listed = new Set(
             (
@@ -1180,17 +1195,19 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
             .sort();
           const gatedTools = configurable.filter((toolName) => !listed.has(toolName));
           const enabledTools = configurable.filter((toolName) => listed.has(toolName));
-          result = enrichAcquisitionResult(result, { gatedTools, enabledTools, ...failureField });
+          result = enrichAcquisitionResult(result, {
+            gatedTools,
+            enabledTools,
+            ...capabilityFailure,
+          });
         } catch (error) {
           acquisitionEnrichmentCancelled ||= Boolean(requestSignal?.aborted);
           // Acquisition already succeeded. Preserve its session handle so the
           // proxy can bind and heartbeat it even if optional discovery fails.
           logger.warn("[MCP] Could not enrich acquisition with gated tools", { tool: name, error });
-          if (enableToolsError) {
-            // A failed capability declaration is not optional detail; report it
-            // even when the gated/enabled pair cannot be computed.
-            result = enrichAcquisitionResult(result, failureField);
-          }
+          // A failed capability declaration is not optional detail; report it
+          // even when the gated/enabled pair cannot be computed.
+          result = withCapabilityDeclarationFailure(result, capabilityFailure);
         }
         // Scoped to the acquisition enrichment on purpose. At the
         // top level this ran for EVERY tool, so a cancellation landing while any

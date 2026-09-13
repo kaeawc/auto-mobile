@@ -112,6 +112,48 @@ describe("dumpsys notification records", () => {
     expect(attributeRowByDumpsys(records, new Set(["Same title"]))).toBeNull();
   });
 
+  test("keeps a row ambiguous when another package's record explains the same text", () => {
+    // A collapsed or custom row can render a title without the body its record
+    // populated, so the thinner record is not the better candidate: naming it
+    // would attribute the other app's row to the requested package (#6875).
+    const records = parseDumpsysNotificationRecords(
+      dump(
+        "    NotificationRecord(0x1: pkg=com.example.requested user=UserHandle{0} id=0 tag=null key=0|com.example.requested|0|null|10100)",
+        "      extras={",
+        "        android.title=String (Download complete)",
+        "      }",
+        "    NotificationRecord(0x2: pkg=com.example.other user=UserHandle{0} id=0 tag=null key=0|com.example.other|0|null|10101)",
+        "      extras={",
+        "        android.title=String (Download complete)",
+        "        android.text=String (file.zip)",
+        "      }",
+      ),
+    );
+    expect(attributeRowByDumpsys(records, new Set(["Download complete"]))).toBeNull();
+  });
+
+  test("still attributes a row when no other package shares its rendered text", () => {
+    const records = parseDumpsysNotificationRecords(
+      dump(
+        wellbeingRecord,
+        "    NotificationRecord(0x2: pkg=com.example.other user=UserHandle{0} id=0 tag=null key=0|com.example.other|0|null|10101)",
+        "      extras={",
+        "        android.title=String (Unrelated)",
+        "        android.text=String (Unrelated body)",
+        "      }",
+      ),
+    );
+    expect(
+      attributeRowByDumpsys(
+        records,
+        new Set([
+          "Need better sleep?",
+          "Use Bedtime mode to silence your phone and keep the screen dark at bedtime",
+        ]),
+      ),
+    ).toBe("com.google.android.apps.wellbeing");
+  });
+
   test("does not attribute a row to a record that carries no readable content", () => {
     expect(
       attributeRowByDumpsys(

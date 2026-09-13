@@ -1,5 +1,8 @@
-import { expect, describe, test, beforeEach } from "bun:test";
-import { ListInstalledApps } from "../../../src/features/observe/ListInstalledApps";
+import { expect, describe, test, beforeEach, spyOn } from "bun:test";
+import {
+  CtrlProxyInstalledPackageSource,
+  ListInstalledApps,
+} from "../../../src/features/observe/ListInstalledApps";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { BootedDevice, AndroidUser } from "../../../src/models";
@@ -9,9 +12,11 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeSimctl } from "../../fakes/FakeSimctl";
 import { getInstalledAppsCacheWriteCoordinator } from "../../../src/db/installedAppsCacheWriteCoordinator";
 import type {
+  AndroidPackagesA11yClient,
   AndroidInstalledPackages,
   AndroidInstalledPackageSource,
 } from "../../../src/features/observe/ListInstalledApps";
+import { logger } from "../../../src/utils/logger";
 
 /**
  * Stands in for the on-device accessibility service: one canned
@@ -428,6 +433,97 @@ describe("ListInstalledApps", function () {
       expect(
         fakeAdb.getExecutedCommands().some((command) => command.includes("query-activities")),
       ).toBe(false);
+    });
+
+    test("warns with the device when an unavailable CtrlProxy catalog falls back to adb", async function () {
+      const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+      const list = new ListInstalledApps(mockDevice, new FakeAdbClientFactory(fakeAdb), null, {
+        installedPackageSource: new FakeInstalledPackageSource(null),
+      });
+
+      try {
+        await list.executeDetailed();
+
+        expect(warnSpy).toHaveBeenCalledTimes(1);
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining(mockDevice.deviceId));
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.stringContaining("CtrlProxy catalog unavailable"),
+        );
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("ADB"));
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+
+    test("warns once for a CtrlProxy catalog with no labels, but not for names-only", async function () {
+      const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+      const list = new ListInstalledApps(mockDevice, new FakeAdbClientFactory(fakeAdb), null, {
+        installedPackageSource: new FakeInstalledPackageSource({
+          userId: 0,
+          packages: [
+            { packageName: "com.android.contacts", isSystem: true },
+            { packageName: "com.android.providers.contacts", isSystem: true },
+            { packageName: "com.example.myapp", isSystem: false },
+          ],
+        }),
+      });
+
+      try {
+        await list.executeDetailed();
+        await list.execute();
+
+        expect(warnSpy).toHaveBeenCalledTimes(1);
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining(mockDevice.deviceId));
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("returned no labels"));
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("ADB"));
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+
+    test("warns with the device, request, and response reason when CtrlProxy reports failure", async function () {
+      const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+      const a11yClient: AndroidPackagesA11yClient = {
+        async requestInstalledPackages() {
+          return {
+            success: false,
+            userId: -1,
+            packages: [],
+            totalTimeMs: 0,
+            error: "WebSocket not connected",
+          };
+        },
+      };
+
+      try {
+        const source = new CtrlProxyInstalledPackageSource(mockDevice, a11yClient);
+        expect(await source.requestInstalledPackages()).toBeNull();
+        expect(warnSpy).toHaveBeenCalledTimes(1);
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining(mockDevice.deviceId));
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("installed_packages"));
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("WebSocket not connected"));
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+
+    test("warns with the device when CtrlProxy request throws", async function () {
+      const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+      const a11yClient: AndroidPackagesA11yClient = {
+        async requestInstalledPackages() {
+          throw new Error("connection refused");
+        },
+      };
+
+      try {
+        const source = new CtrlProxyInstalledPackageSource(mockDevice, a11yClient);
+        expect(await source.requestInstalledPackages()).toBeNull();
+        expect(warnSpy).toHaveBeenCalledTimes(1);
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining(mockDevice.deviceId));
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("connection refused"));
+      } finally {
+        warnSpy.mockRestore();
+      }
     });
 
     test("a failed launcher probe leaves launchability unknown rather than claiming false", async function () {

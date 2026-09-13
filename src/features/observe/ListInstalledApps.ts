@@ -17,7 +17,7 @@ import { InstalledAppsRepository, InstalledAppsStore } from "../../db/installedA
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import type { InstalledApp as DbInstalledApp, NewInstalledApp } from "../../db/types";
 import { AndroidCtrlProxyClient } from "./android";
-import type { InstalledPackageRecord } from "./android/types";
+import type { A11yInstalledPackagesResult, InstalledPackageRecord } from "./android/types";
 import { getInstalledAppsCacheWriteCoordinator } from "../../db/installedAppsCacheWriteCoordinator";
 import { getDbWriteBarrier } from "../../db/dbWriteBarrier";
 import {
@@ -79,23 +79,45 @@ export interface AndroidInstalledPackageSource {
   requestInstalledPackages(signal?: AbortSignal): Promise<AndroidInstalledPackages | null>;
 }
 
+/**
+ * The single CtrlProxy call CtrlProxyInstalledPackageSource makes, narrowed from
+ * AndroidCtrlProxyClient so tests can inject a fake without a live WebSocket
+ * connection.
+ */
+export interface AndroidPackagesA11yClient {
+  requestInstalledPackages(
+    includeSystem: boolean,
+    userId: number | undefined,
+    timeoutMs: number,
+  ): Promise<A11yInstalledPackagesResult>;
+}
+
 /** Production source: one request against the on-device accessibility service. */
-class CtrlProxyInstalledPackageSource implements AndroidInstalledPackageSource {
-  constructor(private readonly device: BootedDevice) {}
+export class CtrlProxyInstalledPackageSource implements AndroidInstalledPackageSource {
+  private readonly device: BootedDevice;
+  private readonly a11yClient: AndroidPackagesA11yClient;
+
+  constructor(device: BootedDevice, a11yClient?: AndroidPackagesA11yClient) {
+    this.device = device;
+    this.a11yClient = a11yClient ?? AndroidCtrlProxyClient.getInstance(device);
+  }
 
   async requestInstalledPackages(signal?: AbortSignal): Promise<AndroidInstalledPackages | null> {
     try {
-      const a11y = AndroidCtrlProxyClient.getInstance(this.device);
-      const result = await a11y.requestInstalledPackages(true, undefined, 4000);
+      const result = await this.a11yClient.requestInstalledPackages(true, undefined, 4000);
       signal?.throwIfAborted();
       if (result.success) {
         return { userId: result.userId, packages: result.packages };
       }
+      logger.warn(
+        `[ListInstalledApps] installed_packages request failed for device ${this.device.deviceId}: ${result.error ?? "unknown error"}`,
+      );
     } catch (error) {
       // Expected whenever CtrlProxy is not installed or not connected; the ADB
-      // path is the supported fallback, not an error case.
-      logger.debug(
-        `[ListInstalledApps] WebSocket package list failed, falling back to ADB: ${error}`,
+      // path is the supported fallback, not an error case, but the reason is
+      // still worth a visible log since it is the only trace of WHY.
+      logger.warn(
+        `[ListInstalledApps] installed_packages request threw for device ${this.device.deviceId}, falling back to ADB: ${error}`,
       );
     }
     return null;
@@ -388,6 +410,7 @@ export class ListInstalledApps {
         catalogByUser.set(userId, catalog);
       }
       if (needsLauncherProbe(catalog, packageNames)) {
+        this.warnCtrlProxyCatalogFallback(proxy, userId);
         signal?.throwIfAborted();
         await this.topUpLaunchability(catalog, packageNames, userId, signal);
       }
@@ -405,6 +428,25 @@ export class ListInstalledApps {
     signal?: AbortSignal,
   ): Promise<AndroidInstalledPackages | null> {
     return this.installedPackageSource.requestInstalledPackages(signal);
+  }
+
+  /** Explain when the label-capable CtrlProxy catalog must be topped up by adb. */
+  private warnCtrlProxyCatalogFallback(
+    proxy: AndroidInstalledPackages | null,
+    userId: number,
+  ): void {
+    const records = proxy?.userId === userId ? proxy.packages : null;
+    const reason =
+      records === null
+        ? "CtrlProxy catalog unavailable"
+        : records.some((record) => record.label?.trim())
+          ? null
+          : "CtrlProxy catalog predates labels or returned no labels";
+    if (reason) {
+      logger.warn(
+        `[ListInstalledApps] ${reason} for device ${this.device.deviceId}; falling back to ADB launcher probe for user ${userId}.`,
+      );
+    }
   }
 
   /**
@@ -683,8 +725,9 @@ export class ListInstalledApps {
     signal?: AbortSignal,
     options: DetailedListingOptions = {},
   ): Promise<PartitionedPackages> {
+    let proxy: AndroidInstalledPackages | null = null;
     if (this.device.platform === "android") {
-      const proxy = await this.fetchCtrlProxyPackages(signal);
+      proxy = await this.fetchCtrlProxyPackages(signal);
       const records = proxy && proxy.userId === userId ? proxy.packages : null;
       if (records) {
         const userPackages: string[] = [];
@@ -701,6 +744,7 @@ export class ListInstalledApps {
           : catalogFromPackageRecords(records);
         const listedPackages = [...userPackages, ...systemPackages];
         if (!options.namesOnly && needsLauncherProbe(catalog, listedPackages)) {
+          this.warnCtrlProxyCatalogFallback(proxy, userId);
           await this.topUpLaunchability(catalog, listedPackages, userId, signal);
         }
         return { userPackages, systemPackages, catalog };
@@ -728,6 +772,7 @@ export class ListInstalledApps {
     const userPackages = this.parsePackages(allRes.stdout).filter((p) => !systemSet.has(p));
     const catalog: AndroidAppCatalog = new Map();
     if (!options.namesOnly) {
+      this.warnCtrlProxyCatalogFallback(proxy, userId);
       await this.topUpLaunchability(catalog, [...userPackages, ...systemPackages], userId, signal);
     }
     return { userPackages, systemPackages, catalog };

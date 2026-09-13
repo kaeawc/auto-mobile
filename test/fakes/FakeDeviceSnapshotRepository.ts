@@ -60,9 +60,7 @@ export class FakeDeviceSnapshotRepository implements DeviceSnapshotRepositoryCon
     // row, so a fake-only code path deleted snapshots no reclaim was pending for
     // (#6490 review).
     if (query.pendingReclaim !== undefined) {
-      results = results.filter(
-        (record) => Boolean(record.pendingReclaim) === query.pendingReclaim,
-      );
+      results = results.filter((record) => Boolean(record.pendingReclaim) === query.pendingReclaim);
     }
     // Mirror the real SQL, which emits the ORDER BY clauses in the same order the
     // repository adds them: last_accessed_at FIRST (primary), created_at SECOND

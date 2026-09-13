@@ -245,7 +245,10 @@ export function registerVideoRecordingResources(): void {
     "Latest Video Recording",
     "The most recent video recording with metadata and base64-encoded video data.",
     "video/mp4",
-    getLatestVideoRecording,
+    // Wrapped, not passed directly: a registered handler's first argument is the
+    // reader's ResourceReadContext, while these functions take an injectable
+    // store there. Calling with no arguments keeps the default-store seam.
+    () => getLatestVideoRecording(),
   );
 
   ResourceRegistry.register(
@@ -253,7 +256,7 @@ export function registerVideoRecordingResources(): void {
     "Video Recording Archive",
     "Metadata list for archived video recordings.",
     "application/json",
-    getVideoArchiveList,
+    () => getVideoArchiveList(),
   );
 
   ResourceRegistry.registerTemplate(

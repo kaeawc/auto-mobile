@@ -7,6 +7,7 @@ import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import {
   defaultResolveRunningAndroidAvdName,
+  killDeviceSchema,
   registerDeviceTools,
   resetDeviceToolsDependencies,
   setDeviceToolsDependencies,
@@ -17,7 +18,7 @@ import {
   resetVideoRecordingManagerDependencies,
   setVideoRecordingManagerDependencies,
 } from "../../src/server/videoRecordingManager";
-import type { BootedDevice, DeviceInfo } from "../../src/models";
+import type { BootedDevice, DeviceInfo, Platform } from "../../src/models";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { getAbortSignal, runWithAbortSignal } from "../../src/utils/AbortContext";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
@@ -49,6 +50,14 @@ class FailingKillDeviceManager extends FakeDeviceUtils {
   readonly killedDeviceIds: string[] = [];
   /** The full targets handed to the platform kill, so a test can assert the NAME it was given. */
   readonly killedDeviceTargets: BootedDevice[] = [];
+  /**
+   * The shutdown options handed to the platform kill. `force` has to REACH the
+   * platform layer, not merely skip the deviceTools probe: without it
+   * `AndroidEmulatorClient.killDevice` re-discovers the serial and refuses the
+   * forced target's name all over again
+   * ([#6874](https://github.com/kaeawc/auto-mobile/pull/6874) review).
+   */
+  readonly killedDeviceOptions: Array<DeviceShutdownOptions | undefined> = [];
 
   constructor() {
     super();
@@ -65,9 +74,10 @@ class FailingKillDeviceManager extends FakeDeviceUtils {
     return this.childProcess;
   }
 
-  override async killDevice(device: BootedDevice): Promise<void> {
+  override async killDevice(device: BootedDevice, options?: DeviceShutdownOptions): Promise<void> {
     this.killedDeviceIds.push(device.deviceId);
     this.killedDeviceTargets.push(device);
+    this.killedDeviceOptions.push(options);
     throw new Error("adb emu kill failed");
   }
 }
@@ -95,9 +105,10 @@ class DeadlineSpendingFakeTimer extends FakeTimer {
 }
 
 class SuccessfulKillDeviceManager extends FailingKillDeviceManager {
-  override async killDevice(device: BootedDevice): Promise<void> {
+  override async killDevice(device: BootedDevice, options?: DeviceShutdownOptions): Promise<void> {
     this.killedDeviceIds.push(device.deviceId);
     this.killedDeviceTargets.push(device);
+    this.killedDeviceOptions.push(options);
     this.setBootedDevices(device.platform, []);
   }
 }
@@ -145,6 +156,45 @@ class ShutdownDiscoveryOptionsDeviceManager extends SuccessfulKillDeviceManager 
       this.shutdownDiscoveryOptions.push(options);
     }
     return await super.getBootedDevicesDetailed(platform);
+  }
+}
+
+class TargetOnlySuccessfulKillDeviceManager extends ShutdownDiscoveryOptionsDeviceManager {
+  private androidBootedDevices: BootedDevice[] = [];
+
+  override setBootedDevices(platform: Platform, devices: BootedDevice[]): void {
+    if (platform === "android") {
+      this.androidBootedDevices = devices;
+    }
+    super.setBootedDevices(platform, devices);
+  }
+
+  override async killDevice(device: BootedDevice, options?: DeviceShutdownOptions): Promise<void> {
+    this.killedDeviceIds.push(device.deviceId);
+    this.killedDeviceTargets.push(device);
+    this.killedDeviceOptions.push(options);
+    this.setBootedDevices(
+      device.platform,
+      this.androidBootedDevices.filter((booted) => booted.deviceId !== device.deviceId),
+    );
+  }
+
+  override async getBootedDevicesDetailed(
+    platform: SomePlatform,
+    options?: BootedDeviceDiscoveryOptions,
+  ): Promise<BootedDeviceDiscovery> {
+    const discovery = await super.getBootedDevicesDetailed(platform, options);
+    if (options?.skipAndroidNameEnrichment !== true) {
+      return discovery;
+    }
+    return {
+      ...discovery,
+      devices: discovery.devices.map((device) =>
+        device.platform === "android"
+          ? { ...device, name: `Unknown (${device.deviceId})` }
+          : device,
+      ),
+    };
   }
 }
 
@@ -664,6 +714,140 @@ describe("killDevice handler", () => {
       expect(manager.killedDeviceIds).toEqual([]);
     });
 
+    // The refusal is the DEFAULT, not the only behaviour: an explicit
+    // `force: false` must read exactly like omitting the flag (#6864).
+    test("refuses the kill when force is explicitly false", async () => {
+      manager = new SuccessfulKillDeviceManager();
+      setDeviceToolsDependencies({ deviceManagerFactory: () => manager });
+      await poolWithUnknownRuntime(unknownEmulator, "Pixel_8_Old");
+
+      await expect(killTool().handler({ device: unknownEmulator, force: false })).rejects.toThrow(
+        /adb -s emulator-5554 emu kill/,
+      );
+      expect(runtimeAvdNameProbes).toEqual(["emulator-5554"]);
+      expect(manager.killedDeviceIds).toEqual([]);
+    });
+
+    // The escape hatch for a wedged console (#6864): with `force: true` the
+    // verification probe never runs at all, so the console never has to answer,
+    // and the kill lands on the serial as given.
+    test("force skips the verification probe and kills the serial as given", async () => {
+      manager = new SuccessfulKillDeviceManager();
+      setDeviceToolsDependencies({ deviceManagerFactory: () => manager });
+      await poolWithUnknownRuntime(unknownEmulator, "Pixel_8_Old");
+      // The console is wedged: it would answer nothing at all.
+
+      await expect(
+        killTool().handler({ device: unknownEmulator, force: true }),
+      ).resolves.toBeDefined();
+      expect(runtimeAvdNameProbes).toEqual([]);
+      expect(manager.killedDeviceIds).toEqual(["emulator-5554"]);
+    });
+
+    // Nothing was confirmed, so nothing may be substituted into the kill target.
+    // `AndroidEmulatorClient.killDevice` re-discovers the serial and refuses a
+    // target whose name differs from the discovered one, so rewriting the target
+    // to the unconfirmed pooled label would make the forced kill refuse itself
+    // on exactly the wedged console the flag exists for (#6864).
+    test("force hands the platform kill the caller's own target, not the pooled label", async () => {
+      manager = new SuccessfulKillDeviceManager();
+      setDeviceToolsDependencies({ deviceManagerFactory: () => manager });
+      await poolWithUnknownRuntime(unknownEmulator, "Pixel_8_Old");
+
+      await expect(
+        killTool().handler({ device: unknownEmulator, force: true }),
+      ).resolves.toBeDefined();
+
+      expect(manager.killedDeviceTargets.map((device) => device.name)).toEqual([
+        "Unknown (emulator-5554)",
+      ]);
+    });
+
+    // ...and the platform kill must be told so. `AndroidEmulatorClient.killDevice`
+    // re-discovers the serial and compares the discovered AVD name against the
+    // target's, so a forced kill that reached it WITHOUT `force` would refuse
+    // itself there -- placeholder against placeholder in the wedged-console
+    // case, pooled label against placeholder on the teardown path
+    // ([#6874](https://github.com/kaeawc/auto-mobile/pull/6874) review).
+    test("force reaches the platform kill so its own identity check is dropped too", async () => {
+      manager = new SuccessfulKillDeviceManager();
+      setDeviceToolsDependencies({ deviceManagerFactory: () => manager });
+      await poolWithUnknownRuntime(unknownEmulator, "Pixel_8_Old");
+
+      await expect(
+        killTool().handler({ device: unknownEmulator, force: true }),
+      ).resolves.toBeDefined();
+
+      expect(manager.killedDeviceOptions.map((options) => options?.force)).toEqual([true]);
+    });
+
+    // The same channel carries the DEFAULT, and it has to carry it as `false`:
+    // the platform check is the only thing standing between a confirmed kill and
+    // a replacement that took the serial after the confirmation.
+    test("an unforced kill tells the platform kill to keep its identity check", async () => {
+      manager = new SuccessfulKillDeviceManager();
+      setDeviceToolsDependencies({ deviceManagerFactory: () => manager });
+      await poolWithUnknownRuntime(unknownEmulator, "Pixel_8_Old");
+      runtimeAvdNames.set("emulator-5554", "Pixel_8_Old");
+
+      await expect(killTool().handler({ device: unknownEmulator })).resolves.toBeDefined();
+
+      expect(manager.killedDeviceOptions.map((options) => options?.force)).toEqual([false]);
+    });
+
+    // `force` does not "override the conflict refusal" — it removes the only
+    // evidence a conflict could ever be detected from. It means "kill whatever
+    // is on this serial", including an AVD that took the serial over (#6864).
+    test("force kills a serial that a different AVD has taken over", async () => {
+      manager = new SuccessfulKillDeviceManager();
+      setDeviceToolsDependencies({ deviceManagerFactory: () => manager });
+      await poolWithUnknownRuntime(unknownEmulator, "Pixel_8_Old");
+      runtimeAvdNames.set("emulator-5554", "Pixel_9_New");
+
+      await expect(
+        killTool().handler({ device: unknownEmulator, force: true }),
+      ).resolves.toBeDefined();
+      expect(runtimeAvdNameProbes).toEqual([]);
+      expect(manager.killedDeviceIds).toEqual(["emulator-5554"]);
+    });
+
+    // A QUARANTINED entry is the wedged-console case the flag exists for: a
+    // discovery sweep read the placeholder off the serial, so the pool's label
+    // stops standing for the runtime and no probe is even attempted. `force`
+    // has nothing to skip here and must not turn that into a refusal — the kill
+    // still runs against the serial as given (#6864).
+    test("force kills an emulator whose pooled entry is quarantined", async () => {
+      manager = new SuccessfulKillDeviceManager();
+      setDeviceToolsDependencies({ deviceManagerFactory: () => manager });
+      const timer = new FakeTimer();
+      sessionManager = new SessionManager(timer, new FakeDeviceSessionRepository());
+      const pool = new DevicePool(
+        sessionManager,
+        "daemon-session",
+        timer,
+        new FakeInstalledAppsRepository(),
+        manager,
+        new DefaultRetryExecutor(timer),
+        new FakeDeviceSessionRepository(),
+      );
+      DaemonState.getInstance().initialize(sessionManager, pool);
+      // The pool started this AVD on the serial and knows it by name...
+      await pool.addDevice(
+        { platform: "android", name: "Pixel_8_Old", deviceId: "emulator-5554" },
+        { platform: "android", name: "Pixel_8_Old", isRunning: true },
+      );
+      // ...and then a discovery sweep could no longer read a name off it.
+      manager.setBootedDevices("android", [unknownEmulator]);
+      await pool.refreshDevices();
+      expect(pool.isPooledIdentityUnresolved("emulator-5554")).toBe(true);
+
+      await expect(
+        killTool().handler({ device: unknownEmulator, force: true }),
+      ).resolves.toBeDefined();
+      expect(runtimeAvdNameProbes).toEqual([]);
+      expect(manager.killedDeviceIds).toEqual(["emulator-5554"]);
+    });
+
     // The probe borrows the kill's deadline. When that deadline is already spent
     // by the time verification runs, there is no budget to probe with and no way
     // to identify the target, so the refusal is immediate and the console is
@@ -786,6 +970,38 @@ describe("killDevice handler", () => {
       });
 
       await expect(killTool().handler({ device: unknownEmulator })).rejects.toThrow(
+        /emulator-5554[\s\S]*Pixel_8_Old/,
+      );
+      expect(manager.killedDeviceIds).toEqual([]);
+    });
+
+    // `force` skips the console probe and nothing else. The `moved` refusal is
+    // not a probe failure: the pool RETIRED the captured epoch under this
+    // daemon's own eyes, so the target the caller named no longer exists and
+    // "act on the serial as given" would be acting on a device the caller never
+    // asked about. Re-resolving is the only correct response (#6864).
+    test("force does not bypass the refusal when the pooled incarnation moved", async () => {
+      manager = new SuccessfulKillDeviceManager();
+      await poolWithUnknownRuntime(unknownEmulator, "Pixel_8_Old");
+      const pool = DaemonState.getInstance().getDevicePool();
+      class ReplacingLifecycleCoordinator extends InMemoryVirtualDeviceLifecycleCoordinator {
+        override async reserve(
+          identity: Parameters<InMemoryVirtualDeviceLifecycleCoordinator["reserve"]>[0],
+          options: Parameters<InMemoryVirtualDeviceLifecycleCoordinator["reserve"]>[1],
+        ) {
+          const pooled = pool.getDevice("emulator-5554");
+          if (pooled) {
+            pooled.incarnation += 1;
+          }
+          return await super.reserve(identity, options);
+        }
+      }
+      setDeviceToolsDependencies({
+        deviceManagerFactory: () => manager,
+        lifecycleCoordinator: new ReplacingLifecycleCoordinator(new FakeTimer()),
+      });
+
+      await expect(killTool().handler({ device: unknownEmulator, force: true })).rejects.toThrow(
         /emulator-5554[\s\S]*Pixel_8_Old/,
       );
       expect(manager.killedDeviceIds).toEqual([]);
@@ -1547,6 +1763,137 @@ describe("killDevice handler", () => {
     expect(cacheAwareManager.shutdownDiscoveryOptions).toEqual(
       expect.arrayContaining([{ bypassAndroidDeviceListCache: true }]),
     );
+  });
+
+  // The review comment on #6874 (thread PRRT_kwDOP-GF5M6h5LDF): `force`
+  // reaches the platform kill, but `waitForDeviceShutdown`'s post-kill
+  // discovery still enriched every attached emulator with `emu avd name`
+  // sequentially, so wedged peer consoles could burn the whole teardown
+  // deadline confirming the kill even though the kill itself was forced.
+  // Forced shutdown confirmation must be serial-only, the same
+  // `skipAndroidNameEnrichment` the pre-kill target resolution already uses.
+  test("force keeps shutdown confirmation serial-only", async () => {
+    const timer = new FakeTimer();
+    const cacheAwareManager = new ShutdownDiscoveryOptionsDeviceManager();
+    manager = cacheAwareManager;
+    const deviceSessionRepository = new FakeDeviceSessionRepository();
+    const image: DeviceInfo = {
+      name: "Pixel 8",
+      platform: "android",
+      deviceId: "emulator-5554",
+      isRunning: false,
+      source: "local",
+    };
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => cacheAwareManager,
+      notifyResourcesChanged: async () => {},
+      ensureCtrlProxyReady: async () => {},
+      clearInstalledAppsForDevice: async () => {},
+      timer,
+    });
+    sessionManager = new SessionManager(timer, deviceSessionRepository);
+    cacheAwareManager.setDeviceImages("android", [image]);
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      cacheAwareManager,
+      new DefaultRetryExecutor(timer),
+      deviceSessionRepository,
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    await pool.assignMultipleDevices(["session-1"], 1_000, "android");
+    const tool = ToolRegistry.getTool("killDevice");
+    if (!tool) {
+      throw new Error("killDevice not registered");
+    }
+
+    cacheAwareManager.beginTrackingShutdownDiscovery();
+    await tool.handler({
+      device: { name: image.name, platform: "android", deviceId: image.deviceId! },
+      force: true,
+    });
+
+    expect(cacheAwareManager.shutdownDiscoveryOptions).not.toBeEmpty();
+    // The FIRST post-kill discovery -- the one `waitForDeviceShutdown` issues
+    // to confirm the target's own disappearance -- is the call a tight
+    // deadline with wedged peers can never reach past unforced. It must be
+    // serial-only.
+    expect(cacheAwareManager.shutdownDiscoveryOptions[0]).toEqual({
+      bypassAndroidDeviceListCache: true,
+      skipAndroidNameEnrichment: true,
+    });
+    // Once the target has disappeared, retirement performs one more bounded
+    // recheck after releasing its session. That post-release scan must retain
+    // the forced serial-only mode as well.
+    expect(cacheAwareManager.shutdownDiscoveryOptions[1]).toEqual({
+      bypassAndroidDeviceListCache: true,
+      skipAndroidNameEnrichment: true,
+    });
+  });
+
+  test("force leaves unrelated pooled peers live after serial-only shutdown discovery", async () => {
+    const timer = new FakeTimer();
+    const targetOnlyManager = new TargetOnlySuccessfulKillDeviceManager();
+    manager = targetOnlyManager;
+    const deviceSessionRepository = new FakeDeviceSessionRepository();
+    const target: BootedDevice = {
+      name: "Pixel_8_API_35",
+      platform: "android",
+      deviceId: "emulator-5554",
+    };
+    const peers: BootedDevice[] = [
+      { name: "Pixel_7_API_34", platform: "android", deviceId: "emulator-5556" },
+      { name: "Pixel_6_API_33", platform: "android", deviceId: "emulator-5558" },
+    ];
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => targetOnlyManager,
+      notifyResourcesChanged: async () => {},
+      ensureCtrlProxyReady: async () => {},
+      clearInstalledAppsForDevice: async () => {},
+      timer,
+    });
+    sessionManager = new SessionManager(timer, deviceSessionRepository);
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      targetOnlyManager,
+      new DefaultRetryExecutor(timer),
+      deviceSessionRepository,
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    targetOnlyManager.setBootedDevices("android", [target, ...peers]);
+    for (const device of [target, ...peers]) {
+      await pool.addDevice(device, {
+        platform: "android",
+        name: device.name,
+        isRunning: true,
+      });
+    }
+    for (const [index, peer] of peers.entries()) {
+      await pool.bindOrReuseDeviceSession(`peer-session-${index}`, peer.deviceId, "android", {
+        platform: "android",
+        name: peer.name,
+        isRunning: true,
+      });
+    }
+    const tool = ToolRegistry.getTool("killDevice");
+    if (!tool) {
+      throw new Error("killDevice not registered");
+    }
+
+    await tool.handler({ device: target, force: true });
+
+    for (const [index, peer] of peers.entries()) {
+      expect(pool.getDevice(peer.deviceId)?.identityUnresolved).toBeUndefined();
+      expect(pool.getDevice(peer.deviceId)?.sessionId).toBe(`peer-session-${index}`);
+      expect(sessionManager.getSession(`peer-session-${index}`)?.assignedDevice).toBe(
+        peer.deviceId,
+      );
+    }
   });
 
   test("waits for the runtime the Android kill preflight actually resolved", async () => {
@@ -4148,4 +4495,21 @@ describe("killDevice handler", () => {
       }
     },
   );
+});
+
+// The escape hatch is a WIRE change, not just handler behaviour: a client that
+// cannot reach a shell has to be able to send it (#6864).
+describe("killDevice input schema", () => {
+  test("accepts force and defaults it to false when omitted", () => {
+    const device = { name: "Pixel_8", deviceId: "emulator-5554", platform: "android" as const };
+
+    expect(killDeviceSchema.parse({ device, force: true }).force).toBe(true);
+    expect(killDeviceSchema.parse({ device }).force).toBe(false);
+  });
+
+  test("rejects a non-boolean force", () => {
+    const device = { name: "Pixel_8", deviceId: "emulator-5554", platform: "android" as const };
+
+    expect(() => killDeviceSchema.parse({ device, force: "yes" })).toThrow();
+  });
 });

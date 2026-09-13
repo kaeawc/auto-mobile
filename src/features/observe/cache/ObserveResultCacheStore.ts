@@ -1,5 +1,11 @@
 import type { ObserveResult } from "../../../models";
 
+/** The most recent cached observation together with the device it came from. */
+export interface RecentObserveCacheEntry {
+  deviceId: string;
+  result: ObserveResult;
+}
+
 /**
  * Storage abstraction for cached observe results.
  *
@@ -32,8 +38,16 @@ export interface ObserveResultCacheStore {
   /** Async lookup: checks memory first, then disk; loads disk hits into memory. */
   getMostRecent(deviceId: string): Promise<ObserveResult | undefined>;
 
-  /** Sync in-memory lookup across all devices (for resource handlers). */
-  getRecentInMemory(): ObserveResult | undefined;
+  /**
+   * Sync in-memory lookup across all devices (for resource handlers).
+   *
+   * Returns the owning device id alongside the result so a caller that needs a
+   * matching artifact (e.g. the screenshot for the same observation) can scope
+   * its follow-up lookup to that device instead of running a second, independent
+   * "most recent across all devices" resolution that may land on another device
+   * (issue #6600).
+   */
+  getRecentInMemoryEntry(): RecentObserveCacheEntry | undefined;
 
   /** Sync in-memory lookup for a specific device. */
   getRecentInMemoryForDevice(deviceId: string): ObserveResult | undefined;

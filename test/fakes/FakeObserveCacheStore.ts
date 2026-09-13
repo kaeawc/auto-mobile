@@ -1,5 +1,8 @@
 import type { ObserveResult } from "../../src/models";
-import type { ObserveResultCacheStore } from "../../src/features/observe/cache/ObserveResultCacheStore";
+import type {
+  ObserveResultCacheStore,
+  RecentObserveCacheEntry,
+} from "../../src/features/observe/cache/ObserveResultCacheStore";
 import { Timer, defaultTimer } from "../../src/utils/SystemTimer";
 
 /**
@@ -65,8 +68,9 @@ export class FakeObserveCacheStore implements ObserveResultCacheStore {
     return this.findMostRecent(deviceId);
   }
 
-  getRecentInMemory(): ObserveResult | undefined {
-    return this.findMostRecent();
+  getRecentInMemoryEntry(): RecentObserveCacheEntry | undefined {
+    const entry = this.findMostRecentEntry();
+    return entry ? { deviceId: entry.deviceId, result: entry.observeResult } : undefined;
   }
 
   getRecentInMemoryForDevice(deviceId: string): ObserveResult | undefined {
@@ -102,6 +106,10 @@ export class FakeObserveCacheStore implements ObserveResultCacheStore {
   }
 
   private findMostRecent(deviceId?: string): ObserveResult | undefined {
+    return this.findMostRecentEntry(deviceId)?.observeResult;
+  }
+
+  private findMostRecentEntry(deviceId?: string): FakeCacheEntry | undefined {
     if (this.entries.size === 0) {
       return undefined;
     }
@@ -117,13 +125,17 @@ export class FakeObserveCacheStore implements ObserveResultCacheStore {
       if (deviceId && entry.deviceId !== deviceId) {
         continue;
       }
-      if (!mostRecent || entry.timestamp > mostRecent.timestamp) {
+      // `>=`, not `>`: mirrors FileSystemObserveCacheStore.collectLiveMostRecent,
+      // where the latest insertion wins a timestamp tie. Under a FakeTimer two
+      // puts routinely share a tick, so a strict `>` here would hand tests the
+      // opposite device from production.
+      if (!mostRecent || entry.timestamp >= mostRecent.timestamp) {
         mostRecent = entry;
       }
     }
     for (const key of expiredKeys) {
       this.entries.delete(key);
     }
-    return mostRecent?.observeResult;
+    return mostRecent;
   }
 }

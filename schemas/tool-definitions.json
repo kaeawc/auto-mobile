@@ -11458,6 +11458,13 @@
                   "required": ["platform", "source", "confidence", "key", "components"],
                   "additionalProperties": {}
                 },
+                "truncationReasons": {
+                  "description": "Why the captured hierarchy is incomplete (issue #6601) — the same field a diffed observation carries, so a client reads it the same way in both modes. Present only when rows were dropped: a device-side stop (max_nodes, max_depth) or the per-node child cap (max_children[<node> kept N of M]). When present, `skeleton`/`context` are a subset of the screen.",
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
                 "settled": {
                   "description": "Whether this observation passed the hierarchy-stability gate (issue #6866): two consecutive structurally-equal captures. `false` means the bound expired, the action was not navigation-class, or the action failed — in every case the capture was never confirmed stable. Stamped on every embedded action observation.",
                   "type": "boolean"

@@ -173,6 +173,17 @@ export const observationSummarySchema = z
     accessibilityFocusedElement: elementSchema.optional(),
     activeWindow: activeWindowSchema.optional(),
     screenIdentity: screenIdentitySchema.optional(),
+    truncationReasons: z
+      .array(z.string())
+      .optional()
+      .describe(
+        "Why the captured hierarchy is incomplete (issue #6601) — the same field " +
+          "a diffed observation carries, so a client reads it the same way in both " +
+          "modes. Present only when rows were dropped: a device-side stop " +
+          "(max_nodes, max_depth) or the per-node child cap (max_children[<node> " +
+          "kept N of M]). When present, `skeleton`/`context` are a subset of the " +
+          "screen.",
+      ),
     settled: z
       .boolean()
       .optional()

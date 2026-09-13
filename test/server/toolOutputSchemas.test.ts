@@ -307,6 +307,22 @@ describe("observationOutputSchema: discriminated union of full observation vs di
   });
 });
 
+describe("observationSummarySchema: truncation reasons (#6601)", () => {
+  test("declares and preserves truncation reasons on a full action observation", () => {
+    const full = {
+      activeWindow: { appId: "com.example" },
+      truncationReasons: ["max_children[root] kept 10 of 12"],
+    };
+
+    const parsed = observationSummarySchema.parse(full);
+    expect(parsed.truncationReasons).toEqual(full.truncationReasons);
+
+    const json = toJSONSchema(observationSummarySchema) as Record<string, any>;
+    expect(json.properties.truncationReasons).toBeDefined();
+    expect(json.required ?? []).not.toContain("truncationReasons");
+  });
+});
+
 /**
  * `context` sibling array on `observeResultSchema` (issue #6221 item 1): the
  * non-actionable rows the same projection that produces `skeleton` emits.

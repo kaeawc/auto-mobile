@@ -28,7 +28,13 @@ interface TestInputText {
     mode?: InputTextMode,
     previousObserveResult?: ObserveResult,
     signal?: AbortSignal,
-  ) => Promise<{ success: boolean; error?: string; method?: string }>;
+  ) => Promise<{
+    success: boolean;
+    error?: string;
+    method?: string;
+    keyboardDismissed?: boolean;
+    warnings?: string[];
+  }>;
 }
 
 type RequestSetText = (
@@ -931,7 +937,7 @@ describe("InputText", () => {
     ]);
   });
 
-  test("eventOnly reports a keyboard dismissal failure without sending raw Back", async () => {
+  test("eventOnly warns about a keyboard dismissal failure without sending raw Back", async () => {
     const factory = new FakeAdbClientFactory();
     factory.getFakeClient().setCommandResult("shell getprop ro.build.version.sdk", "31\n");
     const inputText = new InputText(androidDevice, factory as AdbClientFactory, () => ({
@@ -950,8 +956,12 @@ describe("InputText", () => {
       observeResultWithFocusedText("old"),
     );
 
-    expect(result.success).toBe(false);
-    expect(result.error).toContain("Keyboard state unavailable");
+    // #6868: the characters landed — only the best-effort dismissal epilogue
+    // failed, so this is a success carrying a warning, not an error.
+    expect(result.success).toBe(true);
+    expect(result.error).toBeUndefined();
+    expect(result.keyboardDismissed).toBe(false);
+    expect(result.warnings).toEqual(["keyboard dismissal failed: Keyboard state unavailable"]);
     expect(inputCommands(factory)).toEqual([
       "shell input keyevent KEYCODE_MOVE_END",
       "shell input keyevent KEYCODE_DEL",
@@ -990,6 +1000,8 @@ describe("InputText", () => {
 
     expect(result.success).toBe(true);
     expect(result.method).toBe("a11y");
+    expect(result.keyboardDismissed).toBe(true);
+    expect(result.warnings).toBeUndefined();
     // setText must NOT carry the runner dismissKeyboard flag — the confirmed
     // Keyboard.close() route owns dismissal so close() never decides to send Back
     // off a cached "IME open" tree the runner had already hidden (issue #5887).
@@ -1047,21 +1059,29 @@ describe("InputText", () => {
           text: string,
           imeAction?: string,
           dismissKeyboard?: boolean,
-        ) => Promise<{ success: boolean; error?: string }>;
+        ) => Promise<{
+          success: boolean;
+          error?: string;
+          keyboardDismissed?: boolean;
+          warnings?: string[];
+        }>;
       }
     ).executeAndroidTextInput("hello", "done", true);
 
-    // The dismissal failure surfaces, but the IME action (Enter) already ran —
-    // pre-fix the dismiss-first ordering would have skipped it entirely.
-    expect(result.success).toBe(false);
-    expect(result.error).toContain("Keyboard state unavailable");
+    // The dismissal failure surfaces as a warning on a SUCCESSFUL result (#6868),
+    // and the IME action (Enter) already ran — pre-#5887 the dismiss-first
+    // ordering would have skipped it entirely.
+    expect(result.success).toBe(true);
+    expect(result.error).toBeUndefined();
+    expect(result.keyboardDismissed).toBe(false);
+    expect(result.warnings).toEqual(["keyboard dismissal failed: Keyboard state unavailable"]);
     expect(inputCommands(factory)).toContain("shell input keyevent KEYCODE_ENTER");
     // The completed action is carried on the failure result so a consumer can tell
     // a post-submit cleanup failure from a no-op and not double-submit (#5887).
     expect((result as { imeAction?: string }).imeAction).toBe("done");
   });
 
-  test("a11y reports a keyboard dismissal failure when the closer fails", async () => {
+  test("a11y warns about a keyboard dismissal failure instead of failing the write", async () => {
     const factory = new FakeAdbClientFactory();
     const inputText = new InputText(androidDevice, factory as AdbClientFactory, () => ({
       close: async () => ({
@@ -1075,9 +1095,12 @@ describe("InputText", () => {
 
     const result = await testInputText(inputText).executeAndroidTextInput("hello", undefined, true);
 
-    expect(result.success).toBe(false);
+    // #6868: the text landed; only the dismissal epilogue failed.
+    expect(result.success).toBe(true);
     expect(result.method).toBe("a11y");
-    expect(result.error).toContain("Keyboard state unavailable");
+    expect(result.error).toBeUndefined();
+    expect(result.keyboardDismissed).toBe(false);
+    expect(result.warnings).toEqual(["keyboard dismissal failed: Keyboard state unavailable"]);
   });
 
   test("eventAll dismisses the keyboard via the keyboard closer when dismissKeyboard is true", async () => {
@@ -1126,6 +1149,107 @@ describe("InputText", () => {
     expect(result.success).toBe(true);
     expect(result.method).toBe("eventLast");
     expect(closeCalls).toEqual(["close"]);
+  });
+
+  // #6868: every Android mode routes dismissKeyboard through the same
+  // best-effort epilogue, so a dismissal failure must degrade to a warning on a
+  // successful result in the append mode too — where the characters have
+  // definitively landed and a retry would double them.
+  test("append warns about a keyboard dismissal failure instead of failing the typed text", async () => {
+    const factory = new FakeAdbClientFactory();
+    factory.getFakeClient().setCommandResult("shell getprop ro.build.version.sdk", "31\n");
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory, () => ({
+      close: async () => ({
+        success: false,
+        open: true,
+        error: "Keyboard state unavailable",
+      }),
+    }));
+
+    const result = await testInputText(inputText).executeAndroidTextInput(
+      "abc",
+      undefined,
+      true,
+      "append",
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.method).toBe("append");
+    expect(result.error).toBeUndefined();
+    expect(result.keyboardDismissed).toBe(false);
+    expect(result.warnings).toEqual(["keyboard dismissal failed: Keyboard state unavailable"]);
+    // The retry boundary is still reported, and it covers the whole string.
+    expect((result as { charsSent?: number }).charsSent).toBe(3);
+  });
+
+  test("eventAll warns about a keyboard dismissal failure instead of failing the write", async () => {
+    const factory = new FakeAdbClientFactory();
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory, () => ({
+      close: async () => ({
+        success: false,
+        open: true,
+        error: "Keyboard state unavailable",
+      }),
+    }));
+
+    stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
+
+    const result = await testInputText(inputText).executeAndroidTextInput(
+      "ab",
+      undefined,
+      true,
+      "eventAll",
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.method).toBe("eventAll");
+    expect(result.keyboardDismissed).toBe(false);
+    expect(result.warnings).toEqual(["keyboard dismissal failed: Keyboard state unavailable"]);
+  });
+
+  test("eventLast warns about a keyboard dismissal failure instead of failing the write", async () => {
+    const factory = new FakeAdbClientFactory();
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory, () => ({
+      close: async () => ({
+        success: false,
+        open: true,
+        error: "Keyboard state unavailable",
+      }),
+    }));
+
+    stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
+
+    const result = await testInputText(inputText).executeAndroidTextInput(
+      "abc",
+      undefined,
+      true,
+      "eventLast",
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.method).toBe("eventLast");
+    expect(result.keyboardDismissed).toBe(false);
+    expect(result.warnings).toEqual(["keyboard dismissal failed: Keyboard state unavailable"]);
+  });
+
+  // A failed TEXT WRITE is still a real error — `isError` stays reserved for it.
+  test("a failed setText stays a failure even with dismissKeyboard requested", async () => {
+    const factory = new FakeAdbClientFactory();
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory, () => ({
+      close: async () => ({ success: true, open: false, message: "Keyboard closed" }),
+    }));
+
+    stubAndroidSetText(async () => ({
+      success: false,
+      error: "accessibility service unavailable",
+      totalTimeMs: 1,
+    }));
+
+    const result = await testInputText(inputText).executeAndroidTextInput("hello", undefined, true);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("accessibility service unavailable");
+    expect(result.warnings).toBeUndefined();
   });
 
   test("a11y reports setText timeouts without sending key events", async () => {

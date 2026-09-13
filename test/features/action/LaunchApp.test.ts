@@ -106,8 +106,13 @@ describe("LaunchApp", () => {
       controller.signal,
     );
 
+    // #6868: "make this app foreground" is a goal, not a transition. An app that
+    // is already there is the goal satisfied — a success carrying
+    // `alreadyForeground: true` plus the observation, never an error a client has
+    // to string-match to decide whether to continue.
     expect(result.success).toBe(true);
-    expect(result.error).toBe("App is already in foreground");
+    expect(result.alreadyForeground).toBe(true);
+    expect(result.error).toBeUndefined();
     expect(result.observation).toBeDefined();
     expect(fakeObserveScreen.getExecuteCallCount()).toBeGreaterThan(0);
     expect(
@@ -143,7 +148,8 @@ describe("LaunchApp", () => {
     );
 
     expect(result.success).toBe(true);
-    expect(result.error).toBe("App is already in foreground");
+    expect(result.alreadyForeground).toBe(true);
+    expect(result.error).toBeUndefined();
     expect(fakeAdb.wasCommandExecuted("shell dumpsys activity processes")).toBe(true);
   });
 

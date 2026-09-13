@@ -11,6 +11,14 @@ export interface LaunchAppResult extends BaseActionResult {
   /** Process ID (iOS only) */
   pid?: number;
   /**
+   * The app was already in the foreground, so nothing was launched (issue #6868).
+   * "Make this app foreground" is a goal, not a transition: the desired end state
+   * held before and after the call, so this is a success — the observation and
+   * the response-level `verified`/`observedAppId` carry the proof — not an error
+   * a client has to string-match to decide whether to continue.
+   */
+  alreadyForeground?: boolean;
+  /**
    * Explains a deliberately-omitted `observation` (issue #5872) so the launch
    * payload has a deterministic, self-describing shape: rather than silently
    * dropping the observation when it still reports the previous app, the response

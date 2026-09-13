@@ -18,6 +18,7 @@ import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClie
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { AdbCommandTimeoutError } from "../../utils/android-cmdline-tools/AdbClient";
 import { resolveAutoInputMode } from "./resolveAutoInputMode";
+import { withEpilogueWarning } from "../../utils/bestEffortEpilogue";
 import { serverConfig } from "../../utils/ServerConfig";
 import {
   clearTextWithKeyEvents,
@@ -99,6 +100,12 @@ const defaultKeyboardCloserFactory: KeyboardCloserFactory = (device, adbFactory)
 function assertInputNotAborted(signal?: AbortSignal): void {
   signal?.throwIfAborted();
 }
+
+/**
+ * Fields the best-effort keyboard-dismissal epilogue contributes to an
+ * already-successful input result (issue #6868).
+ */
+type KeyboardDismissalOutcome = Pick<SendTextResult, "keyboardDismissed" | "warnings">;
 
 export class InputText extends BaseVisualChange {
   private androidInputKeyCombinationSupported: boolean | undefined;
@@ -299,28 +306,18 @@ export class InputText extends BaseVisualChange {
 
       // Dismiss via the confirmed Keyboard.close() route (KEYCODE_BACK + state
       // poll), the same path eventOnly/append use (issue #5887).
-      if (dismissKeyboard) {
-        const dismissError = await this.dismissKeyboardViaCloser("a11y", signal);
-        if (dismissError) {
-          // Text (and any imeAction) already landed — only the cleanup dismiss
-          // failed. Carry imeAction so a consumer can tell a post-submit cleanup
-          // failure from an operation that never ran and must not blindly retry
-          // (issue #5887 review).
-          return {
-            success: false,
-            text,
-            imeAction,
-            error: dismissError,
-            method: "a11y",
-          };
-        }
-      }
+      // Text (and any imeAction) already landed, so a dismissal failure is a
+      // warning on a SUCCESSFUL result, never an error (issue #6868). imeAction is
+      // carried so a consumer can tell a post-submit cleanup failure from an
+      // operation that never ran and must not blindly retry (issue #5887 review).
+      const dismissal = dismissKeyboard ? await this.dismissKeyboardEpilogue(signal) : {};
 
       return {
         success: true,
         text,
         imeAction,
         method: "a11y",
+        ...dismissal,
       };
     }
 
@@ -414,27 +411,18 @@ export class InputText extends BaseVisualChange {
       await this.executeImeAction(imeAction, signal);
     }
 
-    // Dismiss via the confirmed Keyboard.close() route (issue #5887).
-    if (dismissKeyboard) {
-      const dismissError = await this.dismissKeyboardViaCloser("eventLast", signal);
-      if (dismissError) {
-        // imeAction already ran — carry it so a dismiss-only failure is not
-        // mistaken for a no-op and retried (issue #5887 review).
-        return {
-          success: false,
-          text,
-          imeAction,
-          error: dismissError,
-          method: "eventLast",
-        };
-      }
-    }
+    // Dismiss via the confirmed Keyboard.close() route (issue #5887); a failure
+    // there degrades to a warning on this success (issue #6868). imeAction is
+    // carried so a dismiss-only failure is not mistaken for a no-op and retried
+    // (issue #5887 review).
+    const dismissal = dismissKeyboard ? await this.dismissKeyboardEpilogue(signal) : {};
 
     return {
       success: true,
       text,
       imeAction,
       method: "eventLast",
+      ...dismissal,
     };
   }
 
@@ -526,27 +514,18 @@ export class InputText extends BaseVisualChange {
       await this.executeImeAction(imeAction, signal);
     }
 
-    // Dismiss via the confirmed Keyboard.close() route (issue #5887).
-    if (dismissKeyboard) {
-      const dismissError = await this.dismissKeyboardViaCloser("eventAll", signal);
-      if (dismissError) {
-        // imeAction already ran — carry it so a dismiss-only failure is not
-        // mistaken for a no-op and retried (issue #5887 review).
-        return {
-          success: false,
-          text,
-          imeAction,
-          error: dismissError,
-          method: "eventAll",
-        };
-      }
-    }
+    // Dismiss via the confirmed Keyboard.close() route (issue #5887); a failure
+    // there degrades to a warning on this success (issue #6868). imeAction is
+    // carried so a dismiss-only failure is not mistaken for a no-op and retried
+    // (issue #5887 review).
+    const dismissal = dismissKeyboard ? await this.dismissKeyboardEpilogue(signal) : {};
 
     return {
       success: true,
       text,
       imeAction,
       method: "eventAll",
+      ...dismissal,
     };
   }
 
@@ -644,16 +623,10 @@ export class InputText extends BaseVisualChange {
       await this.executeImeAction(imeAction, signal);
     }
 
-    if (dismissKeyboard) {
-      const dismissError = await this.dismissKeyboardViaCloser("append", signal);
-      if (dismissError) {
-        // All characters landed (and any imeAction already ran); only the
-        // post-typing keyboard dismissal failed, so the full text was sent — a
-        // retry must NOT re-append any of it, and imeAction is carried so a
-        // dismiss-only failure is not mistaken for a no-op (issue #5887 review).
-        return this.appendFailure(text, dismissError, typed.charsSent, imeAction);
-      }
-    }
+    // All characters landed (and any imeAction already ran), so a post-typing
+    // dismissal failure is a warning on this success, not a failure a caller
+    // might answer by re-appending the whole string (issues #5887, #6868).
+    const dismissal = dismissKeyboard ? await this.dismissKeyboardEpilogue(signal) : {};
 
     return {
       success: true,
@@ -661,6 +634,7 @@ export class InputText extends BaseVisualChange {
       imeAction,
       method: "append",
       charsSent: typed.charsSent,
+      ...dismissal,
     };
   }
 
@@ -800,9 +774,15 @@ export class InputText extends BaseVisualChange {
   }
 
   /**
-   * Dismiss the soft keyboard through the confirmed `Keyboard.close()` route
-   * (KEYCODE_BACK + state-confirmation poll), returning an error message when the
-   * dismissal could not be confirmed, else null.
+   * Run the best-effort keyboard-dismissal epilogue through the confirmed
+   * `Keyboard.close()` route (KEYCODE_BACK + state-confirmation poll).
+   *
+   * Returns the fields to spread onto an already-successful input result: the text
+   * write has landed by the time this runs, so a dismissal that cannot be
+   * confirmed reports `keyboardDismissed: false` plus a `warnings` entry rather
+   * than turning the whole call into an error the caller has to parse prose to
+   * understand (issue #6868). The mode label is not repeated in the warning — the
+   * result already carries `method`.
    *
    * Every Android mode routes `dismissKeyboard:true` here rather than through the
    * runner-side `SHOW_MODE_HIDDEN`: that flag suppresses the a11y service from
@@ -813,22 +793,20 @@ export class InputText extends BaseVisualChange {
    * cached "IME open" tree after the runner had already hidden the window,
    * navigating the app instead. The closer detects the current keyboard state
    * first, so when the keyboard is already closed it short-circuits without a Back.
-   *
-   * @param method - The input mode label, used in the failure message.
    */
-  private async dismissKeyboardViaCloser(
-    method: InputTextMode,
-    signal?: AbortSignal,
-  ): Promise<string | null> {
+  private async dismissKeyboardEpilogue(signal?: AbortSignal): Promise<KeyboardDismissalOutcome> {
     const keyboardResult = await this.keyboardCloserFactory(this.device, this.adbFactory).close(
       signal,
     );
     assertInputNotAborted(signal);
     if (keyboardResult.success) {
-      return null;
+      return { keyboardDismissed: true };
     }
     const cause = keyboardResult.error ?? keyboardResult.message ?? "unknown error";
-    return `${method} input completed but keyboard dismissal failed: ${cause}`;
+    return withEpilogueWarning<KeyboardDismissalOutcome>(
+      { keyboardDismissed: false },
+      `keyboard dismissal failed: ${cause}`,
+    );
   }
 
   /**
@@ -854,14 +832,12 @@ export class InputText extends BaseVisualChange {
     text: string,
     error: string,
     charsSent?: number,
-    imeAction?: ImeAction,
   ): SendTextResult & { method?: InputTextMode } {
     return {
       success: false,
       text,
       error,
       method: "append",
-      ...(imeAction !== undefined ? { imeAction } : {}),
       ...(charsSent !== undefined ? { charsSent } : {}),
     };
   }
@@ -918,26 +894,17 @@ export class InputText extends BaseVisualChange {
       await this.executeImeAction(imeAction, signal);
     }
 
-    if (dismissKeyboard) {
-      const dismissError = await this.dismissKeyboardViaCloser("eventOnly", signal);
-      if (dismissError) {
-        // imeAction already ran — carry it so a dismiss-only failure is not
-        // mistaken for a no-op and retried (issue #5887 review).
-        return {
-          success: false,
-          text,
-          imeAction,
-          error: dismissError,
-          method: "eventOnly",
-        };
-      }
-    }
+    // A dismissal failure degrades to a warning on this success (issue #6868);
+    // imeAction is carried so a dismiss-only failure is not mistaken for a no-op
+    // and retried (issue #5887 review).
+    const dismissal = dismissKeyboard ? await this.dismissKeyboardEpilogue(signal) : {};
 
     return {
       success: true,
       text,
       imeAction,
       method: "eventOnly",
+      ...dismissal,
     };
   }
 

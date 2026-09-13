@@ -2265,7 +2265,7 @@
   },
   {
     "name": "inputText",
-    "description": "Input text. The optional mode field is Android-only and ignored on iOS.",
+    "description": "Input text. The optional mode field is Android-only and ignored on iOS. If the text lands but the optional keyboard dismissal fails, the response stays a success with keyboardDismissed:false and a warnings entry.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -2472,7 +2472,7 @@
   },
   {
     "name": "launchApp",
-    "description": "Launch app by package name",
+    "description": "Launch app by package name. An app that is already in the foreground returns success with alreadyForeground:true plus the observation, not an error.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",

@@ -817,11 +817,16 @@ export class LaunchApp extends BaseVisualChange {
     }
 
     if (alreadyForeground) {
+      // "Make this app foreground" is a goal, not a transition: the goal already
+      // holds, so this is a success flagged with `alreadyForeground` — not an
+      // error a client has to string-match to decide whether to continue, which
+      // also discarded the observation a launch normally returns (issue #6868).
       const result = await this.observedInteraction(
         async () => {
           perf.end();
           return {
             success: true,
+            alreadyForeground: true,
             packageName,
             activityName,
             userId: targetUserId,
@@ -836,8 +841,6 @@ export class LaunchApp extends BaseVisualChange {
           skipUiStability: skipUiStability ?? false,
         },
       );
-      result.error = "App is already in foreground";
-      result.success = true;
       return result;
     }
 

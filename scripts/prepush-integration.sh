@@ -27,7 +27,7 @@ while IFS= read -r file; do
       ;;
   esac
   case "$relative" in
-    package.json | bun.lock | scripts/release/pin-runtime-deps.ts)
+    package.json | bun.lock | scripts/release/pin-runtime-deps.ts | scripts/release/runtime-graph.json | scripts/release/lib/runtime-pins.ts | scripts/release/lib/runtime-roots.ts | scripts/ci/verify-pinned-runtime-graph.sh)
       runtime_graph_changed=true
       ;;
   esac

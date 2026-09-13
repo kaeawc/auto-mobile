@@ -33,7 +33,7 @@ case "$1 $2" in
       */check-runs/15/annotations|*/check-runs/16/annotations|*/check-runs/17/annotations) printf '[]\n' ;;
       */actions/jobs/6/logs) printf 'readiness phase exceeded the remaining deadline\n' ;;
       */actions/jobs/18/logs) printf 'Test exceeded 100ms: some/test.ts > some test (median 142.31ms of 3 isolated runs)\n' ;;
-      */actions/jobs/19/logs|*/actions/jobs/20/logs) : ;;
+      */actions/jobs/19/logs|*/actions/jobs/20/logs|*/actions/jobs/21/logs) : ;;
       */actions/runs/*/artifacts) printf '%s\n' '{"artifacts":[{"id":101,"name":"mcp-build-test-logs-windows-latest"},{"id":102,"name":"mcp-build-test-logs-ubuntu-latest"}]}' ;;
       */actions/artifacts/101/zip) printf 'sharp: Could not load the sharp module\n' ;;
       */actions/artifacts/102/zip) printf 'ordinary ubuntu log text\n' ;;
@@ -97,7 +97,7 @@ JSON
   [[ "$output" != *"RERUN-DONT-FIX"* ]]
 }
 
-@test "scopes fallback artifacts to each failed job matrix suffix" {
+@test "does not let a non-producer job inherit a build/test artifact diagnostic" {
   fixture="$BATS_TEST_TMPDIR/matrix-artifact-run.json"
   cat > "$fixture" <<'JSON'
 {
@@ -111,8 +111,24 @@ JSON
 
   run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" bash "$SCRIPT" 790
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Node Unit Tests (windows-latest) → Run unit lane → none → KNOWN-NONFIX"* ]]
+  [[ "$output" == *"Node Unit Tests (windows-latest) → Run unit lane → none → UNKNOWN"* ]]
   [[ "$output" == *"Node Unit Tests (ubuntu-latest) → Run unit lane → none → UNKNOWN"* ]]
+}
+
+@test "uses the matching build/test artifact for its producer job" {
+  fixture="$BATS_TEST_TMPDIR/build-test-artifact-run.json"
+  cat > "$fixture" <<'JSON'
+{
+  "headBranch": "dependabot/npm_and_yarn/sharp-0.35.4",
+  "jobs": [
+    {"databaseId": 21, "name": "Node TypeScript Build and Test (windows-latest)", "conclusion": "failure", "steps": [{"name": "Run build/test lane", "conclusion": "failure"}]}
+  ]
+}
+JSON
+
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" bash "$SCRIPT" 791
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Node TypeScript Build and Test (windows-latest) → Run build/test lane → none → KNOWN-NONFIX"* ]]
 }
 
 @test "classifies an advisory timing-budget log flake and its red aggregator without annotations" {

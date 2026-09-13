@@ -14,8 +14,9 @@ read-only unless the user also asks to fix a confirmed cause.
 2. Treat `iOS`, `Android`, and `Node Tests` roll-ups as hard only for the
    deterministic dependencies reported by the classifier. Their simulator,
    emulator, or Node-unit advisory failures warn without blocking the roll-up.
-   `WebRTC` is intentionally advisory-only until it has a deterministic required
-   leg. `detect-changes` remains hard for every roll-up.
+   `WebRTC` treats `WebRTC Publisher Integration (MediaMTX)` as hard/required;
+   only its Android and iOS device-capture legs are advisory. `detect-changes`
+   remains hard for every roll-up.
 3. For `CHECK-UPSTREAM-FIRST`, inspect the named upstream row before retrying or
    filing work. A red aggregator is not a test diagnosis.
 4. Do not re-fix `KNOWN-NONFIX` signatures. In particular, a Dependabot

@@ -114,6 +114,9 @@ fetch_job_log() {
 fetch_artifact_logs() {
   local job_name="$1"
   local matrix_suffix artifact_name artifacts artifact_id artifact_file artifact_text=''
+  if [[ "$job_name" != "Node TypeScript Build and Test ("* ]]; then
+    return 0
+  fi
   if [[ ! "$job_name" =~ \(([^\(\)]*)\)$ ]]; then
     return 0
   fi

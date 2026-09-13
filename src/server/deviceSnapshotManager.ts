@@ -893,19 +893,88 @@ async function reclaimVmSnapshotPayload(
   return false;
 }
 
+/**
+ * Returned by {@link withExclusiveSnapshotRecord} when the name is busy or the
+ * row in hand is no longer the row on disk. Distinct from `false` (the task ran
+ * and declined) so a caller can never mistake "did not act" for "acted and
+ * failed".
+ */
+const SNAPSHOT_RECORD_SUPERSEDED = Symbol("snapshot-record-superseded");
+
+/**
+ * Two records describe the same payload only if every field a capture rewrites
+ * still matches. A same-name capture upserts `last_accessed_at` (and normally
+ * `size_bytes` / `device_name`), so comparing those catches a replacement that
+ * landed after this record was read.
+ */
+function isSameSnapshotRecord(a: DeviceSnapshotRecord, b: DeviceSnapshotRecord): boolean {
+  return (
+    a.deviceId === b.deviceId &&
+    a.deviceName === b.deviceName &&
+    a.snapshotType === b.snapshotType &&
+    a.createdAt === b.createdAt &&
+    a.lastAccessedAt === b.lastAccessedAt &&
+    a.sizeBytes === b.sizeBytes
+  );
+}
+
+/**
+ * Run a destructive `task` against `record` only while this process is the sole
+ * actor on that snapshot name AND the row is still the one that was selected.
+ *
+ * Reclaim ran outside the per-name lifecycle lock, so an eviction pass could
+ * select the old row for `foo`, wait while a concurrent capture of `foo` saved
+ * its replacement, and then issue the emulator console delete against — and drop
+ * the row describing — the payload that capture had just reported as a success
+ * (#6490 review).
+ *
+ * The capture lock is TRIED, never awaited: eviction holds the archive budget
+ * lock, which must stay a leaf (a capture holds its name lock while waiting for
+ * the budget lock, so waiting the other way round would deadlock). `Map.has` and
+ * the `Map.set` inside `withCaptureLock` both run synchronously in the same job,
+ * so a capture that starts afterwards queues behind this task instead of
+ * overlapping it.
+ */
+async function withExclusiveSnapshotRecord<T>(
+  record: DeviceSnapshotRecord,
+  task: () => Promise<T>,
+): Promise<T | typeof SNAPSHOT_RECORD_SUPERSEDED> {
+  if (captureLocks.has(record.snapshotName)) {
+    logger.debug(
+      `[DeviceSnapshot] Skipping reclaim of '${record.snapshotName}': a capture of that name is in flight`,
+    );
+    return SNAPSHOT_RECORD_SUPERSEDED;
+  }
+  return withCaptureLock(record.snapshotName, async () => {
+    const { snapshotRepository } = await getDeviceSnapshotDependencies();
+    const current = await snapshotRepository.getSnapshot(record.snapshotName);
+    if (!current || !isSameSnapshotRecord(current, record)) {
+      logger.debug(
+        `[DeviceSnapshot] Skipping reclaim of '${record.snapshotName}': the record was replaced ` +
+          "after it was selected",
+      );
+      return SNAPSHOT_RECORD_SUPERSEDED;
+    }
+    return task();
+  });
+}
+
 async function deleteDeviceSnapshotRecord(
   record: DeviceSnapshotRecord,
   vmSnapshotTimeoutMs: number,
 ): Promise<boolean> {
-  if (
-    isVmSnapshotRecord(record) &&
-    !(await reclaimVmSnapshotPayload(record, vmSnapshotTimeoutMs))
-  ) {
-    // Row kept and flagged; leave its archive data alone so the record stays a
-    // faithful reference to the in-AVD snapshot that is still there.
-    return false;
-  }
-  return removeSnapshotArchiveAndRow(record);
+  const outcome = await withExclusiveSnapshotRecord(record, async () => {
+    if (
+      isVmSnapshotRecord(record) &&
+      !(await reclaimVmSnapshotPayload(record, vmSnapshotTimeoutMs))
+    ) {
+      // Row kept and flagged; leave its archive data alone so the record stays a
+      // faithful reference to the in-AVD snapshot that is still there.
+      return false;
+    }
+    return removeSnapshotArchiveAndRow(record);
+  });
+  return outcome === true;
 }
 
 /**
@@ -1054,23 +1123,27 @@ export async function sweepPendingVmSnapshotReclaims(device: BootedDevice): Prom
   const { vmSnapshotTimeoutMs } = await getDeviceSnapshotConfig();
 
   for (const record of pending.filter((candidate) => candidate.deviceName === device.name)) {
-    const outcome = await avdSnapshots.deleteVmSnapshot(
-      device.deviceId,
-      record.snapshotName,
-      vmSnapshotTimeoutMs,
-    );
-    if (!outcome.reclaimed) {
-      logger.warn(
-        `[DeviceSnapshot] Pending reclaim of VM snapshot '${record.snapshotName}' still ` +
-          `incomplete: ${outcome.reason}`,
+    // Same per-name exclusivity as eviction: this sweep runs BEFORE the caller
+    // takes its own capture lock, so it can try (never await) the lock here.
+    const swept = await withExclusiveSnapshotRecord(record, async () => {
+      const outcome = await avdSnapshots.deleteVmSnapshot(
+        device.deviceId,
+        record.snapshotName,
+        vmSnapshotTimeoutMs,
       );
-      continue;
-    }
+      if (!outcome.reclaimed) {
+        logger.warn(
+          `[DeviceSnapshot] Pending reclaim of VM snapshot '${record.snapshotName}' still ` +
+            `incomplete: ${outcome.reason}`,
+        );
+        return false;
+      }
 
-    // The in-AVD payload is gone, so finish the eviction the offline emulator
-    // interrupted: archive data and row both go. No second console delete.
-    const deleted = await removeSnapshotArchiveAndRow(record);
-    if (deleted) {
+      // The in-AVD payload is gone, so finish the eviction the offline emulator
+      // interrupted: archive data and row both go. No second console delete.
+      return removeSnapshotArchiveAndRow(record);
+    });
+    if (swept === true) {
       reclaimed.push(record.snapshotName);
     }
   }

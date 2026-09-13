@@ -330,3 +330,159 @@ describe("orphan accounting is keyed by AVD and record type (#6891 review)", () 
     expect(listed.orphanedAvdSnapshots.totalSizeBytes).toBe(3 * 1024 * MB);
   });
 });
+
+describe("reclaim never races a same-name capture (#6490 review)", () => {
+  const MB_LOCAL = 1024 * 1024;
+  let fakeTimer: FakeTimer;
+  let repository: FakeDeviceSnapshotRepository;
+  let configRepository: FakeDeviceSnapshotConfigRepository;
+  let store: FakeDeviceSnapshotStore;
+  let avdSnapshots: FakeAvdSnapshotService;
+
+  beforeEach(async () => {
+    fakeTimer = new FakeTimer();
+    repository = new FakeDeviceSnapshotRepository();
+    configRepository = new FakeDeviceSnapshotConfigRepository();
+    store = new FakeDeviceSnapshotStore();
+    avdSnapshots = new FakeAvdSnapshotService();
+    avdSnapshots.setLiveEmulator(AVD_NAME, EMULATOR.deviceId);
+    await configRepository.setConfig({
+      includeAppData: true,
+      includeSettings: false,
+      useVmSnapshot: true,
+      strictBackupMode: false,
+      vmSnapshotTimeoutMs: 12000,
+      maxArchiveSizeMb: 4096,
+    });
+    await setDeviceSnapshotManagerDependencies({
+      snapshotRepository: repository as any,
+      configRepository: configRepository as any,
+      snapshotStore: store as any,
+      avdSnapshots,
+      timer: fakeTimer,
+      now: () => new Date(fakeTimer.now()),
+      createCaptureProvider: () => ({
+        capture: async (args) => {
+          const timestamp = new Date(fakeTimer.now() + 5000).toISOString();
+          avdSnapshots.setVmSnapshot(AVD_NAME, args.snapshotName, 4 * 1024 * MB_LOCAL);
+          return {
+            snapshotName: args.snapshotName,
+            timestamp,
+            snapshotType: "vm" as const,
+            manifest: vmManifest(args.snapshotName, timestamp),
+          };
+        },
+      }),
+      createRestoreProvider: () => ({
+        restore: async (args) => ({
+          snapshotType: args.manifest.snapshotType,
+          restoredAt: new Date(fakeTimer.now()).toISOString(),
+        }),
+      }),
+    });
+  });
+
+  afterEach(() => {
+    resetDeviceSnapshotManagerDependencies();
+  });
+
+  async function seed(snapshotName: string, createdAtMs: number): Promise<void> {
+    const timestamp = new Date(createdAtMs).toISOString();
+    avdSnapshots.setVmSnapshot(AVD_NAME, snapshotName, 2 * 1024 * MB_LOCAL);
+    await repository.insertSnapshot({
+      snapshotName,
+      deviceId: EMULATOR.deviceId,
+      deviceName: AVD_NAME,
+      platform: "android",
+      snapshotType: "vm",
+      includeAppData: true,
+      includeSettings: false,
+      createdAt: timestamp,
+      lastAccessedAt: timestamp,
+      sizeBytes: 2 * 1024 * MB_LOCAL,
+      manifest: vmManifest(snapshotName, timestamp),
+    });
+  }
+
+  test("eviction leaves alone a snapshot whose capture is still in flight", async () => {
+    await seed("vm-inflight", 1000);
+    await seed("vm-idle", 2000);
+
+    // Hold the capture open AFTER its payload is saved and its row upserted —
+    // the exact window in which eviction could delete the replacement it just
+    // wrote while the capture still reports success.
+    const replaceSnapshotData = store.replaceSnapshotData.bind(store);
+    let releaseCapture = (): void => {};
+    const captureGate = new Promise<void>((resolve) => {
+      releaseCapture = resolve;
+    });
+    let captureReachedGate = (): void => {};
+    const atGate = new Promise<void>((resolve) => {
+      captureReachedGate = resolve;
+    });
+    (store as any).replaceSnapshotData = async (
+      name: string,
+      options: unknown,
+      capture: () => Promise<unknown>,
+    ) => {
+      const result = await replaceSnapshotData(name, options, capture);
+      captureReachedGate();
+      await captureGate;
+      return result;
+    };
+
+    const capturing = captureDeviceSnapshot(EMULATOR, { snapshotName: "vm-inflight" });
+    await atGate;
+
+    const { evictedSnapshotNames } = await updateDeviceSnapshotConfig({ maxArchiveSizeMb: 1 });
+
+    releaseCapture();
+    await capturing;
+
+    expect(evictedSnapshotNames).toEqual(["vm-idle"]);
+    expect(avdSnapshots.getDeleteCalls().map((call) => call.snapshotName)).toEqual(["vm-idle"]);
+    const survivor = await repository.getSnapshot("vm-inflight");
+    expect(survivor?.sizeBytes).toBe(4 * 1024 * MB_LOCAL);
+    expect(avdSnapshots.hasVmSnapshot(AVD_NAME, "vm-inflight")).toBe(true);
+  });
+
+  test("eviction re-checks that the selected record is still the current one", async () => {
+    await seed("vm-superseded", 1000);
+
+    // A capture completes and upserts its replacement AFTER the eviction pass
+    // has read its working list: the record in hand is now stale, and acting on
+    // it would delete the fresh payload plus the row that describes it.
+    const listSnapshots = repository.listSnapshots.bind(repository);
+    let superseded = false;
+    (repository as any).listSnapshots = async (query: Record<string, unknown> = {}) => {
+      const rows = await listSnapshots(query as never);
+      if (!superseded && query.orderByLastAccessed === "asc") {
+        superseded = true;
+        const timestamp = new Date(9000).toISOString();
+        avdSnapshots.setVmSnapshot(AVD_NAME, "vm-superseded", 4 * 1024 * MB_LOCAL);
+        await repository.insertSnapshot({
+          snapshotName: "vm-superseded",
+          deviceId: EMULATOR.deviceId,
+          deviceName: AVD_NAME,
+          platform: "android",
+          snapshotType: "vm",
+          includeAppData: true,
+          includeSettings: false,
+          createdAt: new Date(1000).toISOString(),
+          lastAccessedAt: timestamp,
+          sizeBytes: 4 * 1024 * MB_LOCAL,
+          manifest: vmManifest("vm-superseded", timestamp),
+        });
+      }
+      return rows;
+    };
+
+    const { evictedSnapshotNames } = await updateDeviceSnapshotConfig({ maxArchiveSizeMb: 1 });
+
+    expect(evictedSnapshotNames).toEqual([]);
+    expect(avdSnapshots.getDeleteCalls()).toEqual([]);
+    const survivor = await repository.getSnapshot("vm-superseded");
+    expect(survivor?.sizeBytes).toBe(4 * 1024 * MB_LOCAL);
+    expect(avdSnapshots.hasVmSnapshot(AVD_NAME, "vm-superseded")).toBe(true);
+  });
+});

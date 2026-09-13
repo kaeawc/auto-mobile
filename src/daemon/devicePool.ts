@@ -202,9 +202,29 @@ export interface PooledDevice {
    * The placeholder is not evidence of a replacement (it would evict a live
    * emulator on a transient console read) and it is not evidence of continuity
    * either, so the entry is neither evicted nor trusted: session and
-   * `incarnation` are preserved, and everything that would ACT on the pooled
-   * identity is withheld until a resolved name settles it — see
+   * `incarnation` are preserved, and everything that would ACT on or ROUTE BY the
+   * pooled identity is withheld until a resolved name settles it — see
    * {@link DevicePool.reconcilePooledIdentityResolution}.
+   *
+   * The five consumers that read this state:
+   *
+   * 1. **Assignment** — the shared gate
+   *    ({@link DevicePool.ensurePooledDevicePresentForUse}) reports a quarantined
+   *    entry as not assignable, including one the assignment's OWN liveness check
+   *    just quarantined, so idle selection skips it and the exact-device paths
+   *    (`bindOrReuseDeviceSession`, autolock) refuse by serial.
+   * 2. **Tool execution** — {@link DevicePool.assertSessionReadyForAutomation},
+   *    the one choke point every tool passes through, refuses a session bound to
+   *    the serial.
+   * 3. **Publishing** — {@link DevicePool.describesPooledRuntime} reads it, so the
+   *    booted-devices resource publishes neither the pooled epoch nor the pooled
+   *    AVD label.
+   * 4. **Destructive confirmation** — `deviceTools.getValidatedPooledAndroidAvdName`
+   *    returns undefined, so no kill/delete path can act on the cached label.
+   * 5. **Stream routing** — the daemon's `DeviceSessionResolver` withholds the
+   *    serial↔uuid mapping in both directions and every push server drops that
+   *    serial's frames, so a possible replacement's passive events cannot reach
+   *    the previous AVD's subscribers.
    */
   identityUnresolved?: boolean;
 }

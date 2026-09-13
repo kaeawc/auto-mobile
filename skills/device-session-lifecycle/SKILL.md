@@ -64,19 +64,36 @@ applies in all three places the name is read:
    unreadable console never evicts a live entry — tolerance is not agreement.
 
 **The pool state that carries the rule: `PooledDevice.identityUnresolved`.**
-When a discovery sweep observes the placeholder on a LIVE entry, the pool
-quarantines that entry instead of choosing between two wrong answers. The entry
+When any discovery observes the placeholder on a LIVE entry — a refresh sweep or
+the liveness check an assignment runs itself — the pool quarantines that entry
+instead of choosing between two wrong answers. The entry
 is kept — same session, same `incarnation` — but:
 
-- `selectAssignableIdleDevice` skips it;
-- `assertSessionReadyForAutomation` (the single choke point every tool execution
-  passes through) refuses, naming the serial and the pooled AVD label;
-- `describesPooledRuntime` reads the state, so the resource publishes no pool
-  context;
-- `deviceTools.getValidatedPooledAndroidAvdName` returns undefined, so no
-  destructive path can act on the cached label — including the stopped-image
-  inventory path in `deleteDevice`, which previously bypassed the
-  unresolved-runtime guard on the strength of that label.
+- **assignment** — the shared gate `ensurePooledDevicePresentForUse` reports it
+  as not assignable, so `selectAssignableIdleDevice` skips it AND the
+  exact-device paths (`bindOrReuseDeviceSession`, autolock, both via
+  `validateOrReloadIdlePooledDevice`) refuse with an error naming the serial.
+  This covers the entry the assignment's OWN liveness check just quarantined:
+  the operation that ENTERS the quarantine fails at assignment rather than
+  returning a session that then fails every tool;
+- **tool execution** — `assertSessionReadyForAutomation` (the single choke point
+  every tool execution passes through) refuses, naming the serial and the pooled
+  AVD label;
+- **publishing** — `describesPooledRuntime` reads the state, so the resource
+  publishes no pool context;
+- **destructive confirmation** — `deviceTools.getValidatedPooledAndroidAvdName`
+  returns undefined, so no destructive path can act on the cached label —
+  including the stopped-image inventory path in `deleteDevice`, which previously
+  bypassed the unresolved-runtime guard on the strength of that label;
+- **stream routing** — the daemon builds its `DeviceSessionResolver` over the
+  pool quarantine, so a quarantined serial has NO routing identity in either
+  direction (serial→uuid and uuid→serial), and each push server
+  (observation/hierarchy, telemetry, performance, failures) drops that serial's
+  device-attributed frames instead of broadcasting them to all-device
+  subscribers — logged once per quarantine, not once per frame. The registry
+  record is untouched underneath, so lifting the quarantine resumes the SAME
+  `deviceSessionUuid`; a replacement instead mints a new incarnation, whose uuid
+  routes while the retired one stays unresolvable.
 
 Leaving the quarantine is decided by the next discovery that READS a name: the
 pooled label (or the AVD this pool started) restores the entry unchanged, and a

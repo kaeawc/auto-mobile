@@ -109,6 +109,31 @@ export function needsLauncherProbe(
   return false;
 }
 
+/** Explain why the packages that need a launcher probe were not covered by CtrlProxy. */
+export function launcherProbeFallbackReason(
+  catalog: AndroidAppCatalog,
+  packageNames: Iterable<string>,
+): string | null {
+  let missingLaunchabilityHasLabel = false;
+  let missingLaunchability = false;
+  for (const packageName of packageNames) {
+    const entry = catalog.get(packageName);
+    if (entry === undefined) {
+      return "CtrlProxy catalog does not cover all requested packages";
+    }
+    if (entry.launchable === undefined) {
+      missingLaunchability = true;
+      missingLaunchabilityHasLabel ||= entry.label !== undefined;
+    }
+  }
+  if (!missingLaunchability) {
+    return null;
+  }
+  return missingLaunchabilityHasLabel
+    ? "CtrlProxy catalog resolved labels but its launcher/launchability query did not answer"
+    : "CtrlProxy catalog predates labels or returned no labels";
+}
+
 /**
  * Fold one user's catalog entry into a deduplicated system app. Launchability is
  * per user (an activity can be disabled for the owner and enabled in a work

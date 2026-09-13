@@ -4,6 +4,7 @@ import {
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "../../utils/logger";
+import { errorMessage } from "../../utils/describeUnknownError";
 import {
   ActionableError,
   AndroidUser,
@@ -17,7 +18,7 @@ import { InstalledAppsRepository, InstalledAppsStore } from "../../db/installedA
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import type { InstalledApp as DbInstalledApp, NewInstalledApp } from "../../db/types";
 import { AndroidCtrlProxyClient } from "./android";
-import type { InstalledPackageRecord } from "./android/types";
+import type { A11yInstalledPackagesResult, InstalledPackageRecord } from "./android/types";
 import { getInstalledAppsCacheWriteCoordinator } from "../../db/installedAppsCacheWriteCoordinator";
 import { getDbWriteBarrier } from "../../db/dbWriteBarrier";
 import {
@@ -29,6 +30,7 @@ import { isIosPhysicalUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
 import {
   applyLauncherPackages,
   catalogFromPackageRecords,
+  launcherProbeFallbackReason,
   launcherActivitiesCommand,
   mergeSystemAppCatalogEntry,
   needsLauncherProbe,
@@ -69,6 +71,11 @@ export interface AndroidInstalledPackages {
   packages: InstalledPackageRecord[];
 }
 
+/** The result of one CtrlProxy package request, including an actionable unavailable reason. */
+export type AndroidInstalledPackagesRequest =
+  | { available: true; result: AndroidInstalledPackages }
+  | { available: false; reason: string };
+
 /**
  * CtrlProxy package-listing seam, narrowed to the single call this feature
  * makes. Lets a test drive the "CtrlProxy answered for user N" path — including
@@ -76,29 +83,54 @@ export interface AndroidInstalledPackages {
  * up an accessibility-service connection.
  */
 export interface AndroidInstalledPackageSource {
-  requestInstalledPackages(signal?: AbortSignal): Promise<AndroidInstalledPackages | null>;
+  requestInstalledPackages(signal?: AbortSignal): Promise<AndroidInstalledPackagesRequest>;
+}
+
+/**
+ * The single CtrlProxy call CtrlProxyInstalledPackageSource makes, narrowed from
+ * AndroidCtrlProxyClient so tests can inject a fake without a live WebSocket
+ * connection.
+ */
+export interface AndroidPackagesA11yClient {
+  requestInstalledPackages(
+    includeSystem: boolean,
+    userId: number | undefined,
+    timeoutMs: number,
+  ): Promise<A11yInstalledPackagesResult>;
 }
 
 /** Production source: one request against the on-device accessibility service. */
-class CtrlProxyInstalledPackageSource implements AndroidInstalledPackageSource {
-  constructor(private readonly device: BootedDevice) {}
+export class CtrlProxyInstalledPackageSource implements AndroidInstalledPackageSource {
+  private readonly device: BootedDevice;
+  private readonly a11yClient?: AndroidPackagesA11yClient;
 
-  async requestInstalledPackages(signal?: AbortSignal): Promise<AndroidInstalledPackages | null> {
+  constructor(device: BootedDevice, a11yClient?: AndroidPackagesA11yClient) {
+    this.device = device;
+    this.a11yClient = a11yClient;
+  }
+
+  async requestInstalledPackages(signal?: AbortSignal): Promise<AndroidInstalledPackagesRequest> {
     try {
-      const a11y = AndroidCtrlProxyClient.getInstance(this.device);
-      const result = await a11y.requestInstalledPackages(true, undefined, 4000);
+      const client = this.a11yClient ?? AndroidCtrlProxyClient.getInstance(this.device);
+      const result = await client.requestInstalledPackages(true, undefined, 4000);
       signal?.throwIfAborted();
       if (result.success) {
-        return { userId: result.userId, packages: result.packages };
+        return { available: true, result: { userId: result.userId, packages: result.packages } };
       }
-    } catch (error) {
-      // Expected whenever CtrlProxy is not installed or not connected; the ADB
-      // path is the supported fallback, not an error case.
+      const reason = result.error ?? "unknown error";
+      // The caller folds this reason into one warn only when a non-namesOnly catalog fallback runs.
       logger.debug(
-        `[ListInstalledApps] WebSocket package list failed, falling back to ADB: ${error}`,
+        `[ListInstalledApps] installed_packages request failed for device ${this.device.deviceId}: ${reason}`,
       );
+      return { available: false, reason };
+    } catch (error) {
+      const reason = errorMessage(error);
+      // The caller folds this reason into one warn only when a non-namesOnly catalog fallback runs.
+      logger.debug(
+        `[ListInstalledApps] installed_packages request threw for device ${this.device.deviceId}: ${reason}`,
+      );
+      return { available: false, reason };
     }
-    return null;
   }
 }
 
@@ -372,8 +404,8 @@ export class ListInstalledApps {
     signal?.throwIfAborted();
     const proxy = await this.fetchCtrlProxyPackages(signal);
     signal?.throwIfAborted();
-    if (proxy) {
-      catalogByUser.set(proxy.userId, catalogFromPackageRecords(proxy.packages));
+    if (proxy.available) {
+      catalogByUser.set(proxy.result.userId, catalogFromPackageRecords(proxy.result.packages));
     }
     const packagesByUser = new Map<number, string[]>();
     for (const row of rows) {
@@ -388,6 +420,7 @@ export class ListInstalledApps {
         catalogByUser.set(userId, catalog);
       }
       if (needsLauncherProbe(catalog, packageNames)) {
+        this.warnCtrlProxyCatalogFallback(proxy, userId, catalog, packageNames);
         signal?.throwIfAborted();
         await this.topUpLaunchability(catalog, packageNames, userId, signal);
       }
@@ -397,14 +430,41 @@ export class ListInstalledApps {
 
   /**
    * One `installed_packages` request against the on-device accessibility
-   * service, or null when it is unavailable. The result carries the user it
+   * service. The result carries either its unavailable reason or the user it
    * describes — PackageManager runs as the service user, so it answers for that
    * user only and every other profile still needs its own probe (#6798).
    */
   private async fetchCtrlProxyPackages(
     signal?: AbortSignal,
-  ): Promise<AndroidInstalledPackages | null> {
+  ): Promise<AndroidInstalledPackagesRequest> {
     return this.installedPackageSource.requestInstalledPackages(signal);
+  }
+
+  /** Explain when the label-capable CtrlProxy catalog must be topped up by adb. */
+  private warnCtrlProxyCatalogFallback(
+    proxy: AndroidInstalledPackagesRequest,
+    userId: number,
+    catalog: AndroidAppCatalog,
+    packageNames: Iterable<string>,
+  ): void {
+    if (!proxy.available) {
+      logger.warn(
+        `[ListInstalledApps] CtrlProxy catalog unavailable for device ${this.device.deviceId}: ${proxy.reason}; falling back to ADB launcher probe for user ${userId}.`,
+      );
+      return;
+    }
+    if (proxy.result.userId !== userId) {
+      logger.debug(
+        `[ListInstalledApps] CtrlProxy catalog covers user ${proxy.result.userId} only; user ${userId} uses the ADB launcher probe.`,
+      );
+      return;
+    }
+    const reason = launcherProbeFallbackReason(catalog, packageNames);
+    if (reason) {
+      logger.warn(
+        `[ListInstalledApps] ${reason} for device ${this.device.deviceId}; falling back to ADB launcher probe for user ${userId}.`,
+      );
+    }
   }
 
   /**
@@ -683,9 +743,15 @@ export class ListInstalledApps {
     signal?: AbortSignal,
     options: DetailedListingOptions = {},
   ): Promise<PartitionedPackages> {
-    if (this.device.platform === "android") {
-      const proxy = await this.fetchCtrlProxyPackages(signal);
-      const records = proxy && proxy.userId === userId ? proxy.packages : null;
+    const proxy =
+      this.device.platform === "android"
+        ? await this.fetchCtrlProxyPackages(signal)
+        : {
+            available: false as const,
+            reason: "CtrlProxy catalog is unavailable on this platform",
+          };
+    if (proxy.available) {
+      const records = proxy.result.userId === userId ? proxy.result.packages : null;
       if (records) {
         const userPackages: string[] = [];
         const systemPackages: string[] = [];
@@ -701,6 +767,7 @@ export class ListInstalledApps {
           : catalogFromPackageRecords(records);
         const listedPackages = [...userPackages, ...systemPackages];
         if (!options.namesOnly && needsLauncherProbe(catalog, listedPackages)) {
+          this.warnCtrlProxyCatalogFallback(proxy, userId, catalog, listedPackages);
           await this.topUpLaunchability(catalog, listedPackages, userId, signal);
         }
         return { userPackages, systemPackages, catalog };
@@ -728,7 +795,9 @@ export class ListInstalledApps {
     const userPackages = this.parsePackages(allRes.stdout).filter((p) => !systemSet.has(p));
     const catalog: AndroidAppCatalog = new Map();
     if (!options.namesOnly) {
-      await this.topUpLaunchability(catalog, [...userPackages, ...systemPackages], userId, signal);
+      const listedPackages = [...userPackages, ...systemPackages];
+      this.warnCtrlProxyCatalogFallback(proxy, userId, catalog, listedPackages);
+      await this.topUpLaunchability(catalog, listedPackages, userId, signal);
     }
     return { userPackages, systemPackages, catalog };
   }

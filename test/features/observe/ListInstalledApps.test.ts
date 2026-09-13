@@ -1,5 +1,9 @@
-import { expect, describe, test, beforeEach } from "bun:test";
-import { ListInstalledApps } from "../../../src/features/observe/ListInstalledApps";
+import { expect, describe, test, beforeEach, spyOn } from "bun:test";
+import {
+  CtrlProxyInstalledPackageSource,
+  ListInstalledApps,
+} from "../../../src/features/observe/ListInstalledApps";
+import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { BootedDevice, AndroidUser } from "../../../src/models";
@@ -9,18 +13,20 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeSimctl } from "../../fakes/FakeSimctl";
 import { getInstalledAppsCacheWriteCoordinator } from "../../../src/db/installedAppsCacheWriteCoordinator";
 import type {
-  AndroidInstalledPackages,
+  AndroidPackagesA11yClient,
+  AndroidInstalledPackagesRequest,
   AndroidInstalledPackageSource,
 } from "../../../src/features/observe/ListInstalledApps";
+import { logger } from "../../../src/utils/logger";
 
 /**
  * Stands in for the on-device accessibility service: one canned
  * `installed_packages` answer, tagged with the user it describes.
  */
 class FakeInstalledPackageSource implements AndroidInstalledPackageSource {
-  constructor(private readonly result: AndroidInstalledPackages | null) {}
+  constructor(private readonly result: AndroidInstalledPackagesRequest) {}
 
-  async requestInstalledPackages(): Promise<AndroidInstalledPackages | null> {
+  async requestInstalledPackages(): Promise<AndroidInstalledPackagesRequest> {
     return this.result;
   }
 }
@@ -430,6 +436,185 @@ describe("ListInstalledApps", function () {
       ).toBe(false);
     });
 
+    test("constructs CtrlProxy sources lazily, including through an iOS ListInstalledApps", function () {
+      const getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => {
+        throw new Error("must not be called");
+      });
+      const iosDevice: BootedDevice = {
+        deviceId: "ios-lazy-ctrlproxy-device",
+        platform: "ios",
+      } as BootedDevice;
+
+      try {
+        expect(() => new CtrlProxyInstalledPackageSource(iosDevice)).not.toThrow();
+        expect(
+          () => new ListInstalledApps(iosDevice, new FakeAdbClientFactory(fakeAdb)),
+        ).not.toThrow();
+        expect(getInstanceSpy).not.toHaveBeenCalled();
+      } finally {
+        getInstanceSpy.mockRestore();
+      }
+    });
+
+    test("a names-only listing does not warn when CtrlProxy is unavailable", async function () {
+      const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+      const list = new ListInstalledApps(mockDevice, new FakeAdbClientFactory(fakeAdb), null, {
+        installedPackageSource: new FakeInstalledPackageSource({
+          available: false,
+          reason: "WebSocket not connected",
+        }),
+      });
+
+      try {
+        await list.execute();
+
+        expect(warnSpy).not.toHaveBeenCalled();
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+
+    test("warns with the device when an unavailable CtrlProxy catalog falls back to adb", async function () {
+      const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+      const list = new ListInstalledApps(mockDevice, new FakeAdbClientFactory(fakeAdb), null, {
+        installedPackageSource: new FakeInstalledPackageSource({
+          available: false,
+          reason: "WebSocket not connected",
+        }),
+      });
+
+      try {
+        await list.executeDetailed();
+
+        expect(warnSpy).toHaveBeenCalledTimes(1);
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining(mockDevice.deviceId));
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.stringContaining("CtrlProxy catalog unavailable"),
+        );
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("WebSocket not connected"));
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("ADB"));
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+
+    test("warns once for a CtrlProxy catalog with no labels, but not for names-only", async function () {
+      const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+      const list = new ListInstalledApps(mockDevice, new FakeAdbClientFactory(fakeAdb), null, {
+        installedPackageSource: new FakeInstalledPackageSource({
+          available: true,
+          result: {
+            userId: 0,
+            packages: [
+              { packageName: "com.android.contacts", isSystem: true },
+              { packageName: "com.android.providers.contacts", isSystem: true },
+              { packageName: "com.example.myapp", isSystem: false },
+            ],
+          },
+        }),
+      });
+
+      try {
+        await list.executeDetailed();
+        await list.execute();
+
+        expect(warnSpy).toHaveBeenCalledTimes(1);
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining(mockDevice.deviceId));
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("returned no labels"));
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("ADB"));
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+
+    test("warns about missing launchability when CtrlProxy labels resolved", async function () {
+      const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+      const list = new ListInstalledApps(mockDevice, new FakeAdbClientFactory(fakeAdb), null, {
+        installedPackageSource: new FakeInstalledPackageSource({
+          available: true,
+          result: {
+            userId: 0,
+            packages: [
+              {
+                packageName: "com.android.contacts",
+                isSystem: true,
+                label: "Contacts",
+                launchable: null,
+              },
+              {
+                packageName: "com.android.providers.contacts",
+                isSystem: true,
+                label: "Contacts Storage",
+                launchable: false,
+              },
+              {
+                packageName: "com.example.myapp",
+                isSystem: false,
+                label: "My App",
+                launchable: true,
+              },
+            ],
+          },
+        }),
+      });
+
+      try {
+        await list.executeDetailed();
+
+        expect(warnSpy).toHaveBeenCalledTimes(1);
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("launchability"));
+        expect(warnSpy).not.toHaveBeenCalledWith(expect.stringContaining("no labels"));
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+
+    test("returns the response reason without warning when CtrlProxy reports failure", async function () {
+      const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+      const a11yClient: AndroidPackagesA11yClient = {
+        async requestInstalledPackages() {
+          return {
+            success: false,
+            userId: -1,
+            packages: [],
+            totalTimeMs: 0,
+            error: "WebSocket not connected",
+          };
+        },
+      };
+
+      try {
+        const source = new CtrlProxyInstalledPackageSource(mockDevice, a11yClient);
+        expect(await source.requestInstalledPackages()).toEqual({
+          available: false,
+          reason: "WebSocket not connected",
+        });
+        expect(warnSpy).not.toHaveBeenCalled();
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+
+    test("returns the thrown reason without warning when CtrlProxy request throws", async function () {
+      const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+      const a11yClient: AndroidPackagesA11yClient = {
+        async requestInstalledPackages() {
+          throw new Error("connection refused");
+        },
+      };
+
+      try {
+        const source = new CtrlProxyInstalledPackageSource(mockDevice, a11yClient);
+        expect(await source.requestInstalledPackages()).toEqual({
+          available: false,
+          reason: "connection refused",
+        });
+        expect(warnSpy).not.toHaveBeenCalled();
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+
     test("a failed launcher probe leaves launchability unknown rather than claiming false", async function () {
       fakeAdb.setCommandError(
         "shell cmd package query-activities --brief --user 0 " +
@@ -496,15 +681,18 @@ describe("ListInstalledApps", function () {
         installedAppsRepository: repo,
         timer,
         installedPackageSource: new FakeInstalledPackageSource({
-          userId: 0,
-          packages: [
-            {
-              packageName: "com.example.myapp",
-              isSystem: false,
-              label: "My App",
-              launchable: true,
-            },
-          ],
+          available: true,
+          result: {
+            userId: 0,
+            packages: [
+              {
+                packageName: "com.example.myapp",
+                isSystem: false,
+                label: "My App",
+                launchable: true,
+              },
+            ],
+          },
         }),
       });
       const result = await cached.executeDetailed();
@@ -517,6 +705,61 @@ describe("ListInstalledApps", function () {
       expect(
         fakeAdb.getExecutedCommands().filter((command) => command.includes("query-activities")),
       ).toEqual([LAUNCHER_PROBE_USER_10]);
+    });
+
+    test("logs the covered and probed profiles at debug without a warning", async function () {
+      const repo = new FakeInstalledAppsRepository();
+      const timer = new FakeTimer();
+      timer.advanceTime(1000);
+      const now = timer.now();
+      await repo.replaceInstalledApps(mockDevice.deviceId, [
+        {
+          device_id: mockDevice.deviceId,
+          user_id: 10,
+          package_name: "com.example.work",
+          is_system: 0,
+          installed_at: now,
+          last_verified_at: now,
+          profile_type: "managed",
+        },
+      ]);
+      fakeAdb.setUsers(workUsers);
+      fakeAdb.setCommandResponse(LAUNCHER_PROBE_USER_10, {
+        stdout: "com.example.work/.Main\n",
+        stderr: "",
+      });
+      const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+      const debugSpy = spyOn(logger, "debug").mockImplementation(() => {});
+      const cached = new ListInstalledApps(mockDevice, new FakeAdbClientFactory(fakeAdb), null, {
+        cacheEnabled: true,
+        installedAppsRepository: repo,
+        timer,
+        installedPackageSource: new FakeInstalledPackageSource({
+          available: true,
+          result: {
+            userId: 0,
+            packages: [
+              {
+                packageName: "com.example.owner",
+                isSystem: false,
+                label: "Owner",
+                launchable: true,
+              },
+            ],
+          },
+        }),
+      });
+
+      try {
+        await cached.executeDetailed();
+
+        expect(warnSpy).not.toHaveBeenCalled();
+        expect(debugSpy).toHaveBeenCalledWith(expect.stringContaining("user 0"));
+        expect(debugSpy).toHaveBeenCalledWith(expect.stringContaining("user 10"));
+      } finally {
+        warnSpy.mockRestore();
+        debugSpy.mockRestore();
+      }
     });
 
     test("probes cached packages the CtrlProxy catalog did not mention", async function () {
@@ -548,20 +791,31 @@ describe("ListInstalledApps", function () {
         stdout: "com.example.myapp/.Main\n",
         stderr: "",
       });
+      const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
 
       const cached = new ListInstalledApps(mockDevice, new FakeAdbClientFactory(fakeAdb), null, {
         cacheEnabled: true,
         installedAppsRepository: repo,
         timer,
         installedPackageSource: new FakeInstalledPackageSource({
-          userId: 0,
-          packages: [{ packageName: "com.example.myapp", isSystem: false, launchable: true }],
+          available: true,
+          result: {
+            userId: 0,
+            packages: [{ packageName: "com.example.myapp", isSystem: false, launchable: true }],
+          },
         }),
       });
-      const result = await cached.executeDetailed();
+      try {
+        const result = await cached.executeDetailed();
 
-      const other = result.profiles[0].find((app) => app.packageName === "com.example.other");
-      expect(other?.launchable).toBe(false);
+        const other = result.profiles[0].find((app) => app.packageName === "com.example.other");
+        expect(other?.launchable).toBe(false);
+        expect(warnSpy).toHaveBeenCalledTimes(1);
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("does not cover"));
+        expect(warnSpy).not.toHaveBeenCalledWith(expect.stringContaining("no labels"));
+      } finally {
+        warnSpy.mockRestore();
+      }
     });
 
     test("keeps a system app's launchability per user rather than per package", async function () {
@@ -619,7 +873,10 @@ describe("ListInstalledApps", function () {
         cacheEnabled: true,
         installedAppsRepository: repo,
         timer,
-        installedPackageSource: new FakeInstalledPackageSource(null),
+        installedPackageSource: new FakeInstalledPackageSource({
+          available: false,
+          reason: "WebSocket not connected",
+        }),
       });
       const result = await cached.executeDetailed();
 
@@ -665,7 +922,7 @@ describe("ListInstalledApps", function () {
       const source: AndroidInstalledPackageSource = {
         async requestInstalledPackages(signal?: AbortSignal) {
           captured = signal;
-          return null;
+          return { available: false, reason: "WebSocket not connected" };
         },
       };
       const { repo, timer } = await seedFreshCache();
@@ -689,7 +946,7 @@ describe("ListInstalledApps", function () {
       const source: AndroidInstalledPackageSource = {
         async requestInstalledPackages() {
           controller.abort();
-          return null;
+          return { available: false, reason: "WebSocket not connected" };
         },
       };
       const { repo, timer } = await seedFreshCache();

@@ -73,4 +73,24 @@ describe("device snapshot VM reclaim migration (#6490)", () => {
       pending_reclaim_reason: null,
     });
   });
+
+  test("a mid-migration failure leaves no half-applied columns behind", async () => {
+    // SQLite migrations here are NOT wrapped in DDL transactions by the migrator
+    // (Kysely's SqliteAdapter reports supportsTransactionalDdl === false), so an
+    // `up()` that ran its ALTERs one by one could commit `size_unknown` and then
+    // fail — never recording the ledger row. Every later startup would replay
+    // from the top and die on `duplicate column name: size_unknown`, wedging the
+    // daemon until someone repaired the schema by hand (#6490 review).
+    //
+    // A pre-existing `pending_reclaim` column makes the SECOND statement fail for
+    // exactly that reason, so this asserts the first one is rolled back with it.
+    await db.schema
+      .alterTable("device_snapshots")
+      .addColumn("pending_reclaim", "integer", (column) => column.notNull().defaultTo(0))
+      .execute();
+
+    await expect(vmReclaimUp(db)).rejects.toThrow(/duplicate column name: pending_reclaim/);
+
+    expect(await columnNames(db)).not.toContain("size_unknown");
+  });
 });

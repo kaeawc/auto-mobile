@@ -32,6 +32,14 @@ interface ElementBounds {
   bottom: number;
 }
 
+/**
+ * Maximum number of direct children the raw-element-search filter walks per node.
+ * The cap bounds the filtered payload on pathological containers (long lists,
+ * wide grids); children past it are dropped, and every capped node is reported
+ * through the hierarchy's `truncationReasons` so the drop is never silent (#6601).
+ */
+export const MAX_FILTERED_CHILDREN_PER_NODE = 64;
+
 export class ViewHierarchy implements ViewHierarchyInterface {
   private device: BootedDevice;
   private parser: ElementParser;
@@ -364,9 +372,14 @@ export class ViewHierarchy implements ViewHierarchyInterface {
    * Filter a single node and its children
    * @param node - Node to filter
    * @param isRootNode - Whether this is the root node
+   * @param truncations - Optional sink collecting a reason per capped node
    * @returns Filtered node or null
    */
-  public filterSingleNode(node: any, isRootNode: boolean = false): any | null {
+  public filterSingleNode(
+    node: any,
+    isRootNode: boolean = false,
+    truncations?: string[],
+  ): any | null {
     if (!node) {
       return null;
     }
@@ -377,8 +390,10 @@ export class ViewHierarchy implements ViewHierarchyInterface {
       if (node.node) {
         // Always overwrite: when every child is filtered out the root must report an
         // empty child list rather than falling back to the raw cloned children.
-        const processedChildren = this.processNodeChildren(node, (child) =>
-          this.filterSingleNode(child),
+        const processedChildren = this.processNodeChildren(
+          node,
+          (child) => this.filterSingleNode(child, false, truncations),
+          truncations,
         );
         rootCopy.node = this.normalizeNodeStructure(processedChildren);
       }
@@ -388,8 +403,10 @@ export class ViewHierarchy implements ViewHierarchyInterface {
 
     const props = node.$ || node;
     const meetsFilterCriteria = this.meetsFilterCriteria(props);
-    const relevantChildren = this.processNodeChildren(node, (child) =>
-      this.filterSingleNode(child),
+    const relevantChildren = this.processNodeChildren(
+      node,
+      (child) => this.filterSingleNode(child, false, truncations),
+      truncations,
     );
 
     if (meetsFilterCriteria) {
@@ -415,8 +432,13 @@ export class ViewHierarchy implements ViewHierarchyInterface {
    * - OR have clickable, scrollable, focused, or selected set to true
    * - Include descendants that meet criteria even if parents don't
    * - Omit boolean fields not set to true and class="android.view.View"
+   *
+   * Each node's direct children are capped at {@link MAX_FILTERED_CHILDREN_PER_NODE};
+   * every capped node contributes a `max_children[...]` entry to the returned
+   * hierarchy's `truncationReasons` so callers can tell a short child list from a
+   * truncated one (#6601).
    * @param viewHierarchy - The view hierarchy to filter
-   * @returns Filtered view hierarchy
+   * @returns Filtered view hierarchy with any `truncationReasons` appended
    */
   filterViewHierarchy(viewHierarchy: any): any {
     if (!viewHierarchy || !viewHierarchy.hierarchy) {
@@ -425,7 +447,14 @@ export class ViewHierarchy implements ViewHierarchyInterface {
     }
 
     const result = structuredClone(viewHierarchy);
-    result.hierarchy = this.filterSingleNode(viewHierarchy.hierarchy, true);
+    const truncations: string[] = [];
+    result.hierarchy = this.filterSingleNode(viewHierarchy.hierarchy, true, truncations);
+    if (truncations.length > 0) {
+      // Surface the per-node child cap through the same field PerformanceAuditor
+      // already reads for device-side truncation (#6601).
+      result.truncationReasons = [...(result.truncationReasons ?? []), ...truncations];
+      logger.debug(`filterViewHierarchy capped children: ${truncations.join("; ")}`);
+    }
     return result;
   }
 
@@ -634,16 +663,36 @@ export class ViewHierarchy implements ViewHierarchyInterface {
   }
 
   /**
+   * Describe a node whose children were capped, for a truncation reason string.
+   * Commas are avoided because PerformanceAuditor joins reasons with ", ".
+   */
+  private describeTruncatedNode(node: any): string {
+    const props = node.$ || node;
+    const identity =
+      props["resource-id"] || props["view-id"] || props["content-desc"] || props.class;
+    return typeof identity === "string" && identity !== ""
+      ? identity.replace(/,/g, " ")
+      : "unknown-node";
+  }
+
+  /**
    * Process node children with filter function
    * @param node - Parent node
    * @param filterFn - Filter function to apply to children
+   * @param truncations - Optional sink collecting a reason per capped node
    * @returns Array of filtered children
    */
-  processNodeChildren(node: any, filterFn: (child: any) => any): any[] {
+  processNodeChildren(node: any, filterFn: (child: any) => any, truncations?: string[]): any[] {
     const relevantChildren: any[] = [];
 
     if (node.node) {
-      const children = (Array.isArray(node.node) ? node.node : [node.node]).slice(0, 64);
+      const allChildren = Array.isArray(node.node) ? node.node : [node.node];
+      if (allChildren.length > MAX_FILTERED_CHILDREN_PER_NODE && truncations) {
+        truncations.push(
+          `max_children[${this.describeTruncatedNode(node)} kept ${MAX_FILTERED_CHILDREN_PER_NODE} of ${allChildren.length}]`,
+        );
+      }
+      const children = allChildren.slice(0, MAX_FILTERED_CHILDREN_PER_NODE);
       for (const child of children) {
         const filteredChild = filterFn(child);
         if (filteredChild) {

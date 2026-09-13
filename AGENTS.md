@@ -191,3 +191,19 @@ plain `git` stays fine for read-only queries (`git log`, `git diff`, `gh`).
 - auto-mobile-code-review: AutoMobile-specific code review of a PR or current diff — check the PR's real CI, merge and base state first, then run diff-sized review lenses (two fixed, one generated) over runtime behavior and delivery/enforcement, grounding findings in file:line. Never posts to GitHub. Path: `skills/auto-mobile-code-review/SKILL.md`.
 - manual-test: Run one manual-test iteration from a start point (commit, milestone, or date) — rebuild all components, restart the daemon with the right flags, and verify closed issues / merged PRs actually fix bugs or deliver specced features on current HEAD by exercising tool calls on an Android emulator and iOS simulator. Path: `skills/manual-test/SKILL.md`.
 - device-session-lifecycle: Hunt, fix, and prevent device session lifecycle bugs — startDevice/killDevice, session UUIDs, boot readiness, daemon start/stop/restart, session expiry/release, pool state races, and flaky lifecycle tests. Path: `skills/device-session-lifecycle/SKILL.md`.
+- ios-swift-ci: Triage iOS/Swift CI failures with evidence, distinguish advisory simulator flakes from required checks, and run the local pre-push validation. Path: `skills/ios-swift-ci/SKILL.md`.
+
+## iOS/Swift CI
+
+- Run `scripts/prepush-ios.sh` before pushing any Swift change. It enforces the
+  pinned SwiftFormat 0.54.6, SwiftLint's error-severity rules, and the
+  simulator-free XCTestRunner package subset.
+- `XCTestRunner Simulator Tests` is advisory, not required. Classify it from
+  the exact job log before rerunning or changing code. The 2026-09-07–13
+  signatures were: CtrlProxy UI-test action timed out after five minutes;
+  CtrlProxy still running after forced teardown; video recording's `simctl list`
+  state probe timed out at 250ms; and the hierarchy UI test exceeded 90 seconds.
+- A simulator instance is owned by one CI job. Keep its explicit UDID serially
+  within that job; never share it between parallel runners or jobs.
+- Before merging, refresh CI after updating to the current main head. A stale
+  base can reproduce a main-red window even when the PR's earlier head was green.

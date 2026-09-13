@@ -292,3 +292,17 @@ plain `git` stays fine for read-only queries (`git log`, `git diff`, `gh`).
   Validation) rejects violations.
 - Do not create `git worktree`s of a jj checkout. For parallel work use
   `jj workspace add ../<name>` instead.
+
+## iOS/Swift CI
+
+- Before pushing a Swift change, run `scripts/prepush-ios.sh` (pinned
+  SwiftFormat 0.54.6, SwiftLint error rules, XCTestRunner build, and pure unit
+  tests).
+- `XCTestRunner Simulator Tests` is advisory, not required. Read the exact job
+  log and classify before rerunning. Known 2026-09-07–13 signatures: five-minute
+  CtrlProxy UI-test timeout, CtrlProxy surviving forced teardown, `simctl list`
+  timing out during video recording, and a hierarchy UI test exceeding 90s.
+- A simulator UDID belongs to exactly one CI job and is used serially there;
+  never share a simulator between parallel runners or jobs.
+- Re-run CI on the latest main base before merge; stale-base runs can mask a
+  temporary main-red window.

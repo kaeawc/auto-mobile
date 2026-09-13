@@ -5,7 +5,10 @@ import { stringifyToolResponse } from "../utils/toolUtils";
 import { ScreenshotJobTracker } from "../utils/ScreenshotJobTracker";
 import { DaemonState } from "../daemon/daemonState";
 import { TakeScreenshot } from "../features/observe/TakeScreenshot";
-import { resolveDirectSessionDevice } from "./directSessionDeviceRegistry";
+import {
+  resolveDirectSessionDevice,
+  resolveDirectSessionUuidForDevice,
+} from "./directSessionDeviceRegistry";
 import type { TrackedScreenshotService } from "../features/observe/screenshot/ObserveScreenshotRecorder";
 import type { BootedDevice } from "../models";
 import * as realFs from "fs/promises";
@@ -120,76 +123,34 @@ export const RESOURCE_URIS = {
   FRESH_SESSION_SCREENSHOT: "automobile:device-session/{sessionUuid}/screenshot",
 } as const;
 
-// The unscoped `automobile:observation/latest` pair is served by two separate
-// resource reads. Resolving "most recent across all devices" independently in
-// each of them is what let one device's hierarchy be paired with another
-// device's screenshot (issue #6600): a device that completes an observation
-// between a client's two reads wins the second lookup. So the hierarchy read
-// records the observation it served, per reading client, and the screenshot
-// read serves that device instead of re-resolving the global latest.
+// The unscoped `automobile:observation/latest` and
+// `automobile:observation/latest/screenshot` resources are separate reads.
+// Each independently resolves the most-recent-across-all-devices observation
+// from one `getRecentCachedObservation()` call at the instant it is read. That
+// makes each read internally atomic: its hierarchy, or its screenshot-device
+// resolution, cannot be assembled from stale, shared, or racy state.
 //
-// The binding is per device, not per snapshot, because that is the finest
-// identity the screenshot store carries — it keys the most recent capture by
-// device id alone, with no observation/snapshot id to bind to. Binding the
-// device is enough to close the cross-device pairing, which is the defect.
-//
-// Bindings are keyed by the reading client's device session. A context-less
-// read — a client that has not acquired a device session, and so has not scoped
-// itself to any device — falls back to one shared unscoped key; concurrent
-// sessionless clients can still overwrite each other there, which is exactly
-// today's global-latest behavior and never worse than it.
-const UNSCOPED_BINDING_KEY = "__unscoped__";
-// Bindings are tiny (a device id per client) but the key space is unbounded
-// over a long-lived daemon's session churn, so keep only the most recent few.
-const MAX_LATEST_OBSERVATION_BINDINGS = 64;
-const latestObservationBindings = new Map<string, string>();
+// The pair is consequently a best-effort point-in-time snapshot, not a hard
+// cross-read guarantee: a new observation can complete in the small window
+// between the two reads. Callers that require a hierarchy and screenshot from
+// exactly one device must read `pairedScreenshotUri` from the hierarchy and
+// then use that linked session-scoped screenshot resource, which is scoped to
+// one device by construction (issue #6600).
 
-function bindingKey(context: ResourceReadContext | undefined): string {
-  return context?.sessionUuid ?? UNSCOPED_BINDING_KEY;
+function resolvePairedScreenshotSessionUuid(deviceId: string): string | undefined {
+  const daemonState = DaemonState.getInstance();
+  if (daemonState.isInitialized()) {
+    return daemonState.getDevicePool().getDevice(deviceId)?.sessionId ?? undefined;
+  }
+  return resolveDirectSessionUuidForDevice(deviceId);
 }
 
-function rememberServedObservation(
-  context: ResourceReadContext | undefined,
-  deviceId: string,
-): void {
-  const key = bindingKey(context);
-  // Delete first so the re-insert refreshes this key's position in the Map's
-  // insertion order, making the eviction below least-recently-bound.
-  latestObservationBindings.delete(key);
-  latestObservationBindings.set(key, deviceId);
-  while (latestObservationBindings.size > MAX_LATEST_OBSERVATION_BINDINGS) {
-    const oldestKey = latestObservationBindings.keys().next().value;
-    if (oldestKey === undefined) {
-      break;
-    }
-    latestObservationBindings.delete(oldestKey);
-  }
-}
-
-// The device whose screenshot pairs with the hierarchy this client was last
-// served. Falls back to the globally latest observation when this client has
-// not read a hierarchy yet, or when the bound device's observation has since
-// been evicted or invalidated (its screenshot no longer describes anything this
-// client was shown).
-function resolveScreenshotDeviceId(context: ResourceReadContext | undefined): string | undefined {
-  const boundDeviceId = latestObservationBindings.get(bindingKey(context));
-  if (boundDeviceId && RealObserveScreen.getRecentCachedResultForDevice(boundDeviceId)) {
-    return boundDeviceId;
-  }
-  if (boundDeviceId) {
-    latestObservationBindings.delete(bindingKey(context));
-  }
+function resolveLatestScreenshotDeviceId(): string | undefined {
   return RealObserveScreen.getRecentCachedObservation()?.deviceId;
 }
 
-/** Test-only: drop every recorded hierarchy/screenshot binding. */
-export function resetLatestObservationBindings(): void {
-  latestObservationBindings.clear();
-}
-
-// Helper to get the cached screenshot path for a specific device. The device is
-// always the one that owns the observation being served, so the hierarchy and
-// the screenshot can never describe two different devices (issue #6600).
+// Helper to get the cached screenshot path for the device selected by this
+// screenshot read's atomic latest-observation lookup (issue #6600).
 async function getLatestScreenshotPath(deviceId: string): Promise<string | undefined> {
   try {
     const screenshotPath = RealObserveScreen.getRecentCachedScreenshotPathForDevice(deviceId);
@@ -210,7 +171,7 @@ async function getLatestScreenshotPath(deviceId: string): Promise<string | undef
 }
 
 // Handler for latest observation resource (text/json)
-async function getLatestObservation(context?: ResourceReadContext): Promise<ResourceContent> {
+async function getLatestObservation(): Promise<ResourceContent> {
   try {
     const cachedObservation = RealObserveScreen.getRecentCachedObservation();
 
@@ -229,16 +190,17 @@ async function getLatestObservation(context?: ResourceReadContext): Promise<Reso
       };
     }
 
-    // Bind this client's follow-up screenshot read to the observation just
-    // served, so a concurrent observation on another device cannot win a second
-    // global lookup and pair its screenshot with this hierarchy (issue #6600).
-    rememberServedObservation(context, cachedObservation.deviceId);
+    const sessionUuid = resolvePairedScreenshotSessionUuid(cachedObservation.deviceId);
+    // Use null rather than omission when the latest observation has no active session owner.
+    const pairedScreenshotUri = sessionUuid
+      ? RESOURCE_URIS.SESSION_SCREENSHOT.replace("{sessionUuid}", sessionUuid)
+      : null;
 
     // Return the observation as JSON
     return {
       uri: RESOURCE_URIS.LATEST_OBSERVATION,
       mimeType: "application/json",
-      text: stringifyToolResponse(cachedObservation.result),
+      text: stringifyToolResponse({ ...cachedObservation.result, pairedScreenshotUri }),
     };
   } catch (error) {
     logger.error(`[ObservationResources] Failed to get latest observation: ${error}`);
@@ -257,9 +219,9 @@ async function getLatestObservation(context?: ResourceReadContext): Promise<Reso
 }
 
 // Handler for latest screenshot resource (image/png as blob)
-async function getLatestScreenshot(context?: ResourceReadContext): Promise<ResourceContent> {
+async function getLatestScreenshot(): Promise<ResourceContent> {
   try {
-    const deviceId = resolveScreenshotDeviceId(context);
+    const deviceId = resolveLatestScreenshotDeviceId();
     if (!deviceId) {
       return {
         uri: RESOURCE_URIS.LATEST_SCREENSHOT,
@@ -692,7 +654,7 @@ export function registerObservationResources(): void {
   ResourceRegistry.register(
     RESOURCE_URIS.LATEST_OBSERVATION,
     "Latest Observation",
-    "The most recent screen observation including view hierarchy, elements, and metadata. Updated automatically after each observe() call.",
+    "The hierarchy and unscoped screenshot are a best-effort point-in-time snapshot per read, with no cross-read binding: another device's newer observation can land between reads. For a guaranteed matching pair, read pairedScreenshotUri in this JSON instead of automobile:observation/latest/screenshot.",
     "application/json",
     getLatestObservation,
   );

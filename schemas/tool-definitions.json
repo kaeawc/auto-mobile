@@ -438,7 +438,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -618,7 +618,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -1243,7 +1243,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -1794,18 +1794,18 @@
   },
   {
     "name": "getDeviceState",
-    "description": "Read device-level state such as Do Not Disturb, iOS Simulator biometric enrollment, and device-wide network condition",
+    "description": "Read device-level state: Do Not Disturb, the connectivity toggles (airplaneMode, wifiEnabled, bluetoothEnabled, locationEnabled), iOS Simulator biometric enrollment, and device-wide network condition. Use it as the idempotency oracle before flipping a toggle — a bare call returns doNotDisturb + connectivity, so you can check whether Airplane mode is already on instead of inferring it from the status bar. Each connectivity field is true/false, or omitted when the device could not answer (the key is absent on this API level, or the value did not parse) — omitted never means off. Android only: iOS reports connectivity unsupported, because Airplane mode / Wi-Fi / Bluetooth / Location have no simctl or devicectl read verb and a simulator shares the host's network stack.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "include": {
-          "description": "State fields to read; supports doNotDisturb, biometrics, and networkCondition",
+          "description": "State fields to read; supports doNotDisturb, connectivity, biometrics, and networkCondition. Defaults to doNotDisturb + connectivity, so a bare call answers whether Airplane mode / Wi-Fi / Bluetooth / Location are already on.",
           "minItems": 1,
           "type": "array",
           "items": {
             "type": "string",
-            "enum": ["doNotDisturb", "biometrics", "networkCondition"]
+            "enum": ["doNotDisturb", "connectivity", "biometrics", "networkCondition"]
           }
         },
         "platform": {
@@ -2159,7 +2159,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -2271,7 +2271,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -2382,7 +2382,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -2518,7 +2518,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -3080,7 +3080,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Output projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) in place of viewHierarchy/elements. Each skeleton elementId/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "description": "Output projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) in place of viewHierarchy/elements. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -6854,7 +6854,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -7015,7 +7015,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -7142,7 +7142,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -7663,7 +7663,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -7846,7 +7846,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -7882,7 +7882,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -8064,7 +8064,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -9110,7 +9110,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -9448,7 +9448,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -9570,7 +9570,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -9850,7 +9850,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -10031,7 +10031,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -10650,6 +10650,10 @@
                   },
                   "required": ["isFresh"],
                   "additionalProperties": {}
+                },
+                "settled": {
+                  "description": "Same name/meaning as a full observation's `settled` (issue #6866): whether the observation this diff was computed from passed the hierarchy-stability gate. Populated from the post-action observation, not by `diffObserveResult` itself, so a diff-mode client has the same accessor as a full-mode one.",
+                  "type": "boolean"
                 },
                 "added": {
                   "type": "array",
@@ -11439,6 +11443,10 @@
                   },
                   "required": ["platform", "source", "confidence", "key", "components"],
                   "additionalProperties": {}
+                },
+                "settled": {
+                  "description": "Whether this observation passed the hierarchy-stability gate (issue #6866): two consecutive structurally-equal captures. `false` means the bound expired, the action was not navigation-class, or the action failed — in every case the capture was never confirmed stable. Stamped on every embedded action observation.",
+                  "type": "boolean"
                 }
               },
               "additionalProperties": {}
@@ -12231,7 +12239,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },

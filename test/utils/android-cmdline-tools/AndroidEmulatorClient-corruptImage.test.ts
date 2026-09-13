@@ -1041,7 +1041,7 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
     }) as any;
     const execAsync = async (_file: string, args: string[]): Promise<ExecResult> => {
       if (args.includes("-list-avds")) {
-        return createExecResult("am-api33-ga-arm64\n");
+        return createExecResult("am-api33-ga-arm64\nam-api34-ga-arm64\n");
       }
       return createExecResult("");
     };
@@ -1049,7 +1049,10 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
     skipEmulatorPathDetection(client);
 
     const firstLaunch = await client.startEmulator("am-api33-ga-arm64");
-    const secondLaunch = await client.startEmulator("am-api33-ga-arm64");
+    // A DIFFERENT AVD: a second launch of an AVD this process is already
+    // launching is adopted rather than spawned (#6407), and what this test
+    // needs is two concurrent launches of our own.
+    const secondLaunch = await client.startEmulator("am-api34-ga-arm64");
     await expect(
       client.waitForEmulatorReady("am-api33-ga-arm64", 100, firstLaunch),
     ).rejects.toThrow("failed to become ready within 100ms");
@@ -1095,7 +1098,7 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
     }) as any;
     const execAsync = async (_file: string, args: string[]): Promise<ExecResult> => {
       if (args.includes("-list-avds")) {
-        return createExecResult("am-api33-ga-arm64\n");
+        return createExecResult("am-api33-ga-arm64\nam-api34-ga-arm64\n");
       }
       return createExecResult("");
     };
@@ -1103,9 +1106,12 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
     skipEmulatorPathDetection(client);
 
     const firstLaunch = await client.startEmulator("am-api33-ga-arm64");
-    const secondLaunch = await client.startEmulator("am-api33-ga-arm64");
+    // A DIFFERENT AVD: a second launch of an AVD this process is already
+    // launching is adopted rather than spawned (#6407), and what this test
+    // needs is two concurrent launches of our own.
+    const secondLaunch = await client.startEmulator("am-api34-ga-arm64");
     await expect(
-      client.waitForEmulatorReady("am-api33-ga-arm64", 100, secondLaunch),
+      client.waitForEmulatorReady("am-api34-ga-arm64", 100, secondLaunch),
     ).rejects.toThrow("failed to become ready within 100ms");
 
     expect(spawnedArgs.some((args) => !args.includes("-port"))).toBe(true);

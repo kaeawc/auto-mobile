@@ -1220,7 +1220,7 @@ jobs:
     timeout-minutes: 15
     name: "Node Unit Tests (${{ matrix.os }})"
     runs-on: ${{ matrix.os }}
-    needs: detect-changes
+    needs: [detect-changes, fast-validation]
     if: needs.detect-changes.outputs.docs_only != 'true' && needs.detect-changes.outputs.sha256_only != 'true'
     strategy:
       fail-fast: false
@@ -3489,6 +3489,7 @@ jobs:
     if: always() && needs.detect-changes.outputs.auto_chore != 'true'
     needs:
       - detect-changes
+      - fast-validation
       - node-unit-tests
       - node-host-integration-tests
     permissions: {}
@@ -3498,6 +3499,7 @@ jobs:
         run: |
           declare -A results=(
             [detect-changes]="${{ needs.detect-changes.result }}"
+            [fast-validation]="${{ needs.fast-validation.result }}"
             [node-unit-tests]="${{ needs.node-unit-tests.result }}"
             [node-host-integration-tests]="${{ needs.node-host-integration-tests.result }}"
           )

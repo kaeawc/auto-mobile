@@ -345,6 +345,16 @@ describe("Android emulator readiness diagnostics", () => {
       observed: 'observed="Failure [DEVICE_NOT_RESPONDING]"',
     },
     {
+      // The real `pm list packages` failure shape: nothing on stdout, the
+      // reason on stderr. The diagnostic must surface the reason rather than
+      // the vacuous empty listing.
+      name: "package-manager failure with no listing",
+      phase: "package-manager",
+      command: "shell pm list packages",
+      response: result("", "Failure [DEVICE_NOT_RESPONDING]"),
+      observed: 'observed="Failure [DEVICE_NOT_RESPONDING]"',
+    },
+    {
       name: "system boot completion",
       phase: "system-boot-complete",
       command: "shell getprop sys.boot_completed",

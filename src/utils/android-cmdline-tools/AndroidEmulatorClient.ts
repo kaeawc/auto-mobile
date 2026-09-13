@@ -2800,22 +2800,25 @@ export class AndroidEmulatorClient implements AndroidEmulator {
         deviceId,
       );
     }
-    if (!packageManager.stdout.includes("package:")) {
-      return this.unmetReadinessDiagnostic(
-        "package-manager",
-        "pm list packages returned no 'package:' entries",
-        packageManager.stdout.trim(),
-        deviceId,
-      );
-    }
     // Only an explicit package-manager "Failure" blocks readiness. A non-empty stderr
     // on its own is routinely benign (linker and ART warnings on a healthy device) and
     // used to keep a fully booted emulator not-ready forever. See #6818.
+    // Checked BEFORE the empty-listing branch: the real failure shape is an empty
+    // stdout plus the reason on stderr, and reporting that as `observed=""` would
+    // throw away the only actionable detail the timeout error carries.
     if (packageManager.stderr.includes("Failure")) {
       return this.unmetReadinessDiagnostic(
         "package-manager",
         "pm list packages reported a failure",
         packageManager.stderr.trim(),
+        deviceId,
+      );
+    }
+    if (!packageManager.stdout.includes("package:")) {
+      return this.unmetReadinessDiagnostic(
+        "package-manager",
+        "pm list packages returned no 'package:' entries",
+        packageManager.stdout.trim(),
         deviceId,
       );
     }

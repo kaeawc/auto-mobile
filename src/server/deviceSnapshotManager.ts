@@ -78,6 +78,7 @@ interface SnapshotArchiveEvictionResult {
 interface VmSnapshotRetentionResult extends SnapshotArchiveEvictionResult {
   cannotFitExcluded: boolean;
   excludedSnapshotMissing: boolean;
+  excludedSnapshotRecord: DeviceSnapshotRecord | null;
   excludedSnapshotSizeBytes: number | null;
   countEvictedSnapshotNames: string[];
   byteEvictedSnapshotNames: string[];
@@ -91,7 +92,12 @@ interface VmRetentionState {
   failedNames: Set<string>;
 }
 
-type VmRetentionEvictionOutcome = "evicted" | "deferred" | "no-candidate" | "failed";
+type VmRetentionEvictionOutcome =
+  | "evicted"
+  | "deferred"
+  | "no-candidate"
+  | "failed"
+  | "removed-concurrently";
 
 /** An in-AVD snapshot directory with no archive row behind it (#6490). */
 export interface OrphanedAvdSnapshot {
@@ -1268,8 +1274,17 @@ async function evictOldestVmRetentionCandidate(
       // is offline. Continuing would mark newer records pending too, even
       // though retention needs only this oldest reclaim to be scheduled.
       const { snapshotRepository } = await getDeviceSnapshotDependencies();
-      if ((await snapshotRepository.getSnapshot(candidate.snapshotName))?.pendingReclaim) {
+      const current = await snapshotRepository.getSnapshot(candidate.snapshotName);
+      if (current?.pendingReclaim) {
         return "deferred";
+      }
+      // A pending-reclaim sweep can remove this row while its name lock makes
+      // this eviction attempt non-exclusive (#6960); do not count it twice.
+      if (!current) {
+        state.snapshots = state.snapshots.filter(
+          (record) => record.snapshotName !== candidate.snapshotName,
+        );
+        return "removed-concurrently";
       }
       // A busy lifecycle lock or superseded row also produces `false`, but
       // neither is a deferred emulator reclaim. Keep searching for another
@@ -1415,6 +1430,7 @@ async function enforceVmSnapshotRetentionForDevice(
       unsizedCount,
       cannotFitExcluded,
       excludedSnapshotMissing,
+      excludedSnapshotRecord: excluded ?? null,
       excludedSnapshotSizeBytes: excluded?.sizeBytes ?? null,
       countEvictedSnapshotNames: state.countEvictedSnapshotNames,
       byteEvictedSnapshotNames: state.byteEvictedSnapshotNames,
@@ -1637,6 +1653,7 @@ async function enforceCapturedSnapshotRetention(
   }
 
   if (overwroteExistingSnapshot) {
+    await notifySnapshotResources();
     throw new ActionableError(
       `Snapshot '${result.snapshotName}' recapture exceeds the configured maxVmArchiveSizeMb ` +
         `budget for AVD '${device.name}'. The emulator's destructive snapshot save already ` +
@@ -1645,8 +1662,7 @@ async function enforceCapturedSnapshotRetention(
     );
   }
 
-  const { snapshotRepository } = await getDeviceSnapshotDependencies();
-  const record = await snapshotRepository.getSnapshot(result.snapshotName);
+  const record = vmEviction.excludedSnapshotRecord;
   if (record) {
     const deleted = await deleteDeviceSnapshotRecord(record, config.vmSnapshotTimeoutMs);
     if (!deleted) {

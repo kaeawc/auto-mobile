@@ -2134,6 +2134,92 @@ describe("finalizeToolResponse", () => {
         expect(structured.rows).toBeUndefined();
       });
 
+      // The residue kept inline is itself unbounded unless it is capped: a
+      // 70 KB `error`, or an observe-wait `candidates` array, is copied back
+      // beside the artifact pointer and blows the ceiling all over again.
+      test("bounds an oversized error string kept inline", () => {
+        const writer = new FakeObservationArtifactWriter();
+        const finalized = finalizeToolResponse(
+          createStructuredToolResponse({
+            success: false,
+            error: "e".repeat(70_000),
+          }),
+          oversizedCtx(writer),
+        );
+
+        const structured = finalized.structuredContent as any;
+        expect(payloadBytes(finalized)).toBeLessThanOrEqual(DEFAULT_OBSERVATION_INLINE_MAX_BYTES);
+        expect(typeof structured.error).toBe("string");
+        expect(structured.error.startsWith("eeee")).toBe(true);
+        expect(structured.error.length).toBeLessThan(70_000);
+        expect(structured.artifact).toMatchObject({ format: "json", tool: "tapOn" });
+      });
+
+      test("bounds an oversized observe-wait candidates array kept inline", () => {
+        const writer = new FakeObservationArtifactWriter();
+        const finalized = finalizeToolResponse(
+          createStructuredToolResponse({
+            success: true,
+            matched: false,
+            timedOut: true,
+            candidates: Array.from({ length: 4_000 }, (_, index) => ({
+              text: `candidate-${index}`,
+              bounds: { left: index, top: index, right: index + 10, bottom: index + 10 },
+            })),
+          }),
+          oversizedCtx(writer),
+        );
+
+        const structured = finalized.structuredContent as any;
+        expect(payloadBytes(finalized)).toBeLessThanOrEqual(DEFAULT_OBSERVATION_INLINE_MAX_BYTES);
+        // The scalar wait verdict still rides inline; only the unbounded array
+        // is replaced with a marker pointing at the spilled artifact.
+        expect(structured.matched).toBe(false);
+        expect(structured.timedOut).toBe(true);
+        expect(structured.candidates).toEqual({ _truncated: true, bytes: expect.any(Number) });
+      });
+
+      test("stays under the ceiling when every retained field is oversized", () => {
+        const writer = new FakeObservationArtifactWriter();
+        const huge = "h".repeat(70_000);
+        const finalized = finalizeToolResponse(
+          createStructuredToolResponse({
+            success: false,
+            error: huge,
+            awaitedElement: huge,
+            awaitDuration: huge,
+            awaitTimeout: huge,
+            matched: huge,
+            settled: huge,
+            timedOut: huge,
+            polls: huge,
+            waitMs: huge,
+            matchedElement: huge,
+            candidates: [huge],
+          }),
+          oversizedCtx(writer),
+        );
+
+        expect(payloadBytes(finalized)).toBeLessThanOrEqual(DEFAULT_OBSERVATION_INLINE_MAX_BYTES);
+      });
+
+      test("keeps a small error and candidate list verbatim", () => {
+        const writer = new FakeObservationArtifactWriter();
+        const finalized = finalizeToolResponse(
+          createStructuredToolResponse({
+            success: false,
+            error: "tap failed",
+            candidates: [{ text: "Submit" }],
+            pad: "z".repeat(90_000),
+          }),
+          oversizedCtx(writer),
+        );
+
+        const structured = finalized.structuredContent as any;
+        expect(structured.error).toBe("tap failed");
+        expect(structured.candidates).toEqual([{ text: "Submit" }]);
+      });
+
       test("leaves an in-limit payload untouched", () => {
         const writer = new FakeObservationArtifactWriter();
         const finalized = finalizeToolResponse(

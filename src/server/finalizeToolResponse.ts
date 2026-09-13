@@ -19,6 +19,7 @@ import {
 import { serverConfig } from "../utils/ServerConfig";
 import { getStructuredPayload, stringifyToolResponse } from "../utils/toolUtils";
 import { isSubmitImeAction } from "../models/ImeActionResult";
+import { boundStructuredField, truncateBodyText } from "../utils/truncateBodyText";
 
 /**
  * Read/write access to the per-session diff baseline — the "last observation
@@ -680,14 +681,45 @@ function pickObserveWaitMetadata(payload: Record<string, unknown>): Record<strin
  */
 const INLINE_RESIDUE_KEYS = ["success", "error", ...OBSERVE_WAIT_METADATA_KEYS] as const;
 
+/**
+ * Per-field cap on what a retained residue field may contribute (#6870).
+ *
+ * The retained fields are headlines, not payloads, but nothing stops one of them
+ * from being huge on its own: a stack trace lands in `error`, and a `countStable`
+ * wait that never matched returns every candidate it saw. Copying such a field
+ * back verbatim would blow the very ceiling the spill exists to enforce. At
+ * {@link INLINE_RESIDUE_KEYS}.length (10) fields this caps the residue at ~40 KB,
+ * comfortably inside {@link DEFAULT_OBSERVATION_INLINE_MAX_BYTES} once the
+ * artifact envelope is added.
+ */
+const INLINE_RESIDUE_FIELD_LIMIT = 4 * 1024;
+
+/**
+ * Keep the headline fields inline, each bounded: an oversized string is cut to
+ * the cap (still a string, so `error` stays readable), and an oversized
+ * structure is replaced with the canonical `{ _truncated, bytes }` marker. The
+ * complete value is always in the artifact the caller writes alongside this.
+ */
 function pickInlineResidue(payload: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(
     INLINE_RESIDUE_KEYS.filter((key) => payload[key] !== undefined).map((key) => [
       key,
-      payload[key],
+      boundResidueField(payload[key]),
     ]),
   );
 }
+
+function boundResidueField(value: unknown): unknown {
+  if (typeof value === "string") {
+    return value.length <= INLINE_RESIDUE_FIELD_LIMIT
+      ? value
+      : `${truncateBodyText(value, INLINE_RESIDUE_FIELD_LIMIT)}${RESIDUE_TRUNCATION_SUFFIX}`;
+  }
+  return boundStructuredField(value, false, INLINE_RESIDUE_FIELD_LIMIT);
+}
+
+/** Marks a residue string as cut, so a client never reads a partial value as whole. */
+const RESIDUE_TRUNCATION_SUFFIX = "… [truncated; complete value in the tool-output artifact]";
 
 function artifactMode(ctx: FinalizeToolResponseContext): ObservationArtifactMode {
   return ctx.artifactMode ?? "always";

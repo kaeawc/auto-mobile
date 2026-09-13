@@ -21,6 +21,7 @@ import { attachRawViewHierarchy } from "../../utils/viewHierarchySearch";
 import type { ViewHierarchy as ViewHierarchyInterface } from "./interfaces/ViewHierarchy";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { parseBounds } from "../../utils/bounds";
+import { HOST_OUTPUT_CHILD_CAP_REASON_PREFIX } from "./truncationReasons";
 
 /**
  * Interface for element bounds
@@ -450,8 +451,11 @@ export class ViewHierarchy implements ViewHierarchyInterface {
     const truncations: string[] = [];
     result.hierarchy = this.filterSingleNode(viewHierarchy.hierarchy, true, truncations);
     if (truncations.length > 0) {
-      // Surface the per-node child cap through the same field PerformanceAuditor
-      // already reads for device-side truncation (#6601).
+      // Surface the per-node child cap on the same channel as device-side
+      // truncation (#6601) so an agent reading the rendered rows knows they were
+      // cut — but it is an OUTPUT cap, not a partial capture: the uncapped tree
+      // rides along as the raw carrier, so fidelity checks filter it out via
+      // `captureFidelityTruncationReasons` (#6601 review).
       result.truncationReasons = [...(result.truncationReasons ?? []), ...truncations];
       logger.debug(`filterViewHierarchy capped children: ${truncations.join("; ")}`);
     }
@@ -689,7 +693,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
       const allChildren = Array.isArray(node.node) ? node.node : [node.node];
       if (allChildren.length > MAX_FILTERED_CHILDREN_PER_NODE && truncations) {
         truncations.push(
-          `max_children[${this.describeTruncatedNode(node)} kept ${MAX_FILTERED_CHILDREN_PER_NODE} of ${allChildren.length}]`,
+          `${HOST_OUTPUT_CHILD_CAP_REASON_PREFIX}${this.describeTruncatedNode(node)} kept ${MAX_FILTERED_CHILDREN_PER_NODE} of ${allChildren.length}]`,
         );
       }
       const children = allChildren.slice(0, MAX_FILTERED_CHILDREN_PER_NODE);

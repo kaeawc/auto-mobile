@@ -2,7 +2,12 @@ import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import { afterEach, describe, expect, test, beforeEach } from "bun:test";
 import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
-import { DevicePool, type SessionPreservingRecoveryResult } from "../../src/daemon/devicePool";
+import {
+  DevicePool,
+  type DiscoveryReconcileOptions,
+  type PooledDevice,
+  type SessionPreservingRecoveryResult,
+} from "../../src/daemon/devicePool";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
@@ -6894,6 +6899,80 @@ describe("DevicePool", () => {
       const quarantined = devicePool.getDevice("emulator-5554");
       expect(quarantined?.sessionId).toBe("owner-session");
       expect(quarantined?.incarnation).toBe(incarnation);
+    });
+
+    test("stops a stale aborted observation before it can quarantine a newly bound emulator", async () => {
+      const cancellations: { sessionId: string; reason: string }[] = [];
+      devicePool = new DevicePool(
+        sessionManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        fakeAppsRepo,
+        fakeDeviceManager,
+        new DefaultRetryExecutor(fakeTimer),
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        async (sessionId, reason) => {
+          cancellations.push({ sessionId, reason });
+          return 1;
+        },
+      );
+      const first = poolDevice("emulator-5554", "Pixel_8_API_35");
+      const second = poolDevice("emulator-5556", "Pixel_7_API_34");
+      await initializeLiveDevices([first, second]);
+      const controller = new AbortController();
+      type ReconcileObservedPooledIdentity = (
+        pooled: PooledDevice,
+        device: Pick<
+          BootedDevice,
+          "deviceId" | "name" | "platform" | "observedAt" | "consoleBusyDuringProbe"
+        >,
+        options?: DiscoveryReconcileOptions,
+      ) => Promise<void>;
+      const poolWithReconciler = devicePool as unknown as {
+        reconcileObservedPooledIdentity: ReconcileObservedPooledIdentity;
+      };
+      const reconcileObservedPooledIdentity =
+        poolWithReconciler.reconcileObservedPooledIdentity.bind(devicePool);
+      let processedDevices = 0;
+      poolWithReconciler.reconcileObservedPooledIdentity = async (pooled, device, options) => {
+        await reconcileObservedPooledIdentity(pooled, device, options);
+        processedDevices++;
+        if (processedDevices === 1) {
+          controller.abort();
+          await devicePool.bindOrReuseDeviceSession(
+            "unrelated-live-session",
+            second.deviceId,
+            "android",
+            {
+              name: second.name,
+              platform: "android",
+              isRunning: false,
+              source: "local",
+            },
+          );
+        }
+      };
+
+      await devicePool.reconcileDiscoveryObservation(
+        [
+          poolDevice(first.deviceId, "Pixel_9_API_36"),
+          poolDevice(second.deviceId, "Pixel_8_API_36"),
+        ],
+        "test:aborted-stale-observation",
+        { signal: controller.signal },
+      );
+
+      expect(devicePool.isPooledIdentityUnresolved(first.deviceId)).toBe(true);
+      expect(devicePool.isPooledIdentityUnresolved(second.deviceId)).toBe(false);
+      expect(devicePool.getDevice(second.deviceId)?.sessionId).toBe("unrelated-live-session");
+      expect(cancellations).toEqual([]);
     });
 
     test("keeps a capture live when its failed AVD-name probe recorded the console busy", async () => {

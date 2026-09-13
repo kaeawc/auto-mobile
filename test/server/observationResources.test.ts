@@ -26,6 +26,24 @@ import {
 } from "../../src/server/directSessionDeviceRegistry";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
+import { FakeTimer } from "../fakes/FakeTimer";
+
+/** Resolves once the microtask queue has drained, to detect a pending promise. */
+async function settleSentinel(): Promise<"still-pending"> {
+  for (let i = 0; i < 100; i++) {
+    await Promise.resolve();
+  }
+  return "still-pending";
+}
+
+/** A promise a test opens by hand, to hold a screenshot job in flight. */
+function createGate(): { promise: Promise<void>; open: () => void } {
+  let open: () => void = () => {};
+  const promise = new Promise<void>((resolve) => {
+    open = resolve;
+  });
+  return { promise, open };
+}
 
 const sessionUuid = "session-123";
 const sessionDevice: BootedDevice = {
@@ -548,6 +566,7 @@ describe("unscoped latest observation resources", () => {
     ScreenshotJobTracker.clear();
     resetScreenshotStateStore();
     resetScreenshotFileSystem();
+    ScreenshotJobTracker.resetTimer();
   });
 
   function readLatestObservation() {
@@ -587,14 +606,30 @@ describe("unscoped latest observation resources", () => {
     expect(JSON.parse(screenshot.text!).error).toContain("No screenshot available");
   });
 
-  test("waits for the pending screenshot job of the observed device, not the newest job", async () => {
+  test("waits for the observed device's pending job, not the newest pending job", async () => {
+    // Device A has a stale cached capture and, later, the newest pending job;
+    // device B is the device the latest observation belongs to (issue #6600).
     await cacheObservationFor(deviceA, "device-a-hierarchy");
-    getScreenshotStateStore().update(deviceA.deviceId, "/tmp/device-a.png");
+    getScreenshotStateStore().update(deviceA.deviceId, "/tmp/device-a-stale.png");
     await cacheObservationFor(deviceB, "device-b-hierarchy");
-    ScreenshotJobTracker.startJob(deviceB.deviceId, async () => {
+
+    const gateB = createGate();
+    const gateA = createGate();
+    const jobB = ScreenshotJobTracker.startJob(deviceB.deviceId, async () => {
+      await gateB.promise;
       getScreenshotStateStore().update(deviceB.deviceId, "/tmp/device-b.png");
       return { success: true, path: "/tmp/device-b.png" };
     });
+    // Started last, so a global newest-pending lookup would settle on device A.
+    const jobA = ScreenshotJobTracker.startJob(deviceA.deviceId, async () => {
+      await gateA.promise;
+      getScreenshotStateStore().update(deviceA.deviceId, "/tmp/device-a-fresh.png");
+      return { success: true, path: "/tmp/device-a-fresh.png" };
+    });
+    // A fake timer keeps the 3s wait budget from expiring, so the read can only
+    // finish by actually awaiting a job - never by timing out and re-reading.
+    ScreenshotJobTracker.setTimer(new FakeTimer());
+
     const readPaths: string[] = [];
     setScreenshotFileSystem({
       stat: async () => ({ isFile: () => true }),
@@ -604,10 +639,20 @@ describe("unscoped latest observation resources", () => {
       },
     });
 
-    const screenshot = await readLatestScreenshot();
+    const screenshotPromise = readLatestScreenshot();
+    // Only device B's capture lands; device A's stays in flight throughout, so
+    // a read that awaited device A's job would never settle.
+    gateB.open();
+    const outcome = await Promise.race([screenshotPromise, settleSentinel()]);
+    expect(outcome).not.toBe("still-pending");
+
+    const screenshot = await screenshotPromise;
 
     expect(screenshot.mimeType).toBe("image/png");
     expect(readPaths).toEqual(["/tmp/device-b.png"]);
+
+    gateA.open();
+    await Promise.all([jobA.promise, jobB.promise]);
   });
 
   test("still serves the cached screenshot when only one device is observed", async () => {

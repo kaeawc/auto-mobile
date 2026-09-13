@@ -2,6 +2,7 @@ import { ChildProcess } from "child_process";
 import { BootedDevice, DeviceInfo, SomePlatform, Platform } from "../../src/models";
 import {
   BootedDeviceDiscovery,
+  BootedDeviceDiscoveryOptions,
   DeviceDestroyOptions,
   DeviceImageDiscovery,
   PlatformDeviceManager,
@@ -189,7 +190,11 @@ export class FakeDeviceUtils implements PlatformDeviceManager {
    */
   omitSucceededSources: boolean = false;
 
-  async getBootedDevicesDetailed(platform: SomePlatform): Promise<BootedDeviceDiscovery> {
+  async getBootedDevicesDetailed(
+    platform: SomePlatform,
+    options: BootedDeviceDiscoveryOptions = {},
+  ): Promise<BootedDeviceDiscovery> {
+    options.signal?.throwIfAborted();
     const requested: Platform[] = platform === "either" ? ["android", "ios"] : [platform];
     const devices: BootedDevice[] = [];
     const succeededPlatforms = new Set<Platform>();

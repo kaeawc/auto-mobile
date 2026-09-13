@@ -872,6 +872,88 @@ describe("platform device preparation tools", () => {
     expect(releases).toBe(1);
   });
 
+  test("releases the lifecycle lease promptly when abort-aware pre-boot discovery reaches its deadline", async () => {
+    const bootTimeoutMs = 1_000;
+    let markDiscoveryStarted: (() => void) | undefined;
+    const discoveryStarted = new Promise<void>((resolve) => {
+      markDiscoveryStarted = resolve;
+    });
+    class AbortAwareDiscovery extends FakeDeviceUtils {
+      override async getBootedDevicesDetailed(
+        platform: "android" | "ios" | "either",
+        options?: { signal?: AbortSignal },
+      ) {
+        const discovery = await super.getBootedDevicesDetailed(platform);
+        markDiscoveryStarted!();
+        await new Promise<void>((resolve, reject) => {
+          const adbTimeout = timer.setTimeout(resolve, 10_000);
+          options?.signal?.addEventListener(
+            "abort",
+            () => {
+              timer.clearTimeout(adbTimeout);
+              reject(options.signal?.reason ?? new Error("discovery aborted"));
+            },
+            { once: true },
+          );
+        });
+        return discovery;
+      }
+    }
+    const slow = new AbortAwareDiscovery();
+    const emulator: BootedDevice = {
+      platform: "android",
+      name: "Pixel_9_API_36",
+      deviceId: "emulator-5554",
+    };
+    slow.setBootedDevices("android", [emulator]);
+    sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      slow,
+      new DefaultRetryExecutor(timer),
+    );
+    await pool.initializeWithDevices([emulator]);
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    const observations: string[] = [];
+    const reconcile = pool.reconcileDiscoveryObservation.bind(pool);
+    pool.reconcileDiscoveryObservation = async (devices, source, options) => {
+      observations.push(source);
+      await reconcile(devices, source, options);
+    };
+    let releases = 0;
+    const lease: VirtualDeviceLifecycleLease = {
+      signal: new AbortController().signal,
+      identity: { kind: "selector", platform: "android", selector: emulator.name },
+      bindCanonicalIdentity: async () => {},
+      transitionToTeardown: () => {},
+      release: () => {
+        releases++;
+      },
+    };
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => slow,
+      lifecycleCoordinator: { reserve: async () => lease },
+    });
+
+    let failure: unknown;
+    void callTool("getAndroid", {
+      avdName: emulator.name,
+      deviceId: emulator.deviceId,
+      bootTimeoutMs,
+    }).catch((error: unknown) => {
+      failure = error;
+    });
+    await discoveryStarted;
+    await timer.advanceTimeAsync(bootTimeoutMs);
+
+    expect(failure).toBeInstanceOf(ActionableError);
+    expect(releases).toBe(1);
+    expect(observations).not.toContain("pre-boot-serial-validation");
+  });
+
   test("keeps the lifecycle lease held while a pre-boot reconcile is still draining when the boot deadline fires", async () => {
     const bootTimeoutMs = 1_000;
     const emulatorA: BootedDevice = {

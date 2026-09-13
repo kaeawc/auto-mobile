@@ -4164,6 +4164,7 @@ async function validateRequestedAndroidSerialBeforeBoot(
     async (signal) => {
       const discovery = await deviceUtils.getBootedDevicesDetailed("android", {
         bypassAndroidDeviceListCache: true,
+        signal,
       });
       if (signal.aborted) {
         // The deadline/abort already settled prepareDevice and released its

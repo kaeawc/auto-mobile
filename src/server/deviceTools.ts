@@ -3367,12 +3367,24 @@ async function resolveTeardownTarget(context: TeardownContext): Promise<Teardown
         : bootedTarget.target;
     return await finalizeIosNameResolvedTeardownTarget(context, resolvedTarget);
   }
+  // Nothing booted matched this teardown, so the next step is the STOPPED-image
+  // inventory path -- and a booted emulator that could not name itself may be
+  // the very AVD whose image is about to be destroyed.
+  //
+  // The question is answered from THIS discovery, not from the pool. The pool's
+  // quarantine encodes exactly this observation, but only from the sweep that
+  // FOLLOWS it: on the first discovery after a different AVD takes a pooled
+  // serial, the pool still holds the previous occupant's label and reading it
+  // here would treat the placeholder as resolved -- which is what let a
+  // teardown of the new AVD miss the booted runtime and destroy its image while
+  // it was running. The teardown's own observation is the newer evidence of the
+  // two, so it decides ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863)
+  // review).
   const unresolvedAndroidRuntime = booted.devices.find(
     (device) =>
       device.platform === "android" &&
       isVirtualAndroidDevice(device) &&
-      isUnknownAndroidRuntimeName(device) &&
-      !getValidatedPooledAndroidAvdName(device, devicePool),
+      isUnknownAndroidRuntimeName(device),
   );
   if (unresolvedAndroidRuntime) {
     return {

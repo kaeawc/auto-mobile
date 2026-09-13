@@ -1651,6 +1651,54 @@ describe("deleteDevice handler", () => {
     expect(manager.destroyRequests).toEqual([]);
   });
 
+  // The same takeover, one sweep EARLIER: the teardown's own discovery is the
+  // first to observe `Unknown (<serial>)`, so the pool has not quarantined
+  // anything yet and A's label still reads as resolved. The teardown's CURRENT
+  // observation is the newer evidence of the two, and the unresolved-runtime
+  // guard consults it directly rather than the pool's not-yet-updated label
+  // ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
+  test("refuses the inventory path on its OWN unresolved discovery, before the pool refreshes", async () => {
+    const timer = new FakeTimer();
+    const pooledAvdName = "Pixel_8_API_35";
+    const pooledImage: DeviceInfo = {
+      platform: "android",
+      name: pooledAvdName,
+      isRunning: true,
+    };
+    const sessionManager = new SessionManager(timer);
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      manager,
+      new DefaultRetryExecutor(timer),
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    // The pool started AVD A on this serial and still labels it A: no refresh
+    // has run since AVD B took the serial.
+    await pool.addDevice(
+      { platform: "android", name: pooledAvdName, deviceId: "emulator-5556" },
+      pooledImage,
+    );
+    expect(pool.isPooledIdentityUnresolved("emulator-5556")).toBe(false);
+    manager.setBootedDevices("android", [
+      { platform: "android", name: "Unknown (emulator-5556)", deviceId: "emulator-5556" },
+    ]);
+    manager.setDeviceImages("android", [
+      pooledImage,
+      { platform: "android", name: "Pixel_7_API_34", isRunning: false },
+    ]);
+
+    const body = responseBody(
+      await teardownTool().handler(request("android", "Pixel_7_API_34", "Pixel_7_API_34")),
+    );
+
+    expect(body.state).toBe("failed");
+    expect(body.failure).toEqual(expect.objectContaining({ code: "target_identity_unresolved" }));
+    expect(manager.destroyRequests).toEqual([]);
+  });
+
   test("does not delete an AVD when stableId and stableName identify different targets", async () => {
     manager.setBootedDevices("android", [
       {

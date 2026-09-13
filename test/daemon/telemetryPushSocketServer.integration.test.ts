@@ -255,6 +255,7 @@ describe("TelemetryPushSocketServer", () => {
     category: "network",
     timestamp: 1000,
     deviceId,
+    sessionId: null,
     data: { method: "GET", url: "/users", statusCode: 200, durationMs: 42 },
   });
 

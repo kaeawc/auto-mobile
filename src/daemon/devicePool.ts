@@ -2592,6 +2592,22 @@ export class DevicePool {
     }
   }
 
+  async retryDueDeferredSessionRecoveries(): Promise<void> {
+    const dueRecoveries = Array.from(this.recoveringSessionLosses.entries()).filter(
+      ([sessionId, loss]) =>
+        loss.deferredUntil !== undefined &&
+        this.timer.now() >= loss.deferredUntil &&
+        !this.sessionPreservingRecoveries.has(sessionId),
+    );
+    for (const [, loss] of dueRecoveries) {
+      await this.recoverSessionBoundAndroidDeviceAfterLoss(
+        loss.deviceId,
+        loss.incidentId,
+        this.devices.get(loss.deviceId),
+      );
+    }
+  }
+
   private async performSessionPreservingRecovery(
     device: PooledDevice,
     session: Session,

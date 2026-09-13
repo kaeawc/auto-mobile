@@ -1771,6 +1771,8 @@ export class Daemon {
             return;
           }
 
+          await this.devicePool.retryDueDeferredSessionRecoveries();
+
           const discovery = await deviceManager.getBootedDevicesDetailed("either");
           // FUNNEL 1: this sweep joins the observation to `getAllDevices()` by
           // serial below, so the pool must fold it in first (#6863 review).

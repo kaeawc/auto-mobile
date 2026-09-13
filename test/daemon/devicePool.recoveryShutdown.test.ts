@@ -404,6 +404,36 @@ test("ordinary session recovery releases after its retry also has unconfirmed sh
   }
 });
 
+test("due deferred session recovery releases while its AVD remains visible", async () => {
+  const { timer, sessions, manager, pool, captured } = await setup();
+  try {
+    const firstRecovery = pool.recoverSessionBoundAndroidDeviceAfterLoss(
+      original.deviceId,
+      undefined,
+      captured,
+    );
+    await manager.killAccepted.promise;
+    await flush();
+    timer.advanceTime(30_000);
+    expect(await firstRecovery).toBe("deferred");
+    expect(manager.bootedDevices).toEqual([original]);
+    expect(pool.isSessionRecoveryInFlight("session")).toBe(true);
+
+    timer.advanceTime(30_000);
+    const retry = pool.retryDueDeferredSessionRecoveries();
+    await flush();
+    timer.advanceTime(30_000);
+    await retry;
+
+    expect(sessions.getSession("session")).toBeNull();
+    expect(pool.isSessionRecoveryInFlight("session")).toBe(false);
+    const releaseLease = await pool.reserveAndroidStartupLease(original.name, true);
+    await releaseLease();
+  } finally {
+    sessions.stopCleanupTimer();
+  }
+});
+
 test("releasing a deferred ADB-reset session clears its retained AVD startup reservation", async () => {
   const { timer, sessions, manager, pool, captured } = await setup();
   try {

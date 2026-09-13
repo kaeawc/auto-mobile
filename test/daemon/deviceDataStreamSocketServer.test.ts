@@ -183,6 +183,80 @@ describe("DeviceDataStreamSocketServer", () => {
       expect(msgs[1].success).toBe(true);
     });
 
+    // The device-addressed admission gate (`DevicePool.assertDeviceActionable`,
+    // reached here through the resolver) must refuse BEFORE the serial-addressed
+    // observation runs. Without it the handler observed the unknown runtime,
+    // `pushForDevice` then dropped every frame because routing is suspended, and
+    // the requester was acknowledged with `success: true` and no hierarchy
+    // ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
+    it("rejects an explicit observation while the pooled identity is quarantined", async () => {
+      let observed = false;
+      server.setOnObservationRequested(async (request) => {
+        observed = true;
+        return [requestedObservation(request.deviceId ?? "emulator-5554")];
+      });
+      const { socket } = server.simulateSubscription({ deviceId: "emulator-5554" });
+      server.sessionResolver.quarantine("emulator-5554");
+
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({
+          id: "obs-quarantined",
+          command: "request_observation",
+          deviceId: "emulator-5554",
+        }),
+      );
+
+      expect(observed).toBe(false);
+      const msgs = socket.getWrittenMessages<{
+        id?: string;
+        type: string;
+        success?: boolean;
+        error?: string;
+      }>();
+      expect(msgs).toHaveLength(1);
+      expect(msgs[0].type).toBe("error");
+      expect(msgs[0].success).toBe(false);
+      expect(msgs[0].id).toBe("obs-quarantined");
+      expect(msgs[0].error).toContain("emulator-5554");
+    });
+
+    // An all-device request names no serial, so the gate above cannot preflight
+    // it — but the same false acknowledgement follows: `pushForDevice` drops a
+    // quarantined serial's hierarchy because routing is suspended, and the
+    // requester was told `success: true` with nothing delivered
+    // ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
+    it("reports the quarantined device of an all-device observation instead of acking success", async () => {
+      server.setOnObservationRequested(async () => [
+        requestedObservation("emulator-5554"),
+        requestedObservation("emulator-5556"),
+      ]);
+      const { socket } = server.simulateSubscription({ deviceId: null });
+      server.sessionResolver.quarantine("emulator-5554");
+
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({ id: "obs-all", command: "request_observation" }),
+      );
+
+      const msgs = socket.getWrittenMessages<{
+        id?: string;
+        type: string;
+        success?: boolean;
+        error?: string;
+        deviceId?: string;
+      }>();
+      // The healthy device still gets its hierarchy; the quarantined one is
+      // reported as a per-device failure rather than silently dropped.
+      const pushed = msgs.filter((message) => message.type === "hierarchy_update");
+      expect(pushed.map((message) => message.deviceId)).toEqual(["emulator-5556"]);
+      const ack = msgs[msgs.length - 1];
+      expect(ack.type).toBe("error");
+      expect(ack.success).toBe(false);
+      expect(ack.id).toBe("obs-all");
+      expect(ack.error).toContain("emulator-5554");
+    });
+
     it("forwards proven frame context and clears it when an explicit observation lacks provenance", async () => {
       server.setOnObservationRequested(async (request) => [
         requestedObservation(request.deviceId ?? "emulator-5554", "frame-A"),
@@ -2348,6 +2422,80 @@ describe("DeviceDataStreamSocketServer", () => {
       expect(msgs[0].type).toBe("subscription_response");
       expect(msgs[0].id).toBe("s-1");
       expect(msgs[0].success).toBe(true);
+    });
+
+    // FUNNEL 2. The session-keyed target above resolves through
+    // `resolveDeviceId`, which already withholds a quarantined serial; the RAW
+    // `deviceId` target skips that resolution entirely, so it needs the gate to
+    // avoid registering a device-side content observer on a runtime the pool can
+    // no longer identify
+    // ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
+    it("refuses a raw-serial storage subscribe while the pooled identity is quarantined", async () => {
+      const calls: StorageSubReq[] = [];
+      server.setOnStorageSubscriptionRequested(async (req) => {
+        calls.push(req);
+      });
+      server.sessionResolver.quarantine("emulator-5554");
+
+      const socket = new FakeSocket();
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({
+          id: "s-quarantined",
+          command: "subscribe_storage",
+          deviceId: "emulator-5554",
+          packageName: "com.example.app",
+          fileName: "prefs.xml",
+        }),
+      );
+
+      expect(calls).toEqual([]);
+      const msgs = socket.getWrittenMessages<{
+        id?: string;
+        type: string;
+        success?: boolean;
+        error?: string;
+      }>();
+      expect(msgs).toHaveLength(1);
+      expect(msgs[0].type).toBe("error");
+      expect(msgs[0].success).toBe(false);
+      expect(msgs[0].error).toContain("emulator-5554");
+    });
+
+    // Teardown is exempt: refusing an unsubscribe would strand the device-side
+    // observer the daemon itself registered, and releasing it touches only
+    // bookkeeping the quarantine does not call into question.
+    it("still releases a raw-serial storage subscription while quarantined", async () => {
+      const calls: StorageSubReq[] = [];
+      server.setOnStorageSubscriptionRequested(async (req) => {
+        calls.push(req);
+      });
+      const socket = new FakeSocket();
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({
+          id: "s-live",
+          command: "subscribe_storage",
+          deviceId: "emulator-5554",
+          packageName: "com.example.app",
+          fileName: "prefs.xml",
+        }),
+      );
+      calls.length = 0;
+      server.sessionResolver.quarantine("emulator-5554");
+
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({
+          id: "s-release",
+          command: "unsubscribe_storage",
+          deviceId: "emulator-5554",
+          packageName: "com.example.app",
+          fileName: "prefs.xml",
+        }),
+      );
+
+      expect(calls[0].subscribe).toBe(false);
     });
 
     it("passes subscribe:false for an unsubscribe", async () => {

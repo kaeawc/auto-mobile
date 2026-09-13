@@ -11,6 +11,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSnapshotRepository } from "../fakes/FakeDeviceSnapshotRepository";
 import { FakeDeviceSnapshotConfigRepository } from "../fakes/FakeDeviceSnapshotConfigRepository";
 import { FakeDeviceSnapshotStore } from "../fakes/FakeDeviceSnapshotStore";
+import { FakeAvdSnapshotService, fakeAvdSnapshotPath } from "../fakes/FakeAvdSnapshotService";
 
 function makeRecord(overrides: Partial<DeviceSnapshotRecord> = {}): DeviceSnapshotRecord {
   return {
@@ -67,6 +68,7 @@ describe("deviceSnapshotResources", () => {
       snapshotRepository: repository as any,
       configRepository: configRepository as any,
       snapshotStore: new FakeDeviceSnapshotStore() as any,
+      avdSnapshots: new FakeAvdSnapshotService(),
       timer: new FakeTimer(),
       now: () => new Date(0),
     });
@@ -80,11 +82,79 @@ describe("deviceSnapshotResources", () => {
     expect((parsed.snapshots as unknown[]).length).toBe(2);
   });
 
+  test("getSnapshotArchive surfaces unsized, pending-reclaim, and orphaned in-AVD snapshots (#6490)", async () => {
+    const repository = new FakeDeviceSnapshotRepository();
+    // A vm record's deviceName IS the AVD name, and that pair — not the bare
+    // snapshot name — is what accounts for an in-AVD directory (#6490 review).
+    await repository.insertSnapshot(
+      makeRecord({
+        snapshotName: "sized",
+        snapshotType: "vm",
+        deviceName: "am-api34",
+        sizeBytes: 2048,
+      }),
+    );
+    await repository.insertSnapshot(
+      makeRecord({
+        snapshotName: "unsized",
+        snapshotType: "vm",
+        deviceName: "am-api34",
+        sizeBytes: null,
+      }),
+    );
+    await repository.insertSnapshot(
+      makeRecord({
+        snapshotName: "stranded",
+        snapshotType: "vm",
+        deviceName: "am-api34",
+        sizeBytes: 4096,
+        pendingReclaim: true,
+        pendingReclaimReason: "emulator for AVD 'am-api34' is not running",
+      }),
+    );
+
+    const avdSnapshots = new FakeAvdSnapshotService();
+    // One record-backed directory, one orphan, and the emulator's own boot state.
+    avdSnapshots.setVmSnapshot("am-api34", "sized", 2048);
+    avdSnapshots.setVmSnapshot("am-api34", "default_boot", 999);
+    avdSnapshots.setVmSnapshot("am-api34", "emulator-5554_2026-08-11_23-05-15-803Z", 17_300);
+
+    await setDeviceSnapshotManagerDependencies({
+      snapshotRepository: repository as any,
+      configRepository: new FakeDeviceSnapshotConfigRepository() as any,
+      snapshotStore: new FakeDeviceSnapshotStore() as any,
+      avdSnapshots,
+      timer: new FakeTimer(),
+      now: () => new Date(0),
+    });
+
+    const parsed = await readArchiveResource();
+
+    // The unsized row is excluded from the total but not from the report.
+    expect(parsed.totalSizeBytes).toBe(2048 + 4096);
+    expect(parsed.unsizedCount).toBe(1);
+    expect(parsed.pendingReclaimCount).toBe(1);
+    expect(parsed.orphanedAvdSnapshots).toEqual({
+      count: 1,
+      totalSizeBytes: 17_300,
+      unsizedCount: 0,
+      entries: [
+        {
+          avdName: "am-api34",
+          snapshotName: "emulator-5554_2026-08-11_23-05-15-803Z",
+          directoryPath: fakeAvdSnapshotPath("am-api34", "emulator-5554_2026-08-11_23-05-15-803Z"),
+          sizeBytes: 17_300,
+        },
+      ],
+    });
+  });
+
   test("getSnapshotArchive returns an empty envelope when there are no snapshots", async () => {
     await setDeviceSnapshotManagerDependencies({
       snapshotRepository: new FakeDeviceSnapshotRepository() as any,
       configRepository: new FakeDeviceSnapshotConfigRepository() as any,
       snapshotStore: new FakeDeviceSnapshotStore() as any,
+      avdSnapshots: new FakeAvdSnapshotService(),
       timer: new FakeTimer(),
       now: () => new Date(0),
     });
@@ -105,6 +175,7 @@ describe("deviceSnapshotResources", () => {
       } as any,
       configRepository: new FakeDeviceSnapshotConfigRepository() as any,
       snapshotStore: new FakeDeviceSnapshotStore() as any,
+      avdSnapshots: new FakeAvdSnapshotService(),
       timer: new FakeTimer(),
       now: () => new Date(0),
     });

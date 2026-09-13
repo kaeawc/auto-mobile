@@ -141,7 +141,7 @@ import {
   recordingCandidateIncarnations,
   type DisconnectCandidateIncarnation,
 } from "./disconnectMonitor";
-import { describeUnknownError } from "../utils/describeUnknownError";
+import { describeUnknownError, errorMessage } from "../utils/describeUnknownError";
 import { FeatureFlagService } from "../features/featureFlags/FeatureFlagService";
 import { serverConfig } from "../utils/ServerConfig";
 import { setDebugPerfEnabled } from "../utils/PerformanceTracker";
@@ -248,6 +248,9 @@ export function isProcessWideAdbServerReset(
  * - PID file management
  * - Graceful shutdown handling
  */
+/** Completes the FUNNEL 2 refusal: "Refusing `<purpose>` on device '<serial>'". */
+const STORAGE_WATCH_PURPOSE = "to watch stored values";
+
 export class Daemon {
   private httpServer: HttpServer | null = null;
   private httpServerClosePromise: Promise<void> | null = null;
@@ -434,7 +437,8 @@ export class Daemon {
       recoveryConfiguration.policy,
       (deviceId) => this.deviceSessionRegistry.onDeviceDisconnected(deviceId),
       new EmulatorLossIncidentRepository(this.timer, this.idGenerator),
-      (sessionId, reason) => this.cancelAndDrainDeviceSessionExecutions(sessionId, reason),
+      (sessionId, reason, options) =>
+        this.cancelAndDrainDeviceSessionExecutions(sessionId, reason, options),
       this.idGenerator,
     );
     // Initialize singleton for daemon state access
@@ -1236,8 +1240,9 @@ export class Daemon {
     // it in both directions and every push server drops that serial's frames, so a
     // possible replacement AVD's passive events cannot reach the previous AVD's
     // subscribers (#6863 review).
-    const resolver = createRegistryDeviceSessionResolver(this.deviceSessionRegistry, (deviceId) =>
-      this.devicePool.isPooledIdentityUnresolved(deviceId),
+    const resolver = createRegistryDeviceSessionResolver(
+      this.deviceSessionRegistry,
+      this.devicePool,
     );
     const { deviceDataStream, performancePush, failuresPush, telemetryPush } =
       this.getDeviceSessionRoutingTargets();
@@ -1339,26 +1344,8 @@ export class Daemon {
     // observers today; a storage pane is always device-scoped, so target the resolved device and
     // skip when no live CtrlProxy client exists. The device-side subscriptionId is deterministic
     // ("packageName:fileName"), so unsubscribe reconstructs it without daemon-side bookkeeping.
-    server.setOnStorageSubscriptionRequested(
-      async ({ deviceId, packageName, fileName, subscribe }) => {
-        const devices = this.devicePool
-          .getAllDevices()
-          .filter((device) => deviceId === null || device.id === deviceId);
-        for (const device of devices) {
-          if (device.platform !== "android") {
-            continue;
-          }
-          const client = AndroidCtrlProxyClient.getExistingInstance(device.id);
-          if (!client) {
-            continue;
-          }
-          if (subscribe) {
-            await client.subscribeStorage(packageName, fileName);
-          } else {
-            await client.unsubscribeStorage(`${packageName}:${fileName}`);
-          }
-        }
-      },
+    server.setOnStorageSubscriptionRequested((request) =>
+      this.applyStorageSubscriptionRequest(request),
     );
 
     server.setOnObservationRequested(async ({ deviceId, signal }) => {
@@ -1401,6 +1388,67 @@ export class Daemon {
 
     // Wire up navigation graph updates to stream to IDE plugins
     this.setupNavigationGraphStreamListener(server);
+  }
+
+  /**
+   * Expand one storage (un)subscription to the devices it targets and apply it.
+   *
+   * FUNNEL 2 for every target the expansion produces. A request that scopes
+   * itself to a serial is already refused at the socket server, but an
+   * ALL-DEVICE request names no serial at all, so nothing there can preflight it
+   * — and `deviceId === null` means every pooled Android device here. Gating each
+   * expanded target is what stops the request from installing a content observer
+   * on whichever replacement AVD now answers on a quarantined serial and still
+   * acking success. The refusals are collected rather than thrown at the first
+   * one, so a healthy device still gets its observer and the caller learns which
+   * targets the request could not cover -- the same partial-completion shape the
+   * all-device observation path uses
+   * ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
+   *
+   * Teardown is exempt, as it is at the socket server: refusing it would strand
+   * the observer this daemon registered, and releasing one touches only
+   * bookkeeping the quarantine does not question.
+   */
+  private async applyStorageSubscriptionRequest({
+    deviceId,
+    packageName,
+    fileName,
+    subscribe,
+  }: {
+    deviceId: string | null;
+    packageName: string;
+    fileName: string;
+    subscribe: boolean;
+  }): Promise<void> {
+    const devices = this.devicePool
+      .getAllDevices()
+      .filter((device) => deviceId === null || device.id === deviceId);
+    const refusals: string[] = [];
+    for (const device of devices) {
+      if (device.platform !== "android") {
+        continue;
+      }
+      if (subscribe) {
+        try {
+          this.devicePool.assertDeviceActionable(device.id, STORAGE_WATCH_PURPOSE);
+        } catch (error) {
+          refusals.push(errorMessage(error));
+          continue;
+        }
+      }
+      const client = AndroidCtrlProxyClient.getExistingInstance(device.id);
+      if (!client) {
+        continue;
+      }
+      if (subscribe) {
+        await client.subscribeStorage(packageName, fileName);
+      } else {
+        await client.unsubscribeStorage(`${packageName}:${fileName}`);
+      }
+    }
+    if (refusals.length > 0) {
+      throw new ActionableError(refusals.join("; "));
+    }
   }
 
   private createObservationStreamIosClient(device: BootedDevice): ObservationStreamIosClient {
@@ -1724,6 +1772,12 @@ export class Daemon {
           }
 
           const discovery = await deviceManager.getBootedDevicesDetailed("either");
+          // FUNNEL 1: this sweep joins the observation to `getAllDevices()` by
+          // serial below, so the pool must fold it in first (#6863 review).
+          await this.devicePool.reconcileDiscoveryObservation(
+            discovery.devices,
+            "disconnect-monitor",
+          );
           const bootedDevices = discovery.devices;
           const succeededPlatforms = discovery.succeededPlatforms;
           const bootedDeviceIds = new Set(bootedDevices.map((device) => device.deviceId));
@@ -2178,14 +2232,20 @@ export class Daemon {
   private async cancelAndDrainDeviceSessionExecutions(
     sessionId: string,
     reason: string,
+    options?: { excludeExecutionId?: string },
   ): Promise<number> {
-    const cancelled = await executionTracker.cancelDeviceSessionExecutions(sessionId, reason);
+    const cancelled = await executionTracker.cancelDeviceSessionExecutions(
+      sessionId,
+      reason,
+      options,
+    );
     if (cancelled === 0) {
       return 0;
     }
     const drained = await executionTracker.waitForDeviceSessionExecutionsToEnd(
       sessionId,
       DEVICE_LOSS_EXECUTION_DRAIN_TIMEOUT_MS,
+      options,
     );
     if (!drained) {
       logger.warn(

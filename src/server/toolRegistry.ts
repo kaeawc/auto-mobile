@@ -64,6 +64,7 @@ import {
 } from "../features/toolSelection/toolSelectionContext";
 import { isDeviceLostError, throwDeviceLostFromAbortSignal } from "./deviceLossOutcome";
 import { executionTracker } from "./executionTracker";
+import { SET_TOOL_ENABLED_TOOL_NAME } from "../features/toolSelection/toolSelectionControl";
 import {
   INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
   INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
@@ -1185,6 +1186,24 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
   }
 }
 
+/**
+ * Copy an advertised array-field schema with `enum` applied to its items.
+ * Preserves the field's own description and constraints; only the item
+ * vocabulary is added.
+ */
+function withItemsEnum(
+  field: Record<string, unknown> | undefined,
+  values: string[],
+): Record<string, unknown> {
+  return {
+    ...field,
+    items: {
+      ...(field?.items as Record<string, unknown> | undefined),
+      enum: values,
+    },
+  };
+}
+
 // The registry that holds all tools
 export class ToolRegistryClass {
   private tools: Map<string, RegisteredTool> = new Map();
@@ -1774,16 +1793,11 @@ export class ToolRegistryClass {
       // Keep the compact enabled-tool profile while making optional capabilities
       // discoverable through the always-listed selection control (#6797).
       // Copy the cached schema: availability can change between listings.
-      if (tool.name === "setToolEnabled") {
-        const properties = inputSchema.properties as Record<string, Record<string, unknown>>;
-        definition.inputSchema = {
-          ...inputSchema,
-          properties: {
-            ...properties,
-            toolName: { ...properties.toolName, enum: configurableToolNames },
-          },
-        };
-      }
+      definition.inputSchema = this.withConfigurableToolVocabulary(
+        tool.name,
+        inputSchema,
+        configurableToolNames,
+      );
       if (outputSchema) {
         definition.outputSchema = outputSchema;
       }
@@ -1796,6 +1810,56 @@ export class ToolRegistryClass {
       }
       return definition;
     });
+  }
+
+  /**
+   * Decorate the advertised schema with the enum of tool names this listing
+   * accepts, so a schema-driven client cannot build a call the handler rejects.
+   *
+   * Two fields carry that vocabulary: `setToolEnabled`'s `toolName`/`toolNames`
+   * (#6797, #6869) and the `enableTools` array the device-acquisition tools
+   * (`getAndroid`, `getApple`, `provisionDevice`) take so acquisition and
+   * capability declaration are one call. `resolveRequestedEnableTools` rejects
+   * every unknown or non-configurable name before any device work starts, so
+   * advertising "any non-empty string" there both allowed schema-valid calls
+   * that invocation refuses and hid the vocabulary of the one-call flow
+   * (#6886 review). Detected by the field's presence rather than a hardcoded
+   * tool list, so a future acquisition tool is covered by declaring the field.
+   */
+  private withConfigurableToolVocabulary(
+    toolName: string,
+    inputSchema: Record<string, unknown>,
+    configurableToolNames: string[],
+  ): Record<string, unknown> {
+    const properties = inputSchema.properties as
+      | Record<string, Record<string, unknown>>
+      | undefined;
+    if (!properties) {
+      return inputSchema;
+    }
+    if (toolName === SET_TOOL_ENABLED_TOOL_NAME) {
+      return {
+        ...inputSchema,
+        properties: {
+          ...properties,
+          toolName: { ...properties.toolName, enum: configurableToolNames },
+          // #6869 — the batch spelling carries the same vocabulary, so a
+          // client declaring a whole toolset in one call reads the choices
+          // from the field it is actually filling in.
+          toolNames: withItemsEnum(properties.toolNames, configurableToolNames),
+        },
+      };
+    }
+    if (!properties.enableTools) {
+      return inputSchema;
+    }
+    return {
+      ...inputSchema,
+      properties: {
+        ...properties,
+        enableTools: withItemsEnum(properties.enableTools, configurableToolNames),
+      },
+    };
   }
 
   private getCachedToolDefinitionSchemas(

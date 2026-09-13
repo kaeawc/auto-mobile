@@ -549,3 +549,263 @@ describe("systemTray list", () => {
     expect(adb.getExecutedCommands()).toEqual([]);
   });
 });
+
+// The Silent (low-importance) section renders rows without the per-row app-name
+// header, so the shade alone cannot say who posted them (#6875).
+describe("systemTray list silent-section ownership", () => {
+  const WELLBEING = "com.google.android.apps.wellbeing";
+  const MESSAGING = "com.google.android.apps.messaging";
+  const SLEEP_TITLE = "Need better sleep?";
+  const SLEEP_BODY = "Use Bedtime mode to silence your phone and keep the screen dark at bedtime";
+  const execResult = (stdout: string) => ({
+    stdout,
+    stderr: "",
+    toString: () => stdout,
+    trim: () => stdout.trim(),
+    includes: (search: string) => stdout.includes(search),
+  });
+  // Exactly the two rows observed in #6875: the messaging row carries its app
+  // name, the wellbeing row carries no app name anywhere in the row.
+  const silentRow = (title: string, body: string) =>
+    node("com.android.systemui:id/expandableNotificationRow", "", [
+      node("android:id/title", title),
+      node("android:id/text", body),
+    ]);
+  const shade = () => page(row("(555) 123-4567"), silentRow(SLEEP_TITLE, SLEEP_BODY));
+  const dumpsys = (...records: string[]) =>
+    ["Current Notification Manager state:", "  Notification List:", ...records].join("\n");
+  const record = (pkg: string, title: string, text: string) =>
+    [
+      `    NotificationRecord(0x1: pkg=${pkg} user=UserHandle{0} id=0 tag=null key=0|${pkg}|0|null|10164)`,
+      "      extras={",
+      `        android.title=String (${title})`,
+      `        android.text=String (${text})`,
+      "      }",
+    ].join("\n");
+
+  test("attributes a Silent-section row to its package via dumpsys", async () => {
+    const { adb } = setup([shade()]);
+    adb.setCommandResponse(
+      "dumpsys notification",
+      execResult(dumpsys(record(WELLBEING, SLEEP_TITLE, SLEEP_BODY))),
+    );
+    const result = await listSystemTrayNotifications(device, WELLBEING, "Digital Wellbeing", 5000);
+    expect(result.notifications).toMatchObject([
+      { appId: WELLBEING, title: SLEEP_TITLE, body: SLEEP_BODY, ownership: "dumpsys" },
+    ]);
+    expect(result.unattributedRows).toBe(0);
+    expect(adb.getExecutedCommands()).toContain("shell dumpsys notification --noredact");
+  });
+
+  test("keeps header evidence for rows SystemUI does label", async () => {
+    const { adb } = setup([shade()]);
+    adb.setCommandResponse(
+      "dumpsys notification",
+      execResult(dumpsys(record(WELLBEING, SLEEP_TITLE, SLEEP_BODY))),
+    );
+    const result = await listSystemTrayNotifications(device, MESSAGING, "Messages", 5000);
+    expect(result.notifications).toMatchObject([
+      { appId: MESSAGING, title: "(555) 123-4567", ownership: "header" },
+    ]);
+    expect(result.unattributedRows).toBe(0);
+  });
+
+  test("reports unattributed rows instead of a confident empty list", async () => {
+    setup([shade()]);
+    const result = await listSystemTrayNotifications(device, "com.other.app", "Other", 5000);
+    expect(result.notifications).toEqual([]);
+    expect(result.unattributedRows).toBe(1);
+  });
+
+  test("does not claim a header-less row two packages could have posted", async () => {
+    const { adb } = setup([shade()]);
+    adb.setCommandResponse(
+      "dumpsys notification",
+      execResult(
+        dumpsys(
+          record(WELLBEING, SLEEP_TITLE, SLEEP_BODY),
+          record("com.other.clone", SLEEP_TITLE, SLEEP_BODY),
+        ),
+      ),
+    );
+    const result = await listSystemTrayNotifications(device, WELLBEING, "Digital Wellbeing", 5000);
+    expect(result.notifications).toEqual([]);
+    expect(result.unattributedRows).toBe(1);
+  });
+
+  test("does not read dumpsys when every row carries an app header", async () => {
+    const { adb } = setup([page(row("one"))]);
+    await list();
+    expect(adb.getExecutedCommands().some((command) => command.includes("dumpsys"))).toBe(false);
+  });
+
+  test("surfaces unattributed rows through the registered handler message", async () => {
+    setup([shade()]);
+    const apps = new FakeTrayApps();
+    apps.labels.set("com.example.messages", "Other");
+    apps.install();
+    registerInteractionTools();
+    const result = await ToolRegistry.getTool("systemTray")!.deviceAwareHandler!(device, {
+      action: "list",
+      notification: { appId: "com.example.messages" },
+    });
+    const payload = JSON.parse(result.content[0].text);
+    expect(payload.notifications).toEqual([]);
+    expect(payload.unattributedRows).toBe(1);
+    expect(payload.message).toContain("1 shade row");
+  });
+});
+
+// A row's action buttons are chrome SystemUI renders, not content the posting
+// app supplied, so they must not make another app's notification a plausible
+// owner of the row (#6875).
+describe("systemTray list silent-section correlation content", () => {
+  const WELLBEING = "com.google.android.apps.wellbeing";
+  const SLEEP_TITLE = "Need better sleep?";
+  const SLEEP_BODY = "Use Bedtime mode to silence your phone";
+  const execResult = (stdout: string) => ({
+    stdout,
+    stderr: "",
+    toString: () => stdout,
+    trim: () => stdout.trim(),
+    includes: (search: string) => stdout.includes(search),
+  });
+  const silentRowWithAction = (title: string, body: string, action: string) =>
+    node("com.android.systemui:id/expandableNotificationRow", "", [
+      node("android:id/title", title),
+      node("android:id/text", body),
+      node("android:id/actions", "", [node("android:id/action0", action)]),
+      node("com.android.systemui:id/expand_button", "Expand"),
+    ]);
+  const dumpsys = (...records: string[]) =>
+    ["Current Notification Manager state:", "  Notification List:", ...records].join("\n");
+  const record = (pkg: string, title: string, text: string) =>
+    [
+      `    NotificationRecord(0x1: pkg=${pkg} user=UserHandle{0} id=0 tag=null key=0|${pkg}|0|null|10164)`,
+      "      extras={",
+      `        android.title=String (${title})`,
+      `        android.text=String (${text})`,
+      "      }",
+    ].join("\n");
+
+  test("ignores action labels when deciding which packages could own a row", async () => {
+    const { adb } = setup([page(silentRowWithAction(SLEEP_TITLE, SLEEP_BODY, "Reply"))]);
+    adb.setCommandResponse(
+      "dumpsys notification",
+      execResult(
+        dumpsys(
+          record(WELLBEING, SLEEP_TITLE, SLEEP_BODY),
+          record("com.example.chat", "Reply", "Tap to reply"),
+        ),
+      ),
+    );
+    const result = await listSystemTrayNotifications(device, WELLBEING, "Digital Wellbeing", 5000);
+    expect(result.notifications).toMatchObject([
+      { appId: WELLBEING, title: SLEEP_TITLE, body: SLEEP_BODY, ownership: "dumpsys" },
+    ]);
+    expect(result.unattributedRows).toBe(0);
+  });
+
+  test("still reports the action labels the row rendered", async () => {
+    const { adb } = setup([page(silentRowWithAction(SLEEP_TITLE, SLEEP_BODY, "Reply"))]);
+    adb.setCommandResponse(
+      "dumpsys notification",
+      execResult(dumpsys(record(WELLBEING, SLEEP_TITLE, SLEEP_BODY))),
+    );
+    const result = await listSystemTrayNotifications(device, WELLBEING, "Digital Wellbeing", 5000);
+    expect(result.notifications[0].actions).toEqual(["Reply"]);
+    expect(result.notifications[0].texts).toContain("Reply");
+  });
+
+  test("does not let a system control label decide ownership", async () => {
+    const { adb } = setup([page(silentRowWithAction(SLEEP_TITLE, SLEEP_BODY, "Reply"))]);
+    adb.setCommandResponse(
+      "dumpsys notification",
+      execResult(
+        dumpsys(
+          record(WELLBEING, SLEEP_TITLE, SLEEP_BODY),
+          record("com.example.launcher", "Expand", "Expand the view"),
+        ),
+      ),
+    );
+    const result = await listSystemTrayNotifications(device, WELLBEING, "Digital Wellbeing", 5000);
+    expect(result.notifications).toMatchObject([{ appId: WELLBEING, ownership: "dumpsys" }]);
+  });
+});
+
+// SystemUI renders the timer chrome of a chronometer notification itself, and
+// the running value it shows is in no record's extras, so counting it as
+// correlation content only lets an unrelated app whose title reads "00:01"
+// hide an otherwise exact match (#6875).
+describe("systemTray list silent-section chronometer chrome", () => {
+  const WELLBEING = "com.google.android.apps.wellbeing";
+  const SLEEP_TITLE = "Need better sleep?";
+  const SLEEP_BODY = "Use Bedtime mode to silence your phone";
+  const execResult = (stdout: string) => ({
+    stdout,
+    stderr: "",
+    toString: () => stdout,
+    trim: () => stdout.trim(),
+    includes: (search: string) => stdout.includes(search),
+  });
+  const timerRow = (title: string, body: string, elapsed: string) =>
+    node("com.android.systemui:id/expandableNotificationRow", "", [
+      node("android:id/title", title),
+      node("android:id/text", body),
+      node("android:id/chronometer", elapsed),
+      node("android:id/time", "now"),
+    ]);
+  const dumpsys = (...records: string[]) =>
+    ["Current Notification Manager state:", "  Notification List:", ...records].join("\n");
+  const record = (pkg: string, title: string, text: string) =>
+    [
+      `    NotificationRecord(0x1: pkg=${pkg} user=UserHandle{0} id=0 tag=null key=0|${pkg}|0|null|10164)`,
+      "      extras={",
+      `        android.title=String (${title})`,
+      `        android.text=String (${text})`,
+      "      }",
+    ].join("\n");
+
+  test("ignores chronometer and timestamp chrome when deciding plausible owners", async () => {
+    const { adb } = setup([page(timerRow(SLEEP_TITLE, SLEEP_BODY, "00:01"))]);
+    adb.setCommandResponse(
+      "dumpsys notification",
+      execResult(
+        dumpsys(
+          record(WELLBEING, SLEEP_TITLE, SLEEP_BODY),
+          record("com.example.clock", "00:01", "Timer running"),
+        ),
+      ),
+    );
+    const result = await listSystemTrayNotifications(device, WELLBEING, "Digital Wellbeing", 5000);
+    expect(result.notifications).toMatchObject([
+      { appId: WELLBEING, title: SLEEP_TITLE, body: SLEEP_BODY, ownership: "dumpsys" },
+    ]);
+    expect(result.unattributedRows).toBe(0);
+  });
+
+  test("still reports the chronometer text the row rendered", async () => {
+    const { adb } = setup([page(timerRow(SLEEP_TITLE, SLEEP_BODY, "00:01"))]);
+    adb.setCommandResponse(
+      "dumpsys notification",
+      execResult(dumpsys(record(WELLBEING, SLEEP_TITLE, SLEEP_BODY))),
+    );
+    const result = await listSystemTrayNotifications(device, WELLBEING, "Digital Wellbeing", 5000);
+    expect(result.notifications[0].texts).toContain("00:01");
+  });
+
+  test("reads the notification dump with an explicit output buffer", async () => {
+    const { adb } = setup([page(timerRow(SLEEP_TITLE, SLEEP_BODY, "00:01"))]);
+    adb.setCommandResponse(
+      "dumpsys notification",
+      execResult(dumpsys(record(WELLBEING, SLEEP_TITLE, SLEEP_BODY))),
+    );
+    await listSystemTrayNotifications(device, WELLBEING, "Digital Wellbeing", 5000);
+    const call = adb
+      .getCommandCalls()
+      .find((entry) => entry.command.includes("dumpsys notification"))!;
+    // The default child-process buffer is 1 MiB; an unredacted aggregate dump
+    // exceeds it on notification-heavy devices and would reject outright.
+    expect(call.maxBuffer).toBeGreaterThan(1024 * 1024);
+  });
+});

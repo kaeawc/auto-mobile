@@ -39,6 +39,7 @@ function createClient(
   hostPortAvailabilityChecker: HostPortAvailabilityChecker = {
     isAvailable: async () => true,
   },
+  avdName: string = "Pixel 9",
 ): AndroidEmulatorClient {
   const adbFactory: AdbClientFactory = {
     create: (): AdbExecutor => adb,
@@ -56,7 +57,7 @@ function createClient(
   (client as unknown as { ensureEmulatorPath: () => Promise<string> }).ensureEmulatorPath =
     async () => "emulator";
   (client as unknown as { listAvds: () => Promise<DeviceInfo[]> }).listAvds = async () => [
-    { name: "Pixel 9", platform: "android", isRunning: false },
+    { name: avdName, platform: "android", isRunning: false },
   ];
   (client as unknown as { isAvdRunning: () => Promise<boolean> }).isAvdRunning = async () => false;
   (client as unknown as { isAvdStarting: () => Promise<boolean> }).isAvdStarting = async () =>
@@ -149,19 +150,27 @@ describe("AndroidEmulatorClient launch contract", () => {
       );
       return firstChild;
     }, adb);
-    const secondClient = createClient((_command, args) => {
-      secondSpawnedArgs = args;
-      queueMicrotask(() =>
-        secondChild.stdout!.emit("data", Buffer.from("Detected GPU type: host\n")),
-      );
-      return secondChild;
-    }, adb);
+    // A DIFFERENT AVD: a second launch of an AVD this process is already
+    // launching is adopted, never spawned (#6407). What is under test here is
+    // the port reservation, so the two launches must be for distinct AVDs.
+    const secondClient = createClient(
+      (_command, args) => {
+        secondSpawnedArgs = args;
+        queueMicrotask(() =>
+          secondChild.stdout!.emit("data", Buffer.from("Detected GPU type: host\n")),
+        );
+        return secondChild;
+      },
+      adb,
+      undefined,
+      "Pixel 9a",
+    );
 
     const firstLaunch = await firstClient.launchEmulator({
       avdName: "Pixel 9",
       extraArgs: ["-ports", "5562,5555"],
     });
-    const secondLaunch = await secondClient.startEmulator("Pixel 9");
+    const secondLaunch = await secondClient.startEmulator("Pixel 9a");
 
     expect(firstLaunch.targetDeviceId).toBe("emulator-5562");
     expect(firstSpawnedArgs).toEqual(expect.arrayContaining(["-ports", "5562,5555"]));
@@ -218,7 +227,7 @@ describe("AndroidEmulatorClient launch contract", () => {
         return true;
       },
     };
-    const createSharedClient = () =>
+    const createSharedClient = (avdName: string) =>
       createClient(
         (_command, args) => {
           spawnedArgs.push(args);
@@ -230,13 +239,17 @@ describe("AndroidEmulatorClient launch contract", () => {
         },
         adb,
         hostPortAvailabilityChecker,
+        avdName,
       );
 
-    const firstLaunch = createSharedClient().startEmulator("Pixel 9");
+    // Distinct AVDs: two CONCURRENT launches of the SAME AVD are the duplicate
+    // this process now refuses outright (#6407), and the port-reservation race
+    // under test is about the ports, not the AVD label.
+    const firstLaunch = createSharedClient("Pixel 9").startEmulator("Pixel 9");
     while (firstPairProbeCount < 2) {
       await Promise.resolve();
     }
-    const secondLaunch = createSharedClient().startEmulator("Pixel 9");
+    const secondLaunch = createSharedClient("Pixel 9a").startEmulator("Pixel 9a");
     while (firstPairProbeCount < 4) {
       await Promise.resolve();
     }
@@ -284,19 +297,26 @@ describe("AndroidEmulatorClient launch contract", () => {
       );
       return firstChild;
     }, adb);
-    const secondClient = createClient((_command, args) => {
-      secondSpawnedArgs = args;
-      queueMicrotask(() =>
-        secondChild.stdout!.emit("data", Buffer.from("Detected GPU type: host\n")),
-      );
-      return secondChild;
-    }, adb);
+    // A DIFFERENT AVD, for the same reason as above: the serial reservation is
+    // what must hold across clients, not the AVD label (#6407).
+    const secondClient = createClient(
+      (_command, args) => {
+        secondSpawnedArgs = args;
+        queueMicrotask(() =>
+          secondChild.stdout!.emit("data", Buffer.from("Detected GPU type: host\n")),
+        );
+        return secondChild;
+      },
+      adb,
+      undefined,
+      "Pixel 9a",
+    );
 
     const firstLaunch = await firstClient.launchEmulator({
       avdName: "Pixel 9",
       deviceId: "emulator-5554",
     });
-    const secondLaunch = await secondClient.startEmulator("Pixel 9");
+    const secondLaunch = await secondClient.startEmulator("Pixel 9a");
 
     expect(firstLaunch.targetDeviceId).toBe("emulator-5554");
     expect(firstSpawnedArgs).toEqual(expect.arrayContaining(["-port", "5554"]));
@@ -357,18 +377,28 @@ describe("AndroidEmulatorClient launch contract", () => {
       }
       return [];
     };
-    const createSharedClient = () =>
-      createClient((_command, args) => {
-        spawnedArgs.push(args);
-        const child = children.shift()!;
-        queueMicrotask(() => child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n")));
-        return child;
-      }, adb);
-    const firstClient = createSharedClient();
-    const secondClient = createSharedClient();
+    const createSharedClient = (avdName: string) =>
+      createClient(
+        (_command, args) => {
+          spawnedArgs.push(args);
+          const child = children.shift()!;
+          queueMicrotask(() =>
+            child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n")),
+          );
+          return child;
+        },
+        adb,
+        undefined,
+        avdName,
+      );
+    // Distinct AVDs: the terminal reservation under test is about the PORT, and
+    // a second launch of an AVD this process is already running is adopted
+    // rather than spawned (#6407).
+    const firstClient = createSharedClient("Pixel 9");
+    const secondClient = createSharedClient("Pixel 9a");
 
     await firstClient.startEmulator("Pixel 9");
-    const secondLaunch = secondClient.startEmulator("Pixel 9");
+    const secondLaunch = secondClient.startEmulator("Pixel 9a");
     while (!secondStateScanStarted) {
       await Promise.resolve();
     }

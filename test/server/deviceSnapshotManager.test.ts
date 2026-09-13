@@ -18,6 +18,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSnapshotRepository } from "../fakes/FakeDeviceSnapshotRepository";
 import { FakeDeviceSnapshotConfigRepository } from "../fakes/FakeDeviceSnapshotConfigRepository";
 import { FakeDeviceSnapshotStore } from "../fakes/FakeDeviceSnapshotStore";
+import { FakeAvdSnapshotService } from "../fakes/FakeAvdSnapshotService";
 
 const TEST_DEVICE: BootedDevice = {
   deviceId: "test-device",
@@ -45,6 +46,8 @@ describe("deviceSnapshotManager", () => {
       snapshotRepository: repository as any,
       configRepository: configRepository as any,
       snapshotStore: store as any,
+      // No real ~/.android/avd scan in a unit test (#6490).
+      avdSnapshots: new FakeAvdSnapshotService(),
       timer: fakeTimer,
       now: () => new Date(fakeTimer.now()),
       createCaptureProvider: () => ({

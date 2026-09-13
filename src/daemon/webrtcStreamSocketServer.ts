@@ -21,6 +21,8 @@ import {
   createDefaultStreamSocketAuthenticator,
   type StreamSocketAuthenticator,
 } from "./streamSocketAuth";
+import { daemonDeviceAdmissionGate, type DeviceAdmissionGate } from "./deviceAdmissionGate";
+import { reconcileDiscoveryObservation } from "./discoveryReconcile";
 
 /** Injectable dependencies so the server can be tested without a device pool. */
 export interface WebRtcStreamSocketServerDependencies {
@@ -31,6 +33,9 @@ export interface WebRtcStreamSocketServerDependencies {
   getStream: typeof getWebRtcStreamDescriptor;
   awaitReadiness?: typeof waitForWebRtcStreamReadiness;
 }
+
+/** Completes the FUNNEL 2 refusal: "Refusing `<purpose>` on device '<serial>'". */
+const WEBRTC_STREAM_PURPOSE = "to start a WebRTC stream";
 
 /**
  * Lazily import the stream manager (which pulls in werift) only when a request
@@ -48,6 +53,13 @@ export async function resolveWebRtcStreamDevice(
   // The request already names its platform. Querying both platforms makes an
   // iOS stream wait for ADB (and vice versa), so keep discovery platform-scoped.
   const candidates = await deviceManager.getBootedDevices(platform);
+  // FUNNEL 1, before the caller joins any of this to pooled identity. This can be
+  // the first path to observe the `Unknown (<serial>)` placeholder or a different
+  // AVD on a reused serial, and without folding it in the admission gate in
+  // `handleStart` would re-read the pool state from BEFORE this discovery and
+  // admit the stream onto an untrusted runtime
+  // ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
+  await reconcileDiscoveryObservation(candidates, "webrtc-stream-resolve");
 
   if (deviceId) {
     const match = candidates.find((device) => device.deviceId === deviceId);
@@ -127,6 +139,7 @@ export class WebRtcStreamSocketServer extends RequestResponseSocketServer<
   private readonly injectedDeps?: WebRtcStreamSocketServerDependencies;
   private resolvedDeps: WebRtcStreamSocketServerDependencies | null = null;
   private readonly authenticator: StreamSocketAuthenticator;
+  private readonly admissionGate: DeviceAdmissionGate;
 
   constructor(
     socketPath: string = getSocketPath(WEBRTC_STREAM_SOCKET_CONFIG),
@@ -135,10 +148,12 @@ export class WebRtcStreamSocketServer extends RequestResponseSocketServer<
     authenticator: StreamSocketAuthenticator = createDefaultStreamSocketAuthenticator(
       "webrtcStream",
     ),
+    admissionGate: DeviceAdmissionGate = daemonDeviceAdmissionGate,
   ) {
     super(socketPath, timer, "WebRtcStream");
     this.injectedDeps = deps;
     this.authenticator = authenticator;
+    this.admissionGate = admissionGate;
   }
 
   /** Resolve dependencies, lazily loading the (werift-heavy) manager on first use. */
@@ -207,7 +222,17 @@ export class WebRtcStreamSocketServer extends RequestResponseSocketServer<
     if (request.whipEndpoint) {
       assertWhipOverrideAllowed(request.whipEndpoint);
     }
+    // FUNNEL 2, before the capture starts. The quarantine preserves the owning
+    // session, so the authorization above still passes on a serial whose AVD the
+    // pool can no longer identify; the stream would publish whichever runtime now
+    // answers ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
+    // Gated twice because an omitted `deviceId` names its target only after
+    // resolution, and the named serial must be refused before discovery runs.
+    if (request.deviceId !== undefined) {
+      this.admissionGate.assertDeviceActionable(request.deviceId, WEBRTC_STREAM_PURPOSE);
+    }
     const device = await deps.resolveDevice(request.deviceId, request.platform ?? "android");
+    this.admissionGate.assertDeviceActionable(device.deviceId, WEBRTC_STREAM_PURPOSE);
     const stream = await deps.startStream({
       device,
       streamId: request.streamId,

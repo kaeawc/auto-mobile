@@ -24,6 +24,7 @@ import {
   createDefaultStreamSocketAuthenticator,
   type StreamSocketAuthenticator,
 } from "./streamSocketAuth";
+import { daemonDeviceAdmissionGate, type DeviceAdmissionGate } from "./deviceAdmissionGate";
 import {
   encodeDroppedFrames,
   encodePacket,
@@ -83,6 +84,9 @@ interface DeviceCapture {
 }
 
 const ANNEX_B_START_CODE = Buffer.from([0, 0, 0, 1]);
+
+/** Completes the FUNNEL 2 refusal: "Refusing `<purpose>` on device '<serial>'". */
+const VIDEO_STREAM_PURPOSE = "to stream video";
 
 const SUPPORTED_QUALITIES = new Set(["low", "medium", "high"]);
 // The relay resolves the device only after this validation, so it bounds fps to the range every
@@ -213,6 +217,7 @@ export class VideoStreamSocketServer extends BaseSocketServer {
   private readonly socketDeviceIds = new Map<Socket, string>();
 
   private readonly authenticator: StreamSocketAuthenticator;
+  private readonly admissionGate: DeviceAdmissionGate;
 
   constructor(
     private readonly deps: VideoStreamSocketServerDependencies,
@@ -221,11 +226,13 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     authenticator: StreamSocketAuthenticator = createDefaultStreamSocketAuthenticator(
       "video-stream subscribe",
     ),
+    admissionGate: DeviceAdmissionGate = daemonDeviceAdmissionGate,
   ) {
     // Idle timeout disabled: this stream is outbound-only after the handshake, and a viewer that
     // never sends another byte is the normal case, not a dead peer.
     super(socketPath, timer, "VideoStream", 0);
     this.authenticator = authenticator;
+    this.admissionGate = admissionGate;
   }
 
   /** Devices with an active capture, for diagnostics and tests. */
@@ -300,7 +307,18 @@ export class VideoStreamSocketServer extends BaseSocketServer {
         sessionUuid: request.sessionUuid,
         deviceId: request.deviceId,
       });
+      // FUNNEL 2, before any capture starts. Authorization is not this check:
+      // the quarantine deliberately PRESERVES the owning session, so a subscribe
+      // from it still authorizes while the pool can no longer say which AVD
+      // answers on the serial — and a capture started on it would relay whatever
+      // does ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
+      // Gated twice because an omitted `deviceId` names its target only after
+      // resolution, and the named serial must be refused before discovery runs.
+      if (request.deviceId !== undefined) {
+        this.admissionGate.assertDeviceActionable(request.deviceId, VIDEO_STREAM_PURPOSE);
+      }
       const device = await this.deps.resolveDevice(request.deviceId);
+      this.admissionGate.assertDeviceActionable(device.deviceId, VIDEO_STREAM_PURPOSE);
       const capture = await this.attach(socket, device, request);
 
       this.sendJson(socket, {

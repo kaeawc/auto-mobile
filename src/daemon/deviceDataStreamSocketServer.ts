@@ -952,90 +952,9 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     }
 
     // Handle per-file storage (un)subscription: register/release a device-side content observer so
-    // external writes to a key/value store emit storage_update frames. The acknowledgement follows
-    // the device-side result, so the desktop can safely reconcile its snapshot after registration.
+    // external writes to a key/value store emit storage_update frames.
     if (request.command === "subscribe_storage" || request.command === "unsubscribe_storage") {
-      const subscribe = request.command === "subscribe_storage";
-      const { packageName, fileName } = request;
-      if (!packageName || !fileName) {
-        const errorResponse: SubscriptionResponse = {
-          id: request.id,
-          type: "error",
-          success: false,
-          error: `${request.command} requires packageName and fileName`,
-        };
-        this.sendJson(socket, errorResponse);
-        return;
-      }
-
-      let storageDeviceSessionUuid: string | null;
-      try {
-        // JSON parsing does not validate fields at runtime; reject a malformed key
-        // before it can quietly resolve to a null (all-device) target.
-        storageDeviceSessionUuid = this.parseDeviceSessionUuid(request.deviceSessionUuid);
-      } catch (error) {
-        const errorResponse: SubscriptionResponse = {
-          id: request.id,
-          type: "error",
-          success: false,
-          error: errorMessage(error),
-        };
-        this.sendJson(socket, errorResponse);
-        return;
-      }
-
-      // Resolve the target device from the pane's session/serial, mirroring request_observation.
-      // A supplied-but-unresolvable session UUID must NOT fall through to a null (all-device)
-      // target: daemon.ts treats null as every device, so a stale/unknown UUID would otherwise
-      // register or release the content observer on every Android device and still ack success.
-      // Reject it exactly as the `subscribe` path does; a missing UUID stays an intentional
-      // device-scoped-by-serial request.
-      const storageDeviceId =
-        storageDeviceSessionUuid === null
-          ? (request.deviceId ?? null)
-          : this.deviceSessionResolver.resolveDeviceId(storageDeviceSessionUuid);
-      if (storageDeviceSessionUuid !== null && storageDeviceId === null) {
-        const errorResponse: SubscriptionResponse = {
-          id: request.id,
-          type: "error",
-          success: false,
-          error: `deviceSessionUuid '${storageDeviceSessionUuid}' does not identify a live device session`,
-        };
-        this.sendJson(socket, errorResponse);
-        return;
-      }
-
-      // The CtrlProxy observer is keyed by serial/package/file, not by the session epoch. A
-      // reconnecting pane receives a new session UUID for the same serial; keeping UUIDs in this
-      // ownership key lets the retired pane's teardown unregister the refreshed pane's observer.
-      const key = `${storageDeviceId ?? "all"}:${packageName}:${fileName}`;
-      const storageRequest = { deviceId: storageDeviceId, packageName, fileName, subscribe };
-      try {
-        if (subscribe) {
-          await this.subscribeStorageForSocket(socket, key, storageRequest);
-        } else {
-          await this.unsubscribeStorageForSocket(socket, key, storageRequest);
-        }
-      } catch (error) {
-        logger.warn(
-          `[DeviceDataStream] Error handling ${request.command} for ${packageName}/${fileName}: ${errorMessage(error)}`,
-        );
-        const errorResponse: SubscriptionResponse = {
-          id: request.id,
-          type: "error",
-          success: false,
-          error: errorMessage(error),
-        };
-        this.sendJson(socket, errorResponse);
-        return;
-      }
-
-      const response: SubscriptionResponse = {
-        id: request.id,
-        type: "subscription_response",
-        success: true,
-      };
-      this.sendJson(socket, response);
+      await this.handleStorageSubscriptionRequest(socket, request);
       return;
     }
 
@@ -1509,6 +1428,119 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     } catch (error) {
       logger.warn(`[DeviceDataStream] Error in ${callbackName} callback: ${error}`);
     }
+  }
+
+  /**
+   * Register or release a device-side content observer for one key/value file, so
+   * external writes to it emit `storage_update` frames. The acknowledgement follows
+   * the device-side result, so the desktop can safely reconcile its snapshot after
+   * registration.
+   */
+  private async handleStorageSubscriptionRequest(
+    socket: Socket,
+    request: {
+      id?: string;
+      command: string;
+      deviceId?: string;
+      deviceSessionUuid?: string;
+      packageName?: string;
+      fileName?: string;
+    },
+  ): Promise<void> {
+    const subscribe = request.command === "subscribe_storage";
+    const { packageName, fileName } = request;
+    if (!packageName || !fileName) {
+      this.sendJson(socket, {
+        id: request.id,
+        type: "error",
+        success: false,
+        error: `${request.command} requires packageName and fileName`,
+      } satisfies SubscriptionResponse);
+      return;
+    }
+
+    let storageDeviceId: string | null;
+    try {
+      storageDeviceId = this.resolveStorageTargetDeviceId(request, subscribe);
+    } catch (error) {
+      this.sendJson(socket, {
+        id: request.id,
+        type: "error",
+        success: false,
+        error: errorMessage(error),
+      } satisfies SubscriptionResponse);
+      return;
+    }
+
+    // The CtrlProxy observer is keyed by serial/package/file, not by the session epoch. A
+    // reconnecting pane receives a new session UUID for the same serial; keeping UUIDs in this
+    // ownership key lets the retired pane's teardown unregister the refreshed pane's observer.
+    const key = `${storageDeviceId ?? "all"}:${packageName}:${fileName}`;
+    const storageRequest = { deviceId: storageDeviceId, packageName, fileName, subscribe };
+    try {
+      if (subscribe) {
+        await this.subscribeStorageForSocket(socket, key, storageRequest);
+      } else {
+        await this.unsubscribeStorageForSocket(socket, key, storageRequest);
+      }
+    } catch (error) {
+      logger.warn(
+        `[DeviceDataStream] Error handling ${request.command} for ${packageName}/${fileName}: ${errorMessage(error)}`,
+      );
+      this.sendJson(socket, {
+        id: request.id,
+        type: "error",
+        success: false,
+        error: errorMessage(error),
+      } satisfies SubscriptionResponse);
+      return;
+    }
+
+    this.sendJson(socket, {
+      id: request.id,
+      type: "subscription_response",
+      success: true,
+    } satisfies SubscriptionResponse);
+  }
+
+  /**
+   * The serial a storage (un)subscription targets, or null for an all-device
+   * request. Throws the message the caller reports verbatim.
+   *
+   * A supplied-but-unresolvable session UUID must NOT fall through to a null
+   * (all-device) target: daemon.ts treats null as every device, so a stale or
+   * unknown UUID would otherwise register or release the content observer on every
+   * Android device and still ack success. A missing UUID stays an intentional
+   * device-scoped-by-serial request.
+   *
+   * FUNNEL 2 for that raw-serial form: the session-keyed form resolves through
+   * `resolveDeviceId`, which already withholds a quarantined serial, while the raw
+   * one skips that resolution entirely — and registering an observer on a serial
+   * the pool can no longer tie to a runtime observes whichever AVD now answers
+   * ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review). Teardown is
+   * exempt: refusing it would strand the observer this daemon registered, and
+   * releasing it touches only bookkeeping the quarantine does not question.
+   */
+  private resolveStorageTargetDeviceId(
+    request: { deviceId?: string; deviceSessionUuid?: string },
+    subscribe: boolean,
+  ): string | null {
+    // JSON parsing does not validate fields at runtime; reject a malformed key
+    // before it can quietly resolve to a null (all-device) target.
+    const deviceSessionUuid = this.parseDeviceSessionUuid(request.deviceSessionUuid);
+    const deviceId =
+      deviceSessionUuid === null
+        ? (request.deviceId ?? null)
+        : this.deviceSessionResolver.resolveDeviceId(deviceSessionUuid);
+    if (deviceSessionUuid !== null && deviceId === null) {
+      throw new Error(
+        `deviceSessionUuid '${deviceSessionUuid}' does not identify a live device session`,
+      );
+    }
+    if (subscribe && deviceId !== null) {
+      this.deviceSessionResolver.assertDeviceActionable(deviceId, "to watch stored values");
+    }
+    return deviceId;
   }
 
   private async handleObservationRequest(

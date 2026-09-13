@@ -17,6 +17,8 @@ import {
 } from "../../src/daemon/streamSocketAuth";
 import { CODEC_ID_H264 } from "../../src/daemon/videoStreamFraming";
 import { SIMULATOR_FPS_DEFAULT } from "../../src/features/screen-stream/IOSScreenCaptureHelper";
+import type { DeviceAdmissionGate } from "../../src/daemon/deviceAdmissionGate";
+import { ActionableError } from "../../src/models";
 import { WEBRTC_IOS_SIMULATOR_FPS_DEFAULT } from "../../src/features/webrtc/webrtcStreamingConfig";
 
 const DEVICE: BootedDevice = {
@@ -88,6 +90,7 @@ async function startHarness(
     timer?: Timer;
     /** Pre-arms each created source to throttle this many key-frame requests. */
     keyFrameRejections?: number;
+    admissionGate?: DeviceAdmissionGate;
   } = {},
 ): Promise<Harness> {
   const dir = mkdtempSync(path.join(tmpdir(), "amvs-"));
@@ -128,6 +131,7 @@ async function startHarness(
     socketPath,
     options.timer ?? defaultTimer,
     options.authenticator ?? allowAllAuthenticator,
+    options.admissionGate,
   );
   await server.start();
 
@@ -213,6 +217,27 @@ describe("VideoStreamSocketServer", () => {
     expect(ack.type).toBe("video_stream_response");
     expect(ack.deviceId).toBe(DEVICE.deviceId);
     expect(ack.framing).toBe("h264");
+  });
+
+  // FUNNEL 2: the quarantine preserves the owning session, so authorization
+  // still succeeds on a serial whose AVD identity the pool can no longer prove.
+  // Starting a capture on it would relay whichever runtime now answers
+  // ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
+  test("refuses a subscribe on a quarantined serial without starting a capture", async () => {
+    const h = await startHarness({
+      admissionGate: {
+        assertDeviceActionable: (deviceId, purpose) => {
+          throw new ActionableError(`Refusing ${purpose} on device '${deviceId}'`);
+        },
+      },
+    });
+
+    const { ack } = await subscribe(h.socketPath);
+
+    expect(ack.success).toBe(false);
+    expect(String(ack.error)).toContain("Refusing to stream video on device 'emulator-5554'");
+    expect(h.sources).toHaveLength(0);
+    expect(h.server.activeDeviceIds()).toEqual([]);
   });
 
   test("pins the observation capture rate rather than inheriting the WebRTC default", async () => {

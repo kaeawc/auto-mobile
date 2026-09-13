@@ -27,10 +27,20 @@ describe("device-addressed admission gate (issue #6863)", () => {
   const ROOT = join(import.meta.dir, "..", "..");
   const GATE = "assertDeviceActionable";
 
-  /** Socket servers that accept device-addressed requests from clients. */
+  /**
+   * Socket servers that accept device-addressed requests from clients. The
+   * capture and recording servers are here because authorization is NOT this
+   * gate: the quarantine deliberately preserves the owning session, so an
+   * authorized subscribe/start still passes and would capture whichever
+   * replacement AVD now answers on the serial
+   * ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
+   */
   const SCANNED = [
     "src/daemon/socketServer.ts",
     "src/daemon/deviceDataStreamSocketServer.ts",
+    "src/daemon/videoStreamSocketServer.ts",
+    "src/daemon/webrtcStreamSocketServer.ts",
+    "src/daemon/testRecordingSocketServer.ts",
   ] as const;
 
   /**
@@ -63,6 +73,38 @@ describe("device-addressed admission gate (issue #6863)", () => {
       fn: "handleObservationRequest",
       what: "request_observation — refuses BEFORE observing, instead of acking an empty push",
     },
+    {
+      file: "src/daemon/deviceDataStreamSocketServer.ts",
+      fn: "resolveStorageTargetDeviceId",
+      what:
+        "subscribe_storage addressed by RAW serial — the session-keyed form is already " +
+        "withheld by resolveDeviceId; teardown is deliberately exempt",
+    },
+    {
+      file: "src/daemon/videoStreamSocketServer.ts",
+      fn: "processLine",
+      what: "video-stream subscribe — gated before any capture source is created",
+    },
+    {
+      file: "src/daemon/webrtcStreamSocketServer.ts",
+      fn: "handleStart",
+      what: "webrtcStream start — gated before the WHIP publisher attaches to the device",
+    },
+    {
+      file: "src/daemon/testRecordingSocketServer.ts",
+      fn: "handleRequest",
+      what: "testRecording start — gated before resolveDevice readies the runtime",
+    },
+  ];
+
+  /**
+   * Pure resolvers: they turn a serial into a `BootedDevice` and RETURN it,
+   * acting on nothing. The gate belongs to the handler that receives the device —
+   * `handleStart` above — which this file already pins, so gating here too would
+   * only duplicate the refusal.
+   */
+  const RESOLVERS_ONLY: readonly string[] = [
+    "src/daemon/webrtcStreamSocketServer.ts#resolveWebRtcStreamDevice",
   ];
 
   function stripComments(source: string): string {
@@ -151,11 +193,18 @@ describe("device-addressed admission gate (issue #6863)", () => {
         // "Device-addressed" = the function resolves a caller-supplied serial
         // against a discovery listing. That is the shape every bypass had.
         const addressesADevice =
-          /\bdeviceId\s*===/.test(fn.body) && /getBootedDevices|requestObservation/.test(fn.body);
+          (/\bdeviceId\s*===/.test(fn.body) &&
+            /getBootedDevices|requestObservation/.test(fn.body)) ||
+          // The capture/recording shape: hand the caller-supplied serial to a
+          // device resolver, then act on whatever comes back.
+          /resolveDevice\(\s*request\.deviceId/.test(fn.body);
         if (!addressesADevice) {
           continue;
         }
         const key = `${file}#${fn.name}`;
+        if (RESOLVERS_ONLY.includes(key)) {
+          continue;
+        }
         if (!listed.has(key) && !fn.body.includes(GATE)) {
           bypassing.push(key);
         }
@@ -172,5 +221,12 @@ describe("device-addressed admission gate (issue #6863)", () => {
       "const target = devices.find((d) => d.deviceId === request.deviceId);";
     expect(/\bdeviceId\s*===/.test(bypass) && /getBootedDevices/.test(bypass)).toBe(true);
     expect(bypass.includes(GATE)).toBe(false);
+    // ... and on the capture/recording shape, which resolves the serial through a
+    // device resolver instead of scanning a listing itself.
+    const captureBypass =
+      "const device = await deps.resolveDevice(request.deviceId);\n" +
+      "const capture = await this.attach(socket, device, request);";
+    expect(/resolveDevice\(\s*request\.deviceId/.test(captureBypass)).toBe(true);
+    expect(captureBypass.includes(GATE)).toBe(false);
   });
 });

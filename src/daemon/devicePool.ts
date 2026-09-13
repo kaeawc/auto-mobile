@@ -5976,6 +5976,15 @@ export class DevicePool {
    * pooled entry, and refusing an unpooled serial would break direct-mode and
    * pre-allocation paths that legitimately address a device the pool never held.
    *
+   * Reached directly by the pool's own callers, through `DeviceSessionResolver`
+   * by the push servers that already hold one, and through
+   * `DeviceAdmissionGate` (src/daemon/deviceAdmissionGate.ts) by the capture and
+   * recording servers, which hold no pool reference. Authorization is never a
+   * substitute for it: the quarantine deliberately PRESERVES the owning session,
+   * so an authorized subscribe, stream start or recording start still passes and
+   * would act on whichever replacement AVD now answers on the serial
+   * ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
+   *
    * Enforced by `test/lint/deviceAddressedAdmissionGate.test.ts`, which fails on a
    * device-addressed socket handler that does not reach this gate.
    */

@@ -1,5 +1,6 @@
 import { logger } from "../utils/logger";
 import type { DeviceSessionRegistry } from "./deviceSessionRegistry";
+import type { DeviceAdmissionGate } from "./deviceAdmissionGate";
 
 /**
  * Bidirectional resolver between a device's mutable serial/UDID (`deviceId`) and
@@ -67,9 +68,8 @@ export const nullDeviceSessionResolver: DeviceSessionResolver = {
  * into a routing black hole. Omitted (direct mode, tests) means nothing is ever
  * quarantined.
  */
-export interface DeviceIdentityGate {
+export interface DeviceIdentityGate extends DeviceAdmissionGate {
   isPooledIdentityUnresolved(deviceId: string): boolean;
-  assertDeviceActionable(deviceId: string, purpose: string): void;
 }
 
 const permissiveIdentityGate: DeviceIdentityGate = {

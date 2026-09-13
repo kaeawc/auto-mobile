@@ -21,23 +21,27 @@ interface SubscribeReply {
  */
 interface LineDrivable {
   processLineForTest(socket: FakeSocket, line: string): Promise<void>;
+  /** Fan an event out through the stored subscriber filters; returns the delivery count. */
+  pushForTest(data: unknown): number;
 }
 
 function drivable<T extends object>(server: T): T & LineDrivable {
   const target = server as T & {
     processLine(socket: Socket, line: string): Promise<void>;
+    pushToSubscribers(data: unknown): number;
   };
   return Object.assign(server, {
     processLineForTest: (socket: FakeSocket, line: string): Promise<void> =>
       target.processLine(socket as unknown as Socket, line),
+    pushForTest: (data: unknown): number => target.pushToSubscribers(data),
   }) as T & LineDrivable;
 }
 
 async function subscribe(
   server: { processLineForTest(socket: FakeSocket, line: string): Promise<void> },
   request: Record<string, unknown>,
+  socket: FakeSocket = new FakeSocket(),
 ): Promise<SubscribeReply> {
-  const socket = new FakeSocket();
   await server.processLineForTest(
     socket,
     JSON.stringify({ id: "sub-1", command: "subscribe", ...request }),
@@ -48,7 +52,7 @@ async function subscribe(
 
 const servers: Array<{
   name: string;
-  create: () => { processLineForTest(socket: FakeSocket, line: string): Promise<void> } & {
+  create: () => LineDrivable & {
     getSubscriberCount(): number;
   };
 }> = [
@@ -100,6 +104,19 @@ describe("push socket subscription deviceSessionUuid validation (#6676)", () => 
         expect(reply.success).toBe(true);
         expect(reply.type).toBe("subscription_response");
         expect(server.getSubscriberCount()).toBe(1);
+      });
+
+      it("normalizes a padded deviceSessionUuid so events for that device still match", async () => {
+        const server = create();
+        const socket = new FakeSocket();
+
+        const reply = await subscribe(server, { deviceSessionUuid: " uuid-a " }, socket);
+        const delivered = server.pushForTest({ deviceSessionUuid: "uuid-a" });
+
+        // Accepting the padded key but filtering on it verbatim would recreate the
+        // inert subscription this validation exists to prevent (#6676).
+        expect(reply.success).toBe(true);
+        expect(delivered).toBe(1);
       });
 
       it("still accepts an all-device subscription with no deviceSessionUuid", async () => {

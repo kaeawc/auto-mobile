@@ -449,7 +449,8 @@ export abstract class PushSubscriptionSocketServer<TFilter, TPushData> extends B
    * `{ type: "error", success: false, error }` envelope and no subscription is created.
    *
    * @param value Raw value as it arrived on the wire.
-   * @returns The validated uuid, or null when the key is absent (an all-device subscription).
+   * @returns The validated, whitespace-trimmed uuid, or null when the key is absent
+   *          (an all-device subscription).
    */
   protected parseDeviceSessionUuid(value: unknown): string | null {
     if (value === undefined || value === null) {
@@ -458,10 +459,14 @@ export abstract class PushSubscriptionSocketServer<TFilter, TPushData> extends B
     if (typeof value !== "string") {
       throw new Error("deviceSessionUuid must be a string or null");
     }
-    if (value.trim().length === 0) {
+    const trimmed = value.trim();
+    if (trimmed.length === 0) {
       throw new Error("deviceSessionUuid must not be blank");
     }
-    return value;
+    // Return the trimmed key, never the raw one: filters compare by exact equality,
+    // so a padded `" uuid-a "` would ack success and then match nothing - the same
+    // inert subscription this validation exists to prevent (#6676).
+    return trimmed;
   }
 
   /**

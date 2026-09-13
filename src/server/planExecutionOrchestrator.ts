@@ -5,7 +5,11 @@ import {
   Platform,
   PlanExecutionResult,
 } from "../models";
-import { ExecutePlanStepDebugInfo, PlanExecutionOptions } from "../models/ExecutePlanResult";
+import {
+  ExecutePlanStepDebugInfo,
+  PlanExecutionOptions,
+  type PlanStepWarnings,
+} from "../models/ExecutePlanResult";
 import {
   TestExecutionRepository,
   TestExecutionStatus,
@@ -127,6 +131,16 @@ const rethrowDeviceLoss = (error: unknown): void => {
     throw error;
   }
 };
+
+/**
+ * The `warnings` field of an `executePlan` response, or nothing when the plan
+ * produced none (#6887 review).
+ */
+function planWarningsField(warnings: PlanStepWarnings[] | undefined): {
+  warnings?: PlanStepWarnings[];
+} {
+  return warnings?.length ? { warnings } : {};
+}
 
 /**
  * Converts debug step traces from PlanExecutor into the row shape expected by
@@ -330,6 +344,11 @@ export class PlanExecutionOrchestrator {
         deviceId: this.device.deviceId,
         deviceMapping,
         ...(this.request.captureObserveSteps && result.debug ? { debug: result.debug } : {}),
+        // Best-effort warnings from steps that still succeeded are NOT gated on
+        // captureObserveSteps: the debug trace is an opt-in diagnostic, while a
+        // keyboard that would not dismiss changes what every later step saw
+        // (#6887 review).
+        ...planWarningsField(result.warnings),
         ...(finalizedVideo.videoFilePaths.length > 0
           ? {
               videoFilePaths: finalizedVideo.videoFilePaths,

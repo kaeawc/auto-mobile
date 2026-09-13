@@ -32,6 +32,12 @@ import { DefaultElementParser } from "../features/utility/ElementParser";
 import type { NotificationUIDetector } from "../utils/interfaces/NotificationUIDetector";
 import { createNotificationUIDetector } from "./system-tray/createNotificationUIDetector";
 import {
+  attributeRowByDumpsys,
+  parseDumpsysNotificationRecords,
+  type DumpsysNotificationRecord,
+} from "./system-tray/notificationDumpsys";
+import { errorMessage } from "../utils/describeUnknownError";
+import {
   SYSTEM_TRAY_PACKAGE,
   SYSTEM_TRAY_RESOURCE_ID_HINTS,
   SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS as SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS_FROM_HINTS,
@@ -1439,6 +1445,9 @@ export const swipeElement = async (device: BootedDevice, element: Element): Prom
   await getDetector(device).swipeElement(element);
 };
 
+/** Which evidence class attributed a listed row to its app (#6875). */
+export type TrayOwnershipEvidence = "header" | "dumpsys";
+
 export interface ListedTrayNotification {
   id: string | null;
   appId: string;
@@ -1448,7 +1457,39 @@ export interface ListedTrayNotification {
   actions: string[];
   texts: string[];
   inGroup: boolean;
+  ownership: TrayOwnershipEvidence;
 }
+
+const ACTION_FIELD_IDS = ["action0", "action1", "action2", "action_text"];
+
+// Chrome SystemUI renders around the posted content: action buttons (and their
+// container) plus the row's own expand/dismiss/feedback controls. Their labels
+// come from the framework or from a `Notification.Action`, never from the
+// extras `dumpsys` correlates against, so counting them as correlation content
+// only lets an unrelated app whose title happens to read "Reply" make a
+// header-less row look ambiguous (#6875).
+const NON_CONTENT_ROW_IDS = new Set([
+  ...ACTION_FIELD_IDS,
+  "actions",
+  "action_list_margin_target",
+  "smart_reply_container",
+  "expand_button",
+  "expand_button_touch_container",
+  "feedback",
+  "close_button",
+  "snooze_button",
+  // Timer chrome: SystemUI renders the running chronometer value and the post
+  // timestamp itself, so neither appears in the extras `dumpsys` correlates
+  // against, and the chronometer's value changes between observations.
+  "chronometer",
+  "time",
+  "time_divider",
+]);
+
+// Chrome is inherited: everything below an action container or a row control
+// is chrome too.
+const isRowContent = (parentIsContent: boolean, id: string): boolean =>
+  parentIsContent && !NON_CONTENT_ROW_IDS.has(id);
 
 // Read semantic Android notification fields, preserving custom-layout text as a
 // fallback. A group header must not inherit fields from its sibling child rows.
@@ -1463,6 +1504,16 @@ const readTrayNotificationFields = (root: any) => {
     bodies: [] as string[],
     actions: [] as string[],
     texts: [] as string[],
+    // `texts` minus SystemUI's own chrome: what the posting app actually
+    // supplied, and the only text ownership correlation may rely on.
+    contentTexts: [] as string[],
+  };
+  // Chrome labels stay reported, but never become correlation evidence.
+  const recordTexts = (candidates: string[], content: boolean): void => {
+    fields.texts.push(...candidates);
+    if (content) {
+      fields.contentTexts.push(...candidates);
+    }
   };
   const assignSemanticField = (id: string, text: string): void => {
     if (["app_name_text", "app_name"].includes(id)) {
@@ -1474,7 +1525,7 @@ const readTrayNotificationFields = (root: any) => {
     if (["text", "big_text", "text2"].includes(id)) {
       fields.bodies.push(text);
     }
-    if (["action0", "action1", "action2", "action_text"].includes(id)) {
+    if (ACTION_FIELD_IDS.includes(id)) {
       fields.actions.push(text);
     }
   };
@@ -1482,7 +1533,7 @@ const readTrayNotificationFields = (root: any) => {
   // Preserve repeated message nodes within one layout; select the fullest
   // layout instead of deduplicating message values across compact/expanded UI.
   const messageLayouts: string[][] = [[]];
-  const pending = [{ node: root, messages: messageLayouts[0] }];
+  const pending = [{ node: root, messages: messageLayouts[0], content: true }];
   while (pending.length) {
     const entry = pending.shift()!;
     const { node } = entry;
@@ -1505,7 +1556,8 @@ const readTrayNotificationFields = (root: any) => {
     // `content-desc` (and the iOS accessibility label) routinely carry text the
     // rendered `text` omits, so keep every candidate rather than the first.
     const candidates = extractNodeTextCandidates(node);
-    fields.texts.push(...candidates);
+    const content = isRowContent(entry.content, id);
+    recordTexts(candidates, content);
     const text = candidates[0];
     if (text) {
       assignSemanticField(id, text);
@@ -1514,7 +1566,7 @@ const readTrayNotificationFields = (root: any) => {
       }
     }
     const children = [node.node].flat().filter((child) => child && typeof child === "object");
-    pending.push(...children.map((node: any) => ({ node, messages })));
+    pending.push(...children.map((node: any) => ({ node, messages, content })));
   }
   const messages = messageLayouts.reduce((fullest, layout) =>
     layout.length > fullest.length ? layout : fullest,
@@ -1524,7 +1576,11 @@ const readTrayNotificationFields = (root: any) => {
 };
 
 interface TrayObservedRow {
-  notification: Omit<ListedTrayNotification, "appId">;
+  // An observed row has no attribution yet: ownership is decided per request.
+  notification: Omit<ListedTrayNotification, "appId" | "ownership">;
+  // The row's app-supplied text, carried beside the reported fields so
+  // correlation never sees SystemUI's chrome (#6875).
+  correlationTexts: string[];
   bounds?: Element["bounds"];
 }
 
@@ -1538,6 +1594,7 @@ const readTrayNotifications = (hierarchy: ViewHierarchyResult): TrayObservedRow[
     const nodeId = getNodeProperties(candidate.node)?.["unique-id"];
     notifications.push({
       bounds: candidate.element?.bounds,
+      correlationTexts: [...new Set(fields.contentTexts)],
       notification: {
         id: typeof nodeId === "string" && nodeId.length > 0 ? nodeId : null,
         appLabel: label,
@@ -1647,6 +1704,94 @@ const trayAtScrollEnd = (hierarchy: ViewHierarchyResult): boolean =>
     }),
   );
 
+// SystemUI omits the per-row app-name header for the Silent (low-importance)
+// section, so those rows carry no ownership evidence in the shade at all. The
+// notification service does know who posted them; `--noredact` is what exposes
+// the extras values the rendered row can be correlated against. A redacted or
+// unavailable dump yields no records, which leaves such rows unattributed
+// rather than attributed by guess.
+// The aggregate unredacted dump of every posted notification routinely exceeds
+// the child process's 1 MiB default stdout buffer, which rejects the read
+// outright and leaves every header-less row unattributed.
+const DUMPSYS_NOTIFICATION_MAX_BUFFER = 8 * 1024 * 1024;
+
+const readDumpsysNotificationRecords = async (
+  adb: SystemTrayAdb,
+  signal?: AbortSignal,
+): Promise<DumpsysNotificationRecord[]> => {
+  try {
+    const result = await adb.executeCommand(
+      "shell dumpsys notification --noredact",
+      undefined,
+      DUMPSYS_NOTIFICATION_MAX_BUFFER,
+      true,
+      signal,
+    );
+    return parseDumpsysNotificationRecords(result.stdout ?? "");
+  } catch (error) {
+    signal?.throwIfAborted();
+    logger.warn(
+      `[systemTray] could not read dumpsys notification for shade ownership: ${errorMessage(error)}`,
+      error,
+    );
+    return [];
+  }
+};
+
+type TrayRowAttribution = TrayOwnershipEvidence | "other" | "unknown";
+
+const attributeTrayRow = (
+  row: TrayObservedRow,
+  appId: string,
+  appLabel: string | null,
+  records: readonly DumpsysNotificationRecord[],
+): TrayRowAttribution => {
+  if (row.notification.appLabel !== null) {
+    return appLabel && row.notification.appLabel === appLabel ? "header" : "other";
+  }
+  const owner = attributeRowByDumpsys(records, new Set(row.correlationTexts));
+  if (owner === null) {
+    return "unknown";
+  }
+  return owner === appId ? "dumpsys" : "other";
+};
+
+// Keep every app's rows available to align pages, then expose only rows an
+// evidence class actually attributes. Message text is not ownership evidence,
+// so a row nothing can attribute is counted rather than claimed or hidden:
+// "0 notifications" must stay distinguishable from "0 rows we could not read".
+const attributeTrayRows = (
+  rows: TrayObservedRow[],
+  appId: string,
+  appLabel: string | null,
+  records: readonly DumpsysNotificationRecord[],
+): { notifications: ListedTrayNotification[]; unattributedRows: number } => {
+  const notifications: ListedTrayNotification[] = [];
+  const nativeIds = new Map<string, number>();
+  let unattributedRows = 0;
+  for (const row of rows) {
+    const attribution = attributeTrayRow(row, appId, appLabel, records);
+    if (attribution === "unknown") {
+      unattributedRows++;
+      continue;
+    }
+    if (attribution === "other") {
+      continue;
+    }
+    const notification = { ...row.notification, appId, ownership: attribution };
+    const previousIndex = notification.id === null ? undefined : nativeIds.get(notification.id);
+    if (previousIndex !== undefined) {
+      notifications[previousIndex] = notification;
+    } else {
+      if (notification.id !== null) {
+        nativeIds.set(notification.id, notifications.length);
+      }
+      notifications.push(notification);
+    }
+  }
+  return { notifications, unattributedRows };
+};
+
 /** Bounded UI inventory, in encounter order, with no inferred posting times. */
 // eslint-disable-next-line complexity -- bounded scan coordinates shade state, pagination, and overlap.
 export const listSystemTrayNotifications = async (
@@ -1658,6 +1803,7 @@ export const listSystemTrayNotifications = async (
   signal?: AbortSignal,
 ): Promise<{
   notifications: ListedTrayNotification[];
+  unattributedRows: number;
   observation: ObserveResult;
   swipes: number;
   order: "encounter";
@@ -1731,25 +1877,13 @@ export const listSystemTrayNotifications = async (
       },
     );
   }
-  // Keep every app's rows available to align pages, then expose only rows
-  // attributed by the verified header. Message text is not ownership evidence.
-  const notifications: ListedTrayNotification[] = [];
-  const nativeIds = new Map<string, number>();
-  for (const row of rows) {
-    if (!appLabel || row.notification.appLabel !== appLabel) {
-      continue;
-    }
-    const notification = { ...row.notification, appId };
-    const previousIndex = notification.id === null ? undefined : nativeIds.get(notification.id);
-    if (previousIndex !== undefined) {
-      notifications[previousIndex] = notification;
-    } else {
-      if (notification.id !== null) {
-        nativeIds.set(notification.id, notifications.length);
-      }
-      notifications.push(notification);
-    }
-  }
+  signal?.throwIfAborted();
+  // Only pay for the dump when the shade actually rendered a row the header
+  // rule cannot attribute.
+  const records = rows.some((row) => row.notification.appLabel === null)
+    ? await readDumpsysNotificationRecords(adbFactory(device), signal)
+    : [];
+  const { notifications, unattributedRows } = attributeTrayRows(rows, appId, appLabel, records);
   signal?.throwIfAborted();
   await detector.collapseTray();
   signal?.throwIfAborted();
@@ -1758,7 +1892,7 @@ export const listSystemTrayNotifications = async (
     await detector.getObservationTimestamp(),
     signal,
   );
-  return { notifications, observation, swipes, order: "encounter" };
+  return { notifications, unattributedRows, observation, swipes, order: "encounter" };
 };
 
 /** Verify label ownership against a successful, fresh installed-package inventory. */

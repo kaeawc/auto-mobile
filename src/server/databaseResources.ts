@@ -1,5 +1,4 @@
 import { ResourceRegistry, ResourceContent } from "./resourceRegistry";
-import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
 import {
   DatabaseInspector,
   DatabaseInfo,
@@ -11,6 +10,7 @@ import { logger } from "../utils/logger";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
 import type { TableDataResult } from "../features/database/DatabaseInspector";
 import { optionalInteger } from "./queryParamValidation";
+import { findBootedDeviceForResource } from "./resourceDeviceResolver";
 
 // Resource URI templates
 const DATABASE_RESOURCE_TEMPLATES = {
@@ -108,25 +108,7 @@ interface AppDatabaseClient {
  * Find a booted Android or iOS device by ID.
  */
 async function findBootedDevice(deviceId: string): Promise<BootedDevice | null> {
-  const manager = PlatformDeviceManagerFactory.getInstance();
-  const [androidDevices, iosDevices] = await Promise.all([
-    getBootedDevicesSafely("android", () => manager.getBootedDevices("android")),
-    getBootedDevicesSafely("ios", () => manager.getBootedDevices("ios")),
-  ]);
-  const devices = [...androidDevices, ...iosDevices];
-  return devices.find((d) => d.deviceId === deviceId) ?? null;
-}
-
-async function getBootedDevicesSafely(
-  platform: "android" | "ios",
-  listDevices: () => Promise<BootedDevice[]>,
-): Promise<BootedDevice[]> {
-  try {
-    return await listDevices();
-  } catch (error) {
-    logger.warn(`[DatabaseResources] Failed to list ${platform} devices: ${error}`);
-    return [];
-  }
+  return findBootedDeviceForResource(deviceId, "DatabaseResources");
 }
 
 function createDatabaseClient(device: BootedDevice): AppDatabaseClient {

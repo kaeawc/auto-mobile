@@ -67,6 +67,48 @@ export function resetListAppsToolDependencies(): void {
   listAppsToolDependencies = null;
 }
 
+export interface LaunchAppExecutor {
+  execute(
+    appId: string,
+    clearAppData?: boolean,
+    coldBoot?: boolean,
+    activityName?: string,
+    userId?: number,
+    skipUiStability?: boolean,
+    signal?: AbortSignal,
+  ): Promise<LaunchAppResult>;
+}
+
+// Injection seam for the launchApp handler (mirrors the terminateApp/crashApp
+// dependency seams in this file). Lets a unit test exercise the REGISTERED
+// handler wiring with a fake LaunchApp, so the already-foreground response shape
+// is covered by a test rather than only the response builder (issue #6868).
+export interface LaunchAppToolDependencies {
+  createLaunchApp(device: BootedDevice): LaunchAppExecutor;
+}
+
+let launchAppToolDependencies: LaunchAppToolDependencies | null = null;
+
+function getLaunchAppToolDependencies(): LaunchAppToolDependencies {
+  if (!launchAppToolDependencies) {
+    launchAppToolDependencies = {
+      createLaunchApp: (device) => new LaunchApp(device),
+    };
+  }
+  return launchAppToolDependencies;
+}
+
+export function setLaunchAppToolDependencies(deps: Partial<LaunchAppToolDependencies>): void {
+  const currentDeps = getLaunchAppToolDependencies();
+  launchAppToolDependencies = {
+    createLaunchApp: deps.createLaunchApp ?? currentDeps.createLaunchApp,
+  };
+}
+
+export function resetLaunchAppToolDependencies(): void {
+  launchAppToolDependencies = null;
+}
+
 export interface TerminateAppExecutor {
   execute(
     appId: string,
@@ -209,14 +251,21 @@ function buildLaunchMessage(
   appId: string,
   verified: boolean | undefined,
   verifyFailureReason: LaunchVerificationFailureReason | undefined,
+  alreadyForeground: boolean | undefined,
 ): string {
+  // An app that was already foreground was never launched — say so rather than
+  // claiming a launch that did not happen (issue #6868). The verification suffix
+  // is unchanged: it describes the observed end state either way.
+  const lead = alreadyForeground
+    ? `App ${appId} was already in the foreground`
+    : `Launched app ${appId}`;
   if (verified === true) {
-    return `Launched app ${appId} (foreground verified)`;
+    return `${lead} (foreground verified)`;
   }
   if (verifyFailureReason) {
-    return `Launched app ${appId} (verification failed: ${launchVerificationFailureMessage(verifyFailureReason)})`;
+    return `${lead} (verification failed: ${launchVerificationFailureMessage(verifyFailureReason)})`;
   }
-  return `Launched app ${appId}`;
+  return lead;
 }
 
 /**
@@ -281,7 +330,7 @@ export function buildLaunchAppResponse(appId: string, result: LaunchAppResult) {
   const verified = isVerified ? true : verifyFailureReason ? false : undefined;
 
   return {
-    message: buildLaunchMessage(appId, verified, verifyFailureReason),
+    message: buildLaunchMessage(appId, verified, verifyFailureReason, result.alreadyForeground),
     verified,
     ...(verifyFailureReason ? { verifyFailureReason } : {}),
     observedAppId,
@@ -291,11 +340,19 @@ export function buildLaunchAppResponse(appId: string, result: LaunchAppResult) {
 }
 
 // Schema definitions
+// #6613: these app schemas advertised `additionalProperties: false` but were
+// not `.strict()`, so an undeclared caller argument (e.g. `installApp{userId}`,
+// which this tool does not support) was silently dropped and the call ran
+// against the auto-detected user instead of failing. `withAppIdAliases` runs its
+// `z.preprocess` alias normalization before these schemas parse, so documented
+// aliases still work under strict mode (same precedent as launchApp).
 export const packageNameSchema = withAppIdAliases(
   addDeviceTargetingToSchema(
-    z.object({
-      appId: z.string(),
-    }),
+    z
+      .object({
+        appId: z.string(),
+      })
+      .strict(),
   ),
 );
 
@@ -304,18 +361,22 @@ export const packageNameSchema = withAppIdAliases(
 // observation defaults to the compact skeleton, opt-out-able via raw/project.
 export const terminateAppSchema = withAppIdAliases(
   addDeviceTargetingToSchema(
-    z.object({
-      appId: z.string(),
-      ...responseShapeControlFields,
-    }),
+    z
+      .object({
+        appId: z.string(),
+        ...responseShapeControlFields,
+      })
+      .strict(),
   ),
 );
 
 export const crashAppSchema = withAppIdAliases(
   addDeviceTargetingToSchema(
-    z.object({
-      appId: z.string().trim().min(1),
-    }),
+    z
+      .object({
+        appId: z.string().trim().min(1),
+      })
+      .strict(),
   ),
 );
 
@@ -362,20 +423,24 @@ export const launchAppSchema = withAppIdAliases(
 );
 
 export const installAppSchema = addDeviceTargetingToSchema(
-  z.object({
-    artifactPath: z.string().describe("App artifact path (.apk, .app, or .ipa)"),
-  }),
+  z
+    .object({
+      artifactPath: z.string().describe("App artifact path (.apk, .app, or .ipa)"),
+    })
+    .strict(),
 );
 
 export const uninstallAppSchema = withAppIdAliases(
   addDeviceTargetingToSchema(
-    z.object({
-      appId: z.string(),
-      keepData: z
-        .boolean()
-        .optional()
-        .describe("Keep app data after uninstall (Android only, default false)"),
-    }),
+    z
+      .object({
+        appId: z.string(),
+        keepData: z
+          .boolean()
+          .optional()
+          .describe("Keep app data after uninstall (Android only, default false)"),
+      })
+      .strict(),
   ),
 );
 
@@ -511,32 +576,38 @@ export const resetKeychainSchema = withAppIdAliases(
   ),
 );
 
+// #6613: `listApps` advertises `additionalProperties: false` in tools/list, so
+// its runtime schema must reject undeclared arguments too. Without `.strict()`
+// a call such as `listApps({ appId: "com.example" })` had the unsupported
+// filter silently dropped and returned the full unfiltered listing.
 export const listAppsSchema = addDeviceTargetingToSchema(
-  z.object({
-    type: z
-      .enum(["user", "system", "all"])
-      .optional()
-      .describe(
-        "Filter by app type. Defaults to 'user', EXCEPT on a physical iOS device where " +
-          "user/system classification is unavailable (devicectl reports no such signal there): " +
-          "on such a device an omitted type returns every app (reported as 'all'), and an " +
-          "explicit 'user' or 'system' filter is rejected rather than silently honored.",
-      ),
-    search: z
-      .string()
-      .optional()
-      .describe(
-        "Filter by a case-insensitive substring of the package name/bundle id. Also matches " +
-          "the app's display name where the platform reports one (iOS only today — Android's " +
-          "listing does not include app labels).",
-      ),
-    profile: z
-      .number()
-      .int()
-      .min(0)
-      .optional()
-      .describe("Filter to apps visible to this user profile id."),
-  }),
+  z
+    .object({
+      type: z
+        .enum(["user", "system", "all"])
+        .optional()
+        .describe(
+          "Filter by app type. Defaults to 'user', EXCEPT on a physical iOS device where " +
+            "user/system classification is unavailable (devicectl reports no such signal there): " +
+            "on such a device an omitted type returns every app (reported as 'all'), and an " +
+            "explicit 'user' or 'system' filter is rejected rather than silently honored.",
+        ),
+      search: z
+        .string()
+        .optional()
+        .describe(
+          "Filter by a case-insensitive substring of the package name/bundle id. Also matches " +
+            "the app's display name where the platform reports one (iOS only today — Android's " +
+            "listing does not include app labels).",
+        ),
+      profile: z
+        .number()
+        .int()
+        .min(0)
+        .optional()
+        .describe("Filter to apps visible to this user profile id."),
+    })
+    .strict(),
 );
 
 export interface ListAppsArgs {
@@ -658,7 +729,7 @@ export function registerAppTools() {
   ) => {
     try {
       signal?.throwIfAborted();
-      const launchApp = new LaunchApp(device);
+      const launchApp = getLaunchAppToolDependencies().createLaunchApp(device);
       const result = await launchApp.execute(
         args.appId,
         args.clearAppData ?? false,
@@ -870,7 +941,7 @@ export function registerAppTools() {
   // Register with the tool registry
   ToolRegistry.registerDeviceAware(
     "launchApp",
-    "Launch app by package name",
+    "Launch app by package name. On Android an app that is already in the foreground returns success with alreadyForeground:true plus the observation, not an error; iOS re-launches it and returns an ordinary success without that marker.",
     launchAppSchema,
     launchAppHandler,
     { defaultEnabled: true },

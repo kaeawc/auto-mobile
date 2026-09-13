@@ -77,19 +77,36 @@ const priorActivity: fc.Arbitrary<Array<Geometry | number>> = fc.array(
   { maxLength: 5 },
 );
 
-const drive = (steps: Array<Geometry | number>): TrackedScreenGeometry => {
+const driveWithLastGeometry = (
+  steps: Array<Geometry | number>,
+): { tracker: TrackedScreenGeometry; lastGeometry: Geometry | undefined } => {
   const tracker = new TrackedScreenGeometry();
+  let lastGeometry: Geometry | undefined;
   for (const step of steps) {
     if (typeof step === "number") {
       tracker.markForwarded(step);
     } else {
       apply(tracker, step);
+      lastGeometry = step;
     }
   }
-  return tracker;
+  return { tracker, lastGeometry };
 };
 
+const drive = (steps: Array<Geometry | number>): TrackedScreenGeometry =>
+  driveWithLastGeometry(steps).tracker;
+
 describe("TrackedScreenGeometry.update (property-based)", () => {
+  test("identical geometry preserves forwarded provenance", () => {
+    const tracker = new TrackedScreenGeometry();
+    tracker.update(1080, 2340, "px", 3);
+    tracker.markForwarded(7);
+    tracker.update(1080, 2340, "px", 3);
+
+    expect(tracker.isForwarded).toBe(true);
+    expect(tracker.bind()?.captureSequence).toBe(7);
+  });
+
   test("unusable geometry fully clears the tracker, whatever the prior state", () => {
     fc.assert(
       fc.property(
@@ -115,16 +132,23 @@ describe("TrackedScreenGeometry.update (property-based)", () => {
     );
   });
 
-  test("valid geometry is recorded but never claims provenance until it is forwarded", () => {
+  test("valid geometry records provenance only when identity is unchanged", () => {
     fc.assert(
       fc.property(priorActivity, validGeometry, (prior, g) => {
-        const tracker = drive(prior);
+        const { tracker, lastGeometry } = driveWithLastGeometry(prior);
+        const previousBinding = tracker.bind();
         apply(tracker, g);
         expect(tracker.width).toBe(g.width);
         expect(tracker.height).toBe(g.height);
-        // Fresh geometry the daemon has not seen must fail closed.
-        expect(tracker.isForwarded).toBe(false);
-        expect(tracker.bind()).toBeNull();
+        if (lastGeometry && sameGeometry(lastGeometry, g)) {
+          // Re-deriving identical geometry preserves whatever provenance was already established.
+          expect(tracker.isForwarded).toBe(previousBinding !== null);
+          expect(tracker.bind()).toEqual(previousBinding);
+        } else {
+          // Fresh or changed geometry the daemon has not seen must fail closed.
+          expect(tracker.isForwarded).toBe(false);
+          expect(tracker.bind()).toBeNull();
+        }
       }),
       RUN_OPTIONS,
     );

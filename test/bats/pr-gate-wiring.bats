@@ -330,6 +330,8 @@ wiring_requires_yq() {
     "android/video-server/**" \
     "ios/screen-capture/**" \
     "test/integration/webrtcDeviceCapture.integration.test.ts" \
+    "test/helpers/captureStageTimeline.ts" \
+    "test/helpers/webrtcDeviceCaptureHelpers.ts" \
     ".github/workflows/pull_request.yml" \
     ".github/workflows/merge.yml"; do
     [[ $'\n'"$output"$'\n' == *$'\n'"$path"$'\n'* ]]

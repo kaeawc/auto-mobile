@@ -4,6 +4,7 @@ import { logger } from "../utils/logger";
 import { toActionableError } from "../models/ActionableError";
 import { ActionableError } from "../models";
 import { DeviceSessionManager } from "../utils/DeviceSessionManager";
+import type { PlatformDeviceManager } from "../utils/deviceUtils";
 import { createH264CaptureSource } from "../features/webrtc/h264CaptureSourceFactory";
 import { ScreenRecordingPermissionError } from "../features/webrtc/IosH264Source";
 import { resolveVideoServerJar } from "../features/webrtc/videoServerJar";
@@ -700,10 +701,10 @@ export function setVideoStreamSocketServerForTesting(server: VideoStreamSocketSe
  * OTHER serial is still folded in even when this request goes on to fail.
  */
 export async function resolveVideoStreamDevice(
-  deviceSessionManager: Pick<DeviceSessionManager, "detectConnectedPlatforms">,
+  deviceManager: Pick<PlatformDeviceManager, "getBootedDevices">,
   deviceId?: string,
 ): Promise<BootedDevice> {
-  const devices = await deviceSessionManager.detectConnectedPlatforms();
+  const devices = await deviceManager.getBootedDevices("either");
   await reconcileDiscoveryObservation(devices, "video-stream-resolve");
 
   if (deviceId) {
@@ -728,7 +729,10 @@ export async function resolveVideoStreamDevice(
 }
 
 async function defaultResolveDevice(deviceId?: string): Promise<BootedDevice> {
-  return await resolveVideoStreamDevice(DeviceSessionManager.getInstance(), deviceId);
+  return await resolveVideoStreamDevice(
+    DeviceSessionManager.getInstance().getPlatformDeviceManager(),
+    deviceId,
+  );
 }
 
 function defaultDependencies(): VideoStreamSocketServerDependencies {

@@ -104,6 +104,12 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
         "Picks a stream candidate by platform from an injected manager, then hands it to an " +
         "admission gate that reads pooled identity; reconciles first.",
     },
+    "src/daemon/videoStreamSocketServer.ts": {
+      calls: 1,
+      reason:
+        "Picks a stream candidate across both platforms from the AVD-name-aware manager, then " +
+        "reconciles before the admission gate reads pooled identity.",
+    },
 
     // --- Consult no pooled identity -----------------------------------------
     "src/utils/DeviceSessionManager.ts": {
@@ -282,11 +288,6 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
       "src/server/bootedDeviceResources.ts",
       "src/server/deviceTools.ts",
       "src/daemon/webrtcStreamSocketServer.ts",
-      // Discovers through `DeviceSessionManager.detectConnectedPlatforms` rather
-      // than a `getBooted*` API, so it carries no ALLOWLIST entry above — but it
-      // is a device discovery joined to pooled identity by the admission gate on
-      // the resolved device, and the funnel obligation is the same
-      // ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
       "src/daemon/videoStreamSocketServer.ts",
       "src/server/resourceDeviceResolver.ts",
     ];

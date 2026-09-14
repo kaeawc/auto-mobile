@@ -2387,6 +2387,9 @@ export class DevicePool {
       await this.reconcilePooledIdentityResolution(device, bootedDevice);
       return this.confirmLivePooledDevice(device);
     }
+    if (this.isStaleIdentityObservation(device, bootedDevice)) {
+      return this.confirmLivePooledDevice(device);
+    }
     const replaced = await this.replaceIdlePooledDeviceForLivenessCheck(
       device,
       bootedDevice,

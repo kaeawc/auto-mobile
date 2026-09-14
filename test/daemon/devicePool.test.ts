@@ -7268,6 +7268,39 @@ describe("DevicePool", () => {
       expect(devicePool.isPooledIdentityUnresolved("emulator-5554")).toBe(false);
     });
 
+    test("ignores a stale liveness disagreement after newer discovery confirmed the pooled identity", async () => {
+      const device = poolDevice("emulator-5554", "Pixel_8_API_35");
+      await initializeLiveDevices([device]);
+      await devicePool.reconcileDiscoveryObservation([stamped(device, 10)], "test:resolved");
+
+      // This is the separate assignment-time liveness path. Its discovery
+      // started earlier and only completed after the funnel had confirmed A.
+      fakeDeviceManager.bootedDevices = [stamped(poolDevice("emulator-5554", "Pixel_7_API_34"), 9)];
+
+      await devicePool.bindOrReuseDeviceSession("session-1", "emulator-5554", "android");
+
+      expect(devicePool.getDevice("emulator-5554")).toMatchObject({
+        name: "Pixel_8_API_35",
+        sessionId: "session-1",
+      });
+    });
+
+    test("replaces a pooled identity for a newer liveness disagreement", async () => {
+      const device = poolDevice("emulator-5554", "Pixel_8_API_35");
+      await initializeLiveDevices([device]);
+      await devicePool.reconcileDiscoveryObservation([stamped(device, 9)], "test:resolved");
+      fakeDeviceManager.bootedDevices = [
+        stamped(poolDevice("emulator-5554", "Pixel_7_API_34"), 10),
+      ];
+
+      await devicePool.bindOrReuseDeviceSession("session-1", "emulator-5554", "android");
+
+      expect(devicePool.getDevice("emulator-5554")).toMatchObject({
+        name: "Pixel_7_API_34",
+        sessionId: "session-1",
+      });
+    });
+
     // A placeholder that is genuinely newer than the last resolved observation
     // still quarantines: the ordering rule withholds trust from STALE evidence
     // only.

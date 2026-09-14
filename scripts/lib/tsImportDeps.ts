@@ -20,6 +20,23 @@ function relativeModuleSpecifiers(sourceFile: ts.SourceFile): string[] {
     ) {
       specifiers.push(node.moduleSpecifier.text);
     }
+    if (
+      ts.isImportEqualsDeclaration(node) &&
+      ts.isExternalModuleReference(node.moduleReference) &&
+      ts.isStringLiteralLike(node.moduleReference.expression) &&
+      node.moduleReference.expression.text.startsWith(".")
+    ) {
+      specifiers.push(node.moduleReference.expression.text);
+    }
+    if (
+      ts.isCallExpression(node) &&
+      node.expression.kind === ts.SyntaxKind.ImportKeyword &&
+      node.arguments.length === 1 &&
+      ts.isStringLiteralLike(node.arguments[0]) &&
+      node.arguments[0].text.startsWith(".")
+    ) {
+      specifiers.push(node.arguments[0].text);
+    }
     ts.forEachChild(node, visit);
   };
 
@@ -29,7 +46,15 @@ function relativeModuleSpecifiers(sourceFile: ts.SourceFile): string[] {
 
 function resolveRelativeSpecifier(importingFile: string, specifier: string): string | undefined {
   const literalPath = path.resolve(path.dirname(importingFile), specifier);
-  return path.extname(literalPath) === "" ? `${literalPath}.ts` : literalPath;
+  const knownExtensions = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts"]);
+  if (knownExtensions.has(path.extname(literalPath)) && existsSync(literalPath)) {
+    return literalPath;
+  }
+  return (
+    [`${literalPath}.ts`, `${literalPath}.tsx`, path.join(literalPath, "index.ts")].find(
+      (candidate) => existsSync(candidate),
+    ) ?? `${literalPath}.ts`
+  );
 }
 
 /**

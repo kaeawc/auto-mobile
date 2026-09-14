@@ -60,4 +60,60 @@ describe("resolveRelativeImportPaths", () => {
       "scripts/release/lib/deleted-helper.ts",
     ]);
   });
+
+  test("resolves extensionless dotted imports to an existing TypeScript file", () => {
+    writeFileSync(
+      path.join(repoRoot, "scripts/release/lib/foo.test.ts"),
+      "export const value = 1;\n",
+    );
+    const entryFile = path.join(repoRoot, "scripts/release/dotted-consumer.ts");
+    writeFileSync(entryFile, 'import "./lib/foo.test";\n');
+
+    expect(resolveRelativeImportPaths(entryFile, { repoRoot })).toEqual([
+      "scripts/release/lib/foo.test.ts",
+    ]);
+  });
+
+  test("resolves a directory import to its TypeScript index", () => {
+    mkdirSync(path.join(repoRoot, "scripts/release/lib/nested-dir"), { recursive: true });
+    writeFileSync(
+      path.join(repoRoot, "scripts/release/lib/nested-dir/index.ts"),
+      "export const value = 1;\n",
+    );
+    const entryFile = path.join(repoRoot, "scripts/release/directory-consumer.ts");
+    writeFileSync(entryFile, 'import "./lib/nested-dir";\n');
+
+    expect(resolveRelativeImportPaths(entryFile, { repoRoot })).toEqual([
+      "scripts/release/lib/nested-dir/index.ts",
+    ]);
+  });
+
+  test("prefers a TypeScript file over a directory index", () => {
+    writeFileSync(path.join(repoRoot, "scripts/release/lib.ts"), "export const value = 1;\n");
+    const entryFile = path.join(repoRoot, "scripts/release/lib-consumer.ts");
+    writeFileSync(entryFile, 'import "./lib";\n');
+
+    expect(resolveRelativeImportPaths(entryFile, { repoRoot })).toEqual(["scripts/release/lib.ts"]);
+  });
+
+  test("records import equals relative dependencies", () => {
+    writeFileSync(path.join(repoRoot, "scripts/release/dep.ts"), "export const value = 1;\n");
+    const entryFile = path.join(repoRoot, "scripts/release/import-equals-consumer.ts");
+    writeFileSync(entryFile, 'import dep = require("./dep");\nvoid dep;\n');
+
+    expect(resolveRelativeImportPaths(entryFile, { repoRoot })).toEqual(["scripts/release/dep.ts"]);
+  });
+
+  test("records dynamic relative imports", () => {
+    writeFileSync(
+      path.join(repoRoot, "scripts/release/dynamic-dep.ts"),
+      "export const value = 1;\n",
+    );
+    const entryFile = path.join(repoRoot, "scripts/release/dynamic-consumer.ts");
+    writeFileSync(entryFile, 'void import("./dynamic-dep");\n');
+
+    expect(resolveRelativeImportPaths(entryFile, { repoRoot })).toEqual([
+      "scripts/release/dynamic-dep.ts",
+    ]);
+  });
 });

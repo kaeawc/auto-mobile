@@ -69,19 +69,23 @@ describe("Device Image Resources with Fakes", () => {
       ];
       const deviceTypes: AppleDeviceType[] = [
         {
-          minRuntimeVersion: 17,
+          minRuntimeVersion: 1114112,
+          minRuntimeVersionString: "17.0",
           bundlePath:
             "/Library/Developer/CoreSimulator/Profiles/DeviceTypes/iPhone 16.simdevicetype",
-          maxRuntimeVersion: 18,
+          // simctl uses 0xFFFFFFFF for an unbounded maximum.
+          maxRuntimeVersion: 4294967295,
           name: "iPhone 16",
           identifier: "com.apple.CoreSimulator.SimDeviceType.iPhone-16",
           productFamily: "iPhone",
         },
         {
-          minRuntimeVersion: 15,
+          minRuntimeVersion: 786432,
+          minRuntimeVersionString: "12.0",
           bundlePath:
             "/Library/Developer/CoreSimulator/Profiles/DeviceTypes/iPhone 8.simdevicetype",
-          maxRuntimeVersion: 16,
+          maxRuntimeVersion: 1049600,
+          maxRuntimeVersionString: "16.4",
           name: "iPhone 8",
           identifier: "com.apple.CoreSimulator.SimDeviceType.iPhone-8",
           productFamily: "iPhone",

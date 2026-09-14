@@ -27,6 +27,7 @@ import { iosVersionStringFromRuntimeId } from "./iosVersion";
 import { getAbortSignal, runWithAbortSignal } from "../AbortContext";
 import { Mutex } from "async-mutex";
 import { iosSimulatorCapabilityInventory } from "../../features/device-control/virtualDeviceCapabilities";
+import { compareSimctlVersions, parseSimctlVersion } from "./simctlVersion";
 
 const COMMAND_SETTLEMENT_GRACE_MS = 1_000;
 const SIMCTL_AVAILABILITY_PROBE_TIMEOUT_MS = 10_000;
@@ -65,8 +66,10 @@ export interface AppleDeviceRuntime {
 
 export interface AppleDeviceType {
   minRuntimeVersion: number;
+  minRuntimeVersionString?: string;
   bundlePath: string;
   maxRuntimeVersion: number;
+  maxRuntimeVersionString?: string;
   name: string;
   identifier: string;
   productFamily: string;
@@ -437,16 +440,9 @@ function normalizeIosVersion(
 
 /** Numeric, component-wise comparison of dotted version strings. */
 function compareVersions(a: string, b: string): number {
-  const left = a.split(".").map((part) => Number.parseInt(part, 10) || 0);
-  const right = b.split(".").map((part) => Number.parseInt(part, 10) || 0);
-  const length = Math.max(left.length, right.length);
-  for (let index = 0; index < length; index++) {
-    const diff = (left[index] ?? 0) - (right[index] ?? 0);
-    if (diff !== 0) {
-      return diff;
-    }
-  }
-  return 0;
+  const left = parseSimctlVersion(a);
+  const right = parseSimctlVersion(b);
+  return left && right ? compareSimctlVersions(left, right) : Number.NaN;
 }
 
 /** Highest-versioned runtime whose version starts with `prefix`, if any. */

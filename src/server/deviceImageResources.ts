@@ -20,6 +20,12 @@ import {
   iosSimulatorCapabilityInventory,
   type VirtualDeviceCapabilityInventory,
 } from "../features/device-control/virtualDeviceCapabilities";
+import {
+  compareSimctlVersions,
+  decodeSimctlVersion,
+  parseSimctlVersion,
+  type SimctlVersionTuple,
+} from "../utils/ios-cmdline-tools/simctlVersion";
 
 // Resource URIs
 export const DEVICE_IMAGE_RESOURCE_URIS = {
@@ -417,18 +423,21 @@ function appendIosProvisioningCatalog(
   for (const deviceType of deviceTypes) {
     let availability: ProvisioningAvailability;
     try {
-      if (
-        !Number.isFinite(deviceType.minRuntimeVersion) ||
-        !Number.isFinite(deviceType.maxRuntimeVersion)
-      ) {
+      const minVersion: SimctlVersionTuple | undefined =
+        parseSimctlVersion(deviceType.minRuntimeVersionString) ??
+        decodeSimctlVersion(deviceType.minRuntimeVersion);
+      const maxVersion: SimctlVersionTuple | undefined =
+        parseSimctlVersion(deviceType.maxRuntimeVersionString) ??
+        decodeSimctlVersion(deviceType.maxRuntimeVersion);
+      if (!minVersion || !maxVersion) {
         throw new Error("device type has an invalid runtime version range");
       }
       const matchingRuntimes = runtimeEntries.filter(({ runtime }) => {
-        const version = parseFloat(runtime.version);
+        const version = parseSimctlVersion(runtime.version);
         return (
-          Number.isFinite(version) &&
-          version >= deviceType.minRuntimeVersion &&
-          version <= deviceType.maxRuntimeVersion
+          version !== undefined &&
+          compareSimctlVersions(version, minVersion) >= 0 &&
+          compareSimctlVersions(version, maxVersion) <= 0
         );
       });
       const availableRuntime = matchingRuntimes.find(({ availability }) => availability.available);

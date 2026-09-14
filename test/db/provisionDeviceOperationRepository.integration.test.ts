@@ -328,6 +328,45 @@ describe("ProvisionDeviceOperationRepository", () => {
     expect(row?.expires_at_ms).toBe(1_000_000);
   });
 
+  test("allows only the first terminal write for an attempt", async () => {
+    const repository = new ProvisionDeviceOperationRepository(db);
+
+    await repository.begin("fail-first", "request-a", "attempt-1", 0, FAR_FUTURE_EXPIRY_MS);
+    expect(
+      await repository.fail("fail-first", "attempt-1", "timeout", "completion timed out"),
+    ).toBe(true);
+    expect(
+      await repository.complete("fail-first", "attempt-1", { device: { name: "stale" } }),
+    ).toBe(false);
+    expect(await repository.markDeviceCreationStarted("fail-first", "attempt-1")).toBe(false);
+
+    await repository.begin("complete-first", "request-a", "attempt-1", 0, FAR_FUTURE_EXPIRY_MS);
+    expect(
+      await repository.complete("complete-first", "attempt-1", { device: { name: "saved" } }),
+    ).toBe(true);
+    expect(await repository.fail("complete-first", "attempt-1", "timeout", "stale timeout")).toBe(
+      false,
+    );
+    expect(await repository.markDeviceCreationStarted("complete-first", "attempt-1")).toBe(false);
+
+    await repository.begin("replay-fail", "request-a", "attempt-1", 0, FAR_FUTURE_EXPIRY_MS);
+    await repository.complete("replay-fail", "attempt-1", { device: { name: "preserved" } });
+    await repository.begin("replay-fail", "request-a", "attempt-2", 0, FAR_FUTURE_EXPIRY_MS);
+    expect(
+      await repository.fail("replay-fail", "attempt-2", "timeout", "completion timed out"),
+    ).toBe(true);
+    expect(
+      await repository.complete("replay-fail", "attempt-2", { device: { name: "stale" } }),
+    ).toBe(false);
+    expect(
+      await repository.begin("replay-fail", "request-a", "attempt-3", 0, FAR_FUTURE_EXPIRY_MS),
+    ).toEqual({
+      started: false,
+      result: { device: { name: "preserved" } },
+      reconcileExistingConfiguration: false,
+    });
+  });
+
   test("fences a superseded attempt out of complete(), fail() and creation provenance", async () => {
     const repository = new ProvisionDeviceOperationRepository(db);
 

@@ -1,12 +1,14 @@
-import { expect, describe, test, beforeEach } from "bun:test";
+import { expect, describe, test, beforeEach, spyOn } from "bun:test";
 import {
   GetAppMetadata,
   IosAppMetadataSource,
   findAppByBundleId,
+  getAndroidAppMetadataViaAdb,
   iosRecordToMetadata,
 } from "../../../src/features/observe/GetAppMetadata";
 import type { BootedDevice } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+import { logger } from "../../../src/utils/logger";
 
 const fakeAdbFactory = (fakeAdb: FakeAdbExecutor) => ({ create: () => fakeAdb as any });
 const nullAdbFactory = { create: () => ({}) as any };
@@ -90,6 +92,37 @@ describe("GetAppMetadata (Android)", () => {
     const result = await metadata.execute("com.example.app");
 
     expect(result).toBeNull();
+  });
+
+  test("passes optional ADB lookup timeout and cancellation without warning", async () => {
+    fakeAdb.setCommandError("shell dumpsys package", new Error("device offline"));
+    const controller = new AbortController();
+    const warnSpy = spyOn(logger, "warn");
+    const debugSpy = spyOn(logger, "debug");
+    try {
+      const result = await getAndroidAppMetadataViaAdb(
+        androidDevice,
+        "com.example.app",
+        fakeAdbFactory(fakeAdb),
+        { timeoutMs: 2000, signal: controller.signal, optional: true },
+      );
+
+      expect(result).toBeNull();
+      expect(fakeAdb.getCommandCalls()).toEqual([
+        {
+          command: "shell dumpsys package com.example.app",
+          timeoutMs: 2000,
+          maxBuffer: undefined,
+          noRetry: undefined,
+          signal: controller.signal,
+        },
+      ]);
+      expect(warnSpy).not.toHaveBeenCalled();
+      expect(debugSpy).toHaveBeenCalled();
+    } finally {
+      warnSpy.mockRestore();
+      debugSpy.mockRestore();
+    }
   });
 
   test("returns null when output has no useful fields", async () => {

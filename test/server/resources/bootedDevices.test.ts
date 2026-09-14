@@ -1543,7 +1543,33 @@ describe("booted device readiness", () => {
     });
   });
 
-  test("adds iOS CtrlProxy installed-artifact version", async () => {
+  test("omits Android CtrlProxy version when the package is not installed", async () => {
+    const lookup: AndroidServiceStatusLookup = {
+      getManager: () => ({
+        isInstalled: async () => false,
+        isEnabled: async () => false,
+        getInstalledApkSha256: async () => null,
+      }),
+      isConnected: () => false,
+    };
+
+    const status = await queryDeviceServiceStatus(
+      { name: "Pixel", platform: "android", deviceId: "emulator-5554", source: "local" },
+      lookup,
+      {
+        getVersion: async () => ({
+          versionName: "1.2.3",
+          versionCode: "45",
+          source: "android-package",
+        }),
+      },
+    );
+
+    expect(status?.installed).toBe(false);
+    expect(status?.version).toBeUndefined();
+  });
+
+  test("omits iOS CtrlProxy version unless that device's runner is running", async () => {
     const installedSpy = spyOn(IOSCtrlProxyManager.prototype, "isInstalled").mockResolvedValue(
       true,
     );
@@ -1567,11 +1593,31 @@ describe("booted device readiness", () => {
         versionLookup,
       );
 
-      expect(status?.version).toEqual({
-        versionName: "2.0.0",
-        build: "200",
-        source: "ios-runner-bundle",
-      });
+      expect(status?.version).toBeUndefined();
+    } finally {
+      installedSpy.mockRestore();
+      runningSpy.mockRestore();
+    }
+  });
+
+  test("adds iOS CtrlProxy version when that device's runner is running", async () => {
+    const installedSpy = spyOn(IOSCtrlProxyManager.prototype, "isInstalled").mockResolvedValue(
+      true,
+    );
+    const runningSpy = spyOn(IOSCtrlProxyManager.prototype, "isRunning").mockResolvedValue(true);
+    try {
+      const status = await queryDeviceServiceStatus(
+        {
+          name: "iPhone",
+          platform: "ios",
+          deviceId: "00000000-0000-0000-0000-000000000000",
+          source: "local",
+        },
+        undefined,
+        { getVersion: async () => ({ build: "200", source: "ios-runner-bundle" }) },
+      );
+
+      expect(status?.version).toEqual({ build: "200", source: "ios-runner-bundle" });
     } finally {
       installedSpy.mockRestore();
       runningSpy.mockRestore();
@@ -1714,7 +1760,7 @@ describe("booted device readiness", () => {
     const installedSpy = spyOn(IOSCtrlProxyManager.prototype, "isInstalled").mockResolvedValue(
       true,
     );
-    const runningSpy = spyOn(IOSCtrlProxyManager.prototype, "isRunning").mockResolvedValue(false);
+    const runningSpy = spyOn(IOSCtrlProxyManager.prototype, "isRunning").mockResolvedValue(true);
     const versionSpy = spyOn(
       IOSCtrlProxyManager.prototype,
       "getInstalledVersionIdentity",

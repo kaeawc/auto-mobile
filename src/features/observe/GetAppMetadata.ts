@@ -133,19 +133,35 @@ export async function getAndroidAppMetadataViaAdb(
   device: BootedDevice,
   packageName: string,
   adbFactory: AdbClientFactory = defaultAdbClientFactory,
+  options: AndroidAppMetadataAdbOptions = {},
 ): Promise<AppMetadataResult | null> {
-  return getAndroidAppMetadataFromAdb(adbFactory.create(device), packageName);
+  return getAndroidAppMetadataFromAdb(adbFactory.create(device), packageName, options);
+}
+
+export interface AndroidAppMetadataAdbOptions {
+  timeoutMs?: number;
+  signal?: AbortSignal;
+  /** Treat lookup failure as expected best-effort enrichment. */
+  optional?: boolean;
 }
 
 async function getAndroidAppMetadataFromAdb(
   adb: AdbExecutor,
   packageName: string,
+  options: AndroidAppMetadataAdbOptions = {},
 ): Promise<AppMetadataResult | null> {
   let result: ExecResult;
   try {
-    result = await adb.executeCommand(`shell dumpsys package ${packageName}`);
+    result = await adb.executeCommand(
+      `shell dumpsys package ${packageName}`,
+      options.timeoutMs,
+      undefined,
+      undefined,
+      options.signal,
+    );
   } catch (error) {
-    logger.warn(`[GetAppMetadata] Failed to run dumpsys package for ${packageName}: ${error}`);
+    const log = options.optional ? logger.debug : logger.warn;
+    log(`[GetAppMetadata] Failed to run dumpsys package for ${packageName}: ${error}`);
     return null;
   }
 

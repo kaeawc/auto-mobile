@@ -755,14 +755,18 @@ export class DevicePool {
     this.releaseSessionForDisconnectedDevice =
       releaseSessionForDisconnectedDevice ??
       (async (sessionId, _deviceId, releaseReason, shouldCommit) => {
-        // This is the final identity fence. Do not put an await between this
-        // re-check and SessionManager's release call: discovery can replace a
-        // same-serial runtime while a custom releaser is paused before commit.
-        if (shouldCommit?.() === false) {
-          return false;
+        // The session manager re-evaluates the fence immediately before it
+        // removes the session, after its setup/restoration awaits (#7031).
+        if (!shouldCommit) {
+          await this.sessionManager.releaseSession(sessionId, releaseReason);
+          return true;
         }
-        await this.sessionManager.releaseSession(sessionId, releaseReason);
-        return true;
+        const release = await this.sessionManager.releaseSessionUnlessSuperseded(
+          sessionId,
+          releaseReason,
+          shouldCommit,
+        );
+        return !release.superseded;
       });
 
     // Expiry has no caller available to return the device to the pool. Explicit

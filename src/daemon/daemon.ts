@@ -2243,20 +2243,38 @@ export class Daemon {
     shouldCommit?: () => boolean,
   ): Promise<boolean> {
     const cancelled = await executionTracker.cancelSessionUuidExecutions(sessionId, releaseReason);
-    // This is the final identity fence. Do not put an await between this
-    // re-check and SessionManager's release call: discovery can replace a
-    // same-serial runtime while execution cancellation is in flight.
+    // Early identity fence: discovery can replace a same-serial runtime while
+    // execution cancellation is in flight. It is not the final one — the
+    // session manager re-evaluates `shouldCommit` immediately before it
+    // removes the session, after its own setup/restoration awaits (#7031).
     if (shouldCommit?.() === false) {
       return false;
     }
-    const deviceId = expectedSession
-      ? await this.sessionManager.releaseSessionIfOwned(
-          sessionId,
-          expectedSession,
-          expectedSession.assignedDevice,
-          releaseReason,
-        )
-      : await this.sessionManager.releaseSession(sessionId, releaseReason, allowExpired);
+    let deviceId: string | null;
+    if (expectedSession) {
+      deviceId = await this.sessionManager.releaseSessionIfOwned(
+        sessionId,
+        expectedSession,
+        expectedSession.assignedDevice,
+        releaseReason,
+      );
+    } else if (shouldCommit) {
+      const release = await this.sessionManager.releaseSessionUnlessSuperseded(
+        sessionId,
+        releaseReason,
+        shouldCommit,
+        allowExpired,
+      );
+      if (release.superseded) {
+        logger.info(
+          `Kept session ${sessionId}: a newer identity confirmation superseded its release (reason=${releaseReason})`,
+        );
+        return false;
+      }
+      deviceId = release.deviceId;
+    } else {
+      deviceId = await this.sessionManager.releaseSession(sessionId, releaseReason, allowExpired);
+    }
     if (deviceId) {
       await this.devicePool.releaseDevice(deviceId, sessionId);
     }

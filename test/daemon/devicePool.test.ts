@@ -7545,6 +7545,55 @@ describe("DevicePool", () => {
       }
     });
 
+    test("re-checks identity after the default releaser awaits pending session setup (#7031 round 2)", async () => {
+      // No custom releaser: the pool's default path hands the fence to
+      // SessionManager, whose release first awaits tracked setup work. A newer
+      // confirming discovery during that await must keep the session.
+      const device = stamped(poolDevice("emulator-5554", "Pixel_8_API_35"), 1);
+      const replacement = stamped(poolDevice("emulator-5554", "Pixel_7_API_34"), 2);
+      const setupFinished = Promise.withResolvers<void>();
+      await initializeLiveDevices([device]);
+      await devicePool.reconcileDiscoveryObservation([device], "test:initial");
+      await devicePool.bindOrReuseDeviceSession("owner-session", device.deviceId, "android");
+      const pooled = devicePool.getDevice(device.deviceId);
+      const session = sessionManager.getSession("owner-session");
+      if (!pooled || !session) {
+        throw new Error("expected pooled device and session");
+      }
+      const setup = sessionManager.trackSessionSetup(session, () => setupFinished.promise);
+
+      try {
+        fakeDeviceManager.bootedDevices = [replacement];
+        const refresh = devicePool.refreshDevices();
+        // Release refuses new setup once it has begun: a probe that is not
+        // admitted proves the eviction is already inside the release, past the
+        // pool's early fence, so the newer confirmation below exercises the
+        // commit-point fence rather than the up-front one. Only microtasks are
+        // yielded, so the wait is deterministic and bounded.
+        let releaseBegan = false;
+        for (let i = 0; i < 1000 && !releaseBegan; i++) {
+          await Promise.resolve();
+          releaseBegan = true;
+          await sessionManager.trackSessionSetup(session, async () => {
+            releaseBegan = false;
+          });
+        }
+        expect(releaseBegan).toBe(true);
+        expect(sessionManager.getSession("owner-session")).toBe(session);
+
+        await devicePool.reconcileDiscoveryObservation([stamped(device, 3)], "test:newer");
+        setupFinished.resolve();
+        await setup;
+        await refresh;
+
+        expect(sessionManager.getSession("owner-session")).toBe(session);
+        expect(devicePool.getDevice(device.deviceId)).toBe(pooled);
+        expect(pooled.sessionId).toBe("owner-session");
+      } finally {
+        setupFinished.resolve();
+      }
+    });
+
     test("uses a newer discovery identity that arrives during replacement cache cleanup", async () => {
       const device = stamped(poolDevice("emulator-5554", "Pixel_8_API_35"), 1);
       const replacement = stamped(poolDevice("emulator-5554", "Pixel_7_API_34"), 2);

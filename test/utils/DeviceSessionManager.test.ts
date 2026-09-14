@@ -1446,6 +1446,128 @@ describe("DeviceSessionManager dual-platform resolution", () => {
 
     expect(createdFor).toEqual([first.name, second.name]);
   });
+
+  function trackWindowFactories(): { createdFor: string[]; factory: AdbClientFactory } {
+    const createdFor: string[] = [];
+    const factory: AdbClientFactory = {
+      create(target) {
+        if (target) {
+          createdFor.push(target.name);
+        }
+        return fakeAdb;
+      },
+    };
+    const dumpsysOutput =
+      "imeControlTarget in display# 0 Window{12345678 u0 com.example.app/com.example.app.MainActivity}";
+    fakeAdb.setDefaultResponse({
+      stdout: dumpsysOutput,
+      stderr: "",
+      toString: () => dumpsysOutput,
+      trim: () => dumpsysOutput.trim(),
+      includes: (value: string) => dumpsysOutput.includes(value),
+    } as ExecResult);
+    return { createdFor, factory };
+  }
+
+  // Production discovery lists Android devices from raw `adb devices`, so the
+  // provided-device and current-device paths only ever see `name === serial`.
+  // Each path must still resolve the AVD identity so a different AVD taking
+  // over the serial rebuilds the cached Window (#7031 round 2).
+  test("provided-device readiness rebuilds the Window when a different AVD takes the serial", async () => {
+    const first: BootedDevice = {
+      name: "Pixel_8_API_35",
+      deviceId: "emulator-5554",
+      platform: "android",
+    };
+    const second: BootedDevice = { ...first, name: "Pixel_7_API_34" };
+    const raw = (device: BootedDevice): BootedDevice => ({ ...device, name: device.deviceId });
+    const { createdFor, factory } = trackWindowFactories();
+    const provider = buildProvider();
+    const windowProvider = new DefaultDeviceClientProvider(factory);
+    provider.getWindow = windowProvider.getWindow.bind(windowProvider);
+    const manager = DeviceSessionManager.createInstance(provider, fakeAdbFactory);
+
+    fakeDeviceUtils.setBootedDevices("android", [first]);
+    fakeAdb.setDevices([raw(first)]);
+    const readyFirst = await manager.ensureDeviceReady("android", first.deviceId);
+    fakeDeviceUtils.setBootedDevices("android", [second]);
+    fakeAdb.setDevices([raw(second)]);
+    const readySecond = await manager.ensureDeviceReady("android", second.deviceId);
+
+    expect(createdFor).toEqual([first.name, second.name]);
+    expect(readyFirst.name).toBe(first.name);
+    expect(readySecond.name).toBe(second.name);
+  });
+
+  test("current-device readiness rebuilds the Window when a different AVD takes the serial", async () => {
+    const first: BootedDevice = {
+      name: "Pixel_8_API_35",
+      deviceId: "emulator-5554",
+      platform: "android",
+    };
+    const second: BootedDevice = { ...first, name: "Pixel_7_API_34" };
+    const raw = (device: BootedDevice): BootedDevice => ({ ...device, name: device.deviceId });
+    const { createdFor, factory } = trackWindowFactories();
+    const provider = buildProvider();
+    const windowProvider = new DefaultDeviceClientProvider(factory);
+    provider.getWindow = windowProvider.getWindow.bind(windowProvider);
+    const manager = DeviceSessionManager.createInstance(provider, fakeAdbFactory);
+    manager.setCurrentDevice(raw(first), "android");
+
+    fakeDeviceUtils.setBootedDevices("android", [first]);
+    fakeAdb.setDevices([raw(first)]);
+    const readyFirst = await manager.ensureDeviceReady("android");
+    fakeDeviceUtils.setBootedDevices("android", [second]);
+    fakeAdb.setDevices([raw(second)]);
+    const readySecond = await manager.ensureDeviceReady("android");
+
+    expect(createdFor).toEqual([first.name, second.name]);
+    expect(readyFirst.name).toBe(first.name);
+    expect(readySecond.name).toBe(second.name);
+    expect(manager.getCurrentDevice()?.name).toBe(second.name);
+  });
+
+  // Readiness calls for two AVDs can overlap on a reused serial and finish out
+  // of order. An older resolved observation must not evict the Window the newer
+  // AVD already cached (#7031 round 2).
+  test("keeps the newer AVD's Window when an older resolved observation arrives late", async () => {
+    const newer: BootedDevice = {
+      name: "Pixel_7_API_34",
+      deviceId: "emulator-5554",
+      platform: "android",
+      observedAt: 5,
+    };
+    const older: BootedDevice = { ...newer, name: "Pixel_8_API_35", observedAt: 4 };
+    const { createdFor, factory } = trackWindowFactories();
+    const provider = new DefaultDeviceClientProvider(factory);
+
+    const cached = provider.getWindow({ ...newer, observedAt: 2 });
+    expect(provider.getWindow(newer)).toBe(cached);
+    expect(provider.getWindow(older)).toBe(cached);
+    expect(provider.getWindow({ ...newer, name: newer.deviceId, observedAt: 6 })).toBe(cached);
+    expect(provider.getWindow({ ...older, observedAt: 6 })).not.toBe(cached);
+
+    expect(createdFor).toEqual([newer.name, older.name]);
+  });
+
+  test("readiness does not let a stale resolved identity replace a newer AVD's Window", async () => {
+    const newer: BootedDevice = {
+      name: "Pixel_7_API_34",
+      deviceId: "emulator-5554",
+      platform: "android",
+      observedAt: 2,
+    };
+    const older: BootedDevice = { ...newer, name: "Pixel_8_API_35", observedAt: 1 };
+    const raw: BootedDevice = { ...newer, name: newer.deviceId };
+    const { createdFor, factory } = trackWindowFactories();
+    fakeAdb.setDevices([raw]);
+    const manager = DeviceSessionManager.createInstance(new DefaultDeviceClientProvider(factory));
+
+    await manager.verifyAndroidDevice(raw.deviceId, { readiness: "booted" }, newer);
+    await manager.verifyAndroidDevice(raw.deviceId, { readiness: "booted" }, older);
+
+    expect(createdFor).toEqual([newer.name]);
+  });
 });
 
 describe("DeviceSessionManager device-list error formatting (#4227)", () => {

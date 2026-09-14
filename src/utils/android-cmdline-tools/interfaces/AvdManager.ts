@@ -28,11 +28,19 @@ export interface AvdManager {
   listSystemImages(filter?: SystemImageFilter): Promise<SystemImage[]>;
 
   /**
-   * List installed system images.
+   * List installed system images. These are the ONLY packages AVD creation
+   * accepts, so callers that must not drift from what creation validates
+   * against (e.g. the provisioning catalog resource) enumerate this list, never
+   * the available-to-download one.
    * @param filter - Optional filter criteria for system images
+   * @param signal - Optional abort signal so a bounded caller can cancel the
+   *   underlying sdkmanager enumeration once its deadline elapses.
    * @returns Promise with array of installed system images
    */
-  listInstalledSystemImages(filter?: SystemImageFilter): Promise<SystemImage[]>;
+  listInstalledSystemImages(
+    filter?: SystemImageFilter,
+    signal?: AbortSignal,
+  ): Promise<SystemImage[]>;
 
   /**
    * Download and install a system image
@@ -50,9 +58,11 @@ export interface AvdManager {
 
   /**
    * List available AVDs
+   * @param signal - Optional abort signal so a bounded caller can cancel the
+   *   underlying avdmanager enumeration once its deadline elapses.
    * @returns Promise with array of AVD info
    */
-  listDeviceImages(): Promise<AvdInfo[]>;
+  listDeviceImages(signal?: AbortSignal): Promise<AvdInfo[]>;
 
   /**
    * Create a new AVD
@@ -77,7 +87,9 @@ export interface AvdManager {
 
   /**
    * List available device profiles
+   * @param signal - Optional abort signal so a bounded caller can cancel the
+   *   underlying avdmanager enumeration once its deadline elapses.
    * @returns Promise with array of device profiles
    */
-  listDevices(): Promise<DeviceProfile[]>;
+  listDevices(signal?: AbortSignal): Promise<DeviceProfile[]>;
 }

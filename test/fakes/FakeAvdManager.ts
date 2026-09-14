@@ -18,11 +18,13 @@ export class FakeAvdManager implements AvdManager {
   };
   private listSystemImagesResponse: SystemImage[] = [];
   private listInstalledSystemImagesResponse: SystemImage[] = [];
+  private listInstalledSystemImagesHangs: boolean = false;
   private installSystemImageResponse: { success: boolean; message: string } = {
     success: true,
     message: "System image installed successfully",
   };
   private listDeviceImagesResponse: AvdInfo[] = [];
+  private listDeviceImagesHangs: boolean = false;
   private createAvdResponse: { success: boolean; message: string; avdName?: string } = {
     success: true,
     message: "AVD created successfully",
@@ -32,16 +34,20 @@ export class FakeAvdManager implements AvdManager {
     message: "AVD deleted successfully",
   };
   private listDevicesResponse: DeviceProfile[] = [];
+  private listDevicesHangs: boolean = false;
 
   // Call tracking
   private acceptLicensesCalls: number = 0;
   private listSystemImagesCalls: Array<{ filter?: SystemImageFilter }> = [];
-  private listInstalledSystemImagesCalls: Array<{ filter?: SystemImageFilter }> = [];
+  private listInstalledSystemImagesCalls: Array<{
+    filter?: SystemImageFilter;
+    signal?: AbortSignal;
+  }> = [];
   private installSystemImageCalls: Array<{ packageName: string; acceptLicense?: boolean }> = [];
-  private listDeviceImagesCalls: number = 0;
+  private listDeviceImagesCalls: Array<{ signal?: AbortSignal }> = [];
   private createAvdCalls: Array<{ params: CreateAvdParams }> = [];
   private deleteAvdCalls: Array<{ name: string }> = [];
-  private listDevicesCalls: number = 0;
+  private listDevicesCalls: Array<{ signal?: AbortSignal }> = [];
 
   // Configuration setters for responses
   setAcceptLicensesResponse(response: { success: boolean; message: string }): void {
@@ -56,12 +62,32 @@ export class FakeAvdManager implements AvdManager {
     this.listInstalledSystemImagesResponse = response;
   }
 
+  /**
+   * Make listInstalledSystemImages never resolve on its own, so a bounded
+   * caller must fall back to its deadline. If the caller aborts via the passed
+   * signal the promise rejects with the abort reason, letting a test assert the
+   * cancellation propagated.
+   */
+  setListInstalledSystemImagesHangs(hangs: boolean): void {
+    this.listInstalledSystemImagesHangs = hangs;
+  }
+
   setInstallSystemImageResponse(response: { success: boolean; message: string }): void {
     this.installSystemImageResponse = response;
   }
 
   setListDeviceImagesResponse(response: AvdInfo[]): void {
     this.listDeviceImagesResponse = response;
+  }
+
+  /**
+   * Make listDeviceImages never resolve on its own, so a bounded caller must
+   * fall back to its deadline. If the caller aborts via the passed signal the
+   * promise rejects with the abort reason, letting a test assert the
+   * cancellation propagated.
+   */
+  setListDeviceImagesHangs(hangs: boolean): void {
+    this.listDeviceImagesHangs = hangs;
   }
 
   setCreateAvdResponse(response: { success: boolean; message: string; avdName?: string }): void {
@@ -76,6 +102,16 @@ export class FakeAvdManager implements AvdManager {
     this.listDevicesResponse = response;
   }
 
+  /**
+   * Make listDevices never resolve on its own, so a bounded caller must fall
+   * back to its deadline. If the caller aborts via the passed signal the
+   * promise rejects with the abort reason, letting a test assert the
+   * cancellation propagated.
+   */
+  setListDevicesHangs(hangs: boolean): void {
+    this.listDevicesHangs = hangs;
+  }
+
   // Call tracking getters for assertions
   getAcceptLicensesCalls(): number {
     return this.acceptLicensesCalls;
@@ -85,7 +121,10 @@ export class FakeAvdManager implements AvdManager {
     return [...this.listSystemImagesCalls];
   }
 
-  getListInstalledSystemImagesCalls(): Array<{ filter?: SystemImageFilter }> {
+  getListInstalledSystemImagesCalls(): Array<{
+    filter?: SystemImageFilter;
+    signal?: AbortSignal;
+  }> {
     return [...this.listInstalledSystemImagesCalls];
   }
 
@@ -93,8 +132,8 @@ export class FakeAvdManager implements AvdManager {
     return [...this.installSystemImageCalls];
   }
 
-  getListDeviceImagesCalls(): number {
-    return this.listDeviceImagesCalls;
+  getListDeviceImagesCalls(): Array<{ signal?: AbortSignal }> {
+    return [...this.listDeviceImagesCalls];
   }
 
   getCreateAvdCalls(): Array<{ params: CreateAvdParams }> {
@@ -105,8 +144,8 @@ export class FakeAvdManager implements AvdManager {
     return [...this.deleteAvdCalls];
   }
 
-  getListDevicesCalls(): number {
-    return this.listDevicesCalls;
+  getListDevicesCalls(): Array<{ signal?: AbortSignal }> {
+    return [...this.listDevicesCalls];
   }
 
   /**
@@ -117,10 +156,10 @@ export class FakeAvdManager implements AvdManager {
     this.listSystemImagesCalls = [];
     this.listInstalledSystemImagesCalls = [];
     this.installSystemImageCalls = [];
-    this.listDeviceImagesCalls = 0;
+    this.listDeviceImagesCalls = [];
     this.createAvdCalls = [];
     this.deleteAvdCalls = [];
-    this.listDevicesCalls = 0;
+    this.listDevicesCalls = [];
   }
 
   // Implementation of AvdManager interface
@@ -138,8 +177,20 @@ export class FakeAvdManager implements AvdManager {
     return this.listSystemImagesResponse;
   }
 
-  async listInstalledSystemImages(filter?: SystemImageFilter): Promise<SystemImage[]> {
-    this.listInstalledSystemImagesCalls.push({ filter });
+  async listInstalledSystemImages(
+    filter?: SystemImageFilter,
+    signal?: AbortSignal,
+  ): Promise<SystemImage[]> {
+    this.listInstalledSystemImagesCalls.push({ filter, signal });
+    if (this.listInstalledSystemImagesHangs) {
+      return new Promise<SystemImage[]>((_resolve, reject) => {
+        if (signal) {
+          signal.addEventListener("abort", () => reject(signal.reason ?? new Error("aborted")), {
+            once: true,
+          });
+        }
+      });
+    }
     return this.listInstalledSystemImagesResponse;
   }
 
@@ -154,8 +205,17 @@ export class FakeAvdManager implements AvdManager {
     return this.installSystemImageResponse;
   }
 
-  async listDeviceImages(): Promise<AvdInfo[]> {
-    this.listDeviceImagesCalls++;
+  async listDeviceImages(signal?: AbortSignal): Promise<AvdInfo[]> {
+    this.listDeviceImagesCalls.push({ signal });
+    if (this.listDeviceImagesHangs) {
+      return new Promise<AvdInfo[]>((_resolve, reject) => {
+        if (signal) {
+          signal.addEventListener("abort", () => reject(signal.reason ?? new Error("aborted")), {
+            once: true,
+          });
+        }
+      });
+    }
     return this.listDeviceImagesResponse;
   }
 
@@ -176,8 +236,17 @@ export class FakeAvdManager implements AvdManager {
     return this.deleteAvdResponse;
   }
 
-  async listDevices(): Promise<DeviceProfile[]> {
-    this.listDevicesCalls++;
+  async listDevices(signal?: AbortSignal): Promise<DeviceProfile[]> {
+    this.listDevicesCalls.push({ signal });
+    if (this.listDevicesHangs) {
+      return new Promise<DeviceProfile[]>((_resolve, reject) => {
+        if (signal) {
+          signal.addEventListener("abort", () => reject(signal.reason ?? new Error("aborted")), {
+            once: true,
+          });
+        }
+      });
+    }
     return this.listDevicesResponse;
   }
 }

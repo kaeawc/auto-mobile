@@ -9,6 +9,22 @@ type ToolSelectionReader = Pick<SessionToolSelectionService, "isEnabled"> &
   Partial<Pick<SessionToolSelectionService, "getOverride">>;
 
 /**
+ * Builds the independent routes used for device-label discovery and readback.
+ * Label routes must begin at the resolved base session, as documented by the
+ * profile-and-routing union contract in `listSessionTools`.
+ */
+export function buildToolSelectionCandidateRoutes(
+  requiresDevice: boolean,
+  baseSessionUuid: string | undefined,
+  labelSessionUuids: readonly string[],
+  fallbackRoute: ReadonlyArray<string | undefined>,
+): ReadonlyArray<ReadonlyArray<string | undefined>> {
+  return requiresDevice && labelSessionUuids.length > 0
+    ? labelSessionUuids.map((labelSessionUuid) => [baseSessionUuid, labelSessionUuid])
+    : [fallbackRoute];
+}
+
+/**
  * Builds the copy-pasteable `setToolEnabled` remediation call for a disabled-tool error.
  *
  * `resolveSelectionSessionUuid` (src/server/toolSelectionTools.ts) only accepts a

@@ -521,6 +521,7 @@ describe("ListInstalledApps", function () {
         expect(warnSpy).toHaveBeenCalledTimes(1);
         expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining(mockDevice.deviceId));
         expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("returned no labels"));
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("0/3 packages have a label"));
         expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("ADB"));
       } finally {
         warnSpy.mockRestore();
@@ -613,6 +614,22 @@ describe("ListInstalledApps", function () {
       } finally {
         warnSpy.mockRestore();
       }
+    });
+
+    test("rejects promptly when CtrlProxy request is aborted in flight", async function () {
+      const abortReason = new Error("request cancelled");
+      const a11yClient: AndroidPackagesA11yClient = {
+        requestInstalledPackages() {
+          return new Promise(() => {});
+        },
+      };
+      const source = new CtrlProxyInstalledPackageSource(mockDevice, a11yClient);
+      const controller = new AbortController();
+      const request = source.requestInstalledPackages(controller.signal);
+
+      controller.abort(abortReason);
+
+      await expect(request).rejects.toBe(abortReason);
     });
 
     test("a failed launcher probe leaves launchability unknown rather than claiming false", async function () {

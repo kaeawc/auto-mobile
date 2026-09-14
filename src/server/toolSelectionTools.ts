@@ -3,8 +3,13 @@ import type { SessionToolSelectionService } from "../features/toolSelection/Sess
 import { SET_TOOL_ENABLED_TOOL_NAME } from "../features/toolSelection/toolSelectionControl";
 import { getSessionToolSelectionService } from "../features/toolSelection/SessionToolSelectionService";
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
-import { isToolEnabledForAnySession } from "../features/toolSelection/toolSelectionPolicy";
+import {
+  buildToolSelectionCandidateRoutes,
+  isToolEnabledForAnyRoute,
+} from "../features/toolSelection/toolSelectionPolicy";
 import { ActionableError } from "../models";
+import { errorMessage } from "../utils/describeUnknownError";
+import { logger } from "../utils/logger";
 import { withJsonSchemaOverride } from "./toolSchemaHelpers";
 import { createJSONToolResponse } from "../utils/toolUtils";
 import { ToolRegistry } from "./toolRegistry";
@@ -189,36 +194,68 @@ export async function applyToolSelection(
  * update writes to the connection profile, and a connection-profile grant when
  * a freshly minted session (provisionDevice) carries no override of its own.
  * Derived `${base}:${label}` device-label sessions stay a discovery-only
- * refinement: only `tools/list` knows the caller's label map.
+ * refinement: readback mirrors `tools/list`'s independent label routes.
+ * @param baseSessionUuid The resolved base profile for device-label routes.
  */
 export async function listEnabledToolNames(
   service: ToolSelectionServiceLike,
   sessionUuids: ReadonlyArray<string | undefined>,
   connectionProfileUuid?: string,
+  labelSessionUuids: readonly string[] = [],
+  baseSessionUuid?: string,
 ): Promise<string[]> {
   const resolved = service ?? getSessionToolSelectionService();
   const names = await Promise.all(
     ToolRegistry.getAllTools()
       .filter((tool) => ToolRegistry.isUserConfigurableTool(tool.name))
-      .map(async (tool) =>
-        (await isToolEnabledForAnySession(
+      .map(async (tool) => {
+        const candidateRoutes = buildToolSelectionCandidateRoutes(
+          tool.requiresDevice ?? false,
+          baseSessionUuid,
+          labelSessionUuids,
+          sessionUuids,
+        );
+        return (await isToolEnabledForAnyRoute(
           tool.name,
           tool.defaultEnabled ?? true,
-          sessionUuids,
+          candidateRoutes,
           resolved,
           connectionProfileUuid,
         ))
           ? tool.name
-          : undefined,
-      ),
+          : undefined;
+      }),
   );
   return names.filter((toolName): toolName is string => toolName !== undefined).sort();
+}
+
+async function getEnabledToolsResponse(
+  sessionUuid: string,
+  context: ReturnType<typeof getToolSelectionContext>,
+): Promise<{ enabledTools: string[] } | { enabledToolsError: string }> {
+  try {
+    return {
+      enabledTools: await listEnabledToolNames(
+        context?.sessionToolSelectionService,
+        [sessionUuid, context?.routingSessionUuid],
+        context?.toolSelectionProfileUuid,
+        context?.labelSessionUuids ?? [],
+        context?.routingBaseSessionUuid,
+      ),
+    };
+  } catch (error) {
+    const enabledToolsError =
+      `Could not report enabled tools for session ${sessionUuid}: ${errorMessage(error)}. ` +
+      `The tool selection was applied; tools/list or a follow-up ${SET_TOOL_ENABLED_TOOL_NAME} call can confirm the resulting set.`;
+    logger.warn(`[MCP] ${enabledToolsError}`, error);
+    return { enabledToolsError };
+  }
 }
 
 export function registerToolSelectionTools(): void {
   ToolRegistry.register(
     SET_TOOL_ENABLED_TOOL_NAME,
-    "Enable or disable AutoMobile tools for this MCP session: one exact name via toolName, or a whole batch in one call via toolNames. Returns the resulting enabled set.",
+    "Enable or disable AutoMobile tools for this MCP session: one exact name via toolName, or a whole batch in one call via toolNames. Returns enabledTools, or enabledToolsError instead if post-write readback fails (the change still applies).",
     setToolEnabledSchema,
     async (args) => {
       const context = getToolSelectionContext();
@@ -235,17 +272,16 @@ export function registerToolSelectionTools(): void {
         enabled,
       );
       ToolRegistry.notifyToolListChanged();
-      return createJSONToolResponse({
+      const response = {
         sessionUuid,
         // The single-name request keeps its original `toolName` echo; a batch
         // echoes the applied `toolNames` instead (#6869).
         ...(args.toolNames ? { toolNames: requested } : { toolName: args.toolName }),
         enabled,
-        enabledTools: await listEnabledToolNames(
-          context?.sessionToolSelectionService,
-          [sessionUuid, context?.routingSessionUuid],
-          context?.toolSelectionProfileUuid,
-        ),
+      };
+      return createJSONToolResponse({
+        ...response,
+        ...(await getEnabledToolsResponse(sessionUuid, context)),
       });
     },
     { defaultEnabled: true },

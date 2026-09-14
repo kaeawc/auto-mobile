@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import type { SessionToolSelectionService } from "../../src/features/toolSelection/SessionToolSelectionService";
-import { registerToolSelectionTools } from "../../src/server/toolSelectionTools";
+import { buildToolSelectionCandidateRoutes } from "../../src/features/toolSelection/toolSelectionPolicy";
+import {
+  listEnabledToolNames,
+  registerToolSelectionTools,
+} from "../../src/server/toolSelectionTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
 import { getToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
@@ -31,6 +35,72 @@ describe("per-session exact-tool selection", () => {
     await fixture?.teardown();
     fixture = undefined;
     ToolRegistry.clearTools();
+  });
+
+  test("reports a device-aware tool enabled by any independent label route", async () => {
+    ToolRegistry.clearTools();
+    ToolRegistry.registerDeviceAware(
+      "labelAwareTool",
+      "label-aware test tool",
+      z.object({}),
+      async () => ({ content: [] }),
+      { defaultEnabled: true },
+    );
+    const overrides = new Map<string, boolean>([["base:A", false]]);
+    const service: Pick<SessionToolSelectionService, "isEnabled" | "getOverride"> = {
+      isEnabled: async (_sessionUuid, _toolName, declaredDefault) => declaredDefault,
+      getOverride: async (sessionUuid) => overrides.get(sessionUuid),
+    };
+
+    const enabledTools = await listEnabledToolNames(service, ["base", "routing"], undefined, [
+      "base:A",
+      "base:B",
+    ]);
+
+    expect(enabledTools).toContain("labelAwareTool");
+  });
+
+  test("reports a device-aware tool enabled by a sibling label when bound to a disabled derived route", async () => {
+    ToolRegistry.clearTools();
+    ToolRegistry.registerDeviceAware(
+      "labelAwareTool",
+      "label-aware test tool",
+      z.object({}),
+      async () => ({ content: [] }),
+      { defaultEnabled: true },
+    );
+    const overrides = new Map<string, boolean>([["base:A", false]]);
+    const service: Pick<SessionToolSelectionService, "isEnabled" | "getOverride"> = {
+      isEnabled: async (_sessionUuid, _toolName, declaredDefault) => declaredDefault,
+      getOverride: async (sessionUuid) => overrides.get(sessionUuid),
+    };
+
+    const enabledTools = await listEnabledToolNames(
+      service,
+      ["base:A"],
+      undefined,
+      ["base:A", "base:B"],
+      "base",
+    );
+
+    expect(enabledTools).toContain("labelAwareTool");
+    const listSessionToolsRoutes = buildToolSelectionCandidateRoutes(
+      true,
+      "base",
+      ["base:A", "base:B"],
+      ["base", "base:A"],
+    );
+    const enabledToolReadbackRoutes = buildToolSelectionCandidateRoutes(
+      true,
+      "base",
+      ["base:A", "base:B"],
+      ["base:A"],
+    );
+    expect(enabledToolReadbackRoutes).toEqual(listSessionToolsRoutes);
+    expect(enabledToolReadbackRoutes).toEqual([
+      ["base", "base:A"],
+      ["base", "base:B"],
+    ]);
   });
 
   for (const acquisition of ["getAndroid", "getApple"]) {
@@ -552,6 +622,118 @@ describe("per-session exact-tool selection", () => {
     expect(result.content[0]?.text).toBe("ran");
   });
 
+  test("reads sibling label grants from an acquired binding when reaffirming its connection profile", async () => {
+    const overrides = new Map<string, Map<string, boolean>>([
+      ["acquired-session:B", new Map([["observe", true]])],
+      ["foreign-session:B", new Map([["foreignObserve", true]])],
+    ]);
+    const profileService: Pick<
+      SessionToolSelectionService,
+      "isEnabled" | "getOverride" | "setEnabled"
+    > = {
+      isEnabled: async (sessionUuid, toolName, declaredDefault) =>
+        (sessionUuid ? overrides.get(sessionUuid)?.get(toolName) : undefined) ?? declaredDefault,
+      getOverride: async (sessionUuid, toolName) => overrides.get(sessionUuid)?.get(toolName),
+      setEnabled: async (sessionUuid, toolName, enabled) => {
+        const sessionOverrides = overrides.get(sessionUuid) ?? new Map<string, boolean>();
+        sessionOverrides.set(toolName, enabled);
+        overrides.set(sessionUuid, sessionOverrides);
+      },
+    };
+    fixture = new McpTestFixture({
+      sessionToolSelectionService: profileService,
+      toolSelectionSessionManager: {
+        getDeviceLabels: (sessionUuid) => {
+          if (sessionUuid === "acquired-session") {
+            return { A: "acquired-session", B: "acquired-session:B" };
+          }
+          if (sessionUuid === "foreign-session") {
+            return { A: "foreign-session", B: "foreign-session:B" };
+          }
+          return undefined;
+        },
+      },
+    });
+    await fixture.setup();
+
+    ToolRegistry.clearTools();
+    ToolRegistry.register(
+      "getAndroid",
+      "acquire",
+      z.object({}),
+      async () => ({
+        content: [{ type: "text", text: JSON.stringify({ sessionUuid: "acquired-session" }) }],
+      }),
+      { defaultEnabled: true },
+    );
+    ToolRegistry.registerDeviceAware(
+      "observe",
+      "observe",
+      z.object({}),
+      async () => ({ content: [{ type: "text", text: "ran" }] }),
+      { defaultEnabled: false },
+    );
+    ToolRegistry.registerDeviceAware(
+      "foreignObserve",
+      "foreign observe",
+      z.object({}),
+      async () => ({ content: [{ type: "text", text: "ran" }] }),
+      { defaultEnabled: false },
+    );
+    ToolRegistry.register(
+      "clipboard",
+      "clipboard",
+      z.object({}),
+      async () => ({ content: [{ type: "text", text: "ran" }] }),
+      { defaultEnabled: false },
+    );
+    registerToolSelectionTools();
+
+    await fixture.client.request(
+      { method: "tools/call", params: { name: "getAndroid", arguments: {} } },
+      z.any(),
+    );
+    const initialUpdate = await fixture.client.request(
+      {
+        method: "tools/call",
+        params: { name: "setToolEnabled", arguments: { toolName: "clipboard" } },
+      },
+      z.any(),
+    );
+    const profileUuid = JSON.parse(initialUpdate.content[0]!.text).sessionUuid as string;
+
+    const profileUpdate = await fixture.client.request(
+      {
+        method: "tools/call",
+        params: {
+          name: "setToolEnabled",
+          arguments: { toolName: "clipboard", enabled: false, sessionUuid: profileUuid },
+        },
+      },
+      z.any(),
+    );
+    const profileEnabledTools = JSON.parse(profileUpdate.content[0]!.text).enabledTools as string[];
+    const listedTools = (await fixture.client.listTools()).tools.map((tool) => tool.name);
+
+    expect(profileEnabledTools).toContain("observe");
+    expect(listedTools).toContain("observe");
+
+    const foreignUpdate = await fixture.client.request(
+      {
+        method: "tools/call",
+        params: {
+          name: "setToolEnabled",
+          arguments: { toolName: "clipboard", sessionUuid: "foreign-session" },
+        },
+      },
+      z.any(),
+    );
+    const foreignEnabledTools = JSON.parse(foreignUpdate.content[0]!.text).enabledTools as string[];
+
+    expect(foreignEnabledTools).toContain("foreignObserve");
+    expect(foreignEnabledTools).not.toContain("observe");
+  });
+
   test("a derived routing binding retains the base session grant for discovery and calls", async () => {
     const profileService: Pick<SessionToolSelectionService, "isEnabled" | "getOverride"> = {
       isEnabled: async (sessionUuid, toolName, declaredDefault) =>
@@ -624,6 +806,116 @@ describe("per-session exact-tool selection", () => {
     const listedNames = (await fixture.client.listTools()).tools.map((tool) => tool.name);
     expect(listedNames).toContain("observe");
     expect(listedNames).not.toContain("clipboard");
+  });
+
+  test("reports a device-aware tool enabled through a sibling label route", async () => {
+    const overrides = new Map<string, Map<string, boolean>>([
+      ["base-session:B", new Map([["observe", true]])],
+    ]);
+    const profileService: Pick<
+      SessionToolSelectionService,
+      "isEnabled" | "getOverride" | "setEnabled"
+    > = {
+      isEnabled: async (sessionUuid, toolName, declaredDefault) =>
+        (sessionUuid ? overrides.get(sessionUuid)?.get(toolName) : undefined) ?? declaredDefault,
+      getOverride: async (sessionUuid, toolName) => overrides.get(sessionUuid)?.get(toolName),
+      setEnabled: async (sessionUuid, toolName, enabled) => {
+        const sessionOverrides = overrides.get(sessionUuid) ?? new Map<string, boolean>();
+        sessionOverrides.set(toolName, enabled);
+        overrides.set(sessionUuid, sessionOverrides);
+      },
+    };
+    fixture = new McpTestFixture({
+      sessionContext: { initialSessionToolBinding: "base-session" },
+      sessionToolSelectionService: profileService,
+      toolSelectionSessionManager: {
+        getDeviceLabels: (sessionUuid) =>
+          sessionUuid === "base-session" ? { A: "base-session:A", B: "base-session:B" } : undefined,
+      },
+    });
+    await fixture.setup();
+
+    ToolRegistry.clearTools();
+    ToolRegistry.registerDeviceAware(
+      "observe",
+      "observe",
+      z.object({}),
+      async () => ({ content: [{ type: "text", text: "ran" }] }),
+      { defaultEnabled: false },
+    );
+    ToolRegistry.register(
+      "clipboard",
+      "clipboard",
+      z.object({}),
+      async () => ({ content: [{ type: "text", text: "ran" }] }),
+      { defaultEnabled: false },
+    );
+    registerToolSelectionTools();
+
+    const result = await fixture.client.request(
+      {
+        method: "tools/call",
+        params: { name: "setToolEnabled", arguments: { toolName: "clipboard" } },
+      },
+      z.any(),
+    );
+
+    expect(JSON.parse(result.content[0]!.text).enabledTools).toContain("observe");
+  });
+
+  test("does not report a plain tool enabled only through a sibling label route", async () => {
+    const overrides = new Map<string, Map<string, boolean>>([
+      ["base-session:B", new Map([["clipboard", true]])],
+    ]);
+    const profileService: Pick<
+      SessionToolSelectionService,
+      "isEnabled" | "getOverride" | "setEnabled"
+    > = {
+      isEnabled: async (sessionUuid, toolName, declaredDefault) =>
+        (sessionUuid ? overrides.get(sessionUuid)?.get(toolName) : undefined) ?? declaredDefault,
+      getOverride: async (sessionUuid, toolName) => overrides.get(sessionUuid)?.get(toolName),
+      setEnabled: async (sessionUuid, toolName, enabled) => {
+        const sessionOverrides = overrides.get(sessionUuid) ?? new Map<string, boolean>();
+        sessionOverrides.set(toolName, enabled);
+        overrides.set(sessionUuid, sessionOverrides);
+      },
+    };
+    fixture = new McpTestFixture({
+      sessionContext: { initialSessionToolBinding: "base-session" },
+      sessionToolSelectionService: profileService,
+      toolSelectionSessionManager: {
+        getDeviceLabels: (sessionUuid) =>
+          sessionUuid === "base-session" ? { A: "base-session:A", B: "base-session:B" } : undefined,
+      },
+    });
+    await fixture.setup();
+
+    ToolRegistry.clearTools();
+    ToolRegistry.registerDeviceAware(
+      "observe",
+      "observe",
+      z.object({}),
+      async () => ({ content: [{ type: "text", text: "ran" }] }),
+      { defaultEnabled: false },
+    );
+    ToolRegistry.register(
+      "clipboard",
+      "clipboard",
+      z.object({}),
+      async () => ({ content: [{ type: "text", text: "ran" }] }),
+      { defaultEnabled: false },
+    );
+    registerToolSelectionTools();
+
+    const result = await fixture.client.request(
+      {
+        method: "tools/call",
+        params: { name: "setToolEnabled", arguments: { toolName: "observe" } },
+      },
+      z.any(),
+    );
+
+    expect(JSON.parse(result.content[0]!.text).enabledTools).not.toContain("clipboard");
   });
 
   test("does not let one sibling label disable a tool on every route", async () => {

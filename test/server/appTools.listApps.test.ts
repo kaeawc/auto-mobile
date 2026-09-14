@@ -153,6 +153,22 @@ describe("listApps tool", () => {
     expect(capturedOptions?.profile).toBe(0);
   });
 
+  test("forwards cancellation to the installed-app query", async () => {
+    const tool = ToolRegistry.getTool("listApps");
+    const controller = new AbortController();
+    let capturedSignal: AbortSignal | undefined;
+    setListAppsToolDependencies({
+      queryInstalledApps: async (_options, signal) => {
+        capturedSignal = signal;
+        return fakeAppsContent();
+      },
+    });
+
+    await tool!.deviceAwareHandler!(device, {}, undefined, controller.signal);
+
+    expect(capturedSignal).toBe(controller.signal);
+  });
+
   test("wraps a query failure as an ActionableError", async () => {
     const tool = ToolRegistry.getTool("listApps");
     setListAppsToolDependencies({

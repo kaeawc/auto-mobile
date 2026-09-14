@@ -53,8 +53,10 @@ field_sep=$'\037'
 
 # One row per measured testcase: file, classname, name, milliseconds, the
 # occurrence ordinal of that name within the report, and the report it came from.
-# The ordinal keeps same-named tests in one file apart; the report id makes a
-# recheck sample count independent runs rather than rows.
+# The seventh field uses Bun's testcase source line when available, keeping a
+# duplicate stable across a full run and an isolated recheck even if the
+# per-report ordinal shifts; older Bun reports fall back to that ordinal. The
+# report id makes a recheck sample count independent runs rather than rows.
 testcase_rows() {
   bun run scripts/lib/junit-testcase-timings.ts "$@"
 }
@@ -167,6 +169,7 @@ mkdir -p "$recheck_dir"
 measured_rows="$recheck_dir/measured.tsv"
 offender_rows="$recheck_dir/offenders.tsv"
 recheck_rows="$recheck_dir/recheck.tsv"
+identity_counts="$recheck_dir/identity-counts.tsv"
 rechecked_list="$recheck_dir/rechecked-files.txt"
 unverified_list="$recheck_dir/unverified-files.txt"
 changed_test_list="$recheck_dir/changed-test-files.txt"
@@ -191,8 +194,49 @@ if [[ ! -s "$measured_rows" ]]; then
   exit 1
 fi
 
+# Count same-identity rows in each initial report, retaining the largest count
+# when the identity appears in multiple initial reports. A recheck process that
+# omits a same-line sibling is not a complete sample for that identity.
+awk -F"$field_sep" '
+{
+  key = $1 FS $2 FS $3 FS $7
+  report_key = key SUBSEP $6
+  report_rows[report_key] += 1
+  report_identity[report_key] = key
+}
+END {
+  for (report_key in report_rows) {
+    key = report_identity[report_key]
+    if (!(key in identity_count) || report_rows[report_key] > identity_count[key]) {
+      identity_count[key] = report_rows[report_key]
+    }
+  }
+  for (key in identity_count) {
+    print key FS identity_count[key]
+  }
+}
+' "$measured_rows" > "$identity_counts"
+
+# Exact-name testcases from one parameterized declaration can share
+# (file, classname, name, line) -- see test/features/utility/DisplayConfig.test.ts:130-132.
+# Keying by that identity alone and keeping the first matching row would let a
+# fast sibling's row stand in for a slow one, so aggregate the MAXIMUM duration
+# seen for each identity before deciding whether it is over budget.
 awk -F"$field_sep" -v limit_ms="$max_ms" '
-$4 + 0 > limit_ms && !seen[$1 FS $2 FS $3 FS $5]++
+{
+  key = $1 FS $2 FS $3 FS $7
+  if (!(key in maxval) || $4 + 0 > maxval[key]) {
+    maxval[key] = $4 + 0
+    maxrow[key] = $0
+  }
+}
+END {
+  for (key in maxrow) {
+    if (maxval[key] > limit_ms) {
+      print maxrow[key]
+    }
+  }
+}
 ' "$measured_rows" | sort > "$offender_rows"
 
 if [[ ! -s "$offender_rows" ]]; then
@@ -319,6 +363,7 @@ fi
 awk -F"$field_sep" \
   -v limit_ms="$max_ms" \
   -v limit_budget="$recheck_budget_seconds" \
+  -v identity_counts_file="$identity_counts" \
   -v recheck_file="$recheck_rows" \
   -v rechecked_file="$rechecked_list" \
   -v unverified_file="$unverified_list" \
@@ -341,19 +386,41 @@ function median(key,    values, count, outer, inner, swap) {
 }
 FILENAME == rechecked_file { rechecked[$0] = 1; next }
 FILENAME == unverified_file { unverified[$0] = 1; next }
+FILENAME == identity_counts_file {
+  key = $1 SUBSEP $2 SUBSEP $3 SUBSEP $4
+  identity_count[key] = $5 + 0
+  next
+}
 FILENAME == recheck_file {
-  key = $1 SUBSEP $2 SUBSEP $3 SUBSEP $5
-  # One sample per recheck PROCESS. Counting rows would let two same-named
-  # tests in one file look like two independent runs of one test.
-  if (!(key SUBSEP $6 in seen_run)) {
-    seen_run[key SUBSEP $6] = 1
-    samples[key] = (key in samples) ? samples[key] "," $4 : $4
-    runs[key] += 1
+  key = $1 SUBSEP $2 SUBSEP $3 SUBSEP $7
+  runkey = key SUBSEP $6
+  # One sample per recheck PROCESS (SUBSEP $6 pins the report). Exact-name
+  # testcases from one parameterized declaration can share
+  # (file, classname, name, line), so two rows can land on the same runkey; take
+  # the MAXIMUM duration for that identity within this process rather than the
+  # first row encountered, or a fast sibling could clear the median of a slow one.
+  if (!(runkey in seen_run) || $4 + 0 > seen_run[runkey]) {
+    seen_run[runkey] = $4 + 0
   }
+  run_rows[runkey] += 1
+  runkey_identity[runkey] = key
   next
 }
 {
-  key = $1 SUBSEP $2 SUBSEP $3 SUBSEP $5
+  if (!recheck_finalized) {
+    for (aggregated_runkey in seen_run) {
+      aggregated_key = runkey_identity[aggregated_runkey]
+      expected_rows = (aggregated_key in identity_count) ? identity_count[aggregated_key] : 1
+      if (run_rows[aggregated_runkey] >= expected_rows) {
+        runs[aggregated_key] += 1
+        samples[aggregated_key] = (aggregated_key in samples) \
+          ? samples[aggregated_key] "," seen_run[aggregated_runkey] \
+          : seen_run[aggregated_runkey]
+      }
+    }
+    recheck_finalized = 1
+  }
+  key = $1 SUBSEP $2 SUBSEP $3 SUBSEP $7
   label = ($2 != "" && $3 != "") ? $2 "." $3 : $3
   if ($5 + 0 > 1) {
     label = label " #" $5
@@ -393,4 +460,4 @@ FILENAME == recheck_file {
 END {
   exit fail
 }
-' "$rechecked_list" "$unverified_list" "$recheck_rows" "$offender_rows"
+' "$rechecked_list" "$unverified_list" "$identity_counts" "$recheck_rows" "$offender_rows"

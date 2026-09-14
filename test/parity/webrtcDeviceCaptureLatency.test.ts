@@ -233,7 +233,9 @@ describe("#4343 device capture latency instrumentation", () => {
     expect(source).toContain('import { waitFor, withDeadline } from "../helpers/abortableWaitFor"');
     expect(source).toContain("async (signal) => {");
     expect(source).toContain("changeFixture(signal) : launchFixture(signal)");
-    expect(source).toContain('["simctl", "ui", "booted", "appearance", "light"]');
+    expect(source).toContain("waitForBootedSimulatorUdid");
+    expect(source).toContain('["simctl", "ui", udid, "appearance", appearance]');
+    expect(source).not.toContain('["simctl", "ui", "booted", "appearance"');
     expect(source).not.toContain('["simctl", "launch", "booted", "com.apple.Preferences"]');
     expect(source).toContain("let pendingPipelineTeardown: (() => Promise<void>) | undefined;");
     expect(source).toContain("const cleanup = pendingPipelineTeardown;");

@@ -7,6 +7,9 @@ set -euo pipefail
 REPO="kaeawc/auto-mobile"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SIGNATURES="$SCRIPT_DIR/known-flakes.txt"
+RETRY_MARKER='Starting emulator retry attempt 2.'
+# shellcheck disable=SC2016 # The jq program intentionally contains jq variables.
+FAILURE_CONCLUSIONS_JQ_DEF='def is_failed_conclusion: ((. // "") | ascii_downcase) as $conclusion | ($conclusion == "failure" or $conclusion == "cancelled" or $conclusion == "timed_out" or $conclusion == "startup_failure");'
 
 usage() {
   echo "Usage: scripts/ci/classify-failure.sh <run-id>" >&2
@@ -52,15 +55,36 @@ match_signature() {
   printf '%s' 'UNKNOWN — no signature match, investigate'
 }
 
+terminal_attempt_evidence() {
+  local evidence="$1"
+  local diagnostics_marker='First emulator attempt failed; captured diagnostics follow:'
+
+  if [[ "$evidence" == *"$RETRY_MARKER"* ]]; then
+    printf '%s' "${evidence#*"$RETRY_MARKER"}"
+  elif [[ "$evidence" == *"$diagnostics_marker"* ]]; then
+    printf '%s' "$evidence"
+  else
+    printf '%s' "$evidence"
+  fi
+}
+
+ambiguous_terminal_attempt() {
+  local evidence="$1"
+  local diagnostics_marker='First emulator attempt failed; captured diagnostics follow:'
+
+  [[ "$evidence" == *"$diagnostics_marker"* ]] \
+    && [[ "$evidence" != *"$RETRY_MARKER"* ]]
+}
+
 # Gate outcomes are emitted only when every failed upstream job in this run is
 # advisory. This tells a reader to inspect this report's real upstream rows
 # rather than treating a roll-up context as the failing test.
 advisory_only_gate() {
   local gate="$1"
   local failures
-  failures="$(jq -r '
+  failures="$(jq -r "${FAILURE_CONCLUSIONS_JQ_DEF}"$'
     .jobs[]
-    | select((((.conclusion // "") | ascii_downcase) == "failure") or (((.conclusion // "") | ascii_downcase) == "cancelled"))
+    | select(.conclusion | is_failed_conclusion)
     | .name
   ' <<< "$run_json")"
   case "$gate" in
@@ -144,10 +168,10 @@ while IFS=$'\t' read -r job_id job_name steps; do
   [[ -n "$job_id" ]] || continue
   failed_count=$((failed_count + 1))
   annotations=''
-  if ! annotations="$(gh api "repos/${REPO}/check-runs/${job_id}/annotations" 2>/dev/null)"; then
-    annotations='[]'
+  if ! annotations="$(gh api --paginate --slurp "repos/${REPO}/check-runs/${job_id}/annotations?per_page=100" 2>/dev/null)"; then
+    annotations='[[]]'
   fi
-  annotation_text="$(jq -r '[.[]? | (.message // .raw_details // "")] | map(select(length > 0)) | join("; ")' <<< "$annotations")"
+  annotation_text="$(jq -r '[.[][]? | (.message // .raw_details // "")] | map(select(length > 0)) | join("; ")' <<< "$annotations")"
   if [[ -z "$annotation_text" ]]; then
     annotation_text='none'
   fi
@@ -159,16 +183,19 @@ while IFS=$'\t' read -r job_id job_name steps; do
   # shellcheck disable=SC2310 # A non-match is expected classifier control flow.
   if advisory_only_gate "$job_name"; then
     verdict='CHECK-UPSTREAM-FIRST — aggregator is red because of an advisory (non-required) lane; inspect the upstream rows above before rerunning or filing an issue'
+  elif ambiguous_terminal_attempt "${head_branch} ${annotation_text} ${log_text}"; then
+    verdict='UNKNOWN — log predates the retry marker; attempt-one diagnostics are not authoritative for the terminal attempt'
   else
-    verdict="$(match_signature "$job_name" "${head_branch} ${annotation_text} ${log_text}")"
+    evidence="$(terminal_attempt_evidence "${head_branch} ${annotation_text} ${log_text}")"
+    verdict="$(match_signature "$job_name" "$evidence")"
   fi
 
   printf '%s → %s → %s → %s\n' "$job_name" "${steps:-none}" "$annotation_text" "$verdict"
 done < <(
-  jq -r '
+  jq -r "${FAILURE_CONCLUSIONS_JQ_DEF}"$'
     .jobs[]
-    | select((((.conclusion // "") | ascii_downcase) == "failure") or (((.conclusion // "") | ascii_downcase) == "cancelled"))
-    | [(.databaseId // .id // ""), .name, ([.steps[]? | select(((.conclusion // "") | ascii_downcase) == "failure" or ((.conclusion // "") | ascii_downcase) == "cancelled") | .name] | join(", "))]
+    | select(.conclusion | is_failed_conclusion)
+    | [(.databaseId // .id // ""), .name, ([.steps[]? | select(.conclusion | is_failed_conclusion) | .name] | join(", "))]
     | @tsv
   ' <<< "$run_json"
 )

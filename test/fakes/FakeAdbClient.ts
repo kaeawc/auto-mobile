@@ -40,6 +40,7 @@ export class FakeAdbClient implements FakeAdbClientContract {
     maxBuffer?: number;
     noRetry?: boolean;
     signal?: AbortSignal;
+    waitForProcessSettlementAfterAbort?: boolean;
   }> = [];
   private commandResults: Map<string, { stdout: string; stderr: string }> = new Map();
   private commandResultSequences: Map<string, Array<{ stdout: string; stderr: string }>> =
@@ -76,6 +77,7 @@ export class FakeAdbClient implements FakeAdbClientContract {
     maxBuffer?: number,
     noRetry?: boolean,
     signal?: AbortSignal,
+    waitForProcessSettlementAfterAbort?: boolean,
   ): Promise<{
     stdout: string;
     stderr: string;
@@ -83,7 +85,14 @@ export class FakeAdbClient implements FakeAdbClientContract {
     trim: () => string;
     includes: (search: string) => boolean;
   }> {
-    this.commandCalls.push({ command, timeoutMs, maxBuffer, noRetry, signal });
+    this.commandCalls.push({
+      command,
+      timeoutMs,
+      maxBuffer,
+      noRetry,
+      signal,
+      waitForProcessSettlementAfterAbort,
+    });
     this.interactionLog.push({ kind: "command", text: command });
 
     const error = this.commandErrors.get(command);
@@ -140,6 +149,7 @@ export class FakeAdbClient implements FakeAdbClientContract {
       options?.maxBuffer,
       options?.noRetry,
       options?.signal,
+      options?.waitForProcessSettlementAfterAbort,
     );
   }
 
@@ -344,6 +354,7 @@ export class FakeAdbClient implements FakeAdbClientContract {
     maxBuffer?: number;
     noRetry?: boolean;
     signal?: AbortSignal;
+    waitForProcessSettlementAfterAbort?: boolean;
   }> {
     return [...this.commandCalls];
   }
@@ -358,6 +369,7 @@ export class FakeAdbClient implements FakeAdbClientContract {
         maxBuffer?: number;
         noRetry?: boolean;
         signal?: AbortSignal;
+        waitForProcessSettlementAfterAbort?: boolean;
       }
     | undefined {
     return this.commandCalls[this.commandCalls.length - 1];

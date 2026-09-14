@@ -566,12 +566,13 @@ export function setListInstalledAppsFactoryForTests(
 async function fetchAppsForDevice(
   device: BootedDevice,
   timer: Timer = defaultTimer,
+  signal?: AbortSignal,
 ): Promise<FetchedAppsCacheEntry> {
   const listInstalledApps = listInstalledAppsFactory(device);
   const lastUpdated = new Date().toISOString();
 
   if (device.platform === "android") {
-    const result = await listInstalledApps.executeDetailedResult();
+    const result = await listInstalledApps.executeDetailedResult(signal);
     const { userApps, queryApps } = normalizeAndroidApps(result.apps);
     const foregroundApp = queryApps.find((app) => app.foreground)?.packageName ?? null;
     const message = getAndroidAppsMessage(device.deviceId);
@@ -689,21 +690,24 @@ function launchabilityUnknownProfiles(queryApps: AppsQueryAppInfo[]): number[] {
 }
 
 async function ensureAppsCacheEntry(
-  deviceId: string,
+  deviceOrId: BootedDevice | string,
   timer: Timer = defaultTimer,
+  signal?: AbortSignal,
 ): Promise<AppsCacheEntry | null> {
+  const deviceId = typeof deviceOrId === "string" ? deviceOrId : deviceOrId.deviceId;
   const cached = appCacheByDeviceId.get(deviceId);
   if (cached && cached.expiresAt > timer.now()) {
     return cached;
   }
 
-  const device = await findBootedDevice(deviceId);
+  const device = typeof deviceOrId === "string" ? await findBootedDevice(deviceOrId) : deviceOrId;
   if (!device) {
     return null;
   }
 
+  signal?.throwIfAborted();
   const cacheGeneration = getInstalledAppsCacheWriteCoordinator().beginRebuild(deviceId);
-  const result = await fetchAppsForDevice(device, timer);
+  const result = await fetchAppsForDevice(device, timer, signal);
   if (
     result.cacheable &&
     (device.platform !== "android" || !getInstalledAppsCacheWriteCoordinator().isDirty(deviceId))
@@ -887,7 +891,11 @@ function matchesAppsQuerySearch(app: AppsQueryAppInfo, searchTerm: string | unde
   );
 }
 
-async function getAppsQueryDevice(options: AppsQueryOptions): Promise<BootedDevice> {
+async function getAppsQueryDevice(
+  options: AppsQueryOptions,
+  signal?: AbortSignal,
+): Promise<BootedDevice> {
+  signal?.throwIfAborted();
   if (!options.deviceId) {
     throw new Error("deviceId is required");
   }
@@ -895,7 +903,8 @@ async function getAppsQueryDevice(options: AppsQueryOptions): Promise<BootedDevi
   const platforms: Platform[] = options.platform ? [options.platform] : ["android", "ios"];
 
   for (const platform of platforms) {
-    const devices = await listBootedDevicesForResource(platform, "AppResources");
+    signal?.throwIfAborted();
+    const devices = await listBootedDevicesForResource(platform, "AppResources", { signal });
     const matched = devices.find((device) => device.deviceId === options.deviceId);
     if (matched) {
       return matched;
@@ -922,9 +931,10 @@ async function getAppsQueryDevice(options: AppsQueryOptions): Promise<BootedDevi
  */
 export async function queryInstalledApps(
   options: AppsQueryOptions,
+  signal?: AbortSignal,
 ): Promise<AppsQueryResourceContent> {
-  const device = await getAppsQueryDevice(options);
-  const cacheEntry = await ensureAppsCacheEntry(device.deviceId);
+  const device = await getAppsQueryDevice(options, signal);
+  const cacheEntry = await ensureAppsCacheEntry(device, defaultTimer, signal);
   if (!cacheEntry) {
     throw new Error(`Device not found or not booted: ${device.deviceId}`);
   }

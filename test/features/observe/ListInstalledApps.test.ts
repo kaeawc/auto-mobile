@@ -615,6 +615,22 @@ describe("ListInstalledApps", function () {
       }
     });
 
+    test("rejects promptly when CtrlProxy request is aborted in flight", async function () {
+      const abortReason = new Error("request cancelled");
+      const a11yClient: AndroidPackagesA11yClient = {
+        requestInstalledPackages() {
+          return new Promise(() => {});
+        },
+      };
+      const source = new CtrlProxyInstalledPackageSource(mockDevice, a11yClient);
+      const controller = new AbortController();
+      const request = source.requestInstalledPackages(controller.signal);
+
+      controller.abort(abortReason);
+
+      await expect(request).rejects.toBe(abortReason);
+    });
+
     test("a failed launcher probe leaves launchability unknown rather than claiming false", async function () {
       fakeAdb.setCommandError(
         "shell cmd package query-activities --brief --user 0 " +

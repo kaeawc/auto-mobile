@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import type { ChildProcess } from "node:child_process";
+import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import { Daemon } from "../../src/daemon/daemon";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool, type PooledDevice } from "../../src/daemon/devicePool";
@@ -105,7 +106,8 @@ async function setup(
   emulatorLossIncidentStore?: EmulatorLossIncidentStore,
 ) {
   const timer = new FakeTimer();
-  const sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
+  const persistence = new FakeDeviceSessionPersistence();
+  const sessions = new SessionManager(timer, persistence);
   const pool = new DevicePool(
     sessions,
     "daemon",
@@ -134,7 +136,7 @@ async function setup(
     original,
   );
   const captured = pool.getDevice(original.deviceId)!;
-  return { timer, sessions, manager, pool, captured };
+  return { timer, sessions, manager, pool, captured, persistence };
 }
 
 interface DaemonDisconnectInternals {
@@ -946,6 +948,10 @@ test("a retained failure fence is not re-swept as a due deferred recovery", asyn
     expect(internals.failedTerminalRecoveryReleases.has("session")).toBe(true);
     expect(internals.recoveringSessionLosses.has("session")).toBe(true);
     expect(sessions.getSession("session")?.assignedDevice).toBe(original.deviceId);
+    expect(
+      await pool.recoverSessionBoundAndroidDeviceAfterLoss(original.deviceId, undefined, captured),
+    ).toBe("deferred");
+    expect(manager.startedDevices).toHaveLength(0);
 
     sessions.releaseSession = originalReleaseSession;
     await originalReleaseSession("session", "explicit-release");
@@ -1325,4 +1331,182 @@ test("startup lease beats a shorter timeout when matching recovery settles", asy
     manager.releaseReadiness.resolve();
     sessions.stopCleanupTimer();
   }
+});
+
+interface FailedReleaseRecord {
+  generation: number;
+  failedReleaseAttempts?: number;
+  deferredUntil?: number;
+  reservations: Set<string>;
+}
+interface FailedReleaseInternals {
+  startAndroidRecoveryRecord(
+    sessionId: string,
+    details: { deviceId: string },
+    reservations: readonly string[],
+  ): FailedReleaseRecord;
+  markAndroidRecoveryReleaseFailure(record: FailedReleaseRecord): void;
+}
+
+async function setupFailedReleaseFence() {
+  const context = await setup();
+  context.sessions.stopCleanupTimer();
+  context.sessions.setActiveSessionExecutionChecker((id) =>
+    context.pool.isSessionRecoveryInFlight(id),
+  );
+  const internals = context.pool as unknown as FailedReleaseInternals;
+  const record = internals.startAndroidRecoveryRecord("session", { deviceId: original.deviceId }, [
+    "loss",
+    "quarantine",
+    "failed-release",
+  ]);
+  (context.pool as unknown as DevicePoolRecoveryInternals).failedTerminalRecoveryReleases.add(
+    "session",
+  );
+  const releases: string[] = [];
+  const monitor = new SessionHeartbeatMonitor(
+    context.sessions,
+    (id) => context.pool.isSessionRecoveryInFlight(id),
+    async (id, reason) => {
+      releases.push(reason);
+      await context.sessions.releaseSession(id, reason);
+    },
+    context.timer,
+  );
+  return { ...context, internals, record, monitor, releases };
+}
+
+test("failed-release fence becomes reaper eligible and a successful reap finalizes it", async () => {
+  const { pool, timer, monitor, releases, record } = await setupFailedReleaseFence();
+  expect(pool.isSessionRecoveryInFlight("session")).toBe(false);
+  timer.advanceTime(20_001);
+  await monitor.tick();
+  expect(releases).toEqual(["missing-first-heartbeat"]);
+  assertNoRecoveryReservationsRemain(pool, "session");
+  expect(record.reservations.has("failed-release")).toBe(false);
+  expect(record.failedReleaseAttempts ?? 0).toBe(0);
+});
+
+test("failed-release reaper retries back off exponentially and stop at five minutes", async () => {
+  const { pool, timer, monitor, releases, record, persistence } = await setupFailedReleaseFence();
+  persistence.failure = "release";
+  timer.enableAutoAdvance();
+  timer.advanceTime(20_001);
+  for (const [index, delay] of [
+    5_000, 10_000, 20_000, 40_000, 80_000, 160_000, 300_000, 300_000,
+  ].entries()) {
+    await expect(monitor.tick()).rejects.toThrow("persist release failed");
+    expect(record.failedReleaseAttempts).toBe(index + 1);
+    expect(timer.getSleepHistory()).toEqual(Array((index + 1) * 2).fill(1_000));
+    expect(record.deferredUntil).toBe(timer.now() + delay);
+    expect(record.reservations.has("failed-release")).toBe(true);
+    expect(pool.isSessionRecoveryInFlight("session")).toBe(true);
+    const attempts = releases.length;
+    timer.advanceTime(delay - 1);
+    await monitor.tick();
+    expect(releases).toHaveLength(attempts);
+    timer.advanceTime(1);
+    expect(pool.isSessionRecoveryInFlight("session")).toBe(false);
+  }
+  persistence.failure = null;
+  await monitor.tick();
+  assertNoRecoveryReservationsRemain(pool, "session");
+});
+
+test("a live heartbeat leaves a due failed-release fence untouched", async () => {
+  const { pool, sessions, timer, monitor, releases, record } = await setupFailedReleaseFence();
+  timer.advanceTime(20_001);
+  sessions.recordHeartbeat("session");
+  const before = { ...record, reservations: new Set(record.reservations) };
+  await monitor.tick();
+  expect(releases).toEqual([]);
+  expect(record).toEqual(before);
+  expect(
+    (pool as unknown as DevicePoolRecoveryInternals).recoveringSessionLosses.get("session"),
+  ).toBe(record);
+  expect(
+    (pool as unknown as DevicePoolRecoveryInternals).failedTerminalRecoveryReleases.has("session"),
+  ).toBe(true);
+});
+
+test("an in-flight promise blocks reaping a failed-release fence with or without a deadline", async () => {
+  const { pool, timer, monitor, releases, record } = await setupFailedReleaseFence();
+  const recovery = Promise.withResolvers<void>();
+  (pool as unknown as DevicePoolRecoveryInternals).sessionPreservingRecoveries.set("session", {
+    promise: recovery.promise,
+  });
+  timer.advanceTime(20_001);
+  for (const deadline of [undefined, timer.now() - 1, timer.now() + 5_000]) {
+    record.deferredUntil = deadline;
+    expect(pool.isSessionRecoveryInFlight("session")).toBe(true);
+    await monitor.tick();
+  }
+  expect(releases).toEqual([]);
+  recovery.resolve();
+});
+
+test("idle cleanup retries a failed terminal release and honors its backoff", async () => {
+  const { sessions, pool, timer, persistence, record } = await setupFailedReleaseFence();
+  const session = sessions.getSession("session")!;
+  persistence.failure = "release";
+  // A real failed terminal release leaves a durable terminal reason for idle retry.
+  await expect(sessions.releaseSession("session", "device-disconnected:test")).rejects.toThrow(
+    "persist release failed",
+  );
+  session.expiresAt = 0;
+  timer.advanceTime(1);
+  timer.enableAutoAdvance();
+  sessions.cleanupExpiredSessions();
+  await expect(pool.waitForSessionPreservingRecovery("session")).rejects.toThrow(
+    "persist release failed",
+  );
+  await flush();
+  expect(record.failedReleaseAttempts).toBe(1);
+  expect(record.deferredUntil).toBe(timer.now() + 5_000);
+  sessions.cleanupExpiredSessions();
+  await flush();
+  expect(record.failedReleaseAttempts).toBe(1);
+  persistence.failure = null;
+  timer.advanceTime(5_000);
+  sessions.cleanupExpiredSessions();
+  await pool.waitForSessionPreservingRecovery("session");
+  await flush();
+  assertNoRecoveryReservationsRemain(pool, "session");
+  expect(pool.getDevice(original.deviceId)?.sessionId).toBeNull();
+});
+
+test("failed-release expiry preserves a declined commit fence", async () => {
+  const { sessions, pool, record } = await setupFailedReleaseFence();
+  const release = await sessions.releaseSessionUnlessSuperseded(
+    "session",
+    "heartbeat-timeout",
+    () => false,
+  );
+  expect(release).toEqual({ superseded: true });
+  expect(record.reservations.has("failed-release")).toBe(true);
+  expect(record.failedReleaseAttempts).toBeUndefined();
+  expect(
+    (pool as unknown as DevicePoolRecoveryInternals).recoveringSessionLosses.get("session"),
+  ).toBe(record);
+  expect(pool.isSessionRecoveryInFlight("session")).toBe(false);
+});
+
+test("failed-release retry flight excludes overlapping expiry releases", async () => {
+  const { sessions, pool, persistence } = await setupFailedReleaseFence();
+  const started = Promise.withResolvers<void>();
+  const finish = Promise.withResolvers<void>();
+  let attempts = 0;
+  persistence.markReleased = async () => {
+    attempts++;
+    started.resolve();
+    await finish.promise;
+  };
+  const release = sessions.releaseSession("session", "heartbeat-timeout");
+  await started.promise;
+  expect(pool.isSessionRecoveryInFlight("session")).toBe(true);
+  expect(await sessions.releaseSession("session", "cleanup-expired", true)).toBeNull();
+  expect(attempts).toBe(1);
+  finish.resolve();
+  await release;
+  assertNoRecoveryReservationsRemain(pool, "session");
 });

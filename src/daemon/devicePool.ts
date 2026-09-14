@@ -9,6 +9,8 @@ import {
   PlatformDeviceManager,
   waitForDeviceReadyOrCancel,
 } from "../utils/deviceUtils";
+import { exponentialBackoff } from "../utils/Backoff";
+import { toActionableError } from "../models/ActionableError";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { type IdGenerator, defaultIdGenerator } from "../utils/IdGenerator";
 import type { InstalledAppsStore } from "../db/installedAppsRepository";
@@ -113,6 +115,14 @@ export class DevicePoolError extends Error {
 export type DeviceStatus = "idle" | "busy" | "error";
 type AndroidRediscoveryVerification = "rediscovered" | "not-rediscovered" | "unknown";
 export type CurrentDisconnectStatus = "current" | "recovered" | "unknown";
+const FAILED_RELEASE_RETRY_BASE_DELAY_MS = 5_000;
+const FAILED_RELEASE_RETRY_BACKOFF_MULTIPLIER = 2;
+const FAILED_RELEASE_RETRY_MAX_DELAY_MS = 300_000;
+const failedReleaseRetryBackoff = exponentialBackoff({
+  initialDelayMs: FAILED_RELEASE_RETRY_BASE_DELAY_MS,
+  multiplier: FAILED_RELEASE_RETRY_BACKOFF_MULTIPLIER,
+  maxDelayMs: FAILED_RELEASE_RETRY_MAX_DELAY_MS,
+});
 const UNCONFIRMED_RECOVERY_SHUTDOWN_COOLDOWN_MS = 30_000;
 const RECOVERING_IMAGE_SETTLEMENT_MISSING_RETRY_MS = 250;
 const MAX_DEFERRED_RECOVERY_SHUTDOWNS = 1;
@@ -151,6 +161,7 @@ interface AndroidRecoveryRecord {
   avdName?: string;
   deferredUntil?: number;
   deferredShutdowns: number;
+  failedReleaseAttempts?: number;
   state: "pending" | "deferred" | "released" | "finalized";
   reservations: Set<AndroidRecoveryReservationKind>;
 }
@@ -784,6 +795,11 @@ export class DevicePool {
         return !release.superseded;
       });
 
+    this.sessionManager.setRecoveryExpiryReleaseHandler({
+      release: (sessionId, reason, attempt) =>
+        this.releaseFailedRecoveryOnExpiry(sessionId, reason, attempt),
+    });
+
     // Expiry has no caller available to return the device to the pool. Explicit
     // release callers retain their ordered cleanup and release flow, while
     // autolock metadata is still removed when their session ends.
@@ -878,6 +894,8 @@ export class DevicePool {
     }
     if (record.reservations.has("failed-release")) {
       this.failedTerminalRecoveryReleases.delete(sessionId);
+      record.reservations.delete("failed-release");
+      record.failedReleaseAttempts = 0;
     }
     this.recoveringSessionLosses.delete(sessionId);
     return true;
@@ -901,6 +919,9 @@ export class DevicePool {
   private markAndroidRecoveryReleaseFailure(record: AndroidRecoveryRecord): void {
     record.reservations.add("failed-release");
     this.failedTerminalRecoveryReleases.add(record.sessionId);
+    record.failedReleaseAttempts = (record.failedReleaseAttempts ?? 0) + 1;
+    record.deferredUntil =
+      this.timer.now() + failedReleaseRetryBackoff.delayForAttempt(record.failedReleaseAttempts);
   }
 
   private async finalizeReleasedRecoveryAfterAwait(
@@ -2923,7 +2944,7 @@ export class DevicePool {
         return await this.joinSessionPreservingRecovery(inFlight, incidentId);
       }
       if (this.adbServerResetQuarantinedSessions.has(candidateSessionId)) {
-        if (this.shouldDeferSessionRecovery(candidateSessionId)) {
+        if (this.shouldDeferSessionLossRecovery(candidateSessionId)) {
           await this.finishEmulatorLossIncident(incidentId, "not-attempted");
           return "deferred";
         }
@@ -3143,10 +3164,99 @@ export class DevicePool {
   }
 
   isSessionRecoveryInFlight(sessionId: string): boolean {
+    const record = this.recoveringSessionLosses.get(sessionId);
+    if (record?.reservations.has("failed-release")) {
+      // A retained terminal failure is reaper-eligible only when no promise owns
+      // it and its retry deadline is due. Unlike other reservations, no deadline
+      // means eligible; a future deadline must still block heartbeat/idle sweeps.
+      return (
+        this.sessionPreservingRecoveries.has(sessionId) ||
+        (record.deferredUntil !== undefined && this.shouldDeferSessionRecovery(sessionId))
+      );
+    }
     return (
       this.adbServerResetQuarantinedSessions.has(sessionId) &&
       (this.sessionPreservingRecoveries.has(sessionId) ||
         this.shouldDeferSessionRecovery(sessionId))
+    );
+  }
+
+  private releaseFailedRecoveryOnExpiry(
+    sessionId: string,
+    releaseReason: string,
+    attempt: () => Promise<string | null>,
+  ): Promise<string | null> | undefined {
+    const record = this.recoveringSessionLosses.get(sessionId);
+    if (!record?.reservations.has("failed-release")) {
+      return undefined;
+    }
+    if (this.isSessionRecoveryInFlight(sessionId)) {
+      return Promise.resolve(null);
+    }
+    // Publish ownership before invoking release so overlapping idle and heartbeat
+    // sweeps cannot enter a second retry flight. The continuation avoids recursion
+    // through SessionManager's expiry hook and preserves its commit/cancel fences.
+    const release = Promise.resolve().then(() =>
+      this.retryFailedRecoveryRelease(record, releaseReason, attempt),
+    );
+    const entry: SessionPreservingRecovery = {
+      promise: release.then(() => (record.state === "released" ? "released" : "deferred")),
+    };
+    this.sessionPreservingRecoveries.set(sessionId, entry);
+    return entry.promise
+      .then(() => release)
+      .finally(() => {
+        if (this.sessionPreservingRecoveries.get(sessionId) === entry) {
+          this.sessionPreservingRecoveries.delete(sessionId);
+        }
+        this.finalizeUnownedReleasedRecoveryRecord(sessionId);
+      });
+  }
+
+  private async retryFailedRecoveryRelease(
+    record: AndroidRecoveryRecord,
+    releaseReason: string,
+    attempt: () => Promise<string | null>,
+  ): Promise<string | null> {
+    let deviceId: string | null = null;
+    try {
+      await this.releaseDisconnectedRecoverySessionWithRetry(
+        record.sessionId,
+        record.deviceId,
+        releaseReason,
+        async () => {
+          deviceId = await attempt();
+          // A prior terminal reason overrides cleanup-expired/lazy-expiry in
+          // the release notification. Consume that captured device here because
+          // idle expiry has no daemon caller to return it after session release.
+          if (
+            (releaseReason === "cleanup-expired" || releaseReason === "lazy-expiry") &&
+            this.releasedDeviceCaptures.has(record.sessionId)
+          ) {
+            await this.releaseDevice(record.deviceId, record.sessionId);
+          }
+        },
+      );
+      return deviceId;
+    } catch (error) {
+      if (
+        this.recoveringSessionLosses.get(record.sessionId) === record &&
+        record.state !== "released"
+      ) {
+        this.markAndroidRecoveryReleaseFailure(record);
+      }
+      throw toActionableError(
+        error,
+        `Failed to release recovery-fenced session ${record.sessionId}`,
+      );
+    }
+  }
+
+  private shouldDeferSessionLossRecovery(sessionId: string): boolean {
+    // A failed terminal release can retry release, never restart recovery.
+    return (
+      this.failedTerminalRecoveryReleases.has(sessionId) ||
+      this.shouldDeferSessionRecovery(sessionId)
     );
   }
 
@@ -3971,10 +4081,12 @@ export class DevicePool {
     sessionId: string,
     deviceId: string,
     releaseReason: string,
+    attempt?: () => Promise<void>,
   ): Promise<void> {
     await this.retryExecutor.executeOrThrow(
-      async () =>
-        await this.releaseSessionForDisconnectedDevice(sessionId, deviceId, releaseReason),
+      attempt ??
+        (async () =>
+          await this.releaseSessionForDisconnectedDevice(sessionId, deviceId, releaseReason)),
       {
         onRetry: (error, attempt, delay) => {
           logger.warn(

@@ -26,6 +26,7 @@ import {
   DAEMON_COMPLETE_MAINTENANCE_METHOD,
   DAEMON_PREPARE_MAINTENANCE_METHOD,
 } from "../src/daemon/daemonRestartAdmission";
+import { DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV } from "../src/daemon/liveAcceptanceCapability";
 import {
   getAppleSchema,
   getAndroidSchema,
@@ -1291,6 +1292,12 @@ export async function runAcceptanceMatrix(
       ownershipManifestPath: args.ownershipManifestPath ?? "test-only.manifest",
       build: args.build ?? { entryScript: "/test/dist/src/index.js", buildId: "test-build" },
     };
+  }
+  // The daemon captures this only during startup; it is never exposed through
+  // a daemon RPC. Short-lived CLI children inherit it so they can derive the
+  // generation-bound capability needed for the acceptance-only fault.
+  if (!dependencies.testOnly) {
+    process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV] = randomUUID();
   }
   assertControlConfiguration(args.target, args.controls);
   assertLiveSafeguards(args, dependencies);

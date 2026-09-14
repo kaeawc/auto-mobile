@@ -31,6 +31,7 @@ import { PID_FILE_PATH, DAEMON_VERSION } from "./constants";
 import { getCurrentBuildIdentity } from "./buildIdentity";
 import { cleanupDaemonFiles, cleanupDaemonFilesSync, readPidFileDataSync } from "./daemonFiles";
 import { IncumbentOwnerGuard } from "./incumbentOwnerGuard";
+import { daemonLiveAcceptanceStartupSecret } from "./liveAcceptanceCapability";
 import { currentDaemonProcessGenerationToken } from "./processGeneration";
 import { executionTracker } from "../server/executionTracker";
 import {
@@ -313,6 +314,7 @@ export class Daemon {
   private readonly generationStartedAt: number;
   private readonly processStartedAt: number;
   private readonly processGenerationToken: string | undefined;
+  private readonly liveAcceptanceStartupSecret: string | undefined;
   private idGenerator: IdGenerator;
   private databaseInitializer: DatabaseInitializer;
   private toolSelectionProfileProvenanceLoader: ToolSelectionProfileProvenanceLoader;
@@ -368,6 +370,7 @@ export class Daemon {
     this.generationStartedAt = this.timer.now();
     this.processStartedAt = processBirthTime();
     this.processGenerationToken = processGenerationToken();
+    this.liveAcceptanceStartupSecret = daemonLiveAcceptanceStartupSecret();
     this.databaseInitializer = databaseInitializer;
     this.toolSelectionProfileProvenanceLoader = toolSelectionProfileProvenanceLoader;
     this.databaseHealthProbe = databaseHealthProbe;
@@ -639,6 +642,7 @@ export class Daemon {
           onControlMetadataRepair: async (signal) => await this.writePidFile(signal),
           onControlMetadataCorruption: async (signal) =>
             await this.corruptControlMetadataForAcceptance(signal),
+          liveAcceptanceStartupSecret: this.liveAcceptanceStartupSecret,
         },
         this.idGenerator,
         // A hand-launched daemon (no startup lock) must refuse to unlink a live
@@ -2424,6 +2428,7 @@ export class Daemon {
             onControlMetadataRepair: async (signal) => await this.writePidFile(signal),
             onControlMetadataCorruption: async (signal) =>
               await this.corruptControlMetadataForAcceptance(signal),
+            liveAcceptanceStartupSecret: this.liveAcceptanceStartupSecret,
           },
           this.idGenerator,
           // Recovery reuses the same ownership evidence as initial startup. A

@@ -68,6 +68,11 @@ import {
   type DaemonRestartPreparation,
 } from "./daemonRestartAdmission";
 import {
+  createDaemonLiveAcceptanceCapability,
+  daemonGenerationIdentityFromStatus,
+  daemonLiveAcceptanceStartupSecret,
+} from "./liveAcceptanceCapability";
+import {
   DaemonSocketReachability,
   type DaemonSocketReachabilityLike,
 } from "./daemonSocketReachability";
@@ -2789,18 +2794,31 @@ export class DaemonManager implements DaemonManagerLike {
         "corrupt-control-metadata-admitted requires a maintenance admission token.",
       );
     }
+    const startupSecret = daemonLiveAcceptanceStartupSecret();
+    if (!startupSecret) {
+      throw new ActionableError(
+        "corrupt-control-metadata-admitted requires a live-acceptance daemon startup capability.",
+      );
+    }
     const status = await this.status();
     if (!status.running) {
       throw new ActionableError(
         "corrupt-control-metadata-admitted requires the admitted daemon generation to be running.",
       );
     }
+    const generation = daemonGenerationIdentityFromStatus(status);
+    if (!generation) {
+      throw new ActionableError(
+        "corrupt-control-metadata-admitted requires the admitted daemon generation identity.",
+      );
+    }
+    const acceptanceCapability = createDaemonLiveAcceptanceCapability(startupSecret, generation);
     const client = this.createClient({ clientIdentity: null });
     try {
       await client.connect();
       const result: unknown = await client.callDaemonMethod(
         DAEMON_CORRUPT_CONTROL_METADATA_METHOD,
-        { ...status, maintenanceToken },
+        { ...status, maintenanceToken, acceptanceCapability },
       );
       if ((result as Partial<DaemonControlMetadataCorruption> | null)?.corrupted !== true) {
         throw new ActionableError(

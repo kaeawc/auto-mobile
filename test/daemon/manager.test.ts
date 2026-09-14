@@ -39,7 +39,11 @@ import type { DaemonStateLike } from "../../src/daemon/daemonState";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import type { DaemonClientLike } from "../../src/daemon/client";
 import { ActionableError } from "../../src/models";
-import { DAEMON_RESTART_ADMITTED_METHOD } from "../../src/daemon/daemonRestartAdmission";
+import {
+  DAEMON_CORRUPT_CONTROL_METADATA_METHOD,
+  DAEMON_RESTART_ADMITTED_METHOD,
+} from "../../src/daemon/daemonRestartAdmission";
+import { createDaemonLiveAcceptanceCapability } from "../../src/daemon/liveAcceptanceCapability";
 import { INCOMPLETE_EXTRACTION_CODE } from "../../src/db/migrationDependencyIntegrity";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { formatLockContent } from "../../src/utils/fileLock";
@@ -500,6 +504,71 @@ describe("DaemonManager restart", () => {
 });
 
 describe("DaemonManager control metadata repair", () => {
+  test("corrupt-control-metadata-admitted fails closed for an ordinary CLI even with a token", async () => {
+    const originalSecret = process.env.AUTOMOBILE_DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET;
+    delete process.env.AUTOMOBILE_DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET;
+    const manager = new DaemonManager(() => {
+      throw new Error("ordinary CLI must not connect to the destructive RPC");
+    });
+
+    try {
+      await expect(manager.corruptControlMetadataAdmitted("maintenance-token")).rejects.toThrow(
+        "live-acceptance daemon startup capability",
+      );
+    } finally {
+      if (originalSecret === undefined) {
+        delete process.env.AUTOMOBILE_DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET;
+      } else {
+        process.env.AUTOMOBILE_DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET = originalSecret;
+      }
+    }
+  });
+
+  test("derives the startup-authorized capability for the admitted daemon generation", async () => {
+    const originalSecret = process.env.AUTOMOBILE_DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET;
+    const startupSecret = "live-acceptance-startup-secret-123456";
+    process.env.AUTOMOBILE_DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET = startupSecret;
+    const status: DaemonStatus = {
+      running: true,
+      pid: 1001,
+      startedAt: 100,
+      processGenerationToken: "generation-1",
+      version: "0.0.73",
+      buildId: "acceptance-build",
+      entryScript: "/acceptance/dist/src/index.js",
+    };
+    const client = new FakeDaemonClient({});
+    const rpcSpy = spyOn(client, "callDaemonMethod").mockResolvedValue({ corrupted: true });
+    const manager = new DaemonManager(() => client);
+    const statusSpy = spyOn(manager, "status").mockResolvedValue(status);
+
+    try {
+      await expect(manager.corruptControlMetadataAdmitted("maintenance-token")).resolves.toBe(
+        undefined,
+      );
+      expect(rpcSpy).toHaveBeenCalledWith(DAEMON_CORRUPT_CONTROL_METADATA_METHOD, {
+        ...status,
+        maintenanceToken: "maintenance-token",
+        acceptanceCapability: createDaemonLiveAcceptanceCapability(startupSecret, {
+          pid: 1001,
+          startedAt: 100,
+          processGenerationToken: "generation-1",
+          version: "0.0.73",
+          buildId: "acceptance-build",
+          entryScript: "/acceptance/dist/src/index.js",
+        }),
+      });
+    } finally {
+      rpcSpy.mockRestore();
+      statusSpy.mockRestore();
+      if (originalSecret === undefined) {
+        delete process.env.AUTOMOBILE_DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET;
+      } else {
+        process.env.AUTOMOBILE_DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET = originalSecret;
+      }
+    }
+  });
+
   test("passes the shared deadline and abort signal through connect and both control RPCs", async () => {
     const timer = new FakeTimer();
     const controller = new AbortController();

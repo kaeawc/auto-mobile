@@ -143,6 +143,10 @@ import {
   type DaemonRestartPreparation,
 } from "./daemonRestartAdmission";
 import {
+  daemonLiveAcceptanceCapabilityMatches,
+  type DaemonGenerationIdentity,
+} from "./liveAcceptanceCapability";
+import {
   DEVICE_CONTROL_TRANSPORT_FAILURE_CODE,
   DeviceControlTransportError,
   deviceControlToolName,
@@ -567,6 +571,7 @@ export class UnixSocketServer {
   private readonly onRestartAccepted?: () => void;
   private readonly onControlMetadataRepair?: (signal?: AbortSignal) => Promise<void>;
   private readonly onControlMetadataCorruption?: (signal?: AbortSignal) => Promise<void>;
+  private readonly liveAcceptanceStartupSecret: string | undefined;
   private maintenanceAdmissionToken: string | undefined;
   private maintenanceRestartConsumed = false;
   private readonly sessionToolSelectionService?: Pick<
@@ -641,6 +646,7 @@ export class UnixSocketServer {
       onRestartAccepted?: () => void;
       onControlMetadataRepair?: (signal?: AbortSignal) => Promise<void>;
       onControlMetadataCorruption?: (signal?: AbortSignal) => Promise<void>;
+      liveAcceptanceStartupSecret?: string;
       sessionToolSelectionService?: Pick<SessionToolSelectionService, "isEnabled" | "setEnabled">;
     } = {},
     idGenerator: IdGenerator = defaultIdGenerator,
@@ -680,6 +686,7 @@ export class UnixSocketServer {
     this.onRestartAccepted = handshakeConfig.onRestartAccepted;
     this.onControlMetadataRepair = handshakeConfig.onControlMetadataRepair;
     this.onControlMetadataCorruption = handshakeConfig.onControlMetadataCorruption;
+    this.liveAcceptanceStartupSecret = handshakeConfig.liveAcceptanceStartupSecret;
     logger.info(`UnixSocketServer initialized with endpoint: "${mcpEndpoint}"`);
     if (!mcpEndpoint) {
       logger.error("ERROR: mcpEndpoint is empty or undefined!");
@@ -3069,6 +3076,25 @@ export class UnixSocketServer {
     }
     if (params.maintenanceToken !== this.maintenanceAdmissionToken) {
       return { corrupted: false, reason: "maintenance_token_invalid" };
+    }
+    const identity: DaemonGenerationIdentity = {
+      pid: process.pid,
+      startedAt: this.identityStartedAt,
+      ...(this.processGenerationToken === undefined
+        ? {}
+        : { processGenerationToken: this.processGenerationToken }),
+      version: this.daemonIdentity.version,
+      buildId: this.daemonIdentity.build.buildId,
+      entryScript: this.daemonIdentity.build.entryScript,
+    };
+    if (
+      !daemonLiveAcceptanceCapabilityMatches(
+        this.liveAcceptanceStartupSecret,
+        identity,
+        params.acceptanceCapability,
+      )
+    ) {
+      return { corrupted: false, reason: "acceptance_capability_invalid" };
     }
     const sessions = this.daemonState.getSessionManager().getAllSessions?.();
     if (!sessions || sessions.length > 0) {

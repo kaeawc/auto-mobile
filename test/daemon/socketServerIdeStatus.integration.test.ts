@@ -15,10 +15,12 @@ import { RELEASE_CHECKSUM_REGISTRY, IOS_CTRL_PROXY_APP_HASH } from "../../src/co
 import { executionTracker } from "../../src/server/executionTracker";
 import {
   DAEMON_COMPLETE_MAINTENANCE_METHOD,
+  DAEMON_CORRUPT_CONTROL_METADATA_METHOD,
   DAEMON_PREPARE_MAINTENANCE_METHOD,
   DAEMON_PREPARE_RESTART_METHOD,
   DAEMON_RESTART_ADMITTED_METHOD,
 } from "../../src/daemon/daemonRestartAdmission";
+import { createDaemonLiveAcceptanceCapability } from "../../src/daemon/liveAcceptanceCapability";
 
 const SHA256_HEX = /^[0-9a-f]{64}$/;
 
@@ -268,6 +270,133 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
     ).toEqual({ accepted: false, reason: "maintenance_token_consumed" });
     executionTracker.clearDaemonRestartPreparation();
     executionTracker.clearDaemonMaintenancePreparation();
+  });
+
+  test("only the startup-authorized live harness can corrupt admitted control metadata", async () => {
+    const startupSecret = "live-acceptance-startup-secret-123456";
+    let faulted = false;
+    const acceptanceSocketPath = join(tmpdir(), `t-acceptance-${randomUUID().slice(0, 8)}.sock`);
+    const acceptanceServer = new UnixSocketServer(
+      acceptanceSocketPath,
+      "http://localhost:0/mcp",
+      createFakeDaemonState(),
+      new FakeTimer(),
+      null,
+      {
+        processGenerationToken: "acceptance-generation-1",
+        liveAcceptanceStartupSecret: startupSecret,
+        onControlMetadataCorruption: async () => {
+          faulted = true;
+        },
+      },
+    );
+    try {
+      await acceptanceServer.start();
+      const status = (await sendRequest(acceptanceSocketPath, "ide/status")).result!;
+      const admitted = await sendRequest(
+        acceptanceSocketPath,
+        DAEMON_PREPARE_MAINTENANCE_METHOD,
+        status,
+      );
+      const maintenanceToken = (admitted.result as { maintenanceToken: string }).maintenanceToken;
+
+      expect(
+        (
+          await sendRequest(acceptanceSocketPath, DAEMON_CORRUPT_CONTROL_METADATA_METHOD, {
+            ...status,
+            maintenanceToken,
+          })
+        ).result,
+      ).toEqual({ corrupted: false, reason: "acceptance_capability_invalid" });
+      expect(faulted).toBe(false);
+
+      const acceptanceCapability = createDaemonLiveAcceptanceCapability(startupSecret, {
+        pid: status.pid as number,
+        startedAt: status.startedAt as number,
+        processGenerationToken: status.processGenerationToken as string,
+        version: status.version as string,
+        buildId: status.buildId as string,
+        entryScript: status.entryScript as string,
+      });
+      expect(
+        (
+          await sendRequest(acceptanceSocketPath, DAEMON_CORRUPT_CONTROL_METADATA_METHOD, {
+            ...status,
+            maintenanceToken,
+            acceptanceCapability,
+          })
+        ).result,
+      ).toEqual({ corrupted: true });
+      expect(faulted).toBe(true);
+
+      expect(
+        (
+          await sendRequest(acceptanceSocketPath, DAEMON_COMPLETE_MAINTENANCE_METHOD, {
+            ...status,
+            maintenanceToken,
+          })
+        ).result,
+      ).toEqual({ completed: true });
+
+      const replacementSocketPath = join(
+        tmpdir(),
+        `t-acceptance-replacement-${randomUUID().slice(0, 8)}.sock`,
+      );
+      const replacementServer = new UnixSocketServer(
+        replacementSocketPath,
+        "http://localhost:0/mcp",
+        createFakeDaemonState(),
+        new FakeTimer(),
+        null,
+        {
+          processGenerationToken: "acceptance-generation-2",
+          liveAcceptanceStartupSecret: startupSecret,
+        },
+      );
+      try {
+        await replacementServer.start();
+        const replacementStatus = (await sendRequest(replacementSocketPath, "ide/status")).result!;
+        const replacementAdmission = await sendRequest(
+          replacementSocketPath,
+          DAEMON_PREPARE_MAINTENANCE_METHOD,
+          replacementStatus,
+        );
+        const replacementToken = (replacementAdmission.result as { maintenanceToken: string })
+          .maintenanceToken;
+
+        expect(
+          (
+            await sendRequest(replacementSocketPath, DAEMON_CORRUPT_CONTROL_METADATA_METHOD, {
+              ...replacementStatus,
+              maintenanceToken: replacementToken,
+              acceptanceCapability,
+            })
+          ).result,
+        ).toEqual({ corrupted: false, reason: "acceptance_capability_invalid" });
+      } finally {
+        await replacementServer.close();
+        if (existsSync(replacementSocketPath)) {
+          await unlink(replacementSocketPath);
+        }
+      }
+
+      expect(
+        (
+          await sendRequest(acceptanceSocketPath, DAEMON_CORRUPT_CONTROL_METADATA_METHOD, {
+            ...status,
+            processGenerationToken: "replacement-generation",
+            maintenanceToken,
+            acceptanceCapability,
+          })
+        ).result,
+      ).toEqual({ corrupted: false, reason: "generation_changed" });
+    } finally {
+      await acceptanceServer.close();
+      if (existsSync(acceptanceSocketPath)) {
+        await unlink(acceptanceSocketPath);
+      }
+      executionTracker.clearDaemonMaintenancePreparation();
+    }
   });
 
   test("ide/status reports a concrete releaseVersion, never the 'latest' literal (EC7)", async () => {

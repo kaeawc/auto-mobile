@@ -58,6 +58,7 @@ export interface DaemonControlMetadataCorruption {
   reason?:
     | "generation_changed"
     | "maintenance_token_invalid"
+    | "acceptance_capability_invalid"
     | "active_sessions"
     | "fault_unavailable";
 }

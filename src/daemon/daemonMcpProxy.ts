@@ -1281,12 +1281,14 @@ export class DaemonMcpProxy {
   private async waitForJoinedRestartSuccessor(
     expected: DaemonStatus,
     deadline: number,
-  ): Promise<void> {
-    while (this.timer.now() < deadline) {
+  ): Promise<DaemonStatus> {
+    let initialProbe = true;
+    while (initialProbe || this.timer.now() < deadline) {
+      initialProbe = false;
       try {
         const status = await this.reconciliationStatus();
         if (status.running && !this.isSameDaemonGeneration(status, expected)) {
-          return;
+          return status;
         }
       } catch (error) {
         if (!(error instanceof DaemonPreflightConnectionError)) {
@@ -1366,8 +1368,9 @@ export class DaemonMcpProxy {
   /** Newer clients may replace older daemons; mismatches remain a pre-dispatch gate. */
   private async ensureVersionMatches(
     reconciliationDeadline = this.timer.now() + DAEMON_STARTUP_TIMEOUT_MS,
+    observedStatus?: DaemonStatus,
   ): Promise<void> {
-    const status = await this.reconciliationStatus();
+    const status = observedStatus ?? (await this.reconciliationStatus());
     if (!status.running) {
       return;
     }
@@ -1451,6 +1454,12 @@ export class DaemonMcpProxy {
       }
     }
 
+    if (this.timer.now() >= reconciliationDeadline) {
+      throw new DaemonUnavailableError(
+        `Timed out waiting for concurrent daemon restart after ${DAEMON_STARTUP_TIMEOUT_MS}ms`,
+      );
+    }
+
     logger.info(
       `[DaemonMcpProxy] Daemon version ${runningVersion || "unknown"} differs from MCP server ${this.clientVersion}, restarting daemon`,
     );
@@ -1464,8 +1473,11 @@ export class DaemonMcpProxy {
     );
     this.reconciliationSnapshot = undefined;
     if (restartResult === "joined") {
-      await this.waitForJoinedRestartSuccessor(status, reconciliationDeadline);
-      return await this.ensureVersionMatches(reconciliationDeadline);
+      const successorStatus = await this.waitForJoinedRestartSuccessor(
+        status,
+        reconciliationDeadline,
+      );
+      return await this.ensureVersionMatches(reconciliationDeadline, successorStatus);
     }
     // The replacement daemon may expose a different tool set; drop the cache so we
     // never advertise the old daemon's tools against the new build.
@@ -1538,8 +1550,9 @@ export class DaemonMcpProxy {
    */
   private async ensureBuildMatches(
     reconciliationDeadline = this.timer.now() + DAEMON_STARTUP_TIMEOUT_MS,
+    observedStatus?: DaemonStatus,
   ): Promise<void> {
-    const status = await this.reconciliationStatus();
+    const status = observedStatus ?? (await this.reconciliationStatus());
     if (!status.running) {
       return;
     }
@@ -1568,6 +1581,12 @@ export class DaemonMcpProxy {
       }
     }
 
+    if (this.timer.now() >= reconciliationDeadline) {
+      throw new DaemonUnavailableError(
+        `Timed out waiting for concurrent daemon restart after ${DAEMON_STARTUP_TIMEOUT_MS}ms`,
+      );
+    }
+
     logger.info(
       `[DaemonMcpProxy] Daemon build ${daemonIdentity.buildId} (${daemonIdentity.entryScript || "unknown"}) differs from client build ${this.buildIdentity.buildId} (${this.buildIdentity.entryScript || "unknown"}), restarting daemon`,
     );
@@ -1589,8 +1608,11 @@ export class DaemonMcpProxy {
     reconciliationDeadline: number,
   ): Promise<void> {
     if (restartResult === "joined") {
-      await this.waitForJoinedRestartSuccessor(status, reconciliationDeadline);
-      return await this.ensureBuildMatches(reconciliationDeadline);
+      const successorStatus = await this.waitForJoinedRestartSuccessor(
+        status,
+        reconciliationDeadline,
+      );
+      return await this.ensureBuildMatches(reconciliationDeadline, successorStatus);
     }
     // The replacement daemon may expose a different tool set; drop the cache so we
     // never advertise the old daemon's tools against the new build.
@@ -1661,17 +1683,22 @@ export class DaemonMcpProxy {
       );
       this.reconciliationSnapshot = undefined;
       if (restartResult === "joined") {
-        await this.waitForJoinedRestartSuccessor(status, reconciliationDeadline);
+        const successorStatus = await this.waitForJoinedRestartSuccessor(
+          status,
+          reconciliationDeadline,
+        );
+        const remaining = startupOptionDeficits(requested, successorStatus.options);
+        if (remaining.length === 0) {
+          return;
+        }
+        if (this.timer.now() >= reconciliationDeadline) {
+          break;
+        }
         continue;
       }
 
       const readinessTimeout = Math.max(0, reconciliationDeadline - this.timer.now());
-      const ready = await this.daemonManager.waitForReady(readinessTimeout);
-      if (!ready) {
-        throw new DaemonUnavailableError(
-          `Daemon failed to restart within ${DAEMON_STARTUP_TIMEOUT_MS}ms`,
-        );
-      }
+      await this.daemonManager.waitForReady(readinessTimeout);
 
       const restartedStatus = await this.waitForRunningReconciliationStatus(reconciliationDeadline);
       const remaining = startupOptionDeficits(requested, restartedStatus.options);

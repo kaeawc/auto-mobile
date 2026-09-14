@@ -285,68 +285,77 @@ describe("DeviceBootService", () => {
     teardownLease.release();
   });
 
-  it("provisions from android-34 for maxOsVersion '14' and reuses that AVD next time (#6132)", async () => {
-    // The matcher compares release versions and the provisioner compares API
-    // levels; both receive the same criteria. One value must satisfy both.
-    const devices = new FakeDeviceUtils();
-    const timer = new FakeTimer();
-    const createdName = "AutoMobile-android-34-generated";
-    let provisionCalls = 0;
-    const boot = new DeviceBootService({
-      deviceManager: devices,
-      deviceMatcher: new DefaultDeviceMatcher(),
-      deviceCreationGate: { isCreationAllowed: () => true, describeSource: () => "test" },
-      deviceProvisioner: {
-        provision: async (criteria) => {
-          provisionCalls++;
-          const image = pickAndroidSystemImage(
-            [
+  for (const maxOsVersion of ["14", "34"]) {
+    it(`provisions from android-34 for maxOsVersion '${maxOsVersion}' and reuses that AVD`, async () => {
+      // Both stages receive the same criteria, so the documented release form
+      // and retained API-level form must select and then reuse the same image.
+      const devices = new FakeDeviceUtils();
+      const timer = new FakeTimer();
+      const createdName = "AutoMobile-android-34-generated";
+      let provisionCalls = 0;
+      const boot = new DeviceBootService({
+        deviceManager: devices,
+        deviceMatcher: new DefaultDeviceMatcher(),
+        deviceCreationGate: { isCreationAllowed: () => true, describeSource: () => "test" },
+        deviceProvisioner: {
+          provision: async (criteria) => {
+            provisionCalls++;
+            const image = pickAndroidSystemImage(
+              [
+                {
+                  packageName: "system-images;android-34;google_apis;arm64-v8a",
+                  apiLevel: 34,
+                  tag: "google_apis",
+                  abi: "arm64-v8a",
+                  versionInfo: "",
+                },
+              ],
+              criteria,
+              "arm64",
+            );
+            // What AvdConfigReader reports for the new AVD on the next listing.
+            devices.setDeviceImages("android", [
               {
-                packageName: "system-images;android-34;google_apis;arm64-v8a",
+                name: createdName,
+                platform: "android",
+                isRunning: false,
                 apiLevel: 34,
-                tag: "google_apis",
-                abi: "arm64-v8a",
-                versionInfo: "",
+                osVersion: "14",
               },
-            ],
-            criteria,
-            "arm64",
-          );
-          // What AvdConfigReader reports for the new AVD on the next listing.
-          devices.setDeviceImages("android", [
-            { name: createdName, platform: "android", isRunning: false, osVersion: "14" },
-          ]);
-          return {
-            platform: "android" as const,
-            name: createdName,
-            deviceType: image.packageName,
-            runtime: `android-${image.apiLevel}`,
-          };
+            ]);
+            return {
+              platform: "android" as const,
+              name: createdName,
+              deviceType: image.packageName,
+              runtime: `android-${image.apiLevel}`,
+            };
+          },
         },
-      },
-      matchingStrategy: "LATEST",
-      timer,
+        matchingStrategy: "LATEST",
+        timer,
+      });
+      // preferRunning:false forces the second call through matchDeviceImage
+      // instead of the running-device shortcut.
+      const request = {
+        platform: "android" as const,
+        ...(maxOsVersion === "34" ? { minOsVersion: maxOsVersion } : {}),
+        maxOsVersion,
+        createIfMissing: true,
+        preferRunning: false,
+      };
+
+      const first = await boot.boot(request);
+      expect(provisionCalls).toBe(1);
+      expect(first.provisioned).toBe(true);
+      expect(first.device.name).toBe(createdName);
+
+      const second = await boot.boot(request);
+      expect(provisionCalls).toBe(1);
+      expect(second.provisioned).toBe(false);
+      expect(second.source).toBe("cold-boot");
+      expect(second.sourceImage?.name).toBe(createdName);
     });
-    // preferRunning:false forces the second call through matchDeviceImage
-    // (the release-version comparison) instead of the running-device shortcut.
-    const request = {
-      platform: "android" as const,
-      maxOsVersion: "14",
-      createIfMissing: true,
-      preferRunning: false,
-    };
-
-    const first = await boot.boot(request);
-    expect(provisionCalls).toBe(1);
-    expect(first.provisioned).toBe(true);
-    expect(first.device.name).toBe(createdName);
-
-    const second = await boot.boot(request);
-    expect(provisionCalls).toBe(1);
-    expect(second.provisioned).toBe(false);
-    expect(second.source).toBe("cold-boot");
-    expect(second.sourceImage?.name).toBe(createdName);
-  });
+  }
 
   it("binds a generated Android AVD identity before provisioning creates it", async () => {
     const devices = new FakeDeviceUtils();

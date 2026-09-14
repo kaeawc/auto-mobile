@@ -473,6 +473,10 @@ jobs:
               - 'test/integration/mediamtxWebRtcPublisher.integration.test.ts'
               - 'test/integration/webrtcDeviceCapture.integration.test.ts'
               - 'test/helpers/captureStageTimeline.ts'
+              # Controls daemon-start retry and simulator selection for the
+              # real-device WHEP test; a helper-only change must exercise both
+              # device lanes rather than being silently skipped (issue #7001).
+              - 'test/helpers/webrtcDeviceCaptureHelpers.ts'
               - 'test/bats/mediamtx-webrtc-integration.bats'
               - 'scripts/webrtc/**'
               # Native encoder sources decide the on-the-wire H.264 profile the

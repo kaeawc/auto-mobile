@@ -48,6 +48,13 @@ export class FakeDeviceProvisioner implements DeviceProvisioner {
 /** Simctl creation surface with scripted device types/runtime. */
 export class FakeIosSimulatorCreator implements IosSimulatorCreator {
   public readonly createCalls: { name: string; deviceType: string; runtime: string }[] = [];
+  public readonly rangeRequests: {
+    minVersion: string | undefined;
+    maxVersion: string | undefined;
+    signal: AbortSignal | undefined;
+  }[] = [];
+  public rangeFailure: Error | undefined;
+  public runtimeCandidates: string[] | undefined;
 
   constructor(
     private readonly deviceTypes: AppleDeviceType[] = [],
@@ -59,8 +66,16 @@ export class FakeIosSimulatorCreator implements IosSimulatorCreator {
     return this.deviceTypes;
   }
 
-  async resolveRuntimeIdentifier(): Promise<string> {
-    return this.runtime;
+  async resolveRuntimeIdentifiersForBounds(
+    minVersion?: string,
+    maxVersion?: string,
+    signal?: AbortSignal,
+  ): Promise<string[]> {
+    this.rangeRequests.push({ minVersion, maxVersion, signal });
+    if (this.rangeFailure) {
+      throw this.rangeFailure;
+    }
+    return this.runtimeCandidates ?? [this.runtime];
   }
 
   async createSimulator(name: string, deviceType: string, runtime: string): Promise<string> {

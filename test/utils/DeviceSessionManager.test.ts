@@ -672,7 +672,9 @@ describe("DeviceSessionManager legacy iOS auto-start readiness", () => {
     ]);
     fakeSimctl.setCreatedSimulatorUdid(createdUdid);
     Object.assign(fakeSimctl, {
-      resolveRuntimeIdentifier: async () => "com.apple.CoreSimulator.SimRuntime.iOS-26-0",
+      resolveRuntimeIdentifiersForBounds: async () => [
+        "com.apple.CoreSimulator.SimRuntime.iOS-26-0",
+      ],
       openSimulatorApp: async () => true,
     });
     fakeSimctl.bootSimulator = async () => {

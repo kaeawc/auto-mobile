@@ -220,6 +220,12 @@ function matchesVersionRange(
 }
 
 function compareVersionToBound(version: string, bound: string, platform: Platform): number {
+  if (
+    platform === "ios" &&
+    Number.isNaN(compareStrictNumericVersions(bound.trim(), bound.trim()))
+  ) {
+    return Number.NaN;
+  }
   const parsedVersion = parseDeviceVersion(version);
   const parsedBound = parseDeviceVersion(bound);
   if (parsedVersion && parsedBound) {

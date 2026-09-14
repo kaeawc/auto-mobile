@@ -20,6 +20,12 @@ import { SimCtlClient } from "./ios-cmdline-tools/SimCtlClient";
 import { CREATED_DEVICE_NAME_PREFIX } from "./deviceCreationGate";
 import { defaultIdGenerator, type IdGenerator } from "./IdGenerator";
 import { logger } from "./logger";
+import {
+  compareSimctlVersions,
+  decodeSimctlVersion,
+  parseSimctlVersion,
+} from "./ios-cmdline-tools/simctlVersion";
+import { iosVersionStringFromRuntimeId } from "./ios-cmdline-tools/iosVersion";
 
 /** What was created, for logging and for handing straight to the boot path. */
 export interface ProvisionedDevice {
@@ -37,7 +43,11 @@ export interface ProvisionedDevice {
 /** Exactly the SimCtlClient surface provisioning needs. */
 export interface IosSimulatorCreator {
   getDeviceTypes(signal?: AbortSignal): Promise<AppleDeviceType[]>;
-  resolveRuntimeIdentifier(requestedVersion?: string, signal?: AbortSignal): Promise<string>;
+  resolveRuntimeIdentifiersForBounds(
+    minVersion?: string,
+    maxVersion?: string,
+    signal?: AbortSignal,
+  ): Promise<string[]>;
   createSimulator(
     name: string,
     deviceType: string,
@@ -161,6 +171,87 @@ export function pickIosDeviceType(
     }
     return a.name.localeCompare(b.name);
   })[0];
+}
+
+function deviceTypeSupportsRuntime(deviceType: AppleDeviceType, runtimeVersion: string): boolean {
+  const hasRangeMetadata =
+    deviceType.minRuntimeVersionString !== undefined ||
+    deviceType.maxRuntimeVersionString !== undefined ||
+    deviceType.minRuntimeVersion !== 0 ||
+    deviceType.maxRuntimeVersion !== 0;
+  if (!hasRangeMetadata) {
+    return true;
+  }
+  const runtime = parseSimctlVersion(runtimeVersion);
+  const min =
+    parseSimctlVersion(deviceType.minRuntimeVersionString) ??
+    decodeSimctlVersion(deviceType.minRuntimeVersion);
+  const max =
+    parseSimctlVersion(deviceType.maxRuntimeVersionString) ??
+    decodeSimctlVersion(deviceType.maxRuntimeVersion);
+  return (
+    runtime !== undefined &&
+    min !== undefined &&
+    max !== undefined &&
+    compareSimctlVersions(runtime, min) >= 0 &&
+    compareSimctlVersions(runtime, max) <= 0
+  );
+}
+
+export async function resolveIosProvisioningSelection(
+  simctl: IosSimulatorCreator,
+  criteria: Pick<DeviceMatchCriteria, "name" | "formFactor" | "minOsVersion" | "maxOsVersion">,
+  signal?: AbortSignal,
+): Promise<{ deviceType: AppleDeviceType; runtime: string }> {
+  const deviceTypes = await simctl.getDeviceTypes(signal);
+  if (deviceTypes.length === 0) {
+    throw new ActionableError(
+      "No iOS simulator device types are available from 'xcrun simctl list devicetypes'. " +
+        "Install an iOS platform via Xcode > Settings > Components.",
+    );
+  }
+  const runtimeIdentifiers = await simctl.resolveRuntimeIdentifiersForBounds(
+    criteria.minOsVersion,
+    criteria.maxOsVersion,
+    signal,
+  );
+  const requestedName = criteria.name?.trim().toLowerCase();
+  const explicitlyRequested = requestedName
+    ? deviceTypes.find((deviceType) => deviceType.name.toLowerCase() === requestedName)
+    : undefined;
+  const runtimeVersions: string[] = [];
+  for (const runtime of runtimeIdentifiers) {
+    const runtimeVersion = iosVersionStringFromRuntimeId(runtime);
+    if (!runtimeVersion) {
+      throw new ActionableError(
+        `Cannot determine the iOS version from resolved runtime '${runtime}'.`,
+      );
+    }
+    runtimeVersions.push(runtimeVersion);
+    const compatible = deviceTypes.filter((deviceType) =>
+      deviceTypeSupportsRuntime(deviceType, runtimeVersion),
+    );
+    if (explicitlyRequested) {
+      if (compatible.includes(explicitlyRequested)) {
+        return { deviceType: explicitlyRequested, runtime };
+      }
+      continue;
+    }
+    if (compatible.length > 0) {
+      return { deviceType: pickIosDeviceType(compatible, criteria), runtime };
+    }
+  }
+  if (explicitlyRequested) {
+    throw new ActionableError(
+      `Requested iOS device type '${explicitlyRequested.name}' does not support runtime ` +
+        `${runtimeVersions.join(", ")}. Choose a compatible device type or adjust the requested OS range.`,
+    );
+  }
+  throw new ActionableError(
+    `No installed iOS simulator device type supports the matching runtime(s) ` +
+      `${runtimeVersions.join(", ")}. Available device types: ` +
+      `${deviceTypes.map((deviceType) => deviceType.name).join(", ")}.`,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -417,9 +508,7 @@ export class DefaultDeviceProvisioner implements DeviceProvisioner {
       );
     }
 
-    const deviceTypes = await simctl.getDeviceTypes(signal);
-    const deviceType = pickIosDeviceType(deviceTypes, criteria);
-    const runtime = await simctl.resolveRuntimeIdentifier(criteria.minOsVersion, signal);
+    const { deviceType, runtime } = await resolveIosProvisioningSelection(simctl, criteria, signal);
     const name =
       this.dependencies.createdDeviceName?.(deviceType.name) ??
       buildCreatedDeviceName(deviceType.name, this.idGenerator);

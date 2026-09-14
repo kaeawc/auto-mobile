@@ -25,6 +25,18 @@ function deviceType(name: string, productFamily = "iPhone"): AppleDeviceType {
   };
 }
 
+function deviceTypeWithRuntimeRange(
+  name: string,
+  minRuntimeVersion: string,
+  maxRuntimeVersion = "99.0",
+): AppleDeviceType {
+  return {
+    ...deviceType(name),
+    minRuntimeVersionString: minRuntimeVersion,
+    maxRuntimeVersionString: maxRuntimeVersion,
+  };
+}
+
 function systemImage(apiLevel: number, tag: string, abi: string): SystemImage {
   return {
     packageName: `system-images;android-${apiLevel};${tag};${abi}`,
@@ -292,6 +304,95 @@ describe("DefaultDeviceProvisioner", () => {
         runtime: "com.apple.CoreSimulator.SimRuntime.iOS-26-3",
       },
     ]);
+  });
+
+  it("uses both iOS version bounds when selecting the runtime", async () => {
+    const signal = new AbortController().signal;
+    const simctl = new FakeIosSimulatorCreator(
+      [deviceType("iPhone 16")],
+      "com.apple.CoreSimulator.SimRuntime.iOS-18-2",
+      "NEW-UDID",
+    );
+    const provisioner = new DefaultDeviceProvisioner({
+      iosCreator: () => simctl,
+      androidCreator: () => new FakeAndroidAvdCreator(),
+      idGenerator: new CountingIdGenerator("uuid"),
+    });
+
+    const created = await provisioner.provision(
+      { platform: "ios", minOsVersion: "18.0", maxOsVersion: "18.2" },
+      signal,
+    );
+
+    expect(created.runtime).toBe("com.apple.CoreSimulator.SimRuntime.iOS-18-2");
+    expect(simctl.rangeRequests).toEqual([{ minVersion: "18.0", maxVersion: "18.2", signal }]);
+    expect(simctl.createCalls).toHaveLength(1);
+  });
+
+  it("selects a device type compatible with an older bounded iOS runtime", async () => {
+    const simctl = new FakeIosSimulatorCreator(
+      [
+        deviceTypeWithRuntimeRange("iPhone 17", "26.0"),
+        deviceTypeWithRuntimeRange("iPhone 16", "18.0"),
+      ],
+      "com.apple.CoreSimulator.SimRuntime.iOS-18-2",
+      "NEW-UDID",
+    );
+    const provisioner = new DefaultDeviceProvisioner({
+      iosCreator: () => simctl,
+      androidCreator: () => new FakeAndroidAvdCreator(),
+      idGenerator: new CountingIdGenerator("uuid"),
+    });
+
+    const created = await provisioner.provision({ platform: "ios", maxOsVersion: "18.2" });
+
+    expect(created.deviceType).toBe("com.apple.CoreSimulator.SimDeviceType.iPhone-16");
+    expect(simctl.createCalls[0]?.deviceType).toBe(
+      "com.apple.CoreSimulator.SimDeviceType.iPhone-16",
+    );
+  });
+
+  it("falls back to a lower in-range runtime when the newest has no compatible device type", async () => {
+    const simctl = new FakeIosSimulatorCreator(
+      [deviceTypeWithRuntimeRange("iPhone 8", "12.0", "18.2")],
+      "com.apple.CoreSimulator.SimRuntime.iOS-26-3",
+      "NEW-UDID",
+    );
+    simctl.runtimeCandidates = [
+      "com.apple.CoreSimulator.SimRuntime.iOS-26-3",
+      "com.apple.CoreSimulator.SimRuntime.iOS-18-2",
+    ];
+    const provisioner = new DefaultDeviceProvisioner({
+      iosCreator: () => simctl,
+      androidCreator: () => new FakeAndroidAvdCreator(),
+      idGenerator: new CountingIdGenerator("uuid"),
+    });
+
+    const created = await provisioner.provision({
+      platform: "ios",
+      minOsVersion: "18.0",
+      maxOsVersion: "26.3",
+    });
+
+    expect(created.runtime).toBe("com.apple.CoreSimulator.SimRuntime.iOS-18-2");
+    expect(simctl.createCalls[0]?.runtime).toBe("com.apple.CoreSimulator.SimRuntime.iOS-18-2");
+  });
+
+  it("does not create an iOS simulator when no runtime is within the requested range", async () => {
+    const simctl = new FakeIosSimulatorCreator([deviceType("iPhone 16")]);
+    simctl.rangeFailure = new ActionableError(
+      "No available iOS simulator runtime matches the requested range",
+    );
+    const provisioner = new DefaultDeviceProvisioner({
+      iosCreator: () => simctl,
+      androidCreator: () => new FakeAndroidAvdCreator(),
+      idGenerator: new CountingIdGenerator("uuid"),
+    });
+
+    await expect(provisioner.provision({ platform: "ios", minOsVersion: "26.4" })).rejects.toThrow(
+      /No available iOS simulator runtime/,
+    );
+    expect(simctl.createCalls).toEqual([]);
   });
 
   it("reserves the generated iOS name before creation and binds the returned UDID", async () => {

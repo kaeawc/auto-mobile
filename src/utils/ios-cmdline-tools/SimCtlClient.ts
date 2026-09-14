@@ -28,6 +28,7 @@ import { getAbortSignal, runWithAbortSignal } from "../AbortContext";
 import { Mutex } from "async-mutex";
 import { iosSimulatorCapabilityInventory } from "../../features/device-control/virtualDeviceCapabilities";
 import { compareSimctlVersions, parseSimctlVersion } from "./simctlVersion";
+import { compareStrictNumericVersions } from "../deviceMatcher";
 
 const COMMAND_SETTLEMENT_GRACE_MS = 1_000;
 const SIMCTL_AVAILABILITY_PROBE_TIMEOUT_MS = 10_000;
@@ -1560,6 +1561,66 @@ export class SimCtlClient implements SimCtl {
       `No iOS simulator runtime found for iOS ${version} (tried ${version}, ${majorMinor}.x, ${major}.x). ` +
         `Available runtimes: ${available}. Install one via Xcode > Settings > Components.`,
     );
+  }
+
+  /**
+   * Resolve the newest available runtime satisfying both requested bounds.
+   * Unlike SDK compatibility resolution, bounds are strict predicates and
+   * never fall back to another version in the same major.
+   */
+  async resolveRuntimeIdentifiersForBounds(
+    minVersion?: string,
+    maxVersion?: string,
+    signal?: AbortSignal,
+  ): Promise<string[]> {
+    if (minVersion === undefined && maxVersion === undefined) {
+      return [await this.resolveRuntimeIdentifier(undefined, signal)];
+    }
+    const min = this.parseRequestedRuntimeBound(minVersion, "min");
+    const max = this.parseRequestedRuntimeBound(maxVersion, "max");
+    const runtimes = await this.listIosRuntimes(signal);
+    const matching = runtimes
+      .filter(
+        (runtime) => !Number.isNaN(compareStrictNumericVersions(runtime.version, runtime.version)),
+      )
+      .filter(({ version }) => {
+        if (min && compareStrictNumericVersions(version, min) < 0) {
+          return false;
+        }
+        return !max || compareStrictNumericVersions(version, max) <= 0;
+      })
+      .sort((left, right) => compareStrictNumericVersions(right.version, left.version));
+
+    if (matching.length > 0) {
+      logger.debug(
+        `[iOS] Resolved ${matching.length} runtime candidate(s) within requested range ` +
+          `(min=${minVersion ?? "any"}, max=${maxVersion ?? "any"})`,
+      );
+      return matching.map((runtime) => runtime.identifier);
+    }
+
+    const available = runtimes.map((runtime) => runtime.name).join(", ") || "<none>";
+    throw new ActionableError(
+      "No available iOS simulator runtime matches the requested range " +
+        `(min=${minVersion ?? "any"}, max=${maxVersion ?? "any"}). ` +
+        `Available runtimes: ${available}. Install one via Xcode > Settings > Components.`,
+    );
+  }
+
+  private parseRequestedRuntimeBound(
+    version: string | undefined,
+    edge: "min" | "max",
+  ): string | undefined {
+    if (version === undefined) {
+      return undefined;
+    }
+    const trimmed = version.trim();
+    if (Number.isNaN(compareStrictNumericVersions(trimmed, trimmed))) {
+      throw new ActionableError(
+        `Invalid iOS ${edge}OsVersion '${version}'. Pass a numeric version such as '18.2'.`,
+      );
+    }
+    return trimmed;
   }
 
   /** Read the active Xcode iphonesimulator SDK version. */

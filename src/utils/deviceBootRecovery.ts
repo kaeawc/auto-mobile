@@ -1,6 +1,10 @@
 import { ActionableError, type DeviceInfo } from "../models";
 import type { DeviceBootRequest } from "./deviceBootService";
-import { DefaultDeviceProvisioner, createDefaultAndroidAvdCreator } from "./deviceProvisioning";
+import {
+  DefaultDeviceProvisioner,
+  createDefaultAndroidAvdCreator,
+  resolveIosProvisioningSelection,
+} from "./deviceProvisioning";
 import type { DeviceProvisioner } from "./deviceProvisioning";
 import { MultiPlatformDeviceManager } from "./deviceUtils";
 import type { PlatformDeviceManager } from "./deviceUtils";
@@ -115,6 +119,10 @@ export interface CiIosBootConfiguration {
   recovery: DeviceBootRecovery;
 }
 
+export interface CiIosBootConfigurationDependencies {
+  simctl: SimCtlClient;
+}
+
 /** True only in the CI environment where AutoMobile owns the simulator lifecycle. */
 export function isGitHubActionsCi(environment: NodeJS.ProcessEnv): boolean {
   return environment.CI === "true" && environment.GITHUB_ACTIONS === "true";
@@ -148,12 +156,13 @@ export function normalizeCiIosBootRequest(
 export async function createCiIosBootConfiguration(
   request: DeviceBootRequest,
   environment: NodeJS.ProcessEnv = process.env,
+  dependencies?: CiIosBootConfigurationDependencies,
 ): Promise<CiIosBootConfiguration | undefined> {
   if (!shouldUseCiIosBootRecovery(request, environment)) {
     return undefined;
   }
-  const simctl = new SimCtlClient();
-  const runtime = await simctl.resolveRuntimeIdentifier(request.minOsVersion);
+  const simctl = dependencies?.simctl ?? new SimCtlClient();
+  const { runtime } = await resolveIosProvisioningSelection(simctl, request);
   const ownedSimulatorName = `${CI_SIMULATOR_NAME} (${runtime})`;
   const deviceManager = new MultiPlatformDeviceManager(null, simctl);
   return {

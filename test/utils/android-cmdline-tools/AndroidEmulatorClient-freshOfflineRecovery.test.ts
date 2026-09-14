@@ -31,6 +31,8 @@ class FreshOfflineAdbExecutor extends FakeAdbExecutor {
   private timer: FakeTimer | null = null;
   private deviceStateCalls = 0;
   private rejectDeviceStatesAfter: number | null = null;
+  private rejectOnceAfterReconnect = false;
+  private pendingRejectAfterReconnect = false;
 
   configureRecoveryFlipsOnline(): void {
     this.recoverOnReconnect = true;
@@ -56,11 +58,26 @@ class FreshOfflineAdbExecutor extends FakeAdbExecutor {
     this.rejectDeviceStatesAfter = count;
   }
 
+  /**
+   * After the first `adb reconnect offline` settles, REJECT exactly one
+   * subsequent device-state probe (an ADB-server blip during the recovery
+   * grace), then resume reporting `offline`. Models a probe gap that must not
+   * wipe the one-shot recovery history and let a re-confirmed offline start a
+   * fresh episode with a SECOND reconnect (#7054).
+   */
+  configureRejectOnceAfterReconnect(): void {
+    this.rejectOnceAfterReconnect = true;
+  }
+
   override async getDeviceStates(options?: {
     timeoutMs?: number;
     signal?: AbortSignal;
   }): Promise<AdbDeviceState[]> {
     this.deviceStateCalls += 1;
+    if (this.pendingRejectAfterReconnect) {
+      this.pendingRejectAfterReconnect = false;
+      throw new Error("adb server connection reset after reconnect; device state unavailable");
+    }
     if (
       this.rejectDeviceStatesAfter !== null &&
       this.deviceStateCalls > this.rejectDeviceStatesAfter
@@ -79,6 +96,11 @@ class FreshOfflineAdbExecutor extends FakeAdbExecutor {
   ): Promise<ExecResult> {
     if (command.includes("reconnect offline")) {
       this.reconnectCalls += 1;
+      if (this.rejectOnceAfterReconnect) {
+        // Fire the probe gap only after the FIRST reconnect.
+        this.rejectOnceAfterReconnect = false;
+        this.pendingRejectAfterReconnect = true;
+      }
       if (this.reconnectDurationMs > 0 && this.timer) {
         await this.timer.sleep(this.reconnectDurationMs);
       }
@@ -290,6 +312,44 @@ describe("Android emulator fresh-provision offline recovery", () => {
       .filter((call) => call.command.includes("reconnect offline"));
     expect(reconnectCalls).toHaveLength(1);
     expect(reconnectCalls[0]?.noRetry).toBe(true);
+  });
+
+  test("a probe gap after the first reconnect does NOT resurrect a second reconnect", async () => {
+    // REGRESSION (#7054): the round-2 clearOfflineTracker() also wiped
+    // recoveryAttempted/recoveryAt. So once the first `adb reconnect offline`
+    // was dispatched, a probe that rejects/omits the target and then re-reports
+    // offline was treated as a brand-new offline episode: it restarted the 15s
+    // threshold and issued a SECOND reconnect, breaking the one-shot-recovery-
+    // per-readiness-invocation contract. The recovery history must be MONOTONIC
+    // for the lifetime of a single waitForEmulatorReady invocation, so a probe
+    // gap clears only the current observation and the re-confirmed offline
+    // continues toward the fail-fast (grace after the first reconnect).
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const adb = new FreshOfflineAdbExecutor();
+    adb.setDeviceStates(OFFLINE_STATE);
+    adb.setDevices([]);
+    configureReadyProbes(adb);
+    // Sustained offline (never flips online), but the probe right after the
+    // first reconnect rejects once before offline is re-reported.
+    adb.configureRejectOnceAfterReconnect();
+
+    const readiness = clientWith(adb, timer).waitForEmulatorReady(
+      "Pixel_9_Pro",
+      120_000,
+      null,
+      "emulator-5554",
+      undefined,
+      { freshProvision: true },
+    );
+
+    await expect(readiness).rejects.toThrow("state=offline");
+    await expect(readiness).rejects.toThrow("adb reconnect offline");
+    await readiness.catch(() => undefined);
+    // Exactly one reconnect per readiness invocation, despite the probe gap.
+    expect(adb.reconnectCalls).toBe(1);
+    // Fails well before a second 15s episode (~t=40s pre-fix) could complete.
+    expect(timer.now()).toBeLessThan(40_000);
   });
 
   test("quick-boot (non-fresh) offline takes the wait-out branch: no reconnect, generic timeout", async () => {

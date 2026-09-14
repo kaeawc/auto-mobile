@@ -110,7 +110,7 @@ interface OfflineTracker {
   deviceId: string | null;
   since: number | null;
   state?: TargetReadinessState;
-  /** A bounded `adb reconnect offline` recovery has been dispatched for this offline episode. */
+  /** A bounded `adb reconnect offline` recovery has been dispatched during this readiness invocation (monotonic once set). */
   recoveryAttempted?: boolean;
   /** Fake-clock timestamp at which the recovery reconnect was dispatched. */
   recoveryAt?: number | null;
@@ -1122,16 +1122,23 @@ export class AndroidEmulatorClient implements AndroidEmulator {
   }
 
   /**
-   * Reset the offline tracker to a neutral, no-current-observation state. Used
-   * when there is no target serial and when a device-state probe rejects, so a
-   * stale offline reading cannot drive recovery off out-of-date data (#7054).
+   * Clear only the CURRENT OBSERVATION on the offline tracker (device serial,
+   * offline-since, and last observed state). Used when there is no target serial
+   * and when a device-state probe rejects/omits the target, so a stale offline
+   * reading cannot drive recovery off out-of-date data (#7054).
+   *
+   * The recovery-history fields (`recoveryAttempted`/`recoveryAt`) are
+   * deliberately NOT reset: they are MONOTONIC for the lifetime of a single
+   * `waitForEmulatorReady` invocation. A probe gap after the one-shot
+   * `adb reconnect offline` has been dispatched must not wipe that history, or a
+   * later re-confirmed offline would start a fresh 15s episode and issue a
+   * SECOND reconnect, violating one-shot recovery per readiness invocation. The
+   * fields start clean because the tracker is constructed fresh per invocation.
    */
   private clearOfflineTracker(tracker: OfflineTracker): void {
     tracker.deviceId = null;
     tracker.since = null;
     tracker.state = undefined;
-    tracker.recoveryAttempted = false;
-    tracker.recoveryAt = null;
   }
 
   private async detectOfflineFailure(
@@ -1165,16 +1172,15 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     if (targetState?.state !== "offline") {
       tracker.deviceId = null;
       tracker.since = null;
-      tracker.recoveryAttempted = false;
-      tracker.recoveryAt = null;
       return null;
     }
     if (tracker.deviceId !== targetState.deviceId) {
+      // Refresh the current observation for a (re-)observed offline serial.
+      // Recovery history stays monotonic for the invocation, so a re-confirmed
+      // offline after the one-shot reconnect keeps advancing toward the
+      // fail-fast instead of resurrecting a second reconnect (#7054).
       tracker.deviceId = targetState.deviceId;
       tracker.since = this.timer.now();
-      // A new offline episode gets its own recovery budget.
-      tracker.recoveryAttempted = false;
-      tracker.recoveryAt = null;
     }
     // An offline ADB state is transient during normal emulator startup. Keep
     // tracking it for diagnostics, but wait for the caller's readiness deadline

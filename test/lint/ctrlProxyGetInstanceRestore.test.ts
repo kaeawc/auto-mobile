@@ -81,12 +81,20 @@ describe("CtrlProxy getInstance mocks are restored in-file (issue #7052)", () =>
     readonly spyInstalls: ReadonlySet<CtrlProxySymbol>;
     /** Symbols this file assigns a captured original back to (a direct restore). */
     readonly restores: ReadonlySet<CtrlProxySymbol>;
+    /** The final direct-install position for each symbol, used to prove ordering. */
+    readonly directInstallPositions: ReadonlyMap<CtrlProxySymbol, number>;
+    /** The final spy-handle-install position for each symbol, used to prove ordering. */
+    readonly spyInstallPositions: ReadonlyMap<CtrlProxySymbol, number>;
+    /** The final direct-restore position for each symbol, used to prove ordering. */
+    readonly restorePositions: ReadonlyMap<CtrlProxySymbol, number>;
     /**
      * Symbols acquitted by a `.mockRestore()` on the handle that
      * `spyOn(<Symbol>, "getInstance")` returned — the only `.mockRestore()` that
      * actually restores this seam.
      */
     readonly restoredBySpy: ReadonlySet<CtrlProxySymbol>;
+    /** The final matching spy-handle restore position for each symbol. */
+    readonly spyRestorePositions: ReadonlyMap<CtrlProxySymbol, number>;
   }
 
   /** Peel `(expr)`, `expr as T`, `<T>expr`, `expr!`, `expr satisfies T` down to the core. */
@@ -105,6 +113,27 @@ describe("CtrlProxy getInstance mocks are restored in-file (issue #7052)", () =>
       }
       return current;
     }
+  }
+
+  /**
+   * Test-framework teardown callbacks execute after the test bodies even when
+   * their registration appears first in source. Model their restores as the
+   * final file event so source ordering catches ordinary direct code without
+   * rejecting the established `afterEach(() => restore())` suite pattern.
+   */
+  function runsInTeardownCallback(node: ts.Node): boolean {
+    for (let current = node.parent; current; current = current.parent) {
+      if (!ts.isArrowFunction(current) && !ts.isFunctionExpression(current)) {
+        continue;
+      }
+      const call = current.parent;
+      if (!ts.isCallExpression(call) || !call.arguments.includes(current)) {
+        continue;
+      }
+      const callee = unwrap(call.expression);
+      return ts.isIdentifier(callee) && (callee.text === "afterEach" || callee.text === "afterAll");
+    }
+    return false;
   }
 
   type SymbolResolver = (name: ts.Identifier) => CtrlProxySymbol | undefined;
@@ -239,7 +268,20 @@ describe("CtrlProxy getInstance mocks are restored in-file (issue #7052)", () =>
     const scopeChain = (node: ts.Node): ts.Node[] => {
       const scopes: ts.Node[] = [];
       for (let current: ts.Node | undefined = node; current; current = current.parent) {
-        if (ts.isBlock(current) || ts.isFunctionLike(current) || ts.isSourceFile(current)) {
+        if (
+          ts.isBlock(current) ||
+          ts.isFunctionLike(current) ||
+          ts.isSourceFile(current) ||
+          // `let` and `const` declared by a loop initializer are scoped to that
+          // loop, not its enclosing block. Without the loop in this chain,
+          // predeclaration lets a loop-local CtrlProxy-alias look like it shadows
+          // the import throughout the enclosing function, including before the
+          // loop begins.
+          ts.isForStatement(current) ||
+          ts.isForInStatement(current) ||
+          ts.isForOfStatement(current) ||
+          ts.isWhileStatement(current)
+        ) {
           scopes.push(current);
         }
       }
@@ -295,6 +337,9 @@ describe("CtrlProxy getInstance mocks are restored in-file (issue #7052)", () =>
     };
     predeclareWalk(sf);
 
+    const eventPosition = (node: ts.Node): number =>
+      runsInTeardownCallback(node) ? Number.MAX_SAFE_INTEGER : node.pos;
+
     const resolveSymbol: SymbolResolver = (name) => {
       const binding = bindingKeyForReference(name);
       if (binding !== undefined) {
@@ -309,7 +354,7 @@ describe("CtrlProxy getInstance mocks are restored in-file (issue #7052)", () =>
     const idIsMock = new Set<string>();
     const idIsOriginalCapture = new Map<string, CtrlProxySymbol>();
     const spyVarSymbol = new Map<string, CtrlProxySymbol>();
-    const mockRestoreTargets: ts.Identifier[] = [];
+    const mockRestoreTargets: { readonly receiver: ts.Identifier; readonly pos: number }[] = [];
 
     const learn = (binding: string, init: ts.Expression): void => {
       const spied = spyOnGetInstanceSymbol(init, resolveSymbol);
@@ -349,7 +394,7 @@ describe("CtrlProxy getInstance mocks are restored in-file (issue #7052)", () =>
       ) {
         const receiver = unwrap(node.expression.expression);
         if (ts.isIdentifier(receiver)) {
-          mockRestoreTargets.push(receiver);
+          mockRestoreTargets.push({ receiver, pos: eventPosition(node) });
         }
       }
       ts.forEachChild(node, learnWalk);
@@ -359,8 +404,22 @@ describe("CtrlProxy getInstance mocks are restored in-file (issue #7052)", () =>
     const directInstalls = new Set<CtrlProxySymbol>();
     const spyInstalls = new Set<CtrlProxySymbol>();
     const restores = new Set<CtrlProxySymbol>();
+    const directInstallPositions = new Map<CtrlProxySymbol, number>();
+    const spyInstallPositions = new Map<CtrlProxySymbol, number>();
+    const restorePositions = new Map<CtrlProxySymbol, number>();
 
-    const recordInstall = (symbol: CtrlProxySymbol, rhs: ts.Expression): void => {
+    /** Keep the final event of each kind even if an AST shape is revisited. */
+    const recordFinalPosition = (
+      positions: Map<CtrlProxySymbol, number>,
+      symbol: CtrlProxySymbol,
+      pos: number,
+    ): void => {
+      if ((positions.get(symbol) ?? -1) < pos) {
+        positions.set(symbol, pos);
+      }
+    };
+
+    const recordInstall = (symbol: CtrlProxySymbol, rhs: ts.Expression, pos: number): void => {
       const core = unwrap(rhs);
       const binding = ts.isIdentifier(core) ? bindingKeyForReference(core) : undefined;
       if (
@@ -368,8 +427,10 @@ describe("CtrlProxy getInstance mocks are restored in-file (issue #7052)", () =>
         (binding !== undefined && spyVarSymbol.get(binding) === symbol)
       ) {
         spyInstalls.add(symbol);
+        recordFinalPosition(spyInstallPositions, symbol, pos);
       } else {
         directInstalls.add(symbol);
+        recordFinalPosition(directInstallPositions, symbol, pos);
       }
     };
 
@@ -380,23 +441,24 @@ describe("CtrlProxy getInstance mocks are restored in-file (issue #7052)", () =>
           const rhs = node.right;
           const core = unwrap(rhs);
           if (isFreshMock(rhs)) {
-            recordInstall(symbol, rhs);
+            recordInstall(symbol, rhs, eventPosition(node));
           } else if (ts.isIdentifier(core)) {
             const binding = bindingKeyForReference(core);
             const capturedFrom =
               binding === undefined ? undefined : idIsOriginalCapture.get(binding);
             if (binding !== undefined && idIsMock.has(binding)) {
-              recordInstall(symbol, rhs);
+              recordInstall(symbol, rhs, eventPosition(node));
             } else if (capturedFrom === symbol) {
               restores.add(symbol);
+              recordFinalPosition(restorePositions, symbol, eventPosition(node));
             } else {
               // Cannot prove this identifier holds this symbol's captured original,
               // so it is not a verifiable restore — treat it as a fresh install.
-              recordInstall(symbol, rhs);
+              recordInstall(symbol, rhs, eventPosition(node));
             }
           } else {
             // Any other RHS shape is a fresh value, not an original capture.
-            recordInstall(symbol, rhs);
+            recordInstall(symbol, rhs, eventPosition(node));
           }
         }
       }
@@ -405,28 +467,49 @@ describe("CtrlProxy getInstance mocks are restored in-file (issue #7052)", () =>
     classifyWalk(sf);
 
     const restoredBySpy = new Set<CtrlProxySymbol>();
+    const spyRestorePositions = new Map<CtrlProxySymbol, number>();
     for (const target of mockRestoreTargets) {
-      const binding = bindingKeyForReference(target);
+      const binding = bindingKeyForReference(target.receiver);
       const symbol = binding === undefined ? undefined : spyVarSymbol.get(binding);
       if (symbol !== undefined) {
         restoredBySpy.add(symbol);
+        recordFinalPosition(spyRestorePositions, symbol, target.pos);
       }
     }
 
     const installs = new Set([...directInstalls, ...spyInstalls]);
-    return { installs, directInstalls, spyInstalls, restores, restoredBySpy };
+    return {
+      installs,
+      directInstalls,
+      spyInstalls,
+      restores,
+      directInstallPositions,
+      spyInstallPositions,
+      restorePositions,
+      restoredBySpy,
+      spyRestorePositions,
+    };
   }
 
   /** Symbols a file installs without any in-file restoration (a leak). */
   function leaksOf(file: string, facts: FileFacts): string[] {
     const leaks: string[] = [];
     for (const symbol of facts.directInstalls) {
-      if (!facts.restores.has(symbol)) {
+      const installPos = facts.directInstallPositions.get(symbol);
+      const restorePos = facts.restorePositions.get(symbol);
+      if (installPos === undefined || restorePos === undefined || restorePos <= installPos) {
         leaks.push(`${file}: installs ${symbol}.getInstance but never restores it`);
       }
     }
     for (const symbol of facts.spyInstalls) {
-      if (!facts.restoredBySpy.has(symbol) && !facts.restores.has(symbol)) {
+      const installPos = facts.spyInstallPositions.get(symbol);
+      const directRestorePos = facts.restorePositions.get(symbol);
+      const spyRestorePos = facts.spyRestorePositions.get(symbol);
+      if (
+        installPos === undefined ||
+        ((directRestorePos === undefined || directRestorePos <= installPos) &&
+          (spyRestorePos === undefined || spyRestorePos <= installPos))
+      ) {
         leaks.push(`${file}: installs ${symbol}.getInstance but never restores it`);
       }
     }
@@ -644,6 +727,61 @@ describe("CtrlProxy getInstance mocks are restored in-file (issue #7052)", () =>
     expect([...f.spyInstalls]).toEqual(["AndroidCtrlProxyClient"]);
     expect([...f.restores]).toEqual(["AndroidCtrlProxyClient"]);
     expect(leaksOf("direct-spy-restore.ts", f)).toEqual([]);
+  });
+
+  test("REGRESSION 1: a spy install after a direct restore is still a leak", () => {
+    const f = analyzeSource(
+      `const original = AndroidCtrlProxyClient.getInstance;\n` +
+        `AndroidCtrlProxyClient.getInstance = original;\n` +
+        `const getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance");\n` +
+        `AndroidCtrlProxyClient.getInstance = getInstanceSpy;\n`,
+    );
+    expect([...f.installs]).toEqual(["AndroidCtrlProxyClient"]);
+    expect([...f.spyInstalls]).toEqual(["AndroidCtrlProxyClient"]);
+    expect([...f.restores]).toEqual(["AndroidCtrlProxyClient"]);
+    expect(leaksOf("restore-before-spy-install.ts", f)).toEqual([
+      "restore-before-spy-install.ts: installs AndroidCtrlProxyClient.getInstance but never restores it",
+    ]);
+  });
+
+  test("REGRESSION 1: a spy restore before a spy-handle install is still a leak", () => {
+    const f = analyzeSource(
+      `const getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance");\n` +
+        `getInstanceSpy.mockRestore();\n` +
+        `AndroidCtrlProxyClient.getInstance = getInstanceSpy;\n`,
+    );
+    expect([...f.spyInstalls]).toEqual(["AndroidCtrlProxyClient"]);
+    expect([...f.restoredBySpy]).toEqual(["AndroidCtrlProxyClient"]);
+    expect(leaksOf("spy-restore-before-install.ts", f)).toEqual([
+      "spy-restore-before-install.ts: installs AndroidCtrlProxyClient.getInstance but never restores it",
+    ]);
+  });
+
+  test("REGRESSION 2: a real install before a loop-scoped alias shadow is still detected", () => {
+    const f = analyzeSource(
+      `import { AndroidCtrlProxyClient as Client } from "some/path";\n` +
+        `function setup(someArray: unknown[]) {\n` +
+        `  Client.getInstance = mock(() => ({}));\n` +
+        `  for (const Client of someArray) {\n` +
+        `    void Client;\n` +
+        `  }\n` +
+        `}\n`,
+    );
+    expect([...f.installs]).toEqual(["AndroidCtrlProxyClient"]);
+    expect(leaksOf("loop-shadow.ts", f)).toEqual([
+      "loop-shadow.ts: installs AndroidCtrlProxyClient.getInstance but never restores it",
+    ]);
+  });
+
+  test("REGRESSION 2: a clean loop-local alias use is not misattributed", () => {
+    const f = analyzeSource(
+      `import { AndroidCtrlProxyClient as Client } from "some/path";\n` +
+        `for (const Client of someArray) {\n` +
+        `  Client.getInstance = () => ({});\n` +
+        `}\n`,
+    );
+    expect([...f.installs]).toEqual([]);
+    expect(leaksOf("loop-local.ts", f)).toEqual([]);
   });
 
   test("THREAD 1: a typed-cast install with no restore is flagged", () => {

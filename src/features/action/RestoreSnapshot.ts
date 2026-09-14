@@ -193,7 +193,10 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
       let result;
       try {
         result = await this.consoleBusyRegistry.runExclusive(this.device.deviceId, () =>
-          this.adb.executeCommand(loadCommand, vmSnapshotTimeoutMs),
+          this.adb.execute(loadCommand.split(" "), {
+            timeoutMs: vmSnapshotTimeoutMs,
+            waitForProcessSettlementAfterAbort: true,
+          }),
         );
       } catch (error) {
         throw new Error(formatVmSnapshotExecutionError("load", snapshotName, error));

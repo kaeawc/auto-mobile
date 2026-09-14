@@ -168,7 +168,7 @@ const observationDiffMetadataSchema = z
   })
   .passthrough();
 
-const toolOutputArtifactDetailsSchema = z
+export const toolOutputArtifactDetailsSchema = z
   .object({
     path: z.string(),
     format: z.literal("json"),
@@ -484,9 +484,10 @@ export const viewHierarchyResultSchema = z
         "Why the captured hierarchy is incomplete (issue #6601). Present only " +
           "when rows were dropped — a device-side stop (max_nodes, max_depth) or " +
           "the per-node child cap (max_children[<node> kept N of M]). This is the " +
-          "nested location `sanitizeObserveResult` leaves the warning under " +
-          '`project:"full"` or `raw:true`; the skeleton projection instead lifts ' +
-          "the same information to the top-level `truncationReasons` field.",
+          "nested location `sanitizeObserveResult` leaves raw hierarchy reasons under " +
+          '`project:"full"` or `raw:true`; capture-fidelity reasons may also be lifted ' +
+          "to the top-level `truncationReasons` field for skeleton/diff output, while a " +
+          "host-output max_children cap is not lifted to a non-diff skeleton.",
       ),
   })
   .passthrough();
@@ -523,11 +524,11 @@ export const observationSummarySchema = z
       .optional()
       .describe(
         "Why the captured hierarchy is incomplete (issue #6601) — the same field " +
-          "a diffed observation carries, so a client reads it the same way in both " +
-          "modes. Present only when rows were dropped: a device-side stop " +
-          "(max_nodes, max_depth) or the per-node child cap (max_children[<node> " +
-          "kept N of M]). When present, `skeleton`/`context` are a subset of the " +
-          "screen.",
+          "a diff-mode observation carries, so a client reads it the same way in both " +
+          "modes. On this non-diff arm, it contains only capture-fidelity reasons " +
+          "(device-side max_nodes, max_depth, cancelled); its presence means " +
+          "`skeleton`/`context` omit rows. A host-output max_children[<node> kept N of M] " +
+          "cap trims only rendered `viewHierarchy` and is not lifted here.",
       ),
     settled: z
       .boolean()
@@ -762,11 +763,12 @@ export const observeDiffSchema = z
       .optional()
       .describe(
         "Why the captured hierarchy is incomplete (issue #6601) — the same field " +
-          "a skeleton-projected full observation carries, so a client reads it the " +
-          "same way in both modes. Present only when rows were dropped: a " +
-          "device-side stop (max_nodes, max_depth) or the per-node child cap " +
-          "(max_children[<node> kept N of M]). When present, `skeleton`/`context` " +
-          "are a subset of the screen.",
+          "a full observation carries, so a client reads it the same way in both modes. " +
+          "In diff mode (issue #6933), any reason — host-cap (max_children[...]) or " +
+          "capture-fidelity (max_nodes, max_depth, cancelled) — may originate from either " +
+          "comparison input (baseline or current capture), so its presence means the " +
+          "comparison may be incomplete, not that this diff's own `skeleton`/`context` " +
+          "omit rows.",
       ),
     settled: z
       .boolean()
@@ -920,12 +922,15 @@ export const observeResultSchema = z
       .array(z.string())
       .optional()
       .describe(
-        "Why the captured hierarchy is incomplete (issue #6601), lifted out of " +
-          "`viewHierarchy` by the skeleton projection that removes it. Present only " +
-          "when rows were dropped — a device-side stop (max_nodes, max_depth) or the " +
-          "per-node child cap (max_children[<node> kept N of M]). When present, " +
-          "`skeleton`/`context` are a subset of the screen: an element missing from " +
-          "them is not evidence it is absent.",
+        "Why a served observation or diff may be incomplete (issues #6601, #6933). " +
+          "On a non-diff skeleton projection, this contains only capture-fidelity reasons " +
+          "(device-side max_nodes, max_depth, cancelled); its presence means `skeleton`/" +
+          "`context` omit rows. A host-output max_children[<node> kept N of M] cap trims " +
+          "only rendered `viewHierarchy` and is not lifted to a non-diff skeleton. On a " +
+          "diff, any reason — host-cap (max_children[...]) or capture-fidelity (max_nodes, " +
+          "max_depth, cancelled) — may originate from either comparison input (baseline or " +
+          "current capture), so its presence means the comparison may be incomplete rather " +
+          "than that the current `skeleton`/`context` omit rows (issue #6933).",
       ),
     skeleton: z.array(skeletonElementSchema).optional(),
     context: z

@@ -35,8 +35,13 @@ class FakeRepository implements SessionToolSelectionRepository {
   readonly batches: Array<Array<[string, string, boolean]>> = [];
   /** When set, `setMany` rejects with it AFTER staging nothing (see #6886 review). */
   failBatchWith: Error | undefined;
+  /** When set, reporting the enabled set rejects after a successful write. */
+  failListWith: Error | undefined;
 
   async list(sessionUuid: string): Promise<Map<string, boolean>> {
+    if (this.failListWith) {
+      throw this.failListWith;
+    }
     return new Map(this.rows.get(sessionUuid) ?? []);
   }
 
@@ -241,6 +246,19 @@ describe("setToolEnabled batch enable (#6869)", () => {
     expect(repository.writes).toEqual([]);
     expect(repository.rows.get(SESSION_UUID)).toBeUndefined();
     expect(notifications).toBe(0);
+  });
+
+  test("reports a read failure after applying the batch", async () => {
+    repository.failListWith = new Error("selection read unavailable");
+
+    const payload = payloadOf(await callSetToolEnabled({ toolNames: ["inputText", "clearText"] }));
+
+    expect(repository.writes).toEqual([
+      [SESSION_UUID, "inputText", true],
+      [SESSION_UUID, "clearText", true],
+    ]);
+    expect(payload.enabledTools).toBeUndefined();
+    expect(payload.enabledToolsError).toContain("selection read unavailable");
   });
 
   test("applies a repeated name once", async () => {

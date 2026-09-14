@@ -273,6 +273,162 @@ describe("deviceSnapshotManager VM snapshot sizing and reclaim (#6490)", () => {
     expect(await repository.getSnapshot("shared")).toEqual(original);
   });
 
+  test("preserves a same-device non-VM row after a dispatched VM save fails", async () => {
+    const timestamp = new Date(1000).toISOString();
+    const original = {
+      snapshotName: "shared-settings",
+      deviceId: EMULATOR.deviceId,
+      deviceName: AVD_NAME,
+      platform: "android" as const,
+      snapshotType: "adb" as const,
+      includeAppData: false,
+      includeSettings: true,
+      createdAt: timestamp,
+      lastAccessedAt: timestamp,
+      sizeBytes: 1024,
+      manifest: {
+        snapshotName: "shared-settings",
+        timestamp,
+        deviceId: EMULATOR.deviceId,
+        deviceName: AVD_NAME,
+        platform: "android" as const,
+        snapshotType: "adb" as const,
+        includeAppData: false,
+        includeSettings: true,
+        settings: { global: { animator_duration_scale: "1" } },
+      },
+    };
+    await repository.insertSnapshot(original);
+    avdSnapshots.setVmSnapshot(AVD_NAME, "shared-settings", 2 * 1024 * MB);
+    await setDeviceSnapshotManagerDependencies({
+      createCaptureProvider: () => ({
+        capture: async () => {
+          const failure = new Error("emulator went offline");
+          Object.assign(failure, { [VM_SNAPSHOT_SAVE_DISPATCHED]: true });
+          throw failure;
+        },
+      }),
+    });
+
+    await expect(
+      captureDeviceSnapshot(EMULATOR, { snapshotName: "shared-settings" }),
+    ).rejects.toThrow("emulator went offline");
+
+    expect(await repository.getSnapshot("shared-settings")).toEqual(original);
+    expect(avdSnapshots.getDeleteCalls()).toEqual([
+      { deviceId: EMULATOR.deviceId, snapshotName: "shared-settings", timeoutMs: 12000 },
+    ]);
+  });
+
+  test("skips failed-capture cleanup when a different AVD reuses the stale serial", async () => {
+    const replacementAvdName = "am-api34-ga-arm64";
+    const preservedDevice: BootedDevice = {
+      deviceId: "emulator-5560",
+      name: "am-api30-ga-arm64",
+      platform: "android",
+    };
+    const timestamp = new Date(1000).toISOString();
+    const original = {
+      snapshotName: "shared-stale-serial",
+      deviceId: preservedDevice.deviceId,
+      deviceName: preservedDevice.name,
+      platform: "android" as const,
+      snapshotType: "vm" as const,
+      includeAppData: true,
+      includeSettings: false,
+      createdAt: timestamp,
+      lastAccessedAt: timestamp,
+      sizeBytes: 2 * 1024 * MB,
+      manifest: {
+        snapshotName: "shared-stale-serial",
+        timestamp,
+        deviceId: preservedDevice.deviceId,
+        deviceName: preservedDevice.name,
+        platform: "android" as const,
+        snapshotType: "vm" as const,
+        includeAppData: true,
+        includeSettings: false,
+      },
+    };
+    await repository.insertSnapshot(original);
+    avdSnapshots.setLiveEmulator(AVD_NAME, null);
+    avdSnapshots.setLiveEmulator(replacementAvdName, EMULATOR.deviceId);
+    avdSnapshots.setVmSnapshot(replacementAvdName, "shared-stale-serial", 2 * 1024 * MB);
+    await setDeviceSnapshotManagerDependencies({
+      createCaptureProvider: () => ({
+        capture: async () => {
+          const failure = new Error("emulator went offline");
+          Object.assign(failure, { [VM_SNAPSHOT_SAVE_DISPATCHED]: true });
+          throw failure;
+        },
+      }),
+    });
+
+    await expect(
+      captureDeviceSnapshot(EMULATOR, { snapshotName: "shared-stale-serial" }),
+    ).rejects.toThrow("emulator went offline");
+
+    expect(avdSnapshots.getDeleteCalls()).toEqual([]);
+    expect(avdSnapshots.hasVmSnapshot(replacementAvdName, "shared-stale-serial")).toBe(true);
+  });
+
+  test("skips failed-capture cleanup when a different AVD reuses the serial after lookup", async () => {
+    const replacementAvdName = "am-api34-ga-arm64";
+    const preservedDevice: BootedDevice = {
+      deviceId: "emulator-5560",
+      name: "am-api30-ga-arm64",
+      platform: "android",
+    };
+    const timestamp = new Date(1000).toISOString();
+    const original = {
+      snapshotName: "shared-serial-race",
+      deviceId: preservedDevice.deviceId,
+      deviceName: preservedDevice.name,
+      platform: "android" as const,
+      snapshotType: "vm" as const,
+      includeAppData: true,
+      includeSettings: false,
+      createdAt: timestamp,
+      lastAccessedAt: timestamp,
+      sizeBytes: 2 * 1024 * MB,
+      manifest: {
+        snapshotName: "shared-serial-race",
+        timestamp,
+        deviceId: preservedDevice.deviceId,
+        deviceName: preservedDevice.name,
+        platform: "android" as const,
+        snapshotType: "vm" as const,
+        includeAppData: true,
+        includeSettings: false,
+      },
+    };
+    await repository.insertSnapshot(original);
+    avdSnapshots.setVmSnapshot(replacementAvdName, "shared-serial-race", 2 * 1024 * MB);
+    avdSnapshots.onFindLiveEmulatorSerial((avdName) => {
+      if (avdName === AVD_NAME) {
+        avdSnapshots.setLiveEmulator(AVD_NAME, null);
+        avdSnapshots.setLiveEmulator(replacementAvdName, EMULATOR.deviceId);
+      }
+    });
+    await setDeviceSnapshotManagerDependencies({
+      createCaptureProvider: () => ({
+        capture: async () => {
+          const failure = new Error("emulator went offline");
+          Object.assign(failure, { [VM_SNAPSHOT_SAVE_DISPATCHED]: true });
+          throw failure;
+        },
+      }),
+    });
+
+    await expect(
+      captureDeviceSnapshot(EMULATOR, { snapshotName: "shared-serial-race" }),
+    ).rejects.toThrow("emulator went offline");
+
+    expect(await repository.getSnapshot("shared-serial-race")).toEqual(original);
+    expect(avdSnapshots.getDeleteCalls()).toEqual([]);
+    expect(avdSnapshots.hasVmSnapshot(replacementAvdName, "shared-serial-race")).toBe(true);
+  });
+
   test("preserves a valid same-named row when another AVD reuses its emulator serial", async () => {
     const otherDevice: BootedDevice = {
       deviceId: EMULATOR.deviceId,
@@ -915,12 +1071,17 @@ describe("deviceSnapshotManager VM snapshot sizing and reclaim (#6490)", () => {
           avdSnapshots.listAvdSnapshotDirectories(avdName),
         listKnownAvdNames: () => avdSnapshots.listKnownAvdNames(),
         findLiveEmulatorSerial: (avdName: string) => avdSnapshots.findLiveEmulatorSerial(avdName),
-        deleteVmSnapshot: async (deviceId: string, snapshotName: string, timeoutMs: number) => {
+        deleteVmSnapshot: async (
+          deviceId: string,
+          snapshotName: string,
+          timeoutMs: number,
+          expectedAvdName?: string,
+        ) => {
           if (snapshotName === "old") {
             await repository.deleteSnapshot(snapshotName);
             return { reclaimed: false, reason: "concurrent pending-reclaim sweep completed" };
           }
-          return avdSnapshots.deleteVmSnapshot(deviceId, snapshotName, timeoutMs);
+          return avdSnapshots.deleteVmSnapshot(deviceId, snapshotName, timeoutMs, expectedAvdName);
         },
       },
     });
@@ -1417,9 +1578,19 @@ describe("deviceSnapshotManager VM snapshot sizing and reclaim (#6490)", () => {
             avdSnapshots.listAvdSnapshotDirectories(avdName),
           listKnownAvdNames: () => avdSnapshots.listKnownAvdNames(),
           findLiveEmulatorSerial: (avdName: string) => avdSnapshots.findLiveEmulatorSerial(avdName),
-          deleteVmSnapshot: async (deviceId: string, snapshotName: string, timeoutMs: number) => {
+          deleteVmSnapshot: async (
+            deviceId: string,
+            snapshotName: string,
+            timeoutMs: number,
+            expectedAvdName?: string,
+          ) => {
             pendingAtDeleteTime = (await repository.getSnapshot(snapshotName))?.pendingReclaim;
-            return avdSnapshots.deleteVmSnapshot(deviceId, snapshotName, timeoutMs);
+            return avdSnapshots.deleteVmSnapshot(
+              deviceId,
+              snapshotName,
+              timeoutMs,
+              expectedAvdName,
+            );
           },
         },
       });

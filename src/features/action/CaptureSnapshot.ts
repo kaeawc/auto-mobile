@@ -190,6 +190,7 @@ export class CaptureSnapshot implements SnapshotCaptureProvider {
         result = await this.consoleBusyRegistry.runExclusive(this.device.deviceId, () =>
           this.adb.execute(saveCommand.split(" "), {
             timeoutMs: vmSnapshotTimeoutMs,
+            waitForProcessSettlementAfterAbort: true,
             beforeDispatch: async () => {
               saveDispatched = true;
             },

@@ -2520,12 +2520,17 @@ export class DaemonMcpProxy {
   private boundSessionHeartbeatParams(sessionUuid: string): {
     sessionId: string;
     livenessPolicy: string;
+    idleTimeoutMs?: number;
   } {
+    const livenessPolicy = this.cliSessionLivenessDeclared
+      ? CLI_SESSION_LIVENESS_POLICY
+      : HEARTBEAT_SESSION_LIVENESS_POLICY;
     return {
       sessionId: sessionUuid,
-      livenessPolicy: this.cliSessionLivenessDeclared
-        ? CLI_SESSION_LIVENESS_POLICY
-        : HEARTBEAT_SESSION_LIVENESS_POLICY,
+      livenessPolicy,
+      ...(livenessPolicy === CLI_SESSION_LIVENESS_POLICY
+        ? { idleTimeoutMs: getCliSessionIdleTimeoutMs() }
+        : {}),
     };
   }
 

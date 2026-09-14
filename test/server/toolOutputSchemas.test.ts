@@ -12,6 +12,56 @@ import {
   viewHierarchyResultSchema,
 } from "../../src/server/toolOutputSchemas";
 
+const observeTruncationReasonsDescription =
+  "Why a served observation or diff may be incomplete (issues #6601, #6933). " +
+  "On a non-diff skeleton projection, this contains only capture-fidelity reasons " +
+  "(device-side max_nodes, max_depth, cancelled); its presence means `skeleton`/" +
+  "`context` omit rows. A host-output max_children[<node> kept N of M] cap trims " +
+  "only rendered `viewHierarchy` and is not lifted to a non-diff skeleton. On a " +
+  "diff, any reason — host-cap (max_children[...]) or capture-fidelity (max_nodes, " +
+  "max_depth, cancelled) — may originate from either comparison input (baseline or " +
+  "current capture), so its presence means the comparison may be incomplete rather " +
+  "than that the current `skeleton`/`context` omit rows (issue #6933).";
+
+const observationSummaryTruncationReasonsDescription =
+  "Why the captured hierarchy is incomplete (issue #6601) — the same field " +
+  "a diff-mode observation carries, so a client reads it the same way in both " +
+  "modes. On this non-diff arm, it contains only capture-fidelity reasons " +
+  "(device-side max_nodes, max_depth, cancelled); its presence means " +
+  "`skeleton`/`context` omit rows. A host-output max_children[<node> kept N of M] " +
+  "cap trims only rendered `viewHierarchy` and is not lifted here.";
+
+const observeDiffTruncationReasonsDescription =
+  "Why the captured hierarchy is incomplete (issue #6601) — the same field a " +
+  "full observation carries, so a client reads it the same way in both modes. " +
+  "In diff mode (issue #6933), any reason — host-cap (max_children[...]) or " +
+  "capture-fidelity (max_nodes, max_depth, cancelled) — may originate from either " +
+  "comparison input (baseline or current capture), so its presence means the " +
+  "comparison may be incomplete, not that this diff's own `skeleton`/`context` " +
+  "omit rows.";
+
+const viewHierarchyTruncationReasonsDescription =
+  "Why the captured hierarchy is incomplete (issue #6601). Present only when " +
+  "rows were dropped — a device-side stop (max_nodes, max_depth) or the " +
+  "per-node child cap (max_children[<node> kept N of M]). This is the nested " +
+  "location `sanitizeObserveResult` leaves raw hierarchy reasons under " +
+  '`project:"full"` or `raw:true`; capture-fidelity reasons may also be lifted ' +
+  "to the top-level `truncationReasons` field for skeleton/diff output, while a " +
+  "host-output max_children cap is not lifted to a non-diff skeleton.";
+
+test("truncationReasons descriptions distinguish skeleton completeness from diff-input caps (#6933)", () => {
+  const descriptions = [
+    [observeResultSchema, observeTruncationReasonsDescription],
+    [observationSummarySchema, observationSummaryTruncationReasonsDescription],
+    [observeDiffSchema, observeDiffTruncationReasonsDescription],
+    [viewHierarchyResultSchema, viewHierarchyTruncationReasonsDescription],
+  ] as const;
+
+  for (const [schema, expectedDescription] of descriptions) {
+    expect(schema.shape.truncationReasons.description).toBe(expectedDescription);
+  }
+});
+
 /**
  * Wire-schema coverage for the `--observe-result-compact` tuple form (issue #2990,
  * task 2). When the flag is on, `finalizeToolResponse` flattens every `bounds`

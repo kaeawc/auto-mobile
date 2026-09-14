@@ -78,6 +78,22 @@ describe("repairDaemon", () => {
     expect(protocolChecks).toBe(1);
   });
 
+  test("threads invocation daemon options into recovery", async () => {
+    let receivedOptions: { host?: string; port?: number } | undefined;
+    const result = await repairDaemon(
+      { daemonOptions: { host: "127.0.0.1", port: 4321 } },
+      dependencies([healthReport(false), healthReport(true)], {
+        recoverControlState: async (daemonOptions) => {
+          receivedOptions = daemonOptions;
+          return "restarted";
+        },
+      }),
+    );
+
+    expect(result.status).toBe("repaired");
+    expect(receivedOptions).toEqual({ host: "127.0.0.1", port: 4321 });
+  });
+
   test("restarts once when a connectable socket fails the daemon protocol", async () => {
     let protocolChecks = 0;
     const result = await repairDaemon(
@@ -177,7 +193,8 @@ describe("repairDaemon", () => {
         verifyProtocol: async () => {
           throw new Error("unexpected socket protocol");
         },
-        recoverControlState: async () => {
+        recoverControlState: async (_daemonOptions, isProtocolHealthy) => {
+          expect(await isProtocolHealthy()).toBe(false);
           throw new Error("replacement launch failed");
         },
       }),
@@ -187,6 +204,23 @@ describe("repairDaemon", () => {
       status: "failed",
       phase: "recovery",
       nextAction: expect.stringContaining("replacement launch failed"),
+    });
+  });
+
+  test("reports a completed restart when replacement verification fails", async () => {
+    const result = await repairDaemon(
+      {},
+      dependencies([healthReport(true)], {
+        verifyProtocol: async () => {
+          throw new Error("incompatible replacement");
+        },
+      }),
+    );
+
+    expect(result).toMatchObject<Partial<DaemonRecoveryResult>>({
+      status: "failed",
+      phase: "verification",
+      action: "restarted",
     });
   });
 

@@ -26,6 +26,7 @@ describe("doctorToolParams", () => {
   test("runs repair locally and renders its structured result", async () => {
     const written: string[] = [];
     let receivedTimeoutMs: number | undefined;
+    let receivedDaemonOptions: { host?: string; port?: number } | undefined;
     setCliOutputSinksForTesting({
       stdout: { write: (text) => written.push(text) },
       stderr: { write: () => {} },
@@ -35,8 +36,9 @@ describe("doctorToolParams", () => {
       await runDoctorCommand(
         { repair: true, timeoutMs: 12_000 },
         {
-          repairDaemon: async (timeoutMs) => {
-            receivedTimeoutMs = timeoutMs;
+          repairDaemon: async (options) => {
+            receivedTimeoutMs = options.timeoutMs;
+            receivedDaemonOptions = options.daemonOptions;
             return {
               status: "repaired",
               phase: "complete",
@@ -64,18 +66,44 @@ describe("doctorToolParams", () => {
             };
           },
         },
+        { host: "127.0.0.1", port: 4321 },
       );
     } finally {
       resetCliOutputSinksForTesting();
     }
 
     expect(receivedTimeoutMs).toBe(12_000);
+    expect(receivedDaemonOptions).toEqual({ host: "127.0.0.1", port: 4321 });
     expect(JSON.parse(written[0])).toMatchObject({
       status: "repaired",
       action: "restarted",
       before: { socketConnectable: false },
       after: { socketConnectable: true },
     });
+  });
+
+  test("forwards malformed repair timeout values for recovery validation", async () => {
+    let receivedTimeoutMs: unknown;
+    setCliOutputSinksForTesting({
+      stdout: { write: () => {} },
+      stderr: { write: () => {} },
+    });
+
+    try {
+      await runDoctorCommand(
+        { repair: true, timeoutMs: "not-a-number" },
+        {
+          repairDaemon: async (options) => {
+            receivedTimeoutMs = options.timeoutMs;
+            return { status: "repaired", phase: "complete", action: "joined" };
+          },
+        },
+      );
+    } finally {
+      resetCliOutputSinksForTesting();
+    }
+
+    expect(receivedTimeoutMs).toBe("not-a-number");
   });
 
   test("renders a normal doctor report as pretty JSON", async () => {

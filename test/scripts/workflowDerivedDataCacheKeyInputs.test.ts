@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import path from "node:path";
 import { loadAllJobSteps, type WorkflowStep } from "../helpers/workflowSteps";
 
 type JobStep = { jobId: string; step: WorkflowStep };
@@ -47,6 +48,15 @@ const REQUIRED_PROJECT_DESCRIPTOR_EXTENSIONS = [".pbxproj", "project.yml"];
 // / needlessly volatile across otherwise-identical source trees.
 const FORBIDDEN_HASH_SEGMENTS = [".build", "SourcePackages", "DerivedData"];
 
+function hasForbiddenPathSegment(pattern: string): boolean {
+  const normalizedPattern = path.posix.normalize(pattern);
+  return normalizedPattern.split("/").some((segment) => FORBIDDEN_HASH_SEGMENTS.includes(segment));
+}
+
+function hasPathTraversalSegment(pattern: string): boolean {
+  return pattern.split("/").some((segment) => segment === "." || segment === "..");
+}
+
 const REQUIRED_SCOPES_BY_JOB_ID: Record<string, readonly string[]> = {
   "ios-xcode-build": ["ios/"],
   "ios-playground-tests": [
@@ -78,7 +88,7 @@ function validateDerivedDataCacheKeyPatterns(patterns: string[], jobId: string):
   const violations: string[] = [];
   const scopesFromPatterns = new Set(
     patterns
-      .filter((pattern) => pattern.includes("**"))
+      .filter((pattern) => !pattern.startsWith("!") && pattern.includes("**"))
       .map((pattern) => pattern.slice(0, pattern.indexOf("**"))),
   );
   const requiredScopes = REQUIRED_SCOPES_BY_JOB_ID[jobId] ?? [];
@@ -115,15 +125,51 @@ function validateDerivedDataCacheKeyPatterns(patterns: string[], jobId: string):
     }
   }
 
-  for (const pattern of patterns) {
+  for (const [patternIndex, pattern] of patterns.entries()) {
+    const isNegated = pattern.startsWith("!");
+    const patternBody = isNegated ? pattern.slice(1) : pattern;
+    if (hasPathTraversalSegment(patternBody)) {
+      violations.push(
+        `pattern '${pattern}' contains a path traversal segment ('.' or '..'), which is not allowed in a DerivedData cache key hash pattern`,
+      );
+    }
+    if (isNegated) {
+      if (!hasForbiddenPathSegment(patternBody)) {
+        violations.push(
+          `pattern '${pattern}' excludes required build inputs from the DerivedData cache key hash`,
+        );
+      } else if (
+        patterns.slice(patternIndex + 1).some((laterPattern) => !laterPattern.startsWith("!"))
+      ) {
+        violations.push(
+          `pattern '${pattern}' excludes forbidden directory before all positive hash patterns are listed (hashFiles applies patterns in order; a later positive glob would re-include it)`,
+        );
+      }
+      continue;
+    }
+
     for (const forbidden of FORBIDDEN_HASH_SEGMENTS) {
-      if (pattern.includes(forbidden)) {
+      if (patternBody.includes(forbidden)) {
         violations.push(`pattern '${pattern}' re-includes forbidden segment '${forbidden}'`);
       }
     }
   }
 
   return violations;
+}
+
+function requiredPatternsForScopes(scopes: readonly string[]): string[] {
+  return scopes.flatMap((scope) =>
+    REQUIRED_EXTENSIONS.map((extension) => {
+      const suffix =
+        extension === ".xcassets"
+          ? "*.xcassets/**"
+          : extension.startsWith(".")
+            ? `*${extension}`
+            : extension;
+      return `${scope}**/${suffix}`;
+    }),
+  );
 }
 
 function collectDerivedDataCacheSteps(workflowRelativePath: string): JobStep[] {
@@ -212,5 +258,58 @@ test("DerivedData cache guard rejects narrowed filename globs", () => {
 
   expect(validateDerivedDataCacheKeyPatterns(patterns, "ios-playground-tests")).toContain(
     "scope 'ios/Playground/' does not hash '*.swift' inputs",
+  );
+});
+
+test("DerivedData cache guard rejects negated build inputs", () => {
+  const patterns = requiredPatternsForScopes(Object.values(REQUIRED_SCOPES_BY_JOB_ID).flat());
+  patterns.push(
+    "!ios/Playground/Sources/ContentView.swift",
+    "!ios/**/*.build.swift",
+    "!ios/SourcePackagesBackup/**/*.swift",
+  );
+
+  expect(validateDerivedDataCacheKeyPatterns(patterns, "ios-playground-tests")).toContain(
+    "pattern '!ios/Playground/Sources/ContentView.swift' excludes required build inputs from the DerivedData cache key hash",
+  );
+  expect(validateDerivedDataCacheKeyPatterns(patterns, "ios-playground-tests")).toContain(
+    "pattern '!ios/**/*.build.swift' excludes required build inputs from the DerivedData cache key hash",
+  );
+  expect(validateDerivedDataCacheKeyPatterns(patterns, "ios-playground-tests")).toContain(
+    "pattern '!ios/SourcePackagesBackup/**/*.swift' excludes required build inputs from the DerivedData cache key hash",
+  );
+});
+
+test("DerivedData cache guard permits negations of forbidden directories", () => {
+  const patterns = requiredPatternsForScopes(Object.values(REQUIRED_SCOPES_BY_JOB_ID).flat());
+  patterns.push(
+    "!**/DerivedData/**",
+    "!**/.build/**",
+    "!**/SourcePackages/**",
+    "!ios/**/.build/**",
+  );
+
+  expect(validateDerivedDataCacheKeyPatterns(patterns, "ios-playground-tests")).toEqual([]);
+});
+
+test("DerivedData cache guard rejects forbidden-directory negations before positive patterns", () => {
+  const patterns = ["!**/.build/**", "ios/**/*.swift"];
+
+  expect(validateDerivedDataCacheKeyPatterns(patterns, "ios-xcode-build")).toContain(
+    "pattern '!**/.build/**' excludes forbidden directory before all positive hash patterns are listed (hashFiles applies patterns in order; a later positive glob would re-include it)",
+  );
+});
+
+test("DerivedData cache guard permits forbidden-directory negations after positive patterns", () => {
+  const patterns = [...requiredPatternsForScopes(["ios/"]), "!**/.build/**"];
+
+  expect(validateDerivedDataCacheKeyPatterns(patterns, "ios-xcode-build")).toEqual([]);
+});
+
+test("DerivedData cache guard rejects traversal in forbidden-directory negations", () => {
+  const patterns = [...requiredPatternsForScopes(["ios/"]), "!ios/Playground/.build/../**/*.swift"];
+
+  expect(validateDerivedDataCacheKeyPatterns(patterns, "ios-xcode-build")).toContain(
+    "pattern '!ios/Playground/.build/../**/*.swift' contains a path traversal segment ('.' or '..'), which is not allowed in a DerivedData cache key hash pattern",
   );
 });

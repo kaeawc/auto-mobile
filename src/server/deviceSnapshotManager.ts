@@ -488,10 +488,19 @@ async function deleteUnrecordedVmSnapshot(
   context: string,
 ): Promise<void> {
   try {
+    const liveDeviceId = await avdSnapshots.findLiveEmulatorSerial(device.name);
+    if (!liveDeviceId) {
+      logger.warn(
+        `[DeviceSnapshot] Skipping cleanup of ${context} VM snapshot '${snapshotName}' because AVD ` +
+          `'${device.name}' is not live`,
+      );
+      return;
+    }
     const outcome = await avdSnapshots.deleteVmSnapshot(
-      device.deviceId,
+      liveDeviceId,
       snapshotName,
       vmSnapshotTimeoutMs,
+      device.name,
     );
     if (!outcome.reclaimed) {
       logger.warn(
@@ -536,12 +545,16 @@ async function recordFailedVmSnapshotReclaim(
     const existing = await snapshotRepository.getSnapshot(snapshotName);
     if (
       existing &&
-      (existing.deviceId !== device.deviceId || existing.deviceName !== device.name)
+      (!isVmSnapshotRecord(existing) ||
+        existing.deviceId !== device.deviceId ||
+        existing.deviceName !== device.name)
     ) {
+      const preservationReason = isVmSnapshotRecord(existing)
+        ? `it belongs to AVD '${existing.deviceName}' (${existing.deviceId})`
+        : "it is a non-VM snapshot record";
       logger.warn(
         `[DeviceSnapshot] Same-named capture '${snapshotName}' failed on AVD '${device.name}' ` +
-          `(${device.deviceId}); preserving the existing row for AVD '${existing.deviceName}' ` +
-          `(${existing.deviceId}) untouched: ${reason}`,
+          `(${device.deviceId}); preserving the existing row because ${preservationReason}: ${reason}`,
       );
       await deleteUnrecordedVmSnapshot(
         device,
@@ -1166,7 +1179,7 @@ async function reclaimVmSnapshotPayload(
   }
 
   const outcome = serial
-    ? await avdSnapshots.deleteVmSnapshot(serial, record.snapshotName, vmSnapshotTimeoutMs)
+    ? await avdSnapshots.deleteVmSnapshot(serial, record.snapshotName, vmSnapshotTimeoutMs, avdName)
     : {
         reclaimed: false,
         reason: `emulator for AVD '${avdName}' is not running; in-AVD snapshot left in place`,
@@ -1783,6 +1796,7 @@ export async function sweepPendingVmSnapshotReclaims(device: BootedDevice): Prom
         device.deviceId,
         record.snapshotName,
         vmSnapshotTimeoutMs,
+        record.deviceName,
       );
       if (!outcome.reclaimed) {
         logger.warn(
@@ -1844,7 +1858,12 @@ async function reclaimSupersededPendingVmSnapshot(
 
   const serial = await avdSnapshots.findLiveEmulatorSerial(existing.deviceName);
   const outcome = serial
-    ? await avdSnapshots.deleteVmSnapshot(serial, snapshotName, vmSnapshotTimeoutMs)
+    ? await avdSnapshots.deleteVmSnapshot(
+        serial,
+        snapshotName,
+        vmSnapshotTimeoutMs,
+        existing.deviceName,
+      )
     : {
         reclaimed: false,
         reason: `emulator for AVD '${existing.deviceName}' is not running`,

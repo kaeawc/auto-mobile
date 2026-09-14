@@ -519,14 +519,14 @@ async function runDoctorCommand(params: Record<string, any>): Promise<void> {
   }
 
   // Fallback to direct execution
-  const { runDoctor, formatConsoleOutput, formatJsonOutput } = await import("../doctor");
+  const { runDoctor, formatConsoleOutput } = await import("../doctor");
   const report = await runDoctor({
     android: params.android,
     ios: params.ios,
   });
 
   if (jsonOutput) {
-    console.log(formatJsonOutput(report));
+    writeCliToolOutput(report, "doctor");
   } else {
     console.log(formatConsoleOutput(report, process.stdout.isTTY ?? true));
   }
@@ -540,7 +540,7 @@ async function runDoctorCommand(params: Record<string, any>): Promise<void> {
 /**
  * Handle doctor command result from daemon
  */
-async function handleDoctorResult(result: any, jsonOutput: boolean): Promise<void> {
+export async function handleDoctorResult(result: any, jsonOutput: boolean): Promise<void> {
   // Extract the report from MCP response format
   let report = result;
   if (
@@ -570,7 +570,7 @@ async function handleDoctorResult(result: any, jsonOutput: boolean): Promise<voi
   }
 
   if (jsonOutput) {
-    console.log(JSON.stringify(report, null, 2));
+    writeCliToolOutput(report, "doctor");
   } else {
     // Use the formatter for console output
     const { formatConsoleOutput } = await import("../doctor");
@@ -650,7 +650,7 @@ function createCliArtifactWriter(): ObservationArtifactWriter | undefined {
   }
 }
 
-function handleToolResult(result: any, toolName: string): void {
+function writeCliToolOutput(result: unknown, toolName: string): void {
   // Count the bytes BEFORE writing: an oversized result is spilled to an
   // artifact and replaced by its envelope rather than emitted and cut (#6870).
   cliOutputSinks.stdout.write(
@@ -659,6 +659,10 @@ function handleToolResult(result: any, toolName: string): void {
       artifactWriter: createCliArtifactWriter(),
     }) + "\n",
   );
+}
+
+function handleToolResult(result: any, toolName: string): void {
+  writeCliToolOutput(result, toolName);
 
   // MCP tool errors use the top-level `isError` flag, while older daemon
   // responses encode their failure in the JSON payload.

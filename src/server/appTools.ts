@@ -760,16 +760,26 @@ export function describeListAppsResult(
 
 // Register tools
 export function registerAppTools() {
-  const listAppsHandler = async (device: BootedDevice, args: ListAppsArgs) => {
+  const listAppsHandler = async (
+    device: BootedDevice,
+    args: ListAppsArgs,
+    _progress?: unknown,
+    signal?: AbortSignal,
+  ) => {
     const { toolResponseFormatter, queryInstalledApps: queryApps } = getListAppsToolDependencies();
     try {
-      const content = await queryApps({
-        deviceId: device.deviceId,
-        platform: device.platform,
-        type: args.type,
-        search: args.search,
-        profile: args.profile,
-      });
+      signal?.throwIfAborted();
+      const content = await queryApps(
+        {
+          deviceId: device.deviceId,
+          platform: device.platform,
+          type: args.type,
+          search: args.search,
+          profile: args.profile,
+        },
+        signal,
+      );
+      signal?.throwIfAborted();
 
       return toolResponseFormatter.createJSONToolResponse({
         message: describeListAppsResult(device.deviceId, content),

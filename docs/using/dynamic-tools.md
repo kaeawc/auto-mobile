@@ -29,6 +29,10 @@ rejects the request before anything is written.
 Either spelling returns `enabledTools` — the user-configurable tools that are
 enabled for the session after the call — so the resulting capability set is
 visible without a second `tools/list`.
+If the write succeeds but the follow-up read of that set fails, the response
+returns `enabledToolsError` instead of `enabledTools`; the change was still
+applied. Confirm the resulting set with `tools/list` or a follow-up
+`setToolEnabled` call.
 
 ## Declaring capabilities at device acquisition
 

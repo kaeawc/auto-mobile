@@ -109,10 +109,50 @@ export class CtrlProxyInstalledPackageSource implements AndroidInstalledPackageS
     this.a11yClient = a11yClient;
   }
 
+  private async requestFromClient(
+    client: AndroidPackagesA11yClient,
+    signal?: AbortSignal,
+  ): Promise<A11yInstalledPackagesResult> {
+    signal?.throwIfAborted();
+    if (!signal) {
+      return client.requestInstalledPackages(true, undefined, 4000);
+    }
+
+    let onAbort!: () => void;
+    const aborted = new Promise<never>((_resolve, reject) => {
+      onAbort = () => reject(signal.reason);
+      signal.addEventListener("abort", onAbort, { once: true });
+    });
+    try {
+      const request = client.requestInstalledPackages(true, undefined, 4000);
+      void request.then(
+        () => {
+          if (signal.aborted) {
+            // The request settled after cancellation won the race, so its result is safe to ignore.
+            logger.debug(
+              `[ListInstalledApps] ignoring late installed_packages response for device ${this.device.deviceId}`,
+            );
+          }
+        },
+        (error) => {
+          if (signal.aborted) {
+            // The request settled after cancellation won the race, so its failure is safe to ignore.
+            logger.debug(
+              `[ListInstalledApps] ignoring late installed_packages failure for device ${this.device.deviceId}: ${errorMessage(error)}`,
+            );
+          }
+        },
+      );
+      return await Promise.race([aborted, request]);
+    } finally {
+      signal.removeEventListener("abort", onAbort);
+    }
+  }
+
   async requestInstalledPackages(signal?: AbortSignal): Promise<AndroidInstalledPackagesRequest> {
     try {
       const client = this.a11yClient ?? AndroidCtrlProxyClient.getInstance(this.device);
-      const result = await client.requestInstalledPackages(true, undefined, 4000);
+      const result = await this.requestFromClient(client, signal);
       signal?.throwIfAborted();
       if (result.success) {
         return { available: true, result: { userId: result.userId, packages: result.packages } };
@@ -124,6 +164,9 @@ export class CtrlProxyInstalledPackageSource implements AndroidInstalledPackageS
       );
       return { available: false, reason };
     } catch (error) {
+      if (signal?.aborted) {
+        throw signal.reason ?? error;
+      }
       const reason = errorMessage(error);
       // The caller folds this reason into one warn only when a non-namesOnly catalog fallback runs.
       logger.debug(

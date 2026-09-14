@@ -979,12 +979,40 @@ describe("sanitizeObserveResult", () => {
     // agent reads "not present" for an element that is.
     test("skeleton projection lifts viewHierarchy.truncationReasons to the top level", () => {
       const { observe } = loadAndroidHomeObserve();
+      observe.viewHierarchy!.truncationReasons = ["max_nodes"];
+
+      const out = sanitizeObserveResult(observe, { dropElements: false, project: "skeleton" });
+
+      expect(out.viewHierarchy).toBeUndefined();
+      expect(out.truncationReasons).toEqual(["max_nodes"]);
+    });
+
+    // Issue #6933: with `--raw-element-search`, `DefaultObserveElementCollector`
+    // follows the raw (uncapped) hierarchy attached by `attachRawViewHierarchy`,
+    // so the projected skeleton can list every child past the filtered tree's
+    // per-node cap. `max_children[...]` (#6601's HOST-OUTPUT-only reason,
+    // `isHostOutputTruncationReason`) describes only the rendered
+    // `viewHierarchy` payload being trimmed, not the elements the skeleton is
+    // built from — lifting it here would falsely tell a client the complete
+    // skeleton is a subset. Only capture-fidelity reasons (the hierarchy walk
+    // itself stopped early) belong on a skeleton projection.
+    test("skeleton projection does not lift a host-output max_children cap (issue #6933)", () => {
+      const { observe } = loadAndroidHomeObserve();
       observe.viewHierarchy!.truncationReasons = ["max_children[node kept 64 of 70]"];
 
       const out = sanitizeObserveResult(observe, { dropElements: false, project: "skeleton" });
 
       expect(out.viewHierarchy).toBeUndefined();
-      expect(out.truncationReasons).toEqual(["max_children[node kept 64 of 70]"]);
+      expect(out.truncationReasons).toBeUndefined();
+    });
+
+    test("skeleton projection lifts only the capture-fidelity reason out of a mixed list (issue #6933)", () => {
+      const { observe } = loadAndroidHomeObserve();
+      observe.viewHierarchy!.truncationReasons = ["max_nodes", "max_children[node kept 64 of 70]"];
+
+      const out = sanitizeObserveResult(observe, { dropElements: false, project: "skeleton" });
+
+      expect(out.truncationReasons).toEqual(["max_nodes"]);
     });
 
     test("skeleton projection omits truncationReasons when the hierarchy was complete", () => {

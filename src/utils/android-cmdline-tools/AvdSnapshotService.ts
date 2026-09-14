@@ -1,4 +1,5 @@
 import * as path from "path";
+import { combineWithAmbientAbort } from "../AbortContext";
 import { errorMessage } from "../describeUnknownError";
 import { logger } from "../logger";
 import type { AdbClientFactory } from "./AdbClientFactory";
@@ -63,11 +64,16 @@ export interface AvdSnapshotOperations {
   listKnownAvdNames(): Promise<string[]>;
   /** adb serial of the running emulator for `avdName`, or null when it is not live. */
   findLiveEmulatorSerial(avdName: string): Promise<string | null>;
-  /** Issue `adb -s <serial> emu avd snapshot del <name>` and judge the response. */
+  /**
+   * Issue `adb -s <serial> emu avd snapshot del <name>` and judge the response.
+   * When `expectedAvdName` is supplied, verify that the serial still belongs to
+   * that AVD immediately before dispatching the destructive console command.
+   */
   deleteVmSnapshot(
     deviceId: string,
     snapshotName: string,
     timeoutMs: number,
+    expectedAvdName?: string,
   ): Promise<VmSnapshotReclaimOutcome>;
 }
 
@@ -179,16 +185,45 @@ export class AvdSnapshotService implements AvdSnapshotOperations {
     deviceId: string,
     snapshotName: string,
     timeoutMs: number,
+    expectedAvdName?: string,
   ): Promise<VmSnapshotReclaimOutcome> {
     const adb = this.adbFactory.create({ deviceId, name: deviceId, platform: "android" });
     const command = buildVmSnapshotCommand("delete", snapshotName);
+    const identityAbortController =
+      expectedAvdName === undefined ? undefined : new AbortController();
+    let mismatchReason: string | undefined;
 
     let result;
     try {
-      result = await this.consoleBusyRegistry.runExclusive(deviceId, () =>
-        adb.executeCommand(command, timeoutMs),
-      );
+      result = await this.consoleBusyRegistry.runExclusive(deviceId, async () => {
+        return adb.execute(command.split(" "), {
+          timeoutMs,
+          waitForProcessSettlementAfterAbort: true,
+          ...(identityAbortController
+            ? {
+                signal: combineWithAmbientAbort(identityAbortController.signal),
+                beforeDispatch: async () => {
+                  const liveDevice = (await this.emulator.getBootedDevices(true)).find(
+                    (device) => device.deviceId === deviceId,
+                  );
+                  if (liveDevice?.name !== expectedAvdName) {
+                    const actualAvdName = liveDevice?.name ?? "no longer live";
+                    mismatchReason =
+                      `Skipping VM snapshot delete for '${snapshotName}': serial '${deviceId}' expected AVD ` +
+                      `'${expectedAvdName}' but currently hosts '${actualAvdName}'`;
+                    logger.warn(`[AvdSnapshot] ${mismatchReason}`);
+                    identityAbortController.abort();
+                    throw new Error(mismatchReason);
+                  }
+                },
+              }
+            : {}),
+        });
+      });
     } catch (error) {
+      if (mismatchReason !== undefined) {
+        return { reclaimed: false, reason: mismatchReason };
+      }
       const reason = formatVmSnapshotExecutionError("delete", snapshotName, error);
       logger.warn(`[AvdSnapshot] ${reason}`, error);
       return { reclaimed: false, reason };

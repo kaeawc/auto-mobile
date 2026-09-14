@@ -32,12 +32,8 @@ function loadWorkflowCachePaths(workflowRelativePath: string) {
 }
 
 function globMatchesLiteral(segment: string, literal: string): boolean {
-  const opaqueSegment = segment.replace(/\$\{\{.*?\}\}/g, "<github-expression>");
-  const pattern = opaqueSegment
-    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-    .replace(/\\\*/g, ".*")
-    .replace(/\\\?/g, ".");
-  return new RegExp(`^${pattern}$`).test(literal);
+  const pattern = segment.replace(/\$\{\{.*?\}\}/g, "<github-expression>");
+  return new Bun.Glob(pattern).match(literal);
 }
 
 function collectForbiddenCachePaths(entries: string[]): string[] {
@@ -120,5 +116,19 @@ jobs:
       "~/.swiftpm/security",
       "~/.swiftpm/configuration",
     ]);
+  });
+
+  test("supports bracket classes when matching forbidden cache paths", () => {
+    expect(globMatchesLiteral("[.]build", ".build")).toBe(true);
+    expect(globMatchesLiteral("[].]build", ".build")).toBe(true);
+    expect(globMatchesLiteral("[a-z]ourcePackages", "SourcePackages")).toBe(false);
+    expect(globMatchesLiteral("[a-z]ourcePackages", "sourcePackages")).toBe(true);
+    expect(globMatchesLiteral("[!.]build", ".build")).toBe(false);
+    expect(globMatchesLiteral("[^.]build", ".build")).toBe(false);
+    expect(globMatchesLiteral(".b*ild", ".build")).toBe(true);
+    expect(globMatchesLiteral(".b?ild", ".build")).toBe(true);
+
+    expect(collectForbiddenCachePaths(["ios/**/[.]build/**"])).toEqual(["ios/**/[.]build/**"]);
+    expect(collectForbiddenCachePaths(["ios/**/[].]build/**"])).toEqual(["ios/**/[].]build/**"]);
   });
 });

@@ -3432,6 +3432,14 @@ interface TeardownContext {
   timeoutMs: number;
   lifecycleLease?: VirtualDeviceLifecycleLease;
   initialAndroidRuntimeIds?: Set<string>;
+  /**
+   * `force` exists to escape wedged emulator consoles, so every Android
+   * discovery run for THIS teardown must stay serial-only rather than
+   * re-probing consoles one call site at a time (#6946). Computed once at
+   * context construction so a new discovery added to this flow inherits the
+   * mode automatically instead of silently reintroducing a name-aware scan.
+   */
+  serialOnlyAndroidDiscovery: boolean;
 }
 
 async function stopSegmentedVideoRecordingsBeforeDestroy(
@@ -3507,7 +3515,7 @@ async function readTeardownTargetDiscovery(
   context: TeardownContext,
   devicePool: DevicePool | undefined,
 ): Promise<BootedDeviceDiscovery> {
-  if (context.args.force !== true || context.args.target.platform !== "android") {
+  if (!context.serialOnlyAndroidDiscovery || context.args.target.platform !== "android") {
     return await readTeardownBootedDiscovery(context);
   }
   const serialOnly = await readTeardownBootedDiscovery(context, undefined, true);
@@ -4029,6 +4037,7 @@ async function checkForRestartedTeardownTarget(
     phase === "stop"
       ? "post-shutdown booted-device discovery did not complete"
       : "post-delete booted-device discovery did not complete",
+    context.serialOnlyAndroidDiscovery,
   );
   if (!completedInventoryFor(booted, target.device.platform)) {
     return createTeardownFailureResponse(
@@ -4060,6 +4069,15 @@ async function checkForRestartedTeardownTarget(
       target.device,
     );
   }
+  const serialOnlyRestart = await checkForSerialOnlyAndroidTeardownRestart(
+    context,
+    target,
+    booted,
+    phase,
+  );
+  if (serialOnlyRestart) {
+    return serialOnlyRestart;
+  }
   const replacement = findMatchingBootedTeardownDevices(booted, context.args, devicePool)[0];
   if (!replacement) {
     return undefined;
@@ -4071,6 +4089,92 @@ async function checkForRestartedTeardownTarget(
     phase === "stop"
       ? "The Android AVD restarted after shutdown confirmation; refusing deletion."
       : "The Android AVD is still running after deletion.",
+    target.device,
+  );
+}
+
+async function checkForSerialOnlyAndroidTeardownRestart(
+  context: TeardownContext,
+  target: TeardownResolvedTarget,
+  booted: BootedDeviceDiscovery,
+  phase: "stop" | "verification",
+): Promise<TeardownToolResponse | undefined> {
+  if (!context.serialOnlyAndroidDiscovery || target.device.platform !== "android") {
+    return undefined;
+  }
+  const targetOriginalSerial = target.wasBooted ? target.bootedDevice.deviceId : undefined;
+  if (!targetOriginalSerial) {
+    return undefined;
+  }
+  if (
+    targetOriginalSerial &&
+    booted.devices.some((device) => device.deviceId === targetOriginalSerial)
+  ) {
+    return undefined;
+  }
+  const suspectPeers = booted.devices.filter(
+    (device) =>
+      device.platform === "android" &&
+      isVirtualAndroidDevice(device) &&
+      isUnknownAndroidRuntimeName(device) &&
+      device.deviceId !== targetOriginalSerial &&
+      context.initialAndroidRuntimeIds?.has(device.deviceId) === true,
+  );
+  for (const suspect of suspectPeers) {
+    const remainingMs = context.deadlineMs - context.dependencies.timer.now();
+    if (remainingMs <= 0) {
+      break;
+    }
+    const probedName = await context.dependencies.resolveRunningAndroidAvdName(
+      suspect,
+      Math.min(POOLED_AVD_NAME_VERIFICATION_TIMEOUT_MS, remainingMs),
+      context.requestAbortSignal,
+    );
+    const refusal = serialOnlyAndroidTeardownRestartFailure(
+      context,
+      target,
+      phase,
+      suspect,
+      probedName,
+    );
+    if (refusal) {
+      return refusal;
+    }
+  }
+  return undefined;
+}
+
+function serialOnlyAndroidTeardownRestartFailure(
+  context: TeardownContext,
+  target: TeardownResolvedTarget,
+  phase: "stop" | "verification",
+  suspect: BootedDevice,
+  probedName: string | undefined,
+): TeardownToolResponse | undefined {
+  if (probedName === undefined) {
+    return createTeardownFailureResponse(
+      context.args,
+      phase,
+      phase === "stop" ? "target_restarted" : "target_still_running",
+      phase === "stop"
+        ? `Android peer emulator '${suspect.deviceId}' could not identify its AVD while the target's ` +
+            "original serial disappeared; refusing deletion rather than assuming the target did not restart there."
+        : `The Android AVD may have reappeared on peer emulator '${suspect.deviceId}' after deletion, ` +
+            "but its AVD name could not be resolved; refusing to report success rather than assuming inventory absence is durable.",
+      target.device,
+    );
+  }
+  if (probedName !== context.args.target.stableId) {
+    return undefined;
+  }
+  return createTeardownFailureResponse(
+    context.args,
+    phase,
+    phase === "stop" ? "target_restarted" : "target_still_running",
+    phase === "stop"
+      ? "The Android AVD restarted after shutdown confirmation; refusing deletion."
+      : `The Android AVD reappeared on peer emulator '${suspect.deviceId}' after deletion; ` +
+          "refusing to report success rather than assuming inventory absence is durable.",
     target.device,
   );
 }
@@ -5139,6 +5243,7 @@ async function reserveInitialDeviceForReadiness(
       boot.sourceImage?.name ?? boot.device.name,
       undefined,
       isDevicePoolAutolockEnabled() ? { mcpSessionId } : undefined,
+      true,
     ),
   );
 }
@@ -5214,6 +5319,23 @@ async function prepareStartDeviceRunnerReadiness(
 
 function getStartDevicePool(daemonState: DaemonState): DevicePool | undefined {
   return daemonState.isInitialized() ? daemonState.getDevicePool() : undefined;
+}
+
+function assertAndroidBootDidNotEnterRecovery(args: StartDeviceArgs, boot: DeviceBootResult): void {
+  if (args.platform !== "android") {
+    return;
+  }
+  const recoveryTargets = getStartDevicePool(
+    DaemonState.getInstance(),
+  )?.getRecoveringAndroidTargets();
+  if (
+    recoveryTargets?.serials.has(boot.device.deviceId) ||
+    recoveryTargets?.names.has(boot.device.name)
+  ) {
+    throw new ActionableError(
+      `Android device '${boot.device.name}' entered recovery while booting; retry the request.`,
+    );
+  }
 }
 
 /**
@@ -7335,6 +7457,10 @@ export function registerDeviceTools() {
       lifecycleCoordinator: deps.lifecycleCoordinator,
     });
     perf.startOperation("bootDevice");
+    const recoveryTargets =
+      args.platform === "android"
+        ? getStartDevicePool(DaemonState.getInstance())?.getRecoveringAndroidTargets()
+        : undefined;
     state.boot = await bootService.boot(
       {
         ...args,
@@ -7342,9 +7468,12 @@ export function registerDeviceTools() {
         timeoutMs: budgets.bootTimeoutMs,
         totalDeadlineMs: bootDeadlineMs,
         signal,
+        excludeDeviceNames: recoveryTargets?.names,
+        excludeDeviceIds: recoveryTargets?.serials,
       },
       progress ? { report: progress } : undefined,
     );
+    assertAndroidBootDidNotEnterRecovery(args, state.boot);
     perf.endOperation("bootDevice");
     validateBootIdentity(args, state.boot.device, state.boot.source, state.boot.sourceImage);
     validateRequestedAndroidSerial(
@@ -8037,6 +8166,7 @@ export function registerDeviceTools() {
               deadlineMs,
               timeoutMs,
               lifecycleLease,
+              serialOnlyAndroidDiscovery: args.force === true,
             };
             const resolution = await resolveTeardownTarget(context);
             if ("response" in resolution) {

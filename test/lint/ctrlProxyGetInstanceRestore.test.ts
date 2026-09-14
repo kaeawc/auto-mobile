@@ -119,25 +119,25 @@ describe("CtrlProxy getInstance mocks are restored in-file (issue #7052)", () =>
    * Test-framework teardown callbacks execute after the test bodies even when
    * their registration appears first in source. Model their restores as the
    * final file event so source ordering catches ordinary direct code without
-   * rejecting the established `afterEach(() => restore())` suite pattern.
+   * rejecting established `afterEach(() => restore())` and
+   * `afterEach(restore)` suite patterns.
    */
-  function runsInTeardownCallback(node: ts.Node): boolean {
+  function runsInTeardownCallback(
+    node: ts.Node,
+    teardownCallbacks: ReadonlySet<ts.FunctionLikeDeclaration>,
+  ): boolean {
     for (let current = node.parent; current;) {
       if (!ts.isFunctionLike(current)) {
         current = current.parent;
         continue;
       }
+      if (teardownCallbacks.has(current)) {
+        return true;
+      }
       const call = current.parent;
       if (!ts.isCallExpression(call) || !call.arguments.some((argument) => argument === current)) {
         return false;
       }
-      const callee = unwrap(call.expression);
-      if (ts.isIdentifier(callee) && (callee.text === "afterEach" || callee.text === "afterAll")) {
-        return true;
-      }
-      // A synchronous helper callback can be nested in a teardown callback.
-      // Resume outside its call so an enclosing afterEach/afterAll argument can
-      // still establish teardown ordering.
       current = call.parent;
     }
     return false;
@@ -250,8 +250,25 @@ describe("CtrlProxy getInstance mocks are restored in-file (issue #7052)", () =>
    * `relPathHint` only labels the synthetic parse; nothing keys off it.
    */
   function analyzeSource(source: string, relPathHint = "synthetic.ts"): FileFacts {
-    const sf = ts.createSourceFile(relPathHint, source, ts.ScriptTarget.Latest, true);
-    const symbolAliases = new Map<ts.Identifier, CtrlProxySymbol>();
+    const compilerOptions: ts.CompilerOptions = {
+      noLib: true,
+      noResolve: true,
+      target: ts.ScriptTarget.Latest,
+    };
+    const host = ts.createCompilerHost(compilerOptions);
+    host.getSourceFile = (fileName, languageVersion) =>
+      fileName === relPathHint
+        ? ts.createSourceFile(fileName, source, languageVersion, true)
+        : undefined;
+    host.fileExists = (fileName) => fileName === relPathHint;
+    host.readFile = (fileName) => (fileName === relPathHint ? source : undefined);
+    const program = ts.createProgram([relPathHint], compilerOptions, host);
+    const sf = program.getSourceFile(relPathHint);
+    if (sf === undefined) {
+      throw new Error(`TypeScript did not create source file: ${relPathHint}`);
+    }
+    const checker = program.getTypeChecker();
+    const ctrlProxyBindings = new Map<ts.Symbol, CtrlProxySymbol>();
     for (const statement of sf.statements) {
       if (
         !ts.isImportDeclaration(statement) ||
@@ -263,114 +280,110 @@ describe("CtrlProxy getInstance mocks are restored in-file (issue #7052)", () =>
       for (const specifier of statement.importClause.namedBindings.elements) {
         const exportedName = specifier.propertyName?.text ?? specifier.name.text;
         if (SYMBOL_SET.has(exportedName)) {
-          symbolAliases.set(specifier.name, exportedName as CtrlProxySymbol);
+          const binding = checker.getSymbolAtLocation(specifier.name);
+          if (binding !== undefined) {
+            ctrlProxyBindings.set(binding, exportedName as CtrlProxySymbol);
+          }
         }
       }
     }
 
-    let nextScopeId = 0;
-    const scopeIds = new Map<ts.Node, number>();
-    const declaredBindings = new Set<string>();
-    const ctrlProxyBindings = new Map<string, CtrlProxySymbol>();
-    const introducesLexicalScope = (node: ts.Node): boolean =>
-      ts.isBlock(node) ||
-      ts.isFunctionLike(node) ||
-      ts.isSourceFile(node) ||
-      // Loop declarations have a scope of their own, rather than belonging to
-      // their enclosing block.
-      ts.isForStatement(node) ||
-      ts.isForInStatement(node) ||
-      ts.isForOfStatement(node) ||
-      ts.isWhileStatement(node) ||
-      ts.isDoStatement(node) ||
-      // Catch parameters and switch clauses are lexical bindings, but neither
-      // node is a Block. Keep a switch's CaseBlock as one shared scope, as JS
-      // does, rather than pretending every case has an independent scope.
-      ts.isCatchClause(node) ||
-      ts.isCaseBlock(node);
-    const scopeChain = (node: ts.Node): ts.Node[] => {
-      const scopes: ts.Node[] = [];
-      for (let current: ts.Node | undefined = node; current; current = current.parent) {
-        if (introducesLexicalScope(current)) {
-          scopes.push(current);
-        }
-      }
-      return scopes;
-    };
-    const keyForScope = (scope: ts.Node, name: string): string => {
-      let id = scopeIds.get(scope);
-      if (id === undefined) {
-        id = nextScopeId++;
-        scopeIds.set(scope, id);
-      }
-      return `${id}:${name}`;
-    };
-    const isFunctionScopedDeclaration = (name: ts.Identifier): boolean => {
-      const declaration = name.parent;
-      if (ts.isFunctionDeclaration(declaration)) {
-        return true;
-      }
-      if (
-        !ts.isVariableDeclaration(declaration) ||
-        !ts.isVariableDeclarationList(declaration.parent)
-      ) {
+    const isTeardownHook = (callee: ts.Expression): boolean => {
+      const core = unwrap(callee);
+      if (!ts.isIdentifier(core) || (core.text !== "afterEach" && core.text !== "afterAll")) {
         return false;
       }
-      const flags = declaration.parent.flags;
-      return (
-        (flags &
-          (ts.NodeFlags.Let |
-            ts.NodeFlags.Const |
-            ts.NodeFlags.Using |
-            ts.NodeFlags.AwaitUsing)) ===
-        0
-      );
+      const binding = checker.getSymbolAtLocation(core);
+      if (binding === undefined) {
+        return true;
+      }
+      return (binding.declarations ?? []).some((declaration) => {
+        if (!ts.isImportSpecifier(declaration)) {
+          return false;
+        }
+        const importDeclaration = declaration.parent.parent.parent;
+        return (
+          ts.isImportDeclaration(importDeclaration) &&
+          ts.isStringLiteral(importDeclaration.moduleSpecifier) &&
+          importDeclaration.moduleSpecifier.text === "bun:test"
+        );
+      });
     };
-    const declarationKey = (name: ts.Identifier): string => {
-      const declaration = name.parent;
-      // A function declaration binds in its enclosing function/source scope,
-      // not in the scope introduced by its own body.
-      const scopes = scopeChain(ts.isFunctionDeclaration(declaration) ? declaration.parent : name);
-      const scope = isFunctionScopedDeclaration(name)
-        ? scopes.find((candidate) => ts.isFunctionLike(candidate) || ts.isSourceFile(candidate))
-        : scopes[0];
-      return keyForScope(scope, name.text);
-    };
-    const bindingKeyForReference = (name: ts.Identifier): string | undefined => {
-      for (const scope of scopeChain(name)) {
-        const key = keyForScope(scope, name.text);
-        if (declaredBindings.has(key)) {
-          return key;
+    const reassignedBindings = new Set<ts.Symbol>();
+    const recordReassignedTarget = (target: ts.Expression): void => {
+      const core = unwrap(target);
+      if (ts.isIdentifier(core)) {
+        const binding = checker.getSymbolAtLocation(core);
+        if (binding !== undefined) {
+          reassignedBindings.add(binding);
+        }
+        return;
+      }
+      if (ts.isArrayLiteralExpression(core)) {
+        for (const element of core.elements) {
+          if (ts.isOmittedExpression(element)) {
+            continue;
+          }
+          recordReassignedTarget(ts.isSpreadElement(element) ? element.expression : element);
+        }
+        return;
+      }
+      if (ts.isObjectLiteralExpression(core)) {
+        for (const property of core.properties) {
+          if (ts.isShorthandPropertyAssignment(property)) {
+            recordReassignedTarget(property.name);
+          } else if (ts.isPropertyAssignment(property) || ts.isSpreadAssignment(property)) {
+            recordReassignedTarget(property.initializer ?? property.expression);
+          }
         }
       }
-      return undefined;
     };
-
-    for (const [alias, symbol] of symbolAliases) {
-      const binding = declarationKey(alias);
-      declaredBindings.add(binding);
-      ctrlProxyBindings.set(binding, symbol);
-    }
-
-    const predeclareWalk = (node: ts.Node): void => {
-      if (
-        (ts.isVariableDeclaration(node) ||
-          ts.isParameter(node) ||
-          ts.isFunctionDeclaration(node)) &&
-        node.name !== undefined &&
-        ts.isIdentifier(node.name)
-      ) {
-        declaredBindings.add(declarationKey(node.name));
+    const reassignmentWalk = (node: ts.Node): void => {
+      if (ts.isBinaryExpression(node) && ts.isAssignmentOperator(node.operatorToken.kind)) {
+        recordReassignedTarget(node.left);
       }
-      ts.forEachChild(node, predeclareWalk);
+      ts.forEachChild(node, reassignmentWalk);
     };
-    predeclareWalk(sf);
+    reassignmentWalk(sf);
+
+    const teardownCallbacks = new Set<ts.FunctionLikeDeclaration>();
+    const addTeardownCallback = (argument: ts.Expression): void => {
+      if (ts.isFunctionLike(argument)) {
+        teardownCallbacks.add(argument);
+        return;
+      }
+      if (!ts.isIdentifier(argument)) {
+        return;
+      }
+      const binding = checker.getSymbolAtLocation(argument);
+      if (binding === undefined || reassignedBindings.has(binding)) {
+        return;
+      }
+      for (const declaration of binding?.declarations ?? []) {
+        if (ts.isFunctionDeclaration(declaration)) {
+          teardownCallbacks.add(declaration);
+        }
+      }
+    };
+    const teardownWalk = (node: ts.Node): void => {
+      if (ts.isCallExpression(node)) {
+        if (isTeardownHook(node.expression)) {
+          for (const argument of node.arguments) {
+            if (!ts.isSpreadElement(argument)) {
+              addTeardownCallback(argument);
+            }
+          }
+        }
+      }
+      ts.forEachChild(node, teardownWalk);
+    };
+    teardownWalk(sf);
 
     const eventPosition = (node: ts.Node): number =>
-      runsInTeardownCallback(node) ? Number.MAX_SAFE_INTEGER : node.pos;
+      runsInTeardownCallback(node, teardownCallbacks) ? Number.MAX_SAFE_INTEGER : node.pos;
 
     const resolveSymbol: SymbolResolver = (name) => {
-      const binding = bindingKeyForReference(name);
+      const binding = checker.getSymbolAtLocation(name);
       if (binding !== undefined) {
         return ctrlProxyBindings.get(binding);
       }
@@ -380,12 +393,15 @@ describe("CtrlProxy getInstance mocks are restored in-file (issue #7052)", () =>
     // First pass: learn what every bare identifier was bound to, so a later
     // `Symbol.getInstance = someId` can tell a fresh mock from an original
     // capture, and which locals are `spyOn(<Symbol>, "getInstance")` handles.
-    const idIsMock = new Set<string>();
-    const idIsOriginalCapture = new Map<string, CtrlProxySymbol>();
-    const spyVarSymbol = new Map<string, CtrlProxySymbol>();
+    const idIsMock = new Set<ts.Symbol>();
+    const idIsOriginalCapture = new Map<ts.Symbol, CtrlProxySymbol>();
+    const spyVarSymbol = new Map<ts.Symbol, CtrlProxySymbol>();
     const mockRestoreTargets: { readonly receiver: ts.Identifier; readonly pos: number }[] = [];
 
-    const learn = (binding: string, init: ts.Expression): void => {
+    const learn = (binding: ts.Symbol | undefined, init: ts.Expression): void => {
+      if (binding === undefined) {
+        return;
+      }
       const spied = spyOnGetInstanceSymbol(init, resolveSymbol);
       if (spied !== undefined) {
         spyVarSymbol.set(binding, spied);
@@ -402,8 +418,7 @@ describe("CtrlProxy getInstance mocks are restored in-file (issue #7052)", () =>
 
     const learnWalk = (node: ts.Node): void => {
       if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)) {
-        const binding = declarationKey(node.name);
-        declaredBindings.add(binding);
+        const binding = checker.getSymbolAtLocation(node.name);
         if (node.initializer) {
           learn(binding, node.initializer);
         }
@@ -413,8 +428,7 @@ describe("CtrlProxy getInstance mocks are restored in-file (issue #7052)", () =>
         ts.isIdentifier(unwrap(node.left))
       ) {
         const name = unwrap(node.left) as ts.Identifier;
-        const binding = bindingKeyForReference(name) ?? declarationKey(name);
-        declaredBindings.add(binding);
+        const binding = checker.getSymbolAtLocation(name);
         learn(binding, node.right);
       } else if (
         ts.isCallExpression(node) &&
@@ -450,7 +464,7 @@ describe("CtrlProxy getInstance mocks are restored in-file (issue #7052)", () =>
 
     const recordInstall = (symbol: CtrlProxySymbol, rhs: ts.Expression, pos: number): void => {
       const core = unwrap(rhs);
-      const binding = ts.isIdentifier(core) ? bindingKeyForReference(core) : undefined;
+      const binding = ts.isIdentifier(core) ? checker.getSymbolAtLocation(core) : undefined;
       if (
         spyOnGetInstanceSymbol(rhs, resolveSymbol) === symbol ||
         (binding !== undefined && spyVarSymbol.get(binding) === symbol)
@@ -472,7 +486,7 @@ describe("CtrlProxy getInstance mocks are restored in-file (issue #7052)", () =>
           if (isFreshMock(rhs)) {
             recordInstall(symbol, rhs, eventPosition(node));
           } else if (ts.isIdentifier(core)) {
-            const binding = bindingKeyForReference(core);
+            const binding = checker.getSymbolAtLocation(core);
             const capturedFrom =
               binding === undefined ? undefined : idIsOriginalCapture.get(binding);
             if (binding !== undefined && idIsMock.has(binding)) {
@@ -498,7 +512,7 @@ describe("CtrlProxy getInstance mocks are restored in-file (issue #7052)", () =>
     const restoredBySpy = new Set<CtrlProxySymbol>();
     const spyRestorePositions = new Map<CtrlProxySymbol, number>();
     for (const target of mockRestoreTargets) {
-      const binding = bindingKeyForReference(target.receiver);
+      const binding = checker.getSymbolAtLocation(target.receiver);
       const symbol = binding === undefined ? undefined : spyVarSymbol.get(binding);
       if (symbol !== undefined) {
         restoredBySpy.add(symbol);
@@ -924,6 +938,124 @@ describe("CtrlProxy getInstance mocks are restored in-file (issue #7052)", () =>
     expect([...f.restores]).toEqual(["AndroidCtrlProxyClient"]);
     expect(leaksOf("restore-before-later-teardown-spy.ts", f)).toEqual([
       "restore-before-later-teardown-spy.ts: installs AndroidCtrlProxyClient.getInstance but never restores it",
+    ]);
+  });
+
+  test("THREAD 1: a block-level function cannot hide a prior imported-alias install", () => {
+    const f = analyzeSource(
+      `import { AndroidCtrlProxyClient as Client } from "some/path";\n` +
+        `function setup() {\n` +
+        `  Client.getInstance = mock(() => ({}));\n` +
+        `  { function Client() {} }\n` +
+        `}\n`,
+    );
+    expect([...f.installs]).toEqual(["AndroidCtrlProxyClient"]);
+    expect(leaksOf("block-function-shadow.ts", f)).toEqual([
+      "block-function-shadow.ts: installs AndroidCtrlProxyClient.getInstance but never restores it",
+    ]);
+  });
+
+  test("THREAD 1: a block-level function's local use is not misattributed", () => {
+    const f = analyzeSource(
+      `import { AndroidCtrlProxyClient as Client } from "some/path";\n` +
+        `function setup() {\n` +
+        `  { function Client() { Client.getInstance = mock(() => ({})); } }\n` +
+        `}\n`,
+    );
+    expect([...f.installs]).toEqual([]);
+    expect(leaksOf("block-function-local.ts", f)).toEqual([]);
+  });
+
+  test("THREAD 2: a named afterEach callback restores a later install", () => {
+    const f = analyzeSource(
+      `const original = AndroidCtrlProxyClient.getInstance;\n` +
+        `function restoreSingleton() {\n` +
+        `  AndroidCtrlProxyClient.getInstance = original;\n` +
+        `}\n` +
+        `afterEach(restoreSingleton);\n` +
+        `AndroidCtrlProxyClient.getInstance = mock(() => ({}));\n`,
+    );
+    expect([...f.installs]).toEqual(["AndroidCtrlProxyClient"]);
+    expect([...f.restores]).toEqual(["AndroidCtrlProxyClient"]);
+    expect(leaksOf("named-teardown-restore.ts", f)).toEqual([]);
+  });
+
+  test("THREAD 2: an ordinary named function does not become teardown", () => {
+    const f = analyzeSource(
+      `const original = AndroidCtrlProxyClient.getInstance;\n` +
+        `function restoreSingleton() {\n` +
+        `  AndroidCtrlProxyClient.getInstance = original;\n` +
+        `}\n` +
+        `restoreSingleton();\n` +
+        `AndroidCtrlProxyClient.getInstance = mock(() => ({}));\n`,
+    );
+    expect([...f.installs]).toEqual(["AndroidCtrlProxyClient"]);
+    expect([...f.restores]).toEqual(["AndroidCtrlProxyClient"]);
+    expect(leaksOf("ordinary-named-restore.ts", f)).toEqual([
+      "ordinary-named-restore.ts: installs AndroidCtrlProxyClient.getInstance but never restores it",
+    ]);
+  });
+
+  test("a local afterEach helper does not make a restore teardown-ordered", () => {
+    const f = analyzeSource(
+      `const original = AndroidCtrlProxyClient.getInstance;\n` +
+        `function afterEach(callback: () => void) { callback(); }\n` +
+        `afterEach(() => { AndroidCtrlProxyClient.getInstance = original; });\n` +
+        `AndroidCtrlProxyClient.getInstance = mock(() => ({}));\n`,
+    );
+    expect([...f.installs]).toEqual(["AndroidCtrlProxyClient"]);
+    expect([...f.restores]).toEqual(["AndroidCtrlProxyClient"]);
+    expect(leaksOf("local-after-each.ts", f)).toEqual([
+      "local-after-each.ts: installs AndroidCtrlProxyClient.getInstance but never restores it",
+    ]);
+  });
+
+  test("a reassigned named teardown callback does not restore a later install", () => {
+    const f = analyzeSource(
+      `const original = AndroidCtrlProxyClient.getInstance;\n` +
+        `function restoreSingleton() {\n` +
+        `  AndroidCtrlProxyClient.getInstance = original;\n` +
+        `}\n` +
+        `restoreSingleton = () => {};\n` +
+        `afterEach(restoreSingleton);\n` +
+        `AndroidCtrlProxyClient.getInstance = mock(() => ({}));\n`,
+    );
+    expect([...f.installs]).toEqual(["AndroidCtrlProxyClient"]);
+    expect([...f.restores]).toEqual(["AndroidCtrlProxyClient"]);
+    expect(leaksOf("reassigned-named-teardown.ts", f)).toEqual([
+      "reassigned-named-teardown.ts: installs AndroidCtrlProxyClient.getInstance but never restores it",
+    ]);
+  });
+
+  test("an uncalled nested function in teardown does not restore a later install", () => {
+    const f = analyzeSource(
+      `const original = AndroidCtrlProxyClient.getInstance;\n` +
+        `afterEach(() => {\n` +
+        `  function neverCalled() { AndroidCtrlProxyClient.getInstance = original; }\n` +
+        `});\n` +
+        `AndroidCtrlProxyClient.getInstance = mock(() => ({}));\n`,
+    );
+    expect([...f.installs]).toEqual(["AndroidCtrlProxyClient"]);
+    expect([...f.restores]).toEqual(["AndroidCtrlProxyClient"]);
+    expect(leaksOf("uncalled-nested-function.ts", f)).toEqual([
+      "uncalled-nested-function.ts: installs AndroidCtrlProxyClient.getInstance but never restores it",
+    ]);
+  });
+
+  test("a destructuring reassignment invalidates a named teardown callback", () => {
+    const f = analyzeSource(
+      `const original = AndroidCtrlProxyClient.getInstance;\n` +
+        `function restoreSingleton() {\n` +
+        `  AndroidCtrlProxyClient.getInstance = original;\n` +
+        `}\n` +
+        `[restoreSingleton] = [() => {}];\n` +
+        `afterEach(restoreSingleton);\n` +
+        `AndroidCtrlProxyClient.getInstance = mock(() => ({}));\n`,
+    );
+    expect([...f.installs]).toEqual(["AndroidCtrlProxyClient"]);
+    expect([...f.restores]).toEqual(["AndroidCtrlProxyClient"]);
+    expect(leaksOf("destructured-named-teardown.ts", f)).toEqual([
+      "destructured-named-teardown.ts: installs AndroidCtrlProxyClient.getInstance but never restores it",
     ]);
   });
 

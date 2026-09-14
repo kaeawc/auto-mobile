@@ -4069,6 +4069,15 @@ async function checkForRestartedTeardownTarget(
       target.device,
     );
   }
+  const serialOnlyRestart = await checkForSerialOnlyAndroidTeardownRestart(
+    context,
+    target,
+    booted,
+    phase,
+  );
+  if (serialOnlyRestart) {
+    return serialOnlyRestart;
+  }
   const replacement = findMatchingBootedTeardownDevices(booted, context.args, devicePool)[0];
   if (!replacement) {
     return undefined;
@@ -4082,6 +4091,49 @@ async function checkForRestartedTeardownTarget(
       : "The Android AVD is still running after deletion.",
     target.device,
   );
+}
+
+async function checkForSerialOnlyAndroidTeardownRestart(
+  context: TeardownContext,
+  target: TeardownResolvedTarget,
+  booted: BootedDeviceDiscovery,
+  phase: "stop" | "verification",
+): Promise<TeardownToolResponse | undefined> {
+  if (!context.serialOnlyAndroidDiscovery || target.device.platform !== "android") {
+    return undefined;
+  }
+  const targetOriginalSerial = target.wasBooted ? target.bootedDevice.deviceId : undefined;
+  const suspectPeers = booted.devices.filter(
+    (device) =>
+      device.platform === "android" &&
+      isVirtualAndroidDevice(device) &&
+      isUnknownAndroidRuntimeName(device) &&
+      device.deviceId !== targetOriginalSerial &&
+      context.initialAndroidRuntimeIds?.has(device.deviceId) === true,
+  );
+  for (const suspect of suspectPeers) {
+    const remainingMs = context.deadlineMs - context.dependencies.timer.now();
+    if (remainingMs <= 0) {
+      break;
+    }
+    const probedName = await context.dependencies.resolveRunningAndroidAvdName(
+      suspect,
+      Math.min(POOLED_AVD_NAME_VERIFICATION_TIMEOUT_MS, remainingMs),
+      context.requestAbortSignal,
+    );
+    if (probedName === context.args.target.stableId) {
+      return createTeardownFailureResponse(
+        context.args,
+        phase,
+        phase === "stop" ? "target_restarted" : "target_still_running",
+        phase === "stop"
+          ? "The Android AVD restarted after shutdown confirmation; refusing deletion."
+          : "The Android AVD is still running after deletion.",
+        target.device,
+      );
+    }
+  }
+  return undefined;
 }
 
 async function verifyTeardownAbsence(

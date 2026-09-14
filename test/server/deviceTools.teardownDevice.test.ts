@@ -1799,6 +1799,66 @@ describe("deleteDevice handler", () => {
     expect(manager.destroyRequests).toEqual([]);
   });
 
+  test("force refuses deletion when the target restarts on a peer's original serial", async () => {
+    const timer = new FakeTimer();
+    const target: BootedDevice = {
+      platform: "android",
+      name: "Pixel_8_API_35",
+      deviceId: "emulator-5554",
+    };
+    const peer: BootedDevice = {
+      platform: "android",
+      name: "Pixel_7_API_34",
+      deviceId: "emulator-5556",
+    };
+    const targetImage: DeviceInfo = {
+      platform: "android",
+      name: target.name,
+      isRunning: true,
+    };
+    const peerImage: DeviceInfo = {
+      platform: "android",
+      name: peer.name,
+      isRunning: true,
+    };
+    const sessionManager = new SessionManager(timer);
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      manager,
+      new DefaultRetryExecutor(timer),
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    await pool.addDevice(target, targetImage);
+    await pool.addDevice(peer, peerImage);
+    manager.setBootedDevices("android", [target, peer]);
+    manager.setDeviceImages("android", [targetImage]);
+    manager.replacementAfterKill = {
+      ...target,
+      deviceId: peer.deviceId,
+    };
+    runtimeAvdNames.set(peer.deviceId, target.name);
+
+    const body = responseBody(
+      await teardownTool().handler({
+        ...request("android", target.name, target.name),
+        force: true,
+      }),
+    );
+
+    expect(body.state).toBe("failed");
+    expect(body.failure).toEqual(
+      expect.objectContaining({
+        code: "target_restarted",
+        phase: "stop",
+      }),
+    );
+    expect(manager.destroyRequests).toEqual([]);
+    expect(runtimeAvdNameProbes).toEqual([peer.deviceId]);
+  });
+
   test("fails closed when a new Android runtime appears without a resolvable AVD name", async () => {
     const device: BootedDevice = {
       platform: "android",

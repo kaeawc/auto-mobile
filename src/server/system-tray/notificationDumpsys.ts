@@ -40,6 +40,7 @@ const RECORD_LINE = /NotificationRecord\(.*?\bpkg=([^\s]+)/;
 // Every extras entry is printed as `<key>=<value>`, whatever the value's type,
 // so a key-shaped line is where the previous entry ended.
 const EXTRA_KEY_LINE = /^[A-Za-z][A-Za-z0-9_$.]*=/;
+const CUSTOM_LAYOUT_FIELD = /^(?:contentView|bigContentView|headsUpContentView)=(?!null$).+$/;
 
 // The dump prints several record-bearing sections: the active `Notification
 // List:` the shade renders, plus snoozed and enqueued records it does not. A
@@ -162,6 +163,7 @@ export const parseDumpsysNotificationRecords = (output: string): DumpsysNotifica
       continue;
     }
     if (extrasLines === null) {
+      current.hasCustomLayout ||= CUSTOM_LAYOUT_FIELD.test(trimmed);
       if (trimmed.startsWith("extras={")) {
         extrasLines = [];
       }

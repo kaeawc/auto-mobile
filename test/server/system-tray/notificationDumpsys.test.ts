@@ -64,6 +64,56 @@ describe("dumpsys notification records", () => {
     ]);
   });
 
+  test("detects a custom RemoteViews layout without a decorated style", () => {
+    expect(
+      parseDumpsysNotificationRecords(
+        dump(
+          "    NotificationRecord(0x1a2b3c: pkg=com.example.custom user=UserHandle{0} id=0 tag=null key=0|com.example.custom|0|null|10100)",
+          "      uid=10100 userId=0",
+          "      contentView=null",
+          "      bigContentView=android.widget.RemoteViews@a1b2c3d",
+          "      headsUpContentView=null",
+          "      extras={",
+          "        android.title=String (Custom notification)",
+          "        android.template=String (android.app.Notification$BigTextStyle)",
+          "      }",
+        ),
+      ),
+    ).toEqual([
+      {
+        pkg: "com.example.custom",
+        titles: ["Custom notification"],
+        bodies: [],
+        hasCustomLayout: true,
+      },
+    ]);
+  });
+
+  test("does not treat null custom layout fields as custom", () => {
+    expect(
+      parseDumpsysNotificationRecords(
+        dump(
+          "    NotificationRecord(0x1a2b3c: pkg=com.example.default user=UserHandle{0} id=0 tag=null key=0|com.example.default|0|null|10100)",
+          "      uid=10100 userId=0",
+          "      contentView=null",
+          "      bigContentView=null",
+          "      headsUpContentView=null",
+          "      extras={",
+          "        android.title=String (Default notification)",
+          "        android.template=String (android.app.Notification$BigTextStyle)",
+          "      }",
+        ),
+      ),
+    ).toEqual([
+      {
+        pkg: "com.example.default",
+        titles: ["Default notification"],
+        bodies: [],
+        hasCustomLayout: false,
+      },
+    ]);
+  });
+
   test("ignores content-shaped lines outside a record's extras block", () => {
     expect(
       parseDumpsysNotificationRecords(

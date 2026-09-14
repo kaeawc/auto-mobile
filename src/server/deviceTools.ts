@@ -7151,7 +7151,7 @@ export function registerDeviceTools() {
     const settlementState: {
       exactProvisioning?: Promise<unknown>;
       unownedColdBootSettlement?: Promise<void>;
-      bindingSettlements: Promise<void>[];
+      bindingSettlements: Promise<unknown>[];
       readinessReservation?: DeviceReadinessReservation;
     } = { bindingSettlements: [] };
     const notifyResourcesChangedBestEffort = () => {
@@ -7344,7 +7344,7 @@ export function registerDeviceTools() {
     settlementState: {
       unownedColdBootSettlement?: Promise<void>;
       exactProvisioning?: Promise<unknown>;
-      bindingSettlements: Promise<void>[];
+      bindingSettlements: Promise<unknown>[];
       readinessReservation?: DeviceReadinessReservation;
     },
   ): Promise<{
@@ -7497,6 +7497,9 @@ export function registerDeviceTools() {
                   settlementState.bindingSettlements.push(settlement);
                 },
               ),
+            (settlement) => {
+              settlementState.bindingSettlements.push(settlement);
+            },
           );
         },
       );

@@ -4349,6 +4349,106 @@ describe("provisionDevice handler", () => {
     }
   });
 
+  test("keeps provision leases while cancelled autolock session creation settles", async () => {
+    const originalAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+    const activeSessionWriteStarted = Promise.withResolvers<void>();
+    const activeSessionWriteFinished = Promise.withResolvers<void>();
+    const releaseStarted = Promise.withResolvers<void>();
+    const releaseFinished = Promise.withResolvers<void>();
+    const timer = new FakeTimer();
+    const persistence = new FakeDeviceSessionPersistence();
+    persistence.upsertActiveSession = async () => {
+      activeSessionWriteStarted.resolve();
+      await activeSessionWriteFinished.promise;
+    };
+    persistence.markReleased = async () => {
+      releaseStarted.resolve();
+      await releaseFinished.promise;
+    };
+    const sessionManager = new SessionManager(timer, persistence);
+    sessionManager.stopCleanupTimer();
+    const pool = new DevicePool(sessionManager, "daemon-session", timer, undefined, deviceManager);
+    const booted = {
+      name: "phone-api-36-a",
+      platform: "android" as const,
+      deviceId: "emulator-5554",
+    };
+    deviceManager.setBootedDevices("android", [booted]);
+    deviceManager.setDeviceImages("android", [
+      { name: booted.name, platform: "android", isRunning: true },
+    ]);
+    await pool.initializeWithDevices([booted]);
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    let readinessReleases = 0;
+    const reserveReadiness = pool.reserveDeviceForReadiness.bind(pool);
+    pool.reserveDeviceForReadiness = async (
+      ...args: Parameters<DevicePool["reserveDeviceForReadiness"]>
+    ) => {
+      const release = await reserveReadiness(...args);
+      const countedRelease = async () => {
+        readinessReleases++;
+        await release();
+      };
+      return Object.assign(countedRelease, { owner: release.owner });
+    };
+    let lifecycleReleases = 0;
+    setDeviceToolsDependencies({
+      timer,
+      lifecycleCoordinator: {
+        reserve: async () => ({
+          signal: new AbortController().signal,
+          identity: { kind: "stable", platform: "android", stableId: booted.name },
+          bindCanonicalIdentity: async () => {},
+          transitionToTeardown: () => {},
+          release: () => {
+            lifecycleReleases++;
+          },
+        }),
+      },
+      ensureCtrlProxyReady: async () => {
+        timer.advanceTime(59_500);
+      },
+    });
+    exactProvisioner.provision = async () => provisionedTestDevice("android", false);
+    process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
+
+    try {
+      const request = ToolRegistry.getTool("provisionDevice")!.handler({
+        ...provisionTestArgs("android", "cancelled-autolock-session-creation"),
+        timeoutMs: 60_000,
+        __mcpSessionId: "provision-mcp-client",
+      });
+      await activeSessionWriteStarted.promise;
+
+      await timer.advanceTimeAsync(500);
+      const response = await request;
+      expect((response as any).isError).toBe(true);
+      expect(readinessReleases).toBe(0);
+      expect(lifecycleReleases).toBe(0);
+
+      activeSessionWriteFinished.resolve();
+      await releaseStarted.promise;
+      expect(readinessReleases).toBe(0);
+      expect(lifecycleReleases).toBe(0);
+
+      releaseFinished.resolve();
+      for (let attempt = 0; attempt < 50; attempt++) {
+        await Promise.resolve();
+      }
+      expect(readinessReleases).toBe(1);
+      expect(lifecycleReleases).toBe(1);
+    } finally {
+      activeSessionWriteFinished.resolve();
+      releaseFinished.resolve();
+      sessionManager.stopCleanupTimer();
+      if (originalAutolock === undefined) {
+        delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+      } else {
+        process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = originalAutolock;
+      }
+    }
+  });
+
   // `reserveProvisionDeviceReadiness` records a stable-name readiness
   // reservation keyed `android:<avd>`. If the pooled entry's incarnation changes
   // while readiness is in flight (a disconnect + rediscovery of the same serial,

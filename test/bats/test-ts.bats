@@ -419,6 +419,25 @@ EOF
   [[ "$output" == *"#6969"* ]]
 }
 
+@test "wall timeout diagnostics are portable for coverage and stress modes" {
+  cat > "$STUB_BIN/timeout" <<'EOF'
+#!/usr/bin/env bash
+exit 124
+EOF
+  chmod +x "$STUB_BIN/timeout"
+
+  for mode in coverage stress; do
+    case "$mode" in
+      coverage) label="Coverage"; expected_budget=480 ;;
+      stress) label="Stress"; expected_budget=300 ;;
+    esac
+    run env PATH="$STUB_BIN:$PATH" bash "$SCRIPT" "$mode"
+    [ "$status" -eq 124 ]
+    [[ "$output" != *"bad substitution"* ]]
+    [[ "$output" == *"${label} test run exceeded its ${expected_budget}s wall-clock budget"* ]]
+  done
+}
+
 @test "rejects an invalid wall timeout before executing Bun" {
   run env \
     PATH="$STUB_BIN:$PATH" \

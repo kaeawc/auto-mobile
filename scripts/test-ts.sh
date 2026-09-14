@@ -93,8 +93,13 @@ run_test_command() {
     set -e
     elapsed_seconds=$(($(date +%s) - start_seconds))
     if [[ "$status" -eq 124 && ( "$mode" == "stress" || "$mode" == "coverage" ) ]]; then
+      local mode_label
+      case "$mode" in
+        coverage) mode_label="Coverage" ;;
+        stress) mode_label="Stress" ;;
+      esac
       printf '%s test run exceeded its %ss wall-clock budget (ran ~%ss); see #6969 for the ongoing margin investigation.\n' \
-        "${mode^}" "$AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS" "$elapsed_seconds" >&2
+        "$mode_label" "$AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS" "$elapsed_seconds" >&2
     fi
     return "$status"
   fi

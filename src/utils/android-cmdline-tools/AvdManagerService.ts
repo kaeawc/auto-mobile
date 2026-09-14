@@ -44,11 +44,14 @@ export class AvdManagerService implements AvdManager {
     return listSystemImages(filter);
   }
 
-  async listInstalledSystemImages(filter?: SystemImageFilter): Promise<SystemImage[]> {
+  async listInstalledSystemImages(
+    filter?: SystemImageFilter,
+    signal?: AbortSignal,
+  ): Promise<SystemImage[]> {
     if (this.dependencies) {
-      return listInstalledSystemImages(filter, this.dependencies);
+      return listInstalledSystemImages(filter, this.dependencies, signal);
     }
-    return listInstalledSystemImages(filter);
+    return listInstalledSystemImages(filter, undefined, signal);
   }
 
   async installSystemImage(
@@ -64,11 +67,11 @@ export class AvdManagerService implements AvdManager {
     return installSystemImage(packageName, acceptLicense);
   }
 
-  async listDeviceImages(): Promise<AvdInfo[]> {
+  async listDeviceImages(signal?: AbortSignal): Promise<AvdInfo[]> {
     if (this.dependencies) {
-      return listDeviceImages(this.dependencies);
+      return listDeviceImages(this.dependencies, signal);
     }
-    return listDeviceImages();
+    return listDeviceImages(undefined, signal);
   }
 
   async createAvd(params: CreateAvdParams): Promise<{
@@ -92,10 +95,10 @@ export class AvdManagerService implements AvdManager {
     return deleteAvd(name);
   }
 
-  async listDevices(): Promise<DeviceProfile[]> {
+  async listDevices(signal?: AbortSignal): Promise<DeviceProfile[]> {
     if (this.dependencies) {
-      return listDevices(this.dependencies);
+      return listDevices(this.dependencies, signal);
     }
-    return listDevices();
+    return listDevices(undefined, signal);
   }
 }

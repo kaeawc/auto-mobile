@@ -455,15 +455,22 @@ test("ADB-reset recovery clears its failed-release fence after a later release",
     expect(internals.adbServerResetQuarantinedSessions.has("session")).toBe(true);
     expect(internals.recoveringSessionLosses.has("session")).toBe(true);
 
+    // The retained fence is not a due deferred retry: the sweep must wait for
+    // a later durable release rather than re-running the failed recovery.
     sessions.releaseSession = originalReleaseSession;
     timer.advanceTime(30_000);
-    const retry = pool.retryDueDeferredSessionRecoveries();
+    await pool.retryDueDeferredSessionRecoveries();
     await flush();
-    timer.advanceTime(30_000);
-    await retry;
+    expect(internals.failedTerminalRecoveryReleases.has("session")).toBe(true);
+    expect(internals.recoveringSessionLosses.has("session")).toBe(true);
+    expect(manager.startedDevices).toHaveLength(0);
+
+    await originalReleaseSession("session", "explicit-release");
+    await flush();
 
     expect(internals.adbServerResetQuarantinedSessions.has("session")).toBe(false);
     expect(internals.recoveringSessionLosses.has("session")).toBe(false);
+    expect(internals.failedTerminalRecoveryReleases.has("session")).toBe(false);
 
     const abort = new AbortController();
     let reservationReleased = false;
@@ -726,6 +733,63 @@ test("terminal recovery release failure retains the recovery fence until a later
     await leaseReady;
     assertNoRecoveryReservationsRemain(pool, "session");
     await releaseLease?.();
+  } finally {
+    sessions.releaseSession = originalReleaseSession;
+    sessions.stopCleanupTimer();
+  }
+});
+
+test("a retained failure fence is not re-swept as a due deferred recovery", async () => {
+  const { timer, sessions, manager, pool, captured } = await setup();
+  const internals = pool as unknown as DevicePoolRecoveryInternals;
+  const originalReleaseSession = sessions.releaseSession.bind(sessions);
+  sessions.releaseSession = async () => {
+    throw new Error("release persistence failed");
+  };
+  try {
+    const firstRecovery = pool.recoverSessionBoundAndroidDeviceAfterLoss(
+      original.deviceId,
+      undefined,
+      captured,
+    );
+    await manager.killAccepted.promise;
+    await flush();
+    timer.advanceTime(30_000);
+    expect(await firstRecovery).toBe("deferred");
+
+    timer.advanceTime(30_000);
+    const terminalRecovery = pool.recoverSessionBoundAndroidDeviceAfterLoss(
+      original.deviceId,
+      undefined,
+      captured,
+    );
+    await flush();
+    timer.advanceTime(30_000);
+    await flush();
+    timer.advanceTime(1_000);
+    await flush();
+    timer.advanceTime(1_000);
+    await expect(terminalRecovery).rejects.toThrow("release persistence failed");
+    expect(internals.failedTerminalRecoveryReleases.has("session")).toBe(true);
+    expect(manager.startedDevices).toHaveLength(0);
+
+    // Shutdown is now confirmable, so a relaunch would actually start a device.
+    manager.bootedDevices = [];
+    for (let poll = 0; poll < 3; poll++) {
+      timer.advanceTime(30_000);
+      await pool.retryDueDeferredSessionRecoveries();
+      await flush();
+    }
+    expect(manager.startedDevices).toHaveLength(0);
+    expect(internals.failedTerminalRecoveryReleases.has("session")).toBe(true);
+    expect(internals.recoveringSessionLosses.has("session")).toBe(true);
+    expect(sessions.getSession("session")?.assignedDevice).toBe(original.deviceId);
+
+    sessions.releaseSession = originalReleaseSession;
+    await originalReleaseSession("session", "explicit-release");
+    await flush();
+    assertNoRecoveryReservationsRemain(pool, "session");
+    expect(manager.startedDevices).toHaveLength(0);
   } finally {
     sessions.releaseSession = originalReleaseSession;
     sessions.stopCleanupTimer();

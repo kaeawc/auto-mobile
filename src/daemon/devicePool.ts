@@ -788,6 +788,16 @@ export class DevicePool {
         reservations: new Set(),
       };
       this.recoveringSessionLosses.set(sessionId, record);
+    } else {
+      // Reusing the record starts a new attempt. The previous attempt's
+      // expired deadline must not survive into it: a terminal failure that
+      // retains the fence would otherwise stay "due" for every deferred-retry
+      // sweep and relaunch recovery instead of waiting for a later durable
+      // release. A released record keeps that state so the attempt finalizes.
+      record.deferredUntil = undefined;
+      if (record.state !== "released") {
+        record.state = "pending";
+      }
     }
     Object.assign(record, details);
     for (const reservation of reservations) {
@@ -2803,6 +2813,7 @@ export class DevicePool {
   async retryDueDeferredSessionRecoveries(): Promise<void> {
     const dueRecoveries = Array.from(this.recoveringSessionLosses.entries()).filter(
       ([sessionId, loss]) =>
+        loss.state === "deferred" &&
         loss.deferredUntil !== undefined &&
         this.timer.now() >= loss.deferredUntil &&
         !this.sessionPreservingRecoveries.has(sessionId),

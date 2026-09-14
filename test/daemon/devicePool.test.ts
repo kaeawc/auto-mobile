@@ -680,6 +680,26 @@ describe("DevicePool", () => {
     sessionManager.stopCleanupTimer();
   });
 
+  test("reports recovering Android names and serials from tracked recovery state", () => {
+    const recoveringImage = {
+      name: "Pixel_8_API_35",
+      platform: "android" as const,
+      isRunning: false,
+      deviceId: "emulator-5554",
+    };
+    const internals = devicePool as unknown as {
+      recoveringAndroidImages: Map<string, DeviceInfo>;
+      recoveringAndroidDeviceIds: Set<string>;
+    };
+    internals.recoveringAndroidImages.set(recoveringImage.name, recoveringImage);
+    internals.recoveringAndroidDeviceIds.add("emulator-5556");
+
+    expect(devicePool.getRecoveringAndroidTargets()).toEqual({
+      names: new Set([recoveringImage.name]),
+      serials: new Set([recoveringImage.deviceId, "emulator-5556"]),
+    });
+  });
+
   describe("assertSessionReadyForAutomation shutdown admission (#5494)", () => {
     const sourceImage: DeviceInfo = {
       name: "Pixel 8",

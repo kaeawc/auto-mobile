@@ -3225,12 +3225,23 @@ export class DevicePool {
     await this.waitForAdbServerResetReservations([reservation], signal);
   }
 
-  /** Snapshot the Android AVDs whose preserved sessions still own startup recovery. */
-  getRecoveringAndroidAvdNames(): Set<string> {
-    return new Set([
-      ...this.recoveringAndroidImages.keys(),
-      ...this.adbServerResetRecoveryReservations.keys(),
-    ]);
+  /** Snapshot the Android runtimes whose preserved sessions still own startup recovery. */
+  getRecoveringAndroidTargets(): { names: Set<string>; serials: Set<string> } {
+    return {
+      names: new Set([
+        ...this.recoveringAndroidImages.keys(),
+        ...this.adbServerResetRecoveryReservations.keys(),
+      ]),
+      serials: new Set([
+        ...Array.from(this.recoveringAndroidImages.values())
+          .map((image) => image.deviceId)
+          .filter((deviceId): deviceId is string => Boolean(deviceId)),
+        ...Array.from(this.adbServerResetRecoveryReservations.values())
+          .map((reservation) => reservation.deviceId)
+          .filter(Boolean),
+        ...Array.from(this.recoveringAndroidDeviceIds).filter(Boolean),
+      ]),
+    };
   }
 
   /**

@@ -279,6 +279,7 @@ test("ADB-reset recovery settles its incident when the deferred sweep runs", asy
     );
     await manager.killAccepted.promise;
     await flush();
+    expect(pool.getRecoveringAndroidTargets().serials.has(original.deviceId)).toBe(true);
     timer.advanceTime(30_000);
     expect(await recovery).toBe(false);
     expect(
@@ -289,7 +290,8 @@ test("ADB-reset recovery settles its incident when the deferred sweep runs", asy
     timer.advanceTime(30_000);
     await pool.retryDueDeferredSessionRecoveries();
 
-    expect(pool.getRecoveringAndroidAvdNames().has(original.name)).toBe(false);
+    expect(pool.getRecoveringAndroidTargets().names.has(original.name)).toBe(false);
+    expect(pool.getRecoveringAndroidTargets().serials.has(original.deviceId)).toBe(false);
     expect((await pool.waitForEmulatorLossIncident(incidentId, 0))?.recovery.outcome).toMatch(
       /^(recovered|exhausted)$/,
     );

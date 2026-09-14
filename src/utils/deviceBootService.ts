@@ -87,6 +87,8 @@ export interface DeviceBootRequest {
   matchExactName?: boolean;
   /** Recovery snapshots keep preserved Android AVDs out of a concurrent startup match. */
   excludeDeviceNames?: ReadonlySet<string>;
+  /** Recovery snapshots keep preserved Android serials out of a concurrent startup match. */
+  excludeDeviceIds?: ReadonlySet<string>;
 }
 
 export interface DeviceBootProgress {
@@ -338,9 +340,14 @@ export class DeviceBootService {
       false,
     );
     const excludedDeviceNames = request.excludeDeviceNames;
-    const matchingBooted = excludedDeviceNames
-      ? booted.filter((device) => !excludedDeviceNames.has(device.name))
-      : booted;
+    const excludedDeviceIds = request.excludeDeviceIds;
+    const matchingBooted =
+      excludedDeviceNames || excludedDeviceIds
+        ? booted.filter(
+            (device) =>
+              !excludedDeviceNames?.has(device.name) && !excludedDeviceIds?.has(device.deviceId),
+          )
+        : booted;
     const enriched = enrichBootedDevicesFromImages(matchingBooted, images);
     const match =
       request.matchExactName && request.name

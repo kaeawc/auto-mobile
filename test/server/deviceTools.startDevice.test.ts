@@ -348,7 +348,12 @@ describe("startDevice handler", () => {
       undefined,
       fakeDeviceUtils,
     );
-    const recoveringImage = { ...androidImage, name: "Pixel_10_API_35", osVersion: "15" };
+    const recoveringImage = {
+      ...androidImage,
+      name: "Pixel_10_API_35",
+      osVersion: "15",
+      deviceId: "emulator-5556",
+    };
     const availableImage = { ...androidImage, name: "Pixel_9_API_34", osVersion: "14" };
     (
       pool as unknown as { recoveringAndroidImages: Map<string, DeviceInfo> }
@@ -357,10 +362,22 @@ describe("startDevice handler", () => {
     fakeDeviceUtils.setDeviceImages("android", [recoveringImage, availableImage]);
     setDeviceToolsDependencies({ deviceMatcherFactory: () => new DefaultDeviceMatcher() });
 
-    expect(pool.getRecoveringAndroidAvdNames()).toEqual(new Set([recoveringImage.name]));
-    const result = await callStartDevice({ platform: "android", preferRunning: false });
+    expect(pool.getRecoveringAndroidTargets()).toEqual({
+      names: new Set([recoveringImage.name]),
+      serials: new Set([recoveringImage.deviceId]),
+    });
+    fakeDeviceUtils.setBootedDevices("android", [
+      {
+        ...androidDevice,
+        name: `Unknown (${recoveringImage.deviceId})`,
+        deviceId: recoveringImage.deviceId,
+      },
+      { ...androidDevice, name: availableImage.name, deviceId: "emulator-5558" },
+    ]);
+    const result = await callStartDevice({ platform: "android" });
 
     expect(result.name).toBe(availableImage.name);
+    expect(result.deviceId).toBe("emulator-5558");
     expect(fakeDeviceUtils.getExecutedOperations()).not.toContain(
       "startDevice:Pixel_10_API_35:180000",
     );

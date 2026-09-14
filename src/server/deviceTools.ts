@@ -7333,9 +7333,9 @@ export function registerDeviceTools() {
       lifecycleCoordinator: deps.lifecycleCoordinator,
     });
     perf.startOperation("bootDevice");
-    const excludeDeviceNames =
+    const recoveryTargets =
       args.platform === "android"
-        ? getStartDevicePool(DaemonState.getInstance())?.getRecoveringAndroidAvdNames()
+        ? getStartDevicePool(DaemonState.getInstance())?.getRecoveringAndroidTargets()
         : undefined;
     state.boot = await bootService.boot(
       {
@@ -7344,7 +7344,8 @@ export function registerDeviceTools() {
         timeoutMs: budgets.bootTimeoutMs,
         totalDeadlineMs: bootDeadlineMs,
         signal,
-        excludeDeviceNames,
+        excludeDeviceNames: recoveryTargets?.names,
+        excludeDeviceIds: recoveryTargets?.serials,
       },
       progress ? { report: progress } : undefined,
     );

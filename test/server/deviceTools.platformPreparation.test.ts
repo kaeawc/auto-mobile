@@ -220,6 +220,30 @@ describe("platform device preparation tools", () => {
     );
   });
 
+  test("getApple cold-boots its requested UDID instead of reusing a same-name sibling", async () => {
+    const simulator: DeviceInfo = {
+      platform: "ios",
+      name: "iPhone 17",
+      deviceId: "UDID-A",
+      isRunning: true,
+    };
+    deviceUtils.setDeviceImages("ios", [simulator]);
+    deviceUtils.setBootedDevices("ios", [
+      {
+        platform: "ios",
+        name: simulator.name,
+        deviceId: "UDID-B",
+      },
+    ]);
+
+    const result = await callTool("getApple", { udid: simulator.deviceId });
+
+    expect(result.deviceIdentity).toMatchObject({ simulatorUdid: "UDID-A" });
+    expect(deviceUtils.getExecutedOperations()).toContain(
+      `startDevice:${simulator.name}:${DEFAULT_DEVICE_READY_TIMEOUT_MS}`,
+    );
+  });
+
   test("uses explicit boot and automation readiness budgets without accepting matcher inputs", async () => {
     const image: DeviceInfo = {
       platform: "android",

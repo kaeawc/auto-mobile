@@ -25,6 +25,7 @@ import { errorMessage } from "../utils/describeUnknownError";
 import { isDeviceSessionAcquisitionTool } from "./deviceSessionResult";
 import { isHostOutputTruncationReason } from "../features/observe/truncationReasons";
 import { buildObservationScreenshotUri } from "./observationResourceUris";
+import { stripInternalObservationFields } from "./observationInternalFields";
 
 /**
  * Read/write access to the per-session diff baseline — the "last observation
@@ -268,7 +269,7 @@ function attachObservationScreenshotUri(
   } else {
     delete observation.observationScreenshotResourceUri;
   }
-  delete observation.screenshotCaptureAttempted;
+  stripInternalObservationFields(observation);
 }
 
 /**

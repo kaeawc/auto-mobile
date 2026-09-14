@@ -74,7 +74,10 @@ class OperationModel {
   }
 
   markDeviceCreationStarted(attemptId: string): boolean {
-    if (this.row.status === "absent" || this.row.attemptId !== attemptId) {
+    if (
+      (this.row.status !== "running" && this.row.status !== "replaying") ||
+      this.row.attemptId !== attemptId
+    ) {
       return false;
     }
     this.row.creationStarted = true;
@@ -82,7 +85,10 @@ class OperationModel {
   }
 
   complete(attemptId: string, result: Record<string, unknown>): boolean {
-    if (this.row.status === "absent" || this.row.attemptId !== attemptId) {
+    if (
+      (this.row.status !== "running" && this.row.status !== "replaying") ||
+      this.row.attemptId !== attemptId
+    ) {
       return false;
     }
     this.row = { ...this.row, status: "succeeded", result };
@@ -90,7 +96,10 @@ class OperationModel {
   }
 
   fail(attemptId: string, clearCreationStarted: boolean): boolean {
-    if (this.row.status === "absent" || this.row.attemptId !== attemptId) {
+    if (
+      (this.row.status !== "running" && this.row.status !== "replaying") ||
+      this.row.attemptId !== attemptId
+    ) {
       return false;
     }
     // A failed REPLAY reverts to succeeded, preserving the completed result.

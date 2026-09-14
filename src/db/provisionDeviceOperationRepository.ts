@@ -19,7 +19,10 @@ export type ProvisionDeviceOperationBeginResult =
  * compare-and-set: it admits an attempt only by moving the row to `running`
  * under its own `attemptId`, and every later mutation matches on that token.
  * Each mutation returns whether it actually changed a row -- `false` means the
- * caller was superseded and must not report success.
+ * caller was superseded or the attempt already reached a terminal state and
+ * must not report success. This terminal-state fence ensures a delayed
+ * `complete()` cannot overwrite a timeout recorded by `fail()`, and vice
+ * versa.
  *
  * A REPLAY of a completed operation is exclusive too: `begin()` hands back the
  * stored result only by moving the row to the non-terminal `replaying` status,
@@ -192,6 +195,7 @@ export class ProvisionDeviceOperationRepository implements ProvisionDeviceOperat
       })
       .where("operation_id", "=", operationId)
       .where("attempt_id", "=", attemptId)
+      .where("status", "in", ["running", "replaying"])
       .executeTakeFirst();
     return Number(update.numUpdatedRows) > 0;
   }
@@ -205,6 +209,7 @@ export class ProvisionDeviceOperationRepository implements ProvisionDeviceOperat
       })
       .where("operation_id", "=", operationId)
       .where("attempt_id", "=", attemptId)
+      .where("status", "in", ["running", "replaying"])
       .executeTakeFirst();
     return Number(update.numUpdatedRows) > 0;
   }
@@ -248,6 +253,7 @@ export class ProvisionDeviceOperationRepository implements ProvisionDeviceOperat
       })
       .where("operation_id", "=", operationId)
       .where("attempt_id", "=", attemptId)
+      .where("status", "=", "running")
       .executeTakeFirst();
     return Number(update.numUpdatedRows) > 0;
   }

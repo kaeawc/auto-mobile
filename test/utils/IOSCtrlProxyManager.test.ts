@@ -544,6 +544,52 @@ describe("IOSCtrlProxyManager", function () {
       expect(stoppedPids).toEqual([42, 42]);
       expect(internal.xcTestProcessId).toBeNull();
     });
+
+    test("publishes a physical remote runner before yielding to its late-start fence (#7108)", async function () {
+      const fenceEntered = Promise.withResolvers<void>();
+      const releaseFence = Promise.withResolvers<void>();
+      const remoteRunner = {
+        isEnabled: () => true,
+        isRunningInDocker: () => true,
+        isAvailable: async () => true,
+        getHost: () => "remote-host",
+        runIdeviceId: async () => ({ success: true, data: { stdout: "" } }),
+        runIdeviceInstaller: async () => ({ success: true, data: { stdout: "" } }),
+        runSimctl: async () => ({ success: true, data: { stdout: "" } }),
+        startIproxy: async () => ({ success: true, data: { pid: 99 } }),
+        stopIproxy: async () => ({ success: true }),
+        getIproxyStatus: async () => ({ success: true, data: { running: true } }),
+        start: async () => ({ success: true, data: { pid: 42, message: "started" } }),
+        stop: async () => ({ success: true }),
+        status: async () => ({ success: true, data: { running: false } }),
+      };
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        { ...testDevice, deviceId: "00008030-001E28C11E" },
+        fakeTimer,
+        createFakeBuilder(),
+        new FakeProcessExecutor(),
+        undefined,
+        undefined,
+        remoteRunner,
+        { isAvailable: async () => true },
+      );
+      const internal = manager as unknown as {
+        xcTestProcessId: number | null;
+        startOnDevice: () => Promise<void>;
+        fenceLateRemoteStartAfterShutdown: () => Promise<void>;
+      };
+      spyOn(internal, "fenceLateRemoteStartAfterShutdown").mockImplementation(async () => {
+        fenceEntered.resolve();
+        await releaseFence.promise;
+      });
+
+      const startup = internal.startOnDevice();
+      await fenceEntered.promise;
+      expect(internal.xcTestProcessId).toBe(42);
+
+      releaseFence.resolve();
+      await startup;
+    });
   });
 
   describe("evict", function () {

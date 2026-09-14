@@ -1919,13 +1919,13 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         throw new Error(result.error || "Remote runner failed to start CtrlProxy");
       }
 
+      this.xcTestProcessId = result.data.pid;
+      this.xcTestProcess = null;
       await this.fenceLateRemoteStartAfterShutdown(result.data.pid);
 
       if (typeof result.data.port === "number") {
         this.adoptServicePort(result.data.port);
       }
-      this.xcTestProcessId = result.data.pid;
-      this.xcTestProcess = null;
       return;
     }
 
@@ -3083,6 +3083,10 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         throw new Error(result.error || "Remote runner failed to start CtrlProxy");
       }
 
+      // A shutdown can begin at the following await or either tunnel await.
+      // Publish first so its bounded force-stop can always recover this runner.
+      this.xcTestProcessId = result.data.pid;
+      this.xcTestProcess = null;
       await this.fenceLateRemoteStartAfterShutdown(result.data.pid);
 
       const resultDevicePort = result.data.port;
@@ -3093,8 +3097,6 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         await this.stopIproxyTunnel();
         await this.startIproxyTunnel({ devicePort: resultDevicePort });
       }
-      this.xcTestProcessId = result.data.pid;
-      this.xcTestProcess = null;
       return;
     }
 

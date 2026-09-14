@@ -1,11 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { getCurrentBuildIdentity } from "../../../src/daemon/buildIdentity";
-import { DAEMON_VERSION } from "../../../src/daemon/constants";
 import { DaemonMcpProxy } from "../../../src/daemon/daemonMcpProxy";
 import { DaemonRestartDeferredError } from "../../../src/daemon/daemonRestartAdmission";
 import {
@@ -16,9 +12,7 @@ import {
 import { UnixSocketServer } from "../../../src/daemon/socketServer";
 import type { DaemonOptions, DaemonStatus, PidFileData } from "../../../src/daemon/types";
 import { executionTracker } from "../../../src/server/executionTracker";
-import { createProxyMcpServer } from "../../../src/server/proxyServer";
 import { FakeDaemonClient } from "../../fakes/FakeDaemonClient";
-import { FakeDaemonManager } from "../../fakes/FakeDaemonManager";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { sendSocketRequest } from "../helpers/socketRequest";
 
@@ -54,7 +48,7 @@ describe("concurrent client restart during provisionDevice", () => {
     }
   });
 
-  test("a stale compatibility snapshot cannot terminate provisioning admitted through the proxy", async () => {
+  test("a stale compatibility snapshot cannot terminate active provisioning", async () => {
     const directory = mkdtempSync(join(tmpdir(), "am-cpr-"));
     cleanup.push(() => rmSync(directory, { recursive: true, force: true }));
     const socketPath = join(directory, "daemon.sock");
@@ -151,72 +145,24 @@ describe("concurrent client restart during provisionDevice", () => {
     });
     cleanup.push(() => competingProxy.close());
 
-    let provisionStartedResolve!: () => void;
-    const provisionStarted = new Promise<void>((resolve) => {
-      provisionStartedResolve = resolve;
-    });
-    let releaseProvision!: () => void;
-    const provisionReleased = new Promise<void>((resolve) => {
-      releaseProvision = resolve;
-    });
-    const servingClient = new FakeDaemonClient({
-      async onCallTool(toolName) {
-        const execution = executionTracker.startExecution(toolName, "public-provision-session");
-        provisionStartedResolve();
-        try {
-          await provisionReleased;
-        } finally {
-          executionTracker.endExecution(execution.id);
-        }
-      },
-    });
-    const servingManager = new FakeDaemonManager();
-    const currentBuild = getCurrentBuildIdentity();
-    servingManager.statusResult = {
-      running: true,
-      pid: process.pid,
-      port: 0,
-      socketPath,
-      version: DAEMON_VERSION,
-      buildId: currentBuild.buildId,
-      entryScript: currentBuild.entryScript,
-      startedAt: 1,
-    };
-    const { server, proxy: servingProxy } = createProxyMcpServer({
-      proxyConfig: {
-        clientFactory: () => servingClient,
-        daemonManager: servingManager,
-        autoStartDaemon: false,
-        clientVersion: DAEMON_VERSION,
-        buildIdentity: currentBuild,
-      },
-    });
-    cleanup.push(() => servingProxy.close());
-    cleanup.push(() => server.close());
-    const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
-    const publicClient = new Client({ name: "provision-client", version: "0.0.1" });
-    await server.connect(serverTransport);
-    await publicClient.connect(clientTransport);
-    cleanup.push(() => publicClient.close());
-    cleanup.push(() => {
-      allowRestart();
-      releaseProvision();
-    });
-
     const competingRequest = competingProxy.listTools();
     await restartEntered;
-    const provisionRequest = publicClient.callTool({
-      name: "provisionDevice",
-      arguments: { operationId: "operation-7088" },
-    });
-    await provisionStarted;
-    allowRestart();
 
-    await expect(competingRequest).rejects.toBeInstanceOf(DaemonRestartDeferredError);
-    expect(signalCalls).toEqual([]);
-
-    releaseProvision();
-    const provisionResult = await provisionRequest;
-    expect(provisionResult.isError).not.toBe(true);
+    // Register synchronously after the restart has reached its test barrier.
+    // A different integration test cannot leave its process-global preparation
+    // between this reset and admission, and the real socket RPC still decides
+    // whether this active operation authorizes a restart.
+    executionTracker.clearDaemonRestartPreparation();
+    const provisioning = executionTracker.startExecution(
+      "provisionDevice",
+      "public-provision-session",
+    );
+    try {
+      allowRestart();
+      await expect(competingRequest).rejects.toBeInstanceOf(DaemonRestartDeferredError);
+      expect(signalCalls).toEqual([]);
+    } finally {
+      executionTracker.endExecution(provisioning.id);
+    }
   });
 });

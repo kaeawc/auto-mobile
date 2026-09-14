@@ -444,6 +444,50 @@ describe("Device Image Resources with Fakes", () => {
       expect(calls[0].signal?.aborted).toBe(true);
     });
 
+    test("bounds and cancels the primary Android discovery under the same deadline", async () => {
+      const timer = new FakeTimer();
+      // The primary discovery path (deviceManager.listDeviceImages("android") ->
+      // emulator -list-avds) hangs. It must be bounded by the single deadline and
+      // its child cancelled, not left running to accumulate across reads.
+      fakeDeviceUtils.setDeviceImages("android", [
+        { name: "Pixel_9", platform: "android", deviceId: "avd-late", source: "local" },
+      ]);
+      fakeDeviceUtils.setListDeviceImagesHangs("android", true);
+
+      const handler = createDeviceImageResourcesHandler({
+        deviceManager: fakeDeviceUtils,
+        avdManager: fakeAvdManager,
+        timer,
+        androidCatalogBudgetMs: 5_000,
+      });
+
+      const pending = handler.getDeviceImagesForPlatforms(["android"]);
+      for (let i = 0; i < 20; i++) {
+        await Promise.resolve();
+      }
+      timer.advanceTime(5_001);
+      const result = await pending;
+
+      expect(result.catalogComplete).toBe(false);
+      expect(result.catalogObservations.android).toMatchObject({
+        catalogComplete: false,
+        error: {
+          code: "timeout",
+          message: expect.stringContaining("5000"),
+        },
+      });
+      // androidCount stays finalized as incomplete and no images were appended
+      // after the timeout, even though a device was configured for the listing.
+      expect(result.androidCount).toBe(0);
+      expect(result.images).toHaveLength(0);
+      // The hung primary discovery child must have been passed the deadline's
+      // signal and cancelled, not left running.
+      const calls = fakeDeviceUtils.getListDeviceImagesCalls();
+      const androidCall = calls.find((call) => call.platform === "android");
+      expect(androidCall).toBeDefined();
+      expect(androidCall?.signal?.aborted).toBe(true);
+    });
+
     test("aborts profile enumeration too when the deadline wins", async () => {
       const timer = new FakeTimer();
       fakeDeviceUtils.setDeviceImages("android", []);

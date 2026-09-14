@@ -266,9 +266,16 @@ async function appendAndroidImages(
 ): Promise<number> {
   try {
     const [androidDevices, avdInfoList] = await Promise.all([
-      deviceManager.listDeviceImages("android"),
+      deviceManager.listDeviceImages("android", signal),
       readAvdInfo(avdManager, signal),
     ]);
+    // The deadline may have fired while the primary discovery was in flight
+    // (e.g. an all-platform request still awaiting iOS). Do not mutate the
+    // shared images array once androidCount was finalized as incomplete: a late
+    // append would add images the caller already reported as absent.
+    if (signal?.aborted) {
+      return 0;
+    }
     const avdInfoByName = new Map(avdInfoList.map((avd) => [avd.name, avd]));
     for (const device of androidDevices) {
       images.push(toDeviceImageInfo(device, avdInfoByName.get(device.name)));

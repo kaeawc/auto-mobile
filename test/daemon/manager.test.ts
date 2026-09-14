@@ -35,6 +35,8 @@ import {
   DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS,
   DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS,
   DAEMON_STARTUP_TIMEOUT_MS,
+  CLI_SESSION_LIVENESS_POLICY,
+  getCliSessionIdleTimeoutMs,
 } from "../../src/daemon/constants";
 
 describe("daemonBuildIdentityStatusLines", () => {
@@ -3171,7 +3173,14 @@ describe("Daemon manager heartbeat", () => {
     }
 
     expect(fakeClient.callDaemonMethodCalls).toEqual([
-      { method: "daemon/heartbeat", params: { sessionId: "session-1" } },
+      {
+        method: "daemon/heartbeat",
+        params: {
+          sessionId: "session-1",
+          livenessPolicy: CLI_SESSION_LIVENESS_POLICY,
+          idleTimeoutMs: getCliSessionIdleTimeoutMs(),
+        },
+      },
     ]);
     expect(output).toContain("Session session-1 heartbeat recorded");
   });

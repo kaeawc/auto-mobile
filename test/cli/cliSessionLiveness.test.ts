@@ -4,6 +4,7 @@ import {
   setDaemonProxyFactoryForTesting,
   resetDaemonProxyFactoryForTesting,
 } from "../../src/cli";
+import { runDaemonCommand } from "../../src/daemon/manager";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
 import { DaemonClient } from "../../src/daemon/client";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -12,6 +13,7 @@ import {
   CLI_SESSION_LIVENESS_POLICY,
   DAEMON_HEARTBEAT_METHOD,
   DAEMON_VERSION,
+  getCliSessionIdleTimeoutMs,
   HEARTBEAT_SESSION_LIVENESS_POLICY,
 } from "../../src/daemon/constants";
 import { handleDaemonRequest } from "../../src/daemon/daemonRequestHandlers";
@@ -235,6 +237,49 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
     timer.advanceTime(12_367);
     await monitor.tick();
     expect(reaped).toEqual([{ sessionId: "shared", reason: "heartbeat-timeout" }]);
+  });
+
+  test("one-shot daemon heartbeat preserves an adopted CLI session", async () => {
+    const client = new FakeDaemonClient({
+      onCallDaemonMethod: async (method, params) => {
+        await handleDaemonRequest(
+          { id: "1", type: "daemon_request", method, params },
+          daemonStateFor(sessionManager),
+        );
+      },
+    });
+    await sessionManager.createSession("shared", "emulator-5554", "android", 30 * 60_000);
+    sessionManager.adoptCliLivenessPolicy("shared");
+
+    await runDaemonCommand("heartbeat", ["shared"], {
+      clientFactory: () => client,
+      stateProvider: () => ({
+        isInitialized: () => false,
+        getSessionManager: () => {
+          throw new Error("Session manager unavailable");
+        },
+        getDevicePool: () => {
+          throw new Error("Device pool unavailable");
+        },
+        getDeviceSessionRegistry: () => {
+          throw new Error("Device session registry unavailable");
+        },
+      }),
+    });
+
+    const session = sessionManager.getSession("shared")!;
+    expect(session.livenessPolicy).toBe("cli-idle");
+    expect(session.heartbeatTimeoutMs).toBe(getCliSessionIdleTimeoutMs());
+    expect(client.callDaemonMethodCalls).toEqual([
+      {
+        method: DAEMON_HEARTBEAT_METHOD,
+        params: {
+          sessionId: "shared",
+          livenessPolicy: CLI_SESSION_LIVENESS_POLICY,
+          idleTimeoutMs: getCliSessionIdleTimeoutMs(),
+        },
+      },
+    ]);
   });
 
   test("a CLI touch of a proxy-owned session re-adopts the CLI policy", async () => {

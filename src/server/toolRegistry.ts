@@ -376,6 +376,17 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+function isToolResponseFailure(response: unknown): boolean {
+  if (!isRecord(response)) {
+    return false;
+  }
+  if (response.isError === true || response.success === false) {
+    return true;
+  }
+  const structuredContent = getStructuredPayload(response);
+  return isRecord(structuredContent) && structuredContent.success === false;
+}
+
 function isViewHierarchyResult(value: unknown): value is ViewHierarchyResult {
   return isRecord(value) && isRecord(value.hierarchy);
 }
@@ -1369,10 +1380,9 @@ export class ToolRegistryClass {
                 });
               }
 
-              // The handler has settled successfully. A device-loss abort that
-              // lands afterwards must not replace that completed response; a
-              // handler that observed the abort still throws through the catch
-              // below, where the device-loss outcome remains authoritative.
+              // A late device-loss abort cannot replace a completed success.
+              // A resolved failure can have swallowed device-loss cancellation,
+              // so it is checked after the response is finalized below.
 
               const afterToolCallResult = await this.afterToolCall.handle({
                 name,
@@ -1387,6 +1397,9 @@ export class ToolRegistryClass {
                 toolStartMs,
               });
               toolDurationMs = afterToolCallResult.durationMs;
+              if (isToolResponseFailure(afterToolCallResult.finalizedResponse)) {
+                throwDeviceLostFromAbortSignal(signal);
+              }
               return afterToolCallResult.finalizedResponse;
             } catch (error) {
               throwDeviceLostFromAbortSignal(signal);

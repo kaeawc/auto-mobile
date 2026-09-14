@@ -183,6 +183,45 @@ describe("AdbClient missing-device notifications", () => {
       stopListening();
     }
   });
+
+  test("does not forward a missing-device error dispatched before the console becomes idle", async () => {
+    const busyRegistry = new FakeEmulatorConsoleBusyRegistry();
+    const notifications: AdbMissingDeviceEvent[] = [];
+    const stopListening = onAdbMissingDevice((event) => notifications.push(event));
+    const rejection = Promise.withResolvers<ExecResult>();
+    const dispatched = Promise.withResolvers<void>();
+    const client = new AdbClient(
+      DEVICE,
+      async () => {
+        dispatched.resolve();
+        return await rejection.promise;
+      },
+      null,
+      defaultRetryExecutor,
+      new FakeTimer(),
+      undefined,
+      undefined,
+      busyRegistry,
+    );
+
+    try {
+      busyRegistry.setBusy(DEVICE.deviceId, true);
+      const command = client.executeCommand(
+        "shell getprop sys.boot_completed",
+        undefined,
+        undefined,
+        true,
+      );
+      await dispatched.promise;
+      busyRegistry.setBusy(DEVICE.deviceId, false);
+      rejection.reject(new Error("adb: device 'emulator-5554' not found"));
+
+      await expect(command).rejects.toThrow("device 'emulator-5554' not found");
+      expect(notifications).toEqual([]);
+    } finally {
+      stopListening();
+    }
+  });
 });
 
 describe("AdbClient abort-reason preservation", () => {

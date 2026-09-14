@@ -223,6 +223,69 @@ describe("device loss MCP outcome", () => {
     });
   });
 
+  test("keeps a successful response when device loss arrives after the handler settles", async () => {
+    restorePipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({
+      executionTargetResolver: {
+        async resolveExecutionTarget(input) {
+          return {
+            args: input.args,
+            baseSessionUuid: "device-session-a",
+            device,
+            internalCall: false,
+            sessionUuid: "device-session-a",
+            shouldResolveDevice: true,
+          };
+        },
+      },
+      auditRunner: {
+        async run(input) {
+          return await input.handler(input.device, input.args, input.progress, input.signal);
+        },
+      },
+      afterToolCall: {
+        async handle(input) {
+          return { durationMs: 0, finalizedResponse: input.response };
+        },
+      },
+      planLifecycleManager: {
+        async afterExecution() {},
+      },
+    });
+    ToolRegistry.registerDeviceAware(
+      toolName,
+      "successful swallowed device loss wire probe",
+      z.object({}),
+      async (_device, _args, _progress, signal) => {
+        rememberDeviceLossAbort(
+          signal!,
+          new DeviceLostError("emulator-5554", "device-disconnected:emulator-5554"),
+        );
+        return {
+          content: [{ type: "text" as const, text: "operation completed" }],
+          structuredContent: { success: true },
+        };
+      },
+      {
+        outputSchema: z.object({
+          success: z.boolean(),
+        }),
+      },
+    );
+    fixture = new McpTestFixture({
+      sessionContext: {
+        sessionId: "transport-a",
+        initialSessionToolBinding: "device-session-a",
+      },
+    });
+    await fixture.setup();
+
+    const result: any = await fixture.client.callTool({ name: toolName, arguments: {} });
+
+    expect(result.isError).not.toBe(true);
+    expect(result.content).toEqual([{ type: "text", text: "operation completed" }]);
+    expect(result.structuredContent).toEqual({ success: true });
+  });
+
   test("cancels an active observe and drains it before resolving device loss", async () => {
     const observeStarted = Promise.withResolvers<void>();
     RealObserveScreen.prototype.execute = async function (options) {

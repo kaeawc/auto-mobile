@@ -741,6 +741,58 @@ describe("provisionDevice handler", () => {
   });
 
   test.each([
+    [
+      "Play Store RAM below the product floor",
+      {
+        ...provisionTestArgs("android", "handler-low-play-ram"),
+        device: {
+          ...provisionTestArgs("android", "handler-low-play-ram").device,
+          spec: {
+            runtime: "system-images;android-36;google_apis_playstore;x86_64",
+            deviceType: "pixel_9",
+            configuration: { memoryMb: 1024 },
+          },
+        },
+      },
+    ],
+    [
+      "Android device with an iOS runtime",
+      {
+        ...provisionTestArgs("android", "handler-cross-platform-runtime"),
+        device: {
+          ...provisionTestArgs("android", "handler-cross-platform-runtime").device,
+          spec: {
+            runtime: "com.apple.CoreSimulator.SimRuntime.iOS-26-0",
+            deviceType: "pixel_9",
+          },
+        },
+      },
+    ],
+    [
+      "iOS device with Android-only configuration",
+      {
+        ...provisionTestArgs("ios", "handler-ios-android-config"),
+        device: {
+          ...provisionTestArgs("ios", "handler-ios-android-config").device,
+          spec: {
+            runtime: "com.apple.CoreSimulator.SimRuntime.iOS-26-0",
+            deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
+            configuration: { memoryMb: 4096 },
+          },
+        },
+      },
+    ],
+  ] as const)(
+    "rejects %s through the provisionDevice product handler before provisioning",
+    async (_description, input) => {
+      const response = await ToolRegistry.getTool("provisionDevice")!.handler(input);
+
+      expect((response as any).isError).toBe(true);
+      expect(exactProvisioner.requests).toHaveLength(0);
+    },
+  );
+
+  test.each([
     ["system-images;android-36;google_apis_playstore;x86_64", 2048],
     ["system-images;android-36.1;google_apis_playstore;x86_64", 2048],
     ["system-images;android-36.1;google_apis;x86_64", 1024],

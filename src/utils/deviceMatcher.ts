@@ -182,7 +182,7 @@ export function compareVersions(a: string, b: string): number {
   return a < b ? -1 : 1;
 }
 
-function matchesCriteria(
+export function matchesDeviceCriteria(
   item: {
     platform: Platform;
     name: string;
@@ -385,7 +385,7 @@ export class DefaultDeviceMatcher implements DeviceMatcher {
     strategy: MatchingStrategy,
   ): BootedDevice | null {
     return applyStrategy(
-      devices.filter((device) => matchesCriteria(device, criteria)),
+      devices.filter((device) => matchesDeviceCriteria(device, criteria)),
       strategy,
       this.random,
     );
@@ -397,7 +397,7 @@ export class DefaultDeviceMatcher implements DeviceMatcher {
     strategy: MatchingStrategy,
   ): DeviceInfo | null {
     return applyStrategy(
-      images.filter((image) => matchesCriteria(image, criteria)),
+      images.filter((image) => matchesDeviceCriteria(image, criteria)),
       strategy,
       this.random,
     );

@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { FakeTimer } from "../fakes/FakeTimer";
 import {
+  defaultWriteEvidence,
   parseArgs,
   runAcceptanceMatrix,
   type AcceptanceArgs,
@@ -107,10 +112,18 @@ function createHarness(
         };
       }
       if (name === "getAndroid" || name === "getApple" || name === "startDevice") {
-        if (owner.startsWith("reject-incompatible-")) {
+        const isIos = name === "getApple" || arguments_.platform === "ios";
+        const min = arguments_.minOsVersion;
+        const max = arguments_.maxOsVersion;
+        const formFactor = arguments_.formFactor;
+        const incompatibleBounds =
+          (isIos && (min === "9999.0" || max === "0.0")) ||
+          (!isIos && (min === "9999" || max === "0"));
+        const incompatibleFamily = isIos && formFactor === "tablet";
+        if (incompatibleBounds || incompatibleFamily) {
           return {
             isError: true,
-            structuredContent: { error: `No owned device matches ${owner}` },
+            structuredContent: { error: "No matching device satisfies the requested constraints" },
           };
         }
         if (owner === "unrelated-owner") {
@@ -125,7 +138,7 @@ function createHarness(
         }
         startCount += 1;
         const sessionUuid = `start-${startCount}`;
-        if (name === "getApple" || arguments_.platform === "ios") {
+        if (isIos) {
           return {
             structuredContent: {
               sessionUuid,
@@ -190,6 +203,18 @@ function createHarness(
       }
       if (name === "ide/status") {
         return { buildId: "test-build", entryScript: "/test/dist/src/index.js" };
+      }
+      if (name === "ide/prepareMaintenance") {
+        if ((options.activeSessions ?? 0) > 0) {
+          return { accepted: false, reason: "active_sessions" };
+        }
+        if ((options.activeExecutions ?? 0) > 0) {
+          return { accepted: false, reason: "active_operations" };
+        }
+        return { accepted: true };
+      }
+      if (name === "ide/completeMaintenance") {
+        return { completed: true };
       }
       expect(name).toBe("daemon/releaseSession");
       const sessionId = arguments_.sessionId;
@@ -290,32 +315,32 @@ describe("live device acceptance harness", () => {
     expect(
       harness.calls.filter((call) => call.name === "startDevice").map((call) => call.arguments),
     ).toEqual([
-      { platform: "android", name: "Pixel_8_API_35", preferRunning: true },
+      { platform: "android", avdName: "Pixel_8_API_35", preferRunning: true },
       {
         platform: "android",
-        name: "Pixel_8_API_35",
+        avdName: "Pixel_8_API_35",
         preferRunning: true,
         minOsVersion: "34",
       },
       {
         platform: "android",
-        name: "Pixel_8_API_35",
+        avdName: "Pixel_8_API_35",
         preferRunning: true,
         minOsVersion: "9999",
       },
       {
         platform: "android",
-        name: "Pixel_8_API_35",
+        avdName: "Pixel_8_API_35",
         preferRunning: true,
         maxOsVersion: "0",
       },
       {
         platform: "android",
-        name: "Pixel_8_API_35",
+        avdName: "Pixel_8_API_35",
         preferRunning: true,
         maxOsVersion: "35",
       },
-      { platform: "android", name: "Pixel_8_API_35", preferRunning: true },
+      { platform: "android", avdName: "Pixel_8_API_35", preferRunning: true },
     ]);
     expect(harness.calls.find((call) => call.name === "killDevice")?.arguments).toEqual({
       device: {
@@ -422,7 +447,7 @@ describe("live device acceptance harness", () => {
     });
   });
 
-  test("keeps the held session live through restart and requires the terminal diagnostic", async () => {
+  test("releases the owned session before maintenance restart and requires the terminal diagnostic", async () => {
     const harness = createHarness();
 
     await runAcceptanceMatrix({ ...androidArgs, scenario: "recovery" }, harness.dependencies);
@@ -430,8 +455,8 @@ describe("live device acceptance harness", () => {
     const restart = harness.events.indexOf("restart-daemon");
     const oldSession = harness.events.indexOf("old-session:getDeviceState");
     const release = harness.events.indexOf("release:start-5");
+    expect(release).toBeLessThan(restart);
     expect(restart).toBeLessThan(oldSession);
-    expect(oldSession).toBeLessThan(release);
     expect(harness.events).toContain("reacquire-after-repair:getAndroid");
   });
 
@@ -553,7 +578,7 @@ describe("live device acceptance harness", () => {
     const harness = createHarness({ activeSessions: 1, activeExecutions: 0 });
 
     await expect(runAcceptanceMatrix(androidArgs, harness.dependencies)).rejects.toThrow(
-      "Refusing host-wide doctor repair",
+      "daemon maintenance admission rejected active_sessions",
     );
     expect(harness.cliCommands.some((command) => command.includes("doctor"))).toBe(false);
   });
@@ -600,7 +625,7 @@ describe("live device acceptance harness", () => {
     expect(harness.evidence[0]).toContain("hmac-sha256:");
   });
 
-  test("uses FakeTimer to reject a stalled MCP connection before it can report success", async () => {
+  test("uses FakeTimer to abort and reap a stalled MCP connection before it can report success", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const connecting = Promise.withResolvers<McpSessionClient>();
@@ -609,7 +634,10 @@ describe("live device acceptance harness", () => {
       {
         testOnly: true,
         timer,
-        createMcpClient: async () => await connecting.promise,
+        createMcpClient: async (_owner, signal) => {
+          signal.addEventListener("abort", () => connecting.reject(signal.reason), { once: true });
+          return await connecting.promise;
+        },
         createDaemonClient: async () => {
           throw new Error("should not create daemon client");
         },
@@ -623,10 +651,6 @@ describe("live device acceptance harness", () => {
       "Acceptance deadline elapsed during provision MCP connect",
     );
     await rejection;
-    connecting.resolve({
-      callTool: async () => ({ structuredContent: {} }),
-      close: async () => {},
-    });
   });
 
   test("uses the evidence reserve and abort signal so a late writer cannot turn timeout into success", async () => {
@@ -652,6 +676,34 @@ describe("live device acceptance harness", () => {
     await started.promise;
     await rejection;
     expect(lateSuccess).toBe(false);
+  });
+
+  test("does not publish final evidence when the real writer observes an aborted deadline", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "automobile-evidence-"));
+    const path = join(directory, "evidence.json");
+    const controller = new AbortController();
+    writeFileSync(path, "previous");
+    controller.abort(new Error("deadline"));
+    try {
+      await expect(defaultWriteEvidence(path, "late", controller.signal)).rejects.toThrow(
+        "deadline",
+      );
+      expect(readFileSync(path, "utf8")).toBe("previous");
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("publishes evidence atomically through the real writer before its deadline", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "automobile-evidence-"));
+    const path = join(directory, "evidence.json");
+    try {
+      await defaultWriteEvidence(path, "published", new AbortController().signal);
+      expect(existsSync(path)).toBe(true);
+      expect(readFileSync(path, "utf8")).toBe("published");
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   test("requires driver-level live safeguards unless explicitly running injected test fakes", async () => {

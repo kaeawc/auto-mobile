@@ -13,7 +13,7 @@ import {
   type PlatformDeviceManager,
   waitForDeviceReadyOrCancel,
 } from "./deviceUtils";
-import type { DeviceMatcher } from "./deviceMatcher";
+import { matchesDeviceCriteria, type DeviceMatcher } from "./deviceMatcher";
 import type { DeviceProvisioner, DeviceProvisioningIdentityHooks } from "./deviceProvisioning";
 import { NoopDeviceBootRecovery, type DeviceBootRecovery } from "./deviceBootRecovery";
 import { defaultTimer, type Timer } from "./SystemTimer";
@@ -329,13 +329,31 @@ export class DeviceBootService {
     progress?: DeviceBootProgress,
   ): Promise<DeviceBootResult> {
     const { deviceManager } = this.dependencies;
+    const criteria: DeviceMatchCriteria = {
+      platform: request.platform,
+      minOsVersion: request.minOsVersion,
+      maxOsVersion: request.maxOsVersion,
+      name: request.name,
+      formFactor: request.formFactor,
+      screenSize: request.screenSize,
+    };
     const booted = await this.discoverBootedDevices(
       request.platform,
       context,
       "discovering running devices",
     );
+    const hasExplicitConstraints =
+      request.minOsVersion !== undefined ||
+      request.maxOsVersion !== undefined ||
+      request.formFactor !== undefined ||
+      request.screenSize !== undefined;
     const running = booted.find((device) => device.deviceId === request.deviceId);
     if (running) {
+      if (hasExplicitConstraints && !matchesDeviceCriteria(running, criteria)) {
+        throw new ActionableError(
+          `Device '${request.deviceId}' does not satisfy the requested platform, version, or form-factor constraints.`,
+        );
+      }
       return this.waitForRunningDevice(running, context, progress);
     }
     const images = await this.runPhase(context, "listing device images", () =>
@@ -348,6 +366,11 @@ export class DeviceBootService {
       throw new ActionableError(
         `Device '${request.deviceId}' not found. Available booted: ${booted.map((device) => device.deviceId).join(", ") || "none"}. ` +
           `Available images: ${images.map((device) => device.name).join(", ") || "none"}.`,
+      );
+    }
+    if (hasExplicitConstraints && !matchesDeviceCriteria(image, criteria)) {
+      throw new ActionableError(
+        `Device '${request.deviceId}' does not satisfy the requested platform, version, or form-factor constraints.`,
       );
     }
     // `deviceId` also accepts an AVD/image name (see getAndroidSchema), so the
@@ -394,7 +417,11 @@ export class DeviceBootService {
     }
     const image =
       request.matchExactName && request.name
-        ? (matchingImages.find((candidate) => candidate.name === request.name) ?? null)
+        ? deviceMatcher.matchDeviceImage(
+            criteria,
+            matchingImages.filter((candidate) => candidate.name === request.name),
+            matchingStrategy,
+          )
         : deviceMatcher.matchDeviceImage(criteria, matchingImages, matchingStrategy);
     if (image) {
       return this.bootMatchedImage(image, context, progress);
@@ -429,11 +456,22 @@ export class DeviceBootService {
           )
         : booted;
     const enriched = enrichBootedDevicesFromImages(matchingBooted, images);
-    const match =
+    const exactMatches =
       request.matchExactName && request.name
-        ? ((request.platform === "android"
-            ? findUniqueBootedAndroidDeviceByName(enriched, request.name)
-            : enriched.find((candidate) => candidate.name === request.name)) ?? null)
+        ? request.platform === "android"
+          ? (() => {
+              const exact = findUniqueBootedAndroidDeviceByName(enriched, request.name);
+              return exact ? [exact] : [];
+            })()
+          : enriched.filter((candidate) => candidate.name === request.name)
+        : undefined;
+    const match =
+      exactMatches !== undefined
+        ? this.dependencies.deviceMatcher.matchBootedDevice(
+            criteria,
+            exactMatches,
+            this.dependencies.matchingStrategy,
+          )
         : this.dependencies.deviceMatcher.matchBootedDevice(
             criteria,
             enriched,

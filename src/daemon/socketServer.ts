@@ -130,7 +130,10 @@ import type {
 import type { DeviceService } from "../features/observe/DeviceService";
 import { executionTracker } from "../server/executionTracker";
 import {
+  DAEMON_COMPLETE_MAINTENANCE_METHOD,
+  DAEMON_PREPARE_MAINTENANCE_METHOD,
   DAEMON_PREPARE_RESTART_METHOD,
+  type DaemonMaintenancePreparation,
   type DaemonRestartPreparation,
 } from "./daemonRestartAdmission";
 import {
@@ -2879,6 +2882,37 @@ export class UnixSocketServer {
     }
   }
 
+  private daemonGenerationMatches(params: Record<string, unknown>): boolean {
+    return (
+      params.pid === process.pid &&
+      params.startedAt === this.identityStartedAt &&
+      params.version === this.daemonIdentity.version &&
+      params.buildId === this.daemonIdentity.build.buildId &&
+      params.entryScript === this.daemonIdentity.build.entryScript
+    );
+  }
+
+  private prepareDaemonMaintenance(params: Record<string, unknown>): DaemonMaintenancePreparation {
+    if (!this.daemonGenerationMatches(params)) {
+      return { accepted: false, reason: "generation_changed" };
+    }
+    const sessions = this.daemonState.getSessionManager().getAllSessions?.();
+    if (!sessions) {
+      return { accepted: false, reason: "sessions_unavailable" };
+    }
+    const activeSessions = sessions.length;
+    const admission = executionTracker.prepareForDaemonMaintenance(activeSessions);
+    return admission === "accepted" ? { accepted: true } : { accepted: false, reason: admission };
+  }
+
+  private completeDaemonMaintenance(params: Record<string, unknown>): { completed: boolean } {
+    if (!this.daemonGenerationMatches(params)) {
+      return { completed: false };
+    }
+    executionTracker.clearDaemonMaintenancePreparation();
+    return { completed: true };
+  }
+
   private requireFeatureFlagService(): FeatureFlagService {
     if (!this.featureFlagService) {
       throw new Error("Feature flag service not available");
@@ -2970,6 +3004,12 @@ export class UnixSocketServer {
       }
       case DAEMON_PREPARE_RESTART_METHOD: {
         return this.prepareDaemonRestart(request.params);
+      }
+      case DAEMON_PREPARE_MAINTENANCE_METHOD: {
+        return this.prepareDaemonMaintenance(request.params);
+      }
+      case DAEMON_COMPLETE_MAINTENANCE_METHOD: {
+        return this.completeDaemonMaintenance(request.params);
       }
       case "ide/status": {
         return {

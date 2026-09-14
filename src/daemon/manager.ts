@@ -3816,6 +3816,17 @@ export async function runDaemonCommand(
         break;
       }
 
+      case "restart-admitted": {
+        const status = await manager.status();
+        if (!status.running) {
+          throw new ActionableError(
+            "restart-admitted requires a running daemon that has already admitted maintenance.",
+          );
+        }
+        await manager.restart(parseDaemonArgs(args), status);
+        break;
+      }
+
       case "health": {
         const report = await getDaemonHealthReport();
         console.log(formatHealthReport(report));

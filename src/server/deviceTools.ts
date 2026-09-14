@@ -204,6 +204,13 @@ const startDeviceParametersSchema = z.object({
     .optional()
     .describe("Maximum OS version, inclusive (e.g., '15', '18.0')"),
   name: z.string().optional().describe("Device name to match (e.g., 'iPhone 16e', 'Pixel_9_Pro')"),
+  avdName: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      "Exact Android Virtual Device name. Unlike name, this never selects a substring-matching AVD.",
+    ),
   formFactor: z.enum(["phone", "tablet"]).optional().describe("Device form factor"),
   screenSize: z
     .object({
@@ -240,24 +247,42 @@ const startDeviceParametersSchema = z.object({
     ),
 });
 
-export const startDeviceSchema = z.preprocess((input) => {
-  if (!input || typeof input !== "object" || Array.isArray(input)) {
-    return input;
-  }
+export const startDeviceSchema = z.preprocess(
+  (input) => {
+    if (!input || typeof input !== "object" || Array.isArray(input)) {
+      return input;
+    }
 
-  const parsed = input as Record<string, unknown>;
-  const legacyDevice = parsed.device;
-  if (!legacyDevice || typeof legacyDevice !== "object" || Array.isArray(legacyDevice)) {
-    return input;
-  }
+    const parsed = input as Record<string, unknown>;
+    const legacyDevice = parsed.device;
+    if (!legacyDevice || typeof legacyDevice !== "object" || Array.isArray(legacyDevice)) {
+      return input;
+    }
 
-  // Accept both the legacy { device: {...} } payload and the new top-level shape.
-  // Top-level fields win so mixed callers can override nested values intentionally.
-  return {
-    ...(legacyDevice as Record<string, unknown>),
-    ...parsed,
-  };
-}, startDeviceParametersSchema);
+    // Accept both the legacy { device: {...} } payload and the new top-level shape.
+    // Top-level fields win so mixed callers can override nested values intentionally.
+    return {
+      ...(legacyDevice as Record<string, unknown>),
+      ...parsed,
+    };
+  },
+  startDeviceParametersSchema.superRefine((value, context) => {
+    if (value.avdName !== undefined && value.platform !== "android") {
+      context.addIssue({
+        code: "custom",
+        path: ["avdName"],
+        message: "avdName is only supported for Android startDevice requests",
+      });
+    }
+    if (value.avdName !== undefined && value.name !== undefined && value.avdName !== value.name) {
+      context.addIssue({
+        code: "custom",
+        path: ["avdName"],
+        message: "avdName and name must identify the same Android device when both are supplied",
+      });
+    }
+  }),
+);
 
 const devicePreparationTimeoutSchema = z
   .object({
@@ -394,6 +419,8 @@ export const getAppleSchema = devicePreparationTimeoutSchema
   });
 
 const MODERN_PLAY_IMAGE_MIN_API_LEVEL = 30;
+const CORE_SIMULATOR_IDENTIFIER_PREFIX = "com.apple.CoreSimulator.";
+const ANDROID_SYSTEM_IMAGE_PREFIX = "system-images;";
 
 function isModernPlayStoreRuntime(runtime: string): boolean {
   const parsedRuntime = parseAndroidSystemImageRuntime(runtime);
@@ -417,6 +444,20 @@ const androidProvisionDeviceSpecSchema = z
   })
   .strict()
   .superRefine((spec, context) => {
+    if (spec.runtime.startsWith(CORE_SIMULATOR_IDENTIFIER_PREFIX)) {
+      context.addIssue({
+        code: "custom",
+        message: "Android runtime must be an Android system-image identifier",
+        path: ["runtime"],
+      });
+    }
+    if (spec.deviceType.startsWith(CORE_SIMULATOR_IDENTIFIER_PREFIX)) {
+      context.addIssue({
+        code: "custom",
+        message: "Android deviceType must be an Android avdmanager device profile identifier",
+        path: ["deviceType"],
+      });
+    }
     const memoryMb = spec.configuration?.memoryMb;
     if (
       memoryMb !== undefined &&
@@ -444,7 +485,23 @@ const iosProvisionDeviceSpecSchema = z
         "Required display cutout class for the exact device type; 'any' accepts every class",
       ),
   })
-  .strict();
+  .strict()
+  .superRefine((spec, context) => {
+    if (spec.runtime.startsWith(ANDROID_SYSTEM_IMAGE_PREFIX)) {
+      context.addIssue({
+        code: "custom",
+        message: "iOS runtime must be a CoreSimulator runtime identifier",
+        path: ["runtime"],
+      });
+    }
+    if (!spec.deviceType.startsWith(CORE_SIMULATOR_IDENTIFIER_PREFIX)) {
+      context.addIssue({
+        code: "custom",
+        message: "iOS deviceType must be a CoreSimulator device-type identifier",
+        path: ["deviceType"],
+      });
+    }
+  });
 
 export const provisionDeviceSchema = withJsonSchemaOverride(
   z
@@ -686,6 +743,8 @@ export interface StartDeviceArgs {
   minOsVersion?: string;
   maxOsVersion?: string;
   name?: string;
+  /** Exact Android AVD identity for callers that must never match a sibling by substring. */
+  avdName?: string;
   formFactor?: FormFactor;
   screenSize?: { width: number; height: number };
   deviceId?: string;
@@ -8539,17 +8598,22 @@ export function registerDeviceTools() {
       ...startDeviceSchema.parse(stripInternalAcquisitionParams(rawArgs)),
       __mcpSessionId: internalSessionId,
     };
+    const exactAndroidAvdName = args.platform === "android" ? args.avdName : undefined;
+    const target = {
+      ...args,
+      ...(exactAndroidAvdName ? { name: exactAndroidAvdName, matchExactName: true } : {}),
+    };
     const totalTimeoutMs = args.timeoutMs ?? DEFAULT_START_DEVICE_TIMEOUT_MS;
     return await prepareDevice(
-      args,
+      target,
       {
         bootTimeoutMs: totalTimeoutMs,
         automationReadyTimeoutMs: resolveRunnerReadinessTimeoutMs(args),
         automationDeadlineMs: getDeviceToolsDependencies().timer.now() + totalTimeoutMs,
         operationName: "startDevice",
         stableTarget:
-          args.platform === "android" && args.name && !args.deviceId
-            ? { platform: "android", stableId: args.name }
+          args.platform === "android" && target.name && !args.deviceId
+            ? { platform: "android", stableId: target.name }
             : args.platform === "ios" && args.deviceId
               ? { platform: "ios", stableId: args.deviceId }
               : undefined,

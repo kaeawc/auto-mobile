@@ -12,13 +12,17 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { chmod, mkdir, rename, writeFile } from "node:fs/promises";
+import { chmod, mkdir, writeFile } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { computeBuildIdentity, type BuildIdentity } from "../src/daemon/buildIdentity";
 import { DaemonClient } from "../src/daemon/client";
 import { DAEMON_VERSION, SOCKET_PATH } from "../src/daemon/constants";
+import {
+  DAEMON_COMPLETE_MAINTENANCE_METHOD,
+  DAEMON_PREPARE_MAINTENANCE_METHOD,
+} from "../src/daemon/daemonRestartAdmission";
 import {
   getAppleSchema,
   getAndroidSchema,
@@ -107,12 +111,12 @@ interface ToolResponse {
 }
 
 export interface McpSessionClient {
-  callTool(name: string, arguments_: JsonObject): Promise<ToolResponse>;
+  callTool(name: string, arguments_: JsonObject, signal?: AbortSignal): Promise<ToolResponse>;
   close(): Promise<void>;
 }
 
 export interface DaemonSessionClient {
-  callDaemonMethod(name: string, arguments_: JsonObject): Promise<unknown>;
+  callDaemonMethod(name: string, arguments_: JsonObject, signal?: AbortSignal): Promise<unknown>;
   close(): Promise<void>;
 }
 
@@ -120,10 +124,10 @@ export interface MatrixDependencies {
   /** Explicit test seam; production calls must satisfy the live safeguards below. */
   testOnly?: boolean;
   timer?: Timer;
-  spawnCli?: (command: string[], timeoutMs: number) => Promise<void>;
-  createMcpClient?: (owner: string) => Promise<McpSessionClient>;
-  createDaemonClient?: () => Promise<DaemonSessionClient>;
-  restartDaemon?: (timeoutMs: number) => Promise<void>;
+  spawnCli?: (command: string[], timeoutMs: number, signal: AbortSignal) => Promise<void>;
+  createMcpClient?: (owner: string, signal: AbortSignal) => Promise<McpSessionClient>;
+  createDaemonClient?: (signal: AbortSignal) => Promise<DaemonSessionClient>;
+  restartDaemon?: (timeoutMs: number, signal: AbortSignal) => Promise<void>;
   writeFile?: (path: string, content: string, signal: AbortSignal) => Promise<void>;
 }
 
@@ -577,7 +581,7 @@ function acquisitionRequest(
     args.platform === "android"
       ? {
           platform: "android",
-          name: args.target.avdName,
+          avdName: args.target.avdName,
           preferRunning: true,
         }
       : {
@@ -609,7 +613,7 @@ function assertGenericSelectorSchemaMatrix(args: AcceptanceArgs): void {
     throw new Error("startDevice schema did not preserve the requested OS bounds");
   }
   if (args.platform === "android") {
-    if (exact.data.name !== args.target.avdName) {
+    if (exact.data.avdName !== args.target.avdName) {
       throw new Error("startDevice schema did not preserve the exact Android AVD selector");
     }
     return;
@@ -733,50 +737,98 @@ function incompatibleBoundRequests(
   ];
 }
 
-async function defaultSpawnCli(command: string[], timeoutMs: number): Promise<void> {
+async function defaultSpawnCli(
+  command: string[],
+  timeoutMs: number,
+  signal: AbortSignal,
+  timer: Timer = defaultTimer,
+): Promise<void> {
   const child = Bun.spawn(command, { stdout: "inherit", stderr: "inherit" });
-  const outcome = await Promise.race([
-    child.exited.then((exitCode) => ({ exitCode })),
-    Bun.sleep(timeoutMs).then(() => ({ timedOut: true })),
-  ]);
-  if ("timedOut" in outcome) {
+  const abort = () => child.kill();
+  signal.addEventListener("abort", abort, { once: true });
+  const timeout = timer.setTimeout(() => {
     child.kill();
-    throw new Error(`CLI timed out after ${timeoutMs}ms`);
-  }
-  if (outcome.exitCode !== 0) {
-    throw new Error(`CLI exited with ${outcome.exitCode}`);
+  }, timeoutMs);
+  try {
+    const exitCode = await child.exited;
+    if (signal.aborted) {
+      signal.throwIfAborted();
+    }
+    if (exitCode !== 0) {
+      throw new Error(`CLI exited with ${exitCode}`);
+    }
+  } finally {
+    timer.clearTimeout(timeout);
+    signal.removeEventListener("abort", abort);
   }
 }
 
 async function defaultCreateMcpClient(
   owner: string,
   build: BuildIdentity,
+  signal: AbortSignal,
 ): Promise<McpSessionClient> {
   const client = new Client({
     name: `live-device-acceptance-${owner}`,
     version: "1.0.0",
   });
-  await client.connect(
-    new StdioClientTransport({
-      command: process.execPath,
-      args: [build.entryScript],
-      stderr: "inherit",
-    }),
-  );
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: [build.entryScript],
+    stderr: "inherit",
+  });
+  const abort = () => void client.close();
+  signal.addEventListener("abort", abort, { once: true });
+  try {
+    await client.connect(transport);
+    signal.throwIfAborted();
+  } catch (error) {
+    await client.close();
+    throw error;
+  } finally {
+    signal.removeEventListener("abort", abort);
+  }
   return {
-    callTool: (name, arguments_) => client.callTool({ name, arguments: arguments_ }),
+    callTool: (name, arguments_, callSignal) =>
+      client.callTool({ name, arguments: arguments_ }, undefined, { signal: callSignal }),
     close: () => client.close(),
   };
 }
 
-async function defaultCreateDaemonClient(build: BuildIdentity): Promise<DaemonSessionClient> {
-  return new DaemonClient(SOCKET_PATH, undefined, undefined, undefined, {
+async function defaultCreateDaemonClient(
+  build: BuildIdentity,
+  signal: AbortSignal,
+): Promise<DaemonSessionClient> {
+  const client = new DaemonClient(SOCKET_PATH, undefined, undefined, undefined, {
     version: DAEMON_VERSION,
     build,
   });
+  const abort = () => void client.close();
+  signal.addEventListener("abort", abort, { once: true });
+  try {
+    await client.connect();
+    signal.throwIfAborted();
+  } catch (error) {
+    await client.close();
+    throw error;
+  } finally {
+    signal.removeEventListener("abort", abort);
+  }
+  return {
+    callDaemonMethod: async (name, arguments_, callSignal) => {
+      const closeOnAbort = () => void client.close();
+      callSignal?.addEventListener("abort", closeOnAbort, { once: true });
+      try {
+        return await client.callDaemonMethod(name, arguments_);
+      } finally {
+        callSignal?.removeEventListener("abort", closeOnAbort);
+      }
+    },
+    close: () => client.close(),
+  };
 }
 
-async function defaultWriteEvidence(
+export async function defaultWriteEvidence(
   path: string,
   content: string,
   signal: AbortSignal,
@@ -790,8 +842,11 @@ async function defaultWriteEvidence(
   await writeFile(temporaryPath, content, { mode: SECURE_FILE_MODE, flag: "wx" });
   await chmod(temporaryPath, SECURE_FILE_MODE);
   signal.throwIfAborted();
-  await rename(temporaryPath, path);
-  await chmod(path, SECURE_FILE_MODE);
+  // The final publication is deliberately synchronous. Once the last abort
+  // check passes, no event-loop turn can observe a deadline and publish this
+  // stale temporary file afterward.
+  renameSync(temporaryPath, path);
+  chmodSync(path, SECURE_FILE_MODE);
   assertMode(path, SECURE_FILE_MODE, "Evidence file");
 }
 
@@ -907,18 +962,25 @@ export async function runAcceptanceMatrix(
   assertLiveSafeguards(args, dependencies);
   assertProvisionSchemaMatrix(args);
   const timer = dependencies.timer ?? defaultTimer;
-  const spawnCli = dependencies.spawnCli ?? defaultSpawnCli;
+  const spawnCli =
+    dependencies.spawnCli ??
+    (async (command: string[], timeoutMs: number, signal: AbortSignal) =>
+      await defaultSpawnCli(command, timeoutMs, signal, timer));
   const createMcpClient =
     dependencies.createMcpClient ??
-    (async (owner: string) => await defaultCreateMcpClient(owner, args.build));
+    (async (owner: string, signal: AbortSignal) =>
+      await defaultCreateMcpClient(owner, args.build, signal));
   const createDaemonClient =
-    dependencies.createDaemonClient ?? (async () => await defaultCreateDaemonClient(args.build));
+    dependencies.createDaemonClient ??
+    (async (signal: AbortSignal) => await defaultCreateDaemonClient(args.build, signal));
   const restartDaemon =
     dependencies.restartDaemon ??
-    (async (timeoutMs: number) => {
+    (async (timeoutMs: number, signal: AbortSignal) => {
       await defaultSpawnCli(
-        [process.execPath, args.build.entryScript, "--daemon", "restart"],
+        [process.execPath, args.build.entryScript, "--daemon", "restart-admitted"],
         timeoutMs,
+        signal,
+        timer,
       );
     });
   const writeEvidence = dependencies.writeFile ?? defaultWriteEvidence;
@@ -950,15 +1012,26 @@ export async function runAcceptanceMatrix(
     }
     const controller = new AbortController();
     let timeout: NodeJS.Timeout | undefined;
+    let deadlineError: Error | undefined;
     const timedOut = new Promise<never>((_, reject) => {
       timeout = timer.setTimeout(() => {
         const error = new Error(`Acceptance deadline elapsed during ${phase}`);
+        deadlineError = error;
         controller.abort(error);
         reject(error);
       }, remaining);
     });
+    const work = Promise.resolve().then(() => run(controller.signal));
     try {
-      return await Promise.race([Promise.resolve().then(() => run(controller.signal)), timedOut]);
+      return await Promise.race([work, timedOut]);
+    } catch (error) {
+      if (!deadlineError) {
+        throw error;
+      }
+      // Every injected operation accepts this signal. Do not let the matrix
+      // return while a late MCP call, connection, or child still owns work.
+      await work.catch(() => undefined);
+      throw deadlineError;
     } finally {
       if (timeout !== undefined) {
         timer.clearTimeout(timeout);
@@ -988,7 +1061,11 @@ export async function runAcceptanceMatrix(
     phase: string,
     budget: Budget = "work",
   ): Promise<ToolResponse> =>
-    await bounded(`${phase} ${tool}`, budget, async () => await client.callTool(tool, request));
+    await bounded(
+      `${phase} ${tool}`,
+      budget,
+      async (signal) => await client.callTool(tool, request, signal),
+    );
 
   const release = async (
     sessionUuid: string,
@@ -1002,13 +1079,17 @@ export async function runAcceptanceMatrix(
     daemonClient ??= await bounded(
       `${phase} daemon connect`,
       budget,
-      async () => await createDaemonClient(),
+      async (signal) => await createDaemonClient(signal),
     );
     await bounded(
       `${phase} daemon release`,
       budget,
-      async () =>
-        await daemonClient!.callDaemonMethod("daemon/releaseSession", { sessionId: sessionUuid }),
+      async (signal) =>
+        await daemonClient!.callDaemonMethod(
+          "daemon/releaseSession",
+          { sessionId: sessionUuid },
+          signal,
+        ),
     );
     session.released = true;
     const start = timer.now();
@@ -1053,7 +1134,7 @@ export async function runAcceptanceMatrix(
     const client = await bounded(
       `${phase} MCP connect`,
       "work",
-      async () => await createMcpClient(phase),
+      async (signal) => await createMcpClient(phase, signal),
     );
     clients.push(client);
     const request = acquisitionRequest(args, range, kind);
@@ -1081,7 +1162,7 @@ export async function runAcceptanceMatrix(
     const client = await bounded(
       `${phase} MCP connect`,
       "work",
-      async () => await createMcpClient(phase),
+      async (signal) => await createMcpClient(phase, signal),
     );
     clients.push(client);
     const request = acquisitionRequest(args, "exact", "generic");
@@ -1118,7 +1199,7 @@ export async function runAcceptanceMatrix(
     const client = await bounded(
       `${phase} MCP connect`,
       "work",
-      async () => await createMcpClient(phase),
+      async (signal) => await createMcpClient(phase, signal),
     );
     clients.push(client);
     const request = acquisitionRequest(args, "exact", "generic");
@@ -1156,57 +1237,82 @@ export async function runAcceptanceMatrix(
     });
   };
 
-  const repairHost = async (): Promise<void> => {
-    const start = timer.now();
+  const admitMaintenance = async (phase: string, budget: Budget): Promise<JsonObject> => {
     daemonClient ??= await bounded(
-      "host-wide repair safety daemon connect",
-      "work",
-      async () => await createDaemonClient(),
+      `${phase} maintenance daemon connect`,
+      budget,
+      async (signal) => await createDaemonClient(signal),
     );
     const status = asObject(
       await bounded(
-        "host-wide repair build identity check",
-        "work",
-        async () => await daemonClient!.callDaemonMethod("ide/status", {}),
+        `${phase} maintenance build identity check`,
+        budget,
+        async (signal) => await daemonClient!.callDaemonMethod("ide/status", {}, signal),
       ),
       "ide/status",
     );
     if (status.buildId !== args.build.buildId || status.entryScript !== args.build.entryScript) {
-      throw new Error(
-        "Refusing host-wide doctor repair because the daemon is not the built acceptance artifact",
-      );
+      throw new Error(`Refusing ${phase}: the daemon is not the built acceptance artifact`);
     }
-    const active = asObject(
+    const admission = asObject(
       await bounded(
-        "host-wide repair active-work check",
-        "work",
-        async () => await daemonClient!.callDaemonMethod("daemon/activeSessions", {}),
+        `${phase} maintenance admission`,
+        budget,
+        async (signal) =>
+          await daemonClient!.callDaemonMethod(DAEMON_PREPARE_MAINTENANCE_METHOD, status, signal),
       ),
-      "daemon/activeSessions",
+      DAEMON_PREPARE_MAINTENANCE_METHOD,
     );
-    const activeSessions = active.activeSessions;
-    const activeExecutions = active.activeExecutions;
-    if (
-      !Number.isSafeInteger(activeSessions) ||
-      !Number.isSafeInteger(activeExecutions) ||
-      activeSessions !== 0 ||
-      activeExecutions !== 0
-    ) {
+    if (admission.accepted !== true) {
       throw new Error(
-        "Refusing host-wide doctor repair while unrelated AutoMobile sessions or work are active",
+        `Refusing ${phase}: daemon maintenance admission rejected ${
+          typeof admission.reason === "string" ? admission.reason : "an unknown condition"
+        }`,
       );
     }
-    await bounded("host-wide doctor repair", "work", async () => {
-      await spawnCli(doctorRepairCommand(args.build), Math.max(1, workDeadline - timer.now()));
-    });
-    recordStep(steps, timer, "host-wide-doctor-repair", start, {
-      platform: args.platform,
-      platformFlagScope: "diagnostic-only",
-      repairScope: "host-wide",
-      buildIdentityVerified: true,
-      activeSessions,
-      activeExecutions,
-    });
+    return status;
+  };
+
+  const completeMaintenance = async (
+    phase: string,
+    status: JsonObject,
+    budget: Budget,
+  ): Promise<void> => {
+    const result = asObject(
+      await bounded(
+        `${phase} maintenance completion`,
+        budget,
+        async (signal) =>
+          await daemonClient!.callDaemonMethod(DAEMON_COMPLETE_MAINTENANCE_METHOD, status, signal),
+      ),
+      DAEMON_COMPLETE_MAINTENANCE_METHOD,
+    );
+    if (result.completed !== true) {
+      throw new Error(`Daemon maintenance generation changed before ${phase} completed`);
+    }
+  };
+
+  const repairHost = async (): Promise<void> => {
+    const start = timer.now();
+    const status = await admitMaintenance("host-wide doctor repair", "work");
+    try {
+      await bounded("host-wide doctor repair", "work", async (signal) => {
+        await spawnCli(
+          doctorRepairCommand(args.build),
+          Math.max(1, workDeadline - timer.now()),
+          signal,
+        );
+      });
+      recordStep(steps, timer, "host-wide-doctor-repair", start, {
+        platform: args.platform,
+        platformFlagScope: "diagnostic-only",
+        repairScope: "host-wide",
+        buildIdentityVerified: true,
+        maintenanceAdmission: true,
+      });
+    } finally {
+      await completeMaintenance("host-wide doctor repair", status, "cleanup");
+    }
   };
 
   const expectUnrelatedOwnerConflict = async (held: AcquiredSession): Promise<void> => {
@@ -1214,7 +1320,7 @@ export async function runAcceptanceMatrix(
     const client = await bounded(
       "unrelated-owner MCP connect",
       "work",
-      async () => await createMcpClient("unrelated-owner"),
+      async (signal) => await createMcpClient("unrelated-owner", signal),
     );
     clients.push(client);
     const tool = acquisitionTool(args, "generic");
@@ -1255,7 +1361,7 @@ export async function runAcceptanceMatrix(
     const provisionClient = await bounded(
       "provision MCP connect",
       "work",
-      async () => await createMcpClient("provision"),
+      async (signal) => await createMcpClient("provision", signal),
     );
     clients.push(provisionClient);
     const provisionPayload = toolPayload(
@@ -1295,7 +1401,7 @@ export async function runAcceptanceMatrix(
     await expectUnrelatedOwnerConflict(running);
 
     const cliStart = timer.now();
-    await bounded("short-lived CLI", "work", async () => {
+    await bounded("short-lived CLI", "work", async (signal) => {
       await spawnCli(
         [
           process.execPath,
@@ -1306,6 +1412,7 @@ export async function runAcceptanceMatrix(
           "getDeviceState",
         ],
         Math.max(1, workDeadline - timer.now()),
+        signal,
       );
     });
     recordStep(steps, timer, "short-lived-cli", cliStart, { sessionUuid: running.sessionUuid });
@@ -1314,7 +1421,7 @@ export async function runAcceptanceMatrix(
     const independent = await bounded(
       "independent MCP connect",
       "work",
-      async () => await createMcpClient("independent-mcp"),
+      async (signal) => await createMcpClient("independent-mcp", signal),
     );
     clients.push(independent);
     toolPayload(
@@ -1330,18 +1437,29 @@ export async function runAcceptanceMatrix(
       sessionUuid: running.sessionUuid,
     });
 
+    await release(running.sessionUuid, "acquire-running");
+
     if (args.scenario === "recovery") {
       const restartStart = timer.now();
-      await bounded("daemon restart", "work", async () => {
-        await restartDaemon(Math.max(1, workDeadline - timer.now()));
+      const maintenanceStatus = await admitMaintenance("daemon restart", "work");
+      try {
+        await bounded("daemon restart", "work", async (signal) => {
+          await restartDaemon(Math.max(1, workDeadline - timer.now()), signal);
+        });
+      } catch (error) {
+        await completeMaintenance("daemon restart", maintenanceStatus, "cleanup");
+        throw error;
+      }
+      recordStep(steps, timer, "daemon-restart", restartStart, {
+        maintenanceAdmission: true,
+        restartScope: "same-generation",
       });
-      recordStep(steps, timer, "daemon-restart", restartStart, {});
 
       const oldSessionStart = timer.now();
       const oldSessionClient = await bounded(
         "old-session MCP connect",
         "work",
-        async () => await createMcpClient("old-session"),
+        async (signal) => await createMcpClient("old-session", signal),
       );
       clients.push(oldSessionClient);
       const oldSession = await callTool(
@@ -1365,7 +1483,6 @@ export async function runAcceptanceMatrix(
       });
     }
 
-    await release(running.sessionUuid, "acquire-running");
     await repairHost();
     const repaired = await acquire("reacquire-after-repair", "exact", "platform");
     await release(repaired.sessionUuid, "reacquire-after-repair");

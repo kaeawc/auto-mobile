@@ -1,11 +1,24 @@
 import { DaemonUnavailableError } from "./client";
 
 export const DAEMON_PREPARE_RESTART_METHOD = "ide/prepareRestart";
+export const DAEMON_PREPARE_MAINTENANCE_METHOD = "ide/prepareMaintenance";
+export const DAEMON_COMPLETE_MAINTENANCE_METHOD = "ide/completeMaintenance";
 const ACTIVE_PROVISIONING_RESTART_RETRY_MS = 1_000;
 
 export interface DaemonRestartPreparation {
   accepted: boolean;
   reason?: "active_operations" | "generation_changed" | "restart_pending" | "shutdown_unavailable";
+}
+
+/** Explicit host maintenance must prove no sessions or executions can be disrupted. */
+export interface DaemonMaintenancePreparation {
+  accepted: boolean;
+  reason?:
+    | "active_operations"
+    | "active_sessions"
+    | "generation_changed"
+    | "maintenance_pending"
+    | "sessions_unavailable";
 }
 
 /**

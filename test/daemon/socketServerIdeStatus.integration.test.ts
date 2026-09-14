@@ -13,14 +13,22 @@ import { PlatformDeviceManagerFactory } from "../../src/utils/factories/Platform
 import type { BootedDevice } from "../../src/models";
 import { RELEASE_CHECKSUM_REGISTRY, IOS_CTRL_PROXY_APP_HASH } from "../../src/constants/release";
 import { executionTracker } from "../../src/server/executionTracker";
-import { DAEMON_PREPARE_RESTART_METHOD } from "../../src/daemon/daemonRestartAdmission";
+import {
+  DAEMON_COMPLETE_MAINTENANCE_METHOD,
+  DAEMON_PREPARE_MAINTENANCE_METHOD,
+  DAEMON_PREPARE_RESTART_METHOD,
+} from "../../src/daemon/daemonRestartAdmission";
 
 const SHA256_HEX = /^[0-9a-f]{64}$/;
 
 function createFakeDaemonState() {
   return {
     isInitialized: () => true,
-    getSessionManager: () => ({ getSession: () => null, releaseSession: async () => null }),
+    getSessionManager: () => ({
+      getSession: () => null,
+      getAllSessions: () => [],
+      releaseSession: async () => null,
+    }),
     getDevicePool: () => ({
       refreshDevices: async () => 0,
       getStats: () => ({ total: 0, idle: 0, assigned: 0, error: 0 }),
@@ -47,6 +55,7 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
     socketPath = join(tmpdir(), `t-ids-${randomUUID().slice(0, 8)}.sock`);
     fakeTimer = new FakeTimer();
     restartRequests = 0;
+    executionTracker.clearDaemonMaintenancePreparation();
 
     server = new UnixSocketServer(
       socketPath,
@@ -64,9 +73,13 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
   });
 
   afterEach(async () => {
-    await server.close();
-    if (existsSync(socketPath)) {
-      await unlink(socketPath);
+    try {
+      await server.close();
+      if (existsSync(socketPath)) {
+        await unlink(socketPath);
+      }
+    } finally {
+      executionTracker.clearDaemonMaintenancePreparation();
     }
   });
 
@@ -150,6 +163,50 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
     } finally {
       executionTracker.endExecution(execution.id);
     }
+  });
+
+  test("maintenance admission rejects active sessions and fences new work until completion", async () => {
+    const state = createFakeDaemonState();
+    state.getSessionManager = () => ({
+      getSession: () => null,
+      getAllSessions: () => [{ sessionId: "active" }],
+      releaseSession: async () => null,
+    });
+    const activeSocketPath = join(tmpdir(), `t-maintenance-${randomUUID().slice(0, 8)}.sock`);
+    const activeServer = new UnixSocketServer(
+      activeSocketPath,
+      "http://localhost:0/mcp",
+      state,
+      new FakeTimer(),
+      null,
+    );
+    try {
+      await activeServer.start();
+      const activeStatus = (await sendRequest(activeSocketPath, "ide/status")).result!;
+      const rejected = await sendRequest(
+        activeSocketPath,
+        DAEMON_PREPARE_MAINTENANCE_METHOD,
+        activeStatus,
+      );
+      expect(rejected.result).toEqual({ accepted: false, reason: "active_sessions" });
+    } finally {
+      await activeServer.close();
+      if (existsSync(activeSocketPath)) {
+        await unlink(activeSocketPath);
+      }
+    }
+
+    const status = (await sendRequest(socketPath, "ide/status")).result!;
+    const accepted = await sendRequest(socketPath, DAEMON_PREPARE_MAINTENANCE_METHOD, status);
+    expect(accepted.result).toEqual({ accepted: true });
+    expect(() => executionTracker.startExecution("tapOn", "fenced")).toThrow(
+      "Daemon restart is pending",
+    );
+    expect(
+      (await sendRequest(socketPath, DAEMON_COMPLETE_MAINTENANCE_METHOD, status)).result,
+    ).toEqual({ completed: true });
+    const execution = executionTracker.startExecution("tapOn", "unfenced");
+    executionTracker.endExecution(execution.id);
   });
 
   test("ide/status reports a concrete releaseVersion, never the 'latest' literal (EC7)", async () => {

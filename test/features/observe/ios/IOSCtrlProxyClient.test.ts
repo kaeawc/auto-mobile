@@ -2406,6 +2406,53 @@ describe("IOSCtrlProxyClient", function () {
   });
 
   describe("connection management", function () {
+    test("connectWithoutSetup does not invoke automatic runner setup", async function () {
+      const testTimer = fakeTimer;
+      let serviceManagerFactoryCalls = 0;
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        createInstantFailureWebSocketFactory(testTimer),
+        testTimer,
+        () => {
+          serviceManagerFactoryCalls++;
+          throw new Error("automatic setup must not run");
+        },
+      );
+      (testClient as any).autoReconnectEnabled = false;
+
+      try {
+        expect(await testClient.connectWithoutSetup()).toBe(false);
+        expect(serviceManagerFactoryCalls).toBe(0);
+      } finally {
+        await testClient.close();
+      }
+    });
+
+    test("connectWithoutSetup aborts an in-flight WebSocket handshake", async function () {
+      const testTimer = new FakeTimer();
+      const controller = new AbortController();
+      const cancellation = new Error("readiness cancelled");
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        createConnectionTimeoutWebSocketFactory(testTimer),
+        testTimer,
+      );
+      (testClient as any).autoReconnectEnabled = false;
+
+      try {
+        const connection = testClient.connectWithoutSetup(controller.signal);
+        await flushPromises();
+        controller.abort(cancellation);
+
+        await expect(connection).rejects.toBe(cancellation);
+        expect((testClient as any).isConnecting).toBe(false);
+      } finally {
+        await testClient.close();
+      }
+    });
+
     test("isConnected should return true when WebSocket is open", async function () {
       const testTimer = fakeTimer;
 

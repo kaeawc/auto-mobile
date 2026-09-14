@@ -5423,6 +5423,7 @@ async function refreshResourcesAfterCommittedBoot(
 interface StartDeviceRunnerReadinessInput {
   boot: DeviceBootResult;
   args: StartDeviceArgs;
+  operationName: string;
   bootService: DeviceBootService;
   deviceUtils: PlatformDeviceManager;
   daemonState: DaemonState;
@@ -5644,6 +5645,7 @@ function createRunnerReadinessAttempt(
     await input.ensureCtrlProxyReady({
       device: candidate.device,
       requestedIdentity: input.requestedIdentity,
+      operationName: input.operationName,
       totalDeadlineMs: input.totalDeadlineMs,
       readinessTimeoutMs: input.readinessTimeoutMs,
       skipCtrlProxyDownload: serverConfig.isSkipCtrlProxyDownloadEnabled(),
@@ -7741,6 +7743,7 @@ export function registerDeviceTools() {
       const readinessResult = await prepareStartDeviceRunnerReadiness({
         boot: state.boot!,
         args,
+        operationName: budgets.operationName,
         bootService,
         deviceUtils,
         daemonState,

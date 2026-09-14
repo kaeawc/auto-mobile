@@ -3,7 +3,7 @@ import type { SessionToolSelectionService } from "../features/toolSelection/Sess
 import { SET_TOOL_ENABLED_TOOL_NAME } from "../features/toolSelection/toolSelectionControl";
 import { getSessionToolSelectionService } from "../features/toolSelection/SessionToolSelectionService";
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
-import { isToolEnabledForAnySession } from "../features/toolSelection/toolSelectionPolicy";
+import { isToolEnabledForAnyRoute } from "../features/toolSelection/toolSelectionPolicy";
 import { ActionableError } from "../models";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
@@ -203,17 +203,21 @@ export async function listEnabledToolNames(
   const names = await Promise.all(
     ToolRegistry.getAllTools()
       .filter((tool) => ToolRegistry.isUserConfigurableTool(tool.name))
-      .map(async (tool) =>
-        (await isToolEnabledForAnySession(
+      .map(async (tool) => {
+        const candidateRoutes =
+          tool.requiresDevice && labelSessionUuids.length > 0
+            ? labelSessionUuids.map((labelSessionUuid) => [...sessionUuids, labelSessionUuid])
+            : [sessionUuids];
+        return (await isToolEnabledForAnyRoute(
           tool.name,
           tool.defaultEnabled ?? true,
-          tool.requiresDevice ? [...sessionUuids, ...labelSessionUuids] : sessionUuids,
+          candidateRoutes,
           resolved,
           connectionProfileUuid,
         ))
           ? tool.name
-          : undefined,
-      ),
+          : undefined;
+      }),
   );
   return names.filter((toolName): toolName is string => toolName !== undefined).sort();
 }
@@ -243,7 +247,7 @@ async function getEnabledToolsResponse(
 export function registerToolSelectionTools(): void {
   ToolRegistry.register(
     SET_TOOL_ENABLED_TOOL_NAME,
-    "Enable or disable AutoMobile tools for this MCP session: one exact name via toolName, or a whole batch in one call via toolNames. Returns the resulting enabled set.",
+    "Enable or disable AutoMobile tools for this MCP session: one exact name via toolName, or a whole batch in one call via toolNames. Returns enabledTools, or enabledToolsError instead if post-write readback fails (the change still applies).",
     setToolEnabledSchema,
     async (args) => {
       const context = getToolSelectionContext();

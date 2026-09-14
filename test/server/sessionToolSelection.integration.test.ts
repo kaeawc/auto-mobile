@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import type { SessionToolSelectionService } from "../../src/features/toolSelection/SessionToolSelectionService";
-import { registerToolSelectionTools } from "../../src/server/toolSelectionTools";
+import {
+  listEnabledToolNames,
+  registerToolSelectionTools,
+} from "../../src/server/toolSelectionTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
 import { getToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
@@ -31,6 +34,29 @@ describe("per-session exact-tool selection", () => {
     await fixture?.teardown();
     fixture = undefined;
     ToolRegistry.clearTools();
+  });
+
+  test("reports a device-aware tool enabled by any independent label route", async () => {
+    ToolRegistry.clearTools();
+    ToolRegistry.registerDeviceAware(
+      "labelAwareTool",
+      "label-aware test tool",
+      z.object({}),
+      async () => ({ content: [] }),
+      { defaultEnabled: true },
+    );
+    const overrides = new Map<string, boolean>([["base:A", false]]);
+    const service: Pick<SessionToolSelectionService, "isEnabled" | "getOverride"> = {
+      isEnabled: async (_sessionUuid, _toolName, declaredDefault) => declaredDefault,
+      getOverride: async (sessionUuid) => overrides.get(sessionUuid),
+    };
+
+    const enabledTools = await listEnabledToolNames(service, ["base", "routing"], undefined, [
+      "base:A",
+      "base:B",
+    ]);
+
+    expect(enabledTools).toContain("labelAwareTool");
   });
 
   for (const acquisition of ["getAndroid", "getApple"]) {

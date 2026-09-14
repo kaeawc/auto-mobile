@@ -55,15 +55,39 @@ describe("Device Image Resources with Fakes", () => {
           isAvailable: true,
           name: "iOS 18.0",
         },
+        {
+          bundlePath: "/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 16.0.simruntime",
+          buildversion: "20A362",
+          runtimeRoot:
+            "/Library/Developer/CoreSimulator/Volumes/iOS_20A362/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 16.0.simruntime/Contents/Resources/RuntimeRoot",
+          identifier: "com.apple.CoreSimulator.SimRuntime.iOS-16-0",
+          version: "16.0",
+          isAvailable: false,
+          availabilityError: "The runtime bundle was not found.",
+          name: "iOS 16.0",
+        },
       ];
       const deviceTypes: AppleDeviceType[] = [
         {
-          minRuntimeVersion: 17,
+          minRuntimeVersion: 1114112,
+          minRuntimeVersionString: "17.0",
           bundlePath:
             "/Library/Developer/CoreSimulator/Profiles/DeviceTypes/iPhone 16.simdevicetype",
-          maxRuntimeVersion: 18,
+          // simctl uses 0xFFFFFFFF for an unbounded maximum.
+          maxRuntimeVersion: 4294967295,
           name: "iPhone 16",
           identifier: "com.apple.CoreSimulator.SimDeviceType.iPhone-16",
+          productFamily: "iPhone",
+        },
+        {
+          minRuntimeVersion: 786432,
+          minRuntimeVersionString: "12.0",
+          bundlePath:
+            "/Library/Developer/CoreSimulator/Profiles/DeviceTypes/iPhone 8.simdevicetype",
+          maxRuntimeVersion: 1049600,
+          maxRuntimeVersionString: "16.4",
+          name: "iPhone 8",
+          identifier: "com.apple.CoreSimulator.SimDeviceType.iPhone-8",
           productFamily: "iPhone",
         },
       ];
@@ -85,11 +109,21 @@ describe("Device Image Resources with Fakes", () => {
             platform: "android",
             id: "system-images;android-35;google_apis;x86_64",
             version: "35",
+            availability: { available: true },
           }),
           expect.objectContaining({
             platform: "ios",
             id: "com.apple.CoreSimulator.SimRuntime.iOS-18-0",
             version: "18.0",
+            availability: { available: true },
+          }),
+          expect.objectContaining({
+            platform: "ios",
+            id: "com.apple.CoreSimulator.SimRuntime.iOS-16-0",
+            availability: {
+              available: false,
+              reason: "runtime-unavailable: The runtime bundle was not found.",
+            },
           }),
         ]),
         deviceTypes: expect.arrayContaining([
@@ -97,11 +131,21 @@ describe("Device Image Resources with Fakes", () => {
             platform: "android",
             id: "pixel_9",
             name: "Pixel 9",
+            availability: { available: true },
           }),
           expect.objectContaining({
             platform: "ios",
             id: "com.apple.CoreSimulator.SimDeviceType.iPhone-16",
             name: "iPhone 16",
+            availability: { available: true },
+          }),
+          expect.objectContaining({
+            platform: "ios",
+            id: "com.apple.CoreSimulator.SimDeviceType.iPhone-8",
+            availability: {
+              available: false,
+              reason: "runtime-not-installed: iOS 16.0",
+            },
           }),
         ]),
         systemImages: [

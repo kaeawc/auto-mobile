@@ -224,6 +224,32 @@ const packagesMatching = (
 ): Set<string> => new Set(records.filter(predicate).map((record) => record.pkg));
 
 /**
+ * Retain an after-scan record only when its package was the sole plausible
+ * owner before scanning and it still matches the row afterward. A missing
+ * before snapshot deliberately falls back to after-only correlation,
+ * preserving the existing best-effort behavior.
+ */
+export const intersectDumpsysRecordsForRow = (
+  beforeRecords: readonly DumpsysNotificationRecord[] | undefined,
+  afterRecords: readonly DumpsysNotificationRecord[],
+  rowTexts: ReadonlySet<string>,
+): readonly DumpsysNotificationRecord[] => {
+  if (beforeRecords === undefined) {
+    return afterRecords;
+  }
+  const beforePackages = packagesMatching(beforeRecords, (record) =>
+    recordMatchesRow(record, rowTexts),
+  );
+  if (beforePackages.size !== 1) {
+    return [];
+  }
+  const [beforePackage] = beforePackages;
+  return afterRecords.filter(
+    (record) => record.pkg === beforePackage && recordMatchesRow(record, rowTexts),
+  );
+};
+
+/**
  * Name the package that posted a header-less row, or `null` when no record
  * matches the rendered text and when more than one package's record could.
  * Ambiguity is reported as "unknown" rather than resolved by preference.

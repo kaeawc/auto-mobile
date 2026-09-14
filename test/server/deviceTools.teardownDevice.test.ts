@@ -2018,6 +2018,47 @@ describe("deleteDevice handler", () => {
     expect(runtimeAvdNameProbes).toEqual([peer.deviceId]);
   });
 
+  test("force deletes a stopped target without probing an unrelated wedged peer", async () => {
+    const timer = new FakeTimer();
+    const target: DeviceInfo = {
+      platform: "android",
+      name: "Pixel_8_API_35",
+      isRunning: false,
+    };
+    const peer: BootedDevice = {
+      platform: "android",
+      name: "Pixel_7_API_34",
+      deviceId: "emulator-5556",
+    };
+    const sessionManager = new SessionManager(timer);
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      manager,
+      new DefaultRetryExecutor(timer),
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    await pool.addDevice(peer, { platform: "android", name: peer.name, isRunning: true });
+    manager.setBootedDevices("android", [peer]);
+    manager.setDeviceImages("android", [target]);
+
+    const body = responseBody(
+      await teardownTool().handler({
+        ...request("android", target.name, target.name),
+        force: true,
+      }),
+    );
+
+    expect(body.state).toBe("destroyed");
+    expect(manager.destroyRequests).toHaveLength(1);
+    expect(manager.destroyRequests[0]?.device).toEqual(
+      expect.objectContaining({ name: target.name }),
+    );
+    expect(runtimeAvdNameProbes).toEqual([]);
+  });
+
   test("force refuses after one unanswered peer probe when several peers are wedged", async () => {
     const timer = new FakeTimer();
     const target: BootedDevice = {

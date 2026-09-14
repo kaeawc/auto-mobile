@@ -4103,6 +4103,9 @@ async function checkForSerialOnlyAndroidTeardownRestart(
     return undefined;
   }
   const targetOriginalSerial = target.wasBooted ? target.bootedDevice.deviceId : undefined;
+  if (!targetOriginalSerial) {
+    return undefined;
+  }
   if (
     targetOriginalSerial &&
     booted.devices.some((device) => device.deviceId === targetOriginalSerial)

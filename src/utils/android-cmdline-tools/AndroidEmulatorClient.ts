@@ -45,11 +45,9 @@ const MIN_EMULATOR_POLLING_INTERVAL_MS = 100;
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
 const MAX_POLLING_SLEEP_CHUNK_MS = 500;
 // A freshly-provisioned AVD's first cold boot can land its serial in ADB
-// `offline` and stay there. These bound a single re-detect recovery well
-// inside the readiness budget so a stuck fresh provision fails fast with a
-// diagnostic instead of silently burning the whole budget (issue #7054).
+// `offline` and stay there. This bounds a single re-detect recovery while
+// normal readiness polling continues through the caller's full budget.
 const FRESH_OFFLINE_RECOVERY_THRESHOLD_MS = 15_000;
-const FRESH_OFFLINE_RECOVERY_GRACE_MS = 5_000;
 const FRESH_OFFLINE_RECOVERY_COMMAND_TIMEOUT_MS = 5_000;
 const MIN_EMULATOR_CONSOLE_PORT = 5554;
 const MAX_EMULATOR_CONSOLE_PORT = 5682;
@@ -112,8 +110,6 @@ interface OfflineTracker {
   state?: TargetReadinessState;
   /** A bounded `adb reconnect offline` recovery has been dispatched during this readiness invocation (monotonic once set). */
   recoveryAttempted?: boolean;
-  /** Fake-clock timestamp at which the recovery reconnect was dispatched. */
-  recoveryAt?: number | null;
 }
 
 interface ReadinessPollingState {
@@ -193,10 +189,9 @@ export interface AndroidEmulatorReadinessOptions {
    * The device was just created by a fresh provision, so its first boot is a
    * genuine cold boot (no quick-boot snapshot to restore). When its serial sits
    * in ADB `offline` past a bounded threshold, attempt one `adb reconnect
-   * offline` re-detect; if it stays offline, fail fast with a diagnostic naming
-   * the observed state and the recovery attempted rather than waiting out the
-   * whole readiness budget. A quick-boot-after-shutdown restore leaves this
-   * unset and keeps the wait-out behavior (issue #7054).
+   * offline` re-detect, then continue readiness polling through the caller's
+   * timeout. A quick-boot-after-shutdown restore leaves this unset and skips
+   * that recovery attempt.
    */
   freshProvision?: boolean;
 }
@@ -1127,13 +1122,10 @@ export class AndroidEmulatorClient implements AndroidEmulator {
    * and when a device-state probe rejects/omits the target, so a stale offline
    * reading cannot drive recovery off out-of-date data (#7054).
    *
-   * The recovery-history fields (`recoveryAttempted`/`recoveryAt`) are
-   * deliberately NOT reset: they are MONOTONIC for the lifetime of a single
-   * `waitForEmulatorReady` invocation. A probe gap after the one-shot
-   * `adb reconnect offline` has been dispatched must not wipe that history, or a
-   * later re-confirmed offline would start a fresh 15s episode and issue a
-   * SECOND reconnect, violating one-shot recovery per readiness invocation. The
-   * fields start clean because the tracker is constructed fresh per invocation.
+   * `recoveryAttempted` is deliberately NOT reset: it is MONOTONIC for the
+   * lifetime of a single `waitForEmulatorReady` invocation. A probe gap after
+   * the one-shot `adb reconnect offline` has been dispatched must not wipe that
+   * history, or a later re-confirmed offline would issue a SECOND reconnect.
    */
   private clearOfflineTracker(tracker: OfflineTracker): void {
     tracker.deviceId = null;
@@ -1191,13 +1183,9 @@ export class AndroidEmulatorClient implements AndroidEmulator {
   /**
    * Bounded recovery for a fresh-provision cold boot whose serial is stuck in
    * ADB `offline`. Runs at most one `adb reconnect offline` re-detect once the
-   * serial has been offline past {@link FRESH_OFFLINE_RECOVERY_THRESHOLD_MS}. If
-   * it is still offline {@link FRESH_OFFLINE_RECOVERY_GRACE_MS} after that
-   * reconnect, returns a diagnostic {@link ActionableError} naming the observed
-   * `state=offline` and the recovery attempted, so the caller fails fast with an
-   * actionable reason instead of waiting out the whole readiness budget (#7054).
-   * Returns `undefined` when it is not yet time to act (or the caller is not a
-   * fresh provision), leaving the normal readiness loop to continue.
+   * serial has been offline past {@link FRESH_OFFLINE_RECOVERY_THRESHOLD_MS}.
+   * The recovery never terminates readiness: normal polling continues until the
+   * caller's deadline or a terminal emulator failure (issue #7078).
    */
   private async maybeRecoverFreshOffline(
     tracker: OfflineTracker,
@@ -1207,15 +1195,14 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     timeoutMs: number,
     avdName: string,
     signal: AbortSignal | undefined,
-  ): Promise<ActionableError | undefined> {
+  ): Promise<void> {
     if (!this.isFreshOfflineEpisode(tracker, options, deviceId)) {
-      return undefined;
+      return;
     }
     const now = this.timer.now();
     const remainingMs = timeoutMs - (now - startTime);
     if (remainingMs <= 0) {
-      // No budget left; let the normal timeout path produce the target/state error.
-      return undefined;
+      return;
     }
     const offlineSince = tracker.since ?? now;
 
@@ -1231,19 +1218,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
           signal,
         );
       }
-      return undefined;
     }
-
-    const recoveredAt = tracker.recoveryAt ?? now;
-    if (now - recoveredAt < FRESH_OFFLINE_RECOVERY_GRACE_MS) {
-      return undefined;
-    }
-    return new ActionableError(
-      `Emulator '${avdName}' remained ADB-offline during a fresh provision cold boot; ` +
-        `target=${deviceId}; state=offline. Attempted recovery: 'adb reconnect offline' ` +
-        `(serial still offline ${now - recoveredAt}ms after the reconnect). The freshly ` +
-        `created AVD launched its guest but never left the ADB-offline state.`,
-    );
   }
 
   /** True while a fresh-provision target is actively sitting in ADB `offline`. */
@@ -1272,10 +1247,10 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     if (!this.isFreshOfflineEpisode(tracker, options, deviceId)) {
       return currentDelayMs;
     }
-
-    const thresholdAt = tracker.recoveryAttempted
-      ? (tracker.recoveryAt ?? now) + FRESH_OFFLINE_RECOVERY_GRACE_MS
-      : (tracker.since ?? now) + FRESH_OFFLINE_RECOVERY_THRESHOLD_MS;
+    if (tracker.recoveryAttempted) {
+      return currentDelayMs;
+    }
+    const thresholdAt = (tracker.since ?? now) + FRESH_OFFLINE_RECOVERY_THRESHOLD_MS;
     const timeUntilThresholdMs = Math.max(0, thresholdAt - now);
     const thresholdDelayMs = Math.max(
       MIN_EMULATOR_POLLING_INTERVAL_MS,
@@ -1312,19 +1287,12 @@ export class AndroidEmulatorClient implements AndroidEmulator {
         .executeCommand("reconnect offline", commandTimeoutMs, undefined, true, signal);
     } catch (error) {
       this.throwIfReadinessAborted(signal);
-      // Best-effort recovery: a failed reconnect is diagnosed on the next poll
-      // once the grace window elapses and the serial is still offline.
+      // Best-effort recovery: readiness polling continues through its deadline.
       logger.warn(
         `'adb reconnect offline' recovery for ${deviceId} failed: ${errorMessage(error)}`,
         error,
       );
     }
-    // Start the recovery grace only once the reconnect settles (on success or a
-    // caught failure). Recording it before the awaited command would let a slow
-    // reconnect that runs near its timeout consume the entire grace window, so
-    // the next poll fails fast before the device has any chance to come back
-    // online (#7054).
-    tracker.recoveryAt = this.timer.now();
   }
 
   private targetReadinessState(targetState: AdbDeviceState | undefined): TargetReadinessState {
@@ -3654,7 +3622,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
             remainingTimeoutMs,
             signal,
           );
-          const offlineRecoveryFailure = await this.maybeRecoverFreshOffline(
+          await this.maybeRecoverFreshOffline(
             offlineTracker,
             options,
             correlatedTargetDeviceId,
@@ -3663,11 +3631,6 @@ export class AndroidEmulatorClient implements AndroidEmulator {
             avdName,
             signal,
           );
-          if (offlineRecoveryFailure) {
-            polling.failure = offlineRecoveryFailure;
-            polling.active = false;
-            break;
-          }
           if (!polling.active || this.timer.now() - startTime >= timeoutMs) {
             break;
           }

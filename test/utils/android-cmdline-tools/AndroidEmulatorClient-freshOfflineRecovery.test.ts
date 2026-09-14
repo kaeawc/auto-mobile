@@ -19,16 +19,14 @@ const result = (stdout = "", stderr = ""): ExecResult => ({
 
 /**
  * Drives a freshly-created AVD whose serial sits in ADB `offline`. The fake can
- * optionally flip the serial to `device` once `adb reconnect offline` runs, so
- * a test can assert either sustained-offline failure or a successful recovery.
+ * flip the serial to `device` after a configured fake-clock delay, allowing
+ * tests to distinguish transient offline state from a boot that times out.
  */
 class FreshOfflineAdbExecutor extends FakeAdbExecutor {
   reconnectCalls = 0;
-  /** Fake-clock time at which the most recent `adb reconnect offline` settled. */
-  reconnectSettledAt: number | null = null;
   private recoverOnReconnect = false;
-  private reconnectDurationMs = 0;
   private timer: FakeTimer | null = null;
+  private recoverAtMs: number | null = null;
   private deviceStateCalls = 0;
   private rejectDeviceStatesAfter: number | null = null;
   private rejectOnceAfterReconnect = false;
@@ -38,14 +36,9 @@ class FreshOfflineAdbExecutor extends FakeAdbExecutor {
     this.recoverOnReconnect = true;
   }
 
-  /**
-   * Make the fake `adb reconnect offline` consume `ms` of fake time before it
-   * settles (mirroring a reconnect that runs near its 5s command timeout), so a
-   * test can prove the recovery grace only starts once the command returns.
-   */
-  configureReconnectDuration(timer: FakeTimer, ms: number): void {
+  configureRecoveryFlipsOnlineAt(timer: FakeTimer, recoverAtMs: number): void {
     this.timer = timer;
-    this.reconnectDurationMs = ms;
+    this.recoverAtMs = recoverAtMs;
   }
 
   /**
@@ -74,6 +67,18 @@ class FreshOfflineAdbExecutor extends FakeAdbExecutor {
     signal?: AbortSignal;
   }): Promise<AdbDeviceState[]> {
     this.deviceStateCalls += 1;
+    if (this.recoverAtMs !== null && (this.timer?.now() ?? 0) >= this.recoverAtMs) {
+      this.recoverAtMs = null;
+      this.setDeviceStates([{ deviceId: "emulator-5554", state: "device" }]);
+      this.setDevices([
+        {
+          name: "Pixel_9_Pro",
+          platform: "android",
+          deviceId: "emulator-5554",
+          source: "local",
+        },
+      ]);
+    }
     if (this.pendingRejectAfterReconnect) {
       this.pendingRejectAfterReconnect = false;
       throw new Error("adb server connection reset after reconnect; device state unavailable");
@@ -100,12 +105,6 @@ class FreshOfflineAdbExecutor extends FakeAdbExecutor {
         // Fire the probe gap only after the FIRST reconnect.
         this.rejectOnceAfterReconnect = false;
         this.pendingRejectAfterReconnect = true;
-      }
-      if (this.reconnectDurationMs > 0 && this.timer) {
-        await this.timer.sleep(this.reconnectDurationMs);
-      }
-      if (this.timer) {
-        this.reconnectSettledAt = this.timer.now();
       }
       if (this.recoverOnReconnect) {
         this.setDeviceStates([{ deviceId: "emulator-5554", state: "device" }]);
@@ -191,7 +190,31 @@ describe("Android emulator fresh-provision offline recovery", () => {
     expect(timer.now()).toBeLessThan(120_000);
   });
 
-  test("fails a sustained-offline fresh AVD with a recovery diagnostic before the full budget", async () => {
+  test("allows a fresh AVD to leave ADB-offline after more than 20 seconds", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const adb = new FreshOfflineAdbExecutor();
+    adb.setDeviceStates(OFFLINE_STATE);
+    adb.setDevices([]);
+    configureReadyProbes(adb);
+    adb.configureRecoveryFlipsOnlineAt(timer, 25_000);
+
+    const device = await clientWith(adb, timer).waitForEmulatorReady(
+      "Pixel_9_Pro",
+      120_000,
+      null,
+      "emulator-5554",
+      undefined,
+      { freshProvision: true },
+    );
+
+    expect(device.deviceId).toBe("emulator-5554");
+    expect(adb.reconnectCalls).toBe(1);
+    expect(timer.now()).toBeGreaterThanOrEqual(25_000);
+    expect(timer.now()).toBeLessThan(120_000);
+  });
+
+  test("allows a sustained-offline fresh AVD to reach its configured deadline", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const adb = new FreshOfflineAdbExecutor();
@@ -201,7 +224,7 @@ describe("Android emulator fresh-provision offline recovery", () => {
 
     const readiness = clientWith(adb, timer).waitForEmulatorReady(
       "Pixel_9_Pro",
-      120_000,
+      30_000,
       null,
       "emulator-5554",
       undefined,
@@ -209,10 +232,11 @@ describe("Android emulator fresh-provision offline recovery", () => {
     );
 
     await expect(readiness).rejects.toThrow("state=offline");
-    await expect(readiness).rejects.toThrow("adb reconnect offline");
+    await expect(readiness).rejects.not.toThrow("adb reconnect offline");
     await readiness.catch(() => undefined);
-    expect(adb.reconnectCalls).toBeGreaterThanOrEqual(1);
-    expect(timer.now()).toBeLessThan(120_000);
+    expect(adb.reconnectCalls).toBe(1);
+    expect(timer.now()).toBeGreaterThanOrEqual(30_000);
+    expect(timer.now()).toBeLessThan(35_000);
   });
 
   test("caps a large polling interval at the fresh-offline recovery thresholds", async () => {
@@ -222,7 +246,6 @@ describe("Android emulator fresh-provision offline recovery", () => {
     adb.setDeviceStates(OFFLINE_STATE);
     adb.setDevices([]);
     configureReadyProbes(adb);
-    adb.configureReconnectDuration(timer, 0);
     process.env.EMULATOR_POLLING_INTERVAL_MS = "60000";
 
     const readiness = clientWith(adb, timer).waitForEmulatorReady(
@@ -235,14 +258,11 @@ describe("Android emulator fresh-provision offline recovery", () => {
     );
 
     await expect(readiness).rejects.toThrow("state=offline");
-    await expect(readiness).rejects.toThrow("adb reconnect offline");
+    await expect(readiness).rejects.not.toThrow("adb reconnect offline");
     await readiness.catch(() => undefined);
     expect(adb.reconnectCalls).toBe(1);
-    expect(adb.reconnectSettledAt).not.toBeNull();
-    expect(adb.reconnectSettledAt).toBeGreaterThanOrEqual(15_000);
-    expect(adb.reconnectSettledAt).toBeLessThan(20_000);
-    expect(timer.now()).toBeGreaterThanOrEqual(20_000);
-    expect(timer.now()).toBeLessThan(25_000);
+    expect(timer.now()).toBeGreaterThanOrEqual(30_000);
+    expect(timer.now()).toBeLessThan(35_000);
   });
 
   test("leaves the default polling interval's non-fresh offline wait unchanged", async () => {
@@ -284,9 +304,8 @@ describe("Android emulator fresh-provision offline recovery", () => {
     // One successful offline observation, then every probe rejects.
     adb.configureDeviceStateRejectAfter(1);
 
-    // Budget comfortably past the 15s recovery threshold + 5s grace so that,
-    // under the pre-fix behavior, the reconnect + state=offline diagnostic
-    // would already have fired well before this deadline.
+    // The budget is comfortably past the recovery threshold. A run of failed
+    // probes must never satisfy it from a stale offline observation.
     const readiness = clientWith(adb, timer).waitForEmulatorReady(
       "Pixel_9_Pro",
       30_000,
@@ -303,40 +322,6 @@ describe("Android emulator fresh-provision offline recovery", () => {
     expect(adb.reconnectCalls).toBe(0);
   });
 
-  test("a slow reconnect does not exhaust the grace: the grace starts after it settles", async () => {
-    // THREAD 2 (#7054): recoveryAt must be recorded AFTER `adb reconnect
-    // offline` settles. If it is recorded before the awaited command, a
-    // reconnect that runs near its 5s timeout eats the whole 5s grace and the
-    // next poll fails fast immediately, giving the device no time to come back.
-    const timer = new FakeTimer();
-    timer.enableAutoAdvance();
-    const adb = new FreshOfflineAdbExecutor();
-    adb.setDeviceStates(OFFLINE_STATE);
-    adb.setDevices([]);
-    configureReadyProbes(adb);
-    // Reconnect consumes ~5s (its command timeout); poll faster than that so a
-    // poll lands inside the window the pre-fix bug would have already skipped.
-    adb.configureReconnectDuration(timer, 5000);
-    process.env.EMULATOR_POLLING_INTERVAL_MS = "1000";
-
-    const readiness = clientWith(adb, timer).waitForEmulatorReady(
-      "Pixel_9_Pro",
-      120_000,
-      null,
-      "emulator-5554",
-      undefined,
-      { freshProvision: true },
-    );
-
-    await expect(readiness).rejects.toThrow("adb reconnect offline");
-    await readiness.catch(() => undefined);
-    expect(adb.reconnectCalls).toBe(1);
-    expect(adb.reconnectSettledAt).not.toBeNull();
-    // The full 5s grace (FRESH_OFFLINE_RECOVERY_GRACE_MS) must elapse AFTER the
-    // reconnect settled before the fail-fast diagnostic is raised.
-    expect(timer.now() - (adb.reconnectSettledAt ?? 0)).toBeGreaterThanOrEqual(5000);
-  });
-
   test("issues the recovery reconnect with retries disabled (noRetry)", async () => {
     // THREAD 3 (#7054): the one-shot reconnect must pass noRetry=true so the
     // real AdbClient does not route it through the retry executor (up to 4
@@ -351,14 +336,14 @@ describe("Android emulator fresh-provision offline recovery", () => {
 
     const readiness = clientWith(adb, timer).waitForEmulatorReady(
       "Pixel_9_Pro",
-      120_000,
+      30_000,
       null,
       "emulator-5554",
       undefined,
       { freshProvision: true },
     );
 
-    await expect(readiness).rejects.toThrow("adb reconnect offline");
+    await expect(readiness).rejects.toThrow("state=offline");
     await readiness.catch(() => undefined);
 
     const reconnectCalls = adb
@@ -377,7 +362,7 @@ describe("Android emulator fresh-provision offline recovery", () => {
     // per-readiness-invocation contract. The recovery history must be MONOTONIC
     // for the lifetime of a single waitForEmulatorReady invocation, so a probe
     // gap clears only the current observation and the re-confirmed offline
-    // continues toward the fail-fast (grace after the first reconnect).
+    // remains a single recovery attempt before readiness reaches its deadline.
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const adb = new FreshOfflineAdbExecutor();
@@ -390,7 +375,7 @@ describe("Android emulator fresh-provision offline recovery", () => {
 
     const readiness = clientWith(adb, timer).waitForEmulatorReady(
       "Pixel_9_Pro",
-      120_000,
+      30_000,
       null,
       "emulator-5554",
       undefined,
@@ -398,12 +383,11 @@ describe("Android emulator fresh-provision offline recovery", () => {
     );
 
     await expect(readiness).rejects.toThrow("state=offline");
-    await expect(readiness).rejects.toThrow("adb reconnect offline");
+    await expect(readiness).rejects.not.toThrow("adb reconnect offline");
     await readiness.catch(() => undefined);
     // Exactly one reconnect per readiness invocation, despite the probe gap.
     expect(adb.reconnectCalls).toBe(1);
-    // Fails well before a second 15s episode (~t=40s pre-fix) could complete.
-    expect(timer.now()).toBeLessThan(40_000);
+    expect(timer.now()).toBeGreaterThanOrEqual(30_000);
   });
 
   test("quick-boot (non-fresh) offline takes the wait-out branch: no reconnect, generic timeout", async () => {

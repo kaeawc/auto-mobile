@@ -14,6 +14,7 @@
  */
 
 import WebSocket from "ws";
+import { ActionableError } from "../../../models/ActionableError";
 import { logger } from "../../../utils/logger";
 import {
   BootedDevice,
@@ -108,6 +109,26 @@ interface IosSdkCapabilitiesResult extends BaseResult {
   available: boolean;
   bundleId?: string;
   capabilities?: string[];
+}
+
+/**
+ * A capability waiter was created under one probe generation, but a hierarchy
+ * update (foreground app change, reconnect, SDK failure) invalidated that
+ * generation before its probe answered. The replacement generation's result
+ * belongs to a different foreground app and must never authorize this waiter
+ * (#6896): callers either retry against the new generation or fail actionably.
+ */
+export class SdkCapabilityProbeSupersededError extends ActionableError {
+  constructor(
+    readonly capability: IosSdkCapability,
+    readonly probeGeneration: number,
+    readonly currentGeneration: number,
+  ) {
+    super(
+      `The AutoMobile SDK capability probe for ${capability} (generation ${probeGeneration}) was superseded by a newer foreground state (generation ${currentGeneration}); re-observe and retry against the current foreground app.`,
+    );
+    this.name = "SdkCapabilityProbeSupersededError";
+  }
 }
 
 /** Default production lister that queries the real device manager. */
@@ -1304,11 +1325,19 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   }
 
   private hasSdkCapability(capability: IosSdkCapability, bundleId?: string): boolean {
+    return IOSCtrlProxyClient.capabilitiesInclude(this.sdkCapabilities, capability, bundleId);
+  }
+
+  private static capabilitiesInclude(
+    capabilities: IosSdkCapabilities | null,
+    capability: IosSdkCapability,
+    bundleId?: string,
+  ): boolean {
     const normalizedBundleId = bundleId?.trim();
     return (
-      this.sdkCapabilities !== null &&
-      (normalizedBundleId === undefined || this.sdkCapabilities.bundleId === normalizedBundleId) &&
-      this.sdkCapabilities.capabilities.has(capability)
+      capabilities !== null &&
+      (normalizedBundleId === undefined || capabilities.bundleId === normalizedBundleId) &&
+      capabilities.capabilities.has(capability)
     );
   }
 
@@ -1436,8 +1465,40 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
         return this.hasSdkCapability(capability, bundleId);
       }
     }
-    await this.refreshSdkCapabilities();
-    return this.hasSdkCapability(capability, bundleId);
+    // Generation binding (#6896): the waiter records the generation it was created
+    // under and decides ONLY from that generation's probe result. A hierarchy update
+    // can invalidate this generation and complete a replacement probe for another
+    // foreground app before this probe answers; rereading the shared cache here
+    // would let that app's capabilities authorize this waiter.
+    const probeGeneration = this.sdkCapabilityGeneration;
+    const probed = await this.refreshSdkCapabilities();
+    if (probeGeneration !== this.sdkCapabilityGeneration) {
+      throw new SdkCapabilityProbeSupersededError(
+        capability,
+        probeGeneration,
+        this.sdkCapabilityGeneration,
+      );
+    }
+    return IOSCtrlProxyClient.capabilitiesInclude(probed, capability, bundleId);
+  }
+
+  /**
+   * Result-returning variant of `ensureSdkCapability` for callers that report
+   * failures as a `BaseResult` instead of throwing: `null` means the capability
+   * is available; otherwise the actionable failure to return as-is.
+   */
+  private async sdkCapabilityGate(capability: IosSdkCapability): Promise<BaseResult | null> {
+    try {
+      return (await this.ensureSdkCapability(capability))
+        ? null
+        : this.sdkUnavailableResult(capability);
+    } catch (error) {
+      if (error instanceof SdkCapabilityProbeSupersededError) {
+        logger.info(`[IOSCtrlProxyClient] ${error.message}`);
+        return { success: false, totalTimeMs: 0, error: error.message };
+      }
+      throw error;
+    }
   }
 
   private isLegacySdkCommandSupported(capability: IosSdkCapability): boolean {
@@ -1462,8 +1523,17 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   }
 
   public async syncNetworkMockRulesIfAvailable(): Promise<void> {
-    if (await this.ensureSdkCapability("network_mocking")) {
-      this.syncNetworkMockRulesToDevice();
+    try {
+      if (await this.ensureSdkCapability("network_mocking")) {
+        this.syncNetworkMockRulesToDevice();
+      }
+    } catch (error) {
+      if (!(error instanceof SdkCapabilityProbeSupersededError)) {
+        throw error;
+      }
+      // Safe to swallow: the generation that superseded this probe runs its own
+      // refreshSdkCapabilitiesAndSync, which re-syncs the mock rules to the device.
+      logger.debug(`[IOSCtrlProxyClient] mock-rule sync skipped: ${error.message}`);
     }
   }
 
@@ -2382,8 +2452,9 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     timeoutMs?: number,
     perf?: PerformanceTracker,
   ): Promise<CtrlProxyHighlightResult> {
-    if (!(await this.ensureSdkCapability("highlight"))) {
-      return this.sdkUnavailableResult("highlight");
+    const gate = await this.sdkCapabilityGate("highlight");
+    if (gate !== null) {
+      return gate;
     }
     return this.highlights.requestAddHighlight(id, shape, timeoutMs, perf);
   }
@@ -2393,8 +2464,9 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     timeoutMs: number = 5000,
     perf?: PerformanceTracker,
   ): Promise<BaseResult> {
-    if (!(await this.ensureSdkCapability("network_error_simulation"))) {
-      return this.sdkUnavailableResult("network_error_simulation");
+    const gate = await this.sdkCapabilityGate("network_error_simulation");
+    if (gate !== null) {
+      return gate;
     }
     return sendCommand<BaseResult>(this.createDelegateContext(), {
       idPrefix: "networkErrorSimulation",

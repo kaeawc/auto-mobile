@@ -1121,6 +1121,19 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     }
   }
 
+  /**
+   * Reset the offline tracker to a neutral, no-current-observation state. Used
+   * when there is no target serial and when a device-state probe rejects, so a
+   * stale offline reading cannot drive recovery off out-of-date data (#7054).
+   */
+  private clearOfflineTracker(tracker: OfflineTracker): void {
+    tracker.deviceId = null;
+    tracker.since = null;
+    tracker.state = undefined;
+    tracker.recoveryAttempted = false;
+    tracker.recoveryAt = null;
+  }
+
   private async detectOfflineFailure(
     deviceId: string | undefined,
     tracker: OfflineTracker,
@@ -1136,14 +1149,15 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       logger.debug(
         `Offline-state probe unavailable during emulator readiness: ${errorMessage(error)}`,
       );
+      // A rejected probe is NOT a current offline observation. Clear the tracker
+      // so both the reconnect dispatch and the fail-fast wait for a fresh,
+      // successful observation that still shows offline; a run of failed probes
+      // must not by itself satisfy the offline-failure threshold (#7054).
+      this.clearOfflineTracker(tracker);
       return null;
     }
     if (!deviceId) {
-      tracker.deviceId = null;
-      tracker.since = null;
-      tracker.state = undefined;
-      tracker.recoveryAttempted = false;
-      tracker.recoveryAt = null;
+      this.clearOfflineTracker(tracker);
       return null;
     }
     const targetState = states.find((state: AdbDeviceState) => state.deviceId === deviceId);
@@ -1251,7 +1265,6 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     signal: AbortSignal | undefined,
   ): Promise<void> {
     tracker.recoveryAttempted = true;
-    tracker.recoveryAt = now;
     const commandTimeoutMs = Math.max(
       0,
       Math.min(FRESH_OFFLINE_RECOVERY_COMMAND_TIMEOUT_MS, remainingMs),
@@ -1263,7 +1276,10 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     try {
       await this.adbFactory
         .create(null)
-        .executeCommand("reconnect offline", commandTimeoutMs, undefined, undefined, signal);
+        // One-shot recovery: noRetry keeps the real AdbClient from routing this
+        // through its retry executor (up to MAX_ADB_RETRIES + 1 executions), so
+        // one logical recovery issues exactly one reconnect command (#7054).
+        .executeCommand("reconnect offline", commandTimeoutMs, undefined, true, signal);
     } catch (error) {
       this.throwIfReadinessAborted(signal);
       // Best-effort recovery: a failed reconnect is diagnosed on the next poll
@@ -1273,6 +1289,12 @@ export class AndroidEmulatorClient implements AndroidEmulator {
         error,
       );
     }
+    // Start the recovery grace only once the reconnect settles (on success or a
+    // caught failure). Recording it before the awaited command would let a slow
+    // reconnect that runs near its timeout consume the entire grace window, so
+    // the next poll fails fast before the device has any chance to come back
+    // online (#7054).
+    tracker.recoveryAt = this.timer.now();
   }
 
   private targetReadinessState(targetState: AdbDeviceState | undefined): TargetReadinessState {

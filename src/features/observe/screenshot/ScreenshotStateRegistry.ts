@@ -34,6 +34,12 @@ export interface ScreenshotStateStore {
     path?: string,
     error?: string,
   ): void;
+  /** Register a screenshot write that will later be committed for this observation. */
+  beginObservation(deviceId: string, observationId: string): void;
+  /** Wait for this observation's registered screenshot write, or its timeout. */
+  waitForObservation(deviceId: string, observationId: string, timeoutMs: number): Promise<void>;
+  /** Whether this observation still has a registered screenshot write in flight. */
+  isObservationPending(deviceId: string, observationId: string): boolean;
   getPath(deviceId?: string): string | undefined;
   getError(deviceId?: string): string | undefined;
   getPathForObservation(deviceId: string, observationId: string): string | undefined;
@@ -50,6 +56,7 @@ export interface ScreenshotStateStore {
 export class InMemoryScreenshotStateStore implements ScreenshotStateStore {
   private states: Map<string, ScreenshotState> = new Map();
   private observationStates: Map<string, Map<string, ScreenshotState>> = new Map();
+  private pendingObservationWaiters: Map<string, Map<string, Set<() => void>>> = new Map();
   private timer: Timer;
 
   constructor(timer: Timer = defaultTimer) {
@@ -85,6 +92,46 @@ export class InMemoryScreenshotStateStore implements ScreenshotStateStore {
       states.delete(oldestObservationId);
     }
     this.observationStates.set(deviceId, states);
+    this.completeObservation(deviceId, observationId);
+  }
+
+  beginObservation(deviceId: string, observationId: string): void {
+    const pendingForDevice = this.pendingObservationWaiters.get(deviceId);
+    if (pendingForDevice?.has(observationId)) {
+      return;
+    }
+    const pending = pendingForDevice ?? new Map<string, Set<() => void>>();
+    pending.set(observationId, new Set());
+    this.pendingObservationWaiters.set(deviceId, pending);
+  }
+
+  waitForObservation(deviceId: string, observationId: string, timeoutMs: number): Promise<void> {
+    const waiters = this.pendingObservationWaiters.get(deviceId)?.get(observationId);
+    if (!waiters) {
+      return Promise.resolve();
+    }
+
+    return new Promise<void>((resolve) => {
+      let settled = false;
+      const timeout: { id?: NodeJS.Timeout } = {};
+      const finish = () => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        waiters.delete(finish);
+        if (timeout.id) {
+          this.timer.clearTimeout(timeout.id);
+        }
+        resolve();
+      };
+      timeout.id = this.timer.setTimeout(finish, timeoutMs);
+      waiters.add(finish);
+    });
+  }
+
+  isObservationPending(deviceId: string, observationId: string): boolean {
+    return this.pendingObservationWaiters.get(deviceId)?.has(observationId) ?? false;
   }
 
   getPath(deviceId?: string): string | undefined {
@@ -109,9 +156,13 @@ export class InMemoryScreenshotStateStore implements ScreenshotStateStore {
     if (deviceId) {
       this.states.delete(deviceId);
       this.observationStates.delete(deviceId);
+      this.completeAllObservationsForDevice(deviceId);
     } else {
       this.states.clear();
       this.observationStates.clear();
+      for (const pendingDeviceId of [...this.pendingObservationWaiters.keys()]) {
+        this.completeAllObservationsForDevice(pendingDeviceId);
+      }
     }
   }
 
@@ -162,6 +213,31 @@ export class InMemoryScreenshotStateStore implements ScreenshotStateStore {
       return undefined;
     }
     return state;
+  }
+
+  private completeObservation(deviceId: string, observationId: string): void {
+    const pendingForDevice = this.pendingObservationWaiters.get(deviceId);
+    const waiters = pendingForDevice?.get(observationId);
+    if (!waiters) {
+      return;
+    }
+    pendingForDevice?.delete(observationId);
+    if (pendingForDevice?.size === 0) {
+      this.pendingObservationWaiters.delete(deviceId);
+    }
+    for (const resolve of waiters) {
+      resolve();
+    }
+  }
+
+  private completeAllObservationsForDevice(deviceId: string): void {
+    const pendingForDevice = this.pendingObservationWaiters.get(deviceId);
+    if (!pendingForDevice) {
+      return;
+    }
+    for (const observationId of [...pendingForDevice.keys()]) {
+      this.completeObservation(deviceId, observationId);
+    }
   }
 }
 

@@ -434,3 +434,31 @@ describe("observation arms advertise `settled` (#6866)", () => {
     ).toBe(false);
   });
 });
+
+describe("observation arms advertise observationId resource join keys", () => {
+  test("full observe, full action summary, and diff schemas parse it as a string", () => {
+    const observationId = "observation-123";
+
+    expect(observeResultSchema.parse({ observationId }).observationId).toBe(observationId);
+    expect(observationSummarySchema.parse({ observationId }).observationId).toBe(observationId);
+    expect(
+      observeDiffSchema.parse({
+        isDiff: true,
+        skeleton: [],
+        added: [],
+        removed: [],
+        changed: [],
+        observationId,
+      }).observationId,
+    ).toBe(observationId);
+  });
+
+  test("each advertised schema declares the optional join key", () => {
+    for (const schema of [observeResultSchema, observationSummarySchema, observeDiffSchema]) {
+      const json = toJSONSchema(schema) as Record<string, any>;
+      expect(json.properties.observationId).toBeDefined();
+      expect(json.properties.observationId.type).toBe("string");
+      expect(json.required ?? []).not.toContain("observationId");
+    }
+  });
+});

@@ -214,10 +214,11 @@ function resolveDiffContext(
  */
 function resolveDiffScreenState(
   rawObservation: ObserveResult,
-): Pick<ObserveDiff, "activeWindow" | "freshness" | "settled"> {
+): Pick<ObserveDiff, "activeWindow" | "freshness" | "observationId" | "settled"> {
   return {
     activeWindow: rawObservation.activeWindow,
     freshness: rawObservation.freshness,
+    observationId: rawObservation.observationId,
     settled: rawObservation.settled,
   };
 }

@@ -618,6 +618,12 @@ export interface ObserveDiff {
   keyboard?: ObserveResult["keyboard"];
   isDiff: true;
   /**
+   * The post-action observation's identifier, used to join this diff to its
+   * observation-scoped screenshot resource. Populated by the
+   * `finalizeToolResponse` call site, not by {@link diffObserveResult}.
+   */
+  observationId?: string;
+  /**
    * Actionable-only selector surface (issue #6221 items 1 and 4.1), ALWAYS
    * present alongside the diff — the same array a full observation's
    * `.skeleton` carries. Populated by the `finalizeToolResponse` call site from

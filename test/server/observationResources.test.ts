@@ -16,7 +16,9 @@ import {
 } from "../../src/server/observationResources";
 import {
   getScreenshotStateStore,
+  InMemoryScreenshotStateStore,
   resetScreenshotStateStore,
+  setScreenshotStateStore,
 } from "../../src/features/observe/screenshot/ScreenshotStateRegistry";
 import { ResourceRegistry, type ResourceReadContext } from "../../src/server/resourceRegistry";
 import {
@@ -693,6 +695,7 @@ describe("unscoped latest observation resources", () => {
 
   test("waits for a pending capture for the requested observation", async () => {
     const { observationId } = await cacheObservationFor(deviceA, "device-a-hierarchy");
+    getScreenshotStateStore().beginObservation(deviceA.deviceId, observationId);
     const gate = createGate();
     const image = Buffer.from("89504e470d0a1a0a", "hex");
     const job = ScreenshotJobTracker.startJob(deviceA.deviceId, async () => {
@@ -721,11 +724,74 @@ describe("unscoped latest observation resources", () => {
     await job.promise;
   });
 
+  test("waits for the observation-scoped write after the raw capture job resolves", async () => {
+    const { observationId } = await cacheObservationFor(deviceA, "device-a-hierarchy");
+    const gate = createGate();
+    const image = Buffer.from("89504e470d0a1a0a", "hex");
+    const store = getScreenshotStateStore();
+    store.beginObservation(deviceA.deviceId, observationId);
+    const job = ScreenshotJobTracker.startJob(deviceA.deviceId, async () => {
+      await gate.promise;
+      return { success: true, path: "/tmp/device-a-after-job.png" };
+    });
+    ScreenshotJobTracker.setTimer(new FakeTimer());
+    setScreenshotFileSystem({
+      stat: async () => ({ isFile: () => true }),
+      readFile: async () => image,
+    });
+
+    const screenshotPromise = readObservationScreenshot(deviceA.deviceId, observationId);
+    expect(await Promise.race([screenshotPromise, settleSentinel()])).toBe("still-pending");
+
+    gate.open();
+    await job.promise;
+
+    // `ScreenshotJobTracker.waitForCompletion` would have resolved above, but
+    // the recorder's later path-existence/write step has not completed yet.
+    expect(await Promise.race([screenshotPromise, settleSentinel()])).toBe("still-pending");
+    store.updateForObservation(deviceA.deviceId, observationId, "/tmp/device-a-after-job.png");
+
+    expect((await screenshotPromise).blob).toBe(image.toString("base64"));
+  });
+
+  test("does not wait behind a later queued fresh capture for another observation", async () => {
+    const { observationId } = await cacheObservationFor(deviceA, "device-a-hierarchy");
+    const gate = createGate();
+    const image = Buffer.from("89504e470d0a1a0a", "hex");
+    const store = getScreenshotStateStore();
+    store.beginObservation(deviceA.deviceId, observationId);
+    const observationJob = ScreenshotJobTracker.startJob(deviceA.deviceId, async () => {
+      await gate.promise;
+      store.updateForObservation(deviceA.deviceId, observationId, "/tmp/device-a-exact.png");
+      return { success: true, path: "/tmp/device-a-exact.png" };
+    });
+    ScreenshotJobTracker.startJob(
+      deviceA.deviceId,
+      async () => new Promise<ScreenshotResult>(() => {}),
+      { queueAfterPending: true },
+    );
+    ScreenshotJobTracker.setTimer(new FakeTimer());
+    setScreenshotFileSystem({
+      stat: async () => ({ isFile: () => true }),
+      readFile: async () => image,
+    });
+
+    const screenshotPromise = readObservationScreenshot(deviceA.deviceId, observationId);
+    expect(await Promise.race([screenshotPromise, settleSentinel()])).toBe("still-pending");
+
+    gate.open();
+    await observationJob.promise;
+
+    // The second job remains pending, but this resource is keyed to the first observation.
+    expect((await screenshotPromise).blob).toBe(image.toString("base64"));
+  });
+
   test("waits for the pending capture instead of serving a prior observation's screenshot", async () => {
     await cacheObservationFor(deviceA, "device-a-prior-hierarchy");
     getScreenshotStateStore().update(deviceA.deviceId, "/tmp/device-a-prior.png");
     cacheTimer.advanceTime(1);
     const { observationId } = await cacheObservationFor(deviceA, "device-a-current-hierarchy");
+    getScreenshotStateStore().beginObservation(deviceA.deviceId, observationId);
     const gate = createGate();
     const priorImage = Buffer.from("prior screenshot");
     const currentImage = Buffer.from("current screenshot");
@@ -756,6 +822,7 @@ describe("unscoped latest observation resources", () => {
 
   test("does not serve a newer screenshot when the requested observation is replaced while waiting", async () => {
     const { observationId } = await cacheObservationFor(deviceA, "device-a-hierarchy");
+    getScreenshotStateStore().beginObservation(deviceA.deviceId, observationId);
     const gate = createGate();
     const job = ScreenshotJobTracker.startJob(deviceA.deviceId, async () => {
       await gate.promise;
@@ -783,8 +850,10 @@ describe("unscoped latest observation resources", () => {
 
   test("does not use a stale device-wide screenshot after the exact capture wait times out", async () => {
     const { observationId } = await cacheObservationFor(deviceA, "device-a-hierarchy");
-    getScreenshotStateStore().update(deviceA.deviceId, "/tmp/stale.png");
     const timer = new FakeTimer();
+    setScreenshotStateStore(new InMemoryScreenshotStateStore(timer));
+    getScreenshotStateStore().beginObservation(deviceA.deviceId, observationId);
+    getScreenshotStateStore().update(deviceA.deviceId, "/tmp/stale.png");
     ScreenshotJobTracker.setTimer(timer);
     ScreenshotJobTracker.startJob(deviceA.deviceId, async () => new Promise(() => {}));
     setScreenshotFileSystem({

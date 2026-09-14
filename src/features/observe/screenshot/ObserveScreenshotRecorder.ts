@@ -86,6 +86,7 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     signal?: AbortSignal,
   ): void {
+    this.store.beginObservation(this.device.deviceId, observationId);
     perf.startOperation("screenshot");
     const handle = this.screenshotUtil.startTrackedCapture(
       {},
@@ -136,6 +137,7 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     signal?: AbortSignal,
   ): Promise<void> {
+    this.store.beginObservation(this.device.deviceId, observationId);
     await this.captureWithOptions(observationId, perf, signal, { coalesceWithPending: true });
   }
 
@@ -144,6 +146,7 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     signal?: AbortSignal,
   ): Promise<void> {
+    this.store.beginObservation(this.device.deviceId, observationId);
     await this.captureWithOptions(observationId, perf, signal, { queueAfterPending: true });
   }
 

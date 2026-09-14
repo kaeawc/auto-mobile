@@ -3493,6 +3493,10 @@
           "required": ["visible", "package"],
           "additionalProperties": false
         },
+        "observationId": {
+          "description": "Observation-scoped screenshot resource URI join key.",
+          "type": "string"
+        },
         "screenSize": {
           "type": "object",
           "properties": {
@@ -11200,6 +11204,10 @@
                   "type": "boolean",
                   "const": true
                 },
+                "observationId": {
+                  "description": "Observation-scoped screenshot resource URI join key.",
+                  "type": "string"
+                },
                 "skeleton": {
                   "description": "Always present alongside a diff (issue #6221 item 4.1): the same actionable-only selector surface a full observation's `skeleton` carries.",
                   "type": "array",
@@ -11574,6 +11582,10 @@
                 "isDiff": {
                   "type": "boolean",
                   "const": false
+                },
+                "observationId": {
+                  "description": "Observation-scoped screenshot resource URI join key.",
+                  "type": "string"
                 },
                 "selectedElements": {
                   "type": "array",

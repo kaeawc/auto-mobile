@@ -311,6 +311,26 @@ describe("DefaultObserveScreenshotRecorder.start", () => {
     expect(store.getPath("test-device")).toBe(file);
   });
 
+  test("start() registers its observation before returning", () => {
+    svc.setNextResult({ success: false, error: "still pending" });
+
+    recorder.start("observation-pending", new NoOpPerformanceTracker());
+
+    expect(store.hasPendingObservation("test-device", "observation-pending")).toBe(true);
+  });
+
+  test("awaitable capture methods register their observations before awaiting", async () => {
+    svc.setNextResult({ success: false, error: "still pending" });
+
+    const capture = recorder.capture("capture-observation", new NoOpPerformanceTracker());
+    expect(store.hasPendingObservation("test-device", "capture-observation")).toBe(true);
+    await capture;
+
+    const freshCapture = recorder.captureFresh("fresh-observation", new NoOpPerformanceTracker());
+    expect(store.hasPendingObservation("test-device", "fresh-observation")).toBe(true);
+    await freshCapture;
+  });
+
   test("start() with non-latest completion does not write state", async () => {
     svc.setNextIsLatest(false);
     svc.setNextResult({ success: true, path: "/tmp/x.png" });

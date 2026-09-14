@@ -17,6 +17,7 @@ import * as realFs from "fs/promises";
 import { errorMessage } from "../utils/describeUnknownError";
 import { OPERATION_CANCELLED_MESSAGE } from "../utils/constants";
 import { detectImageMimeType } from "../utils/screenshot/imageHeaderDimensions";
+import { getScreenshotStateStore } from "../features/observe/screenshot/ScreenshotStateRegistry";
 
 interface ScreenshotFileSystem {
   stat(path: string): Promise<{ isFile(): boolean }>;
@@ -347,18 +348,12 @@ async function waitForObservationScreenshot(
   deviceId: string,
   observationId: string,
 ): Promise<ResourceContent | undefined> {
-  if (!ScreenshotJobTracker.isPending(deviceId)) {
-    return undefined;
-  }
-
-  const completion = await ScreenshotJobTracker.waitForCompletion(
-    deviceId,
-    SCREENSHOT_CAPTURE_WAIT_TIMEOUT_MS,
-  );
+  const store = getScreenshotStateStore();
+  await store.waitForObservation(deviceId, observationId, SCREENSHOT_CAPTURE_WAIT_TIMEOUT_MS);
   if (!matchesObservationId(deviceId, observationId)) {
     return observationScreenshotUnknownError(uri, deviceId, observationId);
   }
-  if (completion === null || ScreenshotJobTracker.isPending(deviceId)) {
+  if (store.isObservationPending(deviceId, observationId)) {
     return observationScreenshotNotReadyError(uri, observationId);
   }
   return undefined;

@@ -171,6 +171,35 @@ describe("InMemoryScreenshotStateStore", () => {
     expect(store.getPathForObservation("device-A", "observation-A")).toBe("/tmp/exact.png");
   });
 
+  test("waits for the observation-scoped write, then settles on update", async () => {
+    const timer = new FakeTimer();
+    const store = new InMemoryScreenshotStateStore(timer);
+
+    store.beginObservation("device-A", "observation-A");
+    let settled = false;
+    const waiting = store.waitForObservation("device-A", "observation-A", 1_000).then(() => {
+      settled = true;
+    });
+
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    store.updateForObservation("device-A", "observation-A", "/tmp/exact.png");
+    await waiting;
+
+    expect(settled).toBe(true);
+  });
+
+  test("waitForObservation uses the injected timer for its timeout", async () => {
+    const timer = new FakeTimer();
+    const store = new InMemoryScreenshotStateStore(timer);
+
+    store.beginObservation("device-A", "observation-A");
+    const waiting = store.waitForObservation("device-A", "observation-A", 1_000);
+    timer.advanceTime(1_000);
+
+    await waiting;
+  });
+
   test("returns undefined when no state exists", () => {
     const store = new InMemoryScreenshotStateStore(new FakeTimer());
 

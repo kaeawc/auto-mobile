@@ -511,6 +511,10 @@ export const viewHierarchyResultSchema = z
 export const observationSummarySchema = z
   .object({
     isDiff: z.literal(false).optional(),
+    observationId: z
+      .string()
+      .optional()
+      .describe("Observation-scoped screenshot resource URI join key."),
     selectedElements: z.array(selectedElementSchema).optional(),
     focusedElement: elementSchema.optional(),
     accessibilityFocusedElement: elementSchema.optional(),
@@ -717,6 +721,10 @@ export const observeDiffSchema = z
   .object({
     keyboard: z.object({ visible: z.literal(true), package: z.string() }).optional(),
     isDiff: z.literal(true),
+    observationId: z
+      .string()
+      .optional()
+      .describe("Observation-scoped screenshot resource URI join key."),
     skeleton: z
       .array(skeletonElementSchema)
       .describe(
@@ -893,6 +901,10 @@ const perfSnapshotSchema = z.object({
 export const observeResultSchema = z
   .object({
     keyboard: z.object({ visible: z.literal(true), package: z.string() }).optional(),
+    observationId: z
+      .string()
+      .optional()
+      .describe("Observation-scoped screenshot resource URI join key."),
     screenSize: screenSizeSchema.optional(),
     systemInsets: systemInsetsSchema.optional(),
     insets: observationInsetsSchema.optional(),

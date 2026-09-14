@@ -5243,6 +5243,7 @@ async function reserveInitialDeviceForReadiness(
       boot.sourceImage?.name ?? boot.device.name,
       undefined,
       isDevicePoolAutolockEnabled() ? { mcpSessionId } : undefined,
+      true,
     ),
   );
 }
@@ -5318,6 +5319,23 @@ async function prepareStartDeviceRunnerReadiness(
 
 function getStartDevicePool(daemonState: DaemonState): DevicePool | undefined {
   return daemonState.isInitialized() ? daemonState.getDevicePool() : undefined;
+}
+
+function assertAndroidBootDidNotEnterRecovery(args: StartDeviceArgs, boot: DeviceBootResult): void {
+  if (args.platform !== "android") {
+    return;
+  }
+  const recoveryTargets = getStartDevicePool(
+    DaemonState.getInstance(),
+  )?.getRecoveringAndroidTargets();
+  if (
+    recoveryTargets?.serials.has(boot.device.deviceId) ||
+    recoveryTargets?.names.has(boot.device.name)
+  ) {
+    throw new ActionableError(
+      `Android device '${boot.device.name}' entered recovery while booting; retry the request.`,
+    );
+  }
 }
 
 /**
@@ -7439,6 +7457,10 @@ export function registerDeviceTools() {
       lifecycleCoordinator: deps.lifecycleCoordinator,
     });
     perf.startOperation("bootDevice");
+    const recoveryTargets =
+      args.platform === "android"
+        ? getStartDevicePool(DaemonState.getInstance())?.getRecoveringAndroidTargets()
+        : undefined;
     state.boot = await bootService.boot(
       {
         ...args,
@@ -7446,9 +7468,12 @@ export function registerDeviceTools() {
         timeoutMs: budgets.bootTimeoutMs,
         totalDeadlineMs: bootDeadlineMs,
         signal,
+        excludeDeviceNames: recoveryTargets?.names,
+        excludeDeviceIds: recoveryTargets?.serials,
       },
       progress ? { report: progress } : undefined,
     );
+    assertAndroidBootDidNotEnterRecovery(args, state.boot);
     perf.endOperation("bootDevice");
     validateBootIdentity(args, state.boot.device, state.boot.source, state.boot.sourceImage);
     validateRequestedAndroidSerial(

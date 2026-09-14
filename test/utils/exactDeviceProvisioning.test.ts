@@ -77,6 +77,37 @@ describe("DefaultExactDeviceProvisioner", () => {
     ]);
   });
 
+  test("cancellation while reading prevents a later config write", async () => {
+    const readStarted = Promise.withResolvers<void>();
+    const releaseRead = Promise.withResolvers<string>();
+    const writes: string[] = [];
+    const writer = new FileAndroidAvdConfigWriter({
+      readFile: async () => {
+        readStarted.resolve();
+        return await releaseRead.promise;
+      },
+      writeFile: async (_path, content) => {
+        writes.push(content);
+      },
+      environment: { ANDROID_AVD_HOME: "/avds" },
+      homeDirectory: () => "/home/test",
+    });
+    const controller = new AbortController();
+
+    const update = writer.setConfiguration(
+      "phone-api-36-a",
+      { memoryMb: 4096 },
+      { signal: controller.signal },
+    );
+    await readStarted.promise;
+    controller.abort();
+    await expect(update).rejects.toThrow("Operation cancelled");
+
+    releaseRead.resolve("hw.ramSize=2048\n");
+    await Promise.resolve();
+    expect(writes).toEqual([]);
+  });
+
   test("uses the same non-empty Android AVD home fallback as the config reader", async () => {
     const writes: Array<{ path: string; content: string }> = [];
     const writer = new FileAndroidAvdConfigWriter({

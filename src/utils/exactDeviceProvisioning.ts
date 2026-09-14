@@ -14,7 +14,7 @@ import { parseAndroidSystemImageRuntime } from "./android-cmdline-tools/AndroidS
 import { AvdManagerClient } from "./android-cmdline-tools/AvdManagerClient";
 import type { CreateAvdParams } from "./android-cmdline-tools/avdmanager";
 import { SimCtlClient } from "./ios-cmdline-tools/SimCtlClient";
-import { throwIfAborted } from "./toolUtils";
+import { awaitWhileRequestIsLive, throwIfAborted } from "./toolUtils";
 import { defaultTimer, type Timer } from "./SystemTimer";
 import {
   androidAvdConfigurationSchema,
@@ -111,9 +111,21 @@ export interface ExactIosSimulatorClient {
   ): Promise<string>;
 }
 
+export interface AndroidAvdConfigWriteOptions {
+  signal?: AbortSignal;
+}
+
 export interface AndroidAvdConfigWriter {
-  setMemoryMb(avdName: string, memoryMb: number): Promise<void>;
-  setConfiguration?(avdName: string, configuration: AndroidAvdConfiguration): Promise<void>;
+  setMemoryMb(
+    avdName: string,
+    memoryMb: number,
+    options?: AndroidAvdConfigWriteOptions,
+  ): Promise<void>;
+  setConfiguration?(
+    avdName: string,
+    configuration: AndroidAvdConfiguration,
+    options?: AndroidAvdConfigWriteOptions,
+  ): Promise<void>;
 }
 
 interface FileAndroidAvdConfigWriterDependencies {
@@ -132,6 +144,12 @@ function defaultAndroidAvdConfigWriterDependencies(): FileAndroidAvdConfigWriter
   };
 }
 
+function configWriteSignal(
+  options: AndroidAvdConfigWriteOptions | undefined,
+): AbortSignal | undefined {
+  return options?.signal;
+}
+
 /**
  * Applies a small, typed subset of AVD hardware configuration after
  * `avdmanager create avd`. The caller creates only default-path AVDs, so the
@@ -142,17 +160,27 @@ export class FileAndroidAvdConfigWriter implements AndroidAvdConfigWriter {
     private readonly dependencies: FileAndroidAvdConfigWriterDependencies = defaultAndroidAvdConfigWriterDependencies(),
   ) {}
 
-  async setMemoryMb(avdName: string, memoryMb: number): Promise<void> {
+  async setMemoryMb(
+    avdName: string,
+    memoryMb: number,
+    options?: AndroidAvdConfigWriteOptions,
+  ): Promise<void> {
     if (!Number.isInteger(memoryMb) || memoryMb <= 0) {
       throw new ProvisionDeviceError(
         "platform_command_failed",
         `Android AVD memoryMb must be a positive integer; got ${memoryMb}.`,
       );
     }
-    return this.setConfiguration(avdName, { memoryMb });
+    return this.setConfiguration(avdName, { memoryMb }, options);
   }
 
-  async setConfiguration(avdName: string, configuration: AndroidAvdConfiguration): Promise<void> {
+  async setConfiguration(
+    avdName: string,
+    configuration: AndroidAvdConfiguration,
+    options?: AndroidAvdConfigWriteOptions,
+  ): Promise<void> {
+    const signal = configWriteSignal(options);
+    throwIfAborted(signal);
     const validated = androidAvdConfigurationSchema.parse(configuration);
     const replacements = new Map<string, string>();
     for (const key of Object.keys(validated) as (keyof AndroidAvdConfiguration)[]) {
@@ -172,7 +200,13 @@ export class FileAndroidAvdConfigWriter implements AndroidAvdConfigWriter {
       this.dependencies.homeDirectory(),
     );
     const configPath = join(avdHome, `${avdName}.avd`, "config.ini");
-    const content = await this.dependencies.readFile(configPath, "utf8");
+    const content = await awaitWhileRequestIsLive(
+      this.dependencies.readFile(configPath, "utf8"),
+      signal,
+    );
+    // A timed-out provision may have rolled this AVD back while the read was
+    // pending. Never apply its captured content to a same-name replacement.
+    throwIfAborted(signal);
     const lines = content.split(/\r?\n/);
     const replaced = new Set<string>();
     const updated = lines.map((line) => {
@@ -192,6 +226,7 @@ export class FileAndroidAvdConfigWriter implements AndroidAvdConfigWriter {
       }
       updated.push(`${key}=${value}`, "");
     }
+    throwIfAborted(signal);
     await this.dependencies.writeFile(configPath, updated.join("\n"), "utf8");
   }
 }
@@ -257,17 +292,18 @@ export class DefaultExactDeviceProvisioner implements ExactDeviceProvisioner {
   private async configureAndroid(
     name: string,
     configuration: AndroidAvdConfiguration,
+    signal?: AbortSignal,
   ): Promise<void> {
     const writer = this.dependencies.androidConfigWriter;
     if (writer.setConfiguration) {
-      await writer.setConfiguration(name, configuration);
+      await writer.setConfiguration(name, configuration, { signal });
     } else if (Object.keys(configuration).some((key) => key !== "memoryMb")) {
       throw new ProvisionDeviceError(
         "unsupported",
         "The configured AVD writer does not support emulator hardware controls.",
       );
     } else if (configuration.memoryMb !== undefined) {
-      await writer.setMemoryMb(name, configuration.memoryMb);
+      await writer.setMemoryMb(name, configuration.memoryMb, { signal });
     }
   }
   private readonly lifecycleCoordinator: VirtualDeviceLifecycleCoordinator;
@@ -465,7 +501,7 @@ export class DefaultExactDeviceProvisioner implements ExactDeviceProvisioner {
       !existing.isRunning &&
       sameAndroidDeviceIdentity(spec, config)
     ) {
-      await this.configureAndroid(existing.name, spec.configuration);
+      await this.configureAndroid(existing.name, spec.configuration, request.signal);
       const reconciled = await this.dependencies.androidConfigReader.readConfig(existing.name);
       if (sameAndroidSpecification(spec, reconciled)) {
         return;
@@ -516,7 +552,7 @@ export class DefaultExactDeviceProvisioner implements ExactDeviceProvisioner {
       );
     }
     if (spec.configuration) {
-      await this.configureAndroid(request.name, spec.configuration);
+      await this.configureAndroid(request.name, spec.configuration, request.signal);
     }
     return {
       created: true,

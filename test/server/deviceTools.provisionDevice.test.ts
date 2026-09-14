@@ -14,6 +14,10 @@ import type {
   ExactDeviceProvisioner,
   ExactProvisionedDevice,
 } from "../../src/utils/exactDeviceProvisioning";
+import {
+  DefaultExactDeviceProvisioner,
+  FileAndroidAvdConfigWriter,
+} from "../../src/utils/exactDeviceProvisioning";
 import type { ProvisionDeviceOperationStore } from "../../src/db/provisionDeviceOperationRepository";
 import { ProvisionDeviceOperationConflictError } from "../../src/db/provisionDeviceOperationRepository";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
@@ -1252,6 +1256,98 @@ describe("provisionDevice handler", () => {
       cleanup: { status: "succeeded", operationId: "cleanup-partial-android" },
     });
     expect(await deviceManager.listDeviceImages("android")).toEqual([]);
+  });
+
+  test("cancelled exact configuration cannot overwrite a replacement AVD after rollback", async () => {
+    const timer = new FakeTimer();
+    const lifecycleCoordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);
+    const readStarted = Promise.withResolvers<void>();
+    const releaseRead = Promise.withResolvers<void>();
+    let config = "hw.ramSize=2048\n";
+    const configWriter = new FileAndroidAvdConfigWriter({
+      readFile: async () => {
+        const captured = config;
+        readStarted.resolve();
+        await releaseRead.promise;
+        return captured;
+      },
+      writeFile: async (_path, content) => {
+        config = content;
+      },
+      environment: { ANDROID_AVD_HOME: "/avds" },
+      homeDirectory: () => "/home/test",
+    });
+    configureProvisionBootAndTeardown(deviceManager, "android");
+    setDeviceToolsDependencies({
+      timer,
+      lifecycleCoordinator,
+      exactDeviceProvisionerFactory: (manager, creationGate) =>
+        new DefaultExactDeviceProvisioner({
+          listDeviceImages: async (platform) => await manager.listDeviceImages(platform),
+          isCreationAllowed: (createIfMissing) => creationGate.isCreationAllowed(createIfMissing),
+          avdManager: {
+            createAvd: async ({ name }) => {
+              deviceManager.setDeviceImages("android", [
+                { name, platform: "android", isRunning: false },
+              ]);
+              return { success: true, message: "created", avdName: name };
+            },
+          },
+          androidConfigReader: {
+            readConfig: async () => undefined,
+          },
+          androidConfigWriter: configWriter,
+          iosSimulator: {
+            createSimulator: async () => {
+              throw new Error("unexpected iOS simulator creation");
+            },
+          },
+          lifecycleCoordinator,
+          timer,
+        }),
+      idGenerator: new FakeIdGenerator(["attempt-cancelled-config", "cleanup-cancelled-config"]),
+    });
+    registerDeviceTools();
+    const baseArgs = provisionTestArgs("android", "operation-cancelled-config");
+    const args = {
+      ...baseArgs,
+      device: {
+        ...baseArgs.device,
+        spec: {
+          ...baseArgs.device.spec,
+          configuration: { memoryMb: 4096 },
+        },
+      },
+      boot: false,
+      readiness: "none" as const,
+      timeoutMs: 1_000,
+    };
+
+    const responsePromise = ToolRegistry.getTool("provisionDevice")!.handler(args);
+    await readStarted.promise;
+    timer.advanceTime(1_000);
+    const response = JSON.parse(((await responsePromise) as any).content[0].text);
+
+    expect(response).toMatchObject({
+      success: false,
+      error: { code: "timeout" },
+      cleanup: {
+        status: "succeeded",
+        state: "destroyed",
+      },
+    });
+    expect(await deviceManager.listDeviceImages("android")).toEqual([]);
+
+    deviceManager.setDeviceImages("android", [
+      { name: args.device.name, platform: "android", isRunning: false },
+    ]);
+    config = "hw.ramSize=8192\n";
+    releaseRead.resolve();
+    for (let drain = 0; drain < 10; drain++) {
+      await Promise.resolve();
+    }
+
+    expect(config).toBe("hw.ramSize=8192\n");
   });
 
   test("keeps a committed provision when the post-commit resource notification fails", async () => {

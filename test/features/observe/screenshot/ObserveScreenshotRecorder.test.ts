@@ -228,6 +228,8 @@ describe("DefaultObserveScreenshotRecorder.capture", () => {
 
     expect(store.getUpdateCount()).toBe(0);
     expect(store.getPathForObservation("test-device", "observation")).toBeUndefined();
+    expect(store.getErrorForObservation("test-device", "observation")).toBe("capture cancelled");
+    expect(store.isObservationPending("test-device", "observation")).toBe(false);
   });
 
   test("non-latest completion does not write to store", async () => {
@@ -238,6 +240,21 @@ describe("DefaultObserveScreenshotRecorder.capture", () => {
 
     expect(store.getUpdateCount()).toBe(0);
     expect(store.getPathForObservation("test-device", "observation")).toBeUndefined();
+    expect(store.getErrorForObservation("test-device", "observation")).toBe("capture superseded");
+    expect(store.isObservationPending("test-device", "observation")).toBe(false);
+  });
+
+  test("late cancellation does not replace a path already recorded for the observation", async () => {
+    store.updateForObservation("test-device", "observation", "/tmp/already-recorded.png");
+    svc.setNextAborted(true);
+    svc.setNextResult({ success: true, path: "/tmp/stale.png" });
+
+    await recorder.capture("observation", new NoOpPerformanceTracker());
+
+    expect(store.getPathForObservation("test-device", "observation")).toBe(
+      "/tmp/already-recorded.png",
+    );
+    expect(store.getErrorForObservation("test-device", "observation")).toBeUndefined();
   });
 
   test("thrown error from capture writes to store", async () => {
@@ -340,6 +357,8 @@ describe("DefaultObserveScreenshotRecorder.start", () => {
     await svc.lastCapturePromise();
 
     expect(store.getUpdateCount()).toBe(0);
+    expect(store.getErrorForObservation("test-device", "observation")).toBe("capture superseded");
+    expect(store.isObservationPending("test-device", "observation")).toBe(false);
   });
 
   test("start() with aborted completion does not write state", async () => {
@@ -351,6 +370,8 @@ describe("DefaultObserveScreenshotRecorder.start", () => {
     await svc.lastCapturePromise();
 
     expect(store.getUpdateCount()).toBe(0);
+    expect(store.getErrorForObservation("test-device", "observation")).toBe("capture cancelled");
+    expect(store.isObservationPending("test-device", "observation")).toBe(false);
   });
 
   test("start() with failed capture writes error", async () => {

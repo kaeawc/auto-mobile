@@ -724,6 +724,46 @@ describe("unscoped latest observation resources", () => {
     await job.promise;
   });
 
+  test("returns a typed cancellation error promptly when the capture aborts", async () => {
+    const { observationId } = await cacheObservationFor(deviceA, "device-a-hierarchy");
+    const timer = new FakeTimer();
+    const store = new InMemoryScreenshotStateStore(timer);
+    setScreenshotStateStore(store);
+    store.beginObservation(deviceA.deviceId, observationId);
+
+    const screenshotPromise = readObservationScreenshot(deviceA.deviceId, observationId);
+    expect(await Promise.race([screenshotPromise, settleSentinel()])).toBe("still-pending");
+
+    store.endObservation(deviceA.deviceId, observationId, "capture cancelled");
+    timer.advanceTime(1);
+    const screenshot = await screenshotPromise;
+
+    expect(timer.now()).toBe(1);
+    expect(screenshot.mimeType).toBe("application/json");
+    expect(screenshot.text).toContain("capture cancelled");
+  });
+
+  test("returns a typed superseded error promptly for a stale capture", async () => {
+    const { observationId } = await cacheObservationFor(deviceA, "device-a-hierarchy");
+    const timer = new FakeTimer();
+    const store = new InMemoryScreenshotStateStore(timer);
+    setScreenshotStateStore(store);
+    store.beginObservation(deviceA.deviceId, observationId);
+    // The first capture is terminally superseded while a newer capture is still in flight.
+    store.beginObservation(deviceA.deviceId, observationId);
+
+    const screenshotPromise = readObservationScreenshot(deviceA.deviceId, observationId);
+    expect(await Promise.race([screenshotPromise, settleSentinel()])).toBe("still-pending");
+
+    store.endObservation(deviceA.deviceId, observationId, "capture superseded");
+    timer.advanceTime(1);
+    const screenshot = await screenshotPromise;
+
+    expect(timer.now()).toBe(1);
+    expect(screenshot.mimeType).toBe("application/json");
+    expect(screenshot.text).toContain("capture superseded");
+  });
+
   test("waits for the observation-scoped write after the raw capture job resolves", async () => {
     const { observationId } = await cacheObservationFor(deviceA, "device-a-hierarchy");
     const gate = createGate();

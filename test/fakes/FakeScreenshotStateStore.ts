@@ -84,6 +84,16 @@ export class FakeScreenshotStateStore implements ScreenshotStateStore {
     return this.pendingObservations.has(this.observationKey(deviceId, observationId));
   }
 
+  endObservation(deviceId: string, observationId: string, reason: string): void {
+    const existing = this.observationStates.get(deviceId)?.get(observationId);
+    // A late cancellation must not replace a real path or error recorded by another capture.
+    if (!existing || (existing.path === null && existing.error === null)) {
+      this.updateForObservation(deviceId, observationId, undefined, reason);
+      return;
+    }
+    this.completeObservation(deviceId, observationId);
+  }
+
   getPath(deviceId?: string): string | undefined {
     const state = this.findLatest(deviceId);
     return state?.path ?? undefined;

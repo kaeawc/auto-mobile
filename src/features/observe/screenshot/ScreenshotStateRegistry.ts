@@ -40,6 +40,8 @@ export interface ScreenshotStateStore {
   waitForObservation(deviceId: string, observationId: string, timeoutMs: number): Promise<void>;
   /** Whether this observation still has a registered screenshot write in flight. */
   isObservationPending(deviceId: string, observationId: string): boolean;
+  /** Record terminal cancellation evidence without replacing an existing result. */
+  endObservation(deviceId: string, observationId: string, reason: string): void;
   getPath(deviceId?: string): string | undefined;
   getError(deviceId?: string): string | undefined;
   getPathForObservation(deviceId: string, observationId: string): string | undefined;
@@ -132,6 +134,16 @@ export class InMemoryScreenshotStateStore implements ScreenshotStateStore {
 
   isObservationPending(deviceId: string, observationId: string): boolean {
     return this.pendingObservationWaiters.get(deviceId)?.has(observationId) ?? false;
+  }
+
+  endObservation(deviceId: string, observationId: string, reason: string): void {
+    const existing = this.findObservation(deviceId, observationId);
+    // A late cancellation must not replace a real path or error recorded by another capture.
+    if (!existing || (existing.path === null && existing.error === null)) {
+      this.updateForObservation(deviceId, observationId, undefined, reason);
+      return;
+    }
+    this.completeObservation(deviceId, observationId);
   }
 
   getPath(deviceId?: string): string | undefined {

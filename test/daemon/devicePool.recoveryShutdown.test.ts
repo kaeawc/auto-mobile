@@ -3,6 +3,10 @@ import type { ChildProcess } from "node:child_process";
 import { Daemon } from "../../src/daemon/daemon";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool, type PooledDevice } from "../../src/daemon/devicePool";
+import {
+  InMemoryEmulatorLossIncidentStore,
+  type EmulatorLossIncidentStore,
+} from "../../src/daemon/emulatorLossIncident";
 import { SessionManager, type Session } from "../../src/daemon/sessionManager";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
@@ -47,9 +51,58 @@ class BlockingRecoveryReadyManager extends LaggingShutdownManager {
   }
 }
 
+class PerAvdBlockingReadyManager extends LaggingShutdownManager {
+  readonly kills: string[] = [];
+  private readonly readinessStarted = new Map<string, PromiseWithResolvers<void>>();
+  private readonly readinessReleases = new Map<string, PromiseWithResolvers<void>>();
+
+  private gate(map: Map<string, PromiseWithResolvers<void>>, avdName: string) {
+    let gate = map.get(avdName);
+    if (!gate) {
+      gate = Promise.withResolvers<void>();
+      map.set(avdName, gate);
+    }
+    return gate;
+  }
+  override async killDevice(device: BootedDevice): Promise<void> {
+    this.kills.push(device.deviceId);
+  }
+  override async startDevice(device: DeviceInfo): Promise<ChildProcess> {
+    this.startedDevices.push(device);
+    return { pid: 0 } as ChildProcess;
+  }
+  override async waitForDeviceReady(device: DeviceInfo): Promise<BootedDevice> {
+    this.gate(this.readinessStarted, device.name).resolve();
+    await this.gate(this.readinessReleases, device.name).promise;
+    const ready: BootedDevice = {
+      name: device.name,
+      platform: "android",
+      deviceId: `${device.name}-replacement`,
+    };
+    this.bootedDevices = [...this.bootedDevices, ready];
+    return ready;
+  }
+  readinessStartedFor(avdName: string): Promise<void> {
+    return this.gate(this.readinessStarted, avdName).promise;
+  }
+  releaseReadinessFor(avdName: string): void {
+    this.gate(this.readinessReleases, avdName).resolve();
+  }
+}
+class FailingGetIncidentStore extends InMemoryEmulatorLossIncidentStore {
+  failGets = false;
+  override async get(incidentId: string) {
+    if (this.failGets) {
+      throw new Error("incident repository unavailable");
+    }
+    return await super.get(incidentId);
+  }
+}
+
 async function setup(
   manager: LaggingShutdownManager = new LaggingShutdownManager(),
   cancelDeviceSessionExecutions?: (sessionId: string, reason: string) => Promise<number>,
+  emulatorLossIncidentStore?: EmulatorLossIncidentStore,
 ) {
   const timer = new FakeTimer();
   const sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
@@ -67,7 +120,7 @@ async function setup(
     undefined,
     { onLoss: true, maxAttempts: 1 },
     undefined,
-    undefined,
+    emulatorLossIncidentStore,
     cancelDeviceSessionExecutions,
   );
   manager.bootedDevices = [original];
@@ -625,6 +678,115 @@ test("release fires while awaiting incident-store persistence", async () => {
     expect(await recovery).toBe("released");
     expect((await pool.waitForEmulatorLossIncident(incidentId, 0))?.recovery.outcome).toBeDefined();
     assertNoRecoveryReservationsRemain(pool, "session");
+  } finally {
+    sessions.stopCleanupTimer();
+  }
+});
+
+test("release with an unavailable incident repository still finalizes the released record", async () => {
+  const cancellation = Promise.withResolvers<number>();
+  const cancellationStarted = Promise.withResolvers<void>();
+  const store = new FailingGetIncidentStore(new FakeTimer());
+  const { sessions, pool, captured } = await setup(
+    undefined,
+    async () => {
+      cancellationStarted.resolve();
+      return await cancellation.promise;
+    },
+    store,
+  );
+  const internals = pool as unknown as DevicePoolRecoveryInternals;
+  const incidentId = await pool.recordEmulatorLossIncident(
+    original.deviceId,
+    "device-discovery-miss",
+    undefined,
+    "absent",
+  );
+  if (!incidentId) {
+    throw new Error("Expected emulator-loss incident to be recorded");
+  }
+  try {
+    const recovery = pool.recoverSessionBoundAndroidDeviceAfterLoss(
+      original.deviceId,
+      incidentId,
+      captured,
+    );
+    await cancellationStarted.promise;
+    await sessions.releaseSession("session", "explicit-release");
+    store.failGets = true;
+    cancellation.resolve(0);
+
+    expect(await recovery).toBe("released");
+    expect(internals.failedTerminalRecoveryReleases.has("session")).toBe(false);
+    assertNoRecoveryReservationsRemain(pool, "session");
+  } finally {
+    sessions.stopCleanupTimer();
+  }
+});
+
+test("a stale due-recovery snapshot does not finalize a record another sweep is recovering", async () => {
+  const manager = new PerAvdBlockingReadyManager();
+  const { timer, sessions, pool, captured } = await setup(manager);
+  const internals = pool as unknown as DevicePoolRecoveryInternals;
+  const second: BootedDevice = {
+    name: "Pixel_8_API_35_2",
+    platform: "android",
+    deviceId: "emulator-5556",
+  };
+  const secondImage: DeviceInfo = { ...image, name: second.name };
+  manager.bootedDevices = [original, second];
+  await pool.addDevice(second, secondImage);
+  await pool.bindOrReuseDeviceSession(
+    "session-2",
+    second.deviceId,
+    "android",
+    secondImage,
+    undefined,
+    second,
+  );
+  const capturedSecond = pool.getDevice(second.deviceId)!;
+  try {
+    for (const [deviceId, device] of [
+      [original.deviceId, captured],
+      [second.deviceId, capturedSecond],
+    ] as const) {
+      const recovery = pool.recoverSessionBoundAndroidDeviceAfterLoss(deviceId, undefined, device);
+      await flush();
+      timer.advanceTime(30_000);
+      expect(await recovery).toBe("deferred");
+    }
+    expect(manager.kills).toEqual([original.deviceId, second.deviceId]);
+
+    manager.bootedDevices = [];
+    timer.advanceTime(30_000);
+    const sweepA = pool.retryDueDeferredSessionRecoveries();
+    await manager.readinessStartedFor(original.name);
+    const sweepB = pool.retryDueDeferredSessionRecoveries();
+    await manager.readinessStartedFor(second.name);
+    expect(manager.startedDevices.map((device) => device.name)).toEqual([
+      original.name,
+      second.name,
+    ]);
+
+    await sessions.releaseSession("session-2", "explicit-release");
+    manager.releaseReadinessFor(original.name);
+    await sweepA;
+
+    // Sweep B still owns session-2's reboot: sweep A must leave its record alone.
+    expect(internals.sessionPreservingRecoveries.has("session-2")).toBe(true);
+    expect(internals.recoveringSessionLosses.has("session-2")).toBe(true);
+    expect(internals.adbServerResetQuarantinedSessions.has("session-2")).toBe(true);
+    expect(internals.recoveringAndroidImages.has(second.name)).toBe(true);
+    expect(sessions.getSession("session")?.assignedDevice).toBe(`${original.name}-replacement`);
+
+    manager.releaseReadinessFor(second.name);
+    await sweepB;
+    expect(manager.startedDevices).toHaveLength(2);
+    expect(internals.sessionPreservingRecoveries.has("session-2")).toBe(false);
+    expect(internals.recoveringSessionLosses.has("session-2")).toBe(false);
+    expect(internals.adbServerResetQuarantinedSessions.has("session-2")).toBe(false);
+    expect(internals.recoveringAndroidImages.has(second.name)).toBe(false);
+    expect(internals.recoveringAndroidImageSettlements.has(second.name)).toBe(false);
   } finally {
     sessions.stopCleanupTimer();
   }

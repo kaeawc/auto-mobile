@@ -914,7 +914,49 @@ export class DevicePool {
     if (record.state !== "released") {
       return;
     }
-    await this.refreshEmulatorLossRecoverySettlement(incidentId, "exhausted");
+    try {
+      await this.refreshEmulatorLossRecoverySettlement(incidentId, "exhausted");
+    } catch (error) {
+      // Diagnostics persistence is best-effort here: the session is already
+      // released, so the caller must still finalize the record and clear its
+      // reservations instead of recording a failed terminal release.
+      logger.warn(
+        `[DevicePool] Failed to refresh released recovery incident ${incidentId ?? "unknown"} for session ${record.sessionId}: ${error}`,
+        error,
+      );
+    }
+  }
+
+  /**
+   * A release that landed during recovery makes a later cleanup failure a
+   * diagnostics problem, not a terminal-release failure: the record is
+   * finalized instead of fenced behind `failed-release`.
+   */
+  private async finalizeReleasedRecoveryAfterCleanupFailure(
+    record: AndroidRecoveryRecord,
+    incidentId: string | undefined,
+    cleanupError: unknown,
+  ): Promise<boolean> {
+    if (!(await this.finalizeReleasedRecoveryAfterAwait(record, incidentId))) {
+      return false;
+    }
+    logger.warn(
+      `[DevicePool] Session ${record.sessionId} was released before its recovery cleanup failed; finalized without a terminal release: ${cleanupError}`,
+      cleanupError,
+    );
+    return true;
+  }
+
+  /**
+   * Finalizes a released record only when no recovery still owns it; an
+   * in-flight recovery finalizes its own record once its awaits return.
+   */
+  private finalizeUnownedReleasedRecoveryRecord(sessionId: string): boolean {
+    const record = this.recoveringSessionLosses.get(sessionId);
+    if (record?.state !== "released" || this.sessionPreservingRecoveries.has(sessionId)) {
+      return false;
+    }
+    return this.finalizeRecoveryRecord(sessionId, record);
   }
 
   /**
@@ -2819,9 +2861,13 @@ export class DevicePool {
         !this.sessionPreservingRecoveries.has(sessionId),
     );
     for (const [sessionId, loss] of dueRecoveries) {
-      const currentRecord = this.recoveringSessionLosses.get(sessionId);
-      if (currentRecord?.state === "released") {
-        this.finalizeRecoveryRecord(sessionId, currentRecord);
+      // The snapshot goes stale while an earlier entry is awaited: another
+      // sweep may own this session's recovery by now, and a release that
+      // landed during that reboot is finalized by its owner, not here.
+      if (
+        this.finalizeUnownedReleasedRecoveryRecord(sessionId) ||
+        !this.isDueDeferredRecoveryStillCurrent(sessionId, loss)
+      ) {
         continue;
       }
       if (loss.expectedDevice) {
@@ -2837,10 +2883,19 @@ export class DevicePool {
           this.devices.get(loss.deviceId),
         );
       }
-      if (loss.state === "released") {
-        this.finalizeRecoveryRecord(sessionId, loss);
-      }
+      this.finalizeUnownedReleasedRecoveryRecord(sessionId);
     }
+  }
+
+  private isDueDeferredRecoveryStillCurrent(
+    sessionId: string,
+    snapshot: AndroidRecoveryRecord,
+  ): boolean {
+    return (
+      this.recoveringSessionLosses.get(sessionId) === snapshot &&
+      snapshot.state === "deferred" &&
+      !this.sessionPreservingRecoveries.has(sessionId)
+    );
   }
 
   private async performSessionPreservingRecovery(
@@ -2902,19 +2957,12 @@ export class DevicePool {
         complete = result === "released";
         return result;
       }
-      try {
-        await this.releasePreservedSessionAfterRecoveryFailure(device, session, incidentId);
-        complete = true;
-      } catch (releaseError) {
-        this.markAndroidRecoveryReleaseFailure(record);
-        await this.completeEmulatorLossRecovery(incidentId, "exhausted");
-        this.settleEmulatorLossIncident(incidentId);
-        logger.warn(
-          `[DevicePool] Failed to release session ${sessionId} after recovery error: ${releaseError}`,
-          releaseError,
-        );
-        throw releaseError;
+      if (
+        await this.releasePreservedSessionAfterRecoveryError(record, device, session, incidentId)
+      ) {
+        return "released";
       }
+      complete = true;
       logger.warn(
         `[DevicePool] Session-preserving recovery failed for ${device.id}: ${error}`,
         error,
@@ -2925,6 +2973,38 @@ export class DevicePool {
         this.finalizeRecoveryRecord(sessionId, record);
         this.settleEmulatorLossIncident(incidentId);
       }
+    }
+  }
+
+  /**
+   * Releases the preserved session after a recovery error. Returns true when
+   * the record was already finalized because an explicit release landed
+   * mid-recovery; otherwise the caller finalizes it. A genuine release failure
+   * fences the record behind `failed-release` and rethrows.
+   */
+  private async releasePreservedSessionAfterRecoveryError(
+    record: AndroidRecoveryRecord,
+    device: PooledDevice,
+    session: Session,
+    incidentId: string | undefined,
+  ): Promise<boolean> {
+    try {
+      await this.releasePreservedSessionAfterRecoveryFailure(device, session, incidentId);
+      return false;
+    } catch (releaseError) {
+      if (
+        await this.finalizeReleasedRecoveryAfterCleanupFailure(record, incidentId, releaseError)
+      ) {
+        return true;
+      }
+      this.markAndroidRecoveryReleaseFailure(record);
+      await this.completeEmulatorLossRecovery(incidentId, "exhausted");
+      this.settleEmulatorLossIncident(incidentId);
+      logger.warn(
+        `[DevicePool] Failed to release session ${session.sessionId} after recovery error: ${releaseError}`,
+        releaseError,
+      );
+      throw releaseError;
     }
   }
 
@@ -3146,6 +3226,11 @@ export class DevicePool {
         }
         complete = true;
       } catch (releaseError) {
+        if (
+          await this.finalizeReleasedRecoveryAfterCleanupFailure(record, incidentId, releaseError)
+        ) {
+          return "released";
+        }
         this.markAndroidRecoveryReleaseFailure(record);
         await this.completeEmulatorLossRecovery(incidentId, "exhausted");
         logger.warn(

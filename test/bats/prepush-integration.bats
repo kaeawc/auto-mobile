@@ -1,4 +1,8 @@
 #!/usr/bin/env bats
+# bats file_tags=serial
+# Deletes and renames the tracked scripts/release/runtime-graph.json in the
+# real working tree, racing concurrent parallel-pass readers. See
+# scripts/ci/run-bats.sh and test/scripts/batsSerialTags.test.ts.
 
 ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/../.." && pwd)"
 SCRIPT="$ROOT/scripts/prepush-integration.sh"

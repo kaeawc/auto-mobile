@@ -1,7 +1,8 @@
 import type { ObserveResult } from "../../models";
 import type { ObserveScreen } from "./interfaces/ObserveScreen";
 import { Timer } from "../../utils/SystemTimer";
-import { throwIfAborted } from "../../utils/toolUtils";
+import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
+import { logger } from "../../utils/logger";
 import { hierarchyUpdatedAtToMillis } from "./observeTimestamp";
 
 /**
@@ -127,6 +128,41 @@ function nextPollMinTimestamp(
 }
 
 /**
+ * Await terminal best-effort work only while this poll still has budget and its
+ * request remains live. Losing either race leaves the underlying work running:
+ * its eventual settlement is observed here so it cannot become unhandled.
+ */
+async function awaitFinalizationWhilePollIsLive(
+  workPromise: Promise<void>,
+  timer: Timer,
+  remainingMs: number,
+  signal?: AbortSignal,
+): Promise<void> {
+  const result = await Promise.race([
+    awaitWhileRequestIsLive(workPromise, signal).then(() => "settled" as const),
+    timer.sleep(Math.max(0, remainingMs)).then(() => "deadline" as const),
+  ]).catch((error: unknown) => {
+    if (signal?.aborted) {
+      return "aborted" as const;
+    }
+    throw error;
+  });
+
+  if (result === "settled") {
+    return;
+  }
+
+  void workPromise
+    .then(() => {
+      logger.debug("[ObservePoll] Background terminal finalization settled after poll completion");
+    })
+    .catch((error: unknown) => {
+      // A late best-effort persistence failure cannot change an already-returned observation.
+      logger.debug(`[ObservePoll] Background terminal finalization failed: ${error}`);
+    });
+}
+
+/**
  * Poll `observeScreen` until `onObservation` returns true or the budget expires.
  *
  * Freshness lives in ONE clock domain end-to-end — the device-authored
@@ -198,8 +234,16 @@ export async function pollObserveUntil(
       canProcessRecomposition &&
       observeScreen.processRecomposition
     ) {
-      await observeScreen.processRecomposition(outcome.observation);
-      await observeScreen.cacheObserveResult?.(outcome.observation, generation);
+      const workPromise = (async (): Promise<void> => {
+        await observeScreen.processRecomposition!(outcome.observation);
+        await observeScreen.cacheObserveResult?.(outcome.observation, generation);
+      })();
+      await awaitFinalizationWhilePollIsLive(
+        workPromise,
+        timer,
+        options.timeoutMs - (timer.now() - start),
+        options.signal,
+      );
     }
     return outcome;
   };

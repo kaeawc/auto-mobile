@@ -19,6 +19,7 @@ export class FakeObserveScreen implements ObserveScreen {
   private accessibilityAuditCallCount: number = 0;
   private processRecompositionCallCount: number = 0;
   private cacheObserveResultCallCount: number = 0;
+  private neverResolvingOperations: Set<string> = new Set();
   private getMostRecentCachedObserveResultCallCount: number = 0;
   private failures: Map<string, Error> = new Map();
   private callCounter: number = 0;
@@ -131,6 +132,18 @@ export class FakeObserveScreen implements ObserveScreen {
       this.failures.delete(operation);
     } else {
       this.failures.set(operation, error);
+    }
+  }
+
+  /** Keep a configured async operation pending so timer-bound callers can be tested. */
+  setNeverResolving(
+    operation: "processRecomposition" | "cacheObserveResult",
+    enabled: boolean,
+  ): void {
+    if (enabled) {
+      this.neverResolvingOperations.add(operation);
+    } else {
+      this.neverResolvingOperations.delete(operation);
     }
   }
 
@@ -274,6 +287,10 @@ export class FakeObserveScreen implements ObserveScreen {
     this.processRecompositionCallCount++;
     this.recompositionObservations.push(observation);
 
+    if (this.neverResolvingOperations.has("processRecomposition")) {
+      return await new Promise<void>(() => {});
+    }
+
     const error = this.failures.get("processRecomposition");
     if (error) {
       throw error;
@@ -294,6 +311,10 @@ export class FakeObserveScreen implements ObserveScreen {
     this.cacheObserveResultCallCount++;
     this.cachedObserveResultObservations.push(observation);
     this.cachedObserveResultGenerations.push(generation);
+
+    if (this.neverResolvingOperations.has("cacheObserveResult")) {
+      return await new Promise<void>(() => {});
+    }
 
     const error = this.failures.get("cacheObserveResult");
     if (error) {

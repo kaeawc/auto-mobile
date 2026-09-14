@@ -340,6 +340,57 @@ describe("pollObserveUntil minTimestamp floor (#6284)", () => {
 });
 
 describe("pollObserveUntil recomposition tracking (#6932)", () => {
+  test("returns the terminal observation when cache finalization exceeds the remaining poll budget", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const fake = new FakeObserveScreen();
+    const terminal = obs(20, "terminal");
+    fake.setObserveResult(terminal);
+    fake.setNeverResolving("cacheObserveResult", true);
+
+    const outcomePromise = pollObserveUntil(
+      fake,
+      timer,
+      { timeoutMs: 100, pollMs: 10, initialMinTimestampMs: 10, skipRecompositionTracking: true },
+      () => true,
+    );
+
+    const outcome = await outcomePromise;
+
+    expect(outcome.observation).toBe(terminal);
+    expect(fake.getProcessRecompositionCallCount()).toBe(1);
+    expect(fake.getCacheObserveResultCallCount()).toBe(1);
+  });
+
+  test("returns the terminal observation when finalization is aborted after the loop settles", async () => {
+    const timer = new FakeTimer();
+    const fake = new FakeObserveScreen();
+    const terminal = obs(20, "terminal");
+    const controller = new AbortController();
+    fake.setObserveResult(terminal);
+    fake.setNeverResolving("processRecomposition", true);
+
+    const outcomePromise = pollObserveUntil(
+      fake,
+      timer,
+      {
+        timeoutMs: 100,
+        pollMs: 10,
+        initialMinTimestampMs: 10,
+        signal: controller.signal,
+        skipRecompositionTracking: true,
+      },
+      () => true,
+    );
+    await Promise.resolve();
+    controller.abort();
+
+    const outcome = await outcomePromise;
+
+    expect(outcome.observation).toBe(terminal);
+    expect(fake.getProcessRecompositionCallCount()).toBe(1);
+  });
+
   test("does not process or cache a stale independently sampled Asleep hierarchy", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();

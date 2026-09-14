@@ -4,6 +4,7 @@ import type { Timer } from "../SystemTimer";
 import { defaultTimer } from "../SystemTimer";
 import { logger } from "../logger";
 import { errorMessage } from "../describeUnknownError";
+import { withRemainingBudget } from "../withRemainingBudget";
 
 /** Matches a `kill -0` failure caused by the target being owned by another
  * user/process (EPERM), not by it being gone (ESRCH). The process exists in
@@ -260,35 +261,37 @@ export class IOSCtrlProxyProcessClient {
   async terminateProcessTree(
     pid: number,
     deadline?: number,
-    options: { skipGraceful?: boolean; expectedDeviceId?: string } = {},
+    options: {
+      skipGraceful?: boolean;
+      expectedDeviceId?: string;
+      preKillDeadlineMs?: number;
+    } = {},
   ): Promise<void> {
     // Re-verify ownership immediately before signaling: a captured runner PID
     // can be recycled between capture and shutdown, so killing it blind could
     // tear down an unrelated process (#6579).
-    if (await this.isTerminationTargetForeign(pid, options.expectedDeviceId, deadline)) {
+    if (
+      await this.isTerminationTargetForeign(
+        pid,
+        options.expectedDeviceId,
+        options.preKillDeadlineMs ?? deadline,
+        options.preKillDeadlineMs !== undefined,
+      )
+    ) {
       return;
     }
     let descendants: number[];
     if (options.skipGraceful) {
-      // Snapshot before root exit can reparent children, but reserve at least
-      // half the remaining budget for signals. Never spend over 50ms discovering.
-      const discoveryBudgetMs = Math.min(50, (this.remainingTimeoutMs(deadline) ?? 100) / 2);
-      let discoveryError: unknown;
-      try {
-        descendants = await this.findDescendantProcessIds(
-          pid,
-          this.timer.now() + discoveryBudgetMs,
-          { throwOnError: true },
-        );
-      } catch (error) {
-        descendants = [];
-        discoveryError = error;
-      }
+      const discovery = await this.discoverDescendantsBeforeImmediateTermination(
+        pid,
+        options.preKillDeadlineMs ?? deadline,
+      );
+      descendants = discovery.descendants;
       await this.signalGroup(pid, "KILL", deadline);
       await this.signalPids([pid], "KILL", deadline);
-      if (discoveryError !== undefined) {
+      if (discovery.error !== undefined) {
         throw new Error(`CtrlProxy descendant discovery failed for PID ${pid}`, {
-          cause: discoveryError,
+          cause: discovery.error,
         });
       }
     } else {
@@ -313,6 +316,36 @@ export class IOSCtrlProxyProcessClient {
     }
   }
 
+  private async discoverDescendantsBeforeImmediateTermination(
+    pid: number,
+    deadlineMs: number | undefined,
+  ): Promise<{ descendants: number[]; error?: unknown }> {
+    // Snapshot before root exit can reparent children, without consuming the
+    // caller's separately reserved SIGKILL budget. Never spend over 50ms discovering.
+    if (deadlineMs !== undefined && deadlineMs <= this.timer.now()) {
+      return { descendants: [] };
+    }
+    try {
+      const descendants =
+        deadlineMs === undefined
+          ? await this.findDescendantProcessIds(pid, undefined, { throwOnError: true })
+          : await withRemainingBudget(
+              deadlineMs,
+              this.timer,
+              undefined,
+              async (_signal, remainingMs) =>
+                await this.findDescendantProcessIds(
+                  pid,
+                  this.timer.now() + Math.min(50, remainingMs / 2),
+                  { throwOnError: true },
+                ),
+            );
+      return { descendants };
+    } catch (error) {
+      return { descendants: [], error };
+    }
+  }
+
   /**
    * When a caller names the device it believes owns `pid`, prove the PID is
    * still that owned runner before signaling. Returns true only when ownership
@@ -324,14 +357,31 @@ export class IOSCtrlProxyProcessClient {
     pid: number,
     expectedDeviceId: string | undefined,
     deadline?: number,
+    failOpenAfterBudget: boolean = false,
   ): Promise<boolean> {
     if (expectedDeviceId === undefined) {
       return false;
     }
     try {
-      return (await this.checkRunnerOwnership(pid, expectedDeviceId, deadline)) === "foreign";
+      const ownership =
+        deadline === undefined
+          ? await this.checkRunnerOwnership(pid, expectedDeviceId)
+          : await withRemainingBudget(
+              deadline,
+              this.timer,
+              undefined,
+              async (_signal, remainingMs) =>
+                await this.checkRunnerOwnership(
+                  pid,
+                  expectedDeviceId,
+                  this.timer.now() + remainingMs,
+                ),
+            );
+      return ownership === "foreign";
     } catch (error) {
-      this.remainingTimeoutMs(deadline);
+      if (!failOpenAfterBudget) {
+        this.remainingTimeoutMs(deadline);
+      }
       logger.debug(`[IOSCtrlProxy] Runner ownership remains inconclusive: ${error}`);
       return false;
     }

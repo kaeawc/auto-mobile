@@ -436,8 +436,8 @@ export class Daemon {
       undefined,
       this.deviceSessionRepository,
       undefined,
-      (sessionId, _deviceId, releaseReason) =>
-        this.cancelAndReleaseSession(sessionId, releaseReason),
+      (sessionId, _deviceId, releaseReason, shouldCommit) =>
+        this.cancelAndReleaseSession(sessionId, releaseReason, false, undefined, shouldCommit),
       (deviceId) => this.onDeviceReadyForSessionRegistry(deviceId),
       undefined,
       recoveryConfiguration.policy,
@@ -1639,7 +1639,9 @@ export class Daemon {
     this.heartbeatMonitor = new SessionHeartbeatMonitor(
       this.sessionManager,
       (sessionId) => this.hasActiveSessionExecution(sessionId),
-      (sessionId, reason) => this.cancelAndReleaseSession(sessionId, reason),
+      async (sessionId, reason) => {
+        await this.cancelAndReleaseSession(sessionId, reason);
+      },
       this.timer,
     );
     this.heartbeatMonitor.start();
@@ -2238,8 +2240,15 @@ export class Daemon {
     releaseReason: string = "explicit-release",
     allowExpired: boolean = false,
     expectedSession?: Session,
-  ): Promise<void> {
+    shouldCommit?: () => boolean,
+  ): Promise<boolean> {
     const cancelled = await executionTracker.cancelSessionUuidExecutions(sessionId, releaseReason);
+    // This is the final identity fence. Do not put an await between this
+    // re-check and SessionManager's release call: discovery can replace a
+    // same-serial runtime while execution cancellation is in flight.
+    if (shouldCommit?.() === false) {
+      return false;
+    }
     const deviceId = expectedSession
       ? await this.sessionManager.releaseSessionIfOwned(
           sessionId,
@@ -2255,6 +2264,7 @@ export class Daemon {
       `Cancelled session ${sessionId} (${cancelled} executions) and released device ${deviceId ?? "unknown"} ` +
         `(reason=${releaseReason})`,
     );
+    return true;
   }
 
   private async cancelAndDrainDeviceSessionExecutions(
@@ -2772,9 +2782,9 @@ export class Daemon {
   private async releaseActiveSessionsForShutdown(): Promise<void> {
     const sessionIds = this.sessionManager.getAllKnownSessionIds();
     this.shutdownSessionIds = sessionIds;
-    const releases = sessionIds.map((sessionId) =>
-      this.cancelAndReleaseSession(sessionId, "daemon-shutdown", true),
-    );
+    const releases = sessionIds.map(async (sessionId) => {
+      await this.cancelAndReleaseSession(sessionId, "daemon-shutdown", true);
+    });
     const reportFailures = (results: PromiseSettledResult<void>[]): void => {
       for (const [index, release] of results.entries()) {
         if (release.status === "rejected") {

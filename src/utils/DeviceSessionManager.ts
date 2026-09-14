@@ -44,6 +44,7 @@ import {
   deriveEvidenceFromBootedDevice,
   isUnresolvedAndroidEmulatorName,
 } from "../daemon/deviceIdentityEvidence";
+import { isAndroidEmulatorSerial } from "./androidSerial";
 
 /**
  * Render a device list for a "not found" error.
@@ -77,7 +78,7 @@ function lifecycleIdentityForDevice(
     return { platform: "ios", stableId: device.deviceId };
   }
 
-  return !isUnresolvedAndroidEmulatorName(device)
+  return isAndroidEmulatorSerial(device.deviceId) && !isUnresolvedAndroidEmulatorName(device)
     ? { platform: "android", stableId: device.name }
     : { kind: "selector", platform: "android", selector: device.deviceId };
 }
@@ -709,7 +710,11 @@ export class DeviceSessionManager implements DeviceSessionManager {
   /**
    * Verify an Android device is connected and ready
    */
-  public async verifyAndroidDevice(deviceId: string, options?: DeviceReadyOptions): Promise<void> {
+  public async verifyAndroidDevice(
+    deviceId: string,
+    options?: DeviceReadyOptions,
+    resolvedIdentity?: Pick<BootedDevice, "deviceId" | "name" | "observedAt">,
+  ): Promise<void> {
     options?.signal?.throwIfAborted();
     const allDevices = await this.adb.getBootedAndroidDevices();
     const device = allDevices.find((device) => device.deviceId === deviceId);
@@ -723,7 +728,17 @@ export class DeviceSessionManager implements DeviceSessionManager {
     try {
       logger.info(`[DeviceSessionManager] Verifying Android device ${deviceId} readiness`);
 
-      const window = this.provider.getWindow(device);
+      const deviceForWindow =
+        resolvedIdentity?.deviceId === device.deviceId
+          ? {
+              ...device,
+              name: resolvedIdentity.name,
+              ...(resolvedIdentity.observedAt === undefined
+                ? {}
+                : { observedAt: resolvedIdentity.observedAt }),
+            }
+          : device;
+      const window = this.provider.getWindow(deviceForWindow);
 
       const activeWindow = await window.getActive(true);
       if (!activeWindow || !activeWindow.appId || !activeWindow.activityName) {
@@ -1081,7 +1096,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
         options,
         async (signal) => {
           perf.startOperation("verifyDevice");
-          await this.verifyAndroidDevice(deviceId, { ...options, signal });
+          await this.verifyAndroidDevice(deviceId, { ...options, signal }, device);
           perf.endOperation("verifyDevice");
           return device;
         },
@@ -1139,7 +1154,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
         }
 
         perf.startOperation("verifyDevice");
-        await this.verifyAndroidDevice(newDevice.deviceId!, { ...options, signal });
+        await this.verifyAndroidDevice(newDevice.deviceId!, { ...options, signal }, newDevice);
         perf.endOperation("verifyDevice");
         return newDevice;
       },

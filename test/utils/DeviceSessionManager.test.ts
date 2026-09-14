@@ -1376,6 +1376,76 @@ describe("DeviceSessionManager dual-platform resolution", () => {
       operation: "start",
     });
   });
+
+  test("keeps same-model physical Android handsets in distinct serial lifecycle lanes", async () => {
+    const lifecycleCoordinator = new FakeVirtualDeviceLifecycleCoordinator();
+    const first: BootedDevice = {
+      name: "Pixel 7",
+      deviceId: "R5CT10AAAAA",
+      platform: "android",
+    };
+    const second: BootedDevice = { ...first, deviceId: "R5CT10BBBBB" };
+    const manager = DeviceSessionManager.createInstance(buildProvider(), fakeAdbFactory, {
+      lifecycleCoordinator,
+    });
+
+    fakeDeviceUtils.setBootedDevices("android", [first]);
+    fakeAdb.setDevices([first]);
+    await manager.findOrStartAndroidDevice();
+    fakeDeviceUtils.setBootedDevices("android", [second]);
+    fakeAdb.setDevices([second]);
+    await manager.findOrStartAndroidDevice();
+
+    expect(lifecycleCoordinator.reservations).toContainEqual({
+      identity: { kind: "selector", platform: "android", selector: first.deviceId },
+      operation: "start",
+    });
+    expect(lifecycleCoordinator.reservations).toContainEqual({
+      identity: { kind: "selector", platform: "android", selector: second.deviceId },
+      operation: "start",
+    });
+  });
+
+  test("replaces a Window when a warm AVD takes over a serial", async () => {
+    const first: BootedDevice = {
+      name: "Pixel_8_API_35",
+      deviceId: "emulator-5554",
+      platform: "android",
+    };
+    const second: BootedDevice = { ...first, name: "Pixel_7_API_34" };
+    const raw = (device: BootedDevice): BootedDevice => ({ ...device, name: device.deviceId });
+    const createdFor: string[] = [];
+    const factory: AdbClientFactory = {
+      create(target) {
+        if (target) {
+          createdFor.push(target.name);
+        }
+        return fakeAdb;
+      },
+    };
+    const dumpsysOutput =
+      "imeControlTarget in display# 0 Window{12345678 u0 com.example.app/com.example.app.MainActivity}";
+    fakeAdb.setDefaultResponse({
+      stdout: dumpsysOutput,
+      stderr: "",
+      toString: () => dumpsysOutput,
+      trim: () => dumpsysOutput.trim(),
+      includes: (value: string) => dumpsysOutput.includes(value),
+    } as ExecResult);
+    const provider = buildProvider();
+    const windowProvider = new DefaultDeviceClientProvider(factory);
+    provider.getWindow = windowProvider.getWindow.bind(windowProvider);
+    const manager = DeviceSessionManager.createInstance(provider);
+
+    fakeDeviceUtils.setBootedDevices("android", [first]);
+    fakeAdb.setDevices([raw(first)]);
+    await manager.findOrStartAndroidDevice();
+    fakeDeviceUtils.setBootedDevices("android", [second]);
+    fakeAdb.setDevices([raw(second)]);
+    await manager.findOrStartAndroidDevice();
+
+    expect(createdFor).toEqual([first.name, second.name]);
+  });
 });
 
 describe("DeviceSessionManager device-list error formatting (#4227)", () => {

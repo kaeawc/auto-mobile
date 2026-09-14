@@ -7591,6 +7591,74 @@ describe("DevicePool", () => {
       }
     });
 
+    test("ignores raw serial observations but retains failed probes during replacement cleanup", async () => {
+      type DevicePoolInternals = {
+        replacePooledDeviceForRuntimeIdentity(
+          pooledDevice: PooledDevice,
+          bootedDevice: BootedDevice,
+        ): Promise<boolean>;
+        clearDeviceSessionCache(deviceId: string): Promise<void>;
+      };
+      const replacement = stamped(poolDevice("emulator-5554", "Pixel_7_API_34"), 2);
+      const installAfterPendingObservation = async (observation: BootedDevice): Promise<void> => {
+        const device = stamped(poolDevice("emulator-5554", "Pixel_8_API_35"), 1);
+        devicePool = new DevicePool(
+          sessionManager,
+          "test-daemon-session-id",
+          fakeTimer,
+          fakeAppsRepo,
+          fakeDeviceManager,
+          new DefaultRetryExecutor(fakeTimer),
+        );
+        await initializeLiveDevices([device]);
+        await devicePool.reconcileDiscoveryObservation([device], "test:initial");
+        const pooled = devicePool.getDevice(device.deviceId);
+        if (!pooled) {
+          throw new Error("expected pooled device");
+        }
+        const internals = devicePool as unknown as DevicePoolInternals;
+        const cacheCleanupStarted = Promise.withResolvers<void>();
+        const finishCacheCleanup = Promise.withResolvers<void>();
+        const clearDeviceSessionCache = internals.clearDeviceSessionCache.bind(devicePool);
+        internals.clearDeviceSessionCache = async (deviceId) => {
+          cacheCleanupStarted.resolve();
+          await finishCacheCleanup.promise;
+          await clearDeviceSessionCache(deviceId);
+        };
+        try {
+          const replacementPromise = internals.replacePooledDeviceForRuntimeIdentity(
+            pooled,
+            replacement,
+          );
+          await cacheCleanupStarted.promise;
+          await devicePool.reconcileDiscoveryObservation([observation], "test:pending");
+          finishCacheCleanup.resolve();
+          await replacementPromise;
+        } finally {
+          internals.clearDeviceSessionCache = clearDeviceSessionCache;
+          finishCacheCleanup.resolve();
+        }
+      };
+
+      await installAfterPendingObservation({
+        ...replacement,
+        name: replacement.deviceId,
+        observedAt: 4,
+      });
+      expect(devicePool.getDevice(replacement.deviceId)).toMatchObject({
+        name: replacement.name,
+        identityObservedAt: 2,
+      });
+      expect(devicePool.isPooledIdentityUnresolved(replacement.deviceId)).toBe(false);
+
+      await installAfterPendingObservation(stamped(unresolved(replacement.deviceId), 4));
+      expect(devicePool.getDevice(replacement.deviceId)).toMatchObject({
+        name: replacement.name,
+        identityObservedAt: 4,
+        identityUnresolved: true,
+      });
+    });
+
     test("does not let a stale resolved observation outrank newer unresolved replacement evidence", async () => {
       const device = stamped(poolDevice("emulator-5554", "Pixel_8_API_35"), 1);
       const replacement = stamped(poolDevice("emulator-5554", "Pixel_7_API_34"), 2);

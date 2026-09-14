@@ -6729,6 +6729,14 @@ export class DevicePool {
     const evidence = this.identityEvidenceForBootedDevice(device);
     const pendingEvidence = this.identityEvidenceForBootedDevice(pending);
     if (evidence.unresolved) {
+      if (device.name === device.deviceId) {
+        // ADB's raw serial listing did not attempt an AVD-name probe, so it
+        // cannot supersede the identity evidence already pending replacement.
+        logger.debug(
+          `[DevicePool] Ignoring raw serial observation for pending replacement ${device.deviceId}`,
+        );
+        return;
+      }
       const currentUnresolved = this.pendingIdentityReplacementUnresolvedObservations.get(
         device.deviceId,
       );

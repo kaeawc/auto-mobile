@@ -776,6 +776,36 @@
         },
         "error": {
           "type": "string"
+        },
+        "artifact": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "format": {
+              "type": "string",
+              "const": "json"
+            },
+            "payload": {
+              "type": "string"
+            },
+            "bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "tool": {
+              "type": "string"
+            },
+            "resourceUri": {
+              "description": "automobile: resource URI to fetch this artifact's JSON in-band",
+              "type": "string"
+            }
+          },
+          "required": ["path", "format", "payload", "bytes", "tool"],
+          "additionalProperties": {}
         }
       },
       "required": [
@@ -1619,6 +1649,36 @@
         },
         "error": {
           "type": "string"
+        },
+        "artifact": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "format": {
+              "type": "string",
+              "const": "json"
+            },
+            "payload": {
+              "type": "string"
+            },
+            "bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "tool": {
+              "type": "string"
+            },
+            "resourceUri": {
+              "description": "automobile: resource URI to fetch this artifact's JSON in-band",
+              "type": "string"
+            }
+          },
+          "required": ["path", "format", "payload", "bytes", "tool"],
+          "additionalProperties": {}
         }
       },
       "required": ["success"],
@@ -4494,7 +4554,7 @@
               "additionalProperties": false
             },
             "truncationReasons": {
-              "description": "Why the captured hierarchy is incomplete (issue #6601). Present only when rows were dropped — a device-side stop (max_nodes, max_depth) or the per-node child cap (max_children[<node> kept N of M]). This is the nested location `sanitizeObserveResult` leaves the warning under `project:\"full\"` or `raw:true`; the skeleton projection instead lifts the same information to the top-level `truncationReasons` field.",
+              "description": "Why the captured hierarchy is incomplete (issue #6601). Present only when rows were dropped — a device-side stop (max_nodes, max_depth) or the per-node child cap (max_children[<node> kept N of M]). This is the nested location `sanitizeObserveResult` leaves raw hierarchy reasons under `project:\"full\"` or `raw:true`; capture-fidelity reasons may also be lifted to the top-level `truncationReasons` field for skeleton/diff output, while a host-output max_children cap is not lifted to a non-diff skeleton.",
               "type": "array",
               "items": {
                 "type": "string"
@@ -4504,7 +4564,7 @@
           "additionalProperties": {}
         },
         "truncationReasons": {
-          "description": "Why the captured hierarchy is incomplete (issue #6601), lifted out of `viewHierarchy` by the skeleton projection that removes it. Present only when rows were dropped — a device-side stop (max_nodes, max_depth) or the per-node child cap (max_children[<node> kept N of M]). When present, `skeleton`/`context` are a subset of the screen: an element missing from them is not evidence it is absent.",
+          "description": "Why a served observation or diff may be incomplete (issues #6601, #6933). On a non-diff skeleton projection, this contains only capture-fidelity reasons (device-side max_nodes, max_depth, cancelled); its presence means `skeleton`/`context` omit rows. A host-output max_children[<node> kept N of M] cap trims only rendered `viewHierarchy` and is not lifted to a non-diff skeleton. On a diff, any reason — host-cap (max_children[...]) or capture-fidelity (max_nodes, max_depth, cancelled) — may originate from either comparison input (baseline or current capture), so its presence means the comparison may be incomplete rather than that the current `skeleton`/`context` omit rows (issue #6933).",
           "type": "array",
           "items": {
             "type": "string"
@@ -8198,6 +8258,36 @@
         },
         "error": {
           "type": "string"
+        },
+        "artifact": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "format": {
+              "type": "string",
+              "const": "json"
+            },
+            "payload": {
+              "type": "string"
+            },
+            "bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "tool": {
+              "type": "string"
+            },
+            "resourceUri": {
+              "description": "automobile: resource URI to fetch this artifact's JSON in-band",
+              "type": "string"
+            }
+          },
+          "required": ["path", "format", "payload", "bytes", "tool"],
+          "additionalProperties": {}
         }
       },
       "required": ["success"],
@@ -9539,7 +9629,7 @@
   },
   {
     "name": "setToolEnabled",
-    "description": "Enable or disable AutoMobile tools for this MCP session: one exact name via toolName, or a whole batch in one call via toolNames. Returns the resulting enabled set.",
+    "description": "Enable or disable AutoMobile tools for this MCP session: one exact name via toolName, or a whole batch in one call via toolNames. Returns enabledTools, or enabledToolsError instead if post-write readback fails (the change still applies).",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -9878,6 +9968,36 @@
         "error": {
           "description": "Error message",
           "type": "string"
+        },
+        "artifact": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "format": {
+              "type": "string",
+              "const": "json"
+            },
+            "payload": {
+              "type": "string"
+            },
+            "bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "tool": {
+              "type": "string"
+            },
+            "resourceUri": {
+              "description": "automobile: resource URI to fetch this artifact's JSON in-band",
+              "type": "string"
+            }
+          },
+          "required": ["path", "format", "payload", "bytes", "tool"],
+          "additionalProperties": {}
         }
       },
       "required": ["success", "fields", "totalAttempts"],
@@ -10139,6 +10259,36 @@
         },
         "error": {
           "type": "string"
+        },
+        "artifact": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "format": {
+              "type": "string",
+              "const": "json"
+            },
+            "payload": {
+              "type": "string"
+            },
+            "bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "tool": {
+              "type": "string"
+            },
+            "resourceUri": {
+              "description": "automobile: resource URI to fetch this artifact's JSON in-band",
+              "type": "string"
+            }
+          },
+          "required": ["path", "format", "payload", "bytes", "tool"],
+          "additionalProperties": {}
         }
       },
       "required": ["success"],
@@ -11450,7 +11600,7 @@
                   "additionalProperties": {}
                 },
                 "truncationReasons": {
-                  "description": "Why the captured hierarchy is incomplete (issue #6601) — the same field a skeleton-projected full observation carries, so a client reads it the same way in both modes. Present only when rows were dropped: a device-side stop (max_nodes, max_depth) or the per-node child cap (max_children[<node> kept N of M]). When present, `skeleton`/`context` are a subset of the screen.",
+                  "description": "Why the captured hierarchy is incomplete (issue #6601) — the same field a full observation carries, so a client reads it the same way in both modes. In diff mode (issue #6933), any reason — host-cap (max_children[...]) or capture-fidelity (max_nodes, max_depth, cancelled) — may originate from either comparison input (baseline or current capture), so its presence means the comparison may be incomplete, not that this diff's own `skeleton`/`context` omit rows.",
                   "type": "array",
                   "items": {
                     "type": "string"
@@ -12737,7 +12887,7 @@
                       "additionalProperties": false
                     },
                     "truncationReasons": {
-                      "description": "Why the captured hierarchy is incomplete (issue #6601). Present only when rows were dropped — a device-side stop (max_nodes, max_depth) or the per-node child cap (max_children[<node> kept N of M]). This is the nested location `sanitizeObserveResult` leaves the warning under `project:\"full\"` or `raw:true`; the skeleton projection instead lifts the same information to the top-level `truncationReasons` field.",
+                      "description": "Why the captured hierarchy is incomplete (issue #6601). Present only when rows were dropped — a device-side stop (max_nodes, max_depth) or the per-node child cap (max_children[<node> kept N of M]). This is the nested location `sanitizeObserveResult` leaves raw hierarchy reasons under `project:\"full\"` or `raw:true`; capture-fidelity reasons may also be lifted to the top-level `truncationReasons` field for skeleton/diff output, while a host-output max_children cap is not lifted to a non-diff skeleton.",
                       "type": "array",
                       "items": {
                         "type": "string"
@@ -12747,7 +12897,7 @@
                   "additionalProperties": {}
                 },
                 "truncationReasons": {
-                  "description": "Why the captured hierarchy is incomplete (issue #6601) — the same field a diffed observation carries, so a client reads it the same way in both modes. Present only when rows were dropped: a device-side stop (max_nodes, max_depth) or the per-node child cap (max_children[<node> kept N of M]). When present, `skeleton`/`context` are a subset of the screen.",
+                  "description": "Why the captured hierarchy is incomplete (issue #6601) — the same field a diff-mode observation carries, so a client reads it the same way in both modes. On this non-diff arm, it contains only capture-fidelity reasons (device-side max_nodes, max_depth, cancelled); its presence means `skeleton`/`context` omit rows. A host-output max_children[<node> kept N of M] cap trims only rendered `viewHierarchy` and is not lifted here.",
                   "type": "array",
                   "items": {
                     "type": "string"

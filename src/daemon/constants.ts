@@ -412,12 +412,10 @@ export const CLI_SESSION_LIVENESS_POLICY = "cli";
  * contract (issue #6870 review).
  *
  * Adoption of {@link CLI_SESSION_LIVENESS_POLICY} is sticky: it widens the
- * session's timeouts to the CLI idle window. If a long-lived proxy later owns
- * that same session UUID, an unmarked heartbeat would only stamp
- * `lastHeartbeat` and leave the minutes-long window in place, so the session
- * would keep holding its device for the whole idle window after that client
- * disconnects. Proxy heartbeats therefore declare `heartbeat` explicitly and
- * the daemon restores the session's pre-adoption (strict) timeouts.
+ * session's timeouts to the CLI idle window. Explicit long-lived-proxy
+ * heartbeats declare `heartbeat` and restore the session's pre-adoption
+ * (strict) timeouts. Legacy Desktop clients send an unmarked heartbeat; the
+ * daemon restores strict liveness for that backward-compatible wire shape too.
  */
 export const HEARTBEAT_SESSION_LIVENESS_POLICY = "heartbeat";
 

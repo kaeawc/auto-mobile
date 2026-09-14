@@ -31,6 +31,14 @@
 #       Deduplicated + sorted. Verifies the revision resolves; returns non-zero
 #       (with a message on stderr) if it does not, or if the VCS diff fails.
 #
+#   collect_touched_paths_including_deleted <project_root> <regex>
+#       Emit repo-relative modified paths matching <regex>, including paths
+#       deleted from disk. Deduplicated + sorted.
+#
+#   collect_changed_paths_since_sha <project_root> <sha> <regex>
+#       Emit repo-relative paths changed from <sha> to the working copy matching
+#       <regex>, including paths deleted from disk. Deduplicated + sorted.
+#
 #   ensure_tool <name> <installer_path> <install_when_missing>
 #       The install-when-missing gate: if <name> is absent from PATH, either run
 #       <installer_path> (when <install_when_missing> == "true") or fail with an
@@ -67,6 +75,16 @@ _filter_matching_files() {
   done
 }
 
+_filter_matching_paths() {
+  local regex="$1"
+  local file
+  while read -r file; do
+    if [[ "$file" =~ $regex ]]; then
+      echo "$file"
+    fi
+  done
+}
+
 collect_touched_files() {
   local project_root="$1"
   local regex="$2"
@@ -94,6 +112,36 @@ collect_changed_since_sha() {
 
   printf '%s\n' "$changed_files" \
     | _filter_matching_files "$project_root" "$regex" | sort | uniq
+}
+
+collect_touched_paths_including_deleted() {
+  local project_root="$1"
+  local regex="$2"
+
+  : "$project_root"
+  # shellcheck disable=SC2119 # The current workspace determines touched files.
+  vcs_touched_files_including_deleted \
+    | _filter_matching_paths "$regex" | sort | uniq
+}
+
+collect_changed_paths_since_sha() {
+  local project_root="$1"
+  local sha="$2"
+  local regex="$3"
+  local changed_files
+
+  : "$project_root"
+  if ! vcs_base_exists "$sha"; then
+    echo -e "${RED}Revision '$sha' does not exist in the repository${NC}" >&2
+    return 1
+  fi
+
+  if ! changed_files="$(vcs_changed_files_since_merge_base "$sha")"; then
+    return 1
+  fi
+
+  printf '%s\n' "$changed_files" \
+    | _filter_matching_paths "$regex" | sort | uniq
 }
 
 ensure_tool() {

@@ -85,6 +85,10 @@ export interface DeviceBootRequest {
   matchNamedDeviceIgnoringOsVersion?: boolean;
   /** Internal identity policy: select a named runtime only when its name is an exact match. */
   matchExactName?: boolean;
+  /** Recovery snapshots keep preserved Android AVDs out of a concurrent startup match. */
+  excludeDeviceNames?: ReadonlySet<string>;
+  /** Recovery snapshots keep preserved Android serials out of a concurrent startup match. */
+  excludeDeviceIds?: ReadonlySet<string>;
 }
 
 export interface DeviceBootProgress {
@@ -295,18 +299,28 @@ export class DeviceBootService {
     const images = await this.runPhase(context, "listing device images", () =>
       deviceManager.listDeviceImages(request.platform),
     );
-    const running = await this.findRunningMatch(request, criteria, images, context, progress);
+    const excludedDeviceNames = request.excludeDeviceNames;
+    const matchingImages = excludedDeviceNames
+      ? images.filter((image) => !excludedDeviceNames.has(image.name))
+      : images;
+    const running = await this.findRunningMatch(
+      request,
+      criteria,
+      matchingImages,
+      context,
+      progress,
+    );
     if (running) {
       return running;
     }
     const image =
       request.matchExactName && request.name
-        ? (images.find((candidate) => candidate.name === request.name) ?? null)
-        : deviceMatcher.matchDeviceImage(criteria, images, matchingStrategy);
+        ? (matchingImages.find((candidate) => candidate.name === request.name) ?? null)
+        : deviceMatcher.matchDeviceImage(criteria, matchingImages, matchingStrategy);
     if (image) {
       return this.bootMatchedImage(image, context, progress);
     }
-    return this.provisionAndBoot(request, provisionCriteria, images, context, progress);
+    return this.provisionAndBoot(request, provisionCriteria, matchingImages, context, progress);
   }
 
   private async findRunningMatch(
@@ -325,7 +339,16 @@ export class DeviceBootService {
       () => this.dependencies.deviceManager.getBootedDevices(request.platform),
       false,
     );
-    const enriched = enrichBootedDevicesFromImages(booted, images);
+    const excludedDeviceNames = request.excludeDeviceNames;
+    const excludedDeviceIds = request.excludeDeviceIds;
+    const matchingBooted =
+      excludedDeviceNames || excludedDeviceIds
+        ? booted.filter(
+            (device) =>
+              !excludedDeviceNames?.has(device.name) && !excludedDeviceIds?.has(device.deviceId),
+          )
+        : booted;
+    const enriched = enrichBootedDevicesFromImages(matchingBooted, images);
     const match =
       request.matchExactName && request.name
         ? (enriched.find((candidate) => candidate.name === request.name) ?? null)

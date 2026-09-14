@@ -365,6 +365,7 @@ describe("RestoreSnapshot", () => {
         .getCommandCalls()
         .find((entry) => entry.command === `emu avd snapshot load ${snapshotName}`);
       expect(call?.timeoutMs).toBe(vmSnapshotTimeoutMs);
+      expect(call?.waitForProcessSettlementAfterAbort).toBe(true);
     });
 
     it("should use ADB restore for VM snapshot when useVmSnapshot is false", async () => {

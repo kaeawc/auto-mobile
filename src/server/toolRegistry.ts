@@ -56,6 +56,7 @@ import {
   JsonToolOutputArtifactWriter,
   type ToolOutputArtifactRetention,
 } from "./toolOutputArtifactWriter";
+import { toolOutputArtifactDetailsSchema } from "./toolOutputSchemas";
 import { getDefaultToolOutputsDir } from "../utils/toolOutputArtifacts";
 import type { SessionToolSelectionService } from "../features/toolSelection/SessionToolSelectionService";
 import {
@@ -164,6 +165,48 @@ function toAdvertisedJsonSchema(schema: any): Record<string, unknown> {
   });
   canonicalizeDiscriminatedUnionJsonSchema(jsonSchema);
   return flattenTopLevelUnion(jsonSchema);
+}
+
+const advertisedToolOutputArtifactDetailsSchema = toJSONSchema(toolOutputArtifactDetailsSchema);
+
+/**
+ * A hard-ceiling spill retains required headline fields and appends an artifact
+ * pointer. Runtime Zod output schemas deliberately keep their normal unknown-key
+ * behavior, so advertise that one possible runtime addition without admitting
+ * arbitrary top-level output fields.
+ */
+function addSpillArtifactToAdvertisedOutputSchema(
+  jsonSchema: Record<string, unknown>,
+): Record<string, unknown> {
+  const addArtifactProperty = (node: unknown): void => {
+    if (!node || typeof node !== "object") {
+      return;
+    }
+    const objectNode = node as Record<string, unknown>;
+    if (objectNode.type !== "object" || objectNode.additionalProperties !== false) {
+      return;
+    }
+    const properties =
+      objectNode.properties && typeof objectNode.properties === "object"
+        ? (objectNode.properties as Record<string, unknown>)
+        : {};
+    if (Object.hasOwn(properties, "artifact")) {
+      return;
+    }
+    objectNode.properties = {
+      ...properties,
+      artifact: advertisedToolOutputArtifactDetailsSchema,
+    };
+  };
+
+  addArtifactProperty(jsonSchema);
+  for (const unionKey of ["oneOf", "anyOf"] as const) {
+    const branches = jsonSchema[unionKey];
+    if (Array.isArray(branches)) {
+      branches.forEach(addArtifactProperty);
+    }
+  }
+  return jsonSchema;
 }
 
 // Progress notification interface
@@ -352,6 +395,7 @@ function withAmbientDeviceContext(
 
 interface AfterToolCallInput {
   name: string;
+  outputSchema: unknown;
   args: any;
   device: BootedDevice | undefined;
   internalCall: boolean;
@@ -976,6 +1020,7 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
   async handle(input: AfterToolCallInput): Promise<AfterToolCallResult> {
     const {
       name,
+      outputSchema,
       args,
       internalCall,
       device,
@@ -1094,6 +1139,7 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
 
     const finalizedResponse = finalizeToolResponse(response, {
       name,
+      outputSchema,
       args,
       sessionUuid,
       baselineStore,
@@ -1386,6 +1432,7 @@ export class ToolRegistryClass {
 
               const afterToolCallResult = await this.afterToolCall.handle({
                 name,
+                outputSchema: this.getToolOutputSchema(name),
                 args: handlerArgs,
                 device: resolvedTarget.device,
                 internalCall: resolvedTarget.internalCall,
@@ -1484,6 +1531,15 @@ export class ToolRegistryClass {
 
   getRegisteredTool(name: string): RegisteredTool | undefined {
     return this.tools.get(name);
+  }
+
+  /**
+   * Output schemas are execution metadata, so lookup deliberately bypasses the
+   * availability gate used for discovery. A tool that just ran can be hidden or
+   * plan-only and must still preserve its required spill residue.
+   */
+  getToolOutputSchema(name: string): unknown {
+    return this.tools.get(name)?.outputSchema;
   }
 
   // Get a specific tool by name
@@ -1897,7 +1953,7 @@ export class ToolRegistryClass {
       const outputSchema =
         toolHasOutputSchema(tool) && !suppressOutputSchema
           ? (advertiseBoundsForCompact(
-              toAdvertisedJsonSchema(tool.outputSchema),
+              addSpillArtifactToAdvertisedOutputSchema(toAdvertisedJsonSchema(tool.outputSchema)),
               compactBounds,
             ) as Record<string, unknown>)
           : undefined;

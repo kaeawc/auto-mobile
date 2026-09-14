@@ -997,6 +997,7 @@ export class AdbClient implements AdbExecutor {
       let settled = false;
       let pendingTerminationError: Error | undefined;
       let terminationTimeoutId: NodeJS.Timeout | undefined;
+      let killSettlementTimeoutId: NodeJS.Timeout | undefined;
       const { child, result } = adbHostProcessExecutor.executeCommandWithChild(
         file,
         args,
@@ -1043,9 +1044,7 @@ export class AdbClient implements AdbExecutor {
               return;
             }
             child.kill("SIGKILL");
-            settled = true;
-            cleanup();
-            reject(pendingTerminationError);
+            waitForProcessExitAfterSigkill();
           }, PROCESS_SETTLEMENT_GRACE_MS);
           return;
         }
@@ -1059,9 +1058,34 @@ export class AdbClient implements AdbExecutor {
         this.activeProcesses.delete(child);
       };
 
+      const settleAfterSigkill = () => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        cleanup();
+        reject(pendingTerminationError);
+      };
+
+      const waitForProcessExitAfterSigkill = () => {
+        child.once("exit", settleAfterSigkill);
+        child.once("close", settleAfterSigkill);
+        killSettlementTimeoutId = this.timer.setTimeout(() => {
+          if (settled) {
+            return;
+          }
+          logger.warn(
+            `[ADB] Child did not exit after SIGKILL within ${PROCESS_SETTLEMENT_GRACE_MS}ms; settling command termination`,
+          );
+          settleAfterSigkill();
+        }, PROCESS_SETTLEMENT_GRACE_MS);
+      };
+
       const cleanup = () => {
         this.activeProcesses.delete(child);
         child.off("exit", onExit);
+        child.off("exit", settleAfterSigkill);
+        child.off("close", settleAfterSigkill);
         if (signal) {
           signal.removeEventListener("abort", onAbort);
         }
@@ -1070,6 +1094,9 @@ export class AdbClient implements AdbExecutor {
         }
         if (terminationTimeoutId) {
           this.timer.clearTimeout(terminationTimeoutId);
+        }
+        if (killSettlementTimeoutId) {
+          this.timer.clearTimeout(killSettlementTimeoutId);
         }
       };
 
@@ -1091,9 +1118,7 @@ export class AdbClient implements AdbExecutor {
                 return;
               }
               child.kill("SIGKILL");
-              settled = true;
-              cleanup();
-              reject(pendingTerminationError);
+              waitForProcessExitAfterSigkill();
             }, PROCESS_SETTLEMENT_GRACE_MS);
             return;
           }

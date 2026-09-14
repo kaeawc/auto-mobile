@@ -183,7 +183,13 @@ async function enrichProvisionDeviceResult<
       // the call gate apply, and the session this call just minted carries no
       // override of its own — so a capability enabled on the profile is
       // callable and belongs in this report (#6886 review).
-      enabledTools: await listEnabledToolNames(service, [sessionUuid], connectionProfileUuid),
+      enabledTools: await listEnabledToolNames(
+        service,
+        [sessionUuid],
+        connectionProfileUuid,
+        [],
+        undefined,
+      ),
       ...failure,
     });
   } catch (error) {
@@ -324,6 +330,7 @@ import {
 } from "../features/toolSelection/SessionToolSelectionService";
 import {
   assertToolEnabledForAnySession,
+  buildToolSelectionCandidateRoutes,
   isToolEnabledForAnyRoute,
 } from "../features/toolSelection/toolSelectionPolicy";
 import { runWithToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
@@ -676,13 +683,12 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
           definitions.map(async (definition) => {
             const registeredTool = ToolRegistry.getTool(definition.name);
             const deviceAware = registeredTool?.requiresDevice ?? false;
-            const candidateRoutes =
-              deviceAware && labelSessionUuids.length > 0
-                ? labelSessionUuids.map((labelSessionUuid) => [
-                    routingBaseSessionUuid,
-                    labelSessionUuid,
-                  ])
-                : [[routingBaseSessionUuid, routingSessionUuid]];
+            const candidateRoutes = buildToolSelectionCandidateRoutes(
+              deviceAware,
+              routingBaseSessionUuid,
+              labelSessionUuids,
+              [routingBaseSessionUuid, routingSessionUuid],
+            );
             return (await isToolEnabledForAnyRoute(
               definition.name,
               registeredTool?.defaultEnabled ?? true,
@@ -904,14 +910,30 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       (DaemonState.getInstance().isInitialized()
         ? DaemonState.getInstance().getSessionManager()
         : undefined);
+    // `setToolEnabled` is a plain tool, so an explicit connection-profile UUID
+    // remains its routing session. Its readback still has to enumerate labels
+    // from this connection's acquired device session, not from that profile.
+    const routingSessionUuidForLabelLookup =
+      name === SET_TOOL_ENABLED_TOOL_NAME &&
+      requestedToolSelectionProfileUuid !== undefined &&
+      requestedToolSelectionProfileUuid === connectionProfileUuid
+        ? (sessionToolBinding.boundDeviceSessionUuid(sessionId) ?? routingSessionUuid)
+        : routingSessionUuid;
     const routingBaseSessionUuid = resolveToolSelectionBaseSessionUuid(
-      routingSessionUuid,
+      routingSessionUuidForLabelLookup,
       selectionSessionManager,
     );
     const derivedLabelSessionUuid =
       tool.requiresDevice && requestedDeviceLabel && routingBaseSessionUuid
         ? selectionSessionManager?.getDeviceLabels(routingBaseSessionUuid)?.[requestedDeviceLabel]
         : undefined;
+    const labelSessionUuids = routingBaseSessionUuid
+      ? Array.from(
+          new Set(
+            Object.values(selectionSessionManager?.getDeviceLabels(routingBaseSessionUuid) ?? {}),
+          ),
+        )
+      : [];
     // Tool selection follows the connection's routing profile. A raw deviceId is
     // only an execution target and must not borrow an unrelated owning session's
     // grants (which discovery cannot advertise). When both fields are present,
@@ -1160,6 +1182,8 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
             // ToolRegistry. Carry only a distinct connection profile so it
             // cannot suppress that derived-label resolution.
             toolSelectionProfileUuid: connectionProfileUuid,
+            labelSessionUuids,
+            routingBaseSessionUuid,
             // Keep profile persistence lazy for ordinary core-tool calls while
             // giving an admitted plan its service instance for release cleanup.
             sessionToolSelectionService:

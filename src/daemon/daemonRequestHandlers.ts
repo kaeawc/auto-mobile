@@ -131,8 +131,8 @@ export async function handleDaemonRequest(
       }
       // A one-shot `--cli` client declares itself here (issue #6870) so the
       // daemon stops holding its session to the 10 s heartbeat contract no
-      // one-shot process can keep. Any other client omits the field and keeps
-      // the strict contract exactly as before.
+      // one-shot process can keep. An unmarked Desktop heartbeat restores that
+      // strict contract when a prior CLI invocation widened the same session.
       if (heartbeatParams?.livenessPolicy === CLI_SESSION_LIVENESS_POLICY) {
         // The invocation carries its own resolved idle timeout: it reuses a
         // running daemon, whose process env was read at startup and cannot
@@ -148,7 +148,10 @@ export async function handleDaemonRequest(
           },
         };
       }
-      if (heartbeatParams?.livenessPolicy === HEARTBEAT_SESSION_LIVENESS_POLICY) {
+      if (
+        heartbeatParams?.livenessPolicy === HEARTBEAT_SESSION_LIVENESS_POLICY ||
+        heartbeatParams?.livenessPolicy === undefined
+      ) {
         // A long-lived stdio/HTTP proxy CAN keep the strict contract and says so
         // on every heartbeat, so a session a previous `--cli` invocation moved
         // onto the minutes-long idle window goes back to it (issue #6870

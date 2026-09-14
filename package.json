@@ -53,7 +53,7 @@
     "test:integration:webrtc-mediamtx": "bash scripts/webrtc/run-mediamtx-publisher-integration.sh",
     "test:integration:webrtc-device": "bash scripts/webrtc/run-mediamtx-device-integration.sh",
     "gate:android-video-baseline": "bun scripts/webrtc/android-video-baseline-gate.ts",
-    "lint": "oxlint --fix && bash scripts/oxlint-baseline.sh && bash scripts/check-boundaries.sh",
+    "lint": "bash scripts/lint.sh",
     "check:boundaries": "bash scripts/check-boundaries.sh",
     "lint:prune": "bash scripts/oxlint-baseline.sh --update",
     "lint:baseline": "bash scripts/oxlint-baseline.sh --update",

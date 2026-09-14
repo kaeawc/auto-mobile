@@ -770,6 +770,32 @@ repeat_stub_times() {
   [[ "$output" != *"Recheck cleared suite.dup #2"* ]]
 }
 
+# Exact-name testcases minted from ONE parameterized declaration share
+# (file, classname, name, line) -- see test/features/utility/DisplayConfig.test.ts:130-132.
+# Keying `seen_run` by line alone kept only the first matching row per recheck
+# report, so a same-line duplicate's slow sample could be cleared by its fast
+# sibling's row landing first. Aggregating the MAXIMUM per identity per report
+# must keep this offender caught (review thread PRRT_kwDOP-GF5M6h9Pky on PR #6997).
+@test "timing gate aggregates same-line duplicate tuples by their maximum duration" {
+  report_dir="$BATS_TEST_TMPDIR/unit-timing-reports"
+  mkdir -p "$report_dir"
+  write_junit_report_with_lines "$report_dir/shard-0.xml" "$OFFENDER_FILE" \
+    suite dup 0.010 130 \
+    suite dup 0.150 130
+
+  run env \
+    PATH="$STUB_BIN:$PATH" \
+    BUN_TEST_TIMING_BASE_REF=origin/main \
+    BUN_TEST_TIMING_REPORT_DIR="$report_dir" \
+    TIMING_CHANGED_FILES='src/example.ts\n' \
+    STUB_RECHECK_DUP_TIMES="0.010 0.150" \
+    STUB_RECHECK_DUP_LINES="130 130" \
+    bash "$TIMING_SCRIPT" "$BATS_TEST_TMPDIR/timings.xml"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"median 150.00ms of 3 isolated runs"* ]]
+  [[ "$output" != *"Recheck cleared suite.dup"* ]]
+}
+
 @test "timing gate attributes reordered line-identified duplicates across rechecks" {
   report_dir="$BATS_TEST_TMPDIR/unit-timing-reports"
   mkdir -p "$report_dir"

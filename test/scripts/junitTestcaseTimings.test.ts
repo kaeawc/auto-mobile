@@ -57,6 +57,20 @@ describe("parseJunitTestcaseTimings", () => {
     expect(rows.map((row) => row.split(separator)[6])).toEqual(["10", "42"]);
   });
 
+  // The gate's aggregation (scripts/validate-bun-test-timings.sh) depends on
+  // same-line duplicates sharing an identical identity tuple with distinct
+  // durations preserved as separate rows; see
+  // test/features/utility/DisplayConfig.test.ts:130-132 for the real shape.
+  test("emits identical line identity for same-line duplicate tuples, leaving aggregation to the gate", async () => {
+    const rows = await parseJunitTestcaseTimings(
+      `<testsuites><testsuite file="test/case.test.ts"><testcase classname="suite" name="duplicate" time="0.01" line="130"/><testcase classname="suite" name="duplicate" time="0.15" line="130"/></testsuite></testsuites>`,
+      "report.xml",
+    );
+
+    expect(rows.map((row) => row.split(separator)[6])).toEqual(["130", "130"]);
+    expect(rows.map((row) => row.split(separator)[3])).toEqual(["10.000000", "150.000000"]);
+  });
+
   test("falls back to occurrence identity when duplicate tuples have no lines", async () => {
     const rows = await parseJunitTestcaseTimings(
       `<testsuites><testsuite file="test/case.test.ts"><testcase classname="suite" name="duplicate" time="0.01"/><testcase classname="suite" name="duplicate" time="0.02"/></testsuite></testsuites>`,

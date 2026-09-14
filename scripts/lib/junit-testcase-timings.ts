@@ -21,6 +21,15 @@ export const sanitizeJunitField = (value: string): string => value.replace(/[\x1
  *
  * The report id is deliberately the caller-supplied path, matching awk's FILENAME
  * semantics in the timing gate. Occurrence ordinals reset for each invocation.
+ *
+ * Exact-name testcases minted from one parameterized declaration share
+ * (file, classname, name, line) -- e.g. the two cases at
+ * test/features/utility/DisplayConfig.test.ts:130-132 -- so this function
+ * deliberately emits one row per testcase rather than collapsing same-line
+ * duplicates itself. scripts/validate-bun-test-timings.sh owns aggregating
+ * same-identity rows by their MAXIMUM duration (both for offender detection
+ * and for each isolated recheck), so a fast sibling can never clear a slow
+ * one's median.
  */
 export async function parseJunitTestcaseTimings(xml: string, reportId: string): Promise<string[]> {
   const document = (await parseStringPromise(xml, {

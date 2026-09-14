@@ -193,8 +193,26 @@ if [[ ! -s "$measured_rows" ]]; then
   exit 1
 fi
 
+# Exact-name testcases from one parameterized declaration can share
+# (file, classname, name, line) -- see test/features/utility/DisplayConfig.test.ts:130-132.
+# Keying by that identity alone and keeping the first matching row would let a
+# fast sibling's row stand in for a slow one, so aggregate the MAXIMUM duration
+# seen for each identity before deciding whether it is over budget.
 awk -F"$field_sep" -v limit_ms="$max_ms" '
-$4 + 0 > limit_ms && !seen[$1 FS $2 FS $3 FS $7]++
+{
+  key = $1 FS $2 FS $3 FS $7
+  if (!(key in maxval) || $4 + 0 > maxval[key]) {
+    maxval[key] = $4 + 0
+    maxrow[key] = $0
+  }
+}
+END {
+  for (key in maxrow) {
+    if (maxval[key] > limit_ms) {
+      print maxrow[key]
+    }
+  }
+}
 ' "$measured_rows" | sort > "$offender_rows"
 
 if [[ ! -s "$offender_rows" ]]; then
@@ -345,16 +363,31 @@ FILENAME == rechecked_file { rechecked[$0] = 1; next }
 FILENAME == unverified_file { unverified[$0] = 1; next }
 FILENAME == recheck_file {
   key = $1 SUBSEP $2 SUBSEP $3 SUBSEP $7
-  # One sample per recheck PROCESS. Counting rows would let two same-named
-  # tests in one file look like two independent runs of one test.
-  if (!(key SUBSEP $6 in seen_run)) {
-    seen_run[key SUBSEP $6] = 1
-    samples[key] = (key in samples) ? samples[key] "," $4 : $4
-    runs[key] += 1
+  runkey = key SUBSEP $6
+  # One sample per recheck PROCESS (SUBSEP $6 pins the report). Exact-name
+  # testcases from one parameterized declaration can share
+  # (file, classname, name, line), so two rows can land on the same runkey; take
+  # the MAXIMUM duration for that identity within this process rather than the
+  # first row encountered, or a fast sibling could clear the median of a slow one.
+  if (!(runkey in seen_run) || $4 + 0 > seen_run[runkey]) {
+    if (!(runkey in seen_run)) {
+      runs[key] += 1
+    }
+    seen_run[runkey] = $4 + 0
   }
+  runkey_identity[runkey] = key
   next
 }
 {
+  if (!recheck_finalized) {
+    for (aggregated_runkey in seen_run) {
+      aggregated_key = runkey_identity[aggregated_runkey]
+      samples[aggregated_key] = (aggregated_key in samples) \
+        ? samples[aggregated_key] "," seen_run[aggregated_runkey] \
+        : seen_run[aggregated_runkey]
+    }
+    recheck_finalized = 1
+  }
   key = $1 SUBSEP $2 SUBSEP $3 SUBSEP $7
   label = ($2 != "" && $3 != "") ? $2 "." $3 : $3
   if ($5 + 0 > 1) {

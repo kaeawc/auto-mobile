@@ -217,6 +217,8 @@ if [[ "${1:-}" == "--list-checks" ]]; then
   printf 'helper-consumer-four\tscripts/check-helper-consumer-four.sh\n'
   printf 'helper-consumer-five\tscripts/check-helper-consumer-five.sh\n'
   printf 'helper-consumer-deleted-helper\tscripts/check-helper-consumer-deleted-helper.sh\n'
+  printf 'chain-consumer\tscripts/check-chain-consumer.sh\n'
+  printf 'cycle-consumer\tscripts/check-cycle-consumer.sh\n'
   printf 'runtime-pins\tscripts/release/pin-runtime-deps.ts\n'
   exit 0
 fi
@@ -305,6 +307,92 @@ EOF
 
   [ "${status}" -eq 0 ]
   grep -Fqx -- '--only shellcheck,shell-portability,shell-sete,stdlib-first,helper-consumer-deleted-helper' "${FAST_LOG}"
+}
+
+@test "a changed leaf helper two source levels deep selects its consumer" {
+  install_registry_stub
+  cat > scripts/check-chain-consumer.sh <<'EOF'
+#!/usr/bin/env bash
+# shellcheck disable=SC1091 # Resolved relative to this script's location.
+source "$(dirname "${BASH_SOURCE[0]}")/lib/chain-middle.sh"
+EOF
+  cat > scripts/lib/chain-middle.sh <<'EOF'
+#!/usr/bin/env bash
+# shellcheck disable=SC1091 # Resolved relative to the helper's location.
+source "$(dirname "${BASH_SOURCE[0]}")/chain-leaf.sh"
+EOF
+  printf '%s\n' 'leaf baseline' > scripts/lib/chain-leaf.sh
+  git add scripts/check-chain-consumer.sh scripts/lib/chain-middle.sh scripts/lib/chain-leaf.sh
+  git commit -qm "add source chain fixtures"
+  git branch -f base HEAD
+  commit_change "scripts/lib/chain-leaf.sh" "leaf changed"
+
+  run bash scripts/prepush-shell.sh --base base
+
+  [ "${status}" -eq 0 ]
+  grep -Fqx -- '--only shellcheck,shell-portability,shell-sete,stdlib-first,chain-consumer' "${FAST_LOG}"
+}
+
+@test "a changed helper inside a source cycle selects its consumer and terminates" {
+  install_registry_stub
+  cat > scripts/check-cycle-consumer.sh <<'EOF'
+#!/usr/bin/env bash
+# shellcheck disable=SC1091 # Resolved relative to this script's location.
+source "$(dirname "${BASH_SOURCE[0]}")/lib/cycle-a.sh"
+EOF
+  cat > scripts/lib/cycle-a.sh <<'EOF'
+#!/usr/bin/env bash
+# shellcheck disable=SC1091 # Resolved relative to the helper's location.
+source "$(dirname "${BASH_SOURCE[0]}")/cycle-b.sh"
+EOF
+  cat > scripts/lib/cycle-b.sh <<'EOF'
+#!/usr/bin/env bash
+# shellcheck source=scripts/lib/cycle-a.sh
+# shellcheck disable=SC1091 # Resolved relative to the helper's location.
+source "$(dirname "${BASH_SOURCE[0]}")/cycle-a.sh"
+EOF
+  git add scripts/check-cycle-consumer.sh scripts/lib/cycle-a.sh scripts/lib/cycle-b.sh
+  git commit -qm "add source cycle fixtures"
+  git branch -f base HEAD
+  commit_change "scripts/lib/cycle-b.sh" "cycle-b changed"
+
+  run bash scripts/prepush-shell.sh --base base
+
+  [ "${status}" -eq 0 ]
+  grep -Fqx -- '--only shellcheck,shell-portability,shell-sete,stdlib-first,cycle-consumer' "${FAST_LOG}"
+}
+
+@test "a deleted .tsx target of an extensionless import still selects its registered check" {
+  install_registry_stub
+  mkdir -p scripts/release/lib
+  printf '%s\n' 'import "./lib/runtime-roots";' > scripts/release/pin-runtime-deps.ts
+  printf '%s\n' 'export const runtimeRoots = [];' > scripts/release/lib/runtime-roots.tsx
+  git add scripts/release/pin-runtime-deps.ts scripts/release/lib/runtime-roots.tsx
+  git commit -qm "add tsx runtime pins fixtures"
+  git branch -f base HEAD
+  git rm -q scripts/release/lib/runtime-roots.tsx
+  git commit -qm "delete tsx runtime roots"
+
+  run bash scripts/prepush-shell.sh --base base
+
+  [ "${status}" -eq 0 ]
+  grep -Fqx -- '--only stdlib-first,runtime-pins' "${FAST_LOG}"
+}
+
+@test "a changed TypeScript source behind a .js specifier selects its registered check" {
+  install_registry_stub
+  mkdir -p scripts/release/lib
+  printf '%s\n' 'import "./lib/runtime-roots.js";' > scripts/release/pin-runtime-deps.ts
+  printf '%s\n' 'export const runtimeRoots = [];' > scripts/release/lib/runtime-roots.ts
+  git add scripts/release/pin-runtime-deps.ts scripts/release/lib/runtime-roots.ts
+  git commit -qm "add js specifier fixtures"
+  git branch -f base HEAD
+  commit_change "scripts/release/lib/runtime-roots.ts" "export const runtimeRoots = [\"changed\"];"
+
+  run bash scripts/prepush-shell.sh --base base
+
+  [ "${status}" -eq 0 ]
+  grep -Fqx -- '--only stdlib-first,runtime-pins' "${FAST_LOG}"
 }
 
 @test "an SC1091 ROOT_DIR path never evaluates checkout path text" {

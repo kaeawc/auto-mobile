@@ -235,9 +235,73 @@ load_fast_check_registry() {
   done <<< "${registry_output}"
 }
 
+# Direct shell helpers of one script: explicit `# shellcheck source=` directives
+# plus SC1091-disabled `source` lines resolved from the script's location.
+direct_shell_source_paths() {
+  local check_script="$1"
+  local directive helper_path
+  while IFS= read -r directive; do
+    helper_path="${directive#*source=}"
+    helper_path="${helper_path%%[[:space:]]*}"
+    printf '%s\n' "${helper_path}"
+  done < <(grep -E '^[[:space:]]*#[[:space:]]*shellcheck[[:space:]]+source=[^[:space:]]+' "${check_script}" || true)
+  resolved_shellcheck_disable_source_paths "${check_script}"
+}
+
+# Sourced helpers may source further helpers (file-selection.sh sources
+# vcs-diff.sh), so a leaf change must reach every consumer. Breadth-first with a
+# visited list stops cycles; the depth cap bounds pathological chains.
+SHELL_SOURCE_MAX_DEPTH=8
+
+shell_source_closure() {
+  local check_script="$1"
+  local current depth helper_path seen already_seen
+  local -a queue=("${check_script}")
+  local -a queue_depths=(0)
+  local -a visited=("${check_script}")
+
+  while [[ "${#queue[@]}" -gt 0 ]]; do
+    current="${queue[0]}"
+    depth="${queue_depths[0]}"
+    queue=(${queue[@]+"${queue[@]:1}"})
+    queue_depths=(${queue_depths[@]+"${queue_depths[@]:1}"})
+    if [[ ! -f "${current}" || "${depth}" -ge "${SHELL_SOURCE_MAX_DEPTH}" ]]; then
+      continue
+    fi
+    while IFS= read -r helper_path; do
+      [[ -n "${helper_path}" ]] || continue
+      already_seen=0
+      for seen in "${visited[@]}"; do
+        if [[ "${seen}" == "${helper_path}" ]]; then
+          already_seen=1
+          break
+        fi
+      done
+      if [[ "${already_seen}" -eq 1 ]]; then
+        continue
+      fi
+      visited+=("${helper_path}")
+      printf '%s\n' "${helper_path}"
+      queue+=("${helper_path}")
+      queue_depths+=($((depth + 1)))
+    done < <(direct_shell_source_paths "${current}")
+  done
+}
+
+# Memoized per registered check: the closure is the same for every changed path.
+registered_check_helper_paths() {
+  local idx="$1"
+  local check_script="${registered_check_scripts[$idx]}"
+  if [[ "${registered_check_closure_ready[$idx]:-0}" -ne 1 ]]; then
+    registered_check_closures[idx]="$(shell_source_closure "${check_script}")"
+    registered_check_closure_ready[idx]=1
+  fi
+  printf '%s\n' "${registered_check_closures[$idx]}"
+}
+
 add_registered_checks_for_script_path() {
   local path="$1"
-  local idx check_name check_script directive helper_path
+  local idx check_name check_script helper_path
   for idx in "${!registered_check_names[@]}"; do
     check_name="${registered_check_names[$idx]}"
     check_script="${registered_check_scripts[$idx]}"
@@ -249,22 +313,15 @@ add_registered_checks_for_script_path() {
     fi
     case "${check_script}" in
       *.sh)
-        while IFS= read -r directive; do
-          helper_path="${directive#*source=}"
-          helper_path="${helper_path%%[[:space:]]*}"
-          if [[ "${path}" == "${helper_path}" ]]; then
-            add_check "${check_name}"
-          fi
-        done < <(grep -E '^[[:space:]]*#[[:space:]]*shellcheck[[:space:]]+source=[^[:space:]]+' "${check_script}" || true)
         while IFS= read -r helper_path; do
-          if [[ "${path}" == "${helper_path}" ]]; then
+          if [[ -n "${helper_path}" && "${path}" == "${helper_path}" ]]; then
             add_check "${check_name}"
           fi
-        done < <(resolved_shellcheck_disable_source_paths "${check_script}")
+        done < <(registered_check_helper_paths "${idx}")
         ;;
       *.ts)
         set +e
-        resolver_output="$(bun "${PROJECT_ROOT}/scripts/lib/tsImportDeps.ts" "${check_script}")"
+        resolver_output="$(bun "${PROJECT_ROOT}/scripts/lib/tsImportDeps.ts" "${check_script}" --base-ref "${BASE}")"
         resolver_status=$?
         set -e
         if [[ "${resolver_status}" -ne 0 ]]; then
@@ -351,6 +408,8 @@ bats_files=()
 hook_files=()
 registered_check_names=()
 registered_check_scripts=()
+registered_check_closures=()
+registered_check_closure_ready=()
 set +e
 vcs_uses_jj
 is_jj_workspace_status=$?

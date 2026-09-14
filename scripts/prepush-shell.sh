@@ -98,7 +98,7 @@ resolved_shellcheck_disable_source_path() {
   [[ -n "${source_expr:-}" ]] || return 0
 
   resolved_expr="${source_expr//\$\{BASH_SOURCE\[0\]\}/${check_script}}"
-  for line in "${previous_lines[@]}"; do
+  for line in ${previous_lines[@]+"${previous_lines[@]}"}; do
     if [[ "${line}" =~ ^[[:space:]]*([a-zA-Z_][a-zA-Z0-9_]*)=(.*)$ ]]; then
       variable="${BASH_REMATCH[1]}"
       assignment_value="${BASH_REMATCH[2]}"

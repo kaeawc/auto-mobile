@@ -768,8 +768,10 @@ export class RealObserveScreen implements ObserveScreen {
         }
       }
 
-      // Attach recomposition metrics if enabled
-      await RecompositionTracker.getInstance().processObservation(result, this.device);
+      // Attach recomposition metrics if enabled.
+      if (!options?.skipRecompositionTracking) {
+        await this.processRecomposition(result, perf);
+      }
 
       // Audits + accessibility state detection (each is config-gated; failures don't propagate)
       if (!options?.skipPerformanceAudit) {
@@ -898,6 +900,13 @@ export class RealObserveScreen implements ObserveScreen {
     }
   }
 
+  async processRecomposition(
+    observation: ObserveResult,
+    _perf?: PerformanceTracker,
+  ): Promise<void> {
+    await RecompositionTracker.getInstance().processObservation(observation, this.device);
+  }
+
   /**
    * Capture visual evidence without re-reading the hierarchy. Automatic
    * post-action and waitFor flows use this after their final observation so a
@@ -999,10 +1008,33 @@ export class RealObserveScreen implements ObserveScreen {
   }
 
   /**
-   * Cache an observe result. Public for back-compat with tests.
+   * Capture the current device cache generation before a deferred observation
+   * write so #5884 invalidation fences apply after #6932 async work.
    */
-  async cacheObserveResult(observeResult: ObserveResult): Promise<void> {
-    await getObserveCacheStore().put(this.device.deviceId, observeResult);
+  captureCacheGeneration(): number {
+    return getObserveCacheStore().currentGeneration(this.device.deviceId);
+  }
+
+  /**
+   * Cache an observe result. Public for back-compat with tests. The optional
+   * generation preserves the #5884 stale-write fence for #6932 deferred writes.
+   */
+  async cacheObserveResult(
+    observeResult: ObserveResult,
+    generation?: number,
+    cachedAt?: number,
+  ): Promise<void> {
+    const cacheStore = getObserveCacheStore();
+    const resolvedCachedAt = cachedAt ?? this.timer.now();
+    const currentCachedAt = cacheStore.getRecentCachedAtForDevice(this.device.deviceId);
+    if (currentCachedAt !== undefined && currentCachedAt > resolvedCachedAt) {
+      logger.debug(
+        `[OBSERVE_CACHE] Skipping deferred observe result for device ${this.device.deviceId}: ` +
+          "a more recently cached observation already exists",
+      );
+      return;
+    }
+    await cacheStore.put(this.device.deviceId, observeResult, generation, resolvedCachedAt);
   }
 
   // ---------- Orchestration ----------

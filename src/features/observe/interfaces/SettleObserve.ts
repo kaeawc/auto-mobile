@@ -37,6 +37,12 @@ export interface SettleOptions {
    * settled and blow the budget several times over.
    */
   skipPerformanceAudit?: boolean;
+  /**
+   * Skip recomposition processing on every settle poll, forwarded verbatim to
+   * {@link pollObserveUntil}. The embedded settle gate opts in so only its
+   * adopted terminal capture updates recomposition state and telemetry (#6932).
+   */
+  skipRecompositionTracking?: boolean;
 }
 
 /**

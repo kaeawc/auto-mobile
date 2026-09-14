@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import { DeviceSnapshotStore } from "../../src/utils/DeviceSnapshotStore";
 import { promises as fs } from "fs";
 import * as path from "path";
@@ -201,6 +201,47 @@ describe("DeviceSnapshotStore", () => {
     expect(size).toBe(5);
   });
 
+  it("returns zero for a snapshot archive that was never captured", async () => {
+    expect(await store.getSnapshotSizeBytes("does-not-exist")).toBe(0);
+  });
+
+  it("returns unknown when the snapshot archive cannot be read", async () => {
+    const readdirSpy = spyOn(fs, "readdir").mockRejectedValue(
+      Object.assign(new Error("permission denied"), { code: "EACCES" }),
+    );
+
+    try {
+      expect(await store.getSnapshotSizeBytes("unreadable")).toBeNull();
+    } finally {
+      readdirSpy.mockRestore();
+    }
+  });
+
+  it("returns null when a nested snapshot entry vanishes during size measurement", async () => {
+    const snapshotName = "partially-unreadable";
+    const snapshotDir = store.getSnapshotPath(snapshotName);
+    const nestedDir = path.join(snapshotDir, "nested");
+    await fs.mkdir(nestedDir, { recursive: true });
+    await fs.writeFile(path.join(nestedDir, "payload.bin"), "large payload");
+
+    const readdir = fs.readdir.bind(fs);
+    let removedNestedDirectory = false;
+    const readdirSpy = spyOn(fs, "readdir").mockImplementation(async (...args) => {
+      const entries = await readdir(...args);
+      if (args[0] === snapshotDir && !removedNestedDirectory) {
+        removedNestedDirectory = true;
+        await fs.rm(nestedDir, { recursive: true });
+      }
+      return entries;
+    });
+
+    try {
+      expect(await store.getSnapshotSizeBytes(snapshotName)).toBeNull();
+    } finally {
+      readdirSpy.mockRestore();
+    }
+  });
+
   describe("getDirectorySize / listSubdirectoryNames (#6490)", () => {
     it("distinguishes a missing directory (null) from an empty one (0)", async () => {
       const emptyDir = path.join(testBasePath, "empty");
@@ -218,6 +259,31 @@ describe("DeviceSnapshotStore", () => {
       await fs.writeFile(path.join(snapshotDir, "nested", "textures.bin"), "abc");
 
       expect(await store.getDirectorySize(snapshotDir)).toBe(13);
+    });
+
+    it("returns null when a nested directory vanishes during recursive measurement", async () => {
+      const snapshotDir = path.join(testBasePath, "snapshot");
+      const nestedDir = path.join(snapshotDir, "nested");
+      await fs.mkdir(nestedDir, { recursive: true });
+      await fs.writeFile(path.join(snapshotDir, "ram.bin"), "0123456789");
+      await fs.writeFile(path.join(nestedDir, "textures.bin"), "abc");
+
+      const readdir = fs.readdir.bind(fs);
+      let removedNestedDirectory = false;
+      const readdirSpy = spyOn(fs, "readdir").mockImplementation(async (...args) => {
+        const entries = await readdir(...args);
+        if (args[0] === snapshotDir && !removedNestedDirectory) {
+          removedNestedDirectory = true;
+          await fs.rm(nestedDir, { recursive: true });
+        }
+        return entries;
+      });
+
+      try {
+        expect(await store.getDirectorySize(snapshotDir)).toBeNull();
+      } finally {
+        readdirSpy.mockRestore();
+      }
     });
 
     it("lists only subdirectories, and reports null for a missing directory", async () => {

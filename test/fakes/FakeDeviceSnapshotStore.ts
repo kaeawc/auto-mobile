@@ -17,7 +17,7 @@ type DeviceSnapshotStoreContract = Pick<
 
 export class FakeDeviceSnapshotStore implements DeviceSnapshotStoreContract {
   private basePath: string;
-  private sizes = new Map<string, number>();
+  private sizes = new Map<string, number | null>();
   private existing = new Set<string>();
   private deleted = new Set<string>();
   private generatedNames: string[] = [];
@@ -35,7 +35,7 @@ export class FakeDeviceSnapshotStore implements DeviceSnapshotStoreContract {
     return path.join(this.basePath, snapshotName);
   }
 
-  setSnapshotSize(snapshotName: string, sizeBytes: number): void {
+  setSnapshotSize(snapshotName: string, sizeBytes: number | null): void {
     this.sizes.set(snapshotName, sizeBytes);
   }
 
@@ -67,8 +67,8 @@ export class FakeDeviceSnapshotStore implements DeviceSnapshotStoreContract {
     return this.existing.has(snapshotName);
   }
 
-  async getSnapshotSizeBytes(snapshotName: string): Promise<number> {
-    return this.sizes.get(snapshotName) ?? 0;
+  async getSnapshotSizeBytes(snapshotName: string): Promise<number | null> {
+    return this.sizes.has(snapshotName) ? this.sizes.get(snapshotName)! : 0;
   }
 
   /**

@@ -249,6 +249,39 @@ describe("AndroidEmulatorClient.getBootedDevicesChecked", () => {
     });
   });
 
+  test("does not dispatch AVD-name probes while a listed emulator console is busy", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setDevices([
+      {
+        name: "ignored",
+        platform: "android",
+        deviceId: "emulator-5554",
+      } satisfies BootedDevice,
+    ]);
+    const consoleBusy = new FakeEmulatorConsoleBusyRegistry();
+    consoleBusy.setBusy("emulator-5554", true);
+    const client = new AndroidEmulatorClient(
+      null,
+      null,
+      new FakeTimer(),
+      new FakeAdbClientFactory(adb),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      consoleBusy,
+    );
+
+    const [discovered] = await client.getBootedDevicesChecked();
+
+    expect(discovered).toMatchObject({
+      name: "Unknown (emulator-5554)",
+      consoleBusyDuringProbe: true,
+    });
+    expect(adb.getExecutedCommands()).toEqual([]);
+  });
+
   test("records console busy state when an empty AVD-name probe falls through to an empty property", async () => {
     const adb = new FakeAdbExecutor();
     adb.setDevices([

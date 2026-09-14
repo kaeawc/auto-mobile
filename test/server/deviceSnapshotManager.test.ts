@@ -972,6 +972,13 @@ describe("deviceSnapshotManager", () => {
     expect(captureCalls).toEqual([]);
   });
 
+  test("FakeDeviceSnapshotStore distinguishes an explicit unknown size from an absent size", async () => {
+    store.setSnapshotSize("unknown", null);
+
+    expect(await store.getSnapshotSizeBytes("unknown")).toBeNull();
+    expect(await store.getSnapshotSizeBytes("never-set")).toBe(0);
+  });
+
   test("listDeviceSnapshots skips a leftover '.replacing' set-aside directory (#5713)", async () => {
     const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "snapshot-manager-replacing-"));
     try {

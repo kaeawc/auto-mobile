@@ -39,7 +39,11 @@ export interface ViewHierarchy {
    * @param enabled - Whether to enable recomposition tracking
    * @param perf - Optional performance tracker
    */
-  configureRecompositionTracking(enabled: boolean, perf?: PerformanceTracker): Promise<void>;
+  configureRecompositionTracking(
+    enabled: boolean,
+    perf?: PerformanceTracker,
+    signal?: AbortSignal,
+  ): Promise<void>;
 
   /**
    * Find the focused element in the view hierarchy.

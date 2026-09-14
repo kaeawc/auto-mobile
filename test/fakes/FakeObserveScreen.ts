@@ -17,12 +17,21 @@ export class FakeObserveScreen implements ObserveScreen {
   private executeCallCount: number = 0;
   private captureScreenshotCallCount: number = 0;
   private accessibilityAuditCallCount: number = 0;
+  private processRecompositionCallCount: number = 0;
+  private cacheObserveResultCallCount: number = 0;
+  private neverResolvingOperations: Set<string> = new Set();
   private getMostRecentCachedObserveResultCallCount: number = 0;
   private failures: Map<string, Error> = new Map();
   private callCounter: number = 0;
   private autoVaryHierarchy: boolean = false;
+  private cacheGenerationSequence: number[] | null = null;
+  private cacheGenerationCallCount: number = 0;
   private readonly executeOptionsHistory: ObserveScreenExecuteOptions[] = [];
   private readonly capturedScreenshotObservations: Array<ObserveResult | undefined> = [];
+  private readonly recompositionObservations: ObserveResult[] = [];
+  private readonly cachedObserveResultObservations: ObserveResult[] = [];
+  private readonly cachedObserveResultGenerations: Array<number | undefined> = [];
+  private readonly cachedObserveResultCachedAts: Array<number | undefined> = [];
 
   /**
    * Set the observe result to be returned by execute and getMostRecentCachedObserveResult
@@ -55,6 +64,15 @@ export class FakeObserveScreen implements ObserveScreen {
     this.observeSequence = results;
     this.observeResultFactory = null;
     this.configuredObserveResult = null;
+  }
+
+  /** Configure generations captured at the start of successive observations. */
+  setCacheGenerationSequence(generations: number[]): void {
+    if (generations.length === 0) {
+      throw new Error("FakeObserveScreen: empty cache generation sequence");
+    }
+    this.cacheGenerationSequence = generations;
+    this.cacheGenerationCallCount = 0;
   }
 
   /**
@@ -118,6 +136,18 @@ export class FakeObserveScreen implements ObserveScreen {
     }
   }
 
+  /** Keep a configured async operation pending so timer-bound callers can be tested. */
+  setNeverResolving(
+    operation: "processRecomposition" | "cacheObserveResult",
+    enabled: boolean,
+  ): void {
+    if (enabled) {
+      this.neverResolvingOperations.add(operation);
+    } else {
+      this.neverResolvingOperations.delete(operation);
+    }
+  }
+
   /**
    * Get history of executed operations
    */
@@ -147,10 +177,17 @@ export class FakeObserveScreen implements ObserveScreen {
     this.executeCallCount = 0;
     this.captureScreenshotCallCount = 0;
     this.accessibilityAuditCallCount = 0;
+    this.processRecompositionCallCount = 0;
+    this.cacheObserveResultCallCount = 0;
     this.getMostRecentCachedObserveResultCallCount = 0;
     this.callCounter = 0;
+    this.cacheGenerationCallCount = 0;
     this.executeOptionsHistory.length = 0;
     this.capturedScreenshotObservations.length = 0;
+    this.recompositionObservations.length = 0;
+    this.cachedObserveResultObservations.length = 0;
+    this.cachedObserveResultGenerations.length = 0;
+    this.cachedObserveResultCachedAts.length = 0;
   }
 
   /**
@@ -168,6 +205,36 @@ export class FakeObserveScreen implements ObserveScreen {
   /** Total runAccessibilityAudit() calls. */
   getAccessibilityAuditCallCount(): number {
     return this.accessibilityAuditCallCount;
+  }
+
+  /** Total processRecomposition() calls. */
+  getProcessRecompositionCallCount(): number {
+    return this.processRecompositionCallCount;
+  }
+
+  /** Observations passed to processRecomposition(), in call order. */
+  getProcessRecompositionObservations(): ObserveResult[] {
+    return [...this.recompositionObservations];
+  }
+
+  /** Total cacheObserveResult() calls. */
+  getCacheObserveResultCallCount(): number {
+    return this.cacheObserveResultCallCount;
+  }
+
+  /** Observations passed to cacheObserveResult(), in call order. */
+  getCacheObserveResultObservations(): ObserveResult[] {
+    return [...this.cachedObserveResultObservations];
+  }
+
+  /** Generations passed to cacheObserveResult(), in call order. */
+  getCacheObserveResultGenerations(): Array<number | undefined> {
+    return [...this.cachedObserveResultGenerations];
+  }
+
+  /** Host cache timestamps passed to cacheObserveResult(), in call order. */
+  getCacheObserveResultCachedAts(): Array<number | undefined> {
+    return [...this.cachedObserveResultCachedAts];
   }
 
   /** Observations associated with terminal screenshot capture, in call order. */
@@ -217,6 +284,51 @@ export class FakeObserveScreen implements ObserveScreen {
     this.accessibilityAuditCallCount++;
 
     const error = this.failures.get("runAccessibilityAudit");
+    if (error) {
+      throw error;
+    }
+  }
+
+  async processRecomposition(observation: ObserveResult, _perf?: unknown): Promise<void> {
+    this.executedOperations.push("processRecomposition");
+    this.processRecompositionCallCount++;
+    this.recompositionObservations.push(observation);
+
+    if (this.neverResolvingOperations.has("processRecomposition")) {
+      return await new Promise<void>(() => {});
+    }
+
+    const error = this.failures.get("processRecomposition");
+    if (error) {
+      throw error;
+    }
+  }
+
+  captureCacheGeneration(): number | undefined {
+    if (!this.cacheGenerationSequence) {
+      return undefined;
+    }
+    const index = Math.min(this.cacheGenerationCallCount, this.cacheGenerationSequence.length - 1);
+    this.cacheGenerationCallCount++;
+    return this.cacheGenerationSequence[index];
+  }
+
+  async cacheObserveResult(
+    observation: ObserveResult,
+    generation?: number,
+    cachedAt?: number,
+  ): Promise<void> {
+    this.executedOperations.push("cacheObserveResult");
+    this.cacheObserveResultCallCount++;
+    this.cachedObserveResultObservations.push(observation);
+    this.cachedObserveResultGenerations.push(generation);
+    this.cachedObserveResultCachedAts.push(cachedAt);
+
+    if (this.neverResolvingOperations.has("cacheObserveResult")) {
+      return await new Promise<void>(() => {});
+    }
+
+    const error = this.failures.get("cacheObserveResult");
     if (error) {
       throw error;
     }

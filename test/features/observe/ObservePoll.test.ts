@@ -338,3 +338,163 @@ describe("pollObserveUntil minTimestamp floor (#6284)", () => {
     expect(outcome.observation.wakefulness).toBe("Asleep");
   });
 });
+
+describe("pollObserveUntil recomposition tracking (#6932)", () => {
+  test("returns the terminal observation when cache finalization exceeds the remaining poll budget", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const fake = new FakeObserveScreen();
+    const terminal = obs(20, "terminal");
+    fake.setObserveResult(terminal);
+    fake.setNeverResolving("cacheObserveResult", true);
+
+    const outcomePromise = pollObserveUntil(
+      fake,
+      timer,
+      { timeoutMs: 100, pollMs: 10, initialMinTimestampMs: 10, skipRecompositionTracking: true },
+      () => true,
+    );
+
+    const outcome = await outcomePromise;
+
+    expect(outcome.observation).toBe(terminal);
+    expect(fake.getProcessRecompositionCallCount()).toBe(1);
+    expect(fake.getCacheObserveResultCallCount()).toBe(1);
+  });
+
+  test("returns the terminal observation when finalization is aborted after the loop settles", async () => {
+    const timer = new FakeTimer();
+    const fake = new FakeObserveScreen();
+    const terminal = obs(20, "terminal");
+    const controller = new AbortController();
+    fake.setObserveResult(terminal);
+    fake.setNeverResolving("processRecomposition", true);
+
+    const outcomePromise = pollObserveUntil(
+      fake,
+      timer,
+      {
+        timeoutMs: 100,
+        pollMs: 10,
+        initialMinTimestampMs: 10,
+        signal: controller.signal,
+        skipRecompositionTracking: true,
+      },
+      () => true,
+    );
+    await Promise.resolve();
+    controller.abort();
+
+    const outcome = await outcomePromise;
+
+    expect(outcome.observation).toBe(terminal);
+    expect(fake.getProcessRecompositionCallCount()).toBe(1);
+  });
+
+  test("does not process or cache a stale independently sampled Asleep hierarchy", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const fake = new FakeObserveScreen();
+    const staleAsleep = {
+      ...obs(20, "stale-asleep"),
+      wakefulness: "Asleep",
+      wakefulnessSource: "adb",
+      freshness: { isFresh: false, verified: false, category: "cache_age" },
+    } as ObserveResult;
+    fake.setObserveResult(staleAsleep);
+
+    const outcome = await pollObserveUntil(
+      fake,
+      timer,
+      { timeoutMs: 1000, pollMs: 150, initialMinTimestampMs: 10, skipRecompositionTracking: true },
+      () => false,
+    );
+
+    expect(outcome.terminalReason).toBe("screen_off");
+    expect(fake.getProcessRecompositionCallCount()).toBe(0);
+    expect(fake.getCacheObserveResultCallCount()).toBe(0);
+  });
+
+  test("persists the terminal observation with its captured cache generation", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const fake = new FakeObserveScreen();
+    const terminal = obs(30, "terminal");
+    fake.setObserveSequence([obs(10, "baseline"), obs(20, "intermediate"), terminal]);
+    fake.setCacheGenerationSequence([17, 23, 29]);
+
+    await pollObserveUntil(
+      fake,
+      timer,
+      { timeoutMs: 1000, pollMs: 150, skipRecompositionTracking: true },
+      (observation) => observation === terminal,
+    );
+
+    expect(fake.getCacheObserveResultObservations()).toEqual([terminal]);
+    expect(fake.getCacheObserveResultGenerations()).toEqual([29]);
+  });
+
+  test("persists a deferred terminal observation at its poll-start HOST time despite future device time (#6999 round 5)", async () => {
+    const timer = new FakeTimer();
+    timer.setCurrentTime(1_000_000);
+    timer.enableAutoAdvance();
+    const fake = new FakeObserveScreen();
+    const terminal = obs(1_600_000, "future-device-terminal");
+    fake.setObserveSequence([obs(10, "baseline"), terminal]);
+
+    await pollObserveUntil(
+      fake,
+      timer,
+      { timeoutMs: 1000, pollMs: 150, skipRecompositionTracking: true },
+      (observation) => observation === terminal,
+    );
+
+    // The second poll begins after the 150ms interval. Its device-authored
+    // timestamp is deliberately far ahead and must never enter cache recency.
+    expect(fake.getCacheObserveResultCachedAts()).toEqual([1_000_150]);
+  });
+
+  test("skips every poll and processes only the terminal observation once", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const fake = new FakeObserveScreen();
+    const terminal = obs(30, "terminal");
+    fake.setObserveSequence([obs(10, "baseline"), obs(20, "intermediate"), terminal]);
+
+    await pollObserveUntil(
+      fake,
+      timer,
+      { timeoutMs: 1000, pollMs: 150, skipRecompositionTracking: true },
+      (observation) => observation === terminal,
+    );
+
+    expect(fake.getExecuteOptions().every((option) => option.skipRecompositionTracking)).toBe(true);
+    expect(fake.getProcessRecompositionCallCount()).toBe(1);
+    expect(fake.getProcessRecompositionObservations()).toEqual([terminal]);
+    expect(fake.getCacheObserveResultCallCount()).toBe(1);
+    expect(fake.getCacheObserveResultObservations()).toEqual([terminal]);
+  });
+
+  test("does not process or cache an all-stale timeout fallback", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const fake = new FakeObserveScreen();
+    const stale = {
+      ...obs(10, "cached-stale"),
+      freshness: { isFresh: false, verified: false, category: "cache_age" },
+    } as ObserveResult;
+    fake.setObserveSequence([stale]);
+
+    const outcome = await pollObserveUntil(
+      fake,
+      timer,
+      { timeoutMs: 300, pollMs: 150, initialMinTimestampMs: 10, skipRecompositionTracking: true },
+      () => false,
+    );
+
+    expect(outcome.terminalReason).toBe("timeout");
+    expect(outcome.observation).toBe(stale);
+    expect(fake.getProcessRecompositionCallCount()).toBe(0);
+    expect(fake.getCacheObserveResultCallCount()).toBe(0);
+  });
+});

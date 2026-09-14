@@ -738,8 +738,10 @@ describe("settle poll cost (#6890 review)", () => {
     const options = fake.getExecuteOptions();
     expect(options.length).toBeGreaterThan(0);
     expect(options.every((option) => option.skipPerformanceAudit === true)).toBe(true);
+    expect(options.every((option) => option.skipRecompositionTracking === true)).toBe(true);
     expect(options.every((option) => option.skipScreenshot === true)).toBe(true);
     expect(options.every((option) => option.skipAccessibilityAudit === true)).toBe(true);
+    expect(fake.getProcessRecompositionCallCount()).toBe(1);
   });
 });
 

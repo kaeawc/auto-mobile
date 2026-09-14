@@ -40,6 +40,7 @@ export async function parseJunitTestcaseTimings(xml: string, reportId: string): 
       }
       const testFile = sanitizeJunitField(testcase.$?.file ?? "") || suiteFile;
       const classname = sanitizeJunitField(testcase.$?.classname ?? "");
+      const line = sanitizeJunitField(testcase.$?.line ?? "");
       const key = `${testFile}\0${classname}\0${name}`;
       const occurrence = (occurrences.get(key) ?? 0) + 1;
       occurrences.set(key, occurrence);
@@ -51,6 +52,7 @@ export async function parseJunitTestcaseTimings(xml: string, reportId: string): 
           (Number(time) * 1000).toFixed(6),
           String(occurrence),
           reportId,
+          line || String(occurrence),
         ].join(fieldSeparator),
       );
     }

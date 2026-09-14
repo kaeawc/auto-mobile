@@ -14,8 +14,8 @@ describe("parseJunitTestcaseTimings", () => {
     );
 
     expect(rows).toEqual([
-      ["test/suite.test.ts", "suite", "fast", "1.000000", "1", "report.xml"].join(separator),
-      ["test/suite.test.ts", "suite", "slow", "200.000000", "1", "report.xml"].join(separator),
+      ["test/suite.test.ts", "suite", "fast", "1.000000", "1", "report.xml", "1"].join(separator),
+      ["test/suite.test.ts", "suite", "slow", "200.000000", "1", "report.xml", "1"].join(separator),
     ]);
   });
 
@@ -33,6 +33,7 @@ describe("parseJunitTestcaseTimings", () => {
         "150.000000",
         "1",
         "report.xml",
+        "1",
       ].join(separator),
     ]);
   });
@@ -44,6 +45,25 @@ describe("parseJunitTestcaseTimings", () => {
     );
 
     expect(rows.map((row) => row.split(separator)[4])).toEqual(["1", "2"]);
+    expect(rows.map((row) => row.split(separator)[6])).toEqual(["1", "2"]);
+  });
+
+  test("uses testcase lines as stable identity for duplicate tuples", async () => {
+    const rows = await parseJunitTestcaseTimings(
+      `<testsuites><testsuite file="test/case.test.ts"><testcase classname="suite" name="duplicate" time="0.01" line="10"/><testcase classname="suite" name="duplicate" time="0.02" line="42"/></testsuite></testsuites>`,
+      "report.xml",
+    );
+
+    expect(rows.map((row) => row.split(separator)[6])).toEqual(["10", "42"]);
+  });
+
+  test("falls back to occurrence identity when duplicate tuples have no lines", async () => {
+    const rows = await parseJunitTestcaseTimings(
+      `<testsuites><testsuite file="test/case.test.ts"><testcase classname="suite" name="duplicate" time="0.01"/><testcase classname="suite" name="duplicate" time="0.02"/></testsuite></testsuites>`,
+      "report.xml",
+    );
+
+    expect(rows.map((row) => row.split(separator)[6])).toEqual(["1", "2"]);
   });
 
   test("sanitizes row separators and carriage returns without changing other fields", () => {

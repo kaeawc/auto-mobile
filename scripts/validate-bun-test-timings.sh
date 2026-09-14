@@ -53,8 +53,10 @@ field_sep=$'\037'
 
 # One row per measured testcase: file, classname, name, milliseconds, the
 # occurrence ordinal of that name within the report, and the report it came from.
-# The ordinal keeps same-named tests in one file apart; the report id makes a
-# recheck sample count independent runs rather than rows.
+# The seventh field uses Bun's testcase source line when available, keeping a
+# duplicate stable across a full run and an isolated recheck even if the
+# per-report ordinal shifts; older Bun reports fall back to that ordinal. The
+# report id makes a recheck sample count independent runs rather than rows.
 testcase_rows() {
   bun run scripts/lib/junit-testcase-timings.ts "$@"
 }
@@ -192,7 +194,7 @@ if [[ ! -s "$measured_rows" ]]; then
 fi
 
 awk -F"$field_sep" -v limit_ms="$max_ms" '
-$4 + 0 > limit_ms && !seen[$1 FS $2 FS $3 FS $5]++
+$4 + 0 > limit_ms && !seen[$1 FS $2 FS $3 FS $7]++
 ' "$measured_rows" | sort > "$offender_rows"
 
 if [[ ! -s "$offender_rows" ]]; then
@@ -342,7 +344,7 @@ function median(key,    values, count, outer, inner, swap) {
 FILENAME == rechecked_file { rechecked[$0] = 1; next }
 FILENAME == unverified_file { unverified[$0] = 1; next }
 FILENAME == recheck_file {
-  key = $1 SUBSEP $2 SUBSEP $3 SUBSEP $5
+  key = $1 SUBSEP $2 SUBSEP $3 SUBSEP $7
   # One sample per recheck PROCESS. Counting rows would let two same-named
   # tests in one file look like two independent runs of one test.
   if (!(key SUBSEP $6 in seen_run)) {
@@ -353,7 +355,7 @@ FILENAME == recheck_file {
   next
 }
 {
-  key = $1 SUBSEP $2 SUBSEP $3 SUBSEP $5
+  key = $1 SUBSEP $2 SUBSEP $3 SUBSEP $7
   label = ($2 != "" && $3 != "") ? $2 "." $3 : $3
   if ($5 + 0 > 1) {
     label = label " #" $5

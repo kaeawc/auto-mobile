@@ -714,6 +714,44 @@ describe("systemTray list silent-section ownership", () => {
     expect(result.unattributedRows).toBe(0);
   });
 
+  test("does not retry the before snapshot after a swipe once the first read fails", async () => {
+    // Two header-less pages: the stale first-page row is retained while the
+    // second page is scanned. The competitor's matching record disappears
+    // during the swipe (its body updates), leaving a record that only shares
+    // the title. Reading a "before" snapshot after that swipe would uniquely
+    // match the requested package and claim the stale row; after-only
+    // correlation keeps the shared title ambiguous.
+    const { adb } = setup([
+      page(silentRow(SLEEP_TITLE, SLEEP_BODY)),
+      page(silentRow("Second page", "Second page body")),
+    ]);
+    adb.setCommandResponse(
+      "dumpsys notification",
+      execResult(
+        dumpsys(
+          record(WELLBEING, SLEEP_TITLE, SLEEP_BODY),
+          record("com.other.clone", SLEEP_TITLE, "Updated during the swipe"),
+        ),
+      ),
+    );
+    const executeCommand = adb.executeCommand.bind(adb);
+    let dumpsysReads = 0;
+    adb.executeCommand = async (...args) => {
+      if (args[0].includes("dumpsys notification") && ++dumpsysReads === 1) {
+        throw new Error("dumpsys unavailable");
+      }
+      return executeCommand(...args);
+    };
+
+    const result = await listSystemTrayNotifications(device, WELLBEING, "Digital Wellbeing", 5000);
+
+    expect(result.swipes).toBe(1);
+    expect(result.notifications).toEqual([]);
+    expect(result.unattributedRows).toBe(2);
+    // The failed before read and the single after read; no post-swipe retry.
+    expect(dumpsysReads).toBe(2);
+  });
+
   test("throws when dumpsys proves the requested app posted but no rendered row matches", async () => {
     const { adb } = setup([page(silentRow("Rendered later", "The shade text changed"))]);
     adb.setCommandResponseSequence("dumpsys notification", [

@@ -1740,6 +1740,15 @@ const readDumpsysNotificationRecords = async (
 
 type TrayRowAttribution = TrayOwnershipEvidence | "other" | "unknown";
 
+// The before snapshot is only evidence when it precedes every swipe. Once a
+// read fails, a later page must not retry it: a post-swipe dump stored as
+// "before" would present the requested package as the stable owner of a row
+// retained from an earlier page after a competitor left during the swipe.
+type TrayBeforeSnapshot =
+  | { status: "not-attempted" }
+  | { status: "unavailable" }
+  | { status: "records"; records: DumpsysNotificationRecord[] };
+
 const attributeTrayRow = (
   row: TrayObservedRow,
   appId: string,
@@ -1833,7 +1842,7 @@ export const listSystemTrayNotifications = async (
   );
   const rows: TrayObservedRow[] = [];
   let previousNotifications: TrayObservedRow[] = [];
-  let beforeRecords: DumpsysNotificationRecord[] | undefined;
+  let beforeSnapshot: TrayBeforeSnapshot = { status: "not-attempted" };
   let swipes = 0;
   while (true) {
     signal?.throwIfAborted();
@@ -1846,11 +1855,14 @@ export const listSystemTrayNotifications = async (
     previousNotifications = pageNotifications;
     // Capture as soon as a page needs correlation, before another swipe can
     // remove a competing notification from the authoritative snapshot (#6921).
+    // Attempt it at most once: a failed read stays unavailable for the scan.
     if (
-      beforeRecords === undefined &&
+      beforeSnapshot.status === "not-attempted" &&
       pageNotifications.some((row) => row.notification.appLabel === null)
     ) {
-      beforeRecords = await readDumpsysNotificationRecords(adbFactory(device), signal);
+      const records = await readDumpsysNotificationRecords(adbFactory(device), signal);
+      beforeSnapshot =
+        records === undefined ? { status: "unavailable" } : { status: "records", records };
     }
     if (swipes === 3 || trayAtScrollEnd(observation.viewHierarchy)) {
       break;
@@ -1895,6 +1907,7 @@ export const listSystemTrayNotifications = async (
   // Only pay for the dump when the shade actually rendered a row the header
   // rule cannot attribute.
   const hasHeaderlessRows = rows.some((row) => row.notification.appLabel === null);
+  const beforeRecords = beforeSnapshot.status === "records" ? beforeSnapshot.records : undefined;
   if (hasHeaderlessRows && beforeRecords === undefined) {
     logger.debug(
       "[systemTray] before dumpsys snapshot unavailable; falling back to after-only evidence.",

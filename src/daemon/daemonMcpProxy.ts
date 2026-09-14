@@ -1309,7 +1309,9 @@ export class DaemonMcpProxy {
   }
 
   private async waitForRunningReconciliationStatus(deadline: number): Promise<DaemonStatus> {
-    while (this.timer.now() < deadline) {
+    let initialProbe = true;
+    while (initialProbe || this.timer.now() < deadline) {
+      initialProbe = false;
       try {
         const status = await this.reconciliationStatus();
         if (status.running) {

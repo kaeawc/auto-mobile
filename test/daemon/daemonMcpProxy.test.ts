@@ -1939,6 +1939,37 @@ describe("DaemonMcpProxy", () => {
         }
       });
 
+      test("probes a ready successor after restart exhausts the reconciliation deadline", async () => {
+        const timer = new FakeTimer();
+        const fakeClient = new FakeDaemonClient({
+          daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+        });
+        const fakeManager = new FakeDaemonManager();
+        const initialStatus = runningStatus({ embeddedSdk: false });
+        const successorStatus = runningStatus({ embeddedSdk: true });
+        fakeManager.statusResults = [initialStatus, initialStatus, initialStatus, successorStatus];
+        const waitForReadySpy = spyOn(fakeManager, "waitForReady").mockImplementation(async () => {
+          timer.advanceTime(DAEMON_STARTUP_TIMEOUT_MS);
+          return true;
+        });
+        const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+        const proxy = new DaemonMcpProxy({
+          clientFactory: () => fakeClient,
+          daemonManager: fakeManager,
+          daemonOptions: { embeddedSdk: true },
+          timer,
+        });
+
+        try {
+          await proxy.listTools();
+          expect(fakeManager.restartCallCount).toBe(1);
+        } finally {
+          isAvailableSpy.mockRestore();
+          waitForReadySpy.mockRestore();
+          await proxy.close();
+        }
+      });
+
       test("fails once when an owned restart leaves startup options mismatched", async () => {
         const fakeClient = new FakeDaemonClient({
           daemonMethodResults: new Map([["tools/list", { tools: [] }]]),

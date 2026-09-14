@@ -1,7 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import * as path from "path";
+import { AdbClient } from "../../../src/utils/android-cmdline-tools/AdbClient";
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecuteOptions } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { defaultRetryExecutor } from "../../../src/utils/retry/RetryExecutor";
+import { FakeTimer } from "../../fakes/FakeTimer";
 import {
   AVD_SNAPSHOTS_DIRNAME,
   FileAvdConfigReader,
@@ -80,8 +83,9 @@ function recordingAdbFactory(result: ExecResult | Error) {
   const commands: string[] = [];
   const executeOptions: Array<AdbExecuteOptions | undefined> = [];
   const execute = async (command: string, options?: AdbExecuteOptions): Promise<ExecResult> => {
-    commands.push(command);
     executeOptions.push(options);
+    await options?.beforeDispatch?.();
+    commands.push(command);
     if (result instanceof Error) {
       throw result;
     }
@@ -285,6 +289,47 @@ describe("AvdSnapshotService (#6490)", () => {
       reclaimed: true,
     });
     expect(adb.commands).toEqual(["emu avd snapshot del snap"]);
+  });
+
+  test("deleteVmSnapshot stops retries when the serial is reassigned between attempts", async () => {
+    const liveDevices = {
+      current: [
+        { deviceId: "emulator-5556", name: "am-api36", platform: "android" } as BootedDevice,
+      ],
+    };
+    let dispatches = 0;
+    const client = new AdbClient(
+      { deviceId: "emulator-5556", name: "emulator-5556", platform: "android" },
+      async () => {
+        dispatches += 1;
+        liveDevices.current = [
+          { deviceId: "emulator-5556", name: "am-api34", platform: "android" },
+        ];
+        if (dispatches === 1) {
+          throw new Error("adb transient blip");
+        }
+        return execResult("OK");
+      },
+      null,
+      defaultRetryExecutor,
+      new FakeTimer(),
+    );
+    const adbFactory: AdbClientFactory = { create: () => client };
+    const sut = new AvdSnapshotService(
+      new FakeDirectories({}, {}),
+      new FakeAvdDirectories(new Set()),
+      {
+        getBootedDevices: async () => liveDevices.current,
+      } as never,
+      adbFactory,
+    );
+
+    expect(await sut.deleteVmSnapshot("emulator-5556", "snap", 30000, "am-api36")).toEqual({
+      reclaimed: false,
+      reason:
+        "Skipping VM snapshot delete for 'snap': serial 'emulator-5556' expected AVD 'am-api36' but currently hosts 'am-api34'",
+    });
+    expect(dispatches).toBe(1);
   });
 
   test("a snapshot that is already gone counts as reclaimed", async () => {

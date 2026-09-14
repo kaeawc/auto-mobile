@@ -242,6 +242,17 @@ class PersistentSocketClient {
     });
   }
 
+  send(method: string, params: Record<string, unknown>): void {
+    this.socket.write(
+      JSON.stringify({
+        id: randomUUID(),
+        type: "mcp_request",
+        method,
+        params,
+      }) + "\n",
+    );
+  }
+
   close(): void {
     this.socket.destroy();
   }
@@ -529,6 +540,52 @@ describe("UnixSocketServer MCP forward serialization", () => {
     } finally {
       client.close();
     }
+  });
+
+  test("does not republish a generated profile when its owner disconnects before an abort-ignoring result", async () => {
+    const forwardStarted = Promise.withResolvers<void>();
+    const lateResult = Promise.withResolvers<unknown>();
+    server.mcpClientFactory = async () =>
+      ({
+        callTool: async () => {
+          forwardStarted.resolve();
+          return await lateResult.promise;
+        },
+        listTools: async () => ({ tools: [] }),
+        listResources: async () => ({ resources: [] }),
+        readResource: async () => ({ contents: [] }),
+        listResourceTemplates: async () => ({ resourceTemplates: [] }),
+        close: async () => {},
+      }) as FakeMcpClient;
+
+    const client = new PersistentSocketClient();
+    await client.connect(socketPath);
+    client.send("tools/call", {
+      name: "setToolEnabled",
+      arguments: { toolName: "executePlan" },
+    });
+    await forwardStarted.promise;
+    client.close();
+
+    const internals = server as unknown as {
+      clientSockets: Map<string, unknown>;
+      boundMcpClientKeysBySocketSession: Map<string, unknown>;
+    };
+    for (let attempt = 0; attempt < 20 && internals.clientSockets.size > 0; attempt++) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+    expect(internals.clientSockets.size).toBe(0);
+
+    // This is the same response shape that normally creates the socket's
+    // generated tool-selection-profile binding.
+    lateResult.resolve({
+      content: [{ type: "text", text: JSON.stringify({ sessionUuid: "profile-late" }) }],
+    });
+    for (let attempt = 0; attempt < 20; attempt++) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+
+    expect(internals.boundMcpClientKeysBySocketSession.size).toBe(0);
   });
 
   test("preserves a socket-bound selection profile for a later explicit device call", async () => {

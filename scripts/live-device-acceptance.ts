@@ -740,7 +740,7 @@ function acquisitionTool(
 
 function acquisitionRequest(
   args: AcceptanceArgs,
-  range: "exact" | "min" | "max",
+  range: "exact" | "min" | "max" | "bounded",
   kind: AcquisitionKind,
 ): JsonObject {
   if (kind === "platform") {
@@ -768,6 +768,10 @@ function acquisitionRequest(
   if (range === "max") {
     request.maxOsVersion = args.osVersionRange.max;
   }
+  if (range === "bounded") {
+    request.minOsVersion = args.osVersionRange.min;
+    request.maxOsVersion = args.osVersionRange.max;
+  }
   return request;
 }
 
@@ -775,12 +779,15 @@ function assertGenericSelectorSchemaMatrix(args: AcceptanceArgs): void {
   const exact = startDeviceSchema.safeParse(acquisitionRequest(args, "exact", "generic"));
   const min = startDeviceSchema.safeParse(acquisitionRequest(args, "min", "generic"));
   const max = startDeviceSchema.safeParse(acquisitionRequest(args, "max", "generic"));
-  if (!exact.success || !min.success || !max.success) {
-    throw new Error("startDevice schema rejected an exact, min, or max request");
+  const bounded = startDeviceSchema.safeParse(acquisitionRequest(args, "bounded", "generic"));
+  if (!exact.success || !min.success || !max.success || !bounded.success) {
+    throw new Error("startDevice schema rejected an exact, min, max, or bounded request");
   }
   if (
     min.data.minOsVersion !== args.osVersionRange.min ||
-    max.data.maxOsVersion !== args.osVersionRange.max
+    max.data.maxOsVersion !== args.osVersionRange.max ||
+    bounded.data.minOsVersion !== args.osVersionRange.min ||
+    bounded.data.maxOsVersion !== args.osVersionRange.max
   ) {
     throw new Error("startDevice schema did not preserve the requested OS bounds");
   }
@@ -1593,7 +1600,7 @@ export async function runAcceptanceMatrix(
 
   const acquire = async (
     phase: string,
-    range: "exact" | "min" | "max",
+    range: "exact" | "min" | "max" | "bounded",
     kind: AcquisitionKind,
   ): Promise<AcquiredSession> => {
     const start = timer.now();
@@ -2326,6 +2333,9 @@ export async function runAcceptanceMatrix(
 
     const genericMinimum = await acquire("acquire-generic-min", "min", "generic");
     await release(genericMinimum.sessionUuid, "acquire-generic-min");
+
+    const genericBounded = await acquire("acquire-generic-bounded", "bounded", "generic");
+    await release(genericBounded.sessionUuid, "acquire-generic-bounded");
 
     for (const bound of incompatibleBoundRequests(args)) {
       await expectIncompatibleBound(bound.edge, bound.value);

@@ -498,6 +498,13 @@ describe("live device acceptance harness", () => {
         platform: "android",
         avdName: "Pixel_8_API_35",
         preferRunning: true,
+        minOsVersion: "34",
+        maxOsVersion: "35",
+      },
+      {
+        platform: "android",
+        avdName: "Pixel_8_API_35",
+        preferRunning: true,
         minOsVersion: "9999",
       },
       {
@@ -537,6 +544,7 @@ describe("live device acceptance harness", () => {
       "start-6",
       "start-7",
       "start-8",
+      "start-9",
     ]) {
       assertReadinessImmediatelyFollowsSuccess(harness, sessionUuid);
     }
@@ -550,7 +558,14 @@ describe("live device acceptance harness", () => {
       "start-6",
       "start-7",
       "start-8",
+      "start-9",
     ]);
+    expect(
+      evidence.acquisitionRequests.some((entry) => {
+        const request = entry.request as Record<string, unknown>;
+        return "minOsVersion" in request && "maxOsVersion" in request;
+      }),
+    ).toBe(true);
     expect(evidence.checks).toMatchObject({
       stableIdentityPreserved: true,
       allMintedSessionsReleased: true,
@@ -615,6 +630,14 @@ describe("live device acceptance harness", () => {
         preferRunning: true,
         formFactor: "phone",
         minOsVersion: "17.0",
+      },
+      {
+        platform: "ios",
+        deviceId: IOS_UDID,
+        preferRunning: true,
+        formFactor: "phone",
+        minOsVersion: "17.0",
+        maxOsVersion: "18.0",
       },
       {
         platform: "ios",
@@ -691,6 +714,12 @@ describe("live device acceptance harness", () => {
           JSON.stringify(call.arguments).includes("00000000-0000-0000-0000-000000000002"),
       ),
     ).toBe(false);
+    expect(
+      evidence.acquisitionRequests.some((entry) => {
+        const request = entry.request as Record<string, unknown>;
+        return "minOsVersion" in request && "maxOsVersion" in request;
+      }),
+    ).toBe(true);
   });
 
   test("rejects iOS runner restart evidence when neither exposed identity changes", async () => {
@@ -888,6 +917,7 @@ describe("live device acceptance harness", () => {
       "start-5",
       "start-6",
       "start-7",
+      "start-8",
     ]);
   });
 
@@ -1014,7 +1044,7 @@ describe("live device acceptance harness", () => {
     );
 
     expect(harness.events).toContain("close:daemon");
-    expect(harness.events.filter((event) => event.startsWith("close:"))).toHaveLength(15);
+    expect(harness.events.filter((event) => event.startsWith("close:"))).toHaveLength(16);
     expect(harness.evidence[0]).not.toContain("daemon close failed");
     expect(harness.evidence[0]).not.toContain("client close failed");
   });
@@ -1059,6 +1089,65 @@ describe("live device acceptance harness", () => {
     ).rejects.toThrow("Acceptance deadline elapsed during provision MCP connect");
     expect(aborted).toBe(true);
     expect(timer.now()).toBeLessThanOrEqual(100);
+  });
+
+  test("returns by the deadline when a late session-bearing response ignores abort", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const harness = createHarness();
+    const createMcpClient = harness.dependencies.createMcpClient!;
+    const lateResponse = Promise.withResolvers<{ structuredContent: Record<string, unknown> }>();
+    let aborted = false;
+    let daemonConnections = 0;
+    harness.dependencies.timer = timer;
+    harness.dependencies.createMcpClient = async (owner, signal, presentationOrder) => {
+      const client = await createMcpClient(owner, signal, presentationOrder);
+      if (owner !== "controlled-discovery-forward") {
+        return client;
+      }
+      return {
+        async callTool(name, arguments_, callSignal) {
+          if (name !== "getApple") {
+            return await client.callTool(name, arguments_, callSignal);
+          }
+          callSignal?.addEventListener("abort", () => {
+            aborted = true;
+          });
+          return await lateResponse.promise;
+        },
+        async close() {
+          await client.close();
+        },
+      };
+    };
+    const createDaemonClient = harness.dependencies.createDaemonClient!;
+    harness.dependencies.createDaemonClient = async (signal) => {
+      daemonConnections++;
+      return await createDaemonClient(signal);
+    };
+
+    const result = runAcceptanceMatrix({ ...iosArgs, timeoutMs: 100 }, harness.dependencies);
+    await expect(result).rejects.toThrow(
+      "Acceptance deadline elapsed during controlled-discovery-forward-exact-uuid-selection getApple",
+    );
+    expect(aborted).toBe(true);
+    expect(timer.now()).toBeLessThanOrEqual(100);
+    expect(daemonConnections).toBe(0);
+
+    lateResponse.resolve({
+      structuredContent: {
+        sessionUuid: "late-session",
+        deviceIdentity: {
+          simulatorUdid: IOS_UDID,
+          simulatorName: "iPhone 16 Pro",
+          iosServicePort: 8765,
+          iosRunnerGeneration: 0,
+        },
+      },
+    });
+    await Promise.resolve();
+    expect(daemonConnections).toBe(0);
+    expect(harness.releases).not.toContain("late-session");
   });
 
   test("uses the evidence reserve and abort signal so a late writer cannot turn timeout into success", async () => {

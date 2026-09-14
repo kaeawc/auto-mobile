@@ -433,6 +433,8 @@ interface McpForwardRecoveryContext {
   request: DaemonRequest;
   route: McpForwardRoute;
   socketSessionId: string;
+  /** Aborted when the Unix-socket client that owns this forward disconnects. */
+  signal?: AbortSignal;
   totalTimeoutMs: number;
   /**
    * Mutable: a progress notification for THIS request extends `.value`, up to
@@ -580,6 +582,8 @@ export class UnixSocketServer {
   >;
   /** Local control RPCs are cancelled when their owner disconnects or expires. */
   private readonly localRequestAbortControllers = new Map<string, Set<AbortController>>();
+  /** Forwarded MCP requests are cancelled when their owner socket disconnects. */
+  private readonly mcpRequestAbortControllers = new Map<string, Set<AbortController>>();
   /**
    * Factory that `getMcpClient()` calls to open the loopback MCP HTTP client.
    * Defaults to the real {@link createMcpClient}; tests assign a fake here to
@@ -870,6 +874,7 @@ export class UnixSocketServer {
     socket.on("close", () => {
       logger.info(`Client disconnected: ${sessionId}`);
       this.abortLocalRequests(sessionId);
+      this.abortMcpRequests(sessionId);
       this.sessions.delete(sessionId);
       this.clientSockets.delete(sessionId);
       this.notificationSubscribers.delete(sessionId);
@@ -882,6 +887,7 @@ export class UnixSocketServer {
     socket.on("error", (error) => {
       logger.error(`Socket error for ${sessionId}:`, error);
       this.abortLocalRequests(sessionId);
+      this.abortMcpRequests(sessionId);
       this.sessions.delete(sessionId);
       this.clientSockets.delete(sessionId);
       this.notificationSubscribers.delete(sessionId);
@@ -902,14 +908,65 @@ export class UnixSocketServer {
   }
 
   private abortLocalRequests(sessionId: string): void {
-    const controllers = this.localRequestAbortControllers.get(sessionId);
+    this.abortRequestControllers(
+      sessionId,
+      this.localRequestAbortControllers,
+      "Daemon control client disconnected",
+    );
+  }
+
+  private abortMcpRequests(sessionId: string): void {
+    this.abortRequestControllers(
+      sessionId,
+      this.mcpRequestAbortControllers,
+      "Daemon MCP client disconnected",
+    );
+  }
+
+  private abortRequestControllers(
+    sessionId: string,
+    controllerMap: Map<string, Set<AbortController>>,
+    reason: string,
+  ): void {
+    const controllers = controllerMap.get(sessionId);
     if (!controllers) {
       return;
     }
-    this.localRequestAbortControllers.delete(sessionId);
+    controllerMap.delete(sessionId);
     for (const controller of controllers) {
-      controller.abort(new Error("Daemon control client disconnected"));
+      controller.abort(new Error(reason));
     }
+  }
+
+  private mcpRequestSignal(sessionId: string): { signal: AbortSignal; dispose: () => void } {
+    const controller = new AbortController();
+    const controllers =
+      this.mcpRequestAbortControllers.get(sessionId) ?? new Set<AbortController>();
+    controllers.add(controller);
+    this.mcpRequestAbortControllers.set(sessionId, controllers);
+    const socket = this.clientSockets.get(sessionId);
+    if (!socket || socket.destroyed) {
+      controller.abort(new Error("Daemon MCP client disconnected"));
+    }
+    return {
+      signal: controller.signal,
+      dispose: () => {
+        controllers.delete(controller);
+        if (controllers.size === 0) {
+          this.mcpRequestAbortControllers.delete(sessionId);
+        }
+      },
+    };
+  }
+
+  /**
+   * An abort-ignoring MCP transport can return after its owning Unix socket has
+   * disconnected. Its result is no longer allowed to publish a session/profile
+   * binding that a later socket request could reuse.
+   */
+  private isMcpRequestOwnerCurrent(sessionId: string, signal: AbortSignal): boolean {
+    const socket = this.clientSockets.get(sessionId);
+    return !signal.aborted && socket !== undefined && !socket.destroyed;
   }
 
   private localRequestSignal(
@@ -1187,78 +1244,86 @@ export class UnixSocketServer {
         }
         const initialRoute = this.getMcpForwardRoute(request, sessionId);
 
-        const result = await this.runMcpForwardForCurrentRoute(
-          initialRoute,
-          request,
-          sessionId,
-          async (route) => {
-            const remainingTimeoutMs = deadline.value - this.timer.now();
-            const queueWaitMs = totalTimeoutMs - remainingTimeoutMs;
-            const forwardLabel = UnixSocketServer.describeMcpForwardRequest(request);
-            logger.debug(
-              `[McpForward] start executionKey=${route.executionKey} clientKey=${route.clientKey} socketSession=${sessionId} requestId=${request.id} ${forwardLabel} queueWaitMs=${queueWaitMs} remainingTimeoutMs=${remainingTimeoutMs}`,
-            );
-
-            if (remainingTimeoutMs <= 0) {
-              const toolName =
-                request.method === "tools/call"
-                  ? (request.params?.name ?? request.method)
-                  : request.method;
-              throw new McpTimeoutError({
-                toolName,
-                timeoutMs: totalTimeoutMs,
-                origin: "UnixSocketServer.handleRequest",
-                detail: `spent ${queueWaitMs}ms waiting in queue`,
-              });
-            }
-
-            const forwardStartMs = this.timer.now();
-            try {
-              const sessionWasActiveBeforeForward = this.wasRequestSessionActive(request);
-              const response = await this.forwardMcpRequestWithRecovery({
-                request,
-                route,
-                socketSessionId: sessionId,
-                totalTimeoutMs,
-                deadline,
-                remainingTimeoutMs,
-                forwardStartMs,
-              });
-              this.recordBoundMcpClientKey(
-                request,
-                sessionId,
-                route,
-                sessionWasActiveBeforeForward,
-                response,
-              );
-              return response;
-            } finally {
+        const mcpRequest = this.mcpRequestSignal(sessionId);
+        try {
+          const result = await this.runMcpForwardForCurrentRoute(
+            initialRoute,
+            request,
+            sessionId,
+            async (route) => {
+              const remainingTimeoutMs = deadline.value - this.timer.now();
+              const queueWaitMs = totalTimeoutMs - remainingTimeoutMs;
+              const forwardLabel = UnixSocketServer.describeMcpForwardRequest(request);
               logger.debug(
-                `[McpForward] end executionKey=${route.executionKey} clientKey=${route.clientKey} socketSession=${sessionId} requestId=${request.id} ${forwardLabel} forwardMs=${this.timer.now() - forwardStartMs}`,
+                `[McpForward] start executionKey=${route.executionKey} clientKey=${route.clientKey} socketSession=${sessionId} requestId=${request.id} ${forwardLabel} queueWaitMs=${queueWaitMs} remainingTimeoutMs=${remainingTimeoutMs}`,
               );
-              // The idle close is scheduled by runWithActiveMcpClient's wrapper once
-              // this client's active-forward count reaches zero, so it is re-armed
-              // even when a forward throws before reaching this finally (issue #4610).
-            }
-          },
-        );
 
-        if (isDaemonShuttingDownToolResult(result)) {
+              if (remainingTimeoutMs <= 0) {
+                const toolName =
+                  request.method === "tools/call"
+                    ? (request.params?.name ?? request.method)
+                    : request.method;
+                throw new McpTimeoutError({
+                  toolName,
+                  timeoutMs: totalTimeoutMs,
+                  origin: "UnixSocketServer.handleRequest",
+                  detail: `spent ${queueWaitMs}ms waiting in queue`,
+                });
+              }
+
+              const forwardStartMs = this.timer.now();
+              try {
+                const sessionWasActiveBeforeForward = this.wasRequestSessionActive(request);
+                const response = await this.forwardMcpRequestWithRecovery({
+                  request,
+                  route,
+                  socketSessionId: sessionId,
+                  signal: mcpRequest.signal,
+                  totalTimeoutMs,
+                  deadline,
+                  remainingTimeoutMs,
+                  forwardStartMs,
+                });
+                if (this.isMcpRequestOwnerCurrent(sessionId, mcpRequest.signal)) {
+                  this.recordBoundMcpClientKey(
+                    request,
+                    sessionId,
+                    route,
+                    sessionWasActiveBeforeForward,
+                    response,
+                  );
+                }
+                return response;
+              } finally {
+                logger.debug(
+                  `[McpForward] end executionKey=${route.executionKey} clientKey=${route.clientKey} socketSession=${sessionId} requestId=${request.id} ${forwardLabel} forwardMs=${this.timer.now() - forwardStartMs}`,
+                );
+                // The idle close is scheduled by runWithActiveMcpClient's wrapper once
+                // this client's active-forward count reaches zero, so it is re-armed
+                // even when a forward throws before reaching this finally (issue #4610).
+              }
+            },
+          );
+
+          if (isDaemonShuttingDownToolResult(result)) {
+            return {
+              id: request.id,
+              type: "mcp_response",
+              success: false,
+              error: DAEMON_SHUTTING_DOWN_ERROR_MESSAGE,
+              daemonShuttingDown: daemonShuttingDownFailure(),
+            };
+          }
+
           return {
             id: request.id,
             type: "mcp_response",
-            success: false,
-            error: DAEMON_SHUTTING_DOWN_ERROR_MESSAGE,
-            daemonShuttingDown: daemonShuttingDownFailure(),
+            success: true,
+            result,
           };
+        } finally {
+          mcpRequest.dispose();
         }
-
-        return {
-          id: request.id,
-          type: "mcp_response",
-          success: true,
-          result,
-        };
       } catch (error) {
         const errorMsg = errorMessage(error);
         const errorStack = error instanceof Error ? error.stack : "no stack";
@@ -1969,6 +2034,7 @@ export class UnixSocketServer {
   private async forwardMcpRequestWithRecovery(
     context: McpForwardRecoveryContext,
   ): Promise<unknown> {
+    context.signal?.throwIfAborted();
     const identity = this.getDeviceControlTransportIdentity(context);
     let mcpClient: Client;
     try {
@@ -1978,6 +2044,7 @@ export class UnixSocketServer {
         context.route.toolSelectionProfileUuid,
         context.route.releasedSessionUuid,
       );
+      context.signal?.throwIfAborted();
     } catch (error) {
       if (!this.isDeviceControlSocketClosure(context.request, error)) {
         throw error;
@@ -2011,6 +2078,7 @@ export class UnixSocketServer {
         context.socketSessionId,
         context.deadline,
         context.totalTimeoutMs,
+        context.signal,
       );
     } catch (error) {
       if (error instanceof ReleasedBoundSessionError) {
@@ -2038,8 +2106,10 @@ export class UnixSocketServer {
     identity: DeviceControlTransportIdentity,
     failedClient: Client,
   ): Promise<unknown> {
+    context.signal?.throwIfAborted();
     logger.warn("MCP client session expired, reconnecting and retrying...");
     await this.resetMcpClientIfCurrent(context.route.clientKey, failedClient);
+    context.signal?.throwIfAborted();
     let freshClient: Client;
     try {
       freshClient = await this.getMcpClient(
@@ -2048,6 +2118,7 @@ export class UnixSocketServer {
         context.route.toolSelectionProfileUuid,
         context.route.releasedSessionUuid,
       );
+      context.signal?.throwIfAborted();
     } catch (error) {
       if (!this.isDeviceControlSocketClosure(context.request, error)) {
         throw error;
@@ -2075,6 +2146,7 @@ export class UnixSocketServer {
         context.socketSessionId,
         context.deadline,
         context.totalTimeoutMs,
+        context.signal,
       );
     } catch (error) {
       if (!this.isDeviceControlSocketClosure(context.request, error)) {
@@ -2395,7 +2467,9 @@ export class UnixSocketServer {
     route: McpForwardRoute;
     remainingTimeoutMs: number;
     forwardStartMs: number;
+    signal?: AbortSignal;
   }): Promise<Client> {
+    input.signal?.throwIfAborted();
     const remainingMs = this.remainingMcpForwardBudget(input);
     if (remainingMs <= 0) {
       throw new McpClientReconnectDeadlineError();
@@ -2421,7 +2495,11 @@ export class UnixSocketServer {
     // sibling wait or an unrelated request already installed (issue #5499).
     const pendingCreation = this.mcpClientPromises.get(input.route.clientKey);
     try {
-      return await Promise.race([connection, deadline]);
+      const client = await Promise.race([connection, deadline]);
+      // Do not cancel `connection`: it may be shared by a live sibling. This
+      // owner simply must not reuse the client after its socket was cancelled.
+      input.signal?.throwIfAborted();
+      return client;
     } catch (error) {
       if (error instanceof McpClientReconnectDeadlineError) {
         this.discardTimedOutMcpReconnect(input.route.clientKey, connection, pendingCreation);
@@ -2637,9 +2715,11 @@ export class UnixSocketServer {
   private async recoverDeviceControlTransport(
     input: DeviceControlTransportRecoveryContext,
   ): Promise<unknown> {
+    input.signal?.throwIfAborted();
     if (input.failedClient) {
       await this.resetMcpClientIfCurrent(input.route.clientKey, input.failedClient, "detach");
     }
+    input.signal?.throwIfAborted();
     if (!this.isDeviceControlRecoveryIdentityValid(input.identity, input.phase)) {
       throw this.deviceControlTransportError({
         request: input.request,
@@ -2669,7 +2749,9 @@ export class UnixSocketServer {
 
     const recoveryRoute = this.getDeviceControlRecoveryRoute(input, replayAfterResponse);
     const recoveryInput = { ...input, route: recoveryRoute };
+    input.signal?.throwIfAborted();
     const freshClient = await this.reconnectDeviceControlTransport(recoveryInput);
+    input.signal?.throwIfAborted();
 
     const retryRemainingMs = this.remainingMcpForwardBudget(input);
     if (retryRemainingMs <= 0) {
@@ -2718,6 +2800,7 @@ export class UnixSocketServer {
         input.socketSessionId,
         input.deadline,
         input.totalTimeoutMs,
+        input.signal,
       );
       if (!this.isDeviceControlReplayResultIdentityValid(input.identity)) {
         await this.resetMcpClientIfCurrent(recoveryRoute.clientKey, freshClient, "detach");
@@ -4999,12 +5082,14 @@ export class UnixSocketServer {
      * instead, independent of queue wait (#6222 review, P1).
      */
     originalTimeoutMs: number,
+    signal?: AbortSignal,
   ): Promise<any> {
-    const requestOptions = { timeout: timeoutMs };
+    signal?.throwIfAborted();
+    const requestOptions = { timeout: timeoutMs, ...(signal ? { signal } : {}) };
 
     switch (request.method) {
       case "tools/list": {
-        return await mcpClient.listTools();
+        return await mcpClient.listTools(undefined, requestOptions);
       }
       case "tools/call": {
         const progressToken = request.progressToken;
@@ -5067,7 +5152,7 @@ export class UnixSocketServer {
 
           callOptions = {
             ...requestOptions,
-            signal: controller.signal,
+            signal: signal ? AbortSignal.any([signal, controller.signal]) : controller.signal,
             timeout: backstopMs,
             maxTotalTimeout: backstopMs,
             // Relay progress ticks back to the ORIGINATING socket session,
@@ -5111,7 +5196,7 @@ export class UnixSocketServer {
         }
       }
       case "resources/list": {
-        return await mcpClient.listResources();
+        return await mcpClient.listResources(undefined, requestOptions);
       }
       case "resources/read": {
         if (!request.params?.uri) {
@@ -5120,7 +5205,7 @@ export class UnixSocketServer {
         return await mcpClient.readResource({ uri: request.params.uri }, undefined, requestOptions);
       }
       case "resources/list-templates": {
-        return await mcpClient.listResourceTemplates();
+        return await mcpClient.listResourceTemplates(undefined, requestOptions);
       }
       case "ide/getNavigationGraph": {
         const args = {

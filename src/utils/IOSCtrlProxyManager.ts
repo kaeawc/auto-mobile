@@ -295,6 +295,11 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   // Lets ordinary starts detect that a newer forced restart began while they
   // yielded before claiming the shared-start slot.
   private forceRestartGeneration = 0;
+  // A successful forced restart changes the daemon-owned runner incarnation
+  // even when the host service port is reused. This is deliberately separate
+  // from `forceRestartGeneration`, which advances before teardown and can
+  // therefore represent a failed restart attempt.
+  private runnerGeneration = 0;
   // Joining callers may need a longer health-poll budget than the restart owner.
   // Retain their request until the forced restart reaches shared startup.
   private readonly forceRestartHealthPollDurationsMs = new Map<symbol, number>();
@@ -891,6 +896,15 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
    */
   public getServicePort(): number {
     return this.servicePort;
+  }
+
+  /**
+   * Monotonic identity for successful forced runner restarts in this manager.
+   * It stays stable while the same runner generation serves requests, including
+   * when the allocated host service port is reused.
+   */
+  public getRunnerGeneration(): number {
+    return this.runnerGeneration;
   }
 
   /**
@@ -2155,6 +2169,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
             options.minimumHealthPollDurationMs,
           ),
         });
+        this.runnerGeneration += 1;
       } catch (error) {
         if (options.signal?.aborted && !(error instanceof ForceRestartCancelledError)) {
           throw new ForceRestartCancelledError(options.signal.reason ?? error);

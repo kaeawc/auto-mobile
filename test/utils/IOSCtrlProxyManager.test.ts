@@ -746,9 +746,11 @@ describe("IOSCtrlProxyManager", function () {
         "startAfterForceRestart",
       ).mockResolvedValue();
 
+      expect(manager.getRunnerGeneration()).toBe(0);
       await manager.forceRestart(options);
 
       expect(start).toHaveBeenCalledWith(options);
+      expect(manager.getRunnerGeneration()).toBe(1);
     });
 
     test("does not start a replacement after cancellation during stop", async function () {

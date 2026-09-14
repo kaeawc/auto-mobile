@@ -274,11 +274,13 @@ describe("platform device preparation tools", () => {
 
     const result = await callTool("getApple", { udid: simulator.deviceId });
 
-    expect(result.deviceIdentity).toEqual({
+    expect(result.deviceIdentity).toMatchObject({
       platform: "ios",
       simulatorUdid: simulator.deviceId,
       simulatorName: simulator.name,
+      iosRunnerGeneration: 0,
     });
+    expect(result.deviceIdentity.iosServicePort).toBeGreaterThan(0);
     expect(deviceUtils.getExecutedOperations()).toContain(
       `startDevice:${simulator.name}:${DEFAULT_DEVICE_READY_TIMEOUT_MS}`,
     );

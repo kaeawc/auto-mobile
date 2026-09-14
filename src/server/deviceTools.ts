@@ -892,10 +892,18 @@ function deviceIdentityPayload(
     return androidDeviceIdentityPayload(device, sourceImage);
   }
 
+  const ctrlProxy = IOSCtrlProxyManager.getInstance(device);
   return {
     platform: "ios",
     simulatorUdid: device.deviceId,
     simulatorName: device.name,
+    // Runner readiness has already completed before startDevice/getApple
+    // builds this response. Expose the daemon-owned runner's current endpoint
+    // and successful-restart generation so callers can prove a targeted
+    // restart reached a fresh runner without conflating simulator display
+    // names with identity.
+    iosServicePort: ctrlProxy.getServicePort(),
+    iosRunnerGeneration: ctrlProxy.getRunnerGeneration(),
   };
 }
 

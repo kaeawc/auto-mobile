@@ -373,7 +373,13 @@ export class DeviceBootService {
       deviceManager.listDeviceImages(request.platform),
     );
     const image = images.find(
-      (device) => device.deviceId === request.deviceId || device.name === request.deviceId,
+      (device) =>
+        device.deviceId === request.deviceId ||
+        // Android accepts an AVD image name in `deviceId` because a booted
+        // Android device exposes its transient ADB serial instead. iOS has a
+        // durable simulator UDID at both layers, and display names are not
+        // unique, so never treat a name as an iOS identity alias.
+        (request.platform === "android" && device.name === request.deviceId),
     );
     if (!image) {
       throw new ActionableError(

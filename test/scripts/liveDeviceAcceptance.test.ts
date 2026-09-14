@@ -77,6 +77,7 @@ function createHarness(
     resolvedConfiguration?: Record<string, unknown>;
     failCliFor?: string;
     iosSimulatorName?: string;
+    unchangedIosRunnerIdentity?: boolean;
     writeFile?: MatrixDependencies["writeFile"];
     activeSessions?: number;
     activeExecutions?: number;
@@ -92,6 +93,7 @@ function createHarness(
   let startCount = 0;
   let listCount = 0;
   let androidDuplicatePresent = true;
+  let iosRunnerRestarted = false;
 
   const createMcpClient = async (owner: string): Promise<McpSessionClient> => ({
     async callTool(name, arguments_) {
@@ -194,6 +196,9 @@ function createHarness(
               deviceIdentity: {
                 simulatorUdid: IOS_UDID,
                 simulatorName: options.iosSimulatorName ?? "iPhone 16 Pro",
+                iosServicePort: 8765,
+                iosRunnerGeneration:
+                  options.unchangedIosRunnerIdentity || !iosRunnerRestarted ? 0 : 1,
               },
             },
           };
@@ -248,6 +253,12 @@ function createHarness(
 
   const createDaemonClient = async (): Promise<DaemonSessionClient> => ({
     async callDaemonMethod(name, arguments_) {
+      if (name === "ide/updateService") {
+        expect(arguments_).toEqual({ deviceId: IOS_UDID, platform: "ios" });
+        iosRunnerRestarted = true;
+        events.push(`ios-runner-restart:${IOS_UDID}`);
+        return { success: true };
+      }
       if (name === "daemon/activeSessions") {
         return {
           activeSessions: options.activeSessions ?? 0,
@@ -505,6 +516,7 @@ describe("live device acceptance harness", () => {
       { deviceId: IOS_UDID, enableTools: ["observe", "getDeviceState"] },
       { deviceId: IOS_UDID, enableTools: ["observe", "getDeviceState"] },
       { deviceId: IOS_UDID, enableTools: ["observe", "getDeviceState"] },
+      { deviceId: IOS_UDID, enableTools: ["observe", "getDeviceState"] },
     ]);
     expect(harness.calls.find((call) => call.name === "provisionDevice")?.arguments).toMatchObject({
       device: { deviceId: IOS_UDID, name: "iPhone 16 Pro", platform: "ios" },
@@ -514,11 +526,31 @@ describe("live device acceptance harness", () => {
     ).toBe(true);
     expect(evidence.checks).toMatchObject({
       stableIdentityPreserved: true,
-      iosServiceEndpointExposed: false,
+      iosServiceEndpointExposed: true,
       iosServiceEndpointChanged: false,
+      iosRunnerGenerationExposed: true,
+      iosRunnerGenerationChanged: true,
+      iosRunnerIdentityChanged: true,
       controlledDiscoveryPasses: true,
       controlledSiblingUntouched: true,
     });
+    const restart = harness.events.indexOf(`ios-runner-restart:${IOS_UDID}`);
+    const reacquire = harness.events.indexOf("reacquire-after-ios-runner-restart:getApple");
+    expect(restart).toBeGreaterThanOrEqual(0);
+    expect(restart).toBeLessThan(reacquire);
+    const restartedSession = harness.calls.find(
+      (call) => call.owner === "reacquire-after-ios-runner-restart" && call.name === "getApple",
+    )?.arguments.deviceId;
+    expect(restartedSession).toBe(IOS_UDID);
+    const restartedGetApple = harness.calls.find(
+      (call) => call.owner === "reacquire-after-ios-runner-restart" && call.name === "getApple",
+    );
+    expect(restartedGetApple).toBeDefined();
+    const restartedResponseSession = harness.calls
+      .filter((call) => call.owner === "reacquire-after-ios-runner-restart")
+      .find((call) => call.name === "observe")?.arguments.sessionUuid;
+    expect(typeof restartedResponseSession).toBe("string");
+    assertReadinessImmediatelyFollowsSuccess(harness, restartedResponseSession as string);
     expect(
       harness.calls.some(
         (call) =>
@@ -526,6 +558,24 @@ describe("live device acceptance harness", () => {
           JSON.stringify(call.arguments).includes("00000000-0000-0000-0000-000000000002"),
       ),
     ).toBe(false);
+  });
+
+  test("rejects iOS runner restart evidence when neither exposed identity changes", async () => {
+    const harness = createHarness({ unchangedIosRunnerIdentity: true });
+    const iosArgs: AcceptanceArgs = {
+      ...androidArgs,
+      platform: "ios",
+      target: { simulatorName: "iPhone 16 Pro", simulatorUdid: IOS_UDID },
+      runtime: "iOS 18.0",
+      deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-16-Pro",
+      osVersionRange: { min: "17.0", max: "18.0" },
+      androidConfig: undefined,
+    };
+
+    await expect(runAcceptanceMatrix(iosArgs, harness.dependencies)).rejects.toThrow(
+      "iOS runner identity did not change across the required targeted restart",
+    );
+    expect(harness.events).toContain(`ios-runner-restart:${IOS_UDID}`);
   });
 
   test("releases the owned session before maintenance restart and requires the terminal diagnostic", async () => {

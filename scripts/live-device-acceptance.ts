@@ -91,6 +91,8 @@ interface RuntimeIdentity {
   androidSerial?: string;
   androidConsolePort?: number;
   androidConsoleEndpoint?: string;
+  iosServicePort?: number;
+  iosRunnerGeneration?: number;
 }
 
 interface ExactDevice {
@@ -157,7 +159,7 @@ interface MaintenanceAdmission {
 }
 
 interface Evidence {
-  schemaVersion: 6;
+  schemaVersion: 7;
   generatedAt: string;
   scenario: Scenario;
   platform: Platform;
@@ -445,6 +447,14 @@ function stringField(value: JsonObject, field: string, context: string): string 
   return candidate;
 }
 
+function nonNegativeIntegerField(value: JsonObject, field: string, context: string): number {
+  const candidate = value[field];
+  if (!Number.isInteger(candidate) || (candidate as number) < 0) {
+    throw new Error(`${context}.${field} must be a non-negative integer`);
+  }
+  return candidate as number;
+}
+
 function toolDiagnostic(response: ToolResponse, tool: string): string {
   const payload = response.structuredContent;
   if (payload) {
@@ -550,8 +560,21 @@ function acquiredIdentity(
       `acquire returned simulator name ${simulatorName}, expected ${args.target.simulatorName}`,
     );
   }
+  const iosServicePort = nonNegativeIntegerField(
+    deviceIdentity,
+    "iosServicePort",
+    "acquire.deviceIdentity",
+  );
+  if (iosServicePort === 0) {
+    throw new Error("acquire.deviceIdentity.iosServicePort must be a positive integer");
+  }
+  const iosRunnerGeneration = nonNegativeIntegerField(
+    deviceIdentity,
+    "iosRunnerGeneration",
+    "acquire.deviceIdentity",
+  );
   return {
-    identity: { stableIdentity: simulatorUdid },
+    identity: { stableIdentity: simulatorUdid, iosServicePort, iosRunnerGeneration },
     device: { name: simulatorName, deviceId: simulatorUdid, platform: "ios" },
   };
 }
@@ -1018,6 +1041,41 @@ function assertAndroidTransitionEvidence(before: AcquiredSession, after: Acquire
   }
 }
 
+function assertIosRunnerTransitionEvidence(
+  before: AcquiredSession,
+  after: AcquiredSession,
+): {
+  serviceEndpointExposed: boolean;
+  serviceEndpointChanged: boolean;
+  runnerGenerationExposed: boolean;
+  runnerGenerationChanged: boolean;
+  runnerIdentityChanged: boolean;
+} {
+  const beforePort = before.identity.iosServicePort;
+  const afterPort = after.identity.iosServicePort;
+  const beforeGeneration = before.identity.iosRunnerGeneration;
+  const afterGeneration = after.identity.iosRunnerGeneration;
+  const serviceEndpointExposed = beforePort !== undefined && afterPort !== undefined;
+  const runnerGenerationExposed = beforeGeneration !== undefined && afterGeneration !== undefined;
+  if (!serviceEndpointExposed && !runnerGenerationExposed) {
+    throw new Error(
+      "iOS runner restart did not expose a service endpoint or runner generation identity",
+    );
+  }
+  const serviceEndpointChanged = serviceEndpointExposed && beforePort !== afterPort;
+  const runnerGenerationChanged = runnerGenerationExposed && beforeGeneration !== afterGeneration;
+  if (!serviceEndpointChanged && !runnerGenerationChanged) {
+    throw new Error("iOS runner identity did not change across the required targeted restart");
+  }
+  return {
+    serviceEndpointExposed,
+    serviceEndpointChanged,
+    runnerGenerationExposed,
+    runnerGenerationChanged,
+    runnerIdentityChanged: true,
+  };
+}
+
 function assertLiveSafeguards(args: AcceptanceArgs, dependencies: MatrixDependencies): void {
   if (dependencies.testOnly) {
     return;
@@ -1205,6 +1263,13 @@ export async function runAcceptanceMatrix(
   const discoveryOrders: string[][] = [];
   let daemonClient: DaemonSessionClient | undefined;
   let primaryError: unknown;
+  let iosRunnerRestartEvidence = {
+    serviceEndpointExposed: false,
+    serviceEndpointChanged: false,
+    runnerGenerationExposed: false,
+    runnerGenerationChanged: false,
+    runnerIdentityChanged: false,
+  };
 
   const mint = (phase: string, sessionUuid: string): void => {
     if (!minted.some((session) => session.sessionUuid === sessionUuid)) {
@@ -1283,6 +1348,44 @@ export async function runAcceptanceMatrix(
       );
       throw error;
     }
+  };
+
+  const restartIosRunner = async (device: ExactDevice): Promise<void> => {
+    if (args.platform !== "ios") {
+      return;
+    }
+    if (device.deviceId !== args.target.simulatorUdid) {
+      throw new Error(
+        `Refusing iOS runner restart for ${device.deviceId}; expected ${args.target.simulatorUdid}`,
+      );
+    }
+    daemonClient ??= await bounded(
+      "iOS runner restart daemon connect",
+      "work",
+      async (signal) => await createDaemonClient(signal),
+    );
+    const start = timer.now();
+    const result = asObject(
+      await bounded(
+        "iOS runner restart",
+        "work",
+        async (signal) =>
+          await daemonClient!.callDaemonMethod(
+            "ide/updateService",
+            { deviceId: device.deviceId, platform: "ios" },
+            signal,
+          ),
+        () => daemonClient!.close(),
+      ),
+      "ide/updateService",
+    );
+    if (result.success !== true) {
+      throw new Error("ide/updateService did not confirm the iOS runner restart");
+    }
+    recordStep(steps, timer, "ios-runner-restart", start, {
+      deviceId: device.deviceId,
+      platform: "ios",
+    });
   };
 
   const acquire = async (
@@ -1718,6 +1821,13 @@ export async function runAcceptanceMatrix(
 
     await release(running.sessionUuid, "acquire-running");
 
+    if (args.platform === "ios") {
+      await restartIosRunner(running.device);
+      const restarted = await acquire("reacquire-after-ios-runner-restart", "exact", "platform");
+      iosRunnerRestartEvidence = assertIosRunnerTransitionEvidence(running, restarted);
+      await release(restarted.sessionUuid, "reacquire-after-ios-runner-restart");
+    }
+
     if (args.scenario === "recovery") {
       const restartStart = timer.now();
       const maintenanceAdmission = await admitMaintenance("daemon restart", "work");
@@ -1821,7 +1931,7 @@ export async function runAcceptanceMatrix(
         ? undefined
         : String(primaryError);
   const evidence: Evidence = {
-    schemaVersion: 6,
+    schemaVersion: 7,
     generatedAt: new Date().toISOString(),
     scenario: args.scenario,
     platform: args.platform,
@@ -1870,8 +1980,11 @@ export async function runAcceptanceMatrix(
         args.platform === "android" &&
         androidConsolePorts.length > 1 &&
         new Set(androidConsolePorts).size > 1,
-      iosServiceEndpointExposed: false,
-      iosServiceEndpointChanged: false,
+      iosServiceEndpointExposed: iosRunnerRestartEvidence.serviceEndpointExposed,
+      iosServiceEndpointChanged: iosRunnerRestartEvidence.serviceEndpointChanged,
+      iosRunnerGenerationExposed: iosRunnerRestartEvidence.runnerGenerationExposed,
+      iosRunnerGenerationChanged: iosRunnerRestartEvidence.runnerGenerationChanged,
+      iosRunnerIdentityChanged: iosRunnerRestartEvidence.runnerIdentityChanged,
     },
     cleanup: {
       mintedSessionCount: minted.length,

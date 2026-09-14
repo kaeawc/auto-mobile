@@ -4691,9 +4691,10 @@ export class UnixSocketServer {
       this.daemonState.getDevicePool().assertSessionReadyForAutomation?.(sessionUuid);
     }
     const execution = executionTracker.startExecution(toolName, undefined, sessionUuid);
+    const signal = sessionUuid ? execution.abortController.signal : undefined;
     try {
-      execution.abortController.signal.throwIfAborted();
-      return await operation(execution.abortController.signal);
+      signal?.throwIfAborted();
+      return await operation(signal);
     } finally {
       executionTracker.endExecution(execution.id);
     }

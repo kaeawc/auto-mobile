@@ -2852,11 +2852,11 @@ export class UnixSocketServer {
         reason: "generation_changed",
       };
     }
-    const accepted = executionTracker.prepareForDaemonRestart();
-    if (!accepted) {
+    const admission = executionTracker.prepareForDaemonRestart();
+    if (admission !== "accepted") {
       return {
         accepted: false,
-        reason: "active_provisioning",
+        reason: admission,
       };
     }
     if (!this.onRestartAccepted) {
@@ -4687,15 +4687,14 @@ export class UnixSocketServer {
       ? this.daemonState.getSessionManager()
       : undefined;
     const sessionUuid = sessionManager?.getSessionForDevice?.(targetDevice.deviceId) ?? undefined;
-    if (!sessionUuid) {
-      return await operation();
+    if (sessionUuid) {
+      this.daemonState.getDevicePool().assertSessionReadyForAutomation?.(sessionUuid);
     }
-
-    this.daemonState.getDevicePool().assertSessionReadyForAutomation?.(sessionUuid);
     const execution = executionTracker.startExecution(toolName, undefined, sessionUuid);
+    const signal = sessionUuid ? execution.abortController.signal : undefined;
     try {
-      execution.abortController.signal.throwIfAborted();
-      return await operation(execution.abortController.signal);
+      signal?.throwIfAborted();
+      return await operation(signal);
     } finally {
       executionTracker.endExecution(execution.id);
     }

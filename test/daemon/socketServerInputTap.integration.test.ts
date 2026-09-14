@@ -5,8 +5,10 @@ import { unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
+import { DAEMON_PREPARE_RESTART_METHOD } from "../../src/daemon/daemonRestartAdmission";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { IOSCtrlProxyClient } from "../../src/features/observe/ios";
+import { executionTracker } from "../../src/server/executionTracker";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { FakeTimer } from "../fakes/FakeTimer";
 import {
@@ -32,6 +34,7 @@ describe("UnixSocketServer input/tap", () => {
     PlatformDeviceManagerFactory.reset();
     AndroidCtrlProxyClient.resetInstances();
     IOSCtrlProxyClient.resetInstances();
+    executionTracker.clearDaemonRestartPreparation();
     originalAndroidGetInstance = AndroidCtrlProxyClient.getInstance;
     originalIosGetInstance = IOSCtrlProxyClient.getInstance;
   });
@@ -48,6 +51,7 @@ describe("UnixSocketServer input/tap", () => {
     PlatformDeviceManagerFactory.reset();
     AndroidCtrlProxyClient.resetInstances();
     IOSCtrlProxyClient.resetInstances();
+    executionTracker.clearDaemonRestartPreparation();
   });
 
   test("routes Android coordinate taps without forwarding through tools/call", async () => {
@@ -126,6 +130,49 @@ describe("UnixSocketServer input/tap", () => {
     expect(response.error).toContain("emulator-5554");
     expect(response.error).toContain("identity is unresolved");
     expect(requestTapCoordinates).not.toHaveBeenCalled();
+  });
+
+  test("defers a restart while a sessionless direct tap is in flight", async () => {
+    let tapStarted!: () => void;
+    const tapEntered = new Promise<void>((resolve) => {
+      tapStarted = resolve;
+    });
+    let releaseTap!: () => void;
+    const tapReleased = new Promise<void>((resolve) => {
+      releaseTap = resolve;
+    });
+    const requestTapCoordinates = mock(async () => {
+      tapStarted();
+      await tapReleased;
+      return { success: true };
+    });
+    AndroidCtrlProxyClient.getInstance = mock(() => ({
+      requestTapCoordinates,
+    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
+    server = new UnixSocketServer(
+      socketPath,
+      "http://localhost:0/mcp",
+      createFakeDaemonState(),
+      fakeTimer,
+    );
+    await server.start();
+
+    const tap = sendRequest(socketPath, "input/tap", {
+      platform: "android",
+      deviceId: "emulator-5554",
+      x: 12,
+      y: 34,
+    });
+    await tapEntered;
+    try {
+      const status = await sendRequest(socketPath, "ide/status");
+      const restart = await sendRequest(socketPath, DAEMON_PREPARE_RESTART_METHOD, status.result);
+      expect(restart.result).toEqual({ accepted: false, reason: "active_operations" });
+    } finally {
+      releaseTap();
+      await tap;
+    }
   });
 
   test("rejects Android tap coordinates outside known canonical pixel bounds", async () => {

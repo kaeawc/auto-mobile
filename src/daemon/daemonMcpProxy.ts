@@ -9,7 +9,7 @@ import {
   type DaemonClientLike,
   type DaemonClientFactory,
 } from "./client";
-import { DaemonManager, type DaemonManagerLike } from "./manager";
+import { DaemonManager, type DaemonManagerLike, type DaemonRestartResult } from "./manager";
 import { logger } from "../utils/logger";
 import {
   SOCKET_PATH,
@@ -23,6 +23,7 @@ import {
   DAEMON_OWNED_SESSIONS_PARAM,
   DAEMON_RELEASED_SESSION_PARAM,
   DAEMON_SHUTDOWN_TIMEOUT_MS,
+  DAEMON_RESTART_HANDOFF_DELAY_MS,
   DAEMON_RESTART_HANDOFF_TIMEOUT_MS,
   DAEMON_HEARTBEAT_METHOD,
   CLI_SESSION_LIVENESS_POLICY,
@@ -1262,6 +1263,51 @@ export class DaemonMcpProxy {
     return this.reconciliationSnapshot;
   }
 
+  private isSameDaemonGeneration(current: DaemonStatus, expected: DaemonStatus): boolean {
+    if (!current.running || !expected.running || current.pid !== expected.pid) {
+      return false;
+    }
+    const identityFields = ["startedAt", "version", "buildId", "entryScript"] as const;
+    return identityFields.every(
+      (field) => expected[field] === undefined || current[field] === expected[field],
+    );
+  }
+
+  /**
+   * A competing client can observe the incumbent during an admitted restart's
+   * intentional handoff gap. Wait for a different, running generation instead
+   * of treating that gap as a completed reconciliation.
+   */
+  private async waitForJoinedRestartSuccessor(
+    expected: DaemonStatus,
+    deadline: number,
+  ): Promise<void> {
+    while (this.timer.now() < deadline) {
+      try {
+        const status = await this.reconciliationStatus();
+        if (status.running && !this.isSameDaemonGeneration(status, expected)) {
+          return;
+        }
+      } catch (error) {
+        if (!(error instanceof DaemonPreflightConnectionError)) {
+          throw error;
+        }
+        // A missing socket is expected while the restart owner changes generations.
+        logger.debug(`[DaemonMcpProxy] Waiting for joined restart successor: ${error.message}`);
+      }
+      this.reconciliationSnapshot = undefined;
+      const remaining = deadline - this.timer.now();
+      if (remaining <= 0) {
+        break;
+      }
+      await this.timer.sleep(Math.min(DAEMON_RESTART_HANDOFF_DELAY_MS, remaining));
+      this.reconciliationSnapshot = undefined;
+    }
+    throw new DaemonUnavailableError(
+      `Timed out waiting for concurrent daemon restart after ${DAEMON_STARTUP_TIMEOUT_MS}ms`,
+    );
+  }
+
   private async readSocketReconciliationStatus(): Promise<DaemonStatus> {
     const recorded = await this.daemonManager.status();
     const actual = await runPreflightTransport(() => this.daemonStatusProbe!());
@@ -1289,7 +1335,9 @@ export class DaemonMcpProxy {
   }
 
   /** Newer clients may replace older daemons; mismatches remain a pre-dispatch gate. */
-  private async ensureVersionMatches(): Promise<void> {
+  private async ensureVersionMatches(
+    reconciliationDeadline = this.timer.now() + DAEMON_STARTUP_TIMEOUT_MS,
+  ): Promise<void> {
     const status = await this.reconciliationStatus();
     if (!status.running) {
       return;
@@ -1381,11 +1429,15 @@ export class DaemonMcpProxy {
     // Preserve the running daemon's existing options across the restart rather
     // than resetting to this client's config, which would strip flags the
     // daemon was launched with when the connecting client is bare (issue #3846).
-    await this.daemonManager.restart(
+    const restartResult = await this.daemonManager.restart(
       mergeDaemonOptions(status.options, this.config.daemonOptions),
       status,
     );
     this.reconciliationSnapshot = undefined;
+    if (restartResult === "joined") {
+      await this.waitForJoinedRestartSuccessor(status, reconciliationDeadline);
+      return await this.ensureVersionMatches(reconciliationDeadline);
+    }
     // The replacement daemon may expose a different tool set; drop the cache so we
     // never advertise the old daemon's tools against the new build.
     this.invalidateCache();
@@ -1455,7 +1507,9 @@ export class DaemonMcpProxy {
    * frontend and backend run the same code. Independent of, and complementary to,
    * {@link ensureVersionMatches}.
    */
-  private async ensureBuildMatches(): Promise<void> {
+  private async ensureBuildMatches(
+    reconciliationDeadline = this.timer.now() + DAEMON_STARTUP_TIMEOUT_MS,
+  ): Promise<void> {
     const status = await this.reconciliationStatus();
     if (!status.running) {
       return;
@@ -1492,11 +1546,23 @@ export class DaemonMcpProxy {
     // Preserve the running daemon's existing options across the restart rather
     // than resetting to this client's config, which would strip flags the
     // daemon was launched with when the connecting client is bare (issue #3846).
-    await this.daemonManager.restart(
+    const restartResult = await this.daemonManager.restart(
       mergeDaemonOptions(status.options, this.config.daemonOptions),
       status,
     );
     this.reconciliationSnapshot = undefined;
+    return await this.finishBuildRestart(restartResult, status, reconciliationDeadline);
+  }
+
+  private async finishBuildRestart(
+    restartResult: DaemonRestartResult,
+    status: DaemonStatus,
+    reconciliationDeadline: number,
+  ): Promise<void> {
+    if (restartResult === "joined") {
+      await this.waitForJoinedRestartSuccessor(status, reconciliationDeadline);
+      return await this.ensureBuildMatches(reconciliationDeadline);
+    }
     // The replacement daemon may expose a different tool set; drop the cache so we
     // never advertise the old daemon's tools against the new build.
     this.invalidateCache();
@@ -1534,46 +1600,61 @@ export class DaemonMcpProxy {
   }
 
   private async ensureStartupOptionsMatch(): Promise<void> {
-    const status = await this.reconciliationStatus();
-    if (!status.running) {
-      return;
-    }
-
     const requested = this.config.daemonOptions;
-    const deficits = startupOptionDeficits(requested, status.options);
-    if (deficits.length === 0) {
+    const reconciliationDeadline = this.timer.now() + DAEMON_STARTUP_TIMEOUT_MS;
+    while (this.timer.now() < reconciliationDeadline) {
+      const status = await this.reconciliationStatus();
+      if (!status.running) {
+        return;
+      }
+
+      const deficits = startupOptionDeficits(requested, status.options);
+      if (deficits.length === 0) {
+        return;
+      }
+
+      if (!this.config.autoStartDaemon) {
+        throw new DaemonUnavailableError(
+          `Daemon startup options differ from MCP server options (${deficits.join(", ")}) and auto-start is disabled`,
+        );
+      }
+
+      logger.info(
+        `[DaemonMcpProxy] Daemon startup options differ (${deficits.join(", ")}), restarting daemon`,
+      );
+      this.assertAutomaticRestartAllowed(status, "startup option mismatch");
+      // Preserve the running daemon's existing options and add the requested ones
+      // so the restart gains the missing flag without stripping any the daemon
+      // already had (issue #3846).
+      const restartResult = await this.daemonManager.restart(
+        mergeDaemonOptions(status.options, requested),
+        status,
+      );
+      this.reconciliationSnapshot = undefined;
+      if (restartResult === "joined") {
+        await this.waitForJoinedRestartSuccessor(status, reconciliationDeadline);
+        continue;
+      }
+
+      const ready = await this.daemonManager.waitForReady(DAEMON_STARTUP_TIMEOUT_MS);
+      if (!ready) {
+        throw new DaemonUnavailableError(
+          `Daemon failed to restart within ${DAEMON_STARTUP_TIMEOUT_MS}ms`,
+        );
+      }
+
+      const restartedStatus = await this.reconciliationStatus();
+      const remaining = startupOptionDeficits(requested, restartedStatus.options);
+      if (!restartedStatus.running || remaining.length > 0) {
+        throw new DaemonUnavailableError(
+          `Daemon restart completed but startup options still differ (${remaining.join(", ")})`,
+        );
+      }
       return;
     }
-
-    if (!this.config.autoStartDaemon) {
-      throw new DaemonUnavailableError(
-        `Daemon startup options differ from MCP server options (${deficits.join(", ")}) and auto-start is disabled`,
-      );
-    }
-
-    logger.info(
-      `[DaemonMcpProxy] Daemon startup options differ (${deficits.join(", ")}), restarting daemon`,
+    throw new DaemonUnavailableError(
+      `Timed out waiting for concurrent daemon startup-option reconciliation after ${DAEMON_STARTUP_TIMEOUT_MS}ms`,
     );
-    this.assertAutomaticRestartAllowed(status, "startup option mismatch");
-    // Preserve the running daemon's existing options and add the requested ones
-    // so the restart gains the missing flag without stripping any the daemon
-    // already had (issue #3846).
-    await this.daemonManager.restart(mergeDaemonOptions(status.options, requested), status);
-    this.reconciliationSnapshot = undefined;
-    const ready = await this.daemonManager.waitForReady(DAEMON_STARTUP_TIMEOUT_MS);
-    if (!ready) {
-      throw new DaemonUnavailableError(
-        `Daemon failed to restart within ${DAEMON_STARTUP_TIMEOUT_MS}ms`,
-      );
-    }
-
-    const restartedStatus = await this.reconciliationStatus();
-    const remaining = startupOptionDeficits(requested, restartedStatus.options);
-    if (!restartedStatus.running || remaining.length > 0) {
-      throw new DaemonUnavailableError(
-        `Daemon restart completed but startup options still differ (${remaining.join(", ")})`,
-      );
-    }
   }
 
   /**

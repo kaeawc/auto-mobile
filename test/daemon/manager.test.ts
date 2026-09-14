@@ -190,7 +190,7 @@ describe("DaemonManager restart", () => {
     const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
 
     try {
-      await manager.restart(
+      const result = await manager.restart(
         {},
         {
           running: true,
@@ -204,7 +204,48 @@ describe("DaemonManager restart", () => {
       expect(signaler.signals).toEqual([]);
       expect(startSpy).not.toHaveBeenCalled();
       expect(livePids).toEqual(new Set([successorPid]));
+      expect(result).toBe("joined");
     } finally {
+      startSpy.mockRestore();
+      statusSpy.mockRestore();
+    }
+  });
+
+  test("conditional restart joins an already-admitted handoff", async () => {
+    const expected: DaemonStatus = {
+      running: true,
+      pid: 1001,
+      startedAt: 100,
+      version: "0.0.73",
+      buildId: "incumbent-build",
+      entryScript: "/old/dist/src/index.js",
+    };
+    const client = new FakeDaemonClient({});
+    const prepareSpy = spyOn(client, "callDaemonMethod").mockResolvedValue({
+      accepted: false,
+      reason: "restart_pending",
+    });
+    const manager = new DaemonManager(
+      () => client,
+      undefined,
+      new FakeTimer(),
+      undefined,
+      undefined,
+      undefined,
+      {
+        findDaemonProcesses: () => [],
+        isProcessRunning: () => true,
+      },
+    );
+    const statusSpy = spyOn(manager, "status").mockResolvedValue(expected);
+    const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
+
+    try {
+      await expect(manager.restart({}, expected)).resolves.toBe("joined");
+      expect(prepareSpy).toHaveBeenCalledTimes(1);
+      expect(startSpy).not.toHaveBeenCalled();
+    } finally {
+      prepareSpy.mockRestore();
       startSpy.mockRestore();
       statusSpy.mockRestore();
     }
@@ -284,7 +325,7 @@ describe("DaemonManager restart", () => {
     }
   });
 
-  test("conditional restart leaves an actively provisioning generation running", async () => {
+  test("conditional restart leaves a generation with active device work running", async () => {
     const timer = new FakeTimer();
     const incumbentPid = 1001;
     const livePids = new Set([incumbentPid]);
@@ -292,7 +333,7 @@ describe("DaemonManager restart", () => {
     const client = new FakeDaemonClient({});
     const prepareSpy = spyOn(client, "callDaemonMethod").mockResolvedValue({
       accepted: false,
-      reason: "active_provisioning",
+      reason: "active_operations",
     });
     const manager = new DaemonManager(
       () => client,

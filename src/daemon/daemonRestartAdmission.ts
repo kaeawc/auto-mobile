@@ -5,7 +5,7 @@ const ACTIVE_PROVISIONING_RESTART_RETRY_MS = 1_000;
 
 export interface DaemonRestartPreparation {
   accepted: boolean;
-  reason?: "active_provisioning" | "generation_changed" | "shutdown_unavailable";
+  reason?: "active_operations" | "generation_changed" | "restart_pending" | "shutdown_unavailable";
 }
 
 /**

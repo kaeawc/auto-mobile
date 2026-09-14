@@ -50,6 +50,8 @@ export interface ActiveExecutionQuery {
   excludeExecutionId?: string;
 }
 
+export type DaemonRestartAdmission = "accepted" | "active_operations" | "restart_pending";
+
 export class ExecutionTracker {
   private executions = new Map<string, ActiveExecution>();
   private sessionExecutions = new Map<string, Set<string>>();
@@ -71,7 +73,7 @@ export class ExecutionTracker {
     sessionUuid?: string,
     transportSessionId?: string,
   ): ActiveExecution {
-    if (toolName === "provisionDevice" && this.isDaemonRestartPrepared()) {
+    if (this.isDaemonRestartPrepared()) {
       throw new DaemonRestartPendingError();
     }
     const id = this.idGenerator.next();
@@ -105,16 +107,19 @@ export class ExecutionTracker {
   }
 
   /**
-   * Atomically fence new provisionDevice admission if none is active. The
-   * daemon itself initiates shutdown before acknowledging this preparation,
+   * Atomically elects one automatic-restart owner when no tool operation is
+   * active. The owner initiates shutdown before acknowledging this preparation,
    * so the fence remains until shutdown or an explicit admission rollback.
    */
-  prepareForDaemonRestart(): boolean {
-    if (this.hasActiveToolExecutionGlobal("provisionDevice")) {
-      return false;
+  prepareForDaemonRestart(): DaemonRestartAdmission {
+    if (this.daemonRestartPrepared) {
+      return "restart_pending";
+    }
+    if (this.executions.size > 0) {
+      return "active_operations";
     }
     this.daemonRestartPrepared = true;
-    return true;
+    return "accepted";
   }
 
   clearDaemonRestartPreparation(): void {

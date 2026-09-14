@@ -198,18 +198,24 @@ export function normalizeSessionLogPaths(paths: readonly string[]): string[] {
   return normalized;
 }
 
-function splitPathList(value: string): string[] {
-  return value
-    .split(",")
-    .map((path) => path.trim())
-    .filter((path) => path.length > 0)
-    .map((path) => {
-      try {
-        return decodeURIComponent(path);
-      } catch (error) {
-        throw new Error(`paths contains an invalid percent-escape: ${path}`, { cause: error });
-      }
-    });
+function parseJsonPathList(value: string, paramName: "paths" | "groupPaths"): string[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch (error) {
+    throw new Error(`${paramName} must be a JSON array of path strings.`, { cause: error });
+  }
+  if (!Array.isArray(parsed)) {
+    throw new Error(`${paramName} must be a JSON array of path strings.`);
+  }
+  const paths: string[] = [];
+  for (const path of parsed) {
+    if (typeof path !== "string") {
+      throw new Error(`${paramName} must be a JSON array of path strings.`);
+    }
+    paths.push(path);
+  }
+  return paths;
 }
 
 function parseFilesSource(query: Record<string, string>): SessionLogFilesRequest | undefined {
@@ -223,7 +229,7 @@ function parseFilesSource(query: Record<string, string>): SessionLogFilesRequest
   }
   return {
     container: container ?? "documents",
-    paths: normalizeSessionLogPaths(splitPathList(paths)),
+    paths: normalizeSessionLogPaths(parseJsonPathList(paths, "paths")),
   };
 }
 
@@ -238,7 +244,10 @@ function parseAppGroupSource(query: Record<string, string>): SessionLogAppGroupR
   }
   return {
     groupId: normalizeAppGroupId(groupId),
-    paths: groupPaths === undefined ? [] : normalizeSessionLogPaths(splitPathList(groupPaths)),
+    paths:
+      groupPaths === undefined
+        ? []
+        : normalizeSessionLogPaths(parseJsonPathList(groupPaths, "groupPaths")),
   };
 }
 
@@ -301,12 +310,12 @@ export function buildSessionLogResourceUri(
   const query = new URLSearchParams();
   if (request.files) {
     query.set("container", request.files.container);
-    query.set("paths", request.files.paths.map(encodeURIComponent).join(","));
+    query.set("paths", JSON.stringify(request.files.paths));
   }
   if (request.appGroup) {
     query.set("groupId", request.appGroup.groupId);
     if (request.appGroup.paths.length > 0) {
-      query.set("groupPaths", request.appGroup.paths.map(encodeURIComponent).join(","));
+      query.set("groupPaths", JSON.stringify(request.appGroup.paths));
     }
   }
   if (request.unifiedLog) {

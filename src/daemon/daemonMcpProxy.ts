@@ -2065,9 +2065,11 @@ export class DaemonMcpProxy {
       this.toolTargetsDevice(name) &&
       this.hasImplicitDeviceSelector(callerArgs, name === "setActiveDevice");
     const routingArgs =
-      name === SET_TOOL_ENABLED_TOOL_NAME || isSessionAcquisition
-        ? callerArgs
-        : this.withBoundSessionUuid(callerArgs, usesDeviceSelector);
+      name === SET_TOOL_ENABLED_TOOL_NAME
+        ? this.withAcquiredDeviceRoute(callerArgs)
+        : isSessionAcquisition
+          ? callerArgs
+          : this.withBoundSessionUuid(callerArgs, usesDeviceSelector);
     const canUseSurvivingSession = this.canUseSurvivingSession(callerArgs, usesDeviceSelector);
     const forwardedArgs = this.withToolSelectionProfile(
       this.withOwnedSessionCapabilities(routingArgs, usesDeviceSelector && !isSessionAcquisition),
@@ -2233,6 +2235,30 @@ export class DaemonMcpProxy {
     return typeof args.sessionUuid === "string" && args.sessionUuid.trim().length > 0
       ? args.sessionUuid.trim()
       : undefined;
+  }
+
+  /**
+   * A `setToolEnabled` that reaffirms THIS connection's profile keeps that
+   * profile as its routing session, but the daemon would otherwise seed the
+   * loopback it lands on with the profile as a DEVICE binding, so the update's
+   * readback enumerated labels from the profile (none) instead of from the
+   * device session this connection acquired. Carry the acquired device route
+   * separately so the daemon seeds the loopback with it (#7005). A profile
+   * update on a connection with no live device carries nothing extra.
+   */
+  private withAcquiredDeviceRoute(args: Record<string, unknown>): Record<string, unknown> {
+    const explicitSessionUuid = this.sessionUuidFromArgs(args);
+    if (
+      !explicitSessionUuid ||
+      explicitSessionUuid !== this.toolSelectionProfileUuid ||
+      !this.boundSessionUuid ||
+      this.boundSessionUuid === explicitSessionUuid ||
+      this.terminalBoundSession ||
+      this.isBoundSessionReplayExpired()
+    ) {
+      return args;
+    }
+    return { ...args, [DAEMON_BOUND_SESSION_PARAM]: this.boundSessionUuid };
   }
 
   private withToolSelectionProfile(args: Record<string, unknown>): Record<string, unknown> {

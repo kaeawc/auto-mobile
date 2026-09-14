@@ -4,6 +4,8 @@ import type { StreamSocketAuthenticator } from "../../src/daemon/streamSocketAut
 import type { TestRecordingCommand } from "../../src/daemon/testRecordingSocketTypes";
 import { ActionableError } from "../../src/models";
 import type { DeviceAdmissionGate } from "../../src/daemon/deviceAdmissionGate";
+import type { TestRecordingDeviceResolution } from "../../src/daemon/testRecordingSocketServer";
+import type { BootedDevice } from "../../src/models";
 
 /**
  * The socket server's handleRequest is protected; a thin subclass exposes it so
@@ -62,6 +64,87 @@ describe("TestRecordingSocketServer device admission (issue #6863)", () => {
         platform: "android",
       }),
     ).rejects.toThrow(/Refusing to start a test recording on device 'emu-1'/);
+  });
+});
+
+/**
+ * #6923: selection is split from readiness so the post-resolution admission
+ * gate runs BEFORE any runner setup. A device the gate refuses must never reach
+ * `readyDevice`, which is where CtrlProxy/runner setup side effects live.
+ */
+describe("TestRecordingSocketServer gates the resolved device before readiness (#6923)", () => {
+  const resolved: BootedDevice = { deviceId: "emu-1", name: "Pixel_8", platform: "android" };
+
+  test("refuses a resolved quarantined device before any readiness side effect", async () => {
+    const order: string[] = [];
+    const resolution: TestRecordingDeviceResolution = {
+      selectDevice: async () => {
+        order.push("select");
+        return resolved;
+      },
+      readyDevice: async (device) => {
+        order.push(`ready:${device.deviceId}`);
+        return device;
+      },
+    };
+    const gate: DeviceAdmissionGate = {
+      assertDeviceActionable: (candidate, purpose) => {
+        order.push(`gate:${candidate}`);
+        throw new ActionableError(`Refusing ${purpose} on device '${candidate}'`);
+      },
+    };
+    const server = new TestableServer(
+      undefined,
+      undefined,
+      recordingAuthenticator([]),
+      gate,
+      resolution,
+    );
+
+    // No deviceId on the request: the target is only known after selection, so
+    // the gate's one chance to refuse it is between selection and readiness.
+    await expect(
+      server.invoke({ command: "start", sessionUuid: "live", platform: "android" }),
+    ).rejects.toThrow(/Refusing to start a test recording on device 'emu-1'/);
+    expect(order).toEqual(["select", "gate:emu-1"]);
+  });
+
+  test("readies the device only after the gate admits it", async () => {
+    const order: string[] = [];
+    const resolution: TestRecordingDeviceResolution = {
+      selectDevice: async (deviceId, platform) => {
+        order.push(`select:${deviceId}:${platform}`);
+        return resolved;
+      },
+      readyDevice: async (device) => {
+        order.push(`ready:${device.deviceId}`);
+        // Readiness failing here proves the call order without starting a
+        // real recorder on the readied device.
+        throw new ActionableError("runner setup failed");
+      },
+    };
+    const gate: DeviceAdmissionGate = {
+      assertDeviceActionable: (candidate) => {
+        order.push(`gate:${candidate}`);
+      },
+    };
+    const server = new TestableServer(
+      undefined,
+      undefined,
+      recordingAuthenticator([]),
+      gate,
+      resolution,
+    );
+
+    await expect(
+      server.invoke({
+        command: "start",
+        sessionUuid: "live",
+        deviceId: "emu-1",
+        platform: "android",
+      }),
+    ).rejects.toThrow("runner setup failed");
+    expect(order).toEqual(["gate:emu-1", "select:emu-1:android", "gate:emu-1", "ready:emu-1"]);
   });
 });
 

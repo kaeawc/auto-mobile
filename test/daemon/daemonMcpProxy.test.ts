@@ -18,6 +18,7 @@ import {
   DAEMON_VERSION_RESTART_COOLDOWN_MS,
   DAEMON_BOUND_SESSION_REPLAY_TTL_MS,
   DAEMON_TOOL_SELECTION_PROFILE_PARAM,
+  DAEMON_BOUND_SESSION_PARAM,
   DAEMON_OWNED_SESSIONS_PARAM,
   DAEMON_STARTUP_TIMEOUT_MS,
   DAEMON_RESTART_HANDOFF_DELAY_MS,
@@ -4860,6 +4861,90 @@ describe("DaemonMcpProxy", () => {
             sessionUuid: "device-session-a",
             [DAEMON_TOOL_SELECTION_PROFILE_PARAM]: "profile-a",
           },
+        });
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+  });
+
+  describe("acquired device route through profile forwarding (#7005)", () => {
+    function profileMintingClient(rawCalls: Array<Record<string, unknown>>): FakeDaemonClient {
+      return new FakeDaemonClient({
+        onCallTool: (_toolName, params) => {
+          rawCalls.push({ ...params });
+        },
+        toolResultFor: (toolName) =>
+          toolName === "setToolEnabled"
+            ? {
+                content: [
+                  {
+                    type: "text",
+                    text: JSON.stringify({ sessionUuid: "profile-a", toolName: "clipboard" }),
+                  },
+                ],
+              }
+            : undefined,
+      });
+    }
+
+    test("reaffirming the connection profile carries the acquired device session alongside it", async () => {
+      const rawCalls: Array<Record<string, unknown>> = [];
+      const client = profileMintingClient(rawCalls);
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => client,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        await proxy.callTool("observe", { sessionUuid: "device-session-a" });
+        await proxy.callTool("setToolEnabled", { toolName: "clipboard" });
+        await proxy.callTool("setToolEnabled", {
+          toolName: "clipboard",
+          sessionUuid: "profile-a",
+        });
+
+        // The profile stays the routing session of the update; the bound device
+        // session rides along so the daemon seeds the loopback with the DEVICE
+        // route rather than the profile.
+        expect(rawCalls[2]).toEqual({
+          toolName: "clipboard",
+          sessionUuid: "profile-a",
+          [DAEMON_TOOL_SELECTION_PROFILE_PARAM]: "profile-a",
+          [DAEMON_BOUND_SESSION_PARAM]: "device-session-a",
+        });
+        // The mint (no explicit sessionUuid) is untouched: it carries no device route.
+        expect(rawCalls[1]).toEqual({ toolName: "clipboard" });
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("a profile update on a connection with no acquired device carries no device route", async () => {
+      const rawCalls: Array<Record<string, unknown>> = [];
+      const client = profileMintingClient(rawCalls);
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => client,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        await proxy.callTool("setToolEnabled", { toolName: "clipboard" });
+        await proxy.callTool("setToolEnabled", {
+          toolName: "clipboard",
+          sessionUuid: "profile-a",
+        });
+
+        expect(rawCalls[1]).toEqual({
+          toolName: "clipboard",
+          sessionUuid: "profile-a",
+          [DAEMON_TOOL_SELECTION_PROFILE_PARAM]: "profile-a",
         });
       } finally {
         isAvailableSpy.mockRestore();

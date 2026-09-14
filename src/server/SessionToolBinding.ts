@@ -40,10 +40,16 @@ export class SessionToolBinding {
     const explicitSessionUuid =
       typeof explicit === "string" && explicit.trim().length > 0 ? explicit : undefined;
     const boundSessionUuid = this.boundSessionUuid(mcpSessionId);
+    // The connection's own tool-selection profile is not a device route: the
+    // daemon-proxy loopback for an acquired device carries it as its second
+    // seed, and reaffirming it (`setToolEnabled { sessionUuid: <profile> }`)
+    // must reach the profile update rather than trip the cross-routing refusal
+    // meant for a DIFFERENT device session (#7005).
     if (
       this.initialSessionUuid &&
       explicitSessionUuid &&
-      explicitSessionUuid !== this.initialSessionUuid
+      explicitSessionUuid !== this.initialSessionUuid &&
+      explicitSessionUuid !== this.connectionToolSelectionProfileUuid(mcpSessionId)
     ) {
       throw new Error(
         `MCP connection is bound to device session ${this.initialSessionUuid}; ` +

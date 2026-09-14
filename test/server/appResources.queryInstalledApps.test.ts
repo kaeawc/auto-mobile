@@ -7,6 +7,8 @@ import {
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import type { BootedDevice } from "../../src/models";
+import { DaemonState } from "../../src/daemon/daemonState";
+import { createIdentityQuarantinePool } from "../helpers/identityQuarantinePool";
 
 const device: BootedDevice = {
   deviceId: "emulator-5554",
@@ -120,6 +122,36 @@ describe("queryInstalledApps honest-failure contract (#6155)", () => {
     controller.abort();
 
     await expect(promise).rejects.toThrow(/abort/i);
+  });
+
+  test("a cancellation during daemon-mode reconciliation rejects with the abort, not 'Device not found' (#7002)", async () => {
+    const controller = new AbortController();
+    const { disagreeing } = await createIdentityQuarantinePool(() => controller.abort());
+    try {
+      // Discovery names a different AVD on the pooled serial, so the reconcile
+      // stage enters the identity quarantine and awaits the execution canceller
+      // — where this caller is cancelled. The requested serial is NOT in that
+      // listing: without a recheck after the wait the cancelled query fell
+      // through to the unmatched-device error and never reported the abort.
+      fakeDeviceUtils.setBootedDevices("android", [disagreeing]);
+      let listingRequests = 0;
+      setListInstalledAppsFactoryForTests(() => ({
+        executeDetailedResult: async () => {
+          listingRequests += 1;
+          return { apps: { profiles: {}, system: [] }, successful: true };
+        },
+        executeIosDetailedResult: async () => {
+          throw new Error("not exercised on android");
+        },
+      }));
+
+      await expect(
+        queryInstalledApps({ deviceId: "emulator-5556", platform: "android" }, controller.signal),
+      ).rejects.toThrow(/abort/i);
+      expect(listingRequests).toBe(0);
+    } finally {
+      DaemonState.getInstance().reset();
+    }
   });
 });
 

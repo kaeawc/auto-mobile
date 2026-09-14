@@ -1,12 +1,16 @@
 import { describe, expect, it } from "bun:test";
 import {
   CiIosBootRecovery,
+  createCiIosBootConfiguration,
   isGitHubActionsCi,
   NoopDeviceBootRecovery,
   normalizeCiIosBootRequest,
   shouldUseCiIosBootRecovery,
 } from "../../src/utils/deviceBootRecovery";
 import type { DeviceInfo } from "../../src/models";
+import { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
+import { createExecResult } from "../../src/utils/execResult";
+import { FakeTimer } from "../fakes/FakeTimer";
 
 const owned: DeviceInfo = {
   name: "AutoMobile CI iPhone (com.apple.CoreSimulator.SimRuntime.iOS-26-3)",
@@ -49,6 +53,68 @@ describe("CI iOS boot recovery", () => {
       maxOsVersion: "26.3",
       matchNamedDeviceIgnoringOsVersion: true,
     });
+  });
+
+  it("uses a max-only runtime bound when naming the CI-owned simulator", async () => {
+    const calls: string[] = [];
+    const simctl = new SimCtlClient(
+      null,
+      async (file, args) => {
+        const command = `${file} ${args.join(" ")}`;
+        calls.push(command);
+        if (command === "xcrun simctl --version") {
+          return createExecResult("simctl version 1.0.0", "");
+        }
+        if (command === "xcrun simctl list devicetypes --json") {
+          return createExecResult(
+            JSON.stringify({
+              devicetypes: [
+                {
+                  name: "iPhone 16",
+                  identifier: "com.apple.CoreSimulator.SimDeviceType.iPhone-16",
+                  productFamily: "iPhone",
+                  minRuntimeVersionString: "18.0",
+                  maxRuntimeVersionString: "99.0",
+                  minRuntimeVersion: 0,
+                  maxRuntimeVersion: 0,
+                },
+              ],
+            }),
+            "",
+          );
+        }
+        if (command === "xcrun simctl list runtimes iOS --json") {
+          return createExecResult(
+            JSON.stringify({
+              runtimes: [
+                {
+                  version: "18.2.0",
+                  identifier: "com.apple.CoreSimulator.SimRuntime.iOS-18-2",
+                  name: "iOS 18.2.0",
+                  isAvailable: true,
+                },
+              ],
+            }),
+            "",
+          );
+        }
+        if (command === "xcrun --sdk iphonesimulator --show-sdk-version") {
+          return createExecResult("26.3\n", "");
+        }
+        return createExecResult("", "");
+      },
+      new FakeTimer(),
+      "darwin",
+    );
+
+    const configuration = await createCiIosBootConfiguration(
+      { platform: "ios", maxOsVersion: "18.2" },
+      { CI: "true", GITHUB_ACTIONS: "true" },
+      { simctl },
+    );
+
+    expect(configuration?.request.name).toContain("com.apple.CoreSimulator.SimRuntime.iOS-18-2");
+    expect(calls).not.toContain("xcrun --sdk iphonesimulator --show-sdk-version");
   });
 
   it("leaves ordinary product boot as a single no-op attempt", async () => {

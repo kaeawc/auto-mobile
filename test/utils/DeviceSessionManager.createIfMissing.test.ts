@@ -31,7 +31,7 @@ function makeSimctl(recorder: SimctlRecorder, simulatorImages: DeviceInfo[] = []
         maxRuntimeVersion: 0,
       },
     ],
-    resolveRuntimeIdentifier: async () => "com.apple.CoreSimulator.SimRuntime.iOS-26-3",
+    resolveRuntimeIdentifiersForBounds: async () => ["com.apple.CoreSimulator.SimRuntime.iOS-26-3"],
     createSimulator: async (name: string, deviceType: string, runtime: string) => {
       recorder.createCalls.push({ name, deviceType, runtime });
       return "CREATED-UDID";

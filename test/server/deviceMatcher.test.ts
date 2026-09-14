@@ -289,6 +289,18 @@ describe("DefaultDeviceMatcher.matchBootedDevice", () => {
     expect(result?.deviceId).toBe("1");
   });
 
+  it("rejects a non-numeric iOS version bound instead of matching creation-incompatible syntax", () => {
+    const devices = [bootedDevice({ deviceId: "1", platform: "ios", osVersion: "18.2" })];
+
+    const result = matcher.matchBootedDevice(
+      { platform: "ios", maxOsVersion: "18.2beta" },
+      devices,
+      "LATEST",
+    );
+
+    expect(result).toBeNull();
+  });
+
   it("rejects a point release under a major-only iOS maxOsVersion bound (does not widen)", () => {
     // The major-only widening/truncation exists only to mirror Android's
     // API-level range expansion (#6132) -- there is no iOS equivalent

@@ -13,6 +13,7 @@ import {
 import type { DaemonMcpProxyConfig } from "../daemon/daemonMcpProxy";
 import type { DaemonOptions } from "../daemon/types";
 import { resolveDaemonInstallSpecifier } from "../constants/release";
+import { repairDaemon, type DaemonRecoveryResult } from "../doctor/daemonRecovery";
 import {
   DEVICE_SESSION_ACQUISITION_TOOLS,
   isDeviceSessionAcquisitionTool,
@@ -480,6 +481,8 @@ async function runToolViaDaemon(
 export function doctorToolParams(params: Record<string, any>): Record<string, any> {
   const doctorParams = { ...params };
   delete doctorParams.json;
+  delete doctorParams.repair;
+  delete doctorParams.timeoutMs;
   return doctorParams;
 }
 
@@ -505,8 +508,29 @@ async function runDoctorViaDaemon(params: Record<string, any>): Promise<any> {
 /**
  * Run the doctor command with daemon fallback to direct execution
  */
-async function runDoctorCommand(params: Record<string, any>): Promise<void> {
+export interface DoctorCommandDependencies {
+  repairDaemon?: (timeoutMs: number | undefined) => Promise<DaemonRecoveryResult>;
+}
+
+export async function runDoctorCommand(
+  params: Record<string, any>,
+  dependencies: DoctorCommandDependencies = {},
+): Promise<void> {
   const jsonOutput = params.json === true;
+
+  if (params.repair === true) {
+    // Repair is intentionally host-local: a missing, stale, or wrong-protocol
+    // control socket cannot serve the daemon's doctor tool.
+    const timeoutMs = typeof params.timeoutMs === "number" ? params.timeoutMs : undefined;
+    const recovery = await (
+      dependencies.repairDaemon ?? ((timeout) => repairDaemon({ timeoutMs: timeout }))
+    )(timeoutMs);
+    writeCliToolOutput(recovery, "doctor");
+    if (recovery.status === "failed") {
+      process.exit(1);
+    }
+    return;
+  }
 
   // Try daemon first
   try {

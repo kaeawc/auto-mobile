@@ -5,6 +5,7 @@ import path from "node:path";
 import {
   handleDoctorResult,
   doctorToolParams,
+  runDoctorCommand,
   resetCliOutputSinksForTesting,
   setCliOutputSinksForTesting,
 } from "../../src/cli";
@@ -14,6 +15,67 @@ import { serverConfig } from "../../src/utils/ServerConfig";
 describe("doctorToolParams", () => {
   test("keeps CLI JSON formatting out of the daemon doctor request", () => {
     expect(doctorToolParams({ ios: true, json: true })).toEqual({ ios: true });
+  });
+
+  test("keeps recovery-only flags out of the daemon doctor request", () => {
+    expect(doctorToolParams({ android: true, repair: true, timeoutMs: 12_000 })).toEqual({
+      android: true,
+    });
+  });
+
+  test("runs repair locally and renders its structured result", async () => {
+    const written: string[] = [];
+    let receivedTimeoutMs: number | undefined;
+    setCliOutputSinksForTesting({
+      stdout: { write: (text) => written.push(text) },
+      stderr: { write: () => {} },
+    });
+
+    try {
+      await runDoctorCommand(
+        { repair: true, timeoutMs: 12_000 },
+        {
+          repairDaemon: async (timeoutMs) => {
+            receivedTimeoutMs = timeoutMs;
+            return {
+              status: "repaired",
+              phase: "complete",
+              action: "restarted",
+              before: {
+                timestamp: "before",
+                daemonRunning: false,
+                socketExists: false,
+                socketAccessible: false,
+                pidFileExists: true,
+                pidFileValid: false,
+                socketConnectable: false,
+                recommendations: [],
+              },
+              after: {
+                timestamp: "after",
+                daemonRunning: true,
+                socketExists: true,
+                socketAccessible: true,
+                pidFileExists: true,
+                pidFileValid: true,
+                socketConnectable: true,
+                recommendations: [],
+              },
+            };
+          },
+        },
+      );
+    } finally {
+      resetCliOutputSinksForTesting();
+    }
+
+    expect(receivedTimeoutMs).toBe(12_000);
+    expect(JSON.parse(written[0])).toMatchObject({
+      status: "repaired",
+      action: "restarted",
+      before: { socketConnectable: false },
+      after: { socketConnectable: true },
+    });
   });
 
   test("renders a normal doctor report as pretty JSON", async () => {

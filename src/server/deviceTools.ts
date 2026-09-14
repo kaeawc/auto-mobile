@@ -3431,7 +3431,8 @@ interface TeardownContext {
   deadlineMs: number;
   timeoutMs: number;
   lifecycleLease?: VirtualDeviceLifecycleLease;
-  initialAndroidRuntimeIds?: Set<string>;
+  /** Android runtime and pool state captured by the first teardown booted scan. */
+  initialScan: TeardownInitialAndroidScan;
   /**
    * `force` exists to escape wedged emulator consoles, so every Android
    * discovery run for THIS teardown must stay serial-only rather than
@@ -3439,7 +3440,40 @@ interface TeardownContext {
    * context construction so a new discovery added to this flow inherits the
    * mode automatically instead of silently reintroducing a name-aware scan.
    */
-  serialOnlyAndroidDiscovery: boolean;
+  mode: "named" | "serial-only";
+}
+
+interface TeardownInitialAndroidScan {
+  serials: Set<string>;
+  pooledEntries: PooledDevice[];
+}
+
+function teardownProbeBudget(context: TeardownContext): {
+  signal: AbortSignal | undefined;
+  remainingMs: number;
+} {
+  return {
+    signal: context.requestAbortSignal,
+    remainingMs: Math.min(
+      POOLED_AVD_NAME_VERIFICATION_TIMEOUT_MS,
+      context.deadlineMs - context.dependencies.timer.now(),
+    ),
+  };
+}
+
+function captureTeardownInitialAndroidScan(
+  booted: BootedDeviceDiscovery,
+  devicePool: DevicePool | undefined,
+): TeardownInitialAndroidScan {
+  return {
+    serials: new Set(
+      booted.devices
+        .filter((device) => device.platform === "android")
+        .map((device) => device.deviceId),
+    ),
+    pooledEntries:
+      devicePool?.getAllDevices().filter((device) => device.platform === "android") ?? [],
+  };
 }
 
 async function stopSegmentedVideoRecordingsBeforeDestroy(
@@ -3460,8 +3494,9 @@ async function stopSegmentedVideoRecordingsBeforeDestroy(
 async function readTeardownBootedDiscovery(
   context: TeardownContext,
   detail = "booted-device precondition discovery did not complete",
-  skipAndroidNameEnrichment = false,
+  discoveryMode: "context" | "name-aware" = "context",
 ): Promise<BootedDeviceDiscovery> {
+  const skipAndroidNameEnrichment = discoveryMode === "context" && context.mode === "serial-only";
   return await runWithinShutdownDeadline(
     context.deadlineDevice,
     context.dependencies.timer,
@@ -3515,13 +3550,13 @@ async function readTeardownTargetDiscovery(
   context: TeardownContext,
   devicePool: DevicePool | undefined,
 ): Promise<BootedDeviceDiscovery> {
-  if (!context.serialOnlyAndroidDiscovery || context.args.target.platform !== "android") {
+  if (context.mode !== "serial-only" || context.args.target.platform !== "android") {
     return await readTeardownBootedDiscovery(context);
   }
-  const serialOnly = await readTeardownBootedDiscovery(context, undefined, true);
+  const serialOnly = await readTeardownBootedDiscovery(context);
   return findMatchingBootedTeardownDevices(serialOnly, context.args, devicePool).length > 0
     ? serialOnly
-    : await readTeardownBootedDiscovery(context);
+    : await readTeardownBootedDiscovery(context, undefined, "name-aware");
 }
 
 async function readTeardownInventory(
@@ -3742,13 +3777,7 @@ async function resolveTeardownTarget(context: TeardownContext): Promise<Teardown
   const daemonState = DaemonState.getInstance();
   const devicePool = daemonState.isInitialized() ? daemonState.getDevicePool() : undefined;
   const booted = await readTeardownTargetDiscovery(context, devicePool);
-  if (context.args.target.platform === "android") {
-    context.initialAndroidRuntimeIds = new Set(
-      booted.devices
-        .filter((device) => device.platform === "android")
-        .map((device) => device.deviceId),
-    );
-  }
+  context.initialScan = captureTeardownInitialAndroidScan(booted, devicePool);
   // A booted emulator only matches this teardown by its POOLED AVD name when its
   // runtime name is unknown. Pin that label to its epoch here; the runtime is
   // made to confirm it immediately before the stop's platform kill, which is
@@ -4037,7 +4066,6 @@ async function checkForRestartedTeardownTarget(
     phase === "stop"
       ? "post-shutdown booted-device discovery did not complete"
       : "post-delete booted-device discovery did not complete",
-    context.serialOnlyAndroidDiscovery,
   );
   if (!completedInventoryFor(booted, target.device.platform)) {
     return createTeardownFailureResponse(
@@ -4056,7 +4084,7 @@ async function checkForRestartedTeardownTarget(
       isVirtualAndroidDevice(device) &&
       isUnknownAndroidRuntimeName(device) &&
       !getValidatedPooledAndroidAvdName(device, devicePool) &&
-      (!context.initialAndroidRuntimeIds?.has(device.deviceId) ||
+      (!context.initialScan.serials.has(device.deviceId) ||
         (target.wasBooted && device.deviceId === target.bootedDevice.deviceId)),
   );
   if (newlyAppearedUnresolvedRuntime) {
@@ -4099,7 +4127,7 @@ async function checkForSerialOnlyAndroidTeardownRestart(
   booted: BootedDeviceDiscovery,
   phase: "stop" | "verification",
 ): Promise<TeardownToolResponse | undefined> {
-  if (!context.serialOnlyAndroidDiscovery || target.device.platform !== "android") {
+  if (context.mode !== "serial-only" || target.device.platform !== "android") {
     return undefined;
   }
   const targetOriginalSerial = target.wasBooted ? target.bootedDevice.deviceId : undefined;
@@ -4118,17 +4146,19 @@ async function checkForSerialOnlyAndroidTeardownRestart(
       isVirtualAndroidDevice(device) &&
       isUnknownAndroidRuntimeName(device) &&
       device.deviceId !== targetOriginalSerial &&
-      context.initialAndroidRuntimeIds?.has(device.deviceId) === true,
+      (context.initialScan.serials.has(device.deviceId) ||
+        (context.initialScan.pooledEntries.some((pooled) => pooled.id === device.deviceId) &&
+          !context.initialScan.serials.has(device.deviceId))),
   );
   for (const suspect of suspectPeers) {
-    const remainingMs = context.deadlineMs - context.dependencies.timer.now();
-    if (remainingMs <= 0) {
+    const probeBudget = teardownProbeBudget(context);
+    if (probeBudget.remainingMs <= 0) {
       break;
     }
     const probedName = await context.dependencies.resolveRunningAndroidAvdName(
       suspect,
-      Math.min(POOLED_AVD_NAME_VERIFICATION_TIMEOUT_MS, remainingMs),
-      context.requestAbortSignal,
+      probeBudget.remainingMs,
+      probeBudget.signal,
     );
     const refusal = serialOnlyAndroidTeardownRestartFailure(
       context,
@@ -8166,7 +8196,8 @@ export function registerDeviceTools() {
               deadlineMs,
               timeoutMs,
               lifecycleLease,
-              serialOnlyAndroidDiscovery: args.force === true,
+              mode: args.force === true ? "serial-only" : "named",
+              initialScan: { serials: new Set(), pooledEntries: [] },
             };
             const resolution = await resolveTeardownTarget(context);
             if ("response" in resolution) {

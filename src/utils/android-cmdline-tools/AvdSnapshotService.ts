@@ -191,6 +191,9 @@ export class AvdSnapshotService implements AvdSnapshotOperations {
     const command = buildVmSnapshotCommand("delete", snapshotName);
     const identityAbortController =
       expectedAvdName === undefined ? undefined : new AbortController();
+    const identitySignal = identityAbortController
+      ? combineWithAmbientAbort(identityAbortController.signal)
+      : undefined;
     let mismatchReason: string | undefined;
 
     let result;
@@ -201,16 +204,17 @@ export class AvdSnapshotService implements AvdSnapshotOperations {
           waitForProcessSettlementAfterAbort: true,
           ...(identityAbortController
             ? {
-                signal: combineWithAmbientAbort(identityAbortController.signal),
-                beforeDispatch: async () => {
-                  const liveDevice = (await this.emulator.getBootedDevices(true)).find(
-                    (device) => device.deviceId === deviceId,
-                  );
-                  if (liveDevice?.name !== expectedAvdName) {
-                    const actualAvdName = liveDevice?.name ?? "no longer live";
+                signal: identitySignal,
+                beforeDispatch: async (remainingTimeoutMs) => {
+                  const actualAvdName = await this.emulator.resolveAvdNameForSerial(deviceId, {
+                    signal: identitySignal,
+                    timeoutMs: remainingTimeoutMs ?? timeoutMs,
+                  });
+                  if (actualAvdName !== expectedAvdName) {
+                    const actualAvdNameLabel = actualAvdName ?? "no longer live";
                     mismatchReason =
                       `Skipping VM snapshot delete for '${snapshotName}': serial '${deviceId}' expected AVD ` +
-                      `'${expectedAvdName}' but currently hosts '${actualAvdName}'`;
+                      `'${expectedAvdName}' but currently hosts '${actualAvdNameLabel}'`;
                     logger.warn(`[AvdSnapshot] ${mismatchReason}`);
                     identityAbortController.abort();
                     throw new Error(mismatchReason);

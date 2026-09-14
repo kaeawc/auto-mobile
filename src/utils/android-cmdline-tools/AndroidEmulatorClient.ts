@@ -225,6 +225,12 @@ export interface AndroidEmulator {
     options?: { bypassDeviceListCache?: boolean },
   ): Promise<BootedDevice[]>;
 
+  /** Resolve the AVD name from one runtime serial without scanning all devices. */
+  resolveAvdNameForSerial(
+    serial: string,
+    options: { signal?: AbortSignal; timeoutMs: number },
+  ): Promise<string | undefined>;
+
   /**
    * Start an emulator with the specified AVD
    * @param avdName - The AVD name to start
@@ -1466,6 +1472,17 @@ export class AndroidEmulatorClient implements AndroidEmulator {
   ): Promise<string | undefined> {
     const { name } = await this.getRunningAVDName(device, timeoutMs, signal);
     return name === "" ? undefined : name;
+  }
+
+  async resolveAvdNameForSerial(
+    serial: string,
+    options: { signal?: AbortSignal; timeoutMs: number },
+  ): Promise<string | undefined> {
+    return await this.resolveRunningAvdName(
+      { deviceId: serial, name: serial, platform: "android" },
+      options.timeoutMs,
+      options.signal,
+    );
   }
 
   /**

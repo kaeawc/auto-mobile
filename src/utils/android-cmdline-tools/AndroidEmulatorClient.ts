@@ -1260,6 +1260,30 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     );
   }
 
+  private nextPollingDelayMs(
+    tracker: OfflineTracker,
+    options: AndroidEmulatorReadinessOptions | undefined,
+    deviceId: string | undefined,
+    now: number,
+    pollingIntervalMs: number,
+    remainingPollingTimeMs: number,
+  ): number {
+    const currentDelayMs = Math.min(pollingIntervalMs, remainingPollingTimeMs);
+    if (!this.isFreshOfflineEpisode(tracker, options, deviceId)) {
+      return currentDelayMs;
+    }
+
+    const thresholdAt = tracker.recoveryAttempted
+      ? (tracker.recoveryAt ?? now) + FRESH_OFFLINE_RECOVERY_GRACE_MS
+      : (tracker.since ?? now) + FRESH_OFFLINE_RECOVERY_THRESHOLD_MS;
+    const timeUntilThresholdMs = Math.max(0, thresholdAt - now);
+    const thresholdDelayMs = Math.max(
+      MIN_EMULATOR_POLLING_INTERVAL_MS,
+      Math.min(currentDelayMs, timeUntilThresholdMs),
+    );
+    return Math.min(currentDelayMs, thresholdDelayMs);
+  }
+
   /** Dispatch the single bounded `adb reconnect offline` re-detect for a stuck fresh boot. */
   private async dispatchFreshOfflineReconnect(
     tracker: OfflineTracker,
@@ -3611,16 +3635,14 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       // schedules another cycle.
       await Promise.resolve();
       while (polling.active && !foundDeviceId) {
+        let correlatedTargetDeviceId: string | undefined;
         try {
           this.recordLaunchError(childProcess, (error) => {
             processExitError = error;
           });
           logger.debug(`Background polling iteration - checking for emulator '${avdName}'...`);
 
-          const correlatedTargetDeviceId = this.readinessTargetDeviceId(
-            targetDeviceId,
-            childProcess,
-          );
+          correlatedTargetDeviceId = this.readinessTargetDeviceId(targetDeviceId, childProcess);
           const remainingTimeoutMs = timeoutMs - (this.timer.now() - startTime);
           if (remainingTimeoutMs <= 0) {
             polling.active = false;
@@ -3820,12 +3842,20 @@ export class AndroidEmulatorClient implements AndroidEmulator {
           logger.debug(`Background polling error (will continue): ${error}`);
         }
 
-        const remainingPollingTimeMs = timeoutMs - (this.timer.now() - startTime);
+        const now = this.timer.now();
+        const remainingPollingTimeMs = timeoutMs - (now - startTime);
         if (remainingPollingTimeMs <= 0) {
           polling.active = false;
           break;
         }
-        let remainingPollingDelayMs = Math.min(pollingIntervalMs, remainingPollingTimeMs);
+        let remainingPollingDelayMs = this.nextPollingDelayMs(
+          offlineTracker,
+          options,
+          correlatedTargetDeviceId,
+          now,
+          pollingIntervalMs,
+          remainingPollingTimeMs,
+        );
 
         // Never let the background poller sleep past the readiness deadline.
         logger.debug(

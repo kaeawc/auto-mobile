@@ -1,17 +1,11 @@
-import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { logger } from "../utils/logger";
+import { runDaemonProcessCommand, type DaemonProcessCommandRunner } from "./DaemonLauncher";
 
 const LINUX_BOOT_ID_PATH = "/proc/sys/kernel/random/boot_id";
 const CURRENT_PROCESS_GENERATION_CAPTURE_TIMEOUT_MS = 1_000;
 
 type FileReader = (path: string, encoding: BufferEncoding) => string;
-type DarwinProcessLstartCommandRunner = (
-  command: string,
-  args: readonly string[],
-  options: { timeout: number; env: NodeJS.ProcessEnv },
-) => string;
-
 export interface CurrentProcessGenerationTokenDependencies {
   platform?: NodeJS.Platform;
   pid?: number;
@@ -72,18 +66,6 @@ export function createLinuxProcessGenerationTokenReader(
 /** Read a stable Linux process-generation token without reconstructing wall time. */
 export const readLinuxProcessGenerationToken = createLinuxProcessGenerationTokenReader();
 
-function defaultDarwinProcessLstartCommandRunner(
-  command: string,
-  args: readonly string[],
-  options: { timeout: number; env: NodeJS.ProcessEnv },
-): string {
-  return execFileSync(command, args, {
-    encoding: "utf-8",
-    timeout: options.timeout,
-    env: options.env,
-  });
-}
-
 /**
  * Reads only the current Darwin process's `lstart` value, instead of scanning
  * the process table. The C locale preserves the same canonical format used by
@@ -91,7 +73,7 @@ function defaultDarwinProcessLstartCommandRunner(
  */
 export function readDarwinProcessGenerationToken(
   pid: number,
-  runCommand: DarwinProcessLstartCommandRunner = defaultDarwinProcessLstartCommandRunner,
+  runCommand: DaemonProcessCommandRunner = runDaemonProcessCommand,
 ): string | undefined {
   try {
     return darwinProcessGenerationToken(

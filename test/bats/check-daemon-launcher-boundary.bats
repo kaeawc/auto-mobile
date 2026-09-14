@@ -43,6 +43,18 @@ teardown() {
   [[ "$output" == *"DaemonLauncherBoundaryFixture.ts"* ]]
 }
 
+@test "rejects a direct file execution outside the owner" {
+  printf '%s\n' \
+    'import { execFileSync } from "node:child_process";' \
+    'execFileSync("ps", ["-p", "42", "-o", "lstart="]);' \
+    > "$FIXTURE"
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"DaemonLauncherBoundaryFixture.ts"* ]]
+}
+
 @test "rejects CommonJS and aliased child-process execution outside the owner" {
   printf '%s\n' \
     'const { spawn } = require("node:child_process");' \

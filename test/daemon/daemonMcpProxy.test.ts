@@ -13,6 +13,8 @@ import {
   DaemonUnavailableError,
   type DaemonClientLike,
 } from "../../src/daemon/client";
+import type { DaemonRestartResult } from "../../src/daemon/manager";
+import type { DaemonOptions, DaemonStatus } from "../../src/daemon/types";
 import { ActionableError } from "../../src/models";
 import {
   DAEMON_VERSION,
@@ -1879,6 +1881,83 @@ describe("DaemonMcpProxy", () => {
         } finally {
           isAvailableSpy.mockRestore();
           await proxy.close();
+        }
+      });
+
+      test("concurrent narrow and superset clients converge after the narrow restart wins (#7111)", async () => {
+        const narrowOptions = {
+          enabledTools: ["deleteDevice", "listDevices", "provisionDevice"],
+        };
+        const supersetOptions = {
+          enabledTools: [...narrowOptions.enabledTools, "getAndroid"],
+          toolResultsNoStructuredContent: true,
+        };
+        class ConcurrentOptionsManager extends FakeDaemonManager {
+          private currentOptions: DaemonOptions = {};
+          private restartCalls: DaemonOptions[] = [];
+          private releaseFirstRestart!: () => void;
+          private readonly firstRestartCanFinish = new Promise<void>((resolve) => {
+            this.releaseFirstRestart = resolve;
+          });
+
+          override async status(): Promise<DaemonStatus> {
+            return runningStatus(this.currentOptions);
+          }
+
+          override async restart(
+            options: DaemonOptions = {},
+            expectedDaemon?: DaemonStatus,
+          ): Promise<DaemonRestartResult> {
+            await super.restart(options, expectedDaemon);
+            this.restartCalls.push(options);
+            if (this.restartCalls.length === 1) {
+              // Both clients read the empty generation. Hold the narrow owner at
+              // its handoff so the superset client is forced to join it.
+              await this.firstRestartCanFinish;
+              this.currentOptions = narrowOptions;
+              return "restarted";
+            }
+            if (this.restartCalls.length === 2) {
+              this.releaseFirstRestart();
+              return "joined";
+            }
+            this.currentOptions = supersetOptions;
+            return "restarted";
+          }
+        }
+
+        const manager = new ConcurrentOptionsManager();
+        const narrowClient = new FakeDaemonClient({
+          daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+        });
+        const supersetClient = new FakeDaemonClient({
+          daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+        });
+        const supersetTimer = new FakeTimer();
+        supersetTimer.enableAutoAdvance();
+        const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+        const narrowProxy = new DaemonMcpProxy({
+          clientFactory: () => narrowClient,
+          daemonManager: manager,
+          daemonOptions: narrowOptions,
+        });
+        const supersetProxy = new DaemonMcpProxy({
+          clientFactory: () => supersetClient,
+          daemonManager: manager,
+          daemonOptions: supersetOptions,
+          timer: supersetTimer,
+        });
+
+        try {
+          await expect(
+            Promise.all([narrowProxy.listTools(), supersetProxy.listTools()]),
+          ).resolves.toEqual([[], []]);
+          expect(manager.restartCallCount).toBe(3);
+          expect(manager.restartOptions).toMatchObject(supersetOptions);
+          expect(await manager.status()).toMatchObject({ options: supersetOptions });
+        } finally {
+          isAvailableSpy.mockRestore();
+          await Promise.all([narrowProxy.close(), supersetProxy.close()]);
         }
       });
 

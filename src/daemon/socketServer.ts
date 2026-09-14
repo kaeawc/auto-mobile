@@ -2852,11 +2852,11 @@ export class UnixSocketServer {
         reason: "generation_changed",
       };
     }
-    const accepted = executionTracker.prepareForDaemonRestart();
-    if (!accepted) {
+    const admission = executionTracker.prepareForDaemonRestart();
+    if (admission !== "accepted") {
       return {
         accepted: false,
-        reason: "active_provisioning",
+        reason: admission,
       };
     }
     if (!this.onRestartAccepted) {

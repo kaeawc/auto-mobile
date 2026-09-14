@@ -629,7 +629,7 @@ export interface DaemonManagerLike {
    * When `expectedDaemon` is supplied, restart only that verified generation.
    * A changed generation means another client already completed the handoff.
    */
-  restart(options?: DaemonOptions, expectedDaemon?: DaemonStatus): Promise<void>;
+  restart(options?: DaemonOptions, expectedDaemon?: DaemonStatus): Promise<DaemonRestartResult>;
   waitForReady(
     timeout: number,
     signal?: AbortSignal,
@@ -651,6 +651,15 @@ export interface DaemonManagerLike {
    */
   waitForLockHolderReadiness(timeoutMs: number): Promise<boolean>;
 }
+
+/**
+ * The outcome of a daemon restart attempt.
+ *
+ * A conditional restart can join a successor selected by another client instead
+ * of replacing it. Callers must re-read that successor before declaring their
+ * startup options incompatible.
+ */
+export type DaemonRestartResult = "restarted" | "joined";
 
 /**
  * Daemon Manager
@@ -2008,7 +2017,10 @@ export class DaemonManager implements DaemonManagerLike {
   /**
    * Restart the daemon
    */
-  async restart(options: DaemonOptions = {}, expectedDaemon?: DaemonStatus): Promise<void> {
+  async restart(
+    options: DaemonOptions = {},
+    expectedDaemon?: DaemonStatus,
+  ): Promise<DaemonRestartResult> {
     stderrLog("Restarting daemon...");
     // A bare `--daemon restart` has no CLI options, but it is commonly used to
     // replace a stale checkout. Preserve the daemon's PID-recorded options so
@@ -2033,13 +2045,28 @@ export class DaemonManager implements DaemonManagerLike {
     };
     if (expectedDaemon && !this.isSameDaemonGeneration(status, expectedDaemon)) {
       stderrLog("Daemon generation changed before restart; joining the current generation");
-      return;
+      return "joined";
     }
 
     if (expectedDaemon) {
-      if (!(await this.prepareDaemonForConditionalRestart(expectedDaemon))) {
-        stderrLog("Daemon generation changed while preparing restart; joining its successor");
-        return;
+      const preparation = await this.prepareDaemonForConditionalRestart(expectedDaemon);
+      if (!preparation.accepted) {
+        if (
+          preparation.reason === "generation_changed" ||
+          preparation.reason === "restart_pending"
+        ) {
+          stderrLog("Daemon restart is already in progress; joining its successor");
+          return "joined";
+        }
+        if (preparation.reason === "active_operations") {
+          throw new DaemonRestartDeferredError("a device operation is active");
+        }
+        if (preparation.reason === "shutdown_unavailable") {
+          throw new DaemonRestartDeferredError("the daemon could not initiate its own shutdown");
+        }
+        throw new DaemonRestartDeferredError(
+          "the daemon returned an unrecognized safe-restart admission result",
+        );
       }
       if (status.running) {
         // Atomic admission asks the daemon to initiate its own shutdown before
@@ -2051,7 +2078,7 @@ export class DaemonManager implements DaemonManagerLike {
       // handoff. Ordinary start() joins that winner instead of terminating it.
       await this.timer.sleep(DAEMON_RESTART_HANDOFF_DELAY_MS);
       await this.start(restartOptions);
-      return;
+      return "restarted";
     }
 
     // All restart cleanup follows the same 10s graceful + 1s forced-stop
@@ -2073,6 +2100,7 @@ export class DaemonManager implements DaemonManagerLike {
     // Wait a bit before starting
     await this.timer.sleep(DAEMON_RESTART_HANDOFF_DELAY_MS);
     await this.start(restartOptions);
+    return "restarted";
   }
 
   private isSameDaemonGeneration(current: DaemonStatus, expected: DaemonStatus): boolean {
@@ -2085,7 +2113,9 @@ export class DaemonManager implements DaemonManagerLike {
     );
   }
 
-  private async prepareDaemonForConditionalRestart(expected: DaemonStatus): Promise<boolean> {
+  private async prepareDaemonForConditionalRestart(
+    expected: DaemonStatus,
+  ): Promise<DaemonRestartPreparation> {
     // The generation tuple below authorizes this lifecycle RPC. It must reach
     // an older daemon even when its normal client compatibility handshake would
     // reject the newer caller that is requesting the replacement.
@@ -2106,16 +2136,16 @@ export class DaemonManager implements DaemonManagerLike {
       }
       const preparation = result as Partial<DaemonRestartPreparation>;
       if (preparation.accepted === true) {
-        return true;
+        return { accepted: true };
       }
-      if (preparation.accepted === false && preparation.reason === "generation_changed") {
-        return false;
-      }
-      if (preparation.accepted === false && preparation.reason === "active_provisioning") {
-        throw new DaemonRestartDeferredError("provisionDevice is active");
-      }
-      if (preparation.accepted === false && preparation.reason === "shutdown_unavailable") {
-        throw new DaemonRestartDeferredError("the daemon could not initiate its own shutdown");
+      if (
+        preparation.accepted === false &&
+        (preparation.reason === "generation_changed" ||
+          preparation.reason === "restart_pending" ||
+          preparation.reason === "active_operations" ||
+          preparation.reason === "shutdown_unavailable")
+      ) {
+        return { accepted: false, reason: preparation.reason };
       }
       throw new DaemonRestartDeferredError(
         "the daemon returned an unrecognized safe-restart admission result",

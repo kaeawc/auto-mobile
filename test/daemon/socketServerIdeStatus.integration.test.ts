@@ -115,7 +115,7 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
       const rejected = await sendRequest(socketPath, DAEMON_PREPARE_RESTART_METHOD, activeStatus);
       expect(rejected.result).toEqual({
         accepted: false,
-        reason: "active_provisioning",
+        reason: "active_operations",
       });
     } finally {
       executionTracker.endExecution(execution.id);
@@ -127,8 +127,28 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
       const accepted = await sendRequest(socketPath, DAEMON_PREPARE_RESTART_METHOD, idle.result);
       expect(accepted.result).toEqual({ accepted: true });
       expect(restartRequests).toBe(1);
+      const pending = await sendRequest(socketPath, DAEMON_PREPARE_RESTART_METHOD, idle.result);
+      expect(pending.result).toEqual({
+        accepted: false,
+        reason: "restart_pending",
+      });
+      expect(restartRequests).toBe(1);
     } finally {
       executionTracker.clearDaemonRestartPreparation();
+    }
+  });
+
+  test("ide/prepareRestart defers while a non-provisioning device operation is active", async () => {
+    const execution = executionTracker.startExecution("tapOn", "tap-transport");
+    try {
+      const status = await sendRequest(socketPath, "ide/status");
+      const rejected = await sendRequest(socketPath, DAEMON_PREPARE_RESTART_METHOD, status.result!);
+      expect(rejected.result).toEqual({
+        accepted: false,
+        reason: "active_operations",
+      });
+    } finally {
+      executionTracker.endExecution(execution.id);
     }
   });
 

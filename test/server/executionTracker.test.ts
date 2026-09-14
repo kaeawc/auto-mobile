@@ -63,18 +63,22 @@ describe("ExecutionTracker", function () {
     expect(execution.cancelReason).toBe(reason);
   });
 
-  test("atomically fences provisionDevice admission for a prepared restart", function () {
+  test("atomically elects one restart owner and fences active device operations", function () {
     const timer = new FakeTimer();
     const tracker = new ExecutionTracker(
       timer,
       new FakeIdGenerator(["active-provision", "after-clear"]),
     );
-    const active = tracker.startExecution("provisionDevice", "active-session");
+    const active = tracker.startExecution("tapOn", "active-session");
 
-    expect(tracker.prepareForDaemonRestart()).toBe(false);
+    expect(tracker.prepareForDaemonRestart()).toBe("active_operations");
     tracker.endExecution(active.id);
-    expect(tracker.prepareForDaemonRestart()).toBe(true);
+    expect(tracker.prepareForDaemonRestart()).toBe("accepted");
+    expect(tracker.prepareForDaemonRestart()).toBe("restart_pending");
     expect(() => tracker.startExecution("provisionDevice", "blocked-session")).toThrow(
+      "Daemon restart is pending",
+    );
+    expect(() => tracker.startExecution("tapOn", "blocked-device-session")).toThrow(
       "Daemon restart is pending",
     );
 

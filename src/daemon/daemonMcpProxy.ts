@@ -23,6 +23,7 @@ import {
   DAEMON_OWNED_SESSIONS_PARAM,
   DAEMON_RELEASED_SESSION_PARAM,
   DAEMON_SHUTDOWN_TIMEOUT_MS,
+  DAEMON_RESTART_HANDOFF_DELAY_MS,
   DAEMON_RESTART_HANDOFF_TIMEOUT_MS,
   DAEMON_HEARTBEAT_METHOD,
   CLI_SESSION_LIVENESS_POLICY,
@@ -1534,46 +1535,70 @@ export class DaemonMcpProxy {
   }
 
   private async ensureStartupOptionsMatch(): Promise<void> {
-    const status = await this.reconciliationStatus();
-    if (!status.running) {
-      return;
-    }
-
     const requested = this.config.daemonOptions;
-    const deficits = startupOptionDeficits(requested, status.options);
-    if (deficits.length === 0) {
+    const reconciliationDeadline = this.timer.now() + DAEMON_STARTUP_TIMEOUT_MS;
+    while (this.timer.now() < reconciliationDeadline) {
+      const status = await this.reconciliationStatus();
+      if (!status.running) {
+        return;
+      }
+
+      const deficits = startupOptionDeficits(requested, status.options);
+      if (deficits.length === 0) {
+        return;
+      }
+
+      if (!this.config.autoStartDaemon) {
+        throw new DaemonUnavailableError(
+          `Daemon startup options differ from MCP server options (${deficits.join(", ")}) and auto-start is disabled`,
+        );
+      }
+
+      logger.info(
+        `[DaemonMcpProxy] Daemon startup options differ (${deficits.join(", ")}), restarting daemon`,
+      );
+      this.assertAutomaticRestartAllowed(status, "startup option mismatch");
+      // Preserve the running daemon's existing options and add the requested ones
+      // so the restart gains the missing flag without stripping any the daemon
+      // already had (issue #3846).
+      const restartResult = await this.daemonManager.restart(
+        mergeDaemonOptions(status.options, requested),
+        status,
+      );
+      this.reconciliationSnapshot = undefined;
+      if (restartResult === "joined") {
+        // Another client owns the compatible restart. Its old generation can stay
+        // reachable until it begins shutdown, so wait before re-reading rather than
+        // treating that still-running incarnation as the settled successor.
+        await this.timer.sleep(
+          Math.min(
+            DAEMON_RESTART_HANDOFF_DELAY_MS,
+            Math.max(0, reconciliationDeadline - this.timer.now()),
+          ),
+        );
+        this.reconciliationSnapshot = undefined;
+        continue;
+      }
+
+      const ready = await this.daemonManager.waitForReady(DAEMON_STARTUP_TIMEOUT_MS);
+      if (!ready) {
+        throw new DaemonUnavailableError(
+          `Daemon failed to restart within ${DAEMON_STARTUP_TIMEOUT_MS}ms`,
+        );
+      }
+
+      const restartedStatus = await this.reconciliationStatus();
+      const remaining = startupOptionDeficits(requested, restartedStatus.options);
+      if (!restartedStatus.running || remaining.length > 0) {
+        throw new DaemonUnavailableError(
+          `Daemon restart completed but startup options still differ (${remaining.join(", ")})`,
+        );
+      }
       return;
     }
-
-    if (!this.config.autoStartDaemon) {
-      throw new DaemonUnavailableError(
-        `Daemon startup options differ from MCP server options (${deficits.join(", ")}) and auto-start is disabled`,
-      );
-    }
-
-    logger.info(
-      `[DaemonMcpProxy] Daemon startup options differ (${deficits.join(", ")}), restarting daemon`,
+    throw new DaemonUnavailableError(
+      `Timed out waiting for concurrent daemon startup-option reconciliation after ${DAEMON_STARTUP_TIMEOUT_MS}ms`,
     );
-    this.assertAutomaticRestartAllowed(status, "startup option mismatch");
-    // Preserve the running daemon's existing options and add the requested ones
-    // so the restart gains the missing flag without stripping any the daemon
-    // already had (issue #3846).
-    await this.daemonManager.restart(mergeDaemonOptions(status.options, requested), status);
-    this.reconciliationSnapshot = undefined;
-    const ready = await this.daemonManager.waitForReady(DAEMON_STARTUP_TIMEOUT_MS);
-    if (!ready) {
-      throw new DaemonUnavailableError(
-        `Daemon failed to restart within ${DAEMON_STARTUP_TIMEOUT_MS}ms`,
-      );
-    }
-
-    const restartedStatus = await this.reconciliationStatus();
-    const remaining = startupOptionDeficits(requested, restartedStatus.options);
-    if (!restartedStatus.running || remaining.length > 0) {
-      throw new DaemonUnavailableError(
-        `Daemon restart completed but startup options still differ (${remaining.join(", ")})`,
-      );
-    }
   }
 
   /**

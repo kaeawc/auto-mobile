@@ -1,4 +1,4 @@
-import type { DaemonManagerLike } from "../../src/daemon/manager";
+import type { DaemonManagerLike, DaemonRestartResult } from "../../src/daemon/manager";
 import type { DaemonStatus, DaemonOptions } from "../../src/daemon/types";
 
 /**
@@ -20,6 +20,7 @@ export class FakeDaemonManager implements DaemonManagerLike {
   restartCallCount = 0;
   restartOptions: DaemonOptions | undefined;
   restartExpectedDaemon: DaemonStatus | undefined;
+  restartResult: DaemonRestartResult = "restarted";
   waitForReadyResult = true;
   waitForReadyCallCount = 0;
   startupLockHeldByLiveProcess = false;
@@ -38,11 +39,15 @@ export class FakeDaemonManager implements DaemonManagerLike {
     this.startOptions = options;
   }
 
-  async restart(options: DaemonOptions = {}, expectedDaemon?: DaemonStatus): Promise<void> {
+  async restart(
+    options: DaemonOptions = {},
+    expectedDaemon?: DaemonStatus,
+  ): Promise<DaemonRestartResult> {
     this.restartCalled = true;
     this.restartCallCount++;
     this.restartOptions = options;
     this.restartExpectedDaemon = expectedDaemon;
+    return this.restartResult;
   }
 
   async waitForReady(_timeout: number): Promise<boolean> {

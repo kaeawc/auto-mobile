@@ -135,7 +135,7 @@ describe("concurrent client restart during provisionDevice", () => {
         async restart(options?: DaemonOptions, expectedDaemon?: DaemonStatus) {
           enterRestart();
           await restartAllowed;
-          await realManager.restart(options, expectedDaemon);
+          return await realManager.restart(options, expectedDaemon);
         },
         waitForReady: (...args) => realManager.waitForReady(...args),
         isStartupLockHeldByLiveProcess: () => realManager.isStartupLockHeldByLiveProcess(),

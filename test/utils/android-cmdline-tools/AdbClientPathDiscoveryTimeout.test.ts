@@ -88,6 +88,29 @@ describe.serial("AdbClient ADB-path discovery deadline", () => {
     expect(settled).toBeInstanceOf(AdbCommandTimeoutError);
   });
 
+  test("getAdbPathOnly forwards the caller signal and deadline to path discovery (#7008)", async () => {
+    const timer = new FakeTimer();
+    const controller = new AbortController();
+    const client = new AdbClient(null, null, null, defaultRetryExecutor, timer);
+    const internals = client as unknown as AdbClientInternals;
+    internals.isTestMode = false;
+    const probes: Array<{ timeoutMs?: number; signal?: AbortSignal }> = [];
+    internals.execWithSignal = async (file, args, _maxBuffer, timeoutMs, signal) => {
+      probes.push({ timeoutMs, signal });
+      return file === "which" && args[0] === "adb" ? ok("/sdk/platform-tools/adb\n") : ok();
+    };
+
+    await expect(client.getAdbPathOnly({ timeoutMs: 20, signal: controller.signal })).resolves.toBe(
+      "/sdk/platform-tools/adb",
+    );
+
+    expect(probes.length).toBeGreaterThan(0);
+    for (const probe of probes) {
+      expect(probe.signal).toBe(controller.signal);
+      expect(probe.timeoutMs).toBe(20);
+    }
+  });
+
   test("passes only the remaining request budget to the command after discovery", async () => {
     const timer = new FakeTimer();
     const client = new AdbClient(null, null, null, defaultRetryExecutor, timer);

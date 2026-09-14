@@ -31,3 +31,16 @@ teardown() {
   run bash -c 'cd "$1" && bunx oxfmt --check "$2"' _ "$REPO_ROOT" "$FIXTURE"
   [ "$status" -eq 0 ]
 }
+
+@test "oxfmt runs when oxlint reports an unfixed violation" {
+  fixture_with_error="$TEST_DIR/fixture-with-error.ts"
+  printf 'if (true) console.log("fixture");\nif (a == b) { console.log(a); }\n' >"$fixture_with_error"
+
+  run env PATH="$REPO_ROOT/node_modules/.bin:$PATH" bash "$REPO_ROOT/scripts/lint.sh" "$fixture_with_error"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"skipping baseline and boundary checks"* ]]
+  grep -q 'if (true) {' "$fixture_with_error"
+
+  run bash -c 'cd "$1" && bunx oxfmt --check "$2"' _ "$REPO_ROOT" "$fixture_with_error"
+  [ "$status" -eq 0 ]
+}

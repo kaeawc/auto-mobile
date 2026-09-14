@@ -56,6 +56,7 @@ export type FieldAliasMap = Record<string, readonly string[]>;
 export type JsonSchemaOverride = (jsonSchema: Record<string, unknown>) => void;
 
 const jsonSchemaOverrides = new WeakMap<object, JsonSchemaOverride>();
+const postFlattenJsonSchemaOverrides = new WeakMap<object, JsonSchemaOverride>();
 const injectedDeviceIdSchemas = new WeakSet<object>();
 
 export function withJsonSchemaOverride<T extends z.ZodTypeAny>(
@@ -63,6 +64,24 @@ export function withJsonSchemaOverride<T extends z.ZodTypeAny>(
   override: JsonSchemaOverride,
 ): T {
   jsonSchemaOverrides.set(schema, override);
+  return schema;
+}
+
+/**
+ * Register an override that runs on the ADVERTISED JSON Schema AFTER
+ * {@link flattenTopLevelUnion} has collapsed a top-level `z.union(...)` into a
+ * single object schema. A per-node {@link withJsonSchemaOverride} only sees the
+ * pre-flatten arm, and flattening reduces that arm's `required` to the cross-arm
+ * intersection (or re-homes it under a branch discriminator), so a wire contract
+ * that must hold on ONE arm of a flattened union has to be re-asserted here,
+ * against the post-flatten shape. Keyed by the top-level (union) schema identity
+ * the tool registers as its output/input schema.
+ */
+export function withPostFlattenJsonSchemaOverride<T extends z.ZodTypeAny>(
+  schema: T,
+  override: JsonSchemaOverride,
+): T {
+  postFlattenJsonSchemaOverrides.set(schema, override);
   return schema;
 }
 
@@ -151,6 +170,13 @@ export function applyJsonSchemaOverride(
   jsonSchema: Record<string, unknown>,
 ): void {
   jsonSchemaOverrides.get(zodSchema)?.(jsonSchema);
+}
+
+export function applyPostFlattenJsonSchemaOverride(
+  zodSchema: object,
+  jsonSchema: Record<string, unknown>,
+): void {
+  postFlattenJsonSchemaOverrides.get(zodSchema)?.(jsonSchema);
 }
 
 export function isInjectedDeviceIdSchema(zodSchema: object): boolean {

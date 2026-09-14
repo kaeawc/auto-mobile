@@ -44,6 +44,7 @@ import {
 } from "../utils/toolUtils";
 import {
   applyJsonSchemaOverride,
+  applyPostFlattenJsonSchemaOverride,
   canonicalizeDiscriminatedUnionJsonSchema,
   isInjectedDeviceIdSchema,
 } from "./toolSchemaHelpers";
@@ -164,7 +165,14 @@ function toAdvertisedJsonSchema(schema: any): Record<string, unknown> {
     },
   });
   canonicalizeDiscriminatedUnionJsonSchema(jsonSchema);
-  return flattenTopLevelUnion(jsonSchema);
+  const flattened = flattenTopLevelUnion(jsonSchema);
+  // Re-assert any wire contract that must survive union flattening (e.g. the
+  // observe join keys required on the successful-observation arm, issue #7018):
+  // per-node overrides only saw the pre-flatten arm, whose arm-only `required`
+  // flattening reduces to the cross-arm intersection or re-homes under a branch
+  // discriminator. No-op for schemas without a registered post-flatten override.
+  applyPostFlattenJsonSchemaOverride(schema, flattened);
+  return flattened;
 }
 
 const advertisedToolOutputArtifactDetailsSchema = toJSONSchema(toolOutputArtifactDetailsSchema);

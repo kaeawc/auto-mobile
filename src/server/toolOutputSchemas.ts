@@ -1,5 +1,5 @@
 import { z } from "zod/v4";
-import { withJsonSchemaOverride } from "./toolSchemaHelpers";
+import { withJsonSchemaOverride, withPostFlattenJsonSchemaOverride } from "./toolSchemaHelpers";
 
 // Android accessibility returns boolean attributes as strings ("true"/"false")
 // This schema accepts both for compatibility
@@ -584,6 +584,66 @@ function requireObservationJoinKeysOnTheWire(schema: z.ZodTypeAny): void {
   });
 }
 
+/**
+ * The advertised output schema of the `observe` tool is a `z.union` of the
+ * ordinary observation ({@link observeResultSchema}) and the hard-ceiling
+ * artifact-spill metadata ({@link toolOutputArtifactMetadataSchema}). The
+ * registry flattens that top-level union into ONE object schema for `tools/list`
+ * (top-level `anyOf`/`oneOf` is rejected by the Anthropic API and many MCP
+ * clients), and flattening reduces each arm's `required` to the cross-arm
+ * intersection — dropping the join keys entirely — then re-homes the observe
+ * arm's arm-only `required` under whatever single-const property it finds first
+ * (`accessibilityAuditSkipped`). That leaves the join keys advertised as required
+ * ONLY when `accessibilityAuditSkipped` is present, so an ordinary successful
+ * observation wrongly advertises them as optional (issue #7018).
+ *
+ * A per-node {@link requireObservationJoinKeysOnTheWire} cannot fix this: it runs
+ * before flattening. Re-assert the contract on the POST-flatten object instead —
+ * the join keys are required on the successful-observation arm (every shape
+ * except the artifact spill, which is the only arm carrying `artifact`), not on
+ * the artifact/spill arm where they do not apply. The requirement is expressed as
+ * an `if artifact present -> then no join keys / else join keys required`
+ * conditional, the same `if/then/else` construct the flattener already emits for
+ * branch-only required fields.
+ */
+function requireObservationJoinKeysOnFlattenedUnion(schema: z.ZodTypeAny): void {
+  withPostFlattenJsonSchemaOverride(schema, (jsonSchema) => {
+    const properties = jsonSchema.properties as Record<string, unknown> | undefined;
+    if (!properties) {
+      return;
+    }
+    const joinKeys = OBSERVATION_WIRE_REQUIRED_KEYS.filter((key) => Object.hasOwn(properties, key));
+    // Only act on the flattened observe union: it declares the join keys and the
+    // `artifact` spill arm's discriminating property.
+    if (joinKeys.length === 0 || !Object.hasOwn(properties, "artifact")) {
+      return;
+    }
+    // The flattener emits a single `if/then` (no `else`) whose `then.required` is
+    // exactly the observe arm's arm-only required (the join keys) gated on a
+    // bogus discriminator. Only rewrite when the pre-flatten conditional is
+    // either absent or exactly that join-key requirement; if it is anything else
+    // (a future arm added its own branch-only required), bail rather than clobber
+    // it — the assumptions here no longer hold and must be revisited deliberately.
+    const then = jsonSchema.then as { required?: unknown } | undefined;
+    const thenRequired = Array.isArray(then?.required) ? (then.required as string[]) : undefined;
+    const hasConditional = "if" in jsonSchema || "then" in jsonSchema || "else" in jsonSchema;
+    const isJoinKeyOnlyConditional =
+      !("else" in jsonSchema) &&
+      thenRequired !== undefined &&
+      thenRequired.every((key) => (joinKeys as string[]).includes(key));
+    if (hasConditional && !isJoinKeyOnlyConditional) {
+      return;
+    }
+    delete jsonSchema.if;
+    delete jsonSchema.then;
+    delete jsonSchema.else;
+    // Require the join keys on every shape except the artifact spill arm.
+    jsonSchema.if = { required: ["artifact"] };
+    jsonSchema.then = {};
+    jsonSchema.else = { required: [...joinKeys] };
+  });
+}
+
 // This is one arm of the `observation` discriminated union documented on
 // `observationOutputSchema` further down this module (issue #6221 item 4): the
 // FULL-object arm, identified by the ABSENCE of `isDiff` (the diff arm,
@@ -1080,3 +1140,4 @@ export const observeToolResultSchema = z.union([
   observeResultSchema,
   toolOutputArtifactMetadataSchema,
 ]);
+requireObservationJoinKeysOnFlattenedUnion(observeToolResultSchema);

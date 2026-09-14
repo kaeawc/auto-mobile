@@ -55,27 +55,133 @@ function collectBoundsUnions(schema: unknown): Array<Record<string, unknown>> {
   return found;
 }
 
-describe("observeResultSchema: advertises the screenshot-resource join keys on the wire (#7018)", () => {
-  function advertisedRequired(schema: typeof observeResultSchema): string[] {
-    const jsonSchema = toJSONSchema(schema) as Record<string, unknown>;
-    applyJsonSchemaOverride(schema, jsonSchema);
-    return Array.isArray(jsonSchema.required) ? (jsonSchema.required as string[]) : [];
-  }
+const OBSERVE_JOIN_KEYS = [
+  "observationId",
+  "deviceId",
+  "observationScreenshotResourceUri",
+] as const;
 
-  test("a full observe output requires deviceId + observationScreenshotResourceUri alongside observationId", () => {
-    const required = advertisedRequired(observeResultSchema);
-    expect(required).toContain("observationId");
-    expect(required).toContain("deviceId");
-    expect(required).toContain("observationScreenshotResourceUri");
-    // Parse stays lenient for recorded captures that predate the fields.
-    expect(() => observeResultSchema.parse({})).not.toThrow();
+/**
+ * Evaluate the effective JSON-Schema `required` set for one instance, honoring
+ * the `required` + `if`/`then`/`else` conditional shape the top-level union
+ * flattener emits. `if` is matched on `required` presence and `properties.<k>.const`
+ * equality, exactly as the flattener produces it. This exercises the PUBLISHED,
+ * flattened schema — not the inner arm — so it catches join keys that end up
+ * gated behind a branch discriminator after flattening (issue #7018).
+ */
+function effectiveRequired(
+  schema: Record<string, unknown>,
+  instanceKeys: Set<string>,
+  instanceConsts: Record<string, unknown>,
+  acc: Set<string> = new Set(),
+): Set<string> {
+  for (const key of (schema.required as string[] | undefined) ?? []) {
+    acc.add(key);
+  }
+  const ifSchema = schema.if as Record<string, unknown> | undefined;
+  if (ifSchema) {
+    const matches = conditionMatches(ifSchema, instanceKeys, instanceConsts);
+    const branch = (matches ? schema.then : schema.else) as Record<string, unknown> | undefined;
+    if (branch) {
+      effectiveRequired(branch, instanceKeys, instanceConsts, acc);
+    }
+  }
+  return acc;
+}
+
+function conditionMatches(
+  ifSchema: Record<string, unknown>,
+  instanceKeys: Set<string>,
+  instanceConsts: Record<string, unknown>,
+): boolean {
+  const required = (ifSchema.required as string[] | undefined) ?? [];
+  if (!required.every((key) => instanceKeys.has(key))) {
+    return false;
+  }
+  const properties = ifSchema.properties as Record<string, { const?: unknown }> | undefined;
+  if (properties) {
+    for (const [key, value] of Object.entries(properties)) {
+      if ("const" in value && instanceConsts[key] !== value.const) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+function publishedObserveOutputSchema(): Record<string, unknown> {
+  const original = serverConfig.isToolResultsNoStructuredContentEnabled();
+  serverConfig.setToolResultsNoStructuredContentEnabled(false);
+  ToolRegistry.clearTools();
+  try {
+    registerObserveTools();
+    const observe = ToolRegistry.getToolDefinitions().find((tool) => tool.name === "observe");
+    const outputSchema = (observe as Record<string, unknown> | undefined)?.outputSchema;
+    if (!outputSchema || typeof outputSchema !== "object") {
+      throw new Error("observe tool did not advertise an outputSchema");
+    }
+    return outputSchema as Record<string, unknown>;
+  } finally {
+    ToolRegistry.clearTools();
+    serverConfig.setToolResultsNoStructuredContentEnabled(original);
+  }
+}
+
+describe("observe.outputSchema: requires the screenshot-resource join keys on the wire (#7018)", () => {
+  test("the PUBLISHED (flattened) schema requires all three join keys for an ordinary successful observation", () => {
+    const published = publishedObserveOutputSchema();
+    // A successful observation carries no `artifact` spill key.
+    const successfulKeys = new Set<string>(OBSERVE_JOIN_KEYS);
+    const required = effectiveRequired(published, successfulKeys, {});
+    for (const key of OBSERVE_JOIN_KEYS) {
+      expect(required).toContain(key);
+    }
   });
 
-  test("a diff observe output requires the same join keys", () => {
-    const required = advertisedRequired(observeDiffSchema as unknown as typeof observeResultSchema);
-    expect(required).toContain("observationId");
-    expect(required).toContain("deviceId");
-    expect(required).toContain("observationScreenshotResourceUri");
+  test("the join-key requirement does NOT depend on accessibilityAuditSkipped being present", () => {
+    const published = publishedObserveOutputSchema();
+    // Without accessibilityAuditSkipped ...
+    const withoutAudit = effectiveRequired(published, new Set(OBSERVE_JOIN_KEYS), {});
+    // ... and with it present: same required set either way.
+    const withAudit = effectiveRequired(
+      published,
+      new Set([...OBSERVE_JOIN_KEYS, "accessibilityAuditSkipped"]),
+      { accessibilityAuditSkipped: "settled_capture_adopted" },
+    );
+    for (const key of OBSERVE_JOIN_KEYS) {
+      expect(withoutAudit).toContain(key);
+      expect(withAudit).toContain(key);
+    }
+  });
+
+  test("the artifact/spill arm does NOT require the join keys", () => {
+    const published = publishedObserveOutputSchema();
+    // The hard-ceiling spill result is `{ artifact: {...} }` with no join keys.
+    const required = effectiveRequired(published, new Set<string>(["artifact"]), {});
+    for (const key of OBSERVE_JOIN_KEYS) {
+      expect(required).not.toContain(key);
+    }
+  });
+
+  test("parse stays lenient for recorded captures that predate the fields", () => {
+    // The wire contract is advertise-only; runtime parsing must still accept
+    // captures missing the join keys.
+    expect(() => observeResultSchema.parse({})).not.toThrow();
+    expect(() =>
+      observeDiffSchema.parse({ isDiff: true, skeleton: [], added: [], removed: [], changed: [] }),
+    ).not.toThrow();
+  });
+
+  test("the embedded diff arm advertises the same join keys (it is nested, not top-level flattened)", () => {
+    // observeDiffSchema is only ever nested (inside observationOutputSchema /
+    // action-tool `.observation`), so it never hits top-level union flattening
+    // and keeps its per-arm required intact. Assert that contract holds.
+    const jsonSchema = toJSONSchema(observeDiffSchema) as Record<string, unknown>;
+    applyJsonSchemaOverride(observeDiffSchema, jsonSchema);
+    const required = Array.isArray(jsonSchema.required) ? (jsonSchema.required as string[]) : [];
+    for (const key of OBSERVE_JOIN_KEYS) {
+      expect(required).toContain(key);
+    }
   });
 });
 

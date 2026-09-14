@@ -6874,14 +6874,10 @@
         }
       },
       "if": {
-        "properties": {
-          "accessibilityAuditSkipped": {
-            "const": "settled_capture_adopted"
-          }
-        },
-        "required": ["accessibilityAuditSkipped"]
+        "required": ["artifact"]
       },
-      "then": {
+      "then": {},
+      "else": {
         "required": ["observationId", "deviceId", "observationScreenshotResourceUri"]
       }
     },

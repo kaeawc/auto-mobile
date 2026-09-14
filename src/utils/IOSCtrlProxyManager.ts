@@ -1458,9 +1458,10 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
    */
   public async stop(deadline?: number): Promise<void> {
     this.beginStop();
-    if (!this.useRemoteRunner()) {
-      await this.cancelAndAwaitSharedStart();
-    }
+    // A remote start can return its PID after shutdown has begun. Drain the
+    // shared start first so it observes cancellation and retires that runner
+    // before this stop snapshots the tracked PID.
+    await this.cancelAndAwaitSharedStart();
     await this.stopTrackedService(deadline);
   }
 
@@ -1878,6 +1879,34 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
       if (!result.success || !result.data) {
         throw new Error(result.error || "Remote runner failed to start CtrlProxy");
+      }
+
+      const startupAbort = this.sharedStart?.controller.signal;
+      if (startupAbort?.aborted) {
+        const stopResult = await this.remoteRunner
+          .stop({
+            deviceId: this.device.deviceId,
+            pid: result.data.pid,
+          })
+          .catch((error): null => {
+            logger.warn(
+              `[IOSCtrlProxy] Failed to stop remote runner that completed after shutdown: ${errorMessage(error)}`,
+            );
+            return null;
+          });
+        if (stopResult && !stopResult.success) {
+          logger.warn(
+            `[IOSCtrlProxy] Failed to stop remote runner that completed after shutdown: ` +
+              `${stopResult.error ?? "remote runner reported an unsuccessful stop"}`,
+          );
+        }
+        if (!stopResult?.success) {
+          // Keep the PID visible to stopTrackedService()/forceStopForShutdown(), which
+          // gets a second cleanup attempt after this late-start admission fence fails.
+          this.xcTestProcessId = result.data.pid;
+          this.xcTestProcess = null;
+        }
+        throw startupAbort.reason ?? new Error("iOS CtrlProxy startup was cancelled by stop()");
       }
 
       if (typeof result.data.port === "number") {

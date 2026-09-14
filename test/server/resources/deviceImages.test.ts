@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, test } from "bun:test";
 import { FakeDeviceUtils } from "../../fakes/FakeDeviceUtils";
 import { FakeAvdManager } from "../../fakes/FakeAvdManager";
 import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
+import { FakeTimer } from "../../fakes/FakeTimer";
 import {
   createDeviceImageResourcesHandler,
   DeviceImagesResourceContent,
@@ -28,7 +29,7 @@ describe("Device Image Resources with Fakes", () => {
     test("returns a normalized provisioning catalog for Android and iOS", async () => {
       fakeDeviceUtils.setDeviceImages("android", []);
       fakeDeviceUtils.setDeviceImages("ios", []);
-      fakeAvdManager.setListSystemImagesResponse([
+      fakeAvdManager.setListInstalledSystemImagesResponse([
         {
           packageName: "system-images;android-35;google_apis;x86_64",
           apiLevel: 35,
@@ -288,6 +289,236 @@ describe("Device Image Resources with Fakes", () => {
         installedOnlyImage.packageName,
       ]);
       expect(fakeAvdManager.getListInstalledSystemImagesCalls()).toHaveLength(1);
+    });
+
+    test("excludes an available-but-not-installed system image from the catalog", async () => {
+      fakeDeviceUtils.setDeviceImages("android", []);
+      const installedImage = {
+        packageName: "system-images;android-34;google_apis;arm64-v8a",
+        apiLevel: 34,
+        tag: "google_apis",
+        abi: "arm64-v8a",
+        versionInfo: "Google APIs ARM 64 v8a System Image",
+      };
+      const availableOnlyImage = {
+        packageName: "system-images;android-35;google_apis_playstore;arm64-v8a",
+        apiLevel: 35,
+        tag: "google_apis_playstore",
+        abi: "arm64-v8a",
+        versionInfo: "Google Play ARM 64 v8a System Image",
+      };
+      // sdkmanager offers the playstore image to download, but only the api-34
+      // image is installed and therefore accepted by AVD creation.
+      fakeAvdManager.setListSystemImagesResponse([installedImage, availableOnlyImage]);
+      fakeAvdManager.setListInstalledSystemImagesResponse([installedImage]);
+
+      const handler = createDeviceImageResourcesHandler({
+        deviceManager: fakeDeviceUtils,
+        avdManager: fakeAvdManager,
+      });
+      const result = await handler.getDeviceImagesForPlatforms(["android"]);
+
+      expect(result.catalogComplete).toBe(true);
+      const ids = result.provisioningCatalog.systemImages.map((image) => image.id);
+      expect(ids).toEqual([installedImage.packageName]);
+      expect(ids).not.toContain(availableOnlyImage.packageName);
+      // The catalog must never surface a runtime the available-only package minted.
+      expect(result.provisioningCatalog.runtimes.map((runtime) => runtime.id)).not.toContain(
+        availableOnlyImage.packageName,
+      );
+    });
+
+    test("every catalog system image id is one the creation-accept source accepts", async () => {
+      fakeDeviceUtils.setDeviceImages("android", []);
+      const accepted = [
+        {
+          packageName: "system-images;android-34;google_apis;arm64-v8a",
+          apiLevel: 34,
+          tag: "google_apis",
+          abi: "arm64-v8a",
+          versionInfo: "Google APIs ARM 64 v8a System Image",
+        },
+        {
+          packageName: "system-images;android-33;google_apis;x86_64",
+          apiLevel: 33,
+          tag: "google_apis",
+          abi: "x86_64",
+          versionInfo: "Google APIs Intel x86_64 Atom System Image",
+        },
+      ];
+      // A wider available-to-download set that must not leak into the catalog.
+      fakeAvdManager.setListSystemImagesResponse([
+        ...accepted,
+        {
+          packageName: "system-images;android-35;android-tv;arm64-v8a",
+          apiLevel: 35,
+          tag: "android-tv",
+          abi: "arm64-v8a",
+          versionInfo: "Android TV ARM 64 v8a System Image",
+        },
+      ]);
+      fakeAvdManager.setListInstalledSystemImagesResponse(accepted);
+
+      const handler = createDeviceImageResourcesHandler({
+        deviceManager: fakeDeviceUtils,
+        avdManager: fakeAvdManager,
+      });
+      const result = await handler.getDeviceImagesForPlatforms(["android"]);
+
+      const acceptedIds = new Set(accepted.map((image) => image.packageName));
+      for (const image of result.provisioningCatalog.systemImages) {
+        expect(acceptedIds.has(image.id)).toBe(true);
+      }
+      expect(result.provisioningCatalog.systemImages).toHaveLength(acceptedIds.size);
+    });
+
+    test("returns an incomplete diagnostic within budget when enumeration hangs", async () => {
+      const timer = new FakeTimer();
+      fakeDeviceUtils.setDeviceImages("android", []);
+      fakeAvdManager.setListInstalledSystemImagesHangs(true);
+
+      const handler = createDeviceImageResourcesHandler({
+        deviceManager: fakeDeviceUtils,
+        avdManager: fakeAvdManager,
+        timer,
+        androidCatalogBudgetMs: 5_000,
+      });
+
+      const pending = handler.getDeviceImagesForPlatforms(["android"]);
+      // Let appendAndroidImages settle and the bounded enumeration schedule its
+      // deadline timer before we push time past the budget.
+      for (let i = 0; i < 20; i++) {
+        await Promise.resolve();
+      }
+      timer.advanceTime(5_001);
+      const result = await pending;
+
+      expect(result.catalogComplete).toBe(false);
+      expect(result.catalogObservations.android).toMatchObject({
+        catalogComplete: false,
+        error: {
+          code: "timeout",
+          message: expect.stringContaining("5000"),
+        },
+      });
+      // The hung enumeration must have been cancelled, not left running.
+      const calls = fakeAvdManager.getListInstalledSystemImagesCalls();
+      expect(calls).toHaveLength(1);
+      expect(calls[0].signal?.aborted).toBe(true);
+    });
+
+    test("bounds the preceding device-image listing under the same deadline", async () => {
+      const timer = new FakeTimer();
+      fakeDeviceUtils.setDeviceImages("android", []);
+      // The device-image listing (appendAndroidImages -> readAvdInfo) hangs,
+      // BEFORE the provisioning-catalog enumeration is ever reached. The whole
+      // Android path must still be bounded by the single deadline.
+      fakeAvdManager.setListDeviceImagesHangs(true);
+
+      const handler = createDeviceImageResourcesHandler({
+        deviceManager: fakeDeviceUtils,
+        avdManager: fakeAvdManager,
+        timer,
+        androidCatalogBudgetMs: 5_000,
+      });
+
+      const pending = handler.getDeviceImagesForPlatforms(["android"]);
+      for (let i = 0; i < 20; i++) {
+        await Promise.resolve();
+      }
+      timer.advanceTime(5_001);
+      const result = await pending;
+
+      expect(result.catalogComplete).toBe(false);
+      expect(result.catalogObservations.android).toMatchObject({
+        catalogComplete: false,
+        error: {
+          code: "timeout",
+          message: expect.stringContaining("5000"),
+        },
+      });
+      // The hung listing child must have been aborted, not left running to its
+      // own independent 60s avdmanager timeout.
+      const calls = fakeAvdManager.getListDeviceImagesCalls();
+      expect(calls).toHaveLength(1);
+      expect(calls[0].signal?.aborted).toBe(true);
+    });
+
+    test("bounds and cancels the primary Android discovery under the same deadline", async () => {
+      const timer = new FakeTimer();
+      // The primary discovery path (deviceManager.listDeviceImages("android") ->
+      // emulator -list-avds) hangs. It must be bounded by the single deadline and
+      // its child cancelled, not left running to accumulate across reads.
+      fakeDeviceUtils.setDeviceImages("android", [
+        { name: "Pixel_9", platform: "android", deviceId: "avd-late", source: "local" },
+      ]);
+      fakeDeviceUtils.setListDeviceImagesHangs("android", true);
+
+      const handler = createDeviceImageResourcesHandler({
+        deviceManager: fakeDeviceUtils,
+        avdManager: fakeAvdManager,
+        timer,
+        androidCatalogBudgetMs: 5_000,
+      });
+
+      const pending = handler.getDeviceImagesForPlatforms(["android"]);
+      for (let i = 0; i < 20; i++) {
+        await Promise.resolve();
+      }
+      timer.advanceTime(5_001);
+      const result = await pending;
+
+      expect(result.catalogComplete).toBe(false);
+      expect(result.catalogObservations.android).toMatchObject({
+        catalogComplete: false,
+        error: {
+          code: "timeout",
+          message: expect.stringContaining("5000"),
+        },
+      });
+      // androidCount stays finalized as incomplete and no images were appended
+      // after the timeout, even though a device was configured for the listing.
+      expect(result.androidCount).toBe(0);
+      expect(result.images).toHaveLength(0);
+      // The hung primary discovery child must have been passed the deadline's
+      // signal and cancelled, not left running.
+      const calls = fakeDeviceUtils.getListDeviceImagesCalls();
+      const androidCall = calls.find((call) => call.platform === "android");
+      expect(androidCall).toBeDefined();
+      expect(androidCall?.signal?.aborted).toBe(true);
+    });
+
+    test("aborts profile enumeration too when the deadline wins", async () => {
+      const timer = new FakeTimer();
+      fakeDeviceUtils.setDeviceImages("android", []);
+      // listInstalledSystemImages would resolve, but the concurrently-raced
+      // profile enumeration hangs. The timeout must abort BOTH, so a stalled
+      // `avdmanager list device` child cannot run on to its own 60s timeout.
+      fakeAvdManager.setListInstalledSystemImagesResponse([]);
+      fakeAvdManager.setListDevicesHangs(true);
+
+      const handler = createDeviceImageResourcesHandler({
+        deviceManager: fakeDeviceUtils,
+        avdManager: fakeAvdManager,
+        timer,
+        androidCatalogBudgetMs: 5_000,
+      });
+
+      const pending = handler.getDeviceImagesForPlatforms(["android"]);
+      for (let i = 0; i < 20; i++) {
+        await Promise.resolve();
+      }
+      timer.advanceTime(5_001);
+      const result = await pending;
+
+      expect(result.catalogComplete).toBe(false);
+      expect(result.catalogObservations.android).toMatchObject({
+        catalogComplete: false,
+        error: { code: "timeout" },
+      });
+      const profileCalls = fakeAvdManager.getListDevicesCalls();
+      expect(profileCalls).toHaveLength(1);
+      expect(profileCalls[0].signal?.aborted).toBe(true);
     });
 
     test("reports iOS catalog failure when strict simulator discovery fails", async () => {

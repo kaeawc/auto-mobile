@@ -138,9 +138,11 @@ export interface PlatformDeviceManager {
   /**
    * List all available device images for a specific platform
    * @param platform - Target platform ("android", "ios", or "either" for both)
+   * @param signal - Optional caller abort; cancels the Android `emulator
+   *   -list-avds` child so a stalled listing cannot outlive a caller's deadline.
    * @returns Promise with array of available device information
    */
-  listDeviceImages(platform: SomePlatform): Promise<DeviceInfo[]>;
+  listDeviceImages(platform: SomePlatform, signal?: AbortSignal): Promise<DeviceInfo[]>;
 
   /**
    * Check if a specific device image is currently running
@@ -448,14 +450,14 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
    * List all available device images
    * @returns Promise with array of device image names
    */
-  async listDeviceImages(platform: SomePlatform): Promise<DeviceInfo[]> {
+  async listDeviceImages(platform: SomePlatform, signal?: AbortSignal): Promise<DeviceInfo[]> {
     switch (platform) {
       case "android":
-        return this.listAndroidDeviceImages();
+        return this.listAndroidDeviceImages(signal);
       case "ios":
         return this.listIosDeviceImagesIfAvailable({ swallowDiscoveryErrors: false });
       case "either":
-        const emulators = await this.listAndroidDeviceImages();
+        const emulators = await this.listAndroidDeviceImages(signal);
         const simulators = await this.listIosDeviceImagesIfAvailable({
           swallowDiscoveryErrors: true,
         });
@@ -476,9 +478,9 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
    * a handset modelled like an AVD would otherwise mark that AVD running and
    * let bootMatchedImage() hand back the handset instead of booting the AVD.
    */
-  private async listAndroidDeviceImages(): Promise<DeviceInfo[]> {
+  private async listAndroidDeviceImages(signal?: AbortSignal): Promise<DeviceInfo[]> {
     const [images, bootedDevices] = await Promise.all([
-      this.emulator.listAvds(),
+      this.emulator.listAvds({ signal }),
       this.emulator.getBootedDevices(),
     ]);
     const runningAvdNames = new Set(

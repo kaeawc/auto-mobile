@@ -20,6 +20,8 @@ import {
  */
 export class FakeDeviceUtils implements PlatformDeviceManager {
   private deviceImages: Map<Platform, DeviceInfo[]> = new Map();
+  private hangingDeviceImagePlatforms: Set<Platform> = new Set();
+  private listDeviceImagesCalls: Array<{ platform: SomePlatform; signal?: AbortSignal }> = [];
   private bootedDevices: Map<Platform, BootedDevice[]> = new Map();
   private runningDeviceNames: Set<string> = new Set();
   private executedOperations: string[] = [];
@@ -36,6 +38,31 @@ export class FakeDeviceUtils implements PlatformDeviceManager {
    */
   setDeviceImages(platform: Platform, devices: DeviceInfo[]): void {
     this.deviceImages.set(platform, devices);
+  }
+
+  /**
+   * Make listDeviceImages never resolve for a platform, so a bounded caller
+   * must fall back to its deadline. If the caller aborts via the passed signal
+   * the promise rejects with the abort reason, letting a test assert the child
+   * was cancelled (the primary Android `emulator -list-avds` discovery path).
+   * @param platform - The platform whose listing should hang
+   * @param hangs - Whether that platform's listing hangs
+   */
+  setListDeviceImagesHangs(platform: Platform, hangs: boolean): void {
+    if (hangs) {
+      this.hangingDeviceImagePlatforms.add(platform);
+    } else {
+      this.hangingDeviceImagePlatforms.delete(platform);
+    }
+  }
+
+  /**
+   * Recorded listDeviceImages invocations, including the abort signal each was
+   * given, so a test can assert the primary discovery was passed the deadline's
+   * signal and cancelled on timeout.
+   */
+  getListDeviceImagesCalls(): Array<{ platform: SomePlatform; signal?: AbortSignal }> {
+    return [...this.listDeviceImagesCalls];
   }
 
   /**
@@ -145,8 +172,27 @@ export class FakeDeviceUtils implements PlatformDeviceManager {
 
   // Implementation of DeviceUtils interface
 
-  async listDeviceImages(platform: SomePlatform): Promise<DeviceInfo[]> {
+  async listDeviceImages(platform: SomePlatform, signal?: AbortSignal): Promise<DeviceInfo[]> {
     this.executedOperations.push(`listDeviceImages:${platform}`);
+    this.listDeviceImagesCalls.push({ platform, signal });
+
+    const hangs =
+      platform === "either"
+        ? this.hangingDeviceImagePlatforms.has("android") ||
+          this.hangingDeviceImagePlatforms.has("ios")
+        : this.hangingDeviceImagePlatforms.has(platform);
+    if (hangs) {
+      // Never resolve on our own; a bounded caller must hit its deadline. When
+      // that deadline aborts the passed signal, reject with the abort reason so
+      // the underlying "child" is observably cancelled.
+      return new Promise<DeviceInfo[]>((_resolve, reject) => {
+        if (signal) {
+          signal.addEventListener("abort", () => reject(signal.reason ?? new Error("aborted")), {
+            once: true,
+          });
+        }
+      });
+    }
 
     if (platform === "either") {
       const androidDevices = this.deviceImages.get("android") || [];

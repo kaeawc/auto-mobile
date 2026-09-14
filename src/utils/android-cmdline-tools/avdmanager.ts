@@ -112,8 +112,9 @@ export async function installSystemImage(
 /** List AVDs through the dedicated avdmanager boundary. */
 export async function listDeviceImages(
   dependencies = createDefaultDependencies(),
+  signal?: AbortSignal,
 ): Promise<AvdInfo[]> {
-  return createAvdManagerClient(dependencies).listDeviceImages();
+  return createAvdManagerClient(dependencies).listDeviceImages({ signal });
 }
 
 /** Create an AVD through the dedicated avdmanager boundary. */
@@ -137,8 +138,9 @@ export async function deleteAvd(
 /** List device profiles through the dedicated avdmanager boundary. */
 export async function listDevices(
   dependencies = createDefaultDependencies(),
+  signal?: AbortSignal,
 ): Promise<DeviceProfile[]> {
-  return createAvdManagerClient(dependencies).listDevices();
+  return createAvdManagerClient(dependencies).listDevices({ signal });
 }
 
 function createAvdManagerClient(dependencies: AvdManagerDependencies): AvdManagerClient {

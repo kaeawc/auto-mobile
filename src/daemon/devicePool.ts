@@ -1006,6 +1006,7 @@ export class DevicePool {
         simulatorType: this.criteriaMatcher.getBootedDeviceSimulatorType(device),
         ...(device.observedAt !== undefined ? { nameObservedAt: device.observedAt } : {}),
         ...(device.observedAt !== undefined ? { identityObservedAt: device.observedAt } : {}),
+        ...(this.hasUnresolvedEmulatorName(device) ? { identityUnresolved: true } : {}),
         incarnation: this.nextDeviceIncarnation(),
       });
       this.recordSourceAndroidAvd(device.deviceId, sourceImage);
@@ -6528,6 +6529,9 @@ export class DevicePool {
    * serial temporarily absent from the pool during a runtime replacement.
    */
   private recordPendingIdentityReplacementObservation(device: BootedDevice): void {
+    if (this.hasUnresolvedEmulatorName(device)) {
+      return;
+    }
     const pending = this.pendingIdentityReplacements.get(device.deviceId);
     if (
       !pending ||

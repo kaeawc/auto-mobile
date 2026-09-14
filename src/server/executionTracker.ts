@@ -1,11 +1,13 @@
 import { logger } from "../utils/logger";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
+import { errorMessage } from "../utils/describeUnknownError";
 import {
   deviceLostErrorFromCancellationReason,
   isDeviceLostError,
   rememberDeviceLossAbort,
 } from "./deviceLossOutcome";
+import { DaemonRestartPendingError } from "../daemon/daemonRestartAdmission";
 
 interface ActiveExecution {
   id: string;
@@ -41,6 +43,8 @@ export interface ExecutionCancellationOptions {
   excludeExecutionId?: string;
 }
 
+export type ExecutionCancellationReason = string | Error;
+
 export interface ActiveExecutionQuery {
   startedAtOrBefore?: number;
   excludeExecutionId?: string;
@@ -54,6 +58,7 @@ export class ExecutionTracker {
   private executionEndListeners = new Set<() => void>();
   private timer: Timer;
   private idGenerator: IdGenerator;
+  private daemonRestartPrepared = false;
 
   constructor(timer: Timer = defaultTimer, idGenerator: IdGenerator = defaultIdGenerator) {
     this.timer = timer;
@@ -66,6 +71,9 @@ export class ExecutionTracker {
     sessionUuid?: string,
     transportSessionId?: string,
   ): ActiveExecution {
+    if (toolName === "provisionDevice" && this.isDaemonRestartPrepared()) {
+      throw new DaemonRestartPendingError();
+    }
     const id = this.idGenerator.next();
     const execution: ActiveExecution = {
       id,
@@ -94,6 +102,27 @@ export class ExecutionTracker {
     }
 
     return execution;
+  }
+
+  /**
+   * Atomically fence new provisionDevice admission if none is active. The
+   * daemon itself initiates shutdown before acknowledging this preparation,
+   * so the fence remains until shutdown or an explicit admission rollback.
+   */
+  prepareForDaemonRestart(): boolean {
+    if (this.hasActiveToolExecutionGlobal("provisionDevice")) {
+      return false;
+    }
+    this.daemonRestartPrepared = true;
+    return true;
+  }
+
+  clearDaemonRestartPreparation(): void {
+    this.daemonRestartPrepared = false;
+  }
+
+  private isDaemonRestartPrepared(): boolean {
+    return this.daemonRestartPrepared;
   }
 
   endExecution(executionId: string): void {
@@ -133,9 +162,48 @@ export class ExecutionTracker {
    */
   async cancelSessionExecutions(
     sessionId: string,
-    reason: string = "unspecified",
+    reason: ExecutionCancellationReason = "unspecified",
   ): Promise<number> {
     return this.cancelExecutionsForKey(sessionId, this.sessionExecutions, "sessionId", reason);
+  }
+
+  async cancelToolExecutions(
+    toolName: string,
+    reason: ExecutionCancellationReason = "unspecified",
+  ): Promise<number> {
+    const executionIds = Array.from(this.executions.values())
+      .filter((execution) => execution.toolName === toolName)
+      .map((execution) => execution.id);
+    return this.cancelExecutionIds(executionIds, "toolName", toolName, reason);
+  }
+
+  async waitForToolExecutionsToEnd(toolName: string, timeoutMs: number): Promise<boolean> {
+    if (!this.hasActiveToolExecutionGlobal(toolName)) {
+      return true;
+    }
+    return await new Promise<boolean>((resolve) => {
+      let settled = false;
+      const timeout: { handle?: NodeJS.Timeout } = {};
+      const finish = (drained: boolean): void => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        this.executionEndListeners.delete(check);
+        if (timeout.handle !== undefined) {
+          this.timer.clearTimeout(timeout.handle);
+        }
+        resolve(drained);
+      };
+      const check = (): void => {
+        if (!this.hasActiveToolExecutionGlobal(toolName)) {
+          finish(true);
+        }
+      };
+      this.executionEndListeners.add(check);
+      timeout.handle = this.timer.setTimeout(() => finish(false), timeoutMs);
+      check();
+    });
   }
 
   async cancelSessionUuidExecutions(
@@ -344,7 +412,7 @@ export class ExecutionTracker {
     key: string,
     executionMap: Map<string, Set<string>>,
     label: "sessionId" | "sessionUuid",
-    cancelReason: string = "unspecified",
+    cancelReason: ExecutionCancellationReason = "unspecified",
     options: ExecutionCancellationOptions = {},
   ): Promise<number> {
     return this.cancelExecutionIds(executionMap.get(key), label, key, cancelReason, options);
@@ -352,9 +420,9 @@ export class ExecutionTracker {
 
   private async cancelExecutionIds(
     executionIds: Iterable<string> | undefined,
-    label: "sessionId" | "sessionUuid" | "deviceSessionUuid",
+    label: "sessionId" | "sessionUuid" | "deviceSessionUuid" | "toolName",
     key: string,
-    cancelReason: string = "unspecified",
+    cancelReason: ExecutionCancellationReason = "unspecified",
     options: ExecutionCancellationOptions = {},
   ): Promise<number> {
     if (!executionIds) {
@@ -370,7 +438,7 @@ export class ExecutionTracker {
       if (execution.id === options.excludeExecutionId) {
         continue;
       }
-      if (cancelReason.startsWith("device-disconnected:")) {
+      if (typeof cancelReason === "string" && cancelReason.startsWith("device-disconnected:")) {
         // Record the reason on the execution *before* aborting, so the tracker's own
         // authoritative `cancelReason` is set synchronously with the counted cancellation
         // regardless of how the runtime surfaces `signal.reason` (issue #3909). The same
@@ -382,12 +450,15 @@ export class ExecutionTracker {
           rememberDeviceLossAbort(execution.abortController.signal, reasonError);
         }
         execution.abortController.abort(reasonError);
+      } else if (cancelReason instanceof Error) {
+        execution.cancelReason = cancelReason;
+        execution.abortController.abort(cancelReason);
       } else {
         execution.abortController.abort();
       }
       cancelled++;
       logger.info(
-        `[ExecutionTracker] Cancelled execution ${executionId} for ${label}=${key} (tool=${execution.toolName}, reason=${cancelReason})`,
+        `[ExecutionTracker] Cancelled execution ${executionId} for ${label}=${key} (tool=${execution.toolName}, reason=${errorMessage(cancelReason)})`,
       );
     }
 

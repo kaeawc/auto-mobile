@@ -3,6 +3,7 @@ import {
   DaemonMcpProxy,
   DaemonVersionMismatchError,
   DaemonBuildMismatchError,
+  DaemonRestartDeferredError,
   DaemonToolUnavailableError,
 } from "../../src/daemon/daemonMcpProxy";
 import {
@@ -846,6 +847,7 @@ describe("DaemonMcpProxy", () => {
           daemonBuildId?: string;
           daemonEntryScript?: string;
           clientBuild?: { buildId: string; entryScript: string };
+          activeProvisioning?: boolean;
         } = {},
       ) {
         const timer = new FakeTimer();
@@ -863,6 +865,9 @@ describe("DaemonMcpProxy", () => {
           ...(opts.startedAt !== undefined ? { startedAt: opts.startedAt } : {}),
           ...(opts.daemonBuildId !== undefined ? { buildId: opts.daemonBuildId } : {}),
           ...(opts.daemonEntryScript !== undefined ? { entryScript: opts.daemonEntryScript } : {}),
+          ...(opts.activeProvisioning !== undefined
+            ? { activeProvisioning: opts.activeProvisioning }
+            : {}),
         };
         fakeManager.statusResult = initialStatus;
         const restartedStatus = {
@@ -913,6 +918,30 @@ describe("DaemonMcpProxy", () => {
         try {
           await proxy.listTools();
           expect(fakeManager.restartCalled).toBe(true);
+          expect(fakeManager.restartExpectedDaemon).toMatchObject({
+            pid: 1234,
+            version: OLDER_VERSION,
+            startedAt: ANCIENT_TIMESTAMP,
+          });
+        } finally {
+          isAvailableSpy.mockRestore();
+          await proxy.close();
+        }
+      });
+
+      test("defers a version restart while provisionDevice is active", async () => {
+        const { fakeManager, isAvailableSpy, proxy } = makeProxy({
+          runningVersion: OLDER_VERSION,
+          startedAt: ANCIENT_TIMESTAMP,
+          activeProvisioning: true,
+        });
+        try {
+          await expect(proxy.listTools()).rejects.toMatchObject({
+            name: "DaemonRestartDeferredError",
+            code: "daemon_restart_deferred",
+            retryable: true,
+          } satisfies Partial<DaemonRestartDeferredError>);
+          expect(fakeManager.restartCalled).toBe(false);
         } finally {
           isAvailableSpy.mockRestore();
           await proxy.close();
@@ -1847,6 +1876,36 @@ describe("DaemonMcpProxy", () => {
             toolResultsNoStructuredContent: true,
             runnerReadinessTimeoutMs: 45_000,
           });
+        } finally {
+          isAvailableSpy.mockRestore();
+          await proxy.close();
+        }
+      });
+
+      test("defers a startup-option restart while provisionDevice is active", async () => {
+        const fakeClient = new FakeDaemonClient({
+          daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+        });
+        const fakeManager = new FakeDaemonManager();
+        const activeStatus = {
+          ...runningStatus({ embeddedSdk: false }),
+          activeProvisioning: true,
+        };
+        fakeManager.statusResults = [activeStatus, activeStatus, activeStatus];
+        const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+        const proxy = new DaemonMcpProxy({
+          clientFactory: () => fakeClient,
+          daemonManager: fakeManager,
+          daemonOptions: { embeddedSdk: true },
+        });
+
+        try {
+          await expect(proxy.listTools()).rejects.toMatchObject({
+            name: "DaemonRestartDeferredError",
+            code: "daemon_restart_deferred",
+            retryable: true,
+          } satisfies Partial<DaemonRestartDeferredError>);
+          expect(fakeManager.restartCalled).toBe(false);
         } finally {
           isAvailableSpy.mockRestore();
           await proxy.close();
@@ -4348,6 +4407,7 @@ describe("DaemonMcpProxy", () => {
         startedAt?: number;
         autoStartDaemon?: boolean;
         waitForReadyResult?: boolean;
+        activeProvisioning?: boolean;
       } = {},
     ) {
       const timer = new FakeTimer();
@@ -4370,6 +4430,9 @@ describe("DaemonMcpProxy", () => {
         ...(opts.daemonEntryScript === null
           ? {}
           : { entryScript: opts.daemonEntryScript ?? DAEMON_BUILD.entryScript }),
+        ...(opts.activeProvisioning !== undefined
+          ? { activeProvisioning: opts.activeProvisioning }
+          : {}),
       };
       const restartedStatus = {
         ...mismatchStatus,
@@ -4419,6 +4482,23 @@ describe("DaemonMcpProxy", () => {
         expect(invalidateSpy).toHaveBeenCalled();
       } finally {
         invalidateSpy.mockRestore();
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("defers a build restart while provisionDevice is active", async () => {
+      const { fakeManager, isAvailableSpy, proxy } = makeBuildProxy({
+        activeProvisioning: true,
+      });
+      try {
+        await expect(proxy.listTools()).rejects.toMatchObject({
+          name: "DaemonRestartDeferredError",
+          code: "daemon_restart_deferred",
+          retryable: true,
+        } satisfies Partial<DaemonRestartDeferredError>);
+        expect(fakeManager.restartCalled).toBe(false);
+      } finally {
         isAvailableSpy.mockRestore();
         await proxy.close();
       }

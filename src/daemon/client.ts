@@ -44,6 +44,7 @@ const socketStatusSchema = z.object({
   entryScript: z.string().optional(),
   releaseVersion: z.string().optional(),
   startedAt: z.number().finite().optional(),
+  activeProvisioning: z.boolean().optional(),
 });
 
 /** The server rejected this request before dispatch; retry cannot duplicate work. */
@@ -879,4 +880,12 @@ export interface DaemonClientLike {
   onConnectionClosed?(handler: () => void): () => void;
 }
 
-export type DaemonClientFactory = () => DaemonClientLike;
+export interface DaemonClientFactoryOptions {
+  /**
+   * `null` bypasses the normal compatibility handshake for daemon-owned
+   * lifecycle RPCs that authenticate the target generation themselves.
+   */
+  clientIdentity?: { version: string; build: BuildIdentity } | null;
+}
+
+export type DaemonClientFactory = (options?: DaemonClientFactoryOptions) => DaemonClientLike;

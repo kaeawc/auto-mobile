@@ -3,6 +3,7 @@ import { ExecutionTracker, type ExecutionScopeOptions } from "../../src/server/e
 import { DeviceLostError } from "../../src/server/deviceLossOutcome";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { DaemonHandoffInterruptionError } from "../../src/daemon/daemonHandoffInterruption";
 
 describe("ExecutionTracker", function () {
   test("uses injected id generator and timer when starting executions", function () {
@@ -49,6 +50,58 @@ describe("ExecutionTracker", function () {
       new Error("streamable_http_onclose"),
     );
     expect(execution.cancelReason).toBeUndefined();
+  });
+
+  test("preserves a typed daemon handoff cancellation reason", async function () {
+    const tracker = new ExecutionTracker(new FakeTimer(), new FakeIdGenerator(["execution-1"]));
+    const execution = tracker.startExecution("provisionDevice", "session-id");
+    const reason = new DaemonHandoffInterruptionError("daemon shutdown interrupted provisioning");
+
+    await tracker.cancelSessionExecutions("session-id", reason);
+
+    expect(execution.abortController.signal.reason).toBe(reason);
+    expect(execution.cancelReason).toBe(reason);
+  });
+
+  test("atomically fences provisionDevice admission for a prepared restart", function () {
+    const timer = new FakeTimer();
+    const tracker = new ExecutionTracker(
+      timer,
+      new FakeIdGenerator(["active-provision", "after-clear"]),
+    );
+    const active = tracker.startExecution("provisionDevice", "active-session");
+
+    expect(tracker.prepareForDaemonRestart()).toBe(false);
+    tracker.endExecution(active.id);
+    expect(tracker.prepareForDaemonRestart()).toBe(true);
+    expect(() => tracker.startExecution("provisionDevice", "blocked-session")).toThrow(
+      "Daemon restart is pending",
+    );
+
+    timer.advanceTime(5_000);
+    expect(() => tracker.startExecution("provisionDevice", "still-blocked")).toThrow(
+      "Daemon restart is pending",
+    );
+    tracker.clearDaemonRestartPreparation();
+    expect(tracker.startExecution("provisionDevice", "after-clear").id).toBe("after-clear");
+  });
+
+  test("cancels and drains active provisioning before daemon shutdown continues", async function () {
+    const tracker = new ExecutionTracker(
+      new FakeTimer(),
+      new FakeIdGenerator(["provision", "other"]),
+    );
+    const provision = tracker.startExecution("provisionDevice", "provision-session");
+    const other = tracker.startExecution("tapOn", "other-session");
+    const reason = new DaemonHandoffInterruptionError("daemon handoff");
+
+    expect(await tracker.cancelToolExecutions("provisionDevice", reason)).toBe(1);
+    expect(provision.abortController.signal.reason).toBe(reason);
+    expect(other.abortController.signal.aborted).toBe(false);
+
+    const drained = tracker.waitForToolExecutionsToEnd("provisionDevice", 1_000);
+    tracker.endExecution(provision.id);
+    expect(await drained).toBe(true);
   });
 
   // #4183 item 5 (A2): src-behavior assertion refiled from the old "cancel leaves session

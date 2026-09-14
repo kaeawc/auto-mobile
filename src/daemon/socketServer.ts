@@ -130,6 +130,10 @@ import type {
 import type { DeviceService } from "../features/observe/DeviceService";
 import { executionTracker } from "../server/executionTracker";
 import {
+  DAEMON_PREPARE_RESTART_METHOD,
+  type DaemonRestartPreparation,
+} from "./daemonRestartAdmission";
+import {
   DEVICE_CONTROL_TRANSPORT_FAILURE_CODE,
   DeviceControlTransportError,
   deviceControlToolName,
@@ -139,6 +143,11 @@ import {
   type DeviceControlTransportFailure,
   type DeviceControlTransportPhase,
 } from "./deviceControlTransportFailure";
+
+function resolveIdentityStartedAt(value: number | undefined, timer: Timer): number {
+  return value === undefined ? timer.now() : value;
+}
+
 const MCP_CLIENT_IDLE_CLOSE_MS = 5 * 60 * 1000;
 /** Keep shutdown bounded if a request handler ignores its disconnected peer. */
 const DAEMON_REQUEST_HANDLER_DRAIN_TIMEOUT_MS = 1_000;
@@ -545,6 +554,7 @@ export class UnixSocketServer {
   private readonly handshakeEnforced: boolean;
   private readonly daemonIdentity: DaemonSelfIdentity;
   private readonly identityStartedAt: number;
+  private readonly onRestartAccepted?: () => void;
   private readonly sessionToolSelectionService?: Pick<
     SessionToolSelectionService,
     "isEnabled" | "setEnabled"
@@ -609,7 +619,9 @@ export class UnixSocketServer {
     featureFlagService: FeatureFlagService | null = null,
     handshakeConfig: {
       identity?: DaemonSelfIdentity;
+      identityStartedAt?: number;
       enforce?: boolean;
+      onRestartAccepted?: () => void;
       sessionToolSelectionService?: Pick<SessionToolSelectionService, "isEnabled" | "setEnabled">;
     } = {},
     idGenerator: IdGenerator = defaultIdGenerator,
@@ -641,7 +653,11 @@ export class UnixSocketServer {
       version: DAEMON_VERSION,
       build: getCurrentBuildIdentity(),
     };
-    this.identityStartedAt = this.timer.now();
+    this.identityStartedAt = resolveIdentityStartedAt(
+      handshakeConfig.identityStartedAt,
+      this.timer,
+    );
+    this.onRestartAccepted = handshakeConfig.onRestartAccepted;
     logger.info(`UnixSocketServer initialized with endpoint: "${mcpEndpoint}"`);
     if (!mcpEndpoint) {
       logger.error("ERROR: mcpEndpoint is empty or undefined!");
@@ -2823,6 +2839,53 @@ export class UnixSocketServer {
    * Handle socket requests that don't require the MCP client.
    * Returns undefined if the request should be forwarded to MCP.
    */
+  private prepareDaemonRestart(params: Record<string, unknown>): DaemonRestartPreparation {
+    const generationMatches =
+      params.pid === process.pid &&
+      params.startedAt === this.identityStartedAt &&
+      params.version === this.daemonIdentity.version &&
+      params.buildId === this.daemonIdentity.build.buildId &&
+      params.entryScript === this.daemonIdentity.build.entryScript;
+    if (!generationMatches) {
+      return {
+        accepted: false,
+        reason: "generation_changed",
+      };
+    }
+    const accepted = executionTracker.prepareForDaemonRestart();
+    if (!accepted) {
+      return {
+        accepted: false,
+        reason: "active_provisioning",
+      };
+    }
+    if (!this.onRestartAccepted) {
+      executionTracker.clearDaemonRestartPreparation();
+      return {
+        accepted: false,
+        reason: "shutdown_unavailable",
+      };
+    }
+    try {
+      this.onRestartAccepted();
+      return { accepted: true };
+    } catch (error) {
+      logger.warn("Failed to initiate an admitted daemon restart", error);
+      executionTracker.clearDaemonRestartPreparation();
+      return {
+        accepted: false,
+        reason: "shutdown_unavailable",
+      };
+    }
+  }
+
+  private requireFeatureFlagService(): FeatureFlagService {
+    if (!this.featureFlagService) {
+      throw new Error("Feature flag service not available");
+    }
+    return this.featureFlagService;
+  }
+
   private async handleLocalSocketRequest(
     request: DaemonRequest,
     socketSessionId?: string,
@@ -2854,16 +2917,11 @@ export class UnixSocketServer {
 
     switch (request.method) {
       case "ide/listFeatureFlags": {
-        if (!this.featureFlagService) {
-          throw new Error("Feature flag service not available");
-        }
-        const flags = await this.featureFlagService.listFlags();
+        const flags = await this.requireFeatureFlagService().listFlags();
         return { flags };
       }
       case "ide/setFeatureFlag": {
-        if (!this.featureFlagService) {
-          throw new Error("Feature flag service not available");
-        }
+        const featureFlagService = this.requireFeatureFlagService();
         const args = request.params as {
           key?: string;
           enabled?: boolean;
@@ -2872,7 +2930,7 @@ export class UnixSocketServer {
         if (!args.key || typeof args.enabled !== "boolean") {
           throw new Error("setFeatureFlag requires 'key' (string) and 'enabled' (boolean) params");
         }
-        const updated = await this.featureFlagService.setFlag(
+        const updated = await featureFlagService.setFlag(
           args.key as FeatureFlagKey,
           args.enabled,
           args.config,
@@ -2910,6 +2968,9 @@ export class UnixSocketServer {
       case "ide/ping": {
         return { ok: true, timestamp: this.timer.now() };
       }
+      case DAEMON_PREPARE_RESTART_METHOD: {
+        return this.prepareDaemonRestart(request.params);
+      }
       case "ide/status": {
         return {
           // Concrete pinned version (honors AUTOMOBILE_VERSION), never the
@@ -2920,6 +2981,9 @@ export class UnixSocketServer {
           buildId: this.daemonIdentity.build.buildId,
           entryScript: this.daemonIdentity.build.entryScript,
           startedAt: this.identityStartedAt,
+          activeProvisioning: executionTracker.hasActiveToolExecution("provisionDevice", {
+            scope: "global",
+          }),
           releaseVersion: resolveAssetVersion(resolvePinnedVersion()),
           android: {
             ctrlProxy: {

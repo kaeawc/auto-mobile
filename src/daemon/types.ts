@@ -269,6 +269,8 @@ export interface DaemonStatus {
   entryScript?: string;
   /** Content hash of the daemon's entry script (build identity) */
   buildId?: string;
+  /** Whether this daemon generation is currently executing provisionDevice. */
+  activeProvisioning?: boolean;
   /** Options used to start the daemon */
   options?: DaemonOptions;
 }

@@ -3,7 +3,11 @@ import {
   DeviceControlTransportError,
   type DeviceControlTransportFailure,
 } from "../../src/daemon/deviceControlTransportFailure";
-import { deviceControlTransportFailureResult } from "../../src/server/proxyServer";
+import {
+  daemonRestartDeferredResult,
+  deviceControlTransportFailureResult,
+} from "../../src/server/proxyServer";
+import { DaemonRestartDeferredError } from "../../src/daemon/daemonMcpProxy";
 
 describe("proxy server device-control transport errors", () => {
   test("returns safe machine-readable transport failure details", () => {
@@ -48,5 +52,18 @@ describe("proxy server device-control transport errors", () => {
       isError: true,
     });
     expect(JSON.stringify(result)).not.toContain("secret.invalid");
+  });
+
+  test("returns a retryable structured result when active provisioning defers restart", () => {
+    const result = daemonRestartDeferredResult(new DaemonRestartDeferredError("version mismatch"));
+
+    expect(result.structuredContent).toMatchObject({
+      error: {
+        code: "daemon_restart_deferred",
+        retryable: true,
+        retryAfterMs: 1_000,
+      },
+    });
+    expect(result.isError).toBe(true);
   });
 });

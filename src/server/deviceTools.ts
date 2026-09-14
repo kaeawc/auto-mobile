@@ -70,6 +70,10 @@ import { reconcileDiscoveryObservation } from "../daemon/discoveryReconcile";
 import type { DeviceReadinessLevel } from "../utils/DeviceSessionManager";
 import type { DevicePool, DeviceReadinessReservation, PooledDevice } from "../daemon/devicePool";
 import { McpSessionRecoveryInProgressError } from "../daemon/devicePool";
+import {
+  DAEMON_HANDOFF_INTERRUPTED_ERROR_CODE,
+  DaemonHandoffInterruptionError,
+} from "../daemon/daemonHandoffInterruption";
 import type { Session, SessionManager } from "../daemon/sessionManager";
 import {
   DeviceBootService,
@@ -946,6 +950,7 @@ const activeProvisionDeviceOperations = new Map<string, ActiveProvisionDeviceOpe
 function releaseProvisionDeviceWaiter(
   operationId: string,
   operation: ActiveProvisionDeviceOperation,
+  cancellationReason?: unknown,
 ): boolean {
   operation.waiters -= 1;
   if (operation.waiters > 0) {
@@ -965,10 +970,11 @@ function releaseProvisionDeviceWaiter(
   // The settle handlers are identity-guarded, so this early delete is safe.
   activeProvisionDeviceOperations.delete(operationId);
   operation.controller.abort(
-    new ActionableError(
-      `provisionDevice operation '${operationId}' was cancelled: every caller waiting for it ` +
-        "disconnected",
-    ),
+    cancellationReason ??
+      new ActionableError(
+        `provisionDevice operation '${operationId}' was cancelled: every caller waiting for it ` +
+          "disconnected",
+      ),
   );
   return true;
 }
@@ -5884,7 +5890,20 @@ export function registerDeviceTools() {
       releaseProvisionDeviceWaiter(args.operationId, operation);
       return createProvisionDeviceResponse(result);
     } catch (error) {
-      const cancelledOperation = releaseProvisionDeviceWaiter(args.operationId, operation);
+      const cancelledOperation = releaseProvisionDeviceWaiter(args.operationId, operation, error);
+      if (error instanceof DaemonHandoffInterruptionError) {
+        if (cancelledOperation) {
+          // The replacement daemon may replay this operation immediately.
+          // Wait until the fenced attempt has persisted its retryable terminal
+          // state, so replay cannot observe a stale "running" row.
+          await operation.promise.catch(() => {});
+        }
+        logger.warn(
+          `[DeviceTools] provisionDevice ${args.operationId} interrupted by daemon handoff: ${errorMessage(error)}`,
+          error,
+        );
+        return provisionDeviceErrorResponse(error);
+      }
       if (isProvisionDeviceCallerAbort(error, signal)) {
         // The caller went away, which is not a provisioning failure: report it
         // with a code of its own, and say whether the operation is still
@@ -6023,6 +6042,19 @@ export function registerDeviceTools() {
           args.operationId,
           attemptId,
           PROVISION_DEVICE_SESSION_RECOVERY_ERROR_CODE,
+          errorMessage(error),
+        );
+        throw error;
+      }
+      if (error instanceof DaemonHandoffInterruptionError) {
+        logger.warn(
+          `[DeviceTools] provisionDevice ${args.operationId} interrupted by daemon handoff: ${errorMessage(error)}`,
+          error,
+        );
+        await store.fail(
+          args.operationId,
+          attemptId,
+          DAEMON_HANDOFF_INTERRUPTED_ERROR_CODE,
           errorMessage(error),
         );
         throw error;
@@ -6649,11 +6681,13 @@ export function registerDeviceTools() {
     error: unknown,
     unownedColdBootSettlement: Promise<void> | undefined,
   ): Promise<never> {
-    if (error instanceof McpSessionRecoveryInProgressError) {
-      // A transport routing conflict does not invalidate the healthy device
-      // session, so it must reach `executeProvisionDevice`'s guard with its
-      // identity intact instead of being wrapped into a rollback error after
-      // destroying the device it never invalidated.
+    if (
+      error instanceof McpSessionRecoveryInProgressError ||
+      error instanceof DaemonHandoffInterruptionError
+    ) {
+      // A transport routing conflict or daemon-generation handoff does not
+      // invalidate the viable device, so preserve its identity for a retry
+      // instead of wrapping the interruption in destructive rollback.
       throw error;
     }
     const createdDevice =
@@ -7261,6 +7295,15 @@ export function registerDeviceTools() {
   }
 
   function provisionDeviceErrorResponse(error: unknown) {
+    if (error instanceof DaemonHandoffInterruptionError) {
+      return createToolErrorResponse(error.code, error.message, {
+        error: {
+          code: error.code,
+          message: error.message,
+          retryable: error.retryable,
+        },
+      });
+    }
     if (error instanceof ProvisionDeviceRollbackError) {
       return createToolErrorResponse(error.code, error.message, {
         provisionFailure: {

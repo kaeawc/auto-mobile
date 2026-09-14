@@ -32,6 +32,10 @@ import { getCurrentBuildIdentity } from "./buildIdentity";
 import { cleanupDaemonFiles, cleanupDaemonFilesSync, readPidFileDataSync } from "./daemonFiles";
 import { IncumbentOwnerGuard } from "./incumbentOwnerGuard";
 import { executionTracker } from "../server/executionTracker";
+import {
+  DAEMON_HANDOFF_INTERRUPTED_MESSAGE,
+  DaemonHandoffInterruptionError,
+} from "./daemonHandoffInterruption";
 import { SessionReleaseBroadcaster } from "../server/sessionReleaseBroadcast";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import {
@@ -292,6 +296,7 @@ export class Daemon {
   private installedAppsRepository: InstalledAppsStore;
   private deviceSessionRepository: DeviceSessionRepository;
   private timer: Timer;
+  private readonly generationStartedAt: number;
   private idGenerator: IdGenerator;
   private databaseInitializer: DatabaseInitializer;
   private toolSelectionProfileProvenanceLoader: ToolSelectionProfileProvenanceLoader;
@@ -342,6 +347,7 @@ export class Daemon {
     this.idGenerator = idGenerator;
     this.daemonSessionId = this.idGenerator.next();
     this.timer = timer;
+    this.generationStartedAt = this.timer.now();
     this.databaseInitializer = databaseInitializer;
     this.toolSelectionProfileProvenanceLoader = toolSelectionProfileProvenanceLoader;
     this.databaseHealthProbe = databaseHealthProbe;
@@ -604,7 +610,12 @@ export class Daemon {
         undefined,
         undefined,
         FeatureFlagService.getInstance(),
-        undefined,
+        {
+          identityStartedAt: this.generationStartedAt,
+          onRestartAccepted: () => {
+            setImmediate(() => process.kill(process.pid, "SIGTERM"));
+          },
+        },
         this.idGenerator,
         // A hand-launched daemon (no startup lock) must refuse to unlink a live
         // sibling's socket; only a manager-launched, lock-protected daemon may
@@ -966,7 +977,9 @@ export class Daemon {
             if (streamableTransport.sessionId) {
               const cancelled = await executionTracker.cancelSessionExecutions(
                 streamableTransport.sessionId,
-                "streamable_http_onclose",
+                this.shutdownInProgress
+                  ? new DaemonHandoffInterruptionError(DAEMON_HANDOFF_INTERRUPTED_MESSAGE)
+                  : "streamable_http_onclose",
               );
               this.transports.delete(streamableTransport.sessionId);
               logger.info(
@@ -983,7 +996,9 @@ export class Daemon {
               );
               await executionTracker.cancelSessionExecutions(
                 streamableTransport.sessionId,
-                `streamable_http_onerror: ${detail}`,
+                this.shutdownInProgress
+                  ? new DaemonHandoffInterruptionError(DAEMON_HANDOFF_INTERRUPTED_MESSAGE)
+                  : `streamable_http_onerror: ${detail}`,
               );
               this.transports.delete(streamableTransport.sessionId);
             }
@@ -1147,7 +1162,7 @@ export class Daemon {
       socketPath: SOCKET_PATH,
       port: this.port,
       dbPath: getDatabasePath(),
-      startedAt: this.timer.now(),
+      startedAt: this.generationStartedAt,
       version: DAEMON_VERSION,
       launchLogPath: this.launchLogPath(),
       assetVersion: resolveAssetVersion(resolvePinnedVersion()),
@@ -1173,7 +1188,7 @@ export class Daemon {
       sockets: getDaemonSocketPathsByName(),
       port: this.port,
       dbPath: getDatabasePath(),
-      startedAt: this.timer.now(),
+      startedAt: this.generationStartedAt,
       version: DAEMON_VERSION,
       launchLogPath: this.launchLogPath(),
       assetVersion: resolveAssetVersion(resolvePinnedVersion()),
@@ -2346,7 +2361,12 @@ export class Daemon {
           undefined,
           undefined,
           FeatureFlagService.getInstance(),
-          undefined,
+          {
+            identityStartedAt: this.generationStartedAt,
+            onRestartAccepted: () => {
+              setImmediate(() => process.kill(process.pid, "SIGTERM"));
+            },
+          },
           this.idGenerator,
           // Recovery reuses the same ownership evidence as initial startup. A
           // replacement socket is never reclaimed merely because this daemon
@@ -2559,7 +2579,10 @@ export class Daemon {
    * Stop the daemon gracefully
    */
   async stop(): Promise<void> {
+    this.shutdownInProgress = true;
     logger.info("Stopping daemon...");
+    await this.quiesceProvisioningIngress();
+    await this.interruptProvisioningForShutdown();
     this.shutdownReleaseNotifications = new Set();
     this.shutdownFallbackReleaseNotifications = new Set();
     this.shutdownSessionIds = [];
@@ -2572,20 +2595,6 @@ export class Daemon {
     this.deviceDisconnectMonitor = null;
     await runShutdownCleanupStages(
       [
-        {
-          // Quiesce the control socket synchronously before fencing session
-          // publication. Established clients then receive the stable retryable
-          // shutdown response instead of entering SessionManager during the
-          // cleanup stages below. A request admitted before this barrier may
-          // still outlive the bounded handler drain, so fence its eventual pool
-          // assignment before awaiting that drain.
-          name: "Unix socket and device session admission",
-          run: async () => {
-            const quiescing = this.socketServer?.quiesce();
-            this.sessionManager.stopAcceptingSessionCreations();
-            await quiescing;
-          },
-        },
         {
           // Quiesce new recording work and stop owned children before any
           // potentially blocking socket teardown consumes the shutdown budget.
@@ -2656,16 +2665,6 @@ export class Daemon {
           // and hit the just-closed connection (issue #2912; #2792 safety window).
           name: "session cleanup timer",
           run: () => this.sessionManager.stopCleanupTimer(),
-        },
-        {
-          name: "HTTP session admission",
-          run: () => {
-            this.acceptingHttpSessions = false;
-            // Start closing the listener now so it cannot admit a connection
-            // after the transport snapshot below. The later HTTP server stage
-            // awaits this same close once active transports have been closed.
-            void this.closeHttpListener().catch(() => {});
-          },
         },
         { name: "video recording socket server", run: stopVideoRecordingSocketServer },
         { name: "test recording socket server", run: stopTestRecordingSocketServer },
@@ -2779,6 +2778,40 @@ export class Daemon {
       ],
       (message, error) => logger.warn(message, error),
     );
+  }
+
+  /**
+   * Close every ingress before interrupting active provisioning. Without this
+   * ordering, a request can begin after the cancellation sweep and reach
+   * shutdown teardown without persisting its retryable handoff outcome.
+   */
+  private async quiesceProvisioningIngress(): Promise<void> {
+    this.acceptingHttpSessions = false;
+    // Start closing the listener now so it cannot admit a connection after the
+    // transport snapshot. The later HTTP server stage awaits this close.
+    void this.closeHttpListener().catch((error) => {
+      logger.warn(`Failed to begin HTTP listener shutdown: ${errorMessage(error)}`, error);
+    });
+    const quiescing = this.socketServer?.quiesce();
+    this.sessionManager.stopAcceptingSessionCreations();
+    await quiescing;
+  }
+
+  private async interruptProvisioningForShutdown(): Promise<void> {
+    const reason = new DaemonHandoffInterruptionError(DAEMON_HANDOFF_INTERRUPTED_MESSAGE);
+    const cancelled = await executionTracker.cancelToolExecutions("provisionDevice", reason);
+    if (cancelled === 0) {
+      return;
+    }
+    const drained = await executionTracker.waitForToolExecutionsToEnd(
+      "provisionDevice",
+      DEVICE_LOSS_EXECUTION_DRAIN_TIMEOUT_MS,
+    );
+    if (!drained) {
+      logger.warn(
+        `Timed out after ${DEVICE_LOSS_EXECUTION_DRAIN_TIMEOUT_MS}ms persisting ${cancelled} interrupted provisionDevice operation(s) before daemon shutdown`,
+      );
+    }
   }
 
   private async releaseActiveSessionsForShutdown(): Promise<void> {

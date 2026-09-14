@@ -14,6 +14,7 @@ import {
   DaemonBoundSessionExpiredError,
   DaemonConnectionSessionReleasedError,
   DaemonMcpProxy,
+  DaemonRestartDeferredError,
   type DaemonMcpProxyConfig,
 } from "../daemon/daemonMcpProxy";
 import { DaemonShuttingDownError } from "../daemon/client";
@@ -118,6 +119,24 @@ function daemonShuttingDownResult() {
   return {
     content: [{ type: "text", text: JSON.stringify(shutdown) }],
     structuredContent: shutdown,
+    isError: true,
+  };
+}
+
+export function daemonRestartDeferredResult(
+  error: DaemonRestartDeferredError,
+): CallToolResult & { structuredContent: Record<string, unknown> } {
+  const payload = {
+    error: {
+      code: error.code,
+      message: error.message,
+      retryable: error.retryable,
+      retryAfterMs: error.retryAfterMs,
+    },
+  };
+  return {
+    content: [{ type: "text", text: JSON.stringify(payload) }],
+    structuredContent: payload,
     isError: true,
   };
 }
@@ -288,6 +307,9 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
       }
       if (error instanceof DaemonShuttingDownError) {
         return daemonShuttingDownResult();
+      }
+      if (error instanceof DaemonRestartDeferredError) {
+        return daemonRestartDeferredResult(error);
       }
       if (error instanceof DeviceControlTransportError) {
         logger.warn(

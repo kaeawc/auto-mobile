@@ -49,7 +49,17 @@ import {
   runSocketDiagnostics,
   formatSocketDiagnostics,
 } from "./debugTools";
-import { DaemonClient, type DaemonClientFactory, type DaemonClientLike } from "./client";
+import {
+  DaemonClient,
+  type DaemonClientFactory,
+  type DaemonClientFactoryOptions,
+  type DaemonClientLike,
+} from "./client";
+import {
+  DAEMON_PREPARE_RESTART_METHOD,
+  DaemonRestartDeferredError,
+  type DaemonRestartPreparation,
+} from "./daemonRestartAdmission";
 import {
   DaemonSocketReachability,
   type DaemonSocketReachabilityLike,
@@ -615,7 +625,11 @@ interface StartupLockHolder {
 export interface DaemonManagerLike {
   status(): Promise<DaemonStatus>;
   start(options?: DaemonOptions): Promise<void>;
-  restart(options?: DaemonOptions): Promise<void>;
+  /**
+   * When `expectedDaemon` is supplied, restart only that verified generation.
+   * A changed generation means another client already completed the handoff.
+   */
+  restart(options?: DaemonOptions, expectedDaemon?: DaemonStatus): Promise<void>;
   waitForReady(
     timeout: number,
     signal?: AbortSignal,
@@ -750,7 +764,9 @@ export class DaemonManager implements DaemonManagerLike {
       timer,
     });
     this.clientFactory =
-      clientFactory ?? (() => new DaemonClient(this.socketPath, undefined, timer));
+      clientFactory ??
+      ((options) =>
+        new DaemonClient(this.socketPath, undefined, timer, {}, options?.clientIdentity));
   }
 
   /**
@@ -792,8 +808,8 @@ export class DaemonManager implements DaemonManagerLike {
     this.heldLockLogPath = undefined;
   }
 
-  createClient(): DaemonClientLike {
-    return this.clientFactory();
+  createClient(options?: DaemonClientFactoryOptions): DaemonClientLike {
+    return this.clientFactory(options);
   }
 
   getDaemonState(): DaemonStateLike {
@@ -1769,13 +1785,28 @@ export class DaemonManager implements DaemonManagerLike {
       return;
     }
 
+    await this.stopRunningDaemon(status, timeout);
+  }
+
+  /**
+   * Stop the exact generation already observed by the caller. Keeping this
+   * snapshot through the signal closes the stale-restart gap where a second
+   * status read could target a successor that another client just started.
+   */
+  private async stopRunningDaemon(
+    status: DaemonStatus,
+    timeout: number = DAEMON_SHUTDOWN_TIMEOUT_MS,
+    signalFirst: boolean = true,
+  ): Promise<void> {
     stderrLog(`Stopping daemon (PID ${status.pid})...`);
 
     const pid = status.pid!;
 
     try {
-      // Send SIGTERM for graceful shutdown
-      this.processSignaler.signal(pid, "SIGTERM");
+      if (signalFirst) {
+        // Send SIGTERM for graceful shutdown.
+        this.processSignaler.signal(pid, "SIGTERM");
+      }
 
       // Wait for process to exit
       const stopped = await this.waitForStop(pid, timeout);
@@ -1977,7 +2008,7 @@ export class DaemonManager implements DaemonManagerLike {
   /**
    * Restart the daemon
    */
-  async restart(options: DaemonOptions = {}): Promise<void> {
+  async restart(options: DaemonOptions = {}, expectedDaemon?: DaemonStatus): Promise<void> {
     stderrLog("Restarting daemon...");
     // A bare `--daemon restart` has no CLI options, but it is commonly used to
     // replace a stale checkout. Preserve the daemon's PID-recorded options so
@@ -2000,6 +2031,29 @@ export class DaemonManager implements DaemonManagerLike {
       ...requestedOptions,
       strictPort: true,
     };
+    if (expectedDaemon && !this.isSameDaemonGeneration(status, expectedDaemon)) {
+      stderrLog("Daemon generation changed before restart; joining the current generation");
+      return;
+    }
+
+    if (expectedDaemon) {
+      if (!(await this.prepareDaemonForConditionalRestart(expectedDaemon))) {
+        stderrLog("Daemon generation changed while preparing restart; joining its successor");
+        return;
+      }
+      if (status.running) {
+        // Atomic admission asks the daemon to initiate its own shutdown before
+        // acknowledging. Waiting without a second SIGTERM prevents a delayed
+        // manager from acting on stale admission state.
+        await this.stopRunningDaemon(status, DAEMON_SHUTDOWN_TIMEOUT_MS, false);
+      }
+      // Another automatic client may win the shared startup lock during this
+      // handoff. Ordinary start() joins that winner instead of terminating it.
+      await this.timer.sleep(DAEMON_RESTART_HANDOFF_DELAY_MS);
+      await this.start(restartOptions);
+      return;
+    }
+
     // All restart cleanup follows the same 10s graceful + 1s forced-stop
     // budget. Run the PID-recorded daemon and every cross-namespace candidate
     // concurrently so the launcher timeout remains bounded by one cleanup window.
@@ -2019,6 +2073,65 @@ export class DaemonManager implements DaemonManagerLike {
     // Wait a bit before starting
     await this.timer.sleep(DAEMON_RESTART_HANDOFF_DELAY_MS);
     await this.start(restartOptions);
+  }
+
+  private isSameDaemonGeneration(current: DaemonStatus, expected: DaemonStatus): boolean {
+    if (!current.running || !expected.running || current.pid !== expected.pid) {
+      return false;
+    }
+    const identityFields = ["startedAt", "version", "buildId", "entryScript"] as const;
+    return identityFields.every(
+      (field) => expected[field] === undefined || current[field] === expected[field],
+    );
+  }
+
+  private async prepareDaemonForConditionalRestart(expected: DaemonStatus): Promise<boolean> {
+    // The generation tuple below authorizes this lifecycle RPC. It must reach
+    // an older daemon even when its normal client compatibility handshake would
+    // reject the newer caller that is requesting the replacement.
+    const client = this.createClient({ clientIdentity: null });
+    try {
+      await client.connect();
+      const result: unknown = await client.callDaemonMethod(DAEMON_PREPARE_RESTART_METHOD, {
+        pid: expected.pid,
+        startedAt: expected.startedAt,
+        version: expected.version,
+        buildId: expected.buildId,
+        entryScript: expected.entryScript,
+      });
+      if (!result || typeof result !== "object") {
+        throw new DaemonRestartDeferredError(
+          "the daemon returned no safe-restart admission result",
+        );
+      }
+      const preparation = result as Partial<DaemonRestartPreparation>;
+      if (preparation.accepted === true) {
+        return true;
+      }
+      if (preparation.accepted === false && preparation.reason === "generation_changed") {
+        return false;
+      }
+      if (preparation.accepted === false && preparation.reason === "active_provisioning") {
+        throw new DaemonRestartDeferredError("provisionDevice is active");
+      }
+      if (preparation.accepted === false && preparation.reason === "shutdown_unavailable") {
+        throw new DaemonRestartDeferredError("the daemon could not initiate its own shutdown");
+      }
+      throw new DaemonRestartDeferredError(
+        "the daemon returned an unrecognized safe-restart admission result",
+      );
+    } catch (error) {
+      if (error instanceof DaemonRestartDeferredError) {
+        throw error;
+      }
+      // Older daemon generations do not implement atomic restart admission.
+      // Fail closed: an explicit operator restart remains available.
+      throw new DaemonRestartDeferredError(
+        `safe-restart admission is unavailable: ${errorMessage(error)}`,
+      );
+    } finally {
+      await client.close();
+    }
   }
 
   /**

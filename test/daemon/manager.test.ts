@@ -141,6 +141,243 @@ describe("DaemonManager restart", () => {
     // bind-or-fail guard against the port-fallback split-brain.
     expect(startSpy).toHaveBeenCalledWith({ ...recordedOptions, strictPort: true });
   });
+
+  test("conditional restart does not terminate a successor generation", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const successorPid = 1002;
+    const livePids = new Set([successorPid]);
+    const processFinder: DaemonProcessFinder & DaemonProcessLivenessChecker = {
+      findDaemonProcesses: () => [
+        {
+          pid: successorPid,
+          ppid: 1,
+          command: "bun /new/dist/src/index.js --daemon-mode",
+        },
+      ],
+      isProcessRunning: (pid) => livePids.has(pid),
+    };
+    const signaler = new FakeDaemonProcessSignaler((pid, signal) => {
+      if (signal === "SIGTERM") {
+        livePids.delete(pid);
+      }
+    });
+    const manager = new DaemonManager(
+      undefined,
+      undefined,
+      timer,
+      undefined,
+      undefined,
+      undefined,
+      processFinder,
+      undefined,
+      undefined,
+      undefined,
+      signaler,
+      undefined,
+      undefined,
+      undefined,
+      new FakeDaemonPortAvailabilityChecker(),
+    );
+    const successorStatus: DaemonStatus = {
+      running: true,
+      pid: successorPid,
+      startedAt: 200,
+      buildId: "successor-build",
+      entryScript: "/new/dist/src/index.js",
+    };
+    const statusSpy = spyOn(manager, "status").mockResolvedValue(successorStatus);
+    const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
+
+    try {
+      await manager.restart(
+        {},
+        {
+          running: true,
+          pid: 1001,
+          startedAt: 100,
+          buildId: "incumbent-build",
+          entryScript: "/old/dist/src/index.js",
+        },
+      );
+
+      expect(signaler.signals).toEqual([]);
+      expect(startSpy).not.toHaveBeenCalled();
+      expect(livePids).toEqual(new Set([successorPid]));
+    } finally {
+      startSpy.mockRestore();
+      statusSpy.mockRestore();
+    }
+  });
+
+  test("conditional restart atomically admits only the observed idle generation", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const incumbentPid = 1001;
+    const unrelatedPid = 1002;
+    const livePids = new Set([incumbentPid, unrelatedPid]);
+    const processFinder: DaemonProcessFinder & DaemonProcessLivenessChecker = {
+      findDaemonProcesses: () =>
+        [...livePids].map((pid) => ({
+          pid,
+          ppid: 1,
+          command: "bun /dist/src/index.js --daemon-mode",
+        })),
+      isProcessRunning: (pid) => livePids.has(pid),
+    };
+    const signaler = new FakeDaemonProcessSignaler();
+    const client = new FakeDaemonClient({});
+    let clientOptions: { clientIdentity?: unknown } | undefined;
+    const prepareSpy = spyOn(client, "callDaemonMethod").mockImplementation(async () => {
+      livePids.delete(incumbentPid);
+      return { accepted: true };
+    });
+    const manager = new DaemonManager(
+      (options) => {
+        clientOptions = options;
+        return client;
+      },
+      undefined,
+      timer,
+      undefined,
+      undefined,
+      undefined,
+      processFinder,
+      undefined,
+      undefined,
+      undefined,
+      signaler,
+      undefined,
+      undefined,
+      undefined,
+      new FakeDaemonPortAvailabilityChecker(),
+    );
+    const expected: DaemonStatus = {
+      running: true,
+      pid: incumbentPid,
+      startedAt: 100,
+      version: "0.0.73",
+      buildId: "incumbent-build",
+      entryScript: "/old/dist/src/index.js",
+    };
+    const statusSpy = spyOn(manager, "status").mockResolvedValue(expected);
+    const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
+
+    try {
+      await manager.restart({}, expected);
+
+      expect(prepareSpy).toHaveBeenCalledWith("ide/prepareRestart", {
+        pid: incumbentPid,
+        startedAt: 100,
+        version: "0.0.73",
+        buildId: "incumbent-build",
+        entryScript: "/old/dist/src/index.js",
+      });
+      expect(clientOptions).toEqual({ clientIdentity: null });
+      expect(signaler.signals).toEqual([]);
+      expect(livePids).toEqual(new Set([unrelatedPid]));
+      expect(startSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      prepareSpy.mockRestore();
+      startSpy.mockRestore();
+      statusSpy.mockRestore();
+    }
+  });
+
+  test("conditional restart leaves an actively provisioning generation running", async () => {
+    const timer = new FakeTimer();
+    const incumbentPid = 1001;
+    const livePids = new Set([incumbentPid]);
+    const signaler = new FakeDaemonProcessSignaler();
+    const client = new FakeDaemonClient({});
+    const prepareSpy = spyOn(client, "callDaemonMethod").mockResolvedValue({
+      accepted: false,
+      reason: "active_provisioning",
+    });
+    const manager = new DaemonManager(
+      () => client,
+      undefined,
+      timer,
+      undefined,
+      undefined,
+      undefined,
+      {
+        findDaemonProcesses: () => [],
+        isProcessRunning: (pid) => livePids.has(pid),
+      },
+      undefined,
+      undefined,
+      undefined,
+      signaler,
+    );
+    const expected: DaemonStatus = {
+      running: true,
+      pid: incumbentPid,
+      startedAt: 100,
+      version: "0.0.73",
+      buildId: "incumbent-build",
+      entryScript: "/old/dist/src/index.js",
+    };
+    const statusSpy = spyOn(manager, "status").mockResolvedValue(expected);
+    const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
+
+    try {
+      await expect(manager.restart({}, expected)).rejects.toMatchObject({
+        code: "daemon_restart_deferred",
+        retryable: true,
+      });
+      expect(signaler.signals).toEqual([]);
+      expect(startSpy).not.toHaveBeenCalled();
+      expect(livePids).toEqual(new Set([incumbentPid]));
+    } finally {
+      prepareSpy.mockRestore();
+      startSpy.mockRestore();
+      statusSpy.mockRestore();
+    }
+  });
+
+  test("conditional restart fails closed when a legacy daemon lacks restart admission", async () => {
+    const expected: DaemonStatus = {
+      running: true,
+      pid: 1001,
+      startedAt: 100,
+      version: "0.0.72",
+      buildId: "legacy-build",
+      entryScript: "/legacy/dist/src/index.js",
+    };
+    const client = new FakeDaemonClient();
+    const signaler = new FakeDaemonProcessSignaler();
+    const manager = new DaemonManager(
+      () => client,
+      undefined,
+      new FakeTimer(),
+      undefined,
+      undefined,
+      undefined,
+      {
+        findDaemonProcesses: () => [],
+        isProcessRunning: (pid) => pid === expected.pid,
+      },
+      undefined,
+      undefined,
+      undefined,
+      signaler,
+    );
+    const statusSpy = spyOn(manager, "status").mockResolvedValue(expected);
+    const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
+
+    try {
+      await expect(manager.restart({}, expected)).rejects.toMatchObject({
+        code: "daemon_restart_deferred",
+        retryable: true,
+      });
+      expect(signaler.signals).toEqual([]);
+      expect(startSpy).not.toHaveBeenCalled();
+    } finally {
+      startSpy.mockRestore();
+      statusSpy.mockRestore();
+    }
+  });
 });
 
 describe("DaemonManager stop", () => {

@@ -55,7 +55,7 @@ export class AndroidAvdIdentityConflictError extends ActionableError {
   ) {
     super(
       `identity_conflict: Android AVD '${avdName}' is claimed by multiple running ` +
-        `emulators: ${candidateSerials.join(", ")}. Pass an explicit adbSerial to select one.`,
+        `emulators: ${candidateSerials.join(", ")}. Pass an explicit deviceId (ADB serial) to select one.`,
     );
   }
 }
@@ -70,7 +70,12 @@ export function findUniqueBootedAndroidDeviceByName(
 ): BootedDevice | undefined {
   const matchesBySerial = new Map(
     devices
-      .filter((device) => device.platform === "android" && device.name === avdName)
+      .filter(
+        (device) =>
+          device.platform === "android" &&
+          device.name === avdName &&
+          isAndroidEmulatorSerial(device.deviceId),
+      )
       .map((device): [string, BootedDevice] => [device.deviceId, device]),
   );
   const matches = [...matchesBySerial.values()];

@@ -611,9 +611,27 @@ describe("platform device preparation tools", () => {
       expect((failure as ActionableError).message).toContain("identity_conflict");
       expect((failure as ActionableError).message).toContain("emulator-5554");
       expect((failure as ActionableError).message).toContain("emulator-5556");
+      expect((failure as ActionableError).message).toContain("deviceId");
       expect(deviceUtils.wasMethodCalled("waitForDeviceReady")).toBe(false);
     },
   );
+
+  test("getAndroid honors an explicit serial when duplicate emulators share its AVD name", async () => {
+    deviceUtils.setBootedDevices("android", [
+      { name: "Duplicate_AVD", platform: "android", deviceId: "emulator-5556" },
+      { name: "Duplicate_AVD", platform: "android", deviceId: "emulator-5554" },
+    ]);
+
+    const result = await callTool("getAndroid", {
+      avdName: "Duplicate_AVD",
+      deviceId: "emulator-5554",
+    });
+
+    expect(result.deviceIdentity).toMatchObject({
+      avdName: "Duplicate_AVD",
+      adbSerial: "emulator-5554",
+    });
+  });
 
   test("getAndroid does not let a pooled AVD hide a competing live serial", async () => {
     const pooled: BootedDevice = {

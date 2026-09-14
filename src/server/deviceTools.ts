@@ -8347,12 +8347,16 @@ export function registerDeviceTools() {
     const startedAtMs = getDeviceToolsDependencies().timer.now();
     const mcpSessionId = typeof __mcpSessionId === "string" ? __mcpSessionId : undefined;
     // Prefer the AVD name (exact virtual-device identity); otherwise target the
-    // booted serial by deviceId (#5870). The AVD path also coordinates lifecycle
-    // by the stable AVD name, which the deviceId path cannot infer.
+    // booted serial by deviceId (#5870). A paired AVD name and serial keeps
+    // lifecycle coordination by stable name while directing boot to the
+    // validated serial.
+    const explicitAdbSerial =
+      args.deviceId && isAndroidEmulatorSerial(args.deviceId) ? args.deviceId : undefined;
     const target: StartDeviceArgs = args.avdName
       ? {
           platform: "android",
           name: args.avdName,
+          ...(explicitAdbSerial ? { deviceId: explicitAdbSerial } : {}),
           matchExactName: true,
           preferRunning: true,
           createIfMissing: false,

@@ -3223,6 +3223,10 @@ describe("provisionDevice handler", () => {
         calls++;
         if (calls === 1) {
           await request.onBeforeCreate?.();
+        } else {
+          deviceManager.setBootedDevices("android", [
+            { name: request.name, platform: "android", deviceId: "emulator-5554" },
+          ]);
         }
         return {
           created: calls === 1,

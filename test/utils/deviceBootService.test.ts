@@ -495,6 +495,28 @@ describe("DeviceBootService", () => {
     expect(devices.wasMethodCalled("waitForDeviceReady")).toBe(false);
   });
 
+  it("ignores a physical Android device whose model matches the AVD name", async () => {
+    const devices = new FakeDeviceUtils();
+    const emulator: BootedDevice = {
+      name: image.name,
+      platform: "android",
+      deviceId: "emulator-5554",
+    };
+    devices.setDeviceImages("android", [{ ...image, isRunning: true }]);
+    devices.setBootedDevices("android", [
+      { name: image.name, platform: "android", deviceId: "R58M12ABCDE" },
+      emulator,
+    ]);
+
+    const result = await service(devices).boot({
+      platform: "android",
+      deviceId: image.name,
+      preferRunning: true,
+    });
+
+    expect(result.device.deviceId).toBe(emulator.deviceId);
+  });
+
   it("deduplicates repeated discovery of the same running Android serial", async () => {
     const devices = new FakeDeviceUtils();
     const running: BootedDevice = {

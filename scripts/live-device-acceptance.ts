@@ -169,6 +169,7 @@ interface Evidence {
   provision: JsonObject;
   acquisitionRequests: JsonObject[];
   runtimeIdentities: JsonObject[];
+  controls: JsonObject[];
   checks: JsonObject;
   cleanup: JsonObject;
   outcome: JsonObject;
@@ -192,6 +193,19 @@ interface OwnershipManifestPayload {
 
 interface OwnershipManifest extends OwnershipManifestPayload {
   mac: string;
+}
+
+interface DiscoveryDevice extends ExactDevice {}
+
+interface AndroidDiscoveryControls {
+  target: DiscoveryDevice;
+  sibling: DiscoveryDevice;
+  duplicate: DiscoveryDevice;
+}
+
+interface IosDiscoveryControls {
+  target: DiscoveryDevice;
+  sibling: DiscoveryDevice;
 }
 
 const SECURE_DIRECTORY_MODE = 0o700;
@@ -253,6 +267,76 @@ function targetManifestEntry(args: AcceptanceArgs): OwnershipManifestTarget {
   };
 }
 
+function assertControlConfiguration(
+  target: AcceptanceArgs["target"],
+  controls: AcceptanceArgs["controls"],
+): void {
+  for (const [name, value] of Object.entries(controls)) {
+    if (typeof value !== "string" || value.length === 0) {
+      throw new Error(`Ownership control ${name} must be a non-empty string`);
+    }
+  }
+  if (target.avdName === controls.androidSiblingAvdName) {
+    throw new Error("Android ownership sibling must not use the target AVD name");
+  }
+  if (
+    controls.androidDuplicateSerial === target.avdName ||
+    controls.androidDuplicateSerial === controls.androidSiblingAvdName
+  ) {
+    throw new Error("Android ownership duplicate serial must not name an AVD control");
+  }
+  if (target.simulatorUdid === controls.iosSameNameSiblingUdid) {
+    throw new Error("iOS ownership sibling UUID must differ from the target UUID");
+  }
+}
+
+function assertOwnershipManifestTarget(
+  target: unknown,
+  platform: Platform,
+): asserts target is OwnershipManifestTarget {
+  const entry = asObject(target, `ownership manifest ${platform} target`);
+  const targetIdentity = asObject(entry.target, `ownership manifest ${platform} target.target`);
+  const controls = asObject(entry.controls, `ownership manifest ${platform} target.controls`);
+  const parsedTarget: AcceptanceArgs["target"] =
+    platform === "android"
+      ? {
+          avdName: stringField(
+            targetIdentity,
+            "avdName",
+            `ownership manifest ${platform} target.target`,
+          ),
+        }
+      : {
+          simulatorName: stringField(
+            targetIdentity,
+            "simulatorName",
+            `ownership manifest ${platform} target.target`,
+          ),
+          simulatorUdid: stringField(
+            targetIdentity,
+            "simulatorUdid",
+            `ownership manifest ${platform} target.target`,
+          ),
+        };
+  assertControlConfiguration(parsedTarget, {
+    androidSiblingAvdName: stringField(
+      controls,
+      "androidSiblingAvdName",
+      `ownership manifest ${platform} target.controls`,
+    ),
+    androidDuplicateSerial: stringField(
+      controls,
+      "androidDuplicateSerial",
+      `ownership manifest ${platform} target.controls`,
+    ),
+    iosSameNameSiblingUdid: stringField(
+      controls,
+      "iosSameNameSiblingUdid",
+      `ownership manifest ${platform} target.controls`,
+    ),
+  });
+}
+
 function sameJson(left: unknown, right: unknown): boolean {
   return stableStringify(left) === stableStringify(right);
 }
@@ -287,9 +371,15 @@ function parseOwnershipManifest(path: string, key: Buffer): OwnershipManifest {
 }
 
 function assertOwnershipManifest(args: AcceptanceArgs): OwnershipManifest {
+  assertControlConfiguration(args.target, args.controls);
   const manifest = parseOwnershipManifest(args.ownershipManifestPath, args.operatorKey);
   if (!manifest.targets.android || !manifest.targets.ios) {
     throw new Error("Ownership manifest must bind both the Android AVD and iOS simulator");
+  }
+  assertOwnershipManifestTarget(manifest.targets.android, "android");
+  assertOwnershipManifestTarget(manifest.targets.ios, "ios");
+  if (!sameJson(manifest.targets.android.controls, manifest.targets.ios.controls)) {
+    throw new Error("Ownership manifest Android and iOS entries must bind identical controls");
   }
   const target = manifest.targets[args.platform];
   if (!target || !sameJson(target, targetManifestEntry(args))) {
@@ -301,6 +391,7 @@ function assertOwnershipManifest(args: AcceptanceArgs): OwnershipManifest {
 }
 
 export function recordOwnershipManifest(args: AcceptanceArgs): void {
+  assertControlConfiguration(args.target, args.controls);
   let targets: OwnershipManifestPayload["targets"] = {};
   let runId = randomUUID();
   if (existsSync(args.ownershipManifestPath)) {
@@ -312,6 +403,16 @@ export function recordOwnershipManifest(args: AcceptanceArgs): void {
       throw new Error(
         `Ownership manifest already binds a different ${args.platform} target; create a new manifest instead`,
       );
+    }
+    const otherPlatform: Platform = args.platform === "android" ? "ios" : "android";
+    const other = targets[otherPlatform];
+    if (other) {
+      assertOwnershipManifestTarget(other, otherPlatform);
+      if (!sameJson(other.controls, args.controls)) {
+        throw new Error(
+          "Ownership manifest already binds different discovery controls; create a new manifest instead",
+        );
+      }
     }
   }
   targets[args.platform] = targetManifestEntry(args);
@@ -390,7 +491,7 @@ export function parseArgs(argv: string[]): AcceptanceArgs {
   if (build.buildId === "unknown") {
     throw new Error(`Cannot compute a build identity for --entrypoint ${entrypoint}`);
   }
-  return {
+  const args: AcceptanceArgs = {
     platform,
     target,
     controls: {
@@ -422,6 +523,8 @@ export function parseArgs(argv: string[]): AcceptanceArgs {
     testOwnedDevices: values.get("test-owned-devices") === "true",
     recordOwnershipManifest: values.get("record-ownership-manifest") === "true",
   };
+  assertControlConfiguration(args.target, args.controls);
+  return args;
 }
 
 function asObject(value: unknown, context: string): JsonObject {
@@ -956,10 +1059,21 @@ export async function defaultWriteEvidence(
   }
 }
 
-function assertProvisionedIdentity(payload: JsonObject, args: AcceptanceArgs): void {
+function assertProvisionedIdentity(
+  payload: JsonObject,
+  args: AcceptanceArgs,
+  expectedAndroidDeviceId?: string,
+): void {
   const device = asObject(payload.device, "provisionDevice.device");
   if (stringField(device, "name", "provisionDevice.device") !== targetDeviceName(args)) {
     throw new Error("provisionDevice returned a different named device");
+  }
+  if (
+    args.platform === "android" &&
+    expectedAndroidDeviceId !== undefined &&
+    stringField(device, "deviceId", "provisionDevice.device") !== expectedAndroidDeviceId
+  ) {
+    throw new Error("provisionDevice returned a different Android target instance");
   }
   if (
     args.platform === "ios" &&
@@ -1163,6 +1277,7 @@ export async function runAcceptanceMatrix(
       build: args.build ?? { entryScript: "/test/dist/src/index.js", buildId: "test-build" },
     };
   }
+  assertControlConfiguration(args.target, args.controls);
   assertLiveSafeguards(args, dependencies);
   assertProvisionSchemaMatrix(args);
   const timer = dependencies.timer ?? defaultTimer;
@@ -1277,6 +1392,12 @@ export async function runAcceptanceMatrix(
   const minted: MintedSession[] = [];
   const cleanupFailures: string[] = [];
   const discoveryOrders: string[][] = [];
+  const controlSnapshots: JsonObject[] = [];
+  let reversedDiscoveryOrder = false;
+  let destructiveControlChecks = 0;
+  let androidControls: AndroidDiscoveryControls | undefined;
+  let iosControls: IosDiscoveryControls | undefined;
+  let controlClient: McpSessionClient | undefined;
   let daemonClient: DaemonSessionClient | undefined;
   let primaryError: unknown;
   let iosRunnerRestartEvidence = {
@@ -1424,6 +1545,16 @@ export async function runAcceptanceMatrix(
     mint(phase, sessionUuid);
     await verifyReadiness(client, sessionUuid, phase);
     const { identity, device } = acquiredIdentity(payload, args);
+    if (
+      args.platform === "android" &&
+      androidControls &&
+      phase !== "acquire-stopped" &&
+      device.deviceId !== androidControls.target.deviceId
+    ) {
+      throw new Error(
+        `acquire selected Android serial ${device.deviceId}, expected ${androidControls.target.deviceId}`,
+      );
+    }
     runtimeIdentities.push({ phase, ...identity });
     recordStep(steps, timer, `acquire-${phase}`, start, {
       sessionUuid,
@@ -1519,23 +1650,175 @@ export async function runAcceptanceMatrix(
   const listControlledDevices = async (
     client: McpSessionClient,
     phase: string,
-  ): Promise<JsonObject[]> => {
+  ): Promise<DiscoveryDevice[]> => {
     const payload = toolPayload(
       await callTool(client, "listDevices", { platform: args.platform }, phase),
       "listDevices",
     );
     const devices = objectArrayField(payload, "devices", "listDevices");
-    discoveryOrders.push(
-      devices.map(
-        (device) =>
-          `${stringField(device, "name", "listDevices.devices")}:${stringField(
-            device,
-            "deviceId",
-            "listDevices.devices",
-          )}`,
-      ),
+    const discovered = devices.map((device) => {
+      const platform = stringField(device, "platform", "listDevices.devices");
+      if (platform !== args.platform) {
+        throw new Error(`listDevices returned ${platform} while filtering for ${args.platform}`);
+      }
+      return {
+        name: stringField(device, "name", "listDevices.devices"),
+        deviceId: stringField(device, "deviceId", "listDevices.devices"),
+        platform,
+      } as DiscoveryDevice;
+    });
+    discoveryOrders.push(discovered.map((device) => `${device.name}:${device.deviceId}`));
+    return discovered;
+  };
+
+  const sameDevice = (left: DiscoveryDevice, right: DiscoveryDevice): boolean =>
+    left.name === right.name &&
+    left.deviceId === right.deviceId &&
+    left.platform === right.platform;
+  const findExactlyOne = (
+    devices: DiscoveryDevice[],
+    predicate: (device: DiscoveryDevice) => boolean,
+    description: string,
+  ): DiscoveryDevice => {
+    const matches = devices.filter(predicate);
+    if (matches.length !== 1) {
+      throw new Error(
+        `${description} must appear exactly once in discovery, found ${matches.length}`,
+      );
+    }
+    return matches[0]!;
+  };
+  const assertReversedOrder = (first: DiscoveryDevice[], second: DiscoveryDevice[]): void => {
+    if (
+      first.length !== second.length ||
+      first.some((device, index) => !sameDevice(device, second[first.length - index - 1]!))
+    ) {
+      throw new Error(
+        "Controlled discovery order was not demonstrably reversed between the two pre-mutation passes",
+      );
+    }
+    reversedDiscoveryOrder = true;
+  };
+  const captureAndroidControls = (devices: DiscoveryDevice[]): AndroidDiscoveryControls => {
+    const sameNamed = devices.filter((device) => device.name === args.target.avdName);
+    if (sameNamed.length !== 2) {
+      throw new Error(
+        `Controlled Android target must have exactly one intended instance and one signed duplicate; found ${sameNamed.length}`,
+      );
+    }
+    const duplicate = findExactlyOne(
+      sameNamed,
+      (device) => device.deviceId === args.controls.androidDuplicateSerial,
+      "Signed Android duplicate",
     );
-    return devices;
+    const target = findExactlyOne(
+      sameNamed,
+      (device) => device.deviceId !== args.controls.androidDuplicateSerial,
+      "Intended Android target",
+    );
+    const sibling = findExactlyOne(
+      devices,
+      (device) => device.name === args.controls.androidSiblingAvdName,
+      "Controlled Android sibling",
+    );
+    if (
+      sibling.deviceId === target.deviceId ||
+      sibling.deviceId === duplicate.deviceId ||
+      target.deviceId === duplicate.deviceId
+    ) {
+      throw new Error(
+        "Android discovery controls must identify three distinct live device instances",
+      );
+    }
+    return { target, sibling, duplicate };
+  };
+  const captureIosControls = (devices: DiscoveryDevice[]): IosDiscoveryControls => {
+    const sameNamed = devices.filter((device) => device.name === args.target.simulatorName);
+    if (sameNamed.length !== 2) {
+      throw new Error(
+        `Controlled iOS target must have exactly the target and signed same-name sibling; found ${sameNamed.length}`,
+      );
+    }
+    const target = findExactlyOne(
+      sameNamed,
+      (device) => device.deviceId === args.target.simulatorUdid,
+      "Exact iOS UUID target",
+    );
+    const sibling = findExactlyOne(
+      sameNamed,
+      (device) => device.deviceId === args.controls.iosSameNameSiblingUdid,
+      "Controlled iOS same-name sibling",
+    );
+    return { target, sibling };
+  };
+  const recordControlSnapshot = (
+    stage: string,
+    controls: AndroidDiscoveryControls | IosDiscoveryControls,
+    duplicatePresent?: boolean,
+  ): void => {
+    controlSnapshots.push({
+      stage,
+      target: controls.target,
+      sibling: controls.sibling,
+      ...(args.platform === "android"
+        ? {
+            duplicate: (controls as AndroidDiscoveryControls).duplicate,
+            duplicatePresent,
+          }
+        : {}),
+    });
+  };
+  const assertCurrentControls = async (stage: string): Promise<void> => {
+    if (!controlClient) {
+      throw new Error("Controlled discovery client was not initialized");
+    }
+    const start = timer.now();
+    const devices = await listControlledDevices(controlClient, `control-${stage}`);
+    if (args.platform === "android") {
+      if (!androidControls) {
+        throw new Error("Android discovery controls were not initialized");
+      }
+      if (devices.some((device) => device.deviceId === androidControls.duplicate.deviceId)) {
+        throw new Error(`Signed Android duplicate reappeared after ${stage}`);
+      }
+      const target = findExactlyOne(
+        devices,
+        (device) => device.name === androidControls!.target.name,
+        "Intended Android target",
+      );
+      const sibling = findExactlyOne(
+        devices,
+        (device) => sameDevice(device, androidControls!.sibling),
+        "Controlled Android sibling",
+      );
+      if (!sameDevice(target, androidControls.target)) {
+        throw new Error(`Intended Android target changed during ${stage}`);
+      }
+      recordControlSnapshot(stage, { ...androidControls, target, sibling }, false);
+    } else {
+      if (!iosControls) {
+        throw new Error("iOS discovery controls were not initialized");
+      }
+      const target = findExactlyOne(
+        devices,
+        (device) => sameDevice(device, iosControls!.target),
+        "Exact iOS UUID target",
+      );
+      const sibling = findExactlyOne(
+        devices,
+        (device) => sameDevice(device, iosControls!.sibling),
+        "Controlled iOS same-name sibling",
+      );
+      recordControlSnapshot(stage, { target, sibling });
+    }
+    destructiveControlChecks += 1;
+    recordStep(steps, timer, `controls-${stage}`, start, {
+      targetPresent: true,
+      siblingPresentAndUntouched: true,
+      ...(args.platform === "android"
+        ? { signedDuplicateAbsent: true, intendedTargetUnchanged: true }
+        : { exactUuidTargetUntouched: true, sameNameSiblingUntouched: true }),
+    });
   };
 
   const assertControlledDiscovery = async (): Promise<void> => {
@@ -1546,25 +1829,21 @@ export async function runAcceptanceMatrix(
       "work",
       async (signal) => await createMcpClient(phase, signal),
     );
+    controlClient = client;
     clients.push(client);
     const first = await listControlledDevices(client, `${phase}-first`);
     const second = await listControlledDevices(client, `${phase}-second`);
-    const hasDevice = (devices: JsonObject[], name: string, deviceId?: string): boolean =>
-      devices.some(
-        (device) =>
-          device.name === name &&
-          (device.platform === args.platform || device.platform === undefined) &&
-          (deviceId === undefined || device.deviceId === deviceId),
-      );
+    assertReversedOrder(first, second);
 
     if (args.platform === "android") {
-      for (const devices of [first, second]) {
-        if (!hasDevice(devices, args.controls.androidSiblingAvdName)) {
-          throw new Error("Controlled Android sibling was absent from discovery");
-        }
-        if (!hasDevice(devices, args.target.avdName!, args.controls.androidDuplicateSerial)) {
-          throw new Error("Controlled Android duplicate serial was absent from discovery");
-        }
+      androidControls = captureAndroidControls(first);
+      const reversedControls = captureAndroidControls(second);
+      if (
+        !sameDevice(androidControls.target, reversedControls.target) ||
+        !sameDevice(androidControls.sibling, reversedControls.sibling) ||
+        !sameDevice(androidControls.duplicate, reversedControls.duplicate)
+      ) {
+        throw new Error("Android discovery controls changed while proving reversed order");
       }
       const ambiguous = await callTool(
         client,
@@ -1575,7 +1854,8 @@ export async function runAcceptanceMatrix(
       if (
         !ambiguous.isError ||
         !toolDiagnostic(ambiguous, "getAndroid").includes("identity_conflict") ||
-        !toolDiagnostic(ambiguous, "getAndroid").includes(args.controls.androidDuplicateSerial)
+        !toolDiagnostic(ambiguous, "getAndroid").includes(androidControls.duplicate.deviceId) ||
+        !toolDiagnostic(ambiguous, "getAndroid").includes(androidControls.target.deviceId)
       ) {
         throw new Error(
           "Controlled duplicate Android AVD did not fail with the required identity_conflict",
@@ -1600,24 +1880,94 @@ export async function runAcceptanceMatrix(
         client,
         `${phase}-after-duplicate-cleanup`,
       );
-      if (!hasDevice(afterDuplicateCleanup, args.controls.androidSiblingAvdName)) {
-        throw new Error("Controlled Android sibling changed during duplicate cleanup");
+      if (afterDuplicateCleanup.some((device) => sameDevice(device, androidControls!.duplicate))) {
+        throw new Error("Signed Android duplicate remained after its explicit cleanup");
       }
+      const target = findExactlyOne(
+        afterDuplicateCleanup,
+        (device) => sameDevice(device, androidControls!.target),
+        "Intended Android target",
+      );
+      findExactlyOne(
+        afterDuplicateCleanup,
+        (device) => sameDevice(device, androidControls!.sibling),
+        "Controlled Android sibling",
+      );
+      if (
+        afterDuplicateCleanup.filter((device) => device.name === androidControls!.target.name)
+          .length !== 1
+      ) {
+        throw new Error("Android duplicate cleanup left an unsigned same-name target instance");
+      }
+      recordControlSnapshot(
+        "after-signed-android-duplicate-cleanup",
+        { ...androidControls, target },
+        false,
+      );
+      const selected = toolPayload(
+        await callTool(
+          client,
+          "getAndroid",
+          {
+            avdName: androidControls.target.name,
+            deviceId: androidControls.target.deviceId,
+            enableTools: [...ENABLED_TOOLS],
+          },
+          `${phase}-exact-target-selection`,
+        ),
+        "getAndroid",
+      );
+      const selectedSessionUuid = stringField(selected, "sessionUuid", "getAndroid");
+      mint(`${phase}-exact-target-selection`, selectedSessionUuid);
+      await verifyReadiness(client, selectedSessionUuid, `${phase}-exact-target-selection`);
+      const selectedIdentity = acquiredIdentity(selected, args);
+      if (
+        selectedIdentity.device.deviceId !== androidControls.target.deviceId ||
+        selectedIdentity.identity.stableIdentity !== androidControls.target.name
+      ) {
+        throw new Error(
+          "Exact Android control selection did not retain the intended stable identity",
+        );
+      }
+      runtimeIdentities.push({
+        phase: `${phase}-exact-target-selection`,
+        ...selectedIdentity.identity,
+      });
+      acquisitionRequests.push({
+        phase: `${phase}-exact-target-selection`,
+        range: "exact",
+        kind: "platform",
+        tool: "getAndroid",
+        request: {
+          avdName: androidControls.target.name,
+          deviceId: androidControls.target.deviceId,
+          enableTools: [...ENABLED_TOOLS],
+        },
+      });
+      await release(selectedSessionUuid, `${phase}-exact-target-selection`);
     } else {
-      for (const devices of [first, second]) {
-        if (
-          !hasDevice(devices, args.target.simulatorName!, args.target.simulatorUdid) ||
-          !hasDevice(devices, args.target.simulatorName!, args.controls.iosSameNameSiblingUdid)
-        ) {
-          throw new Error("Controlled same-display-name iOS sibling was absent from discovery");
-        }
+      iosControls = captureIosControls(first);
+      const reversedControls = captureIosControls(second);
+      if (
+        !sameDevice(iosControls.target, reversedControls.target) ||
+        !sameDevice(iosControls.sibling, reversedControls.sibling)
+      ) {
+        throw new Error("iOS discovery controls changed while proving reversed order");
       }
+      recordControlSnapshot("pre-mutation-reversed-discovery", iosControls);
     }
     recordStep(steps, timer, phase, start, {
       discoveryPasses: discoveryOrders.length,
-      siblingUntouched: true,
+      orderReversed: true,
+      targetPresent: true,
+      siblingPresentAndUntouched: true,
       ...(args.platform === "android"
-        ? { duplicateRejected: true, duplicateSerial: args.controls.androidDuplicateSerial }
+        ? {
+            duplicateRejected: true,
+            duplicateRemoved: true,
+            exactStableTargetSelected: true,
+            duplicateSerial: args.controls.androidDuplicateSerial,
+          }
         : { sameDisplayNameSiblingUuid: args.controls.iosSameNameSiblingUdid }),
     });
   };
@@ -1809,6 +2159,7 @@ export async function runAcceptanceMatrix(
       const preflight = await acquire("preflight-ios-uuid-ownership", "exact", "platform");
       await release(preflight.sessionUuid, "preflight-ios-uuid-ownership");
     }
+    await assertCurrentControls("before-provision");
     const provisionStart = timer.now();
     const provisionClient = await bounded(
       "provision MCP connect",
@@ -1823,20 +2174,26 @@ export async function runAcceptanceMatrix(
     const provisionSessionUuid = stringField(provisionPayload, "sessionUuid", "provisionDevice");
     mint("provision", provisionSessionUuid);
     await verifyReadiness(provisionClient, provisionSessionUuid, "provision");
-    assertProvisionedIdentity(provisionPayload, args);
+    assertProvisionedIdentity(provisionPayload, args, androidControls?.target.deviceId);
     await release(provisionSessionUuid, "provision");
     recordStep(steps, timer, "provision-exact-runtime-device-type-config", provisionStart, {
       sessionUuid: provisionSessionUuid,
       resolvedSpec: asObject(provisionPayload.resolvedSpec, "provisionDevice.resolvedSpec"),
     });
+    await assertCurrentControls("after-provision");
 
     const prepared = await acquire("prepare-stopped", "exact", "platform");
+    await assertCurrentControls("before-target-kill");
     await kill(prepared, "prepare-stopped");
     await release(prepared.sessionUuid, "prepare-stopped");
 
     const stopped = await acquire("acquire-stopped", "exact", "platform");
     assertAndroidTransitionEvidence(prepared, stopped);
+    if (args.platform === "android" && androidControls) {
+      androidControls = { ...androidControls, target: stopped.device };
+    }
     await release(stopped.sessionUuid, "acquire-stopped");
+    await assertCurrentControls("after-target-reacquire");
 
     const genericExact = await acquire("acquire-generic-exact", "exact", "generic");
     await release(genericExact.sessionUuid, "acquire-generic-exact");
@@ -1900,6 +2257,7 @@ export async function runAcceptanceMatrix(
 
     if (args.scenario === "recovery") {
       const restartStart = timer.now();
+      await assertCurrentControls("before-daemon-restart");
       const maintenanceAdmission = await admitMaintenance("daemon restart", "work");
       try {
         await bounded("daemon restart", "work", async (signal) => {
@@ -1917,6 +2275,7 @@ export async function runAcceptanceMatrix(
         maintenanceAdmission: true,
         restartScope: "same-generation",
       });
+      await assertCurrentControls("after-daemon-restart");
 
       const oldSessionStart = timer.now();
       const oldSessionClient = await bounded(
@@ -1946,7 +2305,9 @@ export async function runAcceptanceMatrix(
       });
     }
 
+    await assertCurrentControls("before-host-wide-doctor-repair");
     await exerciseOwnedDoctorRepair();
+    await assertCurrentControls("after-host-wide-doctor-repair");
     const repaired = await acquire("reacquire-after-repair", "exact", "platform");
     await release(repaired.sessionUuid, "reacquire-after-repair");
   } catch (error) {
@@ -2024,6 +2385,7 @@ export async function runAcceptanceMatrix(
     provision: redact(provisionRequest(args), args.operatorKey) as JsonObject,
     acquisitionRequests: redact(acquisitionRequests, args.operatorKey) as JsonObject[],
     runtimeIdentities: redact(runtimeIdentities, args.operatorKey) as JsonObject[],
+    controls: redact(controlSnapshots, args.operatorKey) as JsonObject[],
     checks: {
       stableIdentityPreserved: runtimeIdentities.every(
         (identity) => identity.stableIdentity === targetIdentity(args),
@@ -2032,9 +2394,26 @@ export async function runAcceptanceMatrix(
       allMintedSessionsReleased,
       singleBuildIdentity: true,
       controlledDiscoveryPasses: discoveryOrders.length >= 2,
+      controlledDiscoveryOrderReversed: reversedDiscoveryOrder,
       controlledSiblingUntouched: steps.some(
         (step) => step.name === "controlled-discovery" && step.passed,
       ),
+      destructiveControlChecks: destructiveControlChecks >= (args.scenario === "recovery" ? 8 : 6),
+      ...(args.platform === "android"
+        ? {
+            signedAndroidDuplicateRemoved: steps.some(
+              (step) => step.name === "controlled-discovery" && step.passed,
+            ),
+            exactAndroidControlSelected: runtimeIdentities.some(
+              (identity) =>
+                identity.phase === "controlled-discovery-exact-target-selection" &&
+                identity.stableIdentity === targetIdentity(args),
+            ),
+          }
+        : {
+            exactIosUuidAndSameNameSiblingRetained:
+              destructiveControlChecks >= (args.scenario === "recovery" ? 8 : 6),
+          }),
       androidSerialExposed: args.platform === "android" && androidSerials.length > 0,
       androidSerialChanged:
         args.platform === "android" &&

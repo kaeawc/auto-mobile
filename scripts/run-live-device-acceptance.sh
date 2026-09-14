@@ -132,6 +132,18 @@ for value in "${android_avd_name}" "${android_sibling_avd_name}" "${android_dupl
     exit 2
   fi
 done
+if [[ "${android_avd_name}" == "${android_sibling_avd_name}" ]]; then
+  echo "error: --android-sibling-avd-name must differ from --android-avd-name." >&2
+  exit 2
+fi
+if [[ "${android_duplicate_serial}" == "${android_avd_name}" || "${android_duplicate_serial}" == "${android_sibling_avd_name}" ]]; then
+  echo "error: --android-duplicate-serial must identify a live serial, not an AVD name." >&2
+  exit 2
+fi
+if [[ "${ios_simulator_uuid}" == "${ios_same_name_sibling_uuid}" ]]; then
+  echo "error: --ios-same-name-sibling-uuid must differ from --ios-simulator-uuid." >&2
+  exit 2
+fi
 
 umask 077
 mkdir -p "${evidence_dir}"

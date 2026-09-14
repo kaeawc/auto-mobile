@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,6 +7,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import {
   defaultWriteEvidence,
   parseArgs,
+  recordOwnershipManifest,
   runAcceptanceMatrix,
   type AcceptanceArgs,
   type DaemonSessionClient,
@@ -81,6 +82,10 @@ function createHarness(
     writeFile?: MatrixDependencies["writeFile"];
     activeSessions?: number;
     activeExecutions?: number;
+    reverseDiscoveryOrder?: boolean;
+    keepAndroidDuplicateAfterKill?: boolean;
+    removeAndroidSiblingAfterDuplicateCleanup?: boolean;
+    removeIosSiblingAfterProvision?: boolean;
   } = {},
 ): Harness {
   const calls: ToolCall[] = [];
@@ -94,6 +99,9 @@ function createHarness(
   let listCount = 0;
   let androidDuplicatePresent = true;
   let iosRunnerRestarted = false;
+  let androidTargetSerial = "emulator-5556";
+  let androidSiblingPresent = true;
+  let iosSiblingPresent = true;
 
   const createMcpClient = async (owner: string): Promise<McpSessionClient> => ({
     async callTool(name, arguments_) {
@@ -109,14 +117,20 @@ function createHarness(
                 name: "iPhone 16 Pro",
                 deviceId: IOS_UDID,
               },
-              {
-                platform: "ios",
-                name: "iPhone 16 Pro",
-                deviceId: "00000000-0000-0000-0000-000000000002",
-              },
+              ...(iosSiblingPresent
+                ? [
+                    {
+                      platform: "ios",
+                      name: "iPhone 16 Pro",
+                      deviceId: "00000000-0000-0000-0000-000000000002",
+                    },
+                  ]
+                : []),
             ]
           : [
-              { platform: "android", name: "Pixel_8_Sibling", deviceId: "emulator-5558" },
+              ...(androidSiblingPresent
+                ? [{ platform: "android", name: "Pixel_8_Sibling", deviceId: "emulator-5558" }]
+                : []),
               ...(androidDuplicatePresent
                 ? [
                     {
@@ -126,22 +140,30 @@ function createHarness(
                     },
                   ]
                 : []),
-              { platform: "android", name: "Pixel_8_API_35", deviceId: "emulator-5556" },
+              { platform: "android", name: "Pixel_8_API_35", deviceId: androidTargetSerial },
             ];
         return {
-          structuredContent: { devices: listCount % 2 === 0 ? devices.toReversed() : devices },
+          structuredContent: {
+            devices:
+              options.reverseDiscoveryOrder === false || listCount !== 2
+                ? devices
+                : devices.toReversed(),
+          },
         };
       }
       if (name === "provisionDevice") {
         const device = arguments_.device as Record<string, unknown>;
         const spec = device.spec as Record<string, unknown>;
         const isIos = device.platform === "ios";
+        if (isIos && options.removeIosSiblingAfterProvision) {
+          iosSiblingPresent = false;
+        }
         return {
           structuredContent: {
             sessionUuid: "provision-1",
             device: {
               name: device.name,
-              deviceId: isIos ? IOS_UDID : "emulator-5554",
+              deviceId: isIos ? IOS_UDID : androidTargetSerial,
             },
             resolvedSpec: {
               runtime: spec.runtime,
@@ -179,9 +201,7 @@ function createHarness(
         }
         if (owner === "unrelated-owner") {
           const deviceId =
-            name === "getApple" || arguments_.platform === "ios"
-              ? IOS_UDID
-              : `emulator-${5554 + startCount * 2}`;
+            name === "getApple" || arguments_.platform === "ios" ? IOS_UDID : androidTargetSerial;
           return {
             isError: true,
             structuredContent: { error: options.ownerDiagnostic ?? ownerDiagnostic(deviceId) },
@@ -203,7 +223,16 @@ function createHarness(
             },
           };
         }
-        const port = options.unchangedAndroidIdentity ? 5556 : 5554 + startCount * 2;
+        const requestedDeviceId = arguments_.deviceId;
+        if (typeof requestedDeviceId === "string" && requestedDeviceId !== androidTargetSerial) {
+          return {
+            isError: true,
+            structuredContent: {
+              error: `identity_conflict: expected ${androidTargetSerial}, received ${requestedDeviceId}`,
+            },
+          };
+        }
+        const port = Number(androidTargetSerial.slice("emulator-".length));
         return {
           structuredContent: {
             sessionUuid,
@@ -237,7 +266,10 @@ function createHarness(
       if (name === "killDevice") {
         const device = arguments_.device as Record<string, unknown>;
         if (device.deviceId === "emulator-5554") {
-          androidDuplicatePresent = false;
+          androidDuplicatePresent = options.keepAndroidDuplicateAfterKill ?? false;
+          androidSiblingPresent = !(options.removeAndroidSiblingAfterDuplicateCleanup ?? false);
+        } else if (device.deviceId === androidTargetSerial && !options.unchangedAndroidIdentity) {
+          androidTargetSerial = "emulator-5560";
         }
         return { structuredContent: { killed: true } };
       }
@@ -428,24 +460,26 @@ describe("live device acceptance harness", () => {
       },
     });
     for (const sessionUuid of [
-      "provision-1",
       "start-1",
+      "provision-1",
       "start-2",
       "start-3",
       "start-4",
       "start-5",
       "start-6",
+      "start-7",
     ]) {
       assertReadinessImmediatelyFollowsSuccess(harness, sessionUuid);
     }
     expect(harness.releases).toEqual([
-      "provision-1",
       "start-1",
+      "provision-1",
       "start-2",
       "start-3",
       "start-4",
       "start-5",
       "start-6",
+      "start-7",
     ]);
     expect(evidence.checks).toMatchObject({
       stableIdentityPreserved: true,
@@ -453,8 +487,31 @@ describe("live device acceptance harness", () => {
       androidSerialChanged: true,
       androidConsolePortChanged: true,
       controlledDiscoveryPasses: true,
+      controlledDiscoveryOrderReversed: true,
       controlledSiblingUntouched: true,
+      signedAndroidDuplicateRemoved: true,
+      exactAndroidControlSelected: true,
+      destructiveControlChecks: true,
     });
+    expect(
+      harness.calls.find(
+        (call) =>
+          call.name === "getAndroid" &&
+          call.owner === "controlled-discovery" &&
+          (call.arguments.deviceId as string | undefined) === "emulator-5556",
+      )?.arguments,
+    ).toEqual({
+      avdName: "Pixel_8_API_35",
+      deviceId: "emulator-5556",
+      enableTools: ["observe", "getDeviceState"],
+    });
+    expect(
+      harness.calls.some(
+        (call) =>
+          call.name === "killDevice" &&
+          (call.arguments.device as Record<string, unknown>).deviceId === "emulator-5554",
+      ),
+    ).toBe(true);
     expect(
       harness.calls.some(
         (call) =>
@@ -536,7 +593,10 @@ describe("live device acceptance harness", () => {
       iosRunnerGenerationChanged: true,
       iosRunnerIdentityChanged: true,
       controlledDiscoveryPasses: true,
+      controlledDiscoveryOrderReversed: true,
       controlledSiblingUntouched: true,
+      exactIosUuidAndSameNameSiblingRetained: true,
+      destructiveControlChecks: true,
     });
     const restart = harness.events.indexOf(`ios-runner-restart:${IOS_UDID}`);
     const reacquire = harness.events.indexOf("reacquire-after-ios-runner-restart:getApple");
@@ -566,6 +626,7 @@ describe("live device acceptance harness", () => {
 
   test("rejects iOS runner restart evidence when neither exposed identity changes", async () => {
     const harness = createHarness({ unchangedIosRunnerIdentity: true });
+
     const iosArgs: AcceptanceArgs = {
       ...androidArgs,
       platform: "ios",
@@ -582,6 +643,105 @@ describe("live device acceptance harness", () => {
     expect(harness.events).toContain(`ios-runner-restart:${IOS_UDID}`);
   });
 
+  test("fails before mutation when the public discovery passes do not reverse order", async () => {
+    const harness = createHarness({ reverseDiscoveryOrder: false });
+
+    await expect(runAcceptanceMatrix(androidArgs, harness.dependencies)).rejects.toThrow(
+      "Controlled discovery order was not demonstrably reversed",
+    );
+    expect(harness.calls.some((call) => call.name === "killDevice")).toBe(false);
+    expect(harness.calls.some((call) => call.name === "provisionDevice")).toBe(false);
+  });
+
+  test("fails after signed duplicate cleanup when the duplicate or sibling control is not intact", async () => {
+    const duplicateHarness = createHarness({ keepAndroidDuplicateAfterKill: true });
+
+    await expect(runAcceptanceMatrix(androidArgs, duplicateHarness.dependencies)).rejects.toThrow(
+      "Signed Android duplicate remained after its explicit cleanup",
+    );
+    expect(duplicateHarness.calls.filter((call) => call.name === "killDevice")).toHaveLength(1);
+    expect(duplicateHarness.calls.some((call) => call.name === "provisionDevice")).toBe(false);
+
+    const siblingHarness = createHarness({ removeAndroidSiblingAfterDuplicateCleanup: true });
+    await expect(runAcceptanceMatrix(androidArgs, siblingHarness.dependencies)).rejects.toThrow(
+      "Controlled Android sibling must appear exactly once",
+    );
+    expect(siblingHarness.calls.filter((call) => call.name === "killDevice")).toHaveLength(1);
+    expect(siblingHarness.calls.some((call) => call.name === "provisionDevice")).toBe(false);
+  });
+
+  test("fails when an iOS same-name sibling disappears after a destructive target operation", async () => {
+    const harness = createHarness({ removeIosSiblingAfterProvision: true });
+    const iosArgs: AcceptanceArgs = {
+      ...androidArgs,
+      platform: "ios",
+      target: { simulatorName: "iPhone 16 Pro", simulatorUdid: IOS_UDID },
+      runtime: "iOS 18.0",
+      deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-16-Pro",
+      osVersionRange: { min: "17.0", max: "18.0" },
+      androidConfig: undefined,
+    };
+
+    await expect(runAcceptanceMatrix(iosArgs, harness.dependencies)).rejects.toThrow(
+      "Controlled iOS same-name sibling must appear exactly once",
+    );
+    expect(harness.calls.filter((call) => call.name === "killDevice")).toHaveLength(0);
+    expect(
+      harness.calls.some((call) =>
+        JSON.stringify(call.arguments).includes("00000000-0000-0000-0000-000000000002"),
+      ),
+    ).toBe(false);
+  });
+
+  test("rejects overlapping ownership controls before connecting to a device", async () => {
+    const harness = createHarness();
+
+    await expect(
+      runAcceptanceMatrix(
+        {
+          ...androidArgs,
+          controls: { ...androidArgs.controls, androidSiblingAvdName: "Pixel_8_API_35" },
+        },
+        harness.dependencies,
+      ),
+    ).rejects.toThrow("Android ownership sibling must not use the target AVD name");
+    expect(harness.calls).toHaveLength(0);
+  });
+
+  test("refuses a signed manifest whose platform entries bind different control sets", () => {
+    const directory = mkdtempSync(join(tmpdir(), "automobile-ownership-"));
+    const operatorKeyPath = join(directory, "operator.key");
+    const ownershipManifestPath = join(directory, "ownership.json");
+    writeFileSync(operatorKeyPath, "x".repeat(32));
+    chmodSync(operatorKeyPath, 0o600);
+    try {
+      const androidOwnershipArgs: AcceptanceArgs = {
+        ...androidArgs,
+        operatorKeyPath,
+        ownershipManifestPath,
+        operatorKey: Buffer.from("x".repeat(32)),
+      };
+      recordOwnershipManifest(androidOwnershipArgs);
+      expect(() =>
+        recordOwnershipManifest({
+          ...androidOwnershipArgs,
+          platform: "ios",
+          target: { simulatorName: "iPhone 16 Pro", simulatorUdid: IOS_UDID },
+          runtime: "iOS 18.0",
+          deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-16-Pro",
+          osVersionRange: { min: "17.0", max: "18.0" },
+          androidConfig: undefined,
+          controls: {
+            ...androidArgs.controls,
+            iosSameNameSiblingUdid: "00000000-0000-0000-0000-000000000003",
+          },
+        }),
+      ).toThrow("already binds different discovery controls");
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   test("releases the owned session before maintenance restart and requires the terminal diagnostic", async () => {
     const harness = createHarness();
 
@@ -589,7 +749,7 @@ describe("live device acceptance harness", () => {
 
     const restart = harness.events.indexOf("restart-daemon");
     const oldSession = harness.events.indexOf("old-session:getDeviceState");
-    const release = harness.events.indexOf("release:start-5");
+    const release = harness.events.indexOf("release:start-6");
     expect(release).toBeLessThan(restart);
     expect(restart).toBeLessThan(oldSession);
     expect(harness.events).toContain("reacquire-after-repair:getAndroid");
@@ -629,7 +789,7 @@ describe("live device acceptance harness", () => {
     await expect(
       runAcceptanceMatrix({ ...androidArgs, scenario: "recovery" }, harness.dependencies),
     ).rejects.toThrow("Old session did not return the required terminal diagnostic");
-    expect(harness.releases).toContain("start-5");
+    expect(harness.releases).toContain("start-6");
   });
 
   test("rejects a generic unrelated-owner error instead of the product conflict diagnostic", async () => {
@@ -639,12 +799,13 @@ describe("live device acceptance harness", () => {
       "Unexpected unrelated-owner diagnostic",
     );
     expect(harness.releases).toEqual([
-      "provision-1",
       "start-1",
+      "provision-1",
       "start-2",
       "start-3",
       "start-4",
       "start-5",
+      "start-6",
     ]);
   });
 
@@ -654,7 +815,7 @@ describe("live device acceptance harness", () => {
     await expect(runAcceptanceMatrix(androidArgs, harness.dependencies)).rejects.toThrow(
       "Android serial did not change across the required kill/reacquire transition",
     );
-    expect(harness.releases).toEqual(["provision-1", "start-1", "start-2"]);
+    expect(harness.releases).toEqual(["start-1", "provision-1", "start-2", "start-3"]);
   });
 
   test("requires an exact resolved Android configuration", async () => {
@@ -663,22 +824,22 @@ describe("live device acceptance harness", () => {
     await expect(runAcceptanceMatrix(androidArgs, harness.dependencies)).rejects.toThrow(
       "resolvedSpec.configuration did not exactly match",
     );
-    expect(harness.releases).toEqual(["provision-1"]);
+    expect(harness.releases).toEqual(["start-1", "provision-1"]);
   });
 
   test("releases every minted session before clients close when readiness fails", async () => {
-    const harness = createHarness({ failObserveFor: "start-1" });
+    const harness = createHarness({ failObserveFor: "start-2" });
 
     await expect(runAcceptanceMatrix(androidArgs, harness.dependencies)).rejects.toThrow(
-      "observe failed for start-1",
+      "observe failed for start-2",
     );
 
-    expect(harness.releases).toEqual(["provision-1", "start-1"]);
-    expect(harness.events.indexOf("release:start-1")).toBeLessThan(
+    expect(harness.releases).toEqual(["start-1", "provision-1", "start-2"]);
+    expect(harness.events.indexOf("release:start-2")).toBeLessThan(
       harness.events.findIndex((event) => event.startsWith("close:")),
     );
     expect(harness.events.filter((event) => event.startsWith("close:"))).toHaveLength(4);
-    expect(harness.evidence[0]).not.toContain("start-1");
+    expect(harness.evidence[0]).not.toContain("start-2");
     const evidence = JSON.parse(harness.evidence[0]);
     expect(evidence.checks.readinessObserveThenState).toBe(false);
     expect(evidence.outcome.passed).toBe(false);
@@ -753,7 +914,7 @@ describe("live device acceptance harness", () => {
       "release failed for provision-1",
     );
 
-    expect(harness.releaseAttempts).toEqual(["provision-1", "provision-1"]);
+    expect(harness.releaseAttempts).toEqual(["start-1", "provision-1", "provision-1"]);
     expect(harness.events).toContain("close:daemon");
     expect(harness.events).toContain("close:provision");
     expect(harness.evidence[0]).not.toContain("provision-1");
@@ -792,65 +953,19 @@ describe("live device acceptance harness", () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     let aborted = false;
-    const result = runAcceptanceMatrix(
-      { ...androidArgs, timeoutMs: 100 },
-      {
-        testOnly: true,
-        timer,
-        createMcpClient: async (owner, signal) => {
-          if (owner === "controlled-discovery") {
-            return {
-              callTool: async (name, arguments_) => {
-                if (name === "listDevices") {
-                  return {
-                    structuredContent: {
-                      devices: [
-                        {
-                          platform: "android",
-                          name: "Pixel_8_Sibling",
-                          deviceId: "emulator-5558",
-                        },
-                        {
-                          platform: "android",
-                          name: "Pixel_8_API_35",
-                          deviceId: "emulator-5554",
-                        },
-                        {
-                          platform: "android",
-                          name: "Pixel_8_API_35",
-                          deviceId: "emulator-5556",
-                        },
-                      ],
-                    },
-                  };
-                }
-                if (name === "getAndroid") {
-                  return {
-                    isError: true,
-                    structuredContent: { error: "identity_conflict: emulator-5554" },
-                  };
-                }
-                if (name === "killDevice") {
-                  return { structuredContent: { killed: true } };
-                }
-                throw new Error(`Unexpected controlled tool ${name} ${String(arguments_)}`);
-              },
-              close: async () => {},
-            };
-          }
-          signal.addEventListener("abort", () => {
-            aborted = true;
-          });
-          return await new Promise<McpSessionClient>(() => {});
-        },
-        createDaemonClient: async () => {
-          throw new Error("should not create daemon client");
-        },
-        restartDaemon: async () => {},
-        spawnCli: async () => {},
-        writeFile: async () => {},
-      },
-    );
+    const harness = createHarness();
+    const createMcpClient = harness.dependencies.createMcpClient!;
+    harness.dependencies.timer = timer;
+    harness.dependencies.createMcpClient = async (owner, signal) => {
+      if (owner !== "provision") {
+        return await createMcpClient(owner, signal);
+      }
+      signal.addEventListener("abort", () => {
+        aborted = true;
+      });
+      return await new Promise<McpSessionClient>(() => {});
+    };
+    const result = runAcceptanceMatrix({ ...androidArgs, timeoutMs: 100 }, harness.dependencies);
 
     await expect(
       Promise.race([

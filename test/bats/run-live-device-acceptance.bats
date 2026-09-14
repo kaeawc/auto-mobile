@@ -67,7 +67,8 @@ run_harness() {
     --operator-key-file "${OPERATOR_KEY}" \
     --evidence-dir "${MOCK_BIN}/evidence" \
     --total-timeout-seconds 30 \
-    --platform-timeout-seconds 10
+    --platform-timeout-seconds 10 \
+    "$@"
 }
 
 @test "requires explicit confirmation, opt-in, and test-owned-device acknowledgement" {
@@ -158,4 +159,18 @@ run_harness() {
   [[ "${output}" == *"android full failed"* ]]
   grep -q -- '--platform android' "${COMMAND_LOG}"
   ! grep -q -- '--platform ios' "${COMMAND_LOG}"
+}
+
+@test "rejects overlapping signed controls before build or live-driver invocation" {
+  run_harness --android-sibling-avd-name "acceptance-android"
+
+  [ "${status}" -eq 2 ]
+  [[ "${output}" == *"--android-sibling-avd-name must differ"* ]]
+  [ ! -f "${COMMAND_LOG}" ]
+
+  run_harness --ios-same-name-sibling-uuid "ACCEPTANCE-IOS-UUID"
+
+  [ "${status}" -eq 2 ]
+  [[ "${output}" == *"--ios-same-name-sibling-uuid must differ"* ]]
+  [ ! -f "${COMMAND_LOG}" ]
 }

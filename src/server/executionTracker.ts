@@ -1,6 +1,7 @@
 import { logger } from "../utils/logger";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
+import { errorMessage } from "../utils/describeUnknownError";
 import {
   deviceLostErrorFromCancellationReason,
   isDeviceLostError,
@@ -40,6 +41,8 @@ export interface ExecutionCancellationOptions {
    */
   excludeExecutionId?: string;
 }
+
+export type ExecutionCancellationReason = string | Error;
 
 export interface ActiveExecutionQuery {
   startedAtOrBefore?: number;
@@ -133,7 +136,7 @@ export class ExecutionTracker {
    */
   async cancelSessionExecutions(
     sessionId: string,
-    reason: string = "unspecified",
+    reason: ExecutionCancellationReason = "unspecified",
   ): Promise<number> {
     return this.cancelExecutionsForKey(sessionId, this.sessionExecutions, "sessionId", reason);
   }
@@ -344,7 +347,7 @@ export class ExecutionTracker {
     key: string,
     executionMap: Map<string, Set<string>>,
     label: "sessionId" | "sessionUuid",
-    cancelReason: string = "unspecified",
+    cancelReason: ExecutionCancellationReason = "unspecified",
     options: ExecutionCancellationOptions = {},
   ): Promise<number> {
     return this.cancelExecutionIds(executionMap.get(key), label, key, cancelReason, options);
@@ -354,7 +357,7 @@ export class ExecutionTracker {
     executionIds: Iterable<string> | undefined,
     label: "sessionId" | "sessionUuid" | "deviceSessionUuid",
     key: string,
-    cancelReason: string = "unspecified",
+    cancelReason: ExecutionCancellationReason = "unspecified",
     options: ExecutionCancellationOptions = {},
   ): Promise<number> {
     if (!executionIds) {
@@ -370,7 +373,7 @@ export class ExecutionTracker {
       if (execution.id === options.excludeExecutionId) {
         continue;
       }
-      if (cancelReason.startsWith("device-disconnected:")) {
+      if (typeof cancelReason === "string" && cancelReason.startsWith("device-disconnected:")) {
         // Record the reason on the execution *before* aborting, so the tracker's own
         // authoritative `cancelReason` is set synchronously with the counted cancellation
         // regardless of how the runtime surfaces `signal.reason` (issue #3909). The same
@@ -382,12 +385,15 @@ export class ExecutionTracker {
           rememberDeviceLossAbort(execution.abortController.signal, reasonError);
         }
         execution.abortController.abort(reasonError);
+      } else if (cancelReason instanceof Error) {
+        execution.cancelReason = cancelReason;
+        execution.abortController.abort(cancelReason);
       } else {
         execution.abortController.abort();
       }
       cancelled++;
       logger.info(
-        `[ExecutionTracker] Cancelled execution ${executionId} for ${label}=${key} (tool=${execution.toolName}, reason=${cancelReason})`,
+        `[ExecutionTracker] Cancelled execution ${executionId} for ${label}=${key} (tool=${execution.toolName}, reason=${errorMessage(cancelReason)})`,
       );
     }
 

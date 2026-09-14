@@ -2920,6 +2920,9 @@ export class UnixSocketServer {
           buildId: this.daemonIdentity.build.buildId,
           entryScript: this.daemonIdentity.build.entryScript,
           startedAt: this.identityStartedAt,
+          activeProvisioning: executionTracker.hasActiveToolExecution("provisionDevice", {
+            scope: "global",
+          }),
           releaseVersion: resolveAssetVersion(resolvePinnedVersion()),
           android: {
             ctrlProxy: {

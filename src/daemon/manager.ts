@@ -615,7 +615,11 @@ interface StartupLockHolder {
 export interface DaemonManagerLike {
   status(): Promise<DaemonStatus>;
   start(options?: DaemonOptions): Promise<void>;
-  restart(options?: DaemonOptions): Promise<void>;
+  /**
+   * When `expectedDaemon` is supplied, restart only that verified generation.
+   * A changed generation means another client already completed the handoff.
+   */
+  restart(options?: DaemonOptions, expectedDaemon?: DaemonStatus): Promise<void>;
   waitForReady(
     timeout: number,
     signal?: AbortSignal,
@@ -1769,6 +1773,18 @@ export class DaemonManager implements DaemonManagerLike {
       return;
     }
 
+    await this.stopRunningDaemon(status, timeout);
+  }
+
+  /**
+   * Stop the exact generation already observed by the caller. Keeping this
+   * snapshot through the signal closes the stale-restart gap where a second
+   * status read could target a successor that another client just started.
+   */
+  private async stopRunningDaemon(
+    status: DaemonStatus,
+    timeout: number = DAEMON_SHUTDOWN_TIMEOUT_MS,
+  ): Promise<void> {
     stderrLog(`Stopping daemon (PID ${status.pid})...`);
 
     const pid = status.pid!;
@@ -1977,7 +1993,7 @@ export class DaemonManager implements DaemonManagerLike {
   /**
    * Restart the daemon
    */
-  async restart(options: DaemonOptions = {}): Promise<void> {
+  async restart(options: DaemonOptions = {}, expectedDaemon?: DaemonStatus): Promise<void> {
     stderrLog("Restarting daemon...");
     // A bare `--daemon restart` has no CLI options, but it is commonly used to
     // replace a stale checkout. Preserve the daemon's PID-recorded options so
@@ -2000,6 +2016,22 @@ export class DaemonManager implements DaemonManagerLike {
       ...requestedOptions,
       strictPort: true,
     };
+    if (expectedDaemon && !this.isSameDaemonGeneration(status, expectedDaemon)) {
+      stderrLog("Daemon generation changed before restart; joining the current generation");
+      return;
+    }
+
+    if (expectedDaemon) {
+      if (status.running) {
+        await this.stopRunningDaemon(status);
+      }
+      // Another automatic client may win the shared startup lock during this
+      // handoff. Ordinary start() joins that winner instead of terminating it.
+      await this.timer.sleep(DAEMON_RESTART_HANDOFF_DELAY_MS);
+      await this.start(restartOptions);
+      return;
+    }
+
     // All restart cleanup follows the same 10s graceful + 1s forced-stop
     // budget. Run the PID-recorded daemon and every cross-namespace candidate
     // concurrently so the launcher timeout remains bounded by one cleanup window.
@@ -2019,6 +2051,16 @@ export class DaemonManager implements DaemonManagerLike {
     // Wait a bit before starting
     await this.timer.sleep(DAEMON_RESTART_HANDOFF_DELAY_MS);
     await this.start(restartOptions);
+  }
+
+  private isSameDaemonGeneration(current: DaemonStatus, expected: DaemonStatus): boolean {
+    if (!current.running || !expected.running || current.pid !== expected.pid) {
+      return false;
+    }
+    const identityFields = ["startedAt", "version", "buildId", "entryScript"] as const;
+    return identityFields.every(
+      (field) => expected[field] === undefined || current[field] === expected[field],
+    );
   }
 
   /**

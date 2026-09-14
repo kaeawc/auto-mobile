@@ -32,6 +32,7 @@ import { getCurrentBuildIdentity } from "./buildIdentity";
 import { cleanupDaemonFiles, cleanupDaemonFilesSync, readPidFileDataSync } from "./daemonFiles";
 import { IncumbentOwnerGuard } from "./incumbentOwnerGuard";
 import { executionTracker } from "../server/executionTracker";
+import { DaemonHandoffInterruptionError } from "./daemonHandoffInterruption";
 import { SessionReleaseBroadcaster } from "../server/sessionReleaseBroadcast";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import {
@@ -966,7 +967,11 @@ export class Daemon {
             if (streamableTransport.sessionId) {
               const cancelled = await executionTracker.cancelSessionExecutions(
                 streamableTransport.sessionId,
-                "streamable_http_onclose",
+                this.shutdownInProgress
+                  ? new DaemonHandoffInterruptionError(
+                      "Daemon handoff interrupted the in-flight request. Retry after the replacement daemon becomes ready.",
+                    )
+                  : "streamable_http_onclose",
               );
               this.transports.delete(streamableTransport.sessionId);
               logger.info(
@@ -983,7 +988,11 @@ export class Daemon {
               );
               await executionTracker.cancelSessionExecutions(
                 streamableTransport.sessionId,
-                `streamable_http_onerror: ${detail}`,
+                this.shutdownInProgress
+                  ? new DaemonHandoffInterruptionError(
+                      "Daemon handoff interrupted the in-flight request. Retry after the replacement daemon becomes ready.",
+                    )
+                  : `streamable_http_onerror: ${detail}`,
               );
               this.transports.delete(streamableTransport.sessionId);
             }

@@ -44,6 +44,7 @@ const socketStatusSchema = z.object({
   entryScript: z.string().optional(),
   releaseVersion: z.string().optional(),
   startedAt: z.number().finite().optional(),
+  activeProvisioning: z.boolean().optional(),
 });
 
 /** The server rejected this request before dispatch; retry cannot duplicate work. */

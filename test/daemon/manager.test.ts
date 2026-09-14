@@ -141,6 +141,74 @@ describe("DaemonManager restart", () => {
     // bind-or-fail guard against the port-fallback split-brain.
     expect(startSpy).toHaveBeenCalledWith({ ...recordedOptions, strictPort: true });
   });
+
+  test("conditional restart does not terminate a successor generation", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const successorPid = 1002;
+    const livePids = new Set([successorPid]);
+    const processFinder: DaemonProcessFinder & DaemonProcessLivenessChecker = {
+      findDaemonProcesses: () => [
+        {
+          pid: successorPid,
+          ppid: 1,
+          command: "bun /new/dist/src/index.js --daemon-mode",
+        },
+      ],
+      isProcessRunning: (pid) => livePids.has(pid),
+    };
+    const signaler = new FakeDaemonProcessSignaler((pid, signal) => {
+      if (signal === "SIGTERM") {
+        livePids.delete(pid);
+      }
+    });
+    const manager = new DaemonManager(
+      undefined,
+      undefined,
+      timer,
+      undefined,
+      undefined,
+      undefined,
+      processFinder,
+      undefined,
+      undefined,
+      undefined,
+      signaler,
+      undefined,
+      undefined,
+      undefined,
+      new FakeDaemonPortAvailabilityChecker(),
+    );
+    const successorStatus: DaemonStatus = {
+      running: true,
+      pid: successorPid,
+      startedAt: 200,
+      buildId: "successor-build",
+      entryScript: "/new/dist/src/index.js",
+    };
+    const statusSpy = spyOn(manager, "status").mockResolvedValue(successorStatus);
+    const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
+
+    try {
+      await manager.restart(
+        {},
+        {
+          running: true,
+          pid: 1001,
+          startedAt: 100,
+          buildId: "incumbent-build",
+          entryScript: "/old/dist/src/index.js",
+        },
+      );
+
+      expect(signaler.signals).toEqual([]);
+      expect(startSpy).not.toHaveBeenCalled();
+      expect(livePids).toEqual(new Set([successorPid]));
+    } finally {
+      startSpy.mockRestore();
+      statusSpy.mockRestore();
+    }
+  });
 });
 
 describe("DaemonManager stop", () => {

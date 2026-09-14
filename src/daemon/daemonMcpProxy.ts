@@ -76,12 +76,32 @@ export type BuildMismatchReason = "autoStartDisabled" | "cooldown" | "restartMis
 
 const DAEMON_MCP_HEARTBEAT_INTERVAL_MS = 2_000;
 const COLD_RESOURCE_CONNECT_RETRY_DELAYS_MS = [250, 1_000, 4_000] as const;
+const ACTIVE_PROVISIONING_RESTART_RETRY_MS = 1_000;
 
 /** A transport failed before dispatch, rather than a reconciliation policy gate. */
 class DaemonPreflightConnectionError extends DaemonUnavailableError {
   constructor(readonly cause: DaemonUnavailableError) {
     super(cause.message);
     this.name = "DaemonPreflightConnectionError";
+  }
+}
+
+/**
+ * A compatibility restart was deliberately deferred because terminating the
+ * current generation would interrupt an active device provision.
+ */
+export class DaemonRestartDeferredError extends DaemonUnavailableError {
+  readonly code = "daemon_restart_deferred";
+  readonly retryable = true;
+  readonly retryAfterMs = ACTIVE_PROVISIONING_RESTART_RETRY_MS;
+
+  constructor(reason: string) {
+    super(
+      `AutoMobile daemon restart deferred while provisionDevice is active (${reason}). ` +
+        `Retry after ${ACTIVE_PROVISIONING_RESTART_RETRY_MS}ms; the active device operation ` +
+        "keeps ownership of this daemon generation until it completes.",
+    );
+    this.name = "DaemonRestartDeferredError";
   }
 }
 
@@ -1279,6 +1299,12 @@ export class DaemonMcpProxy {
     return matchesRecord ? { ...recorded, ...actual } : actual;
   }
 
+  private assertAutomaticRestartAllowed(status: DaemonStatus, reason: string): void {
+    if (status.activeProvisioning) {
+      throw new DaemonRestartDeferredError(reason);
+    }
+  }
+
   /** Newer clients may replace older daemons; mismatches remain a pre-dispatch gate. */
   private async ensureVersionMatches(): Promise<void> {
     const status = await this.reconciliationStatus();
@@ -1368,10 +1394,14 @@ export class DaemonMcpProxy {
     logger.info(
       `[DaemonMcpProxy] Daemon version ${runningVersion || "unknown"} differs from MCP server ${this.clientVersion}, restarting daemon`,
     );
+    this.assertAutomaticRestartAllowed(status, "version mismatch");
     // Preserve the running daemon's existing options across the restart rather
     // than resetting to this client's config, which would strip flags the
     // daemon was launched with when the connecting client is bare (issue #3846).
-    await this.daemonManager.restart(mergeDaemonOptions(status.options, this.config.daemonOptions));
+    await this.daemonManager.restart(
+      mergeDaemonOptions(status.options, this.config.daemonOptions),
+      status,
+    );
     this.reconciliationSnapshot = undefined;
     // The replacement daemon may expose a different tool set; drop the cache so we
     // never advertise the old daemon's tools against the new build.
@@ -1475,10 +1505,14 @@ export class DaemonMcpProxy {
     logger.info(
       `[DaemonMcpProxy] Daemon build ${daemonIdentity.buildId} (${daemonIdentity.entryScript || "unknown"}) differs from client build ${this.buildIdentity.buildId} (${this.buildIdentity.entryScript || "unknown"}), restarting daemon`,
     );
+    this.assertAutomaticRestartAllowed(status, "build mismatch");
     // Preserve the running daemon's existing options across the restart rather
     // than resetting to this client's config, which would strip flags the
     // daemon was launched with when the connecting client is bare (issue #3846).
-    await this.daemonManager.restart(mergeDaemonOptions(status.options, this.config.daemonOptions));
+    await this.daemonManager.restart(
+      mergeDaemonOptions(status.options, this.config.daemonOptions),
+      status,
+    );
     this.reconciliationSnapshot = undefined;
     // The replacement daemon may expose a different tool set; drop the cache so we
     // never advertise the old daemon's tools against the new build.
@@ -1537,10 +1571,11 @@ export class DaemonMcpProxy {
     logger.info(
       `[DaemonMcpProxy] Daemon startup options differ (${deficits.join(", ")}), restarting daemon`,
     );
+    this.assertAutomaticRestartAllowed(status, "startup option mismatch");
     // Preserve the running daemon's existing options and add the requested ones
     // so the restart gains the missing flag without stripping any the daemon
     // already had (issue #3846).
-    await this.daemonManager.restart(mergeDaemonOptions(status.options, requested));
+    await this.daemonManager.restart(mergeDaemonOptions(status.options, requested), status);
     this.reconciliationSnapshot = undefined;
     const ready = await this.daemonManager.waitForReady(DAEMON_STARTUP_TIMEOUT_MS);
     if (!ready) {

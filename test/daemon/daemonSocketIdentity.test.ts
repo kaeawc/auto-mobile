@@ -297,7 +297,11 @@ describe("socket-owner daemon preflight", () => {
       async function (name) {
         expect(name).toBe("ide/status");
         declaredIdentity = (this as unknown as { clientIdentity: unknown }).clientIdentity;
-        return { version: "0.0.68", releaseVersion: "0.0.68" };
+        return {
+          version: "0.0.68",
+          releaseVersion: "0.0.68",
+          activeProvisioning: true,
+        };
       },
     );
     try {
@@ -306,6 +310,7 @@ describe("socket-owner daemon preflight", () => {
         running: true,
         version: "0.0.68",
         assetVersion: "0.0.68",
+        activeProvisioning: true,
         socketPath: "/fake.sock",
       });
       expect(declaredIdentity).toBeNull();

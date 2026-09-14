@@ -19,6 +19,7 @@ export class FakeDaemonManager implements DaemonManagerLike {
   restartCalled = false;
   restartCallCount = 0;
   restartOptions: DaemonOptions | undefined;
+  restartExpectedDaemon: DaemonStatus | undefined;
   waitForReadyResult = true;
   waitForReadyCallCount = 0;
   startupLockHeldByLiveProcess = false;
@@ -37,10 +38,11 @@ export class FakeDaemonManager implements DaemonManagerLike {
     this.startOptions = options;
   }
 
-  async restart(options: DaemonOptions = {}): Promise<void> {
+  async restart(options: DaemonOptions = {}, expectedDaemon?: DaemonStatus): Promise<void> {
     this.restartCalled = true;
     this.restartCallCount++;
     this.restartOptions = options;
+    this.restartExpectedDaemon = expectedDaemon;
   }
 
   async waitForReady(_timeout: number): Promise<boolean> {

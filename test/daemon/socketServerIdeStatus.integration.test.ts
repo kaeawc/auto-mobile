@@ -12,6 +12,7 @@ import { AndroidCtrlProxyManager } from "../../src/utils/CtrlProxyManager";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import type { BootedDevice } from "../../src/models";
 import { RELEASE_CHECKSUM_REGISTRY, IOS_CTRL_PROXY_APP_HASH } from "../../src/constants/release";
+import { executionTracker } from "../../src/server/executionTracker";
 
 const SHA256_HEX = /^[0-9a-f]{64}$/;
 
@@ -94,6 +95,19 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
     expect(result.ios.xcTestService.url).toContain(`/${entry.version}/`);
     expect(result.ios.xcTestService.url.endsWith("control-proxy.ipa")).toBe(true);
     expect(result.ios.xcTestService.expectedAppHash).toBe(IOS_CTRL_PROXY_APP_HASH);
+  });
+
+  test("ide/status reports whether provisionDevice is active", async () => {
+    const execution = executionTracker.startExecution("provisionDevice", "provision-transport");
+    try {
+      const active = await sendRequest(socketPath, "ide/status");
+      expect(active.result).toMatchObject({ activeProvisioning: true });
+    } finally {
+      executionTracker.endExecution(execution.id);
+    }
+
+    const idle = await sendRequest(socketPath, "ide/status");
+    expect(idle.result).toMatchObject({ activeProvisioning: false });
   });
 
   test("ide/status reports a concrete releaseVersion, never the 'latest' literal (EC7)", async () => {

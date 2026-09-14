@@ -3,6 +3,7 @@ import { ExecutionTracker, type ExecutionScopeOptions } from "../../src/server/e
 import { DeviceLostError } from "../../src/server/deviceLossOutcome";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { DaemonHandoffInterruptionError } from "../../src/daemon/daemonHandoffInterruption";
 
 describe("ExecutionTracker", function () {
   test("uses injected id generator and timer when starting executions", function () {
@@ -49,6 +50,17 @@ describe("ExecutionTracker", function () {
       new Error("streamable_http_onclose"),
     );
     expect(execution.cancelReason).toBeUndefined();
+  });
+
+  test("preserves a typed daemon handoff cancellation reason", async function () {
+    const tracker = new ExecutionTracker(new FakeTimer(), new FakeIdGenerator(["execution-1"]));
+    const execution = tracker.startExecution("provisionDevice", "session-id");
+    const reason = new DaemonHandoffInterruptionError("daemon shutdown interrupted provisioning");
+
+    await tracker.cancelSessionExecutions("session-id", reason);
+
+    expect(execution.abortController.signal.reason).toBe(reason);
+    expect(execution.cancelReason).toBe(reason);
   });
 
   // #4183 item 5 (A2): src-behavior assertion refiled from the old "cancel leaves session

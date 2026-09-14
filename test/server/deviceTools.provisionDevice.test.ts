@@ -31,6 +31,7 @@ import {
 } from "../../src/utils/virtualDeviceLifecycleCoordinator";
 import { MAX_PROVISION_DEVICE_TIMEOUT_MS } from "../../src/utils/deviceTimeouts";
 import { RunnerReadinessError } from "../../src/utils/RunnerReadinessService";
+import { DaemonHandoffInterruptionError } from "../../src/daemon/daemonHandoffInterruption";
 
 class FakeExactDeviceProvisioner implements ExactDeviceProvisioner {
   readonly requests: ExactDeviceProvisionRequest[] = [];
@@ -1356,6 +1357,69 @@ describe("provisionDevice handler", () => {
         .filter((operation) => operation.startsWith("destroyDevice:")),
     ).toEqual([]);
     expect(await deviceManager.listDeviceImages("android")).toEqual([created.device]);
+  });
+
+  test("keeps a fresh Android AVD and reports a retryable daemon handoff interruption", async () => {
+    const created = provisionedTestDevice("android", true);
+    configureProvisionBootAndTeardown(deviceManager, "android");
+    let provisionCalls = 0;
+    let readinessCalls = 0;
+    setDeviceToolsDependencies({
+      exactDeviceProvisionerFactory: () => ({
+        provision: async (request) => {
+          provisionCalls++;
+          if (provisionCalls === 1) {
+            await request.onBeforeCreate?.();
+            deviceManager.setDeviceImages("android", [created.device]);
+            return created;
+          }
+          return { ...created, created: false };
+        },
+      }),
+      ensureCtrlProxyReady: async () => {
+        readinessCalls++;
+        if (readinessCalls === 1) {
+          throw new DaemonHandoffInterruptionError("daemon shutdown interrupted provisioning");
+        }
+      },
+      idGenerator: new FakeIdGenerator([
+        "attempt-handoff-first",
+        "attempt-handoff-retry",
+        "session-handoff-retry",
+      ]),
+    });
+    registerDeviceTools();
+    const tool = ToolRegistry.getTool("provisionDevice");
+    if (!tool) {
+      throw new Error("provisionDevice not registered");
+    }
+    const args = provisionTestArgs("android", "operation-handoff-fresh-android");
+
+    const failed = JSON.parse(((await tool.handler(args)) as any).content[0].text);
+    expect(failed).toMatchObject({
+      success: false,
+      error: {
+        code: "daemon_handoff_interrupted",
+        retryable: true,
+      },
+    });
+    expect(failed.cleanup).toBeUndefined();
+    expect(
+      deviceManager
+        .getExecutedOperations()
+        .filter((operation) => operation.startsWith("destroyDevice:")),
+    ).toEqual([]);
+    expect(await deviceManager.listDeviceImages("android")).toEqual([created.device]);
+
+    const retried = JSON.parse(((await tool.handler(args)) as any).content[0].text);
+    expect(retried).toMatchObject({
+      operationId: args.operationId,
+      created: true,
+      adopted: false,
+      lifecycleState: "ready",
+      sessionId: "session-handoff-retry",
+    });
+    expect(provisionCalls).toBe(2);
   });
 
   test("cleans up a retried operation's adopted device when the original cleanup failed", async () => {

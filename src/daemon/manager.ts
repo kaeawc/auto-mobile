@@ -51,6 +51,11 @@ import {
 } from "./debugTools";
 import { DaemonClient, type DaemonClientFactory, type DaemonClientLike } from "./client";
 import {
+  DAEMON_PREPARE_RESTART_METHOD,
+  DaemonRestartDeferredError,
+  type DaemonRestartPreparation,
+} from "./daemonRestartAdmission";
+import {
   DaemonSocketReachability,
   type DaemonSocketReachabilityLike,
 } from "./daemonSocketReachability";
@@ -2022,6 +2027,10 @@ export class DaemonManager implements DaemonManagerLike {
     }
 
     if (expectedDaemon) {
+      if (!(await this.prepareDaemonForConditionalRestart(expectedDaemon))) {
+        stderrLog("Daemon generation changed while preparing restart; joining its successor");
+        return;
+      }
       if (status.running) {
         await this.stopRunningDaemon(status);
       }
@@ -2061,6 +2070,49 @@ export class DaemonManager implements DaemonManagerLike {
     return identityFields.every(
       (field) => expected[field] === undefined || current[field] === expected[field],
     );
+  }
+
+  private async prepareDaemonForConditionalRestart(expected: DaemonStatus): Promise<boolean> {
+    const client = this.createClient();
+    try {
+      await client.connect();
+      const result: unknown = await client.callDaemonMethod(DAEMON_PREPARE_RESTART_METHOD, {
+        pid: expected.pid,
+        startedAt: expected.startedAt,
+        version: expected.version,
+        buildId: expected.buildId,
+        entryScript: expected.entryScript,
+      });
+      if (!result || typeof result !== "object") {
+        throw new DaemonRestartDeferredError(
+          "the daemon returned no safe-restart admission result",
+        );
+      }
+      const preparation = result as Partial<DaemonRestartPreparation>;
+      if (preparation.accepted === true) {
+        return true;
+      }
+      if (preparation.accepted === false && preparation.reason === "generation_changed") {
+        return false;
+      }
+      if (preparation.accepted === false && preparation.reason === "active_provisioning") {
+        throw new DaemonRestartDeferredError("provisionDevice is active");
+      }
+      throw new DaemonRestartDeferredError(
+        "the daemon returned an unrecognized safe-restart admission result",
+      );
+    } catch (error) {
+      if (error instanceof DaemonRestartDeferredError) {
+        throw error;
+      }
+      // Older daemon generations do not implement atomic restart admission.
+      // Fail closed: an explicit operator restart remains available.
+      throw new DaemonRestartDeferredError(
+        `safe-restart admission is unavailable: ${errorMessage(error)}`,
+      );
+    } finally {
+      await client.close();
+    }
   }
 
   /**

@@ -5891,6 +5891,19 @@ export function registerDeviceTools() {
       return createProvisionDeviceResponse(result);
     } catch (error) {
       const cancelledOperation = releaseProvisionDeviceWaiter(args.operationId, operation, error);
+      if (error instanceof DaemonHandoffInterruptionError) {
+        if (cancelledOperation) {
+          // The replacement daemon may replay this operation immediately.
+          // Wait until the fenced attempt has persisted its retryable terminal
+          // state, so replay cannot observe a stale "running" row.
+          await operation.promise.catch(() => {});
+        }
+        logger.warn(
+          `[DeviceTools] provisionDevice ${args.operationId} interrupted by daemon handoff: ${errorMessage(error)}`,
+          error,
+        );
+        return provisionDeviceErrorResponse(error);
+      }
       if (isProvisionDeviceCallerAbort(error, signal)) {
         // The caller went away, which is not a provisioning failure: report it
         // with a code of its own, and say whether the operation is still

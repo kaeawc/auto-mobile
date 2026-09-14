@@ -64,6 +64,9 @@ import {
 } from "./buildIdentity";
 import { DeviceControlTransportError } from "./deviceControlTransportFailure";
 import { getStaticToolDefinitions } from "./staticToolDefinitions";
+import { DaemonRestartDeferredError } from "./daemonRestartAdmission";
+
+export { DaemonRestartDeferredError } from "./daemonRestartAdmission";
 
 export type VersionMismatchReason =
   | "autoStartDisabled"
@@ -76,32 +79,12 @@ export type BuildMismatchReason = "autoStartDisabled" | "cooldown" | "restartMis
 
 const DAEMON_MCP_HEARTBEAT_INTERVAL_MS = 2_000;
 const COLD_RESOURCE_CONNECT_RETRY_DELAYS_MS = [250, 1_000, 4_000] as const;
-const ACTIVE_PROVISIONING_RESTART_RETRY_MS = 1_000;
 
 /** A transport failed before dispatch, rather than a reconciliation policy gate. */
 class DaemonPreflightConnectionError extends DaemonUnavailableError {
   constructor(readonly cause: DaemonUnavailableError) {
     super(cause.message);
     this.name = "DaemonPreflightConnectionError";
-  }
-}
-
-/**
- * A compatibility restart was deliberately deferred because terminating the
- * current generation would interrupt an active device provision.
- */
-export class DaemonRestartDeferredError extends DaemonUnavailableError {
-  readonly code = "daemon_restart_deferred";
-  readonly retryable = true;
-  readonly retryAfterMs = ACTIVE_PROVISIONING_RESTART_RETRY_MS;
-
-  constructor(reason: string) {
-    super(
-      `AutoMobile daemon restart deferred while provisionDevice is active (${reason}). ` +
-        `Retry after ${ACTIVE_PROVISIONING_RESTART_RETRY_MS}ms; the active device operation ` +
-        "keeps ownership of this daemon generation until it completes.",
-    );
-    this.name = "DaemonRestartDeferredError";
   }
 }
 

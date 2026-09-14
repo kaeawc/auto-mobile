@@ -1364,6 +1364,7 @@ describe("provisionDevice handler", () => {
     configureProvisionBootAndTeardown(deviceManager, "android");
     let provisionCalls = 0;
     let readinessCalls = 0;
+    const readinessStarted = Promise.withResolvers<void>();
     setDeviceToolsDependencies({
       exactDeviceProvisionerFactory: () => ({
         provision: async (request) => {
@@ -1376,10 +1377,18 @@ describe("provisionDevice handler", () => {
           return { ...created, created: false };
         },
       }),
-      ensureCtrlProxyReady: async () => {
+      ensureCtrlProxyReady: async (request) => {
         readinessCalls++;
         if (readinessCalls === 1) {
-          throw new DaemonHandoffInterruptionError("daemon shutdown interrupted provisioning");
+          readinessStarted.resolve();
+          await new Promise<never>((_resolve, reject) => {
+            const rejectForAbort = () => reject(request.signal?.reason);
+            if (request.signal?.aborted) {
+              rejectForAbort();
+              return;
+            }
+            request.signal?.addEventListener("abort", rejectForAbort, { once: true });
+          });
         }
       },
       idGenerator: new FakeIdGenerator([
@@ -1394,8 +1403,14 @@ describe("provisionDevice handler", () => {
       throw new Error("provisionDevice not registered");
     }
     const args = provisionTestArgs("android", "operation-handoff-fresh-android");
+    const requestController = new AbortController();
+    const first = tool.handler(args, undefined, requestController.signal);
+    await readinessStarted.promise;
+    requestController.abort(
+      new DaemonHandoffInterruptionError("daemon shutdown interrupted provisioning"),
+    );
 
-    const failed = JSON.parse(((await tool.handler(args)) as any).content[0].text);
+    const failed = JSON.parse(((await first) as any).content[0].text);
     expect(failed).toMatchObject({
       success: false,
       error: {

@@ -63,6 +63,25 @@ describe("ExecutionTracker", function () {
     expect(execution.cancelReason).toBe(reason);
   });
 
+  test("atomically fences provisionDevice admission for a prepared restart", function () {
+    const timer = new FakeTimer();
+    const tracker = new ExecutionTracker(
+      timer,
+      new FakeIdGenerator(["active-provision", "after-lease"]),
+    );
+    const active = tracker.startExecution("provisionDevice", "active-session");
+
+    expect(tracker.prepareForDaemonRestart()).toBe(false);
+    tracker.endExecution(active.id);
+    expect(tracker.prepareForDaemonRestart()).toBe(true);
+    expect(() => tracker.startExecution("provisionDevice", "blocked-session")).toThrow(
+      "Daemon restart is pending",
+    );
+
+    timer.advanceTime(5_000);
+    expect(tracker.startExecution("provisionDevice", "after-lease").id).toBe("after-lease");
+  });
+
   // #4183 item 5 (A2): src-behavior assertion refiled from the old "cancel leaves session
   // active" test. Cancelling aborts the in-flight AbortController but must NOT remove the
   // execution from the tracker — only endExecution() tears down the session bookkeeping.

@@ -14,6 +14,7 @@ import { SessionToolBinding } from "./SessionToolBinding";
 import { SessionReleaseBroadcaster } from "./sessionReleaseBroadcast";
 import { DaemonSessionCreationRejectedError, TerminalSessionError } from "../daemon/sessionManager";
 import { daemonShuttingDownMcpOutcome } from "../daemon/daemonShutdownOutcome";
+import { DaemonRestartPendingError } from "../daemon/daemonRestartAdmission";
 import { resolveDirectSessionDevice, unregisterDirectSession } from "./directSessionDeviceRegistry";
 import {
   INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
@@ -1025,12 +1026,31 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         ? routingBaseSessionUuid
         : routingSessionUuid;
     const executionSessionId = requestMcpSessionId ?? sessionId;
-    const execution = executionTracker.startExecution(
-      name,
-      executionSessionId,
-      executionSessionUuid,
-      sessionId,
-    );
+    let execution: ReturnType<typeof executionTracker.startExecution>;
+    try {
+      execution = executionTracker.startExecution(
+        name,
+        executionSessionId,
+        executionSessionUuid,
+        sessionId,
+      );
+    } catch (error) {
+      if (error instanceof DaemonRestartPendingError) {
+        const pending = {
+          error: {
+            code: error.code,
+            message: error.message,
+            retryable: error.retryable,
+          },
+        };
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(pending) }],
+          structuredContent: pending,
+          isError: true,
+        };
+      }
+      throw error;
+    }
     if (resolvedImplicitAutolockSessionUuid) {
       // Routing resolved before ToolRegistry, so retain its implicit-session
       // tracking here without following later changes to the socket's default.

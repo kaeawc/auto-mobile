@@ -13,6 +13,7 @@ import { PlatformDeviceManagerFactory } from "../../src/utils/factories/Platform
 import type { BootedDevice } from "../../src/models";
 import { RELEASE_CHECKSUM_REGISTRY, IOS_CTRL_PROXY_APP_HASH } from "../../src/constants/release";
 import { executionTracker } from "../../src/server/executionTracker";
+import { DAEMON_PREPARE_RESTART_METHOD } from "../../src/daemon/daemonRestartAdmission";
 
 const SHA256_HEX = /^[0-9a-f]{64}$/;
 
@@ -99,15 +100,28 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
 
   test("ide/status reports whether provisionDevice is active", async () => {
     const execution = executionTracker.startExecution("provisionDevice", "provision-transport");
+    let activeStatus: Record<string, unknown>;
     try {
       const active = await sendRequest(socketPath, "ide/status");
       expect(active.result).toMatchObject({ activeProvisioning: true });
+      activeStatus = active.result!;
+      const rejected = await sendRequest(socketPath, DAEMON_PREPARE_RESTART_METHOD, activeStatus);
+      expect(rejected.result).toEqual({
+        accepted: false,
+        reason: "active_provisioning",
+      });
     } finally {
       executionTracker.endExecution(execution.id);
     }
 
     const idle = await sendRequest(socketPath, "ide/status");
     expect(idle.result).toMatchObject({ activeProvisioning: false });
+    try {
+      const accepted = await sendRequest(socketPath, DAEMON_PREPARE_RESTART_METHOD, idle.result);
+      expect(accepted.result).toEqual({ accepted: true });
+    } finally {
+      executionTracker.clearDaemonRestartPreparation();
+    }
   });
 
   test("ide/status reports a concrete releaseVersion, never the 'latest' literal (EC7)", async () => {

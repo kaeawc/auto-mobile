@@ -7,6 +7,10 @@ import {
   isDeviceLostError,
   rememberDeviceLossAbort,
 } from "./deviceLossOutcome";
+import {
+  DAEMON_RESTART_ADMISSION_LEASE_MS,
+  DaemonRestartPendingError,
+} from "../daemon/daemonRestartAdmission";
 
 interface ActiveExecution {
   id: string;
@@ -57,6 +61,7 @@ export class ExecutionTracker {
   private executionEndListeners = new Set<() => void>();
   private timer: Timer;
   private idGenerator: IdGenerator;
+  private daemonRestartAdmissionDeadlineMs = 0;
 
   constructor(timer: Timer = defaultTimer, idGenerator: IdGenerator = defaultIdGenerator) {
     this.timer = timer;
@@ -69,6 +74,9 @@ export class ExecutionTracker {
     sessionUuid?: string,
     transportSessionId?: string,
   ): ActiveExecution {
+    if (toolName === "provisionDevice" && this.isDaemonRestartPrepared()) {
+      throw new DaemonRestartPendingError();
+    }
     const id = this.idGenerator.next();
     const execution: ActiveExecution = {
       id,
@@ -97,6 +105,26 @@ export class ExecutionTracker {
     }
 
     return execution;
+  }
+
+  /**
+   * Atomically fence new provisionDevice admission if none is active. The
+   * short lease self-expires if the requesting manager dies before signaling.
+   */
+  prepareForDaemonRestart(): boolean {
+    if (this.hasActiveToolExecutionGlobal("provisionDevice")) {
+      return false;
+    }
+    this.daemonRestartAdmissionDeadlineMs = this.timer.now() + DAEMON_RESTART_ADMISSION_LEASE_MS;
+    return true;
+  }
+
+  clearDaemonRestartPreparation(): void {
+    this.daemonRestartAdmissionDeadlineMs = 0;
+  }
+
+  private isDaemonRestartPrepared(): boolean {
+    return this.timer.now() < this.daemonRestartAdmissionDeadlineMs;
   }
 
   endExecution(executionId: string): void {

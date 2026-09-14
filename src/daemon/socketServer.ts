@@ -130,6 +130,10 @@ import type {
 import type { DeviceService } from "../features/observe/DeviceService";
 import { executionTracker } from "../server/executionTracker";
 import {
+  DAEMON_PREPARE_RESTART_METHOD,
+  type DaemonRestartPreparation,
+} from "./daemonRestartAdmission";
+import {
   DEVICE_CONTROL_TRANSPORT_FAILURE_CODE,
   DeviceControlTransportError,
   deviceControlToolName,
@@ -2909,6 +2913,32 @@ export class UnixSocketServer {
       }
       case "ide/ping": {
         return { ok: true, timestamp: this.timer.now() };
+      }
+      case DAEMON_PREPARE_RESTART_METHOD: {
+        const expected = request.params as {
+          pid?: number;
+          startedAt?: number;
+          version?: string;
+          buildId?: string;
+          entryScript?: string;
+        };
+        const generationMatches =
+          expected.pid === process.pid &&
+          expected.startedAt === this.identityStartedAt &&
+          expected.version === this.daemonIdentity.version &&
+          expected.buildId === this.daemonIdentity.build.buildId &&
+          expected.entryScript === this.daemonIdentity.build.entryScript;
+        if (!generationMatches) {
+          return {
+            accepted: false,
+            reason: "generation_changed",
+          } satisfies DaemonRestartPreparation;
+        }
+        const accepted = executionTracker.prepareForDaemonRestart();
+        return {
+          accepted,
+          ...(accepted ? {} : { reason: "active_provisioning" as const }),
+        } satisfies DaemonRestartPreparation;
       }
       case "ide/status": {
         return {

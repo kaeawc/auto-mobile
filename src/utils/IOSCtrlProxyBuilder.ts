@@ -9,6 +9,7 @@ import {
   IOS_CTRL_PROXY_APP_HASH,
   LATEST_RELEASE_VERSION,
   assertHttpsAssetUrl,
+  findReleaseByRunnerSha256,
   isExplicitPin,
   isPinnedVersionKnown,
   resolveAssetVersion,
@@ -146,6 +147,27 @@ export type PrefetchBuilder = Pick<
   "needsRebuild" | "getBuildProductsPath" | "getXctestrunPath" | "build"
 >;
 
+/**
+ * Pre-launch runner hash mismatch explained by a stale cache rather than a
+ * binary swap (#7032): the extracted runner still hashes to a PREVIOUS
+ * release's `runnerSha256`, or the startup prefetch that replaces it is still
+ * in flight. Launch is still refused, but callers (the daemon's startup iOS
+ * init) treat it as "defer to the first tool call" instead of a tampering
+ * incident. `cachedVersion` is null when only the in-flight prefetch explains
+ * the mismatch (the on-disk hash is not in the registry, e.g. a nightly).
+ */
+export class CtrlProxyStaleRunnerCacheError extends ActionableError {
+  constructor(
+    public readonly cachedVersion: string | null,
+    public readonly expectedVersion: string,
+  ) {
+    super(
+      `cached CtrlProxy runner is from ${cachedVersion ?? "an earlier release"}; ` +
+        `waiting for the ${expectedVersion} bundle`,
+    );
+  }
+}
+
 type IOSCtrlProxyPlatform = "simulator" | "device";
 
 type IOSCtrlProxyBundleMetadata = {
@@ -190,6 +212,9 @@ export class IOSCtrlProxyBuilder {
 
   // Build state
   private static prefetchPromise: Promise<CtrlProxyIosBuildResult | null> | null = null;
+  // True from prefetchBuild() until its promise settles (#7032); pendingPrefetch()
+  // exposes the promise only in that window.
+  private static prefetchInFlight = false;
   private static prefetchResult: CtrlProxyIosBuildResult | null = null;
   private static prefetchError: Error | null = null;
   private static expectedChecksumOverride: string | null = null;
@@ -298,6 +323,7 @@ export class IOSCtrlProxyBuilder {
   public static resetInstances(): void {
     IOSCtrlProxyBuilder.instances.clear();
     IOSCtrlProxyBuilder.prefetchPromise = null;
+    IOSCtrlProxyBuilder.prefetchInFlight = false;
     IOSCtrlProxyBuilder.prefetchResult = null;
     IOSCtrlProxyBuilder.prefetchError = null;
     IOSCtrlProxyBuilder.expectedChecksumOverride = null;
@@ -736,6 +762,7 @@ export class IOSCtrlProxyBuilder {
     logger.info("[IOSCtrlProxyBuilder] Starting download prefetch");
     const startTime = IOSCtrlProxyBuilder.timer.now();
 
+    IOSCtrlProxyBuilder.prefetchInFlight = true;
     IOSCtrlProxyBuilder.prefetchPromise = IOSCtrlProxyBuilder.doPrefetch()
       .then((result) => {
         const duration = IOSCtrlProxyBuilder.timer.now() - startTime;
@@ -759,8 +786,23 @@ export class IOSCtrlProxyBuilder {
           error: IOSCtrlProxyBuilder.prefetchError.message,
         });
         return null;
+      })
+      .finally(() => {
+        IOSCtrlProxyBuilder.prefetchInFlight = false;
       });
     return IOSCtrlProxyBuilder.prefetchPromise;
+  }
+
+  /**
+   * The in-flight startup prefetch, or null when none was started or it has
+   * already settled (#7032). Startup iOS init awaits this under its per-device
+   * budget so it never verifies the runner the prefetch is concurrently
+   * replacing; the pre-launch hash gate uses it to classify a mismatch as a
+   * stale cache. Always resolves (never rejects): `prefetchBuild` records
+   * failures via {@link getPrefetchError} and resolves null.
+   */
+  public static pendingPrefetch(): Promise<CtrlProxyIosBuildResult | null> | null {
+    return IOSCtrlProxyBuilder.prefetchInFlight ? IOSCtrlProxyBuilder.prefetchPromise : null;
   }
 
   /**
@@ -1328,6 +1370,16 @@ export class IOSCtrlProxyBuilder {
     }
     const { checksum } = await this.downloader.computeFileSha256(runnerBinaryPath);
     if (checksum.toLowerCase() !== expectedRunnerSha256.toLowerCase()) {
+      if (phase === "pre-launch") {
+        const staleCache = this.classifyStaleRunnerCache(checksum);
+        if (staleCache) {
+          logger.info(
+            `[IOSCtrlProxyBuilder] Runner binary SHA256 mismatch (pre-launch) for ${platform} ` +
+              `explained by a stale cache: ${staleCache.message}`,
+          );
+          throw staleCache;
+        }
+      }
       throw new ActionableError(
         `CtrlProxy runner binary SHA256 mismatch (${phase}) for ${platform}. ` +
           `Expected: ${expectedRunnerSha256}, Got: ${checksum}. Refusing to launch a runner whose ` +
@@ -1338,6 +1390,26 @@ export class IOSCtrlProxyBuilder {
       platform,
       checksum,
     });
+  }
+
+  /**
+   * Explain a pre-launch runner hash mismatch as a stale cache (#7032) when the
+   * observed hash is a previous registry entry's `runnerSha256` (the extracted
+   * runner is simply one release old), or when the startup prefetch that
+   * replaces the extracted runner is still in flight. Returns null when the
+   * hash matches no known release and nothing is replacing it, so the caller
+   * keeps the fail-closed tampering refusal (issue #4759).
+   */
+  private classifyStaleRunnerCache(observedSha256: string): CtrlProxyStaleRunnerCacheError | null {
+    const expectedVersion = resolveAssetVersion(resolvePinnedVersion());
+    const knownRelease = findReleaseByRunnerSha256(observedSha256);
+    if (knownRelease && knownRelease.version !== expectedVersion) {
+      return new CtrlProxyStaleRunnerCacheError(knownRelease.version, expectedVersion);
+    }
+    if (IOSCtrlProxyBuilder.pendingPrefetch() !== null) {
+      return new CtrlProxyStaleRunnerCacheError(null, expectedVersion);
+    }
+    return null;
   }
 
   /** Whether the {@link IOS_CTRL_PROXY_USE_LOCAL_BUILD_ENV} switch is active (#5561). */

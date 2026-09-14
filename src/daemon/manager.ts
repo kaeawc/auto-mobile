@@ -632,6 +632,13 @@ export interface DaemonManagerLike {
   status(): Promise<DaemonStatus>;
   start(options?: DaemonOptions): Promise<DaemonStartResult>;
   /**
+   * Recover a control socket that has already failed health/protocol checks.
+   * The manager owns the lifecycle lock while it rechecks the socket owner and,
+   * only when that check remains unhealthy, escalates to verified daemon-mode
+   * process cleanup and a strict-port replacement.
+   */
+  recoverControlState(options?: DaemonOptions): Promise<DaemonRestartResult>;
+  /**
    * When `expectedDaemon` is supplied, restart only that verified generation.
    * A changed generation means another client already completed the handoff.
    */
@@ -699,6 +706,7 @@ export class DaemonManager implements DaemonManagerLike {
    * and injectable so a test can drive the probe outcome without a real socket.
    */
   private readonly peerSocketReachability: DaemonSocketReachabilityLike;
+  private readonly daemonProtocolHealthProbe: () => Promise<boolean>;
   private readonly launchCommandResolver: (() => DaemonLaunchCommand) | undefined;
   private heldLockLogPath: string | undefined;
   /**
@@ -739,6 +747,7 @@ export class DaemonManager implements DaemonManagerLike {
     platformOverride: NodeJS.Platform = process.platform,
     portAvailabilityChecker: DaemonPortAvailabilityChecker = new NetDaemonPortAvailabilityChecker(),
     retryExecutor: RetryExecutor = new DefaultRetryExecutor(timer),
+    daemonProtocolHealthProbe: (() => Promise<boolean>) | undefined = undefined,
   ) {
     this.platform = platformOverride;
     this.portAvailabilityChecker = portAvailabilityChecker;
@@ -782,6 +791,19 @@ export class DaemonManager implements DaemonManagerLike {
       clientFactory ??
       ((options) =>
         new DaemonClient(this.socketPath, undefined, timer, {}, options?.clientIdentity));
+    this.daemonProtocolHealthProbe =
+      daemonProtocolHealthProbe ??
+      (async () => {
+        try {
+          await new DaemonClient(this.socketPath, undefined, this.timer).getDaemonStatus();
+          return true;
+        } catch (error) {
+          // A failed status probe is the explicit repair precondition, not a
+          // lifecycle failure in its own right.
+          logger.debug(`Daemon control-state protocol probe failed: ${errorMessage(error)}`);
+          return false;
+        }
+      });
   }
 
   /**
@@ -1800,6 +1822,48 @@ export class DaemonManager implements DaemonManagerLike {
     }
 
     await this.stopRunningDaemon(status, timeout);
+  }
+
+  /**
+   * Recover a previously-unusable daemon control socket. Unlike a general
+   * `restart()`, this takes the namespace startup lock *before* deciding
+   * whether to stop anything, then makes a fresh protocol probe while holding
+   * it. A concurrent recovery/start therefore publishes a healthy successor
+   * that this call joins instead of deleting its socket or terminating it.
+   *
+   * This is deliberately invoked only by the explicit doctor repair flow after
+   * the initial health check failed. It still stops only processes whose current
+   * command line identifies them as AutoMobile daemon-mode processes, never a
+   * PID named solely by stale control metadata.
+   */
+  async recoverControlState(options: DaemonOptions = {}): Promise<DaemonRestartResult> {
+    if (!this.acquireLock()) {
+      return restartResultFromStart(await this.start(options));
+    }
+
+    try {
+      if (await this.daemonProtocolHealthProbe()) {
+        stderrLog("Daemon became healthy during control-state recovery; joining it.");
+        return "joined";
+      }
+
+      const candidates = this.findLiveDaemonProcesses();
+      if (candidates.length > 0) {
+        stderrLog(
+          `Repair force-stopping ${candidates.length} verified unusable AutoMobile daemon candidate(s)...`,
+        );
+        await this.awaitRestartCleanup(
+          candidates.map((pid) => () => this.stopUnrecordedDaemonProcess(pid)),
+        );
+      }
+
+      const recoveryOptions: DaemonOptions = { ...options, strictPort: true };
+      await this.assertNoSurvivingDaemonBeforeRestart(recoveryOptions);
+      await this.timer.sleep(DAEMON_RESTART_HANDOFF_DELAY_MS);
+      return restartResultFromStart(await this.startUnlocked(recoveryOptions));
+    } finally {
+      this.releaseLock();
+    }
   }
 
   /**

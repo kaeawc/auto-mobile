@@ -35,11 +35,11 @@ export interface DaemonRecoveryResult {
 export interface DaemonRecoveryDependencies {
   getHealthReport?: () => Promise<DaemonHealthReport>;
   /**
-   * This is the deliberate recovery escalation. DaemonManager.restart() already
-   * verifies daemon-mode process identity before signalling and serializes the
-   * replacement startup through the shared lifecycle lock.
+   * This is the deliberate recovery escalation. DaemonManager acquires the
+   * lifecycle lock, rechecks protocol ownership, then stops only verified
+   * daemon-mode processes before starting a strict-port replacement.
    */
-  restart?: () => Promise<DaemonRestartResult>;
+  recoverControlState?: () => Promise<DaemonRestartResult>;
   /**
    * A successful MCP tools/list round trip verifies the socket protocol and,
    * through DaemonMcpProxy, the daemon's version and build identity.
@@ -125,7 +125,7 @@ type FinalHealthAttempt =
 interface ResolvedRecoveryDependencies {
   timer: Timer;
   getHealthReport: () => Promise<DaemonHealthReport>;
-  restart: () => Promise<DaemonRestartResult>;
+  recoverControlState: () => Promise<DaemonRestartResult>;
   verifyProtocol: () => Promise<void>;
 }
 
@@ -135,7 +135,8 @@ function resolveRecoveryDependencies(
   return {
     timer: dependencies.timer ?? defaultTimer,
     getHealthReport: dependencies.getHealthReport ?? getDaemonHealthReport,
-    restart: dependencies.restart ?? (() => new DaemonManager().restart()),
+    recoverControlState:
+      dependencies.recoverControlState ?? (() => new DaemonManager().recoverControlState()),
     verifyProtocol: dependencies.verifyProtocol ?? verifyDaemonProtocol,
   };
 }
@@ -157,19 +158,19 @@ async function recoverUnusableSocket(
   before: DaemonHealthReport,
   deadline: number,
   timer: Timer,
-  restart: () => Promise<DaemonRestartResult>,
+  recoverControlState: () => Promise<DaemonRestartResult>,
 ): Promise<RecoveryAttempt<DaemonRecoveryAction>> {
   if (before.socketConnectable) {
     return { ok: true, value: "joined" };
   }
-  return await attemptRecoveryStep("recovery", deadline, timer, restart);
+  return await attemptRecoveryStep("recovery", deadline, timer, recoverControlState);
 }
 
 async function verifyProtocolWithRecovery(
   initialAction: DaemonRecoveryAction,
   deadline: number,
   timer: Timer,
-  restart: () => Promise<DaemonRestartResult>,
+  recoverControlState: () => Promise<DaemonRestartResult>,
   verifyProtocol: () => Promise<void>,
 ): Promise<ProtocolRecoveryAttempt> {
   const initialVerification = await attemptRecoveryStep(
@@ -184,7 +185,7 @@ async function verifyProtocolWithRecovery(
       : { ok: false, phase: "verification", error: initialVerification.error };
   }
 
-  const restartResult = await attemptRecoveryStep("recovery", deadline, timer, restart);
+  const restartResult = await attemptRecoveryStep("recovery", deadline, timer, recoverControlState);
   if (!restartResult.ok) {
     return { ok: false, phase: "recovery", error: restartResult.error };
   }
@@ -235,7 +236,7 @@ export async function repairDaemon(
     );
   }
 
-  const { timer, getHealthReport, restart, verifyProtocol } =
+  const { timer, getHealthReport, recoverControlState, verifyProtocol } =
     resolveRecoveryDependencies(dependencies);
   const deadline = timer.now() + timeoutMs;
   const diagnosis = await attemptRecoveryStep("diagnosis", deadline, timer, getHealthReport);
@@ -244,7 +245,7 @@ export async function repairDaemon(
   }
   const before = diagnosis.value;
 
-  const socketRecovery = await recoverUnusableSocket(before, deadline, timer, restart);
+  const socketRecovery = await recoverUnusableSocket(before, deadline, timer, recoverControlState);
   if (!socketRecovery.ok) {
     return failedRecovery("recovery", action, socketRecovery.error, before);
   }
@@ -256,7 +257,7 @@ export async function repairDaemon(
     socketRecovery.value,
     deadline,
     timer,
-    restart,
+    recoverControlState,
     verifyProtocol,
   );
   if (!protocolRecovery.ok) {

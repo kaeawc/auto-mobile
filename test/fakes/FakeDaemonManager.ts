@@ -20,6 +20,10 @@ export class FakeDaemonManager implements DaemonManagerLike {
   startCalled = false;
   startCallCount = 0;
   startOptions: DaemonOptions | undefined;
+  recoverControlStateCalled = false;
+  recoverControlStateCallCount = 0;
+  recoverControlStateOptions: DaemonOptions | undefined;
+  recoverControlStateResult: DaemonRestartResult = "restarted";
   restartCalled = false;
   restartCallCount = 0;
   restartOptions: DaemonOptions | undefined;
@@ -42,6 +46,13 @@ export class FakeDaemonManager implements DaemonManagerLike {
     this.startCallCount++;
     this.startOptions = options;
     return "started";
+  }
+
+  async recoverControlState(options: DaemonOptions = {}): Promise<DaemonRestartResult> {
+    this.recoverControlStateCalled = true;
+    this.recoverControlStateCallCount++;
+    this.recoverControlStateOptions = options;
+    return this.recoverControlStateResult;
   }
 
   async restart(

@@ -28,7 +28,7 @@ function dependencies(
 ): DaemonRecoveryDependencies {
   return {
     getHealthReport: async () => reports.shift() ?? healthReport(true),
-    restart: async () => "restarted",
+    recoverControlState: async () => "restarted",
     verifyProtocol: async () => {},
     ...overrides,
   };
@@ -40,7 +40,7 @@ describe("repairDaemon", () => {
     const result = await repairDaemon(
       {},
       dependencies([healthReport(true), healthReport(true)], {
-        restart: async () => {
+        recoverControlState: async () => {
           restartCalls++;
           return "restarted";
         },
@@ -124,7 +124,7 @@ describe("repairDaemon", () => {
     const result = await repairDaemon(
       {},
       dependencies([healthReport(false)], {
-        restart: async () => {
+        recoverControlState: async () => {
           throw new Error("no usable daemon executable");
         },
       }),
@@ -144,7 +144,7 @@ describe("repairDaemon", () => {
         verifyProtocol: async () => {
           throw new Error("unexpected socket protocol");
         },
-        restart: async () => {
+        recoverControlState: async () => {
           throw new Error("replacement launch failed");
         },
       }),

@@ -152,6 +152,33 @@ describe("IOSCtrlProxyBuilder", function () {
     });
   });
 
+  describe("getInstalledBundleVersion", function () {
+    test("returns the persisted extracted bundle version", async function () {
+      const cacheDir = path.join(tempDir, "bundle-cache");
+      await fs.mkdir(cacheDir);
+      await fs.writeFile(
+        path.join(cacheDir, "ctrl-proxy-ios-bundle.json"),
+        JSON.stringify({
+          checksum: null,
+          version: "2026.9.13",
+          extractedAt: "2026-09-13T00:00:00Z",
+        }),
+      );
+
+      const builder = IOSCtrlProxyBuilder.getInstance({ bundleCacheDir: cacheDir });
+
+      expect(await builder.getInstalledBundleVersion()).toBe("2026.9.13");
+    });
+
+    test("returns null when no extracted bundle metadata exists", async function () {
+      const builder = IOSCtrlProxyBuilder.getInstance({
+        bundleCacheDir: path.join(tempDir, "missing-bundle-cache"),
+      });
+
+      expect(await builder.getInstalledBundleVersion()).toBeNull();
+    });
+  });
+
   describe("getConfig", function () {
     test("should return default configuration when no overrides", function () {
       const builder = IOSCtrlProxyBuilder.getInstance();

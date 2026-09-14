@@ -17,7 +17,6 @@ import { GetAppMetadata } from "../features/observe/GetAppMetadata";
 import { AndroidCtrlProxyManager } from "../utils/CtrlProxyManager";
 import { IOSCtrlProxyManager } from "../utils/IOSCtrlProxyManager";
 import { IOSCtrlProxyBuilder } from "../utils/IOSCtrlProxyBuilder";
-import { createIosMetadataSource } from "../utils/iosAppMetadataSource";
 import {
   IOSCtrlProxyClient,
   IOS_RUNNER_FEATURE_COMMANDS,
@@ -25,7 +24,7 @@ import {
 } from "../features/observe/ios/IOSCtrlProxyClient";
 import { resolveApkChecksum, resolveIpaChecksum } from "../constants/release";
 import { type DiscoverySource, sourcesForPlatform } from "../utils/discoverySource";
-import { defaultTimer } from "../utils/SystemTimer";
+import { defaultTimer, type Timer } from "../utils/SystemTimer";
 
 // Resource URIs
 export const BOOTED_DEVICE_RESOURCE_URIS = {
@@ -52,6 +51,10 @@ export interface DeviceLockStatesResourceContent {
 }
 
 export interface CtrlProxyVersionInfo {
+  /**
+   * For iOS, `build` is the persisted pinned/extracted runner release identity,
+   * not the AutoMobileTest host app Info.plist placeholder (1.0/1).
+   */
   versionName?: string;
   versionCode?: string;
   build?: string;
@@ -912,18 +915,8 @@ const defaultCtrlProxyVersionLookup: CtrlProxyVersionLookup = {
           : undefined;
       }
       if (device.platform === "ios") {
-        const metadata = await new GetAppMetadata(
-          device,
-          defaultAdbClientFactory,
-          createIosMetadataSource(device),
-        ).execute(IOSCtrlProxyManager.APP_BUNDLE_ID);
-        return metadata
-          ? {
-              versionName: metadata.versionName || undefined,
-              build: metadata.buildNumber || undefined,
-              source: "ios-runner-bundle",
-            }
-          : undefined;
+        const version = await IOSCtrlProxyManager.getInstance(device).getInstalledVersionIdentity();
+        return version ? { build: version, source: "ios-runner-bundle" } : undefined;
       }
       return undefined;
     } catch (error) {
@@ -936,18 +929,36 @@ const defaultCtrlProxyVersionLookup: CtrlProxyVersionLookup = {
   },
 };
 
+const CTRL_PROXY_VERSION_TIMEOUT_MS = 2000;
+
 async function getCtrlProxyVersion(
   device: BootedDevice,
   versionLookup: CtrlProxyVersionLookup,
+  timer: Timer = defaultTimer,
 ): Promise<CtrlProxyVersionInfo | undefined> {
+  let timeoutHandle: NodeJS.Timeout | undefined;
   try {
-    return await versionLookup.getVersion(device);
+    return await Promise.race([
+      versionLookup.getVersion(device),
+      new Promise<undefined>((resolve) => {
+        timeoutHandle = timer.setTimeout(() => {
+          logger.debug(
+            `[BootedDeviceResources] CtrlProxy version lookup timed out for ${device.deviceId}`,
+          );
+          resolve(undefined);
+        }, CTRL_PROXY_VERSION_TIMEOUT_MS);
+      }),
+    ]);
   } catch (error) {
     // Injected best-effort metadata lookups must not make service-status reads fail.
     logger.debug(
       `[BootedDeviceResources] CtrlProxy version lookup failed for ${device.deviceId}: ${error}`,
     );
     return undefined;
+  } finally {
+    if (timeoutHandle) {
+      timer.clearTimeout(timeoutHandle);
+    }
   }
 }
 
@@ -956,6 +967,7 @@ export async function queryDeviceServiceStatus(
   device: Pick<BootedDeviceInfo, "name" | "platform" | "deviceId" | "source">,
   androidLookup: AndroidServiceStatusLookup = defaultAndroidServiceStatusLookup,
   versionLookup: CtrlProxyVersionLookup = defaultCtrlProxyVersionLookup,
+  timer: Timer = defaultTimer,
 ): Promise<DeviceServiceStatus | undefined> {
   const bootedDevice: BootedDevice = {
     name: device.name,
@@ -971,7 +983,7 @@ export async function queryDeviceServiceStatus(
         manager.isInstalled(),
         manager.isEnabled(),
         manager.getInstalledApkSha256(),
-        getCtrlProxyVersion(bootedDevice, versionLookup),
+        getCtrlProxyVersion(bootedDevice, versionLookup, timer),
       ]);
       const expectedSha256 = resolveApkChecksum();
       // An explicit pin absent from the registry yields an empty expected checksum,
@@ -995,7 +1007,7 @@ export async function queryDeviceServiceStatus(
       const [installed, running, version] = await Promise.all([
         manager.isInstalled(),
         manager.isRunning(),
-        getCtrlProxyVersion(bootedDevice, versionLookup),
+        getCtrlProxyVersion(bootedDevice, versionLookup, timer),
       ]);
       const expectedSha256 = resolveIpaChecksum();
 

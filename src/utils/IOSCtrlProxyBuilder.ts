@@ -627,6 +627,12 @@ export class IOSCtrlProxyBuilder {
     return false;
   }
 
+  /** Returns the persisted release identity of the currently extracted runner bundle. */
+  public async getInstalledBundleVersion(): Promise<string | null> {
+    const metadata = await this.readBundleMetadata();
+    return metadata?.version ?? null;
+  }
+
   /**
    * Download and extract CtrlProxy release bundle
    */

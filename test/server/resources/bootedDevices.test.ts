@@ -30,6 +30,7 @@ import { DevicePool } from "../../../src/daemon/devicePool";
 import { DeviceSessionRegistry } from "../../../src/daemon/deviceSessionRegistry";
 import { SessionManager } from "../../../src/daemon/sessionManager";
 import { IOSCtrlProxyManager } from "../../../src/utils/IOSCtrlProxyManager";
+import { resolveApkChecksum, resolveIpaChecksum } from "../../../src/constants/release";
 import { z } from "zod/v4";
 
 describe("MCP Booted Device Resources", () => {
@@ -1577,6 +1578,129 @@ describe("booted device readiness", () => {
       isCompatible: false,
     });
     expect(status?.version).toBeUndefined();
+  });
+
+  test("keeps Android service status when CtrlProxy version lookup times out", async () => {
+    const timer = new FakeTimer();
+    const lookup: AndroidServiceStatusLookup = {
+      getManager: () => ({
+        isInstalled: async () => true,
+        isEnabled: async () => true,
+        getInstalledApkSha256: async () => "a".repeat(64),
+      }),
+      isConnected: () => true,
+    };
+    const statusPromise = queryDeviceServiceStatus(
+      {
+        name: "Pixel",
+        platform: "android",
+        deviceId: "emulator-5554",
+        source: "local",
+      },
+      lookup,
+      { getVersion: async () => new Promise(() => {}) },
+      timer,
+    );
+
+    await Promise.resolve();
+    timer.advanceTime(2000);
+
+    const status = await statusPromise;
+    expect(status?.installed).toBe(true);
+    expect(status?.enabled).toBe(true);
+    expect(status?.running).toBe(true);
+    expect(status?.installedSha256).toBe("a".repeat(64));
+    expect(status?.expectedSha256).toBe(resolveApkChecksum());
+    expect(status?.isCompatible).toBe(false);
+    expect(status?.version).toBeUndefined();
+  });
+
+  test("keeps iOS service status when CtrlProxy version lookup times out", async () => {
+    const timer = new FakeTimer();
+    const installedSpy = spyOn(IOSCtrlProxyManager.prototype, "isInstalled").mockResolvedValue(
+      true,
+    );
+    const runningSpy = spyOn(IOSCtrlProxyManager.prototype, "isRunning").mockResolvedValue(false);
+    try {
+      const statusPromise = queryDeviceServiceStatus(
+        {
+          name: "iPhone",
+          platform: "ios",
+          deviceId: "00000000-0000-0000-0000-000000000000",
+          source: "local",
+        },
+        undefined,
+        { getVersion: async () => new Promise(() => {}) },
+        timer,
+      );
+
+      await Promise.resolve();
+      timer.advanceTime(2000);
+
+      const status = await statusPromise;
+      expect(status?.installed).toBe(true);
+      expect(status?.enabled).toBe(false);
+      expect(status?.running).toBe(false);
+      expect(status?.installedSha256).toBeNull();
+      expect(status?.expectedSha256).toBe(resolveIpaChecksum());
+      expect(status?.isCompatible).toBe(false);
+      expect(status?.supportedCommandsComplete).toBeNull();
+      expect(status?.supportedFeaturesComplete).toBeNull();
+      expect(status?.version).toBeUndefined();
+    } finally {
+      installedSpy.mockRestore();
+      runningSpy.mockRestore();
+    }
+  });
+
+  test("uses persisted iOS runner bundle identity instead of the host app plist version", async () => {
+    const installedSpy = spyOn(IOSCtrlProxyManager.prototype, "isInstalled").mockResolvedValue(
+      true,
+    );
+    const runningSpy = spyOn(IOSCtrlProxyManager.prototype, "isRunning").mockResolvedValue(false);
+    const versionSpy = spyOn(
+      IOSCtrlProxyManager.prototype,
+      "getInstalledVersionIdentity",
+    ).mockResolvedValue("2026.9.13");
+    try {
+      const status = await queryDeviceServiceStatus({
+        name: "iPhone",
+        platform: "ios",
+        deviceId: "00000000-0000-0000-0000-000000000000",
+        source: "local",
+      });
+
+      expect(status?.version).toEqual({ build: "2026.9.13", source: "ios-runner-bundle" });
+    } finally {
+      installedSpy.mockRestore();
+      runningSpy.mockRestore();
+      versionSpy.mockRestore();
+    }
+  });
+
+  test("omits iOS version when no persisted runner bundle metadata exists", async () => {
+    const installedSpy = spyOn(IOSCtrlProxyManager.prototype, "isInstalled").mockResolvedValue(
+      true,
+    );
+    const runningSpy = spyOn(IOSCtrlProxyManager.prototype, "isRunning").mockResolvedValue(false);
+    const versionSpy = spyOn(
+      IOSCtrlProxyManager.prototype,
+      "getInstalledVersionIdentity",
+    ).mockResolvedValue(null);
+    try {
+      const status = await queryDeviceServiceStatus({
+        name: "iPhone",
+        platform: "ios",
+        deviceId: "00000000-0000-0000-0000-000000000000",
+        source: "local",
+      });
+
+      expect(status?.version).toBeUndefined();
+    } finally {
+      installedSpy.mockRestore();
+      runningSpy.mockRestore();
+      versionSpy.mockRestore();
+    }
   });
 
   test("reports an unavailable Android service as not ready", () => {

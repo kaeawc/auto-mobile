@@ -732,8 +732,8 @@ id: 1
     Name: Nexus 5X
     OEM: LGE
 ---------
-id: pixel_4
-    Name: Pixel 4
+id: 52 or "pixel_9"
+    Name: Pixel 9
     OEM: Google
           `;
           child.triggerStdout(Buffer.from(mockOutput));
@@ -754,8 +754,8 @@ id: pixel_4
       expect(result[1].name).toBe("Nexus 5X");
       expect(result[1].oem).toBe("LGE");
 
-      expect(result[2].id).toBe("pixel_4");
-      expect(result[2].name).toBe("Pixel 4");
+      expect(result[2].id).toBe("pixel_9");
+      expect(result[2].name).toBe("Pixel 9");
       expect(result[2].oem).toBe("Google");
     });
   });

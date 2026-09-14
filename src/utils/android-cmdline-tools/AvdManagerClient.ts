@@ -491,7 +491,7 @@ export class AvdManagerClient {
         if (current.id) {
           devices.push(current as DeviceProfile);
         }
-        current = { id: trimmed.slice(3).trim() };
+        current = { id: this.normalizeDeviceProfileId(trimmed.slice(3).trim()) };
       } else if (trimmed.startsWith("Name:")) {
         current.name = trimmed.slice(5).trim();
       } else if (trimmed.startsWith("OEM:")) {
@@ -502,5 +502,11 @@ export class AvdManagerClient {
       devices.push(current as DeviceProfile);
     }
     return devices;
+  }
+
+  private normalizeDeviceProfileId(id: string): string {
+    // Recent Android SDKs render the numeric ID and accepted profile name together.
+    const match = /^\d+\s+or\s+"([^"]+)"$/.exec(id);
+    return match?.[1] ?? id;
   }
 }

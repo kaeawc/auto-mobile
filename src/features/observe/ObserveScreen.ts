@@ -62,6 +62,7 @@ import {
 } from "./HierarchyPlatformValidator";
 import { deriveIosScreenIdentity } from "./ios/IosScreenIdentity";
 import { computeFreshness } from "./observationFreshness";
+import { updatedAtToMillis } from "./observeTimestamp";
 import { SafeAreaAuditor, capLayoutWarnings } from "./audits/SafeAreaAuditor";
 
 /**
@@ -1020,7 +1021,24 @@ export class RealObserveScreen implements ObserveScreen {
    * generation preserves the #5884 stale-write fence for #6932 deferred writes.
    */
   async cacheObserveResult(observeResult: ObserveResult, generation?: number): Promise<void> {
-    await getObserveCacheStore().put(this.device.deviceId, observeResult, generation);
+    const cacheStore = getObserveCacheStore();
+    const currentResult = cacheStore.getRecentInMemoryForDevice(this.device.deviceId);
+    if (
+      currentResult &&
+      updatedAtToMillis(currentResult.updatedAt) > updatedAtToMillis(observeResult.updatedAt)
+    ) {
+      logger.debug(
+        `[OBSERVE_CACHE] Skipping deferred observe result for device ${this.device.deviceId}: ` +
+          "a newer capture is already cached",
+      );
+      return;
+    }
+    await cacheStore.put(
+      this.device.deviceId,
+      observeResult,
+      generation,
+      updatedAtToMillis(observeResult.updatedAt),
+    );
   }
 
   // ---------- Orchestration ----------

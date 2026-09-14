@@ -47,11 +47,16 @@ export class FakeObserveCacheStore implements ObserveResultCacheStore {
     return generation;
   }
 
-  async put(deviceId: string, result: ObserveResult, generation?: number): Promise<void> {
+  async put(
+    deviceId: string,
+    result: ObserveResult,
+    generation?: number,
+    cachedAt?: number,
+  ): Promise<void> {
     if (generation !== undefined && generation !== this.rawGeneration(deviceId)) {
       return;
     }
-    const timestamp = this.timer.now();
+    const timestamp = cachedAt ?? this.timer.now();
     this.entries.set(`${deviceId}:${timestamp}`, {
       deviceId,
       timestamp,

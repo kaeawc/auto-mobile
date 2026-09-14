@@ -195,6 +195,68 @@ describe("ObserveScreen", function () {
       }
     });
 
+    test("does not let a deferred observation write supersede a newer same-device capture (#6999 round 4)", async function () {
+      const timer = new FakeTimer();
+      timer.setCurrentTime(1_000_000);
+      const cacheStore = new FakeObserveCacheStore(timer);
+
+      try {
+        const screen = new RealObserveScreen(mockDevice, new FakeAdbClientFactory(fakeAdb), {
+          cacheStore,
+        });
+        const olderResult = {
+          ...screen.createBaseResult(),
+          updatedAt: 999_999,
+          viewHierarchy: "older-deferred-hierarchy",
+        };
+        const newerResult = {
+          ...screen.createBaseResult(),
+          updatedAt: 1_000_000,
+          viewHierarchy: "newer-hierarchy",
+        };
+        const generation = screen.captureCacheGeneration();
+
+        await cacheStore.put(mockDevice.deviceId, newerResult);
+        await screen.cacheObserveResult(olderResult, generation);
+
+        expect(cacheStore.getRecentInMemoryForDevice(mockDevice.deviceId)).toBe(newerResult);
+      } finally {
+        resetObserveCacheStore();
+      }
+    });
+
+    test("persists a deferred observation when the current capture has the same timestamp (#6999 round 4)", async function () {
+      const timer = new FakeTimer();
+      timer.setCurrentTime(1_000_000);
+      const cacheStore = new FakeObserveCacheStore(timer);
+
+      try {
+        const screen = new RealObserveScreen(mockDevice, new FakeAdbClientFactory(fakeAdb), {
+          cacheStore,
+        });
+        const currentResult = {
+          ...screen.createBaseResult(),
+          updatedAt: 1_000_000,
+          viewHierarchy: "current-hierarchy",
+        };
+        const equalTimestampResult = {
+          ...screen.createBaseResult(),
+          updatedAt: 1_000_000,
+          viewHierarchy: "equal-timestamp-deferred-hierarchy",
+        };
+        const generation = screen.captureCacheGeneration();
+
+        await cacheStore.put(mockDevice.deviceId, currentResult);
+        await screen.cacheObserveResult(equalTimestampResult, generation);
+
+        expect(cacheStore.getRecentInMemoryForDevice(mockDevice.deviceId)).toBe(
+          equalTimestampResult,
+        );
+      } finally {
+        resetObserveCacheStore();
+      }
+    });
+
     test("should populate iOS heuristic screen identity from the view hierarchy", async function () {
       const viewHierarchy = new FakeViewHierarchy();
       viewHierarchy.configureHierarchy({

@@ -129,13 +129,18 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
     return true;
   }
 
-  async put(deviceId: string, result: ObserveResult, generation?: number): Promise<void> {
+  async put(
+    deviceId: string,
+    result: ObserveResult,
+    generation?: number,
+    cachedAt?: number,
+  ): Promise<void> {
     // The cache was invalidated for this device while the observation that
     // produced `result` was in flight (issue #5884).
     if (this.isStaleWrite(deviceId, generation)) {
       return;
     }
-    const timestamp = this.timer.now();
+    const timestamp = cachedAt ?? this.timer.now();
     const cacheKey = `${deviceId}:${timestamp}`;
     try {
       logger.debug(

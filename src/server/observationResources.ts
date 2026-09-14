@@ -364,6 +364,33 @@ async function waitForObservationScreenshot(
   return undefined;
 }
 
+// Resolves an immutable observation's cached screenshot without waiting on an
+// unrelated capture for the same device.
+async function resolveObservationScreenshotPath(
+  uri: string,
+  deviceId: string,
+  observationId: string,
+): Promise<{ path: string | undefined } | ResourceContent> {
+  let path = RealObserveScreen.getRecentCachedScreenshotPathForObservation(deviceId, observationId);
+  if (!matchesObservationId(deviceId, observationId)) {
+    return observationScreenshotUnknownError(uri, deviceId, observationId);
+  }
+
+  if (path) {
+    return { path };
+  }
+
+  const pendingResult = await waitForObservationScreenshot(uri, deviceId, observationId);
+  if (pendingResult) {
+    return pendingResult;
+  }
+  path = RealObserveScreen.getRecentCachedScreenshotPathForObservation(deviceId, observationId);
+  if (!matchesObservationId(deviceId, observationId)) {
+    return observationScreenshotUnknownError(uri, deviceId, observationId);
+  }
+  return { path };
+}
+
 // Handler for the screenshot captured alongside one immutable device observation.
 async function getObservationScreenshot(params: Record<string, string>): Promise<ResourceContent> {
   const uri =
@@ -381,26 +408,15 @@ async function getObservationScreenshot(params: Record<string, string>): Promise
       return observationScreenshotUnknownError(uri, deviceId, observationId);
     }
 
-    let screenshotPath = RealObserveScreen.getRecentCachedScreenshotPathForObservation(
+    const screenshotPathResult = await resolveObservationScreenshotPath(
+      uri,
       deviceId,
       observationId,
     );
-    if (!matchesObservationId(deviceId, observationId)) {
-      return observationScreenshotUnknownError(uri, deviceId, observationId);
+    if (!("path" in screenshotPathResult)) {
+      return screenshotPathResult;
     }
-
-    // An exact path is never read while its capture is still pending.
-    const pendingResult = await waitForObservationScreenshot(uri, deviceId, observationId);
-    if (pendingResult) {
-      return pendingResult;
-    }
-    screenshotPath = RealObserveScreen.getRecentCachedScreenshotPathForObservation(
-      deviceId,
-      observationId,
-    );
-    if (!matchesObservationId(deviceId, observationId)) {
-      return observationScreenshotUnknownError(uri, deviceId, observationId);
-    }
+    const { path: screenshotPath } = screenshotPathResult;
 
     if (!screenshotPath) {
       const screenshotError = RealObserveScreen.getRecentCachedScreenshotErrorForObservation(

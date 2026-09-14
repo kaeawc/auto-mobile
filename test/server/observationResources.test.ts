@@ -655,6 +655,33 @@ describe("unscoped latest observation resources", () => {
     expect(screenshot.blob).toBe(image.toString("base64"));
   });
 
+  test("serves an observation's stored screenshot without waiting for an unrelated pending capture", async () => {
+    const { observationId } = await cacheObservationFor(deviceA, "device-a-hierarchy");
+    const image = Buffer.from("89504e470d0a1a0a", "hex");
+    getScreenshotStateStore().updateForObservation(
+      deviceA.deviceId,
+      observationId,
+      "/tmp/device-a-stored.png",
+    );
+    ScreenshotJobTracker.setTimer(new FakeTimer());
+    ScreenshotJobTracker.startJob(deviceA.deviceId, async () => new Promise(() => {}));
+    setScreenshotFileSystem({
+      stat: async () => ({ isFile: () => true }),
+      readFile: async () => image,
+    });
+
+    const outcome = await Promise.race([
+      readObservationScreenshot(deviceA.deviceId, observationId),
+      settleSentinel(),
+    ]);
+
+    expect(outcome).not.toBe("still-pending");
+    expect(outcome).toMatchObject({
+      mimeType: "image/png",
+      blob: image.toString("base64"),
+    });
+  });
+
   test("returns a JSON error when the observation id is unknown or evicted", async () => {
     await cacheObservationFor(deviceA, "device-a-hierarchy");
 

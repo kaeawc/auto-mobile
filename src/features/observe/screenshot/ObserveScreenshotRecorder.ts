@@ -68,6 +68,8 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
   private readonly device: BootedDevice;
   private readonly screenshotUtil: TrackedScreenshotService;
   private readonly store: ScreenshotStateStore;
+  private readonly completionByJob = new Map<string, { aborted: boolean; isLatest: boolean }>();
+  private readonly observationResultCountByJob = new Map<string, number>();
 
   constructor(
     device: BootedDevice,
@@ -85,7 +87,7 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
     signal?: AbortSignal,
   ): void {
     perf.startOperation("screenshot");
-    const { promise } = this.screenshotUtil.startTrackedCapture(
+    const handle = this.screenshotUtil.startTrackedCapture(
       {},
       {
         parentSignal: signal,
@@ -95,6 +97,10 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
         // ~200-300ms — no screenshot ever completes.
         coalesceWithPending: true,
         onComplete: async (completion) => {
+          this.completionByJob.set(completion.jobId, {
+            aborted: completion.aborted,
+            isLatest: completion.isLatest,
+          });
           if (!completion.isLatest) {
             return;
           }
@@ -111,12 +117,12 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
       },
     );
 
-    this.recordObservationResult(promise, observationId);
+    void this.recordObservationResult(handle, observationId);
 
     // Swallow rejections from the chained finally so an unexpected throw inside
     // the tracked capture doesn't surface as an unhandled rejection. The
     // `onComplete` handler already records failures via the state store.
-    promise
+    handle.promise
       .finally(() => {
         perf.endOperation("screenshot");
       })
@@ -149,12 +155,16 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
   ): Promise<void> {
     try {
       await perf.track("screenshot", async () => {
-        const { promise } = this.screenshotUtil.startTrackedCapture(
+        const handle = this.screenshotUtil.startTrackedCapture(
           {},
           {
             parentSignal: signal,
             ...trackerOptions,
             onComplete: async (completion) => {
+              this.completionByJob.set(completion.jobId, {
+                aborted: completion.aborted,
+                isLatest: completion.isLatest,
+              });
               if (!completion.isLatest) {
                 return;
               }
@@ -170,8 +180,9 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
             },
           },
         );
-        this.recordObservationResult(promise, observationId);
-        await promise;
+        const observationResult = this.recordObservationResult(handle, observationId);
+        await handle.promise;
+        await observationResult;
       });
     } catch (error) {
       const errorMsg = errorMessage(error);
@@ -226,13 +237,38 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
     update(screenshotResult.path);
   }
 
-  private recordObservationResult(promise: Promise<ScreenshotResult>, observationId: string): void {
-    promise
+  private recordObservationResult(
+    handle: ScreenshotJobHandle,
+    observationId: string,
+  ): Promise<void> {
+    this.observationResultCountByJob.set(
+      handle.jobId,
+      (this.observationResultCountByJob.get(handle.jobId) ?? 0) + 1,
+    );
+    let released = false;
+    const releaseCompletion = () => {
+      if (released) {
+        return;
+      }
+      released = true;
+      const remaining = (this.observationResultCountByJob.get(handle.jobId) ?? 1) - 1;
+      if (remaining <= 0) {
+        this.observationResultCountByJob.delete(handle.jobId);
+        this.completionByJob.delete(handle.jobId);
+        return;
+      }
+      this.observationResultCountByJob.set(handle.jobId, remaining);
+    };
+
+    return handle.promise
       .then(async (result) => {
-        // The tracker's owner completion has already validated the file before
-        // this shared promise resolves; stamp each coalesced caller synchronously.
-        if (result.success && result.path) {
-          this.store.updateForObservation(this.device.deviceId, observationId, result.path);
+        const snapshot = this.completionByJob.get(handle.jobId);
+        releaseCompletion();
+        // Missing completion metadata preserves the validated pre-snapshot behavior: write the result.
+        const aborted = snapshot?.aborted ?? false;
+        const isLatest = snapshot?.isLatest ?? true;
+        if (aborted || !isLatest) {
+          logger.debug("[OBSERVE] Screenshot capture cancelled");
           return;
         }
         await this.handleScreenshotResult(result, {
@@ -242,6 +278,7 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
         });
       })
       .catch((error) => {
+        releaseCompletion();
         const errorMsg = errorMessage(error);
         this.store.updateForObservation(this.device.deviceId, observationId, undefined, errorMsg);
         logger.warn(

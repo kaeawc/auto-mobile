@@ -206,6 +206,10 @@ describe("DefaultObserveScreenshotRecorder.capture", () => {
 
     expect(store.getError("test-device")).toBe("Screenshot file missing after capture");
     expect(store.getPath("test-device")).toBeUndefined();
+    expect(store.getErrorForObservation("test-device", "observation")).toBe(
+      "Screenshot file missing after capture",
+    );
+    expect(store.getPathForObservation("test-device", "observation")).toBeUndefined();
   });
 
   test("cancelled capture does not write to store", async () => {
@@ -223,6 +227,7 @@ describe("DefaultObserveScreenshotRecorder.capture", () => {
     await recorder.capture("observation", new NoOpPerformanceTracker());
 
     expect(store.getUpdateCount()).toBe(0);
+    expect(store.getPathForObservation("test-device", "observation")).toBeUndefined();
   });
 
   test("non-latest completion does not write to store", async () => {
@@ -232,6 +237,7 @@ describe("DefaultObserveScreenshotRecorder.capture", () => {
     await recorder.capture("observation", new NoOpPerformanceTracker());
 
     expect(store.getUpdateCount()).toBe(0);
+    expect(store.getPathForObservation("test-device", "observation")).toBeUndefined();
   });
 
   test("thrown error from capture writes to store", async () => {
@@ -267,10 +273,10 @@ describe("DefaultObserveScreenshotRecorder.capture", () => {
     writeFileSync(file, "img");
     svc.setNextResult({ success: true, path: file });
 
-    recorder.start("observation-first", new NoOpPerformanceTracker());
-    recorder.start("observation-second", new NoOpPerformanceTracker());
-
-    await svc.lastCapturePromise();
+    await Promise.all([
+      recorder.capture("observation-first", new NoOpPerformanceTracker()),
+      recorder.capture("observation-second", new NoOpPerformanceTracker()),
+    ]);
 
     expect(store.getPathForObservation("test-device", "observation-first")).toBe(file);
     expect(store.getPathForObservation("test-device", "observation-second")).toBe(file);

@@ -215,6 +215,60 @@ describe("Android emulator fresh-provision offline recovery", () => {
     expect(timer.now()).toBeLessThan(120_000);
   });
 
+  test("caps a large polling interval at the fresh-offline recovery thresholds", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const adb = new FreshOfflineAdbExecutor();
+    adb.setDeviceStates(OFFLINE_STATE);
+    adb.setDevices([]);
+    configureReadyProbes(adb);
+    adb.configureReconnectDuration(timer, 0);
+    process.env.EMULATOR_POLLING_INTERVAL_MS = "60000";
+
+    const readiness = clientWith(adb, timer).waitForEmulatorReady(
+      "Pixel_9_Pro",
+      30_000,
+      null,
+      "emulator-5554",
+      undefined,
+      { freshProvision: true },
+    );
+
+    await expect(readiness).rejects.toThrow("state=offline");
+    await expect(readiness).rejects.toThrow("adb reconnect offline");
+    await readiness.catch(() => undefined);
+    expect(adb.reconnectCalls).toBe(1);
+    expect(adb.reconnectSettledAt).not.toBeNull();
+    expect(adb.reconnectSettledAt).toBeGreaterThanOrEqual(15_000);
+    expect(adb.reconnectSettledAt).toBeLessThan(20_000);
+    expect(timer.now()).toBeGreaterThanOrEqual(20_000);
+    expect(timer.now()).toBeLessThan(25_000);
+  });
+
+  test("leaves the default polling interval's non-fresh offline wait unchanged", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const adb = new FreshOfflineAdbExecutor();
+    adb.setDeviceStates(OFFLINE_STATE);
+    adb.setDevices([]);
+    configureReadyProbes(adb);
+    process.env.EMULATOR_POLLING_INTERVAL_MS = "500";
+
+    const readiness = clientWith(adb, timer).waitForEmulatorReady(
+      "Pixel_9_Pro",
+      1_250,
+      null,
+      "emulator-5554",
+    );
+
+    await expect(readiness).rejects.toThrow("target=emulator-5554; state=offline");
+    await expect(readiness).rejects.not.toThrow("adb reconnect offline");
+    await readiness.catch(() => undefined);
+    expect(adb.reconnectCalls).toBe(0);
+    expect(timer.now()).toBeGreaterThanOrEqual(1_250);
+    expect(timer.now()).toBeLessThan(2_000);
+  });
+
   test("failing device-state probes after a cached offline do NOT drive recovery", async () => {
     // THREAD 1 (#7054): once a serial is observed offline and getDeviceStates
     // then starts REJECTING (e.g. an ADB-server restart), a run of failed

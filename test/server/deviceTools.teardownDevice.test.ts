@@ -1869,6 +1869,54 @@ describe("deleteDevice handler", () => {
     expect(runtimeAvdNameProbes).toEqual([peer.deviceId]);
   });
 
+  test("force probes a stale pooled peer that was absent from the initial booted scan", async () => {
+    const timer = new FakeTimer();
+    const target: BootedDevice = {
+      platform: "android",
+      name: "Pixel_8_API_35",
+      deviceId: "emulator-5554",
+    };
+    const stalePooledPeer: BootedDevice = {
+      platform: "android",
+      name: "Pixel_7_API_34",
+      deviceId: "emulator-5556",
+    };
+    const targetImage: DeviceInfo = { platform: "android", name: target.name, isRunning: true };
+    const sessionManager = new SessionManager(timer);
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      manager,
+      new DefaultRetryExecutor(timer),
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    await pool.addDevice(target, targetImage);
+    await pool.addDevice(stalePooledPeer, {
+      platform: "android",
+      name: stalePooledPeer.name,
+      isRunning: true,
+    });
+    manager.setBootedDevices("android", [target]);
+    manager.setDeviceImages("android", [targetImage]);
+    manager.replacementAfterKill = stalePooledPeer;
+    runtimeAvdNames.set(stalePooledPeer.deviceId, target.name);
+
+    const body = responseBody(
+      await teardownTool().handler({
+        ...request("android", target.name, target.name),
+        force: true,
+      }),
+    );
+
+    expect(body.failure).toEqual(
+      expect.objectContaining({ code: "target_restarted", phase: "stop" }),
+    );
+    expect(runtimeAvdNameProbes).toEqual([stalePooledPeer.deviceId]);
+    expect(manager.destroyRequests).toEqual([]);
+  });
+
   test("force reports the target still running when it reappears on a peer serial after destroy", async () => {
     const timer = new FakeTimer();
     const target: BootedDevice = {

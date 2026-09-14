@@ -76,6 +76,8 @@ class FakeAvdDirectories implements AvdDirectoryResolver {
 function stubEmulator(devices: BootedDevice[]) {
   return {
     getBootedDevices: async () => devices,
+    resolveAvdNameForSerial: async (serial: string) =>
+      devices.find((device) => device.deviceId === serial)?.name,
   } as never;
 }
 
@@ -291,6 +293,38 @@ describe("AvdSnapshotService (#6490)", () => {
     expect(adb.commands).toEqual(["emu avd snapshot del snap"]);
   });
 
+  test("deleteVmSnapshot confirms one serial within its remaining delete budget", async () => {
+    const adb = recordingAdbFactory(execResult("OK"));
+    const probes: Array<{ serial: string; timeoutMs: number; signal: AbortSignal | undefined }> =
+      [];
+    const sut = new AvdSnapshotService(
+      new FakeDirectories({}, {}),
+      new FakeAvdDirectories(new Set()),
+      {
+        getBootedDevices: async () => {
+          throw new Error("pre-delete identity confirmation must not discover every emulator");
+        },
+        resolveAvdNameForSerial: async (serial, options) => {
+          probes.push({ serial, timeoutMs: options.timeoutMs, signal: options.signal });
+          return "am-api36";
+        },
+      } as never,
+      adb.factory,
+    );
+
+    expect(await sut.deleteVmSnapshot("emulator-5556", "snap", 50, "am-api36")).toEqual({
+      reclaimed: true,
+    });
+    expect(probes).toEqual([
+      expect.objectContaining({
+        serial: "emulator-5556",
+        timeoutMs: 50,
+        signal: expect.any(AbortSignal),
+      }),
+    ]);
+    expect(adb.commands).toEqual(["emu avd snapshot del snap"]);
+  });
+
   test("deleteVmSnapshot stops retries when the serial is reassigned between attempts", async () => {
     const liveDevices = {
       current: [
@@ -320,6 +354,8 @@ describe("AvdSnapshotService (#6490)", () => {
       new FakeAvdDirectories(new Set()),
       {
         getBootedDevices: async () => liveDevices.current,
+        resolveAvdNameForSerial: async (serial: string) =>
+          liveDevices.current.find((device) => device.deviceId === serial)?.name,
       } as never,
       adbFactory,
     );

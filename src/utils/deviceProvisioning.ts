@@ -112,6 +112,14 @@ const IOS_FAMILY_BY_FORM_FACTOR: Record<"phone" | "tablet", string> = {
   tablet: "iPad",
 };
 
+function deviceTypeMatchesIosFormFactor(
+  deviceType: AppleDeviceType,
+  formFactor: "phone" | "tablet" = "phone",
+): boolean {
+  const family = IOS_FAMILY_BY_FORM_FACTOR[formFactor];
+  return deviceType.productFamily === family || deviceType.name.startsWith(family);
+}
+
 /** Highest numeric token in a device-type name ("iPhone 17 Pro" -> 17). */
 function highestNumericToken(name: string): number {
   const matches = name.match(/\d+/g);
@@ -147,10 +155,9 @@ export function pickIosDeviceType(
     }
   }
 
-  const family = IOS_FAMILY_BY_FORM_FACTOR[criteria.formFactor ?? "phone"];
-  const candidates = deviceTypes.filter(
-    (type) => type.productFamily === family || type.name.startsWith(family),
-  );
+  const formFactor = criteria.formFactor ?? "phone";
+  const family = IOS_FAMILY_BY_FORM_FACTOR[formFactor];
+  const candidates = deviceTypes.filter((type) => deviceTypeMatchesIosFormFactor(type, formFactor));
 
   if (candidates.length === 0) {
     throw new ActionableError(
@@ -198,6 +205,22 @@ function deviceTypeSupportsRuntime(deviceType: AppleDeviceType, runtimeVersion: 
   );
 }
 
+function noCompatibleIosDeviceTypeError(
+  deviceTypes: AppleDeviceType[],
+  runtimeVersions: string[],
+  formFactor: "phone" | "tablet" | undefined,
+  foundRuntimeCompatibleDeviceType: boolean,
+): ActionableError {
+  const family = foundRuntimeCompatibleDeviceType
+    ? IOS_FAMILY_BY_FORM_FACTOR[formFactor ?? "phone"]
+    : "iOS";
+  return new ActionableError(
+    `No installed ${family} simulator device type supports the matching runtime(s) ` +
+      `${runtimeVersions.join(", ")}. Available device types: ` +
+      `${deviceTypes.map((deviceType) => deviceType.name).join(", ")}.`,
+  );
+}
+
 export async function resolveIosProvisioningSelection(
   simctl: IosSimulatorCreator,
   criteria: Pick<DeviceMatchCriteria, "name" | "formFactor" | "minOsVersion" | "maxOsVersion">,
@@ -220,6 +243,7 @@ export async function resolveIosProvisioningSelection(
     ? deviceTypes.find((deviceType) => deviceType.name.toLowerCase() === requestedName)
     : undefined;
   const runtimeVersions: string[] = [];
+  let runtimeCompatibleDeviceTypeCount = 0;
   for (const runtime of runtimeIdentifiers) {
     const runtimeVersion = iosVersionStringFromRuntimeId(runtime);
     if (!runtimeVersion) {
@@ -231,13 +255,18 @@ export async function resolveIosProvisioningSelection(
     const compatible = deviceTypes.filter((deviceType) =>
       deviceTypeSupportsRuntime(deviceType, runtimeVersion),
     );
+    runtimeCompatibleDeviceTypeCount += compatible.length;
     if (explicitlyRequested) {
       if (compatible.includes(explicitlyRequested)) {
         return { deviceType: explicitlyRequested, runtime };
       }
       continue;
     }
-    if (compatible.length > 0) {
+    if (
+      compatible.some((deviceType) =>
+        deviceTypeMatchesIosFormFactor(deviceType, criteria.formFactor),
+      )
+    ) {
       return { deviceType: pickIosDeviceType(compatible, criteria), runtime };
     }
   }
@@ -247,10 +276,11 @@ export async function resolveIosProvisioningSelection(
         `${runtimeVersions.join(", ")}. Choose a compatible device type or adjust the requested OS range.`,
     );
   }
-  throw new ActionableError(
-    `No installed iOS simulator device type supports the matching runtime(s) ` +
-      `${runtimeVersions.join(", ")}. Available device types: ` +
-      `${deviceTypes.map((deviceType) => deviceType.name).join(", ")}.`,
+  throw noCompatibleIosDeviceTypeError(
+    deviceTypes,
+    runtimeVersions,
+    criteria.formFactor,
+    runtimeCompatibleDeviceTypeCount > 0,
   );
 }
 

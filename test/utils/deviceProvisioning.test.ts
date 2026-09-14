@@ -29,9 +29,10 @@ function deviceTypeWithRuntimeRange(
   name: string,
   minRuntimeVersion: string,
   maxRuntimeVersion = "99.0",
+  productFamily = "iPhone",
 ): AppleDeviceType {
   return {
-    ...deviceType(name),
+    ...deviceType(name, productFamily),
     minRuntimeVersionString: minRuntimeVersion,
     maxRuntimeVersionString: maxRuntimeVersion,
   };
@@ -376,6 +377,92 @@ describe("DefaultDeviceProvisioner", () => {
 
     expect(created.runtime).toBe("com.apple.CoreSimulator.SimRuntime.iOS-18-2");
     expect(simctl.createCalls[0]?.runtime).toBe("com.apple.CoreSimulator.SimRuntime.iOS-18-2");
+  });
+
+  it("falls back when the newest runtime supports only the wrong family for a phone", async () => {
+    const simctl = new FakeIosSimulatorCreator(
+      [
+        deviceTypeWithRuntimeRange("iPhone 8", "12.0", "18.2"),
+        deviceTypeWithRuntimeRange("iPad Pro", "26.0", "99.0", "iPad"),
+      ],
+      "com.apple.CoreSimulator.SimRuntime.iOS-26-3",
+      "NEW-UDID",
+    );
+    simctl.runtimeCandidates = [
+      "com.apple.CoreSimulator.SimRuntime.iOS-26-3",
+      "com.apple.CoreSimulator.SimRuntime.iOS-18-2",
+    ];
+    const provisioner = new DefaultDeviceProvisioner({
+      iosCreator: () => simctl,
+      androidCreator: () => new FakeAndroidAvdCreator(),
+      idGenerator: new CountingIdGenerator("uuid"),
+    });
+
+    const created = await provisioner.provision({
+      platform: "ios",
+      formFactor: "phone",
+      minOsVersion: "18.0",
+      maxOsVersion: "26.3",
+    });
+
+    expect(created.deviceType).toBe("com.apple.CoreSimulator.SimDeviceType.iPhone-8");
+    expect(created.runtime).toBe("com.apple.CoreSimulator.SimRuntime.iOS-18-2");
+  });
+
+  it("falls back when the newest runtime supports only the wrong family for a tablet", async () => {
+    const simctl = new FakeIosSimulatorCreator(
+      [
+        deviceTypeWithRuntimeRange("iPhone 17", "26.0"),
+        deviceTypeWithRuntimeRange("iPad Pro", "12.0", "18.2", "iPad"),
+      ],
+      "com.apple.CoreSimulator.SimRuntime.iOS-26-3",
+      "NEW-UDID",
+    );
+    simctl.runtimeCandidates = [
+      "com.apple.CoreSimulator.SimRuntime.iOS-26-3",
+      "com.apple.CoreSimulator.SimRuntime.iOS-18-2",
+    ];
+    const provisioner = new DefaultDeviceProvisioner({
+      iosCreator: () => simctl,
+      androidCreator: () => new FakeAndroidAvdCreator(),
+      idGenerator: new CountingIdGenerator("uuid"),
+    });
+
+    const created = await provisioner.provision({
+      platform: "ios",
+      formFactor: "tablet",
+      minOsVersion: "18.0",
+      maxOsVersion: "26.3",
+    });
+
+    expect(created.deviceType).toBe("com.apple.CoreSimulator.SimDeviceType.iPad-Pro");
+    expect(created.runtime).toBe("com.apple.CoreSimulator.SimRuntime.iOS-18-2");
+  });
+
+  it("reports the requested family when only wrong-family types support matching runtimes", async () => {
+    const simctl = new FakeIosSimulatorCreator(
+      [deviceTypeWithRuntimeRange("iPad Pro", "26.0", "99.0", "iPad")],
+      "com.apple.CoreSimulator.SimRuntime.iOS-26-3",
+      "NEW-UDID",
+    );
+    const provisioner = new DefaultDeviceProvisioner({
+      iosCreator: () => simctl,
+      androidCreator: () => new FakeAndroidAvdCreator(),
+      idGenerator: new CountingIdGenerator("uuid"),
+    });
+
+    await expect(
+      provisioner.provision({
+        platform: "ios",
+        formFactor: "phone",
+        minOsVersion: "26.0",
+        maxOsVersion: "26.3",
+      }),
+    ).rejects.toThrow(
+      "No installed iPhone simulator device type supports the matching runtime(s) 26.3. " +
+        "Available device types: iPad Pro.",
+    );
+    expect(simctl.createCalls).toEqual([]);
   });
 
   it("does not create an iOS simulator when no runtime is within the requested range", async () => {

@@ -227,12 +227,16 @@ describe("DaemonManager restart", () => {
     };
     const signaler = new FakeDaemonProcessSignaler();
     const client = new FakeDaemonClient({});
+    let clientOptions: { clientIdentity?: unknown } | undefined;
     const prepareSpy = spyOn(client, "callDaemonMethod").mockImplementation(async () => {
       livePids.delete(incumbentPid);
       return { accepted: true };
     });
     const manager = new DaemonManager(
-      () => client,
+      (options) => {
+        clientOptions = options;
+        return client;
+      },
       undefined,
       timer,
       undefined,
@@ -269,6 +273,7 @@ describe("DaemonManager restart", () => {
         buildId: "incumbent-build",
         entryScript: "/old/dist/src/index.js",
       });
+      expect(clientOptions).toEqual({ clientIdentity: null });
       expect(signaler.signals).toEqual([]);
       expect(livePids).toEqual(new Set([unrelatedPid]));
       expect(startSpy).toHaveBeenCalledTimes(1);

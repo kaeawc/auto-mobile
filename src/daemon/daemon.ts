@@ -2581,6 +2581,7 @@ export class Daemon {
   async stop(): Promise<void> {
     this.shutdownInProgress = true;
     logger.info("Stopping daemon...");
+    await this.quiesceProvisioningIngress();
     await this.interruptProvisioningForShutdown();
     this.shutdownReleaseNotifications = new Set();
     this.shutdownFallbackReleaseNotifications = new Set();
@@ -2594,20 +2595,6 @@ export class Daemon {
     this.deviceDisconnectMonitor = null;
     await runShutdownCleanupStages(
       [
-        {
-          // Quiesce the control socket synchronously before fencing session
-          // publication. Established clients then receive the stable retryable
-          // shutdown response instead of entering SessionManager during the
-          // cleanup stages below. A request admitted before this barrier may
-          // still outlive the bounded handler drain, so fence its eventual pool
-          // assignment before awaiting that drain.
-          name: "Unix socket and device session admission",
-          run: async () => {
-            const quiescing = this.socketServer?.quiesce();
-            this.sessionManager.stopAcceptingSessionCreations();
-            await quiescing;
-          },
-        },
         {
           // Quiesce new recording work and stop owned children before any
           // potentially blocking socket teardown consumes the shutdown budget.
@@ -2678,16 +2665,6 @@ export class Daemon {
           // and hit the just-closed connection (issue #2912; #2792 safety window).
           name: "session cleanup timer",
           run: () => this.sessionManager.stopCleanupTimer(),
-        },
-        {
-          name: "HTTP session admission",
-          run: () => {
-            this.acceptingHttpSessions = false;
-            // Start closing the listener now so it cannot admit a connection
-            // after the transport snapshot below. The later HTTP server stage
-            // awaits this same close once active transports have been closed.
-            void this.closeHttpListener().catch(() => {});
-          },
         },
         { name: "video recording socket server", run: stopVideoRecordingSocketServer },
         { name: "test recording socket server", run: stopTestRecordingSocketServer },
@@ -2801,6 +2778,23 @@ export class Daemon {
       ],
       (message, error) => logger.warn(message, error),
     );
+  }
+
+  /**
+   * Close every ingress before interrupting active provisioning. Without this
+   * ordering, a request can begin after the cancellation sweep and reach
+   * shutdown teardown without persisting its retryable handoff outcome.
+   */
+  private async quiesceProvisioningIngress(): Promise<void> {
+    this.acceptingHttpSessions = false;
+    // Start closing the listener now so it cannot admit a connection after the
+    // transport snapshot. The later HTTP server stage awaits this close.
+    void this.closeHttpListener().catch((error) => {
+      logger.warn(`Failed to begin HTTP listener shutdown: ${errorMessage(error)}`, error);
+    });
+    const quiescing = this.socketServer?.quiesce();
+    this.sessionManager.stopAcceptingSessionCreations();
+    await quiescing;
   }
 
   private async interruptProvisioningForShutdown(): Promise<void> {

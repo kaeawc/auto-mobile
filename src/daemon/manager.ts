@@ -49,7 +49,12 @@ import {
   runSocketDiagnostics,
   formatSocketDiagnostics,
 } from "./debugTools";
-import { DaemonClient, type DaemonClientFactory, type DaemonClientLike } from "./client";
+import {
+  DaemonClient,
+  type DaemonClientFactory,
+  type DaemonClientFactoryOptions,
+  type DaemonClientLike,
+} from "./client";
 import {
   DAEMON_PREPARE_RESTART_METHOD,
   DaemonRestartDeferredError,
@@ -759,7 +764,9 @@ export class DaemonManager implements DaemonManagerLike {
       timer,
     });
     this.clientFactory =
-      clientFactory ?? (() => new DaemonClient(this.socketPath, undefined, timer));
+      clientFactory ??
+      ((options) =>
+        new DaemonClient(this.socketPath, undefined, timer, {}, options?.clientIdentity));
   }
 
   /**
@@ -801,8 +808,8 @@ export class DaemonManager implements DaemonManagerLike {
     this.heldLockLogPath = undefined;
   }
 
-  createClient(): DaemonClientLike {
-    return this.clientFactory();
+  createClient(options?: DaemonClientFactoryOptions): DaemonClientLike {
+    return this.clientFactory(options);
   }
 
   getDaemonState(): DaemonStateLike {
@@ -2079,7 +2086,10 @@ export class DaemonManager implements DaemonManagerLike {
   }
 
   private async prepareDaemonForConditionalRestart(expected: DaemonStatus): Promise<boolean> {
-    const client = this.createClient();
+    // The generation tuple below authorizes this lifecycle RPC. It must reach
+    // an older daemon even when its normal client compatibility handshake would
+    // reject the newer caller that is requesting the replacement.
+    const client = this.createClient({ clientIdentity: null });
     try {
       await client.connect();
       const result: unknown = await client.callDaemonMethod(DAEMON_PREPARE_RESTART_METHOD, {

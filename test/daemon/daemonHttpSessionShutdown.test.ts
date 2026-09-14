@@ -12,6 +12,8 @@ interface DaemonHttpSessionInternals {
   acceptingHttpSessions: boolean;
   transports: Map<string, ClosableTransport>;
   registerHttpTransport(sessionId: string, transport: ClosableTransport): boolean;
+  socketServer: { quiesce(): Promise<void> } | null;
+  quiesceProvisioningIngress(): Promise<void>;
   interruptProvisioningForShutdown(): Promise<void>;
 }
 
@@ -70,5 +72,22 @@ describe("Daemon HTTP session shutdown", () => {
     expect(
       executionTracker.hasActiveToolExecution("provisionDevice", { scope: "global" }),
     ).toBeFalse();
+  });
+
+  test("closes HTTP and control-socket provisioning ingress before cancellation", async () => {
+    const daemon = new Daemon({});
+    const internals = daemon as unknown as DaemonHttpSessionInternals;
+    let quiesced = false;
+    internals.acceptingHttpSessions = true;
+    internals.socketServer = {
+      async quiesce() {
+        quiesced = true;
+      },
+    };
+
+    await internals.quiesceProvisioningIngress();
+
+    expect(internals.acceptingHttpSessions).toBeFalse();
+    expect(quiesced).toBeTrue();
   });
 });

@@ -22,10 +22,57 @@ import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { DeviceBootTimeoutError } from "../../src/utils/deviceBootService";
+import type { DeviceSessionRecord } from "../../src/db/deviceSessionRepository";
 import type {
   VirtualDeviceLifecycleCoordinator,
   VirtualDeviceLifecycleLease,
 } from "../../src/utils/virtualDeviceLifecycleCoordinator";
+
+class DeferredSessionPersistence extends FakeDeviceSessionPersistence {
+  activeSessionUuid: string | undefined;
+  private releaseActiveSessionWrite: (() => void) | undefined;
+  private signalActiveSessionWriteStarted: (() => void) | undefined;
+  readonly activeSessionWriteStarted = new Promise<void>((resolve) => {
+    this.signalActiveSessionWriteStarted = resolve;
+  });
+  private readonly activeSessionWrite = new Promise<void>((resolve) => {
+    this.releaseActiveSessionWrite = resolve;
+  });
+
+  override async upsertActiveSession(record: DeviceSessionRecord): Promise<void> {
+    this.activeSessionUuid = record.sessionUuid;
+    this.signalActiveSessionWriteStarted!();
+    await this.activeSessionWrite;
+  }
+
+  finishActiveSessionWrite(): void {
+    this.releaseActiveSessionWrite!();
+  }
+}
+
+class DeferredActivityPersistence extends FakeDeviceSessionPersistence {
+  private releaseActivityWrite: (() => void) | undefined;
+  private signalActivityWriteStarted: (() => void) | undefined;
+  readonly activityWriteStarted = new Promise<void>((resolve) => {
+    this.signalActivityWriteStarted = resolve;
+  });
+  private readonly activityWrite = new Promise<void>((resolve) => {
+    this.releaseActivityWrite = resolve;
+  });
+  deferActivity = false;
+
+  override async recordActivity(): Promise<void> {
+    if (!this.deferActivity) {
+      return;
+    }
+    this.signalActivityWriteStarted!();
+    await this.activityWrite;
+  }
+
+  finishActivityWrite(): void {
+    this.releaseActivityWrite!();
+  }
+}
 
 describe("platform device preparation tools", () => {
   let deviceUtils: FakeDeviceUtils;
@@ -561,6 +608,167 @@ describe("platform device preparation tools", () => {
 
     expect(second.sessionUuid).toBe(first.sessionUuid);
     expect(pool.getDevice(emulator.deviceId)).toMatchObject({ avdName: emulator.name });
+  });
+
+  for (const [operation, platform, target, image] of [
+    [
+      "getAndroid",
+      "android",
+      { avdName: "Pixel_9_API_36" },
+      {
+        platform: "android",
+        name: "Pixel_9_API_36",
+        isRunning: false,
+        source: "local",
+      },
+    ],
+    [
+      "getApple",
+      "ios",
+      { udid: "E2F46BCE-4C97-4AA0-BD9D-544756FAB545" },
+      {
+        platform: "ios",
+        name: "iPhone 17",
+        deviceId: "E2F46BCE-4C97-4AA0-BD9D-544756FAB545",
+        isRunning: false,
+      },
+    ],
+  ] as const) {
+    test(`${operation} cancels final session publication at the original preparation deadline`, async () => {
+      const persistence = new DeferredSessionPersistence();
+      deviceUtils.setDeviceImages(platform, [image]);
+      sessionManager = new SessionManager(timer, persistence);
+      const pool = new DevicePool(
+        sessionManager,
+        "daemon-session",
+        timer,
+        new FakeInstalledAppsRepository(),
+        deviceUtils,
+        new DefaultRetryExecutor(timer),
+      );
+      DaemonState.getInstance().initialize(sessionManager, pool);
+      let readinessReleases = 0;
+      const reserveReadiness = pool.reserveDeviceForReadiness.bind(pool);
+      pool.reserveDeviceForReadiness = async (
+        ...args: Parameters<DevicePool["reserveDeviceForReadiness"]>
+      ) => {
+        const release = await reserveReadiness(...args);
+        const countedRelease = async () => {
+          readinessReleases++;
+          await release();
+        };
+        return Object.assign(countedRelease, { owner: release.owner });
+      };
+      let lifecycleReleases = 0;
+      setDeviceToolsDependencies({
+        ensureCtrlProxyReady: async () => {
+          timer.advanceTime(1_500);
+        },
+        lifecycleCoordinator: {
+          reserve: async () => ({
+            signal: new AbortController().signal,
+            identity: { kind: "selector", platform, selector: image.name },
+            bindCanonicalIdentity: async () => {},
+            transitionToTeardown: () => {},
+            release: () => {
+              lifecycleReleases++;
+            },
+          }),
+        },
+      });
+
+      let resultSettled = false;
+      const result = callTool(operation, {
+        ...target,
+        bootTimeoutMs: 1_000,
+        automationReadyTimeoutMs: 1_000,
+      })
+        .then(
+          () => undefined,
+          (error: unknown) => error,
+        )
+        .finally(() => {
+          resultSettled = true;
+        });
+      await persistence.activeSessionWriteStarted;
+
+      await timer.advanceTimeAsync(499);
+      expect(resultSettled).toBe(false);
+      await timer.advanceTimeAsync(1);
+      const failure = await result;
+
+      expect(failure).toBeInstanceOf(ActionableError);
+      expect((failure as ActionableError).message).toContain(
+        `${operation} timeout exhausted while binding the device session`,
+      );
+      expect(sessionManager.getAllSessionIds()).toEqual([]);
+      expect(readinessReleases).toBe(0);
+      expect(lifecycleReleases).toBe(0);
+
+      persistence.finishActiveSessionWrite();
+      for (let attempt = 0; attempt < 50; attempt++) {
+        await Promise.resolve();
+      }
+
+      expect(sessionManager.getAllSessionIds()).toEqual([]);
+      expect(
+        sessionManager.getTerminalReleaseSnapshot(persistence.activeSessionUuid!),
+      ).toMatchObject({
+        releaseReason: "session-creation-cancelled",
+        terminal: true,
+      });
+      expect(pool.getDevice(image.deviceId ?? `mock-${image.name}`)?.sessionId ?? null).toBeNull();
+      expect(readinessReleases).toBe(1);
+      expect(lifecycleReleases).toBe(1);
+    });
+  }
+
+  test("preserves a reused session when its activity write outlives the preparation deadline", async () => {
+    const persistence = new DeferredActivityPersistence();
+    const emulator: BootedDevice = {
+      platform: "android",
+      name: "Pixel_9_API_36",
+      deviceId: "emulator-5562",
+    };
+    deviceUtils.setBootedDevices("android", [emulator]);
+    sessionManager = new SessionManager(timer, persistence);
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      deviceUtils,
+      new DefaultRetryExecutor(timer),
+    );
+    await pool.addDevice(emulator);
+    await pool.bindOrReuseDeviceSession("existing-session", emulator.deviceId, "android");
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    persistence.deferActivity = true;
+
+    const result = callTool("getAndroid", {
+      avdName: emulator.name,
+      bootTimeoutMs: 1_000,
+      automationReadyTimeoutMs: 1_000,
+    }).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    await persistence.activityWriteStarted;
+
+    await timer.advanceTimeAsync(10_000);
+    const failure = await result;
+
+    expect(failure).toBeInstanceOf(ActionableError);
+    expect(sessionManager.getSession("existing-session")).not.toBeNull();
+    expect(pool.getDevice(emulator.deviceId)?.sessionId).toBe("existing-session");
+
+    persistence.finishActivityWrite();
+    for (let attempt = 0; attempt < 50; attempt++) {
+      await Promise.resolve();
+    }
+
+    expect(sessionManager.getSession("existing-session")).not.toBeNull();
+    expect(pool.getDevice(emulator.deviceId)?.sessionId).toBe("existing-session");
   });
 
   test("records the AVD identity after binding an externally booted emulator", async () => {

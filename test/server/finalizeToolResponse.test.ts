@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   DEFAULT_OBSERVATION_INLINE_MAX_BYTES,
+  DIFF_PASSTHROUGH_METADATA_FIELDS,
   finalizeToolResponse,
 } from "../../src/server/finalizeToolResponse";
 import {
@@ -970,6 +971,65 @@ describe("finalizeToolResponse", () => {
       const parsed = JSON.parse(finalized.content[0].text);
       expect(parsed.observation.activeWindow).toEqual(obsSc.activeWindow);
       expect(parsed.observation.freshness).toEqual(obsSc.freshness);
+    });
+
+    test("a diffed observation carries `accessibilityAuditSkipped` with the same shape as full mode (issue #6926)", () => {
+      const { store } = makeStore();
+      const withAccessibilityAuditSkipped = (): ObserveResult => ({
+        ...sameScreenObserve(),
+        accessibilityAuditSkipped: "settled_capture_adopted",
+      });
+
+      finalizeToolResponse(createStructuredToolResponse(withAccessibilityAuditSkipped()), {
+        name: "observe",
+        sessionUuid: "s1",
+        baselineStore: store,
+      });
+
+      const next = withAccessibilityAuditSkipped();
+      (next.viewHierarchy!.hierarchy.node as any).node[0].checked = "true";
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: next }),
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
+      );
+
+      const obsSc = (finalized.structuredContent as any).observation;
+      expect(obsSc.isDiff).toBe(true);
+      expect(obsSc.accessibilityAuditSkipped).toBe("settled_capture_adopted");
+      expect(JSON.parse(finalized.content[0].text).observation.accessibilityAuditSkipped).toBe(
+        "settled_capture_adopted",
+      );
+    });
+
+    test("a diffed observation carries every whitelisted passthrough metadata field", () => {
+      const { store } = makeStore();
+      const freshness = { actualTimestamp: 1000, ageMs: 5, isFresh: true };
+      const withPassthroughMetadata = (): ObserveResult => ({
+        ...sameScreenObserve(),
+        freshness,
+        settled: true,
+        accessibilityAuditSkipped: "settled_capture_adopted",
+      });
+
+      finalizeToolResponse(createStructuredToolResponse(withPassthroughMetadata()), {
+        name: "observe",
+        sessionUuid: "s1",
+        baselineStore: store,
+      });
+
+      const next = withPassthroughMetadata();
+      (next.viewHierarchy!.hierarchy.node as any).node[0].checked = "true";
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: next }),
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
+      );
+
+      const obsSc = (finalized.structuredContent as any).observation as ObserveResult;
+      expect(obsSc.isDiff).toBe(true);
+      for (const field of DIFF_PASSTHROUGH_METADATA_FIELDS) {
+        expect(obsSc[field]).toBeDefined();
+        expect(obsSc[field]).toEqual(next[field]);
+      }
     });
 
     // A diff REPLACES the projected observation, so the truncation provenance

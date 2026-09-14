@@ -4,7 +4,6 @@ import {
   diffObserveResult,
   isSameObservationScreen,
   type SanitizeObserveConfig,
-  type ObserveDiff,
 } from "../features/observe/output/ObserveResultOutput";
 import {
   applyObserveScopeExperiments,
@@ -196,30 +195,36 @@ function resolveDiffContext(
 }
 
 /**
- * The `activeWindow` and `freshness` to attach to a diff response (issue
- * #6258), resolved the same way {@link resolveDiffSkeleton} resolves
- * `skeleton`: `diffObserveResult` never sees either field (both are top-level
- * on the post-transition observation, not part of the hierarchy it diffs), so
- * without this a diff-mode `observation` would carry no `activeWindow`/no
- * `freshness` at all — while a full-mode `observation` carries both — leaving
- * a client unable to write one accessor for "what screen am I on / is this
- * fresh" across modes. Sourced from `rawObservation` (the pre-sanitize
- * observation) rather than `servedObservation` so it is populated
- * unconditionally, regardless of projection.
- *
- * `settled` (issue #6866) rides along for the same reason: the embedded-observation
- * stability verdict is a top-level field the hierarchy diff never sees, and a client
- * that only ever receives diffs must still be able to tell a stability-checked
- * capture from an unchecked one.
+ * Top-level metadata a hierarchy diff cannot derive for itself, but which a
+ * diff-mode client needs with the same shape as a full observation. Sourced
+ * from the raw (pre-sanitize) observation so projection never suppresses it.
+ * Add a field here when it is a straight copy; the contract test walks this
+ * list. `skeleton`, `context`, `keyboard`, and `truncationReasons` are excluded
+ * because they require their existing fallback re-projection logic.
  */
-function resolveDiffScreenState(
-  rawObservation: ObserveResult,
-): Pick<ObserveDiff, "activeWindow" | "freshness" | "settled"> {
-  return {
-    activeWindow: rawObservation.activeWindow,
-    freshness: rawObservation.freshness,
-    settled: rawObservation.settled,
-  };
+export const DIFF_PASSTHROUGH_METADATA_FIELDS = [
+  "activeWindow",
+  "freshness",
+  "settled",
+  "accessibilityAuditSkipped",
+] as const satisfies readonly (keyof ObserveResult)[];
+
+/**
+ * Copy only defined fields so absent metadata remains absent from the emitted
+ * diff and serializes exactly as it does in full mode.
+ */
+function copyDefinedFields<T extends object, K extends keyof T>(
+  source: T,
+  fields: readonly K[],
+): Partial<Pick<T, K>> {
+  const metadata: Partial<Pick<T, K>> = {};
+  for (const field of fields) {
+    const value = source[field];
+    if (value !== undefined) {
+      Object.assign(metadata, { [field]: value });
+    }
+  }
+  return metadata;
 }
 
 /**
@@ -528,11 +533,13 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
                   ...cfg,
                   project: "skeleton",
                 }).keyboard;
-          // Issue #6258: a diff must not silently drop `activeWindow`/`freshness`
-          // either — see resolveDiffScreenState. Both fields come through as
-          // `undefined` when the underlying observation lacks them, which drops
-          // out of the serialized diff the same way an absent key would.
-          Object.assign(diff, resolveDiffScreenState(payload.observation as ObserveResult));
+          Object.assign(
+            diff,
+            copyDefinedFields(
+              payload.observation as ObserveResult,
+              DIFF_PASSTHROUGH_METADATA_FIELDS,
+            ),
+          );
           // Issue #6601: nor may a diff silently drop the hierarchy's truncation
           // provenance — see resolveDiffTruncationReasons.
           diff.truncationReasons = resolveDiffTruncationReasons(

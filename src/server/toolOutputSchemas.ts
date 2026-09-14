@@ -535,6 +535,12 @@ export const observationSummarySchema = z
       .describe(
         "Whether this observation passed the hierarchy-stability gate (issue #6866): two consecutive structurally-equal captures. `false` means the bound expired, the action was not navigation-class, or the action failed — in every case the capture was never confirmed stable. Stamped on every embedded action observation.",
       ),
+    accessibilityAuditSkipped: z
+      .literal("settled_capture_adopted")
+      .optional()
+      .describe(
+        "Why a requested accessibility audit was omitted from this observation (issue #6926): `settled_capture_adopted` means a settled capture replaced the action's original capture, so its audit was deliberately dropped rather than mismatched onto the returned hierarchy.",
+      ),
   })
   .passthrough();
 
@@ -771,6 +777,12 @@ export const observeDiffSchema = z
           "gate. Populated from the post-action observation, not by `diffObserveResult` " +
           "itself, so a diff-mode client has the same accessor as a full-mode one.",
       ),
+    accessibilityAuditSkipped: z
+      .literal("settled_capture_adopted")
+      .optional()
+      .describe(
+        "Same name/meaning as a full observation's `accessibilityAuditSkipped` (issue #6926): `settled_capture_adopted` means a settled capture replaced the action's original capture, so its audit was deliberately dropped rather than mismatched onto the returned hierarchy.",
+      ),
     added: z.array(observeDiffNodeSchema),
     removed: z.array(observeDiffNodeSchema),
     changed: z.array(observeDiffNodeChangeSchema),
@@ -935,6 +947,12 @@ export const observeResultSchema = z
     awaitedElement: elementSchema.optional(),
     matched: z.boolean().optional(),
     settled: z.boolean().optional(),
+    accessibilityAuditSkipped: z
+      .literal("settled_capture_adopted")
+      .optional()
+      .describe(
+        "Why a requested accessibility audit was omitted from this observation (issue #6926): `settled_capture_adopted` means a settled capture replaced the action's original capture, so its audit was deliberately dropped rather than mismatched onto the returned hierarchy.",
+      ),
     timedOut: z.boolean().optional(),
     polls: z.number().int().nonnegative().optional(),
     waitMs: z.number().nonnegative().optional(),

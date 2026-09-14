@@ -147,6 +147,39 @@ describe("tool output artifact metadata schema (#3480)", () => {
   });
 });
 
+describe("accessibility audit skip metadata schema (#6926)", () => {
+  const accessibilityAuditSkipped = "settled_capture_adopted" as const;
+
+  test("observation summaries accept and preserve the skip reason", () => {
+    expect(observationSummarySchema.parse({ accessibilityAuditSkipped })).toMatchObject({
+      accessibilityAuditSkipped,
+    });
+  });
+
+  test("diff observations accept the skip reason", () => {
+    expect(
+      observeDiffSchema.parse({
+        isDiff: true,
+        skeleton: [],
+        added: [],
+        removed: [],
+        changed: [],
+        accessibilityAuditSkipped,
+      }),
+    ).toMatchObject({ accessibilityAuditSkipped });
+  });
+
+  test("full observe results accept the skip reason", () => {
+    expect(observeResultSchema.parse({ accessibilityAuditSkipped })).toMatchObject({
+      accessibilityAuditSkipped,
+    });
+  });
+
+  test("rejects an invalid skip reason", () => {
+    expect(() => observationSummarySchema.parse({ accessibilityAuditSkipped: "bogus" })).toThrow();
+  });
+});
+
 /**
  * Fractional-coordinate coverage (issue #3206). iOS bounds are XCUITest points,
  * which are legitimately fractional (retina point→pixel thirds, `.5` sub-point

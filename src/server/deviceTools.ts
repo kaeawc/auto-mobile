@@ -6905,7 +6905,11 @@ export function registerDeviceTools() {
     let lifecycleLease: VirtualDeviceLifecycleLease | undefined;
     let provisioned: Awaited<ReturnType<ExactDeviceProvisioner["provision"]>> | undefined;
     let creationStarted = reconcileExistingConfiguration;
-    const bootState: { unownedColdBootSettlement?: Promise<void> } = {};
+    const bootState: {
+      unownedColdBootSettlement?: Promise<void>;
+      bindingSettlements: Promise<void>[];
+      readinessReservation?: DeviceReadinessReservation;
+    } = { bindingSettlements: [] };
     const notifyResourcesChangedBestEffort = () => {
       void deps.notifyResourcesChanged().catch((error: unknown) => {
         logger.warn(
@@ -7012,19 +7016,27 @@ export function registerDeviceTools() {
         bootState.unownedColdBootSettlement,
       );
     } finally {
-      if (bootState.unownedColdBootSettlement) {
-        // Release exactly once whatever the settlement does -- `finally`
-        // guarantees the lease is not stranded if it completes by rejecting
-        // (mirrors `prepareDevice`'s deferred release).
-        void bootState.unownedColdBootSettlement
-          .finally(() => lifecycleLease?.release())
+      const settlements = [
+        ...bootState.bindingSettlements,
+        ...(bootState.unownedColdBootSettlement ? [bootState.unownedColdBootSettlement] : []),
+      ];
+      if (settlements.length > 0) {
+        // A cancelled autolock binding may still be durably releasing its
+        // session. Keep both identity reservations until that rollback (and
+        // any cold-boot shutdown) is terminal, without delaying the caller.
+        void Promise.allSettled(settlements)
+          .then(() => {
+            releaseProvisionReadiness(bootState.readinessReservation);
+            lifecycleLease?.release();
+          })
           .catch((error: unknown) => {
             logger.warn(
-              `[DeviceTools] Deferred lifecycle lease release failed: ${errorMessage(error)}`,
+              `[DeviceTools] Deferred provision reservation release failed: ${errorMessage(error)}`,
               error,
             );
           });
       } else {
+        releaseProvisionReadiness(bootState.readinessReservation);
         lifecycleLease?.release();
       }
     }
@@ -7075,9 +7087,13 @@ export function registerDeviceTools() {
     totalDeadlineMs: number,
     lifecycleLease: VirtualDeviceLifecycleLease,
     signal: AbortSignal | undefined,
-    // Carries the cold-boot cancellation settlement back to the caller so the
-    // AVD lifecycle lease is not released while the emulator is still exiting.
-    bootState: { unownedColdBootSettlement?: Promise<void> },
+    // Carries reservation release dependencies back to the caller so both the
+    // readiness and AVD lifecycle reservations outlive cancellation rollback.
+    bootState: {
+      unownedColdBootSettlement?: Promise<void>;
+      bindingSettlements: Promise<void>[];
+      readinessReservation?: DeviceReadinessReservation;
+    },
   ): Promise<{
     device: BootedDevice;
     sessionId: string;
@@ -7224,6 +7240,9 @@ export function registerDeviceTools() {
                 readinessReservation ? new Set([readinessReservation.owner]) : undefined,
                 undefined,
                 resolveProvisionDeviceAchievedReadiness(args.readiness),
+                (settlement) => {
+                  bootState.bindingSettlements.push(settlement);
+                },
               ),
           );
         },
@@ -7241,7 +7260,7 @@ export function registerDeviceTools() {
       }
       throw error;
     } finally {
-      releaseProvisionReadiness(readinessReservation);
+      bootState.readinessReservation = readinessReservation;
     }
   }
 

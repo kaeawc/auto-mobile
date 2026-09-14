@@ -35,10 +35,6 @@ export interface DoctorRepairOptions {
    * This does not narrow the shared daemon/control-socket repair scope.
    */
   ios?: boolean;
-  /** Exact Android serial for an optional recovery-only read-only probe. */
-  androidDeviceId?: string;
-  /** Exact iOS simulator UDID for an optional recovery-only read-only probe. */
-  iosSimulatorUdid?: string;
   /** Daemon options parsed from the current CLI invocation. */
   daemonOptions?: DaemonOptions;
 }
@@ -479,7 +475,6 @@ function assertRequestedDoctorSections(
 
 async function verifyRequestedDoctorChecks(
   requested: PostRepairDoctorVerification | undefined,
-  repairOptions: Pick<DoctorRepairOptions, "androidDeviceId" | "iosSimulatorUdid">,
   deadline: number,
   timer: Timer,
   runDoctorChecks: (options: DoctorOptions) => Promise<DoctorReport>,
@@ -496,8 +491,6 @@ async function verifyRequestedDoctorChecks(
       const report = await runDoctorChecks({
         ...platforms,
         diagnosticProfile,
-        androidDeviceId: repairOptions.androidDeviceId,
-        iosSimulatorUdid: repairOptions.iosSimulatorUdid,
         signal,
         deadlineMs: deadline,
         timer,
@@ -513,7 +506,6 @@ async function completeVerifiedRecovery(
   before: DaemonHealthReport,
   action: DaemonRecoveryAction,
   requestedDoctor: PostRepairDoctorVerification | undefined,
-  repairOptions: Pick<DoctorRepairOptions, "androidDeviceId" | "iosSimulatorUdid">,
   deadline: number,
   timer: Timer,
   getHealthReport: () => Promise<DaemonHealthReport>,
@@ -526,7 +518,6 @@ async function completeVerifiedRecovery(
 
   const postRepairDoctor = await verifyRequestedDoctorChecks(
     requestedDoctor,
-    repairOptions,
     deadline,
     timer,
     runDoctorChecks,
@@ -654,7 +645,6 @@ export async function repairDaemon(
     before,
     protocolRecovery.value,
     requestedPostRepairDoctor(options),
-    options,
     deadline,
     timer,
     getHealthReport,

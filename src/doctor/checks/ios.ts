@@ -1309,7 +1309,7 @@ export async function runIosChecks(
   return results;
 }
 
-/** Run host tooling plus optional exact-target read-only iOS probes after repair. */
+/** Run only host-wide iOS tooling checks after repair. */
 export async function runPostRepairIosChecks(
   options: DoctorOptions = {},
   dependencies = createIosDoctorDependencies(),
@@ -1326,9 +1326,5 @@ export async function runPostRepairIosChecks(
   await run(() => checkXcrunAvailable(dependencies, options));
   await run(() => checkSimctlAvailable(dependencies, options));
   await run(() => checkSimulatorRuntimes(dependencies, options));
-  if (options.iosSimulatorUdid) {
-    await run(() => checkIosCtrlProxyRunner(dependencies, options, options.iosSimulatorUdid));
-    await run(() => checkIosObserveRoundTrip(dependencies, options, options.iosSimulatorUdid));
-  }
   return results;
 }

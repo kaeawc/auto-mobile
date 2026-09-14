@@ -95,14 +95,4 @@ export interface DoctorOptions extends DoctorProbeOptions {
    * not select this profile.
    */
   diagnosticProfile?: DoctorDiagnosticProfile;
-  /**
-   * Exact Android serial permitted for the recovery-only read-only probe.
-   * Without it, the profile deliberately performs no Android device probe.
-   */
-  androidDeviceId?: string;
-  /**
-   * Exact iOS simulator UDID permitted for the recovery-only read-only probe.
-   * Without it, the profile deliberately performs no iOS device probe.
-   */
-  iosSimulatorUdid?: string;
 }

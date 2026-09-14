@@ -70,10 +70,6 @@ export interface AutoMobileCheckDependencies {
   /** Android-branch seams so unit tests avoid real CtrlProxy/ADB I/O. */
   checkCtrlProxy?: (probe?: DoctorProbeOptions) => Promise<CheckResult>;
   checkWorkProfileAccessibility?: (probe?: DoctorProbeOptions) => Promise<CheckResult>;
-  checkReadOnlyCtrlProxyTarget?: (
-    deviceId: string,
-    probe?: DoctorProbeOptions,
-  ) => Promise<CheckResult>;
 }
 
 export interface ImageBackendDoctorLogger {
@@ -637,60 +633,6 @@ export async function checkWorkProfileAccessibility(
 }
 
 /**
- * Verify CtrlProxy state for one exact Android serial without reconciling it.
- * This never downloads, installs, enables, restarts, or chooses a discovery
- * winner; the exact serial is filtered before a per-device manager is created.
- */
-export async function checkReadOnlyCtrlProxyTarget(
-  deviceId: string,
-  adbFactory: AdbClientFactory = defaultAdbClientFactory,
-  probe: DoctorProbeOptions = {},
-): Promise<CheckResult> {
-  const name = "CtrlProxy (read-only target)";
-  try {
-    const currentProbe = remainingDoctorProbe(probe);
-    const discoveryAdb = adbFactory.create();
-    const target = (
-      await discoveryAdb.getBootedAndroidDevices({
-        signal: currentProbe.signal,
-        timeoutMs: currentProbe.timeoutMs,
-      })
-    ).find((device) => device.deviceId === deviceId);
-    if (!target) {
-      return {
-        name,
-        status: "fail",
-        message: `Requested Android device is not booted: ${deviceId}`,
-      };
-    }
-
-    const serviceManager = AndroidCtrlProxyManager.getInstance(target, adbFactory);
-    currentProbe.signal?.throwIfAborted();
-    const installed = await serviceManager.isInstalled();
-    currentProbe.signal?.throwIfAborted();
-    const enabled = await serviceManager.isEnabled();
-    currentProbe.signal?.throwIfAborted();
-    const message = `platform=android; device=${target.deviceId}; installed=${installed}; enabled=${enabled}; mode=read-only`;
-    return installed && enabled
-      ? { name, status: "pass", message }
-      : {
-          name,
-          status: "fail",
-          message,
-          recommendation:
-            "CtrlProxy is not ready on the explicitly requested device. Repair it through a device-owning acquisition or setup flow, then retry.",
-        };
-  } catch (error) {
-    logger.warn(`Read-only CtrlProxy target check failed: ${errorMessage(error)}`, error);
-    return {
-      name,
-      status: "fail",
-      message: `Could not check requested Android device ${deviceId}: ${errorMessage(error)}`,
-    };
-  }
-}
-
-/**
  * Run all AutoMobile checks
  */
 export async function runAutoMobileChecks(
@@ -748,7 +690,7 @@ export async function runAutoMobileChecks(
   return results;
 }
 
-/** Run only daemon-health and explicitly targeted read-only checks after repair. */
+/** Run only host-wide daemon-health checks after repair. */
 export async function runPostRepairAutoMobileChecks(
   options: DoctorOptions = {},
   dependencies: AutoMobileCheckDependencies = {},
@@ -772,14 +714,5 @@ export async function runPostRepairAutoMobileChecks(
   await run(() =>
     (dependencies.checkDaemonBuildIdentity ?? (() => checkDaemonBuildIdentity()))(options),
   );
-  if (options.androidDeviceId) {
-    await run(() =>
-      (
-        dependencies.checkReadOnlyCtrlProxyTarget ??
-        ((deviceId, probe) =>
-          checkReadOnlyCtrlProxyTarget(deviceId, defaultAdbClientFactory, probe))
-      )(options.androidDeviceId!, options),
-    );
-  }
   return results;
 }

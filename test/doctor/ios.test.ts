@@ -1110,31 +1110,25 @@ describe("checkIosObserveRoundTrip", () => {
     expect(names).toContain("iOS Observe Round Trip");
   });
 
-  test("post-repair iOS verification forwards an exact simulator UDID only to filtered probes", async () => {
-    const runnerTargets: Array<string | undefined> = [];
-    const observeTargets: Array<string | undefined> = [];
+  test("keeps post-repair iOS verification device-neutral", async () => {
     const results = await runPostRepairIosChecks(
-      { iosSimulatorUdid: "SIM-TARGET" },
+      {},
       {
         ...baseDependencies,
         runnerInspector: {
-          inspectBootedRunners: async (targetDeviceId) => {
-            runnerTargets.push(targetDeviceId);
-            return [];
+          inspectBootedRunners: async () => {
+            throw new Error("post-repair verification must not inspect iOS devices");
           },
         },
         observeRoundTripInspector: {
-          inspectBootedObserveRoundTrips: async (targetDeviceId) => {
-            observeTargets.push(targetDeviceId);
-            return [];
+          inspectBootedObserveRoundTrips: async () => {
+            throw new Error("post-repair verification must not observe iOS devices");
           },
         },
       },
     );
 
-    expect(runnerTargets).toEqual(["SIM-TARGET"]);
-    expect(observeTargets).toEqual(["SIM-TARGET"]);
-    expect(results.map((result) => result.name)).toEqual(
+    expect(results.map((result) => result.name)).not.toEqual(
       expect.arrayContaining(["iOS CtrlProxy Runner", "iOS Observe Round Trip"]),
     );
   });

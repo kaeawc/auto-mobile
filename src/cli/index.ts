@@ -488,8 +488,6 @@ export function doctorToolParams(params: Record<string, any>): Record<string, an
   delete doctorParams.json;
   delete doctorParams.repair;
   delete doctorParams.timeoutMs;
-  delete doctorParams.androidDeviceId;
-  delete doctorParams.iosSimulatorUdid;
   return doctorParams;
 }
 
@@ -524,18 +522,10 @@ async function runDoctorRepairCommand(
   dependencies: DoctorCommandDependencies,
   daemonOptions?: DaemonOptions,
 ): Promise<void> {
-  if (params.androidDeviceId !== undefined && params.android !== true) {
-    throw new ActionableError("--android-device-id requires --repair --android.");
-  }
-  if (params.iosSimulatorUdid !== undefined && params.ios !== true) {
-    throw new ActionableError("--ios-simulator-udid requires --repair --ios.");
-  }
   const recovery = await (dependencies.repairDaemon ?? repairDaemon)({
     timeoutMs: params.timeoutMs,
     android: params.android,
     ios: params.ios,
-    androidDeviceId: params.androidDeviceId,
-    iosSimulatorUdid: params.iosSimulatorUdid,
     daemonOptions,
   });
   writeCliToolOutput(recovery, "doctor");
@@ -981,14 +971,6 @@ function showToolHelp(toolName: string, output: CliOutput): void {
       output.log("  --timeout-ms (optional)");
       output.log("    Type: number");
       output.log("    Total recovery deadline in milliseconds (used with --repair).");
-      output.log("  --android-device-id (optional)");
-      output.log(
-        "    Exact Android serial for a read-only post-repair CtrlProxy probe (used with --repair --android).",
-      );
-      output.log("  --ios-simulator-udid (optional)");
-      output.log(
-        "    Exact iOS simulator UDID for read-only post-repair runner probes (used with --repair --ios).",
-      );
     }
   } catch (error) {
     output.log("  Could not parse parameter schema");

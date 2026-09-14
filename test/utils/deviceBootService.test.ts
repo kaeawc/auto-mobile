@@ -496,6 +496,36 @@ describe("DeviceBootService", () => {
     expect(devices.wasMethodCalled("waitForDeviceReady")).toBe(false);
   });
 
+  it("bypasses cached Android discovery before rejecting an exact AVD match", async () => {
+    const devices = new FakeDeviceUtils();
+    const first: BootedDevice = {
+      name: image.name,
+      platform: "android",
+      deviceId: "emulator-5554",
+    };
+    const second: BootedDevice = { ...first, deviceId: "emulator-5556" };
+    let bypassedAndroidCache = false;
+    devices.setBootedDevices("android", [first]);
+    devices.getBootedDevicesDetailed = async (_platform, options = {}) => {
+      bypassedAndroidCache = options.bypassAndroidDeviceListCache === true;
+      return {
+        devices: [first, second],
+        succeededPlatforms: new Set(["android"] as const),
+        discoveryErrors: {},
+      };
+    };
+
+    await expect(
+      service(devices).boot({
+        platform: "android",
+        name: image.name,
+        matchExactName: true,
+      }),
+    ).rejects.toThrow(/identity_conflict.*emulator-5554.*emulator-5556/);
+
+    expect(bypassedAndroidCache).toBe(true);
+  });
+
   it("ignores a physical Android device whose model matches the AVD name", async () => {
     const devices = new FakeDeviceUtils();
     const emulator: BootedDevice = {

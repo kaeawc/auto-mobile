@@ -633,6 +633,35 @@ describe("platform device preparation tools", () => {
     });
   });
 
+  test("getAndroid rejects an explicit serial that resolves to a different AVD after discovery", async () => {
+    const unknown: BootedDevice = {
+      name: "Unknown (emulator-5554)",
+      platform: "android",
+      deviceId: "emulator-5554",
+    };
+    const resolved: BootedDevice = {
+      name: "Different_AVD",
+      platform: "android",
+      deviceId: unknown.deviceId,
+    };
+    let discoveries = 0;
+    deviceUtils.setBootedDevices("android", [unknown]);
+    const getBootedDevices = deviceUtils.getBootedDevices.bind(deviceUtils);
+    deviceUtils.getBootedDevices = async (platform) => {
+      discoveries++;
+      return discoveries === 1 ? await getBootedDevices(platform) : [resolved];
+    };
+
+    const failure = await callTool("getAndroid", {
+      avdName: "Requested_AVD",
+      deviceId: unknown.deviceId,
+    }).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(ActionableError);
+    expect((failure as ActionableError).message).toContain("identifier_conflict");
+    expect((failure as ActionableError).message).toContain("Different_AVD");
+  });
+
   test("getAndroid does not let a pooled AVD hide a competing live serial", async () => {
     const pooled: BootedDevice = {
       name: "Duplicate_AVD",

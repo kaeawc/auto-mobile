@@ -4835,6 +4835,16 @@ export function validateRequestedAndroidSerial(
     return;
   }
   const requested = pair.deviceId;
+  if (isAndroidEmulatorSerial(requested) && device.deviceId === requested) {
+    if (device.name === pair.avdName) {
+      return;
+    }
+    throw new ActionableError(
+      `identifier_conflict: avdName '${pair.avdName}' resolved to ` +
+        `${device.name} (${device.deviceId}), which is not the requested AVD. ` +
+        "Pass only the identifier you mean.",
+    );
+  }
   if (
     device.deviceId === requested ||
     device.name === requested ||

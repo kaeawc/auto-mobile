@@ -296,14 +296,43 @@ export class DeviceBootService {
     await this.dependencies.onIdentityResolved?.(identity);
   }
 
+  private async discoverBootedDevices(
+    platform: DeviceBootRequest["platform"],
+    context: BootDeadlineContext,
+    phase: string,
+    bypassAndroidCache = false,
+    awaitAbortSettlement = true,
+  ): Promise<BootedDevice[]> {
+    if (platform === "android" && bypassAndroidCache) {
+      const discovery = await this.runPhase(
+        context,
+        phase,
+        async () =>
+          await this.dependencies.deviceManager.getBootedDevicesDetailed("android", {
+            bypassAndroidDeviceListCache: true,
+          }),
+        awaitAbortSettlement,
+      );
+      return discovery.devices;
+    }
+    return await this.runPhase(
+      context,
+      phase,
+      () => this.dependencies.deviceManager.getBootedDevices(platform),
+      awaitAbortSettlement,
+    );
+  }
+
   private async bootKnownDevice(
     request: DeviceBootRequest & { deviceId: string },
     context: BootDeadlineContext,
     progress?: DeviceBootProgress,
   ): Promise<DeviceBootResult> {
     const { deviceManager } = this.dependencies;
-    const booted = await this.runPhase(context, "discovering running devices", () =>
-      deviceManager.getBootedDevices(request.platform),
+    const booted = await this.discoverBootedDevices(
+      request.platform,
+      context,
+      "discovering running devices",
     );
     const running = booted.find((device) => device.deviceId === request.deviceId);
     if (running) {
@@ -383,10 +412,11 @@ export class DeviceBootService {
     if (request.preferRunning === false) {
       return undefined;
     }
-    const booted = await this.runPhase(
+    const booted = await this.discoverBootedDevices(
+      request.platform,
       context,
       "discovering running devices",
-      () => this.dependencies.deviceManager.getBootedDevices(request.platform),
+      request.matchExactName && request.name !== undefined,
       false,
     );
     const excludedDeviceNames = request.excludeDeviceNames;
@@ -424,8 +454,11 @@ export class DeviceBootService {
     if (!image.isRunning) {
       return this.bootImage(image, context, progress, false);
     }
-    const booted = await this.runPhase(context, "resolving the running device image", () =>
-      this.dependencies.deviceManager.getBootedDevices(image.platform),
+    const booted = await this.discoverBootedDevices(
+      image.platform,
+      context,
+      "resolving the running device image",
+      image.platform === "android",
     );
     // iOS simulators can share a display name, so only their UDID is lifecycle
     // identity. Android `deviceId` may instead name an AVD image, where name

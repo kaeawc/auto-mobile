@@ -159,7 +159,8 @@ export interface AdbExecutor {
 
   /**
    * Resolve and return the path to the `adb` binary without executing a command.
-   * Used by diagnostics (doctor) to surface the detected path.
+   * Used by diagnostics (doctor) to surface the detected path. `timeoutMs`
+   * bounds the whole discovery and `signal` aborts the path probes it spawns.
    */
-  getAdbPathOnly(): Promise<string>;
+  getAdbPathOnly(options?: { timeoutMs?: number; signal?: AbortSignal }): Promise<string>;
 }

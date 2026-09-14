@@ -8,7 +8,7 @@ import {
 import { ResourceRegistry } from "../../../src/server/resourceRegistry";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { DOCTOR_EXEC_TIMEOUT_MS } from "../../../src/doctor/checks/ios";
-import type { CheckResult } from "../../../src/doctor/types";
+import type { CheckResult, DoctorProbeOptions } from "../../../src/doctor/types";
 
 const pass = (value?: string): CheckResult => ({
   name: "test",
@@ -116,6 +116,75 @@ describe("host toolchain resource", () => {
 
     expect(emulator).toMatchObject({ available: false });
     expect(emulator.error).toContain("timed out");
+  });
+
+  test("aborts the losing probe when the timeout wins so its child processes are killed", async () => {
+    const timer = new FakeTimer();
+    let received: DoctorProbeOptions | undefined;
+    const pending = read(
+      makeDependencies({
+        timer,
+        checkEmulator: async (probe) => {
+          received = probe;
+          return new Promise<CheckResult>(() => {});
+        },
+      }),
+    );
+    await Promise.resolve();
+    expect(received?.timeoutMs).toBe(DOCTOR_EXEC_TIMEOUT_MS);
+    expect(received?.signal?.aborted).toBe(false);
+
+    timer.advanceTime(DOCTOR_EXEC_TIMEOUT_MS + 1);
+    const payload = await pending;
+    const emulator = payload.entries.find((entry: { name: string }) => entry.name === "emulator");
+
+    expect(emulator).toMatchObject({ available: false });
+    expect(emulator.error).toContain("timed out");
+    expect(received?.signal?.aborted).toBe(true);
+  });
+
+  test("leaves a probe that settles in time un-aborted", async () => {
+    const signals: AbortSignal[] = [];
+    await read(
+      makeDependencies({
+        checkAdbInstallation: async (probe) => {
+          signals.push(probe.signal!);
+          return pass("/opt/android/platform-tools/adb");
+        },
+      }),
+    );
+
+    expect(signals).toHaveLength(1);
+    expect(signals[0].aborted).toBe(false);
+  });
+
+  test("retains Windows drive-letter tool locations", async () => {
+    const payload = await read(
+      makeDependencies({
+        checkAdbInstallation: async () => pass("C:\\Android\\platform-tools\\adb.exe"),
+        checkAndroidCommandLineTools: async () => ({
+          ...pass("D:\\sdk\\cmdline-tools\\latest"),
+          message: "Android command line tools detected (version v12.3).",
+        }),
+      }),
+    );
+    const entries = Object.fromEntries(
+      payload.entries.map((entry: { name: string }) => [entry.name, entry]),
+    );
+
+    expect(entries.adb).toMatchObject({
+      available: true,
+      location: "C:\\Android\\platform-tools\\adb.exe",
+    });
+    expect(entries.sdkmanager).toMatchObject({ location: "D:\\sdk\\cmdline-tools\\latest" });
+  });
+
+  test("omits a location that is only a bare command name", async () => {
+    const payload = await read(makeDependencies({ checkAdbInstallation: async () => pass("adb") }));
+    const adb = payload.entries.find((entry: { name: string }) => entry.name === "adb");
+
+    expect(adb).toMatchObject({ available: true });
+    expect(adb.location).toBeUndefined();
   });
 
   test("registers a static resource", () => {

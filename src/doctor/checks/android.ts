@@ -5,7 +5,7 @@
 
 import { errorMessage } from "../../utils/describeUnknownError";
 import { existsSync } from "node:fs";
-import { CheckResult, DoctorOptions } from "../types";
+import { CheckResult, DoctorOptions, DoctorProbeOptions } from "../types";
 import {
   detectAndroidCommandLineTools,
   getAndroidHomeWithSystemImages,
@@ -28,18 +28,22 @@ import {
 import type { AdbDeviceState } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 
 const MIN_CMDLINE_TOOLS_VERSION = [9, 0] as const;
-type CmdlineToolsVersionReader = (location: AndroidToolsLocation) => Promise<string | null>;
+type CmdlineToolsVersionReader = (
+  location: AndroidToolsLocation,
+  probe?: DoctorProbeOptions,
+) => Promise<string | null>;
 
-const readCmdlineToolsVersion: CmdlineToolsVersionReader = async (location) => {
-  return readSdkManagerVersion(undefined, location);
+const readCmdlineToolsVersion: CmdlineToolsVersionReader = async (location, probe) => {
+  return readSdkManagerVersion(undefined, location, probe);
 };
 
 async function checkCmdlineToolsVersion(
   location: AndroidToolsLocation,
   reader: CmdlineToolsVersionReader,
+  probe: DoctorProbeOptions,
 ): Promise<CheckResult> {
   try {
-    const version = await reader(location);
+    const version = await reader(location, probe);
     if (!version) {
       return {
         name: "Android Command Line Tools",
@@ -89,9 +93,12 @@ export interface AndroidDoctorDependencies {
   getAndroidHomeWithSystemImages: typeof getAndroidHomeWithSystemImages;
   logger: typeof logger;
   getCmdlineToolsVersion?: CmdlineToolsVersionReader;
-  listAvds?: () => Promise<Array<{ name: string }>>;
+  listAvds?: (probe?: DoctorProbeOptions) => Promise<Array<{ name: string }>>;
   readAvdConfig?: AvdConfigReader;
 }
+
+const listAvdsWithEmulator = async (probe?: DoctorProbeOptions) =>
+  new AndroidEmulatorClient().listAvds(probe);
 
 const createAndroidDoctorDependencies = (): AndroidDoctorDependencies => ({
   detectAndroidCommandLineTools,
@@ -99,7 +106,7 @@ const createAndroidDoctorDependencies = (): AndroidDoctorDependencies => ({
   getAndroidHomeWithSystemImages,
   logger,
   getCmdlineToolsVersion: readCmdlineToolsVersion,
-  listAvds: async () => new AndroidEmulatorClient().listAvds(),
+  listAvds: listAvdsWithEmulator,
   readAvdConfig: new FileAvdConfigReader(),
 });
 
@@ -107,14 +114,23 @@ function normalizePath(value: string): string {
   return value.replace(/\\/g, "/");
 }
 
+/** Only the cancellation half of a mixed options bag, with absent keys left absent. */
+function probeOptions(options: DoctorProbeOptions): DoctorProbeOptions {
+  return {
+    ...(options.signal ? { signal: options.signal } : {}),
+    ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
+  };
+}
+
 /**
  * Check Android command line tools installation and Homebrew mismatch
  */
 export async function checkAndroidCommandLineTools(
-  _options: DoctorOptions = {},
+  options: DoctorOptions & DoctorProbeOptions = {},
   dependencies = createAndroidDoctorDependencies(),
 ): Promise<CheckResult> {
   const name = "Android Command Line Tools";
+  const probe = probeOptions(options);
 
   let locations: Awaited<ReturnType<typeof detectAndroidCommandLineTools>>;
   try {
@@ -155,7 +171,7 @@ export async function checkAndroidCommandLineTools(
   }
 
   if (dependencies.getCmdlineToolsVersion) {
-    return checkCmdlineToolsVersion(bestLocation, dependencies.getCmdlineToolsVersion);
+    return checkCmdlineToolsVersion(bestLocation, dependencies.getCmdlineToolsVersion, probe);
   }
 
   return {
@@ -230,10 +246,11 @@ export async function checkJavaHome(): Promise<CheckResult> {
  */
 export async function checkAdbInstallation(
   adbFactory: AdbClientFactory = defaultAdbClientFactory,
+  probe: DoctorProbeOptions = {},
 ): Promise<CheckResult> {
   try {
     const adb = adbFactory.create();
-    const adbPath = await adb.getAdbPathOnly();
+    const adbPath = await adb.getAdbPathOnly(probe);
 
     return {
       name: "ADB Installation",
@@ -259,10 +276,17 @@ export async function checkAdbInstallation(
  */
 export async function checkAdbVersion(
   adbFactory: AdbClientFactory = defaultAdbClientFactory,
+  probe: DoctorProbeOptions = {},
 ): Promise<CheckResult> {
   try {
     const adb = adbFactory.create();
-    const result = await adb.executeCommand("--version", undefined, undefined, true);
+    const result = await adb.executeCommand(
+      "--version",
+      probe.timeoutMs,
+      undefined,
+      true,
+      probe.signal,
+    );
 
     // Parse version from output like "Android Debug Bridge version 35.0.0"
     const versionMatch = result.stdout.match(/Android Debug Bridge version (\d+\.\d+\.\d+)/);
@@ -287,11 +311,13 @@ export async function checkAdbVersion(
 /**
  * Check Android emulator availability
  */
-export async function checkEmulator(): Promise<CheckResult> {
+export async function checkEmulator(
+  probe: DoctorProbeOptions = {},
+  dependencies: Pick<AndroidDoctorDependencies, "listAvds"> = createAndroidDoctorDependencies(),
+): Promise<CheckResult> {
   try {
-    const emulator = new AndroidEmulatorClient();
     // Try to list AVDs - this will fail if emulator is not available
-    await emulator.listAvds();
+    await (dependencies.listAvds ?? listAvdsWithEmulator)(probe);
 
     return {
       name: "Android Emulator",

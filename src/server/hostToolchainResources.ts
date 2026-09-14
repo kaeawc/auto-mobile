@@ -1,3 +1,4 @@
+import { isAbsolute, win32 } from "node:path";
 import {
   checkAdbInstallation,
   checkAdbVersion,
@@ -12,7 +13,7 @@ import {
   createIosDoctorDependencies,
   DOCTOR_EXEC_TIMEOUT_MS,
 } from "../doctor/checks/ios";
-import type { CheckResult } from "../doctor/types";
+import type { CheckResult, DoctorProbeOptions } from "../doctor/types";
 import { errorMessage } from "../utils/describeUnknownError";
 import { checkDevicectlAvailability } from "../utils/ios-cmdline-tools/DevicectlDeviceLister";
 import { logger } from "../utils/logger";
@@ -34,7 +35,12 @@ export interface HostToolchainResourceContent {
   entries: HostToolchainEntry[];
 }
 
-type DoctorCheck = () => Promise<CheckResult>;
+/**
+ * One doctor probe. The resource hands every check a signal it aborts when its
+ * own deadline wins the race, plus that deadline, so the check bounds and kills
+ * the commands it spawns (#7008). Checks that spawn nothing may ignore both.
+ */
+type DoctorCheck = (probe: DoctorProbeOptions) => Promise<CheckResult>;
 
 export interface HostToolchainResourceDependencies {
   now: () => Date;
@@ -55,10 +61,12 @@ function createDefaultDependencies(): HostToolchainResourceDependencies {
   return {
     now: () => new Date(),
     timer: defaultTimer,
-    checkAdbInstallation,
-    checkAdbVersion,
-    checkEmulator,
-    checkAndroidCommandLineTools,
+    checkAdbInstallation: (probe) => checkAdbInstallation(undefined, probe),
+    checkAdbVersion: (probe) => checkAdbVersion(undefined, probe),
+    checkEmulator: (probe) => checkEmulator(probe),
+    checkAndroidCommandLineTools: (probe) => checkAndroidCommandLineTools(probe),
+    // The iOS dependencies' execFile already bounds every command with
+    // DOCTOR_EXEC_TIMEOUT_MS + SIGKILL, so these need no per-probe signal.
     checkXcodeInstallation: () => checkXcodeInstallation(undefined, iosDependencies),
     checkXcodeCommandLineTools: () => checkXcodeCommandLineTools(undefined, iosDependencies),
     checkXcrunAvailable: () => checkXcrunAvailable(iosDependencies),
@@ -103,20 +111,32 @@ function entryFromCheck(
     name,
     available: true,
     ...(version ? { version } : {}),
-    ...(options.location && value?.startsWith("/") ? { location: value } : {}),
+    ...(options.location && value !== undefined && isAbsolutePath(value)
+      ? { location: value }
+      : {}),
   };
+}
+
+/** POSIX and Windows absolute paths both count; a bare command name does not. */
+function isAbsolutePath(value: string): boolean {
+  return isAbsolute(value) || win32.isAbsolute(value);
 }
 
 async function probe(name: string, check: DoctorCheck, timer: Timer): Promise<CheckResult> {
   let timeout: NodeJS.Timeout | undefined;
+  const controller = new AbortController();
   try {
     return await Promise.race([
-      Promise.resolve().then(check),
+      Promise.resolve().then(() =>
+        check({ signal: controller.signal, timeoutMs: DOCTOR_EXEC_TIMEOUT_MS }),
+      ),
       new Promise<never>((_resolve, reject) => {
-        timeout = timer.setTimeout(
-          () => reject(new Error(`Probe timed out after ${DOCTOR_EXEC_TIMEOUT_MS}ms`)),
-          DOCTOR_EXEC_TIMEOUT_MS,
-        );
+        timeout = timer.setTimeout(() => {
+          const error = new Error(`Probe timed out after ${DOCTOR_EXEC_TIMEOUT_MS}ms`);
+          // The losing check keeps running otherwise; aborting kills its children.
+          controller.abort(error);
+          reject(error);
+        }, DOCTOR_EXEC_TIMEOUT_MS);
       }),
     ]);
   } catch (error) {

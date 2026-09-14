@@ -31,6 +31,13 @@ import {
 import { resetAdbDeviceListCache } from "../utils/android-cmdline-tools/AdbClient";
 import { hasMutableDisplayName, isIosPhysicalUdid } from "../utils/ios-cmdline-tools/iosDeviceType";
 import { isAndroidEmulatorSerial } from "../utils/androidSerial";
+import {
+  compareIdentityEvidence,
+  deriveEvidenceFromBootedDevice,
+  deriveEvidenceFromPooledDevice,
+  isUnresolvedAndroidEmulatorName,
+  type IdentityEvidence,
+} from "./deviceIdentityEvidence";
 import { didSourceSucceedForDevice, type DiscoverySource } from "../utils/discoverySource";
 import { consolePortFromSerial } from "../utils/android-cmdline-tools/EmulatorConsoleClient";
 import {
@@ -325,6 +332,22 @@ export interface PooledDevice {
   identityObservedAt?: number;
 }
 
+function neutralIdentityEvidence(device: Pick<BootedDevice, "observedAt">): IdentityEvidence {
+  return {
+    unresolved: false,
+    ...(device.observedAt === undefined ? {} : { observedAt: device.observedAt }),
+  };
+}
+
+function identityEvidenceFields(
+  evidence: IdentityEvidence,
+): Pick<PooledDevice, "identityObservedAt" | "identityUnresolved"> {
+  return {
+    ...(evidence.observedAt === undefined ? {} : { identityObservedAt: evidence.observedAt }),
+    ...(evidence.unresolved ? { identityUnresolved: true } : {}),
+  };
+}
+
 interface RollbackAssignment {
   deviceId: string;
   session: Session;
@@ -368,7 +391,12 @@ interface AssignableIdleDeviceSelection {
 }
 
 interface DeviceDisconnectSessionReleaser {
-  (sessionId: string, deviceId: string, releaseReason: string): Promise<void>;
+  (
+    sessionId: string,
+    deviceId: string,
+    releaseReason: string,
+    shouldCommit?: () => boolean,
+  ): Promise<boolean | void>;
 }
 
 interface DeviceReadyListener {
@@ -656,7 +684,7 @@ export class DevicePool {
    * A later resolved observation clears this evidence without letting an
    * unresolved observation itself become the replacement candidate.
    */
-  private readonly pendingIdentityReplacementUnresolvedObservations: Map<string, number> =
+  private readonly pendingIdentityReplacementUnresolvedObservations: Map<string, IdentityEvidence> =
     new Map();
   /**
    * Explicit session-release callbacks run before terminal persistence awaits.
@@ -726,8 +754,15 @@ export class DevicePool {
       androidDeviceReboot ?? new BoundedAndroidDeviceReboot(timer, this.recoveryPolicy.maxAttempts);
     this.releaseSessionForDisconnectedDevice =
       releaseSessionForDisconnectedDevice ??
-      (async (sessionId, _deviceId, releaseReason) => {
+      (async (sessionId, _deviceId, releaseReason, shouldCommit) => {
+        // This is the final identity fence. Do not put an await between this
+        // re-check and SessionManager's release call: discovery can replace a
+        // same-serial runtime while a custom releaser is paused before commit.
+        if (shouldCommit?.() === false) {
+          return false;
+        }
         await this.sessionManager.releaseSession(sessionId, releaseReason);
+        return true;
       });
 
     // Expiry has no caller available to return the device to the pool. Explicit
@@ -977,7 +1012,7 @@ export class DevicePool {
     device: BootedDevice,
     sourceImage?: DeviceInfo,
     awaitSessionTracking: boolean = true,
-    identityUnresolved?: boolean,
+    identityEvidence: IdentityEvidence = neutralIdentityEvidence(device),
   ): Promise<void> {
     this.clearAutoStartSuppressionForBootedDevice(device, sourceImage);
     if (sourceImage) {
@@ -1013,8 +1048,7 @@ export class DevicePool {
         iosVersion: device.iosVersion,
         simulatorType: this.criteriaMatcher.getBootedDeviceSimulatorType(device),
         ...(device.observedAt !== undefined ? { nameObservedAt: device.observedAt } : {}),
-        ...(device.observedAt !== undefined ? { identityObservedAt: device.observedAt } : {}),
-        ...(identityUnresolved ? { identityUnresolved: true } : {}),
+        ...identityEvidenceFields(identityEvidence),
         incarnation: this.nextDeviceIncarnation(),
       });
       this.recordSourceAndroidAvd(device.deviceId, sourceImage);
@@ -1073,10 +1107,18 @@ export class DevicePool {
       if (!replacement || this.devices.has(replacement.deviceId)) {
         return false;
       }
-      const identityUnresolved =
-        this.hasUnresolvedEmulatorName(replacement) ||
-        this.pendingIdentityReplacementUnresolvedObservations.has(replacement.deviceId);
-      await this.addDevice(replacement, undefined, true, identityUnresolved);
+      const replacementEvidence = this.identityEvidenceForBootedDevice(replacement);
+      const pendingUnresolvedEvidence = this.pendingIdentityReplacementUnresolvedObservations.get(
+        replacement.deviceId,
+      );
+      const identityEvidence =
+        pendingUnresolvedEvidence &&
+        ["newer", "unresolved-newer"].includes(
+          compareIdentityEvidence(replacementEvidence, pendingUnresolvedEvidence),
+        )
+          ? pendingUnresolvedEvidence
+          : replacementEvidence;
+      await this.addDevice(replacement, undefined, true, identityEvidence);
       return true;
     } finally {
       this.pendingIdentityReplacements.delete(bootedDevice.deviceId);
@@ -2006,7 +2048,7 @@ export class DevicePool {
               ),
               device,
             );
-            await this.addDevice(ready, device);
+            await this.addDevice(ready, device, true, this.identityEvidenceForBootedDevice(ready));
             return { ready, childProcess };
           },
         );
@@ -2180,7 +2222,7 @@ export class DevicePool {
             ),
             device,
           );
-          await this.addDevice(ready, device);
+          await this.addDevice(ready, device, true, this.identityEvidenceForBootedDevice(ready));
           return { ready, childProcess };
         },
       );
@@ -2418,7 +2460,7 @@ export class DevicePool {
       await this.reconcilePooledIdentityResolution(device, bootedDevice);
       return this.confirmLivePooledDevice(device);
     }
-    if (this.isStaleIdentityObservation(device, bootedDevice)) {
+    if (this.comparePooledIdentityEvidence(device, bootedDevice) === "stale") {
       return this.confirmLivePooledDevice(device);
     }
     const replaced = await this.replaceIdlePooledDeviceForLivenessCheck(
@@ -2459,7 +2501,7 @@ export class DevicePool {
       ) {
         return false;
       }
-      if (this.isStaleIdentityObservation(device, bootedDevice)) {
+      if (this.comparePooledIdentityEvidence(device, bootedDevice) === "stale") {
         return false;
       }
       return await this.replacePooledDeviceForRuntimeIdentity(device, bootedDevice);
@@ -2476,7 +2518,7 @@ export class DevicePool {
     incidentId?: string,
     incidentCaptureComplete: boolean = false,
     recoveryPreparation?: SessionRecoveryPreparation,
-    identityObservation?: Pick<BootedDevice, "name" | "observedAt">,
+    identityObservation?: Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">,
   ): Promise<void> {
     if (this.shouldAbortEvictionUpfront(device, reason, identityObservation)) {
       return;
@@ -2498,17 +2540,15 @@ export class DevicePool {
     ) {
       return;
     }
-    if (device.sessionId) {
-      await this.releaseSessionForDisconnectedDevice(
-        device.sessionId,
-        device.id,
-        deviceLossCancellationReason(device.id, correlatedIncidentId),
-      );
-      if (this.devices.get(device.id) !== device) {
-        await this.finishEmulatorLossIncident(correlatedIncidentId, "not-attempted");
-        return;
-      }
-      device.sessionId = null;
+    if (
+      device.sessionId &&
+      !(await this.releaseSessionForEvictedDevice(
+        device,
+        correlatedIncidentId,
+        identityObservation,
+      ))
+    ) {
+      return;
     }
     if (this.devices.get(device.id) !== device) {
       await this.finishEmulatorLossIncident(correlatedIncidentId, "not-attempted");
@@ -2530,10 +2570,58 @@ export class DevicePool {
     this.settleEmulatorLossIncident(correlatedIncidentId);
   }
 
+  private async releaseSessionForEvictedDevice(
+    device: PooledDevice,
+    incidentId: string | undefined,
+    identityObservation?: Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">,
+  ): Promise<boolean> {
+    const sessionId = device.sessionId;
+    if (!sessionId) {
+      return true;
+    }
+    const isSupersededByNewerIdentity = () => {
+      const currentEvidence = deriveEvidenceFromPooledDevice(device);
+      return (
+        identityObservation !== undefined &&
+        !currentEvidence.unresolved &&
+        compareIdentityEvidence(
+          currentEvidence,
+          this.identityEvidenceForBootedDevice(identityObservation),
+        ) === "stale"
+      );
+    };
+    if (isSupersededByNewerIdentity()) {
+      logger.info(
+        `[DevicePool] Aborting session release for ${device.id}: a newer identity observation ` +
+          "superseded this eviction",
+      );
+      return false;
+    }
+    const released = await this.releaseSessionForDisconnectedDevice(
+      sessionId,
+      device.id,
+      deviceLossCancellationReason(device.id, incidentId),
+      () => !isSupersededByNewerIdentity(),
+    );
+    if (released === false) {
+      logger.info(
+        `[DevicePool] Aborting session release for ${device.id}: a newer identity observation ` +
+          "superseded this eviction",
+      );
+      return false;
+    }
+    if (this.devices.get(device.id) !== device) {
+      await this.finishEmulatorLossIncident(incidentId, "not-attempted");
+      return false;
+    }
+    device.sessionId = null;
+    return true;
+  }
+
   private shouldAbortEvictionUpfront(
     device: PooledDevice,
     reason: string,
-    identityObservation?: Pick<BootedDevice, "name" | "observedAt">,
+    identityObservation?: Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">,
   ): boolean {
     if (this.shouldAbortEvictionForStaleIdentityObservation(device, identityObservation)) {
       return true;
@@ -2550,9 +2638,12 @@ export class DevicePool {
 
   private shouldAbortEvictionForStaleIdentityObservation(
     device: PooledDevice,
-    identityObservation?: Pick<BootedDevice, "name" | "observedAt">,
+    identityObservation?: Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">,
   ): boolean {
-    if (!identityObservation || !this.isStaleIdentityObservation(device, identityObservation)) {
+    if (
+      !identityObservation ||
+      this.comparePooledIdentityEvidence(device, identityObservation) !== "stale"
+    ) {
       return false;
     }
     logger.debug(
@@ -3803,7 +3894,12 @@ export class DevicePool {
             await stopCancelledRecovery();
             return;
           }
-          await this.addDevice(ready, recoveryImage);
+          await this.addDevice(
+            ready,
+            recoveryImage,
+            true,
+            this.identityEvidenceForBootedDevice(ready),
+          );
           if (this.consumeAndroidRecoveryCancellation(device, recoveryDeviceIds)) {
             await stopCancelledRecovery(ready);
             return;
@@ -5239,6 +5335,7 @@ export class DevicePool {
         replacement,
         this.sourceImageForSameAndroidReplacement(expectedDevice, replacement),
         false,
+        this.identityEvidenceForBootedDevice(replacement),
       );
       return this.devices.get(replacement.deviceId);
     });
@@ -5432,7 +5529,12 @@ export class DevicePool {
       );
     }
 
-    await this.addDevice(replacement, sourceImage, false);
+    await this.addDevice(
+      replacement,
+      sourceImage,
+      false,
+      this.identityEvidenceForBootedDevice(replacement),
+    );
     const replacementDevice = this.devices.get(replacement.deviceId);
     if (!replacementDevice) {
       throw new ActionableError(
@@ -5971,7 +6073,12 @@ export class DevicePool {
         const bootedDevices = await this.deviceManager.getBootedDevices(platform);
         const booted = bootedDevices.find((d) => d.deviceId === deviceId);
         if (booted) {
-          await this.addDevice(booted, androidAvdIdentity);
+          await this.addDevice(
+            booted,
+            androidAvdIdentity,
+            true,
+            this.identityEvidenceForBootedDevice(booted),
+          );
         }
       }
 
@@ -6292,7 +6399,7 @@ export class DevicePool {
         // against it rather than quarantining what this observation just proved
         // ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
         if (this.hasReusableSerial(pooled)) {
-          this.recordIdentityObservation(pooled, device.observedAt);
+          this.recordIdentityObservation(pooled, this.identityEvidenceForBootedDevice(device));
         }
         continue;
       }
@@ -6505,7 +6612,10 @@ export class DevicePool {
     if (options.namesResolved === false) {
       return;
     }
-    if (!this.hasReusableSerial(pooled) || this.isStaleIdentityObservation(pooled, discovered)) {
+    if (
+      !this.hasReusableSerial(pooled) ||
+      this.comparePooledIdentityEvidence(pooled, discovered) === "stale"
+    ) {
       return;
     }
     if (this.shouldQuarantineUnresolvedEmulatorName(pooled, discovered)) {
@@ -6513,7 +6623,7 @@ export class DevicePool {
         pooled,
         "discovery could not read the AVD name, so the pooled identity " +
           `'${pooled.avdName ?? pooled.name}' can no longer be tied to the runtime`,
-        discovered.observedAt,
+        this.identityEvidenceForBootedDevice(discovered),
         options,
       );
       return;
@@ -6527,7 +6637,7 @@ export class DevicePool {
     // The resolved name is the newest identity evidence for this entry whether or
     // not it is quarantined; recording it on the LIVE path too is what lets a
     // later straggler be recognised as stale before it quarantines anything.
-    this.recordIdentityObservation(pooled, discovered.observedAt);
+    this.recordIdentityObservation(pooled, this.identityEvidenceForBootedDevice(discovered));
     if (pooled.identityUnresolved !== true) {
       return;
     }
@@ -6543,6 +6653,12 @@ export class DevicePool {
     discovered: Pick<BootedDevice, "deviceId" | "name" | "platform" | "consoleBusyDuringProbe">,
   ): boolean {
     if (!this.hasUnresolvedEmulatorName(discovered)) {
+      return false;
+    }
+    if (discovered.name === discovered.deviceId) {
+      // ADB's serial-only listing did not probe an AVD label at all. It is
+      // unresolved evidence, but not a failed identity probe that should
+      // quarantine an otherwise labelled entry.
       return false;
     }
     if (!discovered.consoleBusyDuringProbe) {
@@ -6568,23 +6684,22 @@ export class DevicePool {
    * Asked before BOTH identity transitions, so a straggler can neither lift a
    * newer quarantine nor quarantine a newer resolution.
    */
-  private isStaleIdentityObservation(
+  private comparePooledIdentityEvidence(
     pooled: PooledDevice,
-    discovered: Pick<BootedDevice, "name" | "observedAt">,
-  ): boolean {
-    if (
-      pooled.identityObservedAt === undefined ||
-      discovered.observedAt === undefined ||
-      discovered.observedAt >= pooled.identityObservedAt
-    ) {
-      return false;
-    }
-    logger.debug(
-      `[DevicePool] Ignoring '${discovered.name}' for ${pooled.id}: observation ` +
-        `${discovered.observedAt} is older than the ${pooled.identityObservedAt} identity ` +
-        "observation already folded in",
+    discovered: Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">,
+  ) {
+    const comparison = compareIdentityEvidence(
+      deriveEvidenceFromPooledDevice(pooled),
+      this.identityEvidenceForBootedDevice(discovered),
     );
-    return true;
+    if (comparison === "stale") {
+      logger.debug(
+        `[DevicePool] Ignoring '${discovered.name}' for ${pooled.id}: observation ` +
+          `${discovered.observedAt} is older than the ${pooled.identityObservedAt} identity ` +
+          "observation already folded in",
+      );
+    }
+    return comparison;
   }
 
   /**
@@ -6592,9 +6707,13 @@ export class DevicePool {
    * Monotonic: an unstamped or older observation leaves it where it is, so the
    * entry's ordering evidence can only move forward.
    */
-  private recordIdentityObservation(pooled: PooledDevice, observedAt?: number): void {
-    if (observedAt !== undefined && observedAt > (pooled.identityObservedAt ?? -Infinity)) {
-      pooled.identityObservedAt = observedAt;
+  private recordIdentityObservation(pooled: PooledDevice, evidence: IdentityEvidence): void {
+    const comparison = compareIdentityEvidence(deriveEvidenceFromPooledDevice(pooled), evidence);
+    if (
+      evidence.observedAt !== undefined &&
+      (comparison === "newer" || comparison === "unresolved-newer")
+    ) {
+      pooled.identityObservedAt = evidence.observedAt;
     }
   }
 
@@ -6607,27 +6726,30 @@ export class DevicePool {
     if (!pending) {
       return;
     }
-    if (this.hasUnresolvedEmulatorName(device)) {
-      if (
-        device.observedAt !== undefined &&
-        pending.observedAt !== undefined &&
-        device.observedAt > pending.observedAt
-      ) {
-        this.pendingIdentityReplacementUnresolvedObservations.set(
-          device.deviceId,
-          device.observedAt,
-        );
+    const evidence = this.identityEvidenceForBootedDevice(device);
+    const pendingEvidence = this.identityEvidenceForBootedDevice(pending);
+    if (evidence.unresolved) {
+      const currentUnresolved = this.pendingIdentityReplacementUnresolvedObservations.get(
+        device.deviceId,
+      );
+      const comparison = compareIdentityEvidence(currentUnresolved ?? pendingEvidence, evidence);
+      if (comparison === "newer" || comparison === "unresolved-newer") {
+        this.pendingIdentityReplacementUnresolvedObservations.set(device.deviceId, evidence);
       }
       return;
     }
-    // A later successful name probe supersedes any preceding unreadable probe,
-    // even when its stamp cannot replace the current resolved candidate.
-    this.pendingIdentityReplacementUnresolvedObservations.delete(device.deviceId);
-    if (
-      pending.observedAt === undefined ||
-      device.observedAt === undefined ||
-      device.observedAt <= pending.observedAt
-    ) {
+    const unresolvedEvidence = this.pendingIdentityReplacementUnresolvedObservations.get(
+      device.deviceId,
+    );
+    if (unresolvedEvidence) {
+      // Only a strictly newer resolved probe can confirm the identity again.
+      // Equal and older probes must leave unresolved evidence in place.
+      if (compareIdentityEvidence(unresolvedEvidence, evidence) !== "newer") {
+        return;
+      }
+      this.pendingIdentityReplacementUnresolvedObservations.delete(device.deviceId);
+    }
+    if (compareIdentityEvidence(pendingEvidence, evidence) !== "newer") {
       return;
     }
     this.pendingIdentityReplacements.set(device.deviceId, device);
@@ -6660,14 +6782,17 @@ export class DevicePool {
     because: string,
     options: DiscoveryReconcileOptions = {},
   ): Promise<void> {
-    if (!this.hasReusableSerial(pooled) || this.isStaleIdentityObservation(pooled, discovered)) {
+    if (
+      !this.hasReusableSerial(pooled) ||
+      this.comparePooledIdentityEvidence(pooled, discovered) === "stale"
+    ) {
       return;
     }
     await this.enterPooledIdentityQuarantine(
       pooled,
       `discovery reports '${discovered.name}' on this serial while the pooled identity is ` +
         `'${pooled.avdName ?? pooled.name}', ${because}`,
-      discovered.observedAt,
+      this.identityEvidenceForBootedDevice(discovered),
       options,
     );
   }
@@ -6694,14 +6819,14 @@ export class DevicePool {
   private async enterPooledIdentityQuarantine(
     pooled: PooledDevice,
     reason: string,
-    observedAt?: number,
+    evidence: IdentityEvidence,
     options: DiscoveryReconcileOptions = {},
   ): Promise<void> {
     // Re-observing the same unresolved runtime advances the evidence a later
     // lift is ordered against, so a straggler newer than the FIRST placeholder
     // but older than the latest one cannot lift the quarantine
     // ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
-    this.recordIdentityObservation(pooled, observedAt);
+    this.recordIdentityObservation(pooled, evidence);
     if (pooled.identityUnresolved === true) {
       return;
     }
@@ -6737,11 +6862,13 @@ export class DevicePool {
   private hasUnresolvedEmulatorName(
     expected: Pick<BootedDevice, "deviceId" | "name" | "platform">,
   ): boolean {
-    return (
-      expected.platform === "android" &&
-      isAndroidEmulatorSerial(expected.deviceId) &&
-      expected.name === unknownAndroidRuntimeName(expected.deviceId)
-    );
+    return this.identityEvidenceForBootedDevice(expected).unresolved;
+  }
+
+  private identityEvidenceForBootedDevice(
+    device: Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">,
+  ): IdentityEvidence {
+    return deriveEvidenceFromBootedDevice(device, isUnresolvedAndroidEmulatorName(device));
   }
 
   /**
@@ -6787,7 +6914,7 @@ export class DevicePool {
    */
   private namesAgreeOnIdentity(
     pooled: PooledDevice,
-    expected: Pick<BootedDevice, "name">,
+    expected: Pick<BootedDevice, "deviceId" | "name" | "platform">,
   ): boolean {
     if (this.hasMutableDisplayName(pooled) || pooled.name === expected.name) {
       return true;
@@ -6796,7 +6923,7 @@ export class DevicePool {
       return false;
     }
     const placeholder = unknownAndroidRuntimeName(pooled.id);
-    if (expected.name === placeholder) {
+    if (this.hasUnresolvedEmulatorName(expected)) {
       return true;
     }
     // The pooled label is the placeholder. Accept a resolved name only when the
@@ -6955,7 +7082,12 @@ export class DevicePool {
       const bootedDevices = await this.deviceManager.getBootedDevices(platform);
       const booted = bootedDevices.find((d) => d.deviceId === deviceId);
       if (booted) {
-        await this.addDevice(booted, androidAvdIdentity);
+        await this.addDevice(
+          booted,
+          androidAvdIdentity,
+          true,
+          this.identityEvidenceForBootedDevice(booted),
+        );
       }
     }
 

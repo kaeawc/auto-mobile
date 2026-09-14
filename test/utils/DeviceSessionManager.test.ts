@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { EventEmitter } from "events";
 import {
   DeviceSessionManager,
+  DefaultDeviceClientProvider,
   SIMULATOR_APP_OPEN_GATE_TTL_MS,
 } from "../../src/utils/DeviceSessionManager";
 import { IOSCtrlProxyManager } from "../../src/utils/IOSCtrlProxyManager";
@@ -18,7 +19,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceCreationGate } from "../fakes/FakeDeviceCreationGate";
 import { FakeVirtualDeviceLifecycleCoordinator } from "../fakes/FakeVirtualDeviceLifecycleCoordinator";
 import { FakeWindow } from "../fakes/FakeWindow";
-import { BootedDevice, AppearanceConfigInput } from "../../src/models";
+import { BootedDevice, AppearanceConfigInput, ExecResult } from "../../src/models";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { DEFAULT_RUNNER_PROVISION_TIMEOUT_MS } from "../../src/utils/runnerReadinessConfig";
 import {
@@ -230,6 +231,46 @@ describe("DeviceSessionManager", () => {
     ).resolves.toBeUndefined();
 
     expect(fakeWindow.getGetActiveForceRefreshes()).toEqual([true]);
+  });
+
+  test("readiness reuses a resolved Window, replaces it for a new AVD, and retains it for raw serial evidence", async () => {
+    const resolvedA: BootedDevice = {
+      deviceId: "emulator-5554",
+      name: "Pixel_8_API_35",
+      platform: "android",
+    };
+    const resolvedB: BootedDevice = { ...resolvedA, name: "Pixel_7_API_34" };
+    const raw = { ...resolvedA, name: resolvedA.deviceId };
+    const createdFor: string[] = [];
+    const factory: AdbClientFactory = {
+      create(target) {
+        if (target) {
+          createdFor.push(target.name);
+        }
+        return fakeAdb;
+      },
+    };
+    const dumpsysOutput =
+      "imeControlTarget in display# 0 Window{12345678 u0 com.example.app/com.example.app.MainActivity}";
+    fakeAdb.setDefaultResponse({
+      stdout: dumpsysOutput,
+      stderr: "",
+      toString: () => dumpsysOutput,
+      trim: () => dumpsysOutput.trim(),
+      includes: (value: string) => dumpsysOutput.includes(value),
+    } as ExecResult);
+    fakeAdb.setDevices([resolvedA]);
+    const provider = new DefaultDeviceClientProvider(factory);
+    const manager = DeviceSessionManager.createInstance(provider);
+
+    await manager.verifyAndroidDevice(resolvedA.deviceId, { readiness: "booted" });
+    await manager.verifyAndroidDevice(resolvedA.deviceId, { readiness: "booted" });
+    fakeAdb.setDevices([raw]);
+    await manager.verifyAndroidDevice(raw.deviceId, { readiness: "booted" });
+    fakeAdb.setDevices([resolvedB]);
+    await manager.verifyAndroidDevice(resolvedB.deviceId, { readiness: "booted" });
+
+    expect(createdFor).toEqual([resolvedA.name, resolvedB.name]);
   });
 
   test("booted Android readiness rejects a device whose UI has not finished booting", async () => {

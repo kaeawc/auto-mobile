@@ -7491,6 +7491,60 @@ describe("DevicePool", () => {
       }
     });
 
+    test("re-checks identity at the paused session-release commit", async () => {
+      const device = stamped(poolDevice("emulator-5554", "Pixel_8_API_35"), 1);
+      const replacement = stamped(poolDevice("emulator-5554", "Pixel_7_API_34"), 2);
+      const releaseEntered = Promise.withResolvers<void>();
+      const commitRelease = Promise.withResolvers<void>();
+      const sessionReleases: string[] = [];
+      devicePool = new DevicePool(
+        sessionManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        fakeAppsRepo,
+        fakeDeviceManager,
+        new DefaultRetryExecutor(fakeTimer),
+        undefined,
+        undefined,
+        async (sessionId, _deviceId, reason, shouldCommit) => {
+          releaseEntered.resolve();
+          await commitRelease.promise;
+          if (shouldCommit?.() === false) {
+            return false;
+          }
+          sessionReleases.push(sessionId);
+          await sessionManager.releaseSession(sessionId, reason);
+          return true;
+        },
+      );
+      await initializeLiveDevices([device]);
+      await devicePool.reconcileDiscoveryObservation([device], "test:initial");
+      await devicePool.bindOrReuseDeviceSession("owner-session", device.deviceId, "android");
+      const pooled = devicePool.getDevice(device.deviceId);
+      if (!pooled) {
+        throw new Error("expected pooled device");
+      }
+
+      try {
+        fakeDeviceManager.bootedDevices = [replacement];
+        const refresh = devicePool.refreshDevices();
+        await releaseEntered.promise;
+
+        // The replacement was accepted before release started, but this newer
+        // confirmation arrives while the releaser is paused before it commits.
+        await devicePool.reconcileDiscoveryObservation([stamped(device, 3)], "test:newer");
+        commitRelease.resolve();
+        await refresh;
+
+        expect(sessionReleases).toEqual([]);
+        expect(devicePool.getDevice(device.deviceId)).toBe(pooled);
+        expect(pooled.sessionId).toBe("owner-session");
+        expect(sessionManager.getSession("owner-session")).not.toBeNull();
+      } finally {
+        commitRelease.resolve();
+      }
+    });
+
     test("uses a newer discovery identity that arrives during replacement cache cleanup", async () => {
       const device = stamped(poolDevice("emulator-5554", "Pixel_8_API_35"), 1);
       const replacement = stamped(poolDevice("emulator-5554", "Pixel_7_API_34"), 2);
@@ -7537,11 +7591,71 @@ describe("DevicePool", () => {
       }
     });
 
-    test("does not let an unresolved discovery outrank a resolved replacement during cache cleanup", async () => {
+    test("does not let a stale resolved observation outrank newer unresolved replacement evidence", async () => {
       const device = stamped(poolDevice("emulator-5554", "Pixel_8_API_35"), 1);
       const replacement = stamped(poolDevice("emulator-5554", "Pixel_7_API_34"), 2);
       const unresolvedReplacement = stamped(unresolved("emulator-5554"), 4);
       const resolvedReplacement = stamped(poolDevice("emulator-5554", "Pixel_6_API_33"), 3);
+      await initializeLiveDevices([device]);
+      await devicePool.reconcileDiscoveryObservation([device], "test:initial");
+      const pooled = devicePool.getDevice(device.deviceId);
+      if (!pooled) {
+        throw new Error("expected pooled device");
+      }
+
+      type DevicePoolInternals = {
+        replacePooledDeviceForRuntimeIdentity(
+          pooledDevice: PooledDevice,
+          bootedDevice: BootedDevice,
+        ): Promise<boolean>;
+        clearDeviceSessionCache(deviceId: string): Promise<void>;
+        pendingIdentityReplacementUnresolvedObservations: Map<string, { observedAt?: number }>;
+      };
+      const internals = devicePool as unknown as DevicePoolInternals;
+      const cacheCleanupStarted = Promise.withResolvers<void>();
+      const finishCacheCleanup = Promise.withResolvers<void>();
+      const clearDeviceSessionCache = internals.clearDeviceSessionCache.bind(devicePool);
+      internals.clearDeviceSessionCache = async (deviceId) => {
+        cacheCleanupStarted.resolve();
+        await finishCacheCleanup.promise;
+        await clearDeviceSessionCache(deviceId);
+      };
+      try {
+        const replacementPromise = internals.replacePooledDeviceForRuntimeIdentity(
+          pooled,
+          replacement,
+        );
+        await cacheCleanupStarted.promise;
+
+        await devicePool.reconcileDiscoveryObservation(
+          [unresolvedReplacement],
+          "test:unresolved-newer",
+        );
+        await devicePool.reconcileDiscoveryObservation([resolvedReplacement], "test:resolved");
+
+        expect(
+          internals.pendingIdentityReplacementUnresolvedObservations.get(device.deviceId)
+            ?.observedAt,
+        ).toBe(4);
+
+        finishCacheCleanup.resolve();
+        await replacementPromise;
+
+        const installed = devicePool.getDevice(device.deviceId);
+        expect(installed?.name).toBe("Pixel_7_API_34");
+        expect(installed?.identityObservedAt).toBe(4);
+        expect(installed?.identityUnresolved).toBeTrue();
+      } finally {
+        internals.clearDeviceSessionCache = clearDeviceSessionCache;
+        finishCacheCleanup.resolve();
+      }
+    });
+
+    test("lets a later resolved replacement clear pending unresolved evidence", async () => {
+      const device = stamped(poolDevice("emulator-5554", "Pixel_8_API_35"), 1);
+      const replacement = stamped(poolDevice("emulator-5554", "Pixel_7_API_34"), 2);
+      const unresolvedReplacement = stamped(unresolved("emulator-5554"), 4);
+      const resolvedReplacement = stamped(poolDevice("emulator-5554", "Pixel_6_API_33"), 5);
       await initializeLiveDevices([device]);
       await devicePool.reconcileDiscoveryObservation([device], "test:initial");
       const pooled = devicePool.getDevice(device.deviceId);
@@ -7571,20 +7685,22 @@ describe("DevicePool", () => {
           replacement,
         );
         await cacheCleanupStarted.promise;
-
         await devicePool.reconcileDiscoveryObservation(
           [unresolvedReplacement],
           "test:unresolved-newer",
         );
-        await devicePool.reconcileDiscoveryObservation([resolvedReplacement], "test:resolved");
-
+        await devicePool.reconcileDiscoveryObservation(
+          [resolvedReplacement],
+          "test:resolved-newer",
+        );
         finishCacheCleanup.resolve();
         await replacementPromise;
 
-        const installed = devicePool.getDevice(device.deviceId);
-        expect(installed?.name).toBe("Pixel_6_API_33");
-        expect(installed?.identityObservedAt).toBe(3);
-        expect(installed?.identityUnresolved).toBeUndefined();
+        expect(devicePool.getDevice(device.deviceId)).toMatchObject({
+          name: "Pixel_6_API_33",
+          identityObservedAt: 5,
+        });
+        expect(devicePool.isPooledIdentityUnresolved(device.deviceId)).toBe(false);
       } finally {
         internals.clearDeviceSessionCache = clearDeviceSessionCache;
         finishCacheCleanup.resolve();
@@ -7634,7 +7750,7 @@ describe("DevicePool", () => {
 
         const installed = devicePool.getDevice(device.deviceId);
         expect(installed?.name).toBe("Pixel_7_API_34");
-        expect(installed?.identityObservedAt).toBe(2);
+        expect(installed?.identityObservedAt).toBe(4);
         expect(installed?.identityUnresolved).toBeTrue();
       } finally {
         internals.clearDeviceSessionCache = clearDeviceSessionCache;

@@ -40,6 +40,10 @@ import {
   type VirtualDeviceLifecycleLease,
 } from "./virtualDeviceLifecycleCoordinator";
 import { runWithAbortSignal } from "./AbortContext";
+import {
+  deriveEvidenceFromBootedDevice,
+  isUnresolvedAndroidEmulatorName,
+} from "../daemon/deviceIdentityEvidence";
 
 /**
  * Render a device list for a "not found" error.
@@ -73,7 +77,7 @@ function lifecycleIdentityForDevice(
     return { platform: "ios", stableId: device.deviceId };
   }
 
-  return device.deviceId.startsWith("emulator-") && device.name !== `Unknown (${device.deviceId})`
+  return !isUnresolvedAndroidEmulatorName(device)
     ? { platform: "android", stableId: device.name }
     : { kind: "selector", platform: "android", selector: device.deviceId };
 }
@@ -97,15 +101,16 @@ export interface DeviceClientProvider {
 /**
  * Default provider that lazily creates real clients
  */
-class DefaultDeviceClientProvider implements DeviceClientProvider {
+export class DefaultDeviceClientProvider implements DeviceClientProvider {
   private _adb: AdbExecutor | undefined;
   private _adbFactory: AdbClientFactory;
   private _simctl: SimCtlClient | undefined;
   private _androidEmulator: AndroidEmulatorClient | undefined;
   private _deviceUtils: PlatformDeviceManager | undefined;
-  // Keyed by device.deviceId so Window's internal active-window cache survives
-  // across calls instead of being thrown away on every resolve.
-  private readonly _windows: Map<string, Window> = new Map();
+  // Keyed by serial plus the most recent resolved runtime identity. An
+  // unresolved/raw-serial listing cannot evict a known-good client, while a
+  // different resolved AVD name must not retain clients bound to its predecessor.
+  private readonly _windows: Map<string, { window: Window; stableId?: string }> = new Map();
 
   constructor(adbFactory: AdbClientFactory = defaultAdbClientFactory) {
     this._adbFactory = adbFactory;
@@ -161,12 +166,17 @@ class DefaultDeviceClientProvider implements DeviceClientProvider {
 
   getWindow(device: BootedDevice): Window {
     const key = device.deviceId;
-    let window = this._windows.get(key);
-    if (!window) {
-      window = new WindowImpl(device, this._adbFactory);
-      this._windows.set(key, window);
+    const incoming = deriveEvidenceFromBootedDevice(
+      device,
+      isUnresolvedAndroidEmulatorName(device),
+    );
+    const cached = this._windows.get(key);
+    if (!cached || (!incoming.unresolved && incoming.stableId !== cached.stableId)) {
+      const window = new WindowImpl(device, this._adbFactory);
+      this._windows.set(key, { window, stableId: incoming.stableId });
+      return window;
     }
-    return window;
+    return cached.window;
   }
 
   getObserveScreenCache(): ObserveScreenCache {

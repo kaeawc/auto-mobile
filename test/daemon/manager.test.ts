@@ -302,10 +302,10 @@ describe("DaemonManager restart", () => {
       entryScript: "/old/dist/src/index.js",
     };
     const statusSpy = spyOn(manager, "status").mockResolvedValue(expected);
-    const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
+    const startSpy = spyOn(manager, "start").mockResolvedValue("joined");
 
     try {
-      await manager.restart({}, expected);
+      await expect(manager.restart({}, expected)).resolves.toBe("joined");
 
       expect(prepareSpy).toHaveBeenCalledWith("ide/prepareRestart", {
         pid: incumbentPid,
@@ -366,6 +366,7 @@ describe("DaemonManager restart", () => {
       await expect(manager.restart({}, expected)).rejects.toMatchObject({
         code: "daemon_restart_deferred",
         retryable: true,
+        message: expect.stringContaining("no device operation is active"),
       });
       expect(signaler.signals).toEqual([]);
       expect(startSpy).not.toHaveBeenCalled();
@@ -1618,7 +1619,7 @@ describe("Daemon manager process detection", () => {
         processSpawner,
       );
 
-      await expect(manager.start()).resolves.toBeUndefined();
+      await expect(manager.start()).resolves.toBe("started");
       expect(processFinder.calls).toBe(2);
       expect(spawnCalls).toBe(1);
     } finally {
@@ -1935,7 +1936,7 @@ describe("Daemon manager process detection", () => {
         portChecker,
       );
 
-      await expect(manager.start({ port: 4567 })).resolves.toBeUndefined();
+      await expect(manager.start({ port: 4567 })).resolves.toBe("joined");
       expect(portChecker.checkedProbes).toEqual([
         { host: "127.0.0.1", port: 4567 },
         { host: "::1", port: 4567 },
@@ -3912,7 +3913,7 @@ describe("Daemon manager process detection", () => {
         launcher,
       );
 
-      await expect(manager.start()).resolves.toBeUndefined();
+      await expect(manager.start()).resolves.toBe("started");
 
       expect(launchSpy).toHaveBeenCalledTimes(2);
       expect(launchSpy.mock.calls[0]?.[0].timeoutMs).toBe(DAEMON_STARTUP_TIMEOUT_MS);

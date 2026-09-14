@@ -1308,6 +1308,33 @@ export class DaemonMcpProxy {
     );
   }
 
+  private async waitForRunningReconciliationStatus(deadline: number): Promise<DaemonStatus> {
+    while (this.timer.now() < deadline) {
+      try {
+        const status = await this.reconciliationStatus();
+        if (status.running) {
+          return status;
+        }
+      } catch (error) {
+        if (!(error instanceof DaemonPreflightConnectionError)) {
+          throw error;
+        }
+        // A follow-up reconciler may temporarily remove the incumbent socket.
+        logger.debug(`[DaemonMcpProxy] Waiting through restart handoff: ${error.message}`);
+      }
+      this.reconciliationSnapshot = undefined;
+      const remaining = deadline - this.timer.now();
+      if (remaining <= 0) {
+        break;
+      }
+      await this.timer.sleep(Math.min(DAEMON_RESTART_HANDOFF_DELAY_MS, remaining));
+      this.reconciliationSnapshot = undefined;
+    }
+    throw new DaemonUnavailableError(
+      `Timed out waiting for daemon reconciliation after ${DAEMON_STARTUP_TIMEOUT_MS}ms`,
+    );
+  }
+
   private async readSocketReconciliationStatus(): Promise<DaemonStatus> {
     const recorded = await this.daemonManager.status();
     const actual = await runPreflightTransport(() => this.daemonStatusProbe!());
@@ -1643,12 +1670,11 @@ export class DaemonMcpProxy {
         );
       }
 
-      const restartedStatus = await this.reconciliationStatus();
+      const restartedStatus = await this.waitForRunningReconciliationStatus(reconciliationDeadline);
       const remaining = startupOptionDeficits(requested, restartedStatus.options);
-      if (!restartedStatus.running || remaining.length > 0) {
-        throw new DaemonUnavailableError(
-          `Daemon restart completed but startup options still differ (${remaining.join(", ")})`,
-        );
+      if (remaining.length > 0) {
+        this.reconciliationSnapshot = undefined;
+        continue;
       }
       return;
     }

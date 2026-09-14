@@ -1,4 +1,8 @@
-import type { DaemonManagerLike, DaemonRestartResult } from "../../src/daemon/manager";
+import type {
+  DaemonManagerLike,
+  DaemonRestartResult,
+  DaemonStartResult,
+} from "../../src/daemon/manager";
 import type { DaemonStatus, DaemonOptions } from "../../src/daemon/types";
 
 /**
@@ -33,10 +37,11 @@ export class FakeDaemonManager implements DaemonManagerLike {
     return this.statusResult;
   }
 
-  async start(options: DaemonOptions = {}): Promise<void> {
+  async start(options: DaemonOptions = {}): Promise<DaemonStartResult> {
     this.startCalled = true;
     this.startCallCount++;
     this.startOptions = options;
+    return "started";
   }
 
   async restart(

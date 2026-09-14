@@ -7,7 +7,7 @@ import {
 } from "./captureStageTimeline";
 
 /**
- * Build a schemaVersion-3 record with only the fields the baseline aggregator
+ * Build a schemaVersion-4 record with only the fields the baseline aggregator
  * reads; everything else is filled with inert defaults so a test can state just
  * the sample it cares about.
  */
@@ -16,6 +16,7 @@ function record(overrides: {
   egressKbps?: number | null;
   decodedFps?: number | null;
   stages?: CaptureStageMeasurement[];
+  captureLatencySample?: boolean;
 }): CaptureStageRecord {
   return {
     platform: overrides.platform ?? "ios",
@@ -35,7 +36,8 @@ function record(overrides: {
       startedAtIso: "2026-07-24T00:00:00.000Z",
     },
     samplingIntervalsMs: {},
-    schemaVersion: 3,
+    schemaVersion: 4,
+    captureLatencySample: overrides.captureLatencySample ?? true,
     stages: overrides.stages ?? [],
     phases: [],
     missingStages: [],
@@ -122,9 +124,43 @@ describe("#4387 iOS egress p50/p95 baseline aggregation", () => {
     expect(summary.stages.whepConnected).toBeUndefined();
   });
 
+  test("excludes browser-recovery runs from capture-latency percentiles", () => {
+    const summary = aggregateCaptureStageRecords([
+      record({
+        egressKbps: 100,
+        stages: [{ stage: "firstDecodedFrame", elapsedMs: 1_000, deltaMs: 1_000 }],
+      }),
+      record({
+        captureLatencySample: false,
+        egressKbps: 300,
+        stages: [{ stage: "firstDecodedFrame", elapsedMs: 35_000, deltaMs: 35_000 }],
+      }),
+    ]);
+
+    expect(summary.sampleCount).toBe(2);
+    expect(summary.latencySampleCount).toBe(1);
+    expect(summary.stages.firstDecodedFrame).toEqual({ count: 1, p50: 1_000, p95: 1_000 });
+    // Browser recovery only taints capture latency; its egress sample is still valid.
+    expect(summary.egressKbps).toEqual({ count: 2, p50: 200, p95: 290 });
+  });
+
+  test("keeps schema-version-3 records in capture-latency percentiles", () => {
+    const legacyRecord = record({
+      stages: [{ stage: "firstDecodedFrame", elapsedMs: 1_000, deltaMs: 1_000 }],
+    });
+    legacyRecord.schemaVersion = 3;
+    Reflect.deleteProperty(legacyRecord, "captureLatencySample");
+
+    const summary = aggregateCaptureStageRecords([legacyRecord]);
+
+    expect(summary.latencySampleCount).toBe(1);
+    expect(summary.stages.firstDecodedFrame).toEqual({ count: 1, p50: 1_000, p95: 1_000 });
+  });
+
   test("returns an empty summary for no records", () => {
     const summary = aggregateCaptureStageRecords([]);
     expect(summary.sampleCount).toBe(0);
+    expect(summary.latencySampleCount).toBe(0);
     expect(summary.egressKbps).toBeNull();
     expect(summary.decodedFps).toBeNull();
     expect(summary.stages).toEqual({});

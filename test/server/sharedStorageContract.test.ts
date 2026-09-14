@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  normalizeSharedStorageRelativePath,
   normalizeSharedStorageNamespace,
   stageSharedStorageSchema,
 } from "../../src/server/sharedStorageContract";
@@ -37,7 +38,7 @@ describe("shared-storage contract", () => {
   });
 
   test("rejects unsafe namespace resets before an ADB operation can be constructed", () => {
-    for (const namespace of ["", ".", "..", "a/b", "a\\b"]) {
+    for (const namespace of ["", ".", "..", "a/b", "a\\b", "a\0b"]) {
       expect(
         stageSharedStorageSchema.safeParse({
           namespace,
@@ -61,5 +62,16 @@ describe("shared-storage contract", () => {
       files: [{ contentText: "safe", contentBase64: "c2FmZQ==", destinationPath: "file.txt" }],
     });
     expect(ambiguous.success).toBe(false);
+  });
+
+  test("rejects NUL bytes in file destinations while accepting ordinary relative paths", () => {
+    expect(normalizeSharedStorageRelativePath("docs/fixture.pdf")).toBe("docs/fixture.pdf");
+    expect(() => normalizeSharedStorageRelativePath("a\0b")).toThrow("destinationPath");
+    expect(
+      stageSharedStorageSchema.safeParse({
+        namespace: "run-42",
+        files: [{ contentText: "safe", destinationPath: "a\0b" }],
+      }).success,
+    ).toBe(false);
   });
 });

@@ -99,6 +99,12 @@ export interface CaptureStageContext {
   platform: string;
   streamId: string;
   outcome: "passed" | "failed";
+  /**
+   * Whether this record's stage measurements may feed the capture-latency
+   * baseline. A recovered browser subscription includes retry overhead that is
+   * outside the measured capture pipeline.
+   */
+  captureLatencySample?: boolean;
   /** Device display resolution feeding the encoder, when it could be queried. */
   sourceSize: CaptureDimensions | null;
   /** Frame rate the capture pipeline configures, or null when it does not set one. */
@@ -129,6 +135,8 @@ export interface CaptureStageContext {
 export interface CaptureStageRecord extends CaptureStageContext {
   /** Bumped when the record's shape changes, so a parser can span generations. */
   schemaVersion: number;
+  /** Whether this record feeds the aggregate stage-latency percentiles. */
+  captureLatencySample: boolean;
   stages: CaptureStageMeasurement[];
   /**
    * Bounded lifecycle phases, in run order. Distinct from `stages` and from
@@ -145,9 +153,10 @@ export interface CaptureStageRecord extends CaptureStageContext {
 
 /**
  * Current {@link CaptureStageRecord.schemaVersion}. Bumped to 2 when `phases`
- * was added (#4354), and to 3 when `egressKbps` / `decodedFps` were added (#4349).
+ * was added (#4354), to 3 when `egressKbps` / `decodedFps` were added (#4349),
+ * and to 4 when browser-recovery runs became excluded from latency baselines.
  */
-export const CAPTURE_STAGE_RECORD_SCHEMA_VERSION = 3;
+export const CAPTURE_STAGE_RECORD_SCHEMA_VERSION = 4;
 
 /**
  * A cumulative inbound-RTP counter read from the browser at one instant. Egress
@@ -307,6 +316,7 @@ export class CaptureStageTimeline {
     return {
       ...context,
       schemaVersion: CAPTURE_STAGE_RECORD_SCHEMA_VERSION,
+      captureLatencySample: context.captureLatencySample ?? true,
       stages,
       phases: [...this.phases],
       missingStages: CAPTURE_STAGES.filter((stage) => !this.marks.has(stage)),
@@ -323,7 +333,7 @@ function formatDimensions(size: CaptureDimensions | null): string {
 export function formatCaptureStageRecord(record: CaptureStageRecord): string {
   const width = Math.max(...CAPTURE_STAGES.map((stage) => stage.length));
   const lines = [
-    `platform=${record.platform} stream=${record.streamId} outcome=${record.outcome}`,
+    `platform=${record.platform} stream=${record.streamId} outcome=${record.outcome} captureLatencySample=${record.captureLatencySample}`,
     `source=${formatDimensions(record.sourceSize)} fps=${record.configuredFps ?? "none"} decoded=${formatDimensions(record.decodedSize)}`,
     `egress=${record.egressKbps === null ? "none" : `${Math.round(record.egressKbps)}kbps`} decodedFps=${record.decodedFps === null ? "none" : Math.round(record.decodedFps * 10) / 10}`,
     `run=${record.run.runId ?? "local"}/${record.run.runAttempt ?? "1"} sha=${record.run.commitSha ?? "unknown"} runner=${record.run.runnerImage ?? record.run.runnerOs ?? "unknown"}`,
@@ -374,6 +384,8 @@ export interface CaptureBaselineSummary {
   platform: string | null;
   /** Records considered after the platform filter. */
   sampleCount: number;
+  /** Records that feed aggregate capture-stage latency percentiles. */
+  latencySampleCount: number;
   /** Egress-bitrate percentiles (kbps), or null when no sample carried egress. */
   egressKbps: PercentileSummary | null;
   /** Decoded-fps percentiles, or null when no sample carried decoded fps. */
@@ -415,10 +427,13 @@ export function aggregateCaptureStageRecords(
   const platform = options.platform ?? null;
   const considered =
     platform === null ? records : records.filter((record) => record.platform === platform);
+  // Schema-version 3 artifacts predate this flag and remain valid latency
+  // samples; only an explicit false excludes a recovered browser run.
+  const latencySamples = considered.filter((record) => record.captureLatencySample !== false);
 
   const stages: Partial<Record<CaptureStage, PercentileSummary>> = {};
   for (const stage of CAPTURE_STAGES) {
-    const elapsed = considered
+    const elapsed = latencySamples
       .map(
         (record) =>
           record.stages.find((measurement) => measurement.stage === stage)?.elapsedMs ?? null,
@@ -433,6 +448,7 @@ export function aggregateCaptureStageRecords(
   return {
     platform,
     sampleCount: considered.length,
+    latencySampleCount: latencySamples.length,
     egressKbps: summarizePercentiles(considered.map((record) => record.egressKbps)),
     decodedFps: summarizePercentiles(considered.map((record) => record.decodedFps)),
     stages,
@@ -451,7 +467,7 @@ function formatPercentile(label: string, summary: PercentileSummary | null): str
 /** Human-readable rendering of a {@link CaptureBaselineSummary} for a job log. */
 export function formatCaptureBaselineSummary(summary: CaptureBaselineSummary): string {
   const lines = [
-    `platform=${summary.platform ?? "all"} samples=${summary.sampleCount}`,
+    `platform=${summary.platform ?? "all"} samples=${summary.sampleCount} latencySamples=${summary.latencySampleCount}`,
     formatPercentile("egressKbps", summary.egressKbps),
     formatPercentile("decodedFps", summary.decodedFps),
   ];

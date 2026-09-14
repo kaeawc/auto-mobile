@@ -1,3 +1,4 @@
+import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
 import type { Timer } from "../utils/SystemTimer";
 import { CtrlProxyStaleRunnerCacheError } from "../utils/IOSCtrlProxyBuilder";
@@ -6,7 +7,11 @@ import { CtrlProxyStaleRunnerCacheError } from "../utils/IOSCtrlProxyBuilder";
 export interface IosStartupVerifyOptions {
   /** Startup never downloads: it only warms the cached runner (#7032). */
   skipCtrlProxyDownload: true;
-  signal: AbortSignal;
+  /**
+   * Deliberately omitted for daemon warm-up: its foreground deadline must not
+   * cancel the resident CtrlProxy startup that a later tool call can join.
+   */
+  signal?: AbortSignal;
 }
 
 /**
@@ -26,7 +31,7 @@ export interface IosStartupInitDependencies {
 export interface IosStartupInitResult {
   /** Devices whose CtrlProxy is warm. */
   ready: string[];
-  /** Devices whose setup was deliberately deferred to the first tool call. */
+  /** Devices whose startup continues beyond the foreground warm-up wait. */
   deferred: string[];
 }
 
@@ -68,10 +73,10 @@ async function settledWithinBudget(
  * one-release-old runner while this path (with downloads skipped) would verify
  * the cached one against the new registry hash and refuse it as tampering. So
  * an in-flight prefetch is awaited first under the same per-device budget; if
- * it is still running when the budget expires, setup is deferred to the first
- * tool call (which re-runs setup with downloads enabled), exactly as a failed
- * startup verify already did. A pre-launch refusal classified as a stale cache
- * is likewise deferred at info rather than warned as a failure.
+ * it is still running when the budget expires, startup is deferred until the
+ * first tool call. A slow per-device runner launch is allowed to continue in
+ * the background so later callers can join it. A pre-launch refusal classified
+ * as a stale cache is likewise deferred at info rather than warned as a failure.
  */
 export async function initializeIosCtrlProxyAtStartup(
   deviceIds: string[],
@@ -93,35 +98,52 @@ export async function initializeIosCtrlProxyAtStartup(
     }
   }
 
-  for (const deviceId of deviceIds) {
-    logger.info(`[Daemon] Setting up CtrlProxy iOS for iOS device ${deviceId}`);
-    const controller = new AbortController();
-    const handle = deps.timer.setTimeout(() => {
-      controller.abort(new Error(`Timeout after ${deps.perDeviceTimeoutMs}ms`));
-    }, deps.perDeviceTimeoutMs);
-    unrefTimeout(handle);
-    try {
-      await deps.verifyIosDevice(deviceId, {
-        skipCtrlProxyDownload: true,
-        signal: controller.signal,
-      });
-      logger.info(`[Daemon] CtrlProxy iOS ready for iOS device ${deviceId}`);
-      result.ready.push(deviceId);
-    } catch (error) {
-      if (error instanceof CtrlProxyStaleRunnerCacheError) {
-        // Expected on the first start after a version bump: the cached runner is
-        // one release old and the first tool call re-runs setup with downloads.
-        logger.info(
-          `[Daemon] Deferring CtrlProxy iOS setup for ${deviceId} to the first tool call: ${error.message}`,
-        );
-        result.deferred.push(deviceId);
-      } else {
-        // Log but don't fail - service will be set up on first tool call if needed
-        logger.warn(`[Daemon] Failed to initialize CtrlProxy iOS for ${deviceId}: ${error}`);
+  await Promise.all(
+    deviceIds.map(async (deviceId) => {
+      logger.info(`[Daemon] Setting up CtrlProxy iOS for iOS device ${deviceId}`);
+      try {
+        const verification = deps.verifyIosDevice(deviceId, {
+          skipCtrlProxyDownload: true,
+        });
+        if (!(await settledWithinBudget(verification, deps.timer, deps.perDeviceTimeoutMs))) {
+          // The runner is resident and may finish its provision-class startup after this
+          // foreground warm-up wait. Do not abort it: that makes its shared-start logic
+          // retire the runner and turns a slow healthy simulator into not_ready.
+          logger.warn(
+            `[Daemon] CtrlProxy iOS warm-up timed out for ${deviceId}: ` +
+              `phase=runner-setup after ${deps.perDeviceTimeoutMs}ms; deferring to the resident startup`,
+          );
+          result.deferred.push(deviceId);
+          void verification.then(
+            () =>
+              logger.info(
+                `[Daemon] Deferred CtrlProxy iOS startup completed for ${deviceId} after warm-up timeout`,
+              ),
+            (error) =>
+              logger.warn(
+                `[Daemon] Deferred CtrlProxy iOS startup failed for ${deviceId}: ${errorMessage(error)}`,
+                error,
+              ),
+          );
+          return;
+        }
+        await verification;
+        logger.info(`[Daemon] CtrlProxy iOS ready for iOS device ${deviceId}`);
+        result.ready.push(deviceId);
+      } catch (error) {
+        if (error instanceof CtrlProxyStaleRunnerCacheError) {
+          // Expected on the first start after a version bump: the cached runner is
+          // one release old and the first tool call re-runs setup with downloads.
+          logger.info(
+            `[Daemon] Deferring CtrlProxy iOS setup for ${deviceId} to the first tool call: ${error.message}`,
+          );
+          result.deferred.push(deviceId);
+        } else {
+          // Log but don't fail - service will be set up on first tool call if needed
+          logger.warn(`[Daemon] Failed to initialize CtrlProxy iOS for ${deviceId}: ${error}`);
+        }
       }
-    } finally {
-      deps.timer.clearTimeout(handle);
-    }
-  }
+    }),
+  );
   return result;
 }

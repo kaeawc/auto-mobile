@@ -411,8 +411,8 @@ describe("#4354 teardown phase instrumentation", () => {
     expect(record.phases[0].status).toBe("timedOut");
   });
 
-  test("bumps the record schema version so a parser can span the phases addition", () => {
-    expect(CAPTURE_STAGE_RECORD_SCHEMA_VERSION).toBe(3);
+  test("bumps the record schema version so parsers can span shape changes", () => {
+    expect(CAPTURE_STAGE_RECORD_SCHEMA_VERSION).toBe(4);
   });
 
   test("formats every phase with its status and elapsed time", async () => {

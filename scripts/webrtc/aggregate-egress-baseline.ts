@@ -4,7 +4,7 @@
  * Aggregate accumulated WebRTC device-lane `stage-latency.json` records into a
  * p50/p95 egress / decoded-fps / stage-latency baseline (#4387).
  *
- * The device integration lane writes one `CaptureStageRecord` (schemaVersion 3)
+ * The device integration lane writes one `CaptureStageRecord` (schemaVersion 4)
  * per run as an artifact. #4375's follow-up needs "several CI runs accumulated,
  * then p50/p95 reported" before the `0.1` bpp budget or any timeout contract is
  * tightened — a measurement-collection task. This script is the *reporting* half

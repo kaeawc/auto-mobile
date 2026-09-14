@@ -146,29 +146,73 @@ describe("initializeIosCtrlProxyAtStartup (#7032)", () => {
     }
   });
 
-  test("the per-device budget aborts a hung verify via the injected timer", async () => {
+  test("the per-device budget defers a hung verify without aborting it", async () => {
     const timer = new FakeTimer();
     const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+    let signal: AbortSignal | undefined;
+    let completeVerify!: () => void;
     try {
       const init = initializeIosCtrlProxyAtStartup(["sim-a"], {
         timer,
         perDeviceTimeoutMs: BUDGET_MS,
         pendingPrefetch: () => null,
-        verifyIosDevice: (_deviceId, options) =>
-          new Promise<void>((_resolve, reject) => {
-            options.signal.addEventListener("abort", () => reject(options.signal.reason));
-          }),
+        verifyIosDevice: (_deviceId, options) => {
+          signal = options.signal;
+          return new Promise<void>((resolve) => {
+            completeVerify = resolve;
+          });
+        },
       });
       await Promise.resolve();
       timer.advanceTime(BUDGET_MS);
       const result = await init;
 
-      expect(result).toEqual({ ready: [], deferred: [] });
+      expect(result).toEqual({ ready: [], deferred: ["sim-a"] });
+      expect(signal).toBeUndefined();
       const warned = daemonMessages(warnSpy);
       expect(warned).toHaveLength(1);
-      expect(warned[0]).toContain(`Timeout after ${BUDGET_MS}ms`);
+      expect(warned[0]).toContain("sim-a");
+      expect(warned[0]).toContain("phase=runner-setup");
+      completeVerify();
+      await Promise.resolve();
     } finally {
       warnSpy.mockRestore();
     }
+  });
+
+  test("defers a slow simulator without cancelling its resident CtrlProxy startup", async () => {
+    const timer = new FakeTimer();
+    const calls: string[] = [];
+    let slowSignal: AbortSignal | undefined;
+    let completeSlowVerify!: () => void;
+    const init = initializeIosCtrlProxyAtStartup(["sim-ready", "sim-slow"], {
+      timer,
+      perDeviceTimeoutMs: BUDGET_MS,
+      pendingPrefetch: () => null,
+      verifyIosDevice: (deviceId, options) => {
+        calls.push(deviceId);
+        if (deviceId === "sim-ready") {
+          return Promise.resolve();
+        }
+        slowSignal = options.signal;
+        return new Promise<void>((resolve, reject) => {
+          completeSlowVerify = resolve;
+          options.signal?.addEventListener("abort", () => reject(options.signal?.reason), {
+            once: true,
+          });
+        });
+      },
+    });
+
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(calls).toEqual(["sim-ready", "sim-slow"]);
+
+    timer.advanceTime(BUDGET_MS);
+    await expect(init).resolves.toEqual({ ready: ["sim-ready"], deferred: ["sim-slow"] });
+    expect(slowSignal).toBeUndefined();
+
+    completeSlowVerify();
+    await Promise.resolve();
+    expect(timer.getPendingTimeoutCount()).toBe(0);
   });
 });

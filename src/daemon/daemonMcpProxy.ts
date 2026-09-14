@@ -1665,7 +1665,8 @@ export class DaemonMcpProxy {
         continue;
       }
 
-      const ready = await this.daemonManager.waitForReady(DAEMON_STARTUP_TIMEOUT_MS);
+      const readinessTimeout = Math.max(0, reconciliationDeadline - this.timer.now());
+      const ready = await this.daemonManager.waitForReady(readinessTimeout);
       if (!ready) {
         throw new DaemonUnavailableError(
           `Daemon failed to restart within ${DAEMON_STARTUP_TIMEOUT_MS}ms`,

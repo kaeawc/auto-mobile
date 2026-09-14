@@ -140,6 +140,13 @@ export interface Session {
   hasReceivedHeartbeat: boolean; // Whether any heartbeat has been received
   livenessPolicy: SessionLivenessPolicy; // How this session's liveness is judged (#6870)
   /**
+   * The current token authorized to refresh this session's liveness. It is
+   * daemon-local deliberately: a newly established proxy or explicit CLI
+   * adoption claims it, while a reconnecting keeper must prove it still owns
+   * the token before extending the session.
+   */
+  livenessOwnerToken?: string;
+  /**
    * The strict-contract timeouts this session had before it adopted the
    * `cli-idle` policy, so a later long-lived owner can restore them (#6870).
    * Absent whenever the session is on (or has never left) the `heartbeat`
@@ -3016,6 +3023,41 @@ export class SessionManager {
       .catch((error) =>
         logger.warn(`[SessionManager] Failed to record session activity: ${error}`),
       );
+  }
+
+  /**
+   * Make `ownerToken` the current liveness owner for a session.
+   *
+   * This intentionally does not record activity. The request handler claims
+   * ownership before applying the requested policy and recording its heartbeat,
+   * so a stale token can be rejected without changing any liveness deadline.
+   */
+  claimLivenessOwnership(sessionId: string, ownerToken: string): boolean {
+    const session = this.getSession(sessionId);
+    if (!session) {
+      logger.warn(`Cannot claim liveness ownership for session ${sessionId}: not found`);
+      return false;
+    }
+    session.livenessOwnerToken = ownerToken;
+    return true;
+  }
+
+  /** Return whether `ownerToken` is still authorized to refresh the session. */
+  hasLivenessOwnership(sessionId: string, ownerToken: string): boolean {
+    return this.getSession(sessionId)?.livenessOwnerToken === ownerToken;
+  }
+
+  /**
+   * Recover daemon-local liveness ownership after restart without allowing a
+   * keeper to replace an owner that was established by this daemon instance.
+   */
+  claimUnownedLivenessOwnership(sessionId: string, ownerToken: string): boolean {
+    const session = this.getSession(sessionId);
+    if (!session || session.livenessOwnerToken !== undefined) {
+      return false;
+    }
+    session.livenessOwnerToken = ownerToken;
+    return true;
   }
 
   /**

@@ -3697,6 +3697,77 @@ describe("SessionManager", () => {
     }
   });
 
+  test("reacquires a restarted Android session by its persisted AVD identity", async () => {
+    const persisted: DeviceSession = {
+      session_uuid: "restarted-android-session",
+      device_id: "emulator-5554",
+      stable_device_id: "Pixel_8_API_35",
+      platform: "android",
+      status: "expired",
+      source: null,
+      autolock_enabled: 0,
+      mcp_session_id: null,
+      daemon_session_id: "old-daemon",
+      created_at_ms: 1,
+      last_used_at_ms: 20,
+      expires_at_ms: 30,
+      released_at_ms: 25,
+      release_reason: "daemon-restart",
+      session_timeout_ms: 10,
+      heartbeat_timeout_ms: 5,
+      has_received_heartbeat: 1,
+      created_at: "2026-09-14T00:00:00.000Z",
+      updated_at: "2026-09-14T00:00:00.000Z",
+    };
+    const restarted = new SessionManager(fakeTimer, {
+      async getSession() {
+        return persisted;
+      },
+      async upsertActiveSession() {},
+      async recordActivity() {},
+      async markReleased() {},
+    });
+    let recoveryTarget:
+      | { platform: string; stableDeviceId: string; androidEmulator?: boolean }
+      | undefined;
+    const devicePool: SessionDeviceAssigner = {
+      async assignDeviceToSession(sessionId, _platform, target): Promise<string> {
+        recoveryTarget = target;
+        await restarted.createSession(
+          sessionId,
+          "emulator-5560",
+          "android",
+          undefined,
+          undefined,
+          target?.stableDeviceId,
+        );
+        return "emulator-5560";
+      },
+    };
+
+    try {
+      await expect(
+        restarted.getOrCreateSession(
+          "restarted-android-session",
+          devicePool,
+          "android",
+          undefined,
+          true,
+        ),
+      ).resolves.toMatchObject({
+        assignedDevice: "emulator-5560",
+        stableDeviceId: "Pixel_8_API_35",
+      });
+      expect(recoveryTarget).toEqual({
+        platform: "android",
+        stableDeviceId: "Pixel_8_API_35",
+        androidEmulator: true,
+      });
+    } finally {
+      restarted.stopCleanupTimer();
+    }
+  });
+
   test("terminal device-loss UUID remains fenced after manager restart", async () => {
     const persisted: DeviceSession = {
       session_uuid: "lost-session",

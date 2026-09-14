@@ -53,6 +53,7 @@ import { OUTPUT_REDUCTION_FLAG_SPECS } from "../utils/outputReductionFlags";
 import { compareStrictNumericVersions } from "../server/deviceMatcher";
 import { releaseVersion } from "../utils/mcpVersion";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import { isExplicitPin, resolveAssetVersion, resolvePinnedVersion } from "../constants/release";
 import { SingleFlightInterval } from "./SingleFlightInterval";
 import type { SessionReleaseSnapshot } from "./sessionManager";
@@ -361,6 +362,8 @@ export interface DaemonMcpProxyConfig {
   clientVersion?: string;
   /** Existing device-pool session bound before the first discovery request. */
   initialSessionUuid?: string;
+  /** Supplies this proxy's stable liveness-owner token (injectable for tests). */
+  idGenerator?: IdGenerator;
   /**
    * Supplies the static tool surface served by `listAdvertisedTools()` before a
    * daemon connection exists (issue #5879). Defaults to the committed
@@ -673,6 +676,14 @@ export class DaemonMcpProxy {
    * declaration the invocation just made.
    */
   private cliSessionLivenessDeclared = false;
+  /**
+   * Whether this binding has sent its one ownership-claim heartbeat. Marked
+   * before awaiting the request, because the daemon may apply it even when the
+   * response is lost; reconnects must then verify the same token, not reclaim.
+   */
+  private livenessOwnershipClaimSent = false;
+  /** Stable for this proxy instance, including all transport reconnects. */
+  private readonly livenessOwnerToken: string;
   private readonly buildIdentity: BuildIdentity;
   private readonly clientVersion: string;
   private readonly clientAssetVersion: string | null;
@@ -807,6 +818,7 @@ export class DaemonMcpProxy {
       (() => new DaemonClient(this.config.socketPath, this.config.connectionTimeoutMs));
     this.daemonStatusProbe = this.createStatusProbe(config);
     this.timer = config.timer ?? defaultTimer;
+    this.livenessOwnerToken = (config.idGenerator ?? defaultIdGenerator).next();
     this.heartbeatKeeper = new SingleFlightInterval(
       this.timer,
       heartbeatIntervalMs(config),
@@ -2437,6 +2449,7 @@ export class DaemonMcpProxy {
     this.boundSessionUuidAt = undefined;
     this.initialSessionBindingConfigured = false;
     this.boundSessionFromResultMint = false;
+    this.livenessOwnershipClaimSent = false;
   }
 
   private fenceBoundSessionUuid(
@@ -2583,9 +2596,10 @@ export class DaemonMcpProxy {
       return;
     }
     try {
+      this.livenessOwnershipClaimSent = true;
       await this.client.callDaemonMethod(
         DAEMON_HEARTBEAT_METHOD,
-        this.boundSessionHeartbeatParams(sessionUuid),
+        this.boundSessionHeartbeatParams(sessionUuid, true),
       );
       if (this.boundSessionUuid === sessionUuid && !this.terminalBoundSession) {
         this.boundSessionUuidAt = this.timer.now();
@@ -2634,9 +2648,12 @@ export class DaemonMcpProxy {
       // is in flight must already carry the CLI marker, or it would land after
       // the declaration and restore the strict contract.
       this.cliSessionLivenessDeclared = true;
+      this.livenessOwnershipClaimSent = true;
       await this.client.callDaemonMethod(DAEMON_HEARTBEAT_METHOD, {
         sessionId: sessionUuid,
         livenessPolicy: CLI_SESSION_LIVENESS_POLICY,
+        livenessOwnerToken: this.livenessOwnerToken,
+        claimLivenessOwnership: true,
         // The daemon resolved its own env at startup and this invocation reuses
         // it, so the override only reaches the daemon by travelling with the
         // declaration (issue #6870 review). The daemon re-validates and bounds it.
@@ -2672,10 +2689,15 @@ export class DaemonMcpProxy {
    * its own remaining heartbeats keep the CLI marker instead, so a keeper tick
    * racing process exit cannot undo the declaration.
    */
-  private boundSessionHeartbeatParams(sessionUuid: string): {
+  private boundSessionHeartbeatParams(
+    sessionUuid: string,
+    claimLivenessOwnership = false,
+  ): {
     sessionId: string;
     livenessPolicy: string;
     idleTimeoutMs?: number;
+    livenessOwnerToken: string;
+    claimLivenessOwnership?: true;
   } {
     const livenessPolicy = this.cliSessionLivenessDeclared
       ? CLI_SESSION_LIVENESS_POLICY
@@ -2686,6 +2708,8 @@ export class DaemonMcpProxy {
       ...(livenessPolicy === CLI_SESSION_LIVENESS_POLICY
         ? { idleTimeoutMs: getCliSessionIdleTimeoutMs() }
         : {}),
+      livenessOwnerToken: this.livenessOwnerToken,
+      ...(claimLivenessOwnership ? { claimLivenessOwnership: true } : {}),
     };
   }
 
@@ -2695,11 +2719,15 @@ export class DaemonMcpProxy {
       return;
     }
     try {
+      const claimLivenessOwnership = !this.livenessOwnershipClaimSent;
+      if (claimLivenessOwnership) {
+        this.livenessOwnershipClaimSent = true;
+      }
       await this.withRecoverableReconnect(
         () =>
           this.client!.callDaemonMethod(
             DAEMON_HEARTBEAT_METHOD,
-            this.boundSessionHeartbeatParams(sessionUuid),
+            this.boundSessionHeartbeatParams(sessionUuid, claimLivenessOwnership),
           ),
         sessionUuid,
       );
@@ -2896,6 +2924,7 @@ export class DaemonMcpProxy {
     this.ownedDeviceSessions.add(mintedSessionUuid);
     this.boundSessionFromResultMint = true;
     this.initialSessionBindingConfigured = false;
+    this.livenessOwnershipClaimSent = false;
     // `tools/list` is forwarded under the bound session, so the binding just
     // published invalidates every cached definition fetched under the previous
     // scope. Drop it BEFORE the awaited heartbeat: the daemon's own
@@ -2978,6 +3007,7 @@ export class DaemonMcpProxy {
   private updateBoundSessionUuid(sessionUuid: string): void {
     if (sessionUuid !== this.boundSessionUuid) {
       this.boundSessionFromResultMint = false;
+      this.livenessOwnershipClaimSent = false;
     }
     this.boundSessionUuid = sessionUuid;
     this.boundSessionUuidAt = this.timer.now();

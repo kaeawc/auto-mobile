@@ -3643,6 +3643,53 @@ export interface RunDaemonCommandOptions {
   stateProvider?: () => DaemonStateLike;
 }
 
+export interface DaemonHeartbeatCommandArgs {
+  sessionId: string;
+  livenessOwnerToken?: string;
+  claimLivenessOwnership: boolean;
+}
+
+/**
+ * Parse the ownership options used by first-party recurring heartbeat keepers.
+ *
+ * A bare `--daemon heartbeat <session>` intentionally stays tokenless for
+ * legacy external callers. A keeper that spans several one-shot CLI processes
+ * supplies one stable token, claiming it once and proving it on later ticks.
+ */
+export function parseDaemonHeartbeatCommandArgs(args: string[]): DaemonHeartbeatCommandArgs {
+  const sessionId = args[0];
+  if (!sessionId) {
+    throw new ActionableError("heartbeat requires a session ID argument");
+  }
+
+  let livenessOwnerToken: string | undefined;
+  let claimLivenessOwnership = false;
+  for (let index = 1; index < args.length; index++) {
+    switch (args[index]) {
+      case "--liveness-owner-token": {
+        const ownerToken = args[index + 1];
+        if (!ownerToken || ownerToken.startsWith("--")) {
+          throw new ActionableError("--liveness-owner-token requires a non-empty value");
+        }
+        livenessOwnerToken = ownerToken;
+        index++;
+        break;
+      }
+      case "--claim-liveness-ownership":
+        claimLivenessOwnership = true;
+        break;
+      default:
+        throw new ActionableError(`Unknown heartbeat option: ${args[index]}`);
+    }
+  }
+
+  if (claimLivenessOwnership && !livenessOwnerToken) {
+    throw new ActionableError("--claim-liveness-ownership requires --liveness-owner-token");
+  }
+
+  return { sessionId, livenessOwnerToken, claimLivenessOwnership };
+}
+
 /**
  * Build the `--daemon status` lines that surface the running daemon's build
  * identity (`buildId` + `entryScript`) and flag wrong-build skew against this
@@ -3904,10 +3951,8 @@ export async function runDaemonCommand(
       }
 
       case "heartbeat": {
-        if (args.length === 0) {
-          throw new ActionableError("heartbeat requires a session ID argument");
-        }
-        const sessionId = args[0];
+        const { sessionId, livenessOwnerToken, claimLivenessOwnership } =
+          parseDaemonHeartbeatCommandArgs(args);
         const daemonState = manager.getDaemonState();
         if (daemonState.isInitialized()) {
           const sessionManager = daemonState.getSessionManager();
@@ -3923,6 +3968,8 @@ export async function runDaemonCommand(
               sessionId,
               livenessPolicy: CLI_SESSION_LIVENESS_POLICY,
               idleTimeoutMs: getCliSessionIdleTimeoutMs(),
+              ...(livenessOwnerToken ? { livenessOwnerToken } : {}),
+              ...(claimLivenessOwnership ? { claimLivenessOwnership: true } : {}),
             });
           } catch (error) {
             throw new ActionableError(`Failed to record session heartbeat: ${errorMessage(error)}`);

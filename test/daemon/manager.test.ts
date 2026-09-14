@@ -11,6 +11,7 @@ import {
   DaemonManager,
   parseBusyBoxDaemonProcessTable,
   parseDarwinDaemonProcessTable,
+  parseDaemonHeartbeatCommandArgs,
   parseDaemonProcessTable,
   PsDaemonProcessFinder,
   runDaemonCommand,
@@ -4378,6 +4379,21 @@ describe("Daemon manager available-devices", () => {
 });
 
 describe("Daemon manager heartbeat", () => {
+  test("parses an owned recurring heartbeat command", () => {
+    expect(
+      parseDaemonHeartbeatCommandArgs([
+        "session-1",
+        "--liveness-owner-token",
+        "ios-video-keeper",
+        "--claim-liveness-ownership",
+      ]),
+    ).toEqual({
+      sessionId: "session-1",
+      livenessOwnerToken: "ios-video-keeper",
+      claimLivenessOwnership: true,
+    });
+  });
+
   test("records a session heartbeat through the daemon socket", async () => {
     const fakeClient = new FakeDaemonClient({});
     const output: string[] = [];
@@ -4417,5 +4433,48 @@ describe("Daemon manager heartbeat", () => {
       },
     ]);
     expect(output).toContain("Session session-1 heartbeat recorded");
+  });
+
+  test("forwards the stable owner token for a recurring heartbeat keeper", async () => {
+    const fakeClient = new FakeDaemonClient({});
+    const logSpy = spyOn(console, "log").mockImplementation(() => {});
+
+    try {
+      await runDaemonCommand(
+        "heartbeat",
+        ["session-1", "--liveness-owner-token", "ios-video-keeper", "--claim-liveness-ownership"],
+        {
+          clientFactory: () => fakeClient,
+          stateProvider: () =>
+            ({
+              isInitialized: () => false,
+              getDevicePool: () => {
+                throw new Error("Device pool unavailable");
+              },
+              getSessionManager: () => {
+                throw new Error("Session manager unavailable");
+              },
+              getDeviceSessionRegistry: () => {
+                throw new Error("Device session registry unavailable");
+              },
+            }) satisfies DaemonStateLike,
+        },
+      );
+    } finally {
+      logSpy.mockRestore();
+    }
+
+    expect(fakeClient.callDaemonMethodCalls).toEqual([
+      {
+        method: "daemon/heartbeat",
+        params: {
+          sessionId: "session-1",
+          livenessPolicy: CLI_SESSION_LIVENESS_POLICY,
+          idleTimeoutMs: getCliSessionIdleTimeoutMs(),
+          livenessOwnerToken: "ios-video-keeper",
+          claimLivenessOwnership: true,
+        },
+      },
+    ]);
   });
 });

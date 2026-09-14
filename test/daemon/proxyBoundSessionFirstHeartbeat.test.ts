@@ -365,7 +365,12 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
       expect(heartbeats).toEqual([
         {
           method: "daemon/heartbeat",
-          params: { sessionId: BOUND_SESSION, livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY },
+          params: {
+            sessionId: BOUND_SESSION,
+            livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
+            livenessOwnerToken: expect.any(String),
+            claimLivenessOwnership: true,
+          },
         },
       ]);
     } finally {
@@ -514,7 +519,11 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
       expect(freshHeartbeats).toEqual([
         {
           method: "daemon/heartbeat",
-          params: { sessionId: BOUND_SESSION, livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY },
+          params: {
+            sessionId: BOUND_SESSION,
+            livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
+            livenessOwnerToken: expect.any(String),
+          },
         },
       ]);
       expect(sessionManager.getSession(BOUND_SESSION)).not.toBeNull();

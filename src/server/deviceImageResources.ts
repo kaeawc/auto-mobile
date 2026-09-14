@@ -1,4 +1,5 @@
 import { errorMessage } from "../utils/describeUnknownError";
+import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { ResourceRegistry, ResourceContent } from "./resourceRegistry";
 import { MultiPlatformDeviceManager, PlatformDeviceManager } from "../utils/deviceUtils";
 import { AvdManagerService } from "../utils/android-cmdline-tools/AvdManagerService";
@@ -26,6 +27,15 @@ import {
   parseSimctlVersion,
   type SimctlVersionTuple,
 } from "../utils/ios-cmdline-tools/simctlVersion";
+
+/**
+ * Wall-clock budget for the Android provisioning-catalog enumeration
+ * (sdkmanager + avdmanager). A readiness/health client gives this resource a
+ * 10-second deadline; we bound the slow Android enumeration comfortably inside
+ * it and return an explicit incomplete diagnostic rather than blowing the
+ * deadline when the host toolchain stalls.
+ */
+export const ANDROID_PROVISIONING_CATALOG_BUDGET_MS = 9_000;
 
 // Resource URIs
 export const DEVICE_IMAGE_RESOURCE_URIS = {
@@ -109,7 +119,7 @@ interface ProvisioningCatalog {
 interface ProvisioningCatalogObservation {
   catalogComplete: boolean;
   error?: {
-    code: "unavailable" | "failed";
+    code: "unavailable" | "failed" | "timeout";
     message: string;
   };
 }
@@ -131,6 +141,8 @@ interface DeviceImageResourcesDependencies {
   deviceManager: PlatformDeviceManager;
   avdManager: AvdManager;
   simctl: Pick<SimCtlClient, "getDeviceTypesChecked" | "getRuntimesChecked">;
+  timer: Timer;
+  androidCatalogBudgetMs: number;
 }
 
 /**
@@ -150,6 +162,9 @@ export function createDeviceImageResourcesHandler(
   // Tests often inject only the Android/device seam. Avoid creating a real simctl
   // client in those partial fakes; production construction always includes it.
   const simctl = deps?.simctl ?? (deps ? undefined : new SimCtlClient());
+  const timer = deps?.timer ?? defaultTimer;
+  const androidCatalogBudgetMs =
+    deps?.androidCatalogBudgetMs ?? ANDROID_PROVISIONING_CATALOG_BUDGET_MS;
 
   const getDeviceImagesForPlatformsImpl = async (
     platforms: Platform[],
@@ -169,6 +184,8 @@ export function createDeviceImageResourcesHandler(
       catalogObservations.android = await buildAndroidProvisioningCatalog(
         avdManager,
         provisioningCatalog,
+        timer,
+        androidCatalogBudgetMs,
       );
     }
 
@@ -284,24 +301,59 @@ async function appendIosImages(
 async function buildAndroidProvisioningCatalog(
   avdManager: AvdManager,
   catalog: ProvisioningCatalog,
+  timer: Timer,
+  budgetMs: number,
 ): Promise<ProvisioningCatalogObservation> {
+  // Enumerate ONLY installed system images: they are the exact source
+  // provisionDevice validates against (DeviceProvisioner.provisionAndroid reads
+  // listInstalledSystemImages before createAvd), so the catalog cannot drift
+  // into offering available-to-download packages that fail with "Package path
+  // is not valid". Device profiles come from `avdmanager list device`, which
+  // are the profile ids AVD creation accepts.
+  const controller = new AbortController();
+  let timeoutHandle: NodeJS.Timeout | undefined;
+  let timedOut = false;
   try {
-    const [availableSystemImages, installedSystemImages, profiles] = await Promise.all([
-      avdManager.listSystemImages(),
-      avdManager.listInstalledSystemImages(),
+    const enumeration = Promise.all([
+      avdManager.listInstalledSystemImages(undefined, controller.signal),
       avdManager.listDevices(),
     ]);
-    const systemImages = new Map(
-      [...availableSystemImages, ...installedSystemImages].map((image) => [
-        image.packageName,
-        image,
-      ]),
-    );
+    const [installedSystemImages, profiles] = await Promise.race([
+      enumeration,
+      new Promise<never>((_resolve, reject) => {
+        timeoutHandle = timer.setTimeout(() => {
+          timedOut = true;
+          const error = new Error(
+            `Android provisioning catalog enumeration exceeded ${budgetMs}ms`,
+          );
+          // Cancel the in-flight sdkmanager child so it does not keep running.
+          controller.abort(error);
+          reject(error);
+        }, budgetMs);
+      }),
+    ]);
+    const systemImages = new Map(installedSystemImages.map((image) => [image.packageName, image]));
     appendAndroidProvisioningCatalog(catalog, [...systemImages.values()], profiles);
     return { catalogComplete: true };
   } catch (error) {
+    if (timedOut) {
+      logger.warn(
+        `[DeviceImageResources] Android provisioning catalog timed out after ${budgetMs}ms; returning incomplete catalog`,
+      );
+      return {
+        catalogComplete: false,
+        error: {
+          code: "timeout",
+          message: `Android provisioning catalog enumeration exceeded the ${budgetMs}ms budget; catalog is incomplete.`,
+        },
+      };
+    }
     logger.warn(`[DeviceImageResources] Failed to build Android provisioning catalog: ${error}`);
     return failedCatalogObservation("Android", error);
+  } finally {
+    if (timeoutHandle) {
+      timer.clearTimeout(timeoutHandle);
+    }
   }
 }
 

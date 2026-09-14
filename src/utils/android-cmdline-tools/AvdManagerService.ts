@@ -44,11 +44,14 @@ export class AvdManagerService implements AvdManager {
     return listSystemImages(filter);
   }
 
-  async listInstalledSystemImages(filter?: SystemImageFilter): Promise<SystemImage[]> {
+  async listInstalledSystemImages(
+    filter?: SystemImageFilter,
+    signal?: AbortSignal,
+  ): Promise<SystemImage[]> {
     if (this.dependencies) {
-      return listInstalledSystemImages(filter, this.dependencies);
+      return listInstalledSystemImages(filter, this.dependencies, signal);
     }
-    return listInstalledSystemImages(filter);
+    return listInstalledSystemImages(filter, undefined, signal);
   }
 
   async installSystemImage(

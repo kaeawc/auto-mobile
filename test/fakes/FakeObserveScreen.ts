@@ -18,6 +18,7 @@ export class FakeObserveScreen implements ObserveScreen {
   private captureScreenshotCallCount: number = 0;
   private accessibilityAuditCallCount: number = 0;
   private processRecompositionCallCount: number = 0;
+  private cacheObserveResultCallCount: number = 0;
   private getMostRecentCachedObserveResultCallCount: number = 0;
   private failures: Map<string, Error> = new Map();
   private callCounter: number = 0;
@@ -25,6 +26,7 @@ export class FakeObserveScreen implements ObserveScreen {
   private readonly executeOptionsHistory: ObserveScreenExecuteOptions[] = [];
   private readonly capturedScreenshotObservations: Array<ObserveResult | undefined> = [];
   private readonly recompositionObservations: ObserveResult[] = [];
+  private readonly cachedObserveResultObservations: ObserveResult[] = [];
 
   /**
    * Set the observe result to be returned by execute and getMostRecentCachedObserveResult
@@ -150,11 +152,13 @@ export class FakeObserveScreen implements ObserveScreen {
     this.captureScreenshotCallCount = 0;
     this.accessibilityAuditCallCount = 0;
     this.processRecompositionCallCount = 0;
+    this.cacheObserveResultCallCount = 0;
     this.getMostRecentCachedObserveResultCallCount = 0;
     this.callCounter = 0;
     this.executeOptionsHistory.length = 0;
     this.capturedScreenshotObservations.length = 0;
     this.recompositionObservations.length = 0;
+    this.cachedObserveResultObservations.length = 0;
   }
 
   /**
@@ -182,6 +186,16 @@ export class FakeObserveScreen implements ObserveScreen {
   /** Observations passed to processRecomposition(), in call order. */
   getProcessRecompositionObservations(): ObserveResult[] {
     return [...this.recompositionObservations];
+  }
+
+  /** Total cacheObserveResult() calls. */
+  getCacheObserveResultCallCount(): number {
+    return this.cacheObserveResultCallCount;
+  }
+
+  /** Observations passed to cacheObserveResult(), in call order. */
+  getCacheObserveResultObservations(): ObserveResult[] {
+    return [...this.cachedObserveResultObservations];
   }
 
   /** Observations associated with terminal screenshot capture, in call order. */
@@ -242,6 +256,17 @@ export class FakeObserveScreen implements ObserveScreen {
     this.recompositionObservations.push(observation);
 
     const error = this.failures.get("processRecomposition");
+    if (error) {
+      throw error;
+    }
+  }
+
+  async cacheObserveResult(observation: ObserveResult): Promise<void> {
+    this.executedOperations.push("cacheObserveResult");
+    this.cacheObserveResultCallCount++;
+    this.cachedObserveResultObservations.push(observation);
+
+    const error = this.failures.get("cacheObserveResult");
     if (error) {
       throw error;
     }

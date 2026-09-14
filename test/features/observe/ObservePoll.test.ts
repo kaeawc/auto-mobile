@@ -357,5 +357,30 @@ describe("pollObserveUntil recomposition tracking (#6932)", () => {
     expect(fake.getExecuteOptions().every((option) => option.skipRecompositionTracking)).toBe(true);
     expect(fake.getProcessRecompositionCallCount()).toBe(1);
     expect(fake.getProcessRecompositionObservations()).toEqual([terminal]);
+    expect(fake.getCacheObserveResultCallCount()).toBe(1);
+    expect(fake.getCacheObserveResultObservations()).toEqual([terminal]);
+  });
+
+  test("does not process or cache an all-stale timeout fallback", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const fake = new FakeObserveScreen();
+    const stale = {
+      ...obs(10, "cached-stale"),
+      freshness: { isFresh: false, verified: false, category: "cache_age" },
+    } as ObserveResult;
+    fake.setObserveSequence([stale]);
+
+    const outcome = await pollObserveUntil(
+      fake,
+      timer,
+      { timeoutMs: 300, pollMs: 150, initialMinTimestampMs: 10, skipRecompositionTracking: true },
+      () => false,
+    );
+
+    expect(outcome.terminalReason).toBe("timeout");
+    expect(outcome.observation).toBe(stale);
+    expect(fake.getProcessRecompositionCallCount()).toBe(0);
+    expect(fake.getCacheObserveResultCallCount()).toBe(0);
   });
 });

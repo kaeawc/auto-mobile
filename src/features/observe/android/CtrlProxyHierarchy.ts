@@ -771,9 +771,11 @@ export class CtrlProxyHierarchy {
     }
 
     try {
+      throwIfAborted(signal);
       const connected = await perf.track("ensureConnection", () =>
         awaitWhileRequestIsLive(this.context.ensureConnected(perf), signal),
       );
+      throwIfAborted(signal);
       if (!connected) {
         logger.debug(
           "[CTRL_PROXY] Skipping recomposition tracking config; WebSocket not connected",

@@ -159,7 +159,7 @@ function nextPollMinTimestamp(
  * screen.
  */
 export async function pollObserveUntil(
-  observeScreen: Pick<ObserveScreen, "execute" | "processRecomposition">,
+  observeScreen: Pick<ObserveScreen, "execute" | "processRecomposition" | "cacheObserveResult">,
   timer: Timer,
   options: ObservePollOptions,
   onObservation: (
@@ -184,9 +184,17 @@ export async function pollObserveUntil(
   // results. A late stale fallback must not replace evidence that already met a
   // raised floor (e.g. 10 -> 30 -> 20).
   let newestTrustworthyObservation: ObserveResult | undefined;
-  const finalize = async (outcome: ObservePollOutcome): Promise<ObservePollOutcome> => {
-    if (options.skipRecompositionTracking) {
-      await observeScreen.processRecomposition?.(outcome.observation);
+  const finalize = async (
+    outcome: ObservePollOutcome,
+    canProcessRecomposition: boolean = true,
+  ): Promise<ObservePollOutcome> => {
+    if (
+      options.skipRecompositionTracking &&
+      canProcessRecomposition &&
+      observeScreen.processRecomposition
+    ) {
+      await observeScreen.processRecomposition(outcome.observation);
+      await observeScreen.cacheObserveResult?.(outcome.observation);
     }
     return outcome;
   };
@@ -298,13 +306,16 @@ export async function pollObserveUntil(
     }
 
     if (timer.now() - start >= options.timeoutMs) {
-      return finalize({
-        observation: newestTrustworthyObservation ?? observation,
-        polls,
-        waitMs: timer.now() - start,
-        stopped: false,
-        terminalReason: "timeout",
-      });
+      return finalize(
+        {
+          observation: newestTrustworthyObservation ?? observation,
+          polls,
+          waitMs: timer.now() - start,
+          stopped: false,
+          terminalReason: "timeout",
+        },
+        newestTrustworthyObservation !== undefined,
+      );
     }
 
     await timer.sleep(options.pollMs);

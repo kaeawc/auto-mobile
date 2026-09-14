@@ -58,6 +58,12 @@ export interface ObserveScreen {
   processRecomposition?(observation: ObserveResult, perf?: PerformanceTracker): Promise<void>;
 
   /**
+   * Persist a deferred recomposition-processed observation so cache and memory
+   * agree after #6932 settle-loop tracking.
+   */
+  cacheObserveResult?(observation: ObserveResult): Promise<void>;
+
+  /**
    * Fetch raw (unfiltered) view hierarchy from the device and attach it to an existing
    * ObserveResult. Safe to call after execute() — does not re-observe the screen.
    * @param result - Existing observe result to augment with raw hierarchy data

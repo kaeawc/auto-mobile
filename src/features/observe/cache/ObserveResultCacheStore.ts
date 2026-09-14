@@ -24,9 +24,15 @@ export interface ObserveResultCacheStore {
    * invalidated for the device while this observation was in flight — the write
    * is rejected so an in-flight observation cannot repopulate a just-cleared
    * cache with a now-stale hierarchy (issue #5884). Omit it for unconditional
-   * writes (back-compat).
+   * writes (back-compat). `cachedAt`, when supplied, is used for in-memory
+   * recency ordering; omit it to retain wall-clock write-time ordering.
    */
-  put(deviceId: string, result: ObserveResult, generation?: number): Promise<void>;
+  put(
+    deviceId: string,
+    result: ObserveResult,
+    generation?: number,
+    cachedAt?: number,
+  ): Promise<void>;
 
   /**
    * The device's current cache generation. Bumped by {@link clear} (per-device
@@ -51,6 +57,9 @@ export interface ObserveResultCacheStore {
 
   /** Sync in-memory lookup for a specific device. */
   getRecentInMemoryForDevice(deviceId: string): ObserveResult | undefined;
+
+  /** Host-clock timestamp of the most recent live in-memory entry for a device. */
+  getRecentCachedAtForDevice(deviceId: string): number | undefined;
 
   /** Clear memory + disk cache. If deviceId provided, only that device. */
   clear(deviceId?: string): void;

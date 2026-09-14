@@ -18,6 +18,8 @@ export interface ObserveScreenExecuteOptions {
    * issue #6228) so the nested capture cannot recurse back into the auditor.
    */
   skipPerformanceAudit?: boolean;
+  /** Skip recomposition processing for an intermediate observation. */
+  skipRecompositionTracking?: boolean;
 }
 
 /**
@@ -47,6 +49,30 @@ export interface ObserveScreen {
    * without capturing a screenshot.
    */
   runAccessibilityAudit?(observation: ObserveResult, perf?: PerformanceTracker): Promise<void>;
+
+  /**
+   * Process recomposition metrics for an already-collected observation without
+   * re-observing. Used to charge settle-loop side effects to its adopted
+   * terminal capture exactly once after intermediate polls skipped them (#6932).
+   */
+  processRecomposition?(observation: ObserveResult, perf?: PerformanceTracker): Promise<void>;
+
+  /**
+   * Capture the device cache generation at observation start so a deferred
+   * #6932 cache write can use the same #5884 stale-write fence as execute().
+   */
+  captureCacheGeneration?(): number;
+
+  /**
+   * Persist a deferred recomposition-processed observation so cache and memory
+   * agree after #6932 settle-loop tracking. Pass the generation captured at
+   * observation start so a concurrent #5884 invalidation cannot resurrect it.
+   */
+  cacheObserveResult?(
+    observation: ObserveResult,
+    generation?: number,
+    cachedAt?: number,
+  ): Promise<void>;
 
   /**
    * Fetch raw (unfiltered) view hierarchy from the device and attach it to an existing

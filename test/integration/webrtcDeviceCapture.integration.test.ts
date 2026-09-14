@@ -28,6 +28,11 @@ import {
   waitForBootedSimulatorUdid,
   type SimulatorAppearanceClient,
 } from "../helpers/webrtcDeviceCaptureHelpers";
+import {
+  recoverWhepSubscription,
+  type ChromeReader,
+  type WhepSubscriptionReader,
+} from "../helpers/whepSubscriptionRecovery";
 
 const execFileAsync = promisify(execFile);
 const runIntegration = process.env.AUTOMOBILE_WEBRTC_DEVICE_INTEGRATION === "1";
@@ -79,14 +84,11 @@ interface ReaderDiagnostics {
   video: { frames: number; width: number; height: number; readyState: number };
 }
 
-interface ChromeReader {
-  chrome: ChildProcessWithoutNullStreams;
-  cdp: CdpClient;
-}
-
-interface WHEPSubscriptionReader extends ChromeReader {
-  retried: boolean;
-}
+type DeviceChromeReader = ChromeReader<ChildProcessWithoutNullStreams, CdpClient>;
+type DeviceWhepSubscriptionReader = WhepSubscriptionReader<
+  ChildProcessWithoutNullStreams,
+  CdpClient
+>;
 
 class CdpClient {
   private nextId = 1;
@@ -362,7 +364,7 @@ function chromeDiagnostics(chrome: ChildProcessWithoutNullStreams, logFile: stri
 async function launchChromeReader(
   logFile: string,
   onStarted: (chrome: ChildProcessWithoutNullStreams) => void,
-): Promise<ChromeReader> {
+): Promise<DeviceChromeReader> {
   const maxAttempts = 2;
   let lastError: Error | undefined;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -474,31 +476,17 @@ async function subscribeReader(cdp: CdpClient): Promise<void> {
  * recovered initial subscription does not feed capture-latency percentiles.
  */
 async function subscribeRecoveryReader(
-  reader: ChromeReader,
+  reader: DeviceChromeReader,
   logFile: string,
   onChromeStarted: (chrome: ChildProcessWithoutNullStreams) => void,
-): Promise<WHEPSubscriptionReader> {
-  try {
-    await subscribeReader(reader.cdp);
-    return { ...reader, retried: false };
-  } catch (firstError) {
-    reader.cdp.close();
-    await stop(reader.chrome);
-    await Bun.sleep(1_000);
-    const replacement = await launchChromeReader(logFile, onChromeStarted);
-    try {
-      await subscribeReader(replacement.cdp);
-      return { ...replacement, retried: true };
-    } catch (retryError) {
-      replacement.cdp.close();
-      await stop(replacement.chrome);
-      throw new Error(
-        `WHEP recovery reader failed after a fresh-browser retry: ` +
-          `first=${firstError instanceof Error ? firstError.message : String(firstError)}; ` +
-          `retry=${retryError instanceof Error ? retryError.message : String(retryError)}`,
-      );
-    }
-  }
+): Promise<DeviceWhepSubscriptionReader> {
+  return recoverWhepSubscription(reader, {
+    subscribe: subscribeReader,
+    launch: () => launchChromeReader(logFile, onChromeStarted),
+    close: (cdp) => cdp.close(),
+    stop,
+    timer: defaultTimer,
+  });
 }
 
 async function videoSample(

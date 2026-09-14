@@ -636,7 +636,9 @@ export class Daemon {
           onRestartAccepted: () => {
             setImmediate(() => process.kill(process.pid, "SIGTERM"));
           },
-          onControlMetadataRepair: async () => await this.writePidFile(),
+          onControlMetadataRepair: async (signal) => await this.writePidFile(signal),
+          onControlMetadataCorruption: async (signal) =>
+            await this.corruptControlMetadataForAcceptance(signal),
         },
         this.idGenerator,
         // A hand-launched daemon (no startup lock) must refuse to unlink a live
@@ -1145,11 +1147,13 @@ export class Daemon {
    * Persist a PID-file record to disk (creating the directory as needed).
    * Shared by the early owner record and the final complete write.
    */
-  private async persistPidFileData(pidData: PidFileData): Promise<void> {
+  private async persistPidFileData(pidData: PidFileData, signal?: AbortSignal): Promise<void> {
     await mkdir(dirname(PID_FILE_PATH), { recursive: true });
+    signal?.throwIfAborted();
     await writeFile(PID_FILE_PATH, JSON.stringify(pidData, null, 2), {
       encoding: "utf-8",
       mode: 0o600,
+      signal,
     });
     this.pidFileWritten = true;
   }
@@ -1206,7 +1210,8 @@ export class Daemon {
   /**
    * Write PID file with daemon metadata
    */
-  private async writePidFile(): Promise<void> {
+  private async writePidFile(signal?: AbortSignal): Promise<void> {
+    signal?.throwIfAborted();
     const buildIdentity = getCurrentBuildIdentity();
     const pidData: PidFileData = {
       pid: process.pid,
@@ -1227,8 +1232,27 @@ export class Daemon {
       options: this.options,
     };
 
-    await this.persistPidFileData(pidData);
+    await this.persistPidFileData(pidData, signal);
+    signal?.throwIfAborted();
     logger.info(`PID file written to ${PID_FILE_PATH}`);
+  }
+
+  /**
+   * Acceptance-only, maintenance-token-gated fault. The responsive daemon and
+   * socket remain intact; only its own PID metadata is made unreadable so
+   * doctor must demonstrate the repair path.
+   */
+  private async corruptControlMetadataForAcceptance(signal?: AbortSignal): Promise<void> {
+    signal?.throwIfAborted();
+    await mkdir(dirname(PID_FILE_PATH), { recursive: true });
+    signal?.throwIfAborted();
+    await writeFile(PID_FILE_PATH, "{", {
+      encoding: "utf-8",
+      mode: 0o600,
+      signal,
+    });
+    signal?.throwIfAborted();
+    logger.info(`Acceptance control metadata fault written to ${PID_FILE_PATH}`);
   }
 
   private launchLogPath(): string | null {
@@ -2397,7 +2421,9 @@ export class Daemon {
             onRestartAccepted: () => {
               setImmediate(() => process.kill(process.pid, "SIGTERM"));
             },
-            onControlMetadataRepair: async () => await this.writePidFile(),
+            onControlMetadataRepair: async (signal) => await this.writePidFile(signal),
+            onControlMetadataCorruption: async (signal) =>
+              await this.corruptControlMetadataForAcceptance(signal),
           },
           this.idGenerator,
           // Recovery reuses the same ownership evidence as initial startup. A

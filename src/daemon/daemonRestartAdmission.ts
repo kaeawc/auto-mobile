@@ -5,6 +5,7 @@ export const DAEMON_PREPARE_MAINTENANCE_METHOD = "ide/prepareMaintenance";
 export const DAEMON_COMPLETE_MAINTENANCE_METHOD = "ide/completeMaintenance";
 export const DAEMON_RESTART_ADMITTED_METHOD = "ide/restartAdmitted";
 export const DAEMON_REPAIR_CONTROL_METADATA_METHOD = "ide/repairControlMetadata";
+export const DAEMON_CORRUPT_CONTROL_METADATA_METHOD = "ide/corruptControlMetadata";
 const ACTIVE_PROVISIONING_RESTART_RETRY_MS = 1_000;
 
 export interface DaemonRestartPreparation {
@@ -45,6 +46,20 @@ export interface DaemonAdmittedRestart {
 export interface DaemonControlMetadataRepair {
   repaired: boolean;
   reason?: "generation_changed" | "repair_unavailable";
+}
+
+/**
+ * Explicit, maintenance-token-gated fault used only by the operator-run live
+ * acceptance matrix. It corrupts PID metadata while retaining the responsive
+ * daemon socket, so doctor must prove its safe repair path.
+ */
+export interface DaemonControlMetadataCorruption {
+  corrupted: boolean;
+  reason?:
+    | "generation_changed"
+    | "maintenance_token_invalid"
+    | "active_sessions"
+    | "fault_unavailable";
 }
 
 /**

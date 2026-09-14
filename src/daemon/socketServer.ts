@@ -131,11 +131,13 @@ import type { DeviceService } from "../features/observe/DeviceService";
 import { executionTracker } from "../server/executionTracker";
 import {
   DAEMON_COMPLETE_MAINTENANCE_METHOD,
+  DAEMON_CORRUPT_CONTROL_METADATA_METHOD,
   DAEMON_PREPARE_MAINTENANCE_METHOD,
   DAEMON_PREPARE_RESTART_METHOD,
   DAEMON_REPAIR_CONTROL_METADATA_METHOD,
   DAEMON_RESTART_ADMITTED_METHOD,
   type DaemonAdmittedRestart,
+  type DaemonControlMetadataCorruption,
   type DaemonControlMetadataRepair,
   type DaemonMaintenancePreparation,
   type DaemonRestartPreparation,
@@ -563,13 +565,16 @@ export class UnixSocketServer {
   private readonly identityStartedAt: number;
   private readonly processGenerationToken: string | undefined;
   private readonly onRestartAccepted?: () => void;
-  private readonly onControlMetadataRepair?: () => Promise<void>;
+  private readonly onControlMetadataRepair?: (signal?: AbortSignal) => Promise<void>;
+  private readonly onControlMetadataCorruption?: (signal?: AbortSignal) => Promise<void>;
   private maintenanceAdmissionToken: string | undefined;
   private maintenanceRestartConsumed = false;
   private readonly sessionToolSelectionService?: Pick<
     SessionToolSelectionService,
     "isEnabled" | "setEnabled"
   >;
+  /** Local control RPCs are cancelled when their owner disconnects or expires. */
+  private readonly localRequestAbortControllers = new Map<string, Set<AbortController>>();
   /**
    * Factory that `getMcpClient()` calls to open the loopback MCP HTTP client.
    * Defaults to the real {@link createMcpClient}; tests assign a fake here to
@@ -634,7 +639,8 @@ export class UnixSocketServer {
       processGenerationToken?: string;
       enforce?: boolean;
       onRestartAccepted?: () => void;
-      onControlMetadataRepair?: () => Promise<void>;
+      onControlMetadataRepair?: (signal?: AbortSignal) => Promise<void>;
+      onControlMetadataCorruption?: (signal?: AbortSignal) => Promise<void>;
       sessionToolSelectionService?: Pick<SessionToolSelectionService, "isEnabled" | "setEnabled">;
     } = {},
     idGenerator: IdGenerator = defaultIdGenerator,
@@ -673,6 +679,7 @@ export class UnixSocketServer {
     this.processGenerationToken = handshakeConfig.processGenerationToken;
     this.onRestartAccepted = handshakeConfig.onRestartAccepted;
     this.onControlMetadataRepair = handshakeConfig.onControlMetadataRepair;
+    this.onControlMetadataCorruption = handshakeConfig.onControlMetadataCorruption;
     logger.info(`UnixSocketServer initialized with endpoint: "${mcpEndpoint}"`);
     if (!mcpEndpoint) {
       logger.error("ERROR: mcpEndpoint is empty or undefined!");
@@ -855,6 +862,7 @@ export class UnixSocketServer {
 
     socket.on("close", () => {
       logger.info(`Client disconnected: ${sessionId}`);
+      this.abortLocalRequests(sessionId);
       this.sessions.delete(sessionId);
       this.clientSockets.delete(sessionId);
       this.notificationSubscribers.delete(sessionId);
@@ -866,6 +874,7 @@ export class UnixSocketServer {
 
     socket.on("error", (error) => {
       logger.error(`Socket error for ${sessionId}:`, error);
+      this.abortLocalRequests(sessionId);
       this.sessions.delete(sessionId);
       this.clientSockets.delete(sessionId);
       this.notificationSubscribers.delete(sessionId);
@@ -883,6 +892,69 @@ export class UnixSocketServer {
       () => this.activeRequestHandlers.delete(handler),
       () => this.activeRequestHandlers.delete(handler),
     );
+  }
+
+  private abortLocalRequests(sessionId: string): void {
+    const controllers = this.localRequestAbortControllers.get(sessionId);
+    if (!controllers) {
+      return;
+    }
+    this.localRequestAbortControllers.delete(sessionId);
+    for (const controller of controllers) {
+      controller.abort(new Error("Daemon control client disconnected"));
+    }
+  }
+
+  private localRequestSignal(
+    sessionId: string,
+    timeoutMs: number,
+  ): { signal: AbortSignal; dispose: () => void } {
+    if (timeoutMs <= 0) {
+      throw new McpTimeoutError({
+        toolName: DAEMON_REPAIR_CONTROL_METADATA_METHOD,
+        timeoutMs: 0,
+        origin: "UnixSocketServer.handleRequest",
+        detail: "spent the control-RPC deadline waiting in queue",
+      });
+    }
+    const controller = new AbortController();
+    const controllers =
+      this.localRequestAbortControllers.get(sessionId) ?? new Set<AbortController>();
+    controllers.add(controller);
+    this.localRequestAbortControllers.set(sessionId, controllers);
+    const timeout = this.timer.setTimeout(() => {
+      controller.abort(new Error("Daemon control request deadline elapsed"));
+    }, timeoutMs);
+    return {
+      signal: controller.signal,
+      dispose: () => {
+        this.timer.clearTimeout(timeout);
+        controllers.delete(controller);
+        if (controllers.size === 0) {
+          this.localRequestAbortControllers.delete(sessionId);
+        }
+      },
+    };
+  }
+
+  private async handleBoundLocalSocketRequest(
+    request: DaemonRequest,
+    sessionId: string,
+    timeoutMs: number,
+  ): Promise<any | undefined> {
+    const mutatesControlMetadata =
+      request.method === DAEMON_REPAIR_CONTROL_METADATA_METHOD ||
+      request.method === DAEMON_CORRUPT_CONTROL_METADATA_METHOD;
+    if (!mutatesControlMetadata) {
+      return await this.handleLocalSocketRequest(request, sessionId);
+    }
+
+    const localRequest = this.localRequestSignal(sessionId, timeoutMs);
+    try {
+      return await this.handleLocalSocketRequest(request, sessionId, localRequest.signal);
+    } finally {
+      localRequest.dispose();
+    }
   }
 
   /**
@@ -1086,8 +1158,14 @@ export class UnixSocketServer {
           };
         }
 
-        // Handle socket-local requests that don't need the MCP client
-        const localResult = await this.handleLocalSocketRequest(request, sessionId);
+        // Metadata mutation is the one local operation whose late completion
+        // can alter daemon ownership state, so bind it to the client's
+        // connection lifetime and its remaining request budget.
+        const localResult = await this.handleBoundLocalSocketRequest(
+          request,
+          sessionId,
+          deadline.value - this.timer.now(),
+        );
         if (localResult !== undefined) {
           return {
             id: request.id,
@@ -2968,6 +3046,7 @@ export class UnixSocketServer {
 
   private async repairControlMetadata(
     params: Record<string, unknown>,
+    signal?: AbortSignal,
   ): Promise<DaemonControlMetadataRepair> {
     if (!this.daemonGenerationMatches(params)) {
       return { repaired: false, reason: "generation_changed" };
@@ -2975,8 +3054,33 @@ export class UnixSocketServer {
     if (!this.onControlMetadataRepair) {
       return { repaired: false, reason: "repair_unavailable" };
     }
-    await this.onControlMetadataRepair();
+    signal?.throwIfAborted();
+    await this.onControlMetadataRepair(signal);
+    signal?.throwIfAborted();
     return { repaired: true };
+  }
+
+  private async corruptControlMetadata(
+    params: Record<string, unknown>,
+    signal?: AbortSignal,
+  ): Promise<DaemonControlMetadataCorruption> {
+    if (!this.daemonGenerationMatches(params)) {
+      return { corrupted: false, reason: "generation_changed" };
+    }
+    if (params.maintenanceToken !== this.maintenanceAdmissionToken) {
+      return { corrupted: false, reason: "maintenance_token_invalid" };
+    }
+    const sessions = this.daemonState.getSessionManager().getAllSessions?.();
+    if (!sessions || sessions.length > 0) {
+      return { corrupted: false, reason: "active_sessions" };
+    }
+    if (!this.onControlMetadataCorruption) {
+      return { corrupted: false, reason: "fault_unavailable" };
+    }
+    signal?.throwIfAborted();
+    await this.onControlMetadataCorruption(signal);
+    signal?.throwIfAborted();
+    return { corrupted: true };
   }
 
   private requireFeatureFlagService(): FeatureFlagService {
@@ -2989,6 +3093,7 @@ export class UnixSocketServer {
   private async handleLocalSocketRequest(
     request: DaemonRequest,
     socketSessionId?: string,
+    signal?: AbortSignal,
   ): Promise<any | undefined> {
     if (request.method === "input/tap") {
       return await this.handleInputTap(request, socketSessionId);
@@ -3081,7 +3186,10 @@ export class UnixSocketServer {
         return this.restartAdmittedDaemon(request.params);
       }
       case DAEMON_REPAIR_CONTROL_METADATA_METHOD: {
-        return await this.repairControlMetadata(request.params);
+        return await this.repairControlMetadata(request.params, signal);
+      }
+      case DAEMON_CORRUPT_CONTROL_METADATA_METHOD: {
+        return await this.corruptControlMetadata(request.params, signal);
       }
       case "ide/status": {
         return {

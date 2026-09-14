@@ -998,15 +998,31 @@ function assertProvisionedIdentity(payload: JsonObject, args: AcceptanceArgs): v
   }
 }
 
-function doctorRepairCommand(build: BuildIdentity, remainingBudgetMs: number): string[] {
+function doctorRepairCommand(
+  build: BuildIdentity,
+  platform: Platform,
+  remainingBudgetMs: number,
+): string[] {
   return [
     process.execPath,
     build.entryScript,
     "--cli",
     "doctor",
     "--repair",
+    `--${platform}`,
     "--timeout-ms",
     String(remainingBudgetMs),
+  ];
+}
+
+function corruptControlMetadataCommand(build: BuildIdentity, maintenanceToken: string): string[] {
+  return [
+    process.execPath,
+    build.entryScript,
+    "--daemon",
+    "corrupt-control-metadata-admitted",
+    "--maintenance-token",
+    maintenanceToken,
   ];
 }
 
@@ -1672,27 +1688,81 @@ export async function runAcceptanceMatrix(
     }
   };
 
-  const repairHost = async (): Promise<void> => {
+  const verifyDaemonProtocolAfterRepair = async (): Promise<void> => {
     const start = timer.now();
-    const admission = await admitMaintenance("host-wide doctor repair", "work");
+    const client = await bounded(
+      "post-doctor daemon protocol connect",
+      "work",
+      async (signal) => await createDaemonClient(signal),
+    );
     try {
-      await bounded("host-wide doctor repair", "work", async (signal) => {
+      const status = asObject(
+        await bounded(
+          "post-doctor daemon protocol",
+          "work",
+          async (signal) => await client.callDaemonMethod("ide/status", {}, signal),
+          () => client.close(),
+        ),
+        "ide/status",
+      );
+      if (status.buildId !== args.build.buildId || status.entryScript !== args.build.entryScript) {
+        throw new Error("Post-doctor daemon protocol did not report the delivered build identity");
+      }
+      recordStep(steps, timer, "post-doctor-daemon-protocol", start, {
+        buildIdentityVerified: true,
+      });
+    } finally {
+      try {
+        await bounded(
+          "post-doctor daemon protocol close",
+          "cleanup",
+          async () => await client.close(),
+        );
+      } catch (error) {
+        cleanupFailures.push(
+          `post-doctor daemon protocol close: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+  };
+
+  const exerciseOwnedDoctorRepair = async (): Promise<void> => {
+    const admission = await admitMaintenance("owned control metadata fault", "work");
+    try {
+      const faultStart = timer.now();
+      await bounded("owned control metadata fault", "work", async (signal) => {
         const remainingBudgetMs = Math.max(1, workDeadline - timer.now());
         await spawnCli(
-          doctorRepairCommand(args.build, remainingBudgetMs),
+          corruptControlMetadataCommand(args.build, admission.maintenanceToken),
           remainingBudgetMs,
           signal,
         );
       });
-      recordStep(steps, timer, "host-wide-doctor-repair", start, {
+      recordStep(steps, timer, "owned-corrupt-control-metadata", faultStart, {
+        maintenanceAdmission: true,
+        faultScope: "responsive-daemon-pid-metadata-only",
+        buildIdentityVerified: true,
+      });
+
+      const repairStart = timer.now();
+      await bounded("host-wide doctor repair", "work", async (signal) => {
+        const remainingBudgetMs = Math.max(1, workDeadline - timer.now());
+        await spawnCli(
+          doctorRepairCommand(args.build, args.platform, remainingBudgetMs),
+          remainingBudgetMs,
+          signal,
+        );
+      });
+      recordStep(steps, timer, "host-wide-doctor-repair", repairStart, {
         platform: args.platform,
-        platformFlagScope: "diagnostic-only",
+        platformFlagScope: "requested-filter",
         repairScope: "host-wide",
         buildIdentityVerified: true,
         maintenanceAdmission: true,
       });
+      await verifyDaemonProtocolAfterRepair();
     } finally {
-      await completeMaintenance("host-wide doctor repair", admission, "cleanup");
+      await completeMaintenance("owned control metadata fault", admission, "cleanup");
     }
   };
 
@@ -1876,7 +1946,7 @@ export async function runAcceptanceMatrix(
       });
     }
 
-    await repairHost();
+    await exerciseOwnedDoctorRepair();
     const repaired = await acquire("reacquire-after-repair", "exact", "platform");
     await release(repaired.sessionUuid, "reacquire-after-repair");
   } catch (error) {

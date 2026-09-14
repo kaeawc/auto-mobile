@@ -44,7 +44,7 @@ export interface DaemonRecoveryDependencies {
    * validates its current generation before republishing the record, so doctor
    * does not need to stop a healthy daemon merely because its metadata is bad.
    */
-  repairControlMetadata?: (signal?: AbortSignal) => Promise<boolean>;
+  repairControlMetadata?: (signal?: AbortSignal, deadline?: number) => Promise<boolean>;
   /**
    * This is the deliberate recovery escalation. DaemonManager acquires the
    * lifecycle lock, rechecks protocol ownership, then stops only verified
@@ -230,7 +230,7 @@ type FinalHealthAttempt =
 interface ResolvedRecoveryDependencies {
   timer: Timer;
   getHealthReport: () => Promise<DaemonHealthReport>;
-  repairControlMetadata: (signal?: AbortSignal) => Promise<boolean>;
+  repairControlMetadata: (signal?: AbortSignal, deadline?: number) => Promise<boolean>;
   recoverControlState: (
     daemonOptions: DaemonOptions,
     isProtocolHealthy: () => Promise<boolean>,
@@ -250,7 +250,8 @@ function resolveRecoveryDependencies(
     getHealthReport: dependencies.getHealthReport ?? getDaemonHealthReport,
     repairControlMetadata:
       dependencies.repairControlMetadata ??
-      (async () => await new DaemonManager().repairControlMetadata()),
+      (async (signal, deadline) =>
+        await new DaemonManager().repairControlMetadata(signal, deadline)),
     recoverControlState:
       dependencies.recoverControlState ??
       ((daemonOptions, isProtocolHealthy, signal, deadline) =>
@@ -397,17 +398,23 @@ async function repairConnectableDaemonMetadata(
   before: DaemonHealthReport,
   deadline: number,
   timer: Timer,
-  repairControlMetadata: (signal?: AbortSignal) => Promise<boolean>,
+  repairControlMetadata: (signal?: AbortSignal, deadline?: number) => Promise<boolean>,
 ): Promise<RecoveryAttempt<void> | undefined> {
   if (!before.socketConnectable || before.pidFileValid) {
     return undefined;
   }
-  return await attemptRecoveryStep("recovery", deadline, timer, async (signal) => {
-    if (await repairControlMetadata(signal)) {
-      return;
-    }
-    throw new Error("responsive daemon declined to republish control metadata");
-  });
+  return await attemptRecoveryStep(
+    "recovery",
+    deadline,
+    timer,
+    async (signal) => {
+      if (await repairControlMetadata(signal, deadline)) {
+        return;
+      }
+      throw new Error("responsive daemon declined to republish control metadata");
+    },
+    true,
+  );
 }
 
 /**

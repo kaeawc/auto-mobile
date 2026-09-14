@@ -87,6 +87,45 @@ describe("repairDaemon", () => {
     expect(protocolChecks).toBe(1);
   });
 
+  test("does not let a delayed metadata repair publish after the doctor deadline", async () => {
+    const timer = new FakeTimer();
+    let observedDeadline: number | undefined;
+    let metadataWrites = 0;
+    let repairStarted: (() => void) | undefined;
+    const started = new Promise<void>((resolve) => {
+      repairStarted = resolve;
+    });
+    const repair = repairDaemon(
+      { timeoutMs: 50 },
+      dependencies([{ ...healthReport(true), pidFileValid: false }], {
+        timer,
+        repairControlMetadata: async (signal, deadline) => {
+          observedDeadline = deadline;
+          repairStarted?.();
+          await new Promise<void>((resolve) => {
+            signal?.addEventListener("abort", resolve, { once: true });
+          });
+          signal?.throwIfAborted();
+          metadataWrites++;
+          return true;
+        },
+      }),
+    );
+
+    await started;
+    timer.advanceTime(50);
+    const result = await repair;
+
+    expect(result).toMatchObject<Partial<DaemonRecoveryResult>>({
+      status: "failed",
+      phase: "recovery",
+      action: "joined",
+    });
+    expect(observedDeadline).toBe(50);
+    await waitForDaemonRecoveryCompletion(result);
+    expect(metadataWrites).toBe(0);
+  });
+
   test("restarts a daemon with unusable control state and verifies the replacement", async () => {
     let protocolChecks = 0;
     const result = await repairDaemon(

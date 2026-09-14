@@ -318,7 +318,11 @@ function createHarness(
           throw new Error(`CLI failed for ${options.failCliFor}`);
         }
         events.push(
-          command.includes("doctor") ? `doctor:${command.join(" ")}` : "cli:getDeviceState",
+          command.includes("corrupt-control-metadata-admitted")
+            ? `fault:${command.join(" ")}`
+            : command.includes("doctor")
+              ? `doctor:${command.join(" ")}`
+              : "cli:getDeviceState",
         );
       },
       async restartDaemon() {
@@ -591,6 +595,34 @@ describe("live device acceptance harness", () => {
     expect(harness.events).toContain("reacquire-after-repair:getAndroid");
   });
 
+  test("faults only maintenance-admitted control metadata, then repairs and verifies fresh protocol", async () => {
+    const harness = createHarness();
+
+    const evidence = await runAcceptanceMatrix(androidArgs, harness.dependencies);
+    const fault = harness.cliCommands.findIndex((command) =>
+      command.includes("corrupt-control-metadata-admitted"),
+    );
+    const doctor = harness.cliCommands.findIndex((command) => command.includes("doctor"));
+
+    expect(fault).toBeGreaterThanOrEqual(0);
+    expect(doctor).toBeGreaterThan(fault);
+    expect(harness.cliCommands[fault]).toEqual([
+      process.execPath,
+      "/test/dist/src/index.js",
+      "--daemon",
+      "corrupt-control-metadata-admitted",
+      "--maintenance-token",
+      "test-maintenance-token",
+    ]);
+    expect(harness.cliCommands[doctor]).toContain("--android");
+    expect(harness.events).toContain("reacquire-after-repair:getAndroid");
+    expect(harness.events).toContain("reacquire-after-repair:observe");
+    expect(evidence.checks).toMatchObject({
+      stableIdentityPreserved: true,
+      readinessObserveThenState: true,
+    });
+  });
+
   test("rejects a generic error instead of the required old-session diagnostic", async () => {
     const harness = createHarness({ oldSessionDiagnostic: "unknown session" });
 
@@ -739,7 +771,7 @@ describe("live device acceptance harness", () => {
     );
 
     expect(harness.events).toContain("close:daemon");
-    expect(harness.events.filter((event) => event.startsWith("close:"))).toHaveLength(13);
+    expect(harness.events.filter((event) => event.startsWith("close:"))).toHaveLength(14);
     expect(harness.evidence[0]).not.toContain("daemon close failed");
     expect(harness.evidence[0]).not.toContain("client close failed");
   });

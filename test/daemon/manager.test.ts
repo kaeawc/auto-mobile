@@ -499,6 +499,74 @@ describe("DaemonManager restart", () => {
   });
 });
 
+describe("DaemonManager control metadata repair", () => {
+  test("passes the shared deadline and abort signal through connect and both control RPCs", async () => {
+    const timer = new FakeTimer();
+    const controller = new AbortController();
+    const connectCalls: Array<{ timeoutMs: number | undefined; signal: AbortSignal | undefined }> =
+      [];
+    const rpcCalls: Array<{
+      method: string;
+      timeoutMs: number | undefined;
+      signal: AbortSignal | undefined;
+    }> = [];
+    let lateMetadataWrite = false;
+    let repairStarted: (() => void) | undefined;
+    const started = new Promise<void>((resolve) => {
+      repairStarted = resolve;
+    });
+    const client: DaemonClientLike = {
+      async connect(timeoutMs, signal) {
+        connectCalls.push({ timeoutMs, signal });
+      },
+      async close() {},
+      async callTool() {
+        return {};
+      },
+      async readResource() {
+        return {};
+      },
+      async callDaemonMethod(method, _params, options) {
+        rpcCalls.push({ method, timeoutMs: options?.timeoutMs, signal: options?.signal });
+        if (method === "ide/status") {
+          timer.advanceTime(10);
+          return {
+            pid: 1234,
+            startedAt: 0,
+            version: "test",
+            buildId: "test-build",
+            entryScript: "/test/dist/src/index.js",
+          };
+        }
+        repairStarted?.();
+        await new Promise<void>((resolve) => {
+          options?.signal?.addEventListener("abort", resolve, { once: true });
+        });
+        options?.signal?.throwIfAborted();
+        lateMetadataWrite = true;
+        return { repaired: true };
+      },
+    };
+    const manager = new DaemonManager(() => client, undefined, timer);
+    const repair = manager.repairControlMetadata(controller.signal, 50);
+
+    await started;
+    controller.abort();
+
+    await expect(repair).rejects.toThrow("aborted");
+    expect(connectCalls).toEqual([{ timeoutMs: 50, signal: controller.signal }]);
+    expect(rpcCalls).toEqual([
+      { method: "ide/status", timeoutMs: 50, signal: controller.signal },
+      {
+        method: "ide/repairControlMetadata",
+        timeoutMs: 40,
+        signal: controller.signal,
+      },
+    ]);
+    expect(lateMetadataWrite).toBe(false);
+  });
+});
+
 describe("DaemonManager stop", () => {
   function createManagerForStop(
     livePids: Set<number>,

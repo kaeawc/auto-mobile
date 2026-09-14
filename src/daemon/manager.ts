@@ -54,13 +54,16 @@ import {
   type DaemonClientFactory,
   type DaemonClientFactoryOptions,
   type DaemonClientLike,
+  type DaemonMethodCallOptions,
 } from "./client";
 import {
   DAEMON_PREPARE_RESTART_METHOD,
+  DAEMON_CORRUPT_CONTROL_METADATA_METHOD,
   DAEMON_REPAIR_CONTROL_METADATA_METHOD,
   DAEMON_RESTART_ADMITTED_METHOD,
   DaemonRestartDeferredError,
   type DaemonAdmittedRestart,
+  type DaemonControlMetadataCorruption,
   type DaemonControlMetadataRepair,
   type DaemonRestartPreparation,
 } from "./daemonRestartAdmission";
@@ -2734,19 +2737,85 @@ export class DaemonManager implements DaemonManagerLike {
    * validates this exact socket generation before performing the write, so a
    * stale diagnostic cannot repair metadata on behalf of a replacement.
    */
-  async repairControlMetadata(): Promise<boolean> {
+  async repairControlMetadata(signal?: AbortSignal, recoveryDeadline?: number): Promise<boolean> {
     const client = this.createClient({ clientIdentity: null });
+    const remainingTimeout = (): number | undefined => {
+      if (recoveryDeadline === undefined) {
+        return undefined;
+      }
+      const remaining = recoveryDeadline - this.timer.now();
+      if (remaining <= 0) {
+        throw new ActionableError("Daemon control metadata repair deadline elapsed");
+      }
+      return remaining;
+    };
+    const requestOptions = (): DaemonMethodCallOptions => {
+      const timeoutMs = remainingTimeout();
+      return {
+        ...(signal === undefined ? {} : { signal }),
+        ...(timeoutMs === undefined ? {} : { timeoutMs }),
+      };
+    };
     try {
-      await client.connect();
-      const status = await client.callDaemonMethod("ide/status", {});
+      signal?.throwIfAborted();
+      const connectTimeout = remainingTimeout();
+      await client.connect(connectTimeout, signal);
+      signal?.throwIfAborted();
+      const status = await client.callDaemonMethod("ide/status", {}, requestOptions());
       if (!status || typeof status !== "object" || Array.isArray(status)) {
         return false;
       }
+      signal?.throwIfAborted();
       const result: unknown = await client.callDaemonMethod(
         DAEMON_REPAIR_CONTROL_METADATA_METHOD,
         status as Record<string, unknown>,
+        requestOptions(),
       );
+      signal?.throwIfAborted();
       return (result as Partial<DaemonControlMetadataRepair> | null)?.repaired === true;
+    } finally {
+      await client.close();
+    }
+  }
+
+  /**
+   * Create the live-acceptance control-metadata fault through the currently
+   * admitted daemon generation. The opaque maintenance token is the authority:
+   * without it, no daemon or device state is changed.
+   */
+  async corruptControlMetadataAdmitted(maintenanceToken: string): Promise<void> {
+    if (!maintenanceToken) {
+      throw new ActionableError(
+        "corrupt-control-metadata-admitted requires a maintenance admission token.",
+      );
+    }
+    const status = await this.status();
+    if (!status.running) {
+      throw new ActionableError(
+        "corrupt-control-metadata-admitted requires the admitted daemon generation to be running.",
+      );
+    }
+    const client = this.createClient({ clientIdentity: null });
+    try {
+      await client.connect();
+      const result: unknown = await client.callDaemonMethod(
+        DAEMON_CORRUPT_CONTROL_METADATA_METHOD,
+        { ...status, maintenanceToken },
+      );
+      if ((result as Partial<DaemonControlMetadataCorruption> | null)?.corrupted !== true) {
+        throw new ActionableError(
+          "Daemon declined the maintenance-admitted control metadata fault.",
+        );
+      }
+      // The intentionally broken PID record must not be confused with a dead
+      // socket. Prove the same responsive daemon still answers before doctor is
+      // asked to repair its metadata.
+      const liveStatus = await client.callDaemonMethod("ide/status", {});
+      if (!liveStatus || typeof liveStatus !== "object" || Array.isArray(liveStatus)) {
+        throw new ActionableError(
+          "Control metadata fault did not retain a responsive daemon protocol.",
+        );
+      }
     } finally {
       await client.close();
     }
@@ -3953,6 +4022,11 @@ export async function runDaemonCommand(
           parseDaemonArgs(args),
           parseRestartAdmittedMaintenanceToken(args),
         );
+        break;
+      }
+
+      case "corrupt-control-metadata-admitted": {
+        await manager.corruptControlMetadataAdmitted(parseRestartAdmittedMaintenanceToken(args));
         break;
       }
 

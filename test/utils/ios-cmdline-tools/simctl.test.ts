@@ -1489,7 +1489,7 @@ describe("Simctl", function () {
   });
 
   describe("getRuntimes uses dedicated simctl command", function () {
-    test("should return runtimes from simctl list runtimes --json", async function () {
+    test("returns only available runtimes while getRuntimesChecked preserves all runtime availability", async function () {
       mockExecAsync = async (file: string, args: string[]): Promise<ExecResult> => {
         if (file === "xcrun" && args.join(" ") === "simctl list runtimes --json") {
           return createExecResult(
@@ -1508,6 +1508,7 @@ describe("Simctl", function () {
                     "/Library/Developer/CoreSimulator/Volumes/iOS_18.6/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 18.6.simruntime",
                   identifier: "com.apple.CoreSimulator.SimRuntime.iOS-18-6",
                   isAvailable: false,
+                  availabilityError: "The runtime bundle was not found.",
                   name: "iOS 18.6",
                   version: "18.6",
                 },
@@ -1524,6 +1525,14 @@ describe("Simctl", function () {
       expect(runtimes).toHaveLength(1);
       expect(runtimes[0].name).toBe("iOS 26.2");
       expect(runtimes[0].isAvailable).toBe(true);
+
+      const checkedRuntimes = await simctl.getRuntimesChecked();
+      expect(checkedRuntimes).toHaveLength(2);
+      expect(checkedRuntimes[1]).toMatchObject({
+        name: "iOS 18.6",
+        isAvailable: false,
+        availabilityError: "The runtime bundle was not found.",
+      });
     });
 
     test("surfaces the runtimes command error", async function () {

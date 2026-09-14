@@ -106,16 +106,16 @@ resolved_shellcheck_disable_source_path() {
         continue
       fi
       assignment_value="${assignment_value//\$\{BASH_SOURCE\[0\]\}/${check_script}}"
-      variable_value="$(cd "${PROJECT_ROOT}" && eval "printf '%s\\n' ${assignment_value}" 2>/dev/null || true)"
+      variable_value="$(cd "${PROJECT_ROOT}" && eval "printf '%s\\n' ${assignment_value}" 2>/dev/null)" || variable_value=""
       [[ -n "${variable_value}" ]] || continue
       resolved_expr="${resolved_expr//\$${variable}/${variable_value}}"
       resolved_expr="${resolved_expr//\$\{${variable}\}/${variable_value}}"
     fi
   done
 
-  resolved_path="$(cd "${PROJECT_ROOT}" && eval "printf '%s\\n' \"${resolved_expr}\"" 2>/dev/null || true)"
+  resolved_path="$(cd "${PROJECT_ROOT}" && eval "printf '%s\\n' \"${resolved_expr}\"" 2>/dev/null)" || resolved_path=""
   [[ -n "${resolved_path}" ]] || return 0
-  resolved_path="$(cd "${PROJECT_ROOT}" && cd "$(dirname "${resolved_path}")" && printf '%s/%s\n' "$PWD" "$(basename "${resolved_path}")" 2>/dev/null || true)"
+  resolved_path="$(cd "${PROJECT_ROOT}" && cd "$(dirname "${resolved_path}")" && printf '%s/%s\n' "$PWD" "$(basename "${resolved_path}")" 2>/dev/null)" || resolved_path=""
   [[ "${resolved_path}" == "${PROJECT_ROOT}/"* ]] || return 0
   printf '%s\n' "${resolved_path#"${PROJECT_ROOT}/"}"
 }

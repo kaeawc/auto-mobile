@@ -7407,6 +7407,116 @@ describe("DevicePool", () => {
       }
     });
 
+    test("abandons an assigned refresh replacement superseded before eviction", async () => {
+      const device = stamped(poolDevice("emulator-5554", "Pixel_8_API_35"), 1);
+      const replacement = stamped(poolDevice("emulator-5554", "Pixel_7_API_34"), 2);
+      await initializeLiveDevices([device]);
+      await devicePool.reconcileDiscoveryObservation([device], "test:initial");
+      await devicePool.bindOrReuseDeviceSession("owner-session", device.deviceId, "android");
+      const pooled = devicePool.getDevice(device.deviceId);
+      if (!pooled) {
+        throw new Error("expected pooled device");
+      }
+
+      type DevicePoolInternals = {
+        evictMissingPooledDevice(
+          pooledDevice: PooledDevice,
+          reason: string,
+          recoverAndroidEmulator?: boolean,
+          incidentId?: string,
+          incidentCaptureComplete?: boolean,
+          recoveryPreparation?: unknown,
+          identityObservation?: Pick<BootedDevice, "name" | "observedAt">,
+        ): Promise<void>;
+        releaseSessionForDisconnectedDevice(
+          sessionId: string,
+          deviceId: string,
+          releaseReason: string,
+        ): Promise<void>;
+      };
+      const internals = devicePool as unknown as DevicePoolInternals;
+      const evictionQueued = Promise.withResolvers<void>();
+      const releaseEviction = Promise.withResolvers<void>();
+      const evictMissingPooledDevice = internals.evictMissingPooledDevice.bind(devicePool);
+      const releaseSessionForDisconnectedDevice =
+        internals.releaseSessionForDisconnectedDevice.bind(devicePool);
+      const sessionReleases: string[] = [];
+      internals.evictMissingPooledDevice = async (...args) => {
+        evictionQueued.resolve();
+        await releaseEviction.promise;
+        await evictMissingPooledDevice(...args);
+      };
+      internals.releaseSessionForDisconnectedDevice = async (sessionId, ...args) => {
+        sessionReleases.push(sessionId);
+        await releaseSessionForDisconnectedDevice(sessionId, ...args);
+      };
+      try {
+        fakeDeviceManager.bootedDevices = [replacement];
+        const refresh = devicePool.refreshDevices();
+        await evictionQueued.promise;
+
+        // The refresh chose B at stamp 2, but before its eviction begins a
+        // newer discovery proves that A still owns the serial.
+        await devicePool.reconcileDiscoveryObservation([stamped(device, 3)], "test:newer");
+        releaseEviction.resolve();
+        await refresh;
+
+        expect(sessionReleases).toEqual([]);
+        expect(devicePool.getDevice(device.deviceId)).toBe(pooled);
+        expect(pooled.sessionId).toBe("owner-session");
+      } finally {
+        internals.evictMissingPooledDevice = evictMissingPooledDevice;
+        internals.releaseSessionForDisconnectedDevice = releaseSessionForDisconnectedDevice;
+        releaseEviction.resolve();
+      }
+    });
+
+    test("uses a newer discovery identity that arrives during replacement cache cleanup", async () => {
+      const device = stamped(poolDevice("emulator-5554", "Pixel_8_API_35"), 1);
+      const replacement = stamped(poolDevice("emulator-5554", "Pixel_7_API_34"), 2);
+      const newerReplacement = stamped(poolDevice("emulator-5554", "Pixel_6_API_33"), 3);
+      await initializeLiveDevices([device]);
+      await devicePool.reconcileDiscoveryObservation([device], "test:initial");
+      const pooled = devicePool.getDevice(device.deviceId);
+      if (!pooled) {
+        throw new Error("expected pooled device");
+      }
+
+      type DevicePoolInternals = {
+        replacePooledDeviceForRuntimeIdentity(
+          pooledDevice: PooledDevice,
+          bootedDevice: BootedDevice,
+        ): Promise<boolean>;
+        clearDeviceSessionCache(deviceId: string): Promise<void>;
+      };
+      const internals = devicePool as unknown as DevicePoolInternals;
+      const cacheCleanupStarted = Promise.withResolvers<void>();
+      const finishCacheCleanup = Promise.withResolvers<void>();
+      const clearDeviceSessionCache = internals.clearDeviceSessionCache.bind(devicePool);
+      internals.clearDeviceSessionCache = async (deviceId) => {
+        cacheCleanupStarted.resolve();
+        await finishCacheCleanup.promise;
+        await clearDeviceSessionCache(deviceId);
+      };
+      try {
+        const replacementPromise = internals.replacePooledDeviceForRuntimeIdentity(
+          pooled,
+          replacement,
+        );
+        await cacheCleanupStarted.promise;
+        expect(devicePool.getDevice(device.deviceId)).toBeNull();
+
+        await devicePool.reconcileDiscoveryObservation([newerReplacement], "test:newer");
+        finishCacheCleanup.resolve();
+        await replacementPromise;
+
+        expect(devicePool.getDevice(device.deviceId)?.name).toBe("Pixel_6_API_33");
+      } finally {
+        internals.clearDeviceSessionCache = clearDeviceSessionCache;
+        finishCacheCleanup.resolve();
+      }
+    });
+
     test("replaces a pooled identity for a newer liveness disagreement", async () => {
       const device = poolDevice("emulator-5554", "Pixel_8_API_35");
       await initializeLiveDevices([device]);

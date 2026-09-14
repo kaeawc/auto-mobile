@@ -54,6 +54,23 @@ export type StageSessionDownloadsResult =
 
 export type { SharedStorageIndexingResult, StagedSharedStorageFile };
 
+// JSON-Schema patterns that advertise the runtime path/source refinements to
+// clients generating calls from `tools/list`. Without them the served schema
+// only drops the defaulted keys from `required` and still accepts traversal
+// directories, absolute/`..` destination paths, files with zero or multiple
+// content sources, and malformed base64 — all of which the zod superRefine
+// rejects at runtime. Mirroring the constraints here turns those avoidable
+// runtime failures into up-front schema rejections.
+//
+// A single directory segment: non-empty, not `.`/`..`, no `/`, `\\` or NUL.
+const DIRECTORY_JSON_SCHEMA_PATTERN = "^(?!\\.\\.?$)[^/\\\\\\u0000]+$";
+// A relative destination path: not absolute and with no `.`/`..` segment
+// (either separator). Slightly stricter than the runtime, which also tolerates
+// a leading `./`; advertising it as invalid only avoids a call, never a failure.
+const RELATIVE_PATH_JSON_SCHEMA_PATTERN = "^(?![/\\\\])(?!.*(?:^|[/\\\\])\\.{1,2}(?:[/\\\\]|$)).+$";
+// Non-empty base64 in the standard alphabet with optional `=` padding.
+const BASE64_JSON_SCHEMA_PATTERN = "^[A-Za-z0-9+/]+={0,2}$";
+
 export const stageSessionDownloadsSchema = withJsonSchemaOverride(
   z
     .object({
@@ -95,6 +112,38 @@ export const stageSessionDownloadsSchema = withJsonSchemaOverride(
       jsonSchema.required = jsonSchema.required.filter(
         (field) => field !== "reset" && field !== "indexMedia",
       );
+    }
+    const properties = jsonSchema.properties as Record<string, unknown> | undefined;
+    if (!properties) {
+      return;
+    }
+    const directory = properties.directory as Record<string, unknown> | undefined;
+    if (directory) {
+      directory.pattern = DIRECTORY_JSON_SCHEMA_PATTERN;
+    }
+    const files = properties.files as Record<string, unknown> | undefined;
+    const item = files?.items as Record<string, unknown> | undefined;
+    if (item) {
+      // Mirror putAppFileSchema's exact-one-source oneOf so the served schema
+      // rejects both zero and multiple content sources, not only the runtime
+      // superRefine.
+      item.oneOf = [
+        { required: ["sourcePath"] },
+        { required: ["contentText"] },
+        { required: ["contentBase64"] },
+      ];
+      const itemProperties = item.properties as Record<string, unknown> | undefined;
+      const destinationPath = itemProperties?.destinationPath as
+        | Record<string, unknown>
+        | undefined;
+      if (destinationPath) {
+        destinationPath.pattern = RELATIVE_PATH_JSON_SCHEMA_PATTERN;
+      }
+      const contentBase64 = itemProperties?.contentBase64 as Record<string, unknown> | undefined;
+      if (contentBase64) {
+        contentBase64.pattern = BASE64_JSON_SCHEMA_PATTERN;
+        contentBase64.minLength = 1;
+      }
     }
   },
 );

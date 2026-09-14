@@ -10172,7 +10172,8 @@
         },
         "directory": {
           "description": "One caller-named child directory beneath the device's shared Downloads tree",
-          "type": "string"
+          "type": "string",
+          "pattern": "^(?!\\.\\.?$)[^/\\\\\\u0000]+$"
         },
         "reset": {
           "description": "Remove only this declared directory before writing",
@@ -10202,15 +10203,29 @@
               },
               "contentBase64": {
                 "description": "Base64 content",
-                "type": "string"
+                "type": "string",
+                "pattern": "^[A-Za-z0-9+/]+={0,2}$",
+                "minLength": 1
               },
               "destinationPath": {
                 "description": "Path relative to the declared Downloads namespace",
-                "type": "string"
+                "type": "string",
+                "pattern": "^(?![/\\\\])(?!.*(?:^|[/\\\\])\\.{1,2}(?:[/\\\\]|$)).+$"
               }
             },
             "required": ["destinationPath"],
-            "additionalProperties": false
+            "additionalProperties": false,
+            "oneOf": [
+              {
+                "required": ["sourcePath"]
+              },
+              {
+                "required": ["contentText"]
+              },
+              {
+                "required": ["contentBase64"]
+              }
+            ]
           }
         }
       },

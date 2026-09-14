@@ -2,22 +2,40 @@ import Ajv2020 from "ajv/dist/2020";
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { registerDownloadsFixtureTools } from "../../src/server/downloadsFixtureTools";
+import { FakeTimer } from "../fakes/FakeTimer";
 import type {
   DownloadsFixtureService,
   StageSessionDownloadsRequest,
 } from "../../src/server/downloadsFixtureService";
 
 describe("stageSessionDownloads tool (#7007)", () => {
+  let originalTimer: unknown;
+  let originalToolCallRepository: unknown;
+
   beforeAll(() => {
     new Ajv2020({ strict: false }).compile({
       type: "object",
       properties: { warmup: { type: "string" } },
     });
   });
-  beforeEach(() => (ToolRegistry as any).tools.clear());
-  afterEach(() => (ToolRegistry as any).tools.clear());
+  beforeEach(() => {
+    (ToolRegistry as any).tools.clear();
+    // The tool is now device-aware, so its wrapped handler records a tool call
+    // via the ToolRegistry's repository/timer. Stub both so the fast unit test
+    // never resolves the real file-backed getDatabase() (issue #3067) and stays
+    // deterministic.
+    originalTimer = (ToolRegistry as any).timer;
+    originalToolCallRepository = (ToolRegistry as any).toolCallRepository;
+    (ToolRegistry as any).timer = new FakeTimer();
+    (ToolRegistry as any).toolCallRepository = { async recordToolCall(): Promise<void> {} };
+  });
+  afterEach(() => {
+    (ToolRegistry as any).timer = originalTimer;
+    (ToolRegistry as any).toolCallRepository = originalToolCallRepository;
+    (ToolRegistry as any).tools.clear();
+  });
 
-  test("registers a discoverable, opt-in, strict schema", () => {
+  test("registers a discoverable, opt-in, device-aware, strict schema", () => {
     registerDownloadsFixtureTools();
     const definition = ToolRegistry.getToolDefinitions().find(
       (tool) => tool.name === "stageSessionDownloads",
@@ -27,7 +45,9 @@ describe("stageSessionDownloads tool (#7007)", () => {
     expect(definition!.inputSchema.properties.directory).toBeDefined();
     expect(definition!.inputSchema.properties.files).toBeDefined();
     expect(ToolRegistry.getTool("stageSessionDownloads")!.defaultEnabled).toBe(false);
-    expect(ToolRegistry.getTool("stageSessionDownloads")!.requiresDevice).toBe(false);
+    // Device-aware registration is what makes the MCP boundary's #6069
+    // cross-session ownership guard run for this tool.
+    expect(ToolRegistry.getTool("stageSessionDownloads")!.requiresDevice).toBe(true);
 
     const validate = new Ajv2020({ strict: false }).compile(definition!.inputSchema);
     expect(
@@ -48,6 +68,58 @@ describe("stageSessionDownloads tool (#7007)", () => {
       }),
     ).toBe(true);
     expect(validate({ directory: "run-42", files: [] })).toBe(false);
+  });
+
+  test("published schema advertises the runtime path and content-source constraints", () => {
+    // Test (b): the PUBLISHED/served schema (from the registered tool
+    // definition, not the inner zod) must reject what the runtime refinements
+    // reject, so a client generating a call from tools/list does not hit an
+    // avoidable runtime failure.
+    registerDownloadsFixtureTools();
+    const definition = ToolRegistry.getToolDefinitions().find(
+      (tool) => tool.name === "stageSessionDownloads",
+    );
+    const validate = new Ajv2020({ strict: false }).compile(definition!.inputSchema);
+    const base = { sessionUuid: "session-1", directory: "run-42" };
+
+    // Directory traversal / separators.
+    for (const directory of ["../escape", "a/b", "..", "."]) {
+      expect(
+        validate({ ...base, directory, files: [{ contentText: "x", destinationPath: "a.txt" }] }),
+      ).toBe(false);
+    }
+    // Absolute / traversal destinationPath.
+    for (const destinationPath of ["/etc/passwd", "../secret.txt", "docs/../../escape.txt"]) {
+      expect(validate({ ...base, files: [{ contentText: "x", destinationPath }] })).toBe(false);
+    }
+    // Zero content sources.
+    expect(validate({ ...base, files: [{ destinationPath: "a.txt" }] })).toBe(false);
+    // Multiple content sources.
+    expect(
+      validate({
+        ...base,
+        files: [{ contentText: "x", contentBase64: "aGk=", destinationPath: "a.txt" }],
+      }),
+    ).toBe(false);
+    // Malformed base64.
+    expect(
+      validate({ ...base, files: [{ contentBase64: "not base64!!", destinationPath: "a.txt" }] }),
+    ).toBe(false);
+    // Empty base64.
+    expect(validate({ ...base, files: [{ contentBase64: "", destinationPath: "a.txt" }] })).toBe(
+      false,
+    );
+
+    // Positive controls: each single content source is accepted.
+    expect(validate({ ...base, files: [{ contentText: "x", destinationPath: "a.txt" }] })).toBe(
+      true,
+    );
+    expect(
+      validate({ ...base, files: [{ contentBase64: "aGVsbG8=", destinationPath: "a.txt" }] }),
+    ).toBe(true);
+    expect(
+      validate({ ...base, files: [{ sourcePath: "/host/f", destinationPath: "sub/dir/a.txt" }] }),
+    ).toBe(true);
   });
 
   test("delegates the session-scoped request to the service and returns JSON", async () => {

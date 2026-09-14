@@ -758,11 +758,11 @@ export const observeDiffSchema = z
       .describe(
         "Why the captured hierarchy is incomplete (issue #6601) — the same field " +
           "a full observation carries, so a client reads it the same way in both modes. " +
-          "In diff mode, this can include max_children[...] from either comparison input " +
-          "(baseline or current capture), meaning the comparison may be incomplete rather " +
-          "than that this diff's own `skeleton`/`context` omit rows. Device-side " +
-          "max_nodes, max_depth, and cancelled reasons do mean this diff's `skeleton`/" +
-          "`context` omit rows.",
+          "In diff mode (issue #6933), any reason — host-cap (max_children[...]) or " +
+          "capture-fidelity (max_nodes, max_depth, cancelled) — may originate from either " +
+          "comparison input (baseline or current capture), so its presence means the " +
+          "comparison may be incomplete, not that this diff's own `skeleton`/`context` " +
+          "omit rows.",
       ),
     settled: z
       .boolean()
@@ -915,9 +915,10 @@ export const observeResultSchema = z
           "(device-side max_nodes, max_depth, cancelled); its presence means `skeleton`/" +
           "`context` omit rows. A host-output max_children[<node> kept N of M] cap trims " +
           "only rendered `viewHierarchy` and is not lifted to a non-diff skeleton. On a " +
-          "diff, this can also include max_children[...] from either comparison input, " +
-          "meaning the comparison may be incomplete rather than that the current " +
-          "`skeleton`/`context` omit rows.",
+          "diff, any reason — host-cap (max_children[...]) or capture-fidelity (max_nodes, " +
+          "max_depth, cancelled) — may originate from either comparison input (baseline or " +
+          "current capture), so its presence means the comparison may be incomplete rather " +
+          "than that the current `skeleton`/`context` omit rows (issue #6933).",
       ),
     skeleton: z.array(skeletonElementSchema).optional(),
     context: z

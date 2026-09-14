@@ -82,6 +82,35 @@ describe("doctorToolParams", () => {
     });
   });
 
+  test("keeps android and ios filters diagnostic-only while repair remains host-wide", async () => {
+    const receivedOptions: unknown[] = [];
+    setCliOutputSinksForTesting({
+      stdout: { write: () => {} },
+      stderr: { write: () => {} },
+    });
+
+    try {
+      for (const params of [
+        { repair: true, android: true },
+        { repair: true, ios: true },
+      ]) {
+        await runDoctorCommand(params, {
+          repairDaemon: async (options) => {
+            receivedOptions.push(options);
+            return { status: "repaired", phase: "complete", action: "joined" };
+          },
+        });
+      }
+    } finally {
+      resetCliOutputSinksForTesting();
+    }
+
+    expect(receivedOptions).toEqual([
+      { timeoutMs: undefined, daemonOptions: undefined },
+      { timeoutMs: undefined, daemonOptions: undefined },
+    ]);
+  });
+
   test("forwards malformed repair timeout values for recovery validation", async () => {
     let receivedTimeoutMs: unknown;
     setCliOutputSinksForTesting({

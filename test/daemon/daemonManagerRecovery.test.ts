@@ -1,3 +1,4 @@
+import type { ChildProcess, SpawnOptions } from "node:child_process";
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -6,10 +7,12 @@ import {
   DaemonManager,
   type DaemonProcessFinder,
   type DaemonProcessLivenessChecker,
+  type DaemonProcessSpawner,
   type DaemonProcessRecord,
   type DaemonProcessSignaler,
 } from "../../src/daemon/manager";
 import { repairDaemon, waitForDaemonRecoveryCompletion } from "../../src/doctor/daemonRecovery";
+import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 class MutableDaemonProcesses implements DaemonProcessFinder, DaemonProcessLivenessChecker {
@@ -27,15 +30,33 @@ class MutableDaemonProcesses implements DaemonProcessFinder, DaemonProcessLivene
   }
 }
 
+class CapturingDaemonSpawner implements DaemonProcessSpawner {
+  readonly calls: Array<{ command: string; args: string[]; options: SpawnOptions }> = [];
+
+  spawn(command: string, args: string[], options: SpawnOptions): ChildProcess {
+    this.calls.push({ command, args: [...args], options });
+    return new FakeChildProcess() as unknown as ChildProcess;
+  }
+}
+
+class ImmediatelyReadyRecoveryManager extends DaemonManager {
+  override async waitForReady(): Promise<boolean> {
+    return true;
+  }
+}
+
 describe("DaemonManager control-state recovery", () => {
   const tempDirs: string[] = [];
   let originalDataDir: string | undefined;
+  let originalLogSink: string | undefined;
 
   function paths(): { lock: string; pid: string; socket: string } {
     const dir = mkdtempSync(join(tmpdir(), "daemon-manager-recovery-"));
     tempDirs.push(dir);
     originalDataDir ??= process.env.AUTOMOBILE_DATA_DIR;
+    originalLogSink ??= process.env.AUTOMOBILE_LOG_SINK;
     process.env.AUTOMOBILE_DATA_DIR = dir;
+    process.env.AUTOMOBILE_LOG_SINK = "stderr";
     return {
       lock: join(dir, "daemon.lock"),
       pid: join(dir, "daemon.pid"),
@@ -54,6 +75,261 @@ describe("DaemonManager control-state recovery", () => {
       process.env.AUTOMOBILE_DATA_DIR = originalDataDir;
     }
     originalDataDir = undefined;
+    if (originalLogSink === undefined) {
+      delete process.env.AUTOMOBILE_LOG_SINK;
+    } else {
+      process.env.AUTOMOBILE_LOG_SINK = originalLogSink;
+    }
+    originalLogSink = undefined;
+  });
+
+  test("starts a replacement for absent control state without signalling unrelated processes", async () => {
+    const { lock, pid, socket } = paths();
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const unrelatedLivePids = new Set([9876]);
+    const processes = new MutableDaemonProcesses([], unrelatedLivePids);
+    const spawner = new CapturingDaemonSpawner();
+    const signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
+    const manager = new ImmediatelyReadyRecoveryManager(
+      undefined,
+      undefined,
+      timer,
+      lock,
+      pid,
+      socket,
+      processes,
+      spawner,
+      undefined,
+      () => ({ command: "auto-mobile", args: ["--daemon-mode"] }),
+      {
+        signal: (processId, signal) => signals.push({ pid: processId, signal }),
+      },
+      undefined,
+      undefined,
+      undefined,
+      { isPortFree: async () => true },
+      undefined,
+      async () => false,
+    );
+
+    await expect(manager.recoverControlState()).resolves.toBe("restarted");
+
+    expect(unrelatedLivePids).toEqual(new Set([9876]));
+    expect(signals).toEqual([]);
+    expect(spawner.calls).toHaveLength(1);
+    expect(spawner.calls[0]).toMatchObject({
+      command: "auto-mobile",
+      args: ["--daemon-mode", "--strict-port"],
+    });
+  });
+
+  test("preserves valid dead PID metadata options when starting a replacement", async () => {
+    const { lock, pid, socket } = paths();
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    writeFileSync(
+      pid,
+      JSON.stringify({
+        pid: 1234,
+        socketPath: socket,
+        port: 4321,
+        startedAt: 1,
+        version: "test",
+        options: {
+          port: 4321,
+          host: "127.0.0.1",
+          debug: true,
+          embeddedSdk: true,
+          noOcclusion: true,
+        },
+      }),
+    );
+    const spawner = new CapturingDaemonSpawner();
+    const signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
+    const manager = new ImmediatelyReadyRecoveryManager(
+      undefined,
+      undefined,
+      timer,
+      lock,
+      pid,
+      socket,
+      new MutableDaemonProcesses([], new Set()),
+      spawner,
+      undefined,
+      () => ({ command: "auto-mobile", args: ["--daemon-mode"] }),
+      {
+        signal: (processId, signal) => signals.push({ pid: processId, signal }),
+      },
+      undefined,
+      undefined,
+      undefined,
+      { isPortFree: async () => true },
+      undefined,
+      async () => false,
+    );
+
+    await expect(
+      manager.recoverControlState({
+        host: "0.0.0.0",
+        debug: false,
+        embeddedSdk: false,
+        noOcclusion: false,
+      }),
+    ).resolves.toBe("restarted");
+
+    expect(signals).toEqual([]);
+    expect(spawner.calls).toHaveLength(1);
+    expect(spawner.calls[0]?.args).toEqual([
+      "--daemon-mode",
+      "--port",
+      "4321",
+      "--host",
+      "0.0.0.0",
+      "--strict-port",
+      "--debug",
+      "--embedded-sdk",
+      "--no-occlusion",
+    ]);
+  });
+
+  test("repairs corrupt PID metadata without signalling an uncorrelated process", async () => {
+    const { lock, pid, socket } = paths();
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    writeFileSync(pid, "{ definitely not valid JSON");
+    const spawner = new CapturingDaemonSpawner();
+    const signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
+    const manager = new ImmediatelyReadyRecoveryManager(
+      undefined,
+      undefined,
+      timer,
+      lock,
+      pid,
+      socket,
+      new MutableDaemonProcesses([], new Set([9876])),
+      spawner,
+      undefined,
+      () => ({ command: "auto-mobile", args: ["--daemon-mode"] }),
+      {
+        signal: (processId, signal) => signals.push({ pid: processId, signal }),
+      },
+      undefined,
+      undefined,
+      undefined,
+      { isPortFree: async () => true },
+      undefined,
+      async () => false,
+    );
+
+    await expect(manager.recoverControlState()).resolves.toBe("restarted");
+
+    expect(signals).toEqual([]);
+    expect(spawner.calls).toHaveLength(1);
+    expect(spawner.calls[0]?.args).toEqual(["--daemon-mode", "--strict-port"]);
+  });
+
+  test("stops and replaces the recorded live daemon when its control socket is unresponsive", async () => {
+    const { lock, pid, socket } = paths();
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const livePids = new Set([1234]);
+    const processes = new MutableDaemonProcesses(
+      [{ pid: 1234, ppid: 1, command: "auto-mobile --daemon-mode" }],
+      livePids,
+    );
+    writeFileSync(
+      pid,
+      JSON.stringify({
+        pid: 1234,
+        socketPath: socket,
+        port: 4321,
+        startedAt: 1,
+        version: "test",
+        options: { port: 4321, host: "127.0.0.1", debug: true },
+      }),
+    );
+    const spawner = new CapturingDaemonSpawner();
+    const signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
+    const manager = new ImmediatelyReadyRecoveryManager(
+      undefined,
+      undefined,
+      timer,
+      lock,
+      pid,
+      socket,
+      processes,
+      spawner,
+      undefined,
+      () => ({ command: "auto-mobile", args: ["--daemon-mode"] }),
+      {
+        signal: (processId, signal) => {
+          signals.push({ pid: processId, signal });
+          livePids.delete(processId);
+        },
+      },
+      undefined,
+      undefined,
+      undefined,
+      { isPortFree: async () => true },
+      undefined,
+      async () => false,
+    );
+
+    await expect(manager.recoverControlState()).resolves.toBe("restarted");
+
+    expect(signals).toEqual([{ pid: 1234, signal: "SIGTERM" }]);
+    expect(spawner.calls).toHaveLength(1);
+    expect(spawner.calls[0]?.args).toEqual([
+      "--daemon-mode",
+      "--port",
+      "4321",
+      "--host",
+      "127.0.0.1",
+      "--strict-port",
+      "--debug",
+    ]);
+  });
+
+  test("refuses multiple uncorrelated live daemon candidates without signalling either", async () => {
+    const { lock, pid, socket } = paths();
+    const timer = new FakeTimer();
+    const livePids = new Set([1234, 5678]);
+    const processes = new MutableDaemonProcesses(
+      [
+        { pid: 1234, ppid: 1, command: "auto-mobile --daemon-mode" },
+        { pid: 5678, ppid: 1, command: "auto-mobile --daemon-mode" },
+      ],
+      livePids,
+    );
+    const spawner = new CapturingDaemonSpawner();
+    const signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
+    const manager = new ImmediatelyReadyRecoveryManager(
+      undefined,
+      undefined,
+      timer,
+      lock,
+      pid,
+      socket,
+      processes,
+      spawner,
+      undefined,
+      () => ({ command: "auto-mobile", args: ["--daemon-mode"] }),
+      {
+        signal: (processId, signal) => signals.push({ pid: processId, signal }),
+      },
+      undefined,
+      undefined,
+      undefined,
+      { isPortFree: async () => true },
+      undefined,
+      async () => false,
+    );
+
+    await expect(manager.recoverControlState()).rejects.toThrow("could not correlate");
+
+    expect(signals).toEqual([]);
+    expect(spawner.calls).toEqual([]);
   });
 
   test("joins a healthy successor found after acquiring the lifecycle lock", async () => {

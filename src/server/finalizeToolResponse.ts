@@ -23,6 +23,7 @@ import { boundStructuredField, truncateBodyText } from "../utils/truncateBodyTex
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
 import { isDeviceSessionAcquisitionTool } from "./deviceSessionResult";
+import { isHostOutputTruncationReason } from "../features/observe/truncationReasons";
 
 /**
  * Read/write access to the per-session diff baseline — the "last observation
@@ -247,8 +248,13 @@ function resolveDiffTruncationReasons(
   rawObservation: ObserveResult,
 ): string[] | undefined {
   const baselineReasons = baseline.truncationReasons ?? baseline.viewHierarchy?.truncationReasons;
-  const currentReasons =
-    servedObservation.truncationReasons ?? rawObservation.viewHierarchy?.truncationReasons;
+  const rawReasons = rawObservation.viewHierarchy?.truncationReasons;
+  const currentReasons = servedObservation.truncationReasons
+    ? [
+        ...servedObservation.truncationReasons,
+        ...(rawReasons?.filter(isHostOutputTruncationReason) ?? []),
+      ]
+    : rawReasons;
   const merged = [...(baselineReasons ?? []), ...(currentReasons ?? [])];
   const deduped = Array.from(new Set(merged));
   return deduped.length > 0 ? deduped : undefined;

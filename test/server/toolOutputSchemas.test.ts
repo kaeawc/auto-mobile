@@ -12,6 +12,22 @@ import {
   viewHierarchyResultSchema,
 } from "../../src/server/toolOutputSchemas";
 
+const observeTruncationReasonsDescription =
+  "Why a served observation or diff may be incomplete (issues #6601, #6933). " +
+  "On a non-diff skeleton projection, this contains only capture-fidelity reasons " +
+  "(device-side max_nodes, max_depth, cancelled); its presence means `skeleton`/" +
+  "`context` omit rows. A host-output max_children[<node> kept N of M] cap trims " +
+  "only rendered `viewHierarchy` and is not lifted to a non-diff skeleton. On a " +
+  "diff, this can also include max_children[...] from either comparison input, " +
+  "meaning the comparison may be incomplete rather than that the current " +
+  "`skeleton`/`context` omit rows.";
+
+test("observe truncationReasons distinguishes skeleton completeness from diff-input caps (#6933)", () => {
+  expect(observeResultSchema.shape.truncationReasons.description).toBe(
+    observeTruncationReasonsDescription,
+  );
+});
+
 /**
  * Wire-schema coverage for the `--observe-result-compact` tuple form (issue #2990,
  * task 2). When the flag is on, `finalizeToolResponse` flattens every `bounds`

@@ -1023,6 +1023,29 @@ describe("finalizeToolResponse", () => {
       expect(parsed.observation.truncationReasons).toEqual(reasons);
     });
 
+    test("a diffed observation retains raw host-output truncation alongside served capture-fidelity reasons (issue #6933)", () => {
+      const { store } = makeStore();
+      finalizeToolResponse(createStructuredToolResponse(sameScreenObserve()), {
+        name: "observe",
+        sessionUuid: "s1",
+        baselineStore: store,
+      });
+
+      const next = sameScreenObserve();
+      const reasons = ["max_nodes", "max_children[com.example:id/root kept 64 of 70]"];
+      next.viewHierarchy!.truncationReasons = [...reasons];
+      (next.viewHierarchy!.hierarchy.node as any).node[0].checked = "true";
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: next }),
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
+      );
+
+      const observation = (finalized.structuredContent as any).observation;
+      expect(observation.isDiff).toBe(true);
+      expect(observation.truncationReasons).toEqual(expect.arrayContaining(reasons));
+      expect(observation.truncationReasons).toHaveLength(reasons.length);
+    });
+
     test("a diffed observation under project:'full' still carries the truncation reasons (issue #6601)", () => {
       const { store } = makeStore();
       const reasons = ["max_nodes"];

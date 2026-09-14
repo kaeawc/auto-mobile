@@ -3,6 +3,8 @@ import { DaemonUnavailableError } from "./client";
 export const DAEMON_PREPARE_RESTART_METHOD = "ide/prepareRestart";
 export const DAEMON_PREPARE_MAINTENANCE_METHOD = "ide/prepareMaintenance";
 export const DAEMON_COMPLETE_MAINTENANCE_METHOD = "ide/completeMaintenance";
+export const DAEMON_RESTART_ADMITTED_METHOD = "ide/restartAdmitted";
+export const DAEMON_REPAIR_CONTROL_METADATA_METHOD = "ide/repairControlMetadata";
 const ACTIVE_PROVISIONING_RESTART_RETRY_MS = 1_000;
 
 export interface DaemonRestartPreparation {
@@ -13,12 +15,36 @@ export interface DaemonRestartPreparation {
 /** Explicit host maintenance must prove no sessions or executions can be disrupted. */
 export interface DaemonMaintenancePreparation {
   accepted: boolean;
+  /**
+   * Opaque, single-use capability minted by the daemon generation that fenced
+   * maintenance. A separate `restart-admitted` process must present it before
+   * the daemon will begin its own shutdown.
+   */
+  maintenanceToken?: string;
   reason?:
     | "active_operations"
     | "active_sessions"
     | "generation_changed"
     | "maintenance_pending"
     | "sessions_unavailable";
+}
+
+export interface DaemonAdmittedRestart {
+  accepted: boolean;
+  reason?:
+    | "active_operations"
+    | "active_sessions"
+    | "generation_changed"
+    | "maintenance_token_invalid"
+    | "maintenance_token_consumed"
+    | "restart_pending"
+    | "shutdown_unavailable"
+    | "sessions_unavailable";
+}
+
+export interface DaemonControlMetadataRepair {
+  repaired: boolean;
+  reason?: "generation_changed" | "repair_unavailable";
 }
 
 /**

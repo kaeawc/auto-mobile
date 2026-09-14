@@ -632,9 +632,11 @@ export class Daemon {
         FeatureFlagService.getInstance(),
         {
           identityStartedAt: this.generationStartedAt,
+          processGenerationToken: this.processGenerationToken,
           onRestartAccepted: () => {
             setImmediate(() => process.kill(process.pid, "SIGTERM"));
           },
+          onControlMetadataRepair: async () => await this.writePidFile(),
         },
         this.idGenerator,
         // A hand-launched daemon (no startup lock) must refuse to unlink a live
@@ -2391,9 +2393,11 @@ export class Daemon {
           FeatureFlagService.getInstance(),
           {
             identityStartedAt: this.generationStartedAt,
+            processGenerationToken: this.processGenerationToken,
             onRestartAccepted: () => {
               setImmediate(() => process.kill(process.pid, "SIGTERM"));
             },
+            onControlMetadataRepair: async () => await this.writePidFile(),
           },
           this.idGenerator,
           // Recovery reuses the same ownership evidence as initial startup. A

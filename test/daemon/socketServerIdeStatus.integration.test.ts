@@ -17,6 +17,7 @@ import {
   DAEMON_COMPLETE_MAINTENANCE_METHOD,
   DAEMON_PREPARE_MAINTENANCE_METHOD,
   DAEMON_PREPARE_RESTART_METHOD,
+  DAEMON_RESTART_ADMITTED_METHOD,
 } from "../../src/daemon/daemonRestartAdmission";
 
 const SHA256_HEX = /^[0-9a-f]{64}$/;
@@ -56,6 +57,7 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
     fakeTimer = new FakeTimer();
     restartRequests = 0;
     executionTracker.clearDaemonMaintenancePreparation();
+    executionTracker.clearDaemonRestartPreparation();
 
     server = new UnixSocketServer(
       socketPath,
@@ -64,6 +66,7 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
       fakeTimer,
       null,
       {
+        processGenerationToken: "socket-generation-1",
         onRestartAccepted: () => {
           restartRequests++;
         },
@@ -80,6 +83,7 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
       }
     } finally {
       executionTracker.clearDaemonMaintenancePreparation();
+      executionTracker.clearDaemonRestartPreparation();
     }
   });
 
@@ -165,7 +169,7 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
     }
   });
 
-  test("maintenance admission rejects active sessions and fences new work until completion", async () => {
+  test("maintenance admission is generation-bound, token-gated, and single-use", async () => {
     const state = createFakeDaemonState();
     state.getSessionManager = () => ({
       getSession: () => null,
@@ -197,16 +201,73 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
     }
 
     const status = (await sendRequest(socketPath, "ide/status")).result!;
+    expect(status).toMatchObject({ processGenerationToken: "socket-generation-1" });
     const accepted = await sendRequest(socketPath, DAEMON_PREPARE_MAINTENANCE_METHOD, status);
-    expect(accepted.result).toEqual({ accepted: true });
+    const maintenanceToken = (accepted.result as { maintenanceToken: string }).maintenanceToken;
+    expect(accepted.result).toMatchObject({
+      accepted: true,
+      maintenanceToken: expect.any(String),
+    });
     expect(() => executionTracker.startExecution("tapOn", "fenced")).toThrow(
       "Daemon restart is pending",
     );
     expect(
       (await sendRequest(socketPath, DAEMON_COMPLETE_MAINTENANCE_METHOD, status)).result,
-    ).toEqual({ completed: true });
+    ).toEqual({ completed: false });
+    expect(
+      (
+        await sendRequest(socketPath, DAEMON_COMPLETE_MAINTENANCE_METHOD, {
+          ...status,
+          maintenanceToken: "stale-token",
+        })
+      ).result,
+    ).toEqual({ completed: false });
+    const completion = await sendRequest(socketPath, DAEMON_COMPLETE_MAINTENANCE_METHOD, {
+      ...status,
+      maintenanceToken,
+    });
+    expect(completion.result).toEqual({ completed: true });
     const execution = executionTracker.startExecution("tapOn", "unfenced");
     executionTracker.endExecution(execution.id);
+
+    const secondAdmission = await sendRequest(
+      socketPath,
+      DAEMON_PREPARE_MAINTENANCE_METHOD,
+      status,
+    );
+    const secondToken = (secondAdmission.result as { maintenanceToken: string }).maintenanceToken;
+    expect((await sendRequest(socketPath, DAEMON_RESTART_ADMITTED_METHOD, status)).result).toEqual({
+      accepted: false,
+      reason: "maintenance_token_invalid",
+    });
+    expect(
+      (
+        await sendRequest(socketPath, DAEMON_RESTART_ADMITTED_METHOD, {
+          ...status,
+          processGenerationToken: "replacement-generation",
+          maintenanceToken: secondToken,
+        })
+      ).result,
+    ).toEqual({ accepted: false, reason: "generation_changed" });
+    expect(
+      (
+        await sendRequest(socketPath, DAEMON_RESTART_ADMITTED_METHOD, {
+          ...status,
+          maintenanceToken: secondToken,
+        })
+      ).result,
+    ).toEqual({ accepted: true });
+    expect(restartRequests).toBe(1);
+    expect(
+      (
+        await sendRequest(socketPath, DAEMON_RESTART_ADMITTED_METHOD, {
+          ...status,
+          maintenanceToken: secondToken,
+        })
+      ).result,
+    ).toEqual({ accepted: false, reason: "maintenance_token_consumed" });
+    executionTracker.clearDaemonRestartPreparation();
+    executionTracker.clearDaemonMaintenancePreparation();
   });
 
   test("ide/status reports a concrete releaseVersion, never the 'latest' literal (EC7)", async () => {

@@ -59,16 +59,32 @@ describe("repairDaemon", () => {
     expect(restartCalls).toBe(0);
   });
 
-  test("does not report repaired joined when responsive socket metadata is invalid", async () => {
+  test("repairs corrupt metadata from a responsive daemon and verifies the post-repair protocol", async () => {
     const invalidMetadata = { ...healthReport(true), pidFileValid: false };
-    const result = await repairDaemon({}, dependencies([invalidMetadata, invalidMetadata]));
+    let metadataRepairs = 0;
+    let protocolChecks = 0;
+    const result = await repairDaemon(
+      {},
+      dependencies([invalidMetadata, healthReport(true)], {
+        repairControlMetadata: async () => {
+          metadataRepairs++;
+          return true;
+        },
+        verifyProtocol: async () => {
+          protocolChecks++;
+        },
+      }),
+    );
 
     expect(result).toMatchObject<Partial<DaemonRecoveryResult>>({
-      status: "failed",
-      phase: "verification",
+      status: "repaired",
+      phase: "complete",
       action: "joined",
-      after: { pidFileValid: false },
+      before: { pidFileValid: false },
+      after: { pidFileValid: true, socketConnectable: true },
     });
+    expect(metadataRepairs).toBe(1);
+    expect(protocolChecks).toBe(1);
   });
 
   test("restarts a daemon with unusable control state and verifies the replacement", async () => {

@@ -44,6 +44,7 @@ const socketStatusSchema = z.object({
   entryScript: z.string().optional(),
   releaseVersion: z.string().optional(),
   startedAt: z.number().finite().optional(),
+  processGenerationToken: z.string().optional(),
   activeProvisioning: z.boolean().optional(),
 });
 

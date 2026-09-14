@@ -136,7 +136,11 @@ export interface MatrixDependencies {
   spawnCli?: (command: string[], timeoutMs: number, signal: AbortSignal) => Promise<void>;
   createMcpClient?: (owner: string, signal: AbortSignal) => Promise<McpSessionClient>;
   createDaemonClient?: (signal: AbortSignal) => Promise<DaemonSessionClient>;
-  restartDaemon?: (timeoutMs: number, signal: AbortSignal) => Promise<void>;
+  restartDaemon?: (
+    maintenanceToken: string,
+    timeoutMs: number,
+    signal: AbortSignal,
+  ) => Promise<void>;
   writeFile?: (path: string, content: string, signal: AbortSignal) => Promise<void>;
 }
 
@@ -145,6 +149,11 @@ interface Step {
   passed: boolean;
   elapsedMs: number;
   detail: JsonObject;
+}
+
+interface MaintenanceAdmission {
+  status: JsonObject;
+  maintenanceToken: string;
 }
 
 interface Evidence {
@@ -1096,9 +1105,16 @@ export async function runAcceptanceMatrix(
     (async (signal: AbortSignal) => await defaultCreateDaemonClient(args.build, signal));
   const restartDaemon =
     dependencies.restartDaemon ??
-    (async (timeoutMs: number, signal: AbortSignal) => {
+    (async (maintenanceToken: string, timeoutMs: number, signal: AbortSignal) => {
       await defaultSpawnCli(
-        [process.execPath, args.build.entryScript, "--daemon", "restart-admitted"],
+        [
+          process.execPath,
+          args.build.entryScript,
+          "--daemon",
+          "restart-admitted",
+          "--maintenance-token",
+          maintenanceToken,
+        ],
         timeoutMs,
         signal,
         timer,
@@ -1487,7 +1503,7 @@ export async function runAcceptanceMatrix(
     });
   };
 
-  const admitMaintenance = async (phase: string, budget: Budget): Promise<JsonObject> => {
+  const admitMaintenance = async (phase: string, budget: Budget): Promise<MaintenanceAdmission> => {
     daemonClient ??= await bounded(
       `${phase} maintenance daemon connect`,
       budget,
@@ -1522,12 +1538,16 @@ export async function runAcceptanceMatrix(
         }`,
       );
     }
-    return status;
+    const maintenanceToken = admission.maintenanceToken;
+    if (typeof maintenanceToken !== "string" || maintenanceToken.length === 0) {
+      throw new Error(`Refusing ${phase}: daemon returned no maintenance admission token`);
+    }
+    return { status, maintenanceToken };
   };
 
   const completeMaintenance = async (
     phase: string,
-    status: JsonObject,
+    admission: MaintenanceAdmission,
     budget: Budget,
   ): Promise<void> => {
     const result = asObject(
@@ -1535,7 +1555,11 @@ export async function runAcceptanceMatrix(
         `${phase} maintenance completion`,
         budget,
         async (signal) =>
-          await daemonClient!.callDaemonMethod(DAEMON_COMPLETE_MAINTENANCE_METHOD, status, signal),
+          await daemonClient!.callDaemonMethod(
+            DAEMON_COMPLETE_MAINTENANCE_METHOD,
+            { ...admission.status, maintenanceToken: admission.maintenanceToken },
+            signal,
+          ),
         () => daemonClient!.close(),
       ),
       DAEMON_COMPLETE_MAINTENANCE_METHOD,
@@ -1547,7 +1571,7 @@ export async function runAcceptanceMatrix(
 
   const repairHost = async (): Promise<void> => {
     const start = timer.now();
-    const status = await admitMaintenance("host-wide doctor repair", "work");
+    const admission = await admitMaintenance("host-wide doctor repair", "work");
     try {
       await bounded("host-wide doctor repair", "work", async (signal) => {
         const remainingBudgetMs = Math.max(1, workDeadline - timer.now());
@@ -1565,7 +1589,7 @@ export async function runAcceptanceMatrix(
         maintenanceAdmission: true,
       });
     } finally {
-      await completeMaintenance("host-wide doctor repair", status, "cleanup");
+      await completeMaintenance("host-wide doctor repair", admission, "cleanup");
     }
   };
 
@@ -1696,13 +1720,17 @@ export async function runAcceptanceMatrix(
 
     if (args.scenario === "recovery") {
       const restartStart = timer.now();
-      const maintenanceStatus = await admitMaintenance("daemon restart", "work");
+      const maintenanceAdmission = await admitMaintenance("daemon restart", "work");
       try {
         await bounded("daemon restart", "work", async (signal) => {
-          await restartDaemon(Math.max(1, workDeadline - timer.now()), signal);
+          await restartDaemon(
+            maintenanceAdmission.maintenanceToken,
+            Math.max(1, workDeadline - timer.now()),
+            signal,
+          );
         });
       } catch (error) {
-        await completeMaintenance("daemon restart", maintenanceStatus, "cleanup");
+        await completeMaintenance("daemon restart", maintenanceAdmission, "cleanup");
         throw error;
       }
       recordStep(steps, timer, "daemon-restart", restartStart, {

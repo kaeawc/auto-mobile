@@ -264,7 +264,7 @@ function createHarness(
         if ((options.activeExecutions ?? 0) > 0) {
           return { accepted: false, reason: "active_operations" };
         }
-        return { accepted: true };
+        return { accepted: true, maintenanceToken: "test-maintenance-token" };
       }
       if (name === "ide/completeMaintenance") {
         return { completed: true };

@@ -39,6 +39,7 @@ import type { DaemonStateLike } from "../../src/daemon/daemonState";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import type { DaemonClientLike } from "../../src/daemon/client";
 import { ActionableError } from "../../src/models";
+import { DAEMON_RESTART_ADMITTED_METHOD } from "../../src/daemon/daemonRestartAdmission";
 import { INCOMPLETE_EXTRACTION_CODE } from "../../src/db/migrationDependencyIntegrity";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { formatLockContent } from "../../src/utils/fileLock";
@@ -380,6 +381,75 @@ describe("DaemonManager restart", () => {
       expect(livePids).toEqual(new Set([incumbentPid]));
     } finally {
       prepareSpy.mockRestore();
+      startSpy.mockRestore();
+      statusSpy.mockRestore();
+    }
+  });
+
+  test("restart-admitted rejects missing and stale maintenance admission before lifecycle cleanup", async () => {
+    const expected: DaemonStatus = {
+      running: true,
+      pid: 1001,
+      startedAt: 100,
+      processGenerationToken: "linux:boot:1001",
+      version: "0.0.73",
+      buildId: "incumbent-build",
+      entryScript: "/old/dist/src/index.js",
+    };
+    let processScans = 0;
+    const processFinder: DaemonProcessFinder & DaemonProcessLivenessChecker = {
+      findDaemonProcesses: () => {
+        processScans++;
+        return [];
+      },
+      isProcessRunning: (pid) => pid === expected.pid,
+    };
+    const signaler = new FakeDaemonProcessSignaler();
+    const client = new FakeDaemonClient({});
+    const admissionSpy = spyOn(client, "callDaemonMethod").mockResolvedValue({
+      accepted: false,
+      reason: "generation_changed",
+    });
+    const manager = new DaemonManager(
+      () => client,
+      undefined,
+      new FakeTimer(),
+      undefined,
+      undefined,
+      undefined,
+      processFinder,
+      undefined,
+      undefined,
+      undefined,
+      signaler,
+      undefined,
+      undefined,
+      undefined,
+      new FakeDaemonPortAvailabilityChecker(),
+    );
+    const statusSpy = spyOn(manager, "status").mockResolvedValue(expected);
+    const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
+
+    try {
+      await expect(manager.restartAdmitted({}, "")).rejects.toThrow("maintenance admission token");
+      await expect(manager.restartAdmitted({}, "stale-maintenance-token")).rejects.toMatchObject({
+        code: "daemon_restart_deferred",
+      });
+
+      expect(admissionSpy).toHaveBeenCalledWith(DAEMON_RESTART_ADMITTED_METHOD, {
+        pid: expected.pid,
+        startedAt: expected.startedAt,
+        processGenerationToken: expected.processGenerationToken,
+        version: expected.version,
+        buildId: expected.buildId,
+        entryScript: expected.entryScript,
+        maintenanceToken: "stale-maintenance-token",
+      });
+      expect(signaler.signals).toEqual([]);
+      expect(processScans).toBe(0);
+      expect(startSpy).not.toHaveBeenCalled();
+    } finally {
+      admissionSpy.mockRestore();
       startSpy.mockRestore();
       statusSpy.mockRestore();
     }

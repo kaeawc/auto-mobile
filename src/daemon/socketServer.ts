@@ -133,6 +133,10 @@ import {
   DAEMON_COMPLETE_MAINTENANCE_METHOD,
   DAEMON_PREPARE_MAINTENANCE_METHOD,
   DAEMON_PREPARE_RESTART_METHOD,
+  DAEMON_REPAIR_CONTROL_METADATA_METHOD,
+  DAEMON_RESTART_ADMITTED_METHOD,
+  type DaemonAdmittedRestart,
+  type DaemonControlMetadataRepair,
   type DaemonMaintenancePreparation,
   type DaemonRestartPreparation,
 } from "./daemonRestartAdmission";
@@ -557,7 +561,11 @@ export class UnixSocketServer {
   private readonly handshakeEnforced: boolean;
   private readonly daemonIdentity: DaemonSelfIdentity;
   private readonly identityStartedAt: number;
+  private readonly processGenerationToken: string | undefined;
   private readonly onRestartAccepted?: () => void;
+  private readonly onControlMetadataRepair?: () => Promise<void>;
+  private maintenanceAdmissionToken: string | undefined;
+  private maintenanceRestartConsumed = false;
   private readonly sessionToolSelectionService?: Pick<
     SessionToolSelectionService,
     "isEnabled" | "setEnabled"
@@ -623,8 +631,10 @@ export class UnixSocketServer {
     handshakeConfig: {
       identity?: DaemonSelfIdentity;
       identityStartedAt?: number;
+      processGenerationToken?: string;
       enforce?: boolean;
       onRestartAccepted?: () => void;
+      onControlMetadataRepair?: () => Promise<void>;
       sessionToolSelectionService?: Pick<SessionToolSelectionService, "isEnabled" | "setEnabled">;
     } = {},
     idGenerator: IdGenerator = defaultIdGenerator,
@@ -660,7 +670,9 @@ export class UnixSocketServer {
       handshakeConfig.identityStartedAt,
       this.timer,
     );
+    this.processGenerationToken = handshakeConfig.processGenerationToken;
     this.onRestartAccepted = handshakeConfig.onRestartAccepted;
+    this.onControlMetadataRepair = handshakeConfig.onControlMetadataRepair;
     logger.info(`UnixSocketServer initialized with endpoint: "${mcpEndpoint}"`);
     if (!mcpEndpoint) {
       logger.error("ERROR: mcpEndpoint is empty or undefined!");
@@ -2843,13 +2855,7 @@ export class UnixSocketServer {
    * Returns undefined if the request should be forwarded to MCP.
    */
   private prepareDaemonRestart(params: Record<string, unknown>): DaemonRestartPreparation {
-    const generationMatches =
-      params.pid === process.pid &&
-      params.startedAt === this.identityStartedAt &&
-      params.version === this.daemonIdentity.version &&
-      params.buildId === this.daemonIdentity.build.buildId &&
-      params.entryScript === this.daemonIdentity.build.entryScript;
-    if (!generationMatches) {
+    if (!this.daemonGenerationMatches(params)) {
       return {
         accepted: false,
         reason: "generation_changed",
@@ -2888,7 +2894,8 @@ export class UnixSocketServer {
       params.startedAt === this.identityStartedAt &&
       params.version === this.daemonIdentity.version &&
       params.buildId === this.daemonIdentity.build.buildId &&
-      params.entryScript === this.daemonIdentity.build.entryScript
+      params.entryScript === this.daemonIdentity.build.entryScript &&
+      params.processGenerationToken === this.processGenerationToken
     );
   }
 
@@ -2902,15 +2909,74 @@ export class UnixSocketServer {
     }
     const activeSessions = sessions.length;
     const admission = executionTracker.prepareForDaemonMaintenance(activeSessions);
-    return admission === "accepted" ? { accepted: true } : { accepted: false, reason: admission };
+    if (admission !== "accepted") {
+      return { accepted: false, reason: admission };
+    }
+    this.maintenanceAdmissionToken = this.idGenerator.next();
+    this.maintenanceRestartConsumed = false;
+    return { accepted: true, maintenanceToken: this.maintenanceAdmissionToken };
   }
 
   private completeDaemonMaintenance(params: Record<string, unknown>): { completed: boolean } {
-    if (!this.daemonGenerationMatches(params)) {
+    if (
+      !this.daemonGenerationMatches(params) ||
+      params.maintenanceToken !== this.maintenanceAdmissionToken
+    ) {
       return { completed: false };
     }
     executionTracker.clearDaemonMaintenancePreparation();
+    this.maintenanceAdmissionToken = undefined;
+    this.maintenanceRestartConsumed = false;
     return { completed: true };
+  }
+
+  private restartAdmittedDaemon(params: Record<string, unknown>): DaemonAdmittedRestart {
+    if (!this.daemonGenerationMatches(params)) {
+      return { accepted: false, reason: "generation_changed" };
+    }
+    if (params.maintenanceToken !== this.maintenanceAdmissionToken) {
+      return { accepted: false, reason: "maintenance_token_invalid" };
+    }
+    if (this.maintenanceRestartConsumed) {
+      return { accepted: false, reason: "maintenance_token_consumed" };
+    }
+    const sessions = this.daemonState.getSessionManager().getAllSessions?.();
+    if (!sessions) {
+      return { accepted: false, reason: "sessions_unavailable" };
+    }
+    if (sessions.length > 0) {
+      return { accepted: false, reason: "active_sessions" };
+    }
+    const admission = executionTracker.prepareForDaemonRestart();
+    if (admission !== "accepted") {
+      return { accepted: false, reason: admission };
+    }
+    if (!this.onRestartAccepted) {
+      executionTracker.clearDaemonRestartPreparation();
+      return { accepted: false, reason: "shutdown_unavailable" };
+    }
+    this.maintenanceRestartConsumed = true;
+    try {
+      this.onRestartAccepted();
+      return { accepted: true };
+    } catch (error) {
+      logger.warn("Failed to initiate a maintenance-admitted daemon restart", error);
+      executionTracker.clearDaemonRestartPreparation();
+      return { accepted: false, reason: "shutdown_unavailable" };
+    }
+  }
+
+  private async repairControlMetadata(
+    params: Record<string, unknown>,
+  ): Promise<DaemonControlMetadataRepair> {
+    if (!this.daemonGenerationMatches(params)) {
+      return { repaired: false, reason: "generation_changed" };
+    }
+    if (!this.onControlMetadataRepair) {
+      return { repaired: false, reason: "repair_unavailable" };
+    }
+    await this.onControlMetadataRepair();
+    return { repaired: true };
   }
 
   private requireFeatureFlagService(): FeatureFlagService {
@@ -3011,6 +3077,12 @@ export class UnixSocketServer {
       case DAEMON_COMPLETE_MAINTENANCE_METHOD: {
         return this.completeDaemonMaintenance(request.params);
       }
+      case DAEMON_RESTART_ADMITTED_METHOD: {
+        return this.restartAdmittedDaemon(request.params);
+      }
+      case DAEMON_REPAIR_CONTROL_METADATA_METHOD: {
+        return await this.repairControlMetadata(request.params);
+      }
       case "ide/status": {
         return {
           // Concrete pinned version (honors AUTOMOBILE_VERSION), never the
@@ -3021,6 +3093,9 @@ export class UnixSocketServer {
           buildId: this.daemonIdentity.build.buildId,
           entryScript: this.daemonIdentity.build.entryScript,
           startedAt: this.identityStartedAt,
+          ...(this.processGenerationToken === undefined
+            ? {}
+            : { processGenerationToken: this.processGenerationToken }),
           activeProvisioning: executionTracker.hasActiveToolExecution("provisionDevice", {
             scope: "global",
           }),

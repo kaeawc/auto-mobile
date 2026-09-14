@@ -40,6 +40,12 @@ export interface DaemonRecoveryResult {
 export interface DaemonRecoveryDependencies {
   getHealthReport?: () => Promise<DaemonHealthReport>;
   /**
+   * Repairs PID metadata through the responsive daemon itself. The daemon
+   * validates its current generation before republishing the record, so doctor
+   * does not need to stop a healthy daemon merely because its metadata is bad.
+   */
+  repairControlMetadata?: (signal?: AbortSignal) => Promise<boolean>;
+  /**
    * This is the deliberate recovery escalation. DaemonManager acquires the
    * lifecycle lock, rechecks protocol ownership, then stops only verified
    * daemon-mode processes before starting a strict-port replacement.
@@ -224,6 +230,7 @@ type FinalHealthAttempt =
 interface ResolvedRecoveryDependencies {
   timer: Timer;
   getHealthReport: () => Promise<DaemonHealthReport>;
+  repairControlMetadata: (signal?: AbortSignal) => Promise<boolean>;
   recoverControlState: (
     daemonOptions: DaemonOptions,
     isProtocolHealthy: () => Promise<boolean>,
@@ -241,6 +248,9 @@ function resolveRecoveryDependencies(
   return {
     timer: dependencies.timer ?? defaultTimer,
     getHealthReport: dependencies.getHealthReport ?? getDaemonHealthReport,
+    repairControlMetadata:
+      dependencies.repairControlMetadata ??
+      (async () => await new DaemonManager().repairControlMetadata()),
     recoverControlState:
       dependencies.recoverControlState ??
       ((daemonOptions, isProtocolHealthy, signal, deadline) =>
@@ -383,6 +393,23 @@ async function verifyFinalHealth(
   }
 }
 
+async function repairConnectableDaemonMetadata(
+  before: DaemonHealthReport,
+  deadline: number,
+  timer: Timer,
+  repairControlMetadata: (signal?: AbortSignal) => Promise<boolean>,
+): Promise<RecoveryAttempt<void> | undefined> {
+  if (!before.socketConnectable || before.pidFileValid) {
+    return undefined;
+  }
+  return await attemptRecoveryStep("recovery", deadline, timer, async (signal) => {
+    if (await repairControlMetadata(signal)) {
+      return;
+    }
+    throw new Error("responsive daemon declined to republish control metadata");
+  });
+}
+
 /**
  * Deliberately repair only the shared daemon/control-socket layer. Device
  * selection is intentionally outside this contract: doctor currently accepts
@@ -404,8 +431,14 @@ export async function repairDaemon(
     );
   }
 
-  const { timer, getHealthReport, recoverControlState, verifyProtocol, isProtocolHealthy } =
-    resolveRecoveryDependencies(dependencies);
+  const {
+    timer,
+    getHealthReport,
+    repairControlMetadata,
+    recoverControlState,
+    verifyProtocol,
+    isProtocolHealthy,
+  } = resolveRecoveryDependencies(dependencies);
   const daemonOptions = options.daemonOptions ?? {};
   const deadline = timer.now() + timeoutMs;
   const diagnosis = await attemptRecoveryStep("diagnosis", deadline, timer, () =>
@@ -415,6 +448,22 @@ export async function repairDaemon(
     return failedRecovery("diagnosis", undefined, diagnosis.error);
   }
   const before = diagnosis.value;
+  const metadataRepair = await repairConnectableDaemonMetadata(
+    before,
+    deadline,
+    timer,
+    repairControlMetadata,
+  );
+  if (metadataRepair && !metadataRepair.ok) {
+    return failedRecovery(
+      "recovery",
+      "joined",
+      metadataRepair.error,
+      before,
+      undefined,
+      metadataRepair.lifecycleCompletion,
+    );
+  }
   const socketRecovery = await recoverUnusableSocket(
     before,
     deadline,

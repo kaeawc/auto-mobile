@@ -57,7 +57,11 @@ import {
 } from "./client";
 import {
   DAEMON_PREPARE_RESTART_METHOD,
+  DAEMON_REPAIR_CONTROL_METADATA_METHOD,
+  DAEMON_RESTART_ADMITTED_METHOD,
   DaemonRestartDeferredError,
+  type DaemonAdmittedRestart,
+  type DaemonControlMetadataRepair,
   type DaemonRestartPreparation,
 } from "./daemonRestartAdmission";
 import {
@@ -879,6 +883,7 @@ export interface DaemonManagerLike {
    * A changed generation means another client already completed the handoff.
    */
   restart(options?: DaemonOptions, expectedDaemon?: DaemonStatus): Promise<DaemonRestartResult>;
+  restartAdmitted(options: DaemonOptions, maintenanceToken: string): Promise<DaemonRestartResult>;
   waitForReady(
     timeout: number,
     signal?: AbortSignal,
@@ -909,6 +914,23 @@ export interface DaemonManagerLike {
  * startup options incompatible.
  */
 export type DaemonRestartResult = "restarted" | "joined";
+
+const DAEMON_ADMITTED_RESTART_REASONS: ReadonlySet<string> = new Set([
+  "active_operations",
+  "active_sessions",
+  "generation_changed",
+  "maintenance_token_invalid",
+  "maintenance_token_consumed",
+  "restart_pending",
+  "shutdown_unavailable",
+  "sessions_unavailable",
+]);
+
+function isDaemonAdmittedRestartReason(
+  value: unknown,
+): value is NonNullable<DaemonAdmittedRestart["reason"]> {
+  return typeof value === "string" && DAEMON_ADMITTED_RESTART_REASONS.has(value);
+}
 
 /**
  * Daemon Manager
@@ -2650,6 +2672,47 @@ export class DaemonManager implements DaemonManagerLike {
     return restartResultFromStart(startResult);
   }
 
+  /**
+   * Complete a host-maintenance restart only after the generation that minted
+   * its opaque maintenance token accepts it. This RPC is intentionally the
+   * first lifecycle action: a successor that replaced the admitted daemon
+   * cannot present the old token, so no stop, process-table scan, socket
+   * cleanup, or replacement launch can follow a stale admission.
+   */
+  async restartAdmitted(
+    options: DaemonOptions,
+    maintenanceToken: string,
+  ): Promise<DaemonRestartResult> {
+    if (!maintenanceToken) {
+      throw new ActionableError("restart-admitted requires a maintenance admission token.");
+    }
+    const status = await this.status();
+    if (!status.running) {
+      throw new ActionableError(
+        "restart-admitted requires the daemon generation that admitted maintenance to still be running.",
+      );
+    }
+
+    const admission = await this.admitMaintenanceRestart(status, maintenanceToken);
+    if (!admission.accepted) {
+      throw new DaemonRestartDeferredError(
+        `maintenance admission is no longer valid (${admission.reason ?? "unknown"})`,
+      );
+    }
+
+    const restartOptions: DaemonOptions = {
+      ...(status.options ?? {}),
+      ...Object.fromEntries(Object.entries(options).filter(([, value]) => value !== undefined)),
+      strictPort: true,
+    };
+    // The admitted daemon has already initiated its own SIGTERM before it
+    // acknowledges. Preserve the exact pre-admission status through the wait;
+    // a later status read could name its replacement instead.
+    await this.stopRunningDaemon(status, DAEMON_SHUTDOWN_TIMEOUT_MS, false);
+    await this.timer.sleep(DAEMON_RESTART_HANDOFF_DELAY_MS);
+    return restartResultFromStart(await this.start(restartOptions));
+  }
+
   private isSameDaemonGeneration(current: DaemonStatus, expected: DaemonStatus): boolean {
     if (!current.running || !expected.running || current.pid !== expected.pid) {
       return false;
@@ -2666,6 +2729,29 @@ export class DaemonManager implements DaemonManagerLike {
     );
   }
 
+  /**
+   * Ask a responsive daemon to republish its own PID metadata. The daemon
+   * validates this exact socket generation before performing the write, so a
+   * stale diagnostic cannot repair metadata on behalf of a replacement.
+   */
+  async repairControlMetadata(): Promise<boolean> {
+    const client = this.createClient({ clientIdentity: null });
+    try {
+      await client.connect();
+      const status = await client.callDaemonMethod("ide/status", {});
+      if (!status || typeof status !== "object" || Array.isArray(status)) {
+        return false;
+      }
+      const result: unknown = await client.callDaemonMethod(
+        DAEMON_REPAIR_CONTROL_METADATA_METHOD,
+        status as Record<string, unknown>,
+      );
+      return (result as Partial<DaemonControlMetadataRepair> | null)?.repaired === true;
+    } finally {
+      await client.close();
+    }
+  }
+
   private async prepareDaemonForConditionalRestart(
     expected: DaemonStatus,
   ): Promise<DaemonRestartPreparation> {
@@ -2678,6 +2764,7 @@ export class DaemonManager implements DaemonManagerLike {
       const result: unknown = await client.callDaemonMethod(DAEMON_PREPARE_RESTART_METHOD, {
         pid: expected.pid,
         startedAt: expected.startedAt,
+        processGenerationToken: expected.processGenerationToken,
         version: expected.version,
         buildId: expected.buildId,
         entryScript: expected.entryScript,
@@ -2711,6 +2798,42 @@ export class DaemonManager implements DaemonManagerLike {
       // Fail closed: an explicit operator restart remains available.
       throw new DaemonRestartDeferredError(
         `safe-restart admission is unavailable: ${errorMessage(error)}`,
+      );
+    } finally {
+      await client.close();
+    }
+  }
+
+  private async admitMaintenanceRestart(
+    expected: DaemonStatus,
+    maintenanceToken: string,
+  ): Promise<DaemonAdmittedRestart> {
+    const client = this.createClient({ clientIdentity: null });
+    try {
+      await client.connect();
+      const result: unknown = await client.callDaemonMethod(DAEMON_RESTART_ADMITTED_METHOD, {
+        pid: expected.pid,
+        startedAt: expected.startedAt,
+        processGenerationToken: expected.processGenerationToken,
+        version: expected.version,
+        buildId: expected.buildId,
+        entryScript: expected.entryScript,
+        maintenanceToken,
+      });
+      if (!result || typeof result !== "object") {
+        return { accepted: false, reason: "maintenance_token_invalid" };
+      }
+      const admission = result as Partial<DaemonAdmittedRestart>;
+      if (admission.accepted === true) {
+        return { accepted: true };
+      }
+      if (admission.accepted === false && isDaemonAdmittedRestartReason(admission.reason)) {
+        return { accepted: false, reason: admission.reason };
+      }
+      return { accepted: false, reason: "maintenance_token_invalid" };
+    } catch (error) {
+      throw new DaemonRestartDeferredError(
+        `maintenance admission is unavailable: ${errorMessage(error)}`,
       );
     } finally {
       await client.close();
@@ -3728,6 +3851,15 @@ export function parseDaemonHeartbeatCommandArgs(args: string[]): DaemonHeartbeat
   return { sessionId, livenessOwnerToken, claimLivenessOwnership };
 }
 
+export function parseRestartAdmittedMaintenanceToken(args: string[]): string {
+  const tokenIndex = args.indexOf("--maintenance-token");
+  const token = tokenIndex === -1 ? undefined : args[tokenIndex + 1];
+  if (!token || token.startsWith("--")) {
+    throw new ActionableError("--maintenance-token requires a non-empty value");
+  }
+  return token;
+}
+
 /**
  * Build the `--daemon status` lines that surface the running daemon's build
  * identity (`buildId` + `entryScript`) and flag wrong-build skew against this
@@ -3817,13 +3949,10 @@ export async function runDaemonCommand(
       }
 
       case "restart-admitted": {
-        const status = await manager.status();
-        if (!status.running) {
-          throw new ActionableError(
-            "restart-admitted requires a running daemon that has already admitted maintenance.",
-          );
-        }
-        await manager.restart(parseDaemonArgs(args), status);
+        await manager.restartAdmitted(
+          parseDaemonArgs(args),
+          parseRestartAdmittedMaintenanceToken(args),
+        );
         break;
       }
 

@@ -144,6 +144,13 @@ export interface ScreenIdentity {
  */
 export interface ObserveResult {
   /**
+   * Stable host-side identity for this single observation capture. It remains
+   * attached while deferred post-processing enriches the same result, allowing
+   * cache writes to update that capture in place.
+   */
+  observationId?: string;
+
+  /**
    * Timestamp when the screen state was captured on the device (milliseconds since epoch)
    * This comes from the CtrlProxy on Android or equivalent on iOS
    * Falls back to server timestamp if device timestamp is unavailable

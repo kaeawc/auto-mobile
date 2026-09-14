@@ -31,6 +31,7 @@ import {
 import { PredictiveUIState } from "./PredictiveUIState";
 import { ScreenshotJobTracker } from "../../utils/ScreenshotJobTracker";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
+import { defaultIdGenerator, type IdGenerator } from "../../utils/IdGenerator";
 import { attachRawViewHierarchy } from "../../utils/viewHierarchySearch";
 import type { ObserveScreen, ObserveScreenExecuteOptions } from "./interfaces/ObserveScreen";
 import type { ObserveScreenDependencies } from "./ObserveScreenDependencies";
@@ -465,6 +466,7 @@ export class RealObserveScreen implements ObserveScreen {
   private adb: AdbExecutor;
   private adbFactory: AdbClientFactory;
   private timer: Timer;
+  private idGenerator: IdGenerator;
 
   private viewHierarchy: ViewHierarchyInterface;
   private predictiveUIState: PredictiveUIStateInterface;
@@ -554,6 +556,7 @@ export class RealObserveScreen implements ObserveScreen {
     this.adbFactory = adbFactory;
     this.adb = adbFactory.create(device);
     this.timer = timer;
+    this.idGenerator = dependencies?.idGenerator ?? defaultIdGenerator;
 
     // Data sources (either injected or default)
     this.viewHierarchy = dependencies?.viewHierarchy ?? new ViewHierarchy(device, this.adbFactory);
@@ -733,6 +736,7 @@ export class RealObserveScreen implements ObserveScreen {
         minTimestamp,
         signal,
         skipBackStack,
+        options?.skipRecompositionTracking === true,
       );
 
       // Reject a stale cross-platform hierarchy (e.g. an iOS hierarchy returned on
@@ -854,10 +858,13 @@ export class RealObserveScreen implements ObserveScreen {
         ),
       });
 
-      // Cache the result for future use
-      await perf.track("cacheResult", () =>
-        getObserveCacheStore().put(this.device.deviceId, result, cacheGeneration),
-      );
+      // Intermediate settle polls are read-only. Their adopted terminal result
+      // is enriched and cached once by ObservePoll.finalize().
+      if (!options?.skipRecompositionTracking) {
+        await perf.track("cacheResult", () =>
+          getObserveCacheStore().put(this.device.deviceId, result, cacheGeneration),
+        );
+      }
 
       perf.end();
 
@@ -998,6 +1005,7 @@ export class RealObserveScreen implements ObserveScreen {
 
   createBaseResult(): ObserveResult {
     return {
+      observationId: this.idGenerator.next(),
       // Derive the timestamp from the injected timer so the source is pinnable
       // in tests instead of the real wall clock (issue #4172 item 9).
       updatedAt: new Date(this.timer.now()).toISOString(),
@@ -1026,8 +1034,15 @@ export class RealObserveScreen implements ObserveScreen {
   ): Promise<void> {
     const cacheStore = getObserveCacheStore();
     const resolvedCachedAt = cachedAt ?? this.timer.now();
+    const currentResult = cacheStore.getRecentInMemoryForDevice(this.device.deviceId);
     const currentCachedAt = cacheStore.getRecentCachedAtForDevice(this.device.deviceId);
-    if (currentCachedAt !== undefined && currentCachedAt > resolvedCachedAt) {
+    if (
+      currentResult?.observationId !== undefined &&
+      observeResult.observationId !== undefined &&
+      currentResult.observationId !== observeResult.observationId &&
+      currentCachedAt !== undefined &&
+      currentCachedAt > resolvedCachedAt
+    ) {
       logger.debug(
         `[OBSERVE_CACHE] Skipping deferred observe result for device ${this.device.deviceId}: ` +
           "a more recently cached observation already exists",
@@ -1053,6 +1068,7 @@ export class RealObserveScreen implements ObserveScreen {
     minTimestamp: number = 0,
     signal?: AbortSignal,
     skipBackStack: boolean = false,
+    readOnly: boolean = false,
   ): Promise<void> {
     switch (this.device.platform) {
       case "android":
@@ -1064,6 +1080,7 @@ export class RealObserveScreen implements ObserveScreen {
           skipWaitForFresh,
           minTimestamp,
           signal,
+          readOnly,
         );
         perf.end();
 
@@ -1199,6 +1216,7 @@ export class RealObserveScreen implements ObserveScreen {
           skipWaitForFresh,
           minTimestamp,
           signal,
+          readOnly,
         );
 
         // Resolve screen size: hierarchy-derived bounds, then CtrlProxy-reported logical points.

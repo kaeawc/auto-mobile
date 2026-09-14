@@ -25,7 +25,10 @@ export interface ObserveResultCacheStore {
    * is rejected so an in-flight observation cannot repopulate a just-cleared
    * cache with a now-stale hierarchy (issue #5884). Omit it for unconditional
    * writes (back-compat). `cachedAt`, when supplied, is used for in-memory
-   * recency ordering; omit it to retain wall-clock write-time ordering.
+   * recency ordering; omit it to retain wall-clock write-time ordering. When
+   * `result.observationId` matches an existing entry for `deviceId`, the store
+   * updates that entry in place, preserving its cache ordering position. Results
+   * without an observation id retain key-by-`cachedAt` back-compat behaviour.
    */
   put(
     deviceId: string,

@@ -13,6 +13,7 @@ const TTL_MS = 5 * 60 * 1000;
 interface FakeCacheEntry {
   deviceId: string;
   timestamp: number;
+  observationId?: string;
   observeResult: ObserveResult;
 }
 
@@ -28,6 +29,7 @@ export class FakeObserveCacheStore implements ObserveResultCacheStore {
   private readonly timer: Timer;
   private globalGeneration: number = 0;
   private readonly deviceGeneration: Map<string, number> = new Map();
+  private putCalls: number = 0;
 
   /**
    * Test seam: invoked with `(deviceId, generation)` each time
@@ -53,13 +55,21 @@ export class FakeObserveCacheStore implements ObserveResultCacheStore {
     generation?: number,
     cachedAt?: number,
   ): Promise<void> {
+    this.putCalls++;
     if (generation !== undefined && generation !== this.rawGeneration(deviceId)) {
       return;
     }
-    const timestamp = cachedAt ?? this.timer.now();
-    this.entries.set(`${deviceId}:${timestamp}`, {
+    const existing = result.observationId
+      ? Array.from(this.entries.entries()).find(
+          ([, entry]) =>
+            entry.deviceId === deviceId && entry.observationId === result.observationId,
+        )
+      : undefined;
+    const timestamp = existing?.[1].timestamp ?? cachedAt ?? this.timer.now();
+    this.entries.set(existing?.[0] ?? `${deviceId}:${timestamp}`, {
       deviceId,
       timestamp,
+      observationId: result.observationId,
       observeResult: result,
     });
   }
@@ -103,6 +113,10 @@ export class FakeObserveCacheStore implements ObserveResultCacheStore {
   /** Test helper: number of currently-cached entries (regardless of TTL). */
   getEntryCount(): number {
     return this.entries.size;
+  }
+
+  getPutCallCount(): number {
+    return this.putCalls;
   }
 
   /** Test helper: snapshot of every entry currently held. */

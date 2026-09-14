@@ -22,6 +22,10 @@ import { ActionableError } from "../models";
 import { daemonShuttingDownMcpOutcome } from "../daemon/daemonShutdownOutcome";
 import { getMcpServerVersion } from "../utils/mcpVersion";
 import {
+  stripToolResultStructuredContent,
+  structuredContentOmissionReason,
+} from "./stripToolResultStructuredContent";
+import {
   DeviceControlTransportError,
   sanitizeDeviceControlTransportFailure,
 } from "../daemon/deviceControlTransportFailure";
@@ -114,13 +118,20 @@ function noActiveDeviceSessionError(error: DaemonConnectionSessionReleasedError)
   );
 }
 
-function daemonShuttingDownResult() {
+function daemonShuttingDownResult(hasOutputSchema: boolean) {
   const shutdown = daemonShuttingDownMcpOutcome();
-  return {
-    content: [{ type: "text", text: JSON.stringify(shutdown) }],
+  const result = {
+    content: [{ type: "text" as const, text: JSON.stringify(shutdown) }],
     structuredContent: shutdown,
     isError: true,
   };
+  // The daemon's live advertised schema already accounts for its own
+  // tool-results-no-structured-content setting. Do not consult this frontend
+  // process's ServerConfig, which can be stale after a runtime flag change.
+  return stripToolResultStructuredContent(
+    result,
+    structuredContentOmissionReason(hasOutputSchema, false),
+  );
 }
 
 export function daemonRestartDeferredResult(
@@ -180,6 +191,7 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
   proxy: DaemonMcpProxy;
 } {
   const proxy = new DaemonMcpProxy(options.proxyConfig);
+  const advertisedToolOutputSchemas = new Map<string, boolean>();
 
   // Create the MCP server
   const server = new McpServer(
@@ -210,6 +222,9 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
   proxy.onListChanged((kind) => {
     try {
       if (kind === "tools") {
+        // Until the client re-fetches, fail closed rather than retain a schema
+        // advertised before the daemon changed its tool-result policy.
+        advertisedToolOutputSchemas.clear();
         server.sendToolListChanged();
       } else {
         server.sendResourceListChanged();
@@ -243,6 +258,10 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
   server.server.setRequestHandler(ListToolsRequestSchema, async () => {
     try {
       const tools = await proxy.listAdvertisedTools();
+      advertisedToolOutputSchemas.clear();
+      for (const tool of tools) {
+        advertisedToolOutputSchemas.set(tool.name, tool.outputSchema !== undefined);
+      }
       return { tools };
     } catch (error) {
       if (error instanceof DaemonBoundSessionExpiredError) {
@@ -306,7 +325,7 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
         return noActiveDeviceSessionResult(error);
       }
       if (error instanceof DaemonShuttingDownError) {
-        return daemonShuttingDownResult();
+        return daemonShuttingDownResult(advertisedToolOutputSchemas.get(name) ?? false);
       }
       if (error instanceof DaemonRestartDeferredError) {
         return daemonRestartDeferredResult(error);

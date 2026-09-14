@@ -1373,11 +1373,19 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     } catch (error) {
       if (error instanceof DaemonSessionCreationRejectedError) {
         const shutdown = daemonShuttingDownMcpOutcome();
-        return {
+        const result = {
           content: [{ type: "text" as const, text: JSON.stringify(shutdown) }],
           structuredContent: shutdown,
           isError: true,
         };
+        // The private daemon loopback needs this marker to classify the
+        // shutdown outcome before it reaches the public proxy boundary.
+        return daemonMode
+          ? result
+          : stripToolResultStructuredContent(
+              result,
+              structuredContentOmissionReason(toolHasOutputSchema(tool)),
+            );
       }
       if (error instanceof TerminalSessionError) {
         const sessionOwnershipLost = {

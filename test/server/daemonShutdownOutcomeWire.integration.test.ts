@@ -4,13 +4,16 @@ import {
   DAEMON_SHUTTING_DOWN_ERROR_CODE,
   DAEMON_SHUTTING_DOWN_ERROR_MESSAGE,
 } from "../../src/daemon/constants";
+import { isDaemonShuttingDownToolResult } from "../../src/daemon/daemonShutdownOutcome";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { DeviceSessionPersistence } from "../../src/db/deviceSessionRepository";
 import { ToolRegistry } from "../../src/server/toolRegistry";
+import { serverConfig } from "../../src/utils/ServerConfig";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
 
-const TOOL_NAME = "__daemon_shutdown_wire_probe__";
+const NO_SCHEMA_TOOL_NAME = "__daemon_shutdown_wire_no_schema_probe__";
+const SCHEMA_TOOL_NAME = "__daemon_shutdown_wire_schema_probe__";
 
 class DeferredSessionPersistence implements DeviceSessionPersistence {
   private readonly upsertStarted = Promise.withResolvers<void>();
@@ -39,25 +42,95 @@ describe("daemon shutdown MCP outcome", () => {
   let sessionManager: SessionManager | undefined;
 
   beforeAll(async () => {
-    ToolRegistry.register(TOOL_NAME, "daemon shutdown wire probe", z.object({}), async () => {
+    const handler = async () => {
       if (!sessionManager) {
         throw new Error("SessionManager must be initialized before the wire probe runs");
       }
       return await sessionManager.createSession("pending-ios-session", "ios-simulator-a", "ios");
-    });
+    };
+    ToolRegistry.register(
+      NO_SCHEMA_TOOL_NAME,
+      "daemon shutdown wire probe without output schema",
+      z.object({}),
+      handler,
+    );
+    ToolRegistry.register(
+      SCHEMA_TOOL_NAME,
+      "daemon shutdown wire probe with output schema",
+      z.object({}),
+      handler,
+      {
+        outputSchema: z.object({
+          id: z.string(),
+          deviceId: z.string(),
+          platform: z.string(),
+        }),
+      },
+    );
     await fixture.setup();
   });
 
   afterAll(async () => {
     await fixture.teardown();
-    ToolRegistry.unregister(TOOL_NAME);
+    ToolRegistry.unregister(NO_SCHEMA_TOOL_NAME);
+    ToolRegistry.unregister(SCHEMA_TOOL_NAME);
+    serverConfig.setToolResultsNoStructuredContentEnabled(false);
   });
 
-  test("returns a structured retryable outcome when a session creation loses the shutdown race", async () => {
+  for (const { name, suppressStructuredContent, reason } of [
+    {
+      name: NO_SCHEMA_TOOL_NAME,
+      suppressStructuredContent: false,
+      reason: "the tool has no output schema",
+    },
+    {
+      name: SCHEMA_TOOL_NAME,
+      suppressStructuredContent: true,
+      reason: "structured-content suppression is enabled",
+    },
+  ]) {
+    test(`omits structuredContent when a session creation loses the shutdown race and ${reason}`, async () => {
+      const persistence = new DeferredSessionPersistence();
+      sessionManager = new SessionManager(new FakeTimer(), persistence);
+      serverConfig.setToolResultsNoStructuredContentEnabled(suppressStructuredContent);
+      try {
+        const pending = fixture.client.callTool({ name, arguments: {} });
+        await persistence.waitForUpsert();
+        sessionManager.stopAcceptingSessionCreations();
+        persistence.finishUpsert();
+
+        const result = await pending;
+        const expected = {
+          error: {
+            code: DAEMON_SHUTTING_DOWN_ERROR_CODE,
+            message: DAEMON_SHUTTING_DOWN_ERROR_MESSAGE,
+            retryable: true,
+          },
+        };
+
+        expect(result).toMatchObject({
+          content: [{ type: "text", text: JSON.stringify(expected) }],
+          isError: true,
+        });
+        expect("structuredContent" in result).toBe(false);
+        expect(sessionManager.getSession("pending-ios-session")).toBeNull();
+      } finally {
+        persistence.finishUpsert();
+        sessionManager.stopCleanupTimer();
+        sessionManager = undefined;
+        serverConfig.setToolResultsNoStructuredContentEnabled(false);
+      }
+    });
+  }
+
+  test("preserves the shutdown marker for the private daemon loopback", async () => {
+    const daemonFixture = new McpTestFixture({ daemonMode: true });
     const persistence = new DeferredSessionPersistence();
     sessionManager = new SessionManager(new FakeTimer(), persistence);
+    serverConfig.setToolResultsNoStructuredContentEnabled(true);
     try {
-      const pending = fixture.client.callTool({ name: TOOL_NAME, arguments: {} });
+      await daemonFixture.setup();
+      const pending = daemonFixture.client.callTool({ name: NO_SCHEMA_TOOL_NAME, arguments: {} });
       await persistence.waitForUpsert();
       sessionManager.stopAcceptingSessionCreations();
       persistence.finishUpsert();
@@ -76,11 +149,14 @@ describe("daemon shutdown MCP outcome", () => {
         structuredContent: expected,
         isError: true,
       });
+      expect(isDaemonShuttingDownToolResult(result)).toBe(true);
       expect(sessionManager.getSession("pending-ios-session")).toBeNull();
     } finally {
       persistence.finishUpsert();
       sessionManager.stopCleanupTimer();
       sessionManager = undefined;
+      serverConfig.setToolResultsNoStructuredContentEnabled(false);
+      await daemonFixture.teardown();
     }
   });
 });

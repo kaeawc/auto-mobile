@@ -74,12 +74,13 @@ export class ViewHierarchy implements ViewHierarchyInterface {
   async configureRecompositionTracking(
     enabled: boolean,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    signal?: AbortSignal,
   ): Promise<void> {
     if (this.device.platform !== "android") {
       return;
     }
 
-    await this.accessibilityServiceClient.setRecompositionTrackingEnabled(enabled, perf);
+    await this.accessibilityServiceClient.setRecompositionTrackingEnabled(enabled, perf, signal);
   }
 
   async getScreenIdentity(applicationId?: string): Promise<ScreenIdentity | undefined> {

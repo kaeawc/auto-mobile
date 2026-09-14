@@ -17,12 +17,14 @@ export class FakeObserveScreen implements ObserveScreen {
   private executeCallCount: number = 0;
   private captureScreenshotCallCount: number = 0;
   private accessibilityAuditCallCount: number = 0;
+  private processRecompositionCallCount: number = 0;
   private getMostRecentCachedObserveResultCallCount: number = 0;
   private failures: Map<string, Error> = new Map();
   private callCounter: number = 0;
   private autoVaryHierarchy: boolean = false;
   private readonly executeOptionsHistory: ObserveScreenExecuteOptions[] = [];
   private readonly capturedScreenshotObservations: Array<ObserveResult | undefined> = [];
+  private readonly recompositionObservations: ObserveResult[] = [];
 
   /**
    * Set the observe result to be returned by execute and getMostRecentCachedObserveResult
@@ -147,10 +149,12 @@ export class FakeObserveScreen implements ObserveScreen {
     this.executeCallCount = 0;
     this.captureScreenshotCallCount = 0;
     this.accessibilityAuditCallCount = 0;
+    this.processRecompositionCallCount = 0;
     this.getMostRecentCachedObserveResultCallCount = 0;
     this.callCounter = 0;
     this.executeOptionsHistory.length = 0;
     this.capturedScreenshotObservations.length = 0;
+    this.recompositionObservations.length = 0;
   }
 
   /**
@@ -168,6 +172,16 @@ export class FakeObserveScreen implements ObserveScreen {
   /** Total runAccessibilityAudit() calls. */
   getAccessibilityAuditCallCount(): number {
     return this.accessibilityAuditCallCount;
+  }
+
+  /** Total processRecomposition() calls. */
+  getProcessRecompositionCallCount(): number {
+    return this.processRecompositionCallCount;
+  }
+
+  /** Observations passed to processRecomposition(), in call order. */
+  getProcessRecompositionObservations(): ObserveResult[] {
+    return [...this.recompositionObservations];
   }
 
   /** Observations associated with terminal screenshot capture, in call order. */
@@ -217,6 +231,17 @@ export class FakeObserveScreen implements ObserveScreen {
     this.accessibilityAuditCallCount++;
 
     const error = this.failures.get("runAccessibilityAudit");
+    if (error) {
+      throw error;
+    }
+  }
+
+  async processRecomposition(observation: ObserveResult, _perf?: unknown): Promise<void> {
+    this.executedOperations.push("processRecomposition");
+    this.processRecompositionCallCount++;
+    this.recompositionObservations.push(observation);
+
+    const error = this.failures.get("processRecomposition");
     if (error) {
       throw error;
     }

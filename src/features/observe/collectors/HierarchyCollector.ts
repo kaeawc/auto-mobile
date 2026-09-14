@@ -41,7 +41,7 @@ export class HierarchyCollector {
     const { device, viewHierarchy, adb, timer } = this.opts;
     try {
       if (device.platform === "android") {
-        await viewHierarchy.configureRecompositionTracking(true, perf);
+        await viewHierarchy.configureRecompositionTracking(true, perf, signal);
       }
 
       const viewHierarchyStart = timer.now();

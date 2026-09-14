@@ -52,6 +52,11 @@ export interface ObservePollOptions {
    * navigation action on a one-second budget, opts in.
    */
   skipPerformanceAudit?: boolean;
+  /**
+   * Skip recomposition processing on intermediate polls, then process only the
+   * terminal observation once (#6932).
+   */
+  skipRecompositionTracking?: boolean;
 }
 
 export interface ObservePollOutcome {
@@ -154,7 +159,7 @@ function nextPollMinTimestamp(
  * screen.
  */
 export async function pollObserveUntil(
-  observeScreen: Pick<ObserveScreen, "execute">,
+  observeScreen: Pick<ObserveScreen, "execute" | "processRecomposition">,
   timer: Timer,
   options: ObservePollOptions,
   onObservation: (
@@ -179,6 +184,12 @@ export async function pollObserveUntil(
   // results. A late stale fallback must not replace evidence that already met a
   // raised floor (e.g. 10 -> 30 -> 20).
   let newestTrustworthyObservation: ObserveResult | undefined;
+  const finalize = async (outcome: ObservePollOutcome): Promise<ObservePollOutcome> => {
+    if (options.skipRecompositionTracking) {
+      await observeScreen.processRecomposition?.(outcome.observation);
+    }
+    return outcome;
+  };
 
   while (true) {
     throwIfAborted(options.signal);
@@ -198,6 +209,7 @@ export async function pollObserveUntil(
       skipScreenshot: true,
       skipAccessibilityAudit: true,
       skipPerformanceAudit: options.skipPerformanceAudit,
+      skipRecompositionTracking: options.skipRecompositionTracking,
     });
     polls++;
     throwIfAborted(options.signal);
@@ -258,13 +270,13 @@ export async function pollObserveUntil(
         isAdmissibleEvidence &&
         (!isHierarchySourcedScreenOff || isPostInvocation))
     ) {
-      return {
+      return finalize({
         observation,
         polls,
         waitMs: timer.now() - start,
         stopped: false,
         terminalReason: "screen_off",
-      };
+      });
     }
 
     // Rejected observations are deliberately invisible to stateful predicates:
@@ -272,13 +284,13 @@ export async function pollObserveUntil(
     // could manufacture a two-sample settle from regressed evidence.
     const matched = isAdmissibleEvidence && onObservation(observation, previous, polls);
     if (matched && isPostInvocation) {
-      return {
+      return finalize({
         observation,
         polls,
         waitMs: timer.now() - start,
         stopped: true,
         terminalReason: "matched",
-      };
+      });
     }
 
     if (isAdmissibleEvidence) {
@@ -286,13 +298,13 @@ export async function pollObserveUntil(
     }
 
     if (timer.now() - start >= options.timeoutMs) {
-      return {
+      return finalize({
         observation: newestTrustworthyObservation ?? observation,
         polls,
         waitMs: timer.now() - start,
         stopped: false,
         terminalReason: "timeout",
-      };
+      });
     }
 
     await timer.sleep(options.pollMs);

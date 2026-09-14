@@ -338,3 +338,24 @@ describe("pollObserveUntil minTimestamp floor (#6284)", () => {
     expect(outcome.observation.wakefulness).toBe("Asleep");
   });
 });
+
+describe("pollObserveUntil recomposition tracking (#6932)", () => {
+  test("skips every poll and processes only the terminal observation once", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const fake = new FakeObserveScreen();
+    const terminal = obs(30, "terminal");
+    fake.setObserveSequence([obs(10, "baseline"), obs(20, "intermediate"), terminal]);
+
+    await pollObserveUntil(
+      fake,
+      timer,
+      { timeoutMs: 1000, pollMs: 150, skipRecompositionTracking: true },
+      (observation) => observation === terminal,
+    );
+
+    expect(fake.getExecuteOptions().every((option) => option.skipRecompositionTracking)).toBe(true);
+    expect(fake.getProcessRecompositionCallCount()).toBe(1);
+    expect(fake.getProcessRecompositionObservations()).toEqual([terminal]);
+  });
+});

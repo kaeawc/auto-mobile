@@ -62,6 +62,7 @@ export class RealSettleObserve implements SettleObserve {
         signal: options.signal,
         initialMinTimestampMs: options.initialMinTimestampMs,
         skipPerformanceAudit: options.skipPerformanceAudit,
+        skipRecompositionTracking: options.skipRecompositionTracking,
       },
       (observation, previous) => {
         if (previous === undefined) {

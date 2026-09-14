@@ -359,3 +359,26 @@ describe("RealSettleObserve performance-audit opt-out (#6890 review)", () => {
     expect(options.every((option) => option.skipPerformanceAudit === undefined)).toBe(true);
   });
 });
+
+describe("RealSettleObserve recomposition tracking opt-out (#6932)", () => {
+  test("forwards the opt-out and processes the settled capture once", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const fake = new FakeObserveScreen();
+    const terminal = obs({ "resource-id": "a", text: "done" }, { updatedAt: 20 });
+    fake.setObserveSequence([
+      obs({ "resource-id": "a", text: "loading" }, { updatedAt: 10 }),
+      terminal,
+    ]);
+
+    await new RealSettleObserve(fake, timer).execute({
+      timeoutMs: 1000,
+      pollMs: 150,
+      skipRecompositionTracking: true,
+    });
+
+    expect(fake.getExecuteOptions().every((option) => option.skipRecompositionTracking)).toBe(true);
+    expect(fake.getProcessRecompositionCallCount()).toBe(1);
+    expect(fake.getProcessRecompositionObservations()).toEqual([terminal]);
+  });
+});

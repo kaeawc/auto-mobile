@@ -768,8 +768,10 @@ export class RealObserveScreen implements ObserveScreen {
         }
       }
 
-      // Attach recomposition metrics if enabled
-      await RecompositionTracker.getInstance().processObservation(result, this.device);
+      // Attach recomposition metrics if enabled.
+      if (!options?.skipRecompositionTracking) {
+        await this.processRecomposition(result, perf);
+      }
 
       // Audits + accessibility state detection (each is config-gated; failures don't propagate)
       if (!options?.skipPerformanceAudit) {
@@ -896,6 +898,13 @@ export class RealObserveScreen implements ObserveScreen {
       });
       return fallback;
     }
+  }
+
+  async processRecomposition(
+    observation: ObserveResult,
+    _perf?: PerformanceTracker,
+  ): Promise<void> {
+    await RecompositionTracker.getInstance().processObservation(observation, this.device);
   }
 
   /**

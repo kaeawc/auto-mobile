@@ -44,6 +44,7 @@ describe("DeviceSessionRepository", () => {
     await repo.upsertActiveSession({
       sessionUuid: "session-1",
       deviceId: "emulator-5554",
+      stableDeviceId: "Pixel_8_API_35",
       platform: "android",
       source: "session-manager",
       createdAtMs: 1000,
@@ -70,6 +71,7 @@ describe("DeviceSessionRepository", () => {
     const row = await repo.getSession("session-1");
     expect(row).toBeDefined();
     expect(row!.device_id).toBe("emulator-5554");
+    expect(row!.stable_device_id).toBe("Pixel_8_API_35");
     expect(row!.platform).toBe("android");
     expect(row!.status).toBe("released");
     expect(row!.source).toBe("autolock");
@@ -81,6 +83,56 @@ describe("DeviceSessionRepository", () => {
     expect(row!.released_at_ms).toBe(4000);
     expect(row!.release_reason).toBe("explicit-release");
     expect(row!.has_received_heartbeat).toBe(1);
+  });
+
+  test("clears a stable identity when a legacy writer changes the device transport", async () => {
+    await repo.upsertActiveSession({
+      sessionUuid: "session-1",
+      deviceId: "emulator-5554",
+      stableDeviceId: "Pixel_8_API_35",
+      platform: "android",
+      createdAtMs: 1000,
+      lastUsedAtMs: 1000,
+      expiresAtMs: 61_000,
+      sessionTimeoutMs: 60_000,
+      heartbeatTimeoutMs: 60_000,
+      hasReceivedHeartbeat: false,
+    });
+
+    await db
+      .updateTable("device_sessions")
+      .set({ device_id: "emulator-5556" })
+      .where("session_uuid", "=", "session-1")
+      .execute();
+
+    const row = await repo.getSession("session-1");
+    expect(row).toMatchObject({
+      device_id: "emulator-5556",
+      stable_device_id: null,
+    });
+  });
+
+  test("preserves a stable identity when the current writer rebinds its transport", async () => {
+    const record = {
+      sessionUuid: "session-1",
+      deviceId: "emulator-5554",
+      stableDeviceId: "Pixel_8_API_35",
+      platform: "android" as const,
+      createdAtMs: 1000,
+      lastUsedAtMs: 1000,
+      expiresAtMs: 61_000,
+      sessionTimeoutMs: 60_000,
+      heartbeatTimeoutMs: 60_000,
+      hasReceivedHeartbeat: false,
+    };
+    await repo.upsertActiveSession(record);
+    await repo.upsertActiveSession({ ...record, deviceId: "emulator-5556" });
+
+    const row = await repo.getSession("session-1");
+    expect(row).toMatchObject({
+      device_id: "emulator-5556",
+      stable_device_id: "Pixel_8_API_35",
+    });
   });
 
   test("marks stale active sessions from previous daemon starts expired", async () => {

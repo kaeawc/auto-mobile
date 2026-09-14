@@ -24,6 +24,7 @@ import {
   MAX_CLI_SESSION_IDLE_TIMEOUT_MS,
   sanitizeCliSessionIdleTimeoutMs as sanitizeRequestedCliIdleTimeoutMs,
 } from "./constants";
+import { isAndroidEmulatorSerial } from "../utils/androidSerial";
 
 /**
  * Device-label → session-UUID map. `buildDeviceLabelMap` assigns each configured
@@ -126,6 +127,7 @@ export interface SessionCacheData {
 export interface Session {
   sessionId: string; // UUID provided by JUnitRunner
   assignedDevice: string; // Device ID this session is using
+  stableDeviceId?: string; // Durable identity: Android AVD name or iOS simulator UDID
   platform: Platform; // Device platform
   createdAt: number; // Timestamp when session was created
   lastUsedAt: number; // Last activity timestamp
@@ -271,7 +273,19 @@ interface TerminalReleaseReservation {
 }
 
 export interface SessionDeviceAssigner {
-  assignDeviceToSession(sessionId: string, platform?: Platform): Promise<string>;
+  assignDeviceToSession(
+    sessionId: string,
+    platform?: Platform,
+    recoveryTarget?: SessionRecoveryTarget,
+  ): Promise<string>;
+}
+
+/** Persisted identity required before recovering a session after daemon restart. */
+export interface SessionRecoveryTarget {
+  platform: Platform;
+  stableDeviceId: string;
+  /** Distinguishes an Android AVD name from a physical-device serial. */
+  androidEmulator?: boolean;
 }
 
 export interface RebindSessionOptions {
@@ -280,6 +294,8 @@ export interface RebindSessionOptions {
    * state must be cleared even though the serial is unchanged.
    */
   force?: boolean;
+  /** Durable identity of the replacement device. */
+  stableDeviceId?: string;
   /** Internal owner proving that a shutdown reservation authorized this recovery rebind. */
   terminalReleaseReservationOwner?: symbol;
 }
@@ -630,6 +646,7 @@ export class SessionManager {
     platform: Platform,
     timeoutMs?: number,
     heartbeatTimeoutMs?: number,
+    stableDeviceId?: string,
   ): Promise<Session> {
     getAbortSignal()?.throwIfAborted();
     if (!this.acceptingSessionCreations) {
@@ -667,6 +684,7 @@ export class SessionManager {
     const session: Session = {
       sessionId,
       assignedDevice,
+      stableDeviceId,
       platform,
       createdAt: now,
       lastUsedAt: now,
@@ -1065,6 +1083,9 @@ export class SessionManager {
           "Acquire a device with getAndroid or getApple before using its sessionUuid.",
       );
     }
+    const recoveryTarget = devicePool
+      ? this.recoveryTargetFromPersisted(sessionId, persisted, platform)
+      : undefined;
 
     logger.info(
       `[SessionManager] Creating new session ${sessionId}, calling devicePool.assignDeviceToSession()`,
@@ -1079,7 +1100,7 @@ export class SessionManager {
     }
 
     // DevicePool will call createSession() with assigned device
-    await devicePool.assignDeviceToSession(sessionId, platform);
+    await devicePool.assignDeviceToSession(sessionId, platform, recoveryTarget);
 
     // Session now exists, return it
     const session = this.getSession(sessionId);
@@ -1102,7 +1123,14 @@ export class SessionManager {
     const existing = this.sessions.get(sessionId);
     this.assertTerminalRebindAdmission(sessionId, options.terminalReleaseReservationOwner);
     if (!existing) {
-      return await this.createSession(sessionId, assignedDevice, platform);
+      return await this.createSession(
+        sessionId,
+        assignedDevice,
+        platform,
+        undefined,
+        undefined,
+        options.stableDeviceId,
+      );
     }
     if (existing.assignedDevice === assignedDevice && !options.force) {
       return existing;
@@ -1120,7 +1148,12 @@ export class SessionManager {
       throw new Error(`Cannot rebind released session ${sessionId}.`);
     }
 
-    const promise = this.persistAndPublishRebind(existing, assignedDevice, platform);
+    const promise = this.persistAndPublishRebind(
+      existing,
+      assignedDevice,
+      platform,
+      options.stableDeviceId ?? existing.stableDeviceId,
+    );
     const rebind = { session: existing, promise };
     this.pendingSessionRebinds.set(sessionId, rebind);
     try {
@@ -1152,8 +1185,14 @@ export class SessionManager {
     existing: Session,
     assignedDevice: string,
     platform: Platform,
+    stableDeviceId: string | undefined,
   ): Promise<Session> {
-    const replacement = this.createReboundSession(existing, assignedDevice, platform);
+    const replacement = this.createReboundSession(
+      existing,
+      assignedDevice,
+      platform,
+      stableDeviceId,
+    );
     await this.persistSession(replacement);
     const activeSetups = Array.from(this.sessionSetupPromises, (setup) =>
       setup.session === existing ? setup.promise : null,
@@ -1194,7 +1233,10 @@ export class SessionManager {
     // Recreate the replacement after awaited work: activity and label-routing
     // updates remain live while persistence is in flight, and publishing the
     // pre-persistence snapshot would overwrite them.
-    Object.assign(existing, this.createReboundSession(existing, assignedDevice, platform));
+    Object.assign(
+      existing,
+      this.createReboundSession(existing, assignedDevice, platform, stableDeviceId),
+    );
     this.sessionDeviceMap.set(existing.sessionId, assignedDevice);
     if (this.deviceSessionMap.get(previousDevice) === existing.sessionId) {
       this.deviceSessionMap.delete(previousDevice);
@@ -1212,10 +1254,12 @@ export class SessionManager {
     session: Session,
     assignedDevice: string,
     platform: Platform,
+    stableDeviceId: string | undefined,
   ): Session {
     return {
       ...session,
       assignedDevice,
+      stableDeviceId,
       platform,
       cacheData:
         session.cacheData.deviceLabels === undefined
@@ -3290,6 +3334,7 @@ export class SessionManager {
     await this.deviceSessionRepository.upsertActiveSession({
       sessionUuid: session.sessionId,
       deviceId: session.assignedDevice,
+      stableDeviceId: session.stableDeviceId,
       platform: session.platform,
       source: "session-manager",
       createdAtMs: session.createdAt,
@@ -3299,6 +3344,41 @@ export class SessionManager {
       heartbeatTimeoutMs: session.heartbeatTimeoutMs,
       hasReceivedHeartbeat: session.hasReceivedHeartbeat,
     });
+  }
+
+  private recoveryTargetFromPersisted(
+    sessionId: string,
+    persisted: DeviceSession | undefined,
+    requestedPlatform: Platform | undefined,
+  ): SessionRecoveryTarget | undefined {
+    if (!persisted || !this.isRecoverablePersistedSession(persisted)) {
+      return undefined;
+    }
+    // iOS device_id has always been the simulator's immutable UDID. Android's
+    // persisted device_id is an ADB transport serial and cannot prove continuity.
+    const stableDeviceId =
+      persisted.stable_device_id ??
+      (persisted.platform === "ios" ? persisted.device_id : undefined);
+    if (!stableDeviceId) {
+      throw new ActionableError(
+        `Cannot safely recover session ${sessionId}: its persisted device identity is unavailable. ` +
+          "Acquire a new device with getAndroid or getApple.",
+      );
+    }
+    if (requestedPlatform && requestedPlatform !== persisted.platform) {
+      throw new ActionableError(
+        `Cannot safely recover session ${sessionId}: requested platform ${requestedPlatform} ` +
+          `does not match persisted platform ${persisted.platform}. ` +
+          "Acquire a new device with getAndroid or getApple.",
+      );
+    }
+    return {
+      platform: persisted.platform,
+      stableDeviceId,
+      ...(persisted.platform === "android"
+        ? { androidEmulator: isAndroidEmulatorSerial(persisted.device_id) }
+        : {}),
+    };
   }
 
   // Intentionally NOT barrier-tracked when reached via the awaited path

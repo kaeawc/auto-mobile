@@ -1572,6 +1572,7 @@ describe("ToolExecutionContext", () => {
     const nonTerminalPersisted = (sessionUuid: string, deviceId: string): DeviceSession => ({
       session_uuid: sessionUuid,
       device_id: deviceId,
+      stable_device_id: deviceId,
       platform: "android",
       status: "active",
       source: null,

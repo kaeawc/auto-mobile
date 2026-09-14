@@ -1,4 +1,4 @@
-import type { Kysely } from "kysely";
+import { sql, type Kysely } from "kysely";
 import { getDatabase } from "./database";
 import type { Database, DeviceSession, DeviceSessionStatus, NewDeviceSession } from "./types";
 import { logger } from "../utils/logger";
@@ -16,6 +16,7 @@ const DEVICE_SESSION_RETENTION_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 export interface DeviceSessionRecord {
   sessionUuid: string;
   deviceId: string;
+  stableDeviceId?: string;
   platform: Platform;
   status?: DeviceSessionStatus;
   source?: string | null;
@@ -80,6 +81,8 @@ export class DeviceSessionRepository {
       const row: NewDeviceSession = {
         session_uuid: record.sessionUuid,
         device_id: record.deviceId,
+        stable_device_id: record.stableDeviceId ?? null,
+        stable_identity_generation: 0,
         platform: record.platform,
         status: record.status ?? "active",
         source: record.source ?? null,
@@ -103,6 +106,11 @@ export class DeviceSessionRepository {
         .onConflict((oc) =>
           oc.column("session_uuid").doUpdateSet({
             device_id: row.device_id,
+            stable_device_id: row.stable_device_id,
+            // Distinguishes this writer from a forward-compatible older binary
+            // that preserves columns it does not know. The migration trigger
+            // clears stale stable_device_id evidence after such a rebind.
+            stable_identity_generation: sql`stable_identity_generation + 1`,
             platform: row.platform,
             status: row.status,
             source: row.source,

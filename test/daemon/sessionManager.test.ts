@@ -465,6 +465,7 @@ describe("SessionManager", () => {
       const persisted: DeviceSession = {
         session_uuid: "restarted-session",
         device_id: "emulator-5560",
+        stable_device_id: "Pixel_8_API_35",
         platform: "android",
         status: "active",
         source: null,
@@ -491,9 +492,18 @@ describe("SessionManager", () => {
         async markReleased() {},
       };
       const restarted = new SessionManager(fakeTimer, persistence);
+      let recoveryTarget: { platform: string; stableDeviceId: string } | undefined;
       const devicePool: SessionDeviceAssigner = {
-        async assignDeviceToSession(sessionId: string): Promise<string> {
-          await restarted.createSession(sessionId, "emulator-5560", "android");
+        async assignDeviceToSession(sessionId, _platform, target): Promise<string> {
+          recoveryTarget = target;
+          await restarted.createSession(
+            sessionId,
+            "emulator-5560",
+            "android",
+            undefined,
+            undefined,
+            target?.stableDeviceId,
+          );
           return "emulator-5560";
         },
       };
@@ -501,6 +511,11 @@ describe("SessionManager", () => {
         await expect(
           restarted.getOrCreateSession("restarted-session", devicePool, "android", undefined, true),
         ).resolves.toMatchObject({ assignedDevice: "emulator-5560" });
+        expect(recoveryTarget).toEqual({
+          platform: "android",
+          stableDeviceId: "Pixel_8_API_35",
+          androidEmulator: true,
+        });
       } finally {
         restarted.stopCleanupTimer();
       }
@@ -3551,7 +3566,7 @@ describe("SessionManager", () => {
     }
   });
 
-  test("admits a persisted daemon-restart session for recreation", async () => {
+  test("rejects persisted daemon-restart recovery without a durable device identity", async () => {
     const persisted: DeviceSession = {
       session_uuid: "restarted-session",
       device_id: "emulator-5554",
@@ -3581,8 +3596,10 @@ describe("SessionManager", () => {
       async markReleased() {},
     };
     const restarted = new SessionManager(fakeTimer, persistence);
+    const assignedSessionIds: string[] = [];
     const devicePool: SessionDeviceAssigner = {
       async assignDeviceToSession(sessionId: string): Promise<string> {
+        assignedSessionIds.push(sessionId);
         await restarted.createSession(sessionId, "emulator-5560", "android");
         return "emulator-5560";
       },
@@ -3593,7 +3610,8 @@ describe("SessionManager", () => {
       ).resolves.toBeUndefined();
       await expect(
         restarted.getOrCreateSession("restarted-session", devicePool, "android"),
-      ).resolves.toMatchObject({ assignedDevice: "emulator-5560" });
+      ).rejects.toThrow(/cannot safely recover/i);
+      expect(assignedSessionIds).toEqual([]);
       persisted.status = "released";
       persisted.release_reason = "daemon-shutdown";
       const gracefullyRestarted = new SessionManager(fakeTimer, persistence);
@@ -3613,6 +3631,67 @@ describe("SessionManager", () => {
       } finally {
         ordinarilyReleased.stopCleanupTimer();
       }
+    } finally {
+      restarted.stopCleanupTimer();
+    }
+  });
+
+  test("uses an iOS simulator UDID from a legacy persisted session as its stable identity", async () => {
+    const persisted: DeviceSession = {
+      session_uuid: "restarted-ios-session",
+      device_id: "simulator-uuid",
+      platform: "ios",
+      status: "expired",
+      source: null,
+      autolock_enabled: 0,
+      mcp_session_id: null,
+      daemon_session_id: "old-daemon",
+      created_at_ms: 1,
+      last_used_at_ms: 20,
+      expires_at_ms: 30,
+      released_at_ms: 25,
+      release_reason: "daemon-restart",
+      session_timeout_ms: 10,
+      heartbeat_timeout_ms: 5,
+      has_received_heartbeat: 1,
+      created_at: "2026-09-14T00:00:00.000Z",
+      updated_at: "2026-09-14T00:00:00.000Z",
+    };
+    const restarted = new SessionManager(fakeTimer, {
+      async getSession() {
+        return persisted;
+      },
+      async upsertActiveSession() {},
+      async recordActivity() {},
+      async markReleased() {},
+    });
+    let recoveryTarget: { platform: string; stableDeviceId: string } | undefined;
+    const devicePool: SessionDeviceAssigner = {
+      async assignDeviceToSession(sessionId, _platform, target): Promise<string> {
+        recoveryTarget = target;
+        await restarted.createSession(
+          sessionId,
+          "simulator-uuid",
+          "ios",
+          undefined,
+          undefined,
+          target?.stableDeviceId,
+        );
+        return "simulator-uuid";
+      },
+    };
+
+    try {
+      await expect(
+        restarted.getOrCreateSession("restarted-ios-session", devicePool, "ios", undefined, true),
+      ).resolves.toMatchObject({
+        assignedDevice: "simulator-uuid",
+        stableDeviceId: "simulator-uuid",
+      });
+      expect(recoveryTarget).toEqual({
+        platform: "ios",
+        stableDeviceId: "simulator-uuid",
+      });
     } finally {
       restarted.stopCleanupTimer();
     }

@@ -30,6 +30,7 @@ describe("ToolRegistry persisted daemon-session deviceReadiness gating (#6227)",
   const nonTerminalPersisted = (sessionUuid: string, deviceId: string): DeviceSession => ({
     session_uuid: sessionUuid,
     device_id: deviceId,
+    stable_device_id: androidA.name,
     platform: "android",
     status: "active",
     source: null,

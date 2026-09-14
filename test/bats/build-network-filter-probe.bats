@@ -151,6 +151,15 @@ MOCK
   [ ! -e "${PROBE_TEST_CODESIGN_MARKER}" ]
 }
 
+@test "unsigned build refuses to lipo-combine when no architectures are requested" {
+  install_build_stubs
+  export PROBE_ARCHS=""
+  run bash "${SCRIPT}" unsigned
+  [ "${status}" -eq 1 ]
+  [[ "${output}" == *"no architectures requested for network-filter-controller (PROBE_ARCHS is empty)"* ]]
+  [ ! -e "${PROBE_TEST_LIPO_LOG}" ]
+}
+
 # --- activate exit codes, #6897 ------------------------------------------------
 
 install_controller_stub() {

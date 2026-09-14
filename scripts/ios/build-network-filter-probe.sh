@@ -21,7 +21,9 @@ set -euo pipefail
 EXIT_USAGE=2
 EXIT_APPROVAL_REQUIRED=3
 EXIT_RESTART_REQUIRED=4
-PROBE_ARCHS="arm64 x86_64"
+# Space-separated architectures to build and lipo-combine. Overridable for
+# tests; `-` rather than `:-` so an explicitly empty value is honoured.
+PROBE_ARCHS="${PROBE_ARCHS-arm64 x86_64}"
 DEFAULT_APP="/Applications/AutoMobile Network Identity Probe.app"
 
 mode="${1:-unsigned}"
@@ -116,7 +118,12 @@ for executable in network-filter-controller network-filter-provider; do
     inputs+=("${slices}/${arch}/${executable}")
   done
   universal="${slices}/universal/${executable}"
-  lipo -create "${inputs[@]}" -output "${universal}"
+  # `lipo -create` with no inputs is never what we want; fail before it runs.
+  if [[ -z "${inputs[*]+x}" ]]; then
+    echo "no architectures requested for ${executable} (PROBE_ARCHS is empty)" >&2
+    exit 1
+  fi
+  lipo -create ${inputs[@]+"${inputs[@]}"} -output "${universal}"
   archs="$(lipo -archs "${universal}")"
   for arch in ${PROBE_ARCHS}; do
     case " ${archs} " in

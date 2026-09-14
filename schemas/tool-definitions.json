@@ -1777,6 +1777,7 @@
               "recentApps",
               "recordSteps",
               "removeKeyValue",
+              "resetAppLogs",
               "resetKeychain",
               "rotate",
               "selectAllText",
@@ -1902,6 +1903,7 @@
               "recentApps",
               "recordSteps",
               "removeKeyValue",
+              "resetAppLogs",
               "resetKeychain",
               "rotate",
               "selectAllText",
@@ -7984,6 +7986,7 @@
               "recentApps",
               "recordSteps",
               "removeKeyValue",
+              "resetAppLogs",
               "resetKeychain",
               "rotate",
               "selectAllText",
@@ -8348,6 +8351,54 @@
         }
       },
       "required": ["appId", "key"],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "resetAppLogs",
+    "description": "Reset explicitly named app-container log files (and their rotated `<path>.N` siblings) on the session's device, reporting a per-path outcome.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "appId": {
+          "description": "App package name or bundle identifier",
+          "type": "string",
+          "minLength": 1
+        },
+        "container": {
+          "description": "Logical app container that holds the log files",
+          "default": "documents",
+          "type": "string",
+          "enum": ["documents", "library", "cache", "tmp", "externalFiles"]
+        },
+        "paths": {
+          "description": "Explicitly named log files to reset",
+          "minItems": 1,
+          "maxItems": 32,
+          "type": "array",
+          "items": {
+            "description": "Log file path relative to the container; rotated siblings (`<path>.N`) are reset too",
+            "type": "string"
+          }
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": ["appId", "paths"],
       "additionalProperties": false
     }
   },
@@ -9709,6 +9760,7 @@
             "recentApps",
             "recordSteps",
             "removeKeyValue",
+            "resetAppLogs",
             "resetKeychain",
             "rotate",
             "selectAllText",
@@ -9800,6 +9852,7 @@
               "recentApps",
               "recordSteps",
               "removeKeyValue",
+              "resetAppLogs",
               "resetKeychain",
               "rotate",
               "selectAllText",

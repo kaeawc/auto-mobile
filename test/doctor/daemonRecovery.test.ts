@@ -6,6 +6,7 @@ import {
   type DaemonRecoveryResult,
 } from "../../src/doctor/daemonRecovery";
 import type { DaemonHealthReport } from "../../src/daemon/debugTools";
+import type { DoctorReport } from "../../src/doctor/types";
 import { MAX_SETTIMEOUT_DELAY_MS } from "../../src/utils/SystemTimer";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -33,6 +34,20 @@ function dependencies(
     recoverControlState: async () => "restarted",
     verifyProtocol: async () => {},
     ...overrides,
+  };
+}
+
+function doctorReport(platform: "android" | "ios"): DoctorReport {
+  return {
+    timestamp: "2026-09-14T00:00:00.000Z",
+    version: "0.0.0-test",
+    platform: "darwin",
+    arch: "arm64",
+    system: { checks: [] },
+    autoMobile: { checks: [] },
+    ...(platform === "android" ? { android: { checks: [] } } : { ios: { checks: [] } }),
+    summary: { total: 0, passed: 0, warnings: 0, failed: 0, skipped: 0 },
+    recommendations: [],
   };
 }
 
@@ -85,6 +100,78 @@ describe("repairDaemon", () => {
     });
     expect(metadataRepairs).toBe(1);
     expect(protocolChecks).toBe(1);
+  });
+
+  test.each(["android", "ios"] as const)(
+    "runs requested %s diagnostics after repair under the shared deadline",
+    async (platform) => {
+      const calls: Array<{ android?: boolean; ios?: boolean; timeoutMs?: number }> = [];
+      const result = await repairDaemon(
+        { [platform]: true },
+        dependencies([healthReport(true), healthReport(true)], {
+          runDoctor: async (options) => {
+            calls.push(options);
+            return doctorReport(platform);
+          },
+        }),
+      );
+
+      expect(result).toMatchObject<Partial<DaemonRecoveryResult>>({
+        status: "repaired",
+        phase: "complete",
+        postRepairDoctor: { [platform]: true },
+      });
+      expect(calls).toHaveLength(1);
+      expect(calls[0]).toMatchObject({ [platform]: true });
+      expect(calls[0]?.timeoutMs).toBeGreaterThan(0);
+      expect(calls[0]?.signal).toBeInstanceOf(AbortSignal);
+    },
+  );
+
+  test("rejects a repair result when requested diagnostics do not run the selected platform", async () => {
+    const result = await repairDaemon(
+      { android: true },
+      dependencies([healthReport(true), healthReport(true)], {
+        runDoctor: async () => doctorReport("ios"),
+      }),
+    );
+
+    expect(result).toMatchObject<Partial<DaemonRecoveryResult>>({
+      status: "failed",
+      phase: "verification",
+      action: "joined",
+      after: { socketConnectable: true },
+      nextAction: expect.stringContaining("post-repair doctor did not run"),
+    });
+    expect(result.postRepairDoctor).toBeUndefined();
+  });
+
+  test("returns by the shared deadline when post-repair diagnostics ignore cancellation", async () => {
+    const timer = new FakeTimer();
+    let cancelled = false;
+    const repair = repairDaemon(
+      { android: true, timeoutMs: 50 },
+      dependencies([healthReport(true), healthReport(true)], {
+        timer,
+        runDoctor: async ({ signal }) => {
+          signal?.addEventListener("abort", () => {
+            cancelled = true;
+          });
+          return await new Promise<DoctorReport>(() => {});
+        },
+      }),
+    );
+
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    timer.advanceTime(50);
+
+    await expect(repair).resolves.toMatchObject<Partial<DaemonRecoveryResult>>({
+      status: "failed",
+      phase: "verification",
+      action: "joined",
+      nextAction: expect.stringContaining("deadline"),
+    });
+    expect(cancelled).toBe(true);
   });
 
   test("does not let a delayed metadata repair publish after the doctor deadline", async () => {

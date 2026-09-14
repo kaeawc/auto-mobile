@@ -143,7 +143,7 @@ describe("doctorToolParams", () => {
     });
   });
 
-  test("keeps android and ios filters diagnostic-only while repair remains host-wide", async () => {
+  test("threads Android and iOS filters into host-wide repair's post-repair diagnostics", async () => {
     const receivedOptions: unknown[] = [];
     setCliOutputSinksForTesting({
       stdout: { write: () => {} },
@@ -167,8 +167,8 @@ describe("doctorToolParams", () => {
     }
 
     expect(receivedOptions).toEqual([
-      { timeoutMs: undefined, daemonOptions: undefined },
-      { timeoutMs: undefined, daemonOptions: undefined },
+      { timeoutMs: undefined, android: true, ios: undefined, daemonOptions: undefined },
+      { timeoutMs: undefined, android: undefined, ios: true, daemonOptions: undefined },
     ]);
   });
 

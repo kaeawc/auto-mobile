@@ -52,6 +52,16 @@ const androidArgs: AcceptanceArgs = {
   testOwnedDevices: false,
 };
 
+const iosArgs: AcceptanceArgs = {
+  ...androidArgs,
+  platform: "ios",
+  target: { simulatorName: "iPhone 16 Pro", simulatorUdid: IOS_UDID },
+  runtime: "iOS 18.0",
+  deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-16-Pro",
+  osVersionRange: { min: "17.0", max: "18.0" },
+  androidConfig: undefined,
+};
+
 function oldSessionDiagnostic(sessionUuid: string): string {
   return (
     `Session ${sessionUuid} is not an active daemon session (not found). ` +
@@ -304,6 +314,7 @@ function createHarness(
         };
       }
       if (name === "ide/status") {
+        events.push("daemon:ide/status");
         return { buildId: "test-build", entryScript: "/test/dist/src/index.js" };
       }
       if (name === "ide/prepareMaintenance") {
@@ -762,33 +773,45 @@ describe("live device acceptance harness", () => {
     expect(harness.events).toContain("reacquire-after-repair:getAndroid");
   });
 
-  test("faults only maintenance-admitted control metadata, then repairs and verifies fresh protocol", async () => {
-    const harness = createHarness();
+  test.each([
+    { args: androidArgs, flag: "--android" },
+    { args: iosArgs, flag: "--ios" },
+  ])(
+    "runs filtered post-repair doctor diagnostics before protocol verification and reacquisition",
+    async ({ args, flag }) => {
+      const harness = createHarness();
 
-    const evidence = await runAcceptanceMatrix(androidArgs, harness.dependencies);
-    const fault = harness.cliCommands.findIndex((command) =>
-      command.includes("corrupt-control-metadata-admitted"),
-    );
-    const doctor = harness.cliCommands.findIndex((command) => command.includes("doctor"));
+      const evidence = await runAcceptanceMatrix(args, harness.dependencies);
+      const fault = harness.cliCommands.findIndex((command) =>
+        command.includes("corrupt-control-metadata-admitted"),
+      );
+      const doctor = harness.cliCommands.findIndex((command) => command.includes("doctor"));
+      const doctorEvent = harness.events.findLastIndex((event) => event.startsWith("doctor:"));
+      const protocolEvent = harness.events.findLastIndex((event) => event === "daemon:ide/status");
 
-    expect(fault).toBeGreaterThanOrEqual(0);
-    expect(doctor).toBeGreaterThan(fault);
-    expect(harness.cliCommands[fault]).toEqual([
-      process.execPath,
-      "/test/dist/src/index.js",
-      "--daemon",
-      "corrupt-control-metadata-admitted",
-      "--maintenance-token",
-      "test-maintenance-token",
-    ]);
-    expect(harness.cliCommands[doctor]).toContain("--android");
-    expect(harness.events).toContain("reacquire-after-repair:getAndroid");
-    expect(harness.events).toContain("reacquire-after-repair:observe");
-    expect(evidence.checks).toMatchObject({
-      stableIdentityPreserved: true,
-      readinessObserveThenState: true,
-    });
-  });
+      expect(fault).toBeGreaterThanOrEqual(0);
+      expect(doctor).toBeGreaterThan(fault);
+      expect(doctorEvent).toBeGreaterThanOrEqual(0);
+      expect(protocolEvent).toBeGreaterThan(doctorEvent);
+      expect(harness.cliCommands[fault]).toEqual([
+        process.execPath,
+        "/test/dist/src/index.js",
+        "--daemon",
+        "corrupt-control-metadata-admitted",
+        "--maintenance-token",
+        "test-maintenance-token",
+      ]);
+      expect(harness.cliCommands[doctor]).toContain(flag);
+      expect(harness.events).toContain(
+        `reacquire-after-repair:${args.platform === "android" ? "getAndroid" : "getApple"}`,
+      );
+      expect(harness.events).toContain("reacquire-after-repair:observe");
+      expect(evidence.checks).toMatchObject({
+        stableIdentityPreserved: true,
+        readinessObserveThenState: true,
+      });
+    },
+  );
 
   test("rejects a generic error instead of the required old-session diagnostic", async () => {
     const harness = createHarness({ oldSessionDiagnostic: "unknown session" });

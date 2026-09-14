@@ -438,6 +438,15 @@ describe("runDoctor", () => {
     });
   });
 
+  test("runs Android and autoMobile but not iOS for an Android-only run", async () => {
+    await withProcessPlatform("darwin", async () => {
+      const report = await runDoctor({ android: true }, fakeDeps());
+
+      expect(report.android?.checks.map((c) => c.name)).toEqual(["Android SDK"]);
+      expect(report.ios).toBeUndefined();
+    });
+  });
+
   test("summary.total counts every check across all rendered sections", async () => {
     await withProcessPlatform("linux", async () => {
       const report = await runDoctor({ ios: true }, fakeDeps());

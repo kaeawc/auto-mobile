@@ -10,6 +10,8 @@ import type { DaemonOptions } from "../daemon/types";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
 import { defaultTimer, MAX_SETTIMEOUT_DELAY_MS, type Timer } from "../utils/SystemTimer";
+import { runDoctor } from ".";
+import type { DoctorOptions, DoctorReport } from "./types";
 
 const DEFAULT_DAEMON_RECOVERY_TIMEOUT_MS = 45_000;
 
@@ -19,12 +21,27 @@ export type DaemonRecoveryAction = "joined" | "restarted";
 export interface DoctorRepairOptions {
   /**
    * Total deadline across daemon diagnosis, repair, and verification.
-   * It is intentionally independent of platform selection: the daemon and its
-   * control socket are shared host infrastructure.
+   * Platform diagnostics, when requested, use this same deadline. The daemon
+   * and its control socket remain shared host infrastructure.
    */
   timeoutMs?: unknown;
+  /**
+   * Run Android diagnostics after the host-wide daemon repair completes.
+   * This does not narrow the shared daemon/control-socket repair scope.
+   */
+  android?: boolean;
+  /**
+   * Run iOS diagnostics after the host-wide daemon repair completes.
+   * This does not narrow the shared daemon/control-socket repair scope.
+   */
+  ios?: boolean;
   /** Daemon options parsed from the current CLI invocation. */
   daemonOptions?: DaemonOptions;
+}
+
+export interface PostRepairDoctorVerification {
+  android?: true;
+  ios?: true;
 }
 
 export interface DaemonRecoveryResult {
@@ -34,6 +51,11 @@ export interface DaemonRecoveryResult {
   /** Undefined when diagnosis did not complete and no action was selected. */
   action?: DaemonRecoveryAction;
   after?: DaemonHealthReport;
+  /**
+   * Present only after the requested platform diagnostics ran successfully
+   * within the recovery deadline.
+   */
+  postRepairDoctor?: PostRepairDoctorVerification;
   nextAction?: string;
 }
 
@@ -61,6 +83,8 @@ export interface DaemonRecoveryDependencies {
    * through DaemonMcpProxy, the daemon's version and build identity.
    */
   verifyProtocol?: () => Promise<void>;
+  /** Runs the requested platform doctor checks after host metadata repair. */
+  runDoctor?: (options: DoctorOptions) => Promise<DoctorReport>;
   timer?: Timer;
 }
 
@@ -239,6 +263,7 @@ interface ResolvedRecoveryDependencies {
   ) => Promise<DaemonRestartResult>;
   verifyProtocol: () => Promise<void>;
   isProtocolHealthy: () => Promise<boolean>;
+  runDoctor: (options: DoctorOptions) => Promise<DoctorReport>;
 }
 
 function resolveRecoveryDependencies(
@@ -263,6 +288,7 @@ function resolveRecoveryDependencies(
         )),
     verifyProtocol,
     isProtocolHealthy: protocolHealthProbe(verifyProtocol),
+    runDoctor: dependencies.runDoctor ?? runDoctor,
   };
 }
 
@@ -417,10 +443,56 @@ async function repairConnectableDaemonMetadata(
   );
 }
 
+function requestedPostRepairDoctor(
+  options: DoctorRepairOptions,
+): PostRepairDoctorVerification | undefined {
+  const requested = {
+    ...(options.android === true ? { android: true as const } : {}),
+    ...(options.ios === true ? { ios: true as const } : {}),
+  };
+  return Object.keys(requested).length === 0 ? undefined : requested;
+}
+
+function assertRequestedDoctorSections(
+  report: DoctorReport,
+  requested: PostRepairDoctorVerification,
+): void {
+  if (requested.android && !report.android) {
+    throw new Error("post-repair doctor did not run the requested Android diagnostics");
+  }
+  if (requested.ios && !report.ios) {
+    throw new Error("post-repair doctor did not run the requested iOS diagnostics");
+  }
+  if (report.summary.failed > 0) {
+    throw new Error(`post-repair doctor reported ${report.summary.failed} failed check(s)`);
+  }
+}
+
+async function verifyRequestedDoctorChecks(
+  requested: PostRepairDoctorVerification | undefined,
+  deadline: number,
+  timer: Timer,
+  runDoctorChecks: (options: DoctorOptions) => Promise<DoctorReport>,
+): Promise<RecoveryAttempt<PostRepairDoctorVerification> | undefined> {
+  if (!requested) {
+    return undefined;
+  }
+  return await attemptRecoveryStep("verification", deadline, timer, async (signal) => {
+    const report = await runDoctorChecks({
+      ...requested,
+      signal,
+      timeoutMs: Math.max(1, deadline - timer.now()),
+    });
+    assertRequestedDoctorSections(report, requested);
+    return requested;
+  });
+}
+
 /**
  * Deliberately repair only the shared daemon/control-socket layer. Device
- * selection is intentionally outside this contract: doctor currently accepts
- * platform filters, not a concrete AVD or simulator UUID.
+ * selection is intentionally outside this contract: doctor accepts platform
+ * filters, not a concrete AVD or simulator UUID. Requested filters are instead
+ * used for post-repair diagnostics under the same absolute deadline.
  */
 export async function repairDaemon(
   options: DoctorRepairOptions = {},
@@ -445,6 +517,7 @@ export async function repairDaemon(
     recoverControlState,
     verifyProtocol,
     isProtocolHealthy,
+    runDoctor: runDoctorChecks,
   } = resolveRecoveryDependencies(dependencies);
   const daemonOptions = options.daemonOptions ?? {};
   const deadline = timer.now() + timeoutMs;
@@ -524,11 +597,28 @@ export async function repairDaemon(
     );
   }
 
+  const postRepairDoctor = await verifyRequestedDoctorChecks(
+    requestedPostRepairDoctor(options),
+    deadline,
+    timer,
+    runDoctorChecks,
+  );
+  if (postRepairDoctor && !postRepairDoctor.ok) {
+    return failedRecovery(
+      "verification",
+      protocolRecovery.value,
+      postRepairDoctor.error,
+      before,
+      finalHealth.value,
+    );
+  }
+
   return {
     status: "repaired",
     phase: "complete",
     before,
     action: protocolRecovery.value,
     after: finalHealth.value,
+    ...(postRepairDoctor ? { postRepairDoctor: postRepairDoctor.value } : {}),
   };
 }

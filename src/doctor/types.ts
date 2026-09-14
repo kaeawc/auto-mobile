@@ -68,7 +68,7 @@ export interface DoctorProbeOptions {
 /**
  * Options for running the doctor diagnostic
  */
-export interface DoctorOptions {
+export interface DoctorOptions extends DoctorProbeOptions {
   /** Run Android-specific checks only */
   android?: boolean;
   /** Run iOS-specific checks only */

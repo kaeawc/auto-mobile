@@ -533,6 +533,8 @@ export async function runDoctorCommand(
     // control socket cannot serve the daemon's doctor tool.
     const recovery = await (dependencies.repairDaemon ?? repairDaemon)({
       timeoutMs: params.timeoutMs,
+      android: params.android,
+      ios: params.ios,
       daemonOptions,
     });
     writeCliToolOutput(recovery, "doctor");

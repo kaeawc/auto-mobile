@@ -2,6 +2,7 @@ import type { ObserveResult, SkeletonElement } from "../../../models/ObserveResu
 import type { ViewHierarchyNode } from "../../../models/ViewHierarchyResult";
 import { projectSkeleton } from "./SkeletonProjection";
 import { capLayoutWarnings } from "../audits/SafeAreaAuditor";
+import { captureFidelityTruncationReasons } from "../truncationReasons";
 
 /**
  * Output-only shrinking of a single `ObserveResult` for serialization
@@ -164,9 +165,14 @@ export function sanitizeObserveResult(
  * emitted copy. A hierarchy-less observation (capture failure) yields an empty
  * skeleton and no `context` — still a valid, if empty, projection.
  *
- * Any `viewHierarchy.truncationReasons` are lifted to the payload top level
- * first (issue #6601), so a projection that removes the tree still tells the
- * caller the rows it does list may be incomplete.
+ * Only CAPTURE-FIDELITY `viewHierarchy.truncationReasons` are lifted to the
+ * payload top level (issue #6601, refined by #6933): a host-output
+ * `max_children[...]` cap (`isHostOutputTruncationReason`) trims only the
+ * rendered `viewHierarchy` payload, while `DefaultObserveElementCollector` —
+ * the source of the skeleton's elements — follows the uncapped raw hierarchy
+ * whenever `--raw-element-search` is enabled (`resolveViewHierarchyForSearch`).
+ * Lifting a host-output-only reason here would falsely tell a client that a
+ * complete skeleton is a subset of what the device emitted.
  *
  * `source` is the pre-clone `obs`: its elements still carry the non-enumerable
  * ancestry provenance (issue #5881) that the `sanitizeObserveResult` JSON clone
@@ -196,9 +202,9 @@ function projectSkeletonOnto(out: ObserveResult, source: ObserveResult): void {
   // `truncationReasons` exists to prevent. `layoutWarnings` / `performanceAudit`
   // are deliberately advisory and dropped here; this is not advisory, it is the
   // completeness contract of the rows the skeleton does list.
-  const truncationReasons = out.viewHierarchy?.truncationReasons;
-  if (truncationReasons && truncationReasons.length > 0) {
-    out.truncationReasons = [...truncationReasons];
+  const truncationReasons = captureFidelityTruncationReasons(out.viewHierarchy?.truncationReasons);
+  if (truncationReasons.length > 0) {
+    out.truncationReasons = truncationReasons;
   }
   delete out.viewHierarchy;
   delete out.elements;

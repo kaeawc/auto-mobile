@@ -327,6 +327,25 @@ describe("finalizeToolResponse", () => {
   // say the tree was capped, or the agent reads a short list as a complete one.
   test("a default observe response keeps the hierarchy truncation reasons", () => {
     const obs = makeObserveResult();
+    obs.viewHierarchy!.truncationReasons = ["max_nodes"];
+
+    const finalized = finalizeToolResponse(createStructuredToolResponse(obs), {
+      name: "observe",
+    });
+
+    const payload = finalized.structuredContent as ObserveResult;
+    expect(payload.viewHierarchy).toBeUndefined();
+    expect(payload.truncationReasons).toEqual(["max_nodes"]);
+    expect(JSON.parse(finalized.content[0].text).truncationReasons).toEqual(["max_nodes"]);
+  });
+
+  // Issue #6933: a host-output `max_children[...]` cap trims only the rendered
+  // `viewHierarchy` payload — `DefaultObserveElementCollector` (the source of
+  // the skeleton's elements) follows the uncapped raw hierarchy under
+  // `--raw-element-search` — so the skeleton projection must NOT surface it as
+  // if the skeleton itself were an incomplete subset.
+  test("a default observe response does not surface a host-output max_children cap as skeleton incompleteness", () => {
+    const obs = makeObserveResult();
     obs.viewHierarchy!.truncationReasons = ["max_children[com.example:id/root kept 64 of 70]"];
 
     const finalized = finalizeToolResponse(createStructuredToolResponse(obs), {
@@ -335,10 +354,7 @@ describe("finalizeToolResponse", () => {
 
     const payload = finalized.structuredContent as ObserveResult;
     expect(payload.viewHierarchy).toBeUndefined();
-    expect(payload.truncationReasons).toEqual(["max_children[com.example:id/root kept 64 of 70]"]);
-    expect(JSON.parse(finalized.content[0].text).truncationReasons).toEqual([
-      "max_children[com.example:id/root kept 64 of 70]",
-    ]);
+    expect(payload.truncationReasons).toBeUndefined();
   });
 
   test("EC4: elements are kept only when the include-elements gate is enabled", () => {
@@ -1053,6 +1069,44 @@ describe("finalizeToolResponse", () => {
       expect(obsSc.isDiff).toBe(true);
       expect(obsSc.truncationReasons).toBeUndefined();
       expect("truncationReasons" in JSON.parse(finalized.content[0].text).observation).toBe(false);
+    });
+
+    // Issue #6933: the opposite transition from the #6601 thread above. The
+    // BASELINE observation (stored capped, first 64 of 70 rows) carries the
+    // truncation reason; the post-action observation this resolver consults
+    // has since fallen below the cap and carries none. Without folding the
+    // baseline's provenance in, a diff reports a plain removal count with no
+    // warning that the "removed" rows past its own cap were never diffable to
+    // begin with.
+    test("a diffed observation carries the BASELINE's truncation reasons when the current hierarchy fell below the cap (issue #6933)", () => {
+      const { store } = makeStore();
+      const reasons = ["max_children[com.example:id/root kept 64 of 70]"];
+      const cappedBaseline = (): ObserveResult => {
+        const observation = sameScreenObserve();
+        observation.viewHierarchy!.truncationReasons = [...reasons];
+        return observation;
+      };
+
+      finalizeToolResponse(createStructuredToolResponse(cappedBaseline()), {
+        name: "observe",
+        sessionUuid: "s1",
+        baselineStore: store,
+      });
+
+      // The post-action observation is untruncated (no truncationReasons of its own).
+      const next = sameScreenObserve();
+      (next.viewHierarchy!.hierarchy.node as any).node[0].checked = "true";
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: next }),
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
+      );
+
+      const obsSc = (finalized.structuredContent as any).observation;
+      expect(obsSc.isDiff).toBe(true);
+      expect(obsSc.truncationReasons).toEqual(reasons);
+
+      const parsed = JSON.parse(finalized.content[0].text);
+      expect(parsed.observation.truncationReasons).toEqual(reasons);
     });
 
     test("a diffed observation carries a usable `skeleton` even under raw:true / project:'full' (PR #6242 review PRRT_kwDOP-GF5M6fq3iK)", () => {

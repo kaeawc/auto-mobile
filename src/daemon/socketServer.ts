@@ -2712,41 +2712,14 @@ export class UnixSocketServer {
     }
   }
 
-  private async recoverDeviceControlTransport(
+  private async prepareDeviceControlRecoveryReplay(
     input: DeviceControlTransportRecoveryContext,
-  ): Promise<unknown> {
-    input.signal?.throwIfAborted();
-    if (input.failedClient) {
-      await this.resetMcpClientIfCurrent(input.route.clientKey, input.failedClient, "detach");
-    }
-    input.signal?.throwIfAborted();
-    if (!this.isDeviceControlRecoveryIdentityValid(input.identity, input.phase)) {
-      throw this.deviceControlTransportError({
-        request: input.request,
-        identity: input.identity,
-        phase: input.phase,
-        reconnectAttempted: false,
-        replayAttempted: false,
-        recoveryExhausted: false,
-      });
-    }
-
-    const replayAfterResponse =
-      input.phase === "response" && isReplaySafeAfterResponseClosure(input.request);
-    logger.warn(
-      `[McpForward] device-control transport closed for ${deviceControlToolName(input.request)} during ${input.phase}; reconnecting once`,
-    );
-    if (this.remainingMcpForwardBudget(input) <= 0) {
-      throw this.deviceControlTransportError({
-        request: input.request,
-        identity: input.identity,
-        phase: input.phase,
-        reconnectAttempted: false,
-        replayAttempted: false,
-        recoveryExhausted: true,
-      });
-    }
-
+    replayAfterResponse: boolean,
+  ): Promise<{
+    recoveryRoute: McpForwardRoute;
+    freshClient: Client;
+    retryRemainingMs: number;
+  }> {
     const recoveryRoute = this.getDeviceControlRecoveryRoute(input, replayAfterResponse);
     const recoveryInput = { ...input, route: recoveryRoute };
     input.signal?.throwIfAborted();
@@ -2786,6 +2759,46 @@ export class UnixSocketServer {
         recoveryExhausted: false,
       });
     }
+    return { recoveryRoute, freshClient, retryRemainingMs };
+  }
+
+  private async recoverDeviceControlTransport(
+    input: DeviceControlTransportRecoveryContext,
+  ): Promise<unknown> {
+    input.signal?.throwIfAborted();
+    if (input.failedClient) {
+      await this.resetMcpClientIfCurrent(input.route.clientKey, input.failedClient, "detach");
+    }
+    input.signal?.throwIfAborted();
+    if (!this.isDeviceControlRecoveryIdentityValid(input.identity, input.phase)) {
+      throw this.deviceControlTransportError({
+        request: input.request,
+        identity: input.identity,
+        phase: input.phase,
+        reconnectAttempted: false,
+        replayAttempted: false,
+        recoveryExhausted: false,
+      });
+    }
+
+    const replayAfterResponse =
+      input.phase === "response" && isReplaySafeAfterResponseClosure(input.request);
+    logger.warn(
+      `[McpForward] device-control transport closed for ${deviceControlToolName(input.request)} during ${input.phase}; reconnecting once`,
+    );
+    if (this.remainingMcpForwardBudget(input) <= 0) {
+      throw this.deviceControlTransportError({
+        request: input.request,
+        identity: input.identity,
+        phase: input.phase,
+        reconnectAttempted: false,
+        replayAttempted: false,
+        recoveryExhausted: true,
+      });
+    }
+
+    const { recoveryRoute, freshClient, retryRemainingMs } =
+      await this.prepareDeviceControlRecoveryReplay(input, replayAfterResponse);
 
     try {
       const recoveryRequest = this.pinDeviceControlRecoveryRequest(
@@ -5061,6 +5074,20 @@ export class UnixSocketServer {
     return discovery.devices;
   }
 
+  private mcpRequestOptions(
+    timeoutMs: number,
+    signal?: AbortSignal,
+  ): { timeout: number; signal?: AbortSignal } {
+    return signal ? { timeout: timeoutMs, signal } : { timeout: timeoutMs };
+  }
+
+  private combineMcpRequestSignals(
+    ownerSignal: AbortSignal | undefined,
+    timeoutSignal: AbortSignal,
+  ): AbortSignal {
+    return ownerSignal ? AbortSignal.any([ownerSignal, timeoutSignal]) : timeoutSignal;
+  }
+
   private async handleIdeRequest(
     mcpClient: Client,
     request: DaemonRequest,
@@ -5085,7 +5112,7 @@ export class UnixSocketServer {
     signal?: AbortSignal,
   ): Promise<any> {
     signal?.throwIfAborted();
-    const requestOptions = { timeout: timeoutMs, ...(signal ? { signal } : {}) };
+    const requestOptions = this.mcpRequestOptions(timeoutMs, signal);
 
     switch (request.method) {
       case "tools/list": {
@@ -5152,7 +5179,7 @@ export class UnixSocketServer {
 
           callOptions = {
             ...requestOptions,
-            signal: signal ? AbortSignal.any([signal, controller.signal]) : controller.signal,
+            signal: this.combineMcpRequestSignals(signal, controller.signal),
             timeout: backstopMs,
             maxTotalTimeout: backstopMs,
             // Relay progress ticks back to the ORIGINATING socket session,

@@ -59,7 +59,8 @@ function androidRecord(
       startedAtIso: "2026-07-29T00:00:00.000Z",
     },
     samplingIntervalsMs: {},
-    schemaVersion: 3,
+    schemaVersion: 4,
+    captureLatencySample: true,
     stages:
       firstEncodedFrameMs === null
         ? []

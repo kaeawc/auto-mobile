@@ -84,6 +84,10 @@ interface ChromeReader {
   cdp: CdpClient;
 }
 
+interface WHEPSubscriptionReader extends ChromeReader {
+  retried: boolean;
+}
+
 class CdpClient {
   private nextId = 1;
   private readonly pending = new Map<
@@ -464,19 +468,19 @@ async function subscribeReader(cdp: CdpClient): Promise<void> {
 }
 
 /**
- * The macOS hosted image can leave a previously healthy Chrome renderer unable
- * to create its next WHEP peer connection. A new browser/profile turns that
- * browser-only flake into one bounded retry while preserving the actual
- * keyframe-recovery assertion below.
+ * The macOS hosted image can leave a healthy Chrome renderer unable to create
+ * its next WHEP peer connection. A new browser/profile turns that browser-only
+ * flake into one bounded retry while retaining whether it recovered, so a
+ * recovered initial subscription does not feed capture-latency percentiles.
  */
 async function subscribeRecoveryReader(
   reader: ChromeReader,
   logFile: string,
   onChromeStarted: (chrome: ChildProcessWithoutNullStreams) => void,
-): Promise<ChromeReader> {
+): Promise<WHEPSubscriptionReader> {
   try {
     await subscribeReader(reader.cdp);
-    return reader;
+    return { ...reader, retried: false };
   } catch (firstError) {
     reader.cdp.close();
     await stop(reader.chrome);
@@ -484,7 +488,7 @@ async function subscribeRecoveryReader(
     const replacement = await launchChromeReader(logFile, onChromeStarted);
     try {
       await subscribeReader(replacement.cdp);
-      return replacement;
+      return { ...replacement, retried: true };
     } catch (retryError) {
       replacement.cdp.close();
       await stop(replacement.chrome);
@@ -845,6 +849,7 @@ let decodedSize: CaptureDimensions | null = null;
 let egressKbps: number | null = null;
 let decodedFps: number | null = null;
 let outcome: "passed" | "failed" = "failed";
+let captureLatencySample = true;
 // Bun still executes afterAll after a test deadline, unlike the test body's
 // finally. Retain this callback until it runs so a stalled operation cannot
 // orphan Chrome or MediaMTX on the macOS worker (#5715).
@@ -974,6 +979,7 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
       decodedSize,
       egressKbps,
       decodedFps,
+      captureLatencySample,
       run: captureRunIdentity(),
       samplingIntervalsMs: SAMPLING_INTERVALS_MS,
     } satisfies CaptureStageContext);
@@ -1196,7 +1202,17 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
           timeline.mark("firstEncodedFrame");
           return true;
         }, "capture source did not deliver H.264 frames to the WHIP publisher");
-        await subscribeReader(cdp);
+        if (platform === "ios") {
+          const reader = await subscribeRecoveryReader(
+            { chrome: chrome!, cdp: cdp! },
+            join(artifactDir, "chrome.log"),
+            rememberChrome,
+          );
+          ({ chrome, cdp } = reader);
+          captureLatencySample = !reader.retried;
+        } else {
+          await subscribeReader(cdp);
+        }
         timeline.mark("whepConnected");
         // #4383: the screen has been static since capture started (fixture launched, no further
         // input), so this exercises a late viewer joining an idle stream. The encoder's

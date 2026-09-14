@@ -296,6 +296,7 @@ describe("CaptureSnapshot", () => {
         .getCommandCalls()
         .find((entry) => entry.command === `emu avd snapshot save ${snapshotName}`);
       expect(call?.timeoutMs).toBe(vmSnapshotTimeoutMs);
+      expect(call?.waitForProcessSettlementAfterAbort).toBe(true);
     });
 
     it("should use settings-only snapshot for non-emulator device even with useVmSnapshot=true", async () => {

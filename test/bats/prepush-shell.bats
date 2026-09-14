@@ -40,7 +40,7 @@ EOF
 
   cat > "${STUB_DIR}/git" <<'EOF'
 #!/usr/bin/env bash
-if [[ "${PREPUSH_GIT_DIFF_FAIL:-}" == "1" && "$#" -ge 5 && "$1" == "diff" && "$2" == "--no-renames" && "$3" == "--name-only" && "${!#}" == "HEAD" ]]; then
+if [[ "${PREPUSH_GIT_DIFF_FAIL:-}" == "1" && "$#" -ge 5 && "$1" == "diff" && "$2" == "--no-renames" && "$3" == "--name-only" && "$4" == *"...HEAD" && "$5" == "--" ]]; then
   printf '%s\n' "simulated git diff failure" >&2
   exit 17
 fi
@@ -48,7 +48,32 @@ exec "${PREPUSH_REAL_GIT}" "$@"
 EOF
   chmod +x "${STUB_DIR}/git"
 
+  cat > "${STUB_DIR}/jj" <<'EOF'
+#!/usr/bin/env bash
+case "$1 $2" in
+  "workspace root")
+    printf '%s\n' "${PREPUSH_JJ_ROOT}"
+    ;;
+  "log -r")
+    exit 0
+    ;;
+  "diff --from")
+    if [[ -n "${PREPUSH_JJ_CHANGED_FILES:-}" ]]; then
+      printf '%s\n' "${PREPUSH_JJ_CHANGED_FILES}"
+    else
+      printf '%s\n' "scripts/example.sh" "test/bats/example.bats"
+    fi
+    ;;
+  *)
+    printf 'unexpected jj invocation: %s\n' "$*" >&2
+    exit 2
+    ;;
+esac
+EOF
+  chmod +x "${STUB_DIR}/jj"
+
   cp "${REPO_ROOT}/scripts/prepush-shell.sh" "${TEST_ROOT}/scripts/prepush-shell.sh"
+  cp "${REPO_ROOT}/scripts/lib/vcs-diff.sh" "${TEST_ROOT}/scripts/lib/vcs-diff.sh"
   cp "${REPO_ROOT}/scripts/lib/tsImportDeps.ts" "${TEST_ROOT}/scripts/lib/tsImportDeps.ts"
   ln -s "${REPO_ROOT}/node_modules" "${TEST_ROOT}/node_modules"
   chmod +x "${TEST_ROOT}/scripts/prepush-shell.sh"
@@ -78,8 +103,34 @@ EOF
   mkdir -p scripts/lib
   printf '%s\n' '# shellcheck source=scripts/lib/shared-helper.sh' > scripts/check-helper-consumer-one.sh
   printf '%s\n' '# shellcheck source=scripts/lib/shared-helper.sh' > scripts/check-helper-consumer-two.sh
+  cat > scripts/check-helper-consumer-three.sh <<'EOF'
+#!/usr/bin/env bash
+# shellcheck disable=SC1091 # Resolved relative to this script's location.
+source "$(dirname "${BASH_SOURCE[0]}")/lib/shared-helper.sh"
+EOF
+  cat > scripts/check-helper-consumer-four.sh <<'EOF'
+#!/usr/bin/env bash
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck disable=SC1091 # Resolved relative to this script's location.
+source "$ROOT_DIR/scripts/lib/shared-helper.sh"
+EOF
+  cat > scripts/check-helper-consumer-five.sh <<'EOF'
+#!/usr/bin/env bash
+# shellcheck disable=SC1091 # Resolved relative to this script's location.
+source "$(dirname "${BASH_SOURCE[0]}")/lib/shared-helper.sh"
+# shellcheck disable=SC1091 # Resolved relative to this script's location.
+source "$(dirname "${BASH_SOURCE[0]}")/second-helper.sh"
+EOF
+  mkdir -p scripts/isolated-helper
+  cat > scripts/check-helper-consumer-deleted-helper.sh <<'EOF'
+#!/usr/bin/env bash
+# shellcheck disable=SC1091 # Resolved relative to this script's location.
+source "$(dirname "${BASH_SOURCE[0]}")/isolated-helper/only-helper.sh"
+EOF
   printf '%s\n' 'helper baseline' > scripts/lib/shared-helper.sh
-  git add scripts/check-helper-consumer-one.sh scripts/check-helper-consumer-two.sh scripts/lib/shared-helper.sh
+  printf '%s\n' 'isolated helper baseline' > scripts/isolated-helper/only-helper.sh
+  printf '%s\n' 'second helper baseline' > scripts/second-helper.sh
+  git add scripts/check-helper-consumer-one.sh scripts/check-helper-consumer-two.sh scripts/check-helper-consumer-three.sh scripts/check-helper-consumer-four.sh scripts/check-helper-consumer-five.sh scripts/check-helper-consumer-deleted-helper.sh scripts/lib/shared-helper.sh scripts/isolated-helper/only-helper.sh scripts/second-helper.sh
   git commit -qm "add helper consumers"
   git branch -M main
   git branch base
@@ -162,6 +213,10 @@ if [[ "${1:-}" == "--list-checks" ]]; then
   printf 'stdlib-first\tscripts/conventions/validate-stdlib-first.sh\n'
   printf 'helper-consumer-one\tscripts/check-helper-consumer-one.sh\n'
   printf 'helper-consumer-two\tscripts/check-helper-consumer-two.sh\n'
+  printf 'helper-consumer-three\tscripts/check-helper-consumer-three.sh\n'
+  printf 'helper-consumer-four\tscripts/check-helper-consumer-four.sh\n'
+  printf 'helper-consumer-five\tscripts/check-helper-consumer-five.sh\n'
+  printf 'helper-consumer-deleted-helper\tscripts/check-helper-consumer-deleted-helper.sh\n'
   printf 'runtime-pins\tscripts/release/pin-runtime-deps.ts\n'
   exit 0
 fi
@@ -213,7 +268,166 @@ EOF
   run bash scripts/prepush-shell.sh --base base
 
   [ "${status}" -eq 0 ]
-  grep -Fqx -- '--only shellcheck,shell-portability,shell-sete,stdlib-first,helper-consumer-one,helper-consumer-two' "${FAST_LOG}"
+  grep -Fqx -- '--only shellcheck,shell-portability,shell-sete,stdlib-first,helper-consumer-one,helper-consumer-two,helper-consumer-three,helper-consumer-four,helper-consumer-five' "${FAST_LOG}"
+}
+
+@test "a changed second SC1091 helper selects its multi-source consumer" {
+  install_registry_stub
+  printf '%s\n' 'second helper changed' > scripts/second-helper.sh
+  git add scripts/second-helper.sh
+  git commit -qm "change second isolated helper"
+
+  run bash scripts/prepush-shell.sh --base base
+
+  [ "${status}" -eq 0 ]
+  grep -Fqx -- '--only shellcheck,shell-portability,shell-sete,stdlib-first,helper-consumer-five' "${FAST_LOG}"
+}
+
+@test "a changed first SC1091 helper selects its multi-source consumer" {
+  install_registry_stub
+  printf '%s\n' 'first helper changed' > scripts/lib/shared-helper.sh
+  git add scripts/lib/shared-helper.sh
+  git commit -qm "change first helper"
+
+  run bash scripts/prepush-shell.sh --base base
+
+  [ "${status}" -eq 0 ]
+  grep -Fqx -- '--only shellcheck,shell-portability,shell-sete,stdlib-first,helper-consumer-one,helper-consumer-two,helper-consumer-three,helper-consumer-four,helper-consumer-five' "${FAST_LOG}"
+}
+
+@test "a deleted SC1091 helper in a removed directory still selects its consumer" {
+  install_registry_stub
+  git rm -q scripts/isolated-helper/only-helper.sh
+  [ ! -d scripts/isolated-helper ]
+  git commit -qm "delete isolated helper"
+
+  run bash scripts/prepush-shell.sh --base base
+
+  [ "${status}" -eq 0 ]
+  grep -Fqx -- '--only shellcheck,shell-portability,shell-sete,stdlib-first,helper-consumer-deleted-helper' "${FAST_LOG}"
+}
+
+@test "an SC1091 ROOT_DIR path never evaluates checkout path text" {
+  local unsafe_root pwned_path path_component
+  pwned_path="${TEST_ROOT}/pwned"
+  path_component='$(touch "'"${pwned_path}"'")'
+  unsafe_root="${TEST_ROOT}/${path_component}"
+  mkdir -p "${unsafe_root}/scripts/lib"
+  cp "${REPO_ROOT}/scripts/prepush-shell.sh" "${unsafe_root}/scripts/prepush-shell.sh"
+  cp "${REPO_ROOT}/scripts/lib/vcs-diff.sh" "${unsafe_root}/scripts/lib/vcs-diff.sh"
+  chmod +x "${unsafe_root}/scripts/prepush-shell.sh"
+  cat > "${unsafe_root}/scripts/all_fast_validate_checks.sh" <<'EOF'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--list-checks" ]]; then
+  printf 'helper-consumer-four\tscripts/check-helper-consumer-four.sh\n'
+  exit 0
+fi
+printf '%s\n' "$*" >> "${PREPUSH_FAST_LOG}"
+EOF
+  chmod +x "${unsafe_root}/scripts/all_fast_validate_checks.sh"
+  cat > "${unsafe_root}/scripts/check-helper-consumer-four.sh" <<'EOF'
+#!/usr/bin/env bash
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck disable=SC1091 # Resolved relative to this script's location.
+source "$ROOT_DIR/scripts/lib/shared-helper.sh"
+EOF
+  printf '%s\n' 'helper baseline' > "${unsafe_root}/scripts/lib/shared-helper.sh"
+
+  cd -- "${unsafe_root}"
+  git init -q
+  git config user.email test@example.com
+  git config user.name test
+  git config commit.gpgsign false
+  printf '%s\n' baseline > README.md
+  git add README.md scripts
+  git commit -qm baseline
+  git branch -M main
+  git branch base
+  git checkout -qb feature
+  printf '%s\n' 'helper changed' > scripts/lib/shared-helper.sh
+  git add scripts/lib/shared-helper.sh
+  git commit -qm "change helper"
+
+  run bash scripts/prepush-shell.sh --base base
+
+  [ "${status}" -eq 0 ]
+  [ ! -e "${pwned_path}" ]
+  grep -Fqx -- '--only shellcheck,shell-portability,shell-sete,stdlib-first,helper-consumer-four' "${FAST_LOG}"
+}
+
+@test "an SC1091 helper in an ampersand checkout selects its consumer" {
+  local ampersand_root
+  ampersand_root="${TEST_ROOT}/a&b"
+  mkdir -p "${ampersand_root}/scripts/lib"
+  cp "${REPO_ROOT}/scripts/prepush-shell.sh" "${ampersand_root}/scripts/prepush-shell.sh"
+  cp "${REPO_ROOT}/scripts/lib/vcs-diff.sh" "${ampersand_root}/scripts/lib/vcs-diff.sh"
+  chmod +x "${ampersand_root}/scripts/prepush-shell.sh"
+  cat > "${ampersand_root}/scripts/all_fast_validate_checks.sh" <<'EOF'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--list-checks" ]]; then
+  printf 'helper-consumer-four\tscripts/check-helper-consumer-four.sh\n'
+  exit 0
+fi
+printf '%s\n' "$*" >> "${PREPUSH_FAST_LOG}"
+EOF
+  chmod +x "${ampersand_root}/scripts/all_fast_validate_checks.sh"
+  cat > "${ampersand_root}/scripts/check-helper-consumer-four.sh" <<'EOF'
+#!/usr/bin/env bash
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck disable=SC1091 # Resolved relative to this script's location.
+source "$ROOT_DIR/scripts/lib/shared-helper.sh"
+EOF
+  printf '%s\n' 'helper baseline' > "${ampersand_root}/scripts/lib/shared-helper.sh"
+
+  cd -- "${ampersand_root}"
+  git init -q
+  git config user.email test@example.com
+  git config user.name test
+  git config commit.gpgsign false
+  printf '%s\n' baseline > README.md
+  git add README.md scripts
+  git commit -qm baseline
+  git branch -M main
+  git branch base
+  git checkout -qb feature
+  printf '%s\n' 'helper changed' > scripts/lib/shared-helper.sh
+  git add scripts/lib/shared-helper.sh
+  git commit -qm "change helper"
+
+  run bash scripts/prepush-shell.sh --base base
+
+  [ "${status}" -eq 0 ]
+  grep -Fqx -- '--only shellcheck,shell-portability,shell-sete,stdlib-first,helper-consumer-four' "${FAST_LOG}"
+}
+
+@test "a jj workspace uses the VCS diff seam without a git checkout" {
+  install_registry_stub
+  rm -rf "${TEST_ROOT}/.git"
+  mkdir -p "${TEST_ROOT}/.jj"
+  printf '%s\n' '#!/usr/bin/env bash' > scripts/example.sh
+  printf '%s\n' '# scripts/example.sh' > test/bats/example.bats
+  export PREPUSH_JJ_ROOT="${TEST_ROOT}"
+
+  run bash scripts/prepush-shell.sh --base feature-base
+
+  [ "${status}" -eq 0 ]
+  grep -Fqx -- '--only shellcheck,shell-portability,shell-sete,stdlib-first,lfs-pointers' "${FAST_LOG}"
+  grep -Fqx -- 'test/bats/example.bats' "${BATS_LOG}"
+}
+
+@test "a jj workspace selects LFS pointer validation for changed assets" {
+  install_registry_stub
+  rm -rf "${TEST_ROOT}/.git"
+  mkdir -p "${TEST_ROOT}/.jj" assets
+  printf '%s\n' "asset fixture" > assets/new.png
+  export PREPUSH_JJ_ROOT="${TEST_ROOT}"
+  export PREPUSH_JJ_CHANGED_FILES="assets/new.png"
+
+  run bash scripts/prepush-shell.sh --base feature-base
+
+  [ "${status}" -eq 0 ]
+  grep -Fq -- 'lfs-pointers' "${FAST_LOG}"
+  [[ "${output}" != *"nothing to validate"* ]]
 }
 
 @test "an unmatched scripts file selects no registered fast check" {
@@ -425,6 +639,6 @@ EOF
   run bash scripts/prepush-shell.sh --base base
 
   [ "${status}" -ne 0 ]
-  [[ "${output}" == *"Failed to list changed files between"* ]]
+  [[ "${output}" == *"Failed to list changed files since merge-base"* ]]
   [[ "${output}" != *"nothing to validate"* ]]
 }

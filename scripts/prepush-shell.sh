@@ -4,6 +4,9 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+# shellcheck source=scripts/lib/vcs-diff.sh
+# shellcheck disable=SC1091 # Resolved relative to this script's location.
+source "${SCRIPT_DIR}/lib/vcs-diff.sh"
 DEFAULT_BASE="origin/main"
 BASE="${DEFAULT_BASE}"
 base_was_explicit=0
@@ -43,10 +46,6 @@ add_bats_file() {
   bats_files+=("${candidate}")
 }
 
-resolve_commit() {
-  git rev-parse --verify --quiet "${1}^{commit}" 2>/dev/null || true
-}
-
 lfs_filter_for_path() {
   local path="$1"
   local attributes
@@ -59,15 +58,162 @@ lfs_filter_for_path() {
 }
 
 binary_diff_for_path() {
-  local merge_base="$1"
+  local base_ref="$1"
   local path="$2"
   local numstat
-  numstat="$(git diff --numstat "${merge_base}" HEAD -- "${path}")"
+  numstat="$(git diff --numstat "${base_ref}"...HEAD -- "${path}")"
   if [[ "${numstat}" == -*$'\t'-* ]]; then
     printf '%s\n' "true"
   else
     printf '%s\n' "false"
   fi
+}
+
+lexically_normalize_path() {
+  local path="$1"
+  local segment normalized_path=""
+  local -a path_segments=()
+  local -a normalized_segments=()
+  local IFS='/'
+
+  read -r -a path_segments <<< "${path}"
+  for segment in ${path_segments[@]+"${path_segments[@]}"}; do
+    case "${segment}" in
+      ""|.)
+        ;;
+      ..)
+        if [[ "${#normalized_segments[@]}" -gt 0 ]]; then
+          normalized_segments=("${normalized_segments[@]:0:$((${#normalized_segments[@]} - 1))}")
+        fi
+        ;;
+      *)
+        normalized_segments+=("${segment}")
+        ;;
+    esac
+  done
+
+  for segment in ${normalized_segments[@]+"${normalized_segments[@]}"}; do
+    normalized_path+="/${segment}"
+  done
+  printf '%s\n' "${normalized_path:-/}"
+}
+
+resolved_shellcheck_disable_source_paths() {
+  local check_script="$1"
+  local line source_expr resolved_expr unresolved_expr resolved_path
+  local check_script_dir check_script_dir_path
+  local awaiting_source=0 disable_codes variable assignment_value assignment_inner
+  local dots_suffix variable_value
+  local bash_source_token="\${BASH_SOURCE[0]}"
+  local bash_source_dir_expr="\$(dirname \"\${BASH_SOURCE[0]}\")"
+  local project_root_braced="\${PROJECT_ROOT}"
+  local project_root_token="\$PROJECT_ROOT"
+  local assignment_prefix="\$(cd \"\$(dirname \"\${BASH_SOURCE[0]}\")"
+  local assignment_suffix='" && pwd)'
+  local -a previous_lines=()
+  local -a source_exprs=()
+  local -a resolved_variable_names=()
+  local -a resolved_variable_values=()
+  local idx
+
+  # Bash 5.2+ expands '&' in // replacement operands; concatenation avoids that
+  # unsafe behavior without managing patsub_replacement shell-option state.
+  replace_literal_all() {
+    local haystack="$1" needle="$2" replacement="$3"
+    local result="" before remainder
+    [[ -n "${needle}" ]] || {
+      printf '%s\n' "${haystack}"
+      return 0
+    }
+    while [[ "${haystack}" == *"${needle}"* ]]; do
+      before="${haystack%%"${needle}"*}"
+      remainder="${haystack#*"${needle}"}"
+      result+="${before}${replacement}"
+      haystack="${remainder}"
+    done
+    printf '%s%s\n' "${result}" "${haystack}"
+  }
+
+  while IFS= read -r line || [[ -n "${line}" ]]; do
+    if [[ "${awaiting_source}" -eq 1 && ! "${line}" =~ ^[[:space:]]*$ ]]; then
+      if [[ "${line}" =~ ^[[:space:]]*(source|\.)[[:space:]]+\" ]]; then
+        source_expr="${line#*\"}"
+        source_expr="${source_expr%\"*}"
+        source_exprs+=("${source_expr}")
+        awaiting_source=0
+      else
+        awaiting_source=0
+      fi
+    fi
+
+    if [[ "${line}" =~ ^[[:space:]]*#[[:space:]]*shellcheck[[:space:]]+disable=([^[:space:]#]+) ]]; then
+      disable_codes=",${BASH_REMATCH[1]},"
+      if [[ "${disable_codes}" == *",SC1091,"* ]]; then
+        awaiting_source=1
+      fi
+    fi
+    previous_lines+=("${line}")
+  done < "${check_script}"
+
+  [[ "${#source_exprs[@]}" -gt 0 ]] || return 0
+
+  check_script_dir="${check_script%/*}"
+  [[ "${check_script_dir}" != "${check_script}" ]] || check_script_dir="."
+  check_script_dir_path="$(lexically_normalize_path "${PROJECT_ROOT}/${check_script_dir}")"
+
+  for source_expr in ${source_exprs[@]+"${source_exprs[@]}"}; do
+    resolved_variable_names=()
+    resolved_variable_values=()
+    for line in ${previous_lines[@]+"${previous_lines[@]}"}; do
+      if [[ "${line}" =~ ^[[:space:]]*([a-zA-Z_][a-zA-Z0-9_]*)=(.*)$ ]]; then
+        variable="${BASH_REMATCH[1]}"
+        assignment_value="${BASH_REMATCH[2]}"
+        if [[ "${assignment_value}" != *"${bash_source_token}"* ]] || [[ "${source_expr}" != *"\$${variable}"* && "${source_expr}" != *"\${${variable}}"* ]]; then
+          continue
+        fi
+        assignment_inner="${assignment_value#\"}"
+        assignment_inner="${assignment_inner%\"}"
+        if [[ "${assignment_inner}" != "${assignment_prefix}"*"${assignment_suffix}" ]]; then
+          continue
+        fi
+        dots_suffix="${assignment_inner#"${assignment_prefix}"}"
+        dots_suffix="${dots_suffix%"${assignment_suffix}"}"
+        if [[ ! "${dots_suffix}" =~ ^(/\.\.)*$ ]]; then
+          continue
+        fi
+        variable_value="$(lexically_normalize_path "${check_script_dir_path}${dots_suffix}")"
+        resolved_variable_names+=("${variable}")
+        resolved_variable_values+=("${variable_value}")
+      fi
+    done
+
+    unresolved_expr="${source_expr//"${bash_source_dir_expr}"/}"
+    unresolved_expr="${unresolved_expr//\$\{PROJECT_ROOT\}/}"
+    unresolved_expr="${unresolved_expr//\$PROJECT_ROOT/}"
+    resolved_expr="$(replace_literal_all "${source_expr}" "${bash_source_dir_expr}" "${check_script_dir_path}")"
+    resolved_expr="$(replace_literal_all "${resolved_expr}" "${project_root_braced}" "${PROJECT_ROOT}")"
+    resolved_expr="$(replace_literal_all "${resolved_expr}" "${project_root_token}" "${PROJECT_ROOT}")"
+    for idx in "${!resolved_variable_names[@]}"; do
+      variable="${resolved_variable_names[$idx]}"
+      variable_value="${resolved_variable_values[$idx]}"
+      unresolved_expr="${unresolved_expr//\$\{${variable}\}/}"
+      unresolved_expr="${unresolved_expr//\$${variable}/}"
+      resolved_expr="$(replace_literal_all "${resolved_expr}" "\${${variable}}" "${variable_value}")"
+      resolved_expr="$(replace_literal_all "${resolved_expr}" "\$${variable}" "${variable_value}")"
+    done
+    if [[ "${unresolved_expr}" == *'$'* ]]; then
+      printf 'Unable to resolve shellcheck source path in %s: %s\n' "${check_script}" "${source_expr}" >&2
+      continue
+    fi
+
+    if [[ "${resolved_expr}" == /* ]]; then
+      resolved_path="$(lexically_normalize_path "${resolved_expr}")"
+    else
+      resolved_path="$(lexically_normalize_path "${PROJECT_ROOT}/${resolved_expr}")"
+    fi
+    [[ "${resolved_path}" == "${PROJECT_ROOT}/"* ]] || continue
+    printf '%s\n' "${resolved_path#"${PROJECT_ROOT}/"}"
+  done
 }
 
 load_fast_check_registry() {
@@ -110,6 +256,11 @@ add_registered_checks_for_script_path() {
             add_check "${check_name}"
           fi
         done < <(grep -E '^[[:space:]]*#[[:space:]]*shellcheck[[:space:]]+source=[^[:space:]]+' "${check_script}" || true)
+        while IFS= read -r helper_path; do
+          if [[ "${path}" == "${helper_path}" ]]; then
+            add_check "${check_name}"
+          fi
+        done < <(resolved_shellcheck_disable_source_paths "${check_script}")
         ;;
       *.ts)
         set +e
@@ -157,32 +308,29 @@ done
 
 cd "${PROJECT_ROOT}"
 
-base_commit="$(resolve_commit "${BASE}")"
-if [[ -z "${base_commit}" && "${base_was_explicit}" -eq 0 ]]; then
+set +e
+vcs_base_exists "${BASE}"
+base_exists_status=$?
+set -e
+if [[ "${base_exists_status}" -ne 0 && "${base_was_explicit}" -eq 0 ]]; then
   BASE="main"
-  base_commit="$(resolve_commit "${BASE}")"
+  set +e
+  vcs_base_exists "${BASE}"
+  base_exists_status=$?
+  set -e
 fi
 
-if [[ -z "${base_commit}" ]]; then
+if [[ "${base_exists_status}" -ne 0 ]]; then
   echo "Base ref '${BASE}' does not resolve to a commit." >&2
   exit 1
 fi
 
 set +e
-merge_base="$(git merge-base "${BASE}" HEAD)"
-merge_base_status=$?
-set -e
-if [[ "${merge_base_status}" -ne 0 ]]; then
-  echo "Could not find a merge-base between '${BASE}' and HEAD." >&2
-  exit "${merge_base_status}"
-fi
-
-set +e
-changed_files_output="$(git diff --no-renames --name-only "${merge_base}" HEAD)"
+changed_files_output="$(vcs_changed_files_since_merge_base "${BASE}")"
 changed_files_status=$?
 set -e
 if [[ "${changed_files_status}" -ne 0 ]]; then
-  echo "Failed to list changed files between '${merge_base}' and HEAD." >&2
+  echo "Failed to list changed files since merge-base with '${BASE}'." >&2
   exit "${changed_files_status}"
 fi
 
@@ -203,6 +351,10 @@ bats_files=()
 hook_files=()
 registered_check_names=()
 registered_check_scripts=()
+set +e
+vcs_uses_jj
+is_jj_workspace_status=$?
+set -e
 has_changed_scripts=0
 for path in "${changed_files[@]}"; do
   case "${path}" in
@@ -328,9 +480,13 @@ for path in "${changed_files[@]}"; do
       ;;
   esac
 
-  lfs_filter="$(lfs_filter_for_path "${path}")"
-  binary_diff="$(binary_diff_for_path "${merge_base}" "${path}")"
-  if [[ "${lfs_filter}" == "true" || "${binary_diff}" == "true" ]]; then
+  if [[ "${is_jj_workspace_status}" -ne 0 ]]; then
+    lfs_filter="$(lfs_filter_for_path "${path}")"
+    binary_diff="$(binary_diff_for_path "${BASE}" "${path}")"
+    if [[ "${lfs_filter}" == "true" || "${binary_diff}" == "true" ]]; then
+      add_check "lfs-pointers"
+    fi
+  elif [[ "${is_jj_workspace_status}" -eq 0 ]]; then
     add_check "lfs-pointers"
   fi
 done

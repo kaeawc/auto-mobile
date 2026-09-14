@@ -473,6 +473,7 @@ jobs:
               - 'test/integration/mediamtxWebRtcPublisher.integration.test.ts'
               - 'test/integration/webrtcDeviceCapture.integration.test.ts'
               - 'test/helpers/captureStageTimeline.ts'
+              - 'test/helpers/whepSubscriptionRecovery.ts'
               # Controls daemon-start retry and simulator selection for the
               # real-device WHEP test; a helper-only change must exercise both
               # device lanes rather than being silently skipped (issue #7001).

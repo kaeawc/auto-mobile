@@ -159,7 +159,10 @@ function nextPollMinTimestamp(
  * screen.
  */
 export async function pollObserveUntil(
-  observeScreen: Pick<ObserveScreen, "execute" | "processRecomposition" | "cacheObserveResult">,
+  observeScreen: Pick<
+    ObserveScreen,
+    "execute" | "processRecomposition" | "captureCacheGeneration" | "cacheObserveResult"
+  >,
   timer: Timer,
   options: ObservePollOptions,
   onObservation: (
@@ -184,9 +187,11 @@ export async function pollObserveUntil(
   // results. A late stale fallback must not replace evidence that already met a
   // raised floor (e.g. 10 -> 30 -> 20).
   let newestTrustworthyObservation: ObserveResult | undefined;
+  let newestTrustworthyGeneration: number | undefined;
   const finalize = async (
     outcome: ObservePollOutcome,
     canProcessRecomposition: boolean = true,
+    generation?: number,
   ): Promise<ObservePollOutcome> => {
     if (
       options.skipRecompositionTracking &&
@@ -194,7 +199,7 @@ export async function pollObserveUntil(
       observeScreen.processRecomposition
     ) {
       await observeScreen.processRecomposition(outcome.observation);
-      await observeScreen.cacheObserveResult?.(outcome.observation);
+      await observeScreen.cacheObserveResult?.(outcome.observation, generation);
     }
     return outcome;
   };
@@ -207,6 +212,9 @@ export async function pollObserveUntil(
       deviceFloor,
       enteringReference,
     );
+    // Capture alongside the observation's start, before asynchronous work can
+    // let terminateApp invalidate its cache generation (#5884).
+    const cacheGeneration = observeScreen.captureCacheGeneration?.();
 
     const observation = await observeScreen.execute({
       minTimestamp,
@@ -260,6 +268,7 @@ export async function pollObserveUntil(
 
     if (isAdmissibleEvidence) {
       newestTrustworthyObservation = observation;
+      newestTrustworthyGeneration = cacheGeneration;
     }
 
     // A screen-off terminal is only meaningful when the same observation passed
@@ -278,13 +287,17 @@ export async function pollObserveUntil(
         isAdmissibleEvidence &&
         (!isHierarchySourcedScreenOff || isPostInvocation))
     ) {
-      return finalize({
-        observation,
-        polls,
-        waitMs: timer.now() - start,
-        stopped: false,
-        terminalReason: "screen_off",
-      });
+      return finalize(
+        {
+          observation,
+          polls,
+          waitMs: timer.now() - start,
+          stopped: false,
+          terminalReason: "screen_off",
+        },
+        isAdmissibleEvidence,
+        cacheGeneration,
+      );
     }
 
     // Rejected observations are deliberately invisible to stateful predicates:
@@ -292,13 +305,17 @@ export async function pollObserveUntil(
     // could manufacture a two-sample settle from regressed evidence.
     const matched = isAdmissibleEvidence && onObservation(observation, previous, polls);
     if (matched && isPostInvocation) {
-      return finalize({
-        observation,
-        polls,
-        waitMs: timer.now() - start,
-        stopped: true,
-        terminalReason: "matched",
-      });
+      return finalize(
+        {
+          observation,
+          polls,
+          waitMs: timer.now() - start,
+          stopped: true,
+          terminalReason: "matched",
+        },
+        true,
+        cacheGeneration,
+      );
     }
 
     if (isAdmissibleEvidence) {
@@ -315,6 +332,7 @@ export async function pollObserveUntil(
           terminalReason: "timeout",
         },
         newestTrustworthyObservation !== undefined,
+        newestTrustworthyObservation !== undefined ? newestTrustworthyGeneration : cacheGeneration,
       );
     }
 

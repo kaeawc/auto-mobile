@@ -1008,10 +1008,19 @@ export class RealObserveScreen implements ObserveScreen {
   }
 
   /**
-   * Cache an observe result. Public for back-compat with tests.
+   * Capture the current device cache generation before a deferred observation
+   * write so #5884 invalidation fences apply after #6932 async work.
    */
-  async cacheObserveResult(observeResult: ObserveResult): Promise<void> {
-    await getObserveCacheStore().put(this.device.deviceId, observeResult);
+  captureCacheGeneration(): number {
+    return getObserveCacheStore().currentGeneration(this.device.deviceId);
+  }
+
+  /**
+   * Cache an observe result. Public for back-compat with tests. The optional
+   * generation preserves the #5884 stale-write fence for #6932 deferred writes.
+   */
+  async cacheObserveResult(observeResult: ObserveResult, generation?: number): Promise<void> {
+    await getObserveCacheStore().put(this.device.deviceId, observeResult, generation);
   }
 
   // ---------- Orchestration ----------

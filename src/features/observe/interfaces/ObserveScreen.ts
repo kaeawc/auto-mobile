@@ -58,10 +58,17 @@ export interface ObserveScreen {
   processRecomposition?(observation: ObserveResult, perf?: PerformanceTracker): Promise<void>;
 
   /**
-   * Persist a deferred recomposition-processed observation so cache and memory
-   * agree after #6932 settle-loop tracking.
+   * Capture the device cache generation at observation start so a deferred
+   * #6932 cache write can use the same #5884 stale-write fence as execute().
    */
-  cacheObserveResult?(observation: ObserveResult): Promise<void>;
+  captureCacheGeneration?(): number;
+
+  /**
+   * Persist a deferred recomposition-processed observation so cache and memory
+   * agree after #6932 settle-loop tracking. Pass the generation captured at
+   * observation start so a concurrent #5884 invalidation cannot resurrect it.
+   */
+  cacheObserveResult?(observation: ObserveResult, generation?: number): Promise<void>;
 
   /**
    * Fetch raw (unfiltered) view hierarchy from the device and attach it to an existing

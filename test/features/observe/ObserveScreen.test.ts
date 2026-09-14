@@ -172,6 +172,29 @@ describe("ObserveScreen", function () {
       }
     });
 
+    test("does not repopulate the cache when a deferred observation write is invalidated (#5884)", async function () {
+      const cacheStore = new FakeObserveCacheStore(new FakeTimer());
+      // The deferred caller captures before its asynchronous recomposition work;
+      // terminate clears the cache before the deferred put lands.
+      cacheStore.onCurrentGeneration = (deviceId) => {
+        cacheStore.clear(deviceId);
+      };
+
+      try {
+        const screen = new RealObserveScreen(mockDevice, new FakeAdbClientFactory(fakeAdb), {
+          cacheStore,
+        });
+        const result = { ...screen.createBaseResult(), viewHierarchy: "deferred-hierarchy" };
+        const generation = screen.captureCacheGeneration();
+
+        await screen.cacheObserveResult(result, generation);
+
+        expect(cacheStore.getRecentInMemoryForDevice(mockDevice.deviceId)).toBeUndefined();
+      } finally {
+        resetObserveCacheStore();
+      }
+    });
+
     test("should populate iOS heuristic screen identity from the view hierarchy", async function () {
       const viewHierarchy = new FakeViewHierarchy();
       viewHierarchy.configureHierarchy({

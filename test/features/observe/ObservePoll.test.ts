@@ -340,6 +340,49 @@ describe("pollObserveUntil minTimestamp floor (#6284)", () => {
 });
 
 describe("pollObserveUntil recomposition tracking (#6932)", () => {
+  test("does not process or cache a stale independently sampled Asleep hierarchy", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const fake = new FakeObserveScreen();
+    const staleAsleep = {
+      ...obs(20, "stale-asleep"),
+      wakefulness: "Asleep",
+      wakefulnessSource: "adb",
+      freshness: { isFresh: false, verified: false, category: "cache_age" },
+    } as ObserveResult;
+    fake.setObserveResult(staleAsleep);
+
+    const outcome = await pollObserveUntil(
+      fake,
+      timer,
+      { timeoutMs: 1000, pollMs: 150, initialMinTimestampMs: 10, skipRecompositionTracking: true },
+      () => false,
+    );
+
+    expect(outcome.terminalReason).toBe("screen_off");
+    expect(fake.getProcessRecompositionCallCount()).toBe(0);
+    expect(fake.getCacheObserveResultCallCount()).toBe(0);
+  });
+
+  test("persists the terminal observation with its captured cache generation", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const fake = new FakeObserveScreen();
+    const terminal = obs(30, "terminal");
+    fake.setObserveSequence([obs(10, "baseline"), obs(20, "intermediate"), terminal]);
+    fake.setCacheGenerationSequence([17, 23, 29]);
+
+    await pollObserveUntil(
+      fake,
+      timer,
+      { timeoutMs: 1000, pollMs: 150, skipRecompositionTracking: true },
+      (observation) => observation === terminal,
+    );
+
+    expect(fake.getCacheObserveResultObservations()).toEqual([terminal]);
+    expect(fake.getCacheObserveResultGenerations()).toEqual([29]);
+  });
+
   test("skips every poll and processes only the terminal observation once", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();

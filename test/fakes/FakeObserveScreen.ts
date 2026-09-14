@@ -23,10 +23,13 @@ export class FakeObserveScreen implements ObserveScreen {
   private failures: Map<string, Error> = new Map();
   private callCounter: number = 0;
   private autoVaryHierarchy: boolean = false;
+  private cacheGenerationSequence: number[] | null = null;
+  private cacheGenerationCallCount: number = 0;
   private readonly executeOptionsHistory: ObserveScreenExecuteOptions[] = [];
   private readonly capturedScreenshotObservations: Array<ObserveResult | undefined> = [];
   private readonly recompositionObservations: ObserveResult[] = [];
   private readonly cachedObserveResultObservations: ObserveResult[] = [];
+  private readonly cachedObserveResultGenerations: Array<number | undefined> = [];
 
   /**
    * Set the observe result to be returned by execute and getMostRecentCachedObserveResult
@@ -59,6 +62,15 @@ export class FakeObserveScreen implements ObserveScreen {
     this.observeSequence = results;
     this.observeResultFactory = null;
     this.configuredObserveResult = null;
+  }
+
+  /** Configure generations captured at the start of successive observations. */
+  setCacheGenerationSequence(generations: number[]): void {
+    if (generations.length === 0) {
+      throw new Error("FakeObserveScreen: empty cache generation sequence");
+    }
+    this.cacheGenerationSequence = generations;
+    this.cacheGenerationCallCount = 0;
   }
 
   /**
@@ -155,10 +167,12 @@ export class FakeObserveScreen implements ObserveScreen {
     this.cacheObserveResultCallCount = 0;
     this.getMostRecentCachedObserveResultCallCount = 0;
     this.callCounter = 0;
+    this.cacheGenerationCallCount = 0;
     this.executeOptionsHistory.length = 0;
     this.capturedScreenshotObservations.length = 0;
     this.recompositionObservations.length = 0;
     this.cachedObserveResultObservations.length = 0;
+    this.cachedObserveResultGenerations.length = 0;
   }
 
   /**
@@ -196,6 +210,11 @@ export class FakeObserveScreen implements ObserveScreen {
   /** Observations passed to cacheObserveResult(), in call order. */
   getCacheObserveResultObservations(): ObserveResult[] {
     return [...this.cachedObserveResultObservations];
+  }
+
+  /** Generations passed to cacheObserveResult(), in call order. */
+  getCacheObserveResultGenerations(): Array<number | undefined> {
+    return [...this.cachedObserveResultGenerations];
   }
 
   /** Observations associated with terminal screenshot capture, in call order. */
@@ -261,10 +280,20 @@ export class FakeObserveScreen implements ObserveScreen {
     }
   }
 
-  async cacheObserveResult(observation: ObserveResult): Promise<void> {
+  captureCacheGeneration(): number | undefined {
+    if (!this.cacheGenerationSequence) {
+      return undefined;
+    }
+    const index = Math.min(this.cacheGenerationCallCount, this.cacheGenerationSequence.length - 1);
+    this.cacheGenerationCallCount++;
+    return this.cacheGenerationSequence[index];
+  }
+
+  async cacheObserveResult(observation: ObserveResult, generation?: number): Promise<void> {
     this.executedOperations.push("cacheObserveResult");
     this.cacheObserveResultCallCount++;
     this.cachedObserveResultObservations.push(observation);
+    this.cachedObserveResultGenerations.push(generation);
 
     const error = this.failures.get("cacheObserveResult");
     if (error) {

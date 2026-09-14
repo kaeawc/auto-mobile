@@ -9,6 +9,7 @@ import {
   createDefaultDaemonProcessFinder,
   daemonBuildIdentityStatusLines,
   DaemonManager,
+  parseDarwinDaemonProcessTable,
   parseDaemonProcessTable,
   PsDaemonProcessFinder,
   runDaemonCommand,
@@ -1236,35 +1237,77 @@ describe("Daemon manager process detection", () => {
     ]);
   });
 
-  test("uses an expanded buffer and a bounded timeout when reading the full process table", () => {
-    const calls: Array<{
-      command: string;
-      options: { encoding: "utf-8"; maxBuffer: number; timeout: number };
-    }> = [];
-    const finder = new PsDaemonProcessFinder((command, options) => {
-      calls.push({ command, options });
-      return "20 1 bunx -y @kaeawc/auto-mobile@0.0.38 --daemon-mode";
-    });
-
-    expect(finder.findDaemonProcesses()).toEqual([
+  test("parses Linux elapsed process creation times for PID-reuse protection", () => {
+    expect(
+      parseDaemonProcessTable(
+        "20 1 12 bunx -y @kaeawc/auto-mobile@0.0.38 --daemon-mode",
+        1_000_000,
+      ),
+    ).toEqual([
       {
         pid: 20,
         ppid: 1,
         command: "bunx -y @kaeawc/auto-mobile@0.0.38 --daemon-mode",
+        startedAt: 988_000,
       },
     ]);
-    expect(calls).toEqual([
-      {
-        command: "ps -eo pid=,ppid=,etimes=,command=",
-        options: {
-          encoding: "utf-8",
-          maxBuffer: DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES,
-          timeout: DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS,
-        },
-      },
-    ]);
-    expect(DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES).toBeGreaterThan(1024 * 1024);
   });
+
+  test("parses Darwin lstart process creation times for PID-reuse protection", () => {
+    expect(
+      parseDarwinDaemonProcessTable(
+        "20 1 Sun Sep 13 10:57:04 2026 bunx -y @kaeawc/auto-mobile@0.0.38 --daemon-mode",
+      ),
+    ).toEqual([
+      {
+        pid: 20,
+        ppid: 1,
+        command: "bunx -y @kaeawc/auto-mobile@0.0.38 --daemon-mode",
+        startedAt: new Date(2026, 8, 13, 10, 57, 4).getTime(),
+      },
+    ]);
+  });
+
+  test.each([
+    ["linux", "ps -eo pid=,ppid=,etimes=,command="],
+    ["darwin", "LC_ALL=C ps -axo pid=,ppid=,lstart=,command="],
+  ] as const)(
+    "uses the %s process table command with an expanded buffer and bounded timeout",
+    (platform, command) => {
+      const calls: Array<{
+        command: string;
+        options: { encoding: "utf-8"; maxBuffer: number; timeout: number };
+      }> = [];
+      const finder = new PsDaemonProcessFinder((command, options) => {
+        calls.push({ command, options });
+        return platform === "darwin"
+          ? "20 1 Sun Sep 13 10:57:04 2026 bunx -y @kaeawc/auto-mobile@0.0.38 --daemon-mode"
+          : "20 1 bunx -y @kaeawc/auto-mobile@0.0.38 --daemon-mode";
+      }, platform);
+
+      expect(finder.findDaemonProcesses()).toEqual([
+        {
+          pid: 20,
+          ppid: 1,
+          command: "bunx -y @kaeawc/auto-mobile@0.0.38 --daemon-mode",
+          ...(platform === "darwin"
+            ? { startedAt: new Date(2026, 8, 13, 10, 57, 4).getTime() }
+            : {}),
+        },
+      ]);
+      expect(calls).toEqual([
+        {
+          command,
+          options: {
+            encoding: "utf-8",
+            maxBuffer: DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES,
+            timeout: DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS,
+          },
+        },
+      ]);
+      expect(DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES).toBeGreaterThan(1024 * 1024);
+    },
+  );
 
   // #6140 review: execSync's `timeout: 0` means NO timeout (unbounded), not
   // "expire immediately" — a computed remaining budget can legitimately be

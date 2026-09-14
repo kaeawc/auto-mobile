@@ -266,6 +266,91 @@ export function parseDaemonProcessTable(
   return records;
 }
 
+const LSTART_MONTHS = new Map([
+  ["Jan", 0],
+  ["Feb", 1],
+  ["Mar", 2],
+  ["Apr", 3],
+  ["May", 4],
+  ["Jun", 5],
+  ["Jul", 6],
+  ["Aug", 7],
+  ["Sep", 8],
+  ["Oct", 9],
+  ["Nov", 10],
+  ["Dec", 11],
+]);
+
+function parseLstart(value: string): number | undefined {
+  const match = value.match(
+    /^(?:Sun|Mon|Tue|Wed|Thu|Fri|Sat)\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})\s+(\d{2}):(\d{2}):(\d{2})\s+(\d{4})$/,
+  );
+  if (!match) {
+    return undefined;
+  }
+
+  const month = LSTART_MONTHS.get(match[1]);
+  if (month === undefined) {
+    return undefined;
+  }
+  const day = parseInt(match[2], 10);
+  const hour = parseInt(match[3], 10);
+  const minute = parseInt(match[4], 10);
+  const second = parseInt(match[5], 10);
+  const year = parseInt(match[6], 10);
+
+  // `ps lstart` reports local wall-clock time. Constructing this date locally
+  // keeps its epoch comparable to the Date.now() timestamp written to the PID
+  // file, while the component check rejects JavaScript's overflow normalization.
+  const startedAt = new Date(year, month, day, hour, minute, second);
+  const hasComponentMismatch = [
+    startedAt.getFullYear() !== year,
+    startedAt.getMonth() !== month,
+    startedAt.getDate() !== day,
+    startedAt.getHours() !== hour,
+    startedAt.getMinutes() !== minute,
+    startedAt.getSeconds() !== second,
+  ];
+  if (hasComponentMismatch.some(Boolean)) {
+    return undefined;
+  }
+  return startedAt.getTime();
+}
+
+/**
+ * Parse Darwin's `ps lstart` table. `lstart` has second precision, matching the
+ * existing Linux `etimes` identity precision used to fence PID reuse.
+ */
+export function parseDarwinDaemonProcessTable(psOutput: string): DaemonProcessRecord[] {
+  const records: DaemonProcessRecord[] = [];
+
+  for (const line of psOutput.split("\n")) {
+    const match = line.match(
+      /^\s*(\d+)\s+(\d+)\s+((?:Sun|Mon|Tue|Wed|Thu|Fri|Sat)\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}\s+\d{4})\s+(.+?)\s*$/,
+    );
+    if (!match) {
+      continue;
+    }
+
+    const pid = parseInt(match[1], 10);
+    const ppid = parseInt(match[2], 10);
+    const startedAt = parseLstart(match[3]);
+    const command = match[4];
+    if (
+      !Number.isFinite(pid) ||
+      !Number.isFinite(ppid) ||
+      startedAt === undefined ||
+      !isAutoMobileDaemonCommand(command)
+    ) {
+      continue;
+    }
+
+    records.push({ pid, ppid, command, startedAt });
+  }
+
+  return records;
+}
+
 interface WindowsProcessTableEntry {
   ProcessId?: unknown;
   ParentProcessId?: unknown;
@@ -358,15 +443,24 @@ function boundedProcessTableScanTimeout(timeoutMs: number | undefined): number {
 }
 
 export class PsDaemonProcessFinder implements DaemonProcessFinder, DaemonProcessLivenessChecker {
-  constructor(private readonly runCommand: ProcessTableCommandRunner = execSync) {}
+  constructor(
+    private readonly runCommand: ProcessTableCommandRunner = execSync,
+    private readonly platform: NodeJS.Platform = process.platform,
+  ) {}
 
   findDaemonProcesses(timeoutMs?: number): DaemonProcessRecord[] {
-    const psOutput = this.runCommand("ps -eo pid=,ppid=,etimes=,command=", {
-      encoding: "utf-8",
-      maxBuffer: DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES,
-      timeout: boundedProcessTableScanTimeout(timeoutMs),
-    });
-    return parseDaemonProcessTable(psOutput);
+    const isDarwin = this.platform === "darwin";
+    const psOutput = this.runCommand(
+      isDarwin
+        ? "LC_ALL=C ps -axo pid=,ppid=,lstart=,command="
+        : "ps -eo pid=,ppid=,etimes=,command=",
+      {
+        encoding: "utf-8",
+        maxBuffer: DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES,
+        timeout: boundedProcessTableScanTimeout(timeoutMs),
+      },
+    );
+    return isDarwin ? parseDarwinDaemonProcessTable(psOutput) : parseDaemonProcessTable(psOutput);
   }
 
   isProcessRunning(pid: number): boolean {
@@ -399,7 +493,9 @@ export class WindowsDaemonProcessFinder
 export function createDefaultDaemonProcessFinder(
   platform: NodeJS.Platform = process.platform,
 ): DaemonProcessFinder & DaemonProcessLivenessChecker {
-  return platform === "win32" ? new WindowsDaemonProcessFinder() : new PsDaemonProcessFinder();
+  return platform === "win32"
+    ? new WindowsDaemonProcessFinder()
+    : new PsDaemonProcessFinder(undefined, platform);
 }
 
 export interface ExtractionCleaner {

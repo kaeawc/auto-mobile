@@ -1,7 +1,7 @@
 import { describe, expect, test, beforeEach } from "bun:test";
 import { Duplex } from "node:stream";
 import { DaemonClient, DaemonShuttingDownError } from "../../src/daemon/client";
-import { DAEMON_SHUTTING_DOWN_ERROR_MESSAGE } from "../../src/daemon/constants";
+import { DAEMON_SHUTTING_DOWN_ERROR_CODE } from "../../src/daemon/constants";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -76,7 +76,7 @@ describe("DaemonClient request id comes from the injected IdGenerator", () => {
     await pending;
   });
 
-  test("classifies a quiescing daemon response as retryable", async () => {
+  test("classifies a structured quiescing daemon response as retryable", async () => {
     const idGenerator = new CountingIdGenerator("req");
     const writes: string[] = [];
     const client = createConnectedClient(fakeTimer, idGenerator, writes);
@@ -88,12 +88,37 @@ describe("DaemonClient request id comes from the injected IdGenerator", () => {
           id: "req-1",
           type: "mcp_response",
           success: false,
-          error: DAEMON_SHUTTING_DOWN_ERROR_MESSAGE,
+          error: "A malformed error message must not affect shutdown classification",
+          daemonShuttingDown: {
+            code: DAEMON_SHUTTING_DOWN_ERROR_CODE,
+            retryable: true,
+          },
         }) + "\n",
       ),
     );
 
     await expect(pending).rejects.toBeInstanceOf(DaemonShuttingDownError);
+    await client.close();
+  });
+
+  test("does not classify an unmarked error message as daemon shutdown", async () => {
+    const idGenerator = new CountingIdGenerator("req");
+    const writes: string[] = [];
+    const client = createConnectedClient(fakeTimer, idGenerator, writes);
+
+    const pending = client.callTool("tapOn", {});
+    (client as any).handleData(
+      Buffer.from(
+        JSON.stringify({
+          id: "req-1",
+          type: "mcp_response",
+          success: false,
+          error: "Daemon is shutting down",
+        }) + "\n",
+      ),
+    );
+
+    await expect(pending).rejects.not.toBeInstanceOf(DaemonShuttingDownError);
     await client.close();
   });
 });

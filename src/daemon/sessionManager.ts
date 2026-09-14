@@ -204,6 +204,17 @@ export class TerminalSessionError extends Error {
   }
 }
 
+/** A new session cannot be published after the daemon has begun shutdown. */
+export class DaemonSessionCreationRejectedError extends ActionableError {
+  constructor(
+    readonly sessionUuid: string,
+    readonly release?: SessionReleaseSnapshot,
+  ) {
+    super(`Cannot create device session ${sessionUuid}: the daemon is shutting down.`);
+    this.name = "DaemonSessionCreationRejectedError";
+  }
+}
+
 export type SessionReleaseCallback = (
   sessionId: string,
   deviceId: string,
@@ -611,9 +622,7 @@ export class SessionManager {
   ): Promise<Session> {
     getAbortSignal()?.throwIfAborted();
     if (!this.acceptingSessionCreations) {
-      throw new ActionableError(
-        `Cannot create device session ${sessionId}: the daemon is shutting down.`,
-      );
+      throw new DaemonSessionCreationRejectedError(sessionId);
     }
     this.assertTerminalReleaseAdmission(sessionId, this.sessions.get(sessionId));
     let terminalRelease = this.terminalReleaseSnapshots.get(sessionId);
@@ -730,8 +739,10 @@ export class SessionManager {
     };
     await this.persistTerminalReleaseIfNeeded(snapshot);
     this.notifySessionRelease(snapshot);
-    cancellation?.throwIfAborted();
-    throw new TerminalSessionError(session.sessionId, snapshot);
+    if (cancellation?.aborted) {
+      cancellation.throwIfAborted();
+    }
+    throw new DaemonSessionCreationRejectedError(session.sessionId, snapshot);
   }
 
   private async getPersistedTerminalRelease(

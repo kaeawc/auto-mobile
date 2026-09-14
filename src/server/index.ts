@@ -12,7 +12,8 @@ import { combineAbortSignals, runWithAbortSignal } from "../utils/AbortContext";
 import { createDefaultPlanExecutionLock, type PlanExecutionLock } from "./PlanExecutionLock";
 import { SessionToolBinding } from "./SessionToolBinding";
 import { SessionReleaseBroadcaster } from "./sessionReleaseBroadcast";
-import { TerminalSessionError } from "../daemon/sessionManager";
+import { DaemonSessionCreationRejectedError, TerminalSessionError } from "../daemon/sessionManager";
+import { daemonShuttingDownMcpOutcome } from "../daemon/daemonShutdownOutcome";
 import { resolveDirectSessionDevice, unregisterDirectSession } from "./directSessionDeviceRegistry";
 import {
   INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
@@ -1350,6 +1351,14 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       }
       return response;
     } catch (error) {
+      if (error instanceof DaemonSessionCreationRejectedError) {
+        const shutdown = daemonShuttingDownMcpOutcome();
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(shutdown) }],
+          structuredContent: shutdown,
+          isError: true,
+        };
+      }
       if (error instanceof TerminalSessionError) {
         const sessionOwnershipLost = {
           error: {

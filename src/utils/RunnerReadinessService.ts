@@ -152,6 +152,11 @@ export interface ReadinessClient {
   ): Promise<{ success: boolean; error?: string }>;
 }
 
+export interface ReadinessIosClient extends ReadinessClient {
+  /** Connect once without invoking the client's automatic CtrlProxy setup path. */
+  connectWithoutSetup(signal?: AbortSignal): Promise<boolean>;
+}
+
 export interface AndroidRunnerConnectDiagnostic {
   deviceLock: DeviceLockState | null;
   primaryUserStartState?: string;
@@ -178,7 +183,7 @@ export interface RunnerReadinessDependencies {
   getAndroidManager(device: BootedDevice): ReadinessAndroidManager;
   getAndroidClient(device: BootedDevice): ReadinessClient;
   getIosManager(device: BootedDevice): ReadinessIosManager;
-  getIosClient(device: BootedDevice, port: number): ReadinessClient;
+  getIosClient(device: BootedDevice, port: number): ReadinessIosClient;
   checkIosOverride(): Promise<{ present: boolean; usable: boolean; reason?: string }>;
   awaitIosStartupMaintenance(): Promise<void>;
   getAndroidRunnerConnectDiagnostic?(
@@ -745,6 +750,7 @@ export class RunnerReadinessService {
     const manager = this.dependencies.getIosManager(context.device);
     let client = this.dependencies.getIosClient(context.device, manager.getServicePort());
     if (client.isConnected()) {
+      this.startHealthWindow(context);
       const ready = await this.runPhase(context, "runner-health", 1, () =>
         client.verifyServiceReady(1, 0, this.probeTimeout(context)),
       );
@@ -756,10 +762,10 @@ export class RunnerReadinessService {
       // hierarchy. In that state setup() would short-circuit on port health,
       // leaving the runner wedged indefinitely. Restart the process so the
       // next health probe uses a fresh observation stream (#5532).
-      await this.runPhase(context, "runner-setup", 1, (signal) =>
+      await this.runPhase(context, "runner-health", 1, (signal) =>
         manager.forceRestart({
           signal,
-          minimumHealthPollDurationMs: this.remainingForPhase(context, "runner-setup"),
+          minimumHealthPollDurationMs: this.remainingForPhase(context, "runner-health"),
         }),
       );
       // Restart can reallocate the service port when its prior listener became
@@ -791,7 +797,7 @@ export class RunnerReadinessService {
     // Setup can reallocate a busy port or adopt the runner's actual listener.
     // Resolve the client after launch, just as the force-restart path does.
     client = this.dependencies.getIosClient(context.device, manager.getServicePort());
-    await this.waitForResponsiveClient(context, client);
+    await this.ensureIosClientReadyAfterStart(context, manager, client);
   }
 
   private async ensureIosReadyWithoutDownloads(
@@ -814,7 +820,52 @@ export class RunnerReadinessService {
       }),
     );
     const client = this.dependencies.getIosClient(context.device, manager.getServicePort());
-    await this.waitForResponsiveClient(context, client);
+    await this.ensureIosClientReadyAfterStart(context, manager, client);
+  }
+
+  private async ensureIosClientReadyAfterStart(
+    context: ReadinessAttemptContext,
+    manager: ReadinessIosManager,
+    initialClient: ReadinessIosClient,
+  ): Promise<void> {
+    // setup()/start() may deliberately preserve an existing xcodebuild process
+    // that is alive but whose CtrlProxy endpoint never came up. Give that
+    // process one real WebSocket + hierarchy readiness attempt, then restart it
+    // instead of spending the entire health window polling a dead listener.
+    this.startHealthWindow(context);
+    if (await this.isResponsiveClientOnce(context, initialClient)) {
+      return;
+    }
+
+    manager.resetSetupState();
+    await this.runPhase(context, "runner-health", 1, (signal) =>
+      manager.forceRestart({
+        signal,
+        minimumHealthPollDurationMs: this.remainingForPhase(context, "runner-health"),
+      }),
+    );
+    const restartedClient = this.dependencies.getIosClient(
+      context.device,
+      manager.getServicePort(),
+    );
+    await this.waitForResponsiveClient(context, restartedClient);
+  }
+
+  private async isResponsiveClientOnce(
+    context: ReadinessAttemptContext,
+    client: ReadinessIosClient,
+  ): Promise<boolean> {
+    const connected =
+      client.isConnected() ||
+      (await this.runPhase(context, "runner-connect", 1, (signal) =>
+        client.connectWithoutSetup(signal),
+      ));
+    if (!connected) {
+      return false;
+    }
+    return await this.runPhase(context, "runner-health", 1, () =>
+      client.verifyServiceReady(1, 0, this.probeTimeout(context)),
+    );
   }
 
   private async waitForResponsiveClient(
@@ -1051,6 +1102,9 @@ export class RunnerReadinessService {
    * caller's total deadline (#5376).
    */
   private startHealthWindow(context: ReadinessAttemptContext): void {
+    if (context.healthDeadlineMs !== null) {
+      return;
+    }
     context.healthDeadlineMs = Math.min(
       context.totalDeadlineMs,
       this.dependencies.timer.now() + context.readinessTimeoutMs,

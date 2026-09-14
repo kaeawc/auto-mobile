@@ -4508,6 +4508,7 @@ async function runProvisionDeviceWithinDeadline<T>(
   requestSignal: AbortSignal | undefined,
   phase: string,
   operation: (signal: AbortSignal) => Promise<T>,
+  onPendingSettlement?: (settlement: Promise<unknown>) => void,
 ): Promise<T> {
   return await runOperationWithinDeadline(
     timer,
@@ -4515,6 +4516,7 @@ async function runProvisionDeviceWithinDeadline<T>(
     requestSignal,
     () => provisionDeviceTimeoutError(phase),
     operation,
+    onPendingSettlement,
   );
 }
 
@@ -5423,6 +5425,7 @@ async function refreshResourcesAfterCommittedBoot(
 interface StartDeviceRunnerReadinessInput {
   boot: DeviceBootResult;
   args: StartDeviceArgs;
+  operationName: string;
   bootService: DeviceBootService;
   deviceUtils: PlatformDeviceManager;
   daemonState: DaemonState;
@@ -5644,6 +5647,7 @@ function createRunnerReadinessAttempt(
     await input.ensureCtrlProxyReady({
       device: candidate.device,
       requestedIdentity: input.requestedIdentity,
+      operationName: input.operationName,
       totalDeadlineMs: input.totalDeadlineMs,
       readinessTimeoutMs: input.readinessTimeoutMs,
       skipCtrlProxyDownload: serverConfig.isSkipCtrlProxyDownloadEnabled(),
@@ -6602,13 +6606,81 @@ export function registerDeviceTools() {
     };
   }
 
+  async function provisionMutationSettledWithinRollbackBudget(
+    deps: DeviceToolsDependencies,
+    settlement: Promise<unknown>,
+    rollbackDeadlineMs: number,
+  ): Promise<boolean> {
+    const remainingMs = Math.floor(rollbackDeadlineMs - deps.timer.now());
+    if (remainingMs <= 0) {
+      return false;
+    }
+    let timeoutHandle: NodeJS.Timeout | undefined;
+    try {
+      return await Promise.race([
+        settlement.then(
+          () => true,
+          () => true,
+        ),
+        new Promise<boolean>((resolve) => {
+          timeoutHandle = deps.timer.setTimeout(() => resolve(false), remainingMs);
+        }),
+      ]);
+    } finally {
+      if (timeoutHandle) {
+        deps.timer.clearTimeout(timeoutHandle);
+      }
+    }
+  }
+
+  function retainProvisionLifecycleUntilMutationSettles(
+    lifecycleLease: VirtualDeviceLifecycleLease,
+    settlement: Promise<unknown>,
+    stableId: string,
+  ): void {
+    void settlement
+      .finally(() => lifecycleLease.release())
+      .catch((error: unknown) => {
+        logger.warn(
+          `[DeviceTools] Deferred provision mutation for '${stableId}' rejected before lifecycle ownership was released: ${errorMessage(error)}`,
+          error,
+        );
+      });
+  }
+
+  function retainPendingProvisionMutationLifecycle(
+    args: ProvisionDeviceArgs,
+    provisioned: Awaited<ReturnType<ExactDeviceProvisioner["provision"]>> | undefined,
+    takeLifecycleLease: () => VirtualDeviceLifecycleLease | undefined,
+    pendingMutationSettlement: Promise<unknown> | undefined,
+  ): void {
+    if (!pendingMutationSettlement) {
+      return;
+    }
+    const lifecycleLease = takeLifecycleLease();
+    if (!lifecycleLease) {
+      return;
+    }
+    const stableId =
+      provisioned?.device.platform === "ios"
+        ? (provisioned.device.deviceId ?? args.device.name)
+        : args.device.name;
+    retainProvisionLifecycleUntilMutationSettles(
+      lifecycleLease,
+      pendingMutationSettlement,
+      stableId,
+    );
+  }
+
   async function cleanupFailedProvisionDevice(
     args: ProvisionDeviceArgs,
     deps: DeviceToolsDependencies,
     createdDevice: DeviceInfo,
     provisionFailure: ProvisionDeviceError,
     lifecycleLease: VirtualDeviceLifecycleLease | undefined,
+    pendingMutationSettlement?: Promise<unknown>,
   ): Promise<ProvisionDeviceRollbackError> {
+    const rollbackDeadlineMs = deps.timer.now() + DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS;
     const stableId =
       createdDevice.platform === "android" ? createdDevice.name : createdDevice.deviceId;
     if (!stableId) {
@@ -6659,6 +6731,47 @@ export function registerDeviceTools() {
           },
         });
       }
+      if (
+        pendingMutationSettlement &&
+        !(await provisionMutationSettledWithinRollbackBudget(
+          deps,
+          pendingMutationSettlement,
+          rollbackDeadlineMs,
+        ))
+      ) {
+        lifecycleLeaseTransferred = true;
+        retainProvisionLifecycleUntilMutationSettles(
+          lifecycleLease,
+          pendingMutationSettlement,
+          stableId,
+        );
+        return new ProvisionDeviceRollbackError(provisionFailure, {
+          status: "failed",
+          operationId: cleanupArgs.operationId,
+          target: cleanupArgs.target,
+          failure: {
+            code: "mutation_settlement_timeout",
+            phase: "precondition",
+            message:
+              "Cancelled provisioning mutation did not settle within the rollback budget; " +
+              "cleanup was not attempted and lifecycle ownership remains until it settles.",
+          },
+        });
+      }
+      const remainingRollbackMs = Math.floor(rollbackDeadlineMs - deps.timer.now());
+      if (remainingRollbackMs <= 0) {
+        return new ProvisionDeviceRollbackError(provisionFailure, {
+          status: "failed",
+          operationId: cleanupArgs.operationId,
+          target: cleanupArgs.target,
+          failure: {
+            code: "rollback_budget_exhausted",
+            phase: "precondition",
+            message: "The rollback budget was exhausted before device cleanup could start.",
+          },
+        });
+      }
+      cleanupArgs.timeoutMs = remainingRollbackMs;
       lifecycleLease.transitionToTeardown();
       await lifecycleLease.bindCanonicalIdentity({
         platform: createdDevice.platform,
@@ -6763,6 +6876,7 @@ export function registerDeviceTools() {
     takeLifecycleLease: () => VirtualDeviceLifecycleLease | undefined,
     error: unknown,
     unownedColdBootSettlement: Promise<void> | undefined,
+    pendingMutationSettlement: Promise<unknown> | undefined,
   ): Promise<never> {
     if (
       error instanceof McpSessionRecoveryInProgressError ||
@@ -6770,7 +6884,15 @@ export function registerDeviceTools() {
     ) {
       // A transport routing conflict or daemon-generation handoff does not
       // invalidate the viable device, so preserve its identity for a retry
-      // instead of wrapping the interruption in destructive rollback.
+      // instead of wrapping the interruption in destructive rollback. Keep
+      // the lease when an exact-provisioning mutation is still live so a
+      // replacement daemon cannot recreate this identity underneath it.
+      retainPendingProvisionMutationLifecycle(
+        args,
+        provisioned,
+        takeLifecycleLease,
+        pendingMutationSettlement,
+      );
       throw error;
     }
     const createdDevice =
@@ -6792,6 +6914,7 @@ export function registerDeviceTools() {
       createdDevice,
       toProvisionDeviceError(args, error),
       takeLifecycleLease(),
+      pendingMutationSettlement,
     );
   }
 
@@ -6905,7 +7028,8 @@ export function registerDeviceTools() {
     let lifecycleLease: VirtualDeviceLifecycleLease | undefined;
     let provisioned: Awaited<ReturnType<ExactDeviceProvisioner["provision"]>> | undefined;
     let creationStarted = reconcileExistingConfiguration;
-    const bootState: {
+    const settlementState: {
+      exactProvisioning?: Promise<unknown>;
       unownedColdBootSettlement?: Promise<void>;
       bindingSettlements: Promise<void>[];
       readinessReservation?: DeviceReadinessReservation;
@@ -6966,6 +7090,9 @@ export function registerDeviceTools() {
           creationStarted = true;
         },
         lifecycleLease,
+        (settlement) => {
+          settlementState.exactProvisioning = settlement;
+        },
         signal,
       );
       const createdByOperation = reconcileExistingConfiguration || provisioned.created;
@@ -6988,7 +7115,7 @@ export function registerDeviceTools() {
         totalDeadlineMs,
         lifecycleLease,
         signal,
-        bootState,
+        settlementState,
       );
       if (provisioned.created || booted.source === "cold-boot") {
         // Session and pool ownership are already committed by
@@ -7013,12 +7140,15 @@ export function registerDeviceTools() {
           return rollbackLease;
         },
         error,
-        bootState.unownedColdBootSettlement,
+        settlementState.unownedColdBootSettlement,
+        settlementState.exactProvisioning,
       );
     } finally {
       const settlements = [
-        ...bootState.bindingSettlements,
-        ...(bootState.unownedColdBootSettlement ? [bootState.unownedColdBootSettlement] : []),
+        ...settlementState.bindingSettlements,
+        ...(settlementState.unownedColdBootSettlement
+          ? [settlementState.unownedColdBootSettlement]
+          : []),
       ];
       if (settlements.length > 0) {
         // A cancelled autolock binding may still be durably releasing its
@@ -7026,7 +7156,7 @@ export function registerDeviceTools() {
         // any cold-boot shutdown) is terminal, without delaying the caller.
         void Promise.allSettled(settlements)
           .then(() => {
-            releaseProvisionReadiness(bootState.readinessReservation);
+            releaseProvisionReadiness(settlementState.readinessReservation);
             lifecycleLease?.release();
           })
           .catch((error: unknown) => {
@@ -7036,7 +7166,7 @@ export function registerDeviceTools() {
             );
           });
       } else {
-        releaseProvisionReadiness(bootState.readinessReservation);
+        releaseProvisionReadiness(settlementState.readinessReservation);
         lifecycleLease?.release();
       }
     }
@@ -7051,6 +7181,7 @@ export function registerDeviceTools() {
     reconcileExistingConfiguration: boolean,
     markDeviceCreationStarted: () => Promise<void>,
     lifecycleLease: VirtualDeviceLifecycleLease,
+    collectPendingSettlement: (settlement: Promise<unknown>) => void,
     signal: AbortSignal | undefined,
   ): Promise<Awaited<ReturnType<ExactDeviceProvisioner["provision"]>>> {
     perf.startOperation("provisionExactDevice");
@@ -7071,6 +7202,7 @@ export function registerDeviceTools() {
             deadlineMs: totalDeadlineMs,
             signal: deadlineSignal,
           }),
+        collectPendingSettlement,
       );
     } finally {
       perf.endOperation("provisionExactDevice");
@@ -7089,8 +7221,9 @@ export function registerDeviceTools() {
     signal: AbortSignal | undefined,
     // Carries reservation release dependencies back to the caller so both the
     // readiness and AVD lifecycle reservations outlive cancellation rollback.
-    bootState: {
+    settlementState: {
       unownedColdBootSettlement?: Promise<void>;
+      exactProvisioning?: Promise<unknown>;
       bindingSettlements: Promise<void>[];
       readinessReservation?: DeviceReadinessReservation;
     },
@@ -7241,7 +7374,7 @@ export function registerDeviceTools() {
                 undefined,
                 resolveProvisionDeviceAchievedReadiness(args.readiness),
                 (settlement) => {
-                  bootState.bindingSettlements.push(settlement);
+                  settlementState.bindingSettlements.push(settlement);
                 },
               ),
           );
@@ -7256,11 +7389,11 @@ export function registerDeviceTools() {
       };
     } catch (error) {
       if (!ownershipTransferred) {
-        bootState.unownedColdBootSettlement = cancelUnownedColdBoot(boot);
+        settlementState.unownedColdBootSettlement = cancelUnownedColdBoot(boot);
       }
       throw error;
     } finally {
-      bootState.readinessReservation = readinessReservation;
+      settlementState.readinessReservation = readinessReservation;
     }
   }
 
@@ -7760,6 +7893,7 @@ export function registerDeviceTools() {
       const readinessResult = await prepareStartDeviceRunnerReadiness({
         boot: state.boot!,
         args,
+        operationName: budgets.operationName,
         bootService,
         deviceUtils,
         daemonState,

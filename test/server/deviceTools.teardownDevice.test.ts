@@ -1869,6 +1869,61 @@ describe("deleteDevice handler", () => {
     expect(runtimeAvdNameProbes).toEqual([peer.deviceId]);
   });
 
+  test("force reports the target still running when it reappears on a peer serial after destroy", async () => {
+    const timer = new FakeTimer();
+    const target: BootedDevice = {
+      platform: "android",
+      name: "Pixel_8_API_35",
+      deviceId: "emulator-5554",
+    };
+    const peer: BootedDevice = {
+      platform: "android",
+      name: "Pixel_7_API_34",
+      deviceId: "emulator-5556",
+    };
+    const targetImage: DeviceInfo = { platform: "android", name: target.name, isRunning: true };
+    const sessionManager = new SessionManager(timer);
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      manager,
+      new DefaultRetryExecutor(timer),
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    await pool.addDevice(target, targetImage);
+    await pool.addDevice(peer, { platform: "android", name: peer.name, isRunning: true });
+    manager.setBootedDevices("android", [target, peer]);
+    manager.setDeviceImages("android", [targetImage]);
+    const replacementOnTargetSerial = { ...target, name: "Pixel_9_API_36" };
+    manager.bootedDevicesAfterKill = [replacementOnTargetSerial, peer];
+    manager.bootedDevicesAfterDestroy = [peer];
+    manager.serialOnlyRuntimeNames.set(target.deviceId, replacementOnTargetSerial.name);
+    runtimeAvdNames.set(peer.deviceId, target.name);
+
+    const body = responseBody(
+      await teardownTool().handler({
+        ...request("android", target.name, target.name),
+        force: true,
+      }),
+    );
+
+    expect(body.state).toBe("failed");
+    expect(body.failure).toEqual(
+      expect.objectContaining({
+        code: "target_still_running",
+        phase: "verification",
+      }),
+    );
+    const failureMessage = String((body.failure as Record<string, unknown>).message);
+    expect(failureMessage).toContain(peer.deviceId);
+    expect(failureMessage).toMatch(/reappeared|still running/i);
+    expect(failureMessage).not.toContain("restarted after shutdown confirmation");
+    expect(runtimeAvdNameProbes).toEqual([peer.deviceId]);
+    expect(manager.destroyRequests).toHaveLength(1);
+  });
+
   test("force skips wedged peer probes when the target remains on its original serial", async () => {
     const timer = new FakeTimer();
     const target: BootedDevice = {

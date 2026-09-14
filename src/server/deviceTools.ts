@@ -4102,12 +4102,6 @@ async function checkForSerialOnlyAndroidTeardownRestart(
   if (!context.serialOnlyAndroidDiscovery || target.device.platform !== "android") {
     return undefined;
   }
-  // The stop check is the only point where a peer identity can prevent the
-  // destructive delete. destroy() only targets this teardown's serial/AVD, so
-  // a second peer probe during verification cannot reveal a destroy-caused move.
-  if (phase !== "stop") {
-    return undefined;
-  }
   const targetOriginalSerial = target.wasBooted ? target.bootedDevice.deviceId : undefined;
   if (
     targetOriginalSerial &&
@@ -4158,9 +4152,12 @@ function serialOnlyAndroidTeardownRestartFailure(
     return createTeardownFailureResponse(
       context.args,
       phase,
-      "target_restarted",
-      `Android peer emulator '${suspect.deviceId}' could not identify its AVD while the target's ` +
-        "original serial disappeared; refusing deletion rather than assuming the target did not restart there.",
+      phase === "stop" ? "target_restarted" : "target_still_running",
+      phase === "stop"
+        ? `Android peer emulator '${suspect.deviceId}' could not identify its AVD while the target's ` +
+            "original serial disappeared; refusing deletion rather than assuming the target did not restart there."
+        : `The Android AVD may have reappeared on peer emulator '${suspect.deviceId}' after deletion, ` +
+            "but its AVD name could not be resolved; refusing to report success rather than assuming inventory absence is durable.",
       target.device,
     );
   }
@@ -4173,7 +4170,8 @@ function serialOnlyAndroidTeardownRestartFailure(
     phase === "stop" ? "target_restarted" : "target_still_running",
     phase === "stop"
       ? "The Android AVD restarted after shutdown confirmation; refusing deletion."
-      : "The Android AVD is still running after deletion.",
+      : `The Android AVD reappeared on peer emulator '${suspect.deviceId}' after deletion; ` +
+          "refusing to report success rather than assuming inventory absence is durable.",
     target.device,
   );
 }

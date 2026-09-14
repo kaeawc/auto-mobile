@@ -47,6 +47,10 @@ const REQUIRED_PROJECT_DESCRIPTOR_EXTENSIONS = [".pbxproj", "project.yml"];
 // / needlessly volatile across otherwise-identical source trees.
 const FORBIDDEN_HASH_SEGMENTS = [".build", "SourcePackages", "DerivedData"];
 
+function hasForbiddenPathSegment(pattern: string): boolean {
+  return pattern.split("/").some((segment) => FORBIDDEN_HASH_SEGMENTS.includes(segment));
+}
+
 const REQUIRED_SCOPES_BY_JOB_ID: Record<string, readonly string[]> = {
   "ios-xcode-build": ["ios/"],
   "ios-playground-tests": [
@@ -119,7 +123,7 @@ function validateDerivedDataCacheKeyPatterns(patterns: string[], jobId: string):
     const isNegated = pattern.startsWith("!");
     const patternBody = isNegated ? pattern.slice(1) : pattern;
     if (isNegated) {
-      if (!FORBIDDEN_HASH_SEGMENTS.some((forbidden) => patternBody.includes(forbidden))) {
+      if (!hasForbiddenPathSegment(patternBody)) {
         violations.push(
           `pattern '${pattern}' excludes required build inputs from the DerivedData cache key hash`,
         );
@@ -242,16 +246,31 @@ test("DerivedData cache guard rejects narrowed filename globs", () => {
 
 test("DerivedData cache guard rejects negated build inputs", () => {
   const patterns = requiredPatternsForScopes(Object.values(REQUIRED_SCOPES_BY_JOB_ID).flat());
-  patterns.push("!ios/Playground/Sources/ContentView.swift");
+  patterns.push(
+    "!ios/Playground/Sources/ContentView.swift",
+    "!ios/**/*.build.swift",
+    "!ios/SourcePackagesBackup/**/*.swift",
+  );
 
   expect(validateDerivedDataCacheKeyPatterns(patterns, "ios-playground-tests")).toContain(
     "pattern '!ios/Playground/Sources/ContentView.swift' excludes required build inputs from the DerivedData cache key hash",
+  );
+  expect(validateDerivedDataCacheKeyPatterns(patterns, "ios-playground-tests")).toContain(
+    "pattern '!ios/**/*.build.swift' excludes required build inputs from the DerivedData cache key hash",
+  );
+  expect(validateDerivedDataCacheKeyPatterns(patterns, "ios-playground-tests")).toContain(
+    "pattern '!ios/SourcePackagesBackup/**/*.swift' excludes required build inputs from the DerivedData cache key hash",
   );
 });
 
 test("DerivedData cache guard permits negations of forbidden directories", () => {
   const patterns = requiredPatternsForScopes(Object.values(REQUIRED_SCOPES_BY_JOB_ID).flat());
-  patterns.push("!**/DerivedData/**", "!**/.build/**", "!**/SourcePackages/**");
+  patterns.push(
+    "!**/DerivedData/**",
+    "!**/.build/**",
+    "!**/SourcePackages/**",
+    "!ios/**/.build/**",
+  );
 
   expect(validateDerivedDataCacheKeyPatterns(patterns, "ios-playground-tests")).toEqual([]);
 });

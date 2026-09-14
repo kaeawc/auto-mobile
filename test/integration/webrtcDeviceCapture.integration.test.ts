@@ -29,6 +29,7 @@ import {
   type SimulatorAppearanceClient,
 } from "../helpers/webrtcDeviceCaptureHelpers";
 import {
+  recoverWhepSubscription,
   subscribeWhepReaderForPlatform,
   type ChromeReader,
 } from "../helpers/whepSubscriptionRecovery";
@@ -1254,10 +1255,15 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
             // A brand-new WHEP subscription is the relayed PLI: it renegotiates
             // with MediaMTX, which requests a keyframe upstream. The recovery
             // viewer starts cold, so its baseline is zero on both counters.
-            ({ chrome, cdp } = await subscribeRecoveryReader(
+            ({ chrome, cdp } = await recoverWhepSubscription(
               { chrome: chrome!, cdp: cdp! },
-              join(artifactDir, "chrome.log"),
-              rememberChrome,
+              {
+                subscribe: subscribeReader,
+                launch: () => launchChromeReader(join(artifactDir, "chrome.log"), rememberChrome),
+                close: (readerCdp) => readerCdp.close(),
+                stop,
+                timer: defaultTimer,
+              },
             ));
             const baseline: KeyframeRecoverySample = { keyFramesDecoded: 0, framesDecoded: 0 };
             // Under a static Simulator screen the restarted encoder's IDR only

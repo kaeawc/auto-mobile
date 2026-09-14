@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { FakeTimer } from "../fakes/FakeTimer";
 import {
-  recoverWhepSubscription,
   subscribeWhepReaderForPlatform,
   type ChromeReader,
   type WhepSubscriptionRecoveryDependencies,
@@ -34,7 +33,7 @@ function dependencies(
   };
 }
 
-describe("recoverWhepSubscription", () => {
+describe("subscribeWhepReaderForPlatform", () => {
   test("subscribes directly in non-iOS lanes", async () => {
     const timer = new FakeTimer();
     const events: string[] = [];
@@ -68,7 +67,8 @@ describe("recoverWhepSubscription", () => {
     const initial = reader("initial-chrome", { id: "initial-cdp" });
     const replacement = reader("replacement-chrome", { id: "replacement-cdp" });
 
-    const recovery = recoverWhepSubscription(
+    const recovery = subscribeWhepReaderForPlatform(
+      "ios",
       initial,
       dependencies(
         timer,
@@ -117,7 +117,8 @@ describe("recoverWhepSubscription", () => {
     const replacement = reader("replacement-chrome", { id: "replacement-cdp" });
 
     await expect(
-      recoverWhepSubscription(
+      subscribeWhepReaderForPlatform(
+        "ios",
         initial,
         dependencies(
           timer,

@@ -60,6 +60,7 @@ const OBSERVE_JOIN_KEYS = [
   "deviceId",
   "observationScreenshotResourceUri",
 ] as const;
+const REQUIRED_OBSERVE_JOIN_KEYS = ["observationId", "deviceId"] as const;
 
 /**
  * Evaluate the effective JSON-Schema `required` set for one instance, honoring
@@ -127,15 +128,19 @@ function publishedObserveOutputSchema(): Record<string, unknown> {
   }
 }
 
-describe("observe.outputSchema: requires the screenshot-resource join keys on the wire (#7018)", () => {
-  test("the PUBLISHED (flattened) schema requires all three join keys for an ordinary successful observation", () => {
+describe("observe.outputSchema: requires usable screenshot-resource join keys on the wire (#7018)", () => {
+  test("the PUBLISHED (flattened) schema requires identities but makes the URI optional for an ordinary successful observation", () => {
     const published = publishedObserveOutputSchema();
     // A successful observation carries no `artifact` spill key.
     const successfulKeys = new Set<string>(OBSERVE_JOIN_KEYS);
     const required = effectiveRequired(published, successfulKeys, {});
-    for (const key of OBSERVE_JOIN_KEYS) {
+    for (const key of REQUIRED_OBSERVE_JOIN_KEYS) {
       expect(required).toContain(key);
     }
+    expect(required).not.toContain("observationScreenshotResourceUri");
+    expect(
+      (published.properties as Record<string, unknown>).observationScreenshotResourceUri,
+    ).toBeDefined();
   });
 
   test("the join-key requirement does NOT depend on accessibilityAuditSkipped being present", () => {
@@ -148,10 +153,12 @@ describe("observe.outputSchema: requires the screenshot-resource join keys on th
       new Set([...OBSERVE_JOIN_KEYS, "accessibilityAuditSkipped"]),
       { accessibilityAuditSkipped: "settled_capture_adopted" },
     );
-    for (const key of OBSERVE_JOIN_KEYS) {
+    for (const key of REQUIRED_OBSERVE_JOIN_KEYS) {
       expect(withoutAudit).toContain(key);
       expect(withAudit).toContain(key);
     }
+    expect(withoutAudit).not.toContain("observationScreenshotResourceUri");
+    expect(withAudit).not.toContain("observationScreenshotResourceUri");
   });
 
   test("the artifact/spill arm does NOT require the join keys", () => {
@@ -172,16 +179,20 @@ describe("observe.outputSchema: requires the screenshot-resource join keys on th
     ).not.toThrow();
   });
 
-  test("the embedded diff arm advertises the same join keys (it is nested, not top-level flattened)", () => {
+  test("the embedded diff arm requires identities while declaring the screenshot URI optional (it is nested, not top-level flattened)", () => {
     // observeDiffSchema is only ever nested (inside observationOutputSchema /
     // action-tool `.observation`), so it never hits top-level union flattening
     // and keeps its per-arm required intact. Assert that contract holds.
     const jsonSchema = toJSONSchema(observeDiffSchema) as Record<string, unknown>;
     applyJsonSchemaOverride(observeDiffSchema, jsonSchema);
     const required = Array.isArray(jsonSchema.required) ? (jsonSchema.required as string[]) : [];
-    for (const key of OBSERVE_JOIN_KEYS) {
+    for (const key of REQUIRED_OBSERVE_JOIN_KEYS) {
       expect(required).toContain(key);
     }
+    expect(required).not.toContain("observationScreenshotResourceUri");
+    expect(
+      (jsonSchema.properties as Record<string, unknown>).observationScreenshotResourceUri,
+    ).toBeDefined();
   });
 });
 

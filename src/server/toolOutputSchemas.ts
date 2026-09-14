@@ -534,23 +534,26 @@ const observationScreenshotResourceUriSchema = z
   );
 
 /**
- * The observation join keys advertised as required on the wire (issue #7018):
- * the screenshot-resource join keys and the ready-built resource URI. All three
- * stay optional on the zod parse schema so recorded captures that predate them
- * still validate.
+ * Observation screenshot-resource properties (issue #7018). All three stay
+ * optional on the zod parse schema so recorded captures that predate them still
+ * validate. The URI is declared but not wire-required: observations that
+ * deliberately skip capture have no screenshot resource to advertise.
  */
-const OBSERVATION_WIRE_REQUIRED_KEYS = [
+const OBSERVATION_JOIN_KEY_PROPERTIES = [
   "observationId",
   "deviceId",
   "observationScreenshotResourceUri",
 ] as const;
 
+/** Identity keys every successful observation has on the advertised wire contract. */
+const OBSERVATION_WIRE_REQUIRED_KEYS = ["observationId", "deviceId"] as const;
+
 /**
  * Advertise the observation join keys as required (in property order, so the
  * generated `required` list is stable) while the zod schema still parses
  * captures that omit them. Registers by schema identity, so call it on the
- * final exported schema object. Only keys the schema actually declares are
- * promoted, so a schema that lists a subset advertises exactly that subset.
+ * final exported schema object. It detects every declared screenshot-resource
+ * property, but promotes only the identity keys; the URI remains optional.
  */
 function requireObservationJoinKeysOnTheWire(schema: z.ZodTypeAny): void {
   withJsonSchemaOverride(schema, (jsonSchema) => {
@@ -559,15 +562,16 @@ function requireObservationJoinKeysOnTheWire(schema: z.ZodTypeAny): void {
       return;
     }
     const required = new Set(Array.isArray(jsonSchema.required) ? jsonSchema.required : []);
-    let addedAny = false;
+    const joinKeyProperties = OBSERVATION_JOIN_KEY_PROPERTIES.filter((key) =>
+      Object.hasOwn(properties, key),
+    );
+    if (joinKeyProperties.length === 0) {
+      return;
+    }
     for (const key of OBSERVATION_WIRE_REQUIRED_KEYS) {
       if (Object.hasOwn(properties, key)) {
         required.add(key);
-        addedAny = true;
       }
-    }
-    if (!addedAny) {
-      return;
     }
     // Keep `additionalProperties` as the trailing key so the generated
     // `schemas/tool-definitions.json` stays byte-stable.
@@ -612,10 +616,15 @@ function requireObservationJoinKeysOnFlattenedUnion(schema: z.ZodTypeAny): void 
     if (!properties) {
       return;
     }
-    const joinKeys = OBSERVATION_WIRE_REQUIRED_KEYS.filter((key) => Object.hasOwn(properties, key));
+    const joinKeyProperties = OBSERVATION_JOIN_KEY_PROPERTIES.filter((key) =>
+      Object.hasOwn(properties, key),
+    );
+    const requiredJoinKeys = OBSERVATION_WIRE_REQUIRED_KEYS.filter((key) =>
+      Object.hasOwn(properties, key),
+    );
     // Only act on the flattened observe union: it declares the join keys and the
     // `artifact` spill arm's discriminating property.
-    if (joinKeys.length === 0 || !Object.hasOwn(properties, "artifact")) {
+    if (joinKeyProperties.length === 0 || !Object.hasOwn(properties, "artifact")) {
       return;
     }
     // The flattener emits a single `if/then` (no `else`) whose `then.required` is
@@ -630,7 +639,7 @@ function requireObservationJoinKeysOnFlattenedUnion(schema: z.ZodTypeAny): void 
     const isJoinKeyOnlyConditional =
       !("else" in jsonSchema) &&
       thenRequired !== undefined &&
-      thenRequired.every((key) => (joinKeys as string[]).includes(key));
+      thenRequired.every((key) => (requiredJoinKeys as string[]).includes(key));
     if (hasConditional && !isJoinKeyOnlyConditional) {
       return;
     }
@@ -640,7 +649,7 @@ function requireObservationJoinKeysOnFlattenedUnion(schema: z.ZodTypeAny): void 
     // Require the join keys on every shape except the artifact spill arm.
     jsonSchema.if = { required: ["artifact"] };
     jsonSchema.then = {};
-    jsonSchema.else = { required: [...joinKeys] };
+    jsonSchema.else = { required: [...requiredJoinKeys] };
   });
 }
 

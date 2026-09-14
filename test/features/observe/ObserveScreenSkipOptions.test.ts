@@ -149,10 +149,14 @@ describe("ObserveScreen skip options", () => {
   });
 
   test("skipScreenshot=true prevents screenshot capture", async () => {
-    await observeScreen.execute({ skipScreenshot: true });
+    const result = await observeScreen.execute({ skipScreenshot: true });
 
     expect(fakeScreenshotRecorder.startCalls).toBe(0);
     expect(fakeScreenshotRecorder.captureCalls).toBe(0);
+    expect(
+      (result as ObserveResult & { screenshotCaptureAttempted?: boolean })
+        .screenshotCaptureAttempted,
+    ).toBe(false);
   });
 
   test("skipBackStack=true prevents back stack collection", async () => {
@@ -162,11 +166,15 @@ describe("ObserveScreen skip options", () => {
   });
 
   test("default options collect both screenshot and back stack", async () => {
-    await observeScreen.execute();
+    const result = await observeScreen.execute();
 
     expect(fakeScreenshotRecorder.startCalls).toBe(1);
     expect(fakeDeviceStateCollector.backStackCalls).toBe(1);
     expect(fakeDeviceStateCollector.activeWindowCalls).toBe(0);
+    expect(
+      (result as ObserveResult & { screenshotCaptureAttempted?: boolean })
+        .screenshotCaptureAttempted,
+    ).toBe(true);
   });
 
   test("uses the bootstrap active-window fallback only without CtrlProxy foreground metadata", async () => {

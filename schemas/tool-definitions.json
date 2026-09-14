@@ -6880,7 +6880,7 @@
       },
       "then": {},
       "else": {
-        "required": ["observationId", "deviceId", "observationScreenshotResourceUri"]
+        "required": ["observationId", "deviceId"]
       }
     },
     "_meta": {
@@ -11893,7 +11893,6 @@
                 "isDiff",
                 "observationId",
                 "deviceId",
-                "observationScreenshotResourceUri",
                 "skeleton",
                 "added",
                 "removed",
@@ -13098,7 +13097,7 @@
                   "const": "settled_capture_adopted"
                 }
               },
-              "required": ["observationId", "deviceId", "observationScreenshotResourceUri"],
+              "required": ["observationId", "deviceId"],
               "additionalProperties": {}
             },
             {

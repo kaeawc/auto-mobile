@@ -1045,6 +1045,7 @@ describe("finalizeToolResponse", () => {
         ...sameScreenObserve(),
         observationId: "observe-abc",
         deviceId: "emulator-5554",
+        screenshotCaptureAttempted: true,
       };
       const finalized = finalizeToolResponse(createStructuredToolResponse(observe), {
         name: "observe",
@@ -1065,6 +1066,29 @@ describe("finalizeToolResponse", () => {
       expect(JSON.parse(finalized.content[0].text).observationScreenshotResourceUri).toBe(
         sc.observationScreenshotResourceUri,
       );
+      expect(sc.screenshotCaptureAttempted).toBeUndefined();
+      expect(JSON.parse(finalized.content[0].text).screenshotCaptureAttempted).toBeUndefined();
+    });
+
+    test("a skip-screenshot waitFor-style observation omits the dangling screenshot URI", () => {
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse({
+          ...sameScreenObserve(),
+          observationId: "wait-for-no-screenshot",
+          deviceId: "emulator-5554",
+          screenshotCaptureAttempted: false,
+          matched: true,
+          polls: 1,
+        } as ObserveResult & { screenshotCaptureAttempted: boolean }),
+        { name: "observe" },
+      );
+
+      const observation = finalized.structuredContent as Record<string, unknown>;
+      expect(observation.observationScreenshotResourceUri).toBeUndefined();
+      expect(observation.screenshotCaptureAttempted).toBeUndefined();
+      const textObservation = JSON.parse(finalized.content[0].text) as Record<string, unknown>;
+      expect(textObservation.observationScreenshotResourceUri).toBeUndefined();
+      expect(textObservation.screenshotCaptureAttempted).toBeUndefined();
     });
 
     test("a diffed action observation carries the deviceId + screenshot resource URI (issue #7018)", () => {
@@ -1078,6 +1102,7 @@ describe("finalizeToolResponse", () => {
         ...sameScreenObserve(),
         observationId: "post-action-observation",
         deviceId: "emulator-5554",
+        screenshotCaptureAttempted: true,
       };
       (next.viewHierarchy!.hierarchy.node as any).node[0].checked = "true";
       const finalized = finalizeToolResponse(
@@ -1098,6 +1123,38 @@ describe("finalizeToolResponse", () => {
       expect(
         JSON.parse(finalized.content[0].text).observation.observationScreenshotResourceUri,
       ).toBe(observation.observationScreenshotResourceUri);
+      expect(observation.screenshotCaptureAttempted).toBeUndefined();
+      expect(
+        JSON.parse(finalized.content[0].text).observation.screenshotCaptureAttempted,
+      ).toBeUndefined();
+    });
+
+    test("a skip-screenshot post-action observation omits the dangling screenshot URI", () => {
+      const { store } = makeStore();
+      finalizeToolResponse(
+        createStructuredToolResponse({ ...sameScreenObserve(), deviceId: "emulator-5554" }),
+        { name: "observe", sessionUuid: "s1", baselineStore: store },
+      );
+
+      const next = {
+        ...sameScreenObserve(),
+        observationId: "post-action-no-screenshot",
+        deviceId: "emulator-5554",
+        screenshotCaptureAttempted: false,
+      } as ObserveResult & { screenshotCaptureAttempted: boolean };
+      (next.viewHierarchy!.hierarchy.node as any).node[0].checked = "true";
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: next }),
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
+      );
+
+      const observation = (finalized.structuredContent as any).observation;
+      expect(observation.isDiff).toBe(true);
+      expect(observation.observationScreenshotResourceUri).toBeUndefined();
+      expect(observation.screenshotCaptureAttempted).toBeUndefined();
+      const textObservation = JSON.parse(finalized.content[0].text).observation;
+      expect(textObservation.observationScreenshotResourceUri).toBeUndefined();
+      expect(textObservation.screenshotCaptureAttempted).toBeUndefined();
     });
 
     test("a diffed observation carries `accessibilityAuditSkipped` with the same shape as full mode (issue #6926)", () => {

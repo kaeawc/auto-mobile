@@ -406,8 +406,9 @@ export class SdkManagerClient {
 export async function readSdkManagerVersion(
   client: Pick<SdkManagerClient, "getVersion"> = new SdkManagerClient(),
   location?: AndroidToolsLocation,
+  probe: Pick<SdkManagerExecutionOptions, "signal" | "timeoutMs"> = {},
 ): Promise<string | null> {
-  const result = await client.getVersion(location ? { location } : {});
+  const result = await client.getVersion({ ...probe, ...(location ? { location } : {}) });
   if (result.exitCode !== 0) {
     logger.debug(
       `sdkmanager --version failed (exit ${result.exitCode}): ${result.stderr || result.stdout}`,

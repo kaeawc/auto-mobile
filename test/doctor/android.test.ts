@@ -7,7 +7,9 @@ import {
   checkAdbVersion,
   checkConnectedDevices,
   checkAvdMemory,
+  checkEmulator,
 } from "../../src/doctor/checks/android";
+import type { DoctorProbeOptions } from "../../src/doctor/types";
 import { tmpdir } from "node:os";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
@@ -337,6 +339,129 @@ describe("checkAdbVersion", () => {
     const result = await checkAdbVersion(throwingFactory);
     expect(result.status).toBe("warn");
     expect(result.message).toContain("raw string error");
+  });
+});
+
+describe("doctor probe cancellation seam (#7008)", () => {
+  const androidHome = tmpdir();
+  const cmdlineToolsDependencies = (
+    versionCalls: Array<DoctorProbeOptions | undefined>,
+  ): AndroidDoctorDependencies => ({
+    ...baseDependencies,
+    detectAndroidCommandLineTools: async () => [
+      {
+        path: `${androidHome}/cmdline-tools/latest`,
+        source: "android_home" as const,
+        available_tools: ["sdkmanager"],
+      },
+    ],
+    getBestAndroidToolsLocation: (locations) => locations[0] ?? null,
+    getCmdlineToolsVersion: async (_location, probe) => {
+      versionCalls.push(probe);
+      return "13.0";
+    },
+  });
+
+  test("checkEmulator forwards the signal and deadline to listAvds", async () => {
+    const controller = new AbortController();
+    const calls: Array<DoctorProbeOptions | undefined> = [];
+    const result = await checkEmulator(
+      { signal: controller.signal, timeoutMs: 1234 },
+      {
+        listAvds: async (probe) => {
+          calls.push(probe);
+          return [];
+        },
+      },
+    );
+
+    expect(result.status).toBe("pass");
+    expect(calls).toEqual([{ signal: controller.signal, timeoutMs: 1234 }]);
+  });
+
+  test("checkEmulator passes no signal or deadline when the caller supplies none", async () => {
+    const calls: Array<DoctorProbeOptions | undefined> = [];
+    await checkEmulator(undefined, {
+      listAvds: async (probe) => {
+        calls.push(probe);
+        return [];
+      },
+    });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.signal).toBeUndefined();
+    expect(calls[0]?.timeoutMs).toBeUndefined();
+  });
+
+  test("checkAdbVersion forwards the signal and deadline to the adb command", async () => {
+    const controller = new AbortController();
+    const fakeExecutor = new FakeAdbExecutor();
+    fakeExecutor.setCommandResponse("--version", {
+      stdout: "Android Debug Bridge version 35.0.0",
+      stderr: "",
+      toString: () => "",
+      trim: () => "",
+      includes: () => false,
+    });
+    const fakeFactory = new FakeAdbClientFactory(fakeExecutor as any);
+
+    await checkAdbVersion(fakeFactory, { signal: controller.signal, timeoutMs: 1234 });
+
+    expect(fakeExecutor.getCommandCalls()).toEqual([
+      {
+        command: "--version",
+        timeoutMs: 1234,
+        maxBuffer: undefined,
+        noRetry: true,
+        signal: controller.signal,
+      },
+    ]);
+  });
+
+  test("checkAdbVersion runs the adb command without a signal or deadline by default", async () => {
+    const fakeExecutor = new FakeAdbExecutor();
+    const fakeFactory = new FakeAdbClientFactory(fakeExecutor as any);
+
+    await checkAdbVersion(fakeFactory);
+
+    const [call] = fakeExecutor.getCommandCalls();
+    expect(call?.timeoutMs).toBeUndefined();
+    expect(call?.signal).toBeUndefined();
+  });
+
+  test("checkAdbInstallation forwards the signal and deadline to adb path discovery", async () => {
+    const controller = new AbortController();
+    const calls: Array<DoctorProbeOptions | undefined> = [];
+    const fakeFactory: AdbClientFactory = {
+      create: () =>
+        ({
+          getAdbPathOnly: async (probe?: DoctorProbeOptions) => {
+            calls.push(probe);
+            return "/usr/local/bin/adb";
+          },
+        }) as any,
+    };
+
+    await checkAdbInstallation(fakeFactory, { signal: controller.signal, timeoutMs: 1234 });
+    await checkAdbInstallation(fakeFactory);
+
+    expect(calls).toEqual([{ signal: controller.signal, timeoutMs: 1234 }, {}]);
+  });
+
+  test("checkAndroidCommandLineTools forwards the signal and deadline to the version probe", async () => {
+    const controller = new AbortController();
+    const calls: Array<DoctorProbeOptions | undefined> = [];
+
+    await checkAndroidCommandLineTools(
+      { signal: controller.signal, timeoutMs: 1234 },
+      cmdlineToolsDependencies(calls),
+    );
+    await checkAndroidCommandLineTools(undefined, cmdlineToolsDependencies(calls));
+
+    expect(calls).toHaveLength(2);
+    expect(calls[0]).toEqual({ signal: controller.signal, timeoutMs: 1234 });
+    expect(calls[1]?.signal).toBeUndefined();
+    expect(calls[1]?.timeoutMs).toBeUndefined();
   });
 });
 

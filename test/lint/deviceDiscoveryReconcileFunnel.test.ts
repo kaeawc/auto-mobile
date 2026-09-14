@@ -113,8 +113,11 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
 
     // --- Consult no pooled identity -----------------------------------------
     "src/utils/DeviceSessionManager.ts": {
-      calls: 3,
-      reason: "Tracks adb-level connection state; owns no pooled identity and runs below the pool.",
+      calls: 4,
+      reason:
+        "Tracks adb-level connection state; owns no pooled identity and runs below the pool. The " +
+        "fourth call (resolveAndroidReadinessIdentity) re-reads the AVD-name-aware listing for one " +
+        "serial so the provided/current readiness paths key the Window cache on the runtime (#7031).",
     },
     "src/utils/deviceBootService.ts": {
       calls: 3,

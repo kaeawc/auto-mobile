@@ -191,6 +191,24 @@ describe("SdkManagerClient", () => {
     expect(receivedLocation).toEqual(location);
   });
 
+  test("forwards the caller signal and deadline to the version probe (#7008)", async () => {
+    const controller = new AbortController();
+    let received: { signal?: AbortSignal; timeoutMs?: number } | undefined;
+    await expect(
+      readSdkManagerVersion(
+        {
+          getVersion: async (options) => {
+            received = { signal: options?.signal, timeoutMs: options?.timeoutMs };
+            return { stdout: "13.0\n", stderr: "", exitCode: 0, outputTruncated: false };
+          },
+        },
+        undefined,
+        { signal: controller.signal, timeoutMs: 1234 },
+      ),
+    ).resolves.toBe("13.0");
+    expect(received).toEqual({ signal: controller.signal, timeoutMs: 1234 });
+  });
+
   test("does not truncate the sdkmanager catalogue by default", async () => {
     const { client, child } = createClient();
     const output = "available package\n".repeat(2_000);

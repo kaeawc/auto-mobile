@@ -1008,6 +1008,10 @@ export class RealObserveScreen implements ObserveScreen {
   createBaseResult(): ObserveResult {
     return {
       observationId: this.idGenerator.next(),
+      // The concrete device this observation ran against (issue #7018). The
+      // resolved id is surfaced so the serialization chokepoint can build the
+      // observation-scoped screenshot resource URI (which needs deviceId too).
+      deviceId: this.device.deviceId,
       // Derive the timestamp from the injected timer so the source is pinnable
       // in tests instead of the real wall clock (issue #4172 item 9).
       updatedAt: new Date(this.timer.now()).toISOString(),

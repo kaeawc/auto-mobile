@@ -17,6 +17,7 @@ import { errorMessage } from "../utils/describeUnknownError";
 import { OPERATION_CANCELLED_MESSAGE } from "../utils/constants";
 import { detectImageMimeType } from "../utils/screenshot/imageHeaderDimensions";
 import { getScreenshotStateStore } from "../features/observe/screenshot/ScreenshotStateRegistry";
+import { OBSERVATION_SCREENSHOT_URI_TEMPLATE } from "./observationResourceUris";
 
 interface ScreenshotFileSystem {
   stat(path: string): Promise<{ isFile(): boolean }>;
@@ -76,7 +77,7 @@ export const RESOURCE_URIS = {
   LATEST_OBSERVATION: "automobile:observation/latest",
   LATEST_SCREENSHOT: "automobile:observation/latest/screenshot",
   /** This immutable device-and-capture identity is readable without session ownership. */
-  OBSERVATION_SCREENSHOT: "automobile:observation/{deviceId}/{observationId}/screenshot",
+  OBSERVATION_SCREENSHOT: OBSERVATION_SCREENSHOT_URI_TEMPLATE,
   SESSION_OBSERVATION: "automobile:observation/session/{sessionUuid}/latest",
   SESSION_SCREENSHOT: "automobile:observation/session/{sessionUuid}/latest/screenshot",
   FRESH_SESSION_SCREENSHOT: "automobile:device-session/{sessionUuid}/screenshot",

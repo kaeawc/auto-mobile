@@ -3559,6 +3559,14 @@
           "description": "Observation-scoped screenshot resource URI join key.",
           "type": "string"
         },
+        "deviceId": {
+          "description": "Resolved device this observation ran against; join key (with observationId) for the observation-scoped screenshot resource.",
+          "type": "string"
+        },
+        "observationScreenshotResourceUri": {
+          "description": "Fully-encoded automobile:observation/{deviceId}/{observationId}/screenshot resource URI for this observation.",
+          "type": "string"
+        },
         "screenSize": {
           "type": "object",
           "properties": {
@@ -6874,7 +6882,7 @@
         "required": ["accessibilityAuditSkipped"]
       },
       "then": {
-        "required": ["observationId"]
+        "required": ["observationId", "deviceId", "observationScreenshotResourceUri"]
       }
     },
     "_meta": {
@@ -11427,6 +11435,14 @@
                   "description": "Observation-scoped screenshot resource URI join key.",
                   "type": "string"
                 },
+                "deviceId": {
+                  "description": "Resolved device this observation ran against; join key (with observationId) for the observation-scoped screenshot resource.",
+                  "type": "string"
+                },
+                "observationScreenshotResourceUri": {
+                  "description": "Fully-encoded automobile:observation/{deviceId}/{observationId}/screenshot resource URI for this observation.",
+                  "type": "string"
+                },
                 "skeleton": {
                   "description": "Always present alongside a diff (issue #6221 item 4.1): the same actionable-only selector surface a full observation's `skeleton` carries.",
                   "type": "array",
@@ -11797,7 +11813,16 @@
                   }
                 }
               },
-              "required": ["isDiff", "observationId", "skeleton", "added", "removed", "changed"],
+              "required": [
+                "isDiff",
+                "observationId",
+                "deviceId",
+                "observationScreenshotResourceUri",
+                "skeleton",
+                "added",
+                "removed",
+                "changed"
+              ],
               "additionalProperties": {}
             },
             {
@@ -11809,6 +11834,14 @@
                 },
                 "observationId": {
                   "description": "Observation-scoped screenshot resource URI join key.",
+                  "type": "string"
+                },
+                "deviceId": {
+                  "description": "Resolved device this observation ran against; join key (with observationId) for the observation-scoped screenshot resource.",
+                  "type": "string"
+                },
+                "observationScreenshotResourceUri": {
+                  "description": "Fully-encoded automobile:observation/{deviceId}/{observationId}/screenshot resource URI for this observation.",
                   "type": "string"
                 },
                 "selectedElements": {
@@ -12989,7 +13022,7 @@
                   "const": "settled_capture_adopted"
                 }
               },
-              "required": ["observationId"],
+              "required": ["observationId", "deviceId", "observationScreenshotResourceUri"],
               "additionalProperties": {}
             },
             {

@@ -630,6 +630,20 @@ export interface ObserveDiff {
    */
   observationId?: string;
   /**
+   * The concrete device the post-action observation ran against (issue #7018),
+   * copied verbatim from the observation by the `finalizeToolResponse` call site
+   * so a diff-mode client has the same `deviceId` a full observation carries and
+   * can build the observation-scoped screenshot resource URI.
+   */
+  deviceId?: string;
+  /**
+   * Fully-encoded observation-scoped screenshot resource URI for the post-action
+   * observation (issue #7018), built from `deviceId` + `observationId` via the
+   * shared encoder and stamped by the `finalizeToolResponse` call site, so a
+   * diff-mode client gets the same ready-to-read resource URI as a full one.
+   */
+  observationScreenshotResourceUri?: string;
+  /**
    * Actionable-only selector surface (issue #6221 items 1 and 4.1), ALWAYS
    * present alongside the diff — the same array a full observation's
    * `.skeleton` carries. Populated by the `finalizeToolResponse` call site from

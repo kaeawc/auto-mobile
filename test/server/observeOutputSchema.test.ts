@@ -2,10 +2,12 @@ import { describe, expect, test } from "bun:test";
 import { toJSONSchema } from "zod/v4";
 import {
   elementSchema,
+  observeDiffSchema,
   observeResultSchema,
   observeToolResultSchema,
   viewHierarchyNodeSchema,
 } from "../../src/server/toolOutputSchemas";
+import { applyJsonSchemaOverride } from "../../src/server/toolSchemaHelpers";
 import {
   advertiseBoundsForCompact,
   BOUNDS_UNION_DESCRIPTION_PREFIX,
@@ -52,6 +54,30 @@ function collectBoundsUnions(schema: unknown): Array<Record<string, unknown>> {
   }
   return found;
 }
+
+describe("observeResultSchema: advertises the screenshot-resource join keys on the wire (#7018)", () => {
+  function advertisedRequired(schema: typeof observeResultSchema): string[] {
+    const jsonSchema = toJSONSchema(schema) as Record<string, unknown>;
+    applyJsonSchemaOverride(schema, jsonSchema);
+    return Array.isArray(jsonSchema.required) ? (jsonSchema.required as string[]) : [];
+  }
+
+  test("a full observe output requires deviceId + observationScreenshotResourceUri alongside observationId", () => {
+    const required = advertisedRequired(observeResultSchema);
+    expect(required).toContain("observationId");
+    expect(required).toContain("deviceId");
+    expect(required).toContain("observationScreenshotResourceUri");
+    // Parse stays lenient for recorded captures that predate the fields.
+    expect(() => observeResultSchema.parse({})).not.toThrow();
+  });
+
+  test("a diff observe output requires the same join keys", () => {
+    const required = advertisedRequired(observeDiffSchema as unknown as typeof observeResultSchema);
+    expect(required).toContain("observationId");
+    expect(required).toContain("deviceId");
+    expect(required).toContain("observationScreenshotResourceUri");
+  });
+});
 
 describe("observeResultSchema: parses real captures (#3025)", () => {
   test("models declarative waitFor outcome metadata", () => {

@@ -466,6 +466,24 @@ describe("provisionDevice handler", () => {
     },
   );
 
+  test("rejects adoption when distinct running emulators claim the exact AVD name", async () => {
+    exactProvisioner.provision = async () => provisionedTestDevice("android", false);
+    deviceManager.setBootedDevices("android", [
+      { name: "phone-api-36-a", platform: "android", deviceId: "emulator-5554" },
+      { name: "phone-api-36-a", platform: "android", deviceId: "emulator-5556" },
+    ]);
+
+    const response = await ToolRegistry.getTool("provisionDevice")!.handler(
+      provisionTestArgs("android", "ambiguous-running-avd"),
+    );
+
+    expect((response as any).isError).toBe(true);
+    expect(JSON.stringify(response)).toContain("identity_conflict");
+    expect(JSON.stringify(response)).toContain("emulator-5554");
+    expect(JSON.stringify(response)).toContain("emulator-5556");
+    expect(deviceManager.wasMethodCalled("waitForDeviceReady")).toBe(false);
+  });
+
   test("resource timeout leaves readiness time and returns the retained device and session", async () => {
     const timer = new FakeTimer();
     const resources = new FakeDeviceResourceController();
@@ -3205,6 +3223,10 @@ describe("provisionDevice handler", () => {
         calls++;
         if (calls === 1) {
           await request.onBeforeCreate?.();
+        } else {
+          deviceManager.setBootedDevices("android", [
+            { name: request.name, platform: "android", deviceId: "emulator-5554" },
+          ]);
         }
         return {
           created: calls === 1,

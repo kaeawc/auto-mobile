@@ -15,6 +15,7 @@ import {
   DEFAULT_RUNNER_PROVISION_TIMEOUT_MS,
   MIN_RUNNER_READINESS_TIMEOUT_MS,
 } from "../../src/utils/runnerReadinessConfig";
+import { isAndroidEmulatorSerial } from "../../src/utils/androidSerial";
 
 // Property-based tests. See test/utils/Backoff.property.test.ts for the
 // pinned-seed rationale.
@@ -232,7 +233,8 @@ describe("getAndroidSchema (property-based)", () => {
 // { avdName, deviceId } pair against the device actually resolved. `deviceId`
 // is a serial OR an image name, so the pair names one device whenever the
 // resolved serial, the resolved AVD name, or the source image name equals the
-// requested deviceId. Anything else is an `identifier_conflict`.
+// requested deviceId. A serial paired with an AVD name must additionally
+// resolve back to that exact AVD. Anything else is an `identifier_conflict`.
 // ---------------------------------------------------------------------------
 describe("validateRequestedAndroidSerial (property-based)", () => {
   const bootedDevice = fc.record({
@@ -262,8 +264,13 @@ describe("validateRequestedAndroidSerial (property-based)", () => {
     if (!p) {
       return true;
     }
+    const serialResolvedToWrongAvd =
+      isAndroidEmulatorSerial(p.deviceId) &&
+      device.deviceId === p.deviceId &&
+      device.name !== p.avdName;
     return (
-      device.deviceId === p.deviceId || device.name === p.deviceId || image?.name === p.deviceId
+      !serialResolvedToWrongAvd &&
+      (device.deviceId === p.deviceId || device.name === p.deviceId || image?.name === p.deviceId)
     );
   };
 

@@ -80,8 +80,10 @@ import {
 } from "../daemon/daemonHandoffInterruption";
 import type { Session, SessionManager } from "../daemon/sessionManager";
 import {
+  AndroidAvdIdentityConflictError,
   DeviceBootService,
   DeviceBootTimeoutError,
+  findUniqueBootedAndroidDeviceByName,
   type DeviceBootResult,
 } from "../utils/deviceBootService";
 import { getInstalledAppsCacheWriteCoordinator } from "../db/installedAppsCacheWriteCoordinator";
@@ -156,6 +158,30 @@ import { DeviceShutdownService } from "../utils/deviceShutdownService";
 import { hasMutableDisplayName } from "../utils/ios-cmdline-tools/iosDeviceType";
 import { isAndroidEmulatorSerial } from "../utils/androidSerial";
 import { classifyDisplayCutout, DISPLAY_CUTOUT_PREFERENCES } from "../utils/displayCutout";
+
+function knownProvisionDeviceError(error: unknown): ProvisionDeviceError | undefined {
+  if (error instanceof ProvisionDeviceError) {
+    return error;
+  }
+  if (error instanceof AndroidAvdIdentityConflictError) {
+    return new ProvisionDeviceError("identity_conflict", error.message);
+  }
+  return undefined;
+}
+
+function findExactProvisionedBootedDevice(
+  platform: Platform,
+  booted: readonly BootedDevice[],
+  provisioned: Pick<DeviceInfo, "deviceId" | "name">,
+): BootedDevice | undefined {
+  if (platform === "ios") {
+    return booted.find((device) => device.deviceId === provisioned.deviceId);
+  }
+  const byDeviceId = provisioned.deviceId
+    ? booted.find((device) => device.deviceId === provisioned.deviceId)
+    : undefined;
+  return byDeviceId ?? findUniqueBootedAndroidDeviceByName(booted, provisioned.name);
+}
 
 // Schema definitions
 export const listDeviceImagesSchema = z.object({
@@ -4809,6 +4835,16 @@ export function validateRequestedAndroidSerial(
     return;
   }
   const requested = pair.deviceId;
+  if (isAndroidEmulatorSerial(requested) && device.deviceId === requested) {
+    if (device.name === pair.avdName) {
+      return;
+    }
+    throw new ActionableError(
+      `identifier_conflict: avdName '${pair.avdName}' resolved to ` +
+        `${device.name} (${device.deviceId}), which is not the requested AVD. ` +
+        "Pass only the identifier you mean.",
+    );
+  }
   if (
     device.deviceId === requested ||
     device.name === requested ||
@@ -6646,8 +6682,9 @@ export function registerDeviceTools() {
   }
 
   function toProvisionDeviceError(args: ProvisionDeviceArgs, error: unknown): ProvisionDeviceError {
-    if (error instanceof ProvisionDeviceError) {
-      return error;
+    const knownError = knownProvisionDeviceError(error);
+    if (knownError) {
+      return knownError;
     }
     // A readiness phase that ran out of budget is a purely time-based failure:
     // report it as `timeout` so a controller that retries timeouts but treats
@@ -7383,14 +7420,11 @@ export function registerDeviceTools() {
           return alreadyBootedDevices;
         },
       );
-      const exactBootedDevice =
-        args.device.platform === "ios"
-          ? alreadyBooted.find((device) => device.deviceId === provisioned.device.deviceId)
-          : alreadyBooted.find(
-              (device) =>
-                device.deviceId === provisioned.device.deviceId ||
-                device.name === provisioned.device.name,
-            );
+      const exactBootedDevice = findExactProvisionedBootedDevice(
+        args.device.platform,
+        alreadyBooted,
+        provisioned.device,
+      );
       if (args.device.platform === "ios" && !provisioned.device.deviceId) {
         throw new ProvisionDeviceError(
           "identity_conflict",
@@ -8346,12 +8380,16 @@ export function registerDeviceTools() {
     const startedAtMs = getDeviceToolsDependencies().timer.now();
     const mcpSessionId = typeof __mcpSessionId === "string" ? __mcpSessionId : undefined;
     // Prefer the AVD name (exact virtual-device identity); otherwise target the
-    // booted serial by deviceId (#5870). The AVD path also coordinates lifecycle
-    // by the stable AVD name, which the deviceId path cannot infer.
+    // booted serial by deviceId (#5870). A paired AVD name and serial keeps
+    // lifecycle coordination by stable name while directing boot to the
+    // validated serial.
+    const explicitAdbSerial =
+      args.deviceId && isAndroidEmulatorSerial(args.deviceId) ? args.deviceId : undefined;
     const target: StartDeviceArgs = args.avdName
       ? {
           platform: "android",
           name: args.avdName,
+          ...(explicitAdbSerial ? { deviceId: explicitAdbSerial } : {}),
           matchExactName: true,
           preferRunning: true,
           createIfMissing: false,

@@ -5,6 +5,8 @@ import { getSessionToolSelectionService } from "../features/toolSelection/Sessio
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
 import { isToolEnabledForAnySession } from "../features/toolSelection/toolSelectionPolicy";
 import { ActionableError } from "../models";
+import { errorMessage } from "../utils/describeUnknownError";
+import { logger } from "../utils/logger";
 import { withJsonSchemaOverride } from "./toolSchemaHelpers";
 import { createJSONToolResponse } from "../utils/toolUtils";
 import { ToolRegistry } from "./toolRegistry";
@@ -195,6 +197,7 @@ export async function listEnabledToolNames(
   service: ToolSelectionServiceLike,
   sessionUuids: ReadonlyArray<string | undefined>,
   connectionProfileUuid?: string,
+  labelSessionUuids: readonly string[] = [],
 ): Promise<string[]> {
   const resolved = service ?? getSessionToolSelectionService();
   const names = await Promise.all(
@@ -204,7 +207,7 @@ export async function listEnabledToolNames(
         (await isToolEnabledForAnySession(
           tool.name,
           tool.defaultEnabled ?? true,
-          sessionUuids,
+          tool.requiresDevice ? [...sessionUuids, ...labelSessionUuids] : sessionUuids,
           resolved,
           connectionProfileUuid,
         ))
@@ -213,6 +216,28 @@ export async function listEnabledToolNames(
       ),
   );
   return names.filter((toolName): toolName is string => toolName !== undefined).sort();
+}
+
+async function getEnabledToolsResponse(
+  sessionUuid: string,
+  context: ReturnType<typeof getToolSelectionContext>,
+): Promise<{ enabledTools: string[] } | { enabledToolsError: string }> {
+  try {
+    return {
+      enabledTools: await listEnabledToolNames(
+        context?.sessionToolSelectionService,
+        [sessionUuid, context?.routingSessionUuid],
+        context?.toolSelectionProfileUuid,
+        context?.labelSessionUuids ?? [],
+      ),
+    };
+  } catch (error) {
+    const enabledToolsError =
+      `Could not report enabled tools for session ${sessionUuid}: ${errorMessage(error)}. ` +
+      `The tool selection was applied; tools/list or a follow-up ${SET_TOOL_ENABLED_TOOL_NAME} call can confirm the resulting set.`;
+    logger.warn(`[MCP] ${enabledToolsError}`, error);
+    return { enabledToolsError };
+  }
 }
 
 export function registerToolSelectionTools(): void {
@@ -235,17 +260,16 @@ export function registerToolSelectionTools(): void {
         enabled,
       );
       ToolRegistry.notifyToolListChanged();
-      return createJSONToolResponse({
+      const response = {
         sessionUuid,
         // The single-name request keeps its original `toolName` echo; a batch
         // echoes the applied `toolNames` instead (#6869).
         ...(args.toolNames ? { toolNames: requested } : { toolName: args.toolName }),
         enabled,
-        enabledTools: await listEnabledToolNames(
-          context?.sessionToolSelectionService,
-          [sessionUuid, context?.routingSessionUuid],
-          context?.toolSelectionProfileUuid,
-        ),
+      };
+      return createJSONToolResponse({
+        ...response,
+        ...(await getEnabledToolsResponse(sessionUuid, context)),
       });
     },
     { defaultEnabled: true },

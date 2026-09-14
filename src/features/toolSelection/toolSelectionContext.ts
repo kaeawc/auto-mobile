@@ -18,11 +18,20 @@ export type ToolSelectionContext = {
   };
   /** Connection-scoped selection profile, independent of device routing. */
   toolSelectionProfileUuid?: string;
+  /** Derived device-label selection profiles for the current routing base. */
+  labelSessionUuids?: readonly string[];
   sessionToolSelectionService?: Pick<SessionToolSelectionService, "isEnabled"> &
     Partial<Pick<SessionToolSelectionService, "setEnabled" | "deleteSession">>;
 };
 
 const toolSelectionContext = new AsyncLocalStorage<ToolSelectionContext>();
+
+function resolveLabelSessionUuids(
+  context: ToolSelectionContext,
+  parent: ToolSelectionContext | undefined,
+): readonly string[] | undefined {
+  return context.labelSessionUuids ?? parent?.labelSessionUuids;
+}
 
 export const runWithToolSelectionContext = async <T>(
   context: ToolSelectionContext,
@@ -36,6 +45,7 @@ export const runWithToolSelectionContext = async <T>(
       execution: context.execution ?? parent?.execution,
       toolSelectionProfileUuid:
         context.toolSelectionProfileUuid ?? parent?.toolSelectionProfileUuid,
+      labelSessionUuids: resolveLabelSessionUuids(context, parent),
       sessionToolSelectionService:
         context.sessionToolSelectionService ?? parent?.sessionToolSelectionService,
     },

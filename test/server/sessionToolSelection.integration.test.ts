@@ -626,6 +626,116 @@ describe("per-session exact-tool selection", () => {
     expect(listedNames).not.toContain("clipboard");
   });
 
+  test("reports a device-aware tool enabled through a sibling label route", async () => {
+    const overrides = new Map<string, Map<string, boolean>>([
+      ["base-session:B", new Map([["observe", true]])],
+    ]);
+    const profileService: Pick<
+      SessionToolSelectionService,
+      "isEnabled" | "getOverride" | "setEnabled"
+    > = {
+      isEnabled: async (sessionUuid, toolName, declaredDefault) =>
+        (sessionUuid ? overrides.get(sessionUuid)?.get(toolName) : undefined) ?? declaredDefault,
+      getOverride: async (sessionUuid, toolName) => overrides.get(sessionUuid)?.get(toolName),
+      setEnabled: async (sessionUuid, toolName, enabled) => {
+        const sessionOverrides = overrides.get(sessionUuid) ?? new Map<string, boolean>();
+        sessionOverrides.set(toolName, enabled);
+        overrides.set(sessionUuid, sessionOverrides);
+      },
+    };
+    fixture = new McpTestFixture({
+      sessionContext: { initialSessionToolBinding: "base-session" },
+      sessionToolSelectionService: profileService,
+      toolSelectionSessionManager: {
+        getDeviceLabels: (sessionUuid) =>
+          sessionUuid === "base-session" ? { A: "base-session:A", B: "base-session:B" } : undefined,
+      },
+    });
+    await fixture.setup();
+
+    ToolRegistry.clearTools();
+    ToolRegistry.registerDeviceAware(
+      "observe",
+      "observe",
+      z.object({}),
+      async () => ({ content: [{ type: "text", text: "ran" }] }),
+      { defaultEnabled: false },
+    );
+    ToolRegistry.register(
+      "clipboard",
+      "clipboard",
+      z.object({}),
+      async () => ({ content: [{ type: "text", text: "ran" }] }),
+      { defaultEnabled: false },
+    );
+    registerToolSelectionTools();
+
+    const result = await fixture.client.request(
+      {
+        method: "tools/call",
+        params: { name: "setToolEnabled", arguments: { toolName: "clipboard" } },
+      },
+      z.any(),
+    );
+
+    expect(JSON.parse(result.content[0]!.text).enabledTools).toContain("observe");
+  });
+
+  test("does not report a plain tool enabled only through a sibling label route", async () => {
+    const overrides = new Map<string, Map<string, boolean>>([
+      ["base-session:B", new Map([["clipboard", true]])],
+    ]);
+    const profileService: Pick<
+      SessionToolSelectionService,
+      "isEnabled" | "getOverride" | "setEnabled"
+    > = {
+      isEnabled: async (sessionUuid, toolName, declaredDefault) =>
+        (sessionUuid ? overrides.get(sessionUuid)?.get(toolName) : undefined) ?? declaredDefault,
+      getOverride: async (sessionUuid, toolName) => overrides.get(sessionUuid)?.get(toolName),
+      setEnabled: async (sessionUuid, toolName, enabled) => {
+        const sessionOverrides = overrides.get(sessionUuid) ?? new Map<string, boolean>();
+        sessionOverrides.set(toolName, enabled);
+        overrides.set(sessionUuid, sessionOverrides);
+      },
+    };
+    fixture = new McpTestFixture({
+      sessionContext: { initialSessionToolBinding: "base-session" },
+      sessionToolSelectionService: profileService,
+      toolSelectionSessionManager: {
+        getDeviceLabels: (sessionUuid) =>
+          sessionUuid === "base-session" ? { A: "base-session:A", B: "base-session:B" } : undefined,
+      },
+    });
+    await fixture.setup();
+
+    ToolRegistry.clearTools();
+    ToolRegistry.registerDeviceAware(
+      "observe",
+      "observe",
+      z.object({}),
+      async () => ({ content: [{ type: "text", text: "ran" }] }),
+      { defaultEnabled: false },
+    );
+    ToolRegistry.register(
+      "clipboard",
+      "clipboard",
+      z.object({}),
+      async () => ({ content: [{ type: "text", text: "ran" }] }),
+      { defaultEnabled: false },
+    );
+    registerToolSelectionTools();
+
+    const result = await fixture.client.request(
+      {
+        method: "tools/call",
+        params: { name: "setToolEnabled", arguments: { toolName: "observe" } },
+      },
+      z.any(),
+    );
+
+    expect(JSON.parse(result.content[0]!.text).enabledTools).not.toContain("clipboard");
+  });
+
   test("does not let one sibling label disable a tool on every route", async () => {
     const overrides = new Map<string, boolean>([["base-session:A", false]]);
     const profileService: Pick<SessionToolSelectionService, "isEnabled" | "getOverride"> = {

@@ -912,6 +912,13 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       tool.requiresDevice && requestedDeviceLabel && routingBaseSessionUuid
         ? selectionSessionManager?.getDeviceLabels(routingBaseSessionUuid)?.[requestedDeviceLabel]
         : undefined;
+    const labelSessionUuids = routingBaseSessionUuid
+      ? Array.from(
+          new Set(
+            Object.values(selectionSessionManager?.getDeviceLabels(routingBaseSessionUuid) ?? {}),
+          ),
+        )
+      : [];
     // Tool selection follows the connection's routing profile. A raw deviceId is
     // only an execution target and must not borrow an unrelated owning session's
     // grants (which discovery cannot advertise). When both fields are present,
@@ -1160,6 +1167,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
             // ToolRegistry. Carry only a distinct connection profile so it
             // cannot suppress that derived-label resolution.
             toolSelectionProfileUuid: connectionProfileUuid,
+            labelSessionUuids,
             // Keep profile persistence lazy for ordinary core-tool calls while
             // giving an admitted plan its service instance for release cleanup.
             sessionToolSelectionService:

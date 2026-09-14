@@ -21,6 +21,10 @@ ios_device_type=""
 ios_min_os_version=""
 ios_max_os_version=""
 evidence_dir="${REPO_ROOT}/scratch/live-device-acceptance"
+ownership_manifest=""
+operator_key_file=""
+create_operator_key=false
+record_ownership_manifest=false
 total_timeout_seconds=1200
 platform_timeout_seconds=540
 termination_grace_seconds=2
@@ -40,6 +44,8 @@ Usage:
     --ios-simulator-name <dedicated-simulator-name> --ios-simulator-uuid <dedicated-simulator-uuid> \
     --ios-runtime <runtime> --ios-device-type <device-type> \
     --ios-min-os-version <minimum-os> --ios-max-os-version <maximum-os> \
+    --ownership-manifest <path> --operator-key-file <path> \
+    [--create-operator-key] [--record-ownership-manifest] \
     [--scenario <full|recovery>] [--dry-run]
 
 The full scenario stops, boots, provisions/adopts, repairs, restarts, and
@@ -68,8 +74,10 @@ while [[ "$#" -gt 0 ]]; do
   case "$1" in
     --confirm-live) confirm_live=true; shift ;;
     --test-owned-devices) test_owned_devices=true; shift ;;
+    --create-operator-key) create_operator_key=true; shift ;;
+    --record-ownership-manifest) record_ownership_manifest=true; shift ;;
     --dry-run) dry_run=true; shift ;;
-    --android-avd-name|--android-runtime|--android-device-type|--android-memory-mb|--android-cpu-cores|--android-min-os-version|--android-max-os-version|--ios-simulator-name|--ios-simulator-uuid|--ios-runtime|--ios-device-type|--ios-min-os-version|--ios-max-os-version|--evidence-dir|--total-timeout-seconds|--platform-timeout-seconds|--scenario)
+    --android-avd-name|--android-runtime|--android-device-type|--android-memory-mb|--android-cpu-cores|--android-min-os-version|--android-max-os-version|--ios-simulator-name|--ios-simulator-uuid|--ios-runtime|--ios-device-type|--ios-min-os-version|--ios-max-os-version|--evidence-dir|--ownership-manifest|--operator-key-file|--total-timeout-seconds|--platform-timeout-seconds|--scenario)
       require_value "$1" "${2:-}"
       case "$1" in
         --android-avd-name) android_avd_name="$2" ;;
@@ -86,6 +94,8 @@ while [[ "$#" -gt 0 ]]; do
         --ios-min-os-version) ios_min_os_version="$2" ;;
         --ios-max-os-version) ios_max_os_version="$2" ;;
         --evidence-dir) evidence_dir="$2" ;;
+        --ownership-manifest) ownership_manifest="$2" ;;
+        --operator-key-file) operator_key_file="$2" ;;
         --total-timeout-seconds) total_timeout_seconds="$2" ;;
         --platform-timeout-seconds) platform_timeout_seconds="$2" ;;
         --scenario) scenario="$2" ;;
@@ -104,7 +114,7 @@ case "${scenario}" in full|recovery) ;; *)
   echo "error: unsupported --scenario: ${scenario}" >&2; exit 2 ;;
 esac
 
-if [[ "${dry_run}" != true && ( "${confirm_live}" != true || "${test_owned_devices}" != true || "${AUTOMOBILE_ACCEPTANCE_LIVE:-}" != "1" ) ]]; then
+if [[ "${dry_run}" != true && "${record_ownership_manifest}" != true && ( "${confirm_live}" != true || "${test_owned_devices}" != true || "${AUTOMOBILE_ACCEPTANCE_LIVE:-}" != "1" ) ]]; then
   echo "error: live mutation requires --confirm-live, --test-owned-devices, and AUTOMOBILE_ACCEPTANCE_LIVE=1." >&2
   exit 2
 fi
@@ -117,6 +127,38 @@ done
 
 umask 077
 mkdir -p "${evidence_dir}"
+chmod 700 "${evidence_dir}"
+if [[ -z "${ownership_manifest}" || -z "${operator_key_file}" ]]; then
+  echo "error: --ownership-manifest and --operator-key-file are required." >&2
+  exit 2
+fi
+if [[ "${create_operator_key}" == true ]]; then
+  if [[ -e "${operator_key_file}" ]]; then
+    echo "error: refusing to overwrite existing operator key: ${operator_key_file}" >&2
+    exit 2
+  fi
+  mkdir -p "$(dirname -- "${operator_key_file}")"
+  chmod 700 "$(dirname -- "${operator_key_file}")"
+  dd if=/dev/urandom of="${operator_key_file}" bs=32 count=1 status=none
+  chmod 600 "${operator_key_file}"
+fi
+if [[ ! -f "${operator_key_file}" ]]; then
+  echo "error: operator key file does not exist: ${operator_key_file}" >&2
+  exit 2
+fi
+if [[ "$(stat -f '%Lp' "${operator_key_file}" 2>/dev/null || stat -c '%a' "${operator_key_file}")" != "600" ]]; then
+  echo "error: operator key file must have mode 600: ${operator_key_file}" >&2
+  exit 2
+fi
+(
+  cd "${REPO_ROOT}"
+  bun run build
+)
+entrypoint="${REPO_ROOT}/dist/src/index.js"
+if [[ ! -f "${entrypoint}" ]]; then
+  echo "error: build did not produce ${entrypoint}" >&2
+  exit 1
+fi
 started_at_seconds="${SECONDS}"
 
 run_platform() {
@@ -147,7 +189,12 @@ run_platform() {
     --runtime "${runtime}" --device-type "${device_type}"
     --min-os-version "${min_os_version}" --max-os-version "${max_os_version}" --scenario "${scenario}"
     --evidence "${evidence_path}" --timeout-ms "$((budget * 1000))"
+    --entrypoint "${entrypoint}" --operator-key-file "${operator_key_file}"
+    --ownership-manifest "${ownership_manifest}"
   )
+  if [[ "${record_ownership_manifest}" == true ]]; then
+    driver_args+=(--record-ownership-manifest)
+  fi
   driver_args+=("$@")
   set +e
   (
@@ -172,4 +219,8 @@ run_platform android --avd-name "${android_avd_name}" "${android_runtime}" "${an
   --android-memory-mb "${android_memory_mb}" --android-cpu-cores "${android_cpu_cores}"
 run_platform ios --simulator-uuid "${ios_simulator_uuid}" "${ios_runtime}" "${ios_device_type}" "${ios_min_os_version}" "${ios_max_os_version}" \
   --simulator-name "${ios_simulator_name}"
+if [[ "${record_ownership_manifest}" == true ]]; then
+  echo "Recorded signed ownership manifest for both dedicated targets: ${ownership_manifest}"
+  exit 0
+fi
 echo "Acceptance matrix completed inside the original ${total_timeout_seconds}s wrapper deadline."

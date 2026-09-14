@@ -9,6 +9,7 @@ import {
   DAEMON_HEARTBEAT_METHOD,
   DAEMON_LIST_DEVICE_SESSIONS_METHOD,
 } from "./constants";
+import { executionTracker } from "../server/executionTracker";
 
 /** Socket endpoint clients may query before sending optional newer parameters. */
 export const DAEMON_CAPABILITIES_METHOD = "daemon/capabilities";
@@ -27,6 +28,7 @@ export interface DaemonStateAccess {
   isInitialized(): boolean;
   getSessionManager(): {
     getSession(sessionId: string): Session | null;
+    getAllSessions?(): Session[];
     getTerminalReleaseSnapshot?(sessionId: string): SessionReleaseSnapshot | undefined;
     recordHeartbeat?(sessionId: string): void;
     /** Claim the token permitted to refresh this session's liveness. */
@@ -266,6 +268,16 @@ export async function handleDaemonRequest(
           lastUsedAt: session.lastUsedAt,
           expiresAt: session.expiresAt,
           cacheSize: JSON.stringify(session.cacheData).length,
+        },
+      };
+    }
+    case "daemon/activeSessions": {
+      const sessions = state.getSessionManager().getAllSessions?.() ?? [];
+      return {
+        success: true,
+        result: {
+          activeSessions: sessions.length,
+          activeExecutions: executionTracker.getActiveExecutionCount(),
         },
       };
     }

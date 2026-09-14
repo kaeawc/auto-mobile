@@ -68,6 +68,8 @@ function createHarness(
     failCliFor?: string;
     iosSimulatorName?: string;
     writeFile?: MatrixDependencies["writeFile"];
+    activeSessions?: number;
+    activeExecutions?: number;
   } = {},
 ): Harness {
   const calls: ToolCall[] = [];
@@ -105,6 +107,12 @@ function createHarness(
         };
       }
       if (name === "getAndroid" || name === "getApple" || name === "startDevice") {
+        if (owner.startsWith("reject-incompatible-")) {
+          return {
+            isError: true,
+            structuredContent: { error: `No owned device matches ${owner}` },
+          };
+        }
         if (owner === "unrelated-owner") {
           const deviceId =
             name === "getApple" || arguments_.platform === "ios"
@@ -174,6 +182,15 @@ function createHarness(
 
   const createDaemonClient = async (): Promise<DaemonSessionClient> => ({
     async callDaemonMethod(name, arguments_) {
+      if (name === "daemon/activeSessions") {
+        return {
+          activeSessions: options.activeSessions ?? 0,
+          activeExecutions: options.activeExecutions ?? 0,
+        };
+      }
+      if (name === "ide/status") {
+        return { buildId: "test-build", entryScript: "/test/dist/src/index.js" };
+      }
       expect(name).toBe("daemon/releaseSession");
       const sessionId = arguments_.sessionId;
       expect(typeof sessionId).toBe("string");
@@ -257,7 +274,13 @@ describe("live device acceptance harness", () => {
       },
       enableTools: ["observe", "getDeviceState"],
     });
-    expect(harness.cliCommands).toContainEqual(["auto-mobile", "--cli", "doctor", "--repair"]);
+    expect(harness.cliCommands).toContainEqual([
+      process.execPath,
+      "/test/dist/src/index.js",
+      "--cli",
+      "doctor",
+      "--repair",
+    ]);
     const exactAcquisitions = harness.calls.filter((call) => call.name === "getAndroid");
     expect(exactAcquisitions.map((call) => call.arguments)).toEqual([
       { avdName: "Pixel_8_API_35", enableTools: ["observe", "getDeviceState"] },
@@ -273,6 +296,18 @@ describe("live device acceptance harness", () => {
         name: "Pixel_8_API_35",
         preferRunning: true,
         minOsVersion: "34",
+      },
+      {
+        platform: "android",
+        name: "Pixel_8_API_35",
+        preferRunning: true,
+        minOsVersion: "9999",
+      },
+      {
+        platform: "android",
+        name: "Pixel_8_API_35",
+        preferRunning: true,
+        maxOsVersion: "0",
       },
       {
         platform: "android",
@@ -334,10 +369,37 @@ describe("live device acceptance harness", () => {
     expect(
       harness.calls.filter((call) => call.name === "startDevice").map((call) => call.arguments),
     ).toEqual([
-      { platform: "ios", deviceId: IOS_UDID, preferRunning: true },
-      { platform: "ios", deviceId: IOS_UDID, preferRunning: true, minOsVersion: "17.0" },
-      { platform: "ios", deviceId: IOS_UDID, preferRunning: true, maxOsVersion: "18.0" },
-      { platform: "ios", deviceId: IOS_UDID, preferRunning: true },
+      { platform: "ios", deviceId: IOS_UDID, preferRunning: true, formFactor: "phone" },
+      {
+        platform: "ios",
+        deviceId: IOS_UDID,
+        preferRunning: true,
+        formFactor: "phone",
+        minOsVersion: "17.0",
+      },
+      {
+        platform: "ios",
+        deviceId: IOS_UDID,
+        preferRunning: true,
+        formFactor: "phone",
+        minOsVersion: "9999.0",
+      },
+      {
+        platform: "ios",
+        deviceId: IOS_UDID,
+        preferRunning: true,
+        formFactor: "phone",
+        maxOsVersion: "0.0",
+      },
+      { platform: "ios", deviceId: IOS_UDID, preferRunning: true, formFactor: "tablet" },
+      {
+        platform: "ios",
+        deviceId: IOS_UDID,
+        preferRunning: true,
+        formFactor: "phone",
+        maxOsVersion: "18.0",
+      },
+      { platform: "ios", deviceId: IOS_UDID, preferRunning: true, formFactor: "phone" },
     ]);
     expect(
       harness.calls.filter((call) => call.name === "getApple").map((call) => call.arguments),
@@ -487,6 +549,15 @@ describe("live device acceptance harness", () => {
     expect(evidence.outcome.passed).toBe(false);
   });
 
+  test("refuses host-wide doctor repair when unrelated AutoMobile work is active", async () => {
+    const harness = createHarness({ activeSessions: 1, activeExecutions: 0 });
+
+    await expect(runAcceptanceMatrix(androidArgs, harness.dependencies)).rejects.toThrow(
+      "Refusing host-wide doctor repair",
+    );
+    expect(harness.cliCommands.some((command) => command.includes("doctor"))).toBe(false);
+  });
+
   test("continues all cleanup paths after daemon release fails and redacts the recorded failure", async () => {
     const harness = createHarness({ failReleaseFor: "provision-1" });
 
@@ -512,7 +583,7 @@ describe("live device acceptance harness", () => {
     );
 
     expect(harness.events).toContain("close:daemon");
-    expect(harness.events.filter((event) => event.startsWith("close:"))).toHaveLength(10);
+    expect(harness.events.filter((event) => event.startsWith("close:"))).toHaveLength(12);
     expect(harness.evidence[0]).not.toContain("daemon close failed");
     expect(harness.evidence[0]).not.toContain("client close failed");
   });
@@ -526,7 +597,7 @@ describe("live device acceptance harness", () => {
     expect(harness.evidence[0]).not.toContain("Pixel_8_API_35");
     expect(harness.evidence[0]).not.toContain("emulator-5560");
     expect(harness.evidence[0]).not.toContain("start-3");
-    expect(harness.evidence[0]).toContain("hash:");
+    expect(harness.evidence[0]).toContain("hmac-sha256:");
   });
 
   test("uses FakeTimer to reject a stalled MCP connection before it can report success", async () => {
@@ -594,35 +665,32 @@ describe("live device acceptance harness", () => {
     );
   });
 
-  test("parses separate iOS name and UUID plus direct-driver safeguards", () => {
-    const args = parseArgs([
-      "--platform",
-      "ios",
-      "--simulator-name",
-      "iPhone 16 Pro",
-      "--simulator-uuid",
-      IOS_UDID,
-      "--runtime",
-      "iOS 18.0",
-      "--device-type",
-      "phone",
-      "--min-os-version",
-      "17.0",
-      "--max-os-version",
-      "18.0",
-      "--scenario",
-      "full",
-      "--evidence",
-      "scratch/evidence.json",
-      "--timeout-ms",
-      "1000",
-      "--confirm-live",
-      "--test-owned-devices",
-    ]);
-    expect(args).toMatchObject({
-      target: { simulatorName: "iPhone 16 Pro", simulatorUdid: IOS_UDID },
-      confirmLive: true,
-      testOwnedDevices: true,
-    });
+  test("requires direct drivers to provide the owner-held key and built entrypoint", () => {
+    expect(() =>
+      parseArgs([
+        "--platform",
+        "ios",
+        "--simulator-name",
+        "iPhone 16 Pro",
+        "--simulator-uuid",
+        IOS_UDID,
+        "--runtime",
+        "iOS 18.0",
+        "--device-type",
+        "phone",
+        "--min-os-version",
+        "17.0",
+        "--max-os-version",
+        "18.0",
+        "--scenario",
+        "full",
+        "--evidence",
+        "scratch/evidence.json",
+        "--timeout-ms",
+        "1000",
+        "--confirm-live",
+        "--test-owned-devices",
+      ]),
+    ).toThrow("Missing required --operator-key-file");
   });
 });

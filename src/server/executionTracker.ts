@@ -162,6 +162,11 @@ export class ExecutionTracker {
     }
   }
 
+  /** Number of currently admitted tool executions, for fail-closed host maintenance checks. */
+  getActiveExecutionCount(): number {
+    return this.executions.size;
+  }
+
   /**
    * @param reason Why the Streamable HTTP session (or equivalent) ended — logged for diagnostics.
    */

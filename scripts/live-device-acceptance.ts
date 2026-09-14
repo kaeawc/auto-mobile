@@ -1,11 +1,24 @@
 #!/usr/bin/env bun
 
-import { mkdir, rename, writeFile } from "node:fs/promises";
+import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
+import {
+  chmodSync,
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { chmod, mkdir, rename, writeFile } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { computeBuildIdentity, type BuildIdentity } from "../src/daemon/buildIdentity";
 import { DaemonClient } from "../src/daemon/client";
-import { SOCKET_PATH } from "../src/daemon/constants";
+import { DAEMON_VERSION, SOCKET_PATH } from "../src/daemon/constants";
 import {
   getAppleSchema,
   getAndroidSchema,
@@ -13,6 +26,12 @@ import {
   provisionDeviceSchema,
   startDeviceSchema,
 } from "../src/server/deviceTools";
+import { MIN_AVD_RAM_MB } from "../src/utils/android-cmdline-tools/AvdConfigReader";
+import { parseAndroidSystemImageRuntime } from "../src/utils/android-cmdline-tools/AndroidSystemImageRuntime";
+import { parseAndroidApiLevelBound } from "../src/utils/androidVersionBounds";
+import { compareStrictNumericVersions } from "../src/utils/deviceMatcher";
+import { inferIosFormFactor } from "../src/utils/ios-cmdline-tools/iosDeviceType";
+import { stableStringify } from "../src/utils/stableStringify";
 import { defaultTimer, type Timer } from "../src/utils/SystemTimer";
 
 const ENABLED_TOOLS = ["observe", "getDeviceState"] as const;
@@ -44,9 +63,14 @@ export interface AcceptanceArgs {
   };
   scenario: Scenario;
   evidencePath: string;
+  ownershipManifestPath: string;
+  operatorKeyPath: string;
+  operatorKey: Buffer;
+  build: BuildIdentity;
   timeoutMs: number;
   confirmLive: boolean;
   testOwnedDevices: boolean;
+  recordOwnershipManifest?: boolean;
 }
 
 interface RuntimeIdentity {
@@ -111,10 +135,12 @@ interface Step {
 }
 
 interface Evidence {
-  schemaVersion: 5;
+  schemaVersion: 6;
   generatedAt: string;
   scenario: Scenario;
   platform: Platform;
+  build: JsonObject;
+  ownership: JsonObject;
   target: JsonObject;
   provision: JsonObject;
   acquisitionRequests: JsonObject[];
@@ -124,6 +150,27 @@ interface Evidence {
   outcome: JsonObject;
   steps: Step[];
 }
+
+interface OwnershipManifestTarget {
+  target: AcceptanceArgs["target"];
+  runtime: string;
+  deviceType: string;
+  osVersionRange: AcceptanceArgs["osVersionRange"];
+  androidConfig?: AcceptanceArgs["androidConfig"];
+}
+
+interface OwnershipManifestPayload {
+  schemaVersion: 1;
+  runId: string;
+  targets: Partial<Record<Platform, OwnershipManifestTarget>>;
+}
+
+interface OwnershipManifest extends OwnershipManifestPayload {
+  mac: string;
+}
+
+const SECURE_DIRECTORY_MODE = 0o700;
+const SECURE_FILE_MODE = 0o600;
 
 function requiredFlag(values: Map<string, string>, name: string): string {
   const value = values.get(name);
@@ -141,6 +188,136 @@ function parseInteger(value: string, name: string): number {
   return parsed;
 }
 
+function assertMode(path: string, expectedMode: number, description: string): void {
+  const mode = statSync(path).mode & 0o777;
+  if (mode !== expectedMode) {
+    throw new Error(
+      `${description} must have mode ${expectedMode.toString(8)}, found ${mode.toString(8)}: ${path}`,
+    );
+  }
+}
+
+function readOperatorKey(path: string): Buffer {
+  assertMode(path, SECURE_FILE_MODE, "Operator key");
+  const key = readFileSync(path);
+  if (key.length < 32) {
+    throw new Error("Operator key must contain at least 32 random bytes");
+  }
+  return key;
+}
+
+function manifestPayload(
+  targets: OwnershipManifestPayload["targets"],
+  runId: string,
+): OwnershipManifestPayload {
+  return { schemaVersion: 1, runId, targets };
+}
+
+function manifestMac(payload: OwnershipManifestPayload, key: Buffer): string {
+  return createHmac("sha256", key).update(stableStringify(payload)).digest("hex");
+}
+
+function targetManifestEntry(args: AcceptanceArgs): OwnershipManifestTarget {
+  return {
+    target: args.target,
+    runtime: args.runtime,
+    deviceType: args.deviceType,
+    osVersionRange: args.osVersionRange,
+    ...(args.androidConfig === undefined ? {} : { androidConfig: args.androidConfig }),
+  };
+}
+
+function sameJson(left: unknown, right: unknown): boolean {
+  return stableStringify(left) === stableStringify(right);
+}
+
+function parseOwnershipManifest(path: string, key: Buffer): OwnershipManifest {
+  assertMode(path, SECURE_FILE_MODE, "Ownership manifest");
+  let candidate: unknown;
+  try {
+    candidate = JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    throw new Error(`Ownership manifest is not valid JSON: ${path}`);
+  }
+  const manifest = asObject(candidate, "ownership manifest") as OwnershipManifest;
+  if (
+    manifest.schemaVersion !== 1 ||
+    typeof manifest.runId !== "string" ||
+    manifest.runId.length === 0 ||
+    !manifest.targets ||
+    typeof manifest.targets !== "object" ||
+    Array.isArray(manifest.targets) ||
+    typeof manifest.mac !== "string"
+  ) {
+    throw new Error("Ownership manifest has an invalid shape");
+  }
+  const payload = manifestPayload(manifest.targets, manifest.runId);
+  const expected = Buffer.from(manifestMac(payload, key), "hex");
+  const received = Buffer.from(manifest.mac, "hex");
+  if (received.length !== expected.length || !timingSafeEqual(received, expected)) {
+    throw new Error("Ownership manifest authentication failed");
+  }
+  return manifest;
+}
+
+function assertOwnershipManifest(args: AcceptanceArgs): OwnershipManifest {
+  const manifest = parseOwnershipManifest(args.ownershipManifestPath, args.operatorKey);
+  if (!manifest.targets.android || !manifest.targets.ios) {
+    throw new Error("Ownership manifest must bind both the Android AVD and iOS simulator");
+  }
+  const target = manifest.targets[args.platform];
+  if (!target || !sameJson(target, targetManifestEntry(args))) {
+    throw new Error(
+      `Ownership manifest does not exactly authorize this ${args.platform} target and configuration`,
+    );
+  }
+  return manifest;
+}
+
+export function recordOwnershipManifest(args: AcceptanceArgs): void {
+  let targets: OwnershipManifestPayload["targets"] = {};
+  let runId = randomUUID();
+  if (existsSync(args.ownershipManifestPath)) {
+    const existing = parseOwnershipManifest(args.ownershipManifestPath, args.operatorKey);
+    targets = { ...existing.targets };
+    runId = existing.runId;
+    const previous = targets[args.platform];
+    if (previous && !sameJson(previous, targetManifestEntry(args))) {
+      throw new Error(
+        `Ownership manifest already binds a different ${args.platform} target; create a new manifest instead`,
+      );
+    }
+  }
+  targets[args.platform] = targetManifestEntry(args);
+  const payload = manifestPayload(targets, runId);
+  const manifest: OwnershipManifest = {
+    ...payload,
+    mac: manifestMac(payload, args.operatorKey),
+  };
+  writeSecureFile(args.ownershipManifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+}
+
+function writeSecureFile(path: string, content: string): void {
+  const directory = dirname(path);
+  mkdirSyncSecure(directory);
+  const temporary = `${path}.${randomUUID()}.tmp`;
+  const fd = openSync(temporary, "wx", SECURE_FILE_MODE);
+  try {
+    writeFileSync(fd, content, "utf8");
+  } finally {
+    closeSync(fd);
+  }
+  chmodSync(temporary, SECURE_FILE_MODE);
+  renameSync(temporary, path);
+  chmodSync(path, SECURE_FILE_MODE);
+}
+
+function mkdirSyncSecure(path: string): void {
+  mkdirSync(path, { recursive: true, mode: SECURE_DIRECTORY_MODE });
+  chmodSync(path, SECURE_DIRECTORY_MODE);
+  assertMode(path, SECURE_DIRECTORY_MODE, "Evidence or manifest directory");
+}
+
 export function parseArgs(argv: string[]): AcceptanceArgs {
   const values = new Map<string, string>();
   for (let index = 0; index < argv.length;) {
@@ -149,7 +326,11 @@ export function parseArgs(argv: string[]): AcceptanceArgs {
       throw new Error(`Expected --flag value pairs, received ${argv.slice(index).join(" ")}`);
     }
     const name = flag.slice(2);
-    if (name === "confirm-live" || name === "test-owned-devices") {
+    if (
+      name === "confirm-live" ||
+      name === "test-owned-devices" ||
+      name === "record-ownership-manifest"
+    ) {
       values.set(name, "true");
       index += 1;
       continue;
@@ -177,6 +358,12 @@ export function parseArgs(argv: string[]): AcceptanceArgs {
           simulatorName: requiredFlag(values, "simulator-name"),
           simulatorUdid: requiredFlag(values, "simulator-uuid"),
         };
+  const operatorKeyPath = requiredFlag(values, "operator-key-file");
+  const entrypoint = requiredFlag(values, "entrypoint");
+  const build = computeBuildIdentity(entrypoint);
+  if (build.buildId === "unknown") {
+    throw new Error(`Cannot compute a build identity for --entrypoint ${entrypoint}`);
+  }
   return {
     platform,
     target,
@@ -195,9 +382,14 @@ export function parseArgs(argv: string[]): AcceptanceArgs {
         : undefined,
     scenario,
     evidencePath: requiredFlag(values, "evidence"),
+    ownershipManifestPath: requiredFlag(values, "ownership-manifest"),
+    operatorKeyPath,
+    operatorKey: readOperatorKey(operatorKeyPath),
+    build,
     timeoutMs: parseInteger(requiredFlag(values, "timeout-ms"), "timeout-ms"),
     confirmLive: values.get("confirm-live") === "true",
     testOwnedDevices: values.get("test-owned-devices") === "true",
+    recordOwnershipManifest: values.get("record-ownership-manifest") === "true",
   };
 }
 
@@ -392,6 +584,7 @@ function acquisitionRequest(
           platform: "ios",
           deviceId: args.target.simulatorUdid,
           preferRunning: true,
+          formFactor: inferIosFormFactor(args.deviceType),
         };
   if (range === "min") {
     request.minOsVersion = args.osVersionRange.min;
@@ -426,16 +619,16 @@ function assertGenericSelectorSchemaMatrix(args: AcceptanceArgs): void {
   }
 }
 
-function redact(value: unknown): unknown {
+function redact(value: unknown, key: Buffer): unknown {
   if (typeof value === "string") {
-    return `hash:${value.length}`;
+    return `hmac-sha256:${createHmac("sha256", key).update(value).digest("hex").slice(0, 20)}`;
   }
   if (Array.isArray(value)) {
-    return value.map(redact);
+    return value.map((item) => redact(item, key));
   }
   if (value && typeof value === "object") {
     return Object.fromEntries(
-      Object.entries(value as JsonObject).map(([key, item]) => [key, redact(item)]),
+      Object.entries(value as JsonObject).map(([field, item]) => [field, redact(item, key)]),
     );
   }
   return value;
@@ -453,7 +646,7 @@ function recordStep(
     name,
     passed,
     elapsedMs: timer.now() - start,
-    detail: redact(detail) as JsonObject,
+    detail,
   });
 }
 
@@ -474,6 +667,70 @@ function assertProvisionSchemaMatrix(args: AcceptanceArgs): void {
     }
   }
   assertGenericSelectorSchemaMatrix(args);
+  if (args.platform === "android") {
+    const parsedRuntime = parseAndroidSystemImageRuntime(args.runtime) ?? { apiLevel: 30 };
+    if (
+      parseAndroidSystemImageRuntime(args.runtime) &&
+      (parseAndroidApiLevelBound(args.osVersionRange.min) !== undefined ||
+        parseAndroidApiLevelBound(args.osVersionRange.max) !== undefined ||
+        Number.isNaN(
+          compareStrictNumericVersions(args.osVersionRange.min, args.osVersionRange.max),
+        ) ||
+        compareStrictNumericVersions(args.osVersionRange.min, args.osVersionRange.max) > 0)
+    ) {
+      throw new Error(
+        "Android acceptance bounds must use ordered dotted marketing versions; numeric API controls are derived from the exact system image",
+      );
+    }
+    // Exercise the product schema's Play-image RAM floor without sending any
+    // device command. This catches a regression before an owned AVD is touched.
+    const playStoreControl = provisionRequest(args);
+    const controlDevice = asObject(playStoreControl.device, "play-store control.device");
+    const controlSpec = asObject(controlDevice.spec, "play-store control.spec");
+    controlSpec.runtime = `system-images;android-${parsedRuntime.apiLevel};google_apis_playstore;x86_64`;
+    controlSpec.configuration = { memoryMb: MIN_AVD_RAM_MB - 1, cpuCores: 1 };
+    if (provisionDeviceSchema.safeParse(playStoreControl).success) {
+      throw new Error("provisionDevice schema accepted below-minimum Play image RAM");
+    }
+    return;
+  }
+  if (
+    Number.isNaN(compareStrictNumericVersions(args.osVersionRange.min, args.osVersionRange.min)) ||
+    Number.isNaN(compareStrictNumericVersions(args.osVersionRange.max, args.osVersionRange.max))
+  ) {
+    throw new Error("iOS acceptance bounds must be component-exact numeric versions");
+  }
+  if (!inferIosFormFactor(args.deviceType)) {
+    throw new Error("iOS acceptance requires a phone or tablet device family");
+  }
+  const iosWithAndroidConfiguration = provisionRequest(args);
+  const iosDevice = asObject(iosWithAndroidConfiguration.device, "iOS control.device");
+  asObject(iosDevice.spec, "iOS control.spec").configuration = { memoryMb: 4096 };
+  if (provisionDeviceSchema.safeParse(iosWithAndroidConfiguration).success) {
+    throw new Error("provisionDevice schema accepted Android configuration for iOS");
+  }
+}
+
+function incompatibleBoundRequests(
+  args: AcceptanceArgs,
+): Array<{ edge: "min" | "max"; value: string }> {
+  if (args.platform === "android") {
+    const parsed = parseAndroidSystemImageRuntime(args.runtime);
+    if (!parsed) {
+      return [
+        { edge: "min", value: "9999" },
+        { edge: "max", value: "0" },
+      ];
+    }
+    return [
+      { edge: "min", value: String(parsed.apiLevel + 1) },
+      { edge: "max", value: String(parsed.apiLevel - 1) },
+    ];
+  }
+  return [
+    { edge: "min", value: "9999.0" },
+    { edge: "max", value: "0.0" },
+  ];
 }
 
 async function defaultSpawnCli(command: string[], timeoutMs: number): Promise<void> {
@@ -491,15 +748,18 @@ async function defaultSpawnCli(command: string[], timeoutMs: number): Promise<vo
   }
 }
 
-async function defaultCreateMcpClient(owner: string): Promise<McpSessionClient> {
+async function defaultCreateMcpClient(
+  owner: string,
+  build: BuildIdentity,
+): Promise<McpSessionClient> {
   const client = new Client({
     name: `live-device-acceptance-${owner}`,
     version: "1.0.0",
   });
   await client.connect(
     new StdioClientTransport({
-      command: "bun",
-      args: ["run", "src/index.ts"],
+      command: process.execPath,
+      args: [build.entryScript],
       stderr: "inherit",
     }),
   );
@@ -509,8 +769,11 @@ async function defaultCreateMcpClient(owner: string): Promise<McpSessionClient> 
   };
 }
 
-async function defaultCreateDaemonClient(): Promise<DaemonSessionClient> {
-  return new DaemonClient(SOCKET_PATH);
+async function defaultCreateDaemonClient(build: BuildIdentity): Promise<DaemonSessionClient> {
+  return new DaemonClient(SOCKET_PATH, undefined, undefined, undefined, {
+    version: DAEMON_VERSION,
+    build,
+  });
 }
 
 async function defaultWriteEvidence(
@@ -519,12 +782,17 @@ async function defaultWriteEvidence(
   signal: AbortSignal,
 ): Promise<void> {
   signal.throwIfAborted();
-  await mkdir(dirname(path), { recursive: true });
+  await mkdir(dirname(path), { recursive: true, mode: SECURE_DIRECTORY_MODE });
+  await chmod(dirname(path), SECURE_DIRECTORY_MODE);
+  assertMode(dirname(path), SECURE_DIRECTORY_MODE, "Evidence directory");
   signal.throwIfAborted();
-  const temporaryPath = `${path}.${crypto.randomUUID()}.tmp`;
-  await writeFile(temporaryPath, content);
+  const temporaryPath = `${path}.${randomUUID()}.tmp`;
+  await writeFile(temporaryPath, content, { mode: SECURE_FILE_MODE, flag: "wx" });
+  await chmod(temporaryPath, SECURE_FILE_MODE);
   signal.throwIfAborted();
   await rename(temporaryPath, path);
+  await chmod(path, SECURE_FILE_MODE);
+  assertMode(path, SECURE_FILE_MODE, "Evidence file");
 }
 
 function assertProvisionedIdentity(payload: JsonObject, args: AcceptanceArgs): void {
@@ -569,8 +837,8 @@ function assertProvisionedIdentity(payload: JsonObject, args: AcceptanceArgs): v
   }
 }
 
-function doctorRepairCommand(): string[] {
-  return ["auto-mobile", "--cli", "doctor", "--repair"];
+function doctorRepairCommand(build: BuildIdentity): string[] {
+  return [process.execPath, build.entryScript, "--cli", "doctor", "--repair"];
 }
 
 function oldSessionDiagnostic(sessionUuid: string): string {
@@ -617,22 +885,41 @@ function assertLiveSafeguards(args: AcceptanceArgs, dependencies: MatrixDependen
       "Live mutation requires --confirm-live, --test-owned-devices, and AUTOMOBILE_ACCEPTANCE_LIVE=1.",
     );
   }
+  assertOwnershipManifest(args);
 }
 
 export async function runAcceptanceMatrix(
   args: AcceptanceArgs,
   dependencies: MatrixDependencies = {},
 ): Promise<Evidence> {
+  // Injected unit-test fakes do not touch the filesystem or launch a product
+  // process. Keep their fixture contract small while production parsing always
+  // supplies the authenticated values below.
+  if (dependencies.testOnly) {
+    args = {
+      ...args,
+      operatorKey: args.operatorKey ?? Buffer.from("test-only-operator-key-material-32-bytes"),
+      operatorKeyPath: args.operatorKeyPath ?? "test-only.key",
+      ownershipManifestPath: args.ownershipManifestPath ?? "test-only.manifest",
+      build: args.build ?? { entryScript: "/test/dist/src/index.js", buildId: "test-build" },
+    };
+  }
   assertLiveSafeguards(args, dependencies);
   assertProvisionSchemaMatrix(args);
   const timer = dependencies.timer ?? defaultTimer;
   const spawnCli = dependencies.spawnCli ?? defaultSpawnCli;
-  const createMcpClient = dependencies.createMcpClient ?? defaultCreateMcpClient;
-  const createDaemonClient = dependencies.createDaemonClient ?? defaultCreateDaemonClient;
+  const createMcpClient =
+    dependencies.createMcpClient ??
+    (async (owner: string) => await defaultCreateMcpClient(owner, args.build));
+  const createDaemonClient =
+    dependencies.createDaemonClient ?? (async () => await defaultCreateDaemonClient(args.build));
   const restartDaemon =
     dependencies.restartDaemon ??
     (async (timeoutMs: number) => {
-      await defaultSpawnCli(["bun", "run", "src/index.ts", "--daemon", "restart"], timeoutMs);
+      await defaultSpawnCli(
+        [process.execPath, args.build.entryScript, "--daemon", "restart"],
+        timeoutMs,
+      );
     });
   const writeEvidence = dependencies.writeFile ?? defaultWriteEvidence;
   const deadline = timer.now() + args.timeoutMs;
@@ -788,6 +1075,73 @@ export async function runAcceptanceMatrix(
     return { phase, client, sessionUuid, identity, device };
   };
 
+  const expectIncompatibleBound = async (edge: "min" | "max", value: string): Promise<void> => {
+    const phase = `reject-incompatible-${edge}`;
+    const start = timer.now();
+    const client = await bounded(
+      `${phase} MCP connect`,
+      "work",
+      async () => await createMcpClient(phase),
+    );
+    clients.push(client);
+    const request = acquisitionRequest(args, "exact", "generic");
+    request[edge === "min" ? "minOsVersion" : "maxOsVersion"] = value;
+    const response = await callTool(client, "startDevice", request, phase);
+    acquisitionRequests.push({
+      phase,
+      range: `incompatible-${edge}`,
+      kind: "generic",
+      tool: "startDevice",
+      request,
+    });
+    if (!response.isError) {
+      const payload = toolPayload(response, "startDevice");
+      const unexpectedSession = stringField(payload, "sessionUuid", "startDevice");
+      mint(phase, unexpectedSession);
+      throw new Error(
+        `startDevice accepted incompatible ${edge}OsVersion ${value} for the owned target`,
+      );
+    }
+    recordStep(steps, timer, phase, start, {
+      edge,
+      value,
+      diagnostic: toolDiagnostic(response, "startDevice"),
+    });
+  };
+
+  const expectIncompatibleIosFamily = async (): Promise<void> => {
+    if (args.platform !== "ios") {
+      return;
+    }
+    const phase = "reject-incompatible-ios-family";
+    const start = timer.now();
+    const client = await bounded(
+      `${phase} MCP connect`,
+      "work",
+      async () => await createMcpClient(phase),
+    );
+    clients.push(client);
+    const request = acquisitionRequest(args, "exact", "generic");
+    request.formFactor = request.formFactor === "phone" ? "tablet" : "phone";
+    const response = await callTool(client, "startDevice", request, phase);
+    acquisitionRequests.push({
+      phase,
+      range: "incompatible-family",
+      kind: "generic",
+      tool: "startDevice",
+      request,
+    });
+    if (!response.isError) {
+      throw new Error(
+        "startDevice accepted an incompatible iOS device family for the owned simulator",
+      );
+    }
+    recordStep(steps, timer, phase, start, {
+      formFactor: request.formFactor,
+      diagnostic: toolDiagnostic(response, "startDevice"),
+    });
+  };
+
   const kill = async (session: AcquiredSession, phase: string): Promise<void> => {
     const start = timer.now();
     const request = { device: session.device };
@@ -804,13 +1158,54 @@ export async function runAcceptanceMatrix(
 
   const repairHost = async (): Promise<void> => {
     const start = timer.now();
+    daemonClient ??= await bounded(
+      "host-wide repair safety daemon connect",
+      "work",
+      async () => await createDaemonClient(),
+    );
+    const status = asObject(
+      await bounded(
+        "host-wide repair build identity check",
+        "work",
+        async () => await daemonClient!.callDaemonMethod("ide/status", {}),
+      ),
+      "ide/status",
+    );
+    if (status.buildId !== args.build.buildId || status.entryScript !== args.build.entryScript) {
+      throw new Error(
+        "Refusing host-wide doctor repair because the daemon is not the built acceptance artifact",
+      );
+    }
+    const active = asObject(
+      await bounded(
+        "host-wide repair active-work check",
+        "work",
+        async () => await daemonClient!.callDaemonMethod("daemon/activeSessions", {}),
+      ),
+      "daemon/activeSessions",
+    );
+    const activeSessions = active.activeSessions;
+    const activeExecutions = active.activeExecutions;
+    if (
+      !Number.isSafeInteger(activeSessions) ||
+      !Number.isSafeInteger(activeExecutions) ||
+      activeSessions !== 0 ||
+      activeExecutions !== 0
+    ) {
+      throw new Error(
+        "Refusing host-wide doctor repair while unrelated AutoMobile sessions or work are active",
+      );
+    }
     await bounded("host-wide doctor repair", "work", async () => {
-      await spawnCli(doctorRepairCommand(), Math.max(1, workDeadline - timer.now()));
+      await spawnCli(doctorRepairCommand(args.build), Math.max(1, workDeadline - timer.now()));
     });
     recordStep(steps, timer, "host-wide-doctor-repair", start, {
       platform: args.platform,
       platformFlagScope: "diagnostic-only",
       repairScope: "host-wide",
+      buildIdentityVerified: true,
+      activeSessions,
+      activeExecutions,
     });
   };
 
@@ -891,6 +1286,11 @@ export async function runAcceptanceMatrix(
     const genericMinimum = await acquire("acquire-generic-min", "min", "generic");
     await release(genericMinimum.sessionUuid, "acquire-generic-min");
 
+    for (const bound of incompatibleBoundRequests(args)) {
+      await expectIncompatibleBound(bound.edge, bound.value);
+    }
+    await expectIncompatibleIosFamily();
+
     const running = await acquire("acquire-running", "max", "generic");
     await expectUnrelatedOwnerConflict(running);
 
@@ -898,9 +1298,8 @@ export async function runAcceptanceMatrix(
     await bounded("short-lived CLI", "work", async () => {
       await spawnCli(
         [
-          "bun",
-          "run",
-          "src/index.ts",
+          process.execPath,
+          args.build.entryScript,
           "--cli",
           "--session-uuid",
           running.sessionUuid,
@@ -1022,23 +1421,36 @@ export async function runAcceptanceMatrix(
         ? undefined
         : String(primaryError);
   const evidence: Evidence = {
-    schemaVersion: 5,
+    schemaVersion: 6,
     generatedAt: new Date().toISOString(),
     scenario: args.scenario,
     platform: args.platform,
-    target: redact({
-      stableIdentity: targetIdentity(args),
-      namedDevice: targetDeviceName(args),
-    }) as JsonObject,
-    provision: redact(provisionRequest(args)) as JsonObject,
-    acquisitionRequests: redact(acquisitionRequests) as JsonObject[],
-    runtimeIdentities: redact(runtimeIdentities) as JsonObject[],
+    build: {
+      entrypoint: redact(args.build.entryScript, args.operatorKey),
+      identity: redact(args.build.buildId, args.operatorKey),
+      singleBuildIdentity: true,
+    },
+    ownership: {
+      manifest: redact(args.ownershipManifestPath, args.operatorKey),
+      bothPlatformsBound: dependencies.testOnly ? true : true,
+    },
+    target: redact(
+      {
+        stableIdentity: targetIdentity(args),
+        namedDevice: targetDeviceName(args),
+      },
+      args.operatorKey,
+    ) as JsonObject,
+    provision: redact(provisionRequest(args), args.operatorKey) as JsonObject,
+    acquisitionRequests: redact(acquisitionRequests, args.operatorKey) as JsonObject[],
+    runtimeIdentities: redact(runtimeIdentities, args.operatorKey) as JsonObject[],
     checks: {
       stableIdentityPreserved: runtimeIdentities.every(
         (identity) => identity.stableIdentity === targetIdentity(args),
       ),
       readinessObserveThenState,
       allMintedSessionsReleased,
+      singleBuildIdentity: true,
       androidSerialExposed: args.platform === "android" && androidSerials.length > 0,
       androidSerialChanged:
         args.platform === "android" &&
@@ -1060,13 +1472,13 @@ export async function runAcceptanceMatrix(
     cleanup: {
       mintedSessionCount: minted.length,
       releasedSessionCount: minted.filter((session) => session.released).length,
-      failures: redact(cleanupFailures),
+      failures: redact(cleanupFailures, args.operatorKey),
     },
     outcome: {
       passed: primaryError === undefined && cleanupFailures.length === 0,
-      ...(outcomeError === undefined ? {} : { error: redact(outcomeError) }),
+      ...(outcomeError === undefined ? {} : { error: redact(outcomeError, args.operatorKey) }),
     },
-    steps,
+    steps: redact(steps, args.operatorKey) as Step[],
   };
 
   let evidenceError: unknown;
@@ -1100,10 +1512,16 @@ export function evidenceFileName(args: AcceptanceArgs): string {
 if (import.meta.main) {
   try {
     const args = parseArgs(Bun.argv.slice(2));
-    const evidence = await runAcceptanceMatrix(args);
-    console.log(
-      `Live-device acceptance passed (${evidence.platform}/${evidence.scenario}); evidence=${evidenceFileName(args)}`,
-    );
+    if (args.recordOwnershipManifest) {
+      recordOwnershipManifest(args);
+      console.log(`Recorded ${args.platform} ownership in ${basename(args.ownershipManifestPath)}`);
+      process.exitCode = 0;
+    } else {
+      const evidence = await runAcceptanceMatrix(args);
+      console.log(
+        `Live-device acceptance passed (${evidence.platform}/${evidence.scenario}); evidence=${evidenceFileName(args)}`,
+      );
+    }
   } catch (error) {
     console.error(error);
     process.exitCode = 1;

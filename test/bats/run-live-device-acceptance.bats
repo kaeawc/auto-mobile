@@ -5,12 +5,19 @@ SCRIPT="scripts/run-live-device-acceptance.sh"
 setup() {
   MOCK_BIN="$(mktemp -d)"
   COMMAND_LOG="${MOCK_BIN}/commands.log"
+  OPERATOR_KEY="${MOCK_BIN}/operator.key"
+  OWNERSHIP_MANIFEST="${MOCK_BIN}/ownership.json"
   export COMMAND_LOG
   ORIGINAL_PATH="${PATH}"
 
   cat > "${MOCK_BIN}/bun" <<'EOF'
 #!/usr/bin/env bash
 printf 'bun %s\n' "$*" >> "${COMMAND_LOG}"
+if [[ "$1" == "run" && "$2" == "build" ]]; then
+  mkdir -p dist/src
+  printf '#!/usr/bin/env bun\n' > dist/src/index.js
+  exit 0
+fi
 if [[ "${BUN_FAIL_ANDROID:-}" == "1" && "$*" == *"--platform android"* ]]; then
   exit 1
 fi
@@ -27,6 +34,8 @@ fi
 "$@"
 EOF
   chmod +x "${MOCK_BIN}/timeout"
+  dd if=/dev/zero of="${OPERATOR_KEY}" bs=32 count=1 status=none
+  chmod 600 "${OPERATOR_KEY}"
 }
 
 teardown() {
@@ -51,6 +60,8 @@ run_harness() {
     --ios-device-type "com.apple.CoreSimulator.SimDeviceType.iPhone-17" \
     --ios-min-os-version "25.0" \
     --ios-max-os-version "26.0" \
+    --ownership-manifest "${OWNERSHIP_MANIFEST}" \
+    --operator-key-file "${OPERATOR_KEY}" \
     --evidence-dir "${MOCK_BIN}/evidence" \
     --total-timeout-seconds 30 \
     --platform-timeout-seconds 10
@@ -81,7 +92,8 @@ run_harness() {
   run_harness
 
   [ "${status}" -eq 0 ]
-  [ "$(grep -c '^bun ' "${COMMAND_LOG}")" -eq 2 ]
+  [ "$(grep -c '^bun ' "${COMMAND_LOG}")" -eq 3 ]
+  grep -q '^bun run build$' "${COMMAND_LOG}"
   android_line="$(grep -n -- '--platform android' "${COMMAND_LOG}" | head -n 1 | cut -d: -f1)"
   ios_line="$(grep -n -- '--platform ios' "${COMMAND_LOG}" | head -n 1 | cut -d: -f1)"
   [ "${android_line}" -lt "${ios_line}" ]
@@ -100,6 +112,9 @@ run_harness() {
   grep -q -- '--max-os-version 26.0' "${COMMAND_LOG}"
   grep -q -- '--scenario full' "${COMMAND_LOG}"
   grep -q -- '--confirm-live --test-owned-devices' "${COMMAND_LOG}"
+  grep -q -- "--ownership-manifest ${OWNERSHIP_MANIFEST}" "${COMMAND_LOG}"
+  grep -q -- "--operator-key-file ${OPERATOR_KEY}" "${COMMAND_LOG}"
+  grep -q -- "--entrypoint ${PWD}/dist/src/index.js" "${COMMAND_LOG}"
   grep -q -- '--timeout-ms 8000' "${COMMAND_LOG}"
   [ "$(grep -c '^timeout -k 2 8 bun ' "${COMMAND_LOG}")" -eq 2 ]
 }
@@ -121,6 +136,8 @@ run_harness() {
     --ios-device-type "iphone" \
     --ios-min-os-version "25.0" \
     --ios-max-os-version "26.0" \
+    --ownership-manifest "${OWNERSHIP_MANIFEST}" \
+    --operator-key-file "${OPERATOR_KEY}" \
     --evidence-dir "${MOCK_BIN}/evidence" \
     --total-timeout-seconds 30 \
     --platform-timeout-seconds 10

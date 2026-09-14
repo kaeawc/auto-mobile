@@ -28,6 +28,7 @@ import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeObserveCacheStore } from "../fakes/FakeObserveCacheStore";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { resetObserveCacheStore } from "../../src/features/observe/cache/ObserveCacheRegistry";
 
 /** Resolves once the microtask queue has drained, to detect a pending promise. */
@@ -568,10 +569,12 @@ describe("unscoped latest observation resources", () => {
   // into the shared cache directory.
   let cacheTimer: FakeTimer;
   let cacheStore: FakeObserveCacheStore;
+  let observationIdGenerator: CountingIdGenerator;
 
   beforeEach(() => {
     cacheTimer = new FakeTimer();
     cacheStore = new FakeObserveCacheStore(cacheTimer);
+    observationIdGenerator = new CountingIdGenerator("observation");
   });
 
   afterEach(() => {
@@ -603,17 +606,25 @@ describe("unscoped latest observation resources", () => {
     return template.handler(params);
   }
 
-  async function cacheObservationFor(device: BootedDevice, marker: string): Promise<void> {
+  async function cacheObservationFor(
+    device: BootedDevice,
+    marker: string,
+    observationId?: string,
+  ): Promise<ObserveResult> {
     const observeScreen = new RealObserveScreen(
       device,
       new FakeAdbClientFactory(new FakeAdbExecutor()),
       { cacheStore },
       cacheTimer,
+      observationIdGenerator,
     );
-    await observeScreen.cacheObserveResult({
+    const observation = {
       ...observeScreen.createBaseResult(),
+      ...(observationId ? { observationId } : {}),
       viewHierarchy: marker,
-    } as ObserveResult);
+    } as ObserveResult;
+    await observeScreen.cacheObserveResult(observation);
+    return observation;
   }
 
   test("registers the observation-identity-scoped screenshot template", () => {
@@ -623,12 +634,13 @@ describe("unscoped latest observation resources", () => {
   });
 
   test("serves the screenshot captured with the requested observation", async () => {
-    await cacheObservationFor(deviceA, "device-a-hierarchy");
-    const observationId = String(
-      RealObserveScreen.getRecentCachedResultForDevice(deviceA.deviceId)!.updatedAt,
-    );
+    const { observationId } = await cacheObservationFor(deviceA, "device-a-hierarchy");
     const image = Buffer.from("89504e470d0a1a0a", "hex");
-    getScreenshotStateStore().update(deviceA.deviceId, "/tmp/device-a.png");
+    getScreenshotStateStore().updateForObservation(
+      deviceA.deviceId,
+      observationId,
+      "/tmp/device-a.png",
+    );
     setScreenshotFileSystem({
       stat: async () => ({ isFile: () => true }),
       readFile: async () => image,
@@ -653,15 +665,16 @@ describe("unscoped latest observation resources", () => {
   });
 
   test("waits for a pending capture for the requested observation", async () => {
-    await cacheObservationFor(deviceA, "device-a-hierarchy");
-    const observationId = String(
-      RealObserveScreen.getRecentCachedResultForDevice(deviceA.deviceId)!.updatedAt,
-    );
+    const { observationId } = await cacheObservationFor(deviceA, "device-a-hierarchy");
     const gate = createGate();
     const image = Buffer.from("89504e470d0a1a0a", "hex");
     const job = ScreenshotJobTracker.startJob(deviceA.deviceId, async () => {
       await gate.promise;
-      getScreenshotStateStore().update(deviceA.deviceId, "/tmp/device-a-pending.png");
+      getScreenshotStateStore().updateForObservation(
+        deviceA.deviceId,
+        observationId,
+        "/tmp/device-a-pending.png",
+      );
       return { success: true, path: "/tmp/device-a-pending.png" };
     });
     ScreenshotJobTracker.setTimer(new FakeTimer());
@@ -685,16 +698,17 @@ describe("unscoped latest observation resources", () => {
     await cacheObservationFor(deviceA, "device-a-prior-hierarchy");
     getScreenshotStateStore().update(deviceA.deviceId, "/tmp/device-a-prior.png");
     cacheTimer.advanceTime(1);
-    await cacheObservationFor(deviceA, "device-a-current-hierarchy");
-    const observationId = String(
-      RealObserveScreen.getRecentCachedResultForDevice(deviceA.deviceId)!.updatedAt,
-    );
+    const { observationId } = await cacheObservationFor(deviceA, "device-a-current-hierarchy");
     const gate = createGate();
     const priorImage = Buffer.from("prior screenshot");
     const currentImage = Buffer.from("current screenshot");
     const job = ScreenshotJobTracker.startJob(deviceA.deviceId, async () => {
       await gate.promise;
-      getScreenshotStateStore().update(deviceA.deviceId, "/tmp/device-a-current.png");
+      getScreenshotStateStore().updateForObservation(
+        deviceA.deviceId,
+        observationId,
+        "/tmp/device-a-current.png",
+      );
       return { success: true, path: "/tmp/device-a-current.png" };
     });
     ScreenshotJobTracker.setTimer(new FakeTimer());
@@ -714,14 +728,15 @@ describe("unscoped latest observation resources", () => {
   });
 
   test("does not serve a newer screenshot when the requested observation is replaced while waiting", async () => {
-    await cacheObservationFor(deviceA, "device-a-hierarchy");
-    const observationId = String(
-      RealObserveScreen.getRecentCachedResultForDevice(deviceA.deviceId)!.updatedAt,
-    );
+    const { observationId } = await cacheObservationFor(deviceA, "device-a-hierarchy");
     const gate = createGate();
     const job = ScreenshotJobTracker.startJob(deviceA.deviceId, async () => {
       await gate.promise;
-      getScreenshotStateStore().update(deviceA.deviceId, "/tmp/device-a-newer.png");
+      getScreenshotStateStore().updateForObservation(
+        deviceA.deviceId,
+        observationId,
+        "/tmp/device-a-newer.png",
+      );
       return { success: true, path: "/tmp/device-a-newer.png" };
     });
     ScreenshotJobTracker.setTimer(new FakeTimer());
@@ -737,6 +752,77 @@ describe("unscoped latest observation resources", () => {
     expect(screenshot.mimeType).toBe("application/json");
     expect(screenshot.text).toContain("unknown or has been superseded");
     await job.promise;
+  });
+
+  test("does not use a stale device-wide screenshot after the exact capture wait times out", async () => {
+    const { observationId } = await cacheObservationFor(deviceA, "device-a-hierarchy");
+    getScreenshotStateStore().update(deviceA.deviceId, "/tmp/stale.png");
+    const timer = new FakeTimer();
+    ScreenshotJobTracker.setTimer(timer);
+    ScreenshotJobTracker.startJob(deviceA.deviceId, async () => new Promise(() => {}));
+    setScreenshotFileSystem({
+      stat: async () => ({ isFile: () => true }),
+      readFile: async () => Buffer.from("stale screenshot"),
+    });
+
+    const screenshotPromise = readObservationScreenshot(deviceA.deviceId, observationId);
+    await Promise.resolve();
+    timer.advanceTime(10_000);
+
+    const screenshot = await screenshotPromise;
+    expect(screenshot.mimeType).toBe("application/json");
+    expect(screenshot.text).toContain("not ready");
+  });
+
+  test("decodes encoded observation screenshot path parameters", async () => {
+    const encodedDevice: BootedDevice = {
+      deviceId: "192.168.1.10:5555",
+      name: "Wireless Pixel",
+      platform: "android",
+    };
+    const observation = await cacheObservationFor(
+      encodedDevice,
+      "wireless-hierarchy",
+      "observation:one",
+    );
+    getScreenshotStateStore().updateForObservation(
+      encodedDevice.deviceId,
+      observation.observationId,
+      "/tmp/wireless.png",
+    );
+    setScreenshotFileSystem({
+      stat: async () => ({ isFile: () => true }),
+      readFile: async () => Buffer.from("89504e470d0a1a0a", "hex"),
+    });
+
+    const screenshot = await readObservationScreenshot(
+      encodeURIComponent(encodedDevice.deviceId),
+      encodeURIComponent(observation.observationId),
+    );
+
+    expect(screenshot.mimeType).toBe("image/png");
+  });
+
+  test("returns a typed JSON error for malformed observation screenshot path parameters", async () => {
+    const screenshot = await readObservationScreenshot("device%ZZ", "observation%ZZ");
+
+    expect(screenshot.mimeType).toBe("application/json");
+    expect(screenshot.text).toContain("Malformed resource URI");
+  });
+
+  test("assigns a new observation identity even when hierarchy timestamps are reused", async () => {
+    const screen = new RealObserveScreen(
+      deviceA,
+      new FakeAdbClientFactory(new FakeAdbExecutor()),
+      { cacheStore },
+      cacheTimer,
+      new CountingIdGenerator("observation"),
+    );
+    const first = { ...screen.createBaseResult(), updatedAt: "reused-hierarchy-timestamp" };
+    const second = { ...screen.createBaseResult(), updatedAt: "reused-hierarchy-timestamp" };
+
+    expect(first.updatedAt).toBe(second.updatedAt);
+    expect(first.observationId).not.toBe(second.observationId);
   });
 
   test("does not pair one device's hierarchy with another device's screenshot", async () => {

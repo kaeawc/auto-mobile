@@ -3,9 +3,11 @@ import { DEFAULT_OBSERVATION_REQUEST_TIMEOUT_MS } from "../../src/daemon/deviceD
 import { runObservationRequestBatch } from "../../src/daemon/observationRequestBatch";
 import type { ObserveResult } from "../../src/models";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 
 function successfulObservation(): ObserveResult {
   return {
+    observationId: "successful-observation",
     updatedAt: 0,
     screenSize: { width: 1, height: 1 },
     systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
@@ -32,6 +34,7 @@ describe("runObservationRequestBatch", () => {
         timer,
         signal: new AbortController().signal,
         perDeviceTimeoutMs: DEFAULT_OBSERVATION_REQUEST_TIMEOUT_MS,
+        idGenerator: new CountingIdGenerator("batch"),
       },
     );
 
@@ -77,6 +80,7 @@ describe("runObservationRequestBatch", () => {
       {
         timer,
         signal: new AbortController().signal,
+        idGenerator: new CountingIdGenerator("batch"),
       },
     );
 
@@ -90,6 +94,7 @@ describe("runObservationRequestBatch", () => {
       {
         deviceId: "stalled-sibling",
         observation: {
+          observationId: "failed_observation_20000_batch-1",
           updatedAt: DEFAULT_OBSERVATION_REQUEST_TIMEOUT_MS,
           screenSize: { width: 0, height: 0 },
           systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
@@ -119,6 +124,7 @@ describe("runObservationRequestBatch", () => {
             throw new Error("Device quarantined is not actionable to observe");
           }
         },
+        idGenerator: new CountingIdGenerator("batch"),
       },
     );
 

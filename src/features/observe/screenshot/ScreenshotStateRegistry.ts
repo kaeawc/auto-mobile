@@ -7,6 +7,7 @@ import { defaultTimer } from "../../../utils/SystemTimer";
  * screenshot state stay aligned with the observe result cache.
  */
 export const OBSERVE_RESULT_CACHE_TTL_MS = 5 * 60 * 1000;
+export const MAX_OBSERVATION_SCREENSHOT_STATES_PER_DEVICE = 10;
 
 interface ScreenshotState {
   path: string | null;
@@ -27,8 +28,16 @@ interface ScreenshotState {
  */
 export interface ScreenshotStateStore {
   update(deviceId: string, path?: string, error?: string): void;
+  updateForObservation(
+    deviceId: string,
+    observationId: string,
+    path?: string,
+    error?: string,
+  ): void;
   getPath(deviceId?: string): string | undefined;
   getError(deviceId?: string): string | undefined;
+  getPathForObservation(deviceId: string, observationId: string): string | undefined;
+  getErrorForObservation(deviceId: string, observationId: string): string | undefined;
   clear(deviceId?: string): void;
 }
 
@@ -40,6 +49,7 @@ export interface ScreenshotStateStore {
  */
 export class InMemoryScreenshotStateStore implements ScreenshotStateStore {
   private states: Map<string, ScreenshotState> = new Map();
+  private observationStates: Map<string, Map<string, ScreenshotState>> = new Map();
   private timer: Timer;
 
   constructor(timer: Timer = defaultTimer) {
@@ -54,6 +64,29 @@ export class InMemoryScreenshotStateStore implements ScreenshotStateStore {
     });
   }
 
+  updateForObservation(
+    deviceId: string,
+    observationId: string,
+    path?: string,
+    error?: string,
+  ): void {
+    const states = this.observationStates.get(deviceId) ?? new Map<string, ScreenshotState>();
+    states.delete(observationId);
+    states.set(observationId, {
+      path: path ?? null,
+      error: error ?? null,
+      timestamp: this.timer.now(),
+    });
+    while (states.size > MAX_OBSERVATION_SCREENSHOT_STATES_PER_DEVICE) {
+      const oldestObservationId = states.keys().next().value;
+      if (oldestObservationId === undefined) {
+        break;
+      }
+      states.delete(oldestObservationId);
+    }
+    this.observationStates.set(deviceId, states);
+  }
+
   getPath(deviceId?: string): string | undefined {
     const state = this.findLatest(deviceId);
     return state?.path ?? undefined;
@@ -64,11 +97,21 @@ export class InMemoryScreenshotStateStore implements ScreenshotStateStore {
     return state?.error ?? undefined;
   }
 
+  getPathForObservation(deviceId: string, observationId: string): string | undefined {
+    return this.findObservation(deviceId, observationId)?.path ?? undefined;
+  }
+
+  getErrorForObservation(deviceId: string, observationId: string): string | undefined {
+    return this.findObservation(deviceId, observationId)?.error ?? undefined;
+  }
+
   clear(deviceId?: string): void {
     if (deviceId) {
       this.states.delete(deviceId);
+      this.observationStates.delete(deviceId);
     } else {
       this.states.clear();
+      this.observationStates.clear();
     }
   }
 
@@ -103,6 +146,22 @@ export class InMemoryScreenshotStateStore implements ScreenshotStateStore {
       return null;
     }
     return { path: mostRecent.path, error: mostRecent.error };
+  }
+
+  private findObservation(deviceId: string, observationId: string): ScreenshotState | undefined {
+    const states = this.observationStates.get(deviceId);
+    const state = states?.get(observationId);
+    if (!state) {
+      return undefined;
+    }
+    if (this.timer.now() - state.timestamp > OBSERVE_RESULT_CACHE_TTL_MS) {
+      states?.delete(observationId);
+      if (states?.size === 0) {
+        this.observationStates.delete(deviceId);
+      }
+      return undefined;
+    }
+    return state;
   }
 }
 

@@ -13,6 +13,7 @@ interface FakeScreenshotState {
  */
 export class FakeScreenshotStateStore implements ScreenshotStateStore {
   private states: Map<string, FakeScreenshotState> = new Map();
+  private observationStates: Map<string, Map<string, FakeScreenshotState>> = new Map();
   private currentTime: number = 0;
 
   setNow(time: number): void {
@@ -27,6 +28,22 @@ export class FakeScreenshotStateStore implements ScreenshotStateStore {
     });
   }
 
+  updateForObservation(
+    deviceId: string,
+    observationId: string,
+    path?: string,
+    error?: string,
+  ): void {
+    const states = this.observationStates.get(deviceId) ?? new Map<string, FakeScreenshotState>();
+    states.delete(observationId);
+    states.set(observationId, {
+      path: path ?? null,
+      error: error ?? null,
+      timestamp: this.currentTime,
+    });
+    this.observationStates.set(deviceId, states);
+  }
+
   getPath(deviceId?: string): string | undefined {
     const state = this.findLatest(deviceId);
     return state?.path ?? undefined;
@@ -37,11 +54,21 @@ export class FakeScreenshotStateStore implements ScreenshotStateStore {
     return state?.error ?? undefined;
   }
 
+  getPathForObservation(deviceId: string, observationId: string): string | undefined {
+    return this.observationStates.get(deviceId)?.get(observationId)?.path ?? undefined;
+  }
+
+  getErrorForObservation(deviceId: string, observationId: string): string | undefined {
+    return this.observationStates.get(deviceId)?.get(observationId)?.error ?? undefined;
+  }
+
   clear(deviceId?: string): void {
     if (deviceId) {
       this.states.delete(deviceId);
+      this.observationStates.delete(deviceId);
     } else {
       this.states.clear();
+      this.observationStates.clear();
     }
   }
 

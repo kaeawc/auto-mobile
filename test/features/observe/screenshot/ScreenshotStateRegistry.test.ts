@@ -146,6 +146,31 @@ describe("InMemoryScreenshotStateStore", () => {
     expect(store.getError("device-A")).toBeUndefined();
   });
 
+  test("keeps a bounded history of observation-scoped screenshot states", () => {
+    const timer = new FakeTimer();
+    timer.setCurrentTime(1000);
+    const store = new InMemoryScreenshotStateStore(timer);
+
+    for (let index = 1; index <= 11; index++) {
+      timer.setCurrentTime(1000 + index);
+      store.updateForObservation("device-A", `observation-${index}`, `/tmp/${index}.png`);
+    }
+
+    expect(store.getPathForObservation("device-A", "observation-1")).toBeUndefined();
+    expect(store.getPathForObservation("device-A", "observation-2")).toBe("/tmp/2.png");
+    expect(store.getPathForObservation("device-A", "observation-11")).toBe("/tmp/11.png");
+  });
+
+  test("keeps observation-scoped state isolated from the device-wide latest state", () => {
+    const store = new InMemoryScreenshotStateStore(new FakeTimer());
+
+    store.update("device-A", "/tmp/latest.png");
+    store.updateForObservation("device-A", "observation-A", "/tmp/exact.png");
+
+    expect(store.getPath("device-A")).toBe("/tmp/latest.png");
+    expect(store.getPathForObservation("device-A", "observation-A")).toBe("/tmp/exact.png");
+  });
+
   test("returns undefined when no state exists", () => {
     const store = new InMemoryScreenshotStateStore(new FakeTimer());
 

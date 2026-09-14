@@ -39,20 +39,24 @@ export interface ObserveScreenshotRecorder {
    * Fire-and-forget capture. Returns immediately while the capture continues
    * in the background. State is updated when the capture completes.
    */
-  start(perf?: PerformanceTracker, signal?: AbortSignal): void;
+  start(observationId: string, perf?: PerformanceTracker, signal?: AbortSignal): void;
 
   /**
    * Awaitable capture. The promise resolves once the capture has completed
    * (successfully or not) and state has been updated.
    */
-  capture(perf?: PerformanceTracker, signal?: AbortSignal): Promise<void>;
+  capture(observationId: string, perf?: PerformanceTracker, signal?: AbortSignal): Promise<void>;
 
   /**
    * Await a fresh capture after any already-pending capture. Terminal evidence
    * must reflect the completed action or wait condition rather than an earlier
    * in-flight observation.
    */
-  captureFresh(perf?: PerformanceTracker, signal?: AbortSignal): Promise<void>;
+  captureFresh(
+    observationId: string,
+    perf?: PerformanceTracker,
+    signal?: AbortSignal,
+  ): Promise<void>;
 }
 
 /**
@@ -75,7 +79,11 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
     this.store = store;
   }
 
-  start(perf: PerformanceTracker = new NoOpPerformanceTracker(), signal?: AbortSignal): void {
+  start(
+    observationId: string,
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    signal?: AbortSignal,
+  ): void {
     perf.startOperation("screenshot");
     const { promise } = this.screenshotUtil.startTrackedCapture(
       {},
@@ -103,6 +111,8 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
       },
     );
 
+    this.recordObservationResult(promise, observationId);
+
     // Swallow rejections from the chained finally so an unexpected throw inside
     // the tracked capture doesn't surface as an unhandled rejection. The
     // `onComplete` handler already records failures via the state store.
@@ -116,20 +126,23 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
   }
 
   async capture(
+    observationId: string,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     signal?: AbortSignal,
   ): Promise<void> {
-    await this.captureWithOptions(perf, signal, { coalesceWithPending: true });
+    await this.captureWithOptions(observationId, perf, signal, { coalesceWithPending: true });
   }
 
   async captureFresh(
+    observationId: string,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     signal?: AbortSignal,
   ): Promise<void> {
-    await this.captureWithOptions(perf, signal, { queueAfterPending: true });
+    await this.captureWithOptions(observationId, perf, signal, { queueAfterPending: true });
   }
 
   private async captureWithOptions(
+    observationId: string,
     perf: PerformanceTracker,
     signal: AbortSignal | undefined,
     trackerOptions: Pick<ScreenshotJobOptions, "coalesceWithPending" | "queueAfterPending">,
@@ -157,6 +170,7 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
             },
           },
         );
+        this.recordObservationResult(promise, observationId);
         await promise;
       });
     } catch (error) {
@@ -166,44 +180,73 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
         return;
       }
       this.store.update(this.device.deviceId, undefined, errorMsg);
+      this.store.updateForObservation(this.device.deviceId, observationId, undefined, errorMsg);
       logger.warn(`[OBSERVE] Screenshot capture failed: ${errorMsg}`);
     }
   }
 
   private async handleScreenshotResult(
     screenshotResult: ScreenshotResult,
-    options: { ignoreCancel?: boolean } = {},
+    options: { ignoreCancel?: boolean; observationId?: string; updateDeviceWide?: boolean } = {},
   ): Promise<void> {
+    const update = (path?: string, error?: string) => {
+      if (options.updateDeviceWide !== false) {
+        this.store.update(this.device.deviceId, path, error);
+      }
+      if (options.observationId) {
+        this.store.updateForObservation(this.device.deviceId, options.observationId, path, error);
+      }
+    };
     if (!screenshotResult.success) {
       const errorMsg = screenshotResult.error || "Failed to capture screenshot";
       if (options.ignoreCancel && errorMsg.includes(OPERATION_CANCELLED_MESSAGE)) {
         logger.debug("[OBSERVE] Screenshot capture cancelled");
         return;
       }
-      this.store.update(this.device.deviceId, undefined, errorMsg);
+      update(undefined, errorMsg);
       logger.warn(`[OBSERVE] Screenshot capture failed: ${errorMsg}`);
       return;
     }
 
     if (!screenshotResult.path) {
-      this.store.update(
-        this.device.deviceId,
-        undefined,
-        "Screenshot capture returned no file path",
-      );
+      update(undefined, "Screenshot capture returned no file path");
       logger.warn("[OBSERVE] Screenshot capture succeeded but no file path was returned");
       return;
     }
 
     const exists = await pathExists(screenshotResult.path);
     if (!exists) {
-      this.store.update(this.device.deviceId, undefined, "Screenshot file missing after capture");
+      update(undefined, "Screenshot file missing after capture");
       logger.warn(
         `[OBSERVE] Screenshot capture reported success but file missing: ${screenshotResult.path}`,
       );
       return;
     }
 
-    this.store.update(this.device.deviceId, screenshotResult.path);
+    update(screenshotResult.path);
+  }
+
+  private recordObservationResult(promise: Promise<ScreenshotResult>, observationId: string): void {
+    promise
+      .then(async (result) => {
+        // The tracker's owner completion has already validated the file before
+        // this shared promise resolves; stamp each coalesced caller synchronously.
+        if (result.success && result.path) {
+          this.store.updateForObservation(this.device.deviceId, observationId, result.path);
+          return;
+        }
+        await this.handleScreenshotResult(result, {
+          ignoreCancel: true,
+          observationId,
+          updateDeviceWide: false,
+        });
+      })
+      .catch((error) => {
+        const errorMsg = errorMessage(error);
+        this.store.updateForObservation(this.device.deviceId, observationId, undefined, errorMsg);
+        logger.warn(
+          `[OBSERVE] Failed to record screenshot for observation ${observationId}: ${errorMsg}`,
+        );
+      });
   }
 }

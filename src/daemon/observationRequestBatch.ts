@@ -4,6 +4,7 @@ import type { ObserveResult } from "../models";
 import type { Timer } from "../utils/SystemTimer";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
+import { createTimestampedId, defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 
 /**
  * Each device gets the full outer request budget because batch devices now race
@@ -26,10 +27,12 @@ export interface ObservationRequestBatchOptions<TDevice extends ObservationReque
   signal: AbortSignal;
   perDeviceTimeoutMs?: number;
   assertDeviceActionable?: (device: TDevice) => void;
+  idGenerator?: IdGenerator;
 }
 
-function failedObservation(timer: Timer, error: string): ObserveResult {
+function failedObservation(timer: Timer, idGenerator: IdGenerator, error: string): ObserveResult {
   return {
+    observationId: createTimestampedId("failed_observation", timer, idGenerator),
     updatedAt: timer.now(),
     screenSize: { width: 0, height: 0 },
     systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
@@ -39,10 +42,11 @@ function failedObservation(timer: Timer, error: string): ObserveResult {
 
 function failedRequestObservation(
   timer: Timer,
+  idGenerator: IdGenerator,
   deviceId: string,
   error: string,
 ): RequestedObservation {
-  return { deviceId, observation: failedObservation(timer, error) };
+  return { deviceId, observation: failedObservation(timer, idGenerator, error) };
 }
 
 /** Run all targeted observations independently so one device cannot block its siblings. */
@@ -52,6 +56,7 @@ export async function runObservationRequestBatch<TDevice extends ObservationRequ
   options: ObservationRequestBatchOptions<TDevice>,
 ): Promise<RequestedObservation[]> {
   const { timer, signal, assertDeviceActionable } = options;
+  const idGenerator = options.idGenerator ?? defaultIdGenerator;
   const perDeviceTimeoutMs = options.perDeviceTimeoutMs ?? PER_DEVICE_OBSERVATION_TIMEOUT_MS;
 
   const settled = await Promise.allSettled(
@@ -59,6 +64,7 @@ export async function runObservationRequestBatch<TDevice extends ObservationRequ
       if (signal.aborted) {
         return failedRequestObservation(
           timer,
+          idGenerator,
           device.id,
           `Observation request was aborted for device ${device.id}`,
         );
@@ -69,7 +75,7 @@ export async function runObservationRequestBatch<TDevice extends ObservationRequ
       } catch (error) {
         const message = errorMessage(error);
         logger.warn(`[Daemon] Skipped observation for ${device.id}: ${message}`);
-        return failedRequestObservation(timer, device.id, message);
+        return failedRequestObservation(timer, idGenerator, device.id, message);
       }
 
       const controller = new AbortController();
@@ -91,7 +97,7 @@ export async function runObservationRequestBatch<TDevice extends ObservationRequ
       } catch (error) {
         const message = errorMessage(error);
         logger.warn(`[Daemon] Failed to observe ${device.id}: ${message}`);
-        return failedRequestObservation(timer, device.id, message);
+        return failedRequestObservation(timer, idGenerator, device.id, message);
       } finally {
         if (timeoutHandle) {
           timer.clearTimeout(timeoutHandle);
@@ -108,6 +114,6 @@ export async function runObservationRequestBatch<TDevice extends ObservationRequ
     const device = devices[index]!;
     const message = errorMessage(result.reason);
     logger.warn(`[Daemon] Observation task for ${device.id} rejected unexpectedly: ${message}`);
-    return failedRequestObservation(timer, device.id, message);
+    return failedRequestObservation(timer, idGenerator, device.id, message);
   });
 }

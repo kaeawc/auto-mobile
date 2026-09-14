@@ -1,4 +1,9 @@
-import { ResourceRegistry, ResourceContent, type ResourceReadContext } from "./resourceRegistry";
+import {
+  getRequestedResourceUri,
+  ResourceRegistry,
+  ResourceContent,
+  type ResourceReadContext,
+} from "./resourceRegistry";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import { logger } from "../utils/logger";
 import { stringifyToolResponse } from "../utils/toolUtils";
@@ -41,6 +46,7 @@ interface SessionScreenshotResourceDependencies {
 
 let nextSessionIncarnation = 0;
 const sessionIncarnations = new WeakMap<object, number>();
+const SCREENSHOT_CAPTURE_WAIT_TIMEOUT_MS = 10_000;
 
 function getSessionIncarnation(session: object): number {
   const existing = sessionIncarnations.get(session);
@@ -295,41 +301,112 @@ function observationScreenshotUnknownError(
   };
 }
 
+function observationScreenshotNotReadyError(uri: string, observationId: string): ResourceContent {
+  return {
+    uri,
+    mimeType: "application/json",
+    text: JSON.stringify(
+      {
+        error: `Screenshot for observation id ${observationId} is not ready yet. Call the resource again after the capture completes.`,
+      },
+      null,
+      2,
+    ),
+  };
+}
+
+function observationScreenshotMalformedUriError(uri: string): ResourceContent {
+  return {
+    uri,
+    mimeType: "application/json",
+    text: JSON.stringify(
+      { error: "Malformed resource URI: a path segment is not valid percent-encoding." },
+      null,
+      2,
+    ),
+  };
+}
+
+function safeDecodeSegment(value: string): string | null {
+  try {
+    return decodeURIComponent(value);
+  } catch (error) {
+    // A malformed client URI is expected input validation, so preserve the typed envelope.
+    logger.debug(`[ObservationResources] Malformed URI segment '${value}': ${error}`);
+    return null;
+  }
+}
+
 function matchesObservationId(deviceId: string, observationId: string): boolean {
   const cachedResult = RealObserveScreen.getRecentCachedResultForDevice(deviceId);
-  return cachedResult !== undefined && String(cachedResult.updatedAt) === observationId;
+  return cachedResult?.observationId === observationId;
+}
+
+async function waitForObservationScreenshot(
+  uri: string,
+  deviceId: string,
+  observationId: string,
+): Promise<ResourceContent | undefined> {
+  if (!ScreenshotJobTracker.isPending(deviceId)) {
+    return undefined;
+  }
+
+  const completion = await ScreenshotJobTracker.waitForCompletion(
+    deviceId,
+    SCREENSHOT_CAPTURE_WAIT_TIMEOUT_MS,
+  );
+  if (!matchesObservationId(deviceId, observationId)) {
+    return observationScreenshotUnknownError(uri, deviceId, observationId);
+  }
+  if (completion === null || ScreenshotJobTracker.isPending(deviceId)) {
+    return observationScreenshotNotReadyError(uri, observationId);
+  }
+  return undefined;
 }
 
 // Handler for the screenshot captured alongside one immutable device observation.
 async function getObservationScreenshot(params: Record<string, string>): Promise<ResourceContent> {
-  const { deviceId, observationId } = params;
-  const uri = `automobile:observation/${deviceId}/${observationId}/screenshot`;
+  const uri =
+    getRequestedResourceUri(params) ??
+    `automobile:observation/${params.deviceId}/${params.observationId}/screenshot`;
+  const deviceId = safeDecodeSegment(params.deviceId);
+  const observationId = safeDecodeSegment(params.observationId);
+
+  if (deviceId === null || observationId === null) {
+    return observationScreenshotMalformedUriError(uri);
+  }
 
   try {
     if (!matchesObservationId(deviceId, observationId)) {
       return observationScreenshotUnknownError(uri, deviceId, observationId);
     }
 
-    let screenshotPath = await getLatestScreenshotPath(deviceId);
+    let screenshotPath = RealObserveScreen.getRecentCachedScreenshotPathForObservation(
+      deviceId,
+      observationId,
+    );
     if (!matchesObservationId(deviceId, observationId)) {
       return observationScreenshotUnknownError(uri, deviceId, observationId);
     }
 
-    // A path can belong to the preceding observation while this observation's
-    // fire-and-forget capture is pending, so never use it until that job settles.
-    if (ScreenshotJobTracker.isPending(deviceId)) {
-      await ScreenshotJobTracker.waitForCompletion(deviceId, 3000);
-      if (!matchesObservationId(deviceId, observationId)) {
-        return observationScreenshotUnknownError(uri, deviceId, observationId);
-      }
-      screenshotPath = await getLatestScreenshotPath(deviceId);
-      if (!matchesObservationId(deviceId, observationId)) {
-        return observationScreenshotUnknownError(uri, deviceId, observationId);
-      }
+    // An exact path is never read while its capture is still pending.
+    const pendingResult = await waitForObservationScreenshot(uri, deviceId, observationId);
+    if (pendingResult) {
+      return pendingResult;
+    }
+    screenshotPath = RealObserveScreen.getRecentCachedScreenshotPathForObservation(
+      deviceId,
+      observationId,
+    );
+    if (!matchesObservationId(deviceId, observationId)) {
+      return observationScreenshotUnknownError(uri, deviceId, observationId);
     }
 
     if (!screenshotPath) {
-      const screenshotError = RealObserveScreen.getRecentCachedScreenshotErrorForDevice(deviceId);
+      const screenshotError = RealObserveScreen.getRecentCachedScreenshotErrorForObservation(
+        deviceId,
+        observationId,
+      );
       const errorMessage = screenshotError
         ? `No screenshot available for observation id ${observationId}: ${screenshotError}`
         : "No screenshot available. Call the 'observe' tool again to capture a screenshot.";

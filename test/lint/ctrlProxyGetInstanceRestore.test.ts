@@ -24,16 +24,29 @@ import { join, relative, sep } from "node:path";
  * This is an ORDERING/lifetime obligation ("whatever you install, restore before
  * the file ends"), which no type can express, so it is a source scan. The rule
  * is deliberately narrow: any test file that INSTALLS a fresh `getInstance`
- * implementation MUST also RESTORE that same symbol somewhere in the file, and
- * the file must appear in the inventory below. A new installer — a new file, or
- * a new symbol in a listed file — fails here until it is both restored and
- * inventoried. The count of installs is intentionally NOT pinned (suites add
- * per-test mocks freely); only "installs ⇒ a restore exists for that symbol" is.
+ * implementation by DIRECT ASSIGNMENT (`<Symbol>.getInstance = …`) MUST also
+ * RESTORE that same symbol somewhere in the file, and the file must appear in
+ * the inventory below. A new installer — a new file, or a new symbol in a listed
+ * file — fails here until it is both restored and inventoried. The count of
+ * installs is intentionally NOT pinned (suites add per-test mocks freely); only
+ * "installs ⇒ a restore exists for that symbol" is.
  *
  * It cannot prove a restore is CORRECT (the #7052 file had a restore that saved
  * the wrong value); the real fix for that lives in the suite. What it does
  * guarantee is that the "installed but never restored" class — the simplest and
  * most common way to leak this seam — cannot be introduced silently.
+ *
+ * The classifier is structural, not textual. Earlier revisions matched
+ * `<Symbol>.getInstance =` with one regex, which let three real false negatives
+ * through (PR #7058 review): a typed cast the regex could not spell
+ * (`(Symbol as unknown as { … }).getInstance =`), a named local mock assigned by
+ * bare identifier (`Symbol.getInstance = fakeGetInstance`, which the regex read
+ * as a restore), and a file-wide `.mockRestore()` acquittal that any unrelated
+ * spy could satisfy. It now parses the file with the TypeScript AST — unwrapping
+ * casts/parens on both sides of the assignment, following an assigned
+ * identifier back to its declaration to tell a fresh mock from an original-value
+ * capture, and tying a `.mockRestore()` acquittal to the specific spy handle
+ * returned by `spyOn(<Symbol>, "getInstance")`.
  */
 describe("CtrlProxy getInstance mocks are restored in-file (issue #7052)", () => {
   const ROOT = join(import.meta.dir, "..", "..");
@@ -46,83 +59,238 @@ describe("CtrlProxy getInstance mocks are restored in-file (issue #7052)", () =>
     "AndroidCtrlProxyManager",
     "IOSCtrlProxyManager",
   ] as const;
-  type Symbol = (typeof SYMBOLS)[number];
+  type CtrlProxySymbol = (typeof SYMBOLS)[number];
+  const SYMBOL_SET = new Set<string>(SYMBOLS);
 
   /**
    * A cheap raw-byte prefilter: only files that mention `CtrlProxy` at all pay
-   * for comment stripping and scanning, which keeps this inside the 100ms budget.
+   * for AST parsing and scanning, which keeps this inside the 100ms budget.
    */
   const PREFILTER = "CtrlProxy";
 
   // This guard's own file, excluded from the scan: its example snippets live in
-  // string literals the comment-blanker cannot neutralize.
+  // string literals fed to the classifier directly, not as real seams.
   const SELF = "test/lint/ctrlProxyGetInstanceRestore.test.ts";
 
-  /**
-   * Matches an assignment to `<Symbol>.getInstance`, tolerating an `as any`
-   * cast and its parenthesis (`(AndroidCtrlProxyClient as any).getInstance =`),
-   * and captures the symbol and the first non-space character of the RHS. A
-   * single `=` only — `getInstanceSpy = spyOn(...)` and `===` comparisons never
-   * match because they are not `<Symbol>.getInstance =`.
-   */
-  const ASSIGN =
-    /(AndroidCtrlProxyClient|IOSCtrlProxyClient|AndroidCtrlProxyManager|IOSCtrlProxyManager)(?:\s+as\s+\w+)?\s*\)?\s*\.getInstance\s*=\s*([^=\s])/g;
-
-  /**
-   * An INSTALL replaces the seam with a fresh implementation; a RESTORE assigns
-   * back a previously-captured original (a bare identifier such as
-   * `originalGetInstance` / `origClient`). Installs here always begin with
-   * `mock(`, an arrow `(`, `async`, or `function`; a restore begins with an
-   * identifier character that is not one of those. `.mockRestore()` is also a
-   * restore, matched separately below.
-   */
-  function isInstallRhs(firstChar: string, rest: string): boolean {
-    const rhs = firstChar + rest;
-    return /^(mock\b|\(|async\b|function\b)/.test(rhs);
-  }
-
   interface FileFacts {
-    readonly installs: ReadonlySet<Symbol>;
-    readonly restores: ReadonlySet<Symbol>;
-    /** True if the file calls `.mockRestore()` at least once (a blanket restore). */
-    readonly hasMockRestore: boolean;
+    /** Symbols whose `getInstance` this file replaces with a fresh implementation. */
+    readonly installs: ReadonlySet<CtrlProxySymbol>;
+    /** Symbols this file assigns a captured original back to (a direct restore). */
+    readonly restores: ReadonlySet<CtrlProxySymbol>;
+    /**
+     * Symbols acquitted by a `.mockRestore()` on the handle that
+     * `spyOn(<Symbol>, "getInstance")` returned — the only `.mockRestore()` that
+     * actually restores this seam.
+     */
+    readonly restoredBySpy: ReadonlySet<CtrlProxySymbol>;
+  }
+
+  /** Peel `(expr)`, `expr as T`, `<T>expr`, `expr!`, `expr satisfies T` down to the core. */
+  function unwrap(node: ts.Expression): ts.Expression {
+    let current = node;
+    for (;;) {
+      if (
+        ts.isParenthesizedExpression(current) ||
+        ts.isAsExpression(current) ||
+        ts.isTypeAssertionExpression(current) ||
+        ts.isNonNullExpression(current) ||
+        ts.isSatisfiesExpression(current)
+      ) {
+        current = current.expression;
+        continue;
+      }
+      return current;
+    }
+  }
+
+  /** The CtrlProxy symbol an expression names directly (after unwrapping), if any. */
+  function symbolOf(node: ts.Expression): CtrlProxySymbol | undefined {
+    const core = unwrap(node);
+    if (ts.isIdentifier(core) && SYMBOL_SET.has(core.text)) {
+      return core.text as CtrlProxySymbol;
+    }
+    return undefined;
+  }
+
+  /** The `<Symbol>.getInstance` an assignment target names (after unwrapping), if any. */
+  function getInstanceTarget(node: ts.Expression): CtrlProxySymbol | undefined {
+    const core = unwrap(node);
+    if (ts.isPropertyAccessExpression(core) && core.name.text === "getInstance") {
+      return symbolOf(core.expression);
+    }
+    return undefined;
   }
 
   /**
-   * Blank every comment's characters (newlines preserved) so a symbol named in
-   * prose or in commented-out code is not counted, while every byte offset — and
-   * so every regex position — is unchanged. The TypeScript scanner is used
-   * rather than a comment-stripping regex so that a `//` inside a string literal
-   * is not mistaken for a comment.
+   * A fresh implementation of the seam: an inline function, or a factory call
+   * (`mock(...)` / `spyOn(...)`, including a chained `spyOn(...).mockX(...)`).
+   * These are installs wherever they appear on the RHS.
    */
-  function blankComments(source: string): string {
-    const scanner = ts.createScanner(
-      ts.ScriptTarget.Latest,
-      /* skipTrivia */ false,
-      ts.LanguageVariant.Standard,
-      source,
-    );
-    const out = source.split("");
-    let offset = 0;
-    for (
-      let token = scanner.scan();
-      token !== ts.SyntaxKind.EndOfFileToken;
-      token = scanner.scan()
-    ) {
-      const text = scanner.getTokenText();
-      if (
-        token === ts.SyntaxKind.SingleLineCommentTrivia ||
-        token === ts.SyntaxKind.MultiLineCommentTrivia
+  function isFreshMock(node: ts.Expression): boolean {
+    const core = unwrap(node);
+    if (ts.isArrowFunction(core) || ts.isFunctionExpression(core)) {
+      return true;
+    }
+    if (ts.isCallExpression(core)) {
+      const callee = leftmostCallName(core);
+      return callee === "mock" || callee === "spyOn";
+    }
+    return false;
+  }
+
+  /** The leftmost callee identifier of a (possibly chained) call expression. */
+  function leftmostCallName(call: ts.CallExpression): string | undefined {
+    let expr: ts.Expression = unwrap(call.expression);
+    for (;;) {
+      if (ts.isPropertyAccessExpression(expr)) {
+        expr = unwrap(expr.expression);
+        continue;
+      }
+      if (ts.isCallExpression(expr)) {
+        expr = unwrap(expr.expression);
+        continue;
+      }
+      return ts.isIdentifier(expr) ? expr.text : undefined;
+    }
+  }
+
+  /** True when an expression captures the live `<Symbol>.getInstance` value. */
+  function capturesOriginal(node: ts.Expression): boolean {
+    return getInstanceTarget(node) !== undefined;
+  }
+
+  /**
+   * If an expression is (or chains onto) `spyOn(<Symbol>, "getInstance")`, the
+   * symbol it spies. Handles `spyOn(X, "getInstance").mockReturnValue(...)`.
+   */
+  function spyOnGetInstanceSymbol(node: ts.Expression): CtrlProxySymbol | undefined {
+    let expr: ts.Expression = unwrap(node);
+    for (;;) {
+      if (ts.isCallExpression(expr)) {
+        const callee = unwrap(expr.expression);
+        if (ts.isIdentifier(callee) && callee.text === "spyOn" && expr.arguments.length >= 2) {
+          const target = symbolOf(expr.arguments[0]);
+          const prop = expr.arguments[1];
+          if (target !== undefined && ts.isStringLiteralLike(prop) && prop.text === "getInstance") {
+            return target;
+          }
+        }
+        // Not this call; descend through a chain like `.mockReturnValue(...)`.
+        if (ts.isPropertyAccessExpression(callee)) {
+          expr = unwrap(callee.expression);
+          continue;
+        }
+        return undefined;
+      }
+      if (ts.isPropertyAccessExpression(expr)) {
+        expr = unwrap(expr.expression);
+        continue;
+      }
+      return undefined;
+    }
+  }
+
+  /**
+   * Parse one source and classify every `<Symbol>.getInstance =` assignment as
+   * an install (fresh implementation) or a restore (a captured original). The
+   * `relPathHint` only labels the synthetic parse; nothing keys off it.
+   */
+  function analyzeSource(source: string, relPathHint = "synthetic.ts"): FileFacts {
+    const sf = ts.createSourceFile(relPathHint, source, ts.ScriptTarget.Latest, true);
+
+    // First pass: learn what every bare identifier was bound to, so a later
+    // `Symbol.getInstance = someId` can tell a fresh mock from an original
+    // capture, and which locals are `spyOn(<Symbol>, "getInstance")` handles.
+    const idIsMock = new Set<string>();
+    const idIsOriginalCapture = new Set<string>();
+    const spyVarSymbol = new Map<string, CtrlProxySymbol>();
+    const mockRestoreTargets = new Set<string>();
+
+    const learn = (name: string, init: ts.Expression): void => {
+      const spied = spyOnGetInstanceSymbol(init);
+      if (spied !== undefined) {
+        spyVarSymbol.set(name, spied);
+      }
+      if (isFreshMock(init)) {
+        idIsMock.add(name);
+      } else if (capturesOriginal(init)) {
+        idIsOriginalCapture.add(name);
+      }
+    };
+
+    const learnWalk = (node: ts.Node): void => {
+      if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) {
+        learn(node.name.text, node.initializer);
+      } else if (
+        ts.isBinaryExpression(node) &&
+        node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+        ts.isIdentifier(unwrap(node.left))
       ) {
-        for (let index = offset; index < offset + text.length; index += 1) {
-          if (out[index] !== "\n" && out[index] !== "\r") {
-            out[index] = " ";
+        learn((unwrap(node.left) as ts.Identifier).text, node.right);
+      } else if (
+        ts.isCallExpression(node) &&
+        ts.isPropertyAccessExpression(node.expression) &&
+        node.expression.name.text === "mockRestore"
+      ) {
+        const receiver = unwrap(node.expression.expression);
+        if (ts.isIdentifier(receiver)) {
+          mockRestoreTargets.add(receiver.text);
+        }
+      }
+      ts.forEachChild(node, learnWalk);
+    };
+    learnWalk(sf);
+
+    const installs = new Set<CtrlProxySymbol>();
+    const restores = new Set<CtrlProxySymbol>();
+
+    const classifyWalk = (node: ts.Node): void => {
+      if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+        const symbol = getInstanceTarget(node.left);
+        if (symbol !== undefined) {
+          const rhs = node.right;
+          const core = unwrap(rhs);
+          if (isFreshMock(rhs)) {
+            installs.add(symbol);
+          } else if (ts.isIdentifier(core)) {
+            if (idIsMock.has(core.text)) {
+              installs.add(symbol);
+            } else if (idIsOriginalCapture.has(core.text)) {
+              restores.add(symbol);
+            } else {
+              // Cannot prove this identifier holds the captured original, so it
+              // is not a verifiable restore — treat it as a fresh install.
+              installs.add(symbol);
+            }
+          } else {
+            // Any other RHS shape is a fresh value, not an original capture.
+            installs.add(symbol);
           }
         }
       }
-      offset += text.length;
+      ts.forEachChild(node, classifyWalk);
+    };
+    classifyWalk(sf);
+
+    const restoredBySpy = new Set<CtrlProxySymbol>();
+    for (const [name, symbol] of spyVarSymbol) {
+      if (mockRestoreTargets.has(name)) {
+        restoredBySpy.add(symbol);
+      }
     }
-    return out.join("");
+
+    return { installs, restores, restoredBySpy };
+  }
+
+  /** Symbols a file installs without any in-file restoration (a leak). */
+  function leaksOf(file: string, facts: FileFacts): string[] {
+    const leaks: string[] = [];
+    for (const symbol of facts.installs) {
+      if (!facts.restores.has(symbol) && !facts.restoredBySpy.has(symbol)) {
+        leaks.push(`${file}: installs ${symbol}.getInstance but never restores it`);
+      }
+    }
+    return leaks;
   }
 
   function walk(dir: string, files: string[] = []): string[] {
@@ -153,30 +321,12 @@ describe("CtrlProxy getInstance mocks are restored in-file (issue #7052)", () =>
         continue;
       }
       const relPath = relative(ROOT, file).split(sep).join("/");
-      // Skip this guard's own source: it contains example CtrlProxy.getInstance
-      // assignments in string literals (not comments) that are not real seams.
       if (relPath === SELF) {
         continue;
       }
-      const source = blankComments(readFileSync(file, "utf8"));
-      const installs = new Set<Symbol>();
-      const restores = new Set<Symbol>();
-      for (let m = ASSIGN.exec(source); m !== null; m = ASSIGN.exec(source)) {
-        const symbol = m[1] as Symbol;
-        const rest = source.slice(m.index + m[0].length, m.index + m[0].length + 8);
-        if (isInstallRhs(m[2], rest)) {
-          installs.add(symbol);
-        } else {
-          restores.add(symbol);
-        }
-      }
-      ASSIGN.lastIndex = 0;
-      if (installs.size > 0 || restores.size > 0) {
-        facts.set(relPath, {
-          installs,
-          restores,
-          hasMockRestore: /\.mockRestore\s*\(/.test(source),
-        });
+      const f = analyzeSource(readFileSync(file, "utf8"), relPath);
+      if (f.installs.size > 0 || f.restores.size > 0) {
+        facts.set(relPath, f);
       }
     }
     cached = facts;
@@ -184,11 +334,12 @@ describe("CtrlProxy getInstance mocks are restored in-file (issue #7052)", () =>
   }
 
   /**
-   * The inventory of test files that install a CtrlProxy `getInstance` mock.
-   * Presence here is the whole assertion — a file is listed once and only its
-   * "every install is restored" obligation (below) is enforced, so the list does
-   * not churn as suites add or drop individual per-test mocks. Add a new file
-   * here only after confirming its teardown restores every symbol it installs.
+   * The inventory of test files that install a CtrlProxy `getInstance` mock by
+   * direct assignment. Presence here is the whole assertion — a file is listed
+   * once and only its "every install is restored" obligation (below) is
+   * enforced, so the list does not churn as suites add or drop individual
+   * per-test mocks. Add a new file here only after confirming its teardown
+   * restores every symbol it installs.
    */
   const INSTALLERS: readonly string[] = [
     "test/daemon/socketServerInputGesture.integration.test.ts",
@@ -203,6 +354,7 @@ describe("CtrlProxy getInstance mocks are restored in-file (issue #7052)", () =>
     "test/server/ToolExecutionContext.test.ts",
     "test/server/databaseIos.test.ts",
     "test/server/databaseResourcesPagination.test.ts",
+    "test/server/deviceTools.killDevice.test.ts",
     "test/server/toolRegistry.pipeline.test.ts",
     "test/server/unissuedSessionBoundConnection.integration.test.ts",
   ];
@@ -230,37 +382,128 @@ describe("CtrlProxy getInstance mocks are restored in-file (issue #7052)", () =>
     const facts = scan();
     const leaks: string[] = [];
     for (const [file, f] of facts) {
-      if (f.hasMockRestore) {
-        // A `.mockRestore()` (paired with spyOn) restores whatever it wrapped;
-        // treat the file as restoring every symbol it installs.
-        continue;
-      }
-      for (const symbol of f.installs) {
-        if (!f.restores.has(symbol)) {
-          leaks.push(`${file}: installs ${symbol}.getInstance but never restores it`);
-        }
-      }
+      leaks.push(...leaksOf(file, f));
     }
     expect(leaks.sort()).toEqual([]);
   });
 
-  test("the install/restore classifier splits the two assignment shapes", () => {
-    // Fresh implementations are installs; a bare captured identifier is a restore.
-    expect(isInstallRhs("m", "ock(() => ({}))")).toBe(true);
-    expect(isInstallRhs("(", "() => ({}))")).toBe(true);
-    expect(isInstallRhs("a", "sync () => ({})")).toBe(true);
-    expect(isInstallRhs("o", "riginalGetInstance;")).toBe(false);
-    expect(isInstallRhs("o", "rigClient;")).toBe(false);
+  // --- Self-tests: the classifier proven on synthetic snippets --------------
+  // These plant the exact shapes the earlier regex mishandled and assert the AST
+  // classifier reads them correctly. Each parses a tiny string, so it stays well
+  // inside the 100ms budget without touching the memoized real-tree scan.
+
+  test("a fresh inline mock assigned directly is an install", () => {
+    const f = analyzeSource(
+      `AndroidCtrlProxyClient.getInstance = mock(() => ({}));\n` +
+        `IOSCtrlProxyClient.getInstance = (() => ({})) as never;\n` +
+        `AndroidCtrlProxyManager.getInstance = async () => ({});\n`,
+    );
+    expect([...f.installs].sort()).toEqual([
+      "AndroidCtrlProxyClient",
+      "AndroidCtrlProxyManager",
+      "IOSCtrlProxyClient",
+    ]);
+    expect([...f.restores]).toEqual([]);
   });
 
-  test("the scanner ignores an assignment that only appears in a comment", () => {
-    // A commented-out install must not be counted, or a doc example would trip
-    // the inventory. Offsets are preserved so the real matcher still runs.
-    const blanked = blankComments(
-      "// AndroidCtrlProxyClient.getInstance = mock(() => ({}));\nconst x = 1;",
+  test("a captured original assigned back is a restore, not an install", () => {
+    const f = analyzeSource(
+      `const original = AndroidCtrlProxyClient.getInstance;\n` +
+        `AndroidCtrlProxyClient.getInstance = mock(() => ({}));\n` +
+        `AndroidCtrlProxyClient.getInstance = original;\n`,
     );
-    ASSIGN.lastIndex = 0;
-    expect(ASSIGN.exec(blanked)).toBeNull();
-    ASSIGN.lastIndex = 0;
+    expect([...f.installs]).toEqual(["AndroidCtrlProxyClient"]);
+    expect([...f.restores]).toEqual(["AndroidCtrlProxyClient"]);
+    expect(leaksOf("x", f)).toEqual([]);
+  });
+
+  test("THREAD 1: a typed-cast install with no restore is flagged", () => {
+    const f = analyzeSource(
+      `(\n` +
+        `  IOSCtrlProxyManager as unknown as {\n` +
+        `    getInstance: typeof IOSCtrlProxyManager.getInstance;\n` +
+        `  }\n` +
+        `).getInstance = () => ({ stop: () => x });\n`,
+    );
+    expect([...f.installs]).toEqual(["IOSCtrlProxyManager"]);
+    expect(leaksOf("cast.ts", f)).toEqual([
+      "cast.ts: installs IOSCtrlProxyManager.getInstance but never restores it",
+    ]);
+  });
+
+  test("THREAD 1: a typed-cast install with a matching cast restore is clean", () => {
+    const f = analyzeSource(
+      `const originalGetInstance = IOSCtrlProxyManager.getInstance;\n` +
+        `(IOSCtrlProxyManager as unknown as { getInstance: unknown }).getInstance =\n` +
+        `  () => ({ stop: () => x });\n` +
+        `(IOSCtrlProxyManager as unknown as { getInstance: unknown }).getInstance =\n` +
+        `  originalGetInstance;\n`,
+    );
+    expect([...f.installs]).toEqual(["IOSCtrlProxyManager"]);
+    expect([...f.restores]).toEqual(["IOSCtrlProxyManager"]);
+    expect(leaksOf("cast.ts", f)).toEqual([]);
+  });
+
+  test("THREAD 2: a named local mock assigned by identifier is an install and flagged", () => {
+    const f = analyzeSource(
+      `const fakeGetInstance = mock(() => ({}));\n` +
+        `AndroidCtrlProxyClient.getInstance = fakeGetInstance;\n`,
+    );
+    expect([...f.installs]).toEqual(["AndroidCtrlProxyClient"]);
+    expect([...f.restores]).toEqual([]);
+    expect(leaksOf("named.ts", f)).toEqual([
+      "named.ts: installs AndroidCtrlProxyClient.getInstance but never restores it",
+    ]);
+  });
+
+  test("THREAD 2: an arrow-returning-client local mock assigned by identifier is an install", () => {
+    const f = analyzeSource(
+      `const fake = () => ({ requestSetText: async () => ({}) });\n` +
+        `AndroidCtrlProxyClient.getInstance = fake as never;\n`,
+    );
+    expect([...f.installs]).toEqual(["AndroidCtrlProxyClient"]);
+    expect([...f.restores]).toEqual([]);
+  });
+
+  test("THREAD 3: an unrelated mockRestore does not acquit a direct assignment", () => {
+    const f = analyzeSource(
+      `const executeSpy = spyOn(fakeClient, "executeCommand").mockImplementation(() => {});\n` +
+        `AndroidCtrlProxyClient.getInstance = mock(() => ({}));\n` +
+        `executeSpy.mockRestore();\n`,
+    );
+    expect([...f.installs]).toEqual(["AndroidCtrlProxyClient"]);
+    expect([...f.restoredBySpy]).toEqual([]);
+    expect(leaksOf("unrelated.ts", f)).toEqual([
+      "unrelated.ts: installs AndroidCtrlProxyClient.getInstance but never restores it",
+    ]);
+  });
+
+  test("THREAD 3: mockRestore on the getInstance spy handle acquits that symbol", () => {
+    const f = analyzeSource(
+      `const getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({} as never);\n` +
+        `AndroidCtrlProxyClient.getInstance = mock(() => ({}));\n` +
+        `getInstanceSpy.mockRestore();\n`,
+    );
+    expect([...f.installs]).toEqual(["AndroidCtrlProxyClient"]);
+    expect([...f.restoredBySpy]).toEqual(["AndroidCtrlProxyClient"]);
+    expect(leaksOf("spy.ts", f)).toEqual([]);
+  });
+
+  test("an assignment that only appears in a comment is not counted", () => {
+    const f = analyzeSource(
+      `// AndroidCtrlProxyClient.getInstance = mock(() => ({}));\n` +
+        `/* IOSCtrlProxyClient.getInstance = mock(() => ({})); */\n` +
+        `const x = 1;\n`,
+    );
+    expect([...f.installs]).toEqual([]);
+    expect([...f.restores]).toEqual([]);
+  });
+
+  test("a getInstance mention inside a string literal is not an assignment", () => {
+    const f = analyzeSource(
+      `const doc = "AndroidCtrlProxyClient.getInstance = mock(() => ({}))";\n`,
+    );
+    expect([...f.installs]).toEqual([]);
+    expect([...f.restores]).toEqual([]);
   });
 });

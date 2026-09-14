@@ -77,11 +77,21 @@ class RecordingSimctl implements SessionLogSimctl {
   }
 }
 
+/**
+ * In-memory `AppFileFileSystem` keyed by POSIX-style absolute paths. The service builds
+ * targets with the platform `path` module, so on win32 they arrive with backslashes; every
+ * entry point normalizes separators first so fixture keys stay separator-agnostic.
+ */
 class MemoryFileSystem implements AppFileFileSystem {
   readonly files = new Map<string, Buffer>();
   readonly removed: string[] = [];
 
-  private stats(path: string): AppFileStats {
+  private normalize(path: string): string {
+    return path.replace(/\\/g, "/").replace(/\/+/g, "/");
+  }
+
+  private stats(rawPath: string): AppFileStats {
+    const path = this.normalize(rawPath);
     const file = this.files.get(path);
     if (file) {
       return {
@@ -105,7 +115,8 @@ class MemoryFileSystem implements AppFileFileSystem {
     return this.stats(path);
   }
 
-  async readdir(path: string): Promise<{ name: string }[]> {
+  async readdir(rawPath: string): Promise<{ name: string }[]> {
+    const path = this.normalize(rawPath);
     this.stats(path);
     const names = new Set<string>();
     for (const key of this.files.keys()) {
@@ -120,7 +131,8 @@ class MemoryFileSystem implements AppFileFileSystem {
 
   async copyFile(): Promise<void> {}
 
-  async readFileBuffer(path: string): Promise<Buffer> {
+  async readFileBuffer(rawPath: string): Promise<Buffer> {
+    const path = this.normalize(rawPath);
     const file = this.files.get(path);
     if (!file) {
       throw Object.assign(new Error(`ENOENT: ${path}`), { code: "ENOENT" });
@@ -134,7 +146,8 @@ class MemoryFileSystem implements AppFileFileSystem {
     return prefix;
   }
 
-  async rm(path: string): Promise<void> {
+  async rm(rawPath: string): Promise<void> {
+    const path = this.normalize(rawPath);
     this.removed.push(path);
     this.files.delete(path);
   }

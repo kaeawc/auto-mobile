@@ -12,27 +12,30 @@ device client for a session it cannot serve.
 
 ```text
 automobile:device-session/{sessionUuid}/apps/{appId}/logs
-  {?container,paths,groupId,groupPaths,lastSeconds,level,maxBytes}
+  {?container,paths,pathsJson,groupId,groupPaths,groupPathsJson,lastSeconds,level,maxBytes}
 ```
 
 Each source is optional and selected by its query parameters. At least one
 source is required. Unknown parameters, path traversal, and out-of-range bounds
 are rejected before any device is touched.
 
-| Source             | Parameters                 | Android                                                    | iOS Simulator                                             |
-| ------------------ | -------------------------- | ---------------------------------------------------------- | --------------------------------------------------------- |
-| App-container logs | `paths` (+ `container`)    | `run-as` for private containers; shell for `externalFiles` | Files under the app's data container                      |
-| App Group files    | `groupId` (+ `groupPaths`) | `unavailable`                                              | Lists the group container; `groupPaths` reads named files |
-| Unified-log window | `lastSeconds` (+ `level`)  | `unavailable`                                              | `log show --last N --predicate <subsystem == appId …>`    |
+| Source             | Parameters                     | Android                                                    | iOS Simulator                                                 |
+| ------------------ | ------------------------------ | ---------------------------------------------------------- | ------------------------------------------------------------- |
+| App-container logs | `pathsJson` (+ `container`)    | `run-as` for private containers; shell for `externalFiles` | Files under the app's data container                          |
+| App Group files    | `groupId` (+ `groupPathsJson`) | `unavailable`                                              | Lists the group container; `groupPathsJson` reads named files |
+| Unified-log window | `lastSeconds` (+ `level`)      | `unavailable`                                              | `log show --last N --predicate <subsystem == appId …>`        |
 
 - `container` defaults to `documents`; the same logical containers as
   `putAppFile` apply (`documents`, `library`, `cache`, `tmp`, `externalFiles`).
-- `paths` and `groupPaths` are URL-encoded JSON arrays of relative paths (for
-  example, `paths=["a.log","b.log"]`) in the canonical, recommended form;
-  this is comma-safe for paths that contain commas. A comma-separated list
-  (`paths=a.log,b.log`) or bare path (`paths=app.log`) remains accepted for
-  backward compatibility, but cannot represent a path containing a comma (the
-  unchanged legacy limitation). At most 32 paths are allowed per source.
+- `pathsJson` and `groupPathsJson` are the canonical, recommended URL-encoded
+  JSON arrays of relative paths (for example,
+  `pathsJson=["a.log","b.log"]`). They are comma/bracket/quote-safe for any
+  legal path, including `[report]`, `["report"]`, `a,b.log`, and `100%.log`.
+  The legacy `paths` and `groupPaths` comma-separated-or-bare-scalar form
+  (`paths=a.log,b.log` or `paths=app.log`) remains accepted for backward
+  compatibility, but cannot represent a path containing a comma. Legacy values
+  are interpreted only as literal comma lists/scalars; bracket-looking text is
+  never reinterpreted as JSON. At most 32 paths are allowed per source.
 - `lastSeconds` is 1–3600. `level` is `default`, `info` (adds `--info`), or
   `debug` (adds `--info --debug`).
 - `maxBytes` bounds every returned entry (default 256 KiB, at most 4 MiB). Each

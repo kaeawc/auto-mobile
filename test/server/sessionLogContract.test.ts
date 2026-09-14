@@ -17,9 +17,9 @@ describe("session log contract (#7006)", () => {
   test("parses every source from one bounded query", () => {
     const request = parseSessionLogQuery("com.example.app", {
       container: "cache",
-      paths: JSON.stringify(["logs/app.log", "logs/net.log"]),
+      pathsJson: JSON.stringify(["logs/app.log", "logs/net.log"]),
       groupId: "group.com.example.shared",
-      groupPaths: JSON.stringify(["Logs/extension.log"]),
+      groupPathsJson: JSON.stringify(["Logs/extension.log"]),
       lastSeconds: "120",
       level: "info",
       maxBytes: "1024",
@@ -36,7 +36,7 @@ describe("session log contract (#7006)", () => {
 
   test("defaults the container, level and byte bound", () => {
     const request = parseSessionLogQuery("com.example.app", {
-      paths: JSON.stringify(["app.log"]),
+      pathsJson: JSON.stringify(["app.log"]),
       lastSeconds: "30",
     });
     expect(request.files).toEqual({ container: "documents", paths: ["app.log"] });
@@ -47,13 +47,13 @@ describe("session log contract (#7006)", () => {
   test("rejects an empty request, unknown keys, and dangling modifiers", () => {
     expect(() => parseSessionLogQuery("com.example.app", {})).toThrow(/at least one source/);
     expect(() =>
-      parseSessionLogQuery("com.example.app", { paths: JSON.stringify(["a.log"]), bogus: "1" }),
+      parseSessionLogQuery("com.example.app", { pathsJson: JSON.stringify(["a.log"]), bogus: "1" }),
     ).toThrow(/Unknown session log query parameter: bogus/);
     expect(() => parseSessionLogQuery("com.example.app", { container: "cache" })).toThrow(
       /container requires paths/,
     );
     expect(() => parseSessionLogQuery("com.example.app", { groupPaths: "a.log" })).toThrow(
-      /groupPaths requires groupId/,
+      /groupPaths.*requires groupId/,
     );
     expect(() => parseSessionLogQuery("com.example.app", { level: "debug" })).toThrow(
       /level requires lastSeconds/,
@@ -62,24 +62,24 @@ describe("session log contract (#7006)", () => {
 
   test("rejects path traversal in every path-bearing parameter", () => {
     expect(() =>
-      parseSessionLogQuery("com.example.app", { paths: JSON.stringify(["../shared/app.log"]) }),
+      parseSessionLogQuery("com.example.app", { pathsJson: JSON.stringify(["../shared/app.log"]) }),
     ).toThrow(/'\.\.' segments/);
     expect(() =>
-      parseSessionLogQuery("com.example.app", { paths: JSON.stringify(["/data/app.log"]) }),
+      parseSessionLogQuery("com.example.app", { pathsJson: JSON.stringify(["/data/app.log"]) }),
     ).toThrow(/relative path/);
     expect(() =>
       parseSessionLogQuery("com.example.app", {
         groupId: "group.shared",
-        groupPaths: JSON.stringify(["..\\x"]),
+        groupPathsJson: JSON.stringify(["..\\x"]),
       }),
     ).toThrow(/'\.\.' segments/);
     expect(() =>
       parseSessionLogQuery("com.example.app", {
         groupId: "../group",
-        paths: JSON.stringify(["a"]),
+        pathsJson: JSON.stringify(["a"]),
       }),
     ).toThrow(/groupId must be/);
-    expect(() => parseSessionLogQuery("../etc", { paths: JSON.stringify(["a.log"]) })).toThrow(
+    expect(() => parseSessionLogQuery("../etc", { pathsJson: JSON.stringify(["a.log"]) })).toThrow(
       /appId must be/,
     );
     expect(() => normalizeSessionLogAppId('com.example"; rm')).toThrow(/appId must be/);
@@ -88,11 +88,11 @@ describe("session log contract (#7006)", () => {
 
   test("rejects unbounded reads and windows", () => {
     expect(() =>
-      parseSessionLogQuery("com.example.app", { paths: JSON.stringify(["a"]), maxBytes: "0" }),
+      parseSessionLogQuery("com.example.app", { pathsJson: JSON.stringify(["a"]), maxBytes: "0" }),
     ).toThrow(/Invalid maxBytes/);
     expect(() =>
       parseSessionLogQuery("com.example.app", {
-        paths: JSON.stringify(["a"]),
+        pathsJson: JSON.stringify(["a"]),
         maxBytes: String(SESSION_LOG_MAX_BYTES_LIMIT + 1),
       }),
     ).toThrow(/Invalid maxBytes/);
@@ -127,11 +127,17 @@ describe("session log contract (#7006)", () => {
       async () => ({ uri: "x" }),
     );
     const request = parseSessionLogQuery("com.example.app", {
-      paths: JSON.stringify(["logs/app.log", "logs/net.log"]),
+      pathsJson: JSON.stringify(["logs/app.log", "logs/net.log"]),
       groupId: "group.com.example.shared",
+      groupPathsJson: JSON.stringify(["Logs/extension.log"]),
       lastSeconds: "60",
     });
     const uri = buildSessionLogResourceUri("session 1", request);
+    const builtQuery = new URL(uri).searchParams;
+    expect(builtQuery.has("pathsJson")).toBe(true);
+    expect(builtQuery.has("groupPathsJson")).toBe(true);
+    expect(builtQuery.has("paths")).toBe(false);
+    expect(builtQuery.has("groupPaths")).toBe(false);
     const match = ResourceRegistry.matchTemplate(uri);
     expect(match).toBeDefined();
     const { sessionUuid, appId, ...query } = match!.params;
@@ -232,16 +238,73 @@ describe("session log contract (#7006)", () => {
     ResourceRegistry.clearResources();
   });
 
-  test("rejects malformed JSON path lists", () => {
-    expect(() => parseSessionLogQuery("com.example.app", { paths: '["bad.log",]' })).toThrow(
-      /paths must be a JSON array of path strings/,
+  test("rejects malformed canonical JSON path lists", () => {
+    expect(() => parseSessionLogQuery("com.example.app", { pathsJson: '["bad.log",]' })).toThrow(
+      /pathsJson must be a JSON array of path strings/,
     );
     expect(() =>
       parseSessionLogQuery("com.example.app", {
         groupId: "group.com.example.shared",
-        groupPaths: '["not-an-array", 1]',
+        groupPathsJson: '{"not":"an array"}',
       }),
-    ).toThrow(/groupPaths must be a JSON array of path strings/);
+    ).toThrow(/groupPathsJson must be a JSON array of path strings/);
+  });
+
+  test("rejects canonical and legacy path parameters used together", () => {
+    expect(() =>
+      parseSessionLogQuery("com.example.app", {
+        pathsJson: JSON.stringify(["canonical.log"]),
+        paths: "legacy.log",
+      }),
+    ).toThrow(/pathsJson and paths cannot both be specified/);
+    expect(() =>
+      parseSessionLogQuery("com.example.app", {
+        groupId: "group.com.example.shared",
+        groupPathsJson: JSON.stringify(["canonical.log"]),
+        groupPaths: "legacy.log",
+      }),
+    ).toThrow(/groupPathsJson and groupPaths cannot both be specified/);
+  });
+
+  test("keeps empty canonical app group paths as a container listing", () => {
+    expect(() =>
+      parseSessionLogQuery("com.example.app", { pathsJson: JSON.stringify([]) }),
+    ).toThrow(/paths must name at least one log file/);
+    expect(
+      parseSessionLogQuery("com.example.app", {
+        groupId: "group.com.example.shared",
+        groupPathsJson: JSON.stringify([]),
+      }).appGroup,
+    ).toEqual({ groupId: "group.com.example.shared", paths: [] });
+  });
+
+  test("parses independently single-encoded canonical bracket filenames", () => {
+    ResourceRegistry.clearResources();
+    ResourceRegistry.registerTemplate(
+      SESSION_LOG_RESOURCE_TEMPLATE,
+      "x",
+      "x",
+      "application/json",
+      async () => ({ uri: "x" }),
+    );
+    for (const path of ["[report]", '["report"]']) {
+      const query = new URLSearchParams({
+        container: "documents",
+        pathsJson: JSON.stringify([path]),
+        maxBytes: String(SESSION_LOG_DEFAULT_MAX_BYTES),
+      });
+      const match = ResourceRegistry.matchTemplate(
+        `automobile:device-session/session-1/apps/com.example.app/logs?${query.toString()}`,
+      );
+      expect(match).toBeDefined();
+      const { appId, sessionUuid, ...params } = match!.params;
+      expect(sessionUuid).toBe("session-1");
+      expect(parseSessionLogQuery(appId, params).files).toEqual({
+        container: "documents",
+        paths: [path],
+      });
+    }
+    ResourceRegistry.clearResources();
   });
 
   test("parses an independently single-encoded files path containing a comma", () => {
@@ -256,7 +319,7 @@ describe("session log contract (#7006)", () => {
     const paths = ["a,b.log"];
     const query = new URLSearchParams({
       container: "documents",
-      paths: JSON.stringify(paths),
+      pathsJson: JSON.stringify(paths),
       maxBytes: String(SESSION_LOG_DEFAULT_MAX_BYTES),
     });
     const match = ResourceRegistry.matchTemplate(
@@ -281,7 +344,7 @@ describe("session log contract (#7006)", () => {
     const paths = ["a,b.log", "plain.log", "log file.log"];
     const query = new URLSearchParams({
       container: "documents",
-      paths: JSON.stringify(paths),
+      pathsJson: JSON.stringify(paths),
       maxBytes: String(SESSION_LOG_DEFAULT_MAX_BYTES),
     });
     const match = ResourceRegistry.matchTemplate(
@@ -306,7 +369,7 @@ describe("session log contract (#7006)", () => {
     const paths = ["100%.log"];
     const query = new URLSearchParams({
       container: "documents",
-      paths: JSON.stringify(paths),
+      pathsJson: JSON.stringify(paths),
       maxBytes: String(SESSION_LOG_DEFAULT_MAX_BYTES),
     });
     const match = ResourceRegistry.matchTemplate(
@@ -331,7 +394,7 @@ describe("session log contract (#7006)", () => {
     const paths = ["weird%41file.log"];
     const query = new URLSearchParams({
       container: "documents",
-      paths: JSON.stringify(paths),
+      pathsJson: JSON.stringify(paths),
       maxBytes: String(SESSION_LOG_DEFAULT_MAX_BYTES),
     });
     const match = ResourceRegistry.matchTemplate(
@@ -394,7 +457,7 @@ describe("session log contract (#7006)", () => {
     ResourceRegistry.clearResources();
   });
 
-  test("rejects an independently single-encoded malformed bracket-delimited files path list", () => {
+  test("rejects an independently single-encoded malformed canonical files path list", () => {
     ResourceRegistry.clearResources();
     ResourceRegistry.registerTemplate(
       SESSION_LOG_RESOURCE_TEMPLATE,
@@ -405,7 +468,7 @@ describe("session log contract (#7006)", () => {
     );
     const query = new URLSearchParams({
       container: "documents",
-      paths: "[a.log,b.log]",
+      pathsJson: "[a.log,b.log]",
       maxBytes: String(SESSION_LOG_DEFAULT_MAX_BYTES),
     });
     const match = ResourceRegistry.matchTemplate(
@@ -415,12 +478,12 @@ describe("session log contract (#7006)", () => {
     const { appId, sessionUuid, ...params } = match!.params;
     expect(sessionUuid).toBe("session-1");
     expect(() => parseSessionLogQuery(appId, params)).toThrow(
-      /paths must be a JSON array of path strings/,
+      /pathsJson must be a JSON array of path strings/,
     );
     ResourceRegistry.clearResources();
   });
 
-  test("parses an independently single-encoded legacy bare files path beginning with a bracket", () => {
+  test("parses independently single-encoded legacy bracket filenames literally", () => {
     ResourceRegistry.clearResources();
     ResourceRegistry.registerTemplate(
       SESSION_LOG_RESOURCE_TEMPLATE,
@@ -429,19 +492,23 @@ describe("session log contract (#7006)", () => {
       "application/json",
       async () => ({ uri: "x" }),
     );
-    const paths = ["[weird].log"];
-    const query = new URLSearchParams({
-      container: "documents",
-      paths: paths[0],
-      maxBytes: String(SESSION_LOG_DEFAULT_MAX_BYTES),
-    });
-    const match = ResourceRegistry.matchTemplate(
-      `automobile:device-session/session-1/apps/com.example.app/logs?${query.toString()}`,
-    );
-    expect(match).toBeDefined();
-    const { appId, sessionUuid, ...params } = match!.params;
-    expect(sessionUuid).toBe("session-1");
-    expect(parseSessionLogQuery(appId, params).files).toEqual({ container: "documents", paths });
+    for (const path of ["[report]", '["report"]']) {
+      const query = new URLSearchParams({
+        container: "documents",
+        paths: path,
+        maxBytes: String(SESSION_LOG_DEFAULT_MAX_BYTES),
+      });
+      const match = ResourceRegistry.matchTemplate(
+        `automobile:device-session/session-1/apps/com.example.app/logs?${query.toString()}`,
+      );
+      expect(match).toBeDefined();
+      const { appId, sessionUuid, ...params } = match!.params;
+      expect(sessionUuid).toBe("session-1");
+      expect(parseSessionLogQuery(appId, params).files).toEqual({
+        container: "documents",
+        paths: [path],
+      });
+    }
     ResourceRegistry.clearResources();
   });
 
@@ -457,7 +524,7 @@ describe("session log contract (#7006)", () => {
     const paths = ["a,b.log"];
     const query = new URLSearchParams({
       groupId: "group.com.example.shared",
-      groupPaths: JSON.stringify(paths),
+      groupPathsJson: JSON.stringify(paths),
       maxBytes: String(SESSION_LOG_DEFAULT_MAX_BYTES),
     });
     const match = ResourceRegistry.matchTemplate(
@@ -470,6 +537,52 @@ describe("session log contract (#7006)", () => {
       groupId: "group.com.example.shared",
       paths,
     });
+    ResourceRegistry.clearResources();
+  });
+
+  test("parses canonical bracket group paths and rejects malformed group paths", () => {
+    ResourceRegistry.clearResources();
+    ResourceRegistry.registerTemplate(
+      SESSION_LOG_RESOURCE_TEMPLATE,
+      "x",
+      "x",
+      "application/json",
+      async () => ({ uri: "x" }),
+    );
+    const canonicalQuery = new URLSearchParams({
+      groupId: "group.com.example.shared",
+      groupPathsJson: JSON.stringify(["[report]"]),
+      maxBytes: String(SESSION_LOG_DEFAULT_MAX_BYTES),
+    });
+    const canonicalMatch = ResourceRegistry.matchTemplate(
+      `automobile:device-session/session-1/apps/com.example.app/logs?${canonicalQuery.toString()}`,
+    );
+    expect(canonicalMatch).toBeDefined();
+    const { appId, sessionUuid, ...canonicalParams } = canonicalMatch!.params;
+    expect(sessionUuid).toBe("session-1");
+    expect(parseSessionLogQuery(appId, canonicalParams).appGroup).toEqual({
+      groupId: "group.com.example.shared",
+      paths: ["[report]"],
+    });
+
+    const malformedQuery = new URLSearchParams({
+      groupId: "group.com.example.shared",
+      groupPathsJson: '["bad.log",]',
+      maxBytes: String(SESSION_LOG_DEFAULT_MAX_BYTES),
+    });
+    const malformedMatch = ResourceRegistry.matchTemplate(
+      `automobile:device-session/session-1/apps/com.example.app/logs?${malformedQuery.toString()}`,
+    );
+    expect(malformedMatch).toBeDefined();
+    const {
+      appId: malformedAppId,
+      sessionUuid: malformedSessionUuid,
+      ...malformedParams
+    } = malformedMatch!.params;
+    expect(malformedSessionUuid).toBe("session-1");
+    expect(() => parseSessionLogQuery(malformedAppId, malformedParams)).toThrow(
+      /groupPathsJson must be a JSON array of path strings/,
+    );
     ResourceRegistry.clearResources();
   });
 

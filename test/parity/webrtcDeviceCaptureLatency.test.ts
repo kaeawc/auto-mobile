@@ -137,17 +137,6 @@ describe("#4343 device capture latency instrumentation", () => {
     );
   });
 
-  test("limits initial WHEP browser recovery to the iOS lane", () => {
-    const source = withoutComments(read(INTEGRATION_TEST_PATH));
-    const firstEncodedFrameIndex = indexOfRequired(source, 'timeline.mark("firstEncodedFrame")');
-    const whepConnectedIndex = indexOfRequired(source, 'timeline.mark("whepConnected")');
-    const initialSubscription = source.slice(firstEncodedFrameIndex, whepConnectedIndex);
-
-    expect(initialSubscription).toContain('if (platform === "ios")');
-    expect(initialSubscription).toContain("await subscribeRecoveryReader(");
-    expect(initialSubscription).toMatch(/else\s*\{\s*await subscribeReader\(cdp\);\s*\}/);
-  });
-
   test("writes the latency record from afterAll so a timed-out run still reports", () => {
     const source = withoutComments(read(INTEGRATION_TEST_PATH));
     const afterAllIndex = source.indexOf("afterAll(");

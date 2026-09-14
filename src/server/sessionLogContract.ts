@@ -21,13 +21,15 @@ import type { LocalFileListEntry } from "./appFileService";
  */
 export const SESSION_LOG_RESOURCE_TEMPLATE =
   "automobile:device-session/{sessionUuid}/apps/{appId}/logs" +
-  "{?container,paths,groupId,groupPaths,lastSeconds,level,maxBytes}";
+  "{?container,paths,pathsJson,groupId,groupPaths,groupPathsJson,lastSeconds,level,maxBytes}";
 
 export const SESSION_LOG_QUERY_PARAMS = [
   "container",
   "paths",
+  "pathsJson",
   "groupId",
   "groupPaths",
+  "groupPathsJson",
   "lastSeconds",
   "level",
   "maxBytes",
@@ -198,18 +200,13 @@ export function normalizeSessionLogPaths(paths: readonly string[]): string[] {
   return normalized;
 }
 
-function parseJsonPathList(value: string, paramName: "paths" | "groupPaths"): string[] {
-  const trimmed = value.trim();
-  if (!trimmed.startsWith("[") || !trimmed.endsWith("]")) {
-    return value
-      .split(",")
-      .map((path) => path.trim())
-      .filter((path) => path.length > 0);
-  }
-
+function parseCanonicalJsonPathList(
+  value: string,
+  paramName: "pathsJson" | "groupPathsJson",
+): string[] {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(trimmed);
+    parsed = JSON.parse(value);
   } catch (error) {
     throw new Error(`${paramName} must be a JSON array of path strings.`, { cause: error });
   }
@@ -226,9 +223,35 @@ function parseJsonPathList(value: string, paramName: "paths" | "groupPaths"): st
   return paths;
 }
 
+function parseLegacyPathList(value: string): string[] {
+  return value
+    .split(",")
+    .map((path) => path.trim())
+    .filter((path) => path.length > 0);
+}
+
+function parsePathList(
+  query: Record<string, string>,
+  canonicalParamName: "pathsJson" | "groupPathsJson",
+  legacyParamName: "paths" | "groupPaths",
+): string[] | undefined {
+  const hasCanonical = Object.hasOwn(query, canonicalParamName);
+  const hasLegacy = Object.hasOwn(query, legacyParamName);
+  if (hasCanonical && hasLegacy) {
+    throw new Error(`${canonicalParamName} and ${legacyParamName} cannot both be specified.`);
+  }
+  if (hasCanonical) {
+    return parseCanonicalJsonPathList(query[canonicalParamName], canonicalParamName);
+  }
+  if (hasLegacy) {
+    return parseLegacyPathList(query[legacyParamName]);
+  }
+  return undefined;
+}
+
 function parseFilesSource(query: Record<string, string>): SessionLogFilesRequest | undefined {
   const container = optionalEnum(query.container, "container", APP_FILE_CONTAINERS);
-  const paths = optionalString(query.paths);
+  const paths = parsePathList(query, "pathsJson", "paths");
   if (paths === undefined) {
     if (container !== undefined) {
       throw new Error("container requires paths.");
@@ -237,25 +260,25 @@ function parseFilesSource(query: Record<string, string>): SessionLogFilesRequest
   }
   return {
     container: container ?? "documents",
-    paths: normalizeSessionLogPaths(parseJsonPathList(paths, "paths")),
+    paths: normalizeSessionLogPaths(paths),
   };
 }
 
 function parseAppGroupSource(query: Record<string, string>): SessionLogAppGroupRequest | undefined {
   const groupId = optionalString(query.groupId);
-  const groupPaths = optionalString(query.groupPaths);
+  const groupPaths = parsePathList(query, "groupPathsJson", "groupPaths");
   if (groupId === undefined) {
     if (groupPaths !== undefined) {
-      throw new Error("groupPaths requires groupId.");
+      throw new Error("groupPaths or groupPathsJson requires groupId.");
     }
     return undefined;
   }
   return {
     groupId: normalizeAppGroupId(groupId),
     paths:
-      groupPaths === undefined
+      groupPaths === undefined || groupPaths.length === 0
         ? []
-        : normalizeSessionLogPaths(parseJsonPathList(groupPaths, "groupPaths")),
+        : normalizeSessionLogPaths(groupPaths),
   };
 }
 
@@ -318,12 +341,12 @@ export function buildSessionLogResourceUri(
   const query = new URLSearchParams();
   if (request.files) {
     query.set("container", request.files.container);
-    query.set("paths", JSON.stringify(request.files.paths));
+    query.set("pathsJson", JSON.stringify(request.files.paths));
   }
   if (request.appGroup) {
     query.set("groupId", request.appGroup.groupId);
     if (request.appGroup.paths.length > 0) {
-      query.set("groupPaths", JSON.stringify(request.appGroup.paths));
+      query.set("groupPathsJson", JSON.stringify(request.appGroup.paths));
     }
   }
   if (request.unifiedLog) {

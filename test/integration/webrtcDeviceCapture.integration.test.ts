@@ -27,7 +27,7 @@ import {
   shouldRetryWebRtcDaemonStart,
   waitForBootedSimulatorUdid,
   type SimulatorAppearanceClient,
-} from "./helpers/webrtcDeviceCaptureHelpers";
+} from "../helpers/webrtcDeviceCaptureHelpers";
 
 const execFileAsync = promisify(execFile);
 const runIntegration = process.env.AUTOMOBILE_WEBRTC_DEVICE_INTEGRATION === "1";
@@ -668,7 +668,12 @@ type SimCtlClientFactory = () => Promise<WebRtcSimCtlClient>;
 
 async function createSimCtlClient(): Promise<WebRtcSimCtlClient> {
   const { SimCtlClient } = await import("../../src/utils/ios-cmdline-tools/SimCtlClient");
-  return new SimCtlClient();
+  const simctl = new SimCtlClient();
+  return {
+    getBootedSimulatorsChecked: simctl.getBootedSimulatorsChecked.bind(simctl),
+    getDeviceInfo: simctl.getDeviceInfo.bind(simctl),
+    getScreenSize: simctl.getScreenSize.bind(simctl),
+  };
 }
 
 async function setIosFixtureAppearance(

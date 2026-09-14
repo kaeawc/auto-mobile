@@ -1290,6 +1290,63 @@ describe("Daemon manager process detection", () => {
     }
   });
 
+  test("forces strict-port after timeout degradation and preserves its bind failure", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "daemon-manager-timeout-strict-port-test-"));
+    const originalDataDir = process.env.AUTOMOBILE_DATA_DIR;
+    process.env.AUTOMOBILE_DATA_DIR = directory;
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const processFinder = new TimeoutThenSuccessDaemonProcessFinder(Number.POSITIVE_INFINITY);
+    const portChecker = new FakeDaemonPortAvailabilityChecker(true);
+    const strictPortFailure = new ActionableError(
+      "Port 3000 on 127.0.0.1 is required for this daemon start but is already in use by another process.",
+    );
+    const launcher = new DaemonLauncher({ entryScript: "daemon-entry.ts", timer });
+    let capturedArgs: string[] | undefined;
+    const launchSpy = spyOn(launcher, "launchAndWait").mockImplementation(async (request) => {
+      capturedArgs = [...request.args];
+      throw strictPortFailure;
+    });
+
+    class TestDaemonManager extends DaemonManager {
+      override async status(): Promise<DaemonStatus> {
+        return { running: false };
+      }
+    }
+
+    const manager = new TestDaemonManager(
+      undefined,
+      undefined,
+      timer,
+      join(directory, "daemon.lock"),
+      join(directory, "daemon.pid"),
+      join(directory, "daemon.sock"),
+      processFinder,
+      undefined,
+      undefined,
+      launcher,
+      undefined,
+      undefined,
+      { isReachable: async () => false },
+      undefined,
+      portChecker,
+    );
+
+    try {
+      await expect(manager.start()).rejects.toBe(strictPortFailure);
+      expect(capturedArgs).toContain("--strict-port");
+      expect(portChecker.checkedPorts).toEqual([3000]);
+    } finally {
+      launchSpy.mockRestore();
+      if (originalDataDir === undefined) {
+        delete process.env.AUTOMOBILE_DATA_DIR;
+      } else {
+        process.env.AUTOMOBILE_DATA_DIR = originalDataDir;
+      }
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   test("fails closed after persistent process-table timeouts when the canonical port is bound", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();

@@ -1,10 +1,10 @@
-import { defaultTimer, type Timer } from "../../../src/utils/SystemTimer";
+import { defaultTimer, type Timer } from "../../src/utils/SystemTimer";
 
 const IOS_SIMULATOR_BOOT_DISCOVERY_TIMEOUT_MS = 10_000;
 const IOS_SIMULATOR_BOOT_DISCOVERY_POLL_MS = 250;
 
 export interface SimulatorAppearanceClient {
-  getBootedSimulators(timeoutMs?: number): Promise<Array<{ deviceId: string }>>;
+  getBootedSimulatorsChecked(timeoutMs?: number): Promise<Array<{ deviceId: string }>>;
   getDeviceInfo(deviceId: string): Promise<{ state: string } | null>;
 }
 
@@ -37,7 +37,7 @@ export async function waitForBootedSimulatorUdid(
   const deadline = timer.now() + timeoutMs;
   while (true) {
     const remainingMs = deadline - timer.now();
-    const simulator = (await simctl.getBootedSimulators(Math.max(1, remainingMs)))[0];
+    const simulator = (await simctl.getBootedSimulatorsChecked(Math.max(1, remainingMs)))[0];
     if (simulator) {
       const device = await simctl.getDeviceInfo(simulator.deviceId);
       if (isBootedSimulatorState(device)) {

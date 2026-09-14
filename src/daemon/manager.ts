@@ -780,7 +780,9 @@ export class DaemonManager implements DaemonManagerLike {
 
   /**
    * Startup can still determine socket ownership through the PID/lock/readiness
-   * path when a loaded host times out while listing processes. Keep that narrowly
+   * path when a loaded host times out while listing processes. A successful port
+   * probe forces strict-port launch because it closes its probe socket before the
+   * child binds; the child's own bind is the authoritative guard. Keep that narrowly
    * scoped degradation out of the fail-closed lifecycle scans used elsewhere.
    */
   private async findLiveDaemonProcessesForStart(
@@ -833,9 +835,10 @@ export class DaemonManager implements DaemonManagerLike {
     }
 
     // A process-table scan can miss a daemon in another PID/socket namespace.
-    // Before this start-specific degradation proceeds, atomically prove its
-    // canonical port is bindable so a second daemon cannot silently take a
-    // fallback port beside that live owner.
+    // The probe's socket closes before it resolves, so it cannot atomically reserve
+    // the canonical port for the child. Force the same strict child bind used by
+    // restart() (issue #6260 PRRT ft82d) so a competing owner fails rather than
+    // silently falling back to another port.
     const port = options.port ?? DEFAULT_DAEMON_PORT;
     const host = options.host ?? "127.0.0.1";
     if (!(await this.portAvailabilityChecker.isPortFree(port, host))) {
@@ -845,8 +848,10 @@ export class DaemonManager implements DaemonManagerLike {
       );
     }
 
-    // The canonical port is free, so socket readiness and the ownership record
-    // still protect startup while this best-effort host scan remains unavailable.
+    options.strictPort = true;
+    // The canonical port was free at probe time; strict child binding, socket
+    // readiness, and the ownership record protect startup while this best-effort
+    // host scan remains unavailable.
     logger.warn(
       `[DaemonManager] process-table inspection timed out during daemon start; proceeding with socket ownership checks: ${errorMessage(error)}`,
       error,

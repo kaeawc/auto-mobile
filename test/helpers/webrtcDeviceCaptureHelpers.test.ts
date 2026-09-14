@@ -3,7 +3,7 @@ import {
   shouldRetryWebRtcDaemonStart,
   waitForBootedSimulatorUdid,
   type SimulatorAppearanceClient,
-} from "./helpers/webrtcDeviceCaptureHelpers";
+} from "./webrtcDeviceCaptureHelpers";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 describe("WHEP device capture helper logic", () => {
@@ -26,7 +26,7 @@ describe("WHEP device capture helper logic", () => {
     let discoveryCalls = 0;
     const states = ["Shutdown", "Booted"];
     const simctl: SimulatorAppearanceClient = {
-      async getBootedSimulators() {
+      async getBootedSimulatorsChecked() {
         discoveryCalls++;
         return discoveryCalls === 1 ? [] : [{ deviceId: "ios-simulator-udid" }];
       },
@@ -44,7 +44,8 @@ describe("WHEP device capture helper logic", () => {
   test("propagates simulator-discovery failures to the fixture caller", async () => {
     const timer = new FakeTimer();
     const simctl: SimulatorAppearanceClient = {
-      async getBootedSimulators() {
+      // Match SimCtlClient.getBootedSimulatorsChecked, which propagates discovery failures.
+      async getBootedSimulatorsChecked() {
         throw new Error("simctl discovery failed");
       },
       async getDeviceInfo() {

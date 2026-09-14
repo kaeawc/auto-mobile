@@ -120,6 +120,39 @@ describe("repairDaemon", () => {
     });
   });
 
+  test("waits for destructive recovery to settle after its deadline", async () => {
+    const timer = new FakeTimer();
+    let resolveRecovery: ((result: "restarted") => void) | undefined;
+    let settled = false;
+    const repair = repairDaemon(
+      { timeoutMs: 50 },
+      dependencies([healthReport(false)], {
+        timer,
+        recoverControlState: async () => {
+          const result = await new Promise<"restarted">((resolve) => {
+            resolveRecovery = resolve;
+          });
+          settled = true;
+          return result;
+        },
+      }),
+    );
+
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(resolveRecovery).toBeDefined();
+    timer.advanceTime(50);
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    resolveRecovery!("restarted");
+
+    await expect(repair).resolves.toMatchObject<Partial<DaemonRecoveryResult>>({
+      status: "failed",
+      phase: "recovery",
+      nextAction: expect.stringContaining("deadline"),
+    });
+    expect(settled).toBe(true);
+  });
+
   test("returns a recovery-phase failure instead of claiming repair when restart fails", async () => {
     const result = await repairDaemon(
       {},

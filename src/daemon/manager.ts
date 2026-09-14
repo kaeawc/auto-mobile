@@ -637,7 +637,10 @@ export interface DaemonManagerLike {
    * only when that check remains unhealthy, escalates to verified daemon-mode
    * process cleanup and a strict-port replacement.
    */
-  recoverControlState(options?: DaemonOptions): Promise<DaemonRestartResult>;
+  recoverControlState(
+    options?: DaemonOptions,
+    isProtocolHealthy?: () => Promise<boolean>,
+  ): Promise<DaemonRestartResult>;
   /**
    * When `expectedDaemon` is supplied, restart only that verified generation.
    * A changed generation means another client already completed the handoff.
@@ -1836,34 +1839,79 @@ export class DaemonManager implements DaemonManagerLike {
    * command line identifies them as AutoMobile daemon-mode processes, never a
    * PID named solely by stale control metadata.
    */
-  async recoverControlState(options: DaemonOptions = {}): Promise<DaemonRestartResult> {
+  async recoverControlState(
+    options: DaemonOptions = {},
+    isProtocolHealthy: () => Promise<boolean> = this.daemonProtocolHealthProbe,
+  ): Promise<DaemonRestartResult> {
     if (!this.acquireLock()) {
       return restartResultFromStart(await this.start(options));
     }
 
     try {
-      if (await this.daemonProtocolHealthProbe()) {
+      if (await isProtocolHealthy()) {
         stderrLog("Daemon became healthy during control-state recovery; joining it.");
         return "joined";
       }
 
+      const status = await this.status();
       const candidates = this.findLiveDaemonProcesses();
-      if (candidates.length > 0) {
-        stderrLog(
-          `Repair force-stopping ${candidates.length} verified unusable AutoMobile daemon candidate(s)...`,
-        );
-        await this.awaitRestartCleanup(
-          candidates.map((pid) => () => this.stopUnrecordedDaemonProcess(pid)),
-        );
-      }
+      const recordedCandidate = this.findRecoveryCandidate(status, candidates);
+      this.assertRecoveryCandidateIsScoped(status, candidates, recordedCandidate);
+      await this.stopRecoveryCandidate(recordedCandidate);
 
-      const recoveryOptions: DaemonOptions = { ...options, strictPort: true };
+      const recoveryOptions = this.recoveryOptions(status, options);
       await this.assertNoSurvivingDaemonBeforeRestart(recoveryOptions);
       await this.timer.sleep(DAEMON_RESTART_HANDOFF_DELAY_MS);
       return restartResultFromStart(await this.startUnlocked(recoveryOptions));
     } finally {
       this.releaseLock();
     }
+  }
+
+  private findRecoveryCandidate(status: DaemonStatus, candidates: number[]): number | undefined {
+    if (
+      !status.running ||
+      status.pid === undefined ||
+      status.socketPath !== this.socketPath ||
+      !candidates.includes(status.pid)
+    ) {
+      return undefined;
+    }
+    return status.pid;
+  }
+
+  private assertRecoveryCandidateIsScoped(
+    status: DaemonStatus,
+    candidates: number[],
+    recordedCandidate: number | undefined,
+  ): void {
+    if (candidates.length > 0 && (recordedCandidate === undefined || candidates.length > 1)) {
+      throw new ActionableError(
+        "Doctor repair could not correlate the failed control socket with exactly one live " +
+          "AutoMobile daemon process. Refusing to stop an uncorrelated daemon; inspect " +
+          "`--daemon status` and retry after other daemon instances have stopped.",
+      );
+    }
+    if (status.running && recordedCandidate === undefined) {
+      throw new ActionableError(
+        "Doctor repair found live PID control metadata that does not match a current " +
+          "AutoMobile daemon process. Refusing to signal a potentially reused PID.",
+      );
+    }
+  }
+
+  private async stopRecoveryCandidate(recordedCandidate: number | undefined): Promise<void> {
+    if (recordedCandidate === undefined) {
+      return;
+    }
+    stderrLog(
+      `Repair force-stopping the verified daemon for this control namespace (PID ${recordedCandidate})...`,
+    );
+    await this.stopUnrecordedDaemonProcess(recordedCandidate);
+  }
+
+  private recoveryOptions(status: DaemonStatus, options: DaemonOptions): DaemonOptions {
+    return { ...(status.options ?? {}), ...options, strictPort: true };
   }
 
   /**

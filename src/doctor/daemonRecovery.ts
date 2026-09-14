@@ -7,6 +7,7 @@ import { DaemonMcpProxy } from "../daemon/daemonMcpProxy";
 import { getDaemonHealthReport, type DaemonHealthReport } from "../daemon/debugTools";
 import { DaemonManager, type DaemonRestartResult } from "../daemon/manager";
 import { errorMessage } from "../utils/describeUnknownError";
+import { logger } from "../utils/logger";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 
 const DEFAULT_DAEMON_RECOVERY_TIMEOUT_MS = 45_000;
@@ -39,7 +40,7 @@ export interface DaemonRecoveryDependencies {
    * lifecycle lock, rechecks protocol ownership, then stops only verified
    * daemon-mode processes before starting a strict-port replacement.
    */
-  recoverControlState?: () => Promise<DaemonRestartResult>;
+  recoverControlState?: (isProtocolHealthy: () => Promise<boolean>) => Promise<DaemonRestartResult>;
   /**
    * A successful MCP tools/list round trip verifies the socket protocol and,
    * through DaemonMcpProxy, the daemon's version and build identity.
@@ -55,12 +56,23 @@ class DaemonRecoveryDeadlineError extends Error {
   }
 }
 
-async function verifyDaemonProtocol(): Promise<void> {
-  const proxy = new DaemonMcpProxy();
+async function verifyDaemonProtocol(autoStartDaemon = true): Promise<void> {
+  const proxy = new DaemonMcpProxy({ autoStartDaemon });
   try {
     await proxy.listTools();
   } finally {
     await proxy.close();
+  }
+}
+
+async function isCompatibleDaemonProtocol(): Promise<boolean> {
+  try {
+    await verifyDaemonProtocol(false);
+    return true;
+  } catch (error) {
+    // A failed compatibility probe is the explicit repair precondition.
+    logger.debug(`Daemon repair compatibility probe failed: ${errorMessage(error)}`);
+    return false;
   }
 }
 
@@ -69,6 +81,7 @@ async function withDeadline<T>(
   deadline: number,
   timer: Timer,
   operation: () => Promise<T>,
+  settleOnTimeout = false,
 ): Promise<T> {
   const remaining = deadline - timer.now();
   if (remaining <= 0) {
@@ -79,9 +92,15 @@ async function withDeadline<T>(
   const expired = new Promise<never>((_resolve, reject) => {
     timeout = timer.setTimeout(() => reject(new DaemonRecoveryDeadlineError(phase)), remaining);
   });
+  const task = operation();
 
   try {
-    return await Promise.race([operation(), expired]);
+    return await Promise.race([task, expired]);
+  } catch (error) {
+    if (settleOnTimeout && error instanceof DaemonRecoveryDeadlineError) {
+      await task.catch(() => undefined);
+    }
+    throw error;
   } finally {
     if (timeout !== undefined) {
       timer.clearTimeout(timeout);
@@ -125,7 +144,7 @@ type FinalHealthAttempt =
 interface ResolvedRecoveryDependencies {
   timer: Timer;
   getHealthReport: () => Promise<DaemonHealthReport>;
-  recoverControlState: () => Promise<DaemonRestartResult>;
+  recoverControlState: (isProtocolHealthy: () => Promise<boolean>) => Promise<DaemonRestartResult>;
   verifyProtocol: () => Promise<void>;
 }
 
@@ -136,7 +155,8 @@ function resolveRecoveryDependencies(
     timer: dependencies.timer ?? defaultTimer,
     getHealthReport: dependencies.getHealthReport ?? getDaemonHealthReport,
     recoverControlState:
-      dependencies.recoverControlState ?? (() => new DaemonManager().recoverControlState()),
+      dependencies.recoverControlState ??
+      (() => new DaemonManager().recoverControlState({}, isCompatibleDaemonProtocol)),
     verifyProtocol: dependencies.verifyProtocol ?? verifyDaemonProtocol,
   };
 }
@@ -146,9 +166,13 @@ async function attemptRecoveryStep<T>(
   deadline: number,
   timer: Timer,
   operation: () => Promise<T>,
+  settleOnTimeout = false,
 ): Promise<RecoveryAttempt<T>> {
   try {
-    return { ok: true, value: await withDeadline(phase, deadline, timer, operation) };
+    return {
+      ok: true,
+      value: await withDeadline(phase, deadline, timer, operation, settleOnTimeout),
+    };
   } catch (error) {
     return { ok: false, error };
   }
@@ -158,19 +182,25 @@ async function recoverUnusableSocket(
   before: DaemonHealthReport,
   deadline: number,
   timer: Timer,
-  recoverControlState: () => Promise<DaemonRestartResult>,
+  recoverControlState: (isProtocolHealthy: () => Promise<boolean>) => Promise<DaemonRestartResult>,
 ): Promise<RecoveryAttempt<DaemonRecoveryAction>> {
   if (before.socketConnectable) {
     return { ok: true, value: "joined" };
   }
-  return await attemptRecoveryStep("recovery", deadline, timer, recoverControlState);
+  return await attemptRecoveryStep(
+    "recovery",
+    deadline,
+    timer,
+    () => recoverControlState(isCompatibleDaemonProtocol),
+    true,
+  );
 }
 
 async function verifyProtocolWithRecovery(
   initialAction: DaemonRecoveryAction,
   deadline: number,
   timer: Timer,
-  recoverControlState: () => Promise<DaemonRestartResult>,
+  recoverControlState: (isProtocolHealthy: () => Promise<boolean>) => Promise<DaemonRestartResult>,
   verifyProtocol: () => Promise<void>,
 ): Promise<ProtocolRecoveryAttempt> {
   const initialVerification = await attemptRecoveryStep(
@@ -185,7 +215,13 @@ async function verifyProtocolWithRecovery(
       : { ok: false, phase: "verification", error: initialVerification.error };
   }
 
-  const restartResult = await attemptRecoveryStep("recovery", deadline, timer, recoverControlState);
+  const restartResult = await attemptRecoveryStep(
+    "recovery",
+    deadline,
+    timer,
+    () => recoverControlState(isCompatibleDaemonProtocol),
+    true,
+  );
   if (!restartResult.ok) {
     return { ok: false, phase: "recovery", error: restartResult.error };
   }

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -93,7 +93,7 @@ describe("DaemonManager control-state recovery", () => {
     expect(signals).toBe(0);
   });
 
-  test("signals only a currently identified daemon-mode process before replacement", async () => {
+  test("fails closed rather than signalling an uncorrelated daemon-mode process", async () => {
     const { lock, pid, socket } = paths();
     const timer = new FakeTimer();
     const livePids = new Set([1234]);
@@ -128,7 +128,64 @@ describe("DaemonManager control-state recovery", () => {
       async () => false,
     );
 
-    await expect(manager.recoverControlState()).rejects.toThrow("port 3000");
+    await expect(manager.recoverControlState()).rejects.toThrow("could not correlate");
+    expect(signals).toEqual([]);
+  });
+
+  test("preserves recorded options while stopping the daemon for this namespace", async () => {
+    const { lock, pid, socket } = paths();
+    const timer = new FakeTimer();
+    const livePids = new Set([1234]);
+    const processes = new MutableDaemonProcesses(
+      [{ pid: 1234, ppid: 1, command: "bun /worktree/dist/src/index.js --daemon-mode" }],
+      livePids,
+    );
+    writeFileSync(
+      pid,
+      JSON.stringify({
+        pid: 1234,
+        socketPath: socket,
+        port: 4321,
+        startedAt: 1,
+        version: "test",
+        options: { port: 4321, host: "127.0.0.1", debug: true },
+      }),
+    );
+    const signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
+    const signaler: DaemonProcessSignaler = {
+      signal: (processId, signal) => {
+        signals.push({ pid: processId, signal });
+        livePids.delete(processId);
+      },
+    };
+    const portChecks: Array<{ port: number; host: string }> = [];
+    const manager = new DaemonManager(
+      undefined,
+      undefined,
+      timer,
+      lock,
+      pid,
+      socket,
+      processes,
+      undefined,
+      undefined,
+      undefined,
+      signaler,
+      undefined,
+      undefined,
+      undefined,
+      {
+        isPortFree: async (port, host) => {
+          portChecks.push({ port, host });
+          return false;
+        },
+      },
+      undefined,
+      async () => false,
+    );
+
+    await expect(manager.recoverControlState()).rejects.toThrow("port 4321");
     expect(signals).toEqual([{ pid: 1234, signal: "SIGTERM" }]);
+    expect(portChecks).toEqual([{ port: 4321, host: "127.0.0.1" }]);
   });
 });

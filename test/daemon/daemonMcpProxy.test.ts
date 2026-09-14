@@ -952,6 +952,38 @@ describe("DaemonMcpProxy", () => {
         }
       });
 
+      test("does not restart a mismatched joined version successor after the deadline", async () => {
+        const { fakeManager, isAvailableSpy, proxy, timer } = makeProxy({
+          runningVersion: OLDER_VERSION,
+          startedAt: ANCIENT_TIMESTAMP,
+        });
+        const initialStatus = fakeManager.statusResults[0]!;
+        const successorStatus = { ...initialStatus, pid: 5678 };
+        fakeManager.statusResult = successorStatus;
+        fakeManager.statusResults = [initialStatus, successorStatus];
+        fakeManager.restartResult = "joined";
+        const restart = fakeManager.restart.bind(fakeManager);
+        const restartSpy = spyOn(fakeManager, "restart").mockImplementation(
+          async (options, expectedDaemon) => {
+            const result = await restart(options, expectedDaemon);
+            timer.advanceTime(DAEMON_STARTUP_TIMEOUT_MS);
+            return result;
+          },
+        );
+
+        try {
+          await expect(proxy.listTools()).rejects.toThrow(
+            `Timed out waiting for concurrent daemon restart after ${DAEMON_STARTUP_TIMEOUT_MS}ms`,
+          );
+          expect(restartSpy).toHaveBeenCalledTimes(1);
+          expect(timer.getSleepHistory()).toEqual([]);
+        } finally {
+          restartSpy.mockRestore();
+          isAvailableSpy.mockRestore();
+          await proxy.close();
+        }
+      });
+
       test("defers a version restart while provisionDevice is active", async () => {
         const { fakeManager, isAvailableSpy, proxy } = makeProxy({
           runningVersion: OLDER_VERSION,
@@ -1939,9 +1971,8 @@ describe("DaemonMcpProxy", () => {
         }
       });
 
-      test("probes a ready successor after restart exhausts the reconciliation deadline", async () => {
+      test("probes a ready successor after an owned restart exactly exhausts the deadline", async () => {
         const timer = new FakeTimer();
-        const restartElapsedMs = 1_000;
         const fakeClient = new FakeDaemonClient({
           daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
         });
@@ -1951,7 +1982,7 @@ describe("DaemonMcpProxy", () => {
             expectedDaemon?: DaemonStatus,
           ): Promise<DaemonRestartResult> {
             const result = await super.restart(options, expectedDaemon);
-            timer.advanceTime(restartElapsedMs);
+            timer.advanceTime(DAEMON_STARTUP_TIMEOUT_MS);
             return result;
           }
         }
@@ -1961,8 +1992,8 @@ describe("DaemonMcpProxy", () => {
         fakeManager.statusResults = [initialStatus, initialStatus, initialStatus, successorStatus];
         const waitForReadySpy = spyOn(fakeManager, "waitForReady").mockImplementation(
           async (timeoutMs) => {
-            timer.advanceTime(timeoutMs);
-            return true;
+            expect(timeoutMs).toBe(0);
+            return false;
           },
         );
         const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
@@ -1976,12 +2007,95 @@ describe("DaemonMcpProxy", () => {
         try {
           await proxy.listTools();
           expect(fakeManager.restartCallCount).toBe(1);
-          expect(waitForReadySpy).toHaveBeenCalledWith(
-            DAEMON_STARTUP_TIMEOUT_MS - restartElapsedMs,
-          );
+          expect(waitForReadySpy).toHaveBeenCalledWith(0);
+          expect(timer.getSleepHistory()).toEqual([]);
         } finally {
           isAvailableSpy.mockRestore();
           waitForReadySpy.mockRestore();
+          await proxy.close();
+        }
+      });
+
+      test("probes a ready successor after a joined restart exactly exhausts the deadline", async () => {
+        const timer = new FakeTimer();
+        const fakeClient = new FakeDaemonClient({
+          daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+        });
+        class DeadlineConsumingManager extends FakeDaemonManager {
+          override async restart(
+            options?: DaemonOptions,
+            expectedDaemon?: DaemonStatus,
+          ): Promise<DaemonRestartResult> {
+            await super.restart(options, expectedDaemon);
+            timer.advanceTime(DAEMON_STARTUP_TIMEOUT_MS);
+            return "joined";
+          }
+        }
+        const fakeManager = new DeadlineConsumingManager();
+        const initialStatus = runningStatus({ embeddedSdk: false });
+        const successorStatus = { ...runningStatus({ embeddedSdk: true }), pid: 5678 };
+        fakeManager.statusResults = [initialStatus, initialStatus, initialStatus, successorStatus];
+        const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+        const proxy = new DaemonMcpProxy({
+          clientFactory: () => fakeClient,
+          daemonManager: fakeManager,
+          daemonOptions: { embeddedSdk: true },
+          timer,
+        });
+
+        try {
+          await proxy.listTools();
+          expect(fakeManager.restartCallCount).toBe(1);
+          expect(fakeManager.waitForReadyCallCount).toBe(0);
+          expect(timer.getSleepHistory()).toEqual([]);
+        } finally {
+          isAvailableSpy.mockRestore();
+          await proxy.close();
+        }
+      });
+
+      test("handles a transient initial joined-successor probe at the expired deadline", async () => {
+        const timer = new FakeTimer();
+        const fakeClient = new FakeDaemonClient({
+          daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+        });
+        class DeadlineConsumingManager extends FakeDaemonManager {
+          override async restart(
+            options?: DaemonOptions,
+            expectedDaemon?: DaemonStatus,
+          ): Promise<DaemonRestartResult> {
+            await super.restart(options, expectedDaemon);
+            timer.advanceTime(DAEMON_STARTUP_TIMEOUT_MS);
+            return "joined";
+          }
+        }
+        const fakeManager = new DeadlineConsumingManager();
+        const initialStatus = runningStatus({ embeddedSdk: false });
+        fakeManager.statusResult = initialStatus;
+        let probeCallCount = 0;
+        const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+        const proxy = new DaemonMcpProxy({
+          clientFactory: () => fakeClient,
+          daemonManager: fakeManager,
+          daemonOptions: { embeddedSdk: true },
+          daemonStatusProbe: async () => {
+            probeCallCount++;
+            if (probeCallCount === 2) {
+              throw new DaemonUnavailableError("Daemon socket not found during handoff");
+            }
+            return initialStatus;
+          },
+          timer,
+        });
+
+        try {
+          await expect(proxy.listTools()).rejects.toThrow(
+            `Timed out waiting for concurrent daemon restart after ${DAEMON_STARTUP_TIMEOUT_MS}ms`,
+          );
+          expect(probeCallCount).toBe(2);
+          expect(timer.getSleepHistory()).toEqual([]);
+        } finally {
+          isAvailableSpy.mockRestore();
           await proxy.close();
         }
       });
@@ -4764,6 +4878,35 @@ describe("DaemonMcpProxy", () => {
         expect(fakeManager.restartCallCount).toBe(1);
         expect(fakeManager.waitForReadyCallCount).toBe(0);
       } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("does not restart a mismatched joined build successor after the deadline", async () => {
+      const { fakeManager, isAvailableSpy, proxy, timer } = makeBuildProxy();
+      const [versionStatus, mismatchStatus] = fakeManager.statusResults;
+      const successorStatus = { ...mismatchStatus!, pid: 5678 };
+      fakeManager.statusResult = successorStatus;
+      fakeManager.statusResults = [versionStatus!, mismatchStatus!, successorStatus];
+      fakeManager.restartResult = "joined";
+      const restart = fakeManager.restart.bind(fakeManager);
+      const restartSpy = spyOn(fakeManager, "restart").mockImplementation(
+        async (options, expectedDaemon) => {
+          const result = await restart(options, expectedDaemon);
+          timer.advanceTime(DAEMON_STARTUP_TIMEOUT_MS);
+          return result;
+        },
+      );
+
+      try {
+        await expect(proxy.listTools()).rejects.toThrow(
+          `Timed out waiting for concurrent daemon restart after ${DAEMON_STARTUP_TIMEOUT_MS}ms`,
+        );
+        expect(restartSpy).toHaveBeenCalledTimes(1);
+        expect(timer.getSleepHistory()).toEqual([]);
+      } finally {
+        restartSpy.mockRestore();
         isAvailableSpy.mockRestore();
         await proxy.close();
       }

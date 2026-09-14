@@ -27,8 +27,12 @@ are rejected before any device is touched.
 
 - `container` defaults to `documents`; the same logical containers as
   `putAppFile` apply (`documents`, `library`, `cache`, `tmp`, `externalFiles`).
-- `paths` and `groupPaths` are comma-separated relative paths, at most 32 per
-  source.
+- `paths` and `groupPaths` are URL-encoded JSON arrays of relative paths (for
+  example, `paths=["a.log","b.log"]`) in the canonical, recommended form;
+  this is comma-safe for paths that contain commas. A comma-separated list
+  (`paths=a.log,b.log`) or bare path (`paths=app.log`) remains accepted for
+  backward compatibility, but cannot represent a path containing a comma (the
+  unchanged legacy limitation). At most 32 paths are allowed per source.
 - `lastSeconds` is 1–3600. `level` is `default`, `info` (adds `--info`), or
   `debug` (adds `--info --debug`).
 - `maxBytes` bounds every returned entry (default 256 KiB, at most 4 MiB). Each

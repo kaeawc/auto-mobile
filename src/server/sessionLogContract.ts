@@ -199,9 +199,17 @@ export function normalizeSessionLogPaths(paths: readonly string[]): string[] {
 }
 
 function parseJsonPathList(value: string, paramName: "paths" | "groupPaths"): string[] {
+  const trimmed = value.trim();
+  if (!trimmed.startsWith("[") || !trimmed.endsWith("]")) {
+    return value
+      .split(",")
+      .map((path) => path.trim())
+      .filter((path) => path.length > 0);
+  }
+
   let parsed: unknown;
   try {
-    parsed = JSON.parse(value);
+    parsed = JSON.parse(trimmed);
   } catch (error) {
     throw new Error(`${paramName} must be a JSON array of path strings.`, { cause: error });
   }

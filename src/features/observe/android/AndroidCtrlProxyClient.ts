@@ -1986,6 +1986,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
   protected onConnectionClosed(): void {
     this.supportedCommands = null;
+    this.lateCancelledScreenshotRequestIds.clear();
     this.cancelScreenshotBackoff();
     void this.markInstalledAppsStale("websocket_closed");
     this.deviceConnectionLostNotifier.onDeviceConnectionLost(this.device.deviceId);
@@ -3800,6 +3801,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           `[CTRL_PROXY] Runner error (requestId: ${message.requestId ?? "none"}): ${errorText}`,
         );
         if (message.requestId) {
+          this.lateCancelledScreenshotRequestIds.delete(message.requestId);
           this.requestManager.resolveError(message.requestId, errorText);
           this._hierarchy?.rejectPendingHierarchy(message.requestId, errorText);
         }
@@ -3854,6 +3856,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
       // Handle screenshot error
       if (message.type === "screenshot_error" && message.requestId) {
+        this.lateCancelledScreenshotRequestIds.delete(message.requestId);
         logger.warn(
           `[CTRL_PROXY] Screenshot error (requestId: ${message.requestId}): ${message.error}`,
         );

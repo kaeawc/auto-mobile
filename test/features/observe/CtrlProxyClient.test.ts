@@ -4798,6 +4798,114 @@ describe("AndroidCtrlProxyClient", function () {
       expect(pushSpy).not.toHaveBeenCalled();
       await client.close();
     });
+
+    test("retires a cancelled screenshot tombstone after a late screenshot error", async function () {
+      const localTimer = new FakeTimer();
+      localTimer.enableAutoAdvance();
+      const fakeScheduler = new FakeScreenshotBackoffScheduler();
+      const { client, socket } = await createConnectedCapturingClient(localTimer, fakeScheduler);
+      const controller = new AbortController();
+
+      try {
+        const before = socket.sentMessages.length;
+        const capture = client.requestScreenshot(500, undefined, false, controller.signal);
+        for (
+          let attempt = 0;
+          attempt < 5 && socket.sentMessages.length < before + 1;
+          attempt += 1
+        ) {
+          await Promise.resolve();
+        }
+        const [frame] = screenshotFrames(socket) as Array<{ requestId: string }>;
+        expect(frame).toBeTruthy();
+        controller.abort();
+        await capture;
+
+        socket.emit(
+          "message",
+          JSON.stringify({
+            type: "screenshot_error",
+            requestId: frame.requestId,
+            error: "late screenshot failure",
+          }),
+        );
+        await flushPromises();
+
+        expect((client as any).lateCancelledScreenshotRequestIds.has(frame.requestId)).toBe(false);
+      } finally {
+        await client.close();
+      }
+    });
+
+    test("retires a cancelled screenshot tombstone after a late correlated error", async function () {
+      const localTimer = new FakeTimer();
+      localTimer.enableAutoAdvance();
+      const fakeScheduler = new FakeScreenshotBackoffScheduler();
+      const { client, socket } = await createConnectedCapturingClient(localTimer, fakeScheduler);
+      const controller = new AbortController();
+
+      try {
+        const before = socket.sentMessages.length;
+        const capture = client.requestScreenshot(500, undefined, false, controller.signal);
+        for (
+          let attempt = 0;
+          attempt < 5 && socket.sentMessages.length < before + 1;
+          attempt += 1
+        ) {
+          await Promise.resolve();
+        }
+        const [frame] = screenshotFrames(socket) as Array<{ requestId: string }>;
+        expect(frame).toBeTruthy();
+        controller.abort();
+        await capture;
+
+        socket.emit(
+          "message",
+          JSON.stringify({
+            type: "error",
+            requestId: frame.requestId,
+            error: "late correlated failure",
+          }),
+        );
+        await flushPromises();
+
+        expect((client as any).lateCancelledScreenshotRequestIds.has(frame.requestId)).toBe(false);
+      } finally {
+        await client.close();
+      }
+    });
+
+    test("clears cancelled screenshot tombstones when the connection closes", async function () {
+      const localTimer = new FakeTimer();
+      localTimer.enableAutoAdvance();
+      const fakeScheduler = new FakeScreenshotBackoffScheduler();
+      const { client, socket } = await createConnectedCapturingClient(localTimer, fakeScheduler);
+      const controller = new AbortController();
+
+      try {
+        const before = socket.sentMessages.length;
+        const capture = client.requestScreenshot(500, undefined, false, controller.signal);
+        for (
+          let attempt = 0;
+          attempt < 5 && socket.sentMessages.length < before + 1;
+          attempt += 1
+        ) {
+          await Promise.resolve();
+        }
+        const [frame] = screenshotFrames(socket) as Array<{ requestId: string }>;
+        expect(frame).toBeTruthy();
+        controller.abort();
+        await capture;
+        expect((client as any).lateCancelledScreenshotRequestIds.has(frame.requestId)).toBe(true);
+
+        socket.close();
+        await flushPromises();
+
+        expect((client as any).lateCancelledScreenshotRequestIds).toHaveLength(0);
+      } finally {
+        await client.close();
+      }
+    });
   });
 
   describe("shared rate-limit floor accounting (issue #4927)", function () {

@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { RealObserveScreen } from "../../../src/features/observe/ObserveScreen";
+import { finalizeToolResponse } from "../../../src/server/finalizeToolResponse";
+import { createStructuredToolResponse } from "../../../src/utils/toolUtils";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -19,6 +21,7 @@ import type { PerformanceTracker } from "../../../src/utils/PerformanceTracker";
 class FakeScreenshotRecorder implements ObserveScreenshotRecorder {
   startCalls = 0;
   captureCalls = 0;
+  captureFreshCalls = 0;
 
   start(_perf?: PerformanceTracker, _signal?: AbortSignal): void {
     this.startCalls++;
@@ -26,6 +29,14 @@ class FakeScreenshotRecorder implements ObserveScreenshotRecorder {
 
   async capture(_perf?: PerformanceTracker, _signal?: AbortSignal): Promise<void> {
     this.captureCalls++;
+  }
+
+  async captureFresh(
+    _observationId: string,
+    _perf?: PerformanceTracker,
+    _signal?: AbortSignal,
+  ): Promise<void> {
+    this.captureFreshCalls++;
   }
 }
 
@@ -157,6 +168,33 @@ describe("ObserveScreen skip options", () => {
       (result as ObserveResult & { screenshotCaptureAttempted?: boolean })
         .screenshotCaptureAttempted,
     ).toBe(false);
+  });
+
+  test("deferred capture marks a skipped terminal observation so its screenshot URI is emitted", async () => {
+    const observation = await observeScreen.execute({ skipScreenshot: true });
+
+    await observeScreen.captureScreenshot(undefined, undefined, observation);
+
+    expect(fakeScreenshotRecorder.captureFreshCalls).toBe(1);
+    const finalized = finalizeToolResponse(createStructuredToolResponse(observation), {
+      name: "observe",
+    });
+    const emitted = finalized.structuredContent as ObserveResult;
+    expect(emitted.observationScreenshotResourceUri).toBe(
+      `automobile:observation/${device.deviceId}/${observation.observationId}/screenshot`,
+    );
+    expect(emitted.screenshotCaptureAttempted).toBeUndefined();
+  });
+
+  test("a skipped observation without deferred capture does not emit a screenshot URI", async () => {
+    const observation = await observeScreen.execute({ skipScreenshot: true });
+
+    const finalized = finalizeToolResponse(createStructuredToolResponse(observation), {
+      name: "observe",
+    });
+    const emitted = finalized.structuredContent as ObserveResult;
+    expect(emitted.observationScreenshotResourceUri).toBeUndefined();
+    expect(emitted.screenshotCaptureAttempted).toBeUndefined();
   });
 
   test("skipBackStack=true prevents back stack collection", async () => {

@@ -929,6 +929,9 @@ export class RealObserveScreen implements ObserveScreen {
     observation?: ObserveResult,
   ): Promise<void> {
     const screenshotObservation = observation ?? this.createBaseResult();
+    if (observation) {
+      observation.screenshotCaptureAttempted = true;
+    }
     await this.screenshotRecorder.captureFresh(screenshotObservation.observationId, perf, signal);
     if (observation) {
       await this.runAccessibilityAudit(observation, perf);

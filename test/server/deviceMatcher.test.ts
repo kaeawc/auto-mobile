@@ -645,6 +645,21 @@ describe("DefaultDeviceMatcher.matchBootedDevice", () => {
     );
     expect(result?.deviceId).toBe("2");
   });
+
+  it("matches Android API-level bounds against booted-device API metadata", () => {
+    const devices = [
+      bootedDevice({ deviceId: "api34", apiLevel: 34, osVersion: "14" }),
+      bootedDevice({ deviceId: "api36", apiLevel: 36, osVersion: "16" }),
+    ];
+
+    const result = matcher.matchBootedDevice(
+      { platform: "android", minOsVersion: "34", maxOsVersion: "34" },
+      devices,
+      "LATEST",
+    );
+
+    expect(result?.deviceId).toBe("api34");
+  });
 });
 
 describe("DefaultDeviceMatcher.matchDeviceImage", () => {
@@ -781,5 +796,28 @@ describe("DefaultDeviceMatcher.matchDeviceImage", () => {
       "LATEST",
     );
     expect(result?.name).toBe("B");
+  });
+
+  it("uses Android API metadata for API-level minimum, maximum, and combined bounds", () => {
+    const images = [
+      deviceImage({ name: "api33", apiLevel: 33, osVersion: "13" }),
+      deviceImage({ name: "api34", apiLevel: 34, osVersion: "14" }),
+      deviceImage({ name: "api36", apiLevel: 36, osVersion: "16" }),
+    ];
+
+    expect(
+      matcher.matchDeviceImage({ platform: "android", minOsVersion: "34" }, images, "MINIMUM")
+        ?.name,
+    ).toBe("api34");
+    expect(
+      matcher.matchDeviceImage({ platform: "android", maxOsVersion: "34" }, images, "LATEST")?.name,
+    ).toBe("api34");
+    expect(
+      matcher.matchDeviceImage(
+        { platform: "android", minOsVersion: "34", maxOsVersion: "34" },
+        images,
+        "LATEST",
+      )?.name,
+    ).toBe("api34");
   });
 });

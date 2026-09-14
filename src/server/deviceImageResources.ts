@@ -60,7 +60,7 @@ interface ProvisioningRuntime {
   id: string;
   name: string;
   version?: string;
-  available?: boolean;
+  availability: ProvisioningAvailability;
 }
 
 interface ProvisioningDeviceType {
@@ -68,6 +68,12 @@ interface ProvisioningDeviceType {
   id: string;
   name: string;
   family?: string;
+  availability: ProvisioningAvailability;
+}
+
+interface ProvisioningAvailability {
+  available: boolean;
+  reason?: string;
 }
 
 interface ProvisioningSystemImage {
@@ -344,7 +350,7 @@ function appendAndroidProvisioningCatalog(
       id: image.packageName,
       name: image.versionInfo,
       version: String(image.apiLevel),
-      available: true,
+      availability: { available: true },
     });
     catalog.systemImages.push({
       platform: "android",
@@ -364,6 +370,7 @@ function appendAndroidProvisioningCatalog(
       id: profile.id,
       name,
       ...(profile.oem ? { family: profile.oem } : {}),
+      availability: { available: true },
     });
     catalog.profiles.push({
       platform: "android",
@@ -379,22 +386,73 @@ function appendIosProvisioningCatalog(
   runtimes: AppleDeviceRuntime[],
   deviceTypes: AppleDeviceType[],
 ): void {
-  for (const runtime of runtimes) {
+  const runtimeEntries = runtimes.map((runtime) => {
+    let availability: ProvisioningAvailability;
+    try {
+      const availabilityError = runtime.availabilityError?.trim();
+      availability = runtime.isAvailable
+        ? { available: true }
+        : availabilityError
+          ? { available: false, reason: `runtime-unavailable: ${availabilityError}` }
+          : { available: false, reason: "runtime-not-installed" };
+    } catch (error) {
+      logger.debug(
+        `[DeviceImageResources] Failed to derive iOS runtime availability for ${runtime.identifier}: ${error}`,
+      );
+      availability = { available: false, reason: "unknown" };
+    }
+    return { runtime, availability };
+  });
+
+  for (const { runtime, availability } of runtimeEntries) {
     catalog.runtimes.push({
       platform: "ios",
       id: runtime.identifier,
       name: runtime.name,
       version: runtime.version,
-      available: runtime.isAvailable,
+      availability,
     });
   }
 
   for (const deviceType of deviceTypes) {
+    let availability: ProvisioningAvailability;
+    try {
+      if (
+        !Number.isFinite(deviceType.minRuntimeVersion) ||
+        !Number.isFinite(deviceType.maxRuntimeVersion)
+      ) {
+        throw new Error("device type has an invalid runtime version range");
+      }
+      const matchingRuntimes = runtimeEntries.filter(({ runtime }) => {
+        const version = parseFloat(runtime.version);
+        return (
+          Number.isFinite(version) &&
+          version >= deviceType.minRuntimeVersion &&
+          version <= deviceType.maxRuntimeVersion
+        );
+      });
+      const availableRuntime = matchingRuntimes.find(({ availability }) => availability.available);
+      const unavailableRuntime = matchingRuntimes[0];
+      availability = availableRuntime
+        ? { available: true }
+        : unavailableRuntime
+          ? {
+              available: false,
+              reason: `runtime-not-installed: ${unavailableRuntime.runtime.name}`,
+            }
+          : { available: false, reason: "unsupported-device-type" };
+    } catch (error) {
+      logger.debug(
+        `[DeviceImageResources] Failed to derive iOS device type availability for ${deviceType.identifier}: ${error}`,
+      );
+      availability = { available: false, reason: "unknown" };
+    }
     catalog.deviceTypes.push({
       platform: "ios",
       id: deviceType.identifier,
       name: deviceType.name,
       family: deviceType.productFamily,
+      availability,
     });
   }
 }

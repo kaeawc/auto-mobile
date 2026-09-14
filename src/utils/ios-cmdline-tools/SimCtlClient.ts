@@ -59,6 +59,7 @@ export interface AppleDeviceRuntime {
   identifier: string;
   version: string;
   isAvailable: boolean;
+  availabilityError?: string;
   name: string;
 }
 
@@ -2164,7 +2165,7 @@ export class SimCtlClient implements SimCtl {
     if (!Array.isArray(data?.runtimes)) {
       throw new Error("simctl runtimes response does not contain a runtimes array");
     }
-    return (data.runtimes as AppleDeviceRuntime[]).filter((runtime) => runtime.isAvailable);
+    return data.runtimes as AppleDeviceRuntime[];
   }
 
   /**

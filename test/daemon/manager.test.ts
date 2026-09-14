@@ -9,6 +9,8 @@ import {
   createDefaultDaemonProcessFinder,
   daemonBuildIdentityStatusLines,
   DaemonManager,
+  parseBusyBoxDaemonProcessTable,
+  parseDarwinDaemonProcessTable,
   parseDaemonProcessTable,
   PsDaemonProcessFinder,
   runDaemonCommand,
@@ -1236,34 +1238,167 @@ describe("Daemon manager process detection", () => {
     ]);
   });
 
-  test("uses an expanded buffer and a bounded timeout when reading the full process table", () => {
+  test("parses Linux elapsed process creation times for PID-reuse protection", () => {
+    expect(
+      parseDaemonProcessTable(
+        "20 1 12 bunx -y @kaeawc/auto-mobile@0.0.38 --daemon-mode",
+        1_000_000,
+      ),
+    ).toEqual([
+      {
+        pid: 20,
+        ppid: 1,
+        command: "bunx -y @kaeawc/auto-mobile@0.0.38 --daemon-mode",
+        startedAt: 988_000,
+      },
+    ]);
+  });
+
+  test("parses BusyBox elapsed process creation times for PID-reuse protection", () => {
+    expect(
+      parseBusyBoxDaemonProcessTable(
+        "20 1 2-03:04:05 bunx -y @kaeawc/auto-mobile@0.0.38 --daemon-mode",
+        1_000_000_000,
+      ),
+    ).toEqual([
+      {
+        pid: 20,
+        ppid: 1,
+        command: "bunx -y @kaeawc/auto-mobile@0.0.38 --daemon-mode",
+        startedAt: 1_000_000_000 - (2 * 24 * 60 * 60 + 3 * 60 * 60 + 4 * 60 + 5) * 1000,
+      },
+    ]);
+  });
+
+  test("parses Darwin lstart process creation times for PID-reuse protection", () => {
+    expect(
+      parseDarwinDaemonProcessTable(
+        "20 1 Sun Sep 13 10:57:04 2026 bunx -y @kaeawc/auto-mobile@0.0.38 --daemon-mode",
+      ),
+    ).toEqual([
+      {
+        pid: 20,
+        ppid: 1,
+        command: "bunx -y @kaeawc/auto-mobile@0.0.38 --daemon-mode",
+        startedAt: new Date(2026, 8, 13, 10, 57, 4).getTime(),
+      },
+    ]);
+  });
+
+  test.each([
+    ["linux", "ps -eo pid=,ppid=,etimes=,command="],
+    ["darwin", "LC_ALL=C ps -axo pid=,ppid=,lstart=,command="],
+  ] as const)(
+    "uses the %s process table command with an expanded buffer and bounded timeout",
+    (platform, command) => {
+      const calls: Array<{
+        command: string;
+        options: { encoding: "utf-8"; maxBuffer: number; timeout: number };
+      }> = [];
+      const finder = new PsDaemonProcessFinder((command, options) => {
+        calls.push({ command, options });
+        return platform === "darwin"
+          ? "20 1 Sun Sep 13 10:57:04 2026 bunx -y @kaeawc/auto-mobile@0.0.38 --daemon-mode"
+          : "20 1 bunx -y @kaeawc/auto-mobile@0.0.38 --daemon-mode";
+      }, platform);
+
+      expect(finder.findDaemonProcesses()).toEqual([
+        {
+          pid: 20,
+          ppid: 1,
+          command: "bunx -y @kaeawc/auto-mobile@0.0.38 --daemon-mode",
+          ...(platform === "darwin"
+            ? { startedAt: new Date(2026, 8, 13, 10, 57, 4).getTime() }
+            : {}),
+        },
+      ]);
+      expect(calls).toEqual([
+        {
+          command,
+          options: {
+            encoding: "utf-8",
+            maxBuffer: DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES,
+            timeout: DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS,
+          },
+        },
+      ]);
+      expect(DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES).toBeGreaterThan(1024 * 1024);
+    },
+  );
+
+  test("anchors Linux process ages before a delayed process-table scan", () => {
+    const timer = new FakeTimer();
+    timer.advanceTime(100_000);
+    const finder = new PsDaemonProcessFinder(
+      () => {
+        timer.advanceTime(4_000);
+        return "20 1 40 auto-mobile --daemon-mode";
+      },
+      "linux",
+      timer,
+    );
+    expect(finder.findDaemonProcesses()[0]?.startedAt).toBe(60_000);
+  });
+
+  test("falls back to BusyBox etime under one scan deadline", () => {
     const calls: Array<{
       command: string;
       options: { encoding: "utf-8"; maxBuffer: number; timeout: number };
     }> = [];
-    const finder = new PsDaemonProcessFinder((command, options) => {
-      calls.push({ command, options });
-      return "20 1 bunx -y @kaeawc/auto-mobile@0.0.38 --daemon-mode";
-    });
+    const timer = new FakeTimer();
+    timer.advanceTime(1_000_000);
+    const finder = new PsDaemonProcessFinder(
+      (command, options) => {
+        calls.push({ command, options });
+        if (calls.length === 1) {
+          timer.advanceTime(2_000);
+          throw new Error("ps: invalid option -- 'e'");
+        }
+        return "20 1 00:00:12 bunx -y @kaeawc/auto-mobile@0.0.38 --daemon-mode";
+      },
+      "linux",
+      timer,
+    );
 
     expect(finder.findDaemonProcesses()).toEqual([
       {
         pid: 20,
         ppid: 1,
         command: "bunx -y @kaeawc/auto-mobile@0.0.38 --daemon-mode",
+        startedAt: 990_000,
       },
     ]);
     expect(calls).toEqual([
       {
-        command: "ps -eo pid=,ppid=,command=",
+        command: "ps -eo pid=,ppid=,etimes=,command=",
         options: {
           encoding: "utf-8",
           maxBuffer: DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES,
           timeout: DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS,
         },
       },
+      {
+        command: "ps -o pid,ppid,etime,args",
+        options: {
+          encoding: "utf-8",
+          maxBuffer: DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES,
+          timeout: DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS - 2_000,
+        },
+      },
     ]);
-    expect(DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES).toBeGreaterThan(1024 * 1024);
+  });
+
+  test("reads absolute UTC Windows process birth independently of the host clock", () => {
+    const startedAt = Date.parse("2026-09-14T12:00:00-05:00");
+    const finder = new WindowsDaemonProcessFinder(() =>
+      JSON.stringify({
+        ProcessId: 30,
+        ParentProcessId: 1,
+        CommandLine: "auto-mobile --daemon-mode",
+        StartedAt: startedAt,
+      }),
+    );
+    expect(finder.findDaemonProcesses()[0]?.startedAt).toBe(Date.parse("2026-09-14T17:00:00Z"));
   });
 
   // #6140 review: execSync's `timeout: 0` means NO timeout (unbounded), not
@@ -1374,7 +1509,7 @@ describe("Daemon manager process detection", () => {
     expect(calls).toEqual([
       {
         command:
-          'powershell.exe -NoProfile -NonInteractive -Command "Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,CommandLine | ConvertTo-Json -Compress"',
+          "powershell.exe -NoProfile -NonInteractive -Command \"Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,CommandLine,@{Name='StartedAt';Expression={([DateTimeOffset]$_.CreationDate.ToUniversalTime()).ToUnixTimeMilliseconds()}} | ConvertTo-Json -Compress\"",
         options: {
           encoding: "utf-8",
           maxBuffer: DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES,

@@ -20,6 +20,13 @@ describe("parseArgs (#4277)", () => {
     expect(parsed.networkMockable).toBe(false);
   });
 
+  test("distinguishes the default plan lock scope from an explicit override", () => {
+    expect(parseArgs([], logger).planExecutionLockScopeExplicit).toBe(false);
+    expect(
+      parseArgs(["--plan-execution-lock-scope", "global"], logger).planExecutionLockScopeExplicit,
+    ).toBe(true);
+  });
+
   test("parses an initial device-session binding for proxy mode", () => {
     const parsed = parseArgs(["--initial-session-uuid", "device-session-a"], logger);
 

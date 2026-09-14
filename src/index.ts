@@ -211,6 +211,7 @@ async function main() {
       predictiveUi,
       rawElementSearch,
       planExecutionLockScope,
+      planExecutionLockScopeExplicit,
       runnerReadinessTimeoutMs,
       videoRecordingDefaults,
       daemonMode,
@@ -523,11 +524,14 @@ async function main() {
     // stdio proxy path relayed them. One object also means the two transports can
     // never drift apart again.
     const daemonStartupOptions: DaemonOptions = {
-      debug,
-      debugPerf,
-      planExecutionLockScope,
+      ...(daemonPort !== undefined ? { port: daemonPort } : {}),
+      ...(daemonHost !== undefined ? { host: daemonHost } : {}),
+      ...(strictPort ? { strictPort: true } : {}),
+      ...(debug ? { debug: true } : {}),
+      ...(debugPerf ? { debugPerf: true } : {}),
+      ...(planExecutionLockScopeExplicit ? { planExecutionLockScope } : {}),
       ...(runnerReadinessTimeoutMs !== undefined ? { runnerReadinessTimeoutMs } : {}),
-      mcpRecording,
+      ...(mcpRecording ? { mcpRecording: true } : {}),
       videoQualityPreset: videoRecordingDefaults.qualityPreset,
       videoTargetBitrateKbps: videoRecordingDefaults.targetBitrateKbps,
       videoMaxThroughputMbps: videoRecordingDefaults.maxThroughputMbps,
@@ -535,15 +539,15 @@ async function main() {
       videoFormat: videoRecordingDefaults.format,
       videoMaxArchiveSizeMb: videoRecordingDefaults.maxArchiveSizeMb,
       toolOutputsDir,
-      networkMockable,
-      embeddedSdk,
+      ...(networkMockable ? { networkMockable: true } : {}),
+      ...(embeddedSdk ? { embeddedSdk: true } : {}),
       ...(enabledTools.length > 0 ? { enabledTools } : {}),
       ...(disabledTools.length > 0 ? { disabledTools } : {}),
-      dismissKeyboardAfterInput,
+      ...(dismissKeyboardAfterInput ? { dismissKeyboardAfterInput: true } : {}),
       ...eventAllMarkerDaemonOptions,
-      noUiPerfMode: !uiPerfMode,
-      memPerfAudit: memPerfAuditMode,
-      accessibilityAudit: a11yAuditMode,
+      ...(!uiPerfMode ? { noUiPerfMode: true } : {}),
+      ...(memPerfAuditMode ? { memPerfAudit: true } : {}),
+      ...(a11yAuditMode ? { accessibilityAudit: true } : {}),
       ...(accessibilityConfig
         ? {
             accessibilityLevel: accessibilityConfig.level,
@@ -552,15 +556,15 @@ async function main() {
             accessibilityUseBaseline: accessibilityConfig.useBaseline,
           }
         : {}),
-      predictiveUi,
-      rawElementSearch,
-      skipCtrlProxyDownload,
-      noNavigationScreenshots: !navigationScreenshots,
-      noWaitForPollingOverhead,
-      noA11yIncludeNotImportantViews,
-      noA11yReportViewIds,
-      noA11yRetrieveInteractiveWindows,
-      noOcclusion,
+      ...(predictiveUi ? { predictiveUi: true } : {}),
+      ...(rawElementSearch ? { rawElementSearch: true } : {}),
+      ...(skipCtrlProxyDownload ? { skipCtrlProxyDownload: true } : {}),
+      ...(!navigationScreenshots ? { noNavigationScreenshots: true } : {}),
+      ...(noWaitForPollingOverhead ? { noWaitForPollingOverhead: true } : {}),
+      ...(noA11yIncludeNotImportantViews ? { noA11yIncludeNotImportantViews: true } : {}),
+      ...(noA11yReportViewIds ? { noA11yReportViewIds: true } : {}),
+      ...(noA11yRetrieveInteractiveWindows ? { noA11yRetrieveInteractiveWindows: true } : {}),
+      ...(noOcclusion ? { noOcclusion: true } : {}),
       // OutputReductionFlags field names match these DaemonOptions fields 1:1.
       ...outputReduction,
     };
@@ -574,7 +578,7 @@ async function main() {
       // The event loop may have pending operations (ADB connections, file descriptors) that
       // prevent Node.js from exiting naturally. Force exit with code 0 to ensure clean termination.
       await logger.closeAfterFlush();
-      process.exit(0);
+      process.exit(process.exitCode ?? 0);
     } else {
       // In proxy mode (default), the MCP server proxies requests to the daemon
       // The daemon manages device state and tool execution

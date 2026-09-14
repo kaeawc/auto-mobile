@@ -104,6 +104,7 @@ import {
   RUNNER_READINESS_TIMEOUT_FLAG,
   parseRunnerReadinessTimeout,
 } from "../utils/runnerReadinessConfig";
+import { mergedExactToolSelections } from "./daemonOptionSelections";
 
 export type { DaemonLaunchCommand, DaemonProcessSpawner } from "./DaemonLauncher";
 
@@ -144,6 +145,8 @@ export interface DaemonProcessRecord {
   pid: number;
   ppid: number;
   command: string;
+  /** Approximate process creation time from the OS process table, when available. */
+  startedAt?: number;
 }
 
 export interface DaemonProcessFinder {
@@ -232,24 +235,170 @@ function isShellCommandWrapper(command: string): boolean {
   );
 }
 
-export function parseDaemonProcessTable(psOutput: string): DaemonProcessRecord[] {
+export function parseDaemonProcessTable(
+  psOutput: string,
+  now: number = Date.now(),
+): DaemonProcessRecord[] {
   const records: DaemonProcessRecord[] = [];
 
   for (const line of psOutput.split("\n")) {
-    const match = line.match(/^\s*(\d+)\s+(\d+)\s+(.+?)\s*$/);
+    const match = line.match(/^\s*(\d+)\s+(\d+)\s+(?:(\d+)\s+)?(.+?)\s*$/);
     if (!match) {
       continue;
     }
 
     const pid = parseInt(match[1], 10);
     const ppid = parseInt(match[2], 10);
-    const command = match[3];
+    const elapsedSeconds = match[3] === undefined ? undefined : parseInt(match[3], 10);
+    const command = match[4];
 
     if (!Number.isFinite(pid) || !Number.isFinite(ppid) || !isAutoMobileDaemonCommand(command)) {
       continue;
     }
 
-    records.push({ pid, ppid, command });
+    records.push({
+      pid,
+      ppid,
+      command,
+      ...(elapsedSeconds === undefined ? {} : { startedAt: now - elapsedSeconds * 1000 }),
+    });
+  }
+
+  return records;
+}
+
+function parseBusyBoxElapsedSeconds(value: string): number | undefined {
+  const match = value.match(/^(?:(\d+)-)?(?:(\d{1,2}):)?(\d{2}):(\d{2})$/);
+  if (!match) {
+    return undefined;
+  }
+  const days = match[1] === undefined ? 0 : parseInt(match[1], 10);
+  const hours = match[2] === undefined ? 0 : parseInt(match[2], 10);
+  const minutes = parseInt(match[3], 10);
+  const seconds = parseInt(match[4], 10);
+  if (
+    ![days, hours, minutes, seconds].every(Number.isFinite) ||
+    hours > 23 ||
+    minutes > 59 ||
+    seconds > 59
+  ) {
+    return undefined;
+  }
+  return ((days * 24 + hours) * 60 + minutes) * 60 + seconds;
+}
+
+/** Parse BusyBox `ps -o pid,ppid,etime,args` output. */
+export function parseBusyBoxDaemonProcessTable(
+  psOutput: string,
+  now: number = Date.now(),
+): DaemonProcessRecord[] {
+  const records: DaemonProcessRecord[] = [];
+
+  for (const line of psOutput.split("\n")) {
+    const match = line.match(/^\s*(\d+)\s+(\d+)\s+(\S+)\s+(.+?)\s*$/);
+    if (!match) {
+      continue;
+    }
+
+    const pid = parseInt(match[1], 10);
+    const ppid = parseInt(match[2], 10);
+    const elapsedSeconds = parseBusyBoxElapsedSeconds(match[3]);
+    const command = match[4];
+    if (
+      !Number.isFinite(pid) ||
+      !Number.isFinite(ppid) ||
+      elapsedSeconds === undefined ||
+      !isAutoMobileDaemonCommand(command)
+    ) {
+      continue;
+    }
+
+    records.push({ pid, ppid, command, startedAt: now - elapsedSeconds * 1000 });
+  }
+
+  return records;
+}
+
+const LSTART_MONTHS = new Map([
+  ["Jan", 0],
+  ["Feb", 1],
+  ["Mar", 2],
+  ["Apr", 3],
+  ["May", 4],
+  ["Jun", 5],
+  ["Jul", 6],
+  ["Aug", 7],
+  ["Sep", 8],
+  ["Oct", 9],
+  ["Nov", 10],
+  ["Dec", 11],
+]);
+
+function parseLstart(value: string): number | undefined {
+  const match = value.match(
+    /^(?:Sun|Mon|Tue|Wed|Thu|Fri|Sat)\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})\s+(\d{2}):(\d{2}):(\d{2})\s+(\d{4})$/,
+  );
+  if (!match) {
+    return undefined;
+  }
+
+  const month = LSTART_MONTHS.get(match[1]);
+  if (month === undefined) {
+    return undefined;
+  }
+  const day = parseInt(match[2], 10);
+  const hour = parseInt(match[3], 10);
+  const minute = parseInt(match[4], 10);
+  const second = parseInt(match[5], 10);
+  const year = parseInt(match[6], 10);
+
+  // `ps lstart` reports local wall-clock time. Constructing this date locally
+  // keeps its epoch comparable to the Date.now() timestamp written to the PID
+  // file, while the component check rejects JavaScript's overflow normalization.
+  const startedAt = new Date(year, month, day, hour, minute, second);
+  const hasComponentMismatch = [
+    startedAt.getFullYear() !== year,
+    startedAt.getMonth() !== month,
+    startedAt.getDate() !== day,
+    startedAt.getHours() !== hour,
+    startedAt.getMinutes() !== minute,
+    startedAt.getSeconds() !== second,
+  ];
+  if (hasComponentMismatch.some(Boolean)) {
+    return undefined;
+  }
+  return startedAt.getTime();
+}
+
+/**
+ * Parse Darwin's `ps lstart` table. `lstart` has second precision, matching the
+ * existing Linux `etimes` identity precision used to fence PID reuse.
+ */
+export function parseDarwinDaemonProcessTable(psOutput: string): DaemonProcessRecord[] {
+  const records: DaemonProcessRecord[] = [];
+
+  for (const line of psOutput.split("\n")) {
+    const match = line.match(
+      /^\s*(\d+)\s+(\d+)\s+((?:Sun|Mon|Tue|Wed|Thu|Fri|Sat)\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}\s+\d{4})\s+(.+?)\s*$/,
+    );
+    if (!match) {
+      continue;
+    }
+
+    const pid = parseInt(match[1], 10);
+    const ppid = parseInt(match[2], 10);
+    const startedAt = parseLstart(match[3]);
+    const command = match[4];
+    if (
+      !Number.isFinite(pid) ||
+      !Number.isFinite(ppid) ||
+      startedAt === undefined ||
+      !isAutoMobileDaemonCommand(command)
+    ) {
+      continue;
+    }
+
+    records.push({ pid, ppid, command, startedAt });
   }
 
   return records;
@@ -259,6 +408,7 @@ interface WindowsProcessTableEntry {
   ProcessId?: unknown;
   ParentProcessId?: unknown;
   CommandLine?: unknown;
+  StartedAt?: unknown;
 }
 
 function parseWindowsProcessId(value: unknown): number | undefined {
@@ -286,7 +436,16 @@ function parseWindowsProcessTableEntry(
     return undefined;
   }
 
-  return { pid, ppid, command };
+  const startedAt =
+    typeof entry.StartedAt === "number" && Number.isFinite(entry.StartedAt)
+      ? entry.StartedAt
+      : undefined;
+  return {
+    pid,
+    ppid,
+    command,
+    ...(startedAt === undefined ? {} : { startedAt }),
+  };
 }
 
 export function parseWindowsDaemonProcessTable(processTableJson: string): DaemonProcessRecord[] {
@@ -316,6 +475,13 @@ export interface DaemonProcessSignaler {
   signal(pid: number, signal: NodeJS.Signals): void;
 }
 
+/**
+ * Process tables expose only second-granularity birth data on some supported
+ * platforms. Keep a small allowance for that representation, but compare both
+ * directions: an older process is not interchangeable with this generation.
+ */
+const DAEMON_PROCESS_BIRTH_IDENTITY_TOLERANCE_MS = 2_000;
+
 const defaultDaemonProcessSignaler: DaemonProcessSignaler = {
   signal(pid, signal): void {
     process.kill(pid, signal);
@@ -332,16 +498,56 @@ function boundedProcessTableScanTimeout(timeoutMs: number | undefined): number {
   );
 }
 
+function isUnsupportedGnuProcessTableFormat(error: unknown): boolean {
+  return /(?:\betimes\b|\b(?:invalid|unrecognized|unknown|unsupported)\s+option\b|\bbad\s+-o\b)/i.test(
+    errorMessage(error),
+  );
+}
+
 export class PsDaemonProcessFinder implements DaemonProcessFinder, DaemonProcessLivenessChecker {
-  constructor(private readonly runCommand: ProcessTableCommandRunner = execSync) {}
+  constructor(
+    private readonly runCommand: ProcessTableCommandRunner = execSync,
+    private readonly platform: NodeJS.Platform = process.platform,
+    private readonly timer: Timer = defaultTimer,
+  ) {}
 
   findDaemonProcesses(timeoutMs?: number): DaemonProcessRecord[] {
-    const psOutput = this.runCommand("ps -eo pid=,ppid=,command=", {
-      encoding: "utf-8",
-      maxBuffer: DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES,
-      timeout: boundedProcessTableScanTimeout(timeoutMs),
-    });
-    return parseDaemonProcessTable(psOutput);
+    const isDarwin = this.platform === "darwin";
+    const scanTimeoutMs = boundedProcessTableScanTimeout(timeoutMs);
+    const scanDeadline = this.timer.now() + scanTimeoutMs;
+    const runScan = (command: string): { output: string; scannedAt: number } => {
+      // Relative ages belong to the snapshot immediately before this scan, not
+      // to the later time at which a loaded host returns the process table.
+      const scannedAt = this.timer.now();
+      const remaining = scanDeadline - scannedAt;
+      if (remaining <= 0) {
+        throw new Error("Process-table inspection ETIMEDOUT before scan could begin");
+      }
+      return {
+        output: this.runCommand(command, {
+          encoding: "utf-8",
+          maxBuffer: DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES,
+          timeout: Math.max(MIN_PROCESS_TABLE_SCAN_TIMEOUT_MS, remaining),
+        }),
+        scannedAt,
+      };
+    };
+
+    if (isDarwin) {
+      const { output } = runScan("LC_ALL=C ps -axo pid=,ppid=,lstart=,command=");
+      return parseDarwinDaemonProcessTable(output);
+    }
+
+    try {
+      const { output, scannedAt } = runScan("ps -eo pid=,ppid=,etimes=,command=");
+      return parseDaemonProcessTable(output, scannedAt);
+    } catch (error) {
+      if (!isUnsupportedGnuProcessTableFormat(error)) {
+        throw error;
+      }
+      const { output, scannedAt } = runScan("ps -o pid,ppid,etime,args");
+      return parseBusyBoxDaemonProcessTable(output, scannedAt);
+    }
   }
 
   isProcessRunning(pid: number): boolean {
@@ -355,8 +561,10 @@ export class WindowsDaemonProcessFinder
   constructor(private readonly runCommand: ProcessTableCommandRunner = execSync) {}
 
   findDaemonProcesses(timeoutMs?: number): DaemonProcessRecord[] {
+    // CIM returns local DateTime values. Publish absolute UTC birth times so
+    // neither the host time zone nor PowerShell startup/scan latency shifts them.
     const processTableJson = this.runCommand(
-      'powershell.exe -NoProfile -NonInteractive -Command "Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,CommandLine | ConvertTo-Json -Compress"',
+      "powershell.exe -NoProfile -NonInteractive -Command \"Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,CommandLine,@{Name='StartedAt';Expression={([DateTimeOffset]$_.CreationDate.ToUniversalTime()).ToUnixTimeMilliseconds()}} | ConvertTo-Json -Compress\"",
       {
         encoding: "utf-8",
         maxBuffer: DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES,
@@ -374,7 +582,9 @@ export class WindowsDaemonProcessFinder
 export function createDefaultDaemonProcessFinder(
   platform: NodeJS.Platform = process.platform,
 ): DaemonProcessFinder & DaemonProcessLivenessChecker {
-  return platform === "win32" ? new WindowsDaemonProcessFinder() : new PsDaemonProcessFinder();
+  return platform === "win32"
+    ? new WindowsDaemonProcessFinder()
+    : new PsDaemonProcessFinder(undefined, platform);
 }
 
 export interface ExtractionCleaner {
@@ -632,6 +842,17 @@ export interface DaemonManagerLike {
   status(): Promise<DaemonStatus>;
   start(options?: DaemonOptions): Promise<DaemonStartResult>;
   /**
+   * Recover a control socket that has already failed health/protocol checks.
+   * The manager owns the lifecycle lock while it rechecks the socket owner and,
+   * only when that check remains unhealthy, escalates to verified daemon-mode
+   * process cleanup and a strict-port replacement.
+   */
+  recoverControlState(
+    options?: DaemonOptions,
+    isProtocolHealthy?: () => Promise<boolean>,
+    signal?: AbortSignal,
+  ): Promise<DaemonRestartResult>;
+  /**
    * When `expectedDaemon` is supplied, restart only that verified generation.
    * A changed generation means another client already completed the handoff.
    */
@@ -699,6 +920,7 @@ export class DaemonManager implements DaemonManagerLike {
    * and injectable so a test can drive the probe outcome without a real socket.
    */
   private readonly peerSocketReachability: DaemonSocketReachabilityLike;
+  private readonly daemonProtocolHealthProbe: () => Promise<boolean>;
   private readonly launchCommandResolver: (() => DaemonLaunchCommand) | undefined;
   private heldLockLogPath: string | undefined;
   /**
@@ -739,6 +961,7 @@ export class DaemonManager implements DaemonManagerLike {
     platformOverride: NodeJS.Platform = process.platform,
     portAvailabilityChecker: DaemonPortAvailabilityChecker = new NetDaemonPortAvailabilityChecker(),
     retryExecutor: RetryExecutor = new DefaultRetryExecutor(timer),
+    daemonProtocolHealthProbe: (() => Promise<boolean>) | undefined = undefined,
   ) {
     this.platform = platformOverride;
     this.portAvailabilityChecker = portAvailabilityChecker;
@@ -782,6 +1005,19 @@ export class DaemonManager implements DaemonManagerLike {
       clientFactory ??
       ((options) =>
         new DaemonClient(this.socketPath, undefined, timer, {}, options?.clientIdentity));
+    this.daemonProtocolHealthProbe =
+      daemonProtocolHealthProbe ??
+      (async () => {
+        try {
+          await new DaemonClient(this.socketPath, undefined, this.timer).getDaemonStatus();
+          return true;
+        } catch (error) {
+          // A failed status probe is the explicit repair precondition, not a
+          // lifecycle failure in its own right.
+          logger.debug(`Daemon control-state protocol probe failed: ${errorMessage(error)}`);
+          return false;
+        }
+      });
   }
 
   /**
@@ -859,6 +1095,18 @@ export class DaemonManager implements DaemonManagerLike {
    */
   findLiveDaemonProcesses(timeoutMs?: number): number[] {
     return this.findAllDaemonProcesses(timeoutMs).filter((pid) => this.isProcessRunning(pid));
+  }
+
+  private findLiveDaemonProcessRecords(timeoutMs?: number): DaemonProcessRecord[] {
+    try {
+      const records = this.processFinder.findDaemonProcesses(timeoutMs);
+      const daemonPids = new Set(this.normalizeDaemonProcessRecords(records));
+      return records.filter(
+        (record) => daemonPids.has(record.pid) && this.isProcessRunning(record.pid),
+      );
+    } catch (error) {
+      throw new ActionableError(`Failed to inspect daemon process table: ${errorMessage(error)}`);
+    }
   }
 
   /**
@@ -1077,7 +1325,11 @@ export class DaemonManager implements DaemonManagerLike {
    * releases its lock in the window between a poll's socket check and its liveness
    * check.
    */
-  private async startByAwaitingLockHolder(options: DaemonOptions): Promise<DaemonStartResult> {
+  private async startByAwaitingLockHolder(
+    options: DaemonOptions,
+    recoverySignal?: AbortSignal,
+    onTakeover?: () => Promise<DaemonStartResult>,
+  ): Promise<DaemonStartResult> {
     let holderLogPath: string | null = null;
     let waitedOnHolder = this.readStartupLockHolder();
 
@@ -1096,27 +1348,32 @@ export class DaemonManager implements DaemonManagerLike {
     // (and a count cap would wrongly cut off a legitimate replacement that reclaims
     // the lock with time still on the clock).
     while (this.remainingTime(arbitrationDeadline) > 0) {
+      this.throwIfRecoveryCancelled(recoverySignal);
       const remaining = this.remainingTime(arbitrationDeadline);
       stderrLog("Another process is starting the daemon, waiting...");
       // Capture diagnostics while the current holder still holds the lock, so they
       // survive into the failure message if the holder later releases on failure.
       holderLogPath = (await this.getLockHolderStartupLogPath()) ?? holderLogPath;
+      this.throwIfRecoveryCancelled(recoverySignal);
       const ready = await this.waitForReady(
         remaining,
-        undefined,
+        recoverySignal,
         () => this.isStillWaitingOnStartupLockHolder(waitedOnHolder),
         LOCK_HOLDER_PROBE_TIMEOUT_MS,
       );
+      this.throwIfRecoveryCancelled(recoverySignal);
       if (ready) {
         stderrLog("Daemon started by another process");
         return "joined";
       }
 
       // The holder we waited on is gone — take over its start.
+      this.throwIfRecoveryCancelled(recoverySignal);
       if (this.acquireLock()) {
         stderrLog("Previous lock holder failed, taking over daemon start...");
         try {
-          return await this.startUnlocked(options);
+          this.throwIfRecoveryCancelled(recoverySignal);
+          return await (onTakeover?.() ?? this.startUnlocked(options, recoverySignal));
         } finally {
           this.releaseLock();
         }
@@ -1129,6 +1386,7 @@ export class DaemonManager implements DaemonManagerLike {
       // holder's PID — OS recycling, or a same-process sibling manager instance — is
       // still recognized as a replacement rather than read as the same stuck holder
       // (issue #5904).
+      this.throwIfRecoveryCancelled(recoverySignal);
       const current = this.readStartupLockHolder();
       if (current.livePid === undefined || this.isSameStartupLockHolder(current, waitedOnHolder)) {
         break;
@@ -1149,11 +1407,13 @@ export class DaemonManager implements DaemonManagerLike {
       ABANDONED_WAIT_CONFIRM_TIMEOUT_MS,
       this.remainingTime(arbitrationDeadline),
     );
+    this.throwIfRecoveryCancelled(recoverySignal);
     if (
       confirmBudget > 0 &&
       this.socketPathObservable() &&
       (await this.verifyDaemonConnection(confirmBudget))
     ) {
+      this.throwIfRecoveryCancelled(recoverySignal);
       stderrLog("Daemon became ready before reporting startup failure");
       return "joined";
     }
@@ -1163,7 +1423,10 @@ export class DaemonManager implements DaemonManagerLike {
   /**
    * Internal start implementation (caller must hold lock).
    */
-  private async startUnlocked(options: DaemonOptions): Promise<DaemonStartResult> {
+  private async startUnlocked(
+    options: DaemonOptions,
+    recoverySignal?: AbortSignal,
+  ): Promise<DaemonStartResult> {
     // The overall start budget, captured before any work so the post-exit peer
     // rejoin (issue #6103) can only ever spend time the caller still has. The
     // client times its `tools/list` out at DAEMON_STARTUP_TIMEOUT_MS; launchAndWait
@@ -1174,6 +1437,7 @@ export class DaemonManager implements DaemonManagerLike {
     // the error deliverable.
     const startDeadline = this.timer.now() + DAEMON_STARTUP_TIMEOUT_MS;
     const status = await this.status();
+    this.throwIfRecoveryCancelled(recoverySignal);
     if (status.running) {
       stderrLog(`Daemon is already running (PID ${status.pid}, port ${status.port})`);
       return "joined";
@@ -1185,6 +1449,7 @@ export class DaemonManager implements DaemonManagerLike {
     // transient availability probe. Reuse a responsive daemon; require an
     // explicit restart for a live but unreachable process.
     const liveDaemons = await this.findLiveDaemonProcessesForStart(options, startDeadline);
+    this.throwIfRecoveryCancelled(recoverySignal);
     if (liveDaemons.length > 0) {
       stderrLog(
         `Found ${liveDaemons.length} live auto-mobile daemon process(es) without a usable PID record; waiting for one to become ready...`,
@@ -1204,7 +1469,9 @@ export class DaemonManager implements DaemonManagerLike {
         DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS,
         this.remainingTime(startDeadline),
       );
-      if (await this.waitForExistingDaemon(existingDaemonWaitBudget)) {
+      const existingDaemonReady = await this.waitForExistingDaemon(existingDaemonWaitBudget);
+      this.throwIfRecoveryCancelled(recoverySignal);
+      if (existingDaemonReady) {
         stderrLog("Reusing existing responsive daemon");
         return "joined";
       }
@@ -1287,6 +1554,7 @@ export class DaemonManager implements DaemonManagerLike {
           );
         }
         try {
+          this.throwIfRecoveryCancelled(recoverySignal);
           await this.launcher.launchAndWait({
             command: autoMobileCmd,
             args,
@@ -1322,6 +1590,7 @@ export class DaemonManager implements DaemonManagerLike {
             removed = entryScript
               ? await this.extractionCleaner.removeExtractionForEntryScript(entryScript)
               : false;
+            this.throwIfRecoveryCancelled(recoverySignal);
           } catch (cleanupError) {
             throw new ActionableError(
               `${this.describeError(error)}\nFailed to remove incomplete extraction before retry: ${this.describeError(cleanupError)}`,
@@ -1340,6 +1609,7 @@ export class DaemonManager implements DaemonManagerLike {
         }
       }
     } catch (error) {
+      this.throwIfRecoveryCancelled(recoverySignal);
       // Our spawned subprocess failed before becoming ready. Under a concurrent
       // cold start, a PEER client's same-namespace daemon may still be publishing
       // the shared socket a beat later — our child merely lost the socket-ownership
@@ -1803,6 +2073,245 @@ export class DaemonManager implements DaemonManagerLike {
   }
 
   /**
+   * Recover a previously-unusable daemon control socket. Unlike a general
+   * `restart()`, this takes the namespace startup lock *before* deciding
+   * whether to stop anything, then makes a fresh protocol probe while holding
+   * it. A concurrent recovery/start therefore publishes a healthy successor
+   * that this call joins instead of deleting its socket or terminating it.
+   *
+   * This is deliberately invoked only by the explicit doctor repair flow after
+   * the initial health check failed. It still stops only processes whose current
+   * command line identifies them as AutoMobile daemon-mode processes, never a
+   * PID named solely by stale control metadata.
+   */
+  async recoverControlState(
+    options: DaemonOptions = {},
+    isProtocolHealthy: () => Promise<boolean> = this.daemonProtocolHealthProbe,
+    signal?: AbortSignal,
+    recoveryDeadline?: number,
+  ): Promise<DaemonRestartResult> {
+    this.throwIfRecoveryCancelled(signal);
+    if (!this.acquireLock()) {
+      return restartResultFromStart(
+        await this.startByAwaitingLockHolder(options, signal, async () => {
+          const result = await this.recoverControlStateWhileLocked(
+            options,
+            isProtocolHealthy,
+            signal,
+            recoveryDeadline,
+          );
+          return result === "restarted" ? "started" : "joined";
+        }),
+      );
+    }
+
+    try {
+      return await this.recoverControlStateWhileLocked(
+        options,
+        isProtocolHealthy,
+        signal,
+        recoveryDeadline,
+      );
+    } finally {
+      this.releaseLock();
+    }
+  }
+
+  /**
+   * Recovery transition for a lifecycle lock that the caller already owns.
+   * Lock-contended recovery uses this after the prior holder exits so its
+   * takeover retains the same successor, process, port, and strict-port checks
+   * as an uncontended repair.
+   */
+  private async recoverControlStateWhileLocked(
+    options: DaemonOptions,
+    isProtocolHealthy: () => Promise<boolean>,
+    signal: AbortSignal | undefined,
+    recoveryDeadline: number | undefined,
+  ): Promise<DaemonRestartResult> {
+    if (await isProtocolHealthy()) {
+      this.throwIfRecoveryCancelled(signal);
+      stderrLog("Daemon became healthy during control-state recovery; joining it.");
+      return "joined";
+    }
+
+    this.throwIfRecoveryCancelled(signal);
+    const status = await this.status();
+    this.throwIfRecoveryCancelled(signal);
+    const candidates = this.findLiveDaemonProcessRecords(
+      this.remainingRecoveryTime(recoveryDeadline),
+    );
+    const recordedCandidate = this.findRecoveryCandidate(status, candidates);
+    this.assertRecoveryCandidateIsScoped(
+      status,
+      candidates.map((candidate) => candidate.pid),
+      recordedCandidate,
+    );
+    this.throwIfRecoveryCancelled(signal);
+    await this.stopRecoveryCandidate(recordedCandidate, signal, recoveryDeadline);
+
+    // A cancellation after SIGTERM must still let the verified stop settle,
+    // but must never begin a replacement daemon that the caller will no
+    // longer wait to verify.
+    this.throwIfRecoveryCancelled(signal);
+    const recoveryOptions = await this.recoveryOptions(status, options);
+    this.throwIfRecoveryCancelled(signal);
+    await this.assertNoSurvivingDaemonBeforeRestart(recoveryOptions, recoveryDeadline);
+    this.throwIfRecoveryCancelled(signal);
+    await this.timer.sleep(DAEMON_RESTART_HANDOFF_DELAY_MS);
+    this.throwIfRecoveryCancelled(signal);
+    return restartResultFromStart(await this.startUnlocked(recoveryOptions, signal));
+  }
+
+  private findRecoveryCandidate(
+    status: DaemonStatus,
+    candidates: DaemonProcessRecord[],
+  ): DaemonProcessRecord | undefined {
+    if (!status.running || status.pid === undefined || status.socketPath !== this.socketPath) {
+      return undefined;
+    }
+    const candidate = candidates.find((process) => process.pid === status.pid);
+    if (!candidate || !this.matchesRecordedDaemonGeneration(status, candidate)) {
+      return undefined;
+    }
+    return candidate;
+  }
+
+  /**
+   * Compare a PID file to the process table using the OS process-birth value
+   * written by current daemons. PID files from before that field existed retain
+   * a narrow, symmetric startedAt fallback: it supports normal old records but
+   * refuses a slow-bootstrap process rather than accepting one merely because
+   * it happens to be older than daemon initialization.
+   */
+  private matchesRecordedDaemonGeneration(
+    status: DaemonStatus,
+    candidate: DaemonProcessRecord,
+  ): boolean {
+    const expectedStartedAt = status.processStartedAt ?? status.startedAt;
+    return (
+      expectedStartedAt !== undefined &&
+      candidate.startedAt !== undefined &&
+      Math.abs(candidate.startedAt - expectedStartedAt) <=
+        DAEMON_PROCESS_BIRTH_IDENTITY_TOLERANCE_MS
+    );
+  }
+
+  private matchesObservedDaemonGeneration(
+    expected: DaemonProcessRecord,
+    candidate: DaemonProcessRecord,
+  ): boolean {
+    return (
+      expected.pid === candidate.pid &&
+      expected.startedAt !== undefined &&
+      candidate.startedAt !== undefined &&
+      Math.abs(candidate.startedAt - expected.startedAt) <=
+        DAEMON_PROCESS_BIRTH_IDENTITY_TOLERANCE_MS
+    );
+  }
+
+  private assertRecoveryCandidateIsScoped(
+    status: DaemonStatus,
+    candidates: number[],
+    recordedCandidate: DaemonProcessRecord | undefined,
+  ): void {
+    if (candidates.length > 0 && (recordedCandidate === undefined || candidates.length > 1)) {
+      throw new ActionableError(
+        "Doctor repair could not correlate the failed control socket with exactly one live " +
+          "AutoMobile daemon process. Refusing to stop an uncorrelated daemon; inspect " +
+          "`--daemon status` and retry after other daemon instances have stopped.",
+      );
+    }
+    if (status.running && recordedCandidate === undefined) {
+      throw new ActionableError(
+        "Doctor repair found live PID control metadata that does not match a current " +
+          "AutoMobile daemon process. Refusing to signal a potentially reused PID.",
+      );
+    }
+  }
+
+  private throwIfRecoveryCancelled(signal: AbortSignal | undefined): void {
+    if (signal?.aborted) {
+      throw new ActionableError(
+        "Doctor repair deadline elapsed before a safe daemon recovery transition could complete.",
+      );
+    }
+  }
+
+  private async stopRecoveryCandidate(
+    recordedCandidate: DaemonProcessRecord | undefined,
+    signal: AbortSignal | undefined,
+    recoveryDeadline: number | undefined,
+  ): Promise<void> {
+    if (recordedCandidate === undefined) {
+      return;
+    }
+    this.throwIfRecoveryCancelled(signal);
+    stderrLog(
+      `Repair force-stopping the verified daemon for this control namespace (PID ${recordedCandidate.pid})...`,
+    );
+    await this.stopUnrecordedDaemonProcess(recordedCandidate, recoveryDeadline, signal);
+  }
+
+  private remainingRecoveryTime(recoveryDeadline: number | undefined): number | undefined {
+    if (recoveryDeadline === undefined) {
+      return undefined;
+    }
+    const remaining = this.remainingTime(recoveryDeadline);
+    if (remaining <= 0) {
+      throw new ActionableError(
+        "Doctor repair deadline elapsed before process-table inspection could complete.",
+      );
+    }
+    return remaining;
+  }
+
+  private async recoveryOptions(
+    status: DaemonStatus,
+    options: DaemonOptions,
+  ): Promise<DaemonOptions> {
+    const recordedOptions = status.options ?? (await this.readRecoveryOptionsFromPidFile());
+    // CLI parsing materializes omitted one-way flags as false. False has no
+    // corresponding "disable" argument, so forwarding it here would erase a
+    // PID-recorded true option without an explicit user request.
+    const requestedOptions = Object.fromEntries(
+      Object.entries(options).filter(([, value]) => value !== undefined && value !== false),
+    ) as DaemonOptions;
+    const recoveryOptions = { ...recordedOptions, ...requestedOptions, strictPort: true };
+    const exactToolSelections = mergedExactToolSelections(recordedOptions, requestedOptions);
+    if (exactToolSelections) {
+      Object.assign(recoveryOptions, exactToolSelections);
+    }
+    return recoveryOptions;
+  }
+
+  private async readRecoveryOptionsFromPidFile(): Promise<DaemonOptions> {
+    try {
+      const parsed: unknown = JSON.parse(await readFile(this.pidFilePath, "utf-8"));
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        return {};
+      }
+      const pidData = parsed as Partial<PidFileData>;
+      const options =
+        pidData.options && typeof pidData.options === "object" && !Array.isArray(pidData.options)
+          ? pidData.options
+          : {};
+      // Older PID files predate the options object but still record their
+      // bound port. Preserve it so a dead-record recovery probes/restarts the
+      // same endpoint rather than silently returning to the default.
+      return {
+        ...options,
+        ...(typeof pidData.port === "number" && options.port === undefined
+          ? { port: pidData.port }
+          : {}),
+      };
+    } catch (error) {
+      logger.debug(`Unable to recover daemon options from PID metadata: ${errorMessage(error)}`);
+      return {};
+    }
+  }
+
+  /**
    * Stop the exact generation already observed by the caller. Keeping this
    * snapshot through the signal closes the stale-restart gap where a second
    * status read could target a successor that another client just started.
@@ -2007,6 +2516,7 @@ export class DaemonManager implements DaemonManagerLike {
         sockets: pidData.sockets,
         dbPath: pidData.dbPath,
         startedAt: pidData.startedAt,
+        processStartedAt: pidData.processStartedAt,
         version: pidData.version,
         assetVersion: pidData.assetVersion,
         entryScript: pidData.entryScript,
@@ -2182,8 +2692,11 @@ export class DaemonManager implements DaemonManagerLike {
    *    A definitive "the port is still taken" is worth failing on even without a
    *    named PID.
    */
-  private async assertNoSurvivingDaemonBeforeRestart(options: DaemonOptions): Promise<void> {
-    const survivors = this.findLiveDaemonProcesses();
+  private async assertNoSurvivingDaemonBeforeRestart(
+    options: DaemonOptions,
+    recoveryDeadline?: number,
+  ): Promise<void> {
+    const survivors = this.findLiveDaemonProcesses(this.remainingRecoveryTime(recoveryDeadline));
     if (survivors.length > 0) {
       throw new ActionableError(
         `Restart could not confirm the previous AutoMobile daemon process(es) stopped: ` +
@@ -2199,7 +2712,13 @@ export class DaemonManager implements DaemonManagerLike {
 
     const port = options.port ?? DEFAULT_DAEMON_PORT;
     const host = options.host ?? DEFAULT_DAEMON_HOST;
-    if (await this.portAvailabilityChecker.isPortFree(port, host)) {
+    if (
+      await this.portAvailabilityChecker.isPortFree(
+        port,
+        host,
+        this.remainingRecoveryTime(recoveryDeadline),
+      )
+    ) {
       return;
     }
     throw new ActionableError(
@@ -2228,7 +2747,7 @@ export class DaemonManager implements DaemonManagerLike {
       `Explicit restart force-stopping ${candidates.length} live AutoMobile daemon candidate(s) without this namespace's PID record...`,
     );
     await this.awaitRestartCleanup(
-      candidates.map((pid) => () => this.stopUnrecordedDaemonProcess(pid)),
+      candidates.map((pid) => () => this.stopExplicitRestartDaemonProcess(pid)),
     );
   }
 
@@ -2246,7 +2765,75 @@ export class DaemonManager implements DaemonManagerLike {
     }
   }
 
-  private async stopUnrecordedDaemonProcess(pid: number): Promise<void> {
+  /**
+   * Re-scan immediately before each signal and require the exact process-table
+   * generation that was previously verified. A PID alone is never a safe signal
+   * target: it may have been reused after the original candidate exited.
+   */
+  private async stopUnrecordedDaemonProcess(
+    expected: DaemonProcessRecord,
+    recoveryDeadline: number | undefined,
+    signal: AbortSignal | undefined,
+  ): Promise<void> {
+    if (!this.verifyDaemonGenerationBeforeSignal(expected, recoveryDeadline)) {
+      stderrLog(`Daemon candidate ${expected.pid} exited before explicit restart could stop it.`);
+      return;
+    }
+    this.throwIfRecoveryCancelled(signal);
+
+    stderrLog(`Stopping daemon without this namespace's PID record (PID ${expected.pid})...`);
+    try {
+      this.processSignaler.signal(expected.pid, "SIGTERM");
+    } catch (error) {
+      if (this.isMissingProcessError(error)) {
+        return;
+      }
+      throw new ActionableError(
+        `Failed to stop verified daemon process ${expected.pid}: ${this.describeError(error)}`,
+      );
+    }
+
+    if (
+      await this.waitForStop(
+        expected.pid,
+        this.stopWaitTimeout(DAEMON_SHUTDOWN_TIMEOUT_MS, recoveryDeadline),
+      )
+    ) {
+      return;
+    }
+
+    stderrLog(`Verified daemon ${expected.pid} did not stop gracefully, sending SIGKILL...`);
+    if (!this.verifyDaemonGenerationBeforeSignal(expected, recoveryDeadline)) {
+      stderrLog(
+        `Daemon candidate ${expected.pid} exited before explicit restart could force-stop it.`,
+      );
+      return;
+    }
+    this.throwIfRecoveryCancelled(signal);
+    try {
+      this.processSignaler.signal(expected.pid, "SIGKILL");
+    } catch (error) {
+      if (this.isMissingProcessError(error)) {
+        return;
+      }
+      throw new ActionableError(
+        `Failed to force-stop verified daemon process ${expected.pid}: ${this.describeError(error)}`,
+      );
+    }
+
+    if (
+      !(await this.waitForStop(
+        expected.pid,
+        this.stopWaitTimeout(DAEMON_FORCED_STOP_TIMEOUT_MS, recoveryDeadline),
+      ))
+    ) {
+      throw new ActionableError(
+        `Verified daemon process ${expected.pid} did not exit after SIGKILL`,
+      );
+    }
+  }
+
+  private async stopExplicitRestartDaemonProcess(pid: number): Promise<void> {
     if (!this.findLiveDaemonProcesses().includes(pid)) {
       stderrLog(`Daemon candidate ${pid} exited before explicit restart could stop it.`);
       return;
@@ -2287,6 +2874,46 @@ export class DaemonManager implements DaemonManagerLike {
     if (!(await this.waitForStop(pid, DAEMON_FORCED_STOP_TIMEOUT_MS))) {
       throw new ActionableError(`Verified daemon process ${pid} did not exit after SIGKILL`);
     }
+  }
+
+  /**
+   * The recovery deadline is authoritative for the synchronous process-table
+   * scan too. Check it before and after the scan because a blocking scan can
+   * consume the final budget; signaling after that would violate fail-closed
+   * doctor recovery semantics.
+   */
+  private verifyDaemonGenerationBeforeSignal(
+    expected: DaemonProcessRecord,
+    recoveryDeadline: number | undefined,
+  ): boolean {
+    if (expected.startedAt === undefined) {
+      throw new ActionableError(
+        "Doctor repair could not verify the recorded daemon process generation before signalling it.",
+      );
+    }
+    const currentCandidates = this.findLiveDaemonProcessRecords(
+      this.remainingRecoveryTime(recoveryDeadline),
+    );
+    this.remainingRecoveryTime(recoveryDeadline);
+
+    if (
+      currentCandidates.some((candidate) =>
+        this.matchesObservedDaemonGeneration(expected, candidate),
+      )
+    ) {
+      return true;
+    }
+    if (currentCandidates.some((candidate) => candidate.pid === expected.pid)) {
+      throw new ActionableError(
+        "Doctor repair found that the verified daemon PID was reused before signalling it.",
+      );
+    }
+    return false;
+  }
+
+  private stopWaitTimeout(timeoutMs: number, recoveryDeadline: number | undefined): number {
+    const remaining = this.remainingRecoveryTime(recoveryDeadline);
+    return remaining === undefined ? timeoutMs : Math.min(timeoutMs, remaining);
   }
 
   private isMissingProcessError(error: unknown): boolean {

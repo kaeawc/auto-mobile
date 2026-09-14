@@ -183,6 +183,7 @@ export function parseArgs(
     );
   }
   let planExecutionLockScope: PlanExecutionLockScope = "session";
+  let planExecutionLockScopeExplicit = false;
   const videoRecordingDefaults: VideoRecordingConfigInput = {};
 
   const parsePositiveNumber = (
@@ -306,6 +307,7 @@ export function parseArgs(
       const scope = args[++i];
       if (scope === "global" || scope === "session") {
         planExecutionLockScope = scope;
+        planExecutionLockScopeExplicit = true;
       } else {
         log.warn(
           `Invalid plan execution lock scope: ${scope}. Using default: ${planExecutionLockScope}`,
@@ -367,6 +369,7 @@ export function parseArgs(
     predictiveUi,
     rawElementSearch,
     planExecutionLockScope,
+    planExecutionLockScopeExplicit,
     videoRecordingDefaults,
     runnerReadinessTimeoutMs,
     daemonMode,

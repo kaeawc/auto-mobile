@@ -2071,7 +2071,7 @@ describe("IOSCtrlProxyManager", function () {
       expect(ownedRunner.alive).toBe(false);
     });
 
-    test("forceStopForShutdown skips ownership probes when an eviction leaves only kill time (#6898)", async function () {
+    test("forceStopForShutdown skips a foreign PID when an eviction leaves no ownership-check time (#6898)", async function () {
       const manager = IOSCtrlProxyManager.createForTestingWithDeps(
         testDevice,
         fakeTimer,
@@ -2080,8 +2080,14 @@ describe("IOSCtrlProxyManager", function () {
       );
       const runnerPid = 912356;
       (manager as unknown as { xcTestProcessId: number }).xcTestProcessId = runnerPid;
-      const ownedRunner = { ...ownRunnerProcess(runnerPid), ppid: process.pid };
-      installListeningProcessFakes(fakeExecutor, [ownedRunner]);
+      const foreignRunner: FakeListeningProcess = {
+        pid: runnerPid,
+        port: 8765,
+        command: "/usr/sbin/some-other-daemons-runner --serve",
+        alive: true,
+        ignoreKill: true,
+      };
+      installListeningProcessFakes(fakeExecutor, [foreignRunner]);
       const processClient = (manager as unknown as { processClient: IOSCtrlProxyProcessClient })
         .processClient;
       let ownershipChecks = 0;
@@ -2089,14 +2095,19 @@ describe("IOSCtrlProxyManager", function () {
         ownershipChecks++;
         return "owned";
       };
+      const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        await (
+          manager as unknown as { forceStopForShutdown(deadline: number): Promise<void> }
+        ).forceStopForShutdown(40);
 
-      await (
-        manager as unknown as { forceStopForShutdown(deadline: number): Promise<void> }
-      ).forceStopForShutdown(40);
-
-      expect(ownershipChecks).toBe(0);
-      expect(fakeExecutor.wasCommandExecuted(`kill -KILL -- -${runnerPid}`)).toBe(true);
-      expect(ownedRunner.alive).toBe(false);
+        expect(ownershipChecks).toBe(0);
+        expect(fakeExecutor.wasCommandExecuted(`kill -KILL -- -${runnerPid}`)).toBe(false);
+        expect(foreignRunner.alive).toBe(true);
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("ownership-unverified"));
+      } finally {
+        warnSpy.mockRestore();
+      }
     });
 
     test("forceStopForShutdown kills a surviving owned process group after its root exits (#6579)", async function () {
@@ -2607,6 +2618,102 @@ describe("IOSCtrlProxyManager", function () {
       await retry;
 
       expect(fakeExecutor.getSpawnedProcesses()).toHaveLength(0);
+    });
+
+    test("retires a cancelled startup while an immediate retry is barrier-waiting", async function () {
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        fakeTimer,
+        undefined,
+        fakeExecutor,
+      );
+      const firstStartEntered = deferred();
+      let rejectFirstStart!: (error: Error) => void;
+      let startInternalCalls = 0;
+      spyOn(manager as any, "startInternal").mockImplementation(() => {
+        startInternalCalls++;
+        if (startInternalCalls === 1) {
+          firstStartEntered.resolve();
+          return new Promise<void>((_resolve, reject) => {
+            rejectFirstStart = reject;
+          });
+        }
+        return Promise.resolve();
+      });
+      const forceStop = spyOn(manager as any, "forceStopForShutdown").mockResolvedValue();
+
+      const caller = new AbortController();
+      const cancelledStart = manager.start({ signal: caller.signal });
+      await firstStartEntered.promise;
+      caller.abort(new Error("caller cancelled"));
+      await expect(cancelledStart).rejects.toThrow("caller cancelled");
+
+      // Keep the first start pending until the retry has joined it as the
+      // non-joinable barrier waiter. That waiter is not an external caller.
+      const retry = manager.start();
+      await Promise.resolve();
+      rejectFirstStart(new Error("startup cancelled"));
+
+      await retry;
+
+      expect(forceStop).toHaveBeenCalledTimes(1);
+      expect(startInternalCalls).toBe(2);
+    });
+
+    test("bounds retirement when a remote runner stop never settles", async function () {
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        fakeTimer,
+        undefined,
+        fakeExecutor,
+      );
+      const internal = manager as unknown as {
+        xcTestProcessId: number | null;
+        remoteRunner: { stop: () => Promise<{ success: boolean }> };
+        useRemoteRunner: () => boolean;
+        retireRunnerAfterFinalSharedStartCancellation: (sharedStart: {
+          controller: AbortController;
+          completion: Promise<void>;
+          healthPollDeadlineMs: number | null;
+          defaultHealthPollDeadlineMs: number | null;
+          callerHealthPollDeadlinesMs: Map<symbol, number>;
+          teardownCommitted: boolean;
+          waitingCallers: number;
+          externalWaitingCallers: number;
+          completed: boolean;
+        }) => Promise<void>;
+      };
+      internal.xcTestProcessId = 912357;
+      spyOn(internal, "useRemoteRunner").mockReturnValue(true);
+      internal.remoteRunner.stop = () => new Promise(() => {});
+      const sharedStart = {
+        controller: new AbortController(),
+        completion: Promise.resolve(),
+        healthPollDeadlineMs: null,
+        defaultHealthPollDeadlineMs: null,
+        callerHealthPollDeadlinesMs: new Map<symbol, number>(),
+        teardownCommitted: false,
+        waitingCallers: 0,
+        externalWaitingCallers: 0,
+        completed: false,
+      };
+      sharedStart.controller.abort(new Error("caller cancelled"));
+
+      let retired = false;
+      const retirement = internal.retireRunnerAfterFinalSharedStartCancellation(sharedStart);
+      void retirement.then(() => {
+        retired = true;
+      });
+      await Promise.resolve();
+
+      fakeTimer.advanceTime(250);
+      for (let attempt = 0; attempt < 5 && !retired; attempt++) {
+        await Promise.resolve();
+      }
+
+      expect(retired).toBe(true);
+      await retirement;
+      expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
     });
 
     // Directly exercise the PID-reuse guard added in review (thread 2). Testing the

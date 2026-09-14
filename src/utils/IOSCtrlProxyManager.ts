@@ -42,7 +42,7 @@ const SHUTDOWN_FORCE_STOP_TIMEOUT_MS = 250;
 // forceStopForShutdown must not itself consume the budget the tree kill needs.
 const FORCE_STOP_OWNERSHIP_CHECK_TIMEOUT_MS = 100;
 // Keep this budget exclusively for descendant-free SIGKILL commands after both
-// ownership checks; those probes are advisory, but force-stop must always signal.
+// ownership checks. Do not signal a tracked PID unless it could be inspected first.
 const FORCE_STOP_KILL_RESERVE_MS = 50;
 const IPROXY_GRACEFUL_STOP_TIMEOUT_MS = 1_000;
 // `stop()` tears the runner's process tree down, but its HTTP listener can keep
@@ -82,6 +82,7 @@ interface SharedCtrlProxyStart {
   callerHealthPollDeadlinesMs: Map<symbol, number>;
   teardownCommitted: boolean;
   waitingCallers: number;
+  externalWaitingCallers: number;
   completed: boolean;
 }
 
@@ -673,6 +674,13 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     }
     if (runnerPid) {
       const preKillDeadlineMs = deadline - FORCE_STOP_KILL_RESERVE_MS;
+      if (preKillDeadlineMs <= this.timer.now()) {
+        logger.warn(
+          `[IOSCtrlProxy] ownership-unverified for tracked runner PID ${runnerPid} before ` +
+            "the kill reserve; skipping forced termination",
+        );
+        return;
+      }
       const mayTerminate = await this.isRunnerStillOwnedWithinShutdownDeadline(
         runnerPid,
         preKillDeadlineMs,
@@ -1102,6 +1110,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         callerHealthPollDeadlinesMs: new Map(),
         teardownCommitted: false,
         waitingCallers: 0,
+        externalWaitingCallers: 0,
         completed: false,
       };
       this.sharedStart = createdStart;
@@ -1154,7 +1163,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   ): Promise<void> {
     if (
       !sharedStart.controller.signal.aborted ||
-      sharedStart.waitingCallers !== 0 ||
+      sharedStart.externalWaitingCallers !== 0 ||
       sharedStart.teardownCommitted
     ) {
       return;
@@ -1162,7 +1171,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     sharedStart.teardownCommitted = true;
     logger.info("[IOSCtrlProxy] Final shared startup waiter cancelled; retiring the runner");
     try {
-      await this.forceStopForShutdown(this.timer.now() + SHUTDOWN_FORCE_STOP_TIMEOUT_MS);
+      await IOSCtrlProxyManager.forceStopWithinShutdownDeadline(this, this.timer);
     } catch (error) {
       // Cancellation remains the caller-visible outcome even if best-effort retirement fails.
       logger.warn(
@@ -2431,6 +2440,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     callerId?: symbol,
   ): Promise<void> {
     sharedStart.waitingCallers++;
+    if (callerId) {
+      sharedStart.externalWaitingCallers++;
+    }
     return new Promise<void>((resolve, reject) => {
       let settled = false;
       const settle = (callback: () => void) => {
@@ -2440,6 +2452,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         settled = true;
         signal?.removeEventListener("abort", onAbort);
         sharedStart.waitingCallers--;
+        if (callerId) {
+          sharedStart.externalWaitingCallers--;
+        }
         this.removeHealthPollDeadline(sharedStart, callerId);
         if (!sharedStart.completed && sharedStart.waitingCallers === 0) {
           sharedStart.controller.abort(

@@ -3,6 +3,7 @@ import {
   applyLauncherPackages,
   catalogFromPackageRecords,
   launcherActivitiesCommand,
+  launcherProbeFallbackReason,
   mergeSystemAppCatalogEntry,
   needsLauncherProbe,
   parseLauncherPackages,
@@ -71,6 +72,43 @@ describe("androidAppCatalog (#6798)", () => {
     expect(catalog.get("com.example.app")).toEqual({});
     expect(catalog.get("com.example.blank")).toEqual({});
     expect(needsLauncherProbe(catalog, ["com.example.app", "com.example.blank"])).toBe(true);
+  });
+
+  test("reports how many probe packages have labels when CtrlProxy returned no labels", () => {
+    const catalog = catalogFromPackageRecords([
+      { packageName: "com.example.one", isSystem: false },
+      { packageName: "com.example.two", isSystem: false },
+      { packageName: "com.example.three", isSystem: false },
+    ]);
+
+    expect(
+      launcherProbeFallbackReason(catalog, [
+        "com.example.one",
+        "com.example.two",
+        "com.example.three",
+      ]),
+    ).toBe("CtrlProxy catalog predates labels or returned no labels (0/3 packages have a label)");
+  });
+
+  test("reports how many probe packages have labels when CtrlProxy launchability is missing", () => {
+    const catalog = catalogFromPackageRecords([
+      { packageName: "com.example.one", isSystem: false, label: "One" },
+      { packageName: "com.example.two", isSystem: false, label: "Two" },
+      { packageName: "com.example.three", isSystem: false },
+      { packageName: "com.example.four", isSystem: false, label: "Four", launchable: true },
+    ]);
+
+    expect(
+      launcherProbeFallbackReason(catalog, [
+        "com.example.one",
+        "com.example.two",
+        "com.example.three",
+        "com.example.four",
+      ]),
+    ).toBe(
+      "CtrlProxy catalog resolved labels but its launcher/launchability query did not answer " +
+        "(2/3 packages have a label)",
+    );
   });
 
   test("an explicit null launchability signal remains unknown and needs the probe", () => {

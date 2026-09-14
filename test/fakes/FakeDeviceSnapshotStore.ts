@@ -67,7 +67,7 @@ export class FakeDeviceSnapshotStore implements DeviceSnapshotStoreContract {
     return this.existing.has(snapshotName);
   }
 
-  async getSnapshotSizeBytes(snapshotName: string): Promise<number> {
+  async getSnapshotSizeBytes(snapshotName: string): Promise<number | null> {
     return this.sizes.get(snapshotName) ?? 0;
   }
 

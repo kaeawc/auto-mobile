@@ -199,13 +199,20 @@ export class DeviceSnapshotStore {
     return `snapshot_${timestamp}`;
   }
 
-  async getSnapshotSizeBytes(snapshotName: string, options?: SnapshotPathOptions): Promise<number> {
+  async getSnapshotSizeBytes(
+    snapshotName: string,
+    options?: SnapshotPathOptions,
+  ): Promise<number | null> {
     const snapshotPath = this.getSnapshotPathWithOptions(snapshotName, options);
-    // An archive directory that was never written is genuinely empty, so 0 is
-    // the honest answer here. Only the *emulator-owned* payload (which lives
-    // outside this store) distinguishes "empty" from "unknown" — see
-    // AvdSnapshotService (#6490).
-    return (await this.getDirectorySize(snapshotPath)) ?? 0;
+    let entries: Dirent[];
+    try {
+      entries = await fs.readdir(snapshotPath, { withFileTypes: true });
+    } catch (error) {
+      // A snapshot archive that was never captured is genuinely empty.
+      logger.debug(`Failed to read snapshot archive ${snapshotPath}: ${error}`);
+      return 0;
+    }
+    return this.getDirectorySizeFromEntries(snapshotPath, entries);
   }
 
   /**
@@ -227,6 +234,13 @@ export class DeviceSnapshotStore {
       return null;
     }
 
+    return this.getDirectorySizeFromEntries(dirPath, entries);
+  }
+
+  private async getDirectorySizeFromEntries(
+    dirPath: string,
+    entries: Dirent[],
+  ): Promise<number | null> {
     let size = 0;
     for (const entry of entries) {
       const fullPath = path.join(dirPath, entry.name);

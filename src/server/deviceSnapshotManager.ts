@@ -1193,10 +1193,9 @@ async function reclaimVmSnapshotPayload(
 const SNAPSHOT_RECORD_SUPERSEDED = Symbol("snapshot-record-superseded");
 
 /**
- * Two records describe the same payload only if every field a capture rewrites
- * still matches. A same-name capture upserts `last_accessed_at` (and normally
- * `size_bytes` / `device_name`), so comparing those catches a replacement that
- * landed after this record was read.
+ * Two records describe the same payload only if its stable capture fields still
+ * match. A restore updates only `last_accessed_at`, so it is not an identity
+ * field; a same-name capture still changes the device, creation time, or size.
  */
 function isSameSnapshotRecord(a: DeviceSnapshotRecord, b: DeviceSnapshotRecord): boolean {
   return (
@@ -1204,7 +1203,6 @@ function isSameSnapshotRecord(a: DeviceSnapshotRecord, b: DeviceSnapshotRecord):
     a.deviceName === b.deviceName &&
     a.snapshotType === b.snapshotType &&
     a.createdAt === b.createdAt &&
-    a.lastAccessedAt === b.lastAccessedAt &&
     a.sizeBytes === b.sizeBytes
   );
 }
@@ -1343,10 +1341,6 @@ async function remeasureUnsizedVmSnapshots(
         record.deviceName,
         record.snapshotName,
       );
-      if (sizeBytes === null) {
-        return record;
-      }
-
       const current = await snapshotRepository.getSnapshot(record.snapshotName);
       if (!current || !isSameSnapshotRecord(current, record)) {
         logger.warn(
@@ -1354,6 +1348,10 @@ async function remeasureUnsizedVmSnapshots(
             `'${record.snapshotName}'; skipping stale size update.`,
         );
         return undefined;
+      }
+
+      if (sizeBytes === null) {
+        return record;
       }
 
       try {

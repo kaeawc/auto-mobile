@@ -945,6 +945,137 @@ describe("deviceSnapshotManager VM snapshot sizing and reclaim (#6490)", () => {
       });
     });
 
+    test("keeps a re-measurement-touched snapshot ahead of an older row when its size remains unknown", async () => {
+      const touchedAt = new Date(3_000).toISOString();
+      const olderAt = new Date(1_000).toISOString();
+      const staleTouchedAt = new Date(500).toISOString();
+      await repository.insertSnapshot({
+        snapshotName: "vm-touched",
+        deviceId: EMULATOR.deviceId,
+        deviceName: AVD_NAME,
+        platform: "android",
+        snapshotType: "vm",
+        includeAppData: true,
+        includeSettings: false,
+        createdAt: staleTouchedAt,
+        lastAccessedAt: staleTouchedAt,
+        sizeBytes: null,
+        manifest: vmManifest("vm-touched", staleTouchedAt),
+      });
+      avdSnapshots.setVmSnapshot(AVD_NAME, "vm-older", 2 * MB);
+      await repository.insertSnapshot({
+        snapshotName: "vm-older",
+        deviceId: EMULATOR.deviceId,
+        deviceName: AVD_NAME,
+        platform: "android",
+        snapshotType: "vm",
+        includeAppData: true,
+        includeSettings: false,
+        createdAt: olderAt,
+        lastAccessedAt: olderAt,
+        sizeBytes: 2 * MB,
+        manifest: vmManifest("vm-older", olderAt),
+      });
+
+      await setDeviceSnapshotManagerDependencies({
+        avdSnapshots: {
+          measureVmSnapshotBytes: async (_avdName: string, snapshotName: string) => {
+            if (snapshotName === "vm-touched") {
+              await repository.updateSnapshot(snapshotName, { lastAccessedAt: touchedAt });
+            }
+            return null;
+          },
+          listAvdSnapshotDirectories: (avdName: string) =>
+            avdSnapshots.listAvdSnapshotDirectories(avdName),
+          listKnownAvdNames: () => avdSnapshots.listKnownAvdNames(),
+          findLiveEmulatorSerial: (avdName: string) => avdSnapshots.findLiveEmulatorSerial(avdName),
+          deleteVmSnapshot: (deviceId: string, snapshotName: string, timeoutMs: number) =>
+            avdSnapshots.deleteVmSnapshot(deviceId, snapshotName, timeoutMs),
+        },
+      });
+
+      const { evictedSnapshotNames } = await updateDeviceSnapshotConfig({
+        maxVmSnapshotsPerAvd: 1,
+      });
+
+      expect(evictedSnapshotNames).toEqual(["vm-older"]);
+      expect(await repository.getSnapshot("vm-touched")).toMatchObject({
+        lastAccessedAt: touchedAt,
+        sizeBytes: null,
+      });
+      expect(await repository.getSnapshot("vm-older")).toBeNull();
+    });
+
+    test("keeps a re-measurement-touched snapshot ahead of an older row when recording its size fails", async () => {
+      const touchedAt = new Date(3_000).toISOString();
+      const olderAt = new Date(1_000).toISOString();
+      const staleTouchedAt = new Date(500).toISOString();
+      await repository.insertSnapshot({
+        snapshotName: "vm-touched",
+        deviceId: EMULATOR.deviceId,
+        deviceName: AVD_NAME,
+        platform: "android",
+        snapshotType: "vm",
+        includeAppData: true,
+        includeSettings: false,
+        createdAt: staleTouchedAt,
+        lastAccessedAt: staleTouchedAt,
+        sizeBytes: null,
+        manifest: vmManifest("vm-touched", staleTouchedAt),
+      });
+      avdSnapshots.setVmSnapshot(AVD_NAME, "vm-touched", 2 * MB);
+      avdSnapshots.setVmSnapshot(AVD_NAME, "vm-older", 2 * MB);
+      await repository.insertSnapshot({
+        snapshotName: "vm-older",
+        deviceId: EMULATOR.deviceId,
+        deviceName: AVD_NAME,
+        platform: "android",
+        snapshotType: "vm",
+        includeAppData: true,
+        includeSettings: false,
+        createdAt: olderAt,
+        lastAccessedAt: olderAt,
+        sizeBytes: 2 * MB,
+        manifest: vmManifest("vm-older", olderAt),
+      });
+      const failingUpdateRepository = Object.create(repository) as typeof repository;
+      failingUpdateRepository.updateSnapshot = async (snapshotName, update) => {
+        if (snapshotName === "vm-touched" && update.sizeBytes !== undefined) {
+          throw new Error("snapshot repository unavailable");
+        }
+        await repository.updateSnapshot(snapshotName, update);
+      };
+
+      await setDeviceSnapshotManagerDependencies({
+        snapshotRepository: failingUpdateRepository as any,
+        avdSnapshots: {
+          measureVmSnapshotBytes: async (avdName: string, snapshotName: string) => {
+            if (snapshotName === "vm-touched") {
+              await repository.updateSnapshot(snapshotName, { lastAccessedAt: touchedAt });
+            }
+            return avdSnapshots.measureVmSnapshotBytes(avdName, snapshotName);
+          },
+          listAvdSnapshotDirectories: (avdName: string) =>
+            avdSnapshots.listAvdSnapshotDirectories(avdName),
+          listKnownAvdNames: () => avdSnapshots.listKnownAvdNames(),
+          findLiveEmulatorSerial: (avdName: string) => avdSnapshots.findLiveEmulatorSerial(avdName),
+          deleteVmSnapshot: (deviceId: string, snapshotName: string, timeoutMs: number) =>
+            avdSnapshots.deleteVmSnapshot(deviceId, snapshotName, timeoutMs),
+        },
+      });
+
+      const { evictedSnapshotNames } = await updateDeviceSnapshotConfig({
+        maxVmSnapshotsPerAvd: 1,
+      });
+
+      expect(evictedSnapshotNames).toEqual(["vm-older"]);
+      expect(await repository.getSnapshot("vm-touched")).toMatchObject({
+        lastAccessedAt: touchedAt,
+        sizeBytes: null,
+      });
+      expect(await repository.getSnapshot("vm-older")).toBeNull();
+    });
+
     test("does not stamp a stale re-measurement onto a concurrently replaced row", async () => {
       await seedUnsizedVmRow(2 * 1024 * MB);
       const replacementTimestamp = new Date(2_000).toISOString();
@@ -2173,6 +2304,52 @@ describe("reclaim never races a same-name capture (#6490 review)", () => {
     expect(avdSnapshots.getDeleteCalls()).toEqual([]);
     const survivor = await repository.getSnapshot("vm-superseded");
     expect(survivor?.sizeBytes).toBe(4 * 1024 * MB_LOCAL);
+    expect(avdSnapshots.hasVmSnapshot(AVD_NAME, "vm-superseded")).toBe(true);
+  });
+
+  test("eviction preserves a same-size same-type recapture with a fresh manifest timestamp", async () => {
+    await seed("vm-superseded", 1000);
+
+    // `insertSnapshot` preserves `createdAt`, and this recapture intentionally
+    // keeps all the other identity fields identical. Only the capture-stamped
+    // manifest timestamp can distinguish the replacement selected before this
+    // retention pass reaches its per-name exclusivity check.
+    const listSnapshots = repository.listSnapshots.bind(repository);
+    const originalTimestamp = new Date(1000).toISOString();
+    const replacementTimestamp = new Date(9000).toISOString();
+    let superseded = false;
+    (repository as any).listSnapshots = async (query: Record<string, unknown> = {}) => {
+      const rows = await listSnapshots(query as never);
+      if (!superseded && query.orderByLastAccessed === "asc") {
+        superseded = true;
+        await repository.insertSnapshot({
+          snapshotName: "vm-superseded",
+          deviceId: EMULATOR.deviceId,
+          deviceName: AVD_NAME,
+          platform: "android",
+          snapshotType: "vm",
+          includeAppData: true,
+          includeSettings: false,
+          createdAt: replacementTimestamp,
+          lastAccessedAt: originalTimestamp,
+          sizeBytes: 2 * 1024 * MB_LOCAL,
+          manifest: vmManifest("vm-superseded", replacementTimestamp),
+        });
+      }
+      return rows;
+    };
+
+    const { evictedSnapshotNames } = await updateDeviceSnapshotConfig({ maxVmArchiveSizeMb: 1 });
+
+    expect(superseded).toBe(true);
+    expect(evictedSnapshotNames).toEqual([]);
+    expect(avdSnapshots.getDeleteCalls()).toEqual([]);
+    expect(await repository.getSnapshot("vm-superseded")).toMatchObject({
+      createdAt: originalTimestamp,
+      lastAccessedAt: originalTimestamp,
+      sizeBytes: 2 * 1024 * MB_LOCAL,
+      manifest: { timestamp: replacementTimestamp },
+    });
     expect(avdSnapshots.hasVmSnapshot(AVD_NAME, "vm-superseded")).toBe(true);
   });
 });

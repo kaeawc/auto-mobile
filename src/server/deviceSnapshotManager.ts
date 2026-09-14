@@ -1195,7 +1195,8 @@ const SNAPSHOT_RECORD_SUPERSEDED = Symbol("snapshot-record-superseded");
 /**
  * Two records describe the same payload only if its stable capture fields still
  * match. A restore updates only `last_accessed_at`, so it is not an identity
- * field; a same-name capture still changes the device, creation time, or size.
+ * field. `manifest.timestamp` is included because every capture stamps it
+ * freshly, unlike `createdAt`, which `insertSnapshot` preserves on conflict.
  */
 function isSameSnapshotRecord(a: DeviceSnapshotRecord, b: DeviceSnapshotRecord): boolean {
   return (
@@ -1203,7 +1204,8 @@ function isSameSnapshotRecord(a: DeviceSnapshotRecord, b: DeviceSnapshotRecord):
     a.deviceName === b.deviceName &&
     a.snapshotType === b.snapshotType &&
     a.createdAt === b.createdAt &&
-    a.sizeBytes === b.sizeBytes
+    a.sizeBytes === b.sizeBytes &&
+    a.manifest.timestamp === b.manifest.timestamp
   );
 }
 
@@ -1351,19 +1353,19 @@ async function remeasureUnsizedVmSnapshots(
       }
 
       if (sizeBytes === null) {
-        return record;
+        return current;
       }
 
       try {
         await snapshotRepository.updateSnapshot(record.snapshotName, { sizeBytes });
-        return { ...record, sizeBytes };
+        return { ...current, sizeBytes };
       } catch (error) {
         logger.warn(
           `[DeviceSnapshot] Failed to record the re-measured size of VM snapshot ` +
             `'${record.snapshotName}': ${errorMessage(error)}`,
           error,
         );
-        return record;
+        return current;
       }
     });
     if (remeasured) {

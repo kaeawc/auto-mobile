@@ -208,9 +208,14 @@ export class DeviceSnapshotStore {
     try {
       entries = await fs.readdir(snapshotPath, { withFileTypes: true });
     } catch (error) {
-      // A snapshot archive that was never captured is genuinely empty.
-      logger.debug(`Failed to read snapshot archive ${snapshotPath}: ${error}`);
-      return 0;
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === "ENOENT") {
+        // A snapshot archive that was never captured is genuinely empty.
+        logger.debug(`Snapshot archive ${snapshotPath} does not exist: ${error}`);
+        return 0;
+      }
+      logger.warn(`Failed to read snapshot archive ${snapshotPath}: ${error}`, error);
+      return null;
     }
     return this.getDirectorySizeFromEntries(snapshotPath, entries);
   }

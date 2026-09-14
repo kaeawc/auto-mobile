@@ -235,9 +235,7 @@ export async function withVmRetentionSnapshotProtection<T>(
   useVmSnapshot: boolean,
   task: () => Promise<T>,
 ): Promise<T> {
-  if (
-    !(device.platform === "android" && device.deviceId.startsWith("emulator-") && useVmSnapshot)
-  ) {
+  if (!isAndroidEmulatorVmCapture(device, useVmSnapshot)) {
     return task();
   }
 
@@ -247,6 +245,10 @@ export async function withVmRetentionSnapshotProtection<T>(
   } finally {
     unprotectVmRetentionSnapshot(device.name, snapshotName);
   }
+}
+
+function isAndroidEmulatorVmCapture(device: BootedDevice, useVmSnapshot: boolean): boolean {
+  return device.platform === "android" && device.deviceId.startsWith("emulator-") && useVmSnapshot;
 }
 
 // Shared serialization primitive: run `task` after any prior holder of `key`
@@ -1102,13 +1104,6 @@ function assertSnapshotNameWritable(snapshotName: string): void {
   // name lock, and the record is replaced (not duplicated) by the repository
   // upsert — so the old check-then-create existence probe (a TOCTOU window) is
   // gone.
-  if (snapshotName.trim().toLowerCase() === AVD_DEFAULT_BOOT_SNAPSHOT.toLowerCase()) {
-    throw new ActionableError(
-      `Snapshot name '${AVD_DEFAULT_BOOT_SNAPSHOT}' is reserved for the emulator's own quick-boot ` +
-        "snapshot and cannot be used as an AutoMobile capture name.",
-    );
-  }
-
   if (isReservedScopeSegment(snapshotName)) {
     throw new ActionableError(
       `Snapshot name '${snapshotName}' is reserved. Please choose a different name.`,
@@ -1123,6 +1118,15 @@ function assertSnapshotNameWritable(snapshotName: string): void {
     throw new ActionableError(
       `Snapshot name '${snapshotName}' ends with the reserved '${SNAPSHOT_REPLACING_SUFFIX}' ` +
         "suffix. Please choose a different name.",
+    );
+  }
+}
+
+function assertVmSnapshotNameWritable(snapshotName: string): void {
+  if (snapshotName.trim().toLowerCase() === AVD_DEFAULT_BOOT_SNAPSHOT.toLowerCase()) {
+    throw new ActionableError(
+      `Snapshot name '${AVD_DEFAULT_BOOT_SNAPSHOT}' is reserved for the emulator's own quick-boot ` +
+        "snapshot and cannot be used as an AutoMobile capture name.",
     );
   }
 }
@@ -1982,6 +1986,7 @@ export async function captureDeviceSnapshot(
     await getDeviceSnapshotDependencies();
 
   const baseConfig = await getDeviceSnapshotConfig();
+  const useVmSnapshot = args.useVmSnapshot ?? baseConfig.useVmSnapshot;
 
   const snapshotName = args.snapshotName ?? snapshotStore.generateSnapshotName(device.name);
   // Reject a traversal/absolute name before any filesystem operation or capture
@@ -1990,6 +1995,9 @@ export async function captureDeviceSnapshot(
   // Reject reserved scope-root names (#5707). An existing same-name snapshot is
   // deliberately allowed through — it is overwritten atomically below (#5713).
   assertSnapshotNameWritable(snapshotName);
+  if (isAndroidEmulatorVmCapture(device, useVmSnapshot)) {
+    assertVmSnapshotNameWritable(snapshotName);
+  }
 
   // Cheapest possible hook for finishing reclaims that an offline emulator
   // blocked: this device is live and we already know its AVD, so the sweep is
@@ -2007,7 +2015,7 @@ export async function captureDeviceSnapshot(
     ...baseConfig,
     includeAppData: args.includeAppData ?? baseConfig.includeAppData,
     includeSettings: args.includeSettings ?? baseConfig.includeSettings,
-    useVmSnapshot: args.useVmSnapshot ?? baseConfig.useVmSnapshot,
+    useVmSnapshot,
     strictBackupMode: args.strictBackupMode ?? baseConfig.strictBackupMode,
     vmSnapshotTimeoutMs: args.vmSnapshotTimeoutMs ?? baseConfig.vmSnapshotTimeoutMs,
   };

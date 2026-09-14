@@ -162,6 +162,8 @@ describe("deviceSnapshotManager VM snapshot sizing and reclaim (#6490)", () => {
   });
 
   test("rejects the emulator-owned default_boot snapshot name before any capture side effect", async () => {
+    const replaceSnapshotData = spyOn(store, "replaceSnapshotData");
+    const getSnapshot = spyOn(repository, "getSnapshot");
     const capture = captureDeviceSnapshot(EMULATOR, {
       snapshotName: "default_boot",
       useVmSnapshot: true,
@@ -172,8 +174,62 @@ describe("deviceSnapshotManager VM snapshot sizing and reclaim (#6490)", () => {
       message: expect.stringContaining("default_boot"),
     } satisfies Partial<ActionableError>);
 
+    expect(replaceSnapshotData).not.toHaveBeenCalled();
+    expect(getSnapshot).not.toHaveBeenCalled();
     expect(await repository.getSnapshot("default_boot")).toBeNull();
     expect(avdSnapshots.hasVmSnapshot(AVD_NAME, "default_boot")).toBe(false);
+  });
+
+  test.each([
+    {
+      name: "iOS app_data capture",
+      device: { deviceId: "ios-sim", name: "iPhone", platform: "ios" as const },
+      args: {},
+    },
+    {
+      name: "physical Android capture",
+      device: { deviceId: "serial-123", name: "Pixel physical", platform: "android" as const },
+      args: {},
+    },
+    {
+      name: "non-VM Android emulator capture",
+      device: EMULATOR,
+      args: { useVmSnapshot: false },
+    },
+  ])("allows default_boot for $name", async ({ device, args }) => {
+    await setDeviceSnapshotManagerDependencies({
+      createCaptureProvider: () => ({
+        capture: async (captureArgs) => {
+          const timestamp = new Date(fakeTimer.now()).toISOString();
+          const manifest: DeviceSnapshotManifest = {
+            snapshotName: captureArgs.snapshotName,
+            timestamp,
+            deviceId: device.deviceId,
+            deviceName: device.name,
+            platform: device.platform,
+            snapshotType: "adb",
+            includeAppData: true,
+            includeSettings: false,
+          };
+          return {
+            snapshotName: captureArgs.snapshotName,
+            timestamp,
+            snapshotType: "adb" as const,
+            manifest,
+          };
+        },
+      }),
+    });
+    if (device.platform === "android" && device.deviceId !== EMULATOR.deviceId) {
+      await configRepository.setConfig({ ...config, useVmSnapshot: true });
+    }
+
+    const result = await captureDeviceSnapshot(device, {
+      snapshotName: "DEFAULT_BOOT",
+      ...args,
+    });
+
+    expect(result.result.snapshotName).toBe("DEFAULT_BOOT");
   });
 
   test.each(["DEFAULT_BOOT", "Default_boot"])(

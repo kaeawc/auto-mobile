@@ -205,6 +205,18 @@ describe("DeviceSnapshotStore", () => {
     expect(await store.getSnapshotSizeBytes("does-not-exist")).toBe(0);
   });
 
+  it("returns unknown when the snapshot archive cannot be read", async () => {
+    const readdirSpy = spyOn(fs, "readdir").mockRejectedValue(
+      Object.assign(new Error("permission denied"), { code: "EACCES" }),
+    );
+
+    try {
+      expect(await store.getSnapshotSizeBytes("unreadable")).toBeNull();
+    } finally {
+      readdirSpy.mockRestore();
+    }
+  });
+
   it("returns null when a nested snapshot entry vanishes during size measurement", async () => {
     const snapshotName = "partially-unreadable";
     const snapshotDir = store.getSnapshotPath(snapshotName);

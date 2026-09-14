@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   attributeRowByDumpsys,
+  intersectDumpsysRecordsForRow,
   parseDumpsysNotificationRecords,
 } from "../../../src/server/system-tray/notificationDumpsys";
 
@@ -144,6 +145,60 @@ describe("dumpsys notification records", () => {
         ]),
       ),
     ).toBe("com.google.android.apps.wellbeing");
+  });
+
+  test("keeps a row ambiguous when a competing before-snapshot record was dismissed", () => {
+    const rowTexts = new Set(["Need better sleep?", "Keep the screen dark"]);
+    const before = [
+      {
+        pkg: "com.example.requested",
+        titles: ["Need better sleep?"],
+        bodies: ["Keep the screen dark"],
+        hasCustomLayout: false,
+      },
+      {
+        pkg: "com.example.dismissed",
+        titles: ["Need better sleep?"],
+        bodies: ["Keep the screen dark"],
+        hasCustomLayout: false,
+      },
+    ];
+    const after = [before[0]!];
+
+    const intersected = intersectDumpsysRecordsForRow(before, after, rowTexts);
+    expect(intersected).toEqual([]);
+    expect(attributeRowByDumpsys(intersected, rowTexts)).toBeNull();
+  });
+
+  test("excludes a package that only appears in the after snapshot", () => {
+    const rowTexts = new Set(["Need better sleep?", "Keep the screen dark"]);
+    const requested = {
+      pkg: "com.example.requested",
+      titles: ["Need better sleep?"],
+      bodies: ["Keep the screen dark"],
+      hasCustomLayout: false,
+    };
+    const afterOnly = { ...requested, pkg: "com.example.after-only" };
+
+    expect(
+      intersectDumpsysRecordsForRow([requested], [requested, afterOnly], rowTexts).map(
+        (record) => record.pkg,
+      ),
+    ).toEqual(["com.example.requested"]);
+  });
+
+  test("falls back to the after snapshot when no before snapshot was captured", () => {
+    const after = parseDumpsysNotificationRecords(wellbeingRecord);
+    expect(
+      intersectDumpsysRecordsForRow(
+        undefined,
+        after,
+        new Set([
+          "Need better sleep?",
+          "Use Bedtime mode to silence your phone and keep the screen dark at bedtime",
+        ]),
+      ),
+    ).toEqual(after);
   });
 
   test("requires every populated extras category to be rendered by the row", () => {

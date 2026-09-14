@@ -132,6 +132,110 @@ describe("session log contract (#7006)", () => {
     ResourceRegistry.clearResources();
   });
 
+  test("round-trips a files path containing a comma", () => {
+    ResourceRegistry.clearResources();
+    ResourceRegistry.registerTemplate(
+      SESSION_LOG_RESOURCE_TEMPLATE,
+      "x",
+      "x",
+      "application/json",
+      async () => ({ uri: "x" }),
+    );
+    const request = {
+      appId: "com.example.app",
+      maxBytes: SESSION_LOG_DEFAULT_MAX_BYTES,
+      files: { container: "documents" as const, paths: ["a,b.log"] },
+    };
+    const uri = buildSessionLogResourceUri("session-1", request);
+    const match = ResourceRegistry.matchTemplate(uri);
+    expect(match).toBeDefined();
+    const { appId, sessionUuid, ...query } = match!.params;
+    expect(sessionUuid).toBe("session-1");
+    expect(parseSessionLogQuery(appId, query)).toEqual(request);
+    ResourceRegistry.clearResources();
+  });
+
+  test("round-trips an app group path containing a comma", () => {
+    ResourceRegistry.clearResources();
+    ResourceRegistry.registerTemplate(
+      SESSION_LOG_RESOURCE_TEMPLATE,
+      "x",
+      "x",
+      "application/json",
+      async () => ({ uri: "x" }),
+    );
+    const request = {
+      appId: "com.example.app",
+      maxBytes: SESSION_LOG_DEFAULT_MAX_BYTES,
+      appGroup: { groupId: "group.com.example.shared", paths: ["a,b.log"] },
+    };
+    const uri = buildSessionLogResourceUri("session-1", request);
+    const match = ResourceRegistry.matchTemplate(uri);
+    expect(match).toBeDefined();
+    const { appId, sessionUuid, ...query } = match!.params;
+    expect(sessionUuid).toBe("session-1");
+    expect(parseSessionLogQuery(appId, query)).toEqual(request);
+    ResourceRegistry.clearResources();
+  });
+
+  test("round-trips multiple files paths", () => {
+    ResourceRegistry.clearResources();
+    ResourceRegistry.registerTemplate(
+      SESSION_LOG_RESOURCE_TEMPLATE,
+      "x",
+      "x",
+      "application/json",
+      async () => ({ uri: "x" }),
+    );
+    const request = {
+      appId: "com.example.app",
+      maxBytes: SESSION_LOG_DEFAULT_MAX_BYTES,
+      files: { container: "documents" as const, paths: ["a.log", "b.log", "c.log"] },
+    };
+    const uri = buildSessionLogResourceUri("session-1", request);
+    const match = ResourceRegistry.matchTemplate(uri);
+    expect(match).toBeDefined();
+    const { appId, sessionUuid, ...query } = match!.params;
+    expect(sessionUuid).toBe("session-1");
+    expect(parseSessionLogQuery(appId, query)).toEqual(request);
+    ResourceRegistry.clearResources();
+  });
+
+  test("round-trips files paths with spaces and percent characters", () => {
+    ResourceRegistry.clearResources();
+    ResourceRegistry.registerTemplate(
+      SESSION_LOG_RESOURCE_TEMPLATE,
+      "x",
+      "x",
+      "application/json",
+      async () => ({ uri: "x" }),
+    );
+    const request = {
+      appId: "com.example.app",
+      maxBytes: SESSION_LOG_DEFAULT_MAX_BYTES,
+      files: { container: "documents" as const, paths: ["log file.log", "100%.log"] },
+    };
+    const uri = buildSessionLogResourceUri("session-1", request);
+    const match = ResourceRegistry.matchTemplate(uri);
+    expect(match).toBeDefined();
+    const { appId, sessionUuid, ...query } = match!.params;
+    expect(sessionUuid).toBe("session-1");
+    expect(parseSessionLogQuery(appId, query)).toEqual(request);
+    ResourceRegistry.clearResources();
+  });
+
+  test("rejects malformed percent-escapes in path lists", () => {
+    expect(() => parseSessionLogQuery("com.example.app", { paths: "bad%escape" })).toThrow(
+      /paths contains an invalid percent-escape: bad%escape/,
+    );
+    expect(() =>
+      parseSessionLogQuery("com.example.app", {
+        groupId: "group.com.example.shared",
+        groupPaths: "bad%escape",
+      }),
+    ).toThrow(/paths contains an invalid percent-escape: bad%escape/);
+  });
+
   test("resetAppLogs schema accepts aliases and rejects traversal", () => {
     expect(
       resetAppLogsSchema.parse({ bundleId: "com.example.app", paths: ["logs/app.log"] }),

@@ -202,7 +202,14 @@ function splitPathList(value: string): string[] {
   return value
     .split(",")
     .map((path) => path.trim())
-    .filter((path) => path.length > 0);
+    .filter((path) => path.length > 0)
+    .map((path) => {
+      try {
+        return decodeURIComponent(path);
+      } catch (error) {
+        throw new Error(`paths contains an invalid percent-escape: ${path}`, { cause: error });
+      }
+    });
 }
 
 function parseFilesSource(query: Record<string, string>): SessionLogFilesRequest | undefined {
@@ -294,12 +301,12 @@ export function buildSessionLogResourceUri(
   const query = new URLSearchParams();
   if (request.files) {
     query.set("container", request.files.container);
-    query.set("paths", request.files.paths.join(","));
+    query.set("paths", request.files.paths.map(encodeURIComponent).join(","));
   }
   if (request.appGroup) {
     query.set("groupId", request.appGroup.groupId);
     if (request.appGroup.paths.length > 0) {
-      query.set("groupPaths", request.appGroup.paths.join(","));
+      query.set("groupPaths", request.appGroup.paths.map(encodeURIComponent).join(","));
     }
   }
   if (request.unifiedLog) {

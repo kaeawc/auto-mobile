@@ -598,9 +598,9 @@ export function formatToolParamError(
         candidate.union?.unionId === unionId &&
         !isUnrecognizedKeys(candidate.issue) &&
         !isNeverArtifact(candidate.issue) &&
-        candidatePath.length === issue.path.length + 1 &&
-        candidatePath.slice(0, -1).every((segment, index) => segment === issue.path[index]) &&
-        keys.includes(String(candidatePath.at(-1)))
+        candidatePath.length > issue.path.length &&
+        issue.path.every((segment, index) => segment === candidatePath[index]) &&
+        keys.includes(String(candidatePath[issue.path.length]))
       );
     });
   const render = (entry: FlattenedIssue): string[] => {

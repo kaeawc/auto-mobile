@@ -126,6 +126,14 @@ describe("actionable interaction schema errors", () => {
       expect(message).toContain("selector Mutually exclusive keys");
     });
 
+    // #6996 / PR review: preserve nested array-item value errors beside a
+    // direct selector conflict instead of requiring a second round trip.
+    test("a nested array-item value error beside a selector conflict survives branch selection", () => {
+      const message = parseSelector({ elementId: "id", textAny: [123] });
+      expect(message).toContain("selector Mutually exclusive keys");
+      expect(message).toContain("selector.textAny.0 expected string, received number");
+    });
+
     // PR #6882 review: the caller already passed `index` at the top level, so
     // the remedy is deleting the nested duplicate, not "did you mean".
     test("does not point at a top-level parameter the caller already supplied", () => {

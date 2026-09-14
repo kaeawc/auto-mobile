@@ -87,6 +87,28 @@ describe("SimCtlClient runtime resolution", () => {
     expect(calls).toContain("xcrun --sdk iphonesimulator --show-sdk-version");
   });
 
+  test("tier 1: minor version matching stops at component boundaries", async () => {
+    const { simctl } = createClient("26.1", [
+      { version: "26.1.0", identifier: "com.apple.CoreSimulator.SimRuntime.iOS-26-1" },
+      { version: "26.10.0", identifier: "com.apple.CoreSimulator.SimRuntime.iOS-26-10" },
+    ]);
+
+    expect(await simctl.resolveRuntimeIdentifier()).toBe(
+      "com.apple.CoreSimulator.SimRuntime.iOS-26-1",
+    );
+  });
+
+  test("tier 1: patch version matching stops at component boundaries", async () => {
+    const { simctl } = createClient("26.3.1", [
+      { version: "26.3.1", identifier: "com.apple.CoreSimulator.SimRuntime.iOS-26-3-1" },
+      { version: "26.3.10", identifier: "com.apple.CoreSimulator.SimRuntime.iOS-26-3-10" },
+    ]);
+
+    expect(await simctl.resolveRuntimeIdentifier()).toBe(
+      "com.apple.CoreSimulator.SimRuntime.iOS-26-3-1",
+    );
+  });
+
   test("tier 2: major.minor fallback when the exact patch version is absent", async () => {
     const { simctl } = createClient("26.3.1", [
       { version: "26.3.0", identifier: "com.apple.CoreSimulator.SimRuntime.iOS-26-3" },

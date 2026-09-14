@@ -446,13 +446,18 @@ function compareVersions(a: string, b: string): number {
   return left && right ? compareSimctlVersions(left, right) : Number.NaN;
 }
 
-/** Highest-versioned runtime whose version starts with `prefix`, if any. */
+/** Highest-versioned runtime whose dotted version starts with complete components from `prefix`. */
 function pickHighestRuntime(
   runtimes: AppleDeviceRuntime[],
   prefix: string,
 ): AppleDeviceRuntime | undefined {
+  const componentPrefix = prefix.replace(/\.+$/, "");
   return runtimes
-    .filter((runtime) => typeof runtime.version === "string" && runtime.version.startsWith(prefix))
+    .filter(
+      (runtime) =>
+        typeof runtime.version === "string" &&
+        (runtime.version === componentPrefix || runtime.version.startsWith(`${componentPrefix}.`)),
+    )
     .sort((a, b) => compareVersions(a.version, b.version))
     .pop();
 }

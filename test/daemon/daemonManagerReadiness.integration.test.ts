@@ -825,7 +825,7 @@ describe("DaemonManager readiness", () => {
     const readySpy = spyOn(manager, "waitForReady").mockResolvedValue(false);
 
     try {
-      await expect(manager.start()).resolves.toBeUndefined();
+      await expect(manager.start()).resolves.toBe("started");
       expect(statusCalls).toBe(3);
       expect(clients[0].connectCallCount).toBe(1);
       expect(spawner.process.signals).toEqual([]);
@@ -930,7 +930,7 @@ describe("DaemonManager readiness", () => {
     );
 
     try {
-      await expect(manager.start()).resolves.toBeUndefined();
+      await expect(manager.start()).resolves.toBe("joined");
       expect(reachability.calls).toBeGreaterThanOrEqual(2);
       // We must never terminate the peer daemon we joined.
       expect(spawner.process.signals).toEqual([]);
@@ -1011,7 +1011,7 @@ describe("DaemonManager readiness", () => {
     );
 
     try {
-      await expect(manager.start()).resolves.toBeUndefined();
+      await expect(manager.start()).resolves.toBe("joined");
       expect(reachability.calls).toBeGreaterThanOrEqual(1);
       // Exactly one scan (the pre-spawn reuse check); the rejoin joined via the probe
       // without ever consulting the scan — proving socket-first ordering.
@@ -1051,7 +1051,7 @@ describe("DaemonManager readiness", () => {
     );
 
     try {
-      await expect(manager.start()).resolves.toBeUndefined();
+      await expect(manager.start()).resolves.toBe("joined");
       // Two probes: the first (miss) and the final probe after the empty scan (join).
       expect(reachability.calls).toBe(2);
       expect(spawner.process.signals).toEqual([]);

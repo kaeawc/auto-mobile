@@ -1905,6 +1905,158 @@ describe("DaemonMcpProxy", () => {
         }
       });
 
+      test("waits through a follow-up restart gap before verifying startup options", async () => {
+        const timer = new FakeTimer();
+        timer.enableAutoAdvance();
+        const fakeClient = new FakeDaemonClient({
+          daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+        });
+        const fakeManager = new FakeDaemonManager();
+        const initialStatus = runningStatus({ embeddedSdk: false });
+        const successorStatus = runningStatus({ embeddedSdk: true });
+        fakeManager.statusResult = successorStatus;
+        fakeManager.statusResults = [
+          initialStatus,
+          initialStatus,
+          initialStatus,
+          { running: false },
+          successorStatus,
+        ];
+        const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+        const proxy = new DaemonMcpProxy({
+          clientFactory: () => fakeClient,
+          daemonManager: fakeManager,
+          daemonOptions: { embeddedSdk: true },
+          timer,
+        });
+
+        try {
+          await proxy.listTools();
+          expect(fakeManager.restartCallCount).toBe(1);
+        } finally {
+          isAvailableSpy.mockRestore();
+          await proxy.close();
+        }
+      });
+
+      test("probes a ready successor after restart exhausts the reconciliation deadline", async () => {
+        const timer = new FakeTimer();
+        const restartElapsedMs = 1_000;
+        const fakeClient = new FakeDaemonClient({
+          daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+        });
+        class DeadlineConsumingManager extends FakeDaemonManager {
+          override async restart(
+            options?: DaemonOptions,
+            expectedDaemon?: DaemonStatus,
+          ): Promise<DaemonRestartResult> {
+            const result = await super.restart(options, expectedDaemon);
+            timer.advanceTime(restartElapsedMs);
+            return result;
+          }
+        }
+        const fakeManager = new DeadlineConsumingManager();
+        const initialStatus = runningStatus({ embeddedSdk: false });
+        const successorStatus = runningStatus({ embeddedSdk: true });
+        fakeManager.statusResults = [initialStatus, initialStatus, initialStatus, successorStatus];
+        const waitForReadySpy = spyOn(fakeManager, "waitForReady").mockImplementation(
+          async (timeoutMs) => {
+            timer.advanceTime(timeoutMs);
+            return true;
+          },
+        );
+        const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+        const proxy = new DaemonMcpProxy({
+          clientFactory: () => fakeClient,
+          daemonManager: fakeManager,
+          daemonOptions: { embeddedSdk: true },
+          timer,
+        });
+
+        try {
+          await proxy.listTools();
+          expect(fakeManager.restartCallCount).toBe(1);
+          expect(waitForReadySpy).toHaveBeenCalledWith(
+            DAEMON_STARTUP_TIMEOUT_MS - restartElapsedMs,
+          );
+        } finally {
+          isAvailableSpy.mockRestore();
+          waitForReadySpy.mockRestore();
+          await proxy.close();
+        }
+      });
+
+      test("waits through a transient preflight error during a restart handoff", async () => {
+        const timer = new FakeTimer();
+        timer.enableAutoAdvance();
+        const fakeClient = new FakeDaemonClient({
+          daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+        });
+        const fakeManager = new FakeDaemonManager();
+        const initialStatus = runningStatus({ embeddedSdk: false });
+        const successorStatus = runningStatus({ embeddedSdk: true });
+        fakeManager.statusResult = successorStatus;
+        fakeManager.statusResults = [initialStatus, initialStatus, successorStatus];
+        const probeResults: (DaemonStatus | Error)[] = [
+          initialStatus,
+          new DaemonUnavailableError("Daemon socket not found during handoff"),
+          successorStatus,
+        ];
+        const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+        const proxy = new DaemonMcpProxy({
+          clientFactory: () => fakeClient,
+          daemonManager: fakeManager,
+          daemonOptions: { embeddedSdk: true },
+          daemonStatusProbe: async () => {
+            const result = probeResults.shift();
+            if (result instanceof Error) {
+              throw result;
+            }
+            return result ?? successorStatus;
+          },
+          timer,
+        });
+
+        try {
+          await proxy.listTools();
+          expect(fakeManager.restartCallCount).toBe(1);
+          expect(probeResults).toEqual([]);
+        } finally {
+          isAvailableSpy.mockRestore();
+          await proxy.close();
+        }
+      });
+
+      test("fails once when an owned restart leaves startup options mismatched", async () => {
+        const fakeClient = new FakeDaemonClient({
+          daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+        });
+        const fakeManager = new FakeDaemonManager();
+        const mismatchedStatus = runningStatus({ embeddedSdk: false });
+        fakeManager.statusResults = [
+          mismatchedStatus,
+          mismatchedStatus,
+          mismatchedStatus,
+          mismatchedStatus,
+        ];
+        const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+        const proxy = new DaemonMcpProxy({
+          clientFactory: () => fakeClient,
+          daemonManager: fakeManager,
+          daemonOptions: { embeddedSdk: true },
+        });
+
+        try {
+          await expect(proxy.listTools()).rejects.toThrow(
+            "Daemon restart completed but startup options still differ",
+          );
+          expect(fakeManager.restartCallCount).toBe(1);
+        } finally {
+          isAvailableSpy.mockRestore();
+          await proxy.close();
+        }
+      });
+
       test("concurrent narrow and superset clients converge after the narrow restart wins (#7111)", async () => {
         const narrowOptions = {
           enabledTools: ["deleteDevice", "listDevices", "provisionDevice"],

@@ -21,7 +21,7 @@ export class DaemonRestartDeferredError extends DaemonUnavailableError {
     super(
       `AutoMobile daemon restart deferred (${reason}). ` +
         `Retry after ${ACTIVE_PROVISIONING_RESTART_RETRY_MS}ms; use an explicit daemon restart ` +
-        "only after confirming that no device provisioning operation is active.",
+        "only after confirming that no device operation is active.",
     );
     this.name = "DaemonRestartDeferredError";
   }

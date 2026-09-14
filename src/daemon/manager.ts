@@ -618,13 +618,19 @@ interface StartupLockHolder {
   token: string | undefined;
 }
 
+export type DaemonStartResult = "started" | "joined";
+
+function restartResultFromStart(result: DaemonStartResult): DaemonRestartResult {
+  return result === "joined" ? "joined" : "restarted";
+}
+
 /**
  * Surface of DaemonManager used by clients (e.g. DaemonMcpProxy).
  * Allows injecting fakes in tests without subclassing the concrete class.
  */
 export interface DaemonManagerLike {
   status(): Promise<DaemonStatus>;
-  start(options?: DaemonOptions): Promise<void>;
+  start(options?: DaemonOptions): Promise<DaemonStartResult>;
   /**
    * When `expectedDaemon` is supplied, restart only that verified generation.
    * A changed generation means another client already completed the handoff.
@@ -1045,14 +1051,13 @@ export class DaemonManager implements DaemonManagerLike {
    * Uses an atomic file lock to prevent thundering herd when multiple
    * proxy processes try to start the daemon simultaneously.
    */
-  async start(options: DaemonOptions = {}): Promise<void> {
+  async start(options: DaemonOptions = {}): Promise<DaemonStartResult> {
     if (!this.acquireLock()) {
-      await this.startByAwaitingLockHolder(options);
-      return;
+      return await this.startByAwaitingLockHolder(options);
     }
 
     try {
-      await this.startUnlocked(options);
+      return await this.startUnlocked(options);
     } finally {
       this.releaseLock();
     }
@@ -1072,7 +1077,7 @@ export class DaemonManager implements DaemonManagerLike {
    * releases its lock in the window between a poll's socket check and its liveness
    * check.
    */
-  private async startByAwaitingLockHolder(options: DaemonOptions): Promise<void> {
+  private async startByAwaitingLockHolder(options: DaemonOptions): Promise<DaemonStartResult> {
     let holderLogPath: string | null = null;
     let waitedOnHolder = this.readStartupLockHolder();
 
@@ -1104,18 +1109,17 @@ export class DaemonManager implements DaemonManagerLike {
       );
       if (ready) {
         stderrLog("Daemon started by another process");
-        return;
+        return "joined";
       }
 
       // The holder we waited on is gone — take over its start.
       if (this.acquireLock()) {
         stderrLog("Previous lock holder failed, taking over daemon start...");
         try {
-          await this.startUnlocked(options);
+          return await this.startUnlocked(options);
         } finally {
           this.releaseLock();
         }
-        return;
       }
 
       // We could not take over, so the lock is still held. Keep waiting only for a
@@ -1151,7 +1155,7 @@ export class DaemonManager implements DaemonManagerLike {
       (await this.verifyDaemonConnection(confirmBudget))
     ) {
       stderrLog("Daemon became ready before reporting startup failure");
-      return;
+      return "joined";
     }
     throw await this.createLockHolderStartupFailure(holderLogPath);
   }
@@ -1159,7 +1163,7 @@ export class DaemonManager implements DaemonManagerLike {
   /**
    * Internal start implementation (caller must hold lock).
    */
-  private async startUnlocked(options: DaemonOptions): Promise<void> {
+  private async startUnlocked(options: DaemonOptions): Promise<DaemonStartResult> {
     // The overall start budget, captured before any work so the post-exit peer
     // rejoin (issue #6103) can only ever spend time the caller still has. The
     // client times its `tools/list` out at DAEMON_STARTUP_TIMEOUT_MS; launchAndWait
@@ -1172,7 +1176,7 @@ export class DaemonManager implements DaemonManagerLike {
     const status = await this.status();
     if (status.running) {
       stderrLog(`Daemon is already running (PID ${status.pid}, port ${status.port})`);
-      return;
+      return "joined";
     }
 
     // A missing or stale PID record must not turn an ordinary start request into
@@ -1202,7 +1206,7 @@ export class DaemonManager implements DaemonManagerLike {
       );
       if (await this.waitForExistingDaemon(existingDaemonWaitBudget)) {
         stderrLog("Reusing existing responsive daemon");
-        return;
+        return "joined";
       }
 
       throw new ActionableError(
@@ -1356,7 +1360,7 @@ export class DaemonManager implements DaemonManagerLike {
         stderrLog(
           "A peer daemon became ready on the shared socket after our launch exited; joining it",
         );
-        return;
+        return "joined";
       }
       throw error;
     } finally {
@@ -1368,6 +1372,7 @@ export class DaemonManager implements DaemonManagerLike {
     stderrLog(`Daemon started successfully (PID ${newStatus.pid}, port ${newStatus.port})`);
     stderrLog(`Socket: ${newStatus.socketPath}`);
     stderrLog(`Logs: ${logPath}`);
+    return "started";
   }
 
   private withDaemonOptions(
@@ -2077,8 +2082,8 @@ export class DaemonManager implements DaemonManagerLike {
       // Another automatic client may win the shared startup lock during this
       // handoff. Ordinary start() joins that winner instead of terminating it.
       await this.timer.sleep(DAEMON_RESTART_HANDOFF_DELAY_MS);
-      await this.start(restartOptions);
-      return "restarted";
+      const startResult = await this.start(restartOptions);
+      return restartResultFromStart(startResult);
     }
 
     // All restart cleanup follows the same 10s graceful + 1s forced-stop
@@ -2099,8 +2104,8 @@ export class DaemonManager implements DaemonManagerLike {
     await this.assertNoSurvivingDaemonBeforeRestart(restartOptions);
     // Wait a bit before starting
     await this.timer.sleep(DAEMON_RESTART_HANDOFF_DELAY_MS);
-    await this.start(restartOptions);
-    return "restarted";
+    const startResult = await this.start(restartOptions);
+    return restartResultFromStart(startResult);
   }
 
   private isSameDaemonGeneration(current: DaemonStatus, expected: DaemonStatus): boolean {

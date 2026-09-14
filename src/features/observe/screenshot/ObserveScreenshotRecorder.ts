@@ -232,6 +232,13 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
       const errorMsg = screenshotResult.error || "Failed to capture screenshot";
       if (options.ignoreCancel && errorMsg.includes(OPERATION_CANCELLED_MESSAGE)) {
         logger.debug("[OBSERVE] Screenshot capture cancelled");
+        if (options.observationId) {
+          this.store.endObservation(
+            this.device.deviceId,
+            options.observationId,
+            "capture cancelled",
+          );
+        }
         return;
       }
       update(undefined, errorMsg);

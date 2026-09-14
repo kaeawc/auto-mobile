@@ -171,6 +171,29 @@ describe("InMemoryScreenshotStateStore", () => {
     expect(store.getPathForObservation("device-A", "observation-A")).toBe("/tmp/exact.png");
   });
 
+  test("does not recreate cleared observation state when its cancelled capture finishes late", () => {
+    const store = new InMemoryScreenshotStateStore(new FakeTimer());
+
+    store.beginObservation("device-A", "observation-A");
+    store.clear("device-A");
+    store.updateForObservation("device-A", "observation-A", "/tmp/late.png");
+    store.endObservation("device-A", "observation-A", "capture cancelled");
+
+    expect(store.getPathForObservation("device-A", "observation-A")).toBeUndefined();
+    expect(store.getErrorForObservation("device-A", "observation-A")).toBeUndefined();
+  });
+
+  test("allows a new observation to write after a device clear", () => {
+    const store = new InMemoryScreenshotStateStore(new FakeTimer());
+
+    store.beginObservation("device-A", "obsolete-observation");
+    store.clear("device-A");
+    store.beginObservation("device-A", "new-observation");
+    store.updateForObservation("device-A", "new-observation", "/tmp/new.png");
+
+    expect(store.getPathForObservation("device-A", "new-observation")).toBe("/tmp/new.png");
+  });
+
   test("waits for the observation-scoped write, then settles on update", async () => {
     const timer = new FakeTimer();
     const store = new InMemoryScreenshotStateStore(timer);

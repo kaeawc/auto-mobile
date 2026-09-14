@@ -230,6 +230,9 @@ export class ScreenshotJobTracker {
             logger.warn(`[ScreenshotJobTracker] Completion handler failed: ${err}`);
           }
         }
+        if (!ScreenshotJobTracker.completionReaderCounts.get(jobId)) {
+          ScreenshotJobTracker.evictCompletion(jobId);
+        }
         return result;
       });
 

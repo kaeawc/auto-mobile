@@ -1,5 +1,6 @@
 import type { Timer } from "../../../utils/SystemTimer";
 import { defaultTimer } from "../../../utils/SystemTimer";
+import { logger } from "../../../utils/logger";
 
 /**
  * TTL for cached per-device screenshot state. Mirrors
@@ -59,6 +60,8 @@ export class InMemoryScreenshotStateStore implements ScreenshotStateStore {
   private states: Map<string, ScreenshotState> = new Map();
   private observationStates: Map<string, Map<string, ScreenshotState>> = new Map();
   private pendingObservationWaiters: Map<string, Map<string, Set<() => void>>> = new Map();
+  /** Observation IDs that were active when their device state was explicitly cleared. */
+  private clearedObservationIds: Map<string, Set<string>> = new Map();
   private timer: Timer;
 
   constructor(timer: Timer = defaultTimer) {
@@ -79,6 +82,12 @@ export class InMemoryScreenshotStateStore implements ScreenshotStateStore {
     path?: string,
     error?: string,
   ): void {
+    if (this.isClearedObservation(deviceId, observationId)) {
+      logger.debug(
+        `[OBSERVE] Ignoring late screenshot update for cleared observation ${observationId} on ${deviceId}`,
+      );
+      return;
+    }
     const states = this.observationStates.get(deviceId) ?? new Map<string, ScreenshotState>();
     states.delete(observationId);
     states.set(observationId, {
@@ -98,6 +107,7 @@ export class InMemoryScreenshotStateStore implements ScreenshotStateStore {
   }
 
   beginObservation(deviceId: string, observationId: string): void {
+    this.clearObservationTombstone(deviceId, observationId);
     const pendingForDevice = this.pendingObservationWaiters.get(deviceId);
     if (pendingForDevice?.has(observationId)) {
       return;
@@ -137,6 +147,12 @@ export class InMemoryScreenshotStateStore implements ScreenshotStateStore {
   }
 
   endObservation(deviceId: string, observationId: string, reason: string): void {
+    if (this.isClearedObservation(deviceId, observationId)) {
+      logger.debug(
+        `[OBSERVE] Ignoring late screenshot completion for cleared observation ${observationId} on ${deviceId}`,
+      );
+      return;
+    }
     const existing = this.findObservation(deviceId, observationId);
     // A late cancellation must not replace a real path or error recorded by another capture.
     if (!existing || (existing.path === null && existing.error === null)) {
@@ -166,10 +182,17 @@ export class InMemoryScreenshotStateStore implements ScreenshotStateStore {
 
   clear(deviceId?: string): void {
     if (deviceId) {
+      this.markActiveObservationsCleared(deviceId);
       this.states.delete(deviceId);
       this.observationStates.delete(deviceId);
       this.completeAllObservationsForDevice(deviceId);
     } else {
+      for (const clearedDeviceId of new Set([
+        ...this.observationStates.keys(),
+        ...this.pendingObservationWaiters.keys(),
+      ])) {
+        this.markActiveObservationsCleared(clearedDeviceId);
+      }
       this.states.clear();
       this.observationStates.clear();
       for (const pendingDeviceId of [...this.pendingObservationWaiters.keys()]) {
@@ -240,6 +263,36 @@ export class InMemoryScreenshotStateStore implements ScreenshotStateStore {
     for (const resolve of waiters) {
       resolve();
     }
+  }
+
+  private isClearedObservation(deviceId: string, observationId: string): boolean {
+    return this.clearedObservationIds.get(deviceId)?.has(observationId) ?? false;
+  }
+
+  private clearObservationTombstone(deviceId: string, observationId: string): void {
+    const clearedForDevice = this.clearedObservationIds.get(deviceId);
+    if (!clearedForDevice) {
+      return;
+    }
+    clearedForDevice.delete(observationId);
+    if (clearedForDevice.size === 0) {
+      this.clearedObservationIds.delete(deviceId);
+    }
+  }
+
+  private markActiveObservationsCleared(deviceId: string): void {
+    const observationIds = new Set([
+      ...(this.observationStates.get(deviceId)?.keys() ?? []),
+      ...(this.pendingObservationWaiters.get(deviceId)?.keys() ?? []),
+    ]);
+    if (observationIds.size === 0) {
+      return;
+    }
+    const clearedForDevice = this.clearedObservationIds.get(deviceId) ?? new Set<string>();
+    for (const observationId of observationIds) {
+      clearedForDevice.add(observationId);
+    }
+    this.clearedObservationIds.set(deviceId, clearedForDevice);
   }
 
   private completeAllObservationsForDevice(deviceId: string): void {

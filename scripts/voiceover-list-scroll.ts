@@ -76,6 +76,7 @@ function makeInitialListObserve(): ObserveResult {
   }));
 
   return {
+    observationId: "voiceover-list-initial",
     updatedAt: Date.now(),
     screenSize: { width: 390, height: 844 },
     systemInsets: { top: 59, bottom: 34, left: 0, right: 0 },

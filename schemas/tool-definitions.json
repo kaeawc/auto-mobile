@@ -6862,6 +6862,17 @@
           "required": ["path", "format", "payload", "bytes", "tool"],
           "additionalProperties": {}
         }
+      },
+      "if": {
+        "properties": {
+          "accessibilityAuditSkipped": {
+            "const": "settled_capture_adopted"
+          }
+        },
+        "required": ["accessibilityAuditSkipped"]
+      },
+      "then": {
+        "required": ["observationId"]
       }
     },
     "_meta": {
@@ -11733,7 +11744,7 @@
                   }
                 }
               },
-              "required": ["isDiff", "skeleton", "added", "removed", "changed"],
+              "required": ["isDiff", "observationId", "skeleton", "added", "removed", "changed"],
               "additionalProperties": {}
             },
             {
@@ -12925,6 +12936,7 @@
                   "const": "settled_capture_adopted"
                 }
               },
+              "required": ["observationId"],
               "additionalProperties": {}
             },
             {

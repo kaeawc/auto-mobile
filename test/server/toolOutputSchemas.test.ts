@@ -201,7 +201,9 @@ describe("accessibility audit skip metadata schema (#6926)", () => {
   const accessibilityAuditSkipped = "settled_capture_adopted" as const;
 
   test("observation summaries accept and preserve the skip reason", () => {
-    expect(observationSummarySchema.parse({ accessibilityAuditSkipped })).toMatchObject({
+    expect(
+      observationSummarySchema.parse({ observationId: "summary", accessibilityAuditSkipped }),
+    ).toMatchObject({
       accessibilityAuditSkipped,
     });
   });
@@ -209,6 +211,7 @@ describe("accessibility audit skip metadata schema (#6926)", () => {
   test("diff observations accept the skip reason", () => {
     expect(
       observeDiffSchema.parse({
+        observationId: "diff",
         isDiff: true,
         skeleton: [],
         added: [],
@@ -220,13 +223,20 @@ describe("accessibility audit skip metadata schema (#6926)", () => {
   });
 
   test("full observe results accept the skip reason", () => {
-    expect(observeResultSchema.parse({ accessibilityAuditSkipped })).toMatchObject({
+    expect(
+      observeResultSchema.parse({ observationId: "result", accessibilityAuditSkipped }),
+    ).toMatchObject({
       accessibilityAuditSkipped,
     });
   });
 
   test("rejects an invalid skip reason", () => {
-    expect(() => observationSummarySchema.parse({ accessibilityAuditSkipped: "bogus" })).toThrow();
+    expect(() =>
+      observationSummarySchema.parse({
+        observationId: "summary",
+        accessibilityAuditSkipped: "bogus",
+      }),
+    ).toThrow();
   });
 });
 
@@ -279,13 +289,14 @@ describe("elementBoundsSchema: fractional iOS point coordinates (#3206)", () => 
  */
 describe("observationOutputSchema: discriminated union of full observation vs diff (#6221 item 4)", () => {
   test("accepts a full observation (no `isDiff`)", () => {
-    const full = { activeWindow: { appId: "com.example" } };
+    const full = { observationId: "full", activeWindow: { appId: "com.example" } };
     const parsed = observationOutputSchema.parse(full);
     expect((parsed as Record<string, unknown>).isDiff).toBeUndefined();
   });
 
   test("accepts a diff (`isDiff: true`) that ALWAYS carries a `skeleton`", () => {
     const diff = {
+      observationId: "diff",
       isDiff: true,
       skeleton: [
         {
@@ -324,19 +335,31 @@ describe("observationOutputSchema: discriminated union of full observation vs di
 
   test("observationSummarySchema itself rejects `isDiff: true` — it is a genuinely-typed member, not just permissively passed through", () => {
     expect(() =>
-      observationSummarySchema.parse({ isDiff: true, activeWindow: { appId: "com.example" } }),
+      observationSummarySchema.parse({
+        observationId: "summary",
+        isDiff: true,
+        activeWindow: { appId: "com.example" },
+      }),
     ).toThrow();
     // `isDiff` absent, or explicitly `false`, both still validate.
     expect(() =>
-      observationSummarySchema.parse({ activeWindow: { appId: "com.example" } }),
+      observationSummarySchema.parse({
+        observationId: "summary",
+        activeWindow: { appId: "com.example" },
+      }),
     ).not.toThrow();
     expect(() =>
-      observationSummarySchema.parse({ isDiff: false, activeWindow: { appId: "com.example" } }),
+      observationSummarySchema.parse({
+        observationId: "summary",
+        isDiff: false,
+        activeWindow: { appId: "com.example" },
+      }),
     ).not.toThrow();
   });
 
   test("a diff's added/removed nodes carry their real selector fields directly in `attributes` (no redundant `selector`)", () => {
     const diff = {
+      observationId: "diff",
       isDiff: true,
       skeleton: [],
       added: [
@@ -357,6 +380,7 @@ describe("observationOutputSchema: discriminated union of full observation vs di
 
   test("a diff's `changed` entries carry a real `selector` distinct from the internal `key`", () => {
     const diff = {
+      observationId: "diff",
       isDiff: true,
       skeleton: [],
       added: [],
@@ -394,6 +418,7 @@ describe("observationOutputSchema: discriminated union of full observation vs di
 describe("observationSummarySchema: truncation reasons (#6601)", () => {
   test("declares and preserves truncation reasons on a full action observation", () => {
     const full = {
+      observationId: "summary",
       activeWindow: { appId: "com.example" },
       truncationReasons: ["max_children[root] kept 10 of 12"],
     };
@@ -408,6 +433,7 @@ describe("observationSummarySchema: truncation reasons (#6601)", () => {
 
   test("declares nested hierarchy truncation reasons on full/raw action observations", () => {
     const full = {
+      observationId: "summary",
       activeWindow: { appId: "com.example" },
       viewHierarchy: {
         hierarchy: { node: { bounds: [0, 0, 100, 50] } },
@@ -449,6 +475,7 @@ describe("viewHierarchyResultSchema: nested truncation reasons (#6601)", () => {
 describe("observeResultSchema: context array (#6221 item 1)", () => {
   test("accepts skeleton + context side by side", () => {
     const result = {
+      observationId: "result",
       skeleton: [
         {
           elementId: "com.example:id/btn",
@@ -471,7 +498,7 @@ describe("observeResultSchema: context array (#6221 item 1)", () => {
   });
 
   test("context is optional (omitted when nothing non-actionable survived)", () => {
-    const result = { skeleton: [] };
+    const result = { observationId: "result", skeleton: [] };
     const parsed = observeResultSchema.parse(result);
     expect(parsed.context).toBeUndefined();
   });
@@ -504,9 +531,12 @@ describe("observation arms advertise `settled` (#6866)", () => {
   });
 
   test("both arms still accept an observation carrying the flag", () => {
-    expect(observationSummarySchema.parse({ settled: true }).settled).toBe(true);
+    expect(
+      observationSummarySchema.parse({ observationId: "summary", settled: true }).settled,
+    ).toBe(true);
     expect(
       observeDiffSchema.parse({
+        observationId: "diff",
         isDiff: true,
         skeleton: [],
         added: [],
@@ -519,6 +549,14 @@ describe("observation arms advertise `settled` (#6866)", () => {
 });
 
 describe("observation arms advertise observationId resource join keys", () => {
+  test("rejects observation payloads that omit the join key", () => {
+    expect(() => observeResultSchema.parse({})).toThrow();
+    expect(() => observationSummarySchema.parse({})).toThrow();
+    expect(() =>
+      observeDiffSchema.parse({ isDiff: true, skeleton: [], added: [], removed: [], changed: [] }),
+    ).toThrow();
+  });
+
   test("full observe, full action summary, and diff schemas parse it as a string", () => {
     const observationId = "observation-123";
 
@@ -536,12 +574,12 @@ describe("observation arms advertise observationId resource join keys", () => {
     ).toBe(observationId);
   });
 
-  test("each advertised schema declares the optional join key", () => {
+  test("each advertised schema requires the join key", () => {
     for (const schema of [observeResultSchema, observationSummarySchema, observeDiffSchema]) {
       const json = toJSONSchema(schema) as Record<string, any>;
       expect(json.properties.observationId).toBeDefined();
       expect(json.properties.observationId.type).toBe("string");
-      expect(json.required ?? []).not.toContain("observationId");
+      expect(json.required ?? []).toContain("observationId");
     }
   });
 });

@@ -91,6 +91,7 @@ function makeLoginScreenObserve(): ObserveResult {
   };
 
   return {
+    observationId: "voiceover-login-initial",
     updatedAt: Date.now(),
     screenSize: { width: 390, height: 844 },
     systemInsets: { top: 59, bottom: 34, left: 0, right: 0 },
@@ -136,6 +137,7 @@ function makeUsernameFieldFocusedObserve(): ObserveResult {
   };
 
   return {
+    observationId: "voiceover-login-username-focused",
     updatedAt: Date.now(),
     screenSize: { width: 390, height: 844 },
     systemInsets: { top: 59, bottom: 34, left: 0, right: 0 },
@@ -171,6 +173,7 @@ function makePostLoginObserve(): ObserveResult {
   };
 
   return {
+    observationId: "voiceover-login-complete",
     updatedAt: Date.now(),
     screenSize: { width: 390, height: 844 },
     systemInsets: { top: 59, bottom: 34, left: 0, right: 0 },

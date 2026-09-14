@@ -127,6 +127,7 @@ function makeFormScreenObserve(): ObserveResult {
 
   // TalkBack places its cursor on the first focusable element (the name field).
   return {
+    observationId: "talkback-form-initial",
     updatedAt: Date.now(),
     screenSize: { width: 720, height: 1280 },
     systemInsets: { top: 48, bottom: 80, left: 0, right: 0 },
@@ -210,6 +211,7 @@ function makeCheckboxUncheckedObserve(): ObserveResult {
   };
 
   return {
+    observationId: "talkback-form-unchecked",
     updatedAt: Date.now(),
     screenSize: { width: 720, height: 1280 },
     systemInsets: { top: 48, bottom: 80, left: 0, right: 0 },
@@ -292,6 +294,7 @@ function makeCheckboxCheckedObserve(): ObserveResult {
   };
 
   return {
+    observationId: "talkback-form-checked",
     updatedAt: Date.now(),
     screenSize: { width: 720, height: 1280 },
     systemInsets: { top: 48, bottom: 80, left: 0, right: 0 },
@@ -343,6 +346,7 @@ function makeSuccessScreenObserve(): ObserveResult {
   };
 
   return {
+    observationId: "talkback-form-success",
     updatedAt: Date.now(),
     screenSize: { width: 720, height: 1280 },
     systemInsets: { top: 48, bottom: 80, left: 0, right: 0 },

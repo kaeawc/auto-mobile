@@ -277,6 +277,7 @@ describe("DefaultObserveScreenshotRecorder.capture", () => {
     await recorder.capture("observation", new NoOpPerformanceTracker());
 
     expect(store.getUpdateCount()).toBe(0);
+    expect(store.isObservationPending("test-device", "observation")).toBe(false);
   });
 
   test("aborted completion does not write to store", async () => {

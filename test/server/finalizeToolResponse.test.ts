@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   DEFAULT_OBSERVATION_INLINE_MAX_BYTES,
+  DIFF_PASSTHROUGH_METADATA_FIELDS,
   finalizeToolResponse,
 } from "../../src/server/finalizeToolResponse";
 import {
@@ -14,6 +15,7 @@ import type { ObserveResult } from "../../src/models/ObserveResult";
 import { setElementProvenance } from "../../src/features/observe/output/elementProvenance";
 import { logger } from "../../src/utils/logger";
 import { getDeviceSessionIdFromResult } from "../../src/server/deviceSessionResult";
+import { z } from "zod/v4";
 
 /**
  * Build a minimal ObserveResult whose hierarchy carries trimmable attributes:
@@ -327,6 +329,25 @@ describe("finalizeToolResponse", () => {
   // say the tree was capped, or the agent reads a short list as a complete one.
   test("a default observe response keeps the hierarchy truncation reasons", () => {
     const obs = makeObserveResult();
+    obs.viewHierarchy!.truncationReasons = ["max_nodes"];
+
+    const finalized = finalizeToolResponse(createStructuredToolResponse(obs), {
+      name: "observe",
+    });
+
+    const payload = finalized.structuredContent as ObserveResult;
+    expect(payload.viewHierarchy).toBeUndefined();
+    expect(payload.truncationReasons).toEqual(["max_nodes"]);
+    expect(JSON.parse(finalized.content[0].text).truncationReasons).toEqual(["max_nodes"]);
+  });
+
+  // Issue #6933: a host-output `max_children[...]` cap trims only the rendered
+  // `viewHierarchy` payload — `DefaultObserveElementCollector` (the source of
+  // the skeleton's elements) follows the uncapped raw hierarchy under
+  // `--raw-element-search` — so the skeleton projection must NOT surface it as
+  // if the skeleton itself were an incomplete subset.
+  test("a default observe response does not surface a host-output max_children cap as skeleton incompleteness", () => {
+    const obs = makeObserveResult();
     obs.viewHierarchy!.truncationReasons = ["max_children[com.example:id/root kept 64 of 70]"];
 
     const finalized = finalizeToolResponse(createStructuredToolResponse(obs), {
@@ -335,10 +356,7 @@ describe("finalizeToolResponse", () => {
 
     const payload = finalized.structuredContent as ObserveResult;
     expect(payload.viewHierarchy).toBeUndefined();
-    expect(payload.truncationReasons).toEqual(["max_children[com.example:id/root kept 64 of 70]"]);
-    expect(JSON.parse(finalized.content[0].text).truncationReasons).toEqual([
-      "max_children[com.example:id/root kept 64 of 70]",
-    ]);
+    expect(payload.truncationReasons).toBeUndefined();
   });
 
   test("EC4: elements are kept only when the include-elements gate is enabled", () => {
@@ -972,6 +990,65 @@ describe("finalizeToolResponse", () => {
       expect(parsed.observation.freshness).toEqual(obsSc.freshness);
     });
 
+    test("a diffed observation carries `accessibilityAuditSkipped` with the same shape as full mode (issue #6926)", () => {
+      const { store } = makeStore();
+      const withAccessibilityAuditSkipped = (): ObserveResult => ({
+        ...sameScreenObserve(),
+        accessibilityAuditSkipped: "settled_capture_adopted",
+      });
+
+      finalizeToolResponse(createStructuredToolResponse(withAccessibilityAuditSkipped()), {
+        name: "observe",
+        sessionUuid: "s1",
+        baselineStore: store,
+      });
+
+      const next = withAccessibilityAuditSkipped();
+      (next.viewHierarchy!.hierarchy.node as any).node[0].checked = "true";
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: next }),
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
+      );
+
+      const obsSc = (finalized.structuredContent as any).observation;
+      expect(obsSc.isDiff).toBe(true);
+      expect(obsSc.accessibilityAuditSkipped).toBe("settled_capture_adopted");
+      expect(JSON.parse(finalized.content[0].text).observation.accessibilityAuditSkipped).toBe(
+        "settled_capture_adopted",
+      );
+    });
+
+    test("a diffed observation carries every whitelisted passthrough metadata field", () => {
+      const { store } = makeStore();
+      const freshness = { actualTimestamp: 1000, ageMs: 5, isFresh: true };
+      const withPassthroughMetadata = (): ObserveResult => ({
+        ...sameScreenObserve(),
+        freshness,
+        settled: true,
+        accessibilityAuditSkipped: "settled_capture_adopted",
+      });
+
+      finalizeToolResponse(createStructuredToolResponse(withPassthroughMetadata()), {
+        name: "observe",
+        sessionUuid: "s1",
+        baselineStore: store,
+      });
+
+      const next = withPassthroughMetadata();
+      (next.viewHierarchy!.hierarchy.node as any).node[0].checked = "true";
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: next }),
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
+      );
+
+      const obsSc = (finalized.structuredContent as any).observation as ObserveResult;
+      expect(obsSc.isDiff).toBe(true);
+      for (const field of DIFF_PASSTHROUGH_METADATA_FIELDS) {
+        expect(obsSc[field]).toBeDefined();
+        expect(obsSc[field]).toEqual(next[field]);
+      }
+    });
+
     // A diff REPLACES the projected observation, so the truncation provenance
     // the skeleton projection lifts to the top level (issue #6601) is dropped
     // with it — review thread PRRT_kwDOP-GF5M6h4v0N on PR #6912. The agent then
@@ -1005,6 +1082,29 @@ describe("finalizeToolResponse", () => {
       // Text mirror agrees.
       const parsed = JSON.parse(finalized.content[0].text);
       expect(parsed.observation.truncationReasons).toEqual(reasons);
+    });
+
+    test("a diffed observation retains raw host-output truncation alongside served capture-fidelity reasons (issue #6933)", () => {
+      const { store } = makeStore();
+      finalizeToolResponse(createStructuredToolResponse(sameScreenObserve()), {
+        name: "observe",
+        sessionUuid: "s1",
+        baselineStore: store,
+      });
+
+      const next = sameScreenObserve();
+      const reasons = ["max_nodes", "max_children[com.example:id/root kept 64 of 70]"];
+      next.viewHierarchy!.truncationReasons = [...reasons];
+      (next.viewHierarchy!.hierarchy.node as any).node[0].checked = "true";
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: next }),
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
+      );
+
+      const observation = (finalized.structuredContent as any).observation;
+      expect(observation.isDiff).toBe(true);
+      expect(observation.truncationReasons).toEqual(expect.arrayContaining(reasons));
+      expect(observation.truncationReasons).toHaveLength(reasons.length);
     });
 
     test("a diffed observation under project:'full' still carries the truncation reasons (issue #6601)", () => {
@@ -1053,6 +1153,44 @@ describe("finalizeToolResponse", () => {
       expect(obsSc.isDiff).toBe(true);
       expect(obsSc.truncationReasons).toBeUndefined();
       expect("truncationReasons" in JSON.parse(finalized.content[0].text).observation).toBe(false);
+    });
+
+    // Issue #6933: the opposite transition from the #6601 thread above. The
+    // BASELINE observation (stored capped, first 64 of 70 rows) carries the
+    // truncation reason; the post-action observation this resolver consults
+    // has since fallen below the cap and carries none. Without folding the
+    // baseline's provenance in, a diff reports a plain removal count with no
+    // warning that the "removed" rows past its own cap were never diffable to
+    // begin with.
+    test("a diffed observation carries the BASELINE's truncation reasons when the current hierarchy fell below the cap (issue #6933)", () => {
+      const { store } = makeStore();
+      const reasons = ["max_children[com.example:id/root kept 64 of 70]"];
+      const cappedBaseline = (): ObserveResult => {
+        const observation = sameScreenObserve();
+        observation.viewHierarchy!.truncationReasons = [...reasons];
+        return observation;
+      };
+
+      finalizeToolResponse(createStructuredToolResponse(cappedBaseline()), {
+        name: "observe",
+        sessionUuid: "s1",
+        baselineStore: store,
+      });
+
+      // The post-action observation is untruncated (no truncationReasons of its own).
+      const next = sameScreenObserve();
+      (next.viewHierarchy!.hierarchy.node as any).node[0].checked = "true";
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: next }),
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
+      );
+
+      const obsSc = (finalized.structuredContent as any).observation;
+      expect(obsSc.isDiff).toBe(true);
+      expect(obsSc.truncationReasons).toEqual(reasons);
+
+      const parsed = JSON.parse(finalized.content[0].text);
+      expect(parsed.observation.truncationReasons).toEqual(reasons);
     });
 
     test("a diffed observation carries a usable `skeleton` even under raw:true / project:'full' (PR #6242 review PRRT_kwDOP-GF5M6fq3iK)", () => {
@@ -2267,6 +2405,99 @@ describe("finalizeToolResponse", () => {
         expect(payloadBytes(finalized)).toBeLessThanOrEqual(DEFAULT_OBSERVATION_INLINE_MAX_BYTES);
         expect(structured.artifact).toMatchObject({ format: "json", tool: "tapOn" });
         expect(structured.rows).toBeUndefined();
+      });
+
+      test("keeps required output-schema fields inline after spilling an executePlan result", () => {
+        const writer = new FakeObservationArtifactWriter();
+        const outputSchema = z
+          .object({
+            success: z.boolean(),
+            executedSteps: z.number().int(),
+            totalSteps: z.number().int(),
+            error: z.string().optional(),
+          })
+          .passthrough();
+        const finalized = finalizeToolResponse(
+          createStructuredToolResponse({
+            success: false,
+            executedSteps: 2,
+            totalSteps: 3,
+            pad: "z".repeat(90_000),
+          }),
+          {
+            name: "executePlan",
+            artifactMode: "oversized",
+            artifactWriter: writer,
+            outputSchema,
+          },
+        );
+
+        const structured = finalized.structuredContent as any;
+        expect(writer.writes).toHaveLength(1);
+        expect(structured.executedSteps).toBe(2);
+        expect(structured.totalSteps).toBe(3);
+        expect(structured.pad).toBeUndefined();
+      });
+
+      test("keeps an oversized required setUIState fields residue schema-compatible", () => {
+        const writer = new FakeObservationArtifactWriter();
+        const outputSchema = z.object({
+          success: z.boolean(),
+          fields: z.array(
+            z.object({
+              selector: z.object({ text: z.string().optional(), elementId: z.string().optional() }),
+              success: z.boolean(),
+              attempts: z.number(),
+              verified: z.boolean().optional(),
+              error: z.string().optional(),
+              fieldType: z.enum(["text", "checkbox", "toggle", "dropdown", "unknown"]).optional(),
+              skipped: z.boolean().optional(),
+              notAttempted: z.boolean().optional(),
+              timedOut: z.boolean().optional(),
+            }),
+          ),
+          totalAttempts: z.number(),
+          error: z.string().optional(),
+        });
+        const fields = Array.from({ length: 600 }, (_, index) => ({
+          selector: { text: `field-${index}` },
+          success: false,
+          attempts: 1,
+          error: "field update failed: ".repeat(10),
+        }));
+        const finalized = finalizeToolResponse(
+          createStructuredToolResponse({ success: false, fields, totalAttempts: fields.length }),
+          {
+            name: "setUIState",
+            artifactMode: "oversized",
+            artifactWriter: writer,
+            outputSchema,
+          },
+        );
+
+        const structured = finalized.structuredContent as any;
+        expect(writer.writes).toHaveLength(1);
+        expect(Array.isArray(structured.fields)).toBe(true);
+        expect(outputSchema.safeParse(structured).success).toBe(true);
+        expect(structured.fields.length).toBeLessThan(fields.length);
+        expect(payloadBytes(finalized)).toBeLessThanOrEqual(DEFAULT_OBSERVATION_INLINE_MAX_BYTES);
+      });
+
+      test("uses only the fixed residue keys when no output schema is supplied", () => {
+        const writer = new FakeObservationArtifactWriter();
+        const finalized = finalizeToolResponse(
+          createStructuredToolResponse({
+            success: true,
+            requiredBySomeSchema: "must remain absent without that schema",
+            pad: "z".repeat(90_000),
+          }),
+          { name: "tapOn", artifactMode: "oversized", artifactWriter: writer },
+        );
+
+        const structured = finalized.structuredContent as any;
+        expect(writer.writes).toHaveLength(1);
+        expect(structured.success).toBe(true);
+        expect(structured.requiredBySomeSchema).toBeUndefined();
       });
 
       // The residue kept inline is itself unbounded unless it is capped: a

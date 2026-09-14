@@ -25,6 +25,7 @@ describe("dumpsys notification records", () => {
         pkg: "com.google.android.apps.wellbeing",
         titles: ["Need better sleep?"],
         bodies: ["Use Bedtime mode to silence your phone and keep the screen dark at bedtime"],
+        hasCustomLayout: false,
       },
     ]);
   });
@@ -58,7 +59,59 @@ describe("dumpsys notification records", () => {
           "      }",
         ),
       ),
-    ).toEqual([{ pkg: "com.google.android.apps.wellbeing", titles: [], bodies: [] }]);
+    ).toEqual([
+      { pkg: "com.google.android.apps.wellbeing", titles: [], bodies: [], hasCustomLayout: false },
+    ]);
+  });
+
+  test("detects a custom RemoteViews layout without a decorated style", () => {
+    expect(
+      parseDumpsysNotificationRecords(
+        dump(
+          "    NotificationRecord(0x1a2b3c: pkg=com.example.custom user=UserHandle{0} id=0 tag=null key=0|com.example.custom|0|null|10100)",
+          "      uid=10100 userId=0",
+          "      contentView=null",
+          "      bigContentView=android.widget.RemoteViews@a1b2c3d",
+          "      headsUpContentView=null",
+          "      extras={",
+          "        android.title=String (Custom notification)",
+          "        android.template=String (android.app.Notification$BigTextStyle)",
+          "      }",
+        ),
+      ),
+    ).toEqual([
+      {
+        pkg: "com.example.custom",
+        titles: ["Custom notification"],
+        bodies: [],
+        hasCustomLayout: true,
+      },
+    ]);
+  });
+
+  test("does not treat null custom layout fields as custom", () => {
+    expect(
+      parseDumpsysNotificationRecords(
+        dump(
+          "    NotificationRecord(0x1a2b3c: pkg=com.example.default user=UserHandle{0} id=0 tag=null key=0|com.example.default|0|null|10100)",
+          "      uid=10100 userId=0",
+          "      contentView=null",
+          "      bigContentView=null",
+          "      headsUpContentView=null",
+          "      extras={",
+          "        android.title=String (Default notification)",
+          "        android.template=String (android.app.Notification$BigTextStyle)",
+          "      }",
+        ),
+      ),
+    ).toEqual([
+      {
+        pkg: "com.example.default",
+        titles: ["Default notification"],
+        bodies: [],
+        hasCustomLayout: false,
+      },
+    ]);
   });
 
   test("ignores content-shaped lines outside a record's extras block", () => {
@@ -76,7 +129,9 @@ describe("dumpsys notification records", () => {
           "      android.text=String (After extras)",
         ),
       ),
-    ).toEqual([{ pkg: "com.example.app", titles: ["Inside extras"], bodies: [] }]);
+    ).toEqual([
+      { pkg: "com.example.app", titles: ["Inside extras"], bodies: [], hasCustomLayout: false },
+    ]);
   });
 
   test("attributes a row whose rendered text matches exactly one package", () => {
@@ -168,14 +223,16 @@ describe("dumpsys notification records", () => {
         "      }",
       ),
     );
-    expect(records).toEqual([{ pkg: "com.example.app", titles: ["Sync finished"], bodies: [] }]);
+    expect(records).toEqual([
+      { pkg: "com.example.app", titles: ["Sync finished"], bodies: [], hasCustomLayout: false },
+    ]);
     expect(attributeRowByDumpsys(records, new Set(["Sync finished"]))).toBe("com.example.app");
   });
 
   test("does not attribute a row to a record that carries no readable content", () => {
     expect(
       attributeRowByDumpsys(
-        [{ pkg: "com.example.app", titles: [], bodies: [] }],
+        [{ pkg: "com.example.app", titles: [], bodies: [], hasCustomLayout: false }],
         new Set(["anything"]),
       ),
     ).toBeNull();
@@ -195,7 +252,14 @@ describe("dumpsys notification records", () => {
           "      }",
         ),
       ),
-    ).toEqual([{ pkg: "com.example.app", titles: ["Backup"], bodies: ["Line one\nLine two"] }]);
+    ).toEqual([
+      {
+        pkg: "com.example.app",
+        titles: ["Backup"],
+        bodies: ["Line one\nLine two"],
+        hasCustomLayout: false,
+      },
+    ]);
   });
 
   test("does not run a multiline value past the end of its record", () => {
@@ -213,8 +277,8 @@ describe("dumpsys notification records", () => {
         ),
       ),
     ).toEqual([
-      { pkg: "com.example.app", titles: [], bodies: [] },
-      { pkg: "com.example.other", titles: ["Other"], bodies: [] },
+      { pkg: "com.example.app", titles: [], bodies: [], hasCustomLayout: false },
+      { pkg: "com.example.other", titles: ["Other"], bodies: [], hasCustomLayout: false },
     ]);
   });
 
@@ -237,6 +301,66 @@ describe("dumpsys notification records", () => {
     expect(attributeRowByDumpsys(records, new Set(["Syncing"]))).toBeNull();
   });
 
+  test("keeps a row ambiguous when a custom-layout record has unrelated extras", () => {
+    // A custom layout can render text unrelated to its supported extras, even
+    // when it also carries a default title (#6927).
+    const records = parseDumpsysNotificationRecords(
+      dump(
+        "    NotificationRecord(0x1: pkg=com.actual.custom user=UserHandle{0} id=0 tag=null key=0|com.actual.custom|0|null|10100)",
+        "      extras={",
+        "        android.template=String (android.app.Notification$DecoratedCustomViewStyle)",
+        "        android.title=String (Hidden default)",
+        "      }",
+        "    NotificationRecord(0x2: pkg=com.requested user=UserHandle{0} id=0 tag=null key=0|com.requested|0|null|10101)",
+        "      extras={",
+        "        android.title=String (Syncing)",
+        "      }",
+      ),
+    );
+    expect(records[0]).toEqual({
+      pkg: "com.actual.custom",
+      titles: ["Hidden default"],
+      bodies: [],
+      hasCustomLayout: true,
+    });
+    expect(attributeRowByDumpsys(records, new Set(["Syncing"]))).toBeNull();
+  });
+
+  test("preserves a key-shaped continuation line in a multiline extra", () => {
+    const records = parseDumpsysNotificationRecords(
+      dump(
+        "    NotificationRecord(0x1: pkg=com.example.app user=UserHandle{0} id=0 tag=null key=0|com.example.app|0|null|10100)",
+        "      extras={",
+        "        android.bigText=String (Line one",
+        "Status=offline",
+        "Line three)",
+        "      }",
+      ),
+    );
+    expect(records[0]?.bodies).toEqual(["Line one\nStatus=offline\nLine three"]);
+  });
+
+  test("recognizes an indented extras key after an unterminated multiline value", () => {
+    expect(
+      parseDumpsysNotificationRecords(
+        dump(
+          "    NotificationRecord(0x1: pkg=com.example.app user=UserHandle{0} id=0 tag=null key=0|com.example.app|0|null|10100)",
+          "      extras={",
+          "        android.bigText=String (unterminated",
+          "        android.title=String (Recovered title)",
+          "      }",
+        ),
+      ),
+    ).toEqual([
+      {
+        pkg: "com.example.app",
+        titles: ["Recovered title"],
+        bodies: [],
+        hasCustomLayout: false,
+      },
+    ]);
+  });
+
   test("reads a multiline value whose inner line ends in a parenthesis", () => {
     // The dump prints the value verbatim, so a `)` that belongs to the text is
     // not the wrapper's closing delimiter: only the last physical line of the
@@ -253,7 +377,12 @@ describe("dumpsys notification records", () => {
         ),
       ),
     ).toEqual([
-      { pkg: "com.example.app", titles: [], bodies: ["Line one\nstep (done)\nLine three"] },
+      {
+        pkg: "com.example.app",
+        titles: [],
+        bodies: ["Line one\nstep (done)\nLine three"],
+        hasCustomLayout: false,
+      },
     ]);
   });
 
@@ -275,7 +404,9 @@ describe("dumpsys notification records", () => {
         "      }",
       ),
     );
-    expect(records).toEqual([{ pkg: "com.requested", titles: ["Syncing"], bodies: [] }]);
+    expect(records).toEqual([
+      { pkg: "com.requested", titles: ["Syncing"], bodies: [], hasCustomLayout: false },
+    ]);
     expect(attributeRowByDumpsys(records, new Set(["Syncing"]))).toBe("com.requested");
   });
 });

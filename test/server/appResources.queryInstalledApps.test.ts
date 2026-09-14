@@ -61,6 +61,66 @@ describe("queryInstalledApps honest-failure contract (#6155)", () => {
     expect(content.observationComplete).toBe(true);
     expect(content.totalCount).toBe(0);
   });
+
+  test("uses the device resolved for the query instead of rediscovering it on an uncached call", async () => {
+    setListInstalledAppsFactoryForTests(() => ({
+      executeDetailedResult: async () => ({
+        apps: { profiles: {}, system: [] },
+        successful: true,
+      }),
+      executeIosDetailedResult: async () => {
+        throw new Error("not exercised on android");
+      },
+    }));
+
+    await queryInstalledApps({ deviceId: device.deviceId });
+
+    const discoveryCalls = fakeDeviceUtils
+      .getExecutedOperations()
+      .filter((operation) => operation === "getBootedDevices:android");
+    expect(discoveryCalls).toHaveLength(1);
+  });
+
+  test("forwards cancellation to Android catalog enrichment", async () => {
+    const controller = new AbortController();
+    let capturedSignal: AbortSignal | undefined;
+    setListInstalledAppsFactoryForTests(() => ({
+      executeDetailedResult: async (signal) => {
+        capturedSignal = signal;
+        controller.abort();
+        signal?.throwIfAborted();
+        return { apps: { profiles: {}, system: [] }, successful: true };
+      },
+      executeIosDetailedResult: async () => {
+        throw new Error("not exercised on android");
+      },
+    }));
+
+    await expect(
+      queryInstalledApps({ deviceId: device.deviceId }, controller.signal),
+    ).rejects.toThrow(/abort/i);
+    expect(capturedSignal).toBe(controller.signal);
+  });
+
+  test("forwards cancellation to initial device discovery", async () => {
+    fakeDeviceUtils.getBootedDevicesDetailed = async (_platform, options) => {
+      const signal = options?.signal;
+      return new Promise<never>((_, reject) => {
+        if (!signal) {
+          reject(new Error("expected an abort signal"));
+          return;
+        }
+        signal.throwIfAborted();
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+    };
+
+    const controller = new AbortController();
+    const promise = queryInstalledApps({ deviceId: device.deviceId }, controller.signal);
+    controller.abort();
+
+    await expect(promise).rejects.toThrow(/abort/i);
+  });
 });
 
 describe("queryInstalledApps rejects an unsupported type filter on a physical iOS device (#6216 review, round 5)", () => {

@@ -583,12 +583,33 @@ export function formatToolParamError(
   // already supplied. Only unrecognized keys are promotable (PR #6882 review).
   const conflictLine = (issue: UnrecognizedKeysIssue, keys: string[]): string =>
     renderer(withMergedKeys(issue, keys, mutuallyExclusiveMessage(keys)));
+  // A direct object-union conflict can leave a supplied key's value error in
+  // only its own arm: every other arm instead rejects that key as unrecognized.
+  // It is branch-discrimination noise in isolation, but alongside the conflict
+  // it tells the caller everything they must correct in this object (#6931).
+  const conflictValueIssues = (
+    issue: UnrecognizedKeysIssue,
+    keys: ReadonlyArray<string>,
+    unionId: number,
+  ): FlattenedIssue[] =>
+    flattenedIssues.filter((candidate) => {
+      const candidatePath = candidate.issue.path;
+      return (
+        candidate.union?.unionId === unionId &&
+        !isUnrecognizedKeys(candidate.issue) &&
+        !isNeverArtifact(candidate.issue) &&
+        candidatePath.length > issue.path.length &&
+        issue.path.every((segment, index) => segment === candidatePath[index]) &&
+        keys.includes(String(candidatePath[issue.path.length]))
+      );
+    });
   const render = (entry: FlattenedIssue): string[] => {
     const { issue } = entry;
-    if (!entry.union || !isUnrecognizedKeys(issue)) {
-      if (entry.union) {
-        explanations.push({ unionId: entry.union.unionId, path: pathOf(issue.path) });
-      }
+    if (!entry.union) {
+      return [renderer(issue, isUnrecognizedKeys(issue) ? issue.keys : undefined)];
+    }
+    if (!isUnrecognizedKeys(issue)) {
+      explanations.push({ unionId: entry.union.unionId, path: pathOf(issue.path) });
       return [renderer(issue)];
     }
     const group = unrecognizedGroups.get(coverageKey(entry.union.unionId, issue.path));
@@ -622,7 +643,12 @@ export function formatToolParamError(
       group.exclusive.length > 0
         ? `${unrecognizedKeysMessage(group.intersection)}. ${mutuallyExclusiveMessage(group.exclusive)}`
         : unrecognizedKeysMessage(group.intersection);
-    return [renderer(withMergedKeys(issue, keys, message), group.intersection)];
+    return [
+      renderer(withMergedKeys(issue, keys, message), group.intersection),
+      ...conflictValueIssues(issue, group.exclusive, entry.union.unionId).map(({ issue }) =>
+        renderer(issue),
+      ),
+    ];
   };
 
   // Dedupe formatted messages: union expansion repeats the same real issue once
@@ -634,7 +660,10 @@ export function formatToolParamError(
   // now reached by the same rule.
   const fallback = conflicts
     .filter((conflict) => !explains(conflict))
-    .map(({ issue, keys }) => conflictLine(issue, keys));
+    .flatMap(({ issue, keys, unionId }) => [
+      conflictLine(issue, keys),
+      ...conflictValueIssues(issue, keys, unionId).map(({ issue }) => renderer(issue)),
+    ]);
   const issues = [...new Set([...rendered, ...fallback])];
 
   const hints: string[] = [];

@@ -148,6 +148,85 @@ describe("DeviceBootService", () => {
     ]);
   });
 
+  it("does not cold-boot an Android image excluded by a recovery snapshot", async () => {
+    const devices = new FakeDeviceUtils();
+    const excluded = { ...image, name: "Pixel_10_API_35", osVersion: "35" };
+    const allowed = { ...image, name: "Pixel_9_API_34", osVersion: "34" };
+    devices.setDeviceImages("android", [excluded, allowed]);
+
+    const result = await service(devices, new DefaultDeviceMatcher()).boot({
+      platform: "android",
+      preferRunning: false,
+      excludeDeviceNames: new Set([excluded.name]),
+    });
+
+    expect(result.sourceImage?.name).toBe(allowed.name);
+    expect(devices.getExecutedOperations()).toContain("startDevice:Pixel_9_API_34:180000");
+  });
+
+  it("does not reuse a running Android device excluded by a recovery snapshot", async () => {
+    const devices = new FakeDeviceUtils();
+    const excluded = {
+      ...image,
+      name: "Pixel_10_API_35",
+      osVersion: undefined,
+      isRunning: true,
+    };
+    const allowed = {
+      ...image,
+      name: "Pixel_9_API_34",
+      osVersion: undefined,
+      isRunning: true,
+    };
+    const excludedBooted: BootedDevice = {
+      name: excluded.name,
+      platform: "android",
+      deviceId: "emulator-5554",
+    };
+    const allowedBooted: BootedDevice = {
+      name: allowed.name,
+      platform: "android",
+      deviceId: "emulator-5556",
+    };
+    devices.setDeviceImages("android", [excluded, allowed]);
+    devices.setBootedDevices("android", [excludedBooted, allowedBooted]);
+
+    const result = await service(devices, new DefaultDeviceMatcher()).boot({
+      platform: "android",
+      excludeDeviceNames: new Set([excluded.name]),
+    });
+
+    expect(result.source).toBe("booted");
+    expect(result.device.deviceId).toBe(allowedBooted.deviceId);
+  });
+
+  it("does not reuse an Unknown running Android device excluded by its recovery serial", async () => {
+    const devices = new FakeDeviceUtils();
+    const recovering = { ...image, name: "Pixel_10_API_35", isRunning: true };
+    const allowed = { ...image, name: "Pixel_9_API_34", isRunning: true };
+    const recoveringBooted: BootedDevice = {
+      name: "Unknown (emulator-5556)",
+      platform: "android",
+      deviceId: "emulator-5556",
+    };
+    const allowedBooted: BootedDevice = {
+      name: allowed.name,
+      platform: "android",
+      deviceId: "emulator-5558",
+    };
+    devices.setDeviceImages("android", [recovering, allowed]);
+    devices.setBootedDevices("android", [recoveringBooted, allowedBooted]);
+
+    const result = await service(devices, new DefaultDeviceMatcher()).boot({
+      platform: "android",
+      excludeDeviceNames: new Set([recovering.name]),
+      excludeDeviceIds: new Set([recoveringBooted.deviceId]),
+    });
+
+    expect(result.source).toBe("booted");
+    expect(result.device.deviceId).toBe(allowedBooted.deviceId);
+  });
+
   it("binds a resolved running Android emulator before readiness", async () => {
     const devices = new FakeDeviceUtils();
     const matcher = new FakeDeviceMatcher();

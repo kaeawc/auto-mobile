@@ -1292,6 +1292,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   // observation stream. Scoped per-request so an unrelated in-flight screenshot
   // (e.g. backoff capture or MCP screenshot) cannot consume the suppression.
   private screenshotObservationStreamSuppressions: Set<string> = new Set();
+  // Request ids cancelled after their screenshot frame was dispatched. The runner cannot retract a
+  // request already on the wire, so a later response must be discarded rather than auto-pushed.
+  private lateCancelledScreenshotRequestIds: Set<string> = new Set();
 
   // Capture identity bound to each in-flight screenshot request, keyed by requestId (issue #3348).
   // Recorded when the request is SENT and consumed when its response is pushed, so a hierarchy that
@@ -1987,6 +1990,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
   protected onConnectionClosed(): void {
     this.supportedCommands = null;
+    this.lateCancelledScreenshotRequestIds.clear();
     this.cancelScreenshotBackoff();
     void this.markInstalledAppsStale("websocket_closed");
     this.deviceConnectionLostNotifier.onDeviceConnectionLost(this.device.deviceId);
@@ -3180,6 +3184,38 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     logger.debug(`[CTRL_PROXY] Sent screenshot request (requestId: ${sentRequestId})`);
   }
 
+  private registerPostDispatchAbort(
+    sentRequestId: string,
+    signal: AbortSignal | undefined,
+  ): () => void {
+    if (!signal) {
+      return () => {};
+    }
+
+    const cancelAfterDispatch = () => {
+      if (this.requestManager.resolveError(sentRequestId, OPERATION_CANCELLED_MESSAGE)) {
+        this.lateCancelledScreenshotRequestIds.add(sentRequestId);
+        logger.debug(
+          `[CTRL_PROXY] Screenshot cancelled after dispatch (requestId: ${sentRequestId})`,
+        );
+      }
+    };
+    signal.addEventListener("abort", cancelAfterDispatch, { once: true });
+    if (signal.aborted) {
+      cancelAfterDispatch();
+    }
+    return () => signal.removeEventListener("abort", cancelAfterDispatch);
+  }
+
+  private logScreenshotResult(result: ScreenshotResult, duration: number): void {
+    if (result.success) {
+      const dataSize = result.data ? result.data.length : 0;
+      logger.debug(`[CTRL_PROXY] Screenshot received in ${duration}ms (${dataSize} base64 chars)`);
+    } else {
+      logger.warn(`[CTRL_PROXY] Screenshot failed after ${duration}ms: ${result.error}`);
+    }
+  }
+
   async requestScreenshot(
     timeoutMs: number = 5000,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
@@ -3189,6 +3225,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     const startTime = this.timer.now();
     let suppressedRequestId: string | undefined;
     let requestId: string | undefined;
+    let removeAbortListener: (() => void) | undefined;
 
     try {
       const blocked = await this.connectForScreenshot(perf, signal);
@@ -3221,17 +3258,12 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
       await perf.track("sendRequest", () => this.dispatchScreenshotRequest(sentRequestId, signal));
 
+      removeAbortListener = this.registerPostDispatchAbort(sentRequestId, signal);
+
       const result = await perf.track("waitForScreenshot", () => screenshotPromise);
       const duration = this.timer.now() - startTime;
 
-      if (result.success) {
-        const dataSize = result.data ? result.data.length : 0;
-        logger.debug(
-          `[CTRL_PROXY] Screenshot received in ${duration}ms (${dataSize} base64 chars)`,
-        );
-      } else {
-        logger.warn(`[CTRL_PROXY] Screenshot failed after ${duration}ms: ${result.error}`);
-      }
+      this.logScreenshotResult(result, duration);
 
       return result;
     } catch (error) {
@@ -3239,6 +3271,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       logger.warn(`[CTRL_PROXY] Screenshot request failed after ${duration}ms: ${error}`);
       return { success: false, error: `${error}` };
     } finally {
+      removeAbortListener?.();
       // Clean up the suppression token in case the response never arrived
       // (timeout/error). The message handler deletes it on a normal response;
       // this guards against leaking ids for in-flight requests that never resolve.
@@ -3479,6 +3512,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     } catch (error) {
       logger.warn(`[CTRL_PROXY] Error during cleanup: ${error}`);
     } finally {
+      this.lateCancelledScreenshotRequestIds.clear();
       this.releaseCtrlProxyForwardLeaseAfterConnectionSettles();
     }
   }
@@ -3772,6 +3806,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           `[CTRL_PROXY] Runner error (requestId: ${message.requestId ?? "none"}): ${errorText}`,
         );
         if (message.requestId) {
+          this.lateCancelledScreenshotRequestIds.delete(message.requestId);
           this.requestManager.resolveError(message.requestId, errorText);
           this._hierarchy?.rejectPendingHierarchy(message.requestId, errorText);
         }
@@ -3784,6 +3819,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
       // Handle screenshot response
       if (message.type === "screenshot" && message.requestId) {
+        const cancelledAfterDispatch = this.lateCancelledScreenshotRequestIds.delete(
+          message.requestId,
+        );
         const suppressObservationStreamPush = this.screenshotObservationStreamSuppressions.delete(
           message.requestId,
         );
@@ -3793,7 +3831,11 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         };
         const binding = this.screenshotCaptureBindings.get(message.requestId);
         this.screenshotCaptureBindings.delete(message.requestId);
-        if (!suppressObservationStreamPush) {
+        if (cancelledAfterDispatch) {
+          logger.debug(
+            `[CTRL_PROXY] Discarded screenshot response for cancelled request (requestId: ${message.requestId})`,
+          );
+        } else if (!suppressObservationStreamPush) {
           this.pushScreenshotToObservationStream(
             message.data,
             metadata,
@@ -3819,6 +3861,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
       // Handle screenshot error
       if (message.type === "screenshot_error" && message.requestId) {
+        this.lateCancelledScreenshotRequestIds.delete(message.requestId);
         logger.warn(
           `[CTRL_PROXY] Screenshot error (requestId: ${message.requestId}): ${message.error}`,
         );

@@ -4,6 +4,7 @@ import {
   setDaemonProxyFactoryForTesting,
   resetDaemonProxyFactoryForTesting,
 } from "../../src/cli";
+import { runDaemonCommand } from "../../src/daemon/manager";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
 import { DaemonClient } from "../../src/daemon/client";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -12,6 +13,7 @@ import {
   CLI_SESSION_LIVENESS_POLICY,
   DAEMON_HEARTBEAT_METHOD,
   DAEMON_VERSION,
+  getCliSessionIdleTimeoutMs,
   HEARTBEAT_SESSION_LIVENESS_POLICY,
 } from "../../src/daemon/constants";
 import { handleDaemonRequest } from "../../src/daemon/daemonRequestHandlers";
@@ -237,6 +239,49 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
     expect(reaped).toEqual([{ sessionId: "shared", reason: "heartbeat-timeout" }]);
   });
 
+  test("one-shot daemon heartbeat preserves an adopted CLI session", async () => {
+    const client = new FakeDaemonClient({
+      onCallDaemonMethod: async (method, params) => {
+        await handleDaemonRequest(
+          { id: "1", type: "daemon_request", method, params },
+          daemonStateFor(sessionManager),
+        );
+      },
+    });
+    await sessionManager.createSession("shared", "emulator-5554", "android", 30 * 60_000);
+    sessionManager.adoptCliLivenessPolicy("shared");
+
+    await runDaemonCommand("heartbeat", ["shared"], {
+      clientFactory: () => client,
+      stateProvider: () => ({
+        isInitialized: () => false,
+        getSessionManager: () => {
+          throw new Error("Session manager unavailable");
+        },
+        getDevicePool: () => {
+          throw new Error("Device pool unavailable");
+        },
+        getDeviceSessionRegistry: () => {
+          throw new Error("Device session registry unavailable");
+        },
+      }),
+    });
+
+    const session = sessionManager.getSession("shared")!;
+    expect(session.livenessPolicy).toBe("cli-idle");
+    expect(session.heartbeatTimeoutMs).toBe(getCliSessionIdleTimeoutMs());
+    expect(client.callDaemonMethodCalls).toEqual([
+      {
+        method: DAEMON_HEARTBEAT_METHOD,
+        params: {
+          sessionId: "shared",
+          livenessPolicy: CLI_SESSION_LIVENESS_POLICY,
+          idleTimeoutMs: getCliSessionIdleTimeoutMs(),
+        },
+      },
+    ]);
+  });
+
   test("a CLI touch of a proxy-owned session re-adopts the CLI policy", async () => {
     // proxy → CLI touch, the other direction: the restore above must not make
     // the CLI declaration unable to win back the session it is about to own.
@@ -263,10 +308,11 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
     expect(sessionManager.getSession("shared")!.livenessPolicy).toBe("cli-idle");
   });
 
-  test("heartbeats after the declaration keep the CLI marker", async () => {
+  test("heartbeats after the declaration retain the CLI marker and idle-timeout override", async () => {
     // The keeper is still running when the declaration lands; a tick racing
     // process exit must not restore the strict contract the invocation just
     // opted out of (#6870 review).
+    process.env.AUTOMOBILE_CLI_SESSION_IDLE_TIMEOUT_MS = "120000";
     const client = new FakeDaemonClient({
       toolResultFor: (name) => (name === "getAndroid" ? deviceStartResult("shared") : undefined),
       onCallDaemonMethod: async (method, params) => {
@@ -288,15 +334,19 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
     try {
       await proxy.callTool("getAndroid", {});
       await proxy.adoptCliSessionLiveness();
-      await timer.advanceTimeAsync(1_000);
+      await timer.advanceTimeAsync(2_000);
     } finally {
       await proxy.close();
     }
 
-    const lastHeartbeat = client.callDaemonMethodCalls
-      .filter((call) => call.method === DAEMON_HEARTBEAT_METHOD)
-      .at(-1);
-    expect(lastHeartbeat?.params.livenessPolicy).toBe(CLI_SESSION_LIVENESS_POLICY);
+    const heartbeats = client.callDaemonMethodCalls.filter(
+      (call) => call.method === DAEMON_HEARTBEAT_METHOD,
+    );
+    const cliHeartbeats = heartbeats.filter(
+      (call) => call.params.livenessPolicy === CLI_SESSION_LIVENESS_POLICY,
+    );
+    expect(cliHeartbeats).toHaveLength(3);
+    expect(cliHeartbeats.every((call) => call.params.idleTimeoutMs === 120_000)).toBe(true);
     expect(sessionManager.getSession("shared")!.livenessPolicy).toBe("cli-idle");
   });
 

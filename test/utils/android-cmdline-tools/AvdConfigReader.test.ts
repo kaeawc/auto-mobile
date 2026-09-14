@@ -66,6 +66,13 @@ describe("parseAvdConfig", () => {
     expect(config.tag).toBe("google_apis");
   });
 
+  it("parses whether GPU acceleration is enabled", () => {
+    expect(parseAvdConfig("hw.gpu.mode=host\nhw.gpu.enabled=no\n").gpuEnabled).toBe(false);
+    expect(parseAvdConfig("hw.gpu.mode=host\nhw.gpu.enabled=yes\n").gpuEnabled).toBe(true);
+    expect(parseAvdConfig("hw.gpu.mode=host\nhw.gpu.enabled=maybe\n").gpuEnabled).toBeUndefined();
+    expect(parseAvdConfig("hw.gpu.mode=host\n").gpuEnabled).toBeUndefined();
+  });
+
   it("derives a normalized hardware capability inventory", () => {
     const config = parseAvdConfig(
       ["hw.camera.back=virtualscene", "hw.fingerprint=yes", "hw.nfc=no"].join("\n"),

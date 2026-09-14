@@ -9,7 +9,7 @@ import {
   type DaemonClientLike,
   type DaemonClientFactory,
 } from "./client";
-import { DaemonManager, type DaemonManagerLike } from "./manager";
+import { DaemonManager, type DaemonManagerLike, type DaemonRestartResult } from "./manager";
 import { logger } from "../utils/logger";
 import {
   SOCKET_PATH,
@@ -1263,6 +1263,51 @@ export class DaemonMcpProxy {
     return this.reconciliationSnapshot;
   }
 
+  private isSameDaemonGeneration(current: DaemonStatus, expected: DaemonStatus): boolean {
+    if (!current.running || !expected.running || current.pid !== expected.pid) {
+      return false;
+    }
+    const identityFields = ["startedAt", "version", "buildId", "entryScript"] as const;
+    return identityFields.every(
+      (field) => expected[field] === undefined || current[field] === expected[field],
+    );
+  }
+
+  /**
+   * A competing client can observe the incumbent during an admitted restart's
+   * intentional handoff gap. Wait for a different, running generation instead
+   * of treating that gap as a completed reconciliation.
+   */
+  private async waitForJoinedRestartSuccessor(
+    expected: DaemonStatus,
+    deadline: number,
+  ): Promise<void> {
+    while (this.timer.now() < deadline) {
+      try {
+        const status = await this.reconciliationStatus();
+        if (status.running && !this.isSameDaemonGeneration(status, expected)) {
+          return;
+        }
+      } catch (error) {
+        if (!(error instanceof DaemonPreflightConnectionError)) {
+          throw error;
+        }
+        // A missing socket is expected while the restart owner changes generations.
+        logger.debug(`[DaemonMcpProxy] Waiting for joined restart successor: ${error.message}`);
+      }
+      this.reconciliationSnapshot = undefined;
+      const remaining = deadline - this.timer.now();
+      if (remaining <= 0) {
+        break;
+      }
+      await this.timer.sleep(Math.min(DAEMON_RESTART_HANDOFF_DELAY_MS, remaining));
+      this.reconciliationSnapshot = undefined;
+    }
+    throw new DaemonUnavailableError(
+      `Timed out waiting for concurrent daemon restart after ${DAEMON_STARTUP_TIMEOUT_MS}ms`,
+    );
+  }
+
   private async readSocketReconciliationStatus(): Promise<DaemonStatus> {
     const recorded = await this.daemonManager.status();
     const actual = await runPreflightTransport(() => this.daemonStatusProbe!());
@@ -1290,7 +1335,9 @@ export class DaemonMcpProxy {
   }
 
   /** Newer clients may replace older daemons; mismatches remain a pre-dispatch gate. */
-  private async ensureVersionMatches(): Promise<void> {
+  private async ensureVersionMatches(
+    reconciliationDeadline = this.timer.now() + DAEMON_STARTUP_TIMEOUT_MS,
+  ): Promise<void> {
     const status = await this.reconciliationStatus();
     if (!status.running) {
       return;
@@ -1382,11 +1429,15 @@ export class DaemonMcpProxy {
     // Preserve the running daemon's existing options across the restart rather
     // than resetting to this client's config, which would strip flags the
     // daemon was launched with when the connecting client is bare (issue #3846).
-    await this.daemonManager.restart(
+    const restartResult = await this.daemonManager.restart(
       mergeDaemonOptions(status.options, this.config.daemonOptions),
       status,
     );
     this.reconciliationSnapshot = undefined;
+    if (restartResult === "joined") {
+      await this.waitForJoinedRestartSuccessor(status, reconciliationDeadline);
+      return await this.ensureVersionMatches(reconciliationDeadline);
+    }
     // The replacement daemon may expose a different tool set; drop the cache so we
     // never advertise the old daemon's tools against the new build.
     this.invalidateCache();
@@ -1456,7 +1507,9 @@ export class DaemonMcpProxy {
    * frontend and backend run the same code. Independent of, and complementary to,
    * {@link ensureVersionMatches}.
    */
-  private async ensureBuildMatches(): Promise<void> {
+  private async ensureBuildMatches(
+    reconciliationDeadline = this.timer.now() + DAEMON_STARTUP_TIMEOUT_MS,
+  ): Promise<void> {
     const status = await this.reconciliationStatus();
     if (!status.running) {
       return;
@@ -1493,11 +1546,23 @@ export class DaemonMcpProxy {
     // Preserve the running daemon's existing options across the restart rather
     // than resetting to this client's config, which would strip flags the
     // daemon was launched with when the connecting client is bare (issue #3846).
-    await this.daemonManager.restart(
+    const restartResult = await this.daemonManager.restart(
       mergeDaemonOptions(status.options, this.config.daemonOptions),
       status,
     );
     this.reconciliationSnapshot = undefined;
+    return await this.finishBuildRestart(restartResult, status, reconciliationDeadline);
+  }
+
+  private async finishBuildRestart(
+    restartResult: DaemonRestartResult,
+    status: DaemonStatus,
+    reconciliationDeadline: number,
+  ): Promise<void> {
+    if (restartResult === "joined") {
+      await this.waitForJoinedRestartSuccessor(status, reconciliationDeadline);
+      return await this.ensureBuildMatches(reconciliationDeadline);
+    }
     // The replacement daemon may expose a different tool set; drop the cache so we
     // never advertise the old daemon's tools against the new build.
     this.invalidateCache();
@@ -1567,16 +1632,7 @@ export class DaemonMcpProxy {
       );
       this.reconciliationSnapshot = undefined;
       if (restartResult === "joined") {
-        // Another client owns the compatible restart. Its old generation can stay
-        // reachable until it begins shutdown, so wait before re-reading rather than
-        // treating that still-running incarnation as the settled successor.
-        await this.timer.sleep(
-          Math.min(
-            DAEMON_RESTART_HANDOFF_DELAY_MS,
-            Math.max(0, reconciliationDeadline - this.timer.now()),
-          ),
-        );
-        this.reconciliationSnapshot = undefined;
+        await this.waitForJoinedRestartSuccessor(status, reconciliationDeadline);
         continue;
       }
 

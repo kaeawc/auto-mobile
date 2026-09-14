@@ -4687,11 +4687,9 @@ export class UnixSocketServer {
       ? this.daemonState.getSessionManager()
       : undefined;
     const sessionUuid = sessionManager?.getSessionForDevice?.(targetDevice.deviceId) ?? undefined;
-    if (!sessionUuid) {
-      return await operation();
+    if (sessionUuid) {
+      this.daemonState.getDevicePool().assertSessionReadyForAutomation?.(sessionUuid);
     }
-
-    this.daemonState.getDevicePool().assertSessionReadyForAutomation?.(sessionUuid);
     const execution = executionTracker.startExecution(toolName, undefined, sessionUuid);
     try {
       execution.abortController.signal.throwIfAborted();

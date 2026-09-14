@@ -897,7 +897,7 @@ describe("DaemonMcpProxy", () => {
           clientVersion: opts.clientVersion ?? CLIENT_VERSION,
           buildIdentity: opts.clientBuild,
         });
-        return { fakeClient, fakeManager, isAvailableSpy, proxy };
+        return { fakeClient, fakeManager, isAvailableSpy, proxy, timer };
       }
 
       async function expectVersionMismatch(
@@ -925,6 +925,27 @@ describe("DaemonMcpProxy", () => {
             version: OLDER_VERSION,
             startedAt: ANCIENT_TIMESTAMP,
           });
+        } finally {
+          isAvailableSpy.mockRestore();
+          await proxy.close();
+        }
+      });
+
+      test("waits for a successor after joining a version restart", async () => {
+        const { fakeManager, isAvailableSpy, proxy, timer } = makeProxy({
+          runningVersion: OLDER_VERSION,
+          startedAt: ANCIENT_TIMESTAMP,
+        });
+        const [initialStatus, successorStatus] = fakeManager.statusResults;
+        fakeManager.restartResult = "joined";
+        fakeManager.statusResult = successorStatus!;
+        fakeManager.statusResults = [initialStatus!, initialStatus!, successorStatus!];
+        timer.enableAutoAdvance();
+
+        try {
+          await proxy.listTools();
+          expect(fakeManager.restartCallCount).toBe(1);
+          expect(fakeManager.waitForReadyCallCount).toBe(0);
         } finally {
           isAvailableSpy.mockRestore();
           await proxy.close();
@@ -1894,6 +1915,7 @@ describe("DaemonMcpProxy", () => {
         };
         class ConcurrentOptionsManager extends FakeDaemonManager {
           private currentOptions: DaemonOptions = {};
+          private generation = 1;
           private restartCalls: DaemonOptions[] = [];
           private releaseFirstRestart!: () => void;
           private readonly firstRestartCanFinish = new Promise<void>((resolve) => {
@@ -1901,7 +1923,11 @@ describe("DaemonMcpProxy", () => {
           });
 
           override async status(): Promise<DaemonStatus> {
-            return runningStatus(this.currentOptions);
+            return {
+              ...runningStatus(this.currentOptions),
+              pid: 1234 + this.generation,
+              startedAt: this.generation,
+            };
           }
 
           override async restart(
@@ -1915,6 +1941,7 @@ describe("DaemonMcpProxy", () => {
               // its handoff so the superset client is forced to join it.
               await this.firstRestartCanFinish;
               this.currentOptions = narrowOptions;
+              this.generation++;
               return "restarted";
             }
             if (this.restartCalls.length === 2) {
@@ -1922,6 +1949,7 @@ describe("DaemonMcpProxy", () => {
               return "joined";
             }
             this.currentOptions = supersetOptions;
+            this.generation++;
             return "restarted";
           }
         }
@@ -4537,7 +4565,7 @@ describe("DaemonMcpProxy", () => {
         timer,
         buildIdentity: { ...CLIENT_BUILD },
       });
-      return { fakeClient, fakeManager, isAvailableSpy, proxy };
+      return { fakeClient, fakeManager, isAvailableSpy, proxy, timer };
     }
 
     async function expectBuildMismatch(
@@ -4561,6 +4589,29 @@ describe("DaemonMcpProxy", () => {
         expect(invalidateSpy).toHaveBeenCalled();
       } finally {
         invalidateSpy.mockRestore();
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("waits for a successor after joining a build restart", async () => {
+      const { fakeManager, isAvailableSpy, proxy, timer } = makeBuildProxy();
+      const [versionStatus, mismatchStatus] = fakeManager.statusResults;
+      const successorStatus = fakeManager.statusResult;
+      fakeManager.restartResult = "joined";
+      fakeManager.statusResults = [
+        versionStatus!,
+        mismatchStatus!,
+        mismatchStatus!,
+        successorStatus,
+      ];
+      timer.enableAutoAdvance();
+
+      try {
+        await proxy.listTools();
+        expect(fakeManager.restartCallCount).toBe(1);
+        expect(fakeManager.waitForReadyCallCount).toBe(0);
+      } finally {
         isAvailableSpy.mockRestore();
         await proxy.close();
       }

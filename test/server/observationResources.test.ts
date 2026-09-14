@@ -612,6 +612,7 @@ describe("unscoped latest observation resources", () => {
     device: BootedDevice,
     marker: string,
     observationId?: string,
+    screenshotCaptureAttempted?: boolean,
   ): Promise<ObserveResult> {
     const observeScreen = new RealObserveScreen(
       device,
@@ -623,6 +624,7 @@ describe("unscoped latest observation resources", () => {
     const observation = {
       ...observeScreen.createBaseResult(),
       ...(observationId ? { observationId } : {}),
+      ...(screenshotCaptureAttempted !== undefined ? { screenshotCaptureAttempted } : {}),
       viewHierarchy: marker,
     } as ObserveResult;
     await observeScreen.cacheObserveResult(observation);
@@ -633,6 +635,30 @@ describe("unscoped latest observation resources", () => {
     registerObservationResources();
 
     expect(ResourceRegistry.getTemplate(RESOURCE_URIS.OBSERVATION_SCREENSHOT)).toBeDefined();
+  });
+
+  test("does not expose internal fields from the latest cached observation", async () => {
+    await cacheObservationFor(deviceA, "latest-internal-field", undefined, true);
+
+    const content = await readLatestObservation();
+
+    expect(JSON.parse(content.text!)).not.toHaveProperty("screenshotCaptureAttempted");
+    expect(RealObserveScreen.getRecentCachedObservation()?.result.screenshotCaptureAttempted).toBe(
+      true,
+    );
+  });
+
+  test("does not expose internal fields from a session cached observation", async () => {
+    await cacheObservationFor(deviceA, "session-internal-field", undefined, false);
+    registerDirectSessionDevice(sessionUuid, deviceA);
+
+    const content = await readTemplate("automobile:observation/session/session-123/latest");
+
+    expect(JSON.parse(content.text!)).not.toHaveProperty("screenshotCaptureAttempted");
+    expect(
+      RealObserveScreen.getRecentCachedResultForDevice(deviceA.deviceId)
+        ?.screenshotCaptureAttempted,
+    ).toBe(false);
   });
 
   test("serves the screenshot captured with the requested observation", async () => {

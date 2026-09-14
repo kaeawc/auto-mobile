@@ -18,6 +18,7 @@ import { OPERATION_CANCELLED_MESSAGE } from "../utils/constants";
 import { detectImageMimeType } from "../utils/screenshot/imageHeaderDimensions";
 import { getScreenshotStateStore } from "../features/observe/screenshot/ScreenshotStateRegistry";
 import { OBSERVATION_SCREENSHOT_URI_TEMPLATE } from "./observationResourceUris";
+import { stripInternalObservationFields } from "./observationInternalFields";
 
 interface ScreenshotFileSystem {
   stat(path: string): Promise<{ isFile(): boolean }>;
@@ -144,11 +145,15 @@ async function getLatestObservation(): Promise<ResourceContent> {
       };
     }
 
+    // The cache is shared with tool paths that still need internal observation fields.
+    const observation = { ...cachedObservation.result };
+    stripInternalObservationFields(observation);
+
     // Return the observation as JSON
     return {
       uri: RESOURCE_URIS.LATEST_OBSERVATION,
       mimeType: "application/json",
-      text: stringifyToolResponse(cachedObservation.result),
+      text: stringifyToolResponse(observation),
     };
   } catch (error) {
     logger.error(`[ObservationResources] Failed to get latest observation: ${error}`);
@@ -609,10 +614,14 @@ async function getSessionObservation(
       };
     }
 
+    // The cache is shared with tool paths that still need internal observation fields.
+    const observation = { ...cachedResult };
+    stripInternalObservationFields(observation);
+
     return {
       uri,
       mimeType: "application/json",
-      text: stringifyToolResponse(cachedResult),
+      text: stringifyToolResponse(observation),
     };
   } catch (error) {
     logger.error(

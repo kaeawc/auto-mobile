@@ -6640,10 +6640,34 @@ export function registerDeviceTools() {
       .finally(() => lifecycleLease.release())
       .catch((error: unknown) => {
         logger.warn(
-          `[DeviceTools] Deferred provision mutation for '${stableId}' rejected after rollback timed out: ${errorMessage(error)}`,
+          `[DeviceTools] Deferred provision mutation for '${stableId}' rejected before lifecycle ownership was released: ${errorMessage(error)}`,
           error,
         );
       });
+  }
+
+  function retainPendingProvisionMutationLifecycle(
+    args: ProvisionDeviceArgs,
+    provisioned: Awaited<ReturnType<ExactDeviceProvisioner["provision"]>> | undefined,
+    takeLifecycleLease: () => VirtualDeviceLifecycleLease | undefined,
+    pendingMutationSettlement: Promise<unknown> | undefined,
+  ): void {
+    if (!pendingMutationSettlement) {
+      return;
+    }
+    const lifecycleLease = takeLifecycleLease();
+    if (!lifecycleLease) {
+      return;
+    }
+    const stableId =
+      provisioned?.device.platform === "ios"
+        ? (provisioned.device.deviceId ?? args.device.name)
+        : args.device.name;
+    retainProvisionLifecycleUntilMutationSettles(
+      lifecycleLease,
+      pendingMutationSettlement,
+      stableId,
+    );
   }
 
   async function cleanupFailedProvisionDevice(
@@ -6858,7 +6882,15 @@ export function registerDeviceTools() {
     ) {
       // A transport routing conflict or daemon-generation handoff does not
       // invalidate the viable device, so preserve its identity for a retry
-      // instead of wrapping the interruption in destructive rollback.
+      // instead of wrapping the interruption in destructive rollback. Keep
+      // the lease when an exact-provisioning mutation is still live so a
+      // replacement daemon cannot recreate this identity underneath it.
+      retainPendingProvisionMutationLifecycle(
+        args,
+        provisioned,
+        takeLifecycleLease,
+        pendingMutationSettlement,
+      );
       throw error;
     }
     const createdDevice =

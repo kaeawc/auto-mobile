@@ -1829,6 +1829,116 @@ describe("provisionDevice handler", () => {
     expect(provisionCalls).toBe(2);
   });
 
+  test("retains the AVD lease through a pending config write during daemon handoff", async () => {
+    const timer = new FakeTimer();
+    const lifecycleCoordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);
+    const writeStarted = Promise.withResolvers<void>();
+    const releaseWrite = Promise.withResolvers<void>();
+    let config = "hw.ramSize=2048\n";
+    const configWriter = new FileAndroidAvdConfigWriter({
+      readFile: async () => config,
+      writeFile: async (_path, content) => {
+        writeStarted.resolve();
+        await releaseWrite.promise;
+        config = content;
+      },
+      environment: { ANDROID_AVD_HOME: "/avds" },
+      homeDirectory: () => "/home/test",
+    });
+    configureProvisionBootAndTeardown(deviceManager, "android");
+    setDeviceToolsDependencies({
+      timer,
+      lifecycleCoordinator,
+      exactDeviceProvisionerFactory: (manager, creationGate) =>
+        new DefaultExactDeviceProvisioner({
+          listDeviceImages: async (platform) => await manager.listDeviceImages(platform),
+          isCreationAllowed: (createIfMissing) => creationGate.isCreationAllowed(createIfMissing),
+          avdManager: {
+            createAvd: async ({ name }) => {
+              deviceManager.setDeviceImages("android", [
+                { name, platform: "android", isRunning: false },
+              ]);
+              return { success: true, message: "created", avdName: name };
+            },
+          },
+          androidConfigReader: {
+            readConfig: async () => undefined,
+          },
+          androidConfigWriter: configWriter,
+          iosSimulator: {
+            createSimulator: async () => {
+              throw new Error("unexpected iOS simulator creation");
+            },
+          },
+          lifecycleCoordinator,
+          timer,
+        }),
+      idGenerator: new FakeIdGenerator(["attempt-handoff-config-write"]),
+    });
+    registerDeviceTools();
+    const baseArgs = provisionTestArgs("android", "operation-handoff-config-write");
+    const args = {
+      ...baseArgs,
+      device: {
+        ...baseArgs.device,
+        spec: {
+          ...baseArgs.device.spec,
+          configuration: { memoryMb: 4096 },
+        },
+      },
+      boot: false,
+      readiness: "none" as const,
+    };
+    const requestController = new AbortController();
+
+    const responsePromise = ToolRegistry.getTool("provisionDevice")!.handler(
+      args,
+      undefined,
+      requestController.signal,
+    );
+    await writeStarted.promise;
+    requestController.abort(
+      new DaemonHandoffInterruptionError("daemon shutdown interrupted provisioning"),
+    );
+    const response = JSON.parse(((await responsePromise) as any).content[0].text);
+    expect(response).toMatchObject({
+      success: false,
+      error: {
+        code: "daemon_handoff_interrupted",
+        retryable: true,
+      },
+    });
+    expect(response.cleanup).toBeUndefined();
+
+    let replacementAcquired = false;
+    const replacementLeasePromise = lifecycleCoordinator
+      .reserve(
+        { kind: "stable", platform: "android", stableId: args.device.name },
+        { operation: "provision", deadlineMs: timer.now() + 10_000 },
+      )
+      .then((lease) => {
+        replacementAcquired = true;
+        return lease;
+      });
+    for (let drain = 0; drain < 10; drain++) {
+      await Promise.resolve();
+    }
+    expect(replacementAcquired).toBe(false);
+
+    releaseWrite.resolve();
+    const replacementLease = await replacementLeasePromise;
+    config = "hw.ramSize=8192\n";
+    replacementLease.release();
+
+    expect(config).toBe("hw.ramSize=8192\n");
+    expect(await deviceManager.listDeviceImages("android")).toHaveLength(1);
+    expect(
+      deviceManager
+        .getExecutedOperations()
+        .filter((operation) => operation.startsWith("destroyDevice:")),
+    ).toEqual([]);
+  });
+
   test("cleans up a retried operation's adopted device when the original cleanup failed", async () => {
     const adopted = provisionedTestDevice("android", false);
     configureProvisionBootAndTeardown(deviceManager, "android");

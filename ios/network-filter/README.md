@@ -63,7 +63,10 @@ existing `APPLE_NOTARY_KEY_PATH`, `APPLE_NOTARY_KEY_ID`, and
 bash scripts/ios/build-network-filter-probe.sh signed
 ```
 
-The script follows the existing macOS signing flags, signs the nested extension
+The script builds both macOS slices (`arm64` and `x86_64`), combines them with
+`lipo`, and asserts `lipo -archs` lists both before anything is signed, so the
+artifact launches on Intel and Apple Silicon Macs alike (#6897). It follows the
+existing macOS signing flags, signs the nested extension
 before the app, and reuses `scripts/ci/notarize-macos-artifact.sh`. The existing
 `sign-macos-products.sh` handles standalone Swift products, so provisioning and
 nested system-extension bundle assembly live here. No dependencies were added:
@@ -77,6 +80,13 @@ After placing the signed app in `/Applications`, invoke its executable:
 "/Applications/AutoMobile Network Identity Probe.app/Contents/MacOS/network-filter-controller" status
 "/Applications/AutoMobile Network Identity Probe.app/Contents/MacOS/network-filter-controller" snapshot
 ```
+
+For shell callers, `bash scripts/ios/build-network-filter-probe.sh activate
+[app-path]` wraps the controller's `activate` and maps its JSON `state` to a
+distinct exit code: `0` ready, `3` approval required in System Settings, `4`
+the extension installs only after a macOS restart, `1` any other non-ready
+state (#6897). The controller executable itself exits `0` for both pending
+approval states, so scripts should call the wrapper rather than the executable.
 
 Initial extension and filter approval require macOS interaction. A timeout is an
 uncertain installation result: inspect `status` and System Settings before

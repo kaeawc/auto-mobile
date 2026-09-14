@@ -241,14 +241,21 @@ function copyDefinedFields<T extends object, K extends keyof T>(
  * present, build the URI through the SAME shared encoder the resource template
  * registration uses, so it is guaranteed to round-trip back to that resource.
  * A no-op when either identity is missing (e.g. a recorded capture that predates
- * `deviceId`), so the field stays absent exactly like an unset optional.
+ * `deviceId`) or the capture was explicitly skipped. Older recorded captures
+ * predate `screenshotCaptureAttempted`, so only an explicit `false` suppresses
+ * the URI. The capture signal is internal-only and is removed before serving.
  */
-function attachObservationScreenshotUri(observation: {
-  deviceId?: string;
-  observationId?: string;
-  observationScreenshotResourceUri?: string;
-}): void {
+function attachObservationScreenshotUri(
+  observation: {
+    deviceId?: string;
+    observationId?: string;
+    observationScreenshotResourceUri?: string;
+    screenshotCaptureAttempted?: boolean;
+  },
+  captureAttempted = observation.screenshotCaptureAttempted,
+): void {
   if (
+    captureAttempted !== false &&
     typeof observation.deviceId === "string" &&
     observation.deviceId.length > 0 &&
     typeof observation.observationId === "string" &&
@@ -258,7 +265,10 @@ function attachObservationScreenshotUri(observation: {
       observation.deviceId,
       observation.observationId,
     );
+  } else {
+    delete observation.observationScreenshotResourceUri;
   }
+  delete observation.screenshotCaptureAttempted;
 }
 
 /**
@@ -631,7 +641,9 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
             deviceId?: string;
             observationId?: string;
             observationScreenshotResourceUri?: string;
+            screenshotCaptureAttempted?: boolean;
           },
+          (payload.observation as ObserveResult).screenshotCaptureAttempted,
         );
       }
       sanitizedPayload = {

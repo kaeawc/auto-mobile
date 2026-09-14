@@ -770,11 +770,14 @@ export class RealObserveScreen implements ObserveScreen {
       // Screenshot: fire-and-forget unless an accessibility audit is configured
       // (the audit needs the screenshot file on disk before it runs).
       if (!skipScreenshot) {
+        result.screenshotCaptureAttempted = true;
         if (serverConfig.getAccessibilityAuditConfig()) {
           await this.screenshotRecorder.capture(result.observationId, perf, signal);
         } else {
           this.screenshotRecorder.start(result.observationId, perf, signal);
         }
+      } else {
+        result.screenshotCaptureAttempted = false;
       }
 
       // Attach recomposition metrics if enabled.

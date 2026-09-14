@@ -173,6 +173,14 @@ export interface ObserveResult {
   observationScreenshotResourceUri?: string;
 
   /**
+   * INTERNAL-ONLY: whether this exact observation started a screenshot capture
+   * attempt (issue #7018 review). The serialization boundary uses it to decide
+   * whether to advertise `observationScreenshotResourceUri`, then removes it
+   * before the observation reaches the wire.
+   */
+  screenshotCaptureAttempted?: boolean;
+
+  /**
    * Timestamp when the screen state was captured on the device (milliseconds since epoch)
    * This comes from the CtrlProxy on Android or equivalent on iOS
    * Falls back to server timestamp if device timestamp is unavailable

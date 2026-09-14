@@ -69,7 +69,6 @@ describe("UnixSocketServer exact-tool selection enforcement", () => {
       getBootedDevices: async () => [device],
     } as ReturnType<typeof PlatformDeviceManagerFactory.getInstance>);
     getInstanceCalls = 0;
-    originalGetInstance = AndroidCtrlProxyClient.getInstance;
     AndroidCtrlProxyClient.getInstance = mock(() => {
       getInstanceCalls++;
       return {
@@ -90,6 +89,11 @@ describe("UnixSocketServer exact-tool selection enforcement", () => {
   }
 
   beforeEach(async () => {
+    // Capture the pristine getInstance ONCE per test, before startServer installs its
+    // mock. startServer is called again inside some tests, so capturing inside it would
+    // save an already-mocked value and afterEach would "restore" the mock, leaking it to
+    // later suites (issue #7052).
+    originalGetInstance = AndroidCtrlProxyClient.getInstance;
     await startServer();
   });
 

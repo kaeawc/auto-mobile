@@ -464,10 +464,10 @@ async function subscribeReader(cdp: CdpClient): Promise<void> {
 }
 
 /**
- * The macOS hosted image can leave a previously healthy Chrome renderer unable
- * to create its next WHEP peer connection. A new browser/profile turns that
- * browser-only flake into one bounded retry while preserving the actual
- * keyframe-recovery assertion below.
+ * The macOS hosted image can leave a healthy Chrome renderer unable to create
+ * its next WHEP peer connection. A new browser/profile turns that browser-only
+ * flake into one bounded retry at either WHEP subscription point while
+ * preserving the actual keyframe-recovery assertion below.
  */
 async function subscribeRecoveryReader(
   reader: ChromeReader,
@@ -1196,7 +1196,11 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
           timeline.mark("firstEncodedFrame");
           return true;
         }, "capture source did not deliver H.264 frames to the WHIP publisher");
-        await subscribeReader(cdp);
+        ({ chrome, cdp } = await subscribeRecoveryReader(
+          { chrome: chrome!, cdp: cdp! },
+          join(artifactDir, "chrome.log"),
+          rememberChrome,
+        ));
         timeline.mark("whepConnected");
         // #4383: the screen has been static since capture started (fixture launched, no further
         // input), so this exercises a late viewer joining an idle stream. The encoder's

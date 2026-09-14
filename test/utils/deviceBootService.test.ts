@@ -510,6 +510,34 @@ describe("DeviceBootService", () => {
     expect(result.device.deviceId).toBe("UDID-A");
   });
 
+  it("cold-boots the requested UDID rather than reusing an absent same-name simulator", async () => {
+    const devices = new FakeDeviceUtils();
+    const iosImage: DeviceInfo = {
+      name: "iPhone 16",
+      platform: "ios",
+      deviceId: "UDID-A",
+      isRunning: true,
+      osVersion: "18.0",
+    };
+    const sameNameSibling: BootedDevice = {
+      name: "iPhone 16",
+      platform: "ios",
+      deviceId: "UDID-B",
+    };
+    devices.setDeviceImages("ios", [iosImage]);
+    devices.setBootedDevices("ios", [sameNameSibling]);
+
+    const result = await service(devices).boot({
+      platform: "ios",
+      deviceId: "UDID-A",
+      preferRunning: true,
+    });
+
+    expect(result.source).toBe("cold-boot");
+    expect(result.device.deviceId).toBe("UDID-A");
+    expect(devices.wasMethodCalled("startDevice:iPhone 16")).toBe(true);
+  });
+
   it("preserves a cooperative readiness diagnostic at the boot deadline", async () => {
     const devices = new FakeDeviceUtils();
     const matcher = new FakeDeviceMatcher();

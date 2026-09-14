@@ -521,6 +521,7 @@ describe("ListInstalledApps", function () {
         expect(warnSpy).toHaveBeenCalledTimes(1);
         expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining(mockDevice.deviceId));
         expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("returned no labels"));
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("0/3 packages have a label"));
         expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("ADB"));
       } finally {
         warnSpy.mockRestore();

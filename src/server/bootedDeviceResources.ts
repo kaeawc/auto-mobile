@@ -907,7 +907,15 @@ const defaultCtrlProxyVersionLookup: CtrlProxyVersionLookup = {
   async getVersion(device) {
     try {
       if (device.platform === "android") {
-        const metadata = await getAndroidAppMetadataViaAdb(device, AndroidCtrlProxyManager.PACKAGE);
+        const metadata = await getAndroidAppMetadataViaAdb(
+          device,
+          AndroidCtrlProxyManager.PACKAGE,
+          undefined,
+          {
+            timeoutMs: CTRL_PROXY_VERSION_TIMEOUT_MS,
+            optional: true,
+          },
+        );
         return metadata
           ? {
               versionName: metadata.versionName || undefined,
@@ -1011,7 +1019,7 @@ export async function queryDeviceServiceStatus(
         installedSha256,
         expectedSha256,
         isCompatible,
-        ...(version ? { version } : {}),
+        ...(installed && version ? { version } : {}),
       };
     } else if (device.platform === "ios") {
       const manager = IOSCtrlProxyManager.getInstance(bootedDevice);
@@ -1065,7 +1073,8 @@ export async function queryDeviceServiceStatus(
         installedSha256: null,
         expectedSha256,
         isCompatible,
-        ...(installed && version ? { version } : {}),
+        // isInstalled() is host-wide/unconditional for simulators; running is the per-device signal.
+        ...(running && version ? { version } : {}),
         supportedCommandsComplete,
         supportedFeaturesComplete,
       };

@@ -13,7 +13,6 @@ import os from "os";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../src/utils/workingDirectory";
 import { parsePlist } from "../../src/utils/ios-cmdline-tools/XctestrunPlist";
 import { logger } from "../../src/utils/logger";
-import { resolveAssetVersion, resolvePinnedVersion } from "../../src/constants/release";
 
 describe("IOSCtrlProxyBuilder", function () {
   let originalProjectRoot: string | undefined;
@@ -820,8 +819,27 @@ describe("IOSCtrlProxyBuilder", function () {
       );
 
       expect((await builder.build("simulator")).success).toBe(true);
-      expect(await builder.getInstalledBundleVersion()).not.toBe(
-        resolveAssetVersion(resolvePinnedVersion()),
+      expect(await builder.getInstalledBundleVersion()).toBe(
+        `local-override:${"local-override-checksum".slice(0, 12)}`,
+      );
+    });
+
+    test("records a local override basename when no checksum is available", async function () {
+      const derivedDataPath = path.join(tempDir, "DerivedData");
+      const cacheDir = path.join(tempDir, "cache");
+      const overridePath = path.join(tempDir, "runner-without-checksum.ipa");
+      const downloader = new FakeIOSCtrlProxyBundleDownloader();
+      await fs.writeFile(overridePath, "a".repeat(12000));
+      process.env.AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH = overridePath;
+      IOSCtrlProxyBuilder.setExpectedChecksumForTesting("");
+      const builder = IOSCtrlProxyBuilder.getInstance(
+        { derivedDataPath, bundleCacheDir: cacheDir },
+        { downloader },
+      );
+
+      expect((await builder.build("simulator")).success).toBe(true);
+      expect(await builder.getInstalledBundleVersion()).toBe(
+        `local-override:${path.basename(overridePath)}`,
       );
     });
 

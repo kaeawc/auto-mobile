@@ -10,6 +10,7 @@ import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbCl
 import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { SimCtlClient, type SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { logger } from "../../utils/logger";
+import { withRemainingBudget } from "../../utils/withRemainingBudget";
 import { defaultRecordingCodecProbe, type RecordingCodecProbe } from "./recordingCodec";
 import {
   DefaultFfmpegClient,
@@ -905,6 +906,7 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
       input.device,
       input.startDeadlineMs,
       input.attempt >= input.maxAttempts,
+      input.config.abortSignal,
     );
     logger.warn(
       `[FfmpegVideo] iOS recording start attempt ${input.attempt}/${input.maxAttempts} failed: ${input.error} (${diagnostics})`,
@@ -938,6 +940,7 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
     device: BootedDevice,
     startDeadlineMs: number,
     isFinalAttempt: boolean,
+    abortSignal: AbortSignal | undefined,
   ): Promise<string> {
     if (isFinalAttempt) {
       // No retry is left to protect, so the probe is deliberately NOT clipped to the
@@ -947,6 +950,7 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
         simctl,
         device,
         IOS_RECORDING_DIAGNOSTIC_TIMEOUT_MS,
+        abortSignal,
       );
     }
     const diagnosticBudgetMs = Math.max(
@@ -954,7 +958,7 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
       Math.min(IOS_RECORDING_RETRY_DIAGNOSTIC_TIMEOUT_MS, startDeadlineMs - this.timer.now()),
     );
     return diagnosticBudgetMs > 0
-      ? await this.captureSimulatorDiagnostics(simctl, device, diagnosticBudgetMs)
+      ? await this.captureSimulatorDiagnostics(simctl, device, diagnosticBudgetMs, abortSignal)
       : "simulator state unknown: start budget reserved for the pending retry";
   }
 
@@ -967,18 +971,33 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
     simctl: SimCtl,
     device: BootedDevice,
     timeoutMs: number,
+    abortSignal: AbortSignal | undefined,
   ): Promise<string> {
     const budgetMs = Math.min(IOS_RECORDING_DIAGNOSTIC_TIMEOUT_MS, timeoutMs);
     const probeStartedAtMs = this.timer.now();
     try {
-      const result = await simctl.executeCommandArgs(
-        ["list", "devices", device.deviceId],
-        budgetMs,
+      const result = await withRemainingBudget(
+        probeStartedAtMs + budgetMs,
+        this.timer,
+        abortSignal,
+        async (signal, remainingMs) =>
+          await simctl.executeCommandArgs(
+            ["list", "devices", device.deviceId],
+            remainingMs,
+            signal,
+          ),
       );
       const text = (result.stdout || result.stderr || "").replace(/\s+/g, " ").trim();
       return text ? `simulator state: ${text.slice(0, 500)}` : "simulator state: (empty)";
     } catch (error) {
+      if (abortSignal?.aborted) {
+        // Shutdown cancellation is expected here and must not mask the original start failure.
+        logger.debug("[FfmpegVideo] Simulator state probe cancelled by shutdown");
+        return "simulator state probe cancelled by shutdown";
+      }
       const reason = errorMessage(error);
+      // This best-effort probe must not replace the original recording-start error.
+      logger.debug(`[FfmpegVideo] Simulator state probe failed: ${reason}`);
       // A probe that burned its whole budget says nothing about the simulator — only
       // that the host was too busy to answer in time. Reporting that as "unavailable"
       // reads like a definitive "the simulator is gone" and sent the triage of #6857

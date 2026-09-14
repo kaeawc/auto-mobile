@@ -8010,7 +8010,7 @@ export function registerDeviceTools() {
     operationName: string;
     androidAvdName?: string;
     stableTarget?: StableDeviceTarget;
-    /** getAndroid's `avdName` + `deviceId` pair, validated after discovery. */
+    /** Android `avdName` + `deviceId` pair, validated before and after discovery. */
     requestedAndroidIdentifierPair?: { avdName: string; deviceId: string };
   };
 
@@ -8513,7 +8513,7 @@ export function registerDeviceTools() {
         coordinatedSignals.length === 1
           ? coordinatedSignals[0]
           : AbortSignal.any(coordinatedSignals);
-      // Reject a contradictory getAndroid avdName + serial pair before booting,
+      // Reject a contradictory Android avdName + serial pair before booting,
       // so a stopped AVD is not cold-booted and killed just to report it. Run
       // after its lifecycle lease, however, so a serial not yet visible during
       // reset recovery gets a chance to appear before discovery decides.
@@ -8649,6 +8649,15 @@ export function registerDeviceTools() {
             : args.platform === "ios" && args.deviceId
               ? { platform: "ios", stableId: args.deviceId }
               : undefined,
+        ...(args.platform === "android" && args.avdName && args.deviceId
+          ? {
+              androidAvdName: args.avdName,
+              requestedAndroidIdentifierPair: {
+                avdName: args.avdName,
+                deviceId: args.deviceId,
+              },
+            }
+          : {}),
       },
       progress,
       signal,

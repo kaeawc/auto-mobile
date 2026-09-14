@@ -449,6 +449,8 @@ describe("repairDaemon", () => {
   test("keeps an expired initial verification in the verification phase", async () => {
     const timer = new FakeTimer();
     let recoverCalls = 0;
+    let observedSignal: AbortSignal | undefined;
+    let lateSuccess = false;
     let beginVerification: (() => void) | undefined;
     const verificationBegan = new Promise<void>((resolve) => {
       beginVerification = resolve;
@@ -457,9 +459,15 @@ describe("repairDaemon", () => {
       { timeoutMs: 50 },
       dependencies([healthReport(true)], {
         timer,
-        verifyProtocol: async () => {
+        verifyProtocol: async (signal) => {
+          observedSignal = signal;
           beginVerification?.();
-          return await new Promise<void>(() => {});
+          await new Promise<void>((resolve) => {
+            signal?.addEventListener("abort", resolve, { once: true });
+          });
+          // A non-cooperative verifier could still resolve after its deadline.
+          // The recovery result must remain failed, not turn into late success.
+          lateSuccess = true;
         },
         recoverControlState: async () => {
           recoverCalls++;
@@ -477,18 +485,25 @@ describe("repairDaemon", () => {
       action: "joined",
       nextAction: expect.stringContaining("--cli doctor --repair"),
     });
+    expect(observedSignal?.aborted).toBe(true);
+    expect(lateSuccess).toBe(true);
     expect(recoverCalls).toBe(0);
   });
 
   test("reports recovery when replacement after a wrong-protocol socket fails", async () => {
+    const protocolSignals: AbortSignal[] = [];
     const result = await repairDaemon(
       {},
       dependencies([healthReport(true)], {
-        verifyProtocol: async () => {
+        verifyProtocol: async (signal) => {
+          if (signal) {
+            protocolSignals.push(signal);
+          }
           throw new Error("unexpected socket protocol");
         },
-        recoverControlState: async (_daemonOptions, isProtocolHealthy) => {
+        recoverControlState: async (_daemonOptions, isProtocolHealthy, signal) => {
           expect(await isProtocolHealthy()).toBe(false);
+          expect(protocolSignals[1]).toBe(signal);
           throw new Error("replacement launch failed");
         },
       }),

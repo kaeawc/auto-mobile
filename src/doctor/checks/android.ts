@@ -565,10 +565,9 @@ export async function runAndroidChecks(options: DoctorOptions = {}): Promise<Che
  * Run the narrow Android portion of post-repair verification.
  *
  * This deliberately limits itself to host toolchain probes. In particular it
- * never lists booted devices, resolves the first discovered device, or invokes
- * CtrlProxy's compatibility reconciler, which can install or upgrade an APK.
- * An exact serial can opt into a separate read-only probe when recovery has a
- * caller-owned identity to verify.
+ * never enumerates AVDs or booted devices, resolves the first discovered
+ * device, or invokes CtrlProxy's compatibility reconciler, which can install
+ * or upgrade an APK.
  */
 export async function runPostRepairAndroidChecks(
   options: DoctorOptions = {},
@@ -581,7 +580,6 @@ export async function runPostRepairAndroidChecks(
   results.push(await checkJavaHome());
   results.push(await checkAdbInstallation(dependencies.adbFactory, probe));
   results.push(await checkAdbVersion(dependencies.adbFactory, probe));
-  results.push(await checkEmulator(probe, dependencies));
 
   return results;
 }

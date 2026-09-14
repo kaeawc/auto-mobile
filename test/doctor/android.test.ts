@@ -8,6 +8,7 @@ import {
   checkConnectedDevices,
   checkAvdMemory,
   checkEmulator,
+  runPostRepairAndroidChecks,
 } from "../../src/doctor/checks/android";
 import type { DoctorProbeOptions } from "../../src/doctor/types";
 import { tmpdir } from "node:os";
@@ -121,6 +122,42 @@ describe("Android doctor command line tools check", () => {
     expect(result.status).toBe("pass");
     expect(result.message).toContain("13.0");
     expect(result.value).toBe(location.path);
+  });
+});
+
+describe("post-repair Android doctor checks", () => {
+  test("remain device-neutral and never enumerate AVDs", async () => {
+    let listAvdsCalls = 0;
+    const adbFactory = {
+      create: () => ({
+        getAdbPathOnly: async () => "/test/android-sdk/platform-tools/adb",
+        executeCommand: async () => ({
+          stdout: "Android Debug Bridge version 35.0.0",
+          stderr: "",
+          exitCode: 0,
+        }),
+      }),
+    } as unknown as AdbClientFactory;
+
+    const results = await runPostRepairAndroidChecks(
+      {},
+      {
+        ...baseDependencies,
+        adbFactory,
+        listAvds: async () => {
+          listAvdsCalls++;
+          throw new Error("post-repair verification must not enumerate AVDs");
+        },
+      },
+    );
+
+    expect(listAvdsCalls).toBe(0);
+    expect(results.map((result) => result.name)).toEqual([
+      "Android Command Line Tools",
+      "JAVA_HOME",
+      "ADB Installation",
+      "ADB Version",
+    ]);
   });
 });
 

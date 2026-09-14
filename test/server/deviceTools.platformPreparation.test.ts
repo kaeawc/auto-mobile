@@ -540,6 +540,44 @@ describe("platform device preparation tools", () => {
     expect(deviceUtils.wasMethodCalled("startDevice")).toBe(false);
   });
 
+  test("startDevice rejects a stopped AVD paired with a foreign running serial before booting", async () => {
+    deviceUtils.setDeviceImages("android", [
+      { platform: "android", name: "Pixel_A", isRunning: false, source: "local" },
+    ]);
+    deviceUtils.setBootedDevices("android", [
+      { platform: "android", name: "Pixel_B", deviceId: "emulator-5556" },
+    ]);
+
+    const failure = await callTool("startDevice", {
+      platform: "android",
+      avdName: "Pixel_A",
+      deviceId: "emulator-5556",
+    }).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(ActionableError);
+    expect((failure as ActionableError).message).toContain("identifier_conflict");
+    expect((failure as ActionableError).message).toContain("Pixel_B");
+    expect(deviceUtils.wasMethodCalled("startDevice")).toBe(false);
+  });
+
+  test("startDevice honors an explicit serial when duplicate emulators share its AVD name", async () => {
+    deviceUtils.setBootedDevices("android", [
+      { name: "Duplicate_AVD", platform: "android", deviceId: "emulator-5556" },
+      { name: "Duplicate_AVD", platform: "android", deviceId: "emulator-5554" },
+    ]);
+
+    const result = await callTool("startDevice", {
+      platform: "android",
+      avdName: "Duplicate_AVD",
+      deviceId: "emulator-5554",
+    });
+
+    expect(result.deviceIdentity).toMatchObject({
+      avdName: "Duplicate_AVD",
+      adbSerial: "emulator-5554",
+    });
+  });
+
   test("getAndroid rejects an avdName paired with a serial that is not running before booting", async () => {
     // Neither identifier maps to a running device: the serial is absent from
     // discovery. That is still a contradiction the caller must resolve, decided

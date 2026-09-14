@@ -83,7 +83,7 @@ export interface DaemonRecoveryDependencies {
    * A successful MCP tools/list round trip verifies the socket protocol and,
    * through DaemonMcpProxy, the daemon's version and build identity.
    */
-  verifyProtocol?: () => Promise<void>;
+  verifyProtocol?: (signal?: AbortSignal) => Promise<void>;
   /** Runs the requested platform doctor checks after host metadata repair. */
   runDoctor?: (options: DoctorOptions) => Promise<DoctorReport>;
   timer?: Timer;
@@ -122,21 +122,42 @@ function attachLifecycleCompletion(
   return result;
 }
 
-async function verifyDaemonProtocol(): Promise<void> {
+async function verifyDaemonProtocol(signal?: AbortSignal): Promise<void> {
   // Verification must not reconcile identity itself; explicit repair owns all
   // mutation so its deadline waits for a replacement to settle.
   const proxy = new DaemonMcpProxy({ autoStartDaemon: false });
+  let closePromise: Promise<void> | undefined;
+  const closeProxy = (): Promise<void> => (closePromise ??= proxy.close());
+  let removeAbortListener: (() => void) | undefined;
   try {
-    await proxy.listTools();
+    signal?.throwIfAborted();
+    await Promise.race([
+      proxy.listTools(),
+      new Promise<never>((_resolve, reject) => {
+        if (!signal) {
+          return;
+        }
+        const rejectForAbort = () => {
+          void closeProxy();
+          reject(signal.reason);
+        };
+        signal.addEventListener("abort", rejectForAbort, { once: true });
+        removeAbortListener = () => signal.removeEventListener("abort", rejectForAbort);
+      }),
+    ]);
   } finally {
-    await proxy.close();
+    removeAbortListener?.();
+    await closeProxy();
   }
 }
 
-function protocolHealthProbe(verifyProtocol: () => Promise<void>): () => Promise<boolean> {
+function protocolHealthProbe(
+  verifyProtocol: (signal?: AbortSignal) => Promise<void>,
+  signal?: AbortSignal,
+): () => Promise<boolean> {
   return async () => {
     try {
-      await verifyProtocol();
+      await verifyProtocol(signal);
       return true;
     } catch (error) {
       // A failed compatibility probe is the explicit repair precondition.
@@ -262,8 +283,7 @@ interface ResolvedRecoveryDependencies {
     signal?: AbortSignal,
     deadline?: number,
   ) => Promise<DaemonRestartResult>;
-  verifyProtocol: () => Promise<void>;
-  isProtocolHealthy: () => Promise<boolean>;
+  verifyProtocol: (signal?: AbortSignal) => Promise<void>;
   runDoctor: (options: DoctorOptions) => Promise<DoctorReport>;
 }
 
@@ -288,7 +308,6 @@ function resolveRecoveryDependencies(
           deadline,
         )),
     verifyProtocol,
-    isProtocolHealthy: protocolHealthProbe(verifyProtocol),
     runDoctor: dependencies.runDoctor ?? runDoctor,
   };
 }
@@ -327,7 +346,7 @@ async function recoverUnusableSocket(
     deadline?: number,
   ) => Promise<DaemonRestartResult>,
   daemonOptions: DaemonOptions,
-  isProtocolHealthy: () => Promise<boolean>,
+  verifyProtocol: (signal?: AbortSignal) => Promise<void>,
 ): Promise<RecoveryAttempt<DaemonRecoveryAction>> {
   if (before.socketConnectable) {
     return { ok: true, value: "joined" };
@@ -336,7 +355,13 @@ async function recoverUnusableSocket(
     "recovery",
     deadline,
     timer,
-    (signal) => recoverControlState(daemonOptions, isProtocolHealthy, signal, deadline),
+    (signal) =>
+      recoverControlState(
+        daemonOptions,
+        protocolHealthProbe(verifyProtocol, signal),
+        signal,
+        deadline,
+      ),
     true,
   );
 }
@@ -352,11 +377,10 @@ async function verifyProtocolWithRecovery(
     deadline?: number,
   ) => Promise<DaemonRestartResult>,
   daemonOptions: DaemonOptions,
-  isProtocolHealthy: () => Promise<boolean>,
-  verifyProtocol: () => Promise<void>,
+  verifyProtocol: (signal?: AbortSignal) => Promise<void>,
 ): Promise<ProtocolRecoveryAttempt> {
-  const initialVerification = await attemptRecoveryStep("verification", deadline, timer, () =>
-    verifyProtocol(),
+  const initialVerification = await attemptRecoveryStep("verification", deadline, timer, (signal) =>
+    verifyProtocol(signal),
   );
   if (
     initialVerification.ok ||
@@ -377,7 +401,13 @@ async function verifyProtocolWithRecovery(
     "recovery",
     deadline,
     timer,
-    (signal) => recoverControlState(daemonOptions, isProtocolHealthy, signal, deadline),
+    (signal) =>
+      recoverControlState(
+        daemonOptions,
+        protocolHealthProbe(verifyProtocol, signal),
+        signal,
+        deadline,
+      ),
     true,
   );
   if (!restartResult.ok) {
@@ -389,8 +419,11 @@ async function verifyProtocolWithRecovery(
       lifecycleCompletion: restartResult.lifecycleCompletion,
     };
   }
-  const replacementVerification = await attemptRecoveryStep("verification", deadline, timer, () =>
-    verifyProtocol(),
+  const replacementVerification = await attemptRecoveryStep(
+    "verification",
+    deadline,
+    timer,
+    (signal) => verifyProtocol(signal),
   );
   return replacementVerification.ok
     ? { ok: true, value: restartResult.value }
@@ -571,7 +604,6 @@ export async function repairDaemon(
     repairControlMetadata,
     recoverControlState,
     verifyProtocol,
-    isProtocolHealthy,
     runDoctor: runDoctorChecks,
   } = resolveRecoveryDependencies(dependencies);
   const daemonOptions = options.daemonOptions ?? {};
@@ -605,7 +637,7 @@ export async function repairDaemon(
     timer,
     recoverControlState,
     daemonOptions,
-    isProtocolHealthy,
+    verifyProtocol,
   );
   if (!socketRecovery.ok) {
     return failedRecovery(
@@ -627,7 +659,6 @@ export async function repairDaemon(
     timer,
     recoverControlState,
     daemonOptions,
-    isProtocolHealthy,
     verifyProtocol,
   );
   if (!protocolRecovery.ok) {

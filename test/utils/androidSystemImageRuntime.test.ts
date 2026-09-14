@@ -7,7 +7,9 @@ describe("parseAndroidSystemImageRuntime", () => {
       "system-images;android-36;google_apis;x86_64",
       {
         apiLevel: 36,
+        apiIdentifier: "36",
         tag: "google_apis",
+        abi: "x86_64",
         architecture: "x86_64",
         systemImagePackage: "system-images;android-36;google_apis;x86_64",
       },
@@ -16,7 +18,9 @@ describe("parseAndroidSystemImageRuntime", () => {
       "system-images;android-36.1;google_apis_playstore;arm64-v8a",
       {
         apiLevel: 36,
+        apiIdentifier: "36.1",
         tag: "google_apis_playstore",
+        abi: "arm64-v8a",
         architecture: "arm64",
         systemImagePackage: "system-images;android-36.1;google_apis_playstore;arm64-v8a",
       },
@@ -25,7 +29,9 @@ describe("parseAndroidSystemImageRuntime", () => {
       "system-images;android-35;custom_tag;riscv64",
       {
         apiLevel: 35,
+        apiIdentifier: "35",
         tag: "custom_tag",
+        abi: "riscv64",
         architecture: "riscv64",
         systemImagePackage: "system-images;android-35;custom_tag;riscv64",
       },

@@ -14,6 +14,7 @@ import {
   type SdkManagerCommandResult,
   type SdkManagerClientDependencies,
 } from "./SdkManagerClient";
+import { parseAndroidSystemImageRuntime } from "./AndroidSystemImageRuntime";
 
 /** Dependencies shared by the functional AVD facade and its two typed clients. */
 export type AvdManagerDependencies = Omit<
@@ -179,15 +180,16 @@ export function parseSystemImages(
     }
     const parts = trimmedLine.split(/\s+/);
     const packageName = parts[0].split("|")[0];
-    const packageParts = packageName.split(";");
-    if (packageParts.length < 4) {
+    const parsedRuntime = parseAndroidSystemImageRuntime(packageName);
+    if (!parsedRuntime) {
       continue;
     }
     const image: SystemImage = {
       packageName,
-      apiLevel: Number.parseInt(packageParts[1].replace("android-", ""), 10),
-      tag: packageParts[2],
-      abi: packageParts[3],
+      apiLevel: parsedRuntime.apiLevel,
+      apiIdentifier: parsedRuntime.apiIdentifier,
+      tag: parsedRuntime.tag,
+      abi: parsedRuntime.abi,
       versionInfo: parts.slice(1).join(" "),
     };
     if (!filter || matchesFilter(image, filter)) {
@@ -213,6 +215,9 @@ export interface SystemImageFilter {
 export type SdkManagerSection = "available" | "installed";
 export interface SystemImage {
   packageName: string;
+  /** Exact dotted API identity from the package (for example, "36.1"). */
+  apiIdentifier: string;
+  /** Integer major API used for capability, minSdk, and range checks. */
   apiLevel: number;
   tag: string;
   abi: string;

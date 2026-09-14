@@ -31,7 +31,8 @@ describe("Device Image Resources with Fakes", () => {
       fakeDeviceUtils.setDeviceImages("ios", []);
       fakeAvdManager.setListInstalledSystemImagesResponse([
         {
-          packageName: "system-images;android-35;google_apis;x86_64",
+          packageName: "system-images;android-35.1;google_apis;x86_64",
+          apiIdentifier: "35.1",
           apiLevel: 35,
           tag: "google_apis",
           abi: "x86_64",
@@ -108,8 +109,8 @@ describe("Device Image Resources with Fakes", () => {
         runtimes: expect.arrayContaining([
           expect.objectContaining({
             platform: "android",
-            id: "system-images;android-35;google_apis;x86_64",
-            version: "35",
+            id: "system-images;android-35.1;google_apis;x86_64",
+            version: "35.1",
             availability: { available: true },
           }),
           expect.objectContaining({
@@ -152,12 +153,12 @@ describe("Device Image Resources with Fakes", () => {
         systemImages: [
           {
             platform: "android",
-            id: "system-images;android-35;google_apis;x86_64",
+            id: "system-images;android-35.1;google_apis;x86_64",
             name: "Google APIs Intel x86_64 Atom System Image",
             apiLevel: 35,
             tag: "google_apis",
             abi: "x86_64",
-            version: "35",
+            version: "35.1",
           },
         ],
         profiles: [

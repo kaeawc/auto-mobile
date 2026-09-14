@@ -2,7 +2,9 @@ import { normalizeAndroidArchitecture } from "./AvdConfigReader";
 
 export interface ParsedAndroidSystemImageRuntime {
   apiLevel: number;
+  apiIdentifier: string;
   tag: string;
+  abi: string;
   architecture: string;
   systemImagePackage: string;
 }
@@ -20,7 +22,8 @@ export function parseAndroidSystemImageRuntime(
   if (!apiMatch || !tag || !architecture) {
     return undefined;
   }
-  const apiComponents = apiMatch[1].split(".").map(Number);
+  const apiIdentifier = apiMatch[1];
+  const apiComponents = apiIdentifier.split(".").map(Number);
   const apiLevel = apiComponents[0];
   if (
     apiLevel === undefined ||
@@ -31,7 +34,9 @@ export function parseAndroidSystemImageRuntime(
   }
   return {
     apiLevel,
+    apiIdentifier,
     tag,
+    abi: architecture,
     architecture: normalizeAndroidArchitecture(architecture) ?? architecture,
     systemImagePackage: runtime,
   };

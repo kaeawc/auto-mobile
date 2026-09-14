@@ -7,6 +7,7 @@ import {
   type AndroidFrameworkReadinessResult,
   type ReadinessAndroidManager,
   type ReadinessClient,
+  type ReadinessIosClient,
   type ReadinessIosManager,
 } from "../../src/utils/RunnerReadinessService";
 import {
@@ -27,7 +28,7 @@ const iosDevice: BootedDevice = {
   platform: "ios",
 };
 
-class FakeReadinessClient implements ReadinessClient {
+class FakeReadinessClient implements ReadinessClient, ReadinessIosClient {
   connected = true;
   healthResults: boolean[] = [true];
   connectionResults: boolean[] = [true];
@@ -49,6 +50,11 @@ class FakeReadinessClient implements ReadinessClient {
     const connected = this.connectionResults.shift() ?? false;
     this.connected = connected;
     return connected;
+  }
+
+  async connectWithoutSetup(signal?: AbortSignal): Promise<boolean> {
+    signal?.throwIfAborted();
+    return await this.waitForConnection();
   }
 
   async verifyServiceReady(): Promise<boolean> {
@@ -1056,6 +1062,57 @@ describe("RunnerReadinessService", () => {
     expect(iosManager.setupSignal).toBeDefined();
   });
 
+  test("force-restarts an iOS runner whose live launcher has no listening endpoint", async () => {
+    const iosManager = new FakeIosManager();
+    const iosClient = new FakeReadinessClient();
+    iosClient.connected = false;
+    iosClient.connectionResults = [];
+    iosManager.onForceRestart = async () => {
+      iosClient.connectionResults = [true];
+      iosClient.healthResults = [true];
+    };
+    const { service } = createService({ iosManager, iosClient });
+
+    await service.ensureReady({
+      device: iosDevice,
+      requestedIdentity: "platform=ios deviceId=IOS-UDID",
+      operationName: "getApple",
+      totalDeadlineMs: 30_000,
+      readinessTimeoutMs: 30_000,
+    });
+
+    expect(iosManager.setupCalls).toBe(1);
+    expect(iosManager.forceRestartCalls).toBe(1);
+    expect(iosClient.connectionCalls).toBeGreaterThanOrEqual(2);
+    expect(iosClient.healthCalls).toBe(1);
+  });
+
+  test("reports an actionable getApple failure when iOS endpoint recovery fails", async () => {
+    const iosManager = new FakeIosManager();
+    const iosClient = new FakeReadinessClient();
+    iosClient.connected = false;
+    iosClient.connectionResults = [];
+    const { service, timer } = createService({ iosManager, iosClient });
+
+    const error = await service
+      .ensureReady({
+        device: iosDevice,
+        requestedIdentity: "platform=ios deviceId=IOS-UDID",
+        operationName: "getApple",
+        totalDeadlineMs: 1_000,
+        readinessTimeoutMs: 1_000,
+      })
+      .catch((thrown: unknown) => thrown);
+
+    expect(iosManager.setupCalls).toBe(1);
+    expect(iosManager.forceRestartCalls).toBe(1);
+    expect(error).toBeInstanceOf(RunnerReadinessError);
+    expect((error as RunnerReadinessError).message).toMatch(
+      /getApple automation runner readiness failed:.*phase=runner-connect/,
+    );
+    expect(timer.now()).toBe(1_000);
+  });
+
   test("force-restarts an iOS runner whose port is reachable but hierarchy health fails", async () => {
     const iosManager = new FakeIosManager();
     const iosClient = new FakeReadinessClient();
@@ -1160,7 +1217,7 @@ describe("RunnerReadinessService", () => {
     const ready = service.ensureReady({
       device: iosDevice,
       requestedIdentity: "platform=ios deviceId=IOS-UDID",
-      totalDeadlineMs: 1_000,
+      totalDeadlineMs: 10_000,
       readinessTimeoutMs: 1_000,
     });
     for (let attempt = 0; attempt < 20 && iosManager.forceRestartCalls === 0; attempt++) {
@@ -1170,8 +1227,9 @@ describe("RunnerReadinessService", () => {
     expect(iosManager.forceRestartCalls).toBe(1);
     expect(iosManager.forceRestartOptions?.signal).toBeDefined();
     timer.advanceTime(1_000);
-    await expect(ready).rejects.toThrow(/phase=runner-setup/);
+    await expect(ready).rejects.toThrow(/phase=runner-health/);
     expect(iosManager.forceRestartOptions?.signal?.aborted).toBe(true);
+    expect(timer.now()).toBe(1_000);
   });
 
   // #6416: the disconnected branch of ensureIosReady called manager.setup()

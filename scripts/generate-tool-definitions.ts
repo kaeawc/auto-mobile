@@ -31,6 +31,7 @@ import { registerStorageTools } from "../src/server/storageTools";
 import { registerPreferenceTools } from "../src/server/preferenceTools";
 import { registerAppFileTools } from "../src/server/appFileTools";
 import { registerSessionLogTools } from "../src/server/sessionLogTools";
+import { registerDownloadsFixtureTools } from "../src/server/downloadsFixtureTools";
 import { registerSharedStorageTools } from "../src/server/sharedStorageTools";
 import { registerFormTools } from "../src/server/formTools";
 import { registerAccessibilityTools } from "../src/server/accessibilityTools";
@@ -63,6 +64,7 @@ function registerAllTools(): void {
   registerPreferenceTools();
   registerAppFileTools();
   registerSessionLogTools();
+  registerDownloadsFixtureTools();
   registerSharedStorageTools();
   registerFormTools();
   registerAccessibilityTools();

@@ -1793,6 +1793,7 @@
               "setUIState",
               "shake",
               "sqlQuery",
+              "stageSessionDownloads",
               "stageSharedStorage",
               "stageSharedStorageFixtures",
               "startTestRecording",
@@ -1919,6 +1920,7 @@
               "setUIState",
               "shake",
               "sqlQuery",
+              "stageSessionDownloads",
               "stageSharedStorage",
               "stageSharedStorageFixtures",
               "startTestRecording",
@@ -8006,6 +8008,7 @@
               "setUIState",
               "shake",
               "sqlQuery",
+              "stageSessionDownloads",
               "stageSharedStorage",
               "stageSharedStorageFixtures",
               "startTestRecording",
@@ -9780,6 +9783,7 @@
             "setUIState",
             "shake",
             "sqlQuery",
+            "stageSessionDownloads",
             "stageSharedStorage",
             "stageSharedStorageFixtures",
             "startTestRecording",
@@ -9872,6 +9876,7 @@
               "setUIState",
               "shake",
               "sqlQuery",
+              "stageSessionDownloads",
               "stageSharedStorage",
               "stageSharedStorageFixtures",
               "startTestRecording",
@@ -10154,6 +10159,81 @@
         }
       },
       "required": ["appId", "databasePath", "query"],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "stageSessionDownloads",
+    "description": "Stage host-file, UTF-8, or base64 fixtures into one bounded child directory of the shared Downloads tree on the device owned by the caller's session, optionally resetting that directory first and requesting Android media indexing (Android only).",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "sessionUuid": {
+          "description": "Live device session that owns the target Android device",
+          "type": "string",
+          "minLength": 1
+        },
+        "directory": {
+          "description": "One caller-named child directory beneath the device's shared Downloads tree",
+          "type": "string",
+          "pattern": "^(?!\\.\\.?$)[^/\\\\\\u0000]+$"
+        },
+        "reset": {
+          "description": "Remove only this declared directory before writing",
+          "default": false,
+          "type": "boolean"
+        },
+        "indexMedia": {
+          "description": "Request Android media indexing for media files",
+          "default": true,
+          "type": "boolean"
+        },
+        "files": {
+          "description": "Files to stage into the declared Downloads directory",
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "sourcePath": {
+                "description": "Host file path",
+                "type": "string",
+                "minLength": 1
+              },
+              "contentText": {
+                "description": "UTF-8 content",
+                "type": "string"
+              },
+              "contentBase64": {
+                "description": "Base64 content",
+                "type": "string",
+                "pattern": "^[A-Za-z0-9+/]+={0,2}$",
+                "minLength": 1
+              },
+              "destinationPath": {
+                "description": "Path relative to the declared Downloads namespace",
+                "type": "string",
+                "pattern": "^(?![/\\\\])(?!.*(?:^|[/\\\\])\\.{1,2}(?:[/\\\\]|$)).+$"
+              }
+            },
+            "required": ["destinationPath"],
+            "additionalProperties": false,
+            "oneOf": [
+              {
+                "required": ["sourcePath"]
+              },
+              {
+                "required": ["contentText"]
+              },
+              {
+                "required": ["contentBase64"]
+              }
+            ]
+          }
+        }
+      },
+      "required": ["sessionUuid", "directory", "files"],
       "additionalProperties": false
     }
   },

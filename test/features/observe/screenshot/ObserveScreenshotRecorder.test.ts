@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { tmpdir } from "node:os";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -10,6 +10,7 @@ import type {
   ScreenshotJobHandle,
   ScreenshotJobOptions,
 } from "../../../../src/utils/ScreenshotJobTracker";
+import { ScreenshotJobTracker } from "../../../../src/utils/ScreenshotJobTracker";
 import type { ScreenshotOptions } from "../../../../src/features/observe/TakeScreenshot";
 import {
   DefaultObserveScreenshotRecorder,
@@ -134,6 +135,58 @@ class FakeTrackedScreenshotService implements TrackedScreenshotService {
   }
 }
 
+function createGate(): { promise: Promise<void>; open: () => void } {
+  let open: () => void = () => {};
+  const promise = new Promise<void>((resolve) => {
+    open = resolve;
+  });
+  return { promise, open };
+}
+
+function createQueuedTrackedScreenshotService(results: ScreenshotResult[]) {
+  const captureStarts = results.map(() => createGate());
+  const captureGates = results.map(() => createGate());
+  let captureCount = 0;
+  let lastHandle: ScreenshotJobHandle | undefined;
+  const service: TrackedScreenshotService = {
+    async execute(): Promise<ScreenshotResult> {
+      throw new Error("execute() is not used by tracked-capture tests");
+    },
+    generateScreenshotPath(): string {
+      return "/tmp/path.png";
+    },
+    async getActivityHash(): Promise<string> {
+      return "hash";
+    },
+    startTrackedCapture(_options, trackerOptions) {
+      const handle = ScreenshotJobTracker.startJob(
+        "test-device",
+        async () => {
+          const captureIndex = captureCount++;
+          captureStarts[captureIndex]!.open();
+          await captureGates[captureIndex]!.promise;
+          return results[captureIndex]!;
+        },
+        trackerOptions,
+      );
+      lastHandle = handle;
+      return handle;
+    },
+  };
+
+  return {
+    service,
+    captureStarts,
+    captureGates,
+    get captureCount() {
+      return captureCount;
+    },
+    get lastHandle() {
+      return lastHandle;
+    },
+  };
+}
+
 const mockDevice: BootedDevice = {
   name: "test",
   platform: "android",
@@ -146,9 +199,14 @@ describe("DefaultObserveScreenshotRecorder.capture", () => {
   let recorder: DefaultObserveScreenshotRecorder;
 
   beforeEach(() => {
+    ScreenshotJobTracker.clear();
     store = new FakeScreenshotStateStore();
     svc = new FakeTrackedScreenshotService();
     recorder = new DefaultObserveScreenshotRecorder(mockDevice, svc, store);
+  });
+
+  afterEach(() => {
+    ScreenshotJobTracker.clear();
   });
 
   test("success path writes path to store", async () => {
@@ -284,20 +342,56 @@ describe("DefaultObserveScreenshotRecorder.capture", () => {
     expect(svc.lastTrackerOptions?.coalesceWithPending).toBeUndefined();
   });
 
-  test("records a coalesced capture for every requesting observation", async () => {
+  test("queues an overlapping observation behind a running capture", async () => {
     const dir = mkdtempSync(path.join(tmpdir(), "obs-rec-"));
-    const file = path.join(dir, "shared.png");
-    writeFileSync(file, "img");
-    svc.setNextResult({ success: true, path: file });
-
-    await Promise.all([
-      recorder.capture("observation-first", new NoOpPerformanceTracker()),
-      recorder.capture("observation-second", new NoOpPerformanceTracker()),
+    const firstFile = path.join(dir, "first.png");
+    const secondFile = path.join(dir, "second.png");
+    writeFileSync(firstFile, "first");
+    writeFileSync(secondFile, "second");
+    const queued = createQueuedTrackedScreenshotService([
+      { success: true, path: firstFile },
+      { success: true, path: secondFile },
     ]);
+    const queuedRecorder = new DefaultObserveScreenshotRecorder(mockDevice, queued.service, store);
 
-    expect(store.getPathForObservation("test-device", "observation-first")).toBe(file);
-    expect(store.getPathForObservation("test-device", "observation-second")).toBe(file);
-    expect(svc.captureCount).toBe(1);
+    const first = queuedRecorder.capture("observation-first", new NoOpPerformanceTracker());
+    await queued.captureStarts[0]!.promise;
+    const second = queuedRecorder.capture("observation-second", new NoOpPerformanceTracker());
+    await Promise.resolve();
+
+    expect(queued.captureCount).toBe(1);
+    queued.captureGates[1]!.open();
+    queued.captureGates[0]!.open();
+    await Promise.all([first, second]);
+
+    expect(queued.captureCount).toBe(2);
+    expect(store.getPathForObservation("test-device", "observation-first")).toBe(firstFile);
+    expect(store.getPathForObservation("test-device", "observation-second")).toBe(secondFile);
+  });
+
+  test("shared aborted captures do not record a path in a second recorder", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "obs-rec-"));
+    const file = path.join(dir, "aborted.png");
+    writeFileSync(file, "img");
+    const shared = createQueuedTrackedScreenshotService([{ success: true, path: file }]);
+    const firstRecorder = new DefaultObserveScreenshotRecorder(mockDevice, shared.service, store);
+    const secondRecorder = new DefaultObserveScreenshotRecorder(mockDevice, shared.service, store);
+    const abortController = new AbortController();
+
+    const first = firstRecorder.capture(
+      "observation-first",
+      new NoOpPerformanceTracker(),
+      abortController.signal,
+    );
+    const second = secondRecorder.capture("observation-second", new NoOpPerformanceTracker());
+    await shared.captureStarts[0]!.promise;
+    abortController.abort();
+    shared.captureGates[0]!.open();
+    await Promise.all([first, second]);
+
+    expect(shared.captureCount).toBe(1);
+    expect(store.getPathForObservation("test-device", "observation-first")).toBeUndefined();
+    expect(store.getPathForObservation("test-device", "observation-second")).toBeUndefined();
   });
 });
 
@@ -307,9 +401,14 @@ describe("DefaultObserveScreenshotRecorder.start", () => {
   let recorder: DefaultObserveScreenshotRecorder;
 
   beforeEach(() => {
+    ScreenshotJobTracker.clear();
     store = new FakeScreenshotStateStore();
     svc = new FakeTrackedScreenshotService();
     recorder = new DefaultObserveScreenshotRecorder(mockDevice, svc, store);
+  });
+
+  afterEach(() => {
+    ScreenshotJobTracker.clear();
   });
 
   test("start() returns synchronously and eventually writes state", async () => {

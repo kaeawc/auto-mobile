@@ -11,10 +11,15 @@ export interface ScreenshotJobHandle {
   signal: AbortSignal;
 }
 
-interface ScreenshotJobCompletion {
+export interface ScreenshotJobCompletion {
   deviceId: string;
   jobId: string;
   result: ScreenshotResult;
+  aborted: boolean;
+  isLatest: boolean;
+}
+
+export interface ScreenshotJobCompletionSnapshot {
   aborted: boolean;
   isLatest: boolean;
 }
@@ -39,6 +44,15 @@ export interface ScreenshotJobOptions {
    * before it reaches the runner.
    */
   queueAfterPending?: boolean;
+  /**
+   * When a capture runner is already executing for this device, register a
+   * distinct job behind it instead of coalescing with its stale result.
+   *
+   * Unlike `queueAfterPending`, requests that arrive before the runner starts
+   * may still coalesce. This is used by observation-scoped captures, whose
+   * pixels must correspond to the observation that requested them.
+   */
+  queueAfterPendingIfRunning?: boolean;
 }
 
 interface ScreenshotJobEntry {
@@ -53,6 +67,8 @@ interface ScreenshotJobEntry {
 export class ScreenshotJobTracker {
   private static jobs: Map<string, ScreenshotJobEntry[]> = new Map();
   private static latestJobIds: Map<string, string> = new Map();
+  private static completions: Map<string, ScreenshotJobCompletionSnapshot> = new Map();
+  private static runningJobIds: Set<string> = new Set();
   private static timer: Timer = defaultTimer;
   private static idGenerator: IdGenerator = defaultIdGenerator;
 
@@ -79,10 +95,47 @@ export class ScreenshotJobTracker {
     if (options.queueAfterPending) {
       return true;
     }
+    if (
+      options.queueAfterPendingIfRunning &&
+      existingJobs.some(
+        (entry) =>
+          ScreenshotJobTracker.runningJobIds.has(entry.jobId) &&
+          !entry.abortController.signal.aborted,
+      )
+    ) {
+      return true;
+    }
     return (
       options.coalesceWithPending === true &&
       existingJobs.some((entry) => !entry.abortController.signal.aborted)
     );
+  }
+
+  private static shouldQueueAfterRunning(
+    options: ScreenshotJobOptions,
+    existingJobs: ScreenshotJobEntry[],
+  ): boolean {
+    return (
+      options.queueAfterPendingIfRunning === true &&
+      existingJobs.some(
+        (entry) =>
+          ScreenshotJobTracker.runningJobIds.has(entry.jobId) &&
+          !entry.abortController.signal.aborted,
+      )
+    );
+  }
+
+  private static findCoalescedJob(
+    options: ScreenshotJobOptions,
+    existingJobs: ScreenshotJobEntry[],
+    queueAfterPendingIfRunning: boolean,
+  ): ScreenshotJobEntry | undefined {
+    if (!options.coalesceWithPending || queueAfterPendingIfRunning) {
+      return undefined;
+    }
+    return [...existingJobs]
+      .reverse()
+      .find((entry) => entry.allowsCoalescing && !entry.abortController.signal.aborted);
   }
 
   static startJob(
@@ -91,17 +144,21 @@ export class ScreenshotJobTracker {
     options: ScreenshotJobOptions = {},
   ): ScreenshotJobHandle {
     const existingJobs = ScreenshotJobTracker.jobs.get(deviceId) ?? [];
-    if (options.coalesceWithPending) {
-      const existing = [...existingJobs]
-        .reverse()
-        .find((entry) => entry.allowsCoalescing && !entry.abortController.signal.aborted);
-      if (existing && !existing.abortController.signal.aborted) {
-        return {
-          jobId: existing.jobId,
-          promise: existing.promise,
-          signal: existing.abortController.signal,
-        };
-      }
+    const queueAfterPendingIfRunning = ScreenshotJobTracker.shouldQueueAfterRunning(
+      options,
+      existingJobs,
+    );
+    const existing = ScreenshotJobTracker.findCoalescedJob(
+      options,
+      existingJobs,
+      queueAfterPendingIfRunning,
+    );
+    if (existing) {
+      return {
+        jobId: existing.jobId,
+        promise: existing.promise,
+        signal: existing.abortController.signal,
+      };
     }
 
     const queueAfterPending = ScreenshotJobTracker.shouldQueueAfterPending(options, existingJobs);
@@ -143,6 +200,7 @@ export class ScreenshotJobTracker {
         if (queueAfterPending) {
           ScreenshotJobTracker.latestJobIds.set(deviceId, jobId);
         }
+        ScreenshotJobTracker.runningJobIds.add(jobId);
         return runner(abortController.signal);
       })
       .catch((error) => {
@@ -158,6 +216,10 @@ export class ScreenshotJobTracker {
           aborted: abortController.signal.aborted,
           isLatest,
         };
+        ScreenshotJobTracker.completions.set(jobId, {
+          aborted: completion.aborted,
+          isLatest: completion.isLatest,
+        });
         if (options.onComplete) {
           try {
             await options.onComplete(completion);
@@ -193,6 +255,7 @@ export class ScreenshotJobTracker {
       if (entryIndex !== -1) {
         current.splice(entryIndex, 1);
       }
+      ScreenshotJobTracker.runningJobIds.delete(jobId);
       if (current.length === 0) {
         ScreenshotJobTracker.jobs.delete(deviceId);
         ScreenshotJobTracker.latestJobIds.delete(deviceId);
@@ -225,6 +288,10 @@ export class ScreenshotJobTracker {
 
   static isLatest(deviceId: string, jobId: string): boolean {
     return ScreenshotJobTracker.latestJobIds.get(deviceId) === jobId;
+  }
+
+  static getCompletion(jobId: string): ScreenshotJobCompletionSnapshot | undefined {
+    return ScreenshotJobTracker.completions.get(jobId);
   }
 
   static async waitForCompletion(
@@ -261,5 +328,7 @@ export class ScreenshotJobTracker {
     }
     ScreenshotJobTracker.jobs.clear();
     ScreenshotJobTracker.latestJobIds.clear();
+    ScreenshotJobTracker.completions.clear();
+    ScreenshotJobTracker.runningJobIds.clear();
   }
 }

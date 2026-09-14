@@ -63,6 +63,25 @@ describe("ScreenshotJobTracker", () => {
     await Promise.all([first.promise, second.promise]);
   });
 
+  test("publishes completion status by job ID and clears it with tracker state", async () => {
+    const abortController = new AbortController();
+    const job = ScreenshotJobTracker.startJob(
+      "device-completion",
+      async () => ({ success: true, path: "discarded" }),
+      { parentSignal: abortController.signal },
+    );
+
+    abortController.abort();
+    await job.promise;
+
+    expect(ScreenshotJobTracker.getCompletion(job.jobId)).toEqual({
+      aborted: true,
+      isLatest: true,
+    });
+    ScreenshotJobTracker.clear();
+    expect(ScreenshotJobTracker.getCompletion(job.jobId)).toBeUndefined();
+  });
+
   test("waitForCompletion resolves with result when job completes", async () => {
     ScreenshotJobTracker.startJob("device-2", async (signal) => {
       return new Promise((resolve) => {

@@ -9,6 +9,7 @@ import type {
   ScreenshotJobHandle,
   ScreenshotJobOptions,
 } from "../../../utils/ScreenshotJobTracker";
+import { ScreenshotJobTracker } from "../../../utils/ScreenshotJobTracker";
 import type { ScreenshotService } from "../interfaces/ScreenshotService";
 import type { ScreenshotOptions } from "../TakeScreenshot";
 import { getScreenshotStateStore, ScreenshotStateStore } from "./ScreenshotStateRegistry";
@@ -140,7 +141,10 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
     signal?: AbortSignal,
   ): Promise<void> {
     this.store.beginObservation(this.device.deviceId, observationId);
-    await this.captureWithOptions(observationId, perf, signal, { coalesceWithPending: true });
+    await this.captureWithOptions(observationId, perf, signal, {
+      coalesceWithPending: true,
+      queueAfterPendingIfRunning: true,
+    });
   }
 
   async captureFresh(
@@ -156,7 +160,10 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
     observationId: string,
     perf: PerformanceTracker,
     signal: AbortSignal | undefined,
-    trackerOptions: Pick<ScreenshotJobOptions, "coalesceWithPending" | "queueAfterPending">,
+    trackerOptions: Pick<
+      ScreenshotJobOptions,
+      "coalesceWithPending" | "queueAfterPending" | "queueAfterPendingIfRunning"
+    >,
   ): Promise<void> {
     try {
       await perf.track("screenshot", async () => {
@@ -273,17 +280,16 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
 
     return handle.promise
       .then(async (result) => {
-        const snapshot = this.completionByJob.get(handle.jobId);
+        const snapshot =
+          ScreenshotJobTracker.getCompletion(handle.jobId) ??
+          this.completionByJob.get(handle.jobId);
         releaseCompletion();
-        // Missing completion metadata preserves the validated pre-snapshot behavior: write the result.
-        const aborted = snapshot?.aborted ?? false;
-        const isLatest = snapshot?.isLatest ?? true;
-        if (aborted || !isLatest) {
+        if (!snapshot || snapshot.aborted || !snapshot.isLatest) {
           logger.debug("[OBSERVE] Screenshot capture cancelled");
           this.store.endObservation(
             this.device.deviceId,
             observationId,
-            isLatest ? "capture cancelled" : "capture superseded",
+            snapshot?.isLatest === false ? "capture superseded" : "capture cancelled",
           );
           return;
         }

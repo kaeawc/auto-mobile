@@ -75,6 +75,29 @@ describe("FileSystemObserveCacheStore", function () {
     expect(store.getRecentInMemoryForDevice("device-2")).toBe(wallClockSecond);
   });
 
+  test("updates an observationId in place without changing its cache recency", async function () {
+    const deviceId = "device-1";
+    const initial = { ...makeResult("initial"), observationId: "observation-1" };
+    const completed = {
+      ...initial,
+      recompositionSummary: { recompositions: [] } as never,
+    };
+
+    await store.put(deviceId, initial, undefined, 1_000_000);
+    timer.advanceTime(1);
+    await store.put(deviceId, completed, undefined, 1_000_001);
+
+    expect(store.getRecentInMemoryForDevice(deviceId)).toBe(completed);
+    expect(store.getRecentCachedAtForDevice(deviceId)).toBe(1_000_000);
+    expect(readdirSync(cacheDir).filter((file) => file.endsWith(".json"))).toHaveLength(1);
+
+    const reloaded = new FileSystemObserveCacheStore(timer, cacheDir);
+    expect((await reloaded.getMostRecent(deviceId))?.recompositionSummary).toEqual(
+      completed.recompositionSummary,
+    );
+    expect(reloaded.getRecentCachedAtForDevice(deviceId)).toBe(1_000_000);
+  });
+
   test("put then getRecentInMemoryEntry (cross-device) returns the latest result and its device", async function () {
     const older = makeResult("older");
     const newer = makeResult("newer");

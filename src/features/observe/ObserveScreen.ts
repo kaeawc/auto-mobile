@@ -741,6 +741,7 @@ export class RealObserveScreen implements ObserveScreen {
         minTimestamp,
         signal,
         skipBackStack,
+        options?.skipRecompositionTracking === true,
       );
 
       // Reject a stale cross-platform hierarchy (e.g. an iOS hierarchy returned on
@@ -862,10 +863,13 @@ export class RealObserveScreen implements ObserveScreen {
         ),
       });
 
-      // Cache the result for future use
-      await perf.track("cacheResult", () =>
-        getObserveCacheStore().put(this.device.deviceId, result, cacheGeneration),
-      );
+      // Intermediate settle polls are read-only. Their adopted terminal result
+      // is enriched and cached once by ObservePoll.finalize().
+      if (!options?.skipRecompositionTracking) {
+        await perf.track("cacheResult", () =>
+          getObserveCacheStore().put(this.device.deviceId, result, cacheGeneration),
+        );
+      }
 
       perf.end();
 
@@ -1032,8 +1036,14 @@ export class RealObserveScreen implements ObserveScreen {
   ): Promise<void> {
     const cacheStore = getObserveCacheStore();
     const resolvedCachedAt = cachedAt ?? this.timer.now();
+    const currentResult = cacheStore.getRecentInMemoryForDevice(this.device.deviceId);
     const currentCachedAt = cacheStore.getRecentCachedAtForDevice(this.device.deviceId);
-    if (currentCachedAt !== undefined && currentCachedAt > resolvedCachedAt) {
+    if (
+      currentResult !== undefined &&
+      currentResult.observationId !== observeResult.observationId &&
+      currentCachedAt !== undefined &&
+      currentCachedAt > resolvedCachedAt
+    ) {
       logger.debug(
         `[OBSERVE_CACHE] Skipping deferred observe result for device ${this.device.deviceId}: ` +
           "a more recently cached observation already exists",
@@ -1059,6 +1069,7 @@ export class RealObserveScreen implements ObserveScreen {
     minTimestamp: number = 0,
     signal?: AbortSignal,
     skipBackStack: boolean = false,
+    readOnly: boolean = false,
   ): Promise<void> {
     switch (this.device.platform) {
       case "android":
@@ -1070,6 +1081,7 @@ export class RealObserveScreen implements ObserveScreen {
           skipWaitForFresh,
           minTimestamp,
           signal,
+          readOnly,
         );
         perf.end();
 
@@ -1205,6 +1217,7 @@ export class RealObserveScreen implements ObserveScreen {
           skipWaitForFresh,
           minTimestamp,
           signal,
+          readOnly,
         );
 
         // Resolve screen size: hierarchy-derived bounds, then CtrlProxy-reported logical points.

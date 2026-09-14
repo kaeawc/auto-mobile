@@ -62,10 +62,18 @@ terminal_attempt_evidence() {
   if [[ "$evidence" == *"$RETRY_MARKER"* ]]; then
     printf '%s' "${evidence#*"$RETRY_MARKER"}"
   elif [[ "$evidence" == *"$diagnostics_marker"* ]]; then
-    printf '%s' "${evidence#*"$diagnostics_marker"}"
+    printf '%s' "$evidence"
   else
     printf '%s' "$evidence"
   fi
+}
+
+ambiguous_terminal_attempt() {
+  local evidence="$1"
+  local diagnostics_marker='First emulator attempt failed; captured diagnostics follow:'
+
+  [[ "$evidence" == *"$diagnostics_marker"* ]] \
+    && [[ "$evidence" != *"$RETRY_MARKER"* ]]
 }
 
 # Gate outcomes are emitted only when every failed upstream job in this run is
@@ -175,6 +183,8 @@ while IFS=$'\t' read -r job_id job_name steps; do
   # shellcheck disable=SC2310 # A non-match is expected classifier control flow.
   if advisory_only_gate "$job_name"; then
     verdict='CHECK-UPSTREAM-FIRST — aggregator is red because of an advisory (non-required) lane; inspect the upstream rows above before rerunning or filing an issue'
+  elif ambiguous_terminal_attempt "${head_branch} ${annotation_text} ${log_text}"; then
+    verdict='UNKNOWN — log predates the retry marker; attempt-one diagnostics are not authoritative for the terminal attempt'
   else
     evidence="$(terminal_attempt_evidence "${head_branch} ${annotation_text} ${log_text}")"
     verdict="$(match_signature "$job_name" "$evidence")"

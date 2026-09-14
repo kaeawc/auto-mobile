@@ -49,6 +49,7 @@ case "$1 $2" in
       */check-runs/15/annotations*|*/check-runs/16/annotations*|*/check-runs/17/annotations*) annotation_response '[]' ;;
       */actions/jobs/6/logs) printf 'readiness phase exceeded the remaining deadline\n' ;;
       */actions/jobs/31/logs) printf 'First emulator attempt failed; captured diagnostics follow:\nsys.boot_completed is not 1\nStarting emulator retry attempt 2.\nexpect(received).toBe(expected) ... someRealRegression assertion failed\n' ;;
+      */actions/jobs/32/logs) printf 'First emulator attempt failed; captured diagnostics follow:\nsys.boot_completed is not 1\nexpect(received).toBe(expected) ... someRealRegression assertion failed\n' ;;
       */actions/jobs/18/logs) printf 'Test exceeded 100ms: some/test.ts > some test (median 142.31ms of 3 isolated runs)\n' ;;
       */actions/jobs/22/logs) printf 'Test exceeded 100ms: foo.bar (150.00ms; recheck produced 2 of 5 isolated samples)\n' ;;
       */actions/jobs/19/logs|*/actions/jobs/20/logs|*/actions/jobs/21/logs) : ;;
@@ -243,6 +244,24 @@ JSON
   run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" bash "$SCRIPT" 655
   [ "$status" -eq 0 ]
   [[ "$output" == *"Run JUnit Runner Emulator Tests → Boot and test Emulator (Retry) → none → UNKNOWN"* ]]
+  [[ "$output" != *"RERUN-DONT-FIX"* ]]
+}
+
+@test "does not classify ambiguous markerless emulator retry diagnostics as a known flake" {
+  fixture="$BATS_TEST_TMPDIR/junit-emulator-markerless-retry-run.json"
+  cat > "$fixture" <<'JSON'
+{
+  "headBranch": "work/android-markerless-retry",
+  "jobs": [
+    {"databaseId": 32, "name": "Run JUnit Runner Emulator Tests", "conclusion": "failure", "steps": [{"name": "Boot and test Emulator (Retry)", "conclusion": "failure"}]}
+  ]
+}
+JSON
+
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" bash "$SCRIPT" 658
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Run JUnit Runner Emulator Tests → Boot and test Emulator (Retry) → none → UNKNOWN"* ]]
+  [[ "$output" == *"log predates the retry marker"* ]]
   [[ "$output" != *"RERUN-DONT-FIX"* ]]
 }
 

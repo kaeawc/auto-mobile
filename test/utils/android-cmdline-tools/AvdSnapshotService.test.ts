@@ -253,6 +253,40 @@ describe("AvdSnapshotService (#6490)", () => {
     ]);
   });
 
+  test("deleteVmSnapshot skips the console delete when its serial has been reassigned", async () => {
+    const adb = recordingAdbFactory(execResult("OK"));
+    const sut = service(
+      {},
+      {},
+      [],
+      [{ deviceId: "emulator-5556", name: "am-api34", platform: "android" }],
+      adb,
+    );
+
+    const outcome = await sut.deleteVmSnapshot("emulator-5556", "snap", 30000, "am-api36");
+
+    expect(outcome.reclaimed).toBe(false);
+    expect(outcome.reason).toContain("expected AVD 'am-api36'");
+    expect(outcome.reason).toContain("currently hosts 'am-api34'");
+    expect(adb.commands).toEqual([]);
+  });
+
+  test("deleteVmSnapshot dispatches when its serial still belongs to the expected AVD", async () => {
+    const adb = recordingAdbFactory(execResult("OK"));
+    const sut = service(
+      {},
+      {},
+      [],
+      [{ deviceId: "emulator-5556", name: "am-api36", platform: "android" }],
+      adb,
+    );
+
+    expect(await sut.deleteVmSnapshot("emulator-5556", "snap", 30000, "am-api36")).toEqual({
+      reclaimed: true,
+    });
+    expect(adb.commands).toEqual(["emu avd snapshot del snap"]);
+  });
+
   test("a snapshot that is already gone counts as reclaimed", async () => {
     const adb = recordingAdbFactory(execResult("KO: snapshot 'snap' does not exist"));
     const sut = service({}, {}, [], [], adb);

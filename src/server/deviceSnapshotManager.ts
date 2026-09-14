@@ -474,6 +474,7 @@ async function deleteUnrecordedVmSnapshot(
       liveDeviceId,
       snapshotName,
       vmSnapshotTimeoutMs,
+      device.name,
     );
     if (!outcome.reclaimed) {
       logger.warn(
@@ -1143,7 +1144,7 @@ async function reclaimVmSnapshotPayload(
   }
 
   const outcome = serial
-    ? await avdSnapshots.deleteVmSnapshot(serial, record.snapshotName, vmSnapshotTimeoutMs)
+    ? await avdSnapshots.deleteVmSnapshot(serial, record.snapshotName, vmSnapshotTimeoutMs, avdName)
     : {
         reclaimed: false,
         reason: `emulator for AVD '${avdName}' is not running; in-AVD snapshot left in place`,
@@ -1747,6 +1748,7 @@ export async function sweepPendingVmSnapshotReclaims(device: BootedDevice): Prom
         device.deviceId,
         record.snapshotName,
         vmSnapshotTimeoutMs,
+        record.deviceName,
       );
       if (!outcome.reclaimed) {
         logger.warn(
@@ -1808,7 +1810,12 @@ async function reclaimSupersededPendingVmSnapshot(
 
   const serial = await avdSnapshots.findLiveEmulatorSerial(existing.deviceName);
   const outcome = serial
-    ? await avdSnapshots.deleteVmSnapshot(serial, snapshotName, vmSnapshotTimeoutMs)
+    ? await avdSnapshots.deleteVmSnapshot(
+        serial,
+        snapshotName,
+        vmSnapshotTimeoutMs,
+        existing.deviceName,
+      )
     : {
         reclaimed: false,
         reason: `emulator for AVD '${existing.deviceName}' is not running`,

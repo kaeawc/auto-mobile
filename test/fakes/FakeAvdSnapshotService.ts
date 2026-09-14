@@ -34,6 +34,7 @@ export class FakeAvdSnapshotService implements AvdSnapshotOperations {
   private readonly liveSerials = new Map<string, string>();
   private readonly deleteCalls: FakeVmDeleteCall[] = [];
   private deleteFailureReason: string | null = null;
+  private findLiveEmulatorSerialHook: ((avdName: string) => void) | undefined;
 
   setVmSnapshot(avdName: string, snapshotName: string, sizeBytes: number | null): void {
     const byName = this.avdSnapshots.get(avdName) ?? new Map<string, number | null>();
@@ -53,6 +54,11 @@ export class FakeAvdSnapshotService implements AvdSnapshotOperations {
     this.deleteFailureReason = reason;
   }
 
+  onFindLiveEmulatorSerial(callback: (avdName: string) => void): void {
+    this.findLiveEmulatorSerialHook = callback;
+  }
+
+  /** Console delete commands that passed identity verification and were dispatched. */
   getDeleteCalls(): FakeVmDeleteCall[] {
     return [...this.deleteCalls];
   }
@@ -86,14 +92,30 @@ export class FakeAvdSnapshotService implements AvdSnapshotOperations {
   }
 
   async findLiveEmulatorSerial(avdName: string): Promise<string | null> {
-    return this.liveSerials.get(avdName) ?? null;
+    const deviceId = this.liveSerials.get(avdName) ?? null;
+    this.findLiveEmulatorSerialHook?.(avdName);
+    return deviceId;
   }
 
   async deleteVmSnapshot(
     deviceId: string,
     snapshotName: string,
     timeoutMs: number,
+    expectedAvdName?: string,
   ): Promise<VmSnapshotReclaimOutcome> {
+    const actualAvdName = Array.from(this.liveSerials.entries()).find(
+      ([, serial]) => serial === deviceId,
+    )?.[0];
+    if (expectedAvdName !== undefined && actualAvdName !== expectedAvdName) {
+      const actual = actualAvdName ?? "no longer live";
+      return {
+        reclaimed: false,
+        reason:
+          `Skipping VM snapshot delete for '${snapshotName}': serial '${deviceId}' expected AVD ` +
+          `'${expectedAvdName}' but currently hosts '${actual}'`,
+      };
+    }
+
     this.deleteCalls.push({ deviceId, snapshotName, timeoutMs });
     if (this.deleteFailureReason) {
       return { reclaimed: false, reason: this.deleteFailureReason };
@@ -101,11 +123,8 @@ export class FakeAvdSnapshotService implements AvdSnapshotOperations {
     // The emulator console only ever reaches the AVD behind this serial, so the
     // fake must too: deleting every same-named directory across AVDs would hide
     // exactly the cross-AVD confusion these tests exist to catch.
-    const avdName = Array.from(this.liveSerials.entries()).find(
-      ([, serial]) => serial === deviceId,
-    )?.[0];
-    if (avdName !== undefined) {
-      this.avdSnapshots.get(avdName)?.delete(snapshotName);
+    if (actualAvdName !== undefined) {
+      this.avdSnapshots.get(actualAvdName)?.delete(snapshotName);
     }
     return { reclaimed: true };
   }

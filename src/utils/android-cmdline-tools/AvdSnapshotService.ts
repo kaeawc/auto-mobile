@@ -63,11 +63,16 @@ export interface AvdSnapshotOperations {
   listKnownAvdNames(): Promise<string[]>;
   /** adb serial of the running emulator for `avdName`, or null when it is not live. */
   findLiveEmulatorSerial(avdName: string): Promise<string | null>;
-  /** Issue `adb -s <serial> emu avd snapshot del <name>` and judge the response. */
+  /**
+   * Issue `adb -s <serial> emu avd snapshot del <name>` and judge the response.
+   * When `expectedAvdName` is supplied, verify that the serial still belongs to
+   * that AVD immediately before dispatching the destructive console command.
+   */
   deleteVmSnapshot(
     deviceId: string,
     snapshotName: string,
     timeoutMs: number,
+    expectedAvdName?: string,
   ): Promise<VmSnapshotReclaimOutcome>;
 }
 
@@ -179,22 +184,41 @@ export class AvdSnapshotService implements AvdSnapshotOperations {
     deviceId: string,
     snapshotName: string,
     timeoutMs: number,
+    expectedAvdName?: string,
   ): Promise<VmSnapshotReclaimOutcome> {
     const adb = this.adbFactory.create({ deviceId, name: deviceId, platform: "android" });
     const command = buildVmSnapshotCommand("delete", snapshotName);
 
     let result;
     try {
-      result = await this.consoleBusyRegistry.runExclusive(deviceId, () =>
-        adb.execute(command.split(" "), {
+      result = await this.consoleBusyRegistry.runExclusive(deviceId, async () => {
+        if (expectedAvdName !== undefined) {
+          const liveDevice = (await this.emulator.getBootedDevices(true)).find(
+            (device) => device.deviceId === deviceId,
+          );
+          if (liveDevice?.name !== expectedAvdName) {
+            const actualAvdName = liveDevice?.name ?? "no longer live";
+            const reason =
+              `Skipping VM snapshot delete for '${snapshotName}': serial '${deviceId}' expected AVD ` +
+              `'${expectedAvdName}' but currently hosts '${actualAvdName}'`;
+            logger.warn(`[AvdSnapshot] ${reason}`);
+            return { reclaimed: false, reason };
+          }
+        }
+
+        return adb.execute(command.split(" "), {
           timeoutMs,
           waitForProcessSettlementAfterAbort: true,
-        }),
-      );
+        });
+      });
     } catch (error) {
       const reason = formatVmSnapshotExecutionError("delete", snapshotName, error);
       logger.warn(`[AvdSnapshot] ${reason}`, error);
       return { reclaimed: false, reason };
+    }
+
+    if ("reclaimed" in result) {
+      return result;
     }
 
     const evaluation = evaluateVmSnapshotResult("delete", snapshotName, result);

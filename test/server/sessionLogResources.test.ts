@@ -67,6 +67,7 @@ function read(uri: string, context: ResourceReadContext = { sessionUuid }) {
 }
 
 const baseUri = `automobile:device-session/${sessionUuid}/apps/com.example.app/logs`;
+const appLogPathsQuery = "paths=%5B%22app.log%22%5D";
 
 describe("session log resources (#7006)", () => {
   beforeEach(() => ResourceRegistry.clearResources());
@@ -83,14 +84,14 @@ describe("session log resources (#7006)", () => {
     const { service } = harness();
     const controller = new AbortController();
 
-    const content = await read(`${baseUri}?paths=app.log&lastSeconds=30`, {
+    const content = await read(`${baseUri}?${appLogPathsQuery}&lastSeconds=30`, {
       sessionUuid,
       signal: controller.signal,
     });
 
     expect(content.mimeType).toBe("application/json");
     expect(content.uri).toBe(
-      `${baseUri}?container=documents&paths=app.log&lastSeconds=30&level=default&maxBytes=262144`,
+      `${baseUri}?container=documents&${appLogPathsQuery}&lastSeconds=30&level=default&maxBytes=262144`,
     );
     expect(JSON.parse(content.text!)).toMatchObject({
       sessionUuid,
@@ -109,13 +110,13 @@ describe("session log resources (#7006)", () => {
   test("refuses another session's read before resolving anything", async () => {
     const { service, resolverCalls, serviceResolved } = harness();
 
-    const content = await read(`${baseUri}?paths=app.log`, { sessionUuid: "session-other" });
+    const content = await read(`${baseUri}?${appLogPathsQuery}`, { sessionUuid: "session-other" });
 
     expect(JSON.parse(content.text!)).toEqual({
       code: "SESSION_NOT_BOUND",
       error: "This resource can only be read by its bound device session.",
     });
-    expect(content.uri).toBe(`${baseUri}?paths=app.log`);
+    expect(content.uri).toBe(`${baseUri}?${appLogPathsQuery}`);
     expect(resolverCalls).toEqual([]);
     expect(serviceResolved()).toBe(0);
     expect(service.collects).toEqual([]);
@@ -124,7 +125,7 @@ describe("session log resources (#7006)", () => {
   test("reports an inactive session without constructing the service", async () => {
     const { service, serviceResolved } = harness(false);
 
-    const content = await read(`${baseUri}?paths=app.log`);
+    const content = await read(`${baseUri}?${appLogPathsQuery}`);
 
     expect(JSON.parse(content.text!)).toEqual({
       code: "SESSION_NOT_ACTIVE",
@@ -138,10 +139,10 @@ describe("session log resources (#7006)", () => {
     const { service } = harness();
 
     for (const [query, message] of [
-      ["paths=..%2Fshared%2Fapp.log", "'..' segments"],
-      ["paths=app.log&maxBytes=99999999", "Invalid maxBytes"],
+      ["paths=%5B%22..%2Fshared%2Fapp.log%22%5D", "'..' segments"],
+      [`${appLogPathsQuery}&maxBytes=99999999`, "Invalid maxBytes"],
       ["lastSeconds=86400", "Invalid lastSeconds"],
-      ["paths=app.log&deviceId=other", "Unknown session log query parameter: deviceId"],
+      [`${appLogPathsQuery}&deviceId=other`, "Unknown session log query parameter: deviceId"],
       ["", "at least one source"],
     ] as const) {
       const content = await read(query ? `${baseUri}?${query}` : baseUri);
@@ -156,7 +157,7 @@ describe("session log resources (#7006)", () => {
     const { service } = harness();
     service.failure = new Error("Session logs are not supported on tvos.");
 
-    const content = await read(`${baseUri}?paths=app.log`);
+    const content = await read(`${baseUri}?${appLogPathsQuery}`);
 
     expect(JSON.parse(content.text!)).toEqual({
       code: "COLLECTION_FAILED",

@@ -11,10 +11,7 @@ import { join } from "node:path";
 // new boundary/convention check cannot silently reintroduce the race.
 
 const BATS_DIR = join(import.meta.dir, "..", "..", "test", "bats");
-
-// Real-tree path prefixes for variable-target detection (var assigned a path
-// under one of these, then used as a redirection target).
-const REAL_TREE = /^(src|android|ios)\//;
+const FIXTURE_DIR = join(import.meta.dir, "fixtures", "batsSerialTags");
 
 // Committed paths that, when they are the TARGET of a write op (redirect, cp,
 // mv, tee), mean the test rewrites the real working tree in place. Covers
@@ -26,6 +23,30 @@ const COMMITTED_WRITE = new RegExp(
   String.raw`(?:>>?\s*|tee\s+|(?:cp|mv)\s+\S+\s+)"?` + COMMITTED_TARGET,
   "m",
 );
+
+// Variable-target detection (#7003): a simple assignment whose value is a
+// repo-relative committed path, optionally prefixed by the checkout root
+// (`"$ROOT/scripts/..."`). `local`/`export`/`declare`/`readonly` prefixes are
+// allowed; `local a b` declarations without `=` are not assignments.
+const TRACKED_ASSIGNMENT = new RegExp(
+  String.raw`^\s*(?:(?:local|export|declare|readonly)\s+(?:-\w+\s+)*)?([A-Za-z_][A-Za-z0-9_]*)=["']?(?:\$\{?(?:ROOT|REPO_ROOT)\}?/)?` +
+    COMMITTED_TARGET,
+);
+
+// Real-tree mutation ops whose argument is `$VAR` / `"${VAR}"`: a redirection
+// (`> "$VAR"`), or `rm` / `mv` / `git [-C dir] rm` / `git [-C dir] mv` with the
+// variable anywhere in the argument list. `mv` is flagged for either position
+// (moving a tracked file away is as disruptive as overwriting it); `cp` FROM the
+// variable only reads it, so it is not an op here.
+function mutationOpsFor(varName: string): RegExp[] {
+  const ref = String.raw`"?\$\{?${varName}\}?"?`;
+  return [
+    new RegExp(String.raw`>>?\s*${ref}(?=[\s;&|)]|$)`),
+    new RegExp(
+      String.raw`(?:^|[\s;&|(])(?:git[ \t]+(?:-C[ \t]+\S+[ \t]+)?)?(?:rm|mv)[ \t]+(?:\S+[ \t]+)*${ref}(?=[\s;&|)]|$)`,
+    ),
+  ];
+}
 
 interface BatsFile {
   name: string;
@@ -46,30 +67,29 @@ function operatesInTempCwd(text: string): boolean {
 }
 
 // A file mutates the real tree when it either (a) assigns a variable to a
-// real-tree path and uses that variable as a redirection target
-// (`printf ... > "$FIXTURE"`), or (b) writes directly to a committed path
-// (`> package.json`, `mv x package.json`, `cp x src/...`). Copies FROM a real
-// path INTO a temp dir assign/read the real path but write a temp target, so
-// they are not flagged.
+// committed path and passes that variable to a mutating op (a redirection
+// `printf ... > "$FIXTURE"`, `rm "$runtime_input"`, `git mv "$from" "$to"`), or
+// (b) writes directly to a committed path (`> package.json`,
+// `mv x package.json`, `cp x src/...`). Copies FROM a real path INTO a temp dir
+// assign/read the real path but write a temp target, so they are not flagged.
 function mutatesRealTree(text: string): boolean {
   if (operatesInTempCwd(text)) {
     return false;
   }
-  const realVars = new Set<string>();
-  for (const line of text.split("\n")) {
-    const m = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)=["']?([^"'\s]+)/);
-    if (m && REAL_TREE.test(m[2])) {
-      realVars.add(m[1]);
-    }
-  }
-  for (const varName of realVars) {
-    // A redirection whose target is this variable: `> "$VAR"` / `>"${VAR}"`.
-    const redirect = new RegExp(`>\\s*"?\\$\\{?${varName}\\}?"?`);
-    if (redirect.test(text)) {
-      return true;
-    }
-  }
-  return COMMITTED_WRITE.test(text);
+  const lines = text.split("\n");
+  const trackedVars = new Set(
+    lines
+      .map((line) => line.match(TRACKED_ASSIGNMENT)?.[1])
+      .filter((name): name is string => name !== undefined),
+  );
+  const mutatesViaVariable = [...trackedVars]
+    .flatMap(mutationOpsFor)
+    .some((op) => lines.some((line) => op.test(line)));
+  return mutatesViaVariable || COMMITTED_WRITE.test(text);
+}
+
+function loadFixture(name: string): string {
+  return readFileSync(join(FIXTURE_DIR, name), "utf8");
 }
 
 function hasFileTag(text: string, tag: string): boolean {
@@ -120,6 +140,38 @@ describe("bats serial-pass tagging (scripts/ci/run-bats.sh)", () => {
     const hermetic = files.find((f) => f.name === "docs-changed-since-last-deploy.bats");
     expect(hermetic).toBeDefined();
     expect(mutatesRealTree(hermetic!.text)).toBe(false);
+  });
+
+  test("the tag detector recognizes a `local tmp=src/...` fixture redirect (#7003)", () => {
+    // `local` prefixed assignments defeated the pre-#7003 assignment regex, so
+    // this file wrote under src/ untagged until the detector was widened.
+    const known = files.find((f) => f.name === "validate-no-debug-log-tags.bats");
+    expect(known).toBeDefined();
+    expect(mutatesRealTree(known!.text)).toBe(true);
+    expect(hasFileTag(known!.text, "serial")).toBe(true);
+  });
+
+  test("the tag detector recognizes a variable-target rm of a tracked file (#7003)", () => {
+    expect(mutatesRealTree(loadFixture("variable-rm-tracked.bats"))).toBe(true);
+  });
+
+  test("the tag detector recognizes a variable-target `git mv` of a tracked file (#7003)", () => {
+    expect(mutatesRealTree(loadFixture("variable-git-mv-tracked.bats"))).toBe(true);
+  });
+
+  test("the tag detector recognizes a `$ROOT/<tracked>` variable passed to `git rm` from setup (#7003)", () => {
+    expect(mutatesRealTree(loadFixture("variable-root-prefixed-git-rm.bats"))).toBe(true);
+  });
+
+  test("a variable pointing under $BATS_TEST_TMPDIR is not a real-tree mutation (#7003)", () => {
+    expect(mutatesRealTree(loadFixture("variable-tmpdir-rm.bats"))).toBe(false);
+  });
+
+  test("the detector recognizes the hand-tagged prepush-integration mutator (#6988)", () => {
+    const known = files.find((f) => f.name === "prepush-integration.bats");
+    expect(known).toBeDefined();
+    expect(mutatesRealTree(known!.text)).toBe(true);
+    expect(hasFileTag(known!.text, "serial")).toBe(true);
   });
 
   test("real process, package, and host-tool files carry the orthogonal integration tag", () => {

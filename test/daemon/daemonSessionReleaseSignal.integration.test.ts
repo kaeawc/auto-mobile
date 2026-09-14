@@ -10,8 +10,10 @@ import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
 import { createTestDatabase } from "../db/testDbHelper";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import type { DevicePool } from "../../src/daemon/devicePool";
 import type { BootedDevice } from "../../src/models";
+import { executionTracker } from "../../src/server/executionTracker";
 
 // Issue #4610: the daemon registers a release callback (next to the nav-graph /
 // observe-cache cleanup) that fans the released session key out to the
@@ -170,6 +172,65 @@ describe("Daemon session-release signal wiring", () => {
       markReleasedSpy.mockRestore();
       sessionManager.stopCleanupTimer();
       await db.destroy();
+    }
+  });
+
+  test("keeps a session when a newer identity arrives during daemon release cancellation", async () => {
+    const timer = new FakeTimer();
+    const daemon = new Daemon(
+      {},
+      undefined,
+      timer,
+      new FakeDeviceSessionPersistence() as unknown as DeviceSessionRepository,
+    );
+    const devicePool = daemon.getDevicePool();
+    const sessionManager = daemon.getSessionManager();
+    const original: BootedDevice = {
+      deviceId: "emulator-5554",
+      name: "Pixel_8_API_35",
+      platform: "android",
+      observedAt: 1,
+    };
+    const replacement: BootedDevice = { ...original, name: "Pixel_7_API_34", observedAt: 2 };
+    const cancellationEntered = Promise.withResolvers<void>();
+    const finishCancellation = Promise.withResolvers<number>();
+    const cancelSpy = spyOn(executionTracker, "cancelSessionUuidExecutions").mockImplementation(
+      async () => {
+        cancellationEntered.resolve();
+        return await finishCancellation.promise;
+      },
+    );
+
+    try {
+      stubPoolDiscovery(devicePool, [original]);
+      await devicePool.initializeWithDevices([original]);
+      await devicePool.reconcileDiscoveryObservation([original], "test:initial");
+      await devicePool.bindOrReuseDeviceSession(
+        "identity-fenced-session",
+        original.deviceId,
+        "android",
+      );
+
+      stubPoolDiscovery(devicePool, [replacement]);
+      const refresh = devicePool.refreshDevices();
+      await cancellationEntered.promise;
+
+      await devicePool.reconcileDiscoveryObservation(
+        [{ ...original, observedAt: 3 }],
+        "test:newer-identity",
+      );
+      finishCancellation.resolve(0);
+      await refresh;
+
+      expect(sessionManager.getSession("identity-fenced-session")).not.toBeNull();
+      expect(devicePool.getDevice(original.deviceId)).toMatchObject({
+        name: original.name,
+        sessionId: "identity-fenced-session",
+      });
+    } finally {
+      finishCancellation.resolve(0);
+      cancelSpy.mockRestore();
+      sessionManager.stopCleanupTimer();
     }
   });
 

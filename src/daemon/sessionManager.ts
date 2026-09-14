@@ -303,6 +303,20 @@ const EXPIRY_RELEASE_REASONS = new Set([
 
 class UnissuedSessionError extends ActionableError {}
 
+/**
+ * Synchronous commit predicate for a conditional release. Returning `false`
+ * abandons the release without removing the session.
+ */
+export type ReleaseCommitFence = () => boolean;
+
+export type ConditionalSessionRelease =
+  | { superseded: true }
+  | { superseded: false; deviceId: string | null };
+
+function releaseSuperseded(shouldCommit: ReleaseCommitFence | undefined): boolean {
+  return shouldCommit !== undefined && shouldCommit() === false;
+}
+
 function isTerminalReleaseReason(releaseReason: string): boolean {
   return (
     releaseReason === "missing-first-heartbeat" ||
@@ -1287,6 +1301,7 @@ export class SessionManager {
     sessionId: string,
     releaseReason: string = "explicit-release",
     allowExpired: boolean = false,
+    shouldCommit?: ReleaseCommitFence,
   ): Promise<string | null> {
     const session =
       allowExpired || this.terminalReleaseSnapshots.has(sessionId)
@@ -1308,10 +1323,10 @@ export class SessionManager {
     const promise =
       pendingRebind?.session === session
         ? pendingRebind.promise.then(
-            () => this.releaseSessionInternal(sessionId, session, reason),
-            () => this.releaseSessionInternal(sessionId, session, reason),
+            () => this.releaseSessionInternal(sessionId, session, reason, shouldCommit),
+            () => this.releaseSessionInternal(sessionId, session, reason, shouldCommit),
           )
-        : this.releaseSessionInternal(sessionId, session, reason);
+        : this.releaseSessionInternal(sessionId, session, reason, shouldCommit);
     const release = { session, promise, reason };
     this.releasePromises.set(sessionId, release);
     this.activeReleasePromises.add(release);
@@ -1323,6 +1338,37 @@ export class SessionManager {
         this.releasePromises.delete(sessionId);
       }
     }
+  }
+
+  /**
+   * Release a session unless `shouldCommit` declines at the commit point.
+   *
+   * A device-loss eviction races discovery: a newer observation can confirm the
+   * same serial still hosts the live runtime while release is awaiting tracked
+   * setup or restoration work. The predicate is re-evaluated synchronously
+   * immediately before the session is removed (after every await), so such a
+   * confirmation stops the stale eviction instead of being outrun by it
+   * (#7031). `superseded: true` means nothing was released.
+   */
+  async releaseSessionUnlessSuperseded(
+    sessionId: string,
+    releaseReason: string,
+    shouldCommit: ReleaseCommitFence | undefined,
+    allowExpired: boolean = false,
+  ): Promise<ConditionalSessionRelease> {
+    let superseded = false;
+    const fence: ReleaseCommitFence | undefined =
+      shouldCommit === undefined
+        ? undefined
+        : () => {
+            if (superseded || shouldCommit() === false) {
+              superseded = true;
+              return false;
+            }
+            return true;
+          };
+    const deviceId = await this.releaseSession(sessionId, releaseReason, allowExpired, fence);
+    return superseded ? { superseded: true } : { superseded: false, deviceId };
   }
 
   /** Release only the recorded session incarnation while it still owns the device. */
@@ -1542,6 +1588,7 @@ export class SessionManager {
     sessionId: string,
     session: Session,
     reason: ReleaseReasonState,
+    shouldCommit?: ReleaseCommitFence,
   ): Promise<string | null> {
     try {
       // Release restores the device to `none` itself, so a standalone TTL is now
@@ -1549,27 +1596,17 @@ export class SessionManager {
       // (issue #6085 item 2). Whichever runs first (this release, or the TTL that
       // already cleared the slot) wins.
       this.cancelNetworkConditionExpiry(sessionId);
-      const setups = Array.from(this.sessionSetupPromises, (setup) =>
-        setup.session === session ? setup.promise : null,
-      ).filter((setup): setup is Promise<void> => setup !== null);
-      const pendingSetups =
-        setups.length > 0 ? (await this.waitForSessionSetup(sessionId, setups)).pending : null;
-      const pendingRestoration = (await this.restoreKeepScreenAwakeBestEffort(session)).pending;
-      const pendingBiometricRestoration = session.cacheData.biometricEnrollment
-        ? (await this.getPendingBiometricRestoration(session, pendingSetups)).pending
-        : null;
-      const pendingNetworkRestoration = session.cacheData.networkCondition
-        ? (await this.getPendingNetworkRestoration(session, pendingSetups)).pending
-        : null;
-      const pendingCleanup = [
-        pendingSetups,
-        pendingRestoration,
-        pendingBiometricRestoration,
-        pendingNetworkRestoration,
-      ].filter((cleanup): cleanup is Promise<void> => cleanup !== null);
+      const pendingCleanup = await this.drainReleaseTeardown(sessionId, session);
       const deviceId = session.assignedDevice;
+      // Setup/restoration awaits above are where a newer identity confirmation
+      // can overtake a device-loss eviction. Fence before the terminal snapshot
+      // is persisted so a declined release leaves no terminal trace behind.
+      if (releaseSuperseded(shouldCommit)) {
+        return this.abandonSupersededRelease(sessionId, deviceId, pendingCleanup);
+      }
       const releasedAtMs = this.timer.now();
       const releaseReason = reason.value;
+      const terminalFenceHeldBefore = this.terminalReleaseSnapshots.has(sessionId);
       let releaseSnapshot: SessionReleaseSnapshot = {
         sessionId,
         deviceId,
@@ -1595,11 +1632,24 @@ export class SessionManager {
       // concurrent terminal release can only upgrade the shared reason while
       // this operation is awaiting teardown above.
       if (releaseSnapshot.terminal) {
-        await this.persistTerminalReleaseIfNeeded(releaseSnapshot);
-        if (reason.value !== releaseSnapshot.releaseReason) {
-          releaseSnapshot = this.withReleaseReason(releaseSnapshot, reason.value, session);
-          await this.persistTerminalReleaseIfNeeded(releaseSnapshot);
-        }
+        releaseSnapshot = await this.persistTerminalReleaseWithUpgrade(
+          releaseSnapshot,
+          reason,
+          session,
+        );
+      }
+      // Final fence: evaluated synchronously right before the commit, with no
+      // await in between, so the persistence awaits above cannot hide a newer
+      // confirmation either. A terminal fence this release raised is lifted so
+      // the live session keeps routing; the persisted row is rewritten by
+      // whichever release eventually commits.
+      if (releaseSuperseded(shouldCommit)) {
+        return this.abandonSupersededRelease(
+          sessionId,
+          deviceId,
+          pendingCleanup,
+          !terminalFenceHeldBefore,
+        );
       }
       if (!this.removeSession(sessionId, session)) {
         if (pendingCleanup.length > 0) {
@@ -1635,6 +1685,67 @@ export class SessionManager {
     } finally {
       this.releasingSessions.delete(session);
     }
+  }
+
+  /**
+   * Await tracked setup and start best-effort restoration for a releasing
+   * session, returning the teardown that must still finish before the device
+   * is handed out again.
+   */
+  private async drainReleaseTeardown(
+    sessionId: string,
+    session: Session,
+  ): Promise<readonly Promise<void>[]> {
+    const setups = Array.from(this.sessionSetupPromises, (setup) =>
+      setup.session === session ? setup.promise : null,
+    ).filter((setup): setup is Promise<void> => setup !== null);
+    const pendingSetups =
+      setups.length > 0 ? (await this.waitForSessionSetup(sessionId, setups)).pending : null;
+    const pendingRestoration = (await this.restoreKeepScreenAwakeBestEffort(session)).pending;
+    const pendingBiometricRestoration = session.cacheData.biometricEnrollment
+      ? (await this.getPendingBiometricRestoration(session, pendingSetups)).pending
+      : null;
+    const pendingNetworkRestoration = session.cacheData.networkCondition
+      ? (await this.getPendingNetworkRestoration(session, pendingSetups)).pending
+      : null;
+    return [
+      pendingSetups,
+      pendingRestoration,
+      pendingBiometricRestoration,
+      pendingNetworkRestoration,
+    ].filter((cleanup): cleanup is Promise<void> => cleanup !== null);
+  }
+
+  private async persistTerminalReleaseWithUpgrade(
+    snapshot: SessionReleaseSnapshot,
+    reason: ReleaseReasonState,
+    session: Session,
+  ): Promise<SessionReleaseSnapshot> {
+    await this.persistTerminalReleaseIfNeeded(snapshot);
+    if (reason.value === snapshot.releaseReason) {
+      return snapshot;
+    }
+    const upgradedSnapshot = this.withReleaseReason(snapshot, reason.value, session);
+    await this.persistTerminalReleaseIfNeeded(upgradedSnapshot);
+    return upgradedSnapshot;
+  }
+
+  private abandonSupersededRelease(
+    sessionId: string,
+    deviceId: string,
+    pendingCleanup: readonly Promise<void>[],
+    liftTerminalFence: boolean = false,
+  ): null {
+    if (liftTerminalFence) {
+      this.terminalReleaseSnapshots.delete(sessionId);
+    }
+    if (pendingCleanup.length > 0) {
+      this.trackPendingDeviceCleanup(deviceId, pendingCleanup);
+    }
+    logger.info(
+      `Skipping release of ${sessionId}: a newer identity confirmation superseded the eviction of ${deviceId}`,
+    );
+    return null;
   }
 
   private upgradeReleaseReason(reason: ReleaseReasonState, candidate: string): void {

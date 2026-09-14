@@ -8,6 +8,7 @@ import { AdbClientFactory, unadmittedAdbClientFactory } from "./AdbClientFactory
 import { arch } from "os";
 import { detectAndroidCommandLineTools, getBestAndroidToolsLocation } from "./detection";
 import { defaultTimer, Timer } from "../SystemTimer";
+import { combineAbortSignals } from "../AbortContext";
 import { createGlobalPerformanceTracker } from "../PerformanceTracker";
 import {
   TcpHostPortAvailabilityChecker,
@@ -192,15 +193,17 @@ export interface AndroidEmulator {
    * Execute an emulator command
    * @param command - The command to execute
    * @param timeoutMs - Optional timeout in milliseconds
+   * @param signal - Optional caller abort; kills the child alongside the timeout
    * @returns Promise with stdout and stderr
    */
-  executeCommand(args: string[], timeoutMs?: number): Promise<ExecResult>;
+  executeCommand(args: string[], timeoutMs?: number, signal?: AbortSignal): Promise<ExecResult>;
 
   /**
    * List all available AVDs
+   * @param options - Optional deadline/abort for the `-list-avds` child (#7008)
    * @returns Promise with array of AVD names
    */
-  listAvds(): Promise<DeviceInfo[]>;
+  listAvds(options?: { signal?: AbortSignal; timeoutMs?: number }): Promise<DeviceInfo[]>;
 
   /**
    * Check if a specific AVD is running
@@ -1325,7 +1328,11 @@ export class AndroidEmulatorClient implements AndroidEmulator {
    * @param timeoutMs - Optional timeout in milliseconds
    * @returns Promise with stdout and stderr
    */
-  async executeCommand(args: string[], timeoutMs?: number): Promise<ExecResult> {
+  async executeCommand(
+    args: string[],
+    timeoutMs?: number,
+    signal?: AbortSignal,
+  ): Promise<ExecResult> {
     const emulatorPath = await this.ensureEmulatorPath();
     const fullCommand = `${emulatorPath} ${args.join(" ")}`;
     logger.debug(`Executing emulator command: ${fullCommand}`);
@@ -1344,7 +1351,11 @@ export class AndroidEmulatorClient implements AndroidEmulator {
         }, timeoutMs);
       });
 
-      const runPromise = this.execAsync(emulatorPath, args, controller.signal);
+      const runPromise = this.execAsync(
+        emulatorPath,
+        args,
+        combineAbortSignals(signal, controller.signal),
+      );
       // Once the timeout wins the race the aborted run promise rejects with an
       // AbortError; keep it handled so it can't surface as an unhandledRejection.
       runPromise.catch(() => {
@@ -1354,20 +1365,20 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       try {
         return await Promise.race([runPromise, timeoutPromise]);
       } finally {
-        clearTimeout(timeoutId!);
+        this.timer.clearTimeout(timeoutId!);
       }
     }
 
-    return await this.execAsync(emulatorPath, args);
+    return await this.execAsync(emulatorPath, args, signal);
   }
 
   /**
    * List all available AVDs
    * @returns Promise with array of AVD names
    */
-  async listAvds(): Promise<DeviceInfo[]> {
+  async listAvds(options?: { signal?: AbortSignal; timeoutMs?: number }): Promise<DeviceInfo[]> {
     try {
-      const result = await this.executeCommand(["-list-avds"]);
+      const result = await this.executeCommand(["-list-avds"], options?.timeoutMs, options?.signal);
       const devices = result.stdout
         .split("\n")
         .map((line) => line.trim())

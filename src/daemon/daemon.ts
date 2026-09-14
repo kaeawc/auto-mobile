@@ -436,8 +436,8 @@ export class Daemon {
       undefined,
       this.deviceSessionRepository,
       undefined,
-      (sessionId, _deviceId, releaseReason) =>
-        this.cancelAndReleaseSession(sessionId, releaseReason),
+      (sessionId, _deviceId, releaseReason, shouldCommit) =>
+        this.cancelAndReleaseSession(sessionId, releaseReason, false, undefined, shouldCommit),
       (deviceId) => this.onDeviceReadyForSessionRegistry(deviceId),
       undefined,
       recoveryConfiguration.policy,
@@ -1639,7 +1639,9 @@ export class Daemon {
     this.heartbeatMonitor = new SessionHeartbeatMonitor(
       this.sessionManager,
       (sessionId) => this.hasActiveSessionExecution(sessionId),
-      (sessionId, reason) => this.cancelAndReleaseSession(sessionId, reason),
+      async (sessionId, reason) => {
+        await this.cancelAndReleaseSession(sessionId, reason);
+      },
       this.timer,
     );
     this.heartbeatMonitor.start();
@@ -2238,16 +2240,41 @@ export class Daemon {
     releaseReason: string = "explicit-release",
     allowExpired: boolean = false,
     expectedSession?: Session,
-  ): Promise<void> {
+    shouldCommit?: () => boolean,
+  ): Promise<boolean> {
     const cancelled = await executionTracker.cancelSessionUuidExecutions(sessionId, releaseReason);
-    const deviceId = expectedSession
-      ? await this.sessionManager.releaseSessionIfOwned(
-          sessionId,
-          expectedSession,
-          expectedSession.assignedDevice,
-          releaseReason,
-        )
-      : await this.sessionManager.releaseSession(sessionId, releaseReason, allowExpired);
+    // Early identity fence: discovery can replace a same-serial runtime while
+    // execution cancellation is in flight. It is not the final one — the
+    // session manager re-evaluates `shouldCommit` immediately before it
+    // removes the session, after its own setup/restoration awaits (#7031).
+    if (shouldCommit?.() === false) {
+      return false;
+    }
+    let deviceId: string | null;
+    if (expectedSession) {
+      deviceId = await this.sessionManager.releaseSessionIfOwned(
+        sessionId,
+        expectedSession,
+        expectedSession.assignedDevice,
+        releaseReason,
+      );
+    } else if (shouldCommit) {
+      const release = await this.sessionManager.releaseSessionUnlessSuperseded(
+        sessionId,
+        releaseReason,
+        shouldCommit,
+        allowExpired,
+      );
+      if (release.superseded) {
+        logger.info(
+          `Kept session ${sessionId}: a newer identity confirmation superseded its release (reason=${releaseReason})`,
+        );
+        return false;
+      }
+      deviceId = release.deviceId;
+    } else {
+      deviceId = await this.sessionManager.releaseSession(sessionId, releaseReason, allowExpired);
+    }
     if (deviceId) {
       await this.devicePool.releaseDevice(deviceId, sessionId);
     }
@@ -2255,6 +2282,7 @@ export class Daemon {
       `Cancelled session ${sessionId} (${cancelled} executions) and released device ${deviceId ?? "unknown"} ` +
         `(reason=${releaseReason})`,
     );
+    return true;
   }
 
   private async cancelAndDrainDeviceSessionExecutions(
@@ -2772,9 +2800,9 @@ export class Daemon {
   private async releaseActiveSessionsForShutdown(): Promise<void> {
     const sessionIds = this.sessionManager.getAllKnownSessionIds();
     this.shutdownSessionIds = sessionIds;
-    const releases = sessionIds.map((sessionId) =>
-      this.cancelAndReleaseSession(sessionId, "daemon-shutdown", true),
-    );
+    const releases = sessionIds.map(async (sessionId) => {
+      await this.cancelAndReleaseSession(sessionId, "daemon-shutdown", true);
+    });
     const reportFailures = (results: PromiseSettledResult<void>[]): void => {
       for (const [index, release] of results.entries()) {
         if (release.status === "rejected") {

@@ -1,4 +1,9 @@
 #!/usr/bin/env bats
+# bats file_tags=serial
+# Writes a fixture into the real src/ tree and scans it, so this file cannot
+# run concurrently with the rest of the suite (scripts/ci/run-bats.sh runs
+# serial-tagged files in a dedicated pass; the tag is enforced by
+# test/scripts/batsSerialTags.test.ts).
 #
 # Tests for scripts/validate-no-datetime-now-literal.sh
 

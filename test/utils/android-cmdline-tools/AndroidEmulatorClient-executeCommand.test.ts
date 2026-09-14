@@ -109,4 +109,82 @@ describe("AndroidEmulatorClient executeCommand timeout", () => {
     expect(capturedArgs).toEqual(["-avd", "My Pixel", "-verbose"]);
     expect(capturedSignal).toBeUndefined();
   });
+
+  test("forwards a caller signal to the child when no timeout is specified", async () => {
+    const controller = new AbortController();
+    let capturedSignal: AbortSignal | undefined;
+    const execAsync = async (
+      _file: string,
+      _args: string[],
+      signal?: AbortSignal,
+    ): Promise<ExecResult> => {
+      capturedSignal = signal;
+      return createExecResult("ok", "");
+    };
+
+    const client = newClientWithFakeExec(execAsync, new FakeTimer());
+    await client.executeCommand(["-list-avds"], undefined, controller.signal);
+
+    expect(capturedSignal).toBe(controller.signal);
+  });
+
+  test("a caller abort reaches the child even while a timeout is armed", async () => {
+    const timer = new FakeTimer();
+    const controller = new AbortController();
+    let capturedSignal: AbortSignal | undefined;
+    const execAsync = async (
+      _file: string,
+      _args: string[],
+      signal?: AbortSignal,
+    ): Promise<ExecResult> => {
+      capturedSignal = signal;
+      return new Promise<ExecResult>((_resolve, reject) => {
+        signal?.addEventListener("abort", () => {
+          reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+        });
+      });
+    };
+
+    const client = newClientWithFakeExec(execAsync, timer);
+    const promise = client.executeCommand(["-list-avds"], 5000, controller.signal);
+    while (!capturedSignal) {
+      await Promise.resolve();
+    }
+    expect(capturedSignal.aborted).toBe(false);
+
+    controller.abort();
+
+    await expect(promise).rejects.toThrow("aborted");
+    expect(capturedSignal.aborted).toBe(true);
+    expect(timer.getPendingTimeouts()).toHaveLength(0);
+  });
+
+  test("listAvds threads its signal and deadline into the emulator command", async () => {
+    const timer = new FakeTimer();
+    const controller = new AbortController();
+    let capturedSignal: AbortSignal | undefined;
+    const execAsync = async (
+      _file: string,
+      _args: string[],
+      signal?: AbortSignal,
+    ): Promise<ExecResult> => {
+      capturedSignal = signal;
+      return new Promise<ExecResult>((_resolve, reject) => {
+        signal?.addEventListener("abort", () => {
+          reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+        });
+      });
+    };
+
+    const client = newClientWithFakeExec(execAsync, timer);
+    const promise = client.listAvds({ signal: controller.signal, timeoutMs: 1234 });
+    while (!capturedSignal) {
+      await Promise.resolve();
+    }
+
+    timer.advanceTime(1234);
+
+    await expect(promise).rejects.toThrow("Command timed out after 1234ms");
+    expect(capturedSignal.aborted).toBe(true);
+  });
 });

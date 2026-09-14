@@ -40,6 +40,13 @@ import {
   type VirtualDeviceLifecycleLease,
 } from "./virtualDeviceLifecycleCoordinator";
 import { runWithAbortSignal } from "./AbortContext";
+import {
+  compareIdentityEvidence,
+  deriveEvidenceFromBootedDevice,
+  type IdentityEvidence,
+  isUnresolvedAndroidEmulatorName,
+} from "../daemon/deviceIdentityEvidence";
+import { isAndroidEmulatorSerial } from "./androidSerial";
 
 /**
  * Render a device list for a "not found" error.
@@ -73,7 +80,7 @@ function lifecycleIdentityForDevice(
     return { platform: "ios", stableId: device.deviceId };
   }
 
-  return device.deviceId.startsWith("emulator-") && device.name !== `Unknown (${device.deviceId})`
+  return isAndroidEmulatorSerial(device.deviceId) && !isUnresolvedAndroidEmulatorName(device)
     ? { platform: "android", stableId: device.name }
     : { kind: "selector", platform: "android", selector: device.deviceId };
 }
@@ -97,15 +104,17 @@ export interface DeviceClientProvider {
 /**
  * Default provider that lazily creates real clients
  */
-class DefaultDeviceClientProvider implements DeviceClientProvider {
+export class DefaultDeviceClientProvider implements DeviceClientProvider {
   private _adb: AdbExecutor | undefined;
   private _adbFactory: AdbClientFactory;
   private _simctl: SimCtlClient | undefined;
   private _androidEmulator: AndroidEmulatorClient | undefined;
   private _deviceUtils: PlatformDeviceManager | undefined;
-  // Keyed by device.deviceId so Window's internal active-window cache survives
-  // across calls instead of being thrown away on every resolve.
-  private readonly _windows: Map<string, Window> = new Map();
+  // Keyed by serial plus the most recent resolved runtime identity. An
+  // unresolved/raw-serial listing cannot evict a known-good client, while a
+  // different resolved AVD name must not retain clients bound to its predecessor.
+  private readonly _windows: Map<string, { window: Window; evidence: IdentityEvidence }> =
+    new Map();
 
   constructor(adbFactory: AdbClientFactory = defaultAdbClientFactory) {
     this._adbFactory = adbFactory;
@@ -161,11 +170,39 @@ class DefaultDeviceClientProvider implements DeviceClientProvider {
 
   getWindow(device: BootedDevice): Window {
     const key = device.deviceId;
-    let window = this._windows.get(key);
-    if (!window) {
-      window = new WindowImpl(device, this._adbFactory);
-      this._windows.set(key, window);
+    const incoming = deriveEvidenceFromBootedDevice(
+      device,
+      isUnresolvedAndroidEmulatorName(device),
+    );
+    const cached = this._windows.get(key);
+    if (!cached) {
+      return this.cacheWindow(key, device, incoming);
     }
+    // Raw-serial evidence cannot name an AVD, so it never replaces (or
+    // re-stamps) a cached Window.
+    if (incoming.unresolved) {
+      return cached.window;
+    }
+    const comparison = compareIdentityEvidence(cached.evidence, incoming);
+    if (incoming.stableId === cached.evidence.stableId) {
+      if (comparison === "newer") {
+        cached.evidence = incoming;
+      }
+      return cached.window;
+    }
+    // Overlapping readiness calls for two AVDs on a reused serial complete out
+    // of order: an older resolved observation must not evict the Window the
+    // newer AVD already cached (#7031). Unstamped observations stay
+    // permissive, matching the pool.
+    if (comparison !== "newer") {
+      return cached.window;
+    }
+    return this.cacheWindow(key, device, incoming);
+  }
+
+  private cacheWindow(key: string, device: BootedDevice, evidence: IdentityEvidence): Window {
+    const window = new WindowImpl(device, this._adbFactory);
+    this._windows.set(key, { window, evidence });
     return window;
   }
 
@@ -210,9 +247,16 @@ export interface DeviceSessionManager {
   detectConnectedPlatforms(): Promise<BootedDevice[]>;
 
   /**
-   * Verify a specific device is connected and ready for the given platform
+   * Verify a specific device is connected and ready for the given platform.
+   * `resolvedIdentity` carries the AVD-resolved discovery entry for an Android
+   * emulator so readiness caches key on the runtime, not the reused serial.
    */
-  verifyDevice(deviceId: string, platform: Platform, options?: DeviceReadyOptions): Promise<void>;
+  verifyDevice(
+    deviceId: string,
+    platform: Platform,
+    options?: DeviceReadyOptions,
+    resolvedIdentity?: ResolvedDeviceIdentity,
+  ): Promise<void>;
 
   /**
    * Verify an Android device is connected and ready
@@ -257,6 +301,9 @@ const DEVICE_READINESS_RANK: Readonly<Record<DeviceReadinessLevel, number>> = {
 export function deviceReadinessRank(level: DeviceReadinessLevel): number {
   return DEVICE_READINESS_RANK[level];
 }
+
+/** The discovery entry that resolved an Android runtime's identity for a serial. */
+export type ResolvedDeviceIdentity = Pick<BootedDevice, "deviceId" | "name" | "observedAt">;
 
 export interface DeviceReadyOptions {
   skipCtrlProxyDownload?: boolean;
@@ -587,7 +634,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
             `Available ${platform} devices: ${describeDevices(platformDevices)}`,
         );
       }
-      selectedDevice = providedDevice;
+      selectedDevice = await this.resolveAndroidReadinessIdentity(providedDevice, options?.signal);
       deviceSource = "provided";
     }
 
@@ -601,21 +648,26 @@ export class DeviceSessionManager implements DeviceSessionManager {
         `[DeviceSessionManager] Found current device: ${this.currentDevice.deviceId}, verifying readiness`,
       );
       try {
-        // Prefer the current discovery's name over the cached selection so an
-        // Android emulator uses its stable AVD name rather than its serial.
-        const currentDevice =
+        // Prefer the current discovery over the cached selection, resolved to
+        // its stable AVD name so an Android emulator is keyed by the runtime on
+        // the serial rather than by the serial itself.
+        const currentDevice = await this.resolveAndroidReadinessIdentity(
           platformDevices.find((device) => device.deviceId === this.currentDevice?.deviceId) ??
-          this.currentDevice;
+            this.currentDevice,
+          options?.signal,
+        );
         // Use resolvedPlatform (always "android" | "ios") instead of platform (which may be "either")
         // to ensure verifyDevice dispatches to the correct platform-specific verification
         await this.withLifecycleStart(
           lifecycleIdentityForDevice(currentDevice),
           options,
           async (signal) =>
-            await this.verifyDevice(currentDevice.deviceId, resolvedPlatform, {
-              ...options,
-              signal,
-            }),
+            await this.verifyDevice(
+              currentDevice.deviceId,
+              resolvedPlatform,
+              { ...options, signal },
+              currentDevice,
+            ),
         );
         selectedDevice = currentDevice;
         deviceVerified = true;
@@ -653,10 +705,12 @@ export class DeviceSessionManager implements DeviceSessionManager {
         lifecycleIdentityForDevice(deviceForVerification),
         options,
         async (signal) =>
-          await this.verifyDevice(deviceForVerification.deviceId, resolvedPlatform, {
-            ...options,
-            signal,
-          }),
+          await this.verifyDevice(
+            deviceForVerification.deviceId,
+            resolvedPlatform,
+            { ...options, signal },
+            deviceForVerification,
+          ),
       );
     }
 
@@ -688,18 +742,56 @@ export class DeviceSessionManager implements DeviceSessionManager {
     deviceId: string,
     platform: Platform,
     options?: DeviceReadyOptions,
+    resolvedIdentity?: ResolvedDeviceIdentity,
   ): Promise<void> {
     if (platform === "android") {
-      await this.verifyAndroidDevice(deviceId, options);
+      await this.verifyAndroidDevice(deviceId, options, resolvedIdentity);
     } else {
       await this.verifyIosDevice(deviceId, options);
     }
   }
 
   /**
+   * Production discovery lists Android devices from raw `adb devices`, so the
+   * provided-device and current-device readiness paths only see
+   * `name === serial`. Resolve the AVD identity from the enriched discovery
+   * (the same source `findOrStartAndroidDevice` uses) so those paths also
+   * rebuild the cached Window when another AVD takes over the serial (#7031).
+   * Falls back to the raw entry when the runtime cannot be resolved.
+   */
+  private async resolveAndroidReadinessIdentity(
+    device: BootedDevice,
+    signal?: AbortSignal,
+  ): Promise<BootedDevice> {
+    if (!isUnresolvedAndroidEmulatorName(device)) {
+      return device;
+    }
+    signal?.throwIfAborted();
+    let enriched: BootedDevice | undefined;
+    try {
+      enriched = (await this.deviceUtils.getBootedDevices("android")).find(
+        (candidate) => candidate.deviceId === device.deviceId,
+      );
+    } catch (error) {
+      signal?.throwIfAborted();
+      logger.warn(
+        `[DeviceSessionManager] Could not resolve the AVD identity for ${device.deviceId}; ` +
+          `keeping the raw serial identity: ${errorMessage(error)}`,
+        error,
+      );
+      return device;
+    }
+    return enriched && !isUnresolvedAndroidEmulatorName(enriched) ? enriched : device;
+  }
+
+  /**
    * Verify an Android device is connected and ready
    */
-  public async verifyAndroidDevice(deviceId: string, options?: DeviceReadyOptions): Promise<void> {
+  public async verifyAndroidDevice(
+    deviceId: string,
+    options?: DeviceReadyOptions,
+    resolvedIdentity?: ResolvedDeviceIdentity,
+  ): Promise<void> {
     options?.signal?.throwIfAborted();
     const allDevices = await this.adb.getBootedAndroidDevices();
     const device = allDevices.find((device) => device.deviceId === deviceId);
@@ -713,7 +805,17 @@ export class DeviceSessionManager implements DeviceSessionManager {
     try {
       logger.info(`[DeviceSessionManager] Verifying Android device ${deviceId} readiness`);
 
-      const window = this.provider.getWindow(device);
+      const deviceForWindow =
+        resolvedIdentity?.deviceId === device.deviceId
+          ? {
+              ...device,
+              name: resolvedIdentity.name,
+              ...(resolvedIdentity.observedAt === undefined
+                ? {}
+                : { observedAt: resolvedIdentity.observedAt }),
+            }
+          : device;
+      const window = this.provider.getWindow(deviceForWindow);
 
       const activeWindow = await window.getActive(true);
       if (!activeWindow || !activeWindow.appId || !activeWindow.activityName) {
@@ -1071,7 +1173,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
         options,
         async (signal) => {
           perf.startOperation("verifyDevice");
-          await this.verifyAndroidDevice(deviceId, { ...options, signal });
+          await this.verifyAndroidDevice(deviceId, { ...options, signal }, device);
           perf.endOperation("verifyDevice");
           return device;
         },
@@ -1129,7 +1231,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
         }
 
         perf.startOperation("verifyDevice");
-        await this.verifyAndroidDevice(newDevice.deviceId!, { ...options, signal });
+        await this.verifyAndroidDevice(newDevice.deviceId!, { ...options, signal }, newDevice);
         perf.endOperation("verifyDevice");
         return newDevice;
       },

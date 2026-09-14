@@ -46,11 +46,10 @@ export async function listBootedDevicesForResource(
   options?: { signal?: AbortSignal },
 ): Promise<BootedDevice[]> {
   try {
-    const discovery = await PlatformDeviceManagerFactory.getInstance().getBootedDevicesDetailed(
-      platform,
-      { signal: options?.signal },
-    );
-    const devices = discovery.devices;
+    const manager = PlatformDeviceManagerFactory.getInstance();
+    const devices = options?.signal
+      ? (await manager.getBootedDevicesDetailed(platform, { signal: options.signal })).devices
+      : await manager.getBootedDevices(platform);
     await reconcileDiscoveryObservation(devices, source);
     return devices;
   } catch (error) {

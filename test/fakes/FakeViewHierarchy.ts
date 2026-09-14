@@ -36,7 +36,11 @@ export class FakeViewHierarchy implements ViewHierarchy {
   /**
    * Configure recomposition tracking (fake implementation - no-op).
    */
-  async configureRecompositionTracking(_enabled: boolean, _perf?: any): Promise<void> {
+  async configureRecompositionTracking(
+    _enabled: boolean,
+    _perf?: any,
+    _signal?: AbortSignal,
+  ): Promise<void> {
     // No-op for testing
   }
 

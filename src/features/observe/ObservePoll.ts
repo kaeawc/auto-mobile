@@ -1,7 +1,8 @@
 import type { ObserveResult } from "../../models";
 import type { ObserveScreen } from "./interfaces/ObserveScreen";
 import { Timer } from "../../utils/SystemTimer";
-import { throwIfAborted } from "../../utils/toolUtils";
+import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
+import { logger } from "../../utils/logger";
 import { hierarchyUpdatedAtToMillis } from "./observeTimestamp";
 
 /**
@@ -52,6 +53,11 @@ export interface ObservePollOptions {
    * navigation action on a one-second budget, opts in.
    */
   skipPerformanceAudit?: boolean;
+  /**
+   * Skip recomposition processing on intermediate polls, then process only the
+   * terminal observation once (#6932).
+   */
+  skipRecompositionTracking?: boolean;
 }
 
 export interface ObservePollOutcome {
@@ -122,6 +128,41 @@ function nextPollMinTimestamp(
 }
 
 /**
+ * Await terminal best-effort work only while this poll still has budget and its
+ * request remains live. Losing either race leaves the underlying work running:
+ * its eventual settlement is observed here so it cannot become unhandled.
+ */
+async function awaitFinalizationWhilePollIsLive(
+  workPromise: Promise<void>,
+  timer: Timer,
+  remainingMs: number,
+  signal?: AbortSignal,
+): Promise<void> {
+  const result = await Promise.race([
+    awaitWhileRequestIsLive(workPromise, signal).then(() => "settled" as const),
+    timer.sleep(Math.max(0, remainingMs)).then(() => "deadline" as const),
+  ]).catch((error: unknown) => {
+    if (signal?.aborted) {
+      return "aborted" as const;
+    }
+    throw error;
+  });
+
+  if (result === "settled") {
+    return;
+  }
+
+  void workPromise
+    .then(() => {
+      logger.debug("[ObservePoll] Background terminal finalization settled after poll completion");
+    })
+    .catch((error: unknown) => {
+      // A late best-effort persistence failure cannot change an already-returned observation.
+      logger.debug(`[ObservePoll] Background terminal finalization failed: ${error}`);
+    });
+}
+
+/**
  * Poll `observeScreen` until `onObservation` returns true or the budget expires.
  *
  * Freshness lives in ONE clock domain end-to-end — the device-authored
@@ -154,7 +195,10 @@ function nextPollMinTimestamp(
  * screen.
  */
 export async function pollObserveUntil(
-  observeScreen: Pick<ObserveScreen, "execute">,
+  observeScreen: Pick<
+    ObserveScreen,
+    "execute" | "processRecomposition" | "captureCacheGeneration" | "cacheObserveResult"
+  >,
   timer: Timer,
   options: ObservePollOptions,
   onObservation: (
@@ -179,6 +223,32 @@ export async function pollObserveUntil(
   // results. A late stale fallback must not replace evidence that already met a
   // raised floor (e.g. 10 -> 30 -> 20).
   let newestTrustworthyObservation: ObserveResult | undefined;
+  let newestTrustworthyGeneration: number | undefined;
+  let newestTrustworthyCachedAt: number | undefined;
+  const finalize = async (
+    outcome: ObservePollOutcome,
+    canProcessRecomposition: boolean = true,
+    generation?: number,
+    cachedAt?: number,
+  ): Promise<ObservePollOutcome> => {
+    if (
+      options.skipRecompositionTracking &&
+      canProcessRecomposition &&
+      observeScreen.processRecomposition
+    ) {
+      const workPromise = (async (): Promise<void> => {
+        await observeScreen.processRecomposition!(outcome.observation);
+        await observeScreen.cacheObserveResult?.(outcome.observation, generation, cachedAt);
+      })();
+      await awaitFinalizationWhilePollIsLive(
+        workPromise,
+        timer,
+        options.timeoutMs - (timer.now() - start),
+        options.signal,
+      );
+    }
+    return outcome;
+  };
 
   while (true) {
     throwIfAborted(options.signal);
@@ -188,6 +258,10 @@ export async function pollObserveUntil(
       deviceFloor,
       enteringReference,
     );
+    // Capture alongside the observation's start, before asynchronous work can
+    // let terminateApp invalidate its cache generation (#5884).
+    const cacheGeneration = observeScreen.captureCacheGeneration?.();
+    const cacheStartedAt = timer.now();
 
     const observation = await observeScreen.execute({
       minTimestamp,
@@ -198,6 +272,7 @@ export async function pollObserveUntil(
       skipScreenshot: true,
       skipAccessibilityAudit: true,
       skipPerformanceAudit: options.skipPerformanceAudit,
+      skipRecompositionTracking: options.skipRecompositionTracking,
     });
     polls++;
     throwIfAborted(options.signal);
@@ -240,6 +315,8 @@ export async function pollObserveUntil(
 
     if (isAdmissibleEvidence) {
       newestTrustworthyObservation = observation;
+      newestTrustworthyGeneration = cacheGeneration;
+      newestTrustworthyCachedAt = cacheStartedAt;
     }
 
     // A screen-off terminal is only meaningful when the same observation passed
@@ -258,13 +335,18 @@ export async function pollObserveUntil(
         isAdmissibleEvidence &&
         (!isHierarchySourcedScreenOff || isPostInvocation))
     ) {
-      return {
-        observation,
-        polls,
-        waitMs: timer.now() - start,
-        stopped: false,
-        terminalReason: "screen_off",
-      };
+      return finalize(
+        {
+          observation,
+          polls,
+          waitMs: timer.now() - start,
+          stopped: false,
+          terminalReason: "screen_off",
+        },
+        isAdmissibleEvidence,
+        cacheGeneration,
+        cacheStartedAt,
+      );
     }
 
     // Rejected observations are deliberately invisible to stateful predicates:
@@ -272,13 +354,18 @@ export async function pollObserveUntil(
     // could manufacture a two-sample settle from regressed evidence.
     const matched = isAdmissibleEvidence && onObservation(observation, previous, polls);
     if (matched && isPostInvocation) {
-      return {
-        observation,
-        polls,
-        waitMs: timer.now() - start,
-        stopped: true,
-        terminalReason: "matched",
-      };
+      return finalize(
+        {
+          observation,
+          polls,
+          waitMs: timer.now() - start,
+          stopped: true,
+          terminalReason: "matched",
+        },
+        true,
+        cacheGeneration,
+        cacheStartedAt,
+      );
     }
 
     if (isAdmissibleEvidence) {
@@ -286,13 +373,18 @@ export async function pollObserveUntil(
     }
 
     if (timer.now() - start >= options.timeoutMs) {
-      return {
-        observation: newestTrustworthyObservation ?? observation,
-        polls,
-        waitMs: timer.now() - start,
-        stopped: false,
-        terminalReason: "timeout",
-      };
+      return finalize(
+        {
+          observation: newestTrustworthyObservation ?? observation,
+          polls,
+          waitMs: timer.now() - start,
+          stopped: false,
+          terminalReason: "timeout",
+        },
+        newestTrustworthyObservation !== undefined,
+        newestTrustworthyObservation !== undefined ? newestTrustworthyGeneration : cacheGeneration,
+        newestTrustworthyObservation !== undefined ? newestTrustworthyCachedAt : cacheStartedAt,
+      );
     }
 
     await timer.sleep(options.pollMs);

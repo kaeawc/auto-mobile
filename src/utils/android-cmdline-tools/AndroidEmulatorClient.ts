@@ -29,6 +29,10 @@ import {
   defaultEmulatorConsoleBusyRegistry,
   type EmulatorConsoleBusyRegistry,
 } from "./EmulatorConsoleBusyRegistry";
+import {
+  defaultDiscoveryObservationSequence,
+  type DiscoveryObservationSequence,
+} from "../DiscoveryObservationSequence";
 
 const MODERN_PLAY_IMAGE_MIN_API_LEVEL = 30;
 const MAX_LAUNCH_OUTPUT_LINES = 50;
@@ -142,6 +146,12 @@ function resolveConsoleBusyRegistry(
   registry: EmulatorConsoleBusyRegistry | undefined,
 ): EmulatorConsoleBusyRegistry {
   return registry ?? defaultEmulatorConsoleBusyRegistry;
+}
+
+function resolveEmulatorExecAsync(
+  execAsyncFn: ((file: string, args: string[], signal?: AbortSignal) => Promise<ExecResult>) | null,
+): (file: string, args: string[], signal?: AbortSignal) => Promise<ExecResult> {
+  return execAsyncFn || execAsync;
 }
 
 /**
@@ -647,6 +657,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
    * @param hostArchitecture - Host CPU architecture (for testing)
    * @param hostPortAvailabilityChecker - Checks whether emulator ports are free (for testing)
    * @param consoleBusyRegistry - Tracks daemon-owned console-exclusive operations (for testing)
+   * @param observationSequence - Orders completed device discovery observations (for testing)
    */
   constructor(
     execAsyncFn:
@@ -665,8 +676,9 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     hostPortAvailabilityChecker: HostPortAvailabilityChecker = AndroidEmulatorClient.defaultHostPortAvailabilityChecker(),
     runningAvdAdvertisementReader: RunningAvdAdvertisementReader = new TmpdirRunningAvdAdvertisementReader(),
     consoleBusyRegistry?: EmulatorConsoleBusyRegistry,
+    private readonly observationSequence: DiscoveryObservationSequence = defaultDiscoveryObservationSequence,
   ) {
-    this.execAsync = execAsyncFn || execAsync;
+    this.execAsync = resolveEmulatorExecAsync(execAsyncFn);
     this.spawnFn = spawnFn || spawn;
     this.timer = timer;
     this.adbFactory = adbFactory;
@@ -1475,10 +1487,21 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     consoleBusyDuringProbe?: boolean;
   }> {
     const deviceId = device.deviceId;
+    const busyBeforeDispatch = this.consoleBusyRegistry.isBusy(deviceId);
+    if (busyBeforeDispatch) {
+      // `adb devices` has already established that the serial exists. During a
+      // daemon-owned snapshot operation, both identity probes can transiently
+      // lose the ADB transport; leave identity unresolved instead of creating
+      // the false missing-device evidence that reaches the disconnect monitor.
+      logger.debug(
+        `Skipping AVD-name resolution for ${deviceId}: a console-exclusive operation is in flight`,
+      );
+      return { name: "", consoleBusyDuringProbe: true };
+    }
+
     const adbWithDevice = this.adbFactory.create(device);
     const deadlineMs = this.timer.now() + infoTimeoutMs;
     let diagnostic: ReadinessDiagnostic | undefined;
-    const busyBeforeDispatch = this.consoleBusyRegistry.isBusy(deviceId);
     const generationBeforeDispatch = this.consoleBusyRegistry.getGeneration(deviceId);
     try {
       const result = await adbWithDevice.executeCommand(
@@ -1590,6 +1613,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
           name: avdName.name || this.unknownEmulatorName(deviceId),
           platform: "android",
           deviceId: deviceId,
+          observedAt: this.observationSequence.next(),
           source: "local",
           ...(avdName.name === "" &&
             avdName.consoleBusyDuringProbe === true && {

@@ -764,24 +764,34 @@ export class CtrlProxyHierarchy {
   async setRecompositionTrackingEnabled(
     enabled: boolean,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    signal?: AbortSignal,
   ): Promise<void> {
     if (this.recompositionTrackingConfigured && this.recompositionTrackingEnabled === enabled) {
       return;
     }
 
-    const connected = await perf.track("ensureConnection", () =>
-      this.context.ensureConnected(perf),
-    );
-    if (!connected) {
-      logger.debug("[CTRL_PROXY] Skipping recomposition tracking config; WebSocket not connected");
-      return;
-    }
+    try {
+      throwIfAborted(signal);
+      const connected = await perf.track("ensureConnection", () =>
+        awaitWhileRequestIsLive(this.context.ensureConnected(perf), signal),
+      );
+      throwIfAborted(signal);
+      if (!connected) {
+        logger.debug(
+          "[CTRL_PROXY] Skipping recomposition tracking config; WebSocket not connected",
+        );
+        return;
+      }
 
-    const sent = this.sendRecompositionTrackingRequest(enabled);
-    if (sent) {
-      this.recompositionTrackingConfigured = true;
-      this.recompositionTrackingEnabled = enabled;
-      logger.info(`[CTRL_PROXY] Recomposition tracking ${enabled ? "enabled" : "disabled"}`);
+      const sent = this.sendRecompositionTrackingRequest(enabled);
+      if (sent) {
+        this.recompositionTrackingConfigured = true;
+        this.recompositionTrackingEnabled = enabled;
+        logger.info(`[CTRL_PROXY] Recomposition tracking ${enabled ? "enabled" : "disabled"}`);
+      }
+    } catch (error) {
+      // Safe to swallow for #6932: the hierarchy read still proceeds without tracking this poll.
+      logger.debug(`[CTRL_PROXY] Recomposition tracking config skipped: ${error}`);
     }
   }
 

@@ -199,13 +199,25 @@ export class DeviceSnapshotStore {
     return `snapshot_${timestamp}`;
   }
 
-  async getSnapshotSizeBytes(snapshotName: string, options?: SnapshotPathOptions): Promise<number> {
+  async getSnapshotSizeBytes(
+    snapshotName: string,
+    options?: SnapshotPathOptions,
+  ): Promise<number | null> {
     const snapshotPath = this.getSnapshotPathWithOptions(snapshotName, options);
-    // An archive directory that was never written is genuinely empty, so 0 is
-    // the honest answer here. Only the *emulator-owned* payload (which lives
-    // outside this store) distinguishes "empty" from "unknown" — see
-    // AvdSnapshotService (#6490).
-    return (await this.getDirectorySize(snapshotPath)) ?? 0;
+    let entries: Dirent[];
+    try {
+      entries = await fs.readdir(snapshotPath, { withFileTypes: true });
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === "ENOENT") {
+        // A snapshot archive that was never captured is genuinely empty.
+        logger.debug(`Snapshot archive ${snapshotPath} does not exist: ${error}`);
+        return 0;
+      }
+      logger.warn(`Failed to read snapshot archive ${snapshotPath}: ${error}`, error);
+      return null;
+    }
+    return this.getDirectorySizeFromEntries(snapshotPath, entries);
   }
 
   /**
@@ -227,13 +239,28 @@ export class DeviceSnapshotStore {
       return null;
     }
 
+    return this.getDirectorySizeFromEntries(dirPath, entries);
+  }
+
+  private async getDirectorySizeFromEntries(
+    dirPath: string,
+    entries: Dirent[],
+  ): Promise<number | null> {
     let size = 0;
     for (const entry of entries) {
       const fullPath = path.join(dirPath, entry.name);
       if (entry.isDirectory()) {
-        size += (await this.getDirectorySize(fullPath)) ?? 0;
+        const nestedSize = await this.getDirectorySize(fullPath);
+        if (nestedSize === null) {
+          return null;
+        }
+        size += nestedSize;
       } else {
-        size += await this.getFileSize(fullPath);
+        const fileSize = await this.getFileSize(fullPath);
+        if (fileSize === null) {
+          return null;
+        }
+        size += fileSize;
       }
     }
     return size;
@@ -272,16 +299,16 @@ export class DeviceSnapshotStore {
     }
   }
 
-  private async getFileSize(filePath: string): Promise<number> {
+  private async getFileSize(filePath: string): Promise<number | null> {
     try {
       const stats = await fs.stat(filePath);
       return stats.size;
     } catch (error) {
       // A file that vanished between readdir and stat (an emulator still
-      // writing its snapshot, a concurrent delete) contributes nothing; the
-      // rest of the directory is still worth measuring.
+      // writing its snapshot, a concurrent delete) leaves the total unknown;
+      // callers must not report a partial sum as the full payload size.
       logger.debug(`Failed to stat ${filePath} while measuring a directory: ${error}`);
-      return 0;
+      return null;
     }
   }
 }

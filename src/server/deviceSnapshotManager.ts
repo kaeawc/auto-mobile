@@ -235,9 +235,7 @@ export async function withVmRetentionSnapshotProtection<T>(
   useVmSnapshot: boolean,
   task: () => Promise<T>,
 ): Promise<T> {
-  if (
-    !(device.platform === "android" && device.deviceId.startsWith("emulator-") && useVmSnapshot)
-  ) {
+  if (!isAndroidEmulatorVmCapture(device, useVmSnapshot)) {
     return task();
   }
 
@@ -247,6 +245,10 @@ export async function withVmRetentionSnapshotProtection<T>(
   } finally {
     unprotectVmRetentionSnapshot(device.name, snapshotName);
   }
+}
+
+function isAndroidEmulatorVmCapture(device: BootedDevice, useVmSnapshot: boolean): boolean {
+  return device.platform === "android" && device.deviceId.startsWith("emulator-") && useVmSnapshot;
 }
 
 // Shared serialization primitive: run `task` after any prior holder of `key`
@@ -1133,6 +1135,15 @@ function assertSnapshotNameWritable(snapshotName: string): void {
   }
 }
 
+function assertVmSnapshotNameWritable(snapshotName: string): void {
+  if (snapshotName.trim().toLowerCase() === AVD_DEFAULT_BOOT_SNAPSHOT.toLowerCase()) {
+    throw new ActionableError(
+      `Snapshot name '${AVD_DEFAULT_BOOT_SNAPSHOT}' is reserved for the emulator's own quick-boot ` +
+        "snapshot and cannot be used as an AutoMobile capture name.",
+    );
+  }
+}
+
 /**
  * Reclaim the emulator-owned payload of a `vm` record before its row goes away.
  *
@@ -1199,10 +1210,10 @@ async function reclaimVmSnapshotPayload(
 const SNAPSHOT_RECORD_SUPERSEDED = Symbol("snapshot-record-superseded");
 
 /**
- * Two records describe the same payload only if every field a capture rewrites
- * still matches. A same-name capture upserts `last_accessed_at` (and normally
- * `size_bytes` / `device_name`), so comparing those catches a replacement that
- * landed after this record was read.
+ * Two records describe the same payload only if its stable capture fields still
+ * match. A restore updates only `last_accessed_at`, so it is not an identity
+ * field. `manifest.timestamp` is included because every capture stamps it
+ * freshly, unlike `createdAt`, which `insertSnapshot` preserves on conflict.
  */
 function isSameSnapshotRecord(a: DeviceSnapshotRecord, b: DeviceSnapshotRecord): boolean {
   return (
@@ -1210,8 +1221,8 @@ function isSameSnapshotRecord(a: DeviceSnapshotRecord, b: DeviceSnapshotRecord):
     a.deviceName === b.deviceName &&
     a.snapshotType === b.snapshotType &&
     a.createdAt === b.createdAt &&
-    a.lastAccessedAt === b.lastAccessedAt &&
-    a.sizeBytes === b.sizeBytes
+    a.sizeBytes === b.sizeBytes &&
+    a.manifest.timestamp === b.manifest.timestamp
   );
 }
 
@@ -1344,25 +1355,38 @@ async function remeasureUnsizedVmSnapshots(
       continue;
     }
 
-    const sizeBytes = await avdSnapshots.measureVmSnapshotBytes(
-      record.deviceName,
-      record.snapshotName,
-    );
-    if (sizeBytes === null) {
-      measured.push(record);
-      continue;
-    }
-
-    try {
-      await snapshotRepository.updateSnapshot(record.snapshotName, { sizeBytes });
-      measured.push({ ...record, sizeBytes });
-    } catch (error) {
-      logger.warn(
-        `[DeviceSnapshot] Failed to record the re-measured size of VM snapshot ` +
-          `'${record.snapshotName}': ${errorMessage(error)}`,
-        error,
+    const remeasured = await withSnapshotNameLock(record.snapshotName, async () => {
+      const sizeBytes = await avdSnapshots.measureVmSnapshotBytes(
+        record.deviceName,
+        record.snapshotName,
       );
-      measured.push(record);
+      const current = await snapshotRepository.getSnapshot(record.snapshotName);
+      if (!current || !isSameSnapshotRecord(current, record)) {
+        logger.warn(
+          `[DeviceSnapshot] Concurrent replacement detected while re-measuring VM snapshot ` +
+            `'${record.snapshotName}'; skipping stale size update.`,
+        );
+        return undefined;
+      }
+
+      if (sizeBytes === null) {
+        return current;
+      }
+
+      try {
+        await snapshotRepository.updateSnapshot(record.snapshotName, { sizeBytes });
+        return { ...current, sizeBytes };
+      } catch (error) {
+        logger.warn(
+          `[DeviceSnapshot] Failed to record the re-measured size of VM snapshot ` +
+            `'${record.snapshotName}': ${errorMessage(error)}`,
+          error,
+        );
+        return current;
+      }
+    });
+    if (remeasured) {
+      measured.push(remeasured);
     }
   }
 
@@ -1981,11 +2005,8 @@ export async function captureDeviceSnapshot(
     await getDeviceSnapshotDependencies();
 
   const baseConfig = await getDeviceSnapshotConfig();
+  const useVmSnapshot = args.useVmSnapshot ?? baseConfig.useVmSnapshot;
 
-  // Cheapest possible hook for finishing reclaims that an offline emulator
-  // blocked: this device is live and we already know its AVD, so the sweep is
-  // one filtered row read plus one console delete per stranded snapshot (#6490).
-  await sweepPendingVmSnapshotReclaims(device);
   const snapshotName = args.snapshotName ?? snapshotStore.generateSnapshotName(device.name);
   // Reject a traversal/absolute name before any filesystem operation or capture
   // command can act on it (issue #5705).
@@ -1993,6 +2014,14 @@ export async function captureDeviceSnapshot(
   // Reject reserved scope-root names (#5707). An existing same-name snapshot is
   // deliberately allowed through — it is overwritten atomically below (#5713).
   assertSnapshotNameWritable(snapshotName);
+  if (isAndroidEmulatorVmCapture(device, useVmSnapshot)) {
+    assertVmSnapshotNameWritable(snapshotName);
+  }
+
+  // Cheapest possible hook for finishing reclaims that an offline emulator
+  // blocked: this device is live and we already know its AVD, so the sweep is
+  // one filtered row read plus one console delete per stranded snapshot (#6490).
+  await sweepPendingVmSnapshotReclaims(device);
   const pathOptions = getSnapshotPathOptions({
     platform: device.platform,
     deviceId: device.deviceId,
@@ -2005,7 +2034,7 @@ export async function captureDeviceSnapshot(
     ...baseConfig,
     includeAppData: args.includeAppData ?? baseConfig.includeAppData,
     includeSettings: args.includeSettings ?? baseConfig.includeSettings,
-    useVmSnapshot: args.useVmSnapshot ?? baseConfig.useVmSnapshot,
+    useVmSnapshot,
     strictBackupMode: args.strictBackupMode ?? baseConfig.strictBackupMode,
     vmSnapshotTimeoutMs: args.vmSnapshotTimeoutMs ?? baseConfig.vmSnapshotTimeoutMs,
   };
@@ -2284,8 +2313,13 @@ async function summarizeOrphanedAvdSnapshots(
       const directories = await avdSnapshots.listAvdSnapshotDirectories(avdName);
       entries.push(
         ...directories
-          // default_boot is the emulator's own quick-boot state, not a stranded
-          // AutoMobile capture — never report it as an orphan.
+          // Only the literal default_boot directory is the emulator's own
+          // quick-boot state. Keep this comparison exact: on case-sensitive
+          // filesystems, DEFAULT_BOOT and Default_boot are distinct directories
+          // that may contain real orphaned data and must be reported. The
+          // capture-rejection check elsewhere remains case-insensitive because
+          // it prevents aliasing names from colliding with default_boot on
+          // case-insensitive hosts; that is a separate capture-time concern.
           .filter(
             (entry) =>
               entry.snapshotName !== AVD_DEFAULT_BOOT_SNAPSHOT &&

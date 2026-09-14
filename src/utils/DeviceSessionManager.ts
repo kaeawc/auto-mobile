@@ -409,6 +409,13 @@ export class DeviceSessionManager implements DeviceSessionManager {
   }
 
   /**
+   * Get the platform-aware device discovery manager shared by this session manager.
+   */
+  public getPlatformDeviceManager(): PlatformDeviceManager {
+    return this.deviceUtils;
+  }
+
+  /**
    * Whether the session path should attempt a Simulator.app GUI launch.
    *
    * True until a launch succeeds, and true again once that launch is older than

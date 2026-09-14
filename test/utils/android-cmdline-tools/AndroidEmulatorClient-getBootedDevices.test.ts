@@ -6,6 +6,7 @@ import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeEmulatorConsoleBusyRegistry } from "../../fakes/FakeEmulatorConsoleBusyRegistry";
 import type { AdbExecuteOptions } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
+import type { DiscoveryObservationSequence } from "../../../src/utils/DiscoveryObservationSequence";
 
 function execResult(stdout: string) {
   return {
@@ -76,7 +77,81 @@ class DeferredAvdNameAdbExecutor extends FakeAdbExecutor {
   }
 }
 
+class SequencedDeferredAvdNameAdbExecutor extends FakeAdbExecutor {
+  private readonly avdNameProbe = Promise.withResolvers<ReturnType<typeof execResult>>();
+  readonly avdNameProbeStarted = Promise.withResolvers<void>();
+
+  constructor(private readonly observationSequence: DiscoveryObservationSequence) {
+    super();
+  }
+
+  override async getBootedAndroidDevices(): Promise<BootedDevice[]> {
+    return [
+      {
+        name: "ignored",
+        platform: "android",
+        deviceId: "emulator-5554",
+        observedAt: this.observationSequence.next(),
+      },
+    ];
+  }
+
+  override async executeCommand(
+    command: string,
+    timeoutMs?: number,
+    maxBuffer?: number,
+    noRetry?: boolean,
+    signal?: AbortSignal,
+  ) {
+    if (command === "emu avd name") {
+      this.avdNameProbeStarted.resolve();
+      return await this.avdNameProbe.promise;
+    }
+    return await super.executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+  }
+
+  resolveAvdName(name: string): void {
+    this.avdNameProbe.resolve(execResult(`${name}\n`));
+  }
+}
+
 describe("AndroidEmulatorClient.getBootedDevicesChecked", () => {
+  test("stamps an emulator observation after its AVD name resolves", async () => {
+    let stamp = 0;
+    const observationSequence: DiscoveryObservationSequence = {
+      next: () => ++stamp,
+    };
+    const adb = new SequencedDeferredAvdNameAdbExecutor(observationSequence);
+    const client = new AndroidEmulatorClient(
+      null,
+      null,
+      new FakeTimer(),
+      new FakeAdbClientFactory(adb),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      observationSequence,
+    );
+
+    const discovery = client.getBootedDevicesChecked();
+    await adb.avdNameProbeStarted.promise;
+    expect(observationSequence.next()).toBe(2);
+    adb.resolveAvdName("Pixel_9_Pro");
+
+    await expect(discovery).resolves.toEqual([
+      {
+        name: "Pixel_9_Pro",
+        platform: "android",
+        deviceId: "emulator-5554",
+        observedAt: 3,
+        source: "local",
+      },
+    ]);
+  });
+
   test("uses the AVD name property when the emulator console returns no name", async () => {
     const adb = new FakeAdbExecutor();
     adb.setDevices([
@@ -103,6 +178,7 @@ describe("AndroidEmulatorClient.getBootedDevicesChecked", () => {
         name: "Codex_KVM_Verify",
         platform: "android",
         deviceId: "emulator-5554",
+        observedAt: expect.any(Number),
         source: "local",
       },
     ]);
@@ -134,6 +210,7 @@ describe("AndroidEmulatorClient.getBootedDevicesChecked", () => {
         name: "Unknown (emulator-5554)",
         platform: "android",
         deviceId: "emulator-5554",
+        observedAt: expect.any(Number),
         source: "local",
       },
     ]);
@@ -170,6 +247,39 @@ describe("AndroidEmulatorClient.getBootedDevicesChecked", () => {
       name: "Unknown (emulator-5554)",
       consoleBusyDuringProbe: true,
     });
+  });
+
+  test("does not dispatch AVD-name probes while a listed emulator console is busy", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setDevices([
+      {
+        name: "ignored",
+        platform: "android",
+        deviceId: "emulator-5554",
+      } satisfies BootedDevice,
+    ]);
+    const consoleBusy = new FakeEmulatorConsoleBusyRegistry();
+    consoleBusy.setBusy("emulator-5554", true);
+    const client = new AndroidEmulatorClient(
+      null,
+      null,
+      new FakeTimer(),
+      new FakeAdbClientFactory(adb),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      consoleBusy,
+    );
+
+    const [discovered] = await client.getBootedDevicesChecked();
+
+    expect(discovered).toMatchObject({
+      name: "Unknown (emulator-5554)",
+      consoleBusyDuringProbe: true,
+    });
+    expect(adb.getExecutedCommands()).toEqual([]);
   });
 
   test("records console busy state when an empty AVD-name probe falls through to an empty property", async () => {

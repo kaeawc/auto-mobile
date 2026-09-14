@@ -27,6 +27,7 @@ import {
   structuredContentOmissionReason,
 } from "../../src/server/stripToolResultStructuredContent";
 import type { ToolOutputArtifactRetention } from "../../src/server/toolOutputArtifactWriter";
+import { DeviceLostError } from "../../src/server/deviceLossOutcome";
 
 describe("ToolRegistry device-aware pipeline", () => {
   const device: BootedDevice = {
@@ -162,6 +163,65 @@ describe("ToolRegistry device-aware pipeline", () => {
 
     expect(response).toEqual({ success: true, finalized: true });
     expect(events).toEqual(["resolve", "audit", "handler", "after", "planLifecycle", "record"]);
+  });
+
+  test("returns a settled handler response when device-loss cancellation arrives after it succeeds", async () => {
+    const controller = new AbortController();
+    const lifecycleCalls: string[] = [];
+    restorePipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({
+      executionTargetResolver: {
+        async resolveExecutionTarget(input: any) {
+          return {
+            args: input.args,
+            baseSessionUuid: "session-1",
+            device,
+            internalCall: false,
+            sessionUuid: "session-1",
+            shouldResolveDevice: true,
+          };
+        },
+      },
+      auditRunner: {
+        async run(input: any) {
+          const response = await input.handler(
+            input.device,
+            input.args,
+            input.progress,
+            input.signal,
+          );
+          controller.abort(
+            new DeviceLostError(
+              device.deviceId,
+              `device-disconnected:${device.deviceId};incident=emulator-loss-test`,
+              "emulator-loss-test",
+            ),
+          );
+          return response;
+        },
+      },
+      afterToolCall: {
+        async handle(input: any) {
+          return { durationMs: 0, finalizedResponse: input.response };
+        },
+      },
+      planLifecycleManager: {
+        async afterExecution() {
+          lifecycleCalls.push("afterExecution");
+        },
+      },
+    });
+
+    ToolRegistry.registerDeviceAware(
+      "settledRestoreProbe",
+      "Settled restore probe",
+      z.object({}),
+      async () => ({ restored: true }),
+    );
+
+    await expect(
+      ToolRegistry.getTool("settledRestoreProbe")!.handler({}, undefined, controller.signal),
+    ).resolves.toEqual({ restored: true });
+    expect(lifecycleCalls).toEqual(["afterExecution"]);
   });
 
   test("logs and continues when best-effort CtrlProxy session bind fails", async () => {

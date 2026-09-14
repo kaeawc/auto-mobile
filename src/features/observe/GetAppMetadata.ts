@@ -77,38 +77,7 @@ export class GetAppMetadata {
       logger.debug(`[GetAppMetadata] a11y package info threw: ${error}`);
     }
 
-    let result: ExecResult;
-    try {
-      result = await this.adb.executeCommand(`shell dumpsys package ${packageName}`);
-    } catch (error) {
-      logger.warn(`[GetAppMetadata] Failed to run dumpsys package for ${packageName}: ${error}`);
-      return null;
-    }
-
-    const output = result.stdout;
-    if (!output || output.includes("Unable to find package")) {
-      return null;
-    }
-
-    const versionName = extractField(output, /versionName=(\S+)/);
-    const versionCode = extractField(output, /versionCode=(\d+)/);
-    const codePath = extractField(output, /codePath=(\S+)/);
-    const firstInstallTime = extractTimestamp(output, /firstInstallTime=(.+)/);
-    const lastUpdateTime = extractTimestamp(output, /lastUpdateTime=(.+)/);
-
-    if (!versionName && !versionCode && !codePath) {
-      return null;
-    }
-
-    return {
-      appId: packageName,
-      platform: "android",
-      versionName: versionName ?? "",
-      buildNumber: versionCode ?? "",
-      installPath: codePath ?? "",
-      ...(firstInstallTime ? { firstInstallTime } : {}),
-      ...(lastUpdateTime ? { lastUpdateTime } : {}),
-    };
+    return getAndroidAppMetadataFromAdb(this.adb, packageName);
   }
 
   private async getIosMetadata(bundleId: string): Promise<AppMetadataResult | null> {
@@ -154,6 +123,56 @@ export class GetAppMetadata {
     }
     return iosRecordToMetadata(bundleId, app);
   }
+}
+
+/**
+ * Reads Android package metadata through ADB only. Unlike {@link GetAppMetadata.execute},
+ * this deliberately does not construct an AndroidCtrlProxyClient.
+ */
+export async function getAndroidAppMetadataViaAdb(
+  device: BootedDevice,
+  packageName: string,
+  adbFactory: AdbClientFactory = defaultAdbClientFactory,
+): Promise<AppMetadataResult | null> {
+  return getAndroidAppMetadataFromAdb(adbFactory.create(device), packageName);
+}
+
+async function getAndroidAppMetadataFromAdb(
+  adb: AdbExecutor,
+  packageName: string,
+): Promise<AppMetadataResult | null> {
+  let result: ExecResult;
+  try {
+    result = await adb.executeCommand(`shell dumpsys package ${packageName}`);
+  } catch (error) {
+    logger.warn(`[GetAppMetadata] Failed to run dumpsys package for ${packageName}: ${error}`);
+    return null;
+  }
+
+  const output = result.stdout;
+  if (!output || output.includes("Unable to find package")) {
+    return null;
+  }
+
+  const versionName = extractField(output, /versionName=(\S+)/);
+  const versionCode = extractField(output, /versionCode=(\d+)/);
+  const codePath = extractField(output, /codePath=(\S+)/);
+  const firstInstallTime = extractTimestamp(output, /firstInstallTime=(.+)/);
+  const lastUpdateTime = extractTimestamp(output, /lastUpdateTime=(.+)/);
+
+  if (!versionName && !versionCode && !codePath) {
+    return null;
+  }
+
+  return {
+    appId: packageName,
+    platform: "android",
+    versionName: versionName ?? "",
+    buildNumber: versionCode ?? "",
+    installPath: codePath ?? "",
+    ...(firstInstallTime ? { firstInstallTime } : {}),
+    ...(lastUpdateTime ? { lastUpdateTime } : {}),
+  };
 }
 
 // --- Parsing helpers ---

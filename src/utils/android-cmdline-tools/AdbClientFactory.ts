@@ -3,6 +3,7 @@ import type { AdbExecutor } from "./interfaces/AdbExecutor";
 import { AdbClient } from "./AdbClient";
 import type { RetryExecutor } from "../retry/RetryExecutor";
 import { daemonDeviceAdmissionGate } from "../../daemon/deviceAdmissionGate";
+import { defaultEmulatorConsoleBusyRegistry } from "./EmulatorConsoleBusyRegistry";
 
 /**
  * Factory interface for creating AdbClient instances.
@@ -24,9 +25,27 @@ export interface AdbClientFactory {
 class DefaultAdbClientFactory implements AdbClientFactory {
   create(device?: BootedDevice | null, retryExecutor?: RetryExecutor): AdbExecutor {
     if (retryExecutor) {
-      return new AdbClient(device ?? null, null, null, retryExecutor);
+      return new AdbClient(
+        device ?? null,
+        null,
+        null,
+        retryExecutor,
+        undefined,
+        undefined,
+        undefined,
+        defaultEmulatorConsoleBusyRegistry,
+      );
     }
-    return new AdbClient(device ?? null);
+    return new AdbClient(
+      device ?? null,
+      null,
+      null,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      defaultEmulatorConsoleBusyRegistry,
+    );
   }
 }
 

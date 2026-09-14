@@ -842,7 +842,11 @@ type WebSocketMessage =
  * Interface for accessibility service providing Android UI hierarchy and interaction capabilities
  */
 export interface AndroidCtrlProxy extends CtrlProxyClient {
-  setRecompositionTrackingEnabled(enabled: boolean, perf?: PerformanceTracker): Promise<void>;
+  setRecompositionTrackingEnabled(
+    enabled: boolean,
+    perf?: PerformanceTracker,
+    signal?: AbortSignal,
+  ): Promise<void>;
 
   getLatestHierarchy(
     waitForFresh?: boolean,
@@ -2052,8 +2056,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   async setRecompositionTrackingEnabled(
     enabled: boolean,
     perf?: PerformanceTracker,
+    signal?: AbortSignal,
   ): Promise<void> {
-    return this.hierarchy.setRecompositionTrackingEnabled(enabled, perf);
+    return this.hierarchy.setRecompositionTrackingEnabled(enabled, perf, signal);
   }
 
   async getLatestHierarchy(

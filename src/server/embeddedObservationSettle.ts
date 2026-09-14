@@ -90,6 +90,10 @@ export async function settleEmbeddedObservation(
       // `performanceAudit`, measured across the action window, is preserved by
       // {@link ACTION_AUTHORED_OBSERVATION_METADATA}.
       skipPerformanceAudit: true,
+      // Like performance auditing, processing recomposition on each hidden
+      // poll would corrupt sinceLastObservation and duplicate telemetry; the
+      // adopted terminal capture is processed once inside the poll loop (#6932).
+      skipRecompositionTracking: true,
     });
     return {
       observation: isAdoptableCapture(input.observation, result.observation)

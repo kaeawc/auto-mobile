@@ -13,6 +13,7 @@ import os from "os";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../src/utils/workingDirectory";
 import { parsePlist } from "../../src/utils/ios-cmdline-tools/XctestrunPlist";
 import { logger } from "../../src/utils/logger";
+import { resolveAssetVersion, resolvePinnedVersion } from "../../src/constants/release";
 
 describe("IOSCtrlProxyBuilder", function () {
   let originalProjectRoot: string | undefined;
@@ -149,6 +150,33 @@ describe("IOSCtrlProxyBuilder", function () {
       const instance2 = IOSCtrlProxyBuilder.getInstance({ projectRoot: "/different/path" });
 
       expect(instance1).not.toBe(instance2);
+    });
+  });
+
+  describe("getInstalledBundleVersion", function () {
+    test("returns the persisted extracted bundle version", async function () {
+      const cacheDir = path.join(tempDir, "bundle-cache");
+      await fs.mkdir(cacheDir);
+      await fs.writeFile(
+        path.join(cacheDir, "ctrl-proxy-ios-bundle.json"),
+        JSON.stringify({
+          checksum: null,
+          version: "2026.9.13",
+          extractedAt: "2026-09-13T00:00:00Z",
+        }),
+      );
+
+      const builder = IOSCtrlProxyBuilder.getInstance({ bundleCacheDir: cacheDir });
+
+      expect(await builder.getInstalledBundleVersion()).toBe("2026.9.13");
+    });
+
+    test("returns null when no extracted bundle metadata exists", async function () {
+      const builder = IOSCtrlProxyBuilder.getInstance({
+        bundleCacheDir: path.join(tempDir, "missing-bundle-cache"),
+      });
+
+      expect(await builder.getInstalledBundleVersion()).toBeNull();
     });
   });
 
@@ -777,6 +805,26 @@ describe("IOSCtrlProxyBuilder", function () {
   });
 
   describe("build", function () {
+    test("records local override provenance instead of the pinned release version", async function () {
+      const derivedDataPath = path.join(tempDir, "DerivedData");
+      const cacheDir = path.join(tempDir, "cache");
+      const overridePath = path.join(tempDir, "local-runner.ipa");
+      const downloader = new FakeIOSCtrlProxyBundleDownloader();
+      downloader.checksum = "local-override-checksum";
+      await fs.writeFile(overridePath, "a".repeat(12000));
+      process.env.AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH = overridePath;
+      IOSCtrlProxyBuilder.setExpectedChecksumForTesting("local-override-checksum");
+      const builder = IOSCtrlProxyBuilder.getInstance(
+        { derivedDataPath, bundleCacheDir: cacheDir },
+        { downloader },
+      );
+
+      expect((await builder.build("simulator")).success).toBe(true);
+      expect(await builder.getInstalledBundleVersion()).not.toBe(
+        resolveAssetVersion(resolvePinnedVersion()),
+      );
+    });
+
     test("should download and extract bundle using downloader", async function () {
       const derivedDataPath = path.join(tempDir, "DerivedData");
       const cacheDir = path.join(tempDir, "cache");

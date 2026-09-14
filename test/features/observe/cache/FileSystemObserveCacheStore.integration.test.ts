@@ -54,6 +54,27 @@ describe("FileSystemObserveCacheStore", function () {
     expect(store.getRecentInMemoryForDevice("device-1")).toBe(result);
   });
 
+  test("uses an explicit cached timestamp for in-memory ordering and the clock when omitted", async function () {
+    const deviceId = "device-1";
+    const explicitlyNewer = makeResult("explicitly-newer");
+    const wallClockNewer = makeResult("wall-clock-newer");
+
+    await store.put(deviceId, explicitlyNewer, undefined, 1_000_010);
+    timer.advanceTime(1);
+    await store.put(deviceId, wallClockNewer);
+
+    expect(store.getRecentInMemoryForDevice(deviceId)).toBe(explicitlyNewer);
+
+    const wallClockFirst = makeResult("wall-clock-first");
+    const wallClockSecond = makeResult("wall-clock-second");
+    timer.setCurrentTime(2_000_000);
+    await store.put("device-2", wallClockFirst);
+    timer.advanceTime(1);
+    await store.put("device-2", wallClockSecond);
+
+    expect(store.getRecentInMemoryForDevice("device-2")).toBe(wallClockSecond);
+  });
+
   test("put then getRecentInMemoryEntry (cross-device) returns the latest result and its device", async function () {
     const older = makeResult("older");
     const newer = makeResult("newer");

@@ -935,6 +935,11 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
   // MARK: - Status Checks
 
+  /** Returns the persisted release identity of the currently extracted runner bundle. */
+  public async getInstalledVersionIdentity(): Promise<string | null> {
+    return this.builder.getInstalledBundleVersion();
+  }
+
   /**
    * Check if CtrlProxy is installed on the device
    * For simulators, this checks if the test bundle can be found

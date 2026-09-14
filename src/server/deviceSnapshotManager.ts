@@ -2294,11 +2294,16 @@ async function summarizeOrphanedAvdSnapshots(
       const directories = await avdSnapshots.listAvdSnapshotDirectories(avdName);
       entries.push(
         ...directories
-          // default_boot is the emulator's own quick-boot state, not a stranded
-          // AutoMobile capture — never report it as an orphan.
+          // Only the literal default_boot directory is the emulator's own
+          // quick-boot state. Keep this comparison exact: on case-sensitive
+          // filesystems, DEFAULT_BOOT and Default_boot are distinct directories
+          // that may contain real orphaned data and must be reported. The
+          // capture-rejection check elsewhere remains case-insensitive because
+          // it prevents aliasing names from colliding with default_boot on
+          // case-insensitive hosts; that is a separate capture-time concern.
           .filter(
             (entry) =>
-              entry.snapshotName.toLowerCase() !== AVD_DEFAULT_BOOT_SNAPSHOT.toLowerCase() &&
+              entry.snapshotName !== AVD_DEFAULT_BOOT_SNAPSHOT &&
               !accounted.has(avdSnapshotKey(avdName, entry.snapshotName)),
           )
           .map((entry) => ({ avdName, ...entry })),

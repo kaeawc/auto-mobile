@@ -2072,12 +2072,16 @@ describe("deviceSnapshotManager VM snapshot sizing and reclaim (#6490)", () => {
 
     const listed = await listDeviceSnapshots();
 
-    expect(listed.orphanedAvdSnapshots.count).toBe(2);
-    expect(listed.orphanedAvdSnapshots.totalSizeBytes).toBe(5 * 1024 * MB);
+    expect(listed.orphanedAvdSnapshots.count).toBe(3);
+    expect(listed.orphanedAvdSnapshots.totalSizeBytes).toBe(6 * 1024 * MB);
     expect(listed.orphanedAvdSnapshots.entries.map((entry) => entry.snapshotName).sort()).toEqual([
+      "DEFAULT_BOOT",
       "emulator-5554_2026-08-11_23-05-15-803Z",
       "sweepSnap",
     ]);
+    expect(listed.orphanedAvdSnapshots.entries.map((entry) => entry.snapshotName)).not.toContain(
+      "default_boot",
+    );
     // Report only: an orphan may predate AutoMobile or be user-made.
     expect(avdSnapshots.getDeleteCalls()).toEqual([]);
     expect(avdSnapshots.hasVmSnapshot(AVD_NAME, "sweepSnap")).toBe(true);

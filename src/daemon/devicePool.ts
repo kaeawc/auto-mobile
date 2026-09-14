@@ -2896,10 +2896,6 @@ export class DevicePool {
         bypassRecoveryPolicy: true,
         allowExistingRecoveryReservation: true,
       });
-      if (recovered) {
-        this.adbServerResetQuarantinedSessions.delete(session.sessionId);
-        this.recoveringSessionLosses.delete(session.sessionId);
-      }
       if (!recovered) {
         await this.releasePreservedAdbResetSessionIfDetached(device, session, incidentId);
         await this.refreshEmulatorLossRecoverySettlement(incidentId, "exhausted");
@@ -2938,6 +2934,12 @@ export class DevicePool {
       return "released";
     } finally {
       if (!deferred) {
+        const recovery = this.recoveringSessionLosses.get(session.sessionId);
+        this.adbServerResetQuarantinedSessions.delete(session.sessionId);
+        this.recoveringSessionLosses.delete(session.sessionId);
+        if (recovery?.avdName) {
+          this.clearRecoveringAndroidImage(recovery.avdName);
+        }
         this.settleEmulatorLossIncident(incidentId);
       }
     }
@@ -3238,6 +3240,9 @@ export class DevicePool {
           .filter((deviceId): deviceId is string => Boolean(deviceId)),
         ...Array.from(this.adbServerResetRecoveryReservations.values())
           .map((reservation) => reservation.deviceId)
+          .filter(Boolean),
+        ...Array.from(this.recoveringSessionLosses.values())
+          .map((recovery) => recovery.deviceId)
           .filter(Boolean),
         ...Array.from(this.recoveringAndroidDeviceIds).filter(Boolean),
       ]),

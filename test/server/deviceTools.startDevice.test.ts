@@ -383,6 +383,40 @@ describe("startDevice handler", () => {
     );
   });
 
+  it("rejects an Android device that enters recovery while boot is resolving", async () => {
+    const timer = new FakeTimer();
+    daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      daemonSessionManager,
+      "daemon-session",
+      timer,
+      undefined,
+      fakeDeviceUtils,
+    );
+    DaemonState.getInstance().initialize(daemonSessionManager, pool);
+    fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
+    fakeMatcher.setBootedResult(androidDevice);
+    const waitForDeviceReady = fakeDeviceUtils.waitForDeviceReady.bind(fakeDeviceUtils);
+    const readinessStarted = Promise.withResolvers<void>();
+    const releaseReadiness = Promise.withResolvers<void>();
+    fakeDeviceUtils.waitForDeviceReady = async (...args) => {
+      readinessStarted.resolve();
+      await releaseReadiness.promise;
+      return await waitForDeviceReady(...args);
+    };
+
+    const start = callStartDevice({ platform: "android" });
+    await readinessStarted.promise;
+    (pool as unknown as { recoveringAndroidDeviceIds: Set<string> }).recoveringAndroidDeviceIds.add(
+      androidDevice.deviceId,
+    );
+    releaseReadiness.resolve();
+
+    await expect(start).rejects.toThrow(
+      "Android device 'Pixel_7_API_34' entered recovery while booting; retry the request.",
+    );
+  });
+
   it("cold-boots when discovery supplies a transport ID after boot readiness", async () => {
     const timer = new FakeTimer();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());

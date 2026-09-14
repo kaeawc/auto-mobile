@@ -335,6 +335,9 @@ test("ADB-reset recovery releases after its retry also has unconfirmed shutdown"
     expect(
       (pool as unknown as DevicePoolRecoveryInternals).recoveringSessionLosses.has("session"),
     ).toBe(false);
+    expect(
+      (pool as unknown as DevicePoolRecoveryInternals).recoveringAndroidImages.has(original.name),
+    ).toBe(false);
     expect((await pool.waitForEmulatorLossIncident(incidentId, 0))?.recovery.outcome).toMatch(
       /^(recovered|exhausted)$/,
     );
@@ -360,6 +363,7 @@ test("ordinary session recovery retries after its deferred shutdown cooldown", a
     expect(sessions.getSession("session")?.assignedDevice).toBe(original.deviceId);
     expect(pool.getDevice(original.deviceId)).toBe(captured);
     expect(pool.isSessionRecoveryInFlight("session")).toBe(true);
+    expect(pool.getRecoveringAndroidTargets().serials.has(original.deviceId)).toBe(true);
 
     manager.bootedDevices = [];
     expect(

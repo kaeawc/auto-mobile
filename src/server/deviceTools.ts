@@ -5214,6 +5214,23 @@ function getStartDevicePool(daemonState: DaemonState): DevicePool | undefined {
   return daemonState.isInitialized() ? daemonState.getDevicePool() : undefined;
 }
 
+function assertAndroidBootDidNotEnterRecovery(args: StartDeviceArgs, boot: DeviceBootResult): void {
+  if (args.platform !== "android") {
+    return;
+  }
+  const recoveryTargets = getStartDevicePool(
+    DaemonState.getInstance(),
+  )?.getRecoveringAndroidTargets();
+  if (
+    recoveryTargets?.serials.has(boot.device.deviceId) ||
+    recoveryTargets?.names.has(boot.device.name)
+  ) {
+    throw new ActionableError(
+      `Android device '${boot.device.name}' entered recovery while booting; retry the request.`,
+    );
+  }
+}
+
 /**
  * A `deviceId`-targeted acquisition owns exactly one AVD, so it must not take the
  * wildcard startup lease: `androidStartupRequestMatchesAvd` short-circuits on a
@@ -7349,6 +7366,7 @@ export function registerDeviceTools() {
       },
       progress ? { report: progress } : undefined,
     );
+    assertAndroidBootDidNotEnterRecovery(args, state.boot);
     perf.endOperation("bootDevice");
     validateBootIdentity(args, state.boot.device, state.boot.source, state.boot.sourceImage);
     validateRequestedAndroidSerial(

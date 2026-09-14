@@ -176,6 +176,27 @@ describe("deviceSnapshotManager VM snapshot sizing and reclaim (#6490)", () => {
     expect(avdSnapshots.hasVmSnapshot(AVD_NAME, "default_boot")).toBe(false);
   });
 
+  test.each(["DEFAULT_BOOT", "Default_boot"])(
+    "rejects case variants of the emulator-owned default_boot snapshot name before any capture side effect (%s)",
+    async (snapshotName) => {
+      const capture = captureDeviceSnapshot(EMULATOR, {
+        snapshotName,
+        useVmSnapshot: true,
+      });
+
+      await expect(capture).rejects.toBeInstanceOf(ActionableError);
+      await expect(capture).rejects.toMatchObject({
+        message: expect.stringContaining("default_boot"),
+      } satisfies Partial<ActionableError>);
+
+      expect(await repository.getSnapshot(snapshotName)).toBeNull();
+      expect(await repository.getSnapshot(snapshotName.toLowerCase())).toBeNull();
+      expect(avdSnapshots.hasVmSnapshot(AVD_NAME, snapshotName)).toBe(false);
+      expect(avdSnapshots.hasVmSnapshot(AVD_NAME, snapshotName.toLowerCase())).toBe(false);
+      expect(avdSnapshots.getDeleteCalls()).toEqual([]);
+    },
+  );
+
   test("rejects default_boot before sweeping an unrelated pending VM reclaim", async () => {
     const timestamp = new Date(1_000).toISOString();
     avdSnapshots.setVmSnapshot(AVD_NAME, "vm-pending", 2 * 1024 * MB);
@@ -1989,6 +2010,7 @@ describe("deviceSnapshotManager VM snapshot sizing and reclaim (#6490)", () => {
 
   test("in-AVD snapshot directories with no row are reported as orphans, never deleted", async () => {
     avdSnapshots.setVmSnapshot(AVD_NAME, "default_boot", 1024 * MB);
+    avdSnapshots.setVmSnapshot(AVD_NAME, "DEFAULT_BOOT", 1024 * MB);
     avdSnapshots.setVmSnapshot(AVD_NAME, "emulator-5554_2026-08-11_23-05-15-803Z", 3 * 1024 * MB);
     avdSnapshots.setVmSnapshot(AVD_NAME, "sweepSnap", 2 * 1024 * MB);
 

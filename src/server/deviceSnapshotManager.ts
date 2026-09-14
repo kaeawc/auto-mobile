@@ -1102,7 +1102,7 @@ function assertSnapshotNameWritable(snapshotName: string): void {
   // name lock, and the record is replaced (not duplicated) by the repository
   // upsert — so the old check-then-create existence probe (a TOCTOU window) is
   // gone.
-  if (snapshotName === AVD_DEFAULT_BOOT_SNAPSHOT) {
+  if (snapshotName.trim().toLowerCase() === AVD_DEFAULT_BOOT_SNAPSHOT.toLowerCase()) {
     throw new ActionableError(
       `Snapshot name '${AVD_DEFAULT_BOOT_SNAPSHOT}' is reserved for the emulator's own quick-boot ` +
         "snapshot and cannot be used as an AutoMobile capture name.",
@@ -2290,7 +2290,7 @@ async function summarizeOrphanedAvdSnapshots(
           // AutoMobile capture — never report it as an orphan.
           .filter(
             (entry) =>
-              entry.snapshotName !== AVD_DEFAULT_BOOT_SNAPSHOT &&
+              entry.snapshotName.toLowerCase() !== AVD_DEFAULT_BOOT_SNAPSHOT.toLowerCase() &&
               !accounted.has(avdSnapshotKey(avdName, entry.snapshotName)),
           )
           .map((entry) => ({ avdName, ...entry })),

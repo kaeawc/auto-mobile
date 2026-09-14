@@ -7821,6 +7821,10 @@ export function registerDeviceTools() {
                     readinessResult.preservedSessionId ? undefined : state.boot!.processHandle,
                     new Set(releaseReadinessReservations.map((reservation) => reservation.owner)),
                     verifiedWarmAndroidAvdIdentity,
+                    "automationReady",
+                    (settlement) => {
+                      state.bindingSettlements.push(settlement);
+                    },
                   ),
                 (settlement) => {
                   state.bindingSettlements.push(settlement);
@@ -8164,6 +8168,7 @@ export function registerDeviceTools() {
     readinessReservationOwners?: ReadonlySet<symbol>,
     verifiedAndroidAvdIdentity?: DeviceInfo,
     achievedReadiness: DeviceReadinessLevel = "automationReady",
+    collectCancellationSettlement?: (settlement: Promise<void>) => void,
   ): Promise<string> {
     // Reserve the exact ready device before resource notifications publish it
     // to concurrent allocators.
@@ -8181,6 +8186,7 @@ export function registerDeviceTools() {
           readinessReservationOwners,
           verifiedAndroidAvdIdentity,
           achievedReadiness,
+          collectCancellationSettlement,
         );
       if (autolockSessionId) {
         // #6227 (round 9): readiness is recorded INSIDE `autolockDevice`, before

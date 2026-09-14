@@ -41,10 +41,12 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
   let socketPath: string;
   let server: UnixSocketServer;
   let fakeTimer: FakeTimer;
+  let restartRequests: number;
 
   beforeEach(async () => {
     socketPath = join(tmpdir(), `t-ids-${randomUUID().slice(0, 8)}.sock`);
     fakeTimer = new FakeTimer();
+    restartRequests = 0;
 
     server = new UnixSocketServer(
       socketPath,
@@ -52,6 +54,11 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
       createFakeDaemonState(),
       fakeTimer,
       null,
+      {
+        onRestartAccepted: () => {
+          restartRequests++;
+        },
+      },
     );
     await server.start();
   });
@@ -119,6 +126,7 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
     try {
       const accepted = await sendRequest(socketPath, DAEMON_PREPARE_RESTART_METHOD, idle.result);
       expect(accepted.result).toEqual({ accepted: true });
+      expect(restartRequests).toBe(1);
     } finally {
       executionTracker.clearDaemonRestartPreparation();
     }

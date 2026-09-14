@@ -32,7 +32,10 @@ import { getCurrentBuildIdentity } from "./buildIdentity";
 import { cleanupDaemonFiles, cleanupDaemonFilesSync, readPidFileDataSync } from "./daemonFiles";
 import { IncumbentOwnerGuard } from "./incumbentOwnerGuard";
 import { executionTracker } from "../server/executionTracker";
-import { DaemonHandoffInterruptionError } from "./daemonHandoffInterruption";
+import {
+  DAEMON_HANDOFF_INTERRUPTED_MESSAGE,
+  DaemonHandoffInterruptionError,
+} from "./daemonHandoffInterruption";
 import { SessionReleaseBroadcaster } from "../server/sessionReleaseBroadcast";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import {
@@ -293,6 +296,7 @@ export class Daemon {
   private installedAppsRepository: InstalledAppsStore;
   private deviceSessionRepository: DeviceSessionRepository;
   private timer: Timer;
+  private readonly generationStartedAt: number;
   private idGenerator: IdGenerator;
   private databaseInitializer: DatabaseInitializer;
   private toolSelectionProfileProvenanceLoader: ToolSelectionProfileProvenanceLoader;
@@ -343,6 +347,7 @@ export class Daemon {
     this.idGenerator = idGenerator;
     this.daemonSessionId = this.idGenerator.next();
     this.timer = timer;
+    this.generationStartedAt = this.timer.now();
     this.databaseInitializer = databaseInitializer;
     this.toolSelectionProfileProvenanceLoader = toolSelectionProfileProvenanceLoader;
     this.databaseHealthProbe = databaseHealthProbe;
@@ -605,7 +610,12 @@ export class Daemon {
         undefined,
         undefined,
         FeatureFlagService.getInstance(),
-        undefined,
+        {
+          identityStartedAt: this.generationStartedAt,
+          onRestartAccepted: () => {
+            setImmediate(() => process.kill(process.pid, "SIGTERM"));
+          },
+        },
         this.idGenerator,
         // A hand-launched daemon (no startup lock) must refuse to unlink a live
         // sibling's socket; only a manager-launched, lock-protected daemon may
@@ -968,9 +978,7 @@ export class Daemon {
               const cancelled = await executionTracker.cancelSessionExecutions(
                 streamableTransport.sessionId,
                 this.shutdownInProgress
-                  ? new DaemonHandoffInterruptionError(
-                      "Daemon handoff interrupted the in-flight request. Retry after the replacement daemon becomes ready.",
-                    )
+                  ? new DaemonHandoffInterruptionError(DAEMON_HANDOFF_INTERRUPTED_MESSAGE)
                   : "streamable_http_onclose",
               );
               this.transports.delete(streamableTransport.sessionId);
@@ -989,9 +997,7 @@ export class Daemon {
               await executionTracker.cancelSessionExecutions(
                 streamableTransport.sessionId,
                 this.shutdownInProgress
-                  ? new DaemonHandoffInterruptionError(
-                      "Daemon handoff interrupted the in-flight request. Retry after the replacement daemon becomes ready.",
-                    )
+                  ? new DaemonHandoffInterruptionError(DAEMON_HANDOFF_INTERRUPTED_MESSAGE)
                   : `streamable_http_onerror: ${detail}`,
               );
               this.transports.delete(streamableTransport.sessionId);
@@ -1156,7 +1162,7 @@ export class Daemon {
       socketPath: SOCKET_PATH,
       port: this.port,
       dbPath: getDatabasePath(),
-      startedAt: this.timer.now(),
+      startedAt: this.generationStartedAt,
       version: DAEMON_VERSION,
       launchLogPath: this.launchLogPath(),
       assetVersion: resolveAssetVersion(resolvePinnedVersion()),
@@ -1182,7 +1188,7 @@ export class Daemon {
       sockets: getDaemonSocketPathsByName(),
       port: this.port,
       dbPath: getDatabasePath(),
-      startedAt: this.timer.now(),
+      startedAt: this.generationStartedAt,
       version: DAEMON_VERSION,
       launchLogPath: this.launchLogPath(),
       assetVersion: resolveAssetVersion(resolvePinnedVersion()),
@@ -2355,7 +2361,12 @@ export class Daemon {
           undefined,
           undefined,
           FeatureFlagService.getInstance(),
-          undefined,
+          {
+            identityStartedAt: this.generationStartedAt,
+            onRestartAccepted: () => {
+              setImmediate(() => process.kill(process.pid, "SIGTERM"));
+            },
+          },
           this.idGenerator,
           // Recovery reuses the same ownership evidence as initial startup. A
           // replacement socket is never reclaimed merely because this daemon
@@ -2568,7 +2579,9 @@ export class Daemon {
    * Stop the daemon gracefully
    */
   async stop(): Promise<void> {
+    this.shutdownInProgress = true;
     logger.info("Stopping daemon...");
+    await this.interruptProvisioningForShutdown();
     this.shutdownReleaseNotifications = new Set();
     this.shutdownFallbackReleaseNotifications = new Set();
     this.shutdownSessionIds = [];
@@ -2788,6 +2801,23 @@ export class Daemon {
       ],
       (message, error) => logger.warn(message, error),
     );
+  }
+
+  private async interruptProvisioningForShutdown(): Promise<void> {
+    const reason = new DaemonHandoffInterruptionError(DAEMON_HANDOFF_INTERRUPTED_MESSAGE);
+    const cancelled = await executionTracker.cancelToolExecutions("provisionDevice", reason);
+    if (cancelled === 0) {
+      return;
+    }
+    const drained = await executionTracker.waitForToolExecutionsToEnd(
+      "provisionDevice",
+      DEVICE_LOSS_EXECUTION_DRAIN_TIMEOUT_MS,
+    );
+    if (!drained) {
+      logger.warn(
+        `Timed out after ${DEVICE_LOSS_EXECUTION_DRAIN_TIMEOUT_MS}ms persisting ${cancelled} interrupted provisionDevice operation(s) before daemon shutdown`,
+      );
+    }
   }
 
   private async releaseActiveSessionsForShutdown(): Promise<void> {

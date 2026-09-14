@@ -67,7 +67,7 @@ describe("ExecutionTracker", function () {
     const timer = new FakeTimer();
     const tracker = new ExecutionTracker(
       timer,
-      new FakeIdGenerator(["active-provision", "after-lease"]),
+      new FakeIdGenerator(["active-provision", "after-clear"]),
     );
     const active = tracker.startExecution("provisionDevice", "active-session");
 
@@ -79,7 +79,29 @@ describe("ExecutionTracker", function () {
     );
 
     timer.advanceTime(5_000);
-    expect(tracker.startExecution("provisionDevice", "after-lease").id).toBe("after-lease");
+    expect(() => tracker.startExecution("provisionDevice", "still-blocked")).toThrow(
+      "Daemon restart is pending",
+    );
+    tracker.clearDaemonRestartPreparation();
+    expect(tracker.startExecution("provisionDevice", "after-clear").id).toBe("after-clear");
+  });
+
+  test("cancels and drains active provisioning before daemon shutdown continues", async function () {
+    const tracker = new ExecutionTracker(
+      new FakeTimer(),
+      new FakeIdGenerator(["provision", "other"]),
+    );
+    const provision = tracker.startExecution("provisionDevice", "provision-session");
+    const other = tracker.startExecution("tapOn", "other-session");
+    const reason = new DaemonHandoffInterruptionError("daemon handoff");
+
+    expect(await tracker.cancelToolExecutions("provisionDevice", reason)).toBe(1);
+    expect(provision.abortController.signal.reason).toBe(reason);
+    expect(other.abortController.signal.aborted).toBe(false);
+
+    const drained = tracker.waitForToolExecutionsToEnd("provisionDevice", 1_000);
+    tracker.endExecution(provision.id);
+    expect(await drained).toBe(true);
   });
 
   // #4183 item 5 (A2): src-behavior assertion refiled from the old "cancel leaves session

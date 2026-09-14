@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
+import { DaemonHandoffInterruptionError } from "../../src/daemon/daemonHandoffInterruption";
 import { DaemonState } from "../../src/daemon/daemonState";
+import { executionTracker } from "../../src/server/executionTracker";
 
 interface ClosableTransport {
   close(): Promise<void>;
@@ -10,6 +12,7 @@ interface DaemonHttpSessionInternals {
   acceptingHttpSessions: boolean;
   transports: Map<string, ClosableTransport>;
   registerHttpTransport(sessionId: string, transport: ClosableTransport): boolean;
+  interruptProvisioningForShutdown(): Promise<void>;
 }
 
 class FakeTransport implements ClosableTransport {
@@ -49,5 +52,23 @@ describe("Daemon HTTP session shutdown", () => {
     expect(internals.registerHttpTransport("active-session", transport)).toBeTrue();
     expect(internals.transports.get("active-session")).toBe(transport);
     expect(transport.closeCalls).toBe(0);
+  });
+
+  test("interrupts and drains provisioning before the sequential shutdown stages", async () => {
+    const daemon = new Daemon({});
+    const internals = daemon as unknown as DaemonHttpSessionInternals;
+    const execution = executionTracker.startExecution("provisionDevice", "provision-session");
+    execution.abortController.signal.addEventListener(
+      "abort",
+      () => executionTracker.endExecution(execution.id),
+      { once: true },
+    );
+
+    await internals.interruptProvisioningForShutdown();
+
+    expect(execution.abortController.signal.reason).toBeInstanceOf(DaemonHandoffInterruptionError);
+    expect(
+      executionTracker.hasActiveToolExecution("provisionDevice", { scope: "global" }),
+    ).toBeFalse();
   });
 });

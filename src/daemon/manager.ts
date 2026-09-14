@@ -1789,14 +1789,17 @@ export class DaemonManager implements DaemonManagerLike {
   private async stopRunningDaemon(
     status: DaemonStatus,
     timeout: number = DAEMON_SHUTDOWN_TIMEOUT_MS,
+    signalFirst: boolean = true,
   ): Promise<void> {
     stderrLog(`Stopping daemon (PID ${status.pid})...`);
 
     const pid = status.pid!;
 
     try {
-      // Send SIGTERM for graceful shutdown
-      this.processSignaler.signal(pid, "SIGTERM");
+      if (signalFirst) {
+        // Send SIGTERM for graceful shutdown.
+        this.processSignaler.signal(pid, "SIGTERM");
+      }
 
       // Wait for process to exit
       const stopped = await this.waitForStop(pid, timeout);
@@ -2032,7 +2035,10 @@ export class DaemonManager implements DaemonManagerLike {
         return;
       }
       if (status.running) {
-        await this.stopRunningDaemon(status);
+        // Atomic admission asks the daemon to initiate its own shutdown before
+        // acknowledging. Waiting without a second SIGTERM prevents a delayed
+        // manager from acting on stale admission state.
+        await this.stopRunningDaemon(status, DAEMON_SHUTDOWN_TIMEOUT_MS, false);
       }
       // Another automatic client may win the shared startup lock during this
       // handoff. Ordinary start() joins that winner instead of terminating it.
@@ -2097,6 +2103,9 @@ export class DaemonManager implements DaemonManagerLike {
       }
       if (preparation.accepted === false && preparation.reason === "active_provisioning") {
         throw new DaemonRestartDeferredError("provisionDevice is active");
+      }
+      if (preparation.accepted === false && preparation.reason === "shutdown_unavailable") {
+        throw new DaemonRestartDeferredError("the daemon could not initiate its own shutdown");
       }
       throw new DaemonRestartDeferredError(
         "the daemon returned an unrecognized safe-restart admission result",

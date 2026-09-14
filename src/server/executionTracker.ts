@@ -7,10 +7,7 @@ import {
   isDeviceLostError,
   rememberDeviceLossAbort,
 } from "./deviceLossOutcome";
-import {
-  DAEMON_RESTART_ADMISSION_LEASE_MS,
-  DaemonRestartPendingError,
-} from "../daemon/daemonRestartAdmission";
+import { DaemonRestartPendingError } from "../daemon/daemonRestartAdmission";
 
 interface ActiveExecution {
   id: string;
@@ -61,7 +58,7 @@ export class ExecutionTracker {
   private executionEndListeners = new Set<() => void>();
   private timer: Timer;
   private idGenerator: IdGenerator;
-  private daemonRestartAdmissionDeadlineMs = 0;
+  private daemonRestartPrepared = false;
 
   constructor(timer: Timer = defaultTimer, idGenerator: IdGenerator = defaultIdGenerator) {
     this.timer = timer;
@@ -109,22 +106,23 @@ export class ExecutionTracker {
 
   /**
    * Atomically fence new provisionDevice admission if none is active. The
-   * short lease self-expires if the requesting manager dies before signaling.
+   * daemon itself initiates shutdown before acknowledging this preparation,
+   * so the fence remains until shutdown or an explicit admission rollback.
    */
   prepareForDaemonRestart(): boolean {
     if (this.hasActiveToolExecutionGlobal("provisionDevice")) {
       return false;
     }
-    this.daemonRestartAdmissionDeadlineMs = this.timer.now() + DAEMON_RESTART_ADMISSION_LEASE_MS;
+    this.daemonRestartPrepared = true;
     return true;
   }
 
   clearDaemonRestartPreparation(): void {
-    this.daemonRestartAdmissionDeadlineMs = 0;
+    this.daemonRestartPrepared = false;
   }
 
   private isDaemonRestartPrepared(): boolean {
-    return this.timer.now() < this.daemonRestartAdmissionDeadlineMs;
+    return this.daemonRestartPrepared;
   }
 
   endExecution(executionId: string): void {
@@ -167,6 +165,45 @@ export class ExecutionTracker {
     reason: ExecutionCancellationReason = "unspecified",
   ): Promise<number> {
     return this.cancelExecutionsForKey(sessionId, this.sessionExecutions, "sessionId", reason);
+  }
+
+  async cancelToolExecutions(
+    toolName: string,
+    reason: ExecutionCancellationReason = "unspecified",
+  ): Promise<number> {
+    const executionIds = Array.from(this.executions.values())
+      .filter((execution) => execution.toolName === toolName)
+      .map((execution) => execution.id);
+    return this.cancelExecutionIds(executionIds, "toolName", toolName, reason);
+  }
+
+  async waitForToolExecutionsToEnd(toolName: string, timeoutMs: number): Promise<boolean> {
+    if (!this.hasActiveToolExecutionGlobal(toolName)) {
+      return true;
+    }
+    return await new Promise<boolean>((resolve) => {
+      let settled = false;
+      const timeout: { handle?: NodeJS.Timeout } = {};
+      const finish = (drained: boolean): void => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        this.executionEndListeners.delete(check);
+        if (timeout.handle !== undefined) {
+          this.timer.clearTimeout(timeout.handle);
+        }
+        resolve(drained);
+      };
+      const check = (): void => {
+        if (!this.hasActiveToolExecutionGlobal(toolName)) {
+          finish(true);
+        }
+      };
+      this.executionEndListeners.add(check);
+      timeout.handle = this.timer.setTimeout(() => finish(false), timeoutMs);
+      check();
+    });
   }
 
   async cancelSessionUuidExecutions(
@@ -383,7 +420,7 @@ export class ExecutionTracker {
 
   private async cancelExecutionIds(
     executionIds: Iterable<string> | undefined,
-    label: "sessionId" | "sessionUuid" | "deviceSessionUuid",
+    label: "sessionId" | "sessionUuid" | "deviceSessionUuid" | "toolName",
     key: string,
     cancelReason: ExecutionCancellationReason = "unspecified",
     options: ExecutionCancellationOptions = {},

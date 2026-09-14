@@ -1,12 +1,11 @@
 import { DaemonUnavailableError } from "./client";
 
 export const DAEMON_PREPARE_RESTART_METHOD = "ide/prepareRestart";
-export const DAEMON_RESTART_ADMISSION_LEASE_MS = 5_000;
 const ACTIVE_PROVISIONING_RESTART_RETRY_MS = 1_000;
 
 export interface DaemonRestartPreparation {
   accepted: boolean;
-  reason?: "active_provisioning" | "generation_changed";
+  reason?: "active_provisioning" | "generation_changed" | "shutdown_unavailable";
 }
 
 /**

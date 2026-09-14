@@ -225,13 +225,12 @@ describe("DaemonManager restart", () => {
         })),
       isProcessRunning: (pid) => livePids.has(pid),
     };
-    const signaler = new FakeDaemonProcessSignaler((pid, signal) => {
-      if (signal === "SIGTERM") {
-        livePids.delete(pid);
-      }
-    });
+    const signaler = new FakeDaemonProcessSignaler();
     const client = new FakeDaemonClient({});
-    const prepareSpy = spyOn(client, "callDaemonMethod").mockResolvedValue({ accepted: true });
+    const prepareSpy = spyOn(client, "callDaemonMethod").mockImplementation(async () => {
+      livePids.delete(incumbentPid);
+      return { accepted: true };
+    });
     const manager = new DaemonManager(
       () => client,
       undefined,
@@ -270,7 +269,7 @@ describe("DaemonManager restart", () => {
         buildId: "incumbent-build",
         entryScript: "/old/dist/src/index.js",
       });
-      expect(signaler.signals).toEqual([{ pid: incumbentPid, signal: "SIGTERM" }]);
+      expect(signaler.signals).toEqual([]);
       expect(livePids).toEqual(new Set([unrelatedPid]));
       expect(startSpy).toHaveBeenCalledTimes(1);
     } finally {

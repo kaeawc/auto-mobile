@@ -16,6 +16,7 @@ const DEVICE_SESSION_RETENTION_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 export interface DeviceSessionRecord {
   sessionUuid: string;
   deviceId: string;
+  stableDeviceId?: string;
   platform: Platform;
   status?: DeviceSessionStatus;
   source?: string | null;
@@ -80,6 +81,7 @@ export class DeviceSessionRepository {
       const row: NewDeviceSession = {
         session_uuid: record.sessionUuid,
         device_id: record.deviceId,
+        stable_device_id: record.stableDeviceId ?? null,
         platform: record.platform,
         status: record.status ?? "active",
         source: record.source ?? null,
@@ -103,6 +105,7 @@ export class DeviceSessionRepository {
         .onConflict((oc) =>
           oc.column("session_uuid").doUpdateSet({
             device_id: row.device_id,
+            stable_device_id: row.stable_device_id,
             platform: row.platform,
             status: row.status,
             source: row.source,

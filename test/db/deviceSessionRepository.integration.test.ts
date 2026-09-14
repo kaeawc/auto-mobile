@@ -44,6 +44,7 @@ describe("DeviceSessionRepository", () => {
     await repo.upsertActiveSession({
       sessionUuid: "session-1",
       deviceId: "emulator-5554",
+      stableDeviceId: "Pixel_8_API_35",
       platform: "android",
       source: "session-manager",
       createdAtMs: 1000,
@@ -70,6 +71,7 @@ describe("DeviceSessionRepository", () => {
     const row = await repo.getSession("session-1");
     expect(row).toBeDefined();
     expect(row!.device_id).toBe("emulator-5554");
+    expect(row!.stable_device_id).toBe("Pixel_8_API_35");
     expect(row!.platform).toBe("android");
     expect(row!.status).toBe("released");
     expect(row!.source).toBe("autolock");

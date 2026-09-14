@@ -494,6 +494,7 @@ export type DeviceSessionStatus = "active" | "released" | "expired";
 export interface DeviceSessionsTable {
   session_uuid: string;
   device_id: string;
+  stable_device_id?: string | null;
   platform: "android" | "ios";
   status: DeviceSessionStatus;
   source: string | null;

@@ -1,6 +1,11 @@
 import type { ChildProcess } from "child_process";
 import { logger } from "../utils/logger";
-import { SessionManager, type Session, type SessionExecutionMetadata } from "./sessionManager";
+import {
+  SessionManager,
+  type Session,
+  type SessionExecutionMetadata,
+  type SessionRecoveryTarget,
+} from "./sessionManager";
 import type { DeviceReadinessLevel } from "../utils/DeviceSessionManager";
 import { ActionableError, BootedDevice, DeviceInfo, Platform } from "../models";
 import { Mutex } from "async-mutex";
@@ -4929,14 +4934,18 @@ export class DevicePool {
    * When all devices are busy, waits with timeout for a device to become available.
    * This enables parallel test execution with limited devices.
    */
-  async assignDeviceToSession(sessionId: string, platform?: Platform): Promise<string> {
+  async assignDeviceToSession(
+    sessionId: string,
+    platform?: Platform,
+    recoveryTarget?: SessionRecoveryTarget,
+  ): Promise<string> {
     const maxAttempts = Math.ceil(this.DEVICE_WAIT_TIMEOUT_MS / this.DEVICE_WAIT_INTERVAL_MS);
     let firstAttemptLogged = false;
 
     const result = await this.retryExecutor.execute(
       async (attempt) => {
         // Try to assign device (mutex ensures atomic assignment)
-        const assignResult = await this.tryAssignDevice(sessionId, platform);
+        const assignResult = await this.tryAssignDevice(sessionId, platform, recoveryTarget);
 
         if (assignResult.success) {
           if (attempt > 1) {
@@ -4991,6 +5000,13 @@ export class DevicePool {
     );
 
     if (!result.success) {
+      if (recoveryTarget && result.error instanceof DevicePoolError) {
+        throw new ActionableError(
+          `Cannot safely recover session ${sessionId}: ${recoveryTarget.platform} device ` +
+            `'${recoveryTarget.stableDeviceId}' is unavailable or already in use. ` +
+            "Acquire a new device with getAndroid or getApple.",
+        );
+      }
       // Check if it was a non-retryable error (no devices)
       if (result.error instanceof DevicePoolError && !result.error.isRetryable) {
         throw new ActionableError(result.error.message);
@@ -5026,6 +5042,7 @@ export class DevicePool {
   private async tryAssignDevice(
     sessionId: string,
     platform?: Platform,
+    recoveryTarget?: SessionRecoveryTarget,
   ): Promise<{
     success: boolean;
     deviceId?: string;
@@ -5036,8 +5053,11 @@ export class DevicePool {
   }> {
     return this.tryAssignFrom(
       sessionId,
-      () => this.getDevicesByPlatform(platform),
-      "platform pool empty",
+      () =>
+        recoveryTarget
+          ? this.getDevicesMatchingRecoveryTarget(recoveryTarget)
+          : this.getDevicesByPlatform(platform),
+      recoveryTarget ? "recovery target pool empty" : "platform pool empty",
       () => this.hasPendingAndroidRecovery(platform),
     );
   }
@@ -5221,7 +5241,14 @@ export class DevicePool {
     device.assignmentCount++;
     device.errorCount = 0;
     const session = await this.createSessionOrRestore(device, assignmentSnapshot, () =>
-      this.sessionManager.createSession(sessionId, device.id, device.platform),
+      this.sessionManager.createSession(
+        sessionId,
+        device.id,
+        device.platform,
+        undefined,
+        undefined,
+        this.stableDeviceIdFor(device),
+      ),
     );
     if (session.assignedDevice !== device.id) {
       this.restoreSessionAssignment(device, assignmentSnapshot);
@@ -6586,6 +6613,7 @@ export class DevicePool {
           deviceId,
           platform,
           allowSessionRebind,
+          this.stableDeviceIdFor(device),
         ),
       );
       logger.info(`Bound device ${deviceId} to session ${sessionId}`);
@@ -6662,10 +6690,19 @@ export class DevicePool {
     deviceId: string,
     platform: Platform,
     allowSessionRebind: boolean,
+    stableDeviceId: string | undefined,
   ): () => Promise<Session> {
     const previousDeviceId = previousSession?.assignedDevice;
     if (!previousDeviceId || previousDeviceId === deviceId) {
-      return async () => await this.sessionManager.createSession(sessionId, deviceId, platform);
+      return async () =>
+        await this.sessionManager.createSession(
+          sessionId,
+          deviceId,
+          platform,
+          undefined,
+          undefined,
+          stableDeviceId,
+        );
     }
 
     if (!allowSessionRebind) {
@@ -6678,7 +6715,9 @@ export class DevicePool {
 
     return async () => {
       const wasAutolocked = this.devices.get(previousDeviceId)?.autolockSessionId === sessionId;
-      const session = await this.sessionManager.rebindSession(sessionId, deviceId, platform);
+      const session = await this.sessionManager.rebindSession(sessionId, deviceId, platform, {
+        stableDeviceId,
+      });
       await this.releaseDevice(previousDeviceId, sessionId);
       const replacement = this.devices.get(deviceId);
       if (wasAutolocked && replacement?.sessionId === sessionId) {
@@ -7593,7 +7632,14 @@ export class DevicePool {
     // Interactions still bump lastHeartbeat, so an active client stays locked while
     // a truly idle one is released after the idle timeout.
     const session = await this.createSessionOrRestore(device, assignmentSnapshot, () =>
-      this.sessionManager.createSession(sessionId, deviceId, platform, timeoutMs, timeoutMs),
+      this.sessionManager.createSession(
+        sessionId,
+        deviceId,
+        platform,
+        timeoutMs,
+        timeoutMs,
+        this.stableDeviceIdFor(device),
+      ),
     );
     // #6227 (round 9): record the achieved readiness BEFORE publishing the
     // autolock route below. `mcpSessionAutolockMap.set` makes this session
@@ -8302,6 +8348,28 @@ export class DevicePool {
 
   private getDevicesMatchingCriteria(criteria?: DeviceAllocationCriteria): PooledDevice[] {
     return this.criteriaMatcher.filterDevices(this.getAllDevices(), criteria);
+  }
+
+  private getDevicesMatchingRecoveryTarget(target: SessionRecoveryTarget): PooledDevice[] {
+    const matches = this.getDevicesByPlatform(target.platform).filter(
+      (device) =>
+        this.stableDeviceIdFor(device) === target.stableDeviceId &&
+        (target.androidEmulator === undefined ||
+          isAndroidEmulatorSerial(device.id) === target.androidEmulator),
+    );
+    // A recovery target must prove one exact runtime. A duplicate stable identity
+    // is ambiguous and must not collapse back to normal pool selection.
+    return matches.length === 1 ? matches : [];
+  }
+
+  private stableDeviceIdFor(device: PooledDevice): string | undefined {
+    if (device.platform === "ios") {
+      return device.id;
+    }
+    if (!isAndroidEmulatorSerial(device.id)) {
+      return device.id;
+    }
+    return device.avdName ?? (device.identityUnresolved ? undefined : device.name);
   }
 
   private getDevicesByPlatform(platform?: Platform): PooledDevice[] {

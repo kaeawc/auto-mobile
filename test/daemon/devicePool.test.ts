@@ -14,7 +14,11 @@ import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import { type DeviceSessionPersistence } from "../../src/db/deviceSessionRepository";
+import {
+  type DeviceSessionPersistence,
+  type DeviceSessionRecord,
+} from "../../src/db/deviceSessionRepository";
+import type { DeviceSession } from "../../src/db/types";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { BootedDevice, DeviceInfo, Platform, SomePlatform } from "../../src/models";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
@@ -3400,6 +3404,192 @@ describe("DevicePool", () => {
   });
 
   describe("assignDeviceToSession", () => {
+    test.each([false, true])(
+      "recovers a restarted Android session only onto its persisted AVD identity, reverse=%s",
+      async (reverse) => {
+        const persisted: DeviceSession = {
+          session_uuid: "restarted-session",
+          device_id: "emulator-5554",
+          stable_device_id: "Original_AVD",
+          platform: "android",
+          status: "expired",
+          source: "session-manager",
+          autolock_enabled: 0,
+          mcp_session_id: null,
+          daemon_session_id: "old-daemon",
+          created_at_ms: 1,
+          last_used_at_ms: 20,
+          expires_at_ms: 30,
+          released_at_ms: 25,
+          release_reason: "daemon-restart",
+          session_timeout_ms: 10,
+          heartbeat_timeout_ms: 5,
+          has_received_heartbeat: 1,
+          created_at: "2026-09-14T00:00:00.000Z",
+          updated_at: "2026-09-14T00:00:00.000Z",
+        };
+        const persistedUpdates: DeviceSessionRecord[] = [];
+        const persistence: DeviceSessionPersistence = {
+          async getSession() {
+            return persisted;
+          },
+          async upsertActiveSession(record) {
+            persistedUpdates.push(record);
+          },
+          async recordActivity() {},
+          async markReleased() {},
+        };
+        sessionManager.stopCleanupTimer();
+        sessionManager = new SessionManager(fakeTimer, persistence);
+        devicePool = new DevicePool(
+          sessionManager,
+          "test-daemon-session-id",
+          fakeTimer,
+          fakeAppsRepo,
+          fakeDeviceManager,
+          new DefaultRetryExecutor(fakeTimer),
+        );
+        const devices = [
+          createBootedDevice("emulator-5554", "android", "Unrelated_AVD"),
+          createBootedDevice("emulator-5556", "android", "Original_AVD"),
+        ];
+        await initializeLiveDevices(reverse ? devices.toReversed() : devices);
+
+        const recovered = await sessionManager.getOrCreateSession(
+          "restarted-session",
+          devicePool,
+          "android",
+          undefined,
+          true,
+        );
+
+        expect(recovered).toMatchObject({
+          assignedDevice: "emulator-5556",
+          stableDeviceId: "Original_AVD",
+        });
+        expect(persistedUpdates).toEqual([
+          expect.objectContaining({
+            deviceId: "emulator-5556",
+            stableDeviceId: "Original_AVD",
+          }),
+        ]);
+        expect(devicePool.getDevice("emulator-5554")).toMatchObject({
+          sessionId: null,
+          status: "idle",
+        });
+      },
+    );
+
+    test("does not recover an Android emulator session onto a physical device with the same identifier", async () => {
+      const persisted: DeviceSession = {
+        session_uuid: "restarted-session",
+        device_id: "emulator-5554",
+        stable_device_id: "Original_AVD",
+        platform: "android",
+        status: "expired",
+        source: "session-manager",
+        autolock_enabled: 0,
+        mcp_session_id: null,
+        daemon_session_id: "old-daemon",
+        created_at_ms: 1,
+        last_used_at_ms: 20,
+        expires_at_ms: 30,
+        released_at_ms: 25,
+        release_reason: "daemon-restart",
+        session_timeout_ms: 10,
+        heartbeat_timeout_ms: 5,
+        has_received_heartbeat: 1,
+        created_at: "2026-09-14T00:00:00.000Z",
+        updated_at: "2026-09-14T00:00:00.000Z",
+      };
+      const persistence: DeviceSessionPersistence = {
+        async getSession() {
+          return persisted;
+        },
+        async upsertActiveSession() {},
+        async recordActivity() {},
+        async markReleased() {},
+      };
+      sessionManager.stopCleanupTimer();
+      sessionManager = new SessionManager(fakeTimer, persistence);
+      devicePool = new DevicePool(
+        sessionManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        fakeAppsRepo,
+        fakeDeviceManager,
+        new DefaultRetryExecutor(fakeTimer),
+      );
+      await initializeLiveDevices([createBootedDevice("Original_AVD", "android", "Pixel 9")]);
+
+      await expect(
+        sessionManager.getOrCreateSession(
+          "restarted-session",
+          devicePool,
+          "android",
+          undefined,
+          true,
+        ),
+      ).rejects.toThrow(/cannot safely recover/i);
+      expect(devicePool.getDevice("Original_AVD")).toMatchObject({
+        sessionId: null,
+        status: "idle",
+      });
+    });
+
+    test("refuses a restarted iOS session when only a different UUID is available", async () => {
+      const persisted: DeviceSession = {
+        session_uuid: "restarted-session",
+        device_id: "old-simulator-uuid",
+        stable_device_id: "original-simulator-uuid",
+        platform: "ios",
+        status: "expired",
+        source: "session-manager",
+        autolock_enabled: 0,
+        mcp_session_id: null,
+        daemon_session_id: "old-daemon",
+        created_at_ms: 1,
+        last_used_at_ms: 20,
+        expires_at_ms: 30,
+        released_at_ms: 25,
+        release_reason: "daemon-restart",
+        session_timeout_ms: 10,
+        heartbeat_timeout_ms: 5,
+        has_received_heartbeat: 1,
+        created_at: "2026-09-14T00:00:00.000Z",
+        updated_at: "2026-09-14T00:00:00.000Z",
+      };
+      const persistence: DeviceSessionPersistence = {
+        async getSession() {
+          return persisted;
+        },
+        async upsertActiveSession() {},
+        async recordActivity() {},
+        async markReleased() {},
+      };
+      sessionManager.stopCleanupTimer();
+      sessionManager = new SessionManager(fakeTimer, persistence);
+      devicePool = new DevicePool(
+        sessionManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        fakeAppsRepo,
+        fakeDeviceManager,
+        new DefaultRetryExecutor(fakeTimer),
+      );
+      await initializeLiveDevices([
+        createBootedDevice("replacement-simulator-uuid", "ios", "iPhone 16"),
+      ]);
+
+      await expect(
+        sessionManager.getOrCreateSession("restarted-session", devicePool, "ios", undefined, true),
+      ).rejects.toThrow(/cannot safely recover/i);
+      expect(devicePool.getDevice("replacement-simulator-uuid")).toMatchObject({
+        sessionId: null,
+        status: "idle",
+      });
+    });
+
     test("should assign device to session when devices available", async () => {
       await initializeLiveDevices([createBootedDevice("emulator-5554")]);
       const deviceId = await devicePool.assignDeviceToSession("session-1");

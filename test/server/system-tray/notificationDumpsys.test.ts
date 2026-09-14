@@ -147,7 +147,7 @@ describe("dumpsys notification records", () => {
     ).toBe("com.google.android.apps.wellbeing");
   });
 
-  test("uses only package evidence that matched the row in both snapshots", () => {
+  test("keeps a row ambiguous when a competing before-snapshot record was dismissed", () => {
     const rowTexts = new Set(["Need better sleep?", "Keep the screen dark"]);
     const before = [
       {
@@ -163,10 +163,27 @@ describe("dumpsys notification records", () => {
         hasCustomLayout: false,
       },
     ];
-    const after = [before[0]!, { ...before[1]!, pkg: "com.example.after-only" }];
+    const after = [before[0]!];
+
+    const intersected = intersectDumpsysRecordsForRow(before, after, rowTexts);
+    expect(intersected).toEqual([]);
+    expect(attributeRowByDumpsys(intersected, rowTexts)).toBeNull();
+  });
+
+  test("excludes a package that only appears in the after snapshot", () => {
+    const rowTexts = new Set(["Need better sleep?", "Keep the screen dark"]);
+    const requested = {
+      pkg: "com.example.requested",
+      titles: ["Need better sleep?"],
+      bodies: ["Keep the screen dark"],
+      hasCustomLayout: false,
+    };
+    const afterOnly = { ...requested, pkg: "com.example.after-only" };
 
     expect(
-      intersectDumpsysRecordsForRow(before, after, rowTexts).map((record) => record.pkg),
+      intersectDumpsysRecordsForRow([requested], [requested, afterOnly], rowTexts).map(
+        (record) => record.pkg,
+      ),
     ).toEqual(["com.example.requested"]);
   });
 

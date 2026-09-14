@@ -1718,7 +1718,7 @@ const DUMPSYS_NOTIFICATION_MAX_BUFFER = 8 * 1024 * 1024;
 const readDumpsysNotificationRecords = async (
   adb: SystemTrayAdb,
   signal?: AbortSignal,
-): Promise<DumpsysNotificationRecord[]> => {
+): Promise<DumpsysNotificationRecord[] | undefined> => {
   try {
     const result = await adb.executeCommand(
       "shell dumpsys notification --noredact",
@@ -1734,7 +1734,7 @@ const readDumpsysNotificationRecords = async (
       `[systemTray] could not read dumpsys notification for shade ownership: ${errorMessage(error)}`,
       error,
     );
-    return [];
+    return undefined;
   }
 };
 
@@ -1894,8 +1894,14 @@ export const listSystemTrayNotifications = async (
   signal?.throwIfAborted();
   // Only pay for the dump when the shade actually rendered a row the header
   // rule cannot attribute.
-  const afterRecords = rows.some((row) => row.notification.appLabel === null)
-    ? await readDumpsysNotificationRecords(adbFactory(device), signal)
+  const hasHeaderlessRows = rows.some((row) => row.notification.appLabel === null);
+  if (hasHeaderlessRows && beforeRecords === undefined) {
+    logger.debug(
+      "[systemTray] before dumpsys snapshot unavailable; falling back to after-only evidence.",
+    );
+  }
+  const afterRecords = hasHeaderlessRows
+    ? ((await readDumpsysNotificationRecords(adbFactory(device), signal)) ?? [])
     : [];
   const { notifications, unattributedRows } = attributeTrayRows(
     rows,

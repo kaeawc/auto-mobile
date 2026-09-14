@@ -224,9 +224,10 @@ const packagesMatching = (
 ): Set<string> => new Set(records.filter(predicate).map((record) => record.pkg));
 
 /**
- * Retain after-scan records only for packages that also plausibly owned this
- * row before scanning. A missing before snapshot deliberately falls back to
- * after-only correlation, preserving the existing best-effort behavior.
+ * Retain an after-scan record only when its package was the sole plausible
+ * owner before scanning and it still matches the row afterward. A missing
+ * before snapshot deliberately falls back to after-only correlation,
+ * preserving the existing best-effort behavior.
  */
 export const intersectDumpsysRecordsForRow = (
   beforeRecords: readonly DumpsysNotificationRecord[] | undefined,
@@ -239,7 +240,13 @@ export const intersectDumpsysRecordsForRow = (
   const beforePackages = packagesMatching(beforeRecords, (record) =>
     recordMatchesRow(record, rowTexts),
   );
-  return afterRecords.filter((record) => beforePackages.has(record.pkg));
+  if (beforePackages.size !== 1) {
+    return [];
+  }
+  const [beforePackage] = beforePackages;
+  return afterRecords.filter(
+    (record) => record.pkg === beforePackage && recordMatchesRow(record, rowTexts),
+  );
 };
 
 /**

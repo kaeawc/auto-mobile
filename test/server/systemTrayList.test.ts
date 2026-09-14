@@ -676,6 +676,44 @@ describe("systemTray list silent-section ownership", () => {
     ).rejects.toThrow(/com\.google\.android\.apps\.wellbeing.*no shade row could be matched/i);
   });
 
+  test("does not claim a row when a competing before-snapshot record was dismissed", async () => {
+    const { adb } = setup([shade()]);
+    adb.setCommandResponseSequence("dumpsys notification", [
+      execResult(
+        dumpsys(
+          record(WELLBEING, SLEEP_TITLE, SLEEP_BODY),
+          record("com.other.dismissed", SLEEP_TITLE, SLEEP_BODY),
+        ),
+      ),
+      execResult(dumpsys(record(WELLBEING, SLEEP_TITLE, SLEEP_BODY))),
+    ]);
+
+    await expect(
+      listSystemTrayNotifications(device, WELLBEING, "Digital Wellbeing", 5000),
+    ).rejects.toThrow(/com\.google\.android\.apps\.wellbeing.*no shade row could be matched/i);
+  });
+
+  test("falls back to after-only ownership when the before dumpsys read fails", async () => {
+    const { adb } = setup([shade()]);
+    adb.setCommandResponse(
+      "dumpsys notification",
+      execResult(dumpsys(record(WELLBEING, SLEEP_TITLE, SLEEP_BODY))),
+    );
+    const executeCommand = adb.executeCommand.bind(adb);
+    let dumpsysReads = 0;
+    adb.executeCommand = async (...args) => {
+      if (args[0].includes("dumpsys notification") && ++dumpsysReads === 1) {
+        throw new Error("dumpsys unavailable");
+      }
+      return executeCommand(...args);
+    };
+
+    const result = await listSystemTrayNotifications(device, WELLBEING, "Digital Wellbeing", 5000);
+
+    expect(result.notifications).toMatchObject([{ appId: WELLBEING, ownership: "dumpsys" }]);
+    expect(result.unattributedRows).toBe(0);
+  });
+
   test("throws when dumpsys proves the requested app posted but no rendered row matches", async () => {
     const { adb } = setup([page(silentRow("Rendered later", "The shade text changed"))]);
     adb.setCommandResponseSequence("dumpsys notification", [

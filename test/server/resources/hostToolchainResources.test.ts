@@ -86,6 +86,33 @@ describe("host toolchain resource", () => {
     });
   });
 
+  test("uses detected tool versions instead of dotted install path segments", async () => {
+    const payload = await read(
+      makeDependencies({
+        checkAdbVersion: async () => ({
+          ...pass("35.0.1"),
+          message: "Version 35.0.1",
+        }),
+        checkAndroidCommandLineTools: async () => ({
+          ...pass("/opt/hostedtoolcache/Android/33.0.0/cmdline-tools/latest/bin"),
+          message: "Android command line tools detected (version 12.3).",
+        }),
+        checkXcodeInstallation: async () => ({
+          ...pass("16.1"),
+          message: "Xcode 16.1 installed",
+        }),
+      }),
+    );
+    const entries = Object.fromEntries(
+      payload.entries.map((entry: { name: string }) => [entry.name, entry]),
+    );
+
+    expect(entries.sdkmanager.version).toBe("12.3");
+    expect(entries.avdmanager.version).toBe("12.3");
+    expect(entries.adb.version).toBe("35.0.1");
+    expect(entries.xcodebuild.version).toBe("16.1");
+  });
+
   test("converts one rejected probe into an entry failure without rejecting the read", async () => {
     const payload = await read(
       makeDependencies({

@@ -84,7 +84,10 @@ function normalizedVersion(
   value: string | number | boolean | null | undefined,
   message: string,
 ): string | undefined {
-  const sources = typeof value === "string" ? [value, message] : [message];
+  const sources = [message];
+  if (typeof value === "string" && !isAbsolutePath(value)) {
+    sources.push(value);
+  }
   for (const source of sources) {
     const match = source
       .trim()

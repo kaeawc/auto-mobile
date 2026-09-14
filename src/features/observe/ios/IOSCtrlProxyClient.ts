@@ -229,6 +229,7 @@ import type {
  */
 // oxlint-disable-next-line auto-mobile/naming-convention -- IOS is an acronym, not a Hungarian-notation interface prefix
 export interface IOSCtrlProxy extends CtrlProxyClient {
+  connectWithoutSetup(signal?: AbortSignal): Promise<boolean>;
   getLatestHierarchy(
     waitForFresh?: boolean,
     timeout?: number,
@@ -932,6 +933,22 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   // ===========================================================================
   // Auto-setup on connection failure
   // ===========================================================================
+
+  /**
+   * Probe the WebSocket directly without entering the automatic runner setup path.
+   */
+  public async connectWithoutSetup(signal?: AbortSignal): Promise<boolean> {
+    signal?.throwIfAborted();
+    const abortConnection = () => this.abortPendingConnect();
+    signal?.addEventListener("abort", abortConnection, { once: true });
+    try {
+      const connected = await super.ensureConnected();
+      signal?.throwIfAborted();
+      return connected;
+    } finally {
+      signal?.removeEventListener("abort", abortConnection);
+    }
+  }
 
   /**
    * Override ensureConnected to automatically set up CtrlProxy when

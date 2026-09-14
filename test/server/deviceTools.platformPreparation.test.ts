@@ -264,7 +264,13 @@ describe("platform device preparation tools", () => {
       deviceId: "E2F46BCE-4C97-4AA0-BD9D-544756FAB545",
       isRunning: false,
     };
+    let readinessOperationName: string | undefined;
     deviceUtils.setDeviceImages("ios", [simulator]);
+    setDeviceToolsDependencies({
+      ensureCtrlProxyReady: async (request) => {
+        readinessOperationName = request.operationName;
+      },
+    });
 
     const result = await callTool("getApple", { udid: simulator.deviceId });
 
@@ -276,6 +282,7 @@ describe("platform device preparation tools", () => {
     expect(deviceUtils.getExecutedOperations()).toContain(
       `startDevice:${simulator.name}:${DEFAULT_DEVICE_READY_TIMEOUT_MS}`,
     );
+    expect(readinessOperationName).toBe("getApple");
   });
 
   test("getApple cold-boots its requested UDID instead of reusing a same-name sibling", async () => {

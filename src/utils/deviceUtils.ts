@@ -12,6 +12,7 @@ import {
 import { isIosPhysicalUdid } from "./ios-cmdline-tools/iosDeviceType";
 import type { DiscoverySource } from "./discoverySource";
 import { AndroidEmulatorClient } from "./android-cmdline-tools/AndroidEmulatorClient";
+import type { AndroidEmulatorReadinessOptions } from "./android-cmdline-tools/AndroidEmulatorClient";
 import { deleteAvd } from "./android-cmdline-tools/avdmanager";
 import { logger } from "./logger";
 import { isAndroidEmulatorSerial } from "./androidSerial";
@@ -213,6 +214,7 @@ export interface PlatformDeviceManager {
     timeoutMs?: number,
     childProcess?: ChildProcess | null,
     signal?: AbortSignal,
+    options?: AndroidEmulatorReadinessOptions,
   ): Promise<BootedDevice>;
 }
 
@@ -273,6 +275,7 @@ export async function waitForDeviceReadyOrCancel(
   timer: Pick<Timer, "setTimeout" | "clearTimeout"> = defaultTimer,
   cancelOwnedBoot?: () => void | Promise<void>,
   createTimeoutError?: () => Error,
+  readinessOptions?: AndroidEmulatorReadinessOptions,
 ): Promise<BootedDevice> {
   const timeoutError = new ActionableError(
     `Device readiness timed out after ${timeoutMs}ms for ${device.deviceId ?? device.name}`,
@@ -286,7 +289,13 @@ export async function waitForDeviceReadyOrCancel(
 
   try {
     readinessPromise = runWithAbortSignal(readinessSignal, () =>
-      deviceManager.waitForDeviceReady(device, timeoutMs, handle, readinessSignal),
+      deviceManager.waitForDeviceReady(
+        device,
+        timeoutMs,
+        handle,
+        readinessSignal,
+        readinessOptions,
+      ),
     ).then(
       (ready) => {
         settlement.settled = true;
@@ -860,6 +869,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     timeoutMs: number = DEFAULT_DEVICE_READY_TIMEOUT_MS,
     childProcess?: ChildProcess | null,
     signal?: AbortSignal,
+    options?: AndroidEmulatorReadinessOptions,
   ): Promise<BootedDevice> {
     switch (device.platform) {
       case "android":
@@ -869,6 +879,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
           childProcess,
           device.deviceId,
           signal,
+          options,
         );
       case "ios":
         if (!device.deviceId) {

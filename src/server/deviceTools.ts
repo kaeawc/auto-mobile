@@ -7026,6 +7026,11 @@ export function registerDeviceTools() {
           exactBootedDevice?.deviceId ?? provisioned.device.deviceId ?? provisioned.device.name,
         totalDeadlineMs: totalDeadlineMs - readinessShareMs,
         signal: operationSignal,
+        // A just-created AVD's first boot is a genuine cold boot; opt its
+        // Android readiness wait into bounded ADB-offline recovery (#7054). An
+        // already-running adopted exact device never reaches the cold-boot path,
+        // so the flag is a no-op there and needs no extra guard here.
+        freshProvision: provisioned.created === true,
       });
       perf.endOperation("bootDevice");
       if (args.device.platform === "ios" && boot.device.deviceId !== provisioned.device.deviceId) {

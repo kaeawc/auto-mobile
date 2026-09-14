@@ -1,3 +1,4 @@
+import type { AndroidEmulatorReadinessOptions } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import { ChildProcess } from "child_process";
 import { BootedDevice, DeviceInfo, SomePlatform, Platform } from "../../src/models";
 import {
@@ -28,6 +29,7 @@ export class FakeDeviceUtils implements PlatformDeviceManager {
   private waitForDeviceReadyChildProcess: ChildProcess | null | undefined;
   private waitForDeviceReadySignal: AbortSignal | undefined;
   private waitForDeviceReadyError: Error | undefined;
+  private waitForDeviceReadyOptions: AndroidEmulatorReadinessOptions | undefined;
 
   /**
    * Configure available device images for a platform
@@ -128,6 +130,10 @@ export class FakeDeviceUtils implements PlatformDeviceManager {
 
   getWaitForDeviceReadySignal(): AbortSignal | undefined {
     return this.waitForDeviceReadySignal;
+  }
+
+  getWaitForDeviceReadyOptions(): AndroidEmulatorReadinessOptions | undefined {
+    return this.waitForDeviceReadyOptions;
   }
 
   /**
@@ -361,9 +367,11 @@ export class FakeDeviceUtils implements PlatformDeviceManager {
     timeoutMs: number = 120000,
     childProcess?: ChildProcess | null,
     signal?: AbortSignal,
+    options?: AndroidEmulatorReadinessOptions,
   ): Promise<BootedDevice> {
     this.waitForDeviceReadyChildProcess = childProcess;
     this.waitForDeviceReadySignal = signal;
+    this.waitForDeviceReadyOptions = options;
     this.executedOperations.push(`waitForDeviceReady:${device.name}:${timeoutMs}`);
 
     if (this.waitForDeviceReadyError) {

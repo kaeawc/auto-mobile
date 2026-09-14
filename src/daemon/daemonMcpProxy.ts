@@ -1673,8 +1673,9 @@ export class DaemonMcpProxy {
       const restartedStatus = await this.waitForRunningReconciliationStatus(reconciliationDeadline);
       const remaining = startupOptionDeficits(requested, restartedStatus.options);
       if (remaining.length > 0) {
-        this.reconciliationSnapshot = undefined;
-        continue;
+        throw new DaemonUnavailableError(
+          `Daemon restart completed but startup options still differ (${remaining.join(", ")})`,
+        );
       }
       return;
     }

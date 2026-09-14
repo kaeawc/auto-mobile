@@ -1939,6 +1939,36 @@ describe("DaemonMcpProxy", () => {
         }
       });
 
+      test("fails once when an owned restart leaves startup options mismatched", async () => {
+        const fakeClient = new FakeDaemonClient({
+          daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+        });
+        const fakeManager = new FakeDaemonManager();
+        const mismatchedStatus = runningStatus({ embeddedSdk: false });
+        fakeManager.statusResults = [
+          mismatchedStatus,
+          mismatchedStatus,
+          mismatchedStatus,
+          mismatchedStatus,
+        ];
+        const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+        const proxy = new DaemonMcpProxy({
+          clientFactory: () => fakeClient,
+          daemonManager: fakeManager,
+          daemonOptions: { embeddedSdk: true },
+        });
+
+        try {
+          await expect(proxy.listTools()).rejects.toThrow(
+            "Daemon restart completed but startup options still differ",
+          );
+          expect(fakeManager.restartCallCount).toBe(1);
+        } finally {
+          isAvailableSpy.mockRestore();
+          await proxy.close();
+        }
+      });
+
       test("concurrent narrow and superset clients converge after the narrow restart wins (#7111)", async () => {
         const narrowOptions = {
           enabledTools: ["deleteDevice", "listDevices", "provisionDevice"],

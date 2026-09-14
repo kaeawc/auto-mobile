@@ -733,6 +733,34 @@ describe("DevicePool", () => {
     ).rejects.toThrow("entered recovery while awaiting its readiness reservation");
   });
 
+  test("accepts an unpooled resolved Android replacement with a recycled recovering serial", async () => {
+    const recoveringImage: DeviceInfo = {
+      name: "Pixel_7",
+      platform: "android",
+      isRunning: false,
+      deviceId: "emulator-5556",
+    };
+    (
+      devicePool as unknown as { recoveringAndroidImages: Map<string, DeviceInfo> }
+    ).recoveringAndroidImages.set(recoveringImage.name, recoveringImage);
+    const replacement: BootedDevice = {
+      name: "Pixel_8",
+      platform: "android",
+      deviceId: "emulator-5556",
+    };
+
+    const release = await devicePool.reserveDeviceForReadiness(
+      replacement.deviceId,
+      replacement,
+      replacement.name,
+      undefined,
+      undefined,
+      true,
+    );
+
+    await release();
+  });
+
   describe("assertSessionReadyForAutomation shutdown admission (#5494)", () => {
     const sourceImage: DeviceInfo = {
       name: "Pixel 8",

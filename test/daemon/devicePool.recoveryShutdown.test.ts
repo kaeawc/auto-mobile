@@ -47,7 +47,10 @@ class BlockingRecoveryReadyManager extends LaggingShutdownManager {
   }
 }
 
-async function setup(manager: LaggingShutdownManager = new LaggingShutdownManager()) {
+async function setup(
+  manager: LaggingShutdownManager = new LaggingShutdownManager(),
+  cancelDeviceSessionExecutions?: (sessionId: string, reason: string) => Promise<number>,
+) {
   const timer = new FakeTimer();
   const sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
   const pool = new DevicePool(
@@ -63,6 +66,9 @@ async function setup(manager: LaggingShutdownManager = new LaggingShutdownManage
     undefined,
     undefined,
     { onLoss: true, maxAttempts: 1 },
+    undefined,
+    undefined,
+    cancelDeviceSessionExecutions,
   );
   manager.bootedDevices = [original];
   await pool.addDevice(original, image);
@@ -103,7 +109,12 @@ interface DevicePoolRecoveryInternals {
     { sessionId?: string; recoveryGeneration?: number; resolve(): void }
   >;
   recoveringAndroidImages: Map<string, DeviceInfo>;
+  recoveringAndroidImageSettlements: Map<string, unknown>;
+  recoveringAndroidDeviceIds: Set<string>;
   recoveringSessionLosses: Map<string, { generation: number }>;
+  failedTerminalRecoveryReleases: Set<string>;
+  sessionPreservingRecoveries: Map<string, unknown>;
+  androidRecoveryHandoffOwners: Map<string, unknown>;
   startAndroidRecoveryRecord(
     sessionId: string,
     details: { deviceId: string; avdName?: string },
@@ -114,6 +125,20 @@ interface DevicePoolRecoveryInternals {
     incidentId: string | undefined,
     outcome: "recovered" | "exhausted" | "not-attempted",
   ): Promise<void>;
+}
+
+function assertNoRecoveryReservationsRemain(pool: DevicePool, sessionId: string): void {
+  const internals = pool as unknown as DevicePoolRecoveryInternals;
+  expect(pool.isSessionRecoveryInFlight(sessionId)).toBe(false);
+  expect(internals.sessionPreservingRecoveries.has(sessionId)).toBe(false);
+  expect(internals.recoveringSessionLosses.has(sessionId)).toBe(false);
+  expect(internals.adbServerResetQuarantinedSessions.has(sessionId)).toBe(false);
+  expect(internals.failedTerminalRecoveryReleases.has(sessionId)).toBe(false);
+  expect(internals.recoveringAndroidImages.has(original.name)).toBe(false);
+  expect(internals.recoveringAndroidImageSettlements.has(original.name)).toBe(false);
+  expect(internals.adbServerResetRecoveryReservations.has(original.name)).toBe(false);
+  expect(internals.recoveringAndroidDeviceIds.has(original.deviceId)).toBe(false);
+  expect(internals.androidRecoveryHandoffOwners.has(original.deviceId)).toBe(false);
 }
 
 async function flush(): Promise<void> {
@@ -554,17 +579,45 @@ test("release during shutdown confirmation finalizes session recovery instead of
 
     timer.advanceTime(30_000);
     expect(await recovery).toBe("released");
-    expect(pool.isSessionRecoveryInFlight("session")).toBe(false);
-    expect(
-      (pool as unknown as DevicePoolRecoveryInternals).recoveringAndroidImages.has(original.name),
-    ).toBe(false);
-    expect(
-      (pool as unknown as DevicePoolRecoveryInternals).recoveringSessionLosses.has("session"),
-    ).toBe(false);
+    assertNoRecoveryReservationsRemain(pool, "session");
     expect(finalizations).toBe(1);
 
     const releaseLease = await pool.reserveAndroidStartupLease(original.name, true);
     await releaseLease();
+  } finally {
+    sessions.stopCleanupTimer();
+  }
+});
+
+test("release fires while awaiting incident-store persistence", async () => {
+  const cancellation = Promise.withResolvers<number>();
+  const cancellationStarted = Promise.withResolvers<void>();
+  const { sessions, pool, captured } = await setup(undefined, async () => {
+    cancellationStarted.resolve();
+    return await cancellation.promise;
+  });
+  const incidentId = await pool.recordEmulatorLossIncident(
+    original.deviceId,
+    "device-discovery-miss",
+    undefined,
+    "absent",
+  );
+  if (!incidentId) {
+    throw new Error("Expected emulator-loss incident to be recorded");
+  }
+  try {
+    const recovery = pool.recoverSessionBoundAndroidDeviceAfterLoss(
+      original.deviceId,
+      incidentId,
+      captured,
+    );
+    await cancellationStarted.promise;
+    await sessions.releaseSession("session", "explicit-release");
+    cancellation.resolve(0);
+
+    expect(await recovery).toBe("released");
+    expect((await pool.waitForEmulatorLossIncident(incidentId, 0))?.recovery.outcome).toBeDefined();
+    assertNoRecoveryReservationsRemain(pool, "session");
   } finally {
     sessions.stopCleanupTimer();
   }
@@ -671,9 +724,7 @@ test("terminal recovery release failure retains the recovery fence until a later
 
     await originalReleaseSession("session", "explicit-release");
     await leaseReady;
-    expect(internals.adbServerResetQuarantinedSessions.has("session")).toBe(false);
-    expect(internals.recoveringSessionLosses.has("session")).toBe(false);
-    expect(internals.recoveringAndroidImages.has(original.name)).toBe(false);
+    assertNoRecoveryReservationsRemain(pool, "session");
     await releaseLease?.();
   } finally {
     sessions.releaseSession = originalReleaseSession;

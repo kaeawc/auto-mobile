@@ -897,6 +897,16 @@ export class DevicePool {
     }
   }
 
+  private async refreshReleasedRecoverySettlementAfterAwait(
+    record: AndroidRecoveryRecord,
+    incidentId: string | undefined,
+  ): Promise<void> {
+    if (record.state !== "released") {
+      return;
+    }
+    await this.refreshEmulatorLossRecoverySettlement(incidentId, "exhausted");
+  }
+
   /**
    * Initialize pool with available devices
    *
@@ -2842,6 +2852,7 @@ export class DevicePool {
         sessionId,
         deviceLossCancellationReason(device.id, incidentId),
       );
+      await this.refreshReleasedRecoverySettlementAfterAwait(record, incidentId);
       if (await this.finalizeReleasedRecoveryAfterAwait(record, incidentId)) {
         return "released";
       }
@@ -2855,6 +2866,7 @@ export class DevicePool {
         preserveSession: session,
         allowExistingRecoveryReservation: deferredShutdowns > 0,
       });
+      await this.refreshReleasedRecoverySettlementAfterAwait(record, incidentId);
       if (await this.finalizeReleasedRecoveryAfterAwait(record, incidentId)) {
         return "released";
       }
@@ -5818,17 +5830,20 @@ export class DevicePool {
       return;
     }
     const recoveryTargets = this.getRecoveringAndroidTargets();
-    const isRecoveringTarget = [
-      device?.id,
-      device?.name,
-      expectedIdentity.deviceId,
-      expectedIdentity.name,
-      stableRuntimeName,
-    ].some(
-      (identifier) =>
-        identifier !== undefined &&
-        (recoveryTargets.names.has(identifier) || recoveryTargets.serials.has(identifier)),
+    const isRecoveringName = [device?.name, expectedIdentity.name, stableRuntimeName].some(
+      (identifier) => identifier !== undefined && recoveryTargets.names.has(identifier),
     );
+    const isRecoveringSerial =
+      this.hasUnresolvedEmulatorName(expectedIdentity) &&
+      [device?.id, expectedIdentity.deviceId].some(
+        (identifier) => identifier !== undefined && recoveryTargets.serials.has(identifier),
+      );
+    const isRecoveringCurrentPooledDevice =
+      device?.id === expectedIdentity.deviceId &&
+      device.name === expectedIdentity.name &&
+      recoveryTargets.serials.has(device.id);
+    const isRecoveringTarget =
+      isRecoveringName || isRecoveringSerial || isRecoveringCurrentPooledDevice;
     if (!isRecoveringTarget) {
       return;
     }

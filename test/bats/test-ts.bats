@@ -796,6 +796,29 @@ repeat_stub_times() {
   [[ "$output" != *"Recheck cleared suite.dup"* ]]
 }
 
+# A recheck which omits a sibling from the same source-line identity is not a
+# complete sample. Keep the initial offender instead of letting its fast sibling
+# clear it (review thread PRRT_kwDOP-GF5M6h9WUu on PR #6997).
+@test "timing gate fails closed when a same-line duplicate recheck omits a sibling" {
+  report_dir="$BATS_TEST_TMPDIR/unit-timing-reports"
+  mkdir -p "$report_dir"
+  write_junit_report_with_lines "$report_dir/shard-0.xml" "$OFFENDER_FILE" \
+    suite dup 0.010 130 \
+    suite dup 0.150 130
+
+  run env \
+    PATH="$STUB_BIN:$PATH" \
+    BUN_TEST_TIMING_BASE_REF=origin/main \
+    BUN_TEST_TIMING_REPORT_DIR="$report_dir" \
+    TIMING_CHANGED_FILES='src/example.ts\n' \
+    STUB_RECHECK_DUP_TIMES="0.010" \
+    STUB_RECHECK_DUP_LINES="130" \
+    bash "$TIMING_SCRIPT" "$BATS_TEST_TMPDIR/timings.xml"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Test exceeded 100ms: suite.dup"* ]]
+  [[ "$output" != *"Recheck cleared suite.dup"* ]]
+}
+
 @test "timing gate attributes reordered line-identified duplicates across rechecks" {
   report_dir="$BATS_TEST_TMPDIR/unit-timing-reports"
   mkdir -p "$report_dir"

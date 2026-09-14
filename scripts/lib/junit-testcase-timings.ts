@@ -22,6 +22,10 @@ export const sanitizeJunitField = (value: string): string => value.replace(/[\x1
  * The report id is deliberately the caller-supplied path, matching awk's FILENAME
  * semantics in the timing gate. Occurrence ordinals reset for each invocation.
  *
+ * Field 7 is `line:<n>` when the testcase has a non-empty source line, or
+ * `occurrence:<n>` when it does not. The prefixes keep a missing line attribute
+ * distinct from a coincidentally matching occurrence ordinal or literal line.
+ *
  * Exact-name testcases minted from one parameterized declaration share
  * (file, classname, name, line) -- e.g. the two cases at
  * test/features/utility/DisplayConfig.test.ts:130-132 -- so this function
@@ -53,6 +57,7 @@ export async function parseJunitTestcaseTimings(xml: string, reportId: string): 
       const key = `${testFile}\0${classname}\0${name}`;
       const occurrence = (occurrences.get(key) ?? 0) + 1;
       occurrences.set(key, occurrence);
+      const identity = line === "" ? `occurrence:${occurrence}` : `line:${line}`;
       rows.push(
         [
           testFile,
@@ -61,7 +66,7 @@ export async function parseJunitTestcaseTimings(xml: string, reportId: string): 
           (Number(time) * 1000).toFixed(6),
           String(occurrence),
           reportId,
-          line || String(occurrence),
+          identity,
         ].join(fieldSeparator),
       );
     }

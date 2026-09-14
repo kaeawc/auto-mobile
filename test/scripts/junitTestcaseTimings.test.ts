@@ -14,8 +14,12 @@ describe("parseJunitTestcaseTimings", () => {
     );
 
     expect(rows).toEqual([
-      ["test/suite.test.ts", "suite", "fast", "1.000000", "1", "report.xml", "1"].join(separator),
-      ["test/suite.test.ts", "suite", "slow", "200.000000", "1", "report.xml", "1"].join(separator),
+      ["test/suite.test.ts", "suite", "fast", "1.000000", "1", "report.xml", "occurrence:1"].join(
+        separator,
+      ),
+      ["test/suite.test.ts", "suite", "slow", "200.000000", "1", "report.xml", "occurrence:1"].join(
+        separator,
+      ),
     ]);
   });
 
@@ -33,7 +37,7 @@ describe("parseJunitTestcaseTimings", () => {
         "150.000000",
         "1",
         "report.xml",
-        "1",
+        "occurrence:1",
       ].join(separator),
     ]);
   });
@@ -45,7 +49,7 @@ describe("parseJunitTestcaseTimings", () => {
     );
 
     expect(rows.map((row) => row.split(separator)[4])).toEqual(["1", "2"]);
-    expect(rows.map((row) => row.split(separator)[6])).toEqual(["1", "2"]);
+    expect(rows.map((row) => row.split(separator)[6])).toEqual(["occurrence:1", "occurrence:2"]);
   });
 
   test("uses testcase lines as stable identity for duplicate tuples", async () => {
@@ -54,7 +58,7 @@ describe("parseJunitTestcaseTimings", () => {
       "report.xml",
     );
 
-    expect(rows.map((row) => row.split(separator)[6])).toEqual(["10", "42"]);
+    expect(rows.map((row) => row.split(separator)[6])).toEqual(["line:10", "line:42"]);
   });
 
   // The gate's aggregation (scripts/validate-bun-test-timings.sh) depends on
@@ -67,7 +71,7 @@ describe("parseJunitTestcaseTimings", () => {
       "report.xml",
     );
 
-    expect(rows.map((row) => row.split(separator)[6])).toEqual(["130", "130"]);
+    expect(rows.map((row) => row.split(separator)[6])).toEqual(["line:130", "line:130"]);
     expect(rows.map((row) => row.split(separator)[3])).toEqual(["10.000000", "150.000000"]);
   });
 
@@ -77,7 +81,16 @@ describe("parseJunitTestcaseTimings", () => {
       "report.xml",
     );
 
-    expect(rows.map((row) => row.split(separator)[6])).toEqual(["1", "2"]);
+    expect(rows.map((row) => row.split(separator)[6])).toEqual(["occurrence:1", "occurrence:2"]);
+  });
+
+  test("keeps a missing-line identity distinct from a coincidentally-matching literal line value", async () => {
+    const rows = await parseJunitTestcaseTimings(
+      `<testsuites><testsuite file="test/case.test.ts"><testcase classname="suite" name="duplicate" time="0.01"/><testcase classname="suite" name="duplicate" time="0.02" line="1"/></testsuite></testsuites>`,
+      "report.xml",
+    );
+
+    expect(rows.map((row) => row.split(separator)[6])).toEqual(["occurrence:1", "line:1"]);
   });
 
   test("sanitizes row separators and carriage returns without changing other fields", () => {

@@ -488,6 +488,46 @@ async function verifyRequestedDoctorChecks(
   });
 }
 
+async function completeVerifiedRecovery(
+  before: DaemonHealthReport,
+  action: DaemonRecoveryAction,
+  requestedDoctor: PostRepairDoctorVerification | undefined,
+  deadline: number,
+  timer: Timer,
+  getHealthReport: () => Promise<DaemonHealthReport>,
+  runDoctorChecks: (options: DoctorOptions) => Promise<DoctorReport>,
+): Promise<DaemonRecoveryResult> {
+  const finalHealth = await verifyFinalHealth(deadline, timer, getHealthReport);
+  if (!finalHealth.ok) {
+    return failedRecovery("verification", action, finalHealth.error, before, finalHealth.after);
+  }
+
+  const postRepairDoctor = await verifyRequestedDoctorChecks(
+    requestedDoctor,
+    deadline,
+    timer,
+    runDoctorChecks,
+  );
+  if (postRepairDoctor && !postRepairDoctor.ok) {
+    return failedRecovery(
+      "verification",
+      action,
+      postRepairDoctor.error,
+      before,
+      finalHealth.value,
+    );
+  }
+
+  return {
+    status: "repaired",
+    phase: "complete",
+    before,
+    action,
+    after: finalHealth.value,
+    ...(postRepairDoctor ? { postRepairDoctor: postRepairDoctor.value } : {}),
+  };
+}
+
 /**
  * Deliberately repair only the shared daemon/control-socket layer. Device
  * selection is intentionally outside this contract: doctor accepts platform
@@ -586,39 +626,13 @@ export async function repairDaemon(
     );
   }
 
-  const finalHealth = await verifyFinalHealth(deadline, timer, getHealthReport);
-  if (!finalHealth.ok) {
-    return failedRecovery(
-      "verification",
-      protocolRecovery.value,
-      finalHealth.error,
-      before,
-      finalHealth.after,
-    );
-  }
-
-  const postRepairDoctor = await verifyRequestedDoctorChecks(
+  return await completeVerifiedRecovery(
+    before,
+    protocolRecovery.value,
     requestedPostRepairDoctor(options),
     deadline,
     timer,
+    getHealthReport,
     runDoctorChecks,
   );
-  if (postRepairDoctor && !postRepairDoctor.ok) {
-    return failedRecovery(
-      "verification",
-      protocolRecovery.value,
-      postRepairDoctor.error,
-      before,
-      finalHealth.value,
-    );
-  }
-
-  return {
-    status: "repaired",
-    phase: "complete",
-    before,
-    action: protocolRecovery.value,
-    after: finalHealth.value,
-    ...(postRepairDoctor ? { postRepairDoctor: postRepairDoctor.value } : {}),
-  };
 }

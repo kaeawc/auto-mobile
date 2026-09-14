@@ -13,7 +13,7 @@ import type {
 } from "../daemon/devicePool";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
-import { GetAppMetadata } from "../features/observe/GetAppMetadata";
+import { getAndroidAppMetadataViaAdb } from "../features/observe/GetAppMetadata";
 import { AndroidCtrlProxyManager } from "../utils/CtrlProxyManager";
 import { IOSCtrlProxyManager } from "../utils/IOSCtrlProxyManager";
 import { IOSCtrlProxyBuilder } from "../utils/IOSCtrlProxyBuilder";
@@ -52,8 +52,9 @@ export interface DeviceLockStatesResourceContent {
 
 export interface CtrlProxyVersionInfo {
   /**
-   * For iOS, `build` is the persisted pinned/extracted runner release identity,
-   * not the AutoMobileTest host app Info.plist placeholder (1.0/1).
+   * For iOS, `build` is the persisted extracted-runner identity, not the
+   * AutoMobileTest host app Info.plist placeholder (1.0/1). It is omitted
+   * unless installation is confirmed true for this device.
    */
   versionName?: string;
   versionCode?: string;
@@ -70,7 +71,8 @@ export interface DeviceServiceStatus {
   expectedSha256: string;
   isCompatible: boolean;
   /**
-   * Installed-artifact identity, not a readiness or compatibility signal; omitted when unknown.
+   * Installed-artifact identity, not a readiness or compatibility signal; omitted when unknown
+   * or when installation is not confirmed true for this device.
    * Readiness and compatibility remain represented by isCompatible and runner feature status.
    */
   version?: CtrlProxyVersionInfo;
@@ -905,7 +907,7 @@ const defaultCtrlProxyVersionLookup: CtrlProxyVersionLookup = {
   async getVersion(device) {
     try {
       if (device.platform === "android") {
-        const metadata = await new GetAppMetadata(device).execute(AndroidCtrlProxyManager.PACKAGE);
+        const metadata = await getAndroidAppMetadataViaAdb(device, AndroidCtrlProxyManager.PACKAGE);
         return metadata
           ? {
               versionName: metadata.versionName || undefined,
@@ -927,6 +929,10 @@ const defaultCtrlProxyVersionLookup: CtrlProxyVersionLookup = {
       return undefined;
     }
   },
+};
+
+const noOpCtrlProxyVersionLookup: CtrlProxyVersionLookup = {
+  getVersion: async () => undefined,
 };
 
 const CTRL_PROXY_VERSION_TIMEOUT_MS = 2000;
@@ -966,7 +972,7 @@ async function getCtrlProxyVersion(
 export async function queryDeviceServiceStatus(
   device: Pick<BootedDeviceInfo, "name" | "platform" | "deviceId" | "source">,
   androidLookup: AndroidServiceStatusLookup = defaultAndroidServiceStatusLookup,
-  versionLookup: CtrlProxyVersionLookup = defaultCtrlProxyVersionLookup,
+  versionLookup?: CtrlProxyVersionLookup,
   timer: Timer = defaultTimer,
 ): Promise<DeviceServiceStatus | undefined> {
   const bootedDevice: BootedDevice = {
@@ -975,6 +981,11 @@ export async function queryDeviceServiceStatus(
     deviceId: device.deviceId,
     source: device.source,
   };
+  const resolvedVersionLookup =
+    versionLookup ??
+    (androidLookup === defaultAndroidServiceStatusLookup
+      ? defaultCtrlProxyVersionLookup
+      : noOpCtrlProxyVersionLookup);
 
   try {
     if (device.platform === "android") {
@@ -983,7 +994,7 @@ export async function queryDeviceServiceStatus(
         manager.isInstalled(),
         manager.isEnabled(),
         manager.getInstalledApkSha256(),
-        getCtrlProxyVersion(bootedDevice, versionLookup, timer),
+        getCtrlProxyVersion(bootedDevice, resolvedVersionLookup, timer),
       ]);
       const expectedSha256 = resolveApkChecksum();
       // An explicit pin absent from the registry yields an empty expected checksum,
@@ -1000,14 +1011,14 @@ export async function queryDeviceServiceStatus(
         installedSha256,
         expectedSha256,
         isCompatible,
-        version,
+        ...(version ? { version } : {}),
       };
     } else if (device.platform === "ios") {
       const manager = IOSCtrlProxyManager.getInstance(bootedDevice);
       const [installed, running, version] = await Promise.all([
         manager.isInstalled(),
         manager.isRunning(),
-        getCtrlProxyVersion(bootedDevice, versionLookup, timer),
+        getCtrlProxyVersion(bootedDevice, resolvedVersionLookup, timer),
       ]);
       const expectedSha256 = resolveIpaChecksum();
 
@@ -1054,7 +1065,7 @@ export async function queryDeviceServiceStatus(
         installedSha256: null,
         expectedSha256,
         isCompatible,
-        version,
+        ...(installed && version ? { version } : {}),
         supportedCommandsComplete,
         supportedFeaturesComplete,
       };

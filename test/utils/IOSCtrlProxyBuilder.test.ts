@@ -13,6 +13,7 @@ import os from "os";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../src/utils/workingDirectory";
 import { parsePlist } from "../../src/utils/ios-cmdline-tools/XctestrunPlist";
 import { logger } from "../../src/utils/logger";
+import { resolveAssetVersion, resolvePinnedVersion } from "../../src/constants/release";
 
 describe("IOSCtrlProxyBuilder", function () {
   let originalProjectRoot: string | undefined;
@@ -804,6 +805,26 @@ describe("IOSCtrlProxyBuilder", function () {
   });
 
   describe("build", function () {
+    test("records local override provenance instead of the pinned release version", async function () {
+      const derivedDataPath = path.join(tempDir, "DerivedData");
+      const cacheDir = path.join(tempDir, "cache");
+      const overridePath = path.join(tempDir, "local-runner.ipa");
+      const downloader = new FakeIOSCtrlProxyBundleDownloader();
+      downloader.checksum = "local-override-checksum";
+      await fs.writeFile(overridePath, "a".repeat(12000));
+      process.env.AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH = overridePath;
+      IOSCtrlProxyBuilder.setExpectedChecksumForTesting("local-override-checksum");
+      const builder = IOSCtrlProxyBuilder.getInstance(
+        { derivedDataPath, bundleCacheDir: cacheDir },
+        { downloader },
+      );
+
+      expect((await builder.build("simulator")).success).toBe(true);
+      expect(await builder.getInstalledBundleVersion()).not.toBe(
+        resolveAssetVersion(resolvePinnedVersion()),
+      );
+    });
+
     test("should download and extract bundle using downloader", async function () {
       const derivedDataPath = path.join(tempDir, "DerivedData");
       const cacheDir = path.join(tempDir, "cache");

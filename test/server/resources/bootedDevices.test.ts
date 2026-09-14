@@ -30,6 +30,10 @@ import { DevicePool } from "../../../src/daemon/devicePool";
 import { DeviceSessionRegistry } from "../../../src/daemon/deviceSessionRegistry";
 import { SessionManager } from "../../../src/daemon/sessionManager";
 import { IOSCtrlProxyManager } from "../../../src/utils/IOSCtrlProxyManager";
+import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
+import { getAndroidAppMetadataViaAdb } from "../../../src/features/observe/GetAppMetadata";
+import { defaultAdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
+import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { resolveApkChecksum, resolveIpaChecksum } from "../../../src/constants/release";
 import { z } from "zod/v4";
 
@@ -1454,6 +1458,7 @@ describe("booted device readiness", () => {
   });
 
   test("reads Android connection transitions without creating a connection", async () => {
+    const adbSpy = spyOn(defaultAdbClientFactory, "create");
     const connections = new Set(["emulator-5554"]);
     const lookup: AndroidServiceStatusLookup = {
       getManager: () => ({
@@ -1469,12 +1474,38 @@ describe("booted device readiness", () => {
       deviceId: "emulator-5554",
       source: "local" as const,
     };
-    expect((await queryDeviceServiceStatus(device, lookup))?.running).toBe(true);
-    connections.clear();
-    expect((await queryDeviceServiceStatus(device, lookup))?.running).toBe(false);
-    expect(
-      (await queryDeviceServiceStatus({ ...device, deviceId: "unseen" }, lookup))?.running,
-    ).toBe(false);
+    try {
+      expect((await queryDeviceServiceStatus(device, lookup))?.running).toBe(true);
+      connections.clear();
+      expect((await queryDeviceServiceStatus(device, lookup))?.running).toBe(false);
+      expect(
+        (await queryDeviceServiceStatus({ ...device, deviceId: "unseen" }, lookup))?.running,
+      ).toBe(false);
+      expect(adbSpy).not.toHaveBeenCalled();
+    } finally {
+      adbSpy.mockRestore();
+    }
+  });
+
+  test("reads Android package versions via ADB without constructing CtrlProxy", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("shell dumpsys package com.example.ctrlproxy", {
+      stdout: "versionCode=45\nversionName=1.2.3\ncodePath=/data/app/ctrlproxy",
+      stderr: "",
+    });
+    const getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance");
+    try {
+      const metadata = await getAndroidAppMetadataViaAdb(
+        { name: "Pixel", platform: "android", deviceId: "emulator-5554", source: "local" },
+        "com.example.ctrlproxy",
+        { create: () => adb },
+      );
+
+      expect(metadata).toMatchObject({ versionName: "1.2.3", buildNumber: "45" });
+      expect(getInstanceSpy).not.toHaveBeenCalled();
+    } finally {
+      getInstanceSpy.mockRestore();
+    }
   });
 
   test("adds Android CtrlProxy installed-artifact version without changing service compatibility", async () => {
@@ -1541,6 +1572,32 @@ describe("booted device readiness", () => {
         build: "200",
         source: "ios-runner-bundle",
       });
+    } finally {
+      installedSpy.mockRestore();
+      runningSpy.mockRestore();
+    }
+  });
+
+  test("omits iOS CtrlProxy version when it is not installed on that device", async () => {
+    const installedSpy = spyOn(IOSCtrlProxyManager.prototype, "isInstalled").mockResolvedValue(
+      false,
+    );
+    const runningSpy = spyOn(IOSCtrlProxyManager.prototype, "isRunning").mockResolvedValue(false);
+    try {
+      const status = await queryDeviceServiceStatus(
+        {
+          name: "iPhone",
+          platform: "ios",
+          deviceId: "00000000-0000-0000-0000-000000000000",
+          source: "local",
+        },
+        undefined,
+        { getVersion: async () => ({ build: "other-device", source: "ios-runner-bundle" }) },
+      );
+
+      expect(status?.installed).toBe(false);
+      expect(status?.version).toBeUndefined();
+      expect("version" in (status ?? {})).toBe(false);
     } finally {
       installedSpy.mockRestore();
       runningSpy.mockRestore();

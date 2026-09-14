@@ -153,7 +153,7 @@ describe("PerDeviceInstalledAppsCacheWriteCoordinator", () => {
   test("late release cannot discard a replacement invalidation fence", async () => {
     const coordinator = new PerDeviceInstalledAppsCacheWriteCoordinator();
     await coordinator.invalidate("reused", async () => {});
-    const retired = coordinator.beginRebuild("reused");
+    const retired = coordinator.retireIncarnation("reused");
     await expect(
       coordinator.invalidate("reused", async () => {
         throw new Error("replacement invalidation failed");
@@ -163,6 +163,87 @@ describe("PerDeviceInstalledAppsCacheWriteCoordinator", () => {
     await coordinator.releaseDevice("reused", retired);
     expect(coordinator.isDirty("reused")).toBe(true);
     expect(await coordinator.commitRebuild("reused", replacement, async () => {})).toBe(true);
+  });
+
+  test("rejects a request that resumes after its incarnation was retired (#6894)", async () => {
+    const coordinator = new PerDeviceInstalledAppsCacheWriteCoordinator();
+    const deviceId = "retired-request";
+
+    // The request captures its incarnation before device discovery awaits.
+    const incarnation = coordinator.captureIncarnation(deviceId);
+
+    // Shutdown retires that incarnation and starts draining while discovery
+    // is still in flight.
+    const retired = coordinator.retireIncarnation(deviceId);
+    expect(retired).toBe(incarnation);
+    const release = coordinator.releaseDevice(deviceId, retired);
+
+    // Resuming mid-drain must not be promoted to a fresh, committable
+    // generation on the (possibly reused) device id.
+    expect(coordinator.beginRebuild(deviceId, incarnation)).toBeUndefined();
+    await release;
+    expect(coordinator.trackedDeviceCount()).toBe(0);
+
+    // Resuming after the drain finished is rejected the same way, and the
+    // rejection creates no bookkeeping.
+    expect(coordinator.beginRebuild(deviceId, incarnation)).toBeUndefined();
+    expect(coordinator.trackedDeviceCount()).toBe(0);
+
+    // A request that starts after retirement belongs to a new incarnation.
+    const fresh = coordinator.captureIncarnation(deviceId);
+    expect(fresh).not.toBe(incarnation);
+    const generation = coordinator.beginRebuild(deviceId, fresh);
+    expect(generation).toBeDefined();
+    const writes: string[] = [];
+    await expect(
+      coordinator.commitRebuild(deviceId, generation!, async () => {
+        writes.push("fresh");
+      }),
+    ).resolves.toBe(true);
+    expect(writes).toEqual(["fresh"]);
+  });
+
+  test("a late release binds to the retired incarnation and leaves the replacement untouched (#6894)", async () => {
+    const coordinator = new PerDeviceInstalledAppsCacheWriteCoordinator();
+    const deviceId = "reused-late-release";
+
+    // Shutdown cleanup, then the incarnation is retired BEFORE the reuse
+    // window opens; the release itself runs late (after notification).
+    await coordinator.invalidate(deviceId, async () => undefined);
+    const retired = coordinator.retireIncarnation(deviceId);
+
+    // A replacement reuses the id: it rebuilds, then a failed install
+    // invalidation leaves a dirty fence that must survive the late release.
+    const replacement = coordinator.captureIncarnation(deviceId);
+    expect(replacement).not.toBe(retired);
+    const rebuilt = coordinator.beginRebuild(deviceId, replacement);
+    expect(rebuilt).toBeDefined();
+    await expect(
+      coordinator.commitRebuild(deviceId, rebuilt!, async () => undefined),
+    ).resolves.toBe(true);
+    expect(coordinator.markRebuilt(deviceId, rebuilt!)).toBe(true);
+    expect(coordinator.isDirty(deviceId)).toBe(false);
+    await expect(
+      coordinator.invalidate(deviceId, async () => {
+        throw new Error("replacement stale-marker write failed");
+      }),
+    ).rejects.toThrow("replacement stale-marker write failed");
+    expect(coordinator.isDirty(deviceId)).toBe(true);
+
+    await coordinator.releaseDevice(deviceId, retired);
+
+    // The replacement's fence and bookkeeping are untouched by the old
+    // incarnation's release.
+    expect(coordinator.isDirty(deviceId)).toBe(true);
+    expect(coordinator.trackedDeviceCount()).toBe(1);
+    const next = coordinator.beginRebuild(deviceId, replacement);
+    expect(next).toBeDefined();
+    await expect(coordinator.commitRebuild(deviceId, next!, async () => undefined)).resolves.toBe(
+      true,
+    );
+
+    // Work still holding the retired incarnation stays fenced.
+    expect(coordinator.beginRebuild(deviceId, retired)).toBeUndefined();
   });
 
   test("releaseDevice returns the tracked-device count to zero across many unique ids (#6704)", async () => {

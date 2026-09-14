@@ -576,3 +576,214 @@ describe("documented IME row shape matches the projection (#6871)", () => {
     expect(result.skeleton!.map((entry) => entry.elementId)).not.toContain("<ime>");
   });
 });
+
+/**
+ * The legacy capture path (no `automobile:imePackage` extra) where the IME's
+ * own wrapper is NOT actionable and carries no text — an
+ * `com.ime:id/keyboard_view` `FrameLayout` — so the collector never places it
+ * in any `elements` category. The marker span is then keycap-only, and the
+ * anonymous keys before the first / after the last `key_pos_*` marker fall
+ * outside it: each stayed an individual tap row while `<ime>` claimed only the
+ * marker box (issue #6908 item 1).
+ */
+function uncollectedImeWrapperObservation(): ObserveResult {
+  const key = (index: number): ViewHierarchyNode => ({
+    $: {
+      "resource-id": `com.ime:id/key_pos_0_${index}`,
+      text: String.fromCharCode(113 + index),
+      clickable: true,
+      bounds: { left: index * 10, top: 620, right: index * 10 + 10, bottom: 660 },
+    },
+  });
+  const viewHierarchy = {
+    hierarchy: {
+      node: {
+        $: {},
+        node: [
+          {
+            $: {
+              "resource-id": "com.app:id/save",
+              text: "Save",
+              clickable: true,
+              bounds: { left: 0, top: 100, right: 100, bottom: 150 },
+            },
+          },
+          {
+            // Non-actionable, unlabelled, IME-owned: never collected.
+            $: {
+              "resource-id": "com.ime:id/keyboard_view",
+              bounds: { left: 0, top: 600, right: 100, bottom: 800 },
+            },
+            node: [
+              {
+                $: {
+                  text: "?123",
+                  clickable: true,
+                  bounds: { left: 0, top: 600, right: 20, bottom: 620 },
+                },
+              },
+              key(0),
+              key(1),
+              {
+                $: {
+                  "content-desc": "Enter",
+                  clickable: true,
+                  bounds: { left: 80, top: 760, right: 100, bottom: 800 },
+                },
+              },
+            ],
+          },
+        ],
+      },
+    },
+  };
+  return {
+    updatedAt: 1,
+    screenSize: { width: 100, height: 800 },
+    systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+    viewHierarchy,
+    elements: new DefaultObserveElementCollector().collect(viewHierarchy, "android"),
+  };
+}
+
+describe("uncollected IME wrapper still bounds the fold (#6908)", () => {
+  test("anonymous keys outside the marker span fold into one <ime> row with the wrapper's bounds", () => {
+    const source = uncollectedImeWrapperObservation();
+    // Precondition: the wrapper really is absent from every collected category.
+    expect(JSON.stringify(source.elements)).not.toContain("com.ime:id/keyboard_view");
+    const result = sanitizeObserveResult(source, { dropElements: true, project: "skeleton" });
+    expect(result.skeleton!.map((entry) => entry.elementId)).toEqual(["com.app:id/save", "<ime>"]);
+    expect(result.skeleton!.find((entry) => entry.elementId === "<ime>")).toEqual({
+      elementId: "<ime>",
+      label: "Keyboard (com.ime)",
+      bounds: [0, 600, 100, 800],
+      affordances: ["input"],
+    });
+    expect(result.keyboard).toEqual({ visible: true, package: "com.ime" });
+  });
+
+  test("an uncollected wrapper owned by ANOTHER package never widens the fold", () => {
+    const source = uncollectedImeWrapperObservation();
+    // The framework's own decor wrapper encloses the keys but is not the IME's.
+    source.viewHierarchy!.hierarchy.node!.node![1].$["resource-id"] = "android:id/content";
+    source.elements = new DefaultObserveElementCollector().collect(
+      source.viewHierarchy!,
+      "android",
+    );
+    const result = sanitizeObserveResult(source, { dropElements: true, project: "skeleton" });
+    const ime = result.skeleton!.find((entry) => entry.elementId === "<ime>");
+    expect(ime?.bounds).toEqual([0, 620, 20, 660]);
+    // The anonymous keys stay individual rows: nothing IME-owned encloses them.
+    expect(result.skeleton!.map((entry) => entry.label)).toContain("?123");
+    expect(result.skeleton!.map((entry) => entry.label)).toContain("Enter");
+  });
+
+  test("the authoritative path is unchanged by an uncollected IME-owned wrapper", () => {
+    // The capture vouches for the IME, and its root is ALSO an uncollected,
+    // IME-owned wrapper wider than the keys. Membership comes from the inherited
+    // provenance alone, and the row keeps the keys' own box, as before.
+    const source = observation();
+    const imeRoot = source.viewHierarchy!.hierarchy.node!.node![1];
+    imeRoot.$["resource-id"] = "example.keyboard:id/keyboard_view";
+    imeRoot.$.bounds = { left: 0, top: 0, right: 100, bottom: 200 };
+    source.elements = new DefaultObserveElementCollector().collect(
+      source.viewHierarchy!,
+      "android",
+    );
+    expect(JSON.stringify(source.elements)).not.toContain("example.keyboard:id/keyboard_view");
+    const result = sanitizeObserveResult(source, { dropElements: true, project: "skeleton" });
+    expect(result.skeleton?.map((entry) => entry.label)).toEqual([
+      "SAVE",
+      "App control",
+      "Keyboard (example.keyboard)",
+    ]);
+    expect(result.skeleton!.find((entry) => entry.elementId === "<ime>")?.bounds).toEqual([
+      0, 0, 100, 100,
+    ]);
+  });
+});
+
+/**
+ * Legacy capture where the SAME package owns `key_pos_*` controls in two
+ * different root/window groups: the keyboard app's own settings screen shows a
+ * `key_pos_preview` control in the main root while its IME is up in a window
+ * root. Counting markers per package across groups let the decoy and the real
+ * keys corroborate each other, and `detectImeWindow` then locked onto the FIRST
+ * group's span — the decoy folded into `<ime>` while the real keys stayed
+ * individual rows (issue #6908 item 2).
+ */
+function crossWindowKeycapObservation(windowKeyCount: number): ObserveResult {
+  const key = (index: number): ViewHierarchyNode => ({
+    $: {
+      "resource-id": `com.keyboard:id/key_pos_0_${index}`,
+      text: String.fromCharCode(113 + index),
+      clickable: true,
+      bounds: { left: index * 10, top: 600, right: index * 10 + 10, bottom: 640 },
+    },
+  });
+  const viewHierarchy = {
+    hierarchy: {
+      node: {
+        $: {},
+        node: [
+          {
+            $: {
+              "resource-id": "com.keyboard:id/key_pos_preview",
+              text: "Preview",
+              clickable: true,
+              bounds: { left: 0, top: 100, right: 100, bottom: 150 },
+            },
+          },
+        ],
+      },
+    },
+    windows: [
+      {
+        windowLayer: 5,
+        hierarchy: {
+          node: {
+            $: { bounds: { left: 0, top: 590, right: 100, bottom: 800 } },
+            node: Array.from({ length: windowKeyCount }, (_, index) => key(index)),
+          },
+        },
+      },
+    ],
+  };
+  return {
+    updatedAt: 1,
+    screenSize: { width: 100, height: 800 },
+    systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+    viewHierarchy: viewHierarchy as never,
+    elements: new DefaultObserveElementCollector().collect(viewHierarchy as never, "android"),
+  };
+}
+
+describe("keycap corroboration is scoped to one window group (#6908)", () => {
+  test("a decoy in another window neither corroborates nor captures the fold", () => {
+    const result = sanitizeObserveResult(crossWindowKeycapObservation(2), {
+      dropElements: true,
+      project: "skeleton",
+    });
+    const ids = result.skeleton!.map((entry) => entry.elementId);
+    expect(ids).toEqual(["com.keyboard:id/key_pos_preview", "<ime>"]);
+    expect(result.skeleton!.find((entry) => entry.elementId === "<ime>")).toEqual({
+      elementId: "<ime>",
+      label: "Keyboard (com.keyboard)",
+      bounds: [0, 600, 20, 640],
+      affordances: ["input"],
+    });
+    expect(result.keyboard).toEqual({ visible: true, package: "com.keyboard" });
+  });
+
+  test("one marker per window is not a keyboard", () => {
+    const result = sanitizeObserveResult(crossWindowKeycapObservation(1), {
+      dropElements: true,
+      project: "skeleton",
+    });
+    expect(result.skeleton!.map((entry) => entry.elementId)).toEqual([
+      "com.keyboard:id/key_pos_preview",
+      "com.keyboard:id/key_pos_0_0",
+    ]);
+    expect(result.keyboard).toBeUndefined();
+  });
+});

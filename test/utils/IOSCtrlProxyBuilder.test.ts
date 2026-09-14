@@ -1,9 +1,15 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
+  CtrlProxyStaleRunnerCacheError,
   IOS_CTRL_PROXY_RUNNER_SHA256_ENV,
   IOS_CTRL_PROXY_RUNNER_SHA256_TARGET_ENV,
   IOSCtrlProxyBuilder,
 } from "../../src/utils/IOSCtrlProxyBuilder";
+import {
+  RELEASE_CHECKSUM_REGISTRY,
+  resolveAssetVersion,
+  resolvePinnedVersion,
+} from "../../src/constants/release";
 import { FakeIOSCtrlProxyBundleDownloader } from "../fakes/FakeIOSCtrlProxyBundleDownloader";
 import { FakeCtrlProxyCodesignVerifier } from "../fakes/FakeCtrlProxyCodesignVerifier";
 import { getTempDir } from "../../src/utils/tempDir";
@@ -800,6 +806,130 @@ describe("IOSCtrlProxyBuilder", function () {
       IOSCtrlProxyBuilder.resetInstances();
       const result = await IOSCtrlProxyBuilder.waitForPrefetch();
       expect(result).toBeNull();
+    });
+  });
+
+  describe("pre-launch stale runner cache classification (#7032)", function () {
+    let originalPlatform: PropertyDescriptor | undefined;
+
+    beforeEach(function () {
+      // prefetchBuild() early-returns off macOS; force darwin so the in-flight
+      // prefetch is observable on every CI host.
+      originalPlatform = Object.getOwnPropertyDescriptor(process, "platform");
+      Object.defineProperty(process, "platform", { value: "darwin", configurable: true });
+      IOSCtrlProxyBuilder.setIosPrerequisiteDetectorForTesting({
+        hasIosPrerequisites: async () => true,
+      });
+    });
+
+    afterEach(function () {
+      if (originalPlatform) {
+        Object.defineProperty(process, "platform", originalPlatform);
+      }
+    });
+
+    async function buildWithRunner(
+      downloader: FakeIOSCtrlProxyBundleDownloader,
+    ): Promise<IOSCtrlProxyBuilder> {
+      const derivedDataPath = path.join(tempDir, "DerivedData");
+      const cacheDir = path.join(tempDir, "cache");
+      IOSCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
+      const builder = IOSCtrlProxyBuilder.getInstance(
+        { derivedDataPath, bundleCacheDir: cacheDir },
+        { downloader },
+      );
+      expect((await builder.build("simulator")).success).toBe(true);
+      return builder;
+    }
+
+    test("a cached runner hashing to a previous release's runnerSha256 is stale-cache, not tampering", async function () {
+      const previousRelease = RELEASE_CHECKSUM_REGISTRY[1];
+      const downloader = new FakeIOSCtrlProxyBundleDownloader();
+      downloader.checksum = "expected-checksum";
+      downloader.runnerChecksum = "new-release-runner-sha";
+      IOSCtrlProxyBuilder.setExpectedRunnerChecksumForTesting("new-release-runner-sha", "xctest");
+      const builder = await buildWithRunner(downloader);
+
+      // The registry moved to a new release but the extracted runner on disk is
+      // still the previous release's binary (no prefetch has replaced it yet).
+      downloader.runnerChecksum = previousRelease.runnerSha256;
+
+      const error = await builder.verifyRunnerBinaryBeforeLaunch("simulator").catch((e) => e);
+      expect(error).toBeInstanceOf(CtrlProxyStaleRunnerCacheError);
+      expect(error.message).toContain(
+        `cached CtrlProxy runner is from ${previousRelease.version}; waiting for the ${resolveAssetVersion(resolvePinnedVersion())} bundle`,
+      );
+      expect(error.message).not.toContain("TOCTOU");
+      expect(error.message).not.toContain("tampering");
+    });
+
+    test("a mismatch while the prefetch is in flight is stale-cache even for an unregistered hash", async function () {
+      const downloader = new FakeIOSCtrlProxyBundleDownloader();
+      downloader.checksum = "expected-checksum";
+      downloader.runnerChecksum = "new-release-runner-sha";
+      IOSCtrlProxyBuilder.setExpectedRunnerChecksumForTesting("new-release-runner-sha", "xctest");
+      const builder = await buildWithRunner(downloader);
+      downloader.runnerChecksum = "nightly-runner-not-in-registry";
+
+      const release = Promise.withResolvers<void>();
+      IOSCtrlProxyBuilder.setPrefetchBuilderForTesting({
+        needsRebuild: async () => true,
+        build: async () => {
+          await release.promise;
+          return { success: true, message: "prefetched" };
+        },
+        getBuildProductsPath: async () => null,
+        getXctestrunPath: async () => null,
+      });
+      const first = IOSCtrlProxyBuilder.prefetchBuild();
+      expect(IOSCtrlProxyBuilder.prefetchBuild()).toBe(first);
+      expect(IOSCtrlProxyBuilder.pendingPrefetch()).toBe(first);
+
+      const error = await builder.verifyRunnerBinaryBeforeLaunch("simulator").catch((e) => e);
+      expect(error).toBeInstanceOf(CtrlProxyStaleRunnerCacheError);
+      expect(error.message).not.toContain("tampering");
+
+      release.resolve();
+      await first;
+      expect(IOSCtrlProxyBuilder.pendingPrefetch()).toBeNull();
+
+      // Once the prefetch has landed the new runner, the pre-launch gate passes.
+      downloader.runnerChecksum = "new-release-runner-sha";
+      await builder.verifyRunnerBinaryBeforeLaunch("simulator");
+    });
+
+    test("a hash matching no known release with no prefetch in flight keeps the tampering refusal", async function () {
+      const downloader = new FakeIOSCtrlProxyBundleDownloader();
+      downloader.checksum = "expected-checksum";
+      downloader.runnerChecksum = "new-release-runner-sha";
+      IOSCtrlProxyBuilder.setExpectedRunnerChecksumForTesting("new-release-runner-sha", "xctest");
+      const builder = await buildWithRunner(downloader);
+      downloader.runnerChecksum = "swapped-attacker-checksum";
+
+      const error = await builder.verifyRunnerBinaryBeforeLaunch("simulator").catch((e) => e);
+      expect(error).not.toBeInstanceOf(CtrlProxyStaleRunnerCacheError);
+      expect(error.message).toContain("runner binary SHA256 mismatch (pre-launch)");
+      expect(error.message).toContain("possible TOCTOU tampering");
+    });
+
+    test("post-extract mismatch against a previous release stays an integrity failure", async function () {
+      const previousRelease = RELEASE_CHECKSUM_REGISTRY[1];
+      const downloader = new FakeIOSCtrlProxyBundleDownloader();
+      downloader.checksum = "expected-checksum";
+      downloader.runnerChecksum = previousRelease.runnerSha256;
+      IOSCtrlProxyBuilder.setExpectedRunnerChecksumForTesting("new-release-runner-sha", "xctest");
+      IOSCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
+      const builder = IOSCtrlProxyBuilder.getInstance(
+        {
+          derivedDataPath: path.join(tempDir, "DerivedData"),
+          bundleCacheDir: path.join(tempDir, "cache"),
+        },
+        { downloader },
+      );
+
+      const result = await builder.build("simulator");
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("runner binary SHA256 mismatch (post-extract)");
     });
   });
 

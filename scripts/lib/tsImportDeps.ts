@@ -1,11 +1,61 @@
 #!/usr/bin/env bun
+import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import ts from "typescript";
 
+/** Answers whether a repo-relative POSIX path is known to version control (index or merge-base tree). */
+export interface KnownPathLookup {
+  has(repoRelativePosixPath: string): boolean;
+}
+
+type CommandRunner = (file: string, args: string[]) => string;
+
+const runCommand: CommandRunner = (file, args) => execFileSync(file, args, { encoding: "utf8" });
+
+const noKnownPaths: KnownPathLookup = { has: () => false };
+
+/**
+ * Git-backed KnownPathLookup: the union of the index (`git ls-files`) and, when a base ref is
+ * given, the tree at the merge-base with HEAD, so paths deleted on the branch are still known.
+ * Loaded lazily on the first lookup; a git failure (e.g. a jj-only workspace) yields an empty set.
+ */
+export function gitKnownPathLookup(
+  repoRoot: string,
+  baseRef?: string,
+  runner: CommandRunner = runCommand,
+): KnownPathLookup {
+  let known: Set<string> | undefined;
+  const listedPaths = (args: string[]): string[] =>
+    runner("git", ["-C", repoRoot, ...args])
+      .split("\0")
+      .filter((entry) => entry.length > 0);
+  const load = (): Set<string> => {
+    try {
+      const paths = listedPaths(["ls-files", "-z"]);
+      if (baseRef) {
+        const mergeBase = runner("git", ["-C", repoRoot, "merge-base", baseRef, "HEAD"]).trim();
+        paths.push(...listedPaths(["ls-tree", "-r", "-z", "--name-only", mergeBase]));
+      }
+      return new Set(paths);
+    } catch (error) {
+      // Without git metadata the resolver keeps its filesystem-only fallback, which is safe.
+      console.error(`tsImportDeps: git path lookup unavailable: ${String(error)}`);
+      return new Set();
+    }
+  };
+  return {
+    has: (candidate) => {
+      known ??= load();
+      return known.has(candidate);
+    },
+  };
+}
+
 interface ResolveRelativeImportPathsOptions {
   maxDepth?: number;
   repoRoot?: string;
+  knownPaths?: KnownPathLookup;
 }
 
 function isRuntimeRequire(node: ts.CallExpression): boolean {
@@ -60,28 +110,77 @@ function relativeModuleSpecifiers(sourceFile: ts.SourceFile): string[] {
   return specifiers;
 }
 
-function resolveRelativeSpecifier(importingFile: string, specifier: string): string | undefined {
+const knownExtensions = new Set([
+  ".ts",
+  ".tsx",
+  ".js",
+  ".jsx",
+  ".mjs",
+  ".cjs",
+  ".mts",
+  ".cts",
+  ".json",
+]);
+
+// Bun substitutes TypeScript sources for Node-style JavaScript specifiers when the .js file is absent.
+const sourceSubstitutions: Record<string, string[]> = {
+  ".js": [".ts", ".tsx"],
+  ".jsx": [".tsx"],
+  ".mjs": [".mts"],
+  ".cjs": [".cts"],
+};
+
+function toRepoRelativePosix(repoRoot: string, absolutePath: string): string {
+  return path.relative(repoRoot, absolutePath).split(path.sep).join("/");
+}
+
+/**
+ * Picks the first candidate that exists on disk; otherwise every candidate version control still
+ * knows (so a deleted alternate target keeps its identity); otherwise the supplied fallback.
+ */
+function pickCandidates(
+  candidates: string[],
+  fallback: string,
+  repoRoot: string,
+  knownPaths: KnownPathLookup,
+): string[] {
+  const existing = candidates.find((candidate) => existsSync(candidate));
+  if (existing) {
+    return [existing];
+  }
+  const known = candidates.filter((candidate) =>
+    knownPaths.has(toRepoRelativePosix(repoRoot, candidate)),
+  );
+  return known.length > 0 ? known : [fallback];
+}
+
+function resolveRelativeSpecifier(
+  importingFile: string,
+  specifier: string,
+  repoRoot: string,
+  knownPaths: KnownPathLookup,
+): string[] {
   const literalPath = path.resolve(path.dirname(importingFile), specifier);
-  const knownExtensions = new Set([
-    ".ts",
-    ".tsx",
-    ".js",
-    ".jsx",
-    ".mjs",
-    ".cjs",
-    ".mts",
-    ".cts",
-    ".json",
-  ]);
   const extension = path.extname(specifier);
+  const substitutions = sourceSubstitutions[extension];
+  if (substitutions) {
+    const stem = literalPath.slice(0, -extension.length);
+    return pickCandidates(
+      [literalPath, ...substitutions.map((sourceExtension) => `${stem}${sourceExtension}`)],
+      literalPath,
+      repoRoot,
+      knownPaths,
+    );
+  }
   // A known explicit extension is trusted literally without a filesystem probe; anything else (no extension or an unrecognized dotted suffix) uses extensionless resolution.
   if (extension && knownExtensions.has(extension)) {
-    return literalPath;
+    return [literalPath];
   }
-  return (
-    [`${literalPath}.ts`, `${literalPath}.tsx`, path.join(literalPath, "index.ts")].find(
-      (candidate) => existsSync(candidate),
-    ) ?? `${literalPath}.ts`
+  return pickCandidates(
+    [`${literalPath}.ts`, `${literalPath}.tsx`, path.join(literalPath, "index.ts")],
+    `${literalPath}.ts`,
+    repoRoot,
+    knownPaths,
   );
 }
 
@@ -95,6 +194,7 @@ export function resolveRelativeImportPaths(
 ): string[] {
   const maxDepth = options.maxDepth ?? 2;
   const repoRoot = path.resolve(options.repoRoot ?? process.cwd());
+  const knownPaths = options.knownPaths ?? noKnownPaths;
   const visited = new Map<string, number>();
   const dependencies = new Set<string>();
 
@@ -124,12 +224,15 @@ export function resolveRelativeImportPaths(
       return;
     }
     for (const specifier of relativeModuleSpecifiers(sourceFile)) {
-      const dependency = resolveRelativeSpecifier(absolutePath, specifier);
-      if (!dependency) {
-        continue;
+      for (const dependency of resolveRelativeSpecifier(
+        absolutePath,
+        specifier,
+        repoRoot,
+        knownPaths,
+      )) {
+        dependencies.add(toRepoRelativePosix(repoRoot, dependency));
+        visit(dependency, depth + 1);
       }
-      dependencies.add(path.relative(repoRoot, dependency).split(path.sep).join("/"));
-      visit(dependency, depth + 1);
     }
   };
 
@@ -137,12 +240,24 @@ export function resolveRelativeImportPaths(
   return [...dependencies].sort();
 }
 
+// Usage: bun scripts/lib/tsImportDeps.ts <entry.ts> [--base-ref <ref>]
+// --base-ref lets deleted import targets keep their identity via the merge-base tree.
 if (import.meta.main) {
   const repoRoot = path.resolve(import.meta.dir, "../..");
-  const entryFilePath = process.argv[2];
+  const args = process.argv.slice(2);
+  const baseRefIndex = args.indexOf("--base-ref");
+  const baseRef = baseRefIndex === -1 ? undefined : args[baseRefIndex + 1];
+  if (baseRefIndex !== -1 && !baseRef) {
+    console.error("Missing value for --base-ref");
+    process.exit(1);
+  }
+  const entryFilePath = args.filter(
+    (_, index) => index < baseRefIndex || index > baseRefIndex + 1 || baseRefIndex === -1,
+  )[0];
   if (entryFilePath) {
     for (const dependency of resolveRelativeImportPaths(path.resolve(repoRoot, entryFilePath), {
       repoRoot,
+      knownPaths: gitKnownPathLookup(repoRoot, baseRef),
     })) {
       console.log(dependency);
     }

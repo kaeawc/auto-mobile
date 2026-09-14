@@ -9,6 +9,8 @@ import { logger } from "../../../src/utils/logger";
 import { FakeObserveCacheStore } from "../../fakes/FakeObserveCacheStore";
 import { FakeViewHierarchy } from "../../fakes/FakeViewHierarchy";
 import { resetObserveCacheStore } from "../../../src/features/observe/cache/ObserveCacheRegistry";
+import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
+import { defaultTimer } from "../../../src/utils/SystemTimer";
 
 describe("ObserveScreen", function () {
   describe("Unit Tests for Extracted Methods", function () {
@@ -52,6 +54,20 @@ describe("ObserveScreen", function () {
       const result = pinnedObserveScreen.createBaseResult();
 
       expect(result.updatedAt).toBe("2023-06-15T12:00:00.000Z");
+    });
+
+    test("mints one stable observation identity per base result", function () {
+      const idGenerator = new CountingIdGenerator("observation");
+      const screen = new RealObserveScreen(
+        mockDevice,
+        new FakeAdbClientFactory(fakeAdb),
+        undefined,
+        defaultTimer,
+        idGenerator,
+      );
+
+      expect(screen.createBaseResult().observationId).toBe("observation-1");
+      expect(screen.createBaseResult().observationId).toBe("observation-2");
     });
 
     test("should append error message to empty error field", function () {
@@ -213,6 +229,7 @@ describe("ObserveScreen", function () {
         };
         const newerResult = {
           ...screen.createBaseResult(),
+          observationId: "newer-observation",
           updatedAt: 1_000_000,
           viewHierarchy: "newer-hierarchy",
         };
@@ -243,6 +260,7 @@ describe("ObserveScreen", function () {
         };
         const deferredResult = {
           ...screen.createBaseResult(),
+          observationId: "older-observation",
           updatedAt: 1_600_000,
           viewHierarchy: "future-device-time-deferred-hierarchy",
         };
@@ -253,6 +271,59 @@ describe("ObserveScreen", function () {
 
         expect(cacheStore.getRecentInMemoryForDevice(mockDevice.deviceId)).toBe(newerResult);
         expect(cacheStore.getEntryCount()).toBe(1);
+      } finally {
+        resetObserveCacheStore();
+      }
+    });
+
+    test("an intermediate settle observe is read-only while an ordinary observe retains cache and recomposition side effects", async function () {
+      const timer = new FakeTimer();
+      const cacheStore = new FakeObserveCacheStore(timer);
+      const viewHierarchy = new FakeViewHierarchy();
+      viewHierarchy.configureHierarchy({
+        updatedAt: 123,
+        screenWidth: 1080,
+        screenHeight: 1920,
+        wakefulness: "Awake",
+        hierarchy: { node: { bounds: { left: 0, top: 0, right: 1080, bottom: 1920 } } },
+      } as any);
+      class RecordingObserveScreen extends RealObserveScreen {
+        recompositionCalls = 0;
+
+        override async processRecomposition(): Promise<void> {
+          this.recompositionCalls++;
+        }
+      }
+
+      try {
+        const screen = new RecordingObserveScreen(
+          mockDevice,
+          new FakeAdbClientFactory(fakeAdb),
+          {
+            cacheStore,
+            viewHierarchy,
+            performanceAuditor: { run: async () => undefined } as any,
+            accessibilityAuditor: { run: async () => undefined } as any,
+            accessibilityStateDetector: { run: async () => undefined } as any,
+          },
+          timer,
+        );
+
+        await screen.execute({
+          skipRecompositionTracking: true,
+          skipScreenshot: true,
+          skipBackStack: true,
+        });
+
+        expect(viewHierarchy.getRecompositionTrackingCallCount()).toBe(0);
+        expect(cacheStore.getPutCallCount()).toBe(0);
+        expect(screen.recompositionCalls).toBe(0);
+
+        await screen.execute({ skipScreenshot: true, skipBackStack: true });
+
+        expect(viewHierarchy.getRecompositionTrackingCallCount()).toBe(1);
+        expect(cacheStore.getPutCallCount()).toBe(1);
+        expect(screen.recompositionCalls).toBe(1);
       } finally {
         resetObserveCacheStore();
       }

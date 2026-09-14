@@ -310,6 +310,11 @@ export class ListInstalledApps {
       return { apps: { profiles: {}, system: [] }, successful: false };
     }
 
+    // Captured before the cache lookup awaits: a listing that resumes after
+    // its device was retired must not persist rows for it (#6894).
+    const incarnation = getInstalledAppsCacheWriteCoordinator().captureIncarnation(
+      this.device.deviceId,
+    );
     try {
       if (this.cacheEnabled) {
         const cachedApps = await this.getCachedInstalledApps(signal, options);
@@ -318,7 +323,7 @@ export class ListInstalledApps {
         }
       }
 
-      return await this.rebuildInstalledAppsCache(signal, options);
+      return await this.rebuildInstalledAppsCache(incarnation, signal, options);
     } catch (error) {
       signal?.throwIfAborted();
       logger.warn("Failed to list installed apps with details:", error);
@@ -601,12 +606,16 @@ export class ListInstalledApps {
   }
 
   private async rebuildInstalledAppsCache(
+    incarnation: number,
     signal?: AbortSignal,
     options: DetailedListingOptions = {},
   ): Promise<InstalledAppsDetailedResult> {
     signal?.throwIfAborted();
+    // undefined: the device was retired since the request captured its
+    // incarnation. The live result is still returned; it is just not cached.
     const cacheGeneration = getInstalledAppsCacheWriteCoordinator().beginRebuild(
       this.device.deviceId,
+      incarnation,
     );
     const installedApps: InstalledAppsByProfile = { profiles: {}, system: [] };
     const systemAppsMap = new Map<string, SystemInstalledApp>();
@@ -674,37 +683,50 @@ export class ListInstalledApps {
       `Found ${profileAppCount} user app(s) across ${users.length} user(s); ${installedApps.system.length} system app(s) deduped`,
     );
 
-    if (this.cacheEnabled && !hadUserErrors) {
-      try {
-        const committed = await getInstalledAppsCacheWriteCoordinator().commitRebuild(
-          this.device.deviceId,
-          cacheGeneration,
-          () =>
-            getDbWriteBarrier()
-              .track(() =>
-                this.installedAppsRepository.replaceInstalledApps(
-                  this.device.deviceId,
-                  cacheEntries,
-                ),
-              )
-              .then(() => undefined),
-        );
-        if (committed) {
-          getInstalledAppsCacheWriteCoordinator().markRebuilt(
-            this.device.deviceId,
-            cacheGeneration,
-          );
-        }
-      } catch (error) {
-        // The live result remains valid even if its persistence fails. Keep a
-        // dirty cache dirty so a later read retries the database write.
-        logger.warn("[ListInstalledApps] Failed to update installed apps cache:", error);
-      }
-    } else if (this.cacheEnabled && hadUserErrors) {
-      logger.warn("[ListInstalledApps] Skipping cache update due to user listing errors");
+    if (this.cacheEnabled) {
+      await this.persistRebuiltCache(cacheGeneration, cacheEntries, hadUserErrors);
     }
 
     return { apps: installedApps, successful: !hadUserErrors };
+  }
+
+  /**
+   * Persists a rebuilt listing under the generation it began under. A retired
+   * incarnation (`undefined`) and a partial listing are both skipped: the live
+   * result remains valid either way, it is just not cached.
+   */
+  private async persistRebuiltCache(
+    cacheGeneration: number | undefined,
+    cacheEntries: NewInstalledApp[],
+    hadUserErrors: boolean,
+  ): Promise<void> {
+    if (hadUserErrors) {
+      logger.warn("[ListInstalledApps] Skipping cache update due to user listing errors");
+      return;
+    }
+    if (cacheGeneration === undefined) {
+      logger.info("[ListInstalledApps] Skipping cache update: device incarnation was retired");
+      return;
+    }
+    try {
+      const committed = await getInstalledAppsCacheWriteCoordinator().commitRebuild(
+        this.device.deviceId,
+        cacheGeneration,
+        () =>
+          getDbWriteBarrier()
+            .track(() =>
+              this.installedAppsRepository.replaceInstalledApps(this.device.deviceId, cacheEntries),
+            )
+            .then(() => undefined),
+      );
+      if (committed) {
+        getInstalledAppsCacheWriteCoordinator().markRebuilt(this.device.deviceId, cacheGeneration);
+      }
+    } catch (error) {
+      // The live result remains valid even if its persistence fails. Keep a
+      // dirty cache dirty so a later read retries the database write.
+      logger.warn("[ListInstalledApps] Failed to update installed apps cache:", error);
+    }
   }
 
   private isForegroundFor(

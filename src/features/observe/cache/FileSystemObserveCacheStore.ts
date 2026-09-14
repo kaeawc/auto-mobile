@@ -20,6 +20,8 @@ import type { ObserveResultCacheStore, RecentObserveCacheEntry } from "./Observe
 interface ObserveResultCacheEntry {
   timestamp: number;
   deviceId: string;
+  observationId?: string;
+  filename: string;
   observeResult: ObserveResult;
 }
 
@@ -72,6 +74,7 @@ export type ObserveCacheFileWriter = (filePath: string, data: string) => Promise
  * Behaviour parity with the previous `RealObserveScreen` static cache:
  * - In-memory map keyed by `${deviceId}:${timestamp}`.
  * - On-disk files named `observe_${sanitizedDeviceId}_${timestamp}.json`.
+ * - A repeated `observationId` updates its original key and file in place.
  * - Cache directory is `getTempDir(TEMP_SUBDIRS.OBSERVE_RESULTS)`.
  * - 5 minute TTL; expired entries are evicted from memory lazily on read.
  */
@@ -140,8 +143,9 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
     if (this.isStaleWrite(deviceId, generation)) {
       return;
     }
-    const timestamp = cachedAt ?? this.timer.now();
-    const cacheKey = `${deviceId}:${timestamp}`;
+    const existingEntry = this.findExistingEntryForResult(deviceId, result);
+    const timestamp = existingEntry?.entry.timestamp ?? cachedAt ?? this.timer.now();
+    const cacheKey = existingEntry?.cacheKey ?? `${deviceId}:${timestamp}`;
     try {
       logger.debug(
         `[OBSERVE_CACHE] Caching observe result for device ${deviceId} with timestamp ${timestamp}`,
@@ -159,8 +163,15 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
       // later clear() (issue #5892). A supplied `generation` equals the current
       // one here (isStaleWrite passed); an unconditional write stamps current.
       const stampGeneration = this.currentGeneration(deviceId);
-      const filename = this.diskFilename(cacheKey, stampGeneration);
-      this.cache.set(cacheKey, { timestamp, deviceId, observeResult: result });
+      const filename =
+        existingEntry?.entry.filename ?? this.diskFilename(cacheKey, stampGeneration);
+      this.cache.set(cacheKey, {
+        timestamp,
+        deviceId,
+        observationId: result.observationId,
+        filename,
+        observeResult: result,
+      });
       await this.saveObserveResultToDisk(filename, result);
       await this.reapExpiredDiskFiles(deviceId);
       // Residual 1: a clear() can land during the disk write above, and its
@@ -308,7 +319,7 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
       const now = this.timer.now();
       const currentGeneration = this.currentGeneration(deviceId);
       const expiredFiles: string[] = [];
-      let mostRecentFile: { path: string; mtime: number } | undefined;
+      let mostRecentFile: { path: string; timestamp: number } | undefined;
 
       for (const file of jsonFiles) {
         const filePath = path.join(this.cacheDir, file);
@@ -336,8 +347,9 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
           continue;
         }
 
-        if (!mostRecentFile || stats.mtime.getTime() > mostRecentFile.mtime) {
-          mostRecentFile = { path: filePath, mtime: stats.mtime.getTime() };
+        const timestamp = this.parseTimestampFromFilename(file) ?? stats.mtime.getTime();
+        if (!mostRecentFile || timestamp > mostRecentFile.timestamp) {
+          mostRecentFile = { path: filePath, timestamp };
         }
       }
 
@@ -348,17 +360,19 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
         return undefined;
       }
 
-      const age = now - mostRecentFile.mtime;
+      const age = now - mostRecentFile.timestamp;
       logger.debug(`[OBSERVE_CACHE] Loading most recent disk cache file (age: ${age}ms)`);
 
       const cacheData = await readFileAsync(mostRecentFile.path, "utf8");
       const cachedResult = normalizeCachedObserveResult(JSON.parse(cacheData));
 
       // Warm the in-memory cache so subsequent reads avoid the disk round-trip.
-      const cacheKey = `${deviceId}:${mostRecentFile.mtime}`;
+      const cacheKey = `${deviceId}:${mostRecentFile.timestamp}`;
       this.cache.set(cacheKey, {
-        timestamp: mostRecentFile.mtime,
+        timestamp: mostRecentFile.timestamp,
         deviceId,
+        observationId: cachedResult.observationId,
+        filename: path.basename(mostRecentFile.path),
         observeResult: cachedResult,
       });
       logger.debug(`[OBSERVE_CACHE] Updated in-memory cache from disk cache`);
@@ -377,6 +391,33 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
    */
   private diskFilename(cacheKey: string, generation: number): string {
     return `observe_${cacheKey.replace(/:/g, "_")}_g${generation}.json`;
+  }
+
+  /** Extract the host cache timestamp embedded in current and legacy filenames. */
+  private parseTimestampFromFilename(filename: string): number | undefined {
+    const match = /_(\d+)(?:_g\d+)?\.json$/.exec(filename);
+    return match ? Number(match[1]) : undefined;
+  }
+
+  private findEntryByObservationId(
+    deviceId: string,
+    observationId: string,
+  ): { cacheKey: string; entry: ObserveResultCacheEntry } | undefined {
+    for (const [cacheKey, entry] of this.cache.entries()) {
+      if (entry.deviceId === deviceId && entry.observationId === observationId) {
+        return { cacheKey, entry };
+      }
+    }
+    return undefined;
+  }
+
+  private findExistingEntryForResult(
+    deviceId: string,
+    result: ObserveResult,
+  ): { cacheKey: string; entry: ObserveResultCacheEntry } | undefined {
+    return result.observationId === undefined
+      ? undefined
+      : this.findEntryByObservationId(deviceId, result.observationId);
   }
 
   /**

@@ -683,10 +683,11 @@ function pickInlineResidue(
   ctx: FinalizeToolResponseContext,
   payload: Record<string, unknown>,
 ): Record<string, unknown> {
+  const requiredArrayKeys = new Set(requiredOutputSchemaArrayKeys(ctx.outputSchema));
   return Object.fromEntries(
     inlineResidueKeys(ctx)
       .filter((key) => payload[key] !== undefined)
-      .map((key) => [key, boundResidueField(payload[key])]),
+      .map((key) => [key, boundResidueField(payload[key], requiredArrayKeys.has(key))]),
   );
 }
 
@@ -735,6 +736,17 @@ function requiredOutputSchemaKeys(schema: unknown): readonly string[] {
     .map(([key]) => key);
 }
 
+/** Required output fields whose declared value is an array. */
+function requiredOutputSchemaArrayKeys(schema: unknown): readonly string[] {
+  const objectSchema = unwrapOutputObjectSchema(schema);
+  if (!objectSchema) {
+    return [];
+  }
+  return Object.entries(objectSchema.shape)
+    .filter(([, fieldSchema]) => !fieldSchema.isOptional() && fieldSchema instanceof z.ZodArray)
+    .map(([key]) => key);
+}
+
 function unwrapOutputObjectSchema(schema: unknown): z.ZodObject | undefined {
   let candidate = schema;
   const seen = new Set<unknown>();
@@ -754,9 +766,10 @@ function unwrapOutputObjectSchema(schema: unknown): z.ZodObject | undefined {
 }
 
 /**
- * The last-resort residue: every non-scalar field replaced with the
- * `{ _truncated, bytes }` marker, so the inline size is a fixed function of the
- * field COUNT rather than of the payload. Scalars (a `success` boolean, a
+ * The last-resort residue: non-scalar fields are replaced with the
+ * `{ _truncated, bytes }` marker, except arrays become empty arrays to retain
+ * their declared schema shape. The inline size is therefore a fixed function of
+ * the field COUNT rather than of the payload. Scalars (a `success` boolean, a
  * `polls` count) are the headline a client actually acts on and are always tiny.
  */
 function markerResidue(
@@ -768,20 +781,47 @@ function markerResidue(
       .filter((key) => payload[key] !== undefined)
       .map((key) => [
         key,
-        typeof payload[key] === "object" || typeof payload[key] === "string"
-          ? boundStructuredField(payload[key], false, 0)
-          : payload[key],
+        Array.isArray(payload[key])
+          ? []
+          : typeof payload[key] === "object" || typeof payload[key] === "string"
+            ? boundStructuredField(payload[key], false, 0)
+            : payload[key],
       ]),
   );
 }
 
-function boundResidueField(value: unknown): unknown {
+function boundResidueField(value: unknown, preserveArrayShape: boolean = false): unknown {
   if (typeof value === "string") {
     return value.length <= INLINE_RESIDUE_FIELD_LIMIT
       ? value
       : `${truncateBodyText(value, INLINE_RESIDUE_FIELD_LIMIT)}${RESIDUE_TRUNCATION_SUFFIX}`;
   }
+  if (preserveArrayShape && Array.isArray(value)) {
+    return boundResidueArray(value);
+  }
   return boundStructuredField(value, false, INLINE_RESIDUE_FIELD_LIMIT);
+}
+
+function boundResidueArray(value: unknown[]): unknown[] {
+  if (boundStructuredField(value, false, INLINE_RESIDUE_FIELD_LIMIT) === value) {
+    return value;
+  }
+
+  // Required array fields must remain arrays after a #6950/#6981 spill, unlike
+  // boundStructuredField's telemetry marker behavior; retain real prefix values
+  // only, because the artifact already contains the complete untruncated array.
+  let low = 0;
+  let high = value.length;
+  while (low < high) {
+    const end = Math.ceil((low + high) / 2);
+    const serialized = JSON.stringify(value.slice(0, end));
+    if (serialized !== undefined && serialized.length <= INLINE_RESIDUE_FIELD_LIMIT) {
+      low = end;
+    } else {
+      high = end - 1;
+    }
+  }
+  return value.slice(0, low);
 }
 
 /** Marks a residue string as cut, so a client never reads a partial value as whole. */

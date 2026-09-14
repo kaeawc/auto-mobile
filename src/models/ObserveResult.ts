@@ -151,6 +151,28 @@ export interface ObserveResult {
   observationId: string;
 
   /**
+   * The concrete device this observation resolved to and ran against (issue
+   * #7018). The registry resolves a `platform` request to one device
+   * internally; surfacing that resolved id lets a client construct the
+   * observation-scoped screenshot resource URI, which needs BOTH `deviceId` and
+   * `observationId`. Optional on the model — recorded captures that predate the
+   * field omit it, and in-memory literals need not set it — while the advertised
+   * output schema requires it on the wire (see `requireObservationJoinKeysOnTheWire`).
+   */
+  deviceId?: string;
+
+  /**
+   * Fully-encoded observation-scoped screenshot resource URI for this exact
+   * observation (issue #7018), built from `deviceId` + `observationId` via the
+   * shared `buildObservationScreenshotUri` encoder so it round-trips to the
+   * `automobile:observation/{deviceId}/{observationId}/screenshot` resource
+   * template. Populated on the wire at the serialization chokepoint
+   * (`finalizeToolResponse`), not by the capture pipeline; optional on the model
+   * for the same reason `deviceId` is.
+   */
+  observationScreenshotResourceUri?: string;
+
+  /**
    * Timestamp when the screen state was captured on the device (milliseconds since epoch)
    * This comes from the CtrlProxy on Android or equivalent on iOS
    * Falls back to server timestamp if device timestamp is unavailable

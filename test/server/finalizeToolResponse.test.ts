@@ -15,6 +15,12 @@ import type { ObserveResult } from "../../src/models/ObserveResult";
 import { setElementProvenance } from "../../src/features/observe/output/elementProvenance";
 import { logger } from "../../src/utils/logger";
 import { getDeviceSessionIdFromResult } from "../../src/server/deviceSessionResult";
+import { buildObservationScreenshotUri } from "../../src/server/observationResourceUris";
+import {
+  RESOURCE_URIS as OBSERVATION_RESOURCE_URIS,
+  registerObservationResources,
+} from "../../src/server/observationResources";
+import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import { z } from "zod/v4";
 
 /**
@@ -22,6 +28,27 @@ import { z } from "zod/v4";
  * an empty-string field, a default-false boolean, and a `view-id` that
  * duplicates `resource-id`. sanitizeObserveResult should drop all three.
  */
+/**
+ * Decode an observation-screenshot resource URI back through the ACTUAL #7000
+ * resource template registration, proving the emitted URI is built with the
+ * same encoding the resource parses (issue #7018).
+ */
+function matchObservationScreenshotUri(uri: string): {
+  deviceId: string;
+  observationId: string;
+} {
+  registerObservationResources();
+  const match = ResourceRegistry.matchTemplate(uri);
+  if (!match) {
+    throw new Error(`URI did not match the observation screenshot template: ${uri}`);
+  }
+  expect(match.template.uriTemplate).toBe(OBSERVATION_RESOURCE_URIS.OBSERVATION_SCREENSHOT);
+  return {
+    deviceId: decodeURIComponent(match.params.deviceId),
+    observationId: decodeURIComponent(match.params.observationId),
+  };
+}
+
 function makeObserveResult(): ObserveResult {
   return {
     updatedAt: 123,
@@ -1013,6 +1040,66 @@ describe("finalizeToolResponse", () => {
       );
     });
 
+    test("a full observe output surfaces the resolved deviceId and screenshot resource URI (issue #7018)", () => {
+      const observe = {
+        ...sameScreenObserve(),
+        observationId: "observe-abc",
+        deviceId: "emulator-5554",
+      };
+      const finalized = finalizeToolResponse(createStructuredToolResponse(observe), {
+        name: "observe",
+      });
+
+      const sc = finalized.structuredContent as any;
+      expect(sc.deviceId).toBe("emulator-5554");
+      expect(sc.observationScreenshotResourceUri).toBe(
+        buildObservationScreenshotUri("emulator-5554", "observe-abc"),
+      );
+      // The URI is built via the shared template encoder and round-trips back to
+      // the #7000 observation-screenshot resource with the same identities.
+      expect(matchObservationScreenshotUri(sc.observationScreenshotResourceUri)).toEqual({
+        deviceId: "emulator-5554",
+        observationId: "observe-abc",
+      });
+      // Text mirror agrees.
+      expect(JSON.parse(finalized.content[0].text).observationScreenshotResourceUri).toBe(
+        sc.observationScreenshotResourceUri,
+      );
+    });
+
+    test("a diffed action observation carries the deviceId + screenshot resource URI (issue #7018)", () => {
+      const { store } = makeStore();
+      finalizeToolResponse(
+        createStructuredToolResponse({ ...sameScreenObserve(), deviceId: "emulator-5554" }),
+        { name: "observe", sessionUuid: "s1", baselineStore: store },
+      );
+
+      const next = {
+        ...sameScreenObserve(),
+        observationId: "post-action-observation",
+        deviceId: "emulator-5554",
+      };
+      (next.viewHierarchy!.hierarchy.node as any).node[0].checked = "true";
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: next }),
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
+      );
+
+      const observation = (finalized.structuredContent as any).observation;
+      expect(observation.isDiff).toBe(true);
+      expect(observation.deviceId).toBe("emulator-5554");
+      expect(observation.observationScreenshotResourceUri).toBe(
+        buildObservationScreenshotUri("emulator-5554", "post-action-observation"),
+      );
+      expect(matchObservationScreenshotUri(observation.observationScreenshotResourceUri)).toEqual({
+        deviceId: "emulator-5554",
+        observationId: "post-action-observation",
+      });
+      expect(
+        JSON.parse(finalized.content[0].text).observation.observationScreenshotResourceUri,
+      ).toBe(observation.observationScreenshotResourceUri);
+    });
+
     test("a diffed observation carries `accessibilityAuditSkipped` with the same shape as full mode (issue #6926)", () => {
       const { store } = makeStore();
       const withAccessibilityAuditSkipped = (): ObserveResult => ({
@@ -1047,6 +1134,7 @@ describe("finalizeToolResponse", () => {
       const withPassthroughMetadata = (): ObserveResult => ({
         ...sameScreenObserve(),
         observationId: "passthrough-observation",
+        deviceId: "emulator-5554",
         freshness,
         settled: true,
         accessibilityAuditSkipped: "settled_capture_adopted",

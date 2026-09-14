@@ -1,5 +1,5 @@
 import { z } from "zod/v4";
-import { withJsonSchemaOverride } from "./toolSchemaHelpers";
+import { withJsonSchemaOverride, withPostFlattenJsonSchemaOverride } from "./toolSchemaHelpers";
 
 // Android accessibility returns boolean attributes as strings ("true"/"false")
 // This schema accepts both for compatibility
@@ -498,7 +498,7 @@ export const viewHierarchyResultSchema = z
  * The runtime mints it on every emitted observation (`RealObserveScreen`), so
  * the advertised output contract lists it as required. The same zod schemas
  * also validate recorded captures that predate the field, so the parse schema
- * keeps it optional; {@link requireObservationIdOnTheWire} adds it to the
+ * keeps it optional; {@link requireObservationJoinKeysOnTheWire} adds it to the
  * advertised JSON Schema `required` list without touching runtime validation.
  */
 const observationIdSchema = z
@@ -507,19 +507,68 @@ const observationIdSchema = z
   .describe("Observation-scoped screenshot resource URI join key.");
 
 /**
- * Advertise `observationId` as required (in property order, so the generated
- * `required` list is stable) while the zod schema still parses captures that
- * omit it. Registers by schema identity, so call it on the final exported
- * schema object.
+ * The concrete device this observation resolved to and ran against (issue
+ * #7018). Same wire contract as {@link observationIdSchema}: optional on parse
+ * (recorded captures predate it) but advertised required on the wire, because a
+ * client needs BOTH `deviceId` and `observationId` to build the
+ * observation-scoped screenshot resource URI.
  */
-function requireObservationIdOnTheWire(schema: z.ZodTypeAny): void {
+const observationDeviceIdSchema = z
+  .string()
+  .optional()
+  .describe(
+    "Resolved device this observation ran against; join key (with observationId) for the observation-scoped screenshot resource.",
+  );
+
+/**
+ * Fully-encoded observation-scoped screenshot resource URI (issue #7018), built
+ * from `deviceId` + `observationId` so a client can read the paired screenshot
+ * without assembling the URI itself. Same wire contract as
+ * {@link observationIdSchema}.
+ */
+const observationScreenshotResourceUriSchema = z
+  .string()
+  .optional()
+  .describe(
+    "Fully-encoded automobile:observation/{deviceId}/{observationId}/screenshot resource URI for this observation.",
+  );
+
+/**
+ * The observation join keys advertised as required on the wire (issue #7018):
+ * the screenshot-resource join keys and the ready-built resource URI. All three
+ * stay optional on the zod parse schema so recorded captures that predate them
+ * still validate.
+ */
+const OBSERVATION_WIRE_REQUIRED_KEYS = [
+  "observationId",
+  "deviceId",
+  "observationScreenshotResourceUri",
+] as const;
+
+/**
+ * Advertise the observation join keys as required (in property order, so the
+ * generated `required` list is stable) while the zod schema still parses
+ * captures that omit them. Registers by schema identity, so call it on the
+ * final exported schema object. Only keys the schema actually declares are
+ * promoted, so a schema that lists a subset advertises exactly that subset.
+ */
+function requireObservationJoinKeysOnTheWire(schema: z.ZodTypeAny): void {
   withJsonSchemaOverride(schema, (jsonSchema) => {
     const properties = jsonSchema.properties as Record<string, unknown> | undefined;
-    if (!properties || !Object.hasOwn(properties, "observationId")) {
+    if (!properties) {
       return;
     }
     const required = new Set(Array.isArray(jsonSchema.required) ? jsonSchema.required : []);
-    required.add("observationId");
+    let addedAny = false;
+    for (const key of OBSERVATION_WIRE_REQUIRED_KEYS) {
+      if (Object.hasOwn(properties, key)) {
+        required.add(key);
+        addedAny = true;
+      }
+    }
+    if (!addedAny) {
+      return;
+    }
     // Keep `additionalProperties` as the trailing key so the generated
     // `schemas/tool-definitions.json` stays byte-stable.
     const { additionalProperties, ...rest } = jsonSchema;
@@ -532,6 +581,66 @@ function requireObservationIdOnTheWire(schema: z.ZodTypeAny): void {
     if (additionalProperties !== undefined) {
       jsonSchema.additionalProperties = additionalProperties;
     }
+  });
+}
+
+/**
+ * The advertised output schema of the `observe` tool is a `z.union` of the
+ * ordinary observation ({@link observeResultSchema}) and the hard-ceiling
+ * artifact-spill metadata ({@link toolOutputArtifactMetadataSchema}). The
+ * registry flattens that top-level union into ONE object schema for `tools/list`
+ * (top-level `anyOf`/`oneOf` is rejected by the Anthropic API and many MCP
+ * clients), and flattening reduces each arm's `required` to the cross-arm
+ * intersection — dropping the join keys entirely — then re-homes the observe
+ * arm's arm-only `required` under whatever single-const property it finds first
+ * (`accessibilityAuditSkipped`). That leaves the join keys advertised as required
+ * ONLY when `accessibilityAuditSkipped` is present, so an ordinary successful
+ * observation wrongly advertises them as optional (issue #7018).
+ *
+ * A per-node {@link requireObservationJoinKeysOnTheWire} cannot fix this: it runs
+ * before flattening. Re-assert the contract on the POST-flatten object instead —
+ * the join keys are required on the successful-observation arm (every shape
+ * except the artifact spill, which is the only arm carrying `artifact`), not on
+ * the artifact/spill arm where they do not apply. The requirement is expressed as
+ * an `if artifact present -> then no join keys / else join keys required`
+ * conditional, the same `if/then/else` construct the flattener already emits for
+ * branch-only required fields.
+ */
+function requireObservationJoinKeysOnFlattenedUnion(schema: z.ZodTypeAny): void {
+  withPostFlattenJsonSchemaOverride(schema, (jsonSchema) => {
+    const properties = jsonSchema.properties as Record<string, unknown> | undefined;
+    if (!properties) {
+      return;
+    }
+    const joinKeys = OBSERVATION_WIRE_REQUIRED_KEYS.filter((key) => Object.hasOwn(properties, key));
+    // Only act on the flattened observe union: it declares the join keys and the
+    // `artifact` spill arm's discriminating property.
+    if (joinKeys.length === 0 || !Object.hasOwn(properties, "artifact")) {
+      return;
+    }
+    // The flattener emits a single `if/then` (no `else`) whose `then.required` is
+    // exactly the observe arm's arm-only required (the join keys) gated on a
+    // bogus discriminator. Only rewrite when the pre-flatten conditional is
+    // either absent or exactly that join-key requirement; if it is anything else
+    // (a future arm added its own branch-only required), bail rather than clobber
+    // it — the assumptions here no longer hold and must be revisited deliberately.
+    const then = jsonSchema.then as { required?: unknown } | undefined;
+    const thenRequired = Array.isArray(then?.required) ? (then.required as string[]) : undefined;
+    const hasConditional = "if" in jsonSchema || "then" in jsonSchema || "else" in jsonSchema;
+    const isJoinKeyOnlyConditional =
+      !("else" in jsonSchema) &&
+      thenRequired !== undefined &&
+      thenRequired.every((key) => (joinKeys as string[]).includes(key));
+    if (hasConditional && !isJoinKeyOnlyConditional) {
+      return;
+    }
+    delete jsonSchema.if;
+    delete jsonSchema.then;
+    delete jsonSchema.else;
+    // Require the join keys on every shape except the artifact spill arm.
+    jsonSchema.if = { required: ["artifact"] };
+    jsonSchema.then = {};
+    jsonSchema.else = { required: [...joinKeys] };
   });
 }
 
@@ -556,6 +665,8 @@ export const observationSummarySchema = z
   .object({
     isDiff: z.literal(false).optional(),
     observationId: observationIdSchema,
+    deviceId: observationDeviceIdSchema,
+    observationScreenshotResourceUri: observationScreenshotResourceUriSchema,
     selectedElements: z.array(selectedElementSchema).optional(),
     focusedElement: elementSchema.optional(),
     accessibilityFocusedElement: elementSchema.optional(),
@@ -588,7 +699,7 @@ export const observationSummarySchema = z
       ),
   })
   .passthrough();
-requireObservationIdOnTheWire(observationSummarySchema);
+requireObservationJoinKeysOnTheWire(observationSummarySchema);
 
 /**
  * A `MediaView` entry from the `elements.media` array. Real captures carry an
@@ -770,6 +881,8 @@ export const observeDiffSchema = z
     keyboard: z.object({ visible: z.literal(true), package: z.string() }).optional(),
     isDiff: z.literal(true),
     observationId: observationIdSchema,
+    deviceId: observationDeviceIdSchema,
+    observationScreenshotResourceUri: observationScreenshotResourceUriSchema,
     skeleton: z
       .array(skeletonElementSchema)
       .describe(
@@ -839,7 +952,7 @@ export const observeDiffSchema = z
       .optional(),
   })
   .passthrough();
-requireObservationIdOnTheWire(observeDiffSchema);
+requireObservationJoinKeysOnTheWire(observeDiffSchema);
 
 /**
  * `observation`, as embedded on an action tool result (issue #6221 item 4): a
@@ -955,6 +1068,8 @@ export const observeResultSchema = z
   .object({
     keyboard: z.object({ visible: z.literal(true), package: z.string() }).optional(),
     observationId: observationIdSchema,
+    deviceId: observationDeviceIdSchema,
+    observationScreenshotResourceUri: observationScreenshotResourceUriSchema,
     screenSize: screenSizeSchema.optional(),
     systemInsets: systemInsetsSchema.optional(),
     insets: observationInsetsSchema.optional(),
@@ -1019,9 +1134,10 @@ export const observeResultSchema = z
     observeScope: observeScopeMetadataSchema.optional(),
   })
   .passthrough();
-requireObservationIdOnTheWire(observeResultSchema);
+requireObservationJoinKeysOnTheWire(observeResultSchema);
 
 export const observeToolResultSchema = z.union([
   observeResultSchema,
   toolOutputArtifactMetadataSchema,
 ]);
+requireObservationJoinKeysOnFlattenedUnion(observeToolResultSchema);

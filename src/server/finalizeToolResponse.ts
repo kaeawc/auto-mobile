@@ -24,6 +24,7 @@ import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
 import { isDeviceSessionAcquisitionTool } from "./deviceSessionResult";
 import { isHostOutputTruncationReason } from "../features/observe/truncationReasons";
+import { buildObservationScreenshotUri } from "./observationResourceUris";
 
 /**
  * Read/write access to the per-session diff baseline — the "last observation
@@ -208,6 +209,7 @@ export const DIFF_PASSTHROUGH_METADATA_FIELDS = [
   "activeWindow",
   "freshness",
   "observationId",
+  "deviceId",
   "settled",
   "accessibilityAuditSkipped",
 ] as const satisfies readonly (keyof ObserveResult)[];
@@ -228,6 +230,35 @@ function copyDefinedFields<T extends object, K extends keyof T>(
     }
   }
   return metadata;
+}
+
+/**
+ * Stamp the fully-encoded observation-scoped screenshot resource URI onto an
+ * emitted observation or diff (issue #7018). The observe path resolves the
+ * concrete device internally and mints an `observationId`, but the caller could
+ * not previously construct the `automobile:observation/{deviceId}/{observationId}/screenshot`
+ * URI because the resolved `deviceId` never reached the wire. With both now
+ * present, build the URI through the SAME shared encoder the resource template
+ * registration uses, so it is guaranteed to round-trip back to that resource.
+ * A no-op when either identity is missing (e.g. a recorded capture that predates
+ * `deviceId`), so the field stays absent exactly like an unset optional.
+ */
+function attachObservationScreenshotUri(observation: {
+  deviceId?: string;
+  observationId?: string;
+  observationScreenshotResourceUri?: string;
+}): void {
+  if (
+    typeof observation.deviceId === "string" &&
+    observation.deviceId.length > 0 &&
+    typeof observation.observationId === "string" &&
+    observation.observationId.length > 0
+  ) {
+    observation.observationScreenshotResourceUri = buildObservationScreenshotUri(
+      observation.deviceId,
+      observation.observationId,
+    );
+  }
 }
 
 /**
@@ -447,6 +478,7 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
         served.layoutWarnings = capLayoutWarnings(served.layoutWarnings);
       }
     }
+    attachObservationScreenshotUri(served);
     sanitizedPayload = served as unknown as Record<string, unknown>;
     hasArtifactableObservation = true;
   } else if (!isObserveTool && payload.observation !== undefined) {
@@ -592,6 +624,15 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
           };
         }
         pendingBaselineUpdate = { sessionUuid: ctx.sessionUuid!, observation: sanitized };
+      }
+      if (observationOut && typeof observationOut === "object") {
+        attachObservationScreenshotUri(
+          observationOut as {
+            deviceId?: string;
+            observationId?: string;
+            observationScreenshotResourceUri?: string;
+          },
+        );
       }
       sanitizedPayload = {
         ...payload,

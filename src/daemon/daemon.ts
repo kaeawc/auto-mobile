@@ -262,6 +262,18 @@ export function isProcessWideAdbServerReset(
 /** Completes the FUNNEL 2 refusal: "Refusing `<purpose>` on device '<serial>'". */
 const STORAGE_WATCH_PURPOSE = "to watch stored values";
 
+export type DaemonProcessBirthTimeProvider = () => number;
+
+/**
+ * Captures a wall-clock approximation of this OS process's birth time, rather
+ * than the later point at which daemon bootstrap constructs its generation.
+ * `process.uptime()` is rooted at process creation, so it remains comparable to
+ * the process-table birth timestamps read by DaemonManager.
+ */
+function defaultDaemonProcessBirthTime(): number {
+  return Date.now() - Math.max(0, process.uptime() * 1_000);
+}
+
 export class Daemon {
   private httpServer: HttpServer | null = null;
   private httpServerClosePromise: Promise<void> | null = null;
@@ -297,6 +309,7 @@ export class Daemon {
   private deviceSessionRepository: DeviceSessionRepository;
   private timer: Timer;
   private readonly generationStartedAt: number;
+  private readonly processStartedAt: number;
   private idGenerator: IdGenerator;
   private databaseInitializer: DatabaseInitializer;
   private toolSelectionProfileProvenanceLoader: ToolSelectionProfileProvenanceLoader;
@@ -336,6 +349,7 @@ export class Daemon {
     managedAdbServerShutdown: ManagedAdbServerShutdown = stopManagedAdbServer,
     toolSelectionProfileProvenanceLoader: ToolSelectionProfileProvenanceLoader = defaultToolSelectionProfileRegistry,
     private readonly httpServerFactory: () => HttpServer = () => createHttpServer(),
+    processBirthTime: DaemonProcessBirthTimeProvider = defaultDaemonProcessBirthTime,
   ) {
     this.options = { ...options };
     this.port = options.port || DEFAULT_DAEMON_PORT;
@@ -348,6 +362,7 @@ export class Daemon {
     this.daemonSessionId = this.idGenerator.next();
     this.timer = timer;
     this.generationStartedAt = this.timer.now();
+    this.processStartedAt = processBirthTime();
     this.databaseInitializer = databaseInitializer;
     this.toolSelectionProfileProvenanceLoader = toolSelectionProfileProvenanceLoader;
     this.databaseHealthProbe = databaseHealthProbe;
@@ -1150,7 +1165,7 @@ export class Daemon {
    * TOCTOU (a daemon opening the DB immediately after the guard's check) is covered
    * by the migration cross-process lock (#2794). Issue #2871.
    *
-   * The record is minimal by design (pid, dbPath, socketPath, startedAt, version).
+   * The record is minimal by design (pid, dbPath, socketPath, startedAt, processStartedAt, version).
    * Consumers that gate on daemon readiness — `status()`/`waitForReady()` — key on
    * the socket file plus `verifyDaemonConnection`, not on the PID file's `port`, so
    * a partial record written before the socket exists cannot make the daemon look
@@ -1163,6 +1178,7 @@ export class Daemon {
       port: this.port,
       dbPath: getDatabasePath(),
       startedAt: this.generationStartedAt,
+      processStartedAt: this.processStartedAt,
       version: DAEMON_VERSION,
       launchLogPath: this.launchLogPath(),
       assetVersion: resolveAssetVersion(resolvePinnedVersion()),
@@ -1189,6 +1205,7 @@ export class Daemon {
       port: this.port,
       dbPath: getDatabasePath(),
       startedAt: this.generationStartedAt,
+      processStartedAt: this.processStartedAt,
       version: DAEMON_VERSION,
       launchLogPath: this.launchLogPath(),
       assetVersion: resolveAssetVersion(resolvePinnedVersion()),

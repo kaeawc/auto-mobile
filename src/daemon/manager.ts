@@ -426,6 +426,13 @@ export interface DaemonProcessSignaler {
   signal(pid: number, signal: NodeJS.Signals): void;
 }
 
+/**
+ * Process tables expose only second-granularity birth data on some supported
+ * platforms. Keep a small allowance for that representation, but compare both
+ * directions: an older process is not interchangeable with this generation.
+ */
+const DAEMON_PROCESS_BIRTH_IDENTITY_TOLERANCE_MS = 2_000;
+
 const defaultDaemonProcessSignaler: DaemonProcessSignaler = {
   signal(pid, signal): void {
     process.kill(pid, signal);
@@ -2081,29 +2088,47 @@ export class DaemonManager implements DaemonManagerLike {
     status: DaemonStatus,
     candidates: DaemonProcessRecord[],
   ): DaemonProcessRecord | undefined {
-    if (
-      !status.running ||
-      status.pid === undefined ||
-      status.socketPath !== this.socketPath ||
-      status.startedAt === undefined
-    ) {
+    if (!status.running || status.pid === undefined || status.socketPath !== this.socketPath) {
       return undefined;
     }
     const candidate = candidates.find((process) => process.pid === status.pid);
-    if (
-      !candidate ||
-      candidate.startedAt === undefined ||
-      // The PID record is written by Daemon after process bootstrap, while
-      // process tables report OS process birth. A legitimate cold start can
-      // therefore predate its record by more than two seconds. PID reuse is
-      // still fenced: a daemon with the same PID born materially after the
-      // recorded generation cannot be that generation. Keep the existing
-      // two-second allowance for second-resolution process tables.
-      candidate.startedAt > status.startedAt + 2_000
-    ) {
+    if (!candidate || !this.matchesRecordedDaemonGeneration(status, candidate)) {
       return undefined;
     }
     return candidate;
+  }
+
+  /**
+   * Compare a PID file to the process table using the OS process-birth value
+   * written by current daemons. PID files from before that field existed retain
+   * a narrow, symmetric startedAt fallback: it supports normal old records but
+   * refuses a slow-bootstrap process rather than accepting one merely because
+   * it happens to be older than daemon initialization.
+   */
+  private matchesRecordedDaemonGeneration(
+    status: DaemonStatus,
+    candidate: DaemonProcessRecord,
+  ): boolean {
+    const expectedStartedAt = status.processStartedAt ?? status.startedAt;
+    return (
+      expectedStartedAt !== undefined &&
+      candidate.startedAt !== undefined &&
+      Math.abs(candidate.startedAt - expectedStartedAt) <=
+        DAEMON_PROCESS_BIRTH_IDENTITY_TOLERANCE_MS
+    );
+  }
+
+  private matchesObservedDaemonGeneration(
+    expected: DaemonProcessRecord,
+    candidate: DaemonProcessRecord,
+  ): boolean {
+    return (
+      expected.pid === candidate.pid &&
+      expected.startedAt !== undefined &&
+      candidate.startedAt !== undefined &&
+      Math.abs(candidate.startedAt - expected.startedAt) <=
+        DAEMON_PROCESS_BIRTH_IDENTITY_TOLERANCE_MS
+    );
   }
 
   private assertRecoveryCandidateIsScoped(
@@ -2142,25 +2167,11 @@ export class DaemonManager implements DaemonManagerLike {
     if (recordedCandidate === undefined) {
       return;
     }
-    const currentCandidate = this.findLiveDaemonProcessRecords(
-      this.remainingRecoveryTime(recoveryDeadline),
-    ).find(
-      (candidate) =>
-        candidate.pid === recordedCandidate.pid &&
-        candidate.startedAt !== undefined &&
-        recordedCandidate.startedAt !== undefined &&
-        Math.abs(candidate.startedAt - recordedCandidate.startedAt) <= 2_000,
-    );
-    if (!currentCandidate) {
-      throw new ActionableError(
-        "Doctor repair could not verify the recorded daemon process generation before signalling it.",
-      );
-    }
     this.throwIfRecoveryCancelled(signal);
     stderrLog(
       `Repair force-stopping the verified daemon for this control namespace (PID ${recordedCandidate.pid})...`,
     );
-    await this.stopUnrecordedDaemonProcess(recordedCandidate.pid);
+    await this.stopUnrecordedDaemonProcess(recordedCandidate, recoveryDeadline, signal);
   }
 
   private remainingRecoveryTime(recoveryDeadline: number | undefined): number | undefined {
@@ -2421,6 +2432,7 @@ export class DaemonManager implements DaemonManagerLike {
         sockets: pidData.sockets,
         dbPath: pidData.dbPath,
         startedAt: pidData.startedAt,
+        processStartedAt: pidData.processStartedAt,
         version: pidData.version,
         assetVersion: pidData.assetVersion,
         entryScript: pidData.entryScript,
@@ -2645,7 +2657,7 @@ export class DaemonManager implements DaemonManagerLike {
       `Explicit restart force-stopping ${candidates.length} live AutoMobile daemon candidate(s) without this namespace's PID record...`,
     );
     await this.awaitRestartCleanup(
-      candidates.map((pid) => () => this.stopUnrecordedDaemonProcess(pid)),
+      candidates.map((pid) => () => this.stopExplicitRestartDaemonProcess(pid)),
     );
   }
 
@@ -2663,7 +2675,75 @@ export class DaemonManager implements DaemonManagerLike {
     }
   }
 
-  private async stopUnrecordedDaemonProcess(pid: number): Promise<void> {
+  /**
+   * Re-scan immediately before each signal and require the exact process-table
+   * generation that was previously verified. A PID alone is never a safe signal
+   * target: it may have been reused after the original candidate exited.
+   */
+  private async stopUnrecordedDaemonProcess(
+    expected: DaemonProcessRecord,
+    recoveryDeadline: number | undefined,
+    signal: AbortSignal | undefined,
+  ): Promise<void> {
+    if (!this.verifyDaemonGenerationBeforeSignal(expected, recoveryDeadline)) {
+      stderrLog(`Daemon candidate ${expected.pid} exited before explicit restart could stop it.`);
+      return;
+    }
+    this.throwIfRecoveryCancelled(signal);
+
+    stderrLog(`Stopping daemon without this namespace's PID record (PID ${expected.pid})...`);
+    try {
+      this.processSignaler.signal(expected.pid, "SIGTERM");
+    } catch (error) {
+      if (this.isMissingProcessError(error)) {
+        return;
+      }
+      throw new ActionableError(
+        `Failed to stop verified daemon process ${expected.pid}: ${this.describeError(error)}`,
+      );
+    }
+
+    if (
+      await this.waitForStop(
+        expected.pid,
+        this.stopWaitTimeout(DAEMON_SHUTDOWN_TIMEOUT_MS, recoveryDeadline),
+      )
+    ) {
+      return;
+    }
+
+    stderrLog(`Verified daemon ${expected.pid} did not stop gracefully, sending SIGKILL...`);
+    if (!this.verifyDaemonGenerationBeforeSignal(expected, recoveryDeadline)) {
+      stderrLog(
+        `Daemon candidate ${expected.pid} exited before explicit restart could force-stop it.`,
+      );
+      return;
+    }
+    this.throwIfRecoveryCancelled(signal);
+    try {
+      this.processSignaler.signal(expected.pid, "SIGKILL");
+    } catch (error) {
+      if (this.isMissingProcessError(error)) {
+        return;
+      }
+      throw new ActionableError(
+        `Failed to force-stop verified daemon process ${expected.pid}: ${this.describeError(error)}`,
+      );
+    }
+
+    if (
+      !(await this.waitForStop(
+        expected.pid,
+        this.stopWaitTimeout(DAEMON_FORCED_STOP_TIMEOUT_MS, recoveryDeadline),
+      ))
+    ) {
+      throw new ActionableError(
+        `Verified daemon process ${expected.pid} did not exit after SIGKILL`,
+      );
+    }
+  }
+
+  private async stopExplicitRestartDaemonProcess(pid: number): Promise<void> {
     if (!this.findLiveDaemonProcesses().includes(pid)) {
       stderrLog(`Daemon candidate ${pid} exited before explicit restart could stop it.`);
       return;
@@ -2704,6 +2784,46 @@ export class DaemonManager implements DaemonManagerLike {
     if (!(await this.waitForStop(pid, DAEMON_FORCED_STOP_TIMEOUT_MS))) {
       throw new ActionableError(`Verified daemon process ${pid} did not exit after SIGKILL`);
     }
+  }
+
+  /**
+   * The recovery deadline is authoritative for the synchronous process-table
+   * scan too. Check it before and after the scan because a blocking scan can
+   * consume the final budget; signaling after that would violate fail-closed
+   * doctor recovery semantics.
+   */
+  private verifyDaemonGenerationBeforeSignal(
+    expected: DaemonProcessRecord,
+    recoveryDeadline: number | undefined,
+  ): boolean {
+    if (expected.startedAt === undefined) {
+      throw new ActionableError(
+        "Doctor repair could not verify the recorded daemon process generation before signalling it.",
+      );
+    }
+    const currentCandidates = this.findLiveDaemonProcessRecords(
+      this.remainingRecoveryTime(recoveryDeadline),
+    );
+    this.remainingRecoveryTime(recoveryDeadline);
+
+    if (
+      currentCandidates.some((candidate) =>
+        this.matchesObservedDaemonGeneration(expected, candidate),
+      )
+    ) {
+      return true;
+    }
+    if (currentCandidates.some((candidate) => candidate.pid === expected.pid)) {
+      throw new ActionableError(
+        "Doctor repair found that the verified daemon PID was reused before signalling it.",
+      );
+    }
+    return false;
+  }
+
+  private stopWaitTimeout(timeoutMs: number, recoveryDeadline: number | undefined): number {
+    const remaining = this.remainingRecoveryTime(recoveryDeadline);
+    return remaining === undefined ? timeoutMs : Math.min(timeoutMs, remaining);
   }
 
   private isMissingProcessError(error: unknown): boolean {

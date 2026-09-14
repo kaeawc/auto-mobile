@@ -30,6 +30,26 @@ class MutableDaemonProcesses implements DaemonProcessFinder, DaemonProcessLivene
   }
 }
 
+class SequencedDaemonProcesses implements DaemonProcessFinder, DaemonProcessLivenessChecker {
+  private scanIndex = 0;
+
+  constructor(
+    private readonly scans: readonly DaemonProcessRecord[][],
+    readonly livePids: Set<number>,
+    private readonly afterScan?: (scanIndex: number, timeoutMs: number | undefined) => void,
+  ) {}
+
+  findDaemonProcesses(timeoutMs?: number): DaemonProcessRecord[] {
+    const scanIndex = this.scanIndex++;
+    this.afterScan?.(scanIndex, timeoutMs);
+    return [...(this.scans[Math.min(scanIndex, this.scans.length - 1)] ?? [])];
+  }
+
+  isProcessRunning(pid: number): boolean {
+    return this.livePids.has(pid);
+  }
+}
+
 class CapturingDaemonSpawner implements DaemonProcessSpawner {
   readonly calls: Array<{ command: string; args: string[]; options: SpawnOptions }> = [];
 
@@ -672,6 +692,48 @@ describe("DaemonManager control-state recovery", () => {
     expect(signals).toEqual([]);
   });
 
+  test("does not use a legacy daemon-bootstrap timestamp to accept an arbitrarily older process", async () => {
+    const { lock, pid, socket } = paths();
+    writeFileSync(
+      pid,
+      JSON.stringify({
+        pid: 1234,
+        socketPath: socket,
+        port: 4321,
+        // Old PID records have no processStartedAt. Their daemon-bootstrap
+        // timestamp cannot prove that a much older process is this generation.
+        startedAt: 6_000,
+        version: "test",
+      }),
+    );
+    const signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
+    const manager = new DaemonManager(
+      undefined,
+      undefined,
+      new FakeTimer(),
+      lock,
+      pid,
+      socket,
+      new MutableDaemonProcesses(
+        [{ pid: 1234, ppid: 1, command: "auto-mobile --daemon-mode", startedAt: 1_000 }],
+        new Set([1234]),
+      ),
+      undefined,
+      undefined,
+      undefined,
+      { signal: (processId, signal) => signals.push({ pid: processId, signal }) },
+      undefined,
+      undefined,
+      undefined,
+      { isPortFree: async () => true },
+      undefined,
+      async () => false,
+    );
+
+    await expect(manager.recoverControlState()).rejects.toThrow("could not correlate");
+    expect(signals).toEqual([]);
+  });
+
   test("accepts a recorded daemon whose bootstrap began after OS process birth", async () => {
     const { lock, pid, socket } = paths();
     const timer = new FakeTimer();
@@ -689,6 +751,9 @@ describe("DaemonManager control-state recovery", () => {
         port: 4321,
         // Daemon metadata is created after a deliberately slow bootstrap.
         startedAt: 6_000,
+        // New PID metadata records the OS process birth independently from the
+        // delayed daemon bootstrap timestamp.
+        processStartedAt: 1_000,
         version: "test",
       }),
     );
@@ -723,6 +788,166 @@ describe("DaemonManager control-state recovery", () => {
 
     expect(signals).toEqual([{ pid: 1234, signal: "SIGTERM" }]);
     expect(spawner.calls).toHaveLength(1);
+  });
+
+  test("does not SIGTERM a PID reused after recovery initially verified its generation", async () => {
+    const { lock, pid, socket } = paths();
+    const timer = new FakeTimer();
+    const expected = {
+      pid: 1234,
+      ppid: 1,
+      command: "auto-mobile --daemon-mode",
+      startedAt: 1_000,
+    };
+    const replacement = { ...expected, startedAt: 10_000 };
+    const processes = new SequencedDaemonProcesses(
+      [[expected], [replacement]],
+      new Set([expected.pid]),
+    );
+    writeFileSync(
+      pid,
+      JSON.stringify({
+        pid: expected.pid,
+        socketPath: socket,
+        port: 4321,
+        startedAt: 6_000,
+        processStartedAt: expected.startedAt,
+        version: "test",
+      }),
+    );
+    const signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
+    const manager = new DaemonManager(
+      undefined,
+      undefined,
+      timer,
+      lock,
+      pid,
+      socket,
+      processes,
+      undefined,
+      undefined,
+      undefined,
+      { signal: (processId, signal) => signals.push({ pid: processId, signal }) },
+      undefined,
+      undefined,
+      undefined,
+      { isPortFree: async () => true },
+      undefined,
+      async () => false,
+    );
+
+    await expect(manager.recoverControlState()).rejects.toThrow("PID was reused");
+    expect(signals).toEqual([]);
+  });
+
+  test("does not SIGKILL a PID reused after SIGTERM", async () => {
+    const { lock, pid, socket } = paths();
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const expected = {
+      pid: 1234,
+      ppid: 1,
+      command: "auto-mobile --daemon-mode",
+      startedAt: 1_000,
+    };
+    const replacement = { ...expected, startedAt: 10_000 };
+    const processes = new SequencedDaemonProcesses(
+      [[expected], [expected], [replacement]],
+      new Set([expected.pid]),
+    );
+    writeFileSync(
+      pid,
+      JSON.stringify({
+        pid: expected.pid,
+        socketPath: socket,
+        port: 4321,
+        startedAt: 6_000,
+        processStartedAt: expected.startedAt,
+        version: "test",
+      }),
+    );
+    const signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
+    const manager = new DaemonManager(
+      undefined,
+      undefined,
+      timer,
+      lock,
+      pid,
+      socket,
+      processes,
+      undefined,
+      undefined,
+      undefined,
+      { signal: (processId, signal) => signals.push({ pid: processId, signal }) },
+      undefined,
+      undefined,
+      undefined,
+      { isPortFree: async () => true },
+      undefined,
+      async () => false,
+    );
+
+    await expect(manager.recoverControlState()).rejects.toThrow("PID was reused");
+    expect(signals).toEqual([{ pid: expected.pid, signal: "SIGTERM" }]);
+  });
+
+  test("fails closed when the nested pre-signal scan exhausts the recovery deadline", async () => {
+    const { lock, pid, socket } = paths();
+    const timer = new FakeTimer();
+    const expected = {
+      pid: 1234,
+      ppid: 1,
+      command: "auto-mobile --daemon-mode",
+      startedAt: 1_000,
+    };
+    const scanTimeouts: Array<number | undefined> = [];
+    const processes = new SequencedDaemonProcesses(
+      [[expected], [expected]],
+      new Set([expected.pid]),
+      (scanIndex, timeoutMs) => {
+        scanTimeouts.push(timeoutMs);
+        if (scanIndex === 1) {
+          timer.advanceTime(50);
+        }
+      },
+    );
+    writeFileSync(
+      pid,
+      JSON.stringify({
+        pid: expected.pid,
+        socketPath: socket,
+        port: 4321,
+        startedAt: 6_000,
+        processStartedAt: expected.startedAt,
+        version: "test",
+      }),
+    );
+    const signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
+    const manager = new DaemonManager(
+      undefined,
+      undefined,
+      timer,
+      lock,
+      pid,
+      socket,
+      processes,
+      undefined,
+      undefined,
+      undefined,
+      { signal: (processId, signal) => signals.push({ pid: processId, signal }) },
+      undefined,
+      undefined,
+      undefined,
+      { isPortFree: async () => true },
+      undefined,
+      async () => false,
+    );
+
+    await expect(manager.recoverControlState({}, async () => false, undefined, 50)).rejects.toThrow(
+      "deadline elapsed before process-table inspection",
+    );
+    expect(scanTimeouts).toEqual([50, 50]);
+    expect(signals).toEqual([]);
   });
 
   test("keeps lock-takeover recovery behind its canonical-port guard", async () => {

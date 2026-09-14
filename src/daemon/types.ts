@@ -261,6 +261,12 @@ export interface DaemonStatus {
   dbPath?: string;
   /** Timestamp when daemon was started */
   startedAt?: number;
+  /**
+   * OS process birth timestamp captured by the daemon itself. Unlike
+   * {@link startedAt}, this is not delayed by daemon bootstrap and can fence
+   * PID reuse against the process table.
+   */
+  processStartedAt?: number;
   /** Daemon version */
   version?: string;
   /** Concrete CtrlProxy asset version resolved from AUTOMOBILE_VERSION at daemon start */
@@ -295,6 +301,11 @@ export interface PidFileData {
   dbPath?: string;
   /** Timestamp when daemon was started */
   startedAt: number;
+  /**
+   * OS process birth timestamp captured by the daemon itself. Optional so
+   * managers can continue reading PID files written by older daemon versions.
+   */
+  processStartedAt?: number;
   /** Daemon version */
   version: string;
   /**

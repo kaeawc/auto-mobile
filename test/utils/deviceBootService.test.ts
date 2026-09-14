@@ -304,6 +304,7 @@ describe("DeviceBootService", () => {
               [
                 {
                   packageName: "system-images;android-34;google_apis;arm64-v8a",
+                  apiIdentifier: "34",
                   apiLevel: 34,
                   tag: "google_apis",
                   abi: "arm64-v8a",

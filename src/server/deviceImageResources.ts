@@ -445,7 +445,7 @@ function appendAndroidProvisioningCatalog(
       platform: "android",
       id: image.packageName,
       name: image.versionInfo,
-      version: String(image.apiLevel),
+      version: image.apiIdentifier,
       availability: { available: true },
     });
     catalog.systemImages.push({
@@ -455,7 +455,7 @@ function appendAndroidProvisioningCatalog(
       apiLevel: image.apiLevel,
       tag: image.tag,
       abi: image.abi,
-      version: String(image.apiLevel),
+      version: image.apiIdentifier,
     });
   }
 

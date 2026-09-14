@@ -10,7 +10,10 @@ import {
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { ActionableError } from "../../src/models/ActionableError";
 import type { AppleDeviceType } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
-import type { SystemImage } from "../../src/utils/android-cmdline-tools/avdmanager";
+import {
+  parseSystemImages,
+  type SystemImage,
+} from "../../src/utils/android-cmdline-tools/avdmanager";
 import { FakeAndroidAvdCreator, FakeIosSimulatorCreator } from "../fakes/FakeDeviceProvisioner";
 import { logger } from "../../src/utils/logger";
 
@@ -41,6 +44,7 @@ function deviceTypeWithRuntimeRange(
 function systemImage(apiLevel: number, tag: string, abi: string): SystemImage {
   return {
     packageName: `system-images;android-${apiLevel};${tag};${abi}`,
+    apiIdentifier: String(apiLevel),
     apiLevel,
     tag,
     abi,
@@ -134,6 +138,34 @@ describe("pickAndroidSystemImage", () => {
   it("prefers the newest API level with a host-runnable ABI", () => {
     expect(pickAndroidSystemImage(images, {}, "x64").packageName).toBe(
       "system-images;android-35;google_apis;x86_64",
+    );
+  });
+
+  it("orders dotted API components numerically after parsing sdkmanager output", () => {
+    const parsed = parseSystemImages(
+      `Installed packages:
+ system-images;android-36.2;google_apis;arm64-v8a | 1 | image
+ system-images;android-36.10;google_apis;arm64-v8a | 1 | image`,
+      undefined,
+      "installed",
+    );
+
+    expect(pickAndroidSystemImage(parsed, {}, "arm64").packageName).toBe(
+      "system-images;android-36.10;google_apis;arm64-v8a",
+    );
+  });
+
+  it("selects the newest minor API after parsing sdkmanager output", () => {
+    const parsed = parseSystemImages(
+      `Installed packages:
+ system-images;android-36.1;google_apis;arm64-v8a | 1 | image
+ system-images;android-36.2;google_apis;arm64-v8a | 1 | image`,
+      undefined,
+      "installed",
+    );
+
+    expect(pickAndroidSystemImage(parsed, {}, "arm64").packageName).toBe(
+      "system-images;android-36.2;google_apis;arm64-v8a",
     );
   });
 
@@ -585,6 +617,27 @@ describe("DefaultDeviceProvisioner", () => {
         package: "system-images;android-34;google_apis;arm64-v8a",
       },
     ]);
+  });
+
+  it("returns the exact minor runtime selected through the parser and creator", async () => {
+    const images = parseSystemImages(
+      `Installed packages:
+ system-images;android-36.1;google_apis;arm64-v8a | 1 | image`,
+      undefined,
+      "installed",
+    );
+    const avd = new FakeAndroidAvdCreator(images);
+    const provisioner = new DefaultDeviceProvisioner({
+      iosCreator: () => undefined,
+      androidCreator: () => avd,
+      idGenerator: new CountingIdGenerator("uuid"),
+      architecture: "arm64",
+    });
+
+    const created = await provisioner.provision({ platform: "android" });
+
+    expect(created.runtime).toBe("android-36.1");
+    expect(avd.createCalls[0]?.package).toBe("system-images;android-36.1;google_apis;arm64-v8a");
   });
 
   it("reserves the generated Android AVD name before creation and binds afterward", async () => {

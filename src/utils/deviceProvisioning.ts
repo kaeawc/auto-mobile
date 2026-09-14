@@ -27,6 +27,7 @@ import {
   parseSimctlVersion,
 } from "./ios-cmdline-tools/simctlVersion";
 import { iosVersionStringFromRuntimeId } from "./ios-cmdline-tools/iosVersion";
+import { compareStrictNumericVersions } from "./deviceMatcher";
 
 /** What was created, for logging and for handing straight to the boot path. */
 export interface ProvisionedDevice {
@@ -393,8 +394,8 @@ function describeBound(bound: string | undefined, apiLevel: number | undefined):
 }
 
 /**
- * Choose an installed system image: newest API level within the requested
- * range, preferring a host-runnable ABI and a Google APIs tag.
+ * Choose an installed system image: newest exact API identifier within the
+ * requested major-API range, preferring a host-runnable ABI and a Google APIs tag.
  */
 export function pickAndroidSystemImage(
   images: SystemImage[],
@@ -452,7 +453,7 @@ export function pickAndroidSystemImage(
   const candidates = runnable.length > 0 ? runnable : inRange;
 
   return [...candidates].sort((a, b) => {
-    const apiDelta = b.apiLevel - a.apiLevel;
+    const apiDelta = compareStrictNumericVersions(b.apiIdentifier, a.apiIdentifier);
     if (apiDelta !== 0) {
       return apiDelta;
     }
@@ -604,11 +605,11 @@ export class DefaultDeviceProvisioner implements DeviceProvisioner {
       platform: "android" as const,
       name,
       deviceType: image.packageName,
-      runtime: `android-${image.apiLevel}`,
+      runtime: `android-${image.apiIdentifier}`,
     };
     logger.info(
       `[DeviceProvisioner] Created Android AVD '${name}' ` +
-        `(systemImage=${image.packageName}, apiLevel=${image.apiLevel}, tag=${image.tag}, abi=${image.abi}). ` +
+        `(systemImage=${image.packageName}, api=${image.apiIdentifier}, tag=${image.tag}, abi=${image.abi}). ` +
         `Delete it with 'avdmanager delete avd -n ${name}' when no longer needed.`,
     );
     await identityHooks?.bindAfterCreate(provisioned);

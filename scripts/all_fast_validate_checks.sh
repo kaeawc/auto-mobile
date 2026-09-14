@@ -41,6 +41,7 @@ add_check "schema-copy-drift" "bun \"$PROJECT_ROOT/scripts/check-schema-copy-dri
 add_check "bun-version-coherence" "bun \"$PROJECT_ROOT/scripts/check-bun-version-coherence.ts\"" "config,dependencies" "Keep Bun versions aligned across package, workflows, Docker, and local development"
 add_check "xml" "\"$PROJECT_ROOT/scripts/xml/validate_xml.sh\"" "config,xml" "Validate XML files"
 add_check "shellcheck" "\"$PROJECT_ROOT/scripts/shellcheck/validate_shell_scripts.sh\"" "lint,shell" "Validate shell scripts with shellcheck"
+add_check "workflow-script-exec-bits" "\"$PROJECT_ROOT/scripts/shellcheck/validate_workflow_script_exec_bits.sh\"" "lint,shell" "Reject workflow/action scripts invoked directly without the git exec bit"
 add_check "shell-portability" "\"$PROJECT_ROOT/scripts/shellcheck/validate_shell_portability.sh\"" "lint,shell" "Lint shell scripts for portability footguns"
 add_check "shell-sete" "\"$PROJECT_ROOT/scripts/shellcheck/validate_shell_sete.sh\"" "lint,shell" "Gate new set -e-suppressed shell findings against the baseline"
 add_check "markdown-bash" "\"$PROJECT_ROOT/scripts/shellcheck/validate_markdown_bash.sh\"" "lint,shell" "Shellcheck fenced bash blocks in .claude/commands and skills Markdown"

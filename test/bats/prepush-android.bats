@@ -80,6 +80,53 @@ SCRIPT
   grep -qx 'detektTest' "${invocations_file}"
 }
 
+@test "runs full-scope Detekt and module compile when Kotlin and Detekt config change" {
+  fixture_repo="$(cd "$(mktemp -d)" && pwd -P)"
+  invocations_file="$(mktemp)"
+  export GIT_CONFIG_GLOBAL=/dev/null
+  export GIT_CONFIG_SYSTEM=/dev/null
+
+  mkdir -p "${fixture_repo}/android/config/detekt" "${fixture_repo}/android/foo/src/main/kotlin"
+  copy_prepush_fixture
+  cat > "${fixture_repo}/scripts/ktfmt/validate_ktfmt.sh" <<'SCRIPT'
+#!/usr/bin/env bash
+exit 0
+SCRIPT
+  cat > "${fixture_repo}/android/gradlew" <<'SCRIPT'
+#!/usr/bin/env bash
+printf '%s\n' "$@" >> "${GRADLEW_INVOCATIONS_FILE}"
+SCRIPT
+  chmod +x "${fixture_repo}/android/gradlew"
+  printf '%s\n' 'config: initial' > "${fixture_repo}/android/config/detekt/detekt.yml"
+  printf '%s\n' 'plugins {}' > "${fixture_repo}/android/foo/build.gradle.kts"
+  printf '%s\n' 'class X' > "${fixture_repo}/android/foo/src/main/kotlin/X.kt"
+
+  cd "${fixture_repo}"
+  git init -q
+  git config user.email t@t.t
+  git config user.name t
+  git config commit.gpgsign false
+  git add -A
+  git commit -qm "initial Android module and Detekt config"
+  base_sha="$(git rev-parse HEAD)"
+  printf '%s\n' 'config: changed' > android/config/detekt/detekt.yml
+  printf '%s\n' '// changed Kotlin source' >> android/foo/src/main/kotlin/X.kt
+  git add android/config/detekt/detekt.yml android/foo/src/main/kotlin/X.kt
+  git commit -qm "change Kotlin source and Detekt config"
+
+  run env ANDROID_PREPUSH_BASE_REF="${base_sha}" \
+    GRADLEW_INVOCATIONS_FILE="${invocations_file}" \
+    bash "${fixture_repo}/${SCRIPT}"
+
+  [ "$status" -eq 0 ]
+  grep -qx 'detektMain' "${invocations_file}"
+  grep -qx 'detektTest' "${invocations_file}"
+  grep -qx ':foo:compileKotlin' "${invocations_file}"
+  if grep -qx ':foo:detekt' "${invocations_file}"; then
+    false
+  fi
+}
+
 @test "accepts a repository root reached through a symlink" {
   fixture_repo="$(cd "$(mktemp -d)" && pwd -P)"
   symlink_parent="$(cd "$(mktemp -d)" && pwd -P)"

@@ -105,14 +105,18 @@ validate_root_gradle_configuration() {
   (cd android && ./gradlew help)
 }
 
+run_full_scope_detekt() {
+  echo "==> full-scope Detekt (Detekt config changed)"
+  (cd android && ./gradlew detektMain detektTest)
+}
+
 kotlin_changes=()
 while IFS= read -r changed_file; do
   [[ -n "${changed_file}" ]] && kotlin_changes+=("${changed_file}")
 done < <(printf '%s\n' "${android_changes[@]+"${android_changes[@]}"}" | grep -E '^android/.*\.(kt|kts)$' || true)
 if [[ "${#kotlin_changes[@]}" -eq 0 ]]; then
   if [[ "${detekt_config_changed}" == "true" ]]; then
-    echo "==> full-scope Detekt (Detekt config changed)"
-    (cd android && ./gradlew detektMain detektTest)
+    run_full_scope_detekt
     if [[ "${root_gradle_changed}" == "true" ]]; then
       validate_root_gradle_configuration
     fi
@@ -134,7 +138,7 @@ echo "==> ktfmt"
 ONLY_CHANGED_SINCE_SHA="${base_ref}" bash scripts/ktfmt/validate_ktfmt.sh
 
 declare -a modules=()
-for changed_file in "${kotlin_changes[@]}"; do
+for changed_file in "${kotlin_changes[@]+"${kotlin_changes[@]}"}"; do
   module_dir="$(dirname "${changed_file}")"
   while [[ "${module_dir}" != "android" && ! -f "${module_dir}/build.gradle.kts" ]]; do
     module_dir="$(dirname "${module_dir}")"
@@ -156,8 +160,7 @@ modules=("${unique_modules[@]+"${unique_modules[@]}"}")
 
 if [[ "${#modules[@]}" -eq 0 ]]; then
   if [[ "${detekt_config_changed}" == "true" ]]; then
-    echo "==> full-scope Detekt (Detekt config changed)"
-    (cd android && ./gradlew detektMain detektTest)
+    run_full_scope_detekt
     if [[ "${root_gradle_changed}" == "true" ]]; then
       validate_root_gradle_configuration
     fi
@@ -179,6 +182,9 @@ fi
 detekt_tasks=()
 compile_tasks=()
 test_tasks=()
+if [[ "${detekt_config_changed}" == "true" ]]; then
+  detekt_tasks+=(detektMain detektTest)
+fi
 for module_path in "${modules[@]+"${modules[@]}"}"; do
   module_dir="android/${module_path#:}"
   module_dir="${module_dir//:/\/}"
@@ -186,7 +192,9 @@ for module_path in "${modules[@]+"${modules[@]}"}"; do
     # build-logic is a kotlin-dsl-only build with no detekt plugin applied.
     compile_tasks+=("${module_path}:compileKotlin")
   else
-    detekt_tasks+=("${module_path}:detekt")
+    if [[ "${detekt_config_changed}" == "false" ]]; then
+      detekt_tasks+=("${module_path}:detekt")
+    fi
     if grep -Eq 'alias\(libs\.plugins\.android\.(application|library)\)' "${module_dir}/build.gradle.kts"; then
       compile_tasks+=("${module_path}:compileDebugKotlin")
     else
@@ -198,7 +206,11 @@ for module_path in "${modules[@]+"${modules[@]}"}"; do
   fi
 done
 
-echo "==> scoped Detekt (${modules[*]})"
+if [[ "${detekt_config_changed}" == "true" ]]; then
+  echo "==> full-scope Detekt (Detekt config changed)"
+else
+  echo "==> scoped Detekt (${modules[*]})"
+fi
 (cd android && ./gradlew "${detekt_tasks[@]+"${detekt_tasks[@]}"}")
 
 echo "==> compile (${modules[*]})"

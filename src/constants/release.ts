@@ -534,6 +534,22 @@ export function resolveRunnerChecksum(
 }
 
 /**
+ * The registry entry whose `runnerSha256` equals `sha256` (case-insensitive),
+ * if any. Lets the pre-launch runner integrity gate tell "the extracted runner
+ * is one release old" apart from "the extracted runner is unknown" (#7032).
+ */
+export function findReleaseByRunnerSha256(
+  sha256: string,
+  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY,
+): ReleaseChecksumEntry | undefined {
+  const normalized = sha256.trim().toLowerCase();
+  if (normalized.length === 0) {
+    return undefined;
+  }
+  return registry.find((entry) => entry.runnerSha256.toLowerCase() === normalized);
+}
+
+/**
  * Resolve the executable represented by the selected runner checksum.
  * Existing entries omit this field because their hashes were taken from the
  * outer XCTRunner stub before CtrlProxy's code executable was adopted.

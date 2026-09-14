@@ -286,6 +286,15 @@ describe("IOSCtrlProxyManager", function () {
     });
   });
 
+  test("returns the persisted runner bundle identity from its builder", async function () {
+    const builder = {
+      getInstalledBundleVersion: async () => "2026.9.13",
+    } as unknown as IOSCtrlProxyBuilder;
+    const manager = IOSCtrlProxyManager.createForTesting(testDevice, fakeTimer, builder);
+
+    expect(await manager.getInstalledVersionIdentity()).toBe("2026.9.13");
+  });
+
   describe("shutdownAll", function () {
     test("awaits in-flight force termination when the original stop settles", async () => {
       const manager = IOSCtrlProxyManager.getInstance(testDevice);

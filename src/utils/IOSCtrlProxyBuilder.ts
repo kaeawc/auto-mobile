@@ -627,6 +627,12 @@ export class IOSCtrlProxyBuilder {
     return false;
   }
 
+  /** Returns the persisted release identity of the currently extracted runner bundle. */
+  public async getInstalledBundleVersion(): Promise<string | null> {
+    const metadata = await this.readBundleMetadata();
+    return metadata?.version ?? null;
+  }
+
   /**
    * Download and extract CtrlProxy release bundle
    */
@@ -679,11 +685,12 @@ export class IOSCtrlProxyBuilder {
     }
 
     try {
-      const { bundlePath, usedCachedFallback } = await perf.track("downloadBundle", () =>
-        this.ensureBundleDownloaded(),
+      const { bundlePath, usedCachedFallback, localOverridePath } = await perf.track(
+        "downloadBundle",
+        () => this.ensureBundleDownloaded(),
       );
       if (!usedCachedFallback) {
-        await perf.track("extractBundle", () => this.extractBundle(bundlePath));
+        await perf.track("extractBundle", () => this.extractBundle(bundlePath, localOverridePath));
       }
 
       // Clear cached paths to force rediscovery
@@ -1005,6 +1012,7 @@ export class IOSCtrlProxyBuilder {
   private async ensureBundleDownloaded(): Promise<{
     bundlePath: string;
     usedCachedFallback: boolean;
+    localOverridePath: string | null;
   }> {
     await ensureSecureDir(this.config.bundleCacheDir);
     const bundlePath = this.getBundlePath();
@@ -1047,7 +1055,7 @@ export class IOSCtrlProxyBuilder {
             // of trusting a size-valid-but-unverified cached IPA (issue #4761).
             // A mismatch throws and fails closed rather than reusing it silently.
             await this.verifyBundle(bundlePath);
-            return { bundlePath, usedCachedFallback: true };
+            return { bundlePath, usedCachedFallback: true, localOverridePath: null };
           }
           throw error;
         }
@@ -1055,7 +1063,7 @@ export class IOSCtrlProxyBuilder {
     }
 
     await this.verifyBundle(bundlePath);
-    return { bundlePath, usedCachedFallback: false };
+    return { bundlePath, usedCachedFallback: false, localOverridePath: overridePath };
   }
 
   private async isBundleValid(bundlePath: string, expectedChecksum: string): Promise<boolean> {
@@ -1138,7 +1146,7 @@ export class IOSCtrlProxyBuilder {
     return isExplicitPin() && !isPinnedVersionKnown();
   }
 
-  private async extractBundle(bundlePath: string): Promise<void> {
+  private async extractBundle(bundlePath: string, localOverridePath: string | null): Promise<void> {
     // A re-extract replaces the runner binary, so drop any local-build-mode pin
     // (#5561) BEFORE re-extraction — the post-extract verify a few lines down
     // re-derives it. Clearing here (not after extract) is essential: the pin is
@@ -1158,9 +1166,14 @@ export class IOSCtrlProxyBuilder {
     await this.verifyExtractedArtifacts();
 
     const appHashes = await this.computeAppHashes();
+    const checksum = this.getExpectedChecksum();
     const metadata: IOSCtrlProxyBundleMetadata = {
-      checksum: this.getExpectedChecksum() || null,
-      version: resolveAssetVersion(resolvePinnedVersion()),
+      checksum: checksum || null,
+      version: localOverridePath
+        ? checksum
+          ? `local-override:${checksum.slice(0, 12)}`
+          : `local-override:${path.basename(localOverridePath)}`
+        : resolveAssetVersion(resolvePinnedVersion()),
       extractedAt: new Date().toISOString(),
       appHashes,
     };

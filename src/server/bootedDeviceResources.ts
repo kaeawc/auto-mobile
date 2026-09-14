@@ -13,6 +13,7 @@ import type {
 } from "../daemon/devicePool";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
+import { getAndroidAppMetadataViaAdb } from "../features/observe/GetAppMetadata";
 import { AndroidCtrlProxyManager } from "../utils/CtrlProxyManager";
 import { IOSCtrlProxyManager } from "../utils/IOSCtrlProxyManager";
 import { IOSCtrlProxyBuilder } from "../utils/IOSCtrlProxyBuilder";
@@ -23,7 +24,7 @@ import {
 } from "../features/observe/ios/IOSCtrlProxyClient";
 import { resolveApkChecksum, resolveIpaChecksum } from "../constants/release";
 import { type DiscoverySource, sourcesForPlatform } from "../utils/discoverySource";
-import { defaultTimer } from "../utils/SystemTimer";
+import { defaultTimer, type Timer } from "../utils/SystemTimer";
 
 // Resource URIs
 export const BOOTED_DEVICE_RESOURCE_URIS = {
@@ -49,6 +50,18 @@ export interface DeviceLockStatesResourceContent {
   lockStates: DeviceLockStateInfo[];
 }
 
+export interface CtrlProxyVersionInfo {
+  /**
+   * For iOS, `build` is the persisted extracted-runner identity, not the
+   * AutoMobileTest host app Info.plist placeholder (1.0/1). It is omitted
+   * unless installation is confirmed true for this device.
+   */
+  versionName?: string;
+  versionCode?: string;
+  build?: string;
+  source: "android-package" | "ios-runner-bundle";
+}
+
 // Service status for a booted device
 export interface DeviceServiceStatus {
   installed: boolean;
@@ -57,6 +70,12 @@ export interface DeviceServiceStatus {
   installedSha256: string | null;
   expectedSha256: string;
   isCompatible: boolean;
+  /**
+   * Installed-artifact identity, not a readiness or compatibility signal; omitted when unknown
+   * or when installation is not confirmed true for this device.
+   * Readiness and compatibility remain represented by isCompatible and runner feature status.
+   */
+  version?: CtrlProxyVersionInfo;
   /**
    * iOS only: whether the running runner advertises the full feature command set.
    * The iOS runner exposes no version/hash (installedSha256 stays null), so this
@@ -94,6 +113,7 @@ interface DeviceCapabilities {
     | "enabled"
     | "running"
     | "isCompatible"
+    | "version"
     | "supportedCommandsComplete"
     | "supportedFeaturesComplete"
   > | null;
@@ -763,6 +783,7 @@ function withServiceStatus(
         enabled: serviceStatus.enabled,
         running: serviceStatus.running,
         isCompatible: serviceStatus.isCompatible,
+        version: serviceStatus.version,
         supportedCommandsComplete: serviceStatus.supportedCommandsComplete,
         supportedFeaturesComplete: serviceStatus.supportedFeaturesComplete,
       },
@@ -876,10 +897,83 @@ const defaultAndroidServiceStatusLookup: AndroidServiceStatusLookup = {
     AndroidCtrlProxyClient.getExistingInstance(deviceId)?.isConnected() ?? false,
 };
 
+export interface CtrlProxyVersionLookup {
+  getVersion(
+    device: Pick<BootedDevice, "name" | "platform" | "deviceId" | "source">,
+  ): Promise<CtrlProxyVersionInfo | undefined>;
+}
+
+const defaultCtrlProxyVersionLookup: CtrlProxyVersionLookup = {
+  async getVersion(device) {
+    try {
+      if (device.platform === "android") {
+        const metadata = await getAndroidAppMetadataViaAdb(device, AndroidCtrlProxyManager.PACKAGE);
+        return metadata
+          ? {
+              versionName: metadata.versionName || undefined,
+              versionCode: metadata.buildNumber || undefined,
+              source: "android-package",
+            }
+          : undefined;
+      }
+      if (device.platform === "ios") {
+        const version = await IOSCtrlProxyManager.getInstance(device).getInstalledVersionIdentity();
+        return version ? { build: version, source: "ios-runner-bundle" } : undefined;
+      }
+      return undefined;
+    } catch (error) {
+      // Version metadata is optional diagnostic enrichment, so service-status reads remain available.
+      logger.debug(
+        `[BootedDeviceResources] CtrlProxy version lookup failed for ${device.deviceId}: ${error}`,
+      );
+      return undefined;
+    }
+  },
+};
+
+const noOpCtrlProxyVersionLookup: CtrlProxyVersionLookup = {
+  getVersion: async () => undefined,
+};
+
+const CTRL_PROXY_VERSION_TIMEOUT_MS = 2000;
+
+async function getCtrlProxyVersion(
+  device: BootedDevice,
+  versionLookup: CtrlProxyVersionLookup,
+  timer: Timer = defaultTimer,
+): Promise<CtrlProxyVersionInfo | undefined> {
+  let timeoutHandle: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      versionLookup.getVersion(device),
+      new Promise<undefined>((resolve) => {
+        timeoutHandle = timer.setTimeout(() => {
+          logger.debug(
+            `[BootedDeviceResources] CtrlProxy version lookup timed out for ${device.deviceId}`,
+          );
+          resolve(undefined);
+        }, CTRL_PROXY_VERSION_TIMEOUT_MS);
+      }),
+    ]);
+  } catch (error) {
+    // Injected best-effort metadata lookups must not make service-status reads fail.
+    logger.debug(
+      `[BootedDeviceResources] CtrlProxy version lookup failed for ${device.deviceId}: ${error}`,
+    );
+    return undefined;
+  } finally {
+    if (timeoutHandle) {
+      timer.clearTimeout(timeoutHandle);
+    }
+  }
+}
+
 // Query service status for a single booted device
 export async function queryDeviceServiceStatus(
   device: Pick<BootedDeviceInfo, "name" | "platform" | "deviceId" | "source">,
   androidLookup: AndroidServiceStatusLookup = defaultAndroidServiceStatusLookup,
+  versionLookup?: CtrlProxyVersionLookup,
+  timer: Timer = defaultTimer,
 ): Promise<DeviceServiceStatus | undefined> {
   const bootedDevice: BootedDevice = {
     name: device.name,
@@ -887,14 +981,20 @@ export async function queryDeviceServiceStatus(
     deviceId: device.deviceId,
     source: device.source,
   };
+  const resolvedVersionLookup =
+    versionLookup ??
+    (androidLookup === defaultAndroidServiceStatusLookup
+      ? defaultCtrlProxyVersionLookup
+      : noOpCtrlProxyVersionLookup);
 
   try {
     if (device.platform === "android") {
       const manager = androidLookup.getManager(bootedDevice);
-      const [installed, enabled, installedSha256] = await Promise.all([
+      const [installed, enabled, installedSha256, version] = await Promise.all([
         manager.isInstalled(),
         manager.isEnabled(),
         manager.getInstalledApkSha256(),
+        getCtrlProxyVersion(bootedDevice, resolvedVersionLookup, timer),
       ]);
       const expectedSha256 = resolveApkChecksum();
       // An explicit pin absent from the registry yields an empty expected checksum,
@@ -911,10 +1011,15 @@ export async function queryDeviceServiceStatus(
         installedSha256,
         expectedSha256,
         isCompatible,
+        ...(version ? { version } : {}),
       };
     } else if (device.platform === "ios") {
       const manager = IOSCtrlProxyManager.getInstance(bootedDevice);
-      const [installed, running] = await Promise.all([manager.isInstalled(), manager.isRunning()]);
+      const [installed, running, version] = await Promise.all([
+        manager.isInstalled(),
+        manager.isRunning(),
+        getCtrlProxyVersion(bootedDevice, resolvedVersionLookup, timer),
+      ]);
       const expectedSha256 = resolveIpaChecksum();
 
       // The iOS runner exposes no hash/version, so identity comes from the cached
@@ -960,6 +1065,7 @@ export async function queryDeviceServiceStatus(
         installedSha256: null,
         expectedSha256,
         isCompatible,
+        ...(installed && version ? { version } : {}),
         supportedCommandsComplete,
         supportedFeaturesComplete,
       };

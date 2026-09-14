@@ -18,6 +18,10 @@ import {
   WindowsDaemonProcessFinder,
   NetDaemonPortAvailabilityChecker,
 } from "../../src/daemon/manager";
+import {
+  darwinProcessGenerationToken,
+  linuxProcessGenerationToken,
+} from "../../src/daemon/processGeneration";
 import { DaemonLauncher } from "../../src/daemon/DaemonLauncher";
 import type { BuildIdentity } from "../../src/daemon/buildIdentity";
 import type { DaemonOptions, DaemonStatus } from "../../src/daemon/types";
@@ -1255,6 +1259,26 @@ describe("Daemon manager process detection", () => {
     ]);
   });
 
+  test("keeps Linux's OS generation token stable when the wall clock jumps", () => {
+    const stat = `123 (auto mobile) ${["S", ...Array(18).fill("0"), "424242"].join(" ")}`;
+    const token = linuxProcessGenerationToken(stat, "boot-id");
+    const timer = new FakeTimer();
+    const finder = new PsDaemonProcessFinder(
+      () => "20 1 12 bunx -y @kaeawc/auto-mobile@0.0.38 --daemon-mode",
+      "linux",
+      timer,
+      () => token,
+    );
+
+    const beforeClockJump = finder.findDaemonProcesses()[0]!;
+    timer.advanceTime(3_600_000);
+    const afterClockJump = finder.findDaemonProcesses()[0]!;
+
+    expect(beforeClockJump.startedAt).not.toBe(afterClockJump.startedAt);
+    expect(beforeClockJump.processGenerationToken).toBe("linux:boot-id:424242");
+    expect(afterClockJump.processGenerationToken).toBe(beforeClockJump.processGenerationToken);
+  });
+
   test("parses BusyBox elapsed process creation times for PID-reuse protection", () => {
     expect(
       parseBusyBoxDaemonProcessTable(
@@ -1282,8 +1306,19 @@ describe("Daemon manager process detection", () => {
         ppid: 1,
         command: "bunx -y @kaeawc/auto-mobile@0.0.38 --daemon-mode",
         startedAt: new Date(2026, 8, 13, 10, 57, 4).getTime(),
+        processGenerationToken: "darwin:Sun Sep 13 10:57:04 2026",
       },
     ]);
+  });
+
+  test("retains Darwin's raw lstart token through the repeated DST fall-back hour", () => {
+    const lstart = "Sun Nov 1 01:30:00 2026";
+    const record = parseDarwinDaemonProcessTable(
+      `20 1 ${lstart} bunx -y @kaeawc/auto-mobile@0.0.38 --daemon-mode`,
+    )[0]!;
+
+    expect(record.processGenerationToken).toBe(darwinProcessGenerationToken(lstart));
+    expect(record.processGenerationToken).toBe(`darwin:${lstart}`);
   });
 
   test.each([
@@ -1310,6 +1345,9 @@ describe("Daemon manager process detection", () => {
           command: "bunx -y @kaeawc/auto-mobile@0.0.38 --daemon-mode",
           ...(platform === "darwin"
             ? { startedAt: new Date(2026, 8, 13, 10, 57, 4).getTime() }
+            : {}),
+          ...(platform === "darwin"
+            ? { processGenerationToken: "darwin:Sun Sep 13 10:57:04 2026" }
             : {}),
         },
       ]);

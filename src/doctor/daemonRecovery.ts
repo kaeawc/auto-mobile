@@ -392,7 +392,8 @@ export async function repairDaemon(
   options: DoctorRepairOptions = {},
   dependencies: DaemonRecoveryDependencies = {},
 ): Promise<DaemonRecoveryResult> {
-  const timeoutMs = options.timeoutMs ?? DEFAULT_DAEMON_RECOVERY_TIMEOUT_MS;
+  const timeoutMs =
+    options.timeoutMs === undefined ? DEFAULT_DAEMON_RECOVERY_TIMEOUT_MS : options.timeoutMs;
   if (!isUsableRecoveryTimeout(timeoutMs)) {
     return failedRecovery(
       "diagnosis",

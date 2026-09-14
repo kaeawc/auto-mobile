@@ -832,6 +832,128 @@ describe("DaemonManager control-state recovery", () => {
     expect(spawner.calls).toHaveLength(1);
   });
 
+  test("uses a Linux generation token after an NTP wall-clock correction", async () => {
+    const { lock, pid, socket } = paths();
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const processGenerationToken = "linux:boot-id:424242";
+    const livePids = new Set([1234]);
+    const processes = new MutableDaemonProcesses(
+      [
+        {
+          pid: 1234,
+          ppid: 1,
+          command: "auto-mobile --daemon-mode",
+          // This intentionally disagrees with the old wall-clock estimate.
+          startedAt: 3_601_000,
+          processGenerationToken,
+        },
+      ],
+      livePids,
+    );
+    writeFileSync(
+      pid,
+      JSON.stringify({
+        pid: 1234,
+        socketPath: socket,
+        port: 4321,
+        startedAt: 6_000,
+        processStartedAt: 1_000,
+        processGenerationToken,
+        version: "test",
+      }),
+    );
+    const signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
+    const manager = new ImmediatelyReadyRecoveryManager(
+      undefined,
+      undefined,
+      timer,
+      lock,
+      pid,
+      socket,
+      processes,
+      new CapturingDaemonSpawner(),
+      undefined,
+      () => ({ command: "auto-mobile", args: ["--daemon-mode"] }),
+      {
+        signal: (processId, signal) => {
+          signals.push({ pid: processId, signal });
+          livePids.delete(processId);
+        },
+      },
+      undefined,
+      undefined,
+      undefined,
+      { isPortFree: async () => true },
+      undefined,
+      async () => false,
+    );
+
+    await expect(manager.recoverControlState()).resolves.toBe("restarted");
+    expect(signals).toEqual([{ pid: 1234, signal: "SIGTERM" }]);
+  });
+
+  test("uses the Darwin generation token through an ambiguous DST fall-back hour", async () => {
+    const { lock, pid, socket } = paths();
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const processGenerationToken = "darwin:Sun Nov 1 01:30:00 2026";
+    const livePids = new Set([1234]);
+    const processes = new MutableDaemonProcesses(
+      [
+        {
+          pid: 1234,
+          ppid: 1,
+          command: "auto-mobile --daemon-mode",
+          // The two local 01:30 occurrences are an hour apart in epoch time.
+          startedAt: 1_793_513_400_000,
+          processGenerationToken,
+        },
+      ],
+      livePids,
+    );
+    writeFileSync(
+      pid,
+      JSON.stringify({
+        pid: 1234,
+        socketPath: socket,
+        port: 4321,
+        startedAt: 6_000,
+        processStartedAt: 1_793_509_800_000,
+        processGenerationToken,
+        version: "test",
+      }),
+    );
+    const signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
+    const manager = new ImmediatelyReadyRecoveryManager(
+      undefined,
+      undefined,
+      timer,
+      lock,
+      pid,
+      socket,
+      processes,
+      new CapturingDaemonSpawner(),
+      undefined,
+      () => ({ command: "auto-mobile", args: ["--daemon-mode"] }),
+      {
+        signal: (processId, signal) => {
+          signals.push({ pid: processId, signal });
+          livePids.delete(processId);
+        },
+      },
+      undefined,
+      undefined,
+      undefined,
+      { isPortFree: async () => true },
+      undefined,
+      async () => false,
+    );
+
+    await expect(manager.recoverControlState()).resolves.toBe("restarted");
+    expect(signals).toEqual([{ pid: 1234, signal: "SIGTERM" }]);
+  });
+
   test("does not SIGTERM a PID reused after recovery initially verified its generation", async () => {
     const { lock, pid, socket } = paths();
     const timer = new FakeTimer();
@@ -840,8 +962,13 @@ describe("DaemonManager control-state recovery", () => {
       ppid: 1,
       command: "auto-mobile --daemon-mode",
       startedAt: 1_000,
+      processGenerationToken: "linux:boot-id:1",
     };
-    const replacement = { ...expected, startedAt: 10_000 };
+    const replacement = {
+      ...expected,
+      startedAt: 10_000,
+      processGenerationToken: "linux:boot-id:2",
+    };
     const processes = new SequencedDaemonProcesses(
       [[expected], [replacement]],
       new Set([expected.pid]),
@@ -854,6 +981,7 @@ describe("DaemonManager control-state recovery", () => {
         port: 4321,
         startedAt: 6_000,
         processStartedAt: expected.startedAt,
+        processGenerationToken: expected.processGenerationToken,
         version: "test",
       }),
     );
@@ -891,8 +1019,13 @@ describe("DaemonManager control-state recovery", () => {
       ppid: 1,
       command: "auto-mobile --daemon-mode",
       startedAt: 1_000,
+      processGenerationToken: "linux:boot-id:1",
     };
-    const replacement = { ...expected, startedAt: 10_000 };
+    const replacement = {
+      ...expected,
+      startedAt: 10_000,
+      processGenerationToken: "linux:boot-id:2",
+    };
     const processes = new SequencedDaemonProcesses(
       [[expected], [expected], [replacement]],
       new Set([expected.pid]),
@@ -905,6 +1038,7 @@ describe("DaemonManager control-state recovery", () => {
         port: 4321,
         startedAt: 6_000,
         processStartedAt: expected.startedAt,
+        processGenerationToken: expected.processGenerationToken,
         version: "test",
       }),
     );

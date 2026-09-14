@@ -199,6 +199,32 @@ describe("repairDaemon", () => {
     expect(result.action).toBeUndefined();
   });
 
+  test("rejects an explicit null timeout before diagnosis can mutate control state", async () => {
+    let healthChecks = 0;
+    let recoveryCalls = 0;
+    const result = await repairDaemon(
+      { timeoutMs: null },
+      dependencies([], {
+        getHealthReport: async () => {
+          healthChecks++;
+          return healthReport(false);
+        },
+        recoverControlState: async () => {
+          recoveryCalls++;
+          return "restarted";
+        },
+      }),
+    );
+
+    expect(result).toMatchObject<Partial<DaemonRecoveryResult>>({
+      status: "failed",
+      phase: "diagnosis",
+      nextAction: expect.stringContaining("positive finite"),
+    });
+    expect(healthChecks).toBe(0);
+    expect(recoveryCalls).toBe(0);
+  });
+
   test("reports no action when diagnosis fails", async () => {
     const result = await repairDaemon(
       {},

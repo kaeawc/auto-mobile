@@ -31,6 +31,7 @@ import { PID_FILE_PATH, DAEMON_VERSION } from "./constants";
 import { getCurrentBuildIdentity } from "./buildIdentity";
 import { cleanupDaemonFiles, cleanupDaemonFilesSync, readPidFileDataSync } from "./daemonFiles";
 import { IncumbentOwnerGuard } from "./incumbentOwnerGuard";
+import { currentDaemonProcessGenerationToken } from "./processGeneration";
 import { executionTracker } from "../server/executionTracker";
 import {
   DAEMON_HANDOFF_INTERRUPTED_MESSAGE,
@@ -263,6 +264,7 @@ export function isProcessWideAdbServerReset(
 const STORAGE_WATCH_PURPOSE = "to watch stored values";
 
 export type DaemonProcessBirthTimeProvider = () => number;
+export type DaemonProcessGenerationTokenProvider = () => string | undefined;
 
 /**
  * Captures a wall-clock approximation of this OS process's birth time, rather
@@ -310,6 +312,7 @@ export class Daemon {
   private timer: Timer;
   private readonly generationStartedAt: number;
   private readonly processStartedAt: number;
+  private readonly processGenerationToken: string | undefined;
   private idGenerator: IdGenerator;
   private databaseInitializer: DatabaseInitializer;
   private toolSelectionProfileProvenanceLoader: ToolSelectionProfileProvenanceLoader;
@@ -350,6 +353,7 @@ export class Daemon {
     toolSelectionProfileProvenanceLoader: ToolSelectionProfileProvenanceLoader = defaultToolSelectionProfileRegistry,
     private readonly httpServerFactory: () => HttpServer = () => createHttpServer(),
     processBirthTime: DaemonProcessBirthTimeProvider = defaultDaemonProcessBirthTime,
+    processGenerationToken: DaemonProcessGenerationTokenProvider = currentDaemonProcessGenerationToken,
   ) {
     this.options = { ...options };
     this.port = options.port || DEFAULT_DAEMON_PORT;
@@ -363,6 +367,7 @@ export class Daemon {
     this.timer = timer;
     this.generationStartedAt = this.timer.now();
     this.processStartedAt = processBirthTime();
+    this.processGenerationToken = processGenerationToken();
     this.databaseInitializer = databaseInitializer;
     this.toolSelectionProfileProvenanceLoader = toolSelectionProfileProvenanceLoader;
     this.databaseHealthProbe = databaseHealthProbe;
@@ -1179,6 +1184,9 @@ export class Daemon {
       dbPath: getDatabasePath(),
       startedAt: this.generationStartedAt,
       processStartedAt: this.processStartedAt,
+      ...(this.processGenerationToken === undefined
+        ? {}
+        : { processGenerationToken: this.processGenerationToken }),
       version: DAEMON_VERSION,
       launchLogPath: this.launchLogPath(),
       assetVersion: resolveAssetVersion(resolvePinnedVersion()),
@@ -1206,6 +1214,9 @@ export class Daemon {
       dbPath: getDatabasePath(),
       startedAt: this.generationStartedAt,
       processStartedAt: this.processStartedAt,
+      ...(this.processGenerationToken === undefined
+        ? {}
+        : { processGenerationToken: this.processGenerationToken }),
       version: DAEMON_VERSION,
       launchLogPath: this.launchLogPath(),
       assetVersion: resolveAssetVersion(resolvePinnedVersion()),

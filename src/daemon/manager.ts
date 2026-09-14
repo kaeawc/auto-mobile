@@ -105,6 +105,7 @@ import {
   parseRunnerReadinessTimeout,
 } from "../utils/runnerReadinessConfig";
 import { mergedExactToolSelections } from "./daemonOptionSelections";
+import { darwinProcessGenerationToken, readLinuxProcessGenerationToken } from "./processGeneration";
 
 export type { DaemonLaunchCommand, DaemonProcessSpawner } from "./DaemonLauncher";
 
@@ -147,6 +148,8 @@ export interface DaemonProcessRecord {
   command: string;
   /** Approximate process creation time from the OS process table, when available. */
   startedAt?: number;
+  /** Stable OS-derived identity for this process generation, when available. */
+  processGenerationToken?: string;
 }
 
 export interface DaemonProcessFinder {
@@ -398,7 +401,14 @@ export function parseDarwinDaemonProcessTable(psOutput: string): DaemonProcessRe
       continue;
     }
 
-    records.push({ pid, ppid, command, startedAt });
+    const processGenerationToken = darwinProcessGenerationToken(match[3]);
+    records.push({
+      pid,
+      ppid,
+      command,
+      startedAt,
+      ...(processGenerationToken === undefined ? {} : { processGenerationToken }),
+    });
   }
 
   return records;
@@ -509,6 +519,9 @@ export class PsDaemonProcessFinder implements DaemonProcessFinder, DaemonProcess
     private readonly runCommand: ProcessTableCommandRunner = execSync,
     private readonly platform: NodeJS.Platform = process.platform,
     private readonly timer: Timer = defaultTimer,
+    private readonly linuxProcessGenerationTokenForPid: (
+      pid: number,
+    ) => string | undefined = readLinuxProcessGenerationToken,
   ) {}
 
   findDaemonProcesses(timeoutMs?: number): DaemonProcessRecord[] {
@@ -540,14 +553,23 @@ export class PsDaemonProcessFinder implements DaemonProcessFinder, DaemonProcess
 
     try {
       const { output, scannedAt } = runScan("ps -eo pid=,ppid=,etimes=,command=");
-      return parseDaemonProcessTable(output, scannedAt);
+      return this.withLinuxProcessGenerationTokens(parseDaemonProcessTable(output, scannedAt));
     } catch (error) {
       if (!isUnsupportedGnuProcessTableFormat(error)) {
         throw error;
       }
       const { output, scannedAt } = runScan("ps -o pid,ppid,etime,args");
-      return parseBusyBoxDaemonProcessTable(output, scannedAt);
+      return this.withLinuxProcessGenerationTokens(
+        parseBusyBoxDaemonProcessTable(output, scannedAt),
+      );
     }
+  }
+
+  private withLinuxProcessGenerationTokens(records: DaemonProcessRecord[]): DaemonProcessRecord[] {
+    return records.map((record) => {
+      const processGenerationToken = this.linuxProcessGenerationTokenForPid(record.pid);
+      return processGenerationToken === undefined ? record : { ...record, processGenerationToken };
+    });
   }
 
   isProcessRunning(pid: number): boolean {
@@ -2188,6 +2210,9 @@ export class DaemonManager implements DaemonManagerLike {
     status: DaemonStatus,
     candidate: DaemonProcessRecord,
   ): boolean {
+    if (status.processGenerationToken !== undefined) {
+      return candidate.processGenerationToken === status.processGenerationToken;
+    }
     const expectedStartedAt = status.processStartedAt ?? status.startedAt;
     return (
       expectedStartedAt !== undefined &&
@@ -2201,6 +2226,12 @@ export class DaemonManager implements DaemonManagerLike {
     expected: DaemonProcessRecord,
     candidate: DaemonProcessRecord,
   ): boolean {
+    if (expected.processGenerationToken !== undefined) {
+      return (
+        expected.pid === candidate.pid &&
+        candidate.processGenerationToken === expected.processGenerationToken
+      );
+    }
     return (
       expected.pid === candidate.pid &&
       expected.startedAt !== undefined &&
@@ -2517,6 +2548,7 @@ export class DaemonManager implements DaemonManagerLike {
         dbPath: pidData.dbPath,
         startedAt: pidData.startedAt,
         processStartedAt: pidData.processStartedAt,
+        processGenerationToken: pidData.processGenerationToken,
         version: pidData.version,
         assetVersion: pidData.assetVersion,
         entryScript: pidData.entryScript,
@@ -2622,7 +2654,13 @@ export class DaemonManager implements DaemonManagerLike {
     if (!current.running || !expected.running || current.pid !== expected.pid) {
       return false;
     }
-    const identityFields = ["startedAt", "version", "buildId", "entryScript"] as const;
+    const identityFields = [
+      "startedAt",
+      "processGenerationToken",
+      "version",
+      "buildId",
+      "entryScript",
+    ] as const;
     return identityFields.every(
       (field) => expected[field] === undefined || current[field] === expected[field],
     );
@@ -2776,12 +2814,14 @@ export class DaemonManager implements DaemonManagerLike {
     signal: AbortSignal | undefined,
   ): Promise<void> {
     if (!this.verifyDaemonGenerationBeforeSignal(expected, recoveryDeadline)) {
-      stderrLog(`Daemon candidate ${expected.pid} exited before explicit restart could stop it.`);
+      stderrLog(`Daemon candidate ${expected.pid} exited before repair could stop it.`);
       return;
     }
     this.throwIfRecoveryCancelled(signal);
 
-    stderrLog(`Stopping daemon without this namespace's PID record (PID ${expected.pid})...`);
+    stderrLog(
+      `Repair stopping the verified daemon for this control namespace (PID ${expected.pid})...`,
+    );
     try {
       this.processSignaler.signal(expected.pid, "SIGTERM");
     } catch (error) {
@@ -2804,9 +2844,7 @@ export class DaemonManager implements DaemonManagerLike {
 
     stderrLog(`Verified daemon ${expected.pid} did not stop gracefully, sending SIGKILL...`);
     if (!this.verifyDaemonGenerationBeforeSignal(expected, recoveryDeadline)) {
-      stderrLog(
-        `Daemon candidate ${expected.pid} exited before explicit restart could force-stop it.`,
-      );
+      stderrLog(`Daemon candidate ${expected.pid} exited before repair could force-stop it.`);
       return;
     }
     this.throwIfRecoveryCancelled(signal);

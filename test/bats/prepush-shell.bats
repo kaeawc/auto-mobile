@@ -730,3 +730,35 @@ EOF
   [[ "${output}" == *"Failed to list changed files since merge-base"* ]]
   [[ "${output}" != *"nothing to validate"* ]]
 }
+
+@test "the SC1091 source resolver stays correct under system bash 3.2 (issue #7044)" {
+  # Regression guard: lexically_normalize_path set a function-wide IFS='/', and
+  # under bash 3.2 that made the "${arr[@]:o:l}" slice-pop collapse to a single
+  # space-joined word, so resolved_shellcheck_disable_source_paths silently
+  # emitted nothing under /bin/bash 3.2 on macOS while passing under Homebrew
+  # bash 5. Pin the resolver to the system bash so the macOS BATS lane
+  # (nightly.yml) exercises 3.2; on Linux /bin/bash is bash 5 and the assertion
+  # still holds, so this case guards both lanes.
+  [ -x /bin/bash ] || skip "/bin/bash not available"
+
+  local resolver="${TEST_ROOT}/resolver-under-test.sh"
+  sed -n '/^lexically_normalize_path() {/,/^}/p' \
+    "${REPO_ROOT}/scripts/prepush-shell.sh" > "${resolver}"
+  sed -n '/^resolved_shellcheck_disable_source_paths() {/,/^}/p' \
+    "${REPO_ROOT}/scripts/prepush-shell.sh" >> "${resolver}"
+
+  mkdir -p "${TEST_ROOT}/resolver-fixture/scripts/sub" \
+    "${TEST_ROOT}/resolver-fixture/scripts/lib"
+  cat > "${TEST_ROOT}/resolver-fixture/scripts/sub/consumer.sh" <<'FIXTURE'
+#!/usr/bin/env bash
+# shellcheck disable=SC1091
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/helper.sh"
+FIXTURE
+  printf 'helper baseline\n' > "${TEST_ROOT}/resolver-fixture/scripts/lib/helper.sh"
+
+  run /bin/bash -c "cd '${TEST_ROOT}/resolver-fixture' && source '${resolver}' && PROJECT_ROOT=\"\${PWD}\" resolved_shellcheck_disable_source_paths scripts/sub/consumer.sh"
+
+  [ "${status}" -eq 0 ]
+  [ -n "${output}" ]
+  [ "${output}" = "scripts/lib/helper.sh" ]
+}

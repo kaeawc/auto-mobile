@@ -38,7 +38,7 @@ const fieldSpecSchema = z
 /**
  * Schema for setUIState tool input
  */
-const setUIStateSchema = z.object({
+export const setUIStateSchema = z.object({
   fields: z
     .array(fieldSpecSchema)
     .min(1, "At least one field is required")

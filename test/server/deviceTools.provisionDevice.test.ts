@@ -1280,6 +1280,92 @@ describe("provisionDevice handler", () => {
     expect(await deviceManager.listDeviceImages("android")).toEqual([created.device]);
   });
 
+  test.each(["android", "ios"] as const)(
+    "keeps a stopped %s device when its resource notification fails",
+    async (platform) => {
+      const created = provisionedTestDevice(platform, true);
+      setDeviceToolsDependencies({
+        exactDeviceProvisionerFactory: () => ({
+          provision: async (request) => {
+            await request.onBeforeCreate?.();
+            deviceManager.setDeviceImages(platform, [created.device]);
+            return created;
+          },
+        }),
+        notifyResourcesChanged: async () => {
+          throw new Error("resource notification transport closed");
+        },
+      });
+      registerDeviceTools();
+
+      const response = JSON.parse(
+        (
+          (await ToolRegistry.getTool("provisionDevice")!.handler({
+            ...provisionTestArgs(platform, `stopped-notify-failure-${platform}`),
+            boot: false,
+            readiness: "none",
+          })) as any
+        ).content[0].text,
+      );
+
+      expect(response).toMatchObject({
+        created: true,
+        adopted: false,
+        lifecycleState: "created",
+        readiness: { status: "not_requested" },
+      });
+      expect(response.error).toBeUndefined();
+      expect(response.cleanup).toBeUndefined();
+      expect(operationStore.failCalls).toBe(0);
+      expect(
+        deviceManager
+          .getExecutedOperations()
+          .filter((operation) => operation.startsWith("destroyDevice:")),
+      ).toEqual([]);
+      expect(await deviceManager.listDeviceImages(platform)).toEqual([created.device]);
+    },
+  );
+
+  test("returns a stopped-device result without waiting for a resource notification", async () => {
+    const created = provisionedTestDevice("android", true);
+    const notification = Promise.withResolvers<void>();
+    setDeviceToolsDependencies({
+      exactDeviceProvisionerFactory: () => ({
+        provision: async (request) => {
+          await request.onBeforeCreate?.();
+          deviceManager.setDeviceImages("android", [created.device]);
+          return created;
+        },
+      }),
+      notifyResourcesChanged: () => notification.promise,
+    });
+    registerDeviceTools();
+
+    let responseSettled = false;
+    const request = ToolRegistry.getTool("provisionDevice")!
+      .handler({
+        ...provisionTestArgs("android", "stopped-notify-pending"),
+        boot: false,
+        readiness: "none",
+      })
+      .then((response) => {
+        responseSettled = true;
+        return response;
+      });
+    try {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(responseSettled).toBe(true);
+      expect(JSON.parse(((await request) as any).content[0].text)).toMatchObject({
+        created: true,
+        lifecycleState: "created",
+      });
+      expect(await deviceManager.listDeviceImages("android")).toEqual([created.device]);
+    } finally {
+      notification.resolve();
+      await request;
+    }
+  });
+
   test("cleans up an iOS simulator created before exact provisioning fails", async () => {
     const created = provisionedTestDevice("ios", true);
     configureProvisionBootAndTeardown(deviceManager, "ios");

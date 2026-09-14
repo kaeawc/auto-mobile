@@ -128,10 +128,10 @@ import {
   createDefaultExactDeviceProvisioner,
   type ExactDeviceProvisioner,
   type ExactDeviceSpecification,
-  parseAndroidSystemImageRuntime,
   ProvisionDeviceError,
 } from "../utils/exactDeviceProvisioning";
 import { MIN_AVD_RAM_MB } from "../utils/android-cmdline-tools/AvdConfigReader";
+import { parseAndroidSystemImageRuntime } from "../utils/android-cmdline-tools/AndroidSystemImageRuntime";
 import {
   ProvisionDeviceOperationRepository,
   ProvisionDeviceOperationConflictError,

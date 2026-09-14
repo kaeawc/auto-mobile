@@ -8,9 +8,9 @@ import type { PlatformDeviceManager } from "./deviceUtils";
 import type { AvdConfigReader } from "./android-cmdline-tools/AvdConfigReader";
 import {
   FileAvdConfigReader,
-  normalizeAndroidArchitecture,
   resolveAndroidAvdHome,
 } from "./android-cmdline-tools/AvdConfigReader";
+import { parseAndroidSystemImageRuntime } from "./android-cmdline-tools/AndroidSystemImageRuntime";
 import { AvdManagerClient } from "./android-cmdline-tools/AvdManagerClient";
 import type { CreateAvdParams } from "./android-cmdline-tools/avdmanager";
 import { SimCtlClient } from "./ios-cmdline-tools/SimCtlClient";
@@ -209,32 +209,6 @@ export interface DefaultExactDeviceProvisionerDependencies {
   iosSimulator: ExactIosSimulatorClient;
   lifecycleCoordinator?: VirtualDeviceLifecycleCoordinator;
   timer?: Pick<Timer, "now">;
-}
-
-export interface ParsedAndroidSystemImageRuntime {
-  apiLevel: number;
-  tag: string;
-  architecture: string;
-  systemImagePackage: string;
-}
-
-export function parseAndroidSystemImageRuntime(
-  runtime: string,
-): ParsedAndroidSystemImageRuntime | undefined {
-  const parts = runtime.split(";");
-  if (parts.length !== 4 || parts[0] !== "system-images") {
-    return undefined;
-  }
-  const apiMatch = /^android-(\d+(?:\.\d+)*)$/.exec(parts[1] ?? "");
-  if (!apiMatch || !parts[2] || !parts[3]) {
-    return undefined;
-  }
-  return {
-    apiLevel: Number.parseInt(apiMatch[1], 10),
-    tag: parts[2],
-    architecture: normalizeAndroidArchitecture(parts[3]) ?? parts[3],
-    systemImagePackage: runtime,
-  };
 }
 
 function sameAndroidDeviceIdentity(

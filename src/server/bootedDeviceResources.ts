@@ -26,6 +26,7 @@ import {
 import { resolveApkChecksum, resolveIpaChecksum } from "../constants/release";
 import { type DiscoverySource, sourcesForPlatform } from "../utils/discoverySource";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import { withRemainingBudget } from "../utils/withRemainingBudget";
 
 // Resource URIs
 export const BOOTED_DEVICE_RESOURCE_URIS = {
@@ -88,6 +89,24 @@ export interface DeviceServiceStatus {
   supportedFeaturesComplete?: boolean | null;
 }
 
+/**
+ * A per-device diagnostic recorded when the bounded service-status probe could
+ * not complete for THIS observation. It is TRANSIENT: it marks the automation
+ * snapshot as momentarily unknown without changing the device's presence in the
+ * list or its readiness. A booted simulator whose CtrlProxy loopback refused,
+ * reset, or hung keeps appearing with this marker, and the next observation
+ * usually clears it, so a healthy device does not flap present/absent (#7053).
+ */
+export interface ServiceStatusDiagnostic {
+  /**
+   * "timeout": the probe did not settle within the caller's budget (a hung
+   * loopback connection). "unreachable": the probe failed outright (e.g. the
+   * CtrlProxy loopback connection was refused or reset).
+   */
+  state: "timeout" | "unreachable";
+  reason: string;
+}
+
 interface DeviceIdentity {
   stableId: string;
   /**
@@ -141,6 +160,14 @@ interface BootedDeviceInfo {
   recoveryEligibility?: DeviceRecoveryEligibility;
   session?: DeviceSessionInfo;
   serviceStatus?: DeviceServiceStatus;
+  /**
+   * Set when the bounded service-status probe for this observation timed out or
+   * failed (CtrlProxy loopback refused/reset). The device stays booted and
+   * present; this only says the automation-service snapshot is momentarily
+   * unknown, never that the device is unavailable. Distinct from `serviceStatus`
+   * simply being absent for a non-probeable (quarantined) entry (#7053).
+   */
+  serviceStatusDiagnostic?: ServiceStatusDiagnostic;
   /**
    * Whether the device's keyguard/lock screen currently obscures the app. Android only (from
    * `dumpsys window policy`); omitted when unread or on iOS, where no lock-state probe exists yet.
@@ -737,42 +764,145 @@ function isProbeableDevice(device: BootedDeviceInfo): boolean {
   return device.identityUnresolved !== true;
 }
 
-async function enrichDeviceServiceStatuses(devices: BootedDeviceInfo[]): Promise<void> {
-  if (!serviceStatusEnabled) {
+const SERVICE_STATUS_TIMEOUT_MS = 5000;
+
+/** Probes one device's automation-service status; resolves undefined when the platform has none. */
+export type ServiceStatusProbe = (
+  device: Pick<BootedDeviceInfo, "name" | "platform" | "deviceId" | "source">,
+) => Promise<DeviceServiceStatus | undefined>;
+
+// Injected only by tests, which need a deterministic service-status result without real CtrlProxy
+// I/O. When null, the real CtrlProxy-backed probe runs — but only while `serviceStatusEnabled`
+// (i.e. no fake device manager), mirroring how the lock probe is gated.
+let injectedServiceStatusProbe: ServiceStatusProbe | null = null;
+
+/** Inject a fake service-status probe for tests (or null to restore the real CtrlProxy-backed probe). */
+export function setServiceStatusProbe(probe: ServiceStatusProbe | null): void {
+  injectedServiceStatusProbe = probe;
+}
+
+const realServiceStatusProbe: ServiceStatusProbe = (device) => queryDeviceServiceStatus(device);
+
+/** The active service-status probe: an injected fake (tests) or the real CtrlProxy probe when no fake manager is set. */
+function activeServiceStatusProbe(): ServiceStatusProbe | null {
+  return injectedServiceStatusProbe ?? (serviceStatusEnabled ? realServiceStatusProbe : null);
+}
+
+/** Outcome of a bounded service-status probe: at most one of `status` (success) or `diagnostic` (transient failure). */
+export interface ServiceStatusProbeOutcome {
+  status?: DeviceServiceStatus;
+  diagnostic?: ServiceStatusDiagnostic;
+}
+
+/**
+ * Run [probe] for one device bounded by the caller's absolute [deadlineMs]. A hang yields a
+ * TRANSIENT "timeout" diagnostic and a thrown failure (e.g. a CtrlProxy loopback connection
+ * refused/reset) yields "unreachable" — this function never rejects, so a probe failure can never
+ * drop the device or mark it unavailable (#7053). The bounded wait is driven off the injected
+ * [timer] and its losing handle is always cleared, so a fast success logs nothing.
+ */
+export async function probeServiceStatusWithBudget(
+  device: Pick<BootedDeviceInfo, "name" | "platform" | "deviceId" | "source">,
+  probe: ServiceStatusProbe,
+  deadlineMs: number,
+  timer: Timer = defaultTimer,
+): Promise<ServiceStatusProbeOutcome> {
+  let timeoutHandle: NodeJS.Timeout | undefined;
+  try {
+    return await withRemainingBudget(deadlineMs, timer, undefined, async (_signal, remainingMs) => {
+      type Race =
+        | { kind: "settled"; status: DeviceServiceStatus | undefined }
+        | { kind: "failed"; error: unknown }
+        | { kind: "timeout" };
+      const raced = await Promise.race<Race>([
+        probe(device).then(
+          (status) => ({ kind: "settled", status }),
+          (error) => ({ kind: "failed", error }),
+        ),
+        new Promise<Race>((resolve) => {
+          timeoutHandle = timer.setTimeout(() => resolve({ kind: "timeout" }), remainingMs);
+        }),
+      ]);
+      if (raced.kind === "timeout") {
+        logger.warn(`[BootedDeviceResources] Service status timeout for ${device.deviceId}`);
+        return {
+          diagnostic: {
+            state: "timeout",
+            reason: `Service-status probe did not settle within ${remainingMs}ms`,
+          },
+        };
+      }
+      if (raced.kind === "failed") {
+        const reason = errorMessage(raced.error);
+        logger.warn(
+          `[BootedDeviceResources] Service status unreachable for ${device.deviceId}: ${reason}`,
+        );
+        return { diagnostic: { state: "unreachable", reason } };
+      }
+      return raced.status ? { status: raced.status } : {};
+    });
+  } catch (error) {
+    // withRemainingBudget throws only when the budget was already spent before the probe began;
+    // that is a timeout, surfaced transiently so the booted device still appears in the list.
+    const reason = errorMessage(error);
+    logger.warn(
+      `[BootedDeviceResources] Service status budget elapsed for ${device.deviceId}: ${reason}`,
+    );
+    return { diagnostic: { state: "timeout", reason } };
+  } finally {
+    if (timeoutHandle) {
+      timer.clearTimeout(timeoutHandle);
+    }
+  }
+}
+
+/**
+ * Enrich each PROBEABLE booted device with its automation-service status, bounded by a single
+ * per-observation deadline. A device whose probe times out or is unreachable keeps its place in the
+ * list with a transient {@link ServiceStatusDiagnostic}; it is never dropped and its readiness is
+ * left untouched (#7053). Exported for direct, timer-controlled unit tests.
+ */
+export async function enrichDeviceServiceStatuses(
+  devices: BootedDeviceInfo[],
+  timer: Timer = defaultTimer,
+): Promise<void> {
+  const probe = activeServiceStatusProbe();
+  if (!probe) {
     return;
   }
 
-  const SERVICE_STATUS_TIMEOUT_MS = 5000;
-  const serviceStatusResults = await Promise.allSettled(
-    devices.map(async (device) => {
-      if (!isProbeableDevice(device)) {
-        return undefined;
-      }
-      try {
-        return await Promise.race([
-          queryDeviceServiceStatus(device),
-          new Promise<undefined>((resolve) =>
-            defaultTimer.setTimeout(() => {
-              logger.warn(`[BootedDeviceResources] Service status timeout for ${device.deviceId}`);
-              resolve(undefined);
-            }, SERVICE_STATUS_TIMEOUT_MS),
-          ),
-        ]);
-      } catch (error) {
-        logger.warn(
-          `[BootedDeviceResources] Failed to query service status for ${device.deviceId}: ${error}`,
-        );
-        return undefined;
-      }
-    }),
+  const deadlineMs = timer.now() + SERVICE_STATUS_TIMEOUT_MS;
+  const outcomes = await Promise.all(
+    devices.map(async (device) =>
+      isProbeableDevice(device)
+        ? await probeServiceStatusWithBudget(device, probe, deadlineMs, timer)
+        : undefined,
+    ),
   );
 
   for (let i = 0; i < devices.length; i++) {
-    const result = serviceStatusResults[i];
-    if (result.status === "fulfilled" && result.value) {
-      devices[i] = withServiceStatus(devices[i], result.value);
+    const outcome = outcomes[i];
+    if (!outcome) {
+      continue;
+    }
+    if (outcome.status) {
+      devices[i] = withServiceStatus(devices[i], outcome.status);
+    } else if (outcome.diagnostic) {
+      devices[i] = withServiceStatusDiagnostic(devices[i], outcome.diagnostic);
     }
   }
+}
+
+/**
+ * Attach a transient service-status diagnostic. Readiness is deliberately left as discovery set it
+ * (`unknown` for a freshly-discovered device): a momentary probe failure must never demote a booted
+ * device to `not_ready`/unavailable (#7053).
+ */
+function withServiceStatusDiagnostic(
+  device: BootedDeviceInfo,
+  diagnostic: ServiceStatusDiagnostic,
+): BootedDeviceInfo {
+  return { ...device, serviceStatusDiagnostic: diagnostic };
 }
 
 function withServiceStatus(
@@ -782,6 +912,8 @@ function withServiceStatus(
   return {
     ...device,
     serviceStatus,
+    // A confirmed status supersedes any transient diagnostic from an earlier failed probe.
+    serviceStatusDiagnostic: undefined,
     readiness: readinessFromServiceStatus(device.platform, serviceStatus),
     capabilities: {
       automation: {

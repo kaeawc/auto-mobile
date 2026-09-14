@@ -652,6 +652,13 @@ export class DevicePool {
    */
   private readonly pendingIdentityReplacements: Map<string, BootedDevice> = new Map();
   /**
+   * Newer unresolved observations seen after the current pending replacement.
+   * A later resolved observation clears this evidence without letting an
+   * unresolved observation itself become the replacement candidate.
+   */
+  private readonly pendingIdentityReplacementUnresolvedObservations: Map<string, number> =
+    new Map();
+  /**
    * Explicit session-release callbacks run before terminal persistence awaits.
    * Capture ownership there so the later caller-ordered pool release cannot
    * snapshot and free a same-UUID replacement assignment.
@@ -970,6 +977,7 @@ export class DevicePool {
     device: BootedDevice,
     sourceImage?: DeviceInfo,
     awaitSessionTracking: boolean = true,
+    identityUnresolved?: boolean,
   ): Promise<void> {
     this.clearAutoStartSuppressionForBootedDevice(device, sourceImage);
     if (sourceImage) {
@@ -1006,7 +1014,7 @@ export class DevicePool {
         simulatorType: this.criteriaMatcher.getBootedDeviceSimulatorType(device),
         ...(device.observedAt !== undefined ? { nameObservedAt: device.observedAt } : {}),
         ...(device.observedAt !== undefined ? { identityObservedAt: device.observedAt } : {}),
-        ...(this.hasUnresolvedEmulatorName(device) ? { identityUnresolved: true } : {}),
+        ...(identityUnresolved ? { identityUnresolved: true } : {}),
         incarnation: this.nextDeviceIncarnation(),
       });
       this.recordSourceAndroidAvd(device.deviceId, sourceImage);
@@ -1050,6 +1058,7 @@ export class DevicePool {
     bootedDevice: BootedDevice,
   ): Promise<boolean> {
     this.pendingIdentityReplacements.set(bootedDevice.deviceId, bootedDevice);
+    this.pendingIdentityReplacementUnresolvedObservations.delete(bootedDevice.deviceId);
     try {
       await this.evictMissingPooledDevice(
         pooledDevice,
@@ -1064,10 +1073,14 @@ export class DevicePool {
       if (!replacement || this.devices.has(replacement.deviceId)) {
         return false;
       }
-      await this.addDevice(replacement);
+      const identityUnresolved =
+        this.hasUnresolvedEmulatorName(replacement) ||
+        this.pendingIdentityReplacementUnresolvedObservations.has(replacement.deviceId);
+      await this.addDevice(replacement, undefined, true, identityUnresolved);
       return true;
     } finally {
       this.pendingIdentityReplacements.delete(bootedDevice.deviceId);
+      this.pendingIdentityReplacementUnresolvedObservations.delete(bootedDevice.deviceId);
     }
   }
 
@@ -6590,12 +6603,27 @@ export class DevicePool {
    * serial temporarily absent from the pool during a runtime replacement.
    */
   private recordPendingIdentityReplacementObservation(device: BootedDevice): void {
-    if (this.hasUnresolvedEmulatorName(device)) {
+    const pending = this.pendingIdentityReplacements.get(device.deviceId);
+    if (!pending) {
       return;
     }
-    const pending = this.pendingIdentityReplacements.get(device.deviceId);
+    if (this.hasUnresolvedEmulatorName(device)) {
+      if (
+        device.observedAt !== undefined &&
+        pending.observedAt !== undefined &&
+        device.observedAt > pending.observedAt
+      ) {
+        this.pendingIdentityReplacementUnresolvedObservations.set(
+          device.deviceId,
+          device.observedAt,
+        );
+      }
+      return;
+    }
+    // A later successful name probe supersedes any preceding unreadable probe,
+    // even when its stamp cannot replace the current resolved candidate.
+    this.pendingIdentityReplacementUnresolvedObservations.delete(device.deviceId);
     if (
-      !pending ||
       pending.observedAt === undefined ||
       device.observedAt === undefined ||
       device.observedAt <= pending.observedAt

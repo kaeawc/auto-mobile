@@ -5684,6 +5684,11 @@
         "settled": {
           "type": "boolean"
         },
+        "accessibilityAuditSkipped": {
+          "description": "Why a requested accessibility audit was omitted from this observation (issue #6926): `settled_capture_adopted` means a settled capture replaced the action's original capture, so its audit was deliberately dropped rather than mismatched onto the returned hierarchy.",
+          "type": "string",
+          "const": "settled_capture_adopted"
+        },
         "timedOut": {
           "type": "boolean"
         },
@@ -11455,6 +11460,11 @@
                   "description": "Same name/meaning as a full observation's `settled` (issue #6866): whether the observation this diff was computed from passed the hierarchy-stability gate. Populated from the post-action observation, not by `diffObserveResult` itself, so a diff-mode client has the same accessor as a full-mode one.",
                   "type": "boolean"
                 },
+                "accessibilityAuditSkipped": {
+                  "description": "Same name/meaning as a full observation's `accessibilityAuditSkipped` (issue #6926): `settled_capture_adopted` means a settled capture replaced the action's original capture, so its audit was deliberately dropped rather than mismatched onto the returned hierarchy.",
+                  "type": "string",
+                  "const": "settled_capture_adopted"
+                },
                 "added": {
                   "type": "array",
                   "items": {
@@ -12746,6 +12756,11 @@
                 "settled": {
                   "description": "Whether this observation passed the hierarchy-stability gate (issue #6866): two consecutive structurally-equal captures. `false` means the bound expired, the action was not navigation-class, or the action failed — in every case the capture was never confirmed stable. Stamped on every embedded action observation.",
                   "type": "boolean"
+                },
+                "accessibilityAuditSkipped": {
+                  "description": "Why a requested accessibility audit was omitted from this observation (issue #6926): `settled_capture_adopted` means a settled capture replaced the action's original capture, so its audit was deliberately dropped rather than mismatched onto the returned hierarchy.",
+                  "type": "string",
+                  "const": "settled_capture_adopted"
                 }
               },
               "additionalProperties": {}

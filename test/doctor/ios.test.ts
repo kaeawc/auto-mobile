@@ -18,6 +18,7 @@ import {
   IOS_RUNNER_FEATURE_COMMANDS,
   IOS_RUNNER_FEATURE_FLAGS,
   runIosChecks,
+  runPostRepairIosChecks,
 } from "../../src/doctor/checks/ios";
 import type {
   IosObserveRoundTripInspection,
@@ -1108,6 +1109,35 @@ describe("checkIosObserveRoundTrip", () => {
     const names = results.map((check) => check.name);
     expect(names).toContain("iOS Observe Round Trip");
   });
+
+  test("post-repair iOS verification forwards an exact simulator UDID only to filtered probes", async () => {
+    const runnerTargets: Array<string | undefined> = [];
+    const observeTargets: Array<string | undefined> = [];
+    const results = await runPostRepairIosChecks(
+      { iosSimulatorUdid: "SIM-TARGET" },
+      {
+        ...baseDependencies,
+        runnerInspector: {
+          inspectBootedRunners: async (targetDeviceId) => {
+            runnerTargets.push(targetDeviceId);
+            return [];
+          },
+        },
+        observeRoundTripInspector: {
+          inspectBootedObserveRoundTrips: async (targetDeviceId) => {
+            observeTargets.push(targetDeviceId);
+            return [];
+          },
+        },
+      },
+    );
+
+    expect(runnerTargets).toEqual(["SIM-TARGET"]);
+    expect(observeTargets).toEqual(["SIM-TARGET"]);
+    expect(results.map((result) => result.name)).toEqual(
+      expect.arrayContaining(["iOS CtrlProxy Runner", "iOS Observe Round Trip"]),
+    );
+  });
 });
 
 describe("createIosCtrlProxyRunnerInspector lifecycle", () => {
@@ -1209,6 +1239,41 @@ describe("createIosCtrlProxyRunnerInspector lifecycle", () => {
     expect(inspections[0].supportedCommands).toBeNull();
     expect(inspections[0].supportedFeatures).toBeNull();
     expect(closes).toBe(1);
+  });
+
+  test("filters unrelated booted simulators before creating a runner manager or client", async () => {
+    const managerDevices: string[] = [];
+    const clientDevices: string[] = [];
+    const hooks: IosRunnerInspectorHooks = {
+      getManager: (device) => {
+        managerDevices.push(device.deviceId);
+        return runningManager;
+      },
+      getExistingClient: () => null,
+      createClient: (device) => {
+        clientDevices.push(device.deviceId);
+        return {
+          getSupportedCommands: async () => [...IOS_RUNNER_FEATURE_COMMANDS],
+          getSupportedFeatures: async () => [...IOS_RUNNER_FEATURE_FLAGS],
+          close: async () => {},
+        };
+      },
+    };
+
+    const inspector = createIosCtrlProxyRunnerInspector(
+      () =>
+        simctlReturning([
+          { name: "Unrelated", deviceId: "SIM-OTHER" },
+          { name: "Target", deviceId: "SIM-TARGET" },
+        ]) as any,
+      new FakeLogger(),
+      hooks,
+    );
+    const inspections = await inspector.inspectBootedRunners("SIM-TARGET");
+
+    expect(inspections.map((inspection) => inspection.deviceId)).toEqual(["SIM-TARGET"]);
+    expect(managerDevices).toEqual(["SIM-TARGET"]);
+    expect(clientDevices).toEqual(["SIM-TARGET"]);
   });
 });
 

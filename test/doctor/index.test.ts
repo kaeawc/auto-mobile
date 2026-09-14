@@ -448,6 +448,50 @@ describe("runDoctor", () => {
     });
   });
 
+  test("uses only the filtered read-only runners for post-repair verification", async () => {
+    const calls: string[] = [];
+    const report = await runDoctor(
+      { diagnosticProfile: "post-repair-read-only", ios: true },
+      {
+        runSystemChecks: () => {
+          calls.push("system");
+          return [];
+        },
+        runAndroidChecks: async () => {
+          calls.push("android");
+          return [];
+        },
+        runIosChecks: async () => {
+          calls.push("ios");
+          return [];
+        },
+        runAutoMobileChecks: async () => {
+          calls.push("automobile");
+          return [];
+        },
+        runPostRepairAndroidChecks: async () => {
+          calls.push("post-repair-android");
+          return [];
+        },
+        runPostRepairIosChecks: async () => {
+          calls.push("post-repair-ios");
+          return [makeCheck({ name: "simctl", status: "pass" })];
+        },
+        runPostRepairAutoMobileChecks: async () => {
+          calls.push("post-repair-automobile");
+          return [makeCheck({ name: "Daemon Connectivity", status: "pass" })];
+        },
+      },
+    );
+
+    expect(calls).toEqual(["post-repair-ios", "post-repair-automobile"]);
+    expect(report.diagnosticProfile).toBe("post-repair-read-only");
+    expect(report.system.checks).toEqual([]);
+    expect(report.android).toBeUndefined();
+    expect(report.ios?.checks.map((check) => check.name)).toEqual(["simctl"]);
+    expect(report.autoMobile.checks.map((check) => check.name)).toEqual(["Daemon Connectivity"]);
+  });
+
   test("summary.total counts every check across all rendered sections", async () => {
     await withProcessPlatform("linux", async () => {
       const report = await runDoctor({ ios: true }, fakeDeps());

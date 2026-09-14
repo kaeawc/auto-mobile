@@ -93,6 +93,7 @@ export interface AndroidDoctorDependencies {
   getBestAndroidToolsLocation: typeof getBestAndroidToolsLocation;
   getAndroidHomeWithSystemImages: typeof getAndroidHomeWithSystemImages;
   logger: typeof logger;
+  adbFactory?: AdbClientFactory;
   getCmdlineToolsVersion?: CmdlineToolsVersionReader;
   listAvds?: (probe?: DoctorProbeOptions) => Promise<Array<{ name: string }>>;
   readAvdConfig?: AvdConfigReader;
@@ -556,6 +557,31 @@ export async function runAndroidChecks(options: DoctorOptions = {}): Promise<Che
   await run(() => checkConnectedDevices(defaultAdbClientFactory, options));
   await run(() => checkAvailableAvds(options));
   await run(() => checkAvdMemory(createAndroidDoctorDependencies(), options));
+
+  return results;
+}
+
+/**
+ * Run the narrow Android portion of post-repair verification.
+ *
+ * This deliberately limits itself to host toolchain probes. In particular it
+ * never lists booted devices, resolves the first discovered device, or invokes
+ * CtrlProxy's compatibility reconciler, which can install or upgrade an APK.
+ * An exact serial can opt into a separate read-only probe when recovery has a
+ * caller-owned identity to verify.
+ */
+export async function runPostRepairAndroidChecks(
+  options: DoctorOptions = {},
+  dependencies = createAndroidDoctorDependencies(),
+): Promise<CheckResult[]> {
+  const probe = probeOptions(options);
+  const results: CheckResult[] = [];
+
+  results.push(await checkAndroidCommandLineTools(options, dependencies));
+  results.push(await checkJavaHome());
+  results.push(await checkAdbInstallation(dependencies.adbFactory, probe));
+  results.push(await checkAdbVersion(dependencies.adbFactory, probe));
+  results.push(await checkEmulator(probe, dependencies));
 
   return results;
 }

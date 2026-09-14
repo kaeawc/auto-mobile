@@ -11,7 +11,7 @@ import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
 import { defaultTimer, MAX_SETTIMEOUT_DELAY_MS, type Timer } from "../utils/SystemTimer";
 import { runDoctor } from ".";
-import type { DoctorOptions, DoctorReport } from "./types";
+import type { DoctorDiagnosticProfile, DoctorOptions, DoctorReport } from "./types";
 
 const DEFAULT_DAEMON_RECOVERY_TIMEOUT_MS = 45_000;
 
@@ -35,11 +35,16 @@ export interface DoctorRepairOptions {
    * This does not narrow the shared daemon/control-socket repair scope.
    */
   ios?: boolean;
+  /** Exact Android serial for an optional recovery-only read-only probe. */
+  androidDeviceId?: string;
+  /** Exact iOS simulator UDID for an optional recovery-only read-only probe. */
+  iosSimulatorUdid?: string;
   /** Daemon options parsed from the current CLI invocation. */
   daemonOptions?: DaemonOptions;
 }
 
 export interface PostRepairDoctorVerification {
+  profile: DoctorDiagnosticProfile;
   android?: true;
   ios?: true;
 }
@@ -447,16 +452,20 @@ function requestedPostRepairDoctor(
   options: DoctorRepairOptions,
 ): PostRepairDoctorVerification | undefined {
   const requested = {
+    profile: "post-repair-read-only" as const,
     ...(options.android === true ? { android: true as const } : {}),
     ...(options.ios === true ? { ios: true as const } : {}),
   };
-  return Object.keys(requested).length === 0 ? undefined : requested;
+  return options.android === true || options.ios === true ? requested : undefined;
 }
 
 function assertRequestedDoctorSections(
   report: DoctorReport,
   requested: PostRepairDoctorVerification,
 ): void {
+  if (report.diagnosticProfile !== requested.profile) {
+    throw new Error("post-repair doctor did not run the read-only diagnostic profile");
+  }
   if (requested.android && !report.android) {
     throw new Error("post-repair doctor did not run the requested Android diagnostics");
   }
@@ -470,6 +479,7 @@ function assertRequestedDoctorSections(
 
 async function verifyRequestedDoctorChecks(
   requested: PostRepairDoctorVerification | undefined,
+  repairOptions: Pick<DoctorRepairOptions, "androidDeviceId" | "iosSimulatorUdid">,
   deadline: number,
   timer: Timer,
   runDoctorChecks: (options: DoctorOptions) => Promise<DoctorReport>,
@@ -482,8 +492,12 @@ async function verifyRequestedDoctorChecks(
     deadline,
     timer,
     async (signal) => {
+      const { profile: diagnosticProfile, ...platforms } = requested;
       const report = await runDoctorChecks({
-        ...requested,
+        ...platforms,
+        diagnosticProfile,
+        androidDeviceId: repairOptions.androidDeviceId,
+        iosSimulatorUdid: repairOptions.iosSimulatorUdid,
         signal,
         deadlineMs: deadline,
         timer,
@@ -499,6 +513,7 @@ async function completeVerifiedRecovery(
   before: DaemonHealthReport,
   action: DaemonRecoveryAction,
   requestedDoctor: PostRepairDoctorVerification | undefined,
+  repairOptions: Pick<DoctorRepairOptions, "androidDeviceId" | "iosSimulatorUdid">,
   deadline: number,
   timer: Timer,
   getHealthReport: () => Promise<DaemonHealthReport>,
@@ -511,6 +526,7 @@ async function completeVerifiedRecovery(
 
   const postRepairDoctor = await verifyRequestedDoctorChecks(
     requestedDoctor,
+    repairOptions,
     deadline,
     timer,
     runDoctorChecks,
@@ -638,6 +654,7 @@ export async function repairDaemon(
     before,
     protocolRecovery.value,
     requestedPostRepairDoctor(options),
+    options,
     deadline,
     timer,
     getHealthReport,

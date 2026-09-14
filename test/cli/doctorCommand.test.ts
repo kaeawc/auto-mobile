@@ -79,9 +79,15 @@ describe("doctorToolParams", () => {
   });
 
   test("keeps recovery-only flags out of the daemon doctor request", () => {
-    expect(doctorToolParams({ android: true, repair: true, timeoutMs: 12_000 })).toEqual({
-      android: true,
-    });
+    expect(
+      doctorToolParams({
+        android: true,
+        repair: true,
+        timeoutMs: 12_000,
+        androidDeviceId: "emulator-5554",
+        iosSimulatorUdid: "SIM-TARGET",
+      }),
+    ).toEqual({ android: true });
   });
 
   test("runs repair locally and renders its structured result", async () => {
@@ -196,6 +202,62 @@ describe("doctorToolParams", () => {
     expect(receivedTimeoutMs).toBe("not-a-number");
   });
 
+  test("threads exact device identities only into recovery's read-only verification", async () => {
+    let receivedOptions: unknown;
+    setCliOutputSinksForTesting({
+      stdout: { write: () => {} },
+      stderr: { write: () => {} },
+    });
+
+    try {
+      await runDoctorCommand(
+        {
+          repair: true,
+          android: true,
+          ios: true,
+          androidDeviceId: "emulator-5554",
+          iosSimulatorUdid: "SIM-TARGET",
+        },
+        {
+          repairDaemon: async (options) => {
+            receivedOptions = options;
+            return { status: "repaired", phase: "complete", action: "joined" };
+          },
+        },
+      );
+    } finally {
+      resetCliOutputSinksForTesting();
+    }
+
+    expect(receivedOptions).toEqual({
+      timeoutMs: undefined,
+      android: true,
+      ios: true,
+      androidDeviceId: "emulator-5554",
+      iosSimulatorUdid: "SIM-TARGET",
+      daemonOptions: undefined,
+    });
+  });
+
+  test.each([
+    {
+      params: { repair: true, androidDeviceId: "emulator-5554" },
+      message: "--android-device-id requires --repair --android",
+    },
+    {
+      params: { repair: true, iosSimulatorUdid: "SIM-TARGET" },
+      message: "--ios-simulator-udid requires --repair --ios",
+    },
+  ])("rejects a target without its matching platform filter", async ({ params, message }) => {
+    await expect(
+      runDoctorCommand(params, {
+        repairDaemon: async () => {
+          throw new Error("repair should not run");
+        },
+      }),
+    ).rejects.toThrow(message);
+  });
+
   test("documents repair-only doctor flags without adding them to the MCP schema", async () => {
     const lines: string[] = [];
     await runCliCommand(["help", "doctor"], undefined, {
@@ -206,6 +268,8 @@ describe("doctorToolParams", () => {
     const help = lines.join("\n");
     expect(help).toContain("--repair (optional)");
     expect(help).toContain("--timeout-ms (optional)");
+    expect(help).toContain("--android-device-id (optional)");
+    expect(help).toContain("--ios-simulator-udid (optional)");
   });
 
   test("renders a normal doctor report as pretty JSON", async () => {

@@ -43,6 +43,7 @@ function doctorReport(platform: "android" | "ios"): DoctorReport {
     version: "0.0.0-test",
     platform: "darwin",
     arch: "arm64",
+    diagnosticProfile: "post-repair-read-only",
     system: { checks: [] },
     autoMobile: { checks: [] },
     ...(platform === "android" ? { android: { checks: [] } } : { ios: { checks: [] } }),
@@ -106,6 +107,7 @@ describe("repairDaemon", () => {
     "runs requested %s diagnostics after repair under the shared deadline",
     async (platform) => {
       const calls: Array<{
+        diagnosticProfile?: string;
         android?: boolean;
         ios?: boolean;
         deadlineMs?: number;
@@ -124,10 +126,13 @@ describe("repairDaemon", () => {
       expect(result).toMatchObject<Partial<DaemonRecoveryResult>>({
         status: "repaired",
         phase: "complete",
-        postRepairDoctor: { [platform]: true },
+        postRepairDoctor: { profile: "post-repair-read-only", [platform]: true },
       });
       expect(calls).toHaveLength(1);
-      expect(calls[0]).toMatchObject({ [platform]: true });
+      expect(calls[0]).toMatchObject({
+        diagnosticProfile: "post-repair-read-only",
+        [platform]: true,
+      });
       expect(calls[0]?.deadlineMs).toBeGreaterThan(0);
       expect(calls[0]?.signal).toBeInstanceOf(AbortSignal);
     },

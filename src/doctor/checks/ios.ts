@@ -60,7 +60,10 @@ export interface IosRunnerInspection {
 
 /** Source of booted-simulator runner identities (injectable for tests). */
 export interface IosCtrlProxyRunnerInspector {
-  inspectBootedRunners(probe?: DoctorProbeOptions): Promise<IosRunnerInspection[]>;
+  inspectBootedRunners(
+    targetDeviceId?: string,
+    probe?: DoctorProbeOptions,
+  ): Promise<IosRunnerInspection[]>;
 }
 
 /** Per-simulator result of a real iOS runner observe round trip. */
@@ -78,6 +81,7 @@ export interface IosObserveRoundTripInspection {
 /** Source of booted-simulator iOS observe round trips (injectable for tests). */
 export interface IosObserveRoundTripInspector {
   inspectBootedObserveRoundTrips(
+    targetDeviceId?: string,
     probe?: DoctorProbeOptions,
   ): Promise<IosObserveRoundTripInspection[]>;
 }
@@ -201,7 +205,10 @@ export function createIosCtrlProxyRunnerInspector(
   hooks: IosRunnerInspectorHooks = defaultIosRunnerInspectorHooks,
 ): IosCtrlProxyRunnerInspector {
   return {
-    async inspectBootedRunners(probe: DoctorProbeOptions = {}): Promise<IosRunnerInspection[]> {
+    async inspectBootedRunners(
+      targetDeviceId?: string,
+      probe: DoctorProbeOptions = {},
+    ): Promise<IosRunnerInspection[]> {
       const currentProbe = remainingDoctorProbe(probe);
       const simctl = createSimctlClient();
       if (
@@ -218,7 +225,9 @@ export function createIosCtrlProxyRunnerInspector(
         currentProbe.signal,
       );
       const inspections: IosRunnerInspection[] = [];
-      for (const simulator of simulators) {
+      for (const simulator of simulators.filter(
+        (candidate) => targetDeviceId === undefined || candidate.deviceId === targetDeviceId,
+      )) {
         currentProbe.signal?.throwIfAborted();
         const device: BootedDevice = {
           name: simulator.name,
@@ -286,6 +295,7 @@ export function createIosObserveRoundTripInspector(
 ): IosObserveRoundTripInspector {
   return {
     async inspectBootedObserveRoundTrips(
+      targetDeviceId?: string,
       probe: DoctorProbeOptions = {},
     ): Promise<IosObserveRoundTripInspection[]> {
       const currentProbe = remainingDoctorProbe(probe);
@@ -305,7 +315,9 @@ export function createIosObserveRoundTripInspector(
       );
       const inspections: IosObserveRoundTripInspection[] = [];
 
-      for (const simulator of simulators) {
+      for (const simulator of simulators.filter(
+        (candidate) => targetDeviceId === undefined || candidate.deviceId === targetDeviceId,
+      )) {
         currentProbe.signal?.throwIfAborted();
         const device: BootedDevice = {
           name: simulator.name,
@@ -1106,6 +1118,7 @@ function classifyObserveRoundTrip(
 export async function checkIosCtrlProxyRunner(
   dependencies = createIosDoctorDependencies(),
   probe: DoctorProbeOptions = {},
+  targetDeviceId?: string,
 ): Promise<CheckResult> {
   const name = "iOS CtrlProxy Runner";
 
@@ -1119,14 +1132,18 @@ export async function checkIosCtrlProxyRunner(
 
   try {
     const inspections = await dependencies.runnerInspector.inspectBootedRunners(
+      targetDeviceId,
       remainingDoctorProbe(probe),
     );
 
     if (inspections.length === 0) {
       return {
         name,
-        status: "skip",
-        message: "No booted simulators to check",
+        status: targetDeviceId === undefined ? "skip" : "fail",
+        message:
+          targetDeviceId === undefined
+            ? "No booted simulators to check"
+            : `Requested simulator is not booted: ${targetDeviceId}`,
       };
     }
 
@@ -1200,6 +1217,7 @@ export async function checkIosCtrlProxyRunner(
 export async function checkIosObserveRoundTrip(
   dependencies = createIosDoctorDependencies(),
   probe: DoctorProbeOptions = {},
+  targetDeviceId?: string,
 ): Promise<CheckResult> {
   const name = "iOS Observe Round Trip";
 
@@ -1213,14 +1231,18 @@ export async function checkIosObserveRoundTrip(
 
   try {
     const inspections = await dependencies.observeRoundTripInspector.inspectBootedObserveRoundTrips(
+      targetDeviceId,
       remainingDoctorProbe(probe),
     );
 
     if (inspections.length === 0) {
       return {
         name,
-        status: "skip",
-        message: "No booted simulators to check",
+        status: targetDeviceId === undefined ? "skip" : "fail",
+        message:
+          targetDeviceId === undefined
+            ? "No booted simulators to check"
+            : `Requested simulator is not booted: ${targetDeviceId}`,
       };
     }
 
@@ -1284,5 +1306,29 @@ export async function runIosChecks(
   await run(() => checkIosCtrlProxyRunner(dependencies, options));
   await run(() => checkIosObserveRoundTrip(dependencies, options));
 
+  return results;
+}
+
+/** Run host tooling plus optional exact-target read-only iOS probes after repair. */
+export async function runPostRepairIosChecks(
+  options: DoctorOptions = {},
+  dependencies = createIosDoctorDependencies(),
+): Promise<CheckResult[]> {
+  const results: CheckResult[] = [];
+  const run = async (check: () => Promise<CheckResult>): Promise<void> => {
+    remainingDoctorProbe(options);
+    results.push(await check());
+    remainingDoctorProbe(options);
+  };
+
+  await run(() => checkXcodeInstallation(MIN_XCODE_VERSION, dependencies, options));
+  await run(() => checkXcodeCommandLineTools(options, dependencies));
+  await run(() => checkXcrunAvailable(dependencies, options));
+  await run(() => checkSimctlAvailable(dependencies, options));
+  await run(() => checkSimulatorRuntimes(dependencies, options));
+  if (options.iosSimulatorUdid) {
+    await run(() => checkIosCtrlProxyRunner(dependencies, options, options.iosSimulatorUdid));
+    await run(() => checkIosObserveRoundTrip(dependencies, options, options.iosSimulatorUdid));
+  }
   return results;
 }

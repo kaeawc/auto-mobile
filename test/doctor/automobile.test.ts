@@ -7,7 +7,9 @@ import {
   checkDaemonConnectivity,
   checkDaemonStatus,
   checkDaemonVersion,
+  checkReadOnlyCtrlProxyTarget,
   runAutoMobileChecks,
+  runPostRepairAutoMobileChecks,
 } from "../../src/doctor/checks/automobile";
 import type { BuildIdentity } from "../../src/daemon/buildIdentity";
 import {
@@ -665,6 +667,102 @@ describe("checkCtrlProxy", () => {
         process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_DOWNLOAD_IF_INSTALLED = originalSkipDownload;
       }
     }
+  });
+});
+
+describe("post-repair read-only Android verification", () => {
+  beforeEach(() => {
+    AndroidCtrlProxyManager.resetInstances();
+  });
+
+  afterEach(() => {
+    AndroidCtrlProxyManager.resetInstances();
+  });
+
+  test("binds only the exact requested device and never invokes mutation commands", async () => {
+    const target = {
+      deviceId: "emulator-5554",
+      platform: "android" as const,
+      isEmulator: true,
+      name: "owned-target",
+    };
+    const unrelated = {
+      deviceId: "emulator-5556",
+      platform: "android" as const,
+      isEmulator: true,
+      name: "unrelated",
+    };
+    const discoveryAdb = new FakeAdbExecutor();
+    discoveryAdb.setDevices([unrelated, target]);
+    const targetAdb = new FakeAdbExecutor();
+    targetAdb.setCommandResponse(
+      `shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`,
+      { stdout: `package:${AndroidCtrlProxyManager.PACKAGE}`, stderr: "" },
+    );
+    targetAdb.setCommandResponse("settings get secure enabled_accessibility_services", {
+      stdout: AndroidCtrlProxyManager.PACKAGE,
+      stderr: "",
+    });
+    const selectedDeviceIds: string[] = [];
+    const factory: AdbClientFactory = {
+      create: (device) => {
+        if (!device) {
+          return discoveryAdb;
+        }
+        selectedDeviceIds.push(device.deviceId);
+        if (device.deviceId !== target.deviceId) {
+          throw new Error(`unrelated device selected: ${device.deviceId}`);
+        }
+        return targetAdb;
+      },
+    };
+
+    const result = await checkReadOnlyCtrlProxyTarget(target.deviceId, factory);
+
+    expect(result).toMatchObject({
+      status: "pass",
+      message: expect.stringContaining(`device=${target.deviceId}`),
+    });
+    expect(selectedDeviceIds).toEqual([target.deviceId]);
+    expect(targetAdb.getExecutedCommands()).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("pm list packages"),
+        expect.stringContaining("settings get secure"),
+      ]),
+    );
+    expect(targetAdb.getExecutedCommands().join("\n")).not.toMatch(
+      /\b(?:install|uninstall|enable|disable|reboot|emu kill|settings put)\b/,
+    );
+  });
+
+  test("adds a device probe only when an exact Android identity is supplied", async () => {
+    let targetProbeCalls = 0;
+    const commonDependencies = {
+      checkDaemonStatus: async () => ({
+        name: "Daemon Status",
+        status: "pass" as const,
+        message: "",
+      }),
+      checkDaemonConnectivity: async () => ({
+        name: "Daemon Connectivity",
+        status: "pass" as const,
+        message: "",
+      }),
+      checkDaemonBuildIdentity: async () => ({
+        name: "Daemon Build Identity",
+        status: "pass" as const,
+        message: "",
+      }),
+      checkReadOnlyCtrlProxyTarget: async () => {
+        targetProbeCalls++;
+        return { name: "CtrlProxy (read-only target)", status: "pass" as const, message: "" };
+      },
+    };
+
+    await runPostRepairAutoMobileChecks({}, commonDependencies);
+    await runPostRepairAutoMobileChecks({ androidDeviceId: "emulator-5554" }, commonDependencies);
+
+    expect(targetProbeCalls).toBe(1);
   });
 });
 

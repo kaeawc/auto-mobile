@@ -45,6 +45,11 @@ export interface DoctorReport {
   version: string;
   platform: string;
   arch: string;
+  /**
+   * Present for deliberately restricted diagnostic runs. Ordinary doctor runs
+   * leave this absent so their existing behavior and report shape are unchanged.
+   */
+  diagnosticProfile?: DoctorDiagnosticProfile;
   system: CheckSection;
   android?: CheckSection;
   ios?: CheckSection;
@@ -69,6 +74,13 @@ export interface DoctorProbeOptions {
 }
 
 /**
+ * A deliberately restricted diagnostic profile used after repairing shared
+ * daemon control state. It is host/toolchain and daemon-health focused; it
+ * never picks an arbitrary booted device for CtrlProxy setup or validation.
+ */
+export type DoctorDiagnosticProfile = "post-repair-read-only";
+
+/**
  * Options for running the doctor diagnostic
  */
 export interface DoctorOptions extends DoctorProbeOptions {
@@ -78,4 +90,19 @@ export interface DoctorOptions extends DoctorProbeOptions {
   ios?: boolean;
   /** Output in JSON format */
   json?: boolean;
+  /**
+   * Internal recovery-only profile. Ordinary CLI/MCP doctor invocations must
+   * not select this profile.
+   */
+  diagnosticProfile?: DoctorDiagnosticProfile;
+  /**
+   * Exact Android serial permitted for the recovery-only read-only probe.
+   * Without it, the profile deliberately performs no Android device probe.
+   */
+  androidDeviceId?: string;
+  /**
+   * Exact iOS simulator UDID permitted for the recovery-only read-only probe.
+   * Without it, the profile deliberately performs no iOS device probe.
+   */
+  iosSimulatorUdid?: string;
 }

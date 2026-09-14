@@ -417,6 +417,33 @@ describe("startDevice handler", () => {
     );
   });
 
+  it("rejects an Android device that enters recovery before its initial readiness reservation", async () => {
+    const timer = new FakeTimer();
+    daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      daemonSessionManager,
+      "daemon-session",
+      timer,
+      undefined,
+      fakeDeviceUtils,
+    );
+    await pool.initializeWithDevices([androidDevice]);
+    DaemonState.getInstance().initialize(daemonSessionManager, pool);
+    fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
+    fakeMatcher.setBootedResult(androidDevice);
+    const reserveDeviceForReadiness = pool.reserveDeviceForReadiness.bind(pool);
+    pool.reserveDeviceForReadiness = async (...args) => {
+      (
+        pool as unknown as { recoveringAndroidDeviceIds: Set<string> }
+      ).recoveringAndroidDeviceIds.add(androidDevice.deviceId);
+      return await reserveDeviceForReadiness(...args);
+    };
+
+    await expect(callStartDevice({ platform: "android" })).rejects.toThrow(
+      "Android device 'Pixel_7_API_34' entered recovery while awaiting its readiness reservation; retry the request.",
+    );
+  });
+
   it("cold-boots when discovery supplies a transport ID after boot readiness", async () => {
     const timer = new FakeTimer();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());

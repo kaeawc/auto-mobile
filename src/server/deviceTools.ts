@@ -5137,6 +5137,7 @@ async function reserveInitialDeviceForReadiness(
       boot.sourceImage?.name ?? boot.device.name,
       undefined,
       isDevicePoolAutolockEnabled() ? { mcpSessionId } : undefined,
+      true,
     ),
   );
 }

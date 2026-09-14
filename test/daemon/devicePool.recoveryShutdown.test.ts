@@ -347,6 +347,46 @@ test("ADB-reset recovery releases after its retry also has unconfirmed shutdown"
   }
 });
 
+test("ADB-reset terminal release failure retains its recovery fence", async () => {
+  const { timer, sessions, manager, pool, captured } = await setup();
+  const internals = pool as unknown as DevicePoolRecoveryInternals;
+  const originalReleaseSession = sessions.releaseSession.bind(sessions);
+  sessions.releaseSession = async () => {
+    throw new Error("ADB-reset release persistence failed");
+  };
+  try {
+    await pool.detachAdbServerResetCohort([captured]);
+    const firstRecovery = pool.recoverSessionBoundAndroidDeviceAfterAdbServerReset(
+      original.deviceId,
+      captured,
+    );
+    await manager.killAccepted.promise;
+    await flush();
+    timer.advanceTime(30_000);
+    expect(await firstRecovery).toBe(false);
+
+    timer.advanceTime(30_000);
+    const terminalRecovery = pool.recoverSessionBoundAndroidDeviceAfterAdbServerReset(
+      original.deviceId,
+      captured,
+    );
+    await flush();
+    timer.advanceTime(30_000);
+    await flush();
+    timer.advanceTime(1_000);
+    await flush();
+    timer.advanceTime(1_000);
+    await expect(terminalRecovery).rejects.toThrow("ADB-reset release persistence failed");
+
+    expect(internals.adbServerResetQuarantinedSessions.has("session")).toBe(true);
+    expect(internals.recoveringSessionLosses.has("session")).toBe(true);
+    expect(internals.recoveringAndroidImages.has(original.name)).toBe(true);
+  } finally {
+    sessions.releaseSession = originalReleaseSession;
+    sessions.stopCleanupTimer();
+  }
+});
+
 test("ordinary session recovery retries after its deferred shutdown cooldown", async () => {
   const { timer, sessions, manager, pool, captured } = await setup();
   try {

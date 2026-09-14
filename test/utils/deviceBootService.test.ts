@@ -583,6 +583,41 @@ describe("DeviceBootService", () => {
     expect(killCount).toBe(1);
   });
 
+  it("opts a fresh-provision Android cold boot into offline recovery and kills the AVD process when readiness fails (#7054)", async () => {
+    const devices = new FakeDeviceUtils();
+    const matcher = new FakeDeviceMatcher();
+    let killCount = 0;
+    devices.setDeviceImages("android", [image]);
+    devices.setMockChildProcess(image.name, {
+      kill: () => {
+        killCount++;
+        return true;
+      },
+      pid: 24,
+    } as any);
+    // Mirror the diagnostic the emulator client raises when a fresh cold boot
+    // stays ADB-offline through the bounded recovery.
+    devices.setWaitForDeviceReadyError(
+      new ActionableError(
+        "Emulator 'Pixel_9_API_35' remained ADB-offline during a fresh provision cold boot; " +
+          "target=emulator-5554; state=offline. Attempted recovery: 'adb reconnect offline'.",
+      ),
+    );
+
+    const boot = service(devices, matcher).boot({
+      platform: "android",
+      deviceId: image.name,
+      freshProvision: true,
+    });
+
+    await expect(boot).rejects.toThrow("state=offline");
+    await expect(boot).rejects.toThrow("adb reconnect offline");
+    // The fresh-provision flag reaches the Android readiness wait...
+    expect(devices.getWaitForDeviceReadyOptions()).toEqual({ freshProvision: true });
+    // ...and the owned emulator process is torn down, leaving no dangling boot.
+    expect(killCount).toBe(1);
+  });
+
   it("cancels the owned process when a pending progress callback is externally aborted", async () => {
     const devices = new FakeDeviceUtils();
     const matcher = new FakeDeviceMatcher();

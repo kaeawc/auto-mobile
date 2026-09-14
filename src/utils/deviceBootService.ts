@@ -81,6 +81,13 @@ export interface DeviceBootRequest {
   totalDeadlineMs?: number;
   signal?: AbortSignal;
   createIfMissing?: boolean;
+  /**
+   * The caller just created this device (a fresh provision), so its first boot
+   * is a genuine cold boot. Opts the Android readiness wait into bounded
+   * ADB-offline recovery instead of silently waiting out the whole budget
+   * (issue #7054).
+   */
+  freshProvision?: boolean;
   /** Internal CI policy: preserve OS bounds for provisioning while matching its exact owned name across runtime fallback. */
   matchNamedDeviceIgnoringOsVersion?: boolean;
   /** Internal identity policy: select a named runtime only when its name is an exact match. */
@@ -127,6 +134,8 @@ interface BootDeadlineContext {
   signal?: AbortSignal;
   lifecycleLease?: VirtualDeviceLifecycleLease;
   ownsLifecycleLease: boolean;
+  /** A fresh provision's cold boot opts Android readiness into offline recovery (#7054). */
+  freshProvision?: boolean;
 }
 
 interface PhaseCancellation {
@@ -194,6 +203,7 @@ export class DeviceBootService {
       signal: request.signal,
       lifecycleLease: this.dependencies.lifecycleLease,
       ownsLifecycleLease: false,
+      freshProvision: request.freshProvision === true,
     };
     if (!context.lifecycleLease && !this.dependencies.onIdentityResolved) {
       context.lifecycleLease = await this.lifecycleCoordinator.reserve(
@@ -553,6 +563,15 @@ export class DeviceBootService {
           this.timer,
           cancelHandle,
           () => this.timeoutError(context, "waiting for device boot readiness"),
+          // A freshly-provisioned Android AVD's first boot is a genuine cold
+          // boot; opt it into bounded ADB-offline recovery (#7054). Fresh state
+          // arrives either from this call site (`provisioned`) or from the
+          // request when a just-created device is booted by serial through
+          // `bootKnownDevice` (`context.freshProvision`). A cold boot of a
+          // pre-existing AVD keeps the wait-out behavior, as does any iOS boot.
+          image.platform === "android" && (provisioned || context.freshProvision === true)
+            ? { freshProvision: true }
+            : undefined,
         ),
       );
       await this.reportProgress(context, progress, 100, "Device is ready for use");

@@ -44,6 +44,13 @@ const DEFAULT_EMULATOR_POLLING_INTERVAL_MS = 500;
 const MIN_EMULATOR_POLLING_INTERVAL_MS = 100;
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
 const MAX_POLLING_SLEEP_CHUNK_MS = 500;
+// A freshly-provisioned AVD's first cold boot can land its serial in ADB
+// `offline` and stay there. These bound a single re-detect recovery well
+// inside the readiness budget so a stuck fresh provision fails fast with a
+// diagnostic instead of silently burning the whole budget (issue #7054).
+const FRESH_OFFLINE_RECOVERY_THRESHOLD_MS = 15_000;
+const FRESH_OFFLINE_RECOVERY_GRACE_MS = 5_000;
+const FRESH_OFFLINE_RECOVERY_COMMAND_TIMEOUT_MS = 5_000;
 const MIN_EMULATOR_CONSOLE_PORT = 5554;
 const MAX_EMULATOR_CONSOLE_PORT = 5682;
 const EMULATOR_CONSOLE_PORT_STEP = 2;
@@ -103,6 +110,10 @@ interface OfflineTracker {
   deviceId: string | null;
   since: number | null;
   state?: TargetReadinessState;
+  /** A bounded `adb reconnect offline` recovery has been dispatched for this offline episode. */
+  recoveryAttempted?: boolean;
+  /** Fake-clock timestamp at which the recovery reconnect was dispatched. */
+  recoveryAt?: number | null;
 }
 
 interface ReadinessPollingState {
@@ -178,6 +189,16 @@ export interface AndroidEmulatorLaunchRequest {
 export interface AndroidEmulatorReadinessOptions {
   /** Preserve the guest's restored display and keyguard state instead of waking it. */
   skipWakeAndUnlock?: boolean;
+  /**
+   * The device was just created by a fresh provision, so its first boot is a
+   * genuine cold boot (no quick-boot snapshot to restore). When its serial sits
+   * in ADB `offline` past a bounded threshold, attempt one `adb reconnect
+   * offline` re-detect; if it stays offline, fail fast with a diagnostic naming
+   * the observed state and the recovery attempted rather than waiting out the
+   * whole readiness budget. A quick-boot-after-shutdown restore leaves this
+   * unset and keeps the wait-out behavior (issue #7054).
+   */
+  freshProvision?: boolean;
 }
 
 export interface AndroidEmulatorLaunchHandle {
@@ -1121,6 +1142,8 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       tracker.deviceId = null;
       tracker.since = null;
       tracker.state = undefined;
+      tracker.recoveryAttempted = false;
+      tracker.recoveryAt = null;
       return null;
     }
     const targetState = states.find((state: AdbDeviceState) => state.deviceId === deviceId);
@@ -1128,16 +1151,128 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     if (targetState?.state !== "offline") {
       tracker.deviceId = null;
       tracker.since = null;
+      tracker.recoveryAttempted = false;
+      tracker.recoveryAt = null;
       return null;
     }
     if (tracker.deviceId !== targetState.deviceId) {
       tracker.deviceId = targetState.deviceId;
       tracker.since = this.timer.now();
+      // A new offline episode gets its own recovery budget.
+      tracker.recoveryAttempted = false;
+      tracker.recoveryAt = null;
     }
     // An offline ADB state is transient during normal emulator startup. Keep
     // tracking it for diagnostics, but wait for the caller's readiness deadline
     // unless the emulator process provides definitive failure evidence.
     return null;
+  }
+
+  /**
+   * Bounded recovery for a fresh-provision cold boot whose serial is stuck in
+   * ADB `offline`. Runs at most one `adb reconnect offline` re-detect once the
+   * serial has been offline past {@link FRESH_OFFLINE_RECOVERY_THRESHOLD_MS}. If
+   * it is still offline {@link FRESH_OFFLINE_RECOVERY_GRACE_MS} after that
+   * reconnect, returns a diagnostic {@link ActionableError} naming the observed
+   * `state=offline` and the recovery attempted, so the caller fails fast with an
+   * actionable reason instead of waiting out the whole readiness budget (#7054).
+   * Returns `undefined` when it is not yet time to act (or the caller is not a
+   * fresh provision), leaving the normal readiness loop to continue.
+   */
+  private async maybeRecoverFreshOffline(
+    tracker: OfflineTracker,
+    options: AndroidEmulatorReadinessOptions | undefined,
+    deviceId: string | undefined,
+    startTime: number,
+    timeoutMs: number,
+    avdName: string,
+    signal: AbortSignal | undefined,
+  ): Promise<ActionableError | undefined> {
+    if (!this.isFreshOfflineEpisode(tracker, options, deviceId)) {
+      return undefined;
+    }
+    const now = this.timer.now();
+    const remainingMs = timeoutMs - (now - startTime);
+    if (remainingMs <= 0) {
+      // No budget left; let the normal timeout path produce the target/state error.
+      return undefined;
+    }
+    const offlineSince = tracker.since ?? now;
+
+    if (!tracker.recoveryAttempted) {
+      if (now - offlineSince >= FRESH_OFFLINE_RECOVERY_THRESHOLD_MS) {
+        await this.dispatchFreshOfflineReconnect(
+          tracker,
+          deviceId!,
+          now,
+          offlineSince,
+          remainingMs,
+          avdName,
+          signal,
+        );
+      }
+      return undefined;
+    }
+
+    const recoveredAt = tracker.recoveryAt ?? now;
+    if (now - recoveredAt < FRESH_OFFLINE_RECOVERY_GRACE_MS) {
+      return undefined;
+    }
+    return new ActionableError(
+      `Emulator '${avdName}' remained ADB-offline during a fresh provision cold boot; ` +
+        `target=${deviceId}; state=offline. Attempted recovery: 'adb reconnect offline' ` +
+        `(serial still offline ${now - recoveredAt}ms after the reconnect). The freshly ` +
+        `created AVD launched its guest but never left the ADB-offline state.`,
+    );
+  }
+
+  /** True while a fresh-provision target is actively sitting in ADB `offline`. */
+  private isFreshOfflineEpisode(
+    tracker: OfflineTracker,
+    options: AndroidEmulatorReadinessOptions | undefined,
+    deviceId: string | undefined,
+  ): boolean {
+    return (
+      options?.freshProvision === true &&
+      Boolean(deviceId) &&
+      tracker.state === "offline" &&
+      tracker.since !== null
+    );
+  }
+
+  /** Dispatch the single bounded `adb reconnect offline` re-detect for a stuck fresh boot. */
+  private async dispatchFreshOfflineReconnect(
+    tracker: OfflineTracker,
+    deviceId: string,
+    now: number,
+    offlineSince: number,
+    remainingMs: number,
+    avdName: string,
+    signal: AbortSignal | undefined,
+  ): Promise<void> {
+    tracker.recoveryAttempted = true;
+    tracker.recoveryAt = now;
+    const commandTimeoutMs = Math.max(
+      0,
+      Math.min(FRESH_OFFLINE_RECOVERY_COMMAND_TIMEOUT_MS, remainingMs),
+    );
+    logger.warn(
+      `Fresh provision '${avdName}' target ${deviceId} has been ADB-offline for ` +
+        `${now - offlineSince}ms; attempting 'adb reconnect offline' recovery`,
+    );
+    try {
+      await this.adbFactory
+        .create(null)
+        .executeCommand("reconnect offline", commandTimeoutMs, undefined, undefined, signal);
+    } catch (error) {
+      this.throwIfReadinessAborted(signal);
+      // Best-effort recovery: a failed reconnect is diagnosed on the next poll
+      // once the grace window elapses and the serial is still offline.
+      logger.warn(
+        `'adb reconnect offline' recovery for ${deviceId} failed: ${errorMessage(error)}`,
+        error,
+      );
+    }
   }
 
   private targetReadinessState(targetState: AdbDeviceState | undefined): TargetReadinessState {
@@ -3469,6 +3604,20 @@ export class AndroidEmulatorClient implements AndroidEmulator {
             remainingTimeoutMs,
             signal,
           );
+          const offlineRecoveryFailure = await this.maybeRecoverFreshOffline(
+            offlineTracker,
+            options,
+            correlatedTargetDeviceId,
+            startTime,
+            timeoutMs,
+            avdName,
+            signal,
+          );
+          if (offlineRecoveryFailure) {
+            polling.failure = offlineRecoveryFailure;
+            polling.active = false;
+            break;
+          }
           if (!polling.active || this.timer.now() - startTime >= timeoutMs) {
             break;
           }

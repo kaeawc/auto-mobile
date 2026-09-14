@@ -1081,6 +1081,34 @@ async function notifyResourcesAfterShutdown(dependencies: DeviceToolsDependencie
   }
 }
 
+/**
+ * Resolves when `operation` settles or after `boundMs`, whichever comes first.
+ * Never rejects: the caller only needs to know the wait is over.
+ */
+async function settleWithin(
+  operation: Promise<unknown>,
+  timer: Timer,
+  boundMs: number,
+): Promise<void> {
+  let timeout: NodeJS.Timeout | undefined;
+  const deadline = new Promise<void>((resolve) => {
+    timeout = timer.setTimeout(resolve, boundMs);
+  });
+  try {
+    await Promise.race([
+      operation.then(
+        () => undefined,
+        () => undefined,
+      ),
+      deadline,
+    ]);
+  } finally {
+    if (timeout !== undefined) {
+      timer.clearTimeout(timeout);
+    }
+  }
+}
+
 interface ShutdownDeadlineContext {
   device: BootedDevice;
   timer: Timer;
@@ -2629,35 +2657,44 @@ async function shutdownDevice(
         perf.endOperation("retireOwnership");
       }
 
+      // Retire the installed-apps cache incarnation BEFORE the shutdown
+      // reservation is released, i.e. before a same-ID replacement can boot
+      // (#6894). From here on, work that captured this incarnation is fenced,
+      // the replacement starts a fresh incarnation, and the late release below
+      // binds to this token so it can never delete the replacement's fences.
+      // Invalidations landing on the retired incarnation meanwhile (the
+      // cleanup below, and notifyResourcesAfterShutdown() ->
+      // syncInstalledAppResources() re-invalidating the same, already-gone
+      // device) fence it without starting a phantom incarnation, so the
+      // release still finds and frees the bookkeeping (#6704).
+      const retiredIncarnation = getInstalledAppsCacheWriteCoordinator().retireIncarnation(
+        device.deviceId,
+      );
       await shutdownReservation?.release();
       unregisterDirectSessionsForDevice(device.deviceId);
 
       const cleanup = clearInstalledAppsAfterShutdown(dependencies, device.deviceId);
-      const notification = cleanup.then(async (cacheCleared) => {
+      const notification = cleanup.then(async () => {
         await notifyResourcesAfterShutdown(dependencies);
+      });
+      const release = cleanup.then(async (cacheCleared) => {
         // Failed persistence must keep the dirty fence across device-ID reuse.
-        if (cacheCleared) {
-          const coordinator = getInstalledAppsCacheWriteCoordinator();
-          // Capture the expected generation AFTER the notification above, not
-          // before. For a device with a registered app resource,
-          // notifyResourcesAfterShutdown() -> syncInstalledAppResources()
-          // (src/server/appResources.ts) invalidates this same, already-gone
-          // device again as part of the SAME shutdown flow. Capturing the
-          // generation earlier meant that expected, self-triggered
-          // invalidation always advanced it past what releaseDevice's
-          // expected-generation guard held, so the guard always mismatched
-          // and release always no-opped -- leaking the exact per-device
-          // bookkeeping (#6704) this fix exists to release, for every killed
-          // device that had a registered app resource. beginRebuild() is a
-          // synchronous read here (the generation is already assigned), so
-          // there is no await between it and releaseDevice() below.
-          const generation = coordinator.beginRebuild(device.deviceId);
-          await coordinator.releaseDevice(device.deviceId, generation);
+        if (!cacheCleared) {
+          return;
         }
+        // Prefer releasing after the notification's own re-invalidation has
+        // been queued, but never wait on it unboundedly: a notifier that
+        // never settles must not retain this device's bookkeeping forever.
+        await settleWithin(notification, dependencies.timer, timeoutMs);
+        await getInstalledAppsCacheWriteCoordinator().releaseDevice(
+          device.deviceId,
+          retiredIncarnation,
+        );
       });
       // Keep late cleanup visible to DB shutdown without blocking a later
       // device teardown retry if resource notification never settles.
       void getDbWriteBarrier().trackExisting(notification);
+      void getDbWriteBarrier().trackExisting(release);
 
       await runPostShutdownStep(
         shutdownContext,

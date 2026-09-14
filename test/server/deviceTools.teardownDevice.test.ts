@@ -3069,6 +3069,50 @@ describe("deleteDevice handler", () => {
     expect(coordinator.isDirty(device.deviceId)).toBe(false);
   });
 
+  test("releases per-device installed-apps bookkeeping within the shutdown bound when resource notification never settles (#6894)", async () => {
+    // Codex P2 on PR #6765: the release used to be chained strictly behind
+    // notifyResourcesChanged(). A notifier that never settles therefore kept
+    // the retired device's generation + dirty bookkeeping forever, even after
+    // its cache cleanup succeeded. The release must be bounded by the
+    // injected timer instead of by the notifier.
+    const coordinator = getInstalledAppsCacheWriteCoordinator();
+    const timer = new FakeTimer();
+    const device: BootedDevice = {
+      platform: "ios",
+      name: "iPhone 16",
+      deviceId: "IOS-DEVICE-NOTIFY-NEVER-SETTLES",
+    };
+    manager.setBootedDevices("ios", [device]);
+    manager.setDeviceImages("ios", [{ ...device, isRunning: true }]);
+    setDeviceToolsDependencies({
+      timer,
+      clearInstalledAppsForDevice: async (deviceId: string) => {
+        await coordinator.invalidate(deviceId, async () => undefined);
+      },
+      notifyResourcesChanged: () => new Promise<void>(() => undefined),
+    });
+
+    const args = {
+      ...request("ios", device.deviceId, device.name),
+      timeoutMs: 10,
+    };
+    const teardown = teardownTool().handler(args);
+    for (let i = 0; i < 3; i++) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+    // Cleanup succeeded, so the retired incarnation is dirty but not yet
+    // released: the release is waiting (bounded) on the notifier.
+    expect(coordinator.isDirty(device.deviceId)).toBe(true);
+
+    timer.advanceTime(10);
+    await teardown;
+    for (let i = 0; i < 3; i++) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+
+    expect(coordinator.isDirty(device.deviceId)).toBe(false);
+  });
+
   test("holds the stable lifecycle lease until a late shutdown command settles", async () => {
     const timer = new FakeTimer();
     const lifecycleCoordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);

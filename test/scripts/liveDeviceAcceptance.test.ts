@@ -581,7 +581,7 @@ describe("live device acceptance harness", () => {
     expect(
       harness.calls.filter((call) => call.name === "getApple").map((call) => call.arguments),
     ).toEqual([
-      ...Array.from({ length: 6 }, () => ({
+      ...Array.from({ length: 7 }, () => ({
         deviceId: IOS_UDID,
         enableTools: ["observe", "getDeviceState"],
       })),
@@ -940,7 +940,7 @@ describe("live device acceptance harness", () => {
     );
 
     expect(harness.events).toContain("close:daemon");
-    expect(harness.events.filter((event) => event.startsWith("close:"))).toHaveLength(14);
+    expect(harness.events.filter((event) => event.startsWith("close:"))).toHaveLength(15);
     expect(harness.evidence[0]).not.toContain("daemon close failed");
     expect(harness.evidence[0]).not.toContain("client close failed");
   });

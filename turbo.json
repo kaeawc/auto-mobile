@@ -23,10 +23,12 @@
         "src/**",
         "test/**",
         "scripts/**/*.ts",
-        "scripts/oxlint-baseline.sh",
+        "scripts/**/*.sh",
         "scripts/oxlint-baseline.txt",
         ".oxlintrc.json",
         "oxlint-plugins/**",
+        ".oxfmtrc.json",
+        ".editorconfig",
         "tsconfig.json"
       ],
       "outputs": [],

@@ -189,6 +189,8 @@ shifts. Because the type-aware rules need type info, the ratchet script runs
 and CI type-checks only once. When you FIX violations, run `bun run lint:prune` and
 commit the smaller file; the ratchet refuses to grow without `-- --allow-grow`.
 
+The `scripts/lint.sh` script always runs `oxfmt --write` after `oxlint --fix`, even when oxlint fails, so autofix output is format-clean; baseline and boundary checks run only when oxlint passes. `test/bats/lint-format-pipeline.bats` guards this contract.
+
 `bun run lint` runs `oxlint --fix`, so only **non-auto-fixable** rules belong to
 the ratchet — an auto-fixable one would rewrite `src/` on every CI run. Keep each
 ratchet rule as its own rule (the custom plugin already does) rather than folding

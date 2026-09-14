@@ -109,6 +109,7 @@ nav:
   - "How it Works":
       - "System design": design-docs/index.md
       - "Device resources": design-docs/device-resources.md
+      - "Host toolchain resource": design-docs/host-toolchain-resource.md
       - "Android emulator optimization": design-docs/android-emulator-optimization.md
       - "Runtime dependency pinning": design-docs/release/runtime-dependency-pinning.md
       - "Interaction loop": design-docs/mcp/interaction-loop.md

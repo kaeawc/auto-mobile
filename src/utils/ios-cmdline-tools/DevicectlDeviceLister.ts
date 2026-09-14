@@ -2,6 +2,7 @@ import { promises as fs } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import type { ExecResult } from "../../models";
+import type { CheckResult } from "../../doctor/types";
 import type { BootedDevice } from "../../models/DeviceInfo";
 import { errorMessage } from "../describeUnknownError";
 import { DefaultHostCommandExecutor, type HostCommandOptions } from "../HostCommandExecutor";
@@ -12,6 +13,33 @@ import {
   type DiscoveryObservationSequence,
 } from "../DiscoveryObservationSequence";
 import { inferIosFormFactor, isIosPhysicalUdid } from "./iosDeviceType";
+
+/** Minimal injected seam for the diagnostic-only devicectl availability probe. */
+export interface DevicectlAvailabilityDependencies {
+  platform: () => NodeJS.Platform;
+  invoke: (file: string, args: string[]) => Promise<ExecResult>;
+  logger: Pick<Logger, "warn">;
+}
+
+/** Checks devicectl without constructing a lister or enumerating devices. */
+export async function checkDevicectlAvailability(
+  dependencies: DevicectlAvailabilityDependencies,
+): Promise<CheckResult> {
+  if (dependencies.platform() !== "darwin") {
+    return { name: "devicectl", status: "skip", message: "iOS development requires macOS" };
+  }
+  try {
+    await dependencies.invoke("xcrun", ["devicectl", "--version"]);
+    return { name: "devicectl", status: "pass", message: "devicectl functional" };
+  } catch (error) {
+    dependencies.logger.warn(`devicectl check failed: ${errorMessage(error)}`, error);
+    return {
+      name: "devicectl",
+      status: "fail",
+      message: `devicectl not functional: ${errorMessage(error)}`,
+    };
+  }
+}
 
 /**
  * Discovery seam for *physical* iOS devices attached to this host.
@@ -217,7 +245,7 @@ function classifyDeviceEntry(entry: unknown): DeviceEntryOutcome {
 /**
  * Parse a `devicectl list devices --json-output` payload into the reachable
  * physical iOS devices it reports, sorted by UDID to match
- * `SimCtlClient.getBootedSimulatorsChecked`'s stable ordering.
+ * SimCtlClient's stable simulator ordering.
  *
  * `complete` separates a *recognized* listing (authoritative — an empty one means
  * "nothing is plugged in") from one this parser could not fully read. That covers
@@ -260,7 +288,7 @@ function mergeById(preferred: BootedDevice[], fallback: BootedDevice[]): BootedD
 /**
  * How long a devicectl listing is reused before re-shelling out.
  *
- * `getBootedDevices("ios")` is a hot path — the app resources and the daemon's
+ * iOS booted-device resolution is a hot path — the app resources and the daemon's
  * device sweep both call it — while `devicectl list devices` costs on the order
  * of a second. The window is short enough that a freshly-plugged device shows up
  * within one sweep, and long enough that a burst of resource reads spawns one

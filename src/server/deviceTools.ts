@@ -4502,6 +4502,13 @@ function provisionDeviceTimeoutError(phase: string): ProvisionDeviceError {
   );
 }
 
+class FinalizedProvisionDeviceCompletionError extends Error {
+  constructor(readonly completionError: unknown) {
+    super(errorMessage(completionError));
+    this.name = "FinalizedProvisionDeviceCompletionError";
+  }
+}
+
 async function runProvisionDeviceWithinDeadline<T>(
   timer: Pick<Timer, "now" | "setTimeout" | "clearTimeout">,
   totalDeadlineMs: number,
@@ -6076,7 +6083,16 @@ export function registerDeviceTools() {
         // would leave the claim held and make every later identical call report
         // operation_in_progress until the row's TTL (~30m) expires. Re-storing
         // an identical result is harmless; leaving the claim open is not.
-        await completeProvisionDeviceOperation(store, args.operationId, attemptId, replayResult);
+        await completeProvisionDeviceOperation(
+          store,
+          args.operationId,
+          attemptId,
+          replayResult,
+          args,
+          deps.timer,
+          totalDeadlineMs,
+          signal,
+        );
         return replayResult;
       }
       if (!operation.started) {
@@ -6094,7 +6110,16 @@ export function registerDeviceTools() {
           signal,
         );
         const refreshed = preserveProvisionDeviceOwnership(operation.result, rebound);
-        await completeProvisionDeviceOperation(store, args.operationId, attemptId, refreshed);
+        await completeProvisionDeviceOperation(
+          store,
+          args.operationId,
+          attemptId,
+          refreshed,
+          args,
+          deps.timer,
+          totalDeadlineMs,
+          signal,
+        );
         return refreshed;
       }
 
@@ -6106,9 +6131,24 @@ export function registerDeviceTools() {
         totalDeadlineMs,
         signal,
       );
-      await completeProvisionDeviceOperation(store, args.operationId, attemptId, result);
+      await completeProvisionDeviceOperation(
+        store,
+        args.operationId,
+        attemptId,
+        result,
+        args,
+        deps.timer,
+        totalDeadlineMs,
+        signal,
+      );
       return result;
     } catch (error) {
+      if (error instanceof FinalizedProvisionDeviceCompletionError) {
+        // Completion failures start an observed finalizer below. Do not await
+        // or duplicate its failure write here; either can share the stalled
+        // persistence boundary that made completion fail.
+        throw error.completionError;
+      }
       if (error instanceof McpSessionRecoveryInProgressError) {
         // Transient by construction ("cannot remap until recovery finishes"),
         // so the client is told to retry. A retry only works if this attempt's
@@ -6434,11 +6474,23 @@ export function registerDeviceTools() {
     operationId: string,
     attemptId: string,
     result: Record<string, unknown>,
+    args: ProvisionDeviceArgs,
+    timer: Pick<Timer, "now" | "setTimeout" | "clearTimeout">,
+    totalDeadlineMs: number,
+    signal: AbortSignal | undefined,
   ): Promise<void> {
     try {
-      if (!(await store.complete(operationId, attemptId, result))) {
-        throw new ProvisionDeviceOperationSupersededError(operationId);
-      }
+      await runOperationWithinDeadline(
+        timer,
+        totalDeadlineMs,
+        signal,
+        () => provisionDeviceTimeoutError("persisting the final operation result"),
+        async () => {
+          if (!(await store.complete(operationId, attemptId, result))) {
+            throw new ProvisionDeviceOperationSupersededError(operationId);
+          }
+        },
+      );
     } catch (error) {
       const superseded = error instanceof ProvisionDeviceOperationSupersededError;
       logger.warn(
@@ -6446,14 +6498,82 @@ export function registerDeviceTools() {
           `${errorMessage(error)}`,
         error,
       );
-      await releaseProvisionDeviceSession(
+      const finalization = finalizeFailedProvisionDeviceCompletion(
+        store,
+        args,
+        attemptId,
+        result,
+        error,
+        superseded,
+      );
+      try {
+        await runOperationWithinDeadline(
+          timer,
+          totalDeadlineMs,
+          signal,
+          () => provisionDeviceTimeoutError("finalizing failed operation completion"),
+          async () => await finalization,
+        );
+      } catch (finalizationError) {
+        // Cleanup remains observed by finalizeFailedProvisionDeviceCompletion;
+        // crossing the request deadline only detaches this wait.
+        logger.debug(
+          `[DeviceTools] Deferred provisionDevice ${operationId} completion cleanup: ` +
+            `${errorMessage(finalizationError)}`,
+        );
+      }
+      throw new FinalizedProvisionDeviceCompletionError(error);
+    }
+  }
+
+  function finalizeFailedProvisionDeviceCompletion(
+    store: ProvisionDeviceOperationStore,
+    args: ProvisionDeviceArgs,
+    attemptId: string,
+    result: Record<string, unknown>,
+    completionError: unknown,
+    superseded: boolean,
+  ): Promise<void> {
+    const finalizers: Array<{ label: string; promise: Promise<unknown> }> = [];
+    if (!superseded) {
+      const provisionError = toProvisionDeviceError(args, completionError);
+      finalizers.push({
+        label: "operation failure persistence",
+        promise: (async () =>
+          await store.fail(
+            args.operationId,
+            attemptId,
+            provisionError.code,
+            provisionError.message,
+          ))(),
+      });
+    }
+    finalizers.push({
+      label: "session release",
+      promise: releaseProvisionDeviceSession(
         result,
         superseded
           ? "provision-device-operation-superseded"
           : "provision-device-persistence-failed",
-      );
-      throw error;
-    }
+      ),
+    });
+
+    // Completion, failure persistence, and session release can share one
+    // stalled backend. Observe cleanup without moving that stall outside the
+    // request deadline; attempt/status fencing makes every late write safe.
+    return Promise.all(
+      finalizers.map(async (finalizer) => {
+        try {
+          await finalizer.promise;
+        } catch (error) {
+          logger.warn(
+            `[DeviceTools] Deferred provisionDevice ${args.operationId} ${finalizer.label} failed: ` +
+              `${errorMessage(error)}`,
+            error,
+          );
+        }
+      }),
+    ).then(() => undefined);
   }
 
   /**

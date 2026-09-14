@@ -73,6 +73,7 @@ class FakeProvisionDeviceOperationStore implements ProvisionDeviceOperationStore
   >();
   private readonly forcedInProgress = new Set<string>();
   completeError: Error | undefined;
+  completeReturnsFalse = false;
   failCalls = 0;
   readonly failures: { operationId: string; errorCode: string }[] = [];
   readonly failCodes: string[] = [];
@@ -138,7 +139,11 @@ class FakeProvisionDeviceOperationStore implements ProvisionDeviceOperationStore
     if (!operation) {
       throw new Error(`missing operation ${operationId}`);
     }
-    if (operation.attemptId !== attemptId) {
+    if (
+      operation.attemptId !== attemptId ||
+      operation.failed ||
+      (operation.result !== undefined && !operation.replaying)
+    ) {
       return false;
     }
     operation.creationStarted = true;
@@ -153,11 +158,18 @@ class FakeProvisionDeviceOperationStore implements ProvisionDeviceOperationStore
     if (this.completeError) {
       throw this.completeError;
     }
+    if (this.completeReturnsFalse) {
+      return false;
+    }
     const operation = this.results.get(operationId);
     if (!operation) {
       throw new Error(`missing operation ${operationId}`);
     }
-    if (operation.attemptId !== attemptId) {
+    if (
+      operation.attemptId !== attemptId ||
+      operation.failed ||
+      (operation.result !== undefined && !operation.replaying)
+    ) {
       return false;
     }
     operation.result = result;
@@ -186,7 +198,12 @@ class FakeProvisionDeviceOperationStore implements ProvisionDeviceOperationStore
     options?: { clearCreationStarted?: boolean },
   ): Promise<boolean> {
     const operation = this.results.get(operationId);
-    if (operation && operation.attemptId !== attemptId) {
+    if (
+      operation &&
+      (operation.attemptId !== attemptId ||
+        operation.failed ||
+        (operation.result !== undefined && !operation.replaying))
+    ) {
       return false;
     }
     this.failCalls++;
@@ -207,6 +224,71 @@ class FakeProvisionDeviceOperationStore implements ProvisionDeviceOperationStore
     }
     return true;
   }
+}
+
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+function blockNextCompletion(store: FakeProvisionDeviceOperationStore): {
+  entered: Promise<void>;
+  release: () => void;
+  settled: Promise<void>;
+} {
+  const entered = deferred();
+  const release = deferred();
+  const settled = deferred();
+  const complete = store.complete.bind(store);
+  let shouldBlock = true;
+  store.complete = async (...args) => {
+    try {
+      if (shouldBlock) {
+        shouldBlock = false;
+        entered.resolve();
+        await release.promise;
+      }
+      return await complete(...args);
+    } finally {
+      settled.resolve();
+    }
+  };
+  return { entered: entered.promise, release: release.resolve, settled: settled.promise };
+}
+
+function blockNextFailure(store: FakeProvisionDeviceOperationStore): {
+  entered: Promise<void>;
+  release: () => void;
+  settled: Promise<void>;
+} {
+  const entered = deferred();
+  const release = deferred();
+  const settled = deferred();
+  const fail = store.fail.bind(store);
+  let shouldBlock = true;
+  store.fail = async (...args) => {
+    try {
+      if (shouldBlock) {
+        shouldBlock = false;
+        entered.resolve();
+        await release.promise;
+      }
+      return await fail(...args);
+    } finally {
+      settled.resolve();
+    }
+  };
+  return { entered: entered.promise, release: release.resolve, settled: settled.promise };
+}
+
+async function flushMicrotasks(): Promise<void> {
+  for (let attempt = 0; attempt < 10; attempt++) {
+    await Promise.resolve();
+  }
+  await new Promise<void>((resolve) => setImmediate(resolve));
 }
 
 type ProvisionTestPlatform = "android" | "ios";
@@ -2918,42 +3000,83 @@ describe("provisionDevice handler", () => {
     ]);
     await pool.initializeWithDevices([bootedDevice]);
     DaemonState.getInstance().initialize(sessionManager, pool);
+    sessionManager.stopCleanupTimer();
+    const releaseEntered = deferred();
+    const releaseGate = deferred();
+    const releaseSettled = deferred();
+    const releaseSession = sessionManager.releaseSession.bind(sessionManager);
+    sessionManager.releaseSession = async (...releaseArgs) => {
+      releaseEntered.resolve();
+      await releaseGate.promise;
+      try {
+        return await releaseSession(...releaseArgs);
+      } finally {
+        releaseSettled.resolve();
+      }
+    };
     operationStore.completeError = new Error("database unavailable");
+    const failure = blockNextFailure(operationStore);
+    setDeviceToolsDependencies({ timer });
+    registerDeviceTools();
 
     const tool = ToolRegistry.getTool("provisionDevice");
     if (!tool) {
       throw new Error("provisionDevice not registered");
     }
-    const response = JSON.parse(
-      (
-        (await tool.handler({
-          operationId: "operation-persistence-failure",
-          device: {
-            platform: "android",
-            name: "phone-api-36-a",
-            spec: {
-              runtime: "system-images;android-36;google_apis;x86_64",
-              deviceType: "pixel_9",
-            },
-          },
-          boot: true,
-          readiness: "none",
-        })) as any
-      ).content[0].text,
-    );
+    const request = tool.handler({
+      operationId: "operation-persistence-failure",
+      device: {
+        platform: "android",
+        name: "phone-api-36-a",
+        spec: {
+          runtime: "system-images;android-36;google_apis;x86_64",
+          deviceType: "pixel_9",
+        },
+      },
+      boot: true,
+      readiness: "none",
+      timeoutMs: 1_000,
+    });
+    await Promise.all([failure.entered, releaseEntered.promise]);
+    let settled = false;
+    void request.then(() => {
+      settled = true;
+    });
+    await flushMicrotasks();
+    expect(settled).toBe(false);
 
+    timer.advanceTime(1_000);
+    const response = JSON.parse(((await request) as any).content[0].text);
     expect(response).toMatchObject({
       success: false,
       error: {
         code: "platform_command_failed",
       },
     });
+
+    failure.release();
+    releaseGate.resolve();
+    await Promise.all([failure.settled, releaseSettled.promise]);
     expect(pool.getDevice(bootedDevice.deviceId)).toMatchObject({
       sessionId: null,
       status: "idle",
     });
     expect(operationStore.failCalls).toBe(1);
-    sessionManager.stopCleanupTimer();
+  });
+
+  test("retains superseded completion handling without failing the newer attempt", async () => {
+    operationStore.completeReturnsFalse = true;
+
+    const response = await ToolRegistry.getTool("provisionDevice")!.handler({
+      ...provisionTestArgs("android", "operation-superseded-completion"),
+      boot: false,
+      readiness: "none",
+    });
+    const payload = JSON.parse((response as any).content[0].text);
+
+    expect(payload.error.code).toBe("operation_superseded");
+    expect(operationStore.failCalls).toBe(0);
+    expect(operationStore.getStoredResult("operation-superseded-completion")).toBeUndefined();
   });
 
   test("retains creation ownership when a completed boot operation rebinds", async () => {
@@ -3626,6 +3749,182 @@ describe("provisionDevice handler", () => {
     expect(payload.error.code).toBe("timeout");
     expect(payload.error.message).toContain("binding the device session");
     expect(sessionManager.getAllSessionIds()).toEqual([]);
+  });
+
+  test("bounds stopped provisioning completion by the original deadline", async () => {
+    const timer = new FakeTimer();
+    setDeviceToolsDependencies({ timer });
+    registerDeviceTools();
+    const completion = blockNextCompletion(operationStore);
+    const args = {
+      ...provisionTestArgs("android", "pending-stopped-completion"),
+      boot: false,
+      readiness: "none" as const,
+      timeoutMs: 1_000,
+    };
+
+    let payload: Record<string, any> | undefined;
+    const request = ToolRegistry.getTool("provisionDevice")!
+      .handler(args)
+      .then((response) => {
+        payload = JSON.parse((response as any).content[0].text);
+        return response;
+      });
+    await completion.entered;
+    timer.advanceTime(10_000);
+    await flushMicrotasks();
+    const payloadAtDeadline = payload;
+
+    let retryPayload: Record<string, any> | undefined;
+    let persistedRetry: Record<string, unknown> | undefined;
+    try {
+      expect(payloadAtDeadline?.error.code).toBe("timeout");
+      expect(payloadAtDeadline?.error.message).toContain("persisting the final operation result");
+      expect(operationStore.getStoredResult(args.operationId)).toBeUndefined();
+      expect(operationStore.failCalls).toBe(1);
+
+      const retry = await ToolRegistry.getTool("provisionDevice")!.handler(args);
+      retryPayload = JSON.parse((retry as any).content[0].text);
+      persistedRetry = structuredClone(operationStore.getStoredResult(args.operationId));
+    } finally {
+      completion.release();
+      await request;
+      await completion.settled;
+      await flushMicrotasks();
+    }
+
+    expect(retryPayload).toMatchObject({ lifecycleState: "created" });
+    expect(operationStore.getStoredResult(args.operationId)).toEqual(persistedRetry);
+  });
+
+  test("releases a booted session when final completion exceeds the original deadline", async () => {
+    const timer = new FakeTimer();
+    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    sessionManager.stopCleanupTimer();
+    const pool = new DevicePool(sessionManager, "daemon-session", timer, undefined, deviceManager);
+    const bootedDevice = {
+      name: "phone-api-36-a",
+      platform: "android" as const,
+      deviceId: "mock-phone-api-36-a",
+    };
+    deviceManager.setDeviceImages("android", [
+      {
+        name: "phone-api-36-a",
+        platform: "android",
+        isRunning: false,
+      },
+    ]);
+    await pool.initializeWithDevices([bootedDevice]);
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    const releaseEntered = deferred();
+    const releaseGate = deferred();
+    const releaseSettled = deferred();
+    const releaseSession = sessionManager.releaseSession.bind(sessionManager);
+    sessionManager.releaseSession = async (...releaseArgs) => {
+      releaseEntered.resolve();
+      await releaseGate.promise;
+      try {
+        return await releaseSession(...releaseArgs);
+      } finally {
+        releaseSettled.resolve();
+      }
+    };
+    setDeviceToolsDependencies({ timer });
+    registerDeviceTools();
+    const completion = blockNextCompletion(operationStore);
+    const failure = blockNextFailure(operationStore);
+    const args = {
+      ...provisionTestArgs("android", "pending-booted-completion"),
+      boot: true,
+      readiness: "none" as const,
+      timeoutMs: 1_000,
+    };
+
+    let payload: Record<string, any> | undefined;
+    const request = ToolRegistry.getTool("provisionDevice")!
+      .handler(args)
+      .then((response) => {
+        payload = JSON.parse((response as any).content[0].text);
+        return response;
+      });
+    await completion.entered;
+    timer.advanceTime(10_000);
+    await flushMicrotasks();
+    await Promise.all([failure.entered, releaseEntered.promise]);
+    const payloadAtDeadline = payload;
+
+    await request;
+    expect(payloadAtDeadline?.error.code).toBe("timeout");
+    expect(payloadAtDeadline?.error.message).toContain("persisting the final operation result");
+    expect(pool.getDevice(bootedDevice.deviceId)).toMatchObject({
+      sessionId: expect.any(String),
+      status: "busy",
+    });
+    const pendingRetryResponse = await ToolRegistry.getTool("provisionDevice")!.handler(args);
+    const pendingRetry = JSON.parse((pendingRetryResponse as any).content[0].text);
+    expect(pendingRetry.error.code).toBe("operation_in_progress");
+
+    failure.release();
+    releaseGate.resolve();
+    await Promise.all([failure.settled, releaseSettled.promise]);
+    expect(sessionManager.getAllSessionIds()).toEqual([]);
+    expect(operationStore.getStoredResult(args.operationId)).toBeUndefined();
+    expect(operationStore.failCalls).toBe(1);
+
+    const retryResponse = await ToolRegistry.getTool("provisionDevice")!.handler(args);
+    const retry = JSON.parse((retryResponse as any).content[0].text);
+    const persistedRetry = structuredClone(operationStore.getStoredResult(args.operationId));
+    expect(retry.sessionId).toEqual(expect.any(String));
+
+    completion.release();
+    await completion.settled;
+    await flushMicrotasks();
+    expect(operationStore.getStoredResult(args.operationId)).toEqual(persistedRetry);
+    expect(pool.getDevice(bootedDevice.deviceId)).toMatchObject({
+      sessionId: retry.sessionId,
+      status: "busy",
+    });
+  });
+
+  test("releases a replay claim when final completion exceeds the original deadline", async () => {
+    const timer = new FakeTimer();
+    setDeviceToolsDependencies({ timer });
+    registerDeviceTools();
+    const args = {
+      ...provisionTestArgs("android", "pending-replay-completion"),
+      boot: false,
+      readiness: "none" as const,
+      timeoutMs: 1_000,
+    };
+    const firstResponse = await ToolRegistry.getTool("provisionDevice")!.handler(args);
+    const first = JSON.parse((firstResponse as any).content[0].text);
+    const persisted = structuredClone(operationStore.getStoredResult(args.operationId));
+    const completion = blockNextCompletion(operationStore);
+
+    let payload: Record<string, any> | undefined;
+    const request = ToolRegistry.getTool("provisionDevice")!
+      .handler(args)
+      .then((response) => {
+        payload = JSON.parse((response as any).content[0].text);
+        return response;
+      });
+    await completion.entered;
+    timer.advanceTime(10_000);
+    await flushMicrotasks();
+    const payloadAtDeadline = payload;
+
+    completion.release();
+    await request;
+    await completion.settled;
+    await flushMicrotasks();
+
+    expect(payloadAtDeadline?.error.code).toBe("timeout");
+    expect(payloadAtDeadline?.error.message).toContain("persisting the final operation result");
+    expect(operationStore.getStoredResult(args.operationId)).toEqual(persisted);
+    expect(operationStore.failCalls).toBe(1);
+
+    const replay = await ToolRegistry.getTool("provisionDevice")!.handler(args);
+    expect(JSON.parse((replay as any).content[0].text)).toEqual(first);
   });
 
   test("enforces timeoutMs across exact provisioning before boot begins", async () => {

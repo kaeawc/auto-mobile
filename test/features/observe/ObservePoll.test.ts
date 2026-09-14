@@ -434,6 +434,26 @@ describe("pollObserveUntil recomposition tracking (#6932)", () => {
     expect(fake.getCacheObserveResultGenerations()).toEqual([29]);
   });
 
+  test("persists a deferred terminal observation at its poll-start HOST time despite future device time (#6999 round 5)", async () => {
+    const timer = new FakeTimer();
+    timer.setCurrentTime(1_000_000);
+    timer.enableAutoAdvance();
+    const fake = new FakeObserveScreen();
+    const terminal = obs(1_600_000, "future-device-terminal");
+    fake.setObserveSequence([obs(10, "baseline"), terminal]);
+
+    await pollObserveUntil(
+      fake,
+      timer,
+      { timeoutMs: 1000, pollMs: 150, skipRecompositionTracking: true },
+      (observation) => observation === terminal,
+    );
+
+    // The second poll begins after the 150ms interval. Its device-authored
+    // timestamp is deliberately far ahead and must never enter cache recency.
+    expect(fake.getCacheObserveResultCachedAts()).toEqual([1_000_150]);
+  });
+
   test("skips every poll and processes only the terminal observation once", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();

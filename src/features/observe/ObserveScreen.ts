@@ -62,7 +62,6 @@ import {
 } from "./HierarchyPlatformValidator";
 import { deriveIosScreenIdentity } from "./ios/IosScreenIdentity";
 import { computeFreshness } from "./observationFreshness";
-import { updatedAtToMillis } from "./observeTimestamp";
 import { SafeAreaAuditor, capLayoutWarnings } from "./audits/SafeAreaAuditor";
 
 /**
@@ -1020,25 +1019,22 @@ export class RealObserveScreen implements ObserveScreen {
    * Cache an observe result. Public for back-compat with tests. The optional
    * generation preserves the #5884 stale-write fence for #6932 deferred writes.
    */
-  async cacheObserveResult(observeResult: ObserveResult, generation?: number): Promise<void> {
+  async cacheObserveResult(
+    observeResult: ObserveResult,
+    generation?: number,
+    cachedAt?: number,
+  ): Promise<void> {
     const cacheStore = getObserveCacheStore();
-    const currentResult = cacheStore.getRecentInMemoryForDevice(this.device.deviceId);
-    if (
-      currentResult &&
-      updatedAtToMillis(currentResult.updatedAt) > updatedAtToMillis(observeResult.updatedAt)
-    ) {
+    const resolvedCachedAt = cachedAt ?? this.timer.now();
+    const currentCachedAt = cacheStore.getRecentCachedAtForDevice(this.device.deviceId);
+    if (currentCachedAt !== undefined && currentCachedAt > resolvedCachedAt) {
       logger.debug(
         `[OBSERVE_CACHE] Skipping deferred observe result for device ${this.device.deviceId}: ` +
-          "a newer capture is already cached",
+          "a more recently cached observation already exists",
       );
       return;
     }
-    await cacheStore.put(
-      this.device.deviceId,
-      observeResult,
-      generation,
-      updatedAtToMillis(observeResult.updatedAt),
-    );
+    await cacheStore.put(this.device.deviceId, observeResult, generation, resolvedCachedAt);
   }
 
   // ---------- Orchestration ----------

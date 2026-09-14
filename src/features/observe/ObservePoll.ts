@@ -224,10 +224,12 @@ export async function pollObserveUntil(
   // raised floor (e.g. 10 -> 30 -> 20).
   let newestTrustworthyObservation: ObserveResult | undefined;
   let newestTrustworthyGeneration: number | undefined;
+  let newestTrustworthyCachedAt: number | undefined;
   const finalize = async (
     outcome: ObservePollOutcome,
     canProcessRecomposition: boolean = true,
     generation?: number,
+    cachedAt?: number,
   ): Promise<ObservePollOutcome> => {
     if (
       options.skipRecompositionTracking &&
@@ -236,7 +238,7 @@ export async function pollObserveUntil(
     ) {
       const workPromise = (async (): Promise<void> => {
         await observeScreen.processRecomposition!(outcome.observation);
-        await observeScreen.cacheObserveResult?.(outcome.observation, generation);
+        await observeScreen.cacheObserveResult?.(outcome.observation, generation, cachedAt);
       })();
       await awaitFinalizationWhilePollIsLive(
         workPromise,
@@ -259,6 +261,7 @@ export async function pollObserveUntil(
     // Capture alongside the observation's start, before asynchronous work can
     // let terminateApp invalidate its cache generation (#5884).
     const cacheGeneration = observeScreen.captureCacheGeneration?.();
+    const cacheStartedAt = timer.now();
 
     const observation = await observeScreen.execute({
       minTimestamp,
@@ -313,6 +316,7 @@ export async function pollObserveUntil(
     if (isAdmissibleEvidence) {
       newestTrustworthyObservation = observation;
       newestTrustworthyGeneration = cacheGeneration;
+      newestTrustworthyCachedAt = cacheStartedAt;
     }
 
     // A screen-off terminal is only meaningful when the same observation passed
@@ -341,6 +345,7 @@ export async function pollObserveUntil(
         },
         isAdmissibleEvidence,
         cacheGeneration,
+        cacheStartedAt,
       );
     }
 
@@ -359,6 +364,7 @@ export async function pollObserveUntil(
         },
         true,
         cacheGeneration,
+        cacheStartedAt,
       );
     }
 
@@ -377,6 +383,7 @@ export async function pollObserveUntil(
         },
         newestTrustworthyObservation !== undefined,
         newestTrustworthyObservation !== undefined ? newestTrustworthyGeneration : cacheGeneration,
+        newestTrustworthyObservation !== undefined ? newestTrustworthyCachedAt : cacheStartedAt,
       );
     }
 

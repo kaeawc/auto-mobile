@@ -195,7 +195,7 @@ describe("ObserveScreen", function () {
       }
     });
 
-    test("does not let a deferred observation write supersede a newer same-device capture (#6999 round 4)", async function () {
+    test("does not let a deferred future-device-time observation supersede a newer host-cached capture (#6999 round 5)", async function () {
       const timer = new FakeTimer();
       timer.setCurrentTime(1_000_000);
       const cacheStore = new FakeObserveCacheStore(timer);
@@ -204,10 +204,12 @@ describe("ObserveScreen", function () {
         const screen = new RealObserveScreen(mockDevice, new FakeAdbClientFactory(fakeAdb), {
           cacheStore,
         });
-        const olderResult = {
+        const deferredResult = {
           ...screen.createBaseResult(),
-          updatedAt: 999_999,
-          viewHierarchy: "older-deferred-hierarchy",
+          // A device clock ahead of the host must not make this deferred write
+          // rank ahead of a later host-clock capture.
+          updatedAt: 1_600_000,
+          viewHierarchy: "future-device-time-deferred-hierarchy",
         };
         const newerResult = {
           ...screen.createBaseResult(),
@@ -216,8 +218,8 @@ describe("ObserveScreen", function () {
         };
         const generation = screen.captureCacheGeneration();
 
-        await cacheStore.put(mockDevice.deviceId, newerResult);
-        await screen.cacheObserveResult(olderResult, generation);
+        await screen.cacheObserveResult(deferredResult, generation, 1_000_000);
+        await cacheStore.put(mockDevice.deviceId, newerResult, undefined, 1_000_100);
 
         expect(cacheStore.getRecentInMemoryForDevice(mockDevice.deviceId)).toBe(newerResult);
       } finally {
@@ -225,7 +227,66 @@ describe("ObserveScreen", function () {
       }
     });
 
-    test("persists a deferred observation when the current capture has the same timestamp (#6999 round 4)", async function () {
+    test("skips a deferred write when a more recent host-cached observation already exists (#6999 round 5)", async function () {
+      const timer = new FakeTimer();
+      timer.setCurrentTime(1_000_100);
+      const cacheStore = new FakeObserveCacheStore(timer);
+
+      try {
+        const screen = new RealObserveScreen(mockDevice, new FakeAdbClientFactory(fakeAdb), {
+          cacheStore,
+        });
+        const newerResult = {
+          ...screen.createBaseResult(),
+          updatedAt: 1,
+          viewHierarchy: "newer-host-cached-hierarchy",
+        };
+        const deferredResult = {
+          ...screen.createBaseResult(),
+          updatedAt: 1_600_000,
+          viewHierarchy: "future-device-time-deferred-hierarchy",
+        };
+        const generation = screen.captureCacheGeneration();
+
+        await cacheStore.put(mockDevice.deviceId, newerResult, undefined, 1_000_100);
+        await screen.cacheObserveResult(deferredResult, generation, 1_000_000);
+
+        expect(cacheStore.getRecentInMemoryForDevice(mockDevice.deviceId)).toBe(newerResult);
+        expect(cacheStore.getEntryCount()).toBe(1);
+      } finally {
+        resetObserveCacheStore();
+      }
+    });
+
+    test("uses host write time for a direct cache caller despite future device time (#6999 round 5)", async function () {
+      const timer = new FakeTimer();
+      timer.setCurrentTime(1_000_000);
+      const cacheStore = new FakeObserveCacheStore(timer);
+
+      try {
+        const screen = new RealObserveScreen(
+          mockDevice,
+          new FakeAdbClientFactory(fakeAdb),
+          {
+            cacheStore,
+          },
+          timer,
+        );
+        const result = {
+          ...screen.createBaseResult(),
+          updatedAt: 1_600_000,
+          viewHierarchy: "future-device-time-direct-caller-hierarchy",
+        };
+
+        await screen.cacheObserveResult(result);
+
+        expect(cacheStore.getRecentCachedAtForDevice(mockDevice.deviceId)).toBe(1_000_000);
+      } finally {
+        resetObserveCacheStore();
+      }
+    });
+
+    test("persists a deferred observation when the current host cache timestamp is equal (#6999 round 5)", async function () {
       const timer = new FakeTimer();
       timer.setCurrentTime(1_000_000);
       const cacheStore = new FakeObserveCacheStore(timer);
@@ -236,18 +297,18 @@ describe("ObserveScreen", function () {
         });
         const currentResult = {
           ...screen.createBaseResult(),
-          updatedAt: 1_000_000,
+          updatedAt: 1_600_000,
           viewHierarchy: "current-hierarchy",
         };
         const equalTimestampResult = {
           ...screen.createBaseResult(),
-          updatedAt: 1_000_000,
+          updatedAt: 1,
           viewHierarchy: "equal-timestamp-deferred-hierarchy",
         };
         const generation = screen.captureCacheGeneration();
 
-        await cacheStore.put(mockDevice.deviceId, currentResult);
-        await screen.cacheObserveResult(equalTimestampResult, generation);
+        await cacheStore.put(mockDevice.deviceId, currentResult, undefined, 1_000_000);
+        await screen.cacheObserveResult(equalTimestampResult, generation, 1_000_000);
 
         expect(cacheStore.getRecentInMemoryForDevice(mockDevice.deviceId)).toBe(
           equalTimestampResult,

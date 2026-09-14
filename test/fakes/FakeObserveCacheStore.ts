@@ -82,6 +82,10 @@ export class FakeObserveCacheStore implements ObserveResultCacheStore {
     return this.findMostRecent(deviceId);
   }
 
+  getRecentCachedAtForDevice(deviceId: string): number | undefined {
+    return this.findMostRecentEntry(deviceId)?.timestamp;
+  }
+
   clear(deviceId?: string): void {
     if (!deviceId) {
       this.globalGeneration += 1;

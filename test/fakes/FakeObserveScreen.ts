@@ -31,6 +31,7 @@ export class FakeObserveScreen implements ObserveScreen {
   private readonly recompositionObservations: ObserveResult[] = [];
   private readonly cachedObserveResultObservations: ObserveResult[] = [];
   private readonly cachedObserveResultGenerations: Array<number | undefined> = [];
+  private readonly cachedObserveResultCachedAts: Array<number | undefined> = [];
 
   /**
    * Set the observe result to be returned by execute and getMostRecentCachedObserveResult
@@ -186,6 +187,7 @@ export class FakeObserveScreen implements ObserveScreen {
     this.recompositionObservations.length = 0;
     this.cachedObserveResultObservations.length = 0;
     this.cachedObserveResultGenerations.length = 0;
+    this.cachedObserveResultCachedAts.length = 0;
   }
 
   /**
@@ -228,6 +230,11 @@ export class FakeObserveScreen implements ObserveScreen {
   /** Generations passed to cacheObserveResult(), in call order. */
   getCacheObserveResultGenerations(): Array<number | undefined> {
     return [...this.cachedObserveResultGenerations];
+  }
+
+  /** Host cache timestamps passed to cacheObserveResult(), in call order. */
+  getCacheObserveResultCachedAts(): Array<number | undefined> {
+    return [...this.cachedObserveResultCachedAts];
   }
 
   /** Observations associated with terminal screenshot capture, in call order. */
@@ -306,11 +313,16 @@ export class FakeObserveScreen implements ObserveScreen {
     return this.cacheGenerationSequence[index];
   }
 
-  async cacheObserveResult(observation: ObserveResult, generation?: number): Promise<void> {
+  async cacheObserveResult(
+    observation: ObserveResult,
+    generation?: number,
+    cachedAt?: number,
+  ): Promise<void> {
     this.executedOperations.push("cacheObserveResult");
     this.cacheObserveResultCallCount++;
     this.cachedObserveResultObservations.push(observation);
     this.cachedObserveResultGenerations.push(generation);
+    this.cachedObserveResultCachedAts.push(cachedAt);
 
     if (this.neverResolvingOperations.has("cacheObserveResult")) {
       return await new Promise<void>(() => {});

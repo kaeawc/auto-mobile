@@ -58,6 +58,9 @@ export interface ObserveResultCacheStore {
   /** Sync in-memory lookup for a specific device. */
   getRecentInMemoryForDevice(deviceId: string): ObserveResult | undefined;
 
+  /** Host-clock timestamp of the most recent live in-memory entry for a device. */
+  getRecentCachedAtForDevice(deviceId: string): number | undefined;
+
   /** Clear memory + disk cache. If deviceId provided, only that device. */
   clear(deviceId?: string): void;
 }

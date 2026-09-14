@@ -197,6 +197,10 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
     return this.findMostRecentInMemory(deviceId);
   }
 
+  getRecentCachedAtForDevice(deviceId: string): number | undefined {
+    return this.collectLiveMostRecent(deviceId)?.timestamp;
+  }
+
   clear(deviceId?: string): void {
     if (deviceId) {
       // Advance the device's generation before deleting so any in-flight

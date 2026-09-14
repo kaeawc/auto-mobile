@@ -68,7 +68,11 @@ export interface ObserveScreen {
    * agree after #6932 settle-loop tracking. Pass the generation captured at
    * observation start so a concurrent #5884 invalidation cannot resurrect it.
    */
-  cacheObserveResult?(observation: ObserveResult, generation?: number): Promise<void>;
+  cacheObserveResult?(
+    observation: ObserveResult,
+    generation?: number,
+    cachedAt?: number,
+  ): Promise<void>;
 
   /**
    * Fetch raw (unfiltered) view hierarchy from the device and attach it to an existing

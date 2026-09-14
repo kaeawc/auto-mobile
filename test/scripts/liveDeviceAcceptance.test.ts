@@ -3,6 +3,8 @@ import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { ACCEPTANCE_DISCOVERY_CAPABILITY_ENV } from "../../src/daemon/constants";
+import { DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV } from "../../src/daemon/liveAcceptanceCapability";
 import { FakeTimer } from "../fakes/FakeTimer";
 import {
   defaultWriteEvidence,
@@ -33,6 +35,7 @@ interface Harness {
 }
 
 const IOS_UDID = "00000000-0000-0000-0000-000000000001";
+const LIVE_ACCEPTANCE_ENV = "AUTOMOBILE_ACCEPTANCE_LIVE";
 const androidArgs: AcceptanceArgs = {
   platform: "android",
   target: { avdName: "Pixel_8_API_35" },
@@ -61,6 +64,54 @@ const iosArgs: AcceptanceArgs = {
   osVersionRange: { min: "17.0", max: "18.0" },
   androidConfig: undefined,
 };
+
+function restoreEnvironmentVariable(name: string, value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[name];
+  } else {
+    process.env[name] = value;
+  }
+}
+
+function createProductionAcceptanceFixture(): {
+  android: AcceptanceArgs;
+  ios: AcceptanceArgs;
+  dispose(): void;
+} {
+  const directory = mkdtempSync(join(tmpdir(), "automobile-live-acceptance-"));
+  const operatorKeyPath = join(directory, "operator.key");
+  const ownershipManifestPath = join(directory, "ownership.json");
+  const operatorKey = Buffer.from("x".repeat(32));
+  writeFileSync(operatorKeyPath, operatorKey);
+  chmodSync(operatorKeyPath, 0o600);
+
+  const common = {
+    ownershipManifestPath,
+    operatorKeyPath,
+    operatorKey,
+    build: { entryScript: "/test/dist/src/index.js", buildId: "test-build" },
+    timeoutMs: 10_000,
+    confirmLive: true,
+    testOwnedDevices: true,
+  };
+  const android = {
+    ...androidArgs,
+    ...common,
+    evidencePath: join(directory, "android-evidence.json"),
+  };
+  const ios = {
+    ...iosArgs,
+    ...common,
+    evidencePath: join(directory, "ios-evidence.json"),
+  };
+  recordOwnershipManifest(android);
+  recordOwnershipManifest(ios);
+  return {
+    android,
+    ios,
+    dispose: () => rmSync(directory, { recursive: true, force: true }),
+  };
+}
 
 function oldSessionDiagnostic(sessionUuid: string): string {
   return (
@@ -1094,6 +1145,138 @@ describe("live device acceptance harness", () => {
     ).rejects.toThrow(
       "Live mutation requires --confirm-live, --test-owned-devices, and AUTOMOBILE_ACCEPTANCE_LIVE=1.",
     );
+  });
+
+  test("keeps one wrapper scope while iOS reuses Android's resident daemon and restarts", async () => {
+    const fixture = createProductionAcceptanceFixture();
+    const previousLiveAcceptance = process.env[LIVE_ACCEPTANCE_ENV];
+    const previousStartupSecret = process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV];
+    const previousDiscoveryCapability = process.env[ACCEPTANCE_DISCOVERY_CAPABILITY_ENV];
+    const wrapperStartupSecret = "wrapper-startup-secret-012345678901234567890";
+    const wrapperDiscoveryCapability = "wrapper-discovery-capability-012345678901234";
+    const scopeObservations: Array<{ source: string; startupSecret: string; capability: string }> =
+      [];
+    let residentDaemonStarts = 0;
+    let residentDaemonScope: { startupSecret: string; capability: string } | undefined;
+
+    const observeScope = (source: string): void => {
+      const scope = {
+        startupSecret: process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV],
+        capability: process.env[ACCEPTANCE_DISCOVERY_CAPABILITY_ENV],
+      };
+      expect(scope.startupSecret).toBeDefined();
+      expect(scope.capability).toBeDefined();
+      if (residentDaemonScope === undefined) {
+        residentDaemonStarts += 1;
+        residentDaemonScope = scope as { startupSecret: string; capability: string };
+      } else {
+        expect(scope).toEqual(residentDaemonScope);
+      }
+      scopeObservations.push({
+        source,
+        startupSecret: scope.startupSecret!,
+        capability: scope.capability!,
+      });
+    };
+
+    const productionDependencies = (harness: Harness): MatrixDependencies => {
+      const createMcpClient = harness.dependencies.createMcpClient!;
+      const createDaemonClient = harness.dependencies.createDaemonClient!;
+      const restartDaemon = harness.dependencies.restartDaemon!;
+      return {
+        ...harness.dependencies,
+        testOnly: false,
+        createMcpClient: async (owner, signal, presentationOrder) => {
+          observeScope(`mcp:${owner}`);
+          return await createMcpClient(owner, signal, presentationOrder);
+        },
+        createDaemonClient: async (signal) => {
+          observeScope("daemon-client");
+          return await createDaemonClient(signal);
+        },
+        restartDaemon: async (maintenanceToken, timeoutMs, signal) => {
+          observeScope("daemon-restart");
+          await restartDaemon(maintenanceToken, timeoutMs, signal);
+        },
+      };
+    };
+
+    try {
+      process.env[LIVE_ACCEPTANCE_ENV] = "1";
+      process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV] = wrapperStartupSecret;
+      process.env[ACCEPTANCE_DISCOVERY_CAPABILITY_ENV] = wrapperDiscoveryCapability;
+      await runAcceptanceMatrix(
+        { ...fixture.android, scenario: "recovery" },
+        productionDependencies(createHarness()),
+      );
+      await runAcceptanceMatrix(
+        { ...fixture.ios, scenario: "recovery" },
+        productionDependencies(createHarness()),
+      );
+
+      expect(residentDaemonStarts).toBe(1);
+      expect(scopeObservations.some((observation) => observation.source === "daemon-restart")).toBe(
+        true,
+      );
+      expect(scopeObservations.map((observation) => observation.startupSecret)).toEqual(
+        Array.from({ length: scopeObservations.length }, () => wrapperStartupSecret),
+      );
+      expect(scopeObservations.map((observation) => observation.capability)).toEqual(
+        Array.from({ length: scopeObservations.length }, () => wrapperDiscoveryCapability),
+      );
+      expect(process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV]).toBe(wrapperStartupSecret);
+      expect(process.env[ACCEPTANCE_DISCOVERY_CAPABILITY_ENV]).toBe(wrapperDiscoveryCapability);
+    } finally {
+      fixture.dispose();
+      restoreEnvironmentVariable(LIVE_ACCEPTANCE_ENV, previousLiveAcceptance);
+      restoreEnvironmentVariable(DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV, previousStartupSecret);
+      restoreEnvironmentVariable(ACCEPTANCE_DISCOVERY_CAPABILITY_ENV, previousDiscoveryCapability);
+    }
+  });
+
+  test("direct invocation replaces incomplete scope only for the matrix and restores caller values", async () => {
+    const fixture = createProductionAcceptanceFixture();
+    const previousLiveAcceptance = process.env[LIVE_ACCEPTANCE_ENV];
+    const previousStartupSecret = process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV];
+    const previousDiscoveryCapability = process.env[ACCEPTANCE_DISCOVERY_CAPABILITY_ENV];
+    const callerDiscoveryCapability = "caller-discovery-capability-0123456789012345";
+    let observedScope: { startupSecret: string; capability: string } | undefined;
+
+    try {
+      process.env[LIVE_ACCEPTANCE_ENV] = "1";
+      delete process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV];
+      process.env[ACCEPTANCE_DISCOVERY_CAPABILITY_ENV] = callerDiscoveryCapability;
+      await expect(
+        runAcceptanceMatrix(fixture.android, {
+          testOnly: false,
+          timer: new FakeTimer(),
+          createMcpClient: async () => {
+            observedScope = {
+              startupSecret: process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV]!,
+              capability: process.env[ACCEPTANCE_DISCOVERY_CAPABILITY_ENV]!,
+            };
+            throw new Error("stop after direct scope observation");
+          },
+          createDaemonClient: async () => {
+            throw new Error("daemon client should not be created");
+          },
+          restartDaemon: async () => {},
+          spawnCli: async () => {},
+          writeFile: async () => {},
+        }),
+      ).rejects.toThrow("stop after direct scope observation");
+
+      expect(observedScope?.startupSecret).toHaveLength(36);
+      expect(observedScope?.capability).toHaveLength(36);
+      expect(observedScope?.capability).not.toBe(callerDiscoveryCapability);
+      expect(process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV]).toBeUndefined();
+      expect(process.env[ACCEPTANCE_DISCOVERY_CAPABILITY_ENV]).toBe(callerDiscoveryCapability);
+    } finally {
+      fixture.dispose();
+      restoreEnvironmentVariable(LIVE_ACCEPTANCE_ENV, previousLiveAcceptance);
+      restoreEnvironmentVariable(DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV, previousStartupSecret);
+      restoreEnvironmentVariable(ACCEPTANCE_DISCOVERY_CAPABILITY_ENV, previousDiscoveryCapability);
+    }
   });
 
   test("requires direct drivers to provide the owner-held key and built entrypoint", () => {

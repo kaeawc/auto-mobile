@@ -30,7 +30,10 @@ import {
   DAEMON_COMPLETE_MAINTENANCE_METHOD,
   DAEMON_PREPARE_MAINTENANCE_METHOD,
 } from "../src/daemon/daemonRestartAdmission";
-import { DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV } from "../src/daemon/liveAcceptanceCapability";
+import {
+  daemonLiveAcceptanceStartupSecret,
+  DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV,
+} from "../src/daemon/liveAcceptanceCapability";
 import {
   getAppleSchema,
   getAndroidSchema,
@@ -1281,6 +1284,46 @@ async function settleWithin(
   }
 }
 
+function restoreEnvironmentVariable(name: string, value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[name];
+  } else {
+    process.env[name] = value;
+  }
+}
+
+function establishAcceptanceRunScope(): () => void {
+  const previousLiveAcceptanceStartupSecret =
+    process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV];
+  const previousAcceptanceDiscoveryCapability = process.env[ACCEPTANCE_DISCOVERY_CAPABILITY_ENV];
+  const inheritedStartupSecret = daemonLiveAcceptanceStartupSecret();
+  const inheritedDiscoveryCapability = process.env[ACCEPTANCE_DISCOVERY_CAPABILITY_ENV];
+
+  // The wrapper establishes both opaque values once for its Android+iOS
+  // process tree. A direct driver invocation gets a private pair instead of
+  // accepting a partial or accidental environment, then restores its caller.
+  if (
+    inheritedStartupSecret !== undefined &&
+    typeof inheritedDiscoveryCapability === "string" &&
+    inheritedDiscoveryCapability.length >= 32
+  ) {
+    return () => {};
+  }
+
+  process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV] = randomUUID();
+  process.env[ACCEPTANCE_DISCOVERY_CAPABILITY_ENV] = randomUUID();
+  return () => {
+    restoreEnvironmentVariable(
+      DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV,
+      previousLiveAcceptanceStartupSecret,
+    );
+    restoreEnvironmentVariable(
+      ACCEPTANCE_DISCOVERY_CAPABILITY_ENV,
+      previousAcceptanceDiscoveryCapability,
+    );
+  };
+}
+
 export async function runAcceptanceMatrix(
   args: AcceptanceArgs,
   dependencies: MatrixDependencies = {},
@@ -1300,21 +1343,9 @@ export async function runAcceptanceMatrix(
   assertControlConfiguration(args.target, args.controls);
   assertLiveSafeguards(args, dependencies);
   assertProvisionSchemaMatrix(args);
-  const previousLiveAcceptanceStartupSecret =
-    process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV];
-  // This is an opaque, per-matrix capability. Every harness-owned subprocess
-  // inherits it, including a daemon started before the controlled
-  // forward/reverse clients and a recovery restart. Ordinary MCP/daemon callers
-  // do not receive it and cannot turn a hidden tool argument into an accepted
-  // presentation-order request.
-  const previousAcceptanceDiscoveryCapability = process.env[ACCEPTANCE_DISCOVERY_CAPABILITY_ENV];
-  if (!dependencies.testOnly) {
-    // The daemon captures this only during startup; it is never exposed through
-    // a daemon RPC. Short-lived CLI children inherit it so they can derive the
-    // generation-bound capability needed for the acceptance-only fault.
-    process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV] = randomUUID();
-    process.env[ACCEPTANCE_DISCOVERY_CAPABILITY_ENV] = randomUUID();
-  }
+  const restoreAcceptanceRunScope = dependencies.testOnly
+    ? () => {}
+    : establishAcceptanceRunScope();
   const timer = dependencies.timer ?? defaultTimer;
   const spawnCli =
     dependencies.spawnCli ??
@@ -2435,19 +2466,7 @@ export async function runAcceptanceMatrix(
         );
       }
     }
-    if (!dependencies.testOnly) {
-      if (previousLiveAcceptanceStartupSecret === undefined) {
-        delete process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV];
-      } else {
-        process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV] =
-          previousLiveAcceptanceStartupSecret;
-      }
-      if (previousAcceptanceDiscoveryCapability === undefined) {
-        delete process.env[ACCEPTANCE_DISCOVERY_CAPABILITY_ENV];
-      } else {
-        process.env[ACCEPTANCE_DISCOVERY_CAPABILITY_ENV] = previousAcceptanceDiscoveryCapability;
-      }
-    }
+    restoreAcceptanceRunScope();
   }
 
   const androidEndpoints = runtimeIdentities

@@ -7,6 +7,16 @@ REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 # shellcheck source=scripts/ios/run_with_timeout.sh disable=SC1091
 source "${SCRIPT_DIR}/ios/run_with_timeout.sh"
 
+acceptance_run_token() {
+  local token
+  token="$(LC_ALL=C od -An -N32 -tx1 /dev/urandom | tr -d '[:space:]')"
+  if [[ "${#token}" -ne 64 ]]; then
+    echo "error: could not generate live acceptance run capability." >&2
+    return 1
+  fi
+  printf '%s' "${token}"
+}
+
 android_avd_name=""
 android_sibling_avd_name=""
 android_duplicate_serial=""
@@ -237,6 +247,14 @@ if [[ "${dry_run}" == true ]]; then
   echo "Dry run validated explicit targets and bounds; no daemon or device command was invoked."
   exit 0
 fi
+
+# These opaque values scope the entire Android+iOS matrix, rather than either
+# platform invocation. They are inherited by every harness child, including a
+# daemon started by Android that iOS later reuses and any admitted restart.
+AUTOMOBILE_DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET="$(acceptance_run_token)"
+AUTOMOBILE_ACCEPTANCE_DISCOVERY_CAPABILITY="$(acceptance_run_token)"
+export AUTOMOBILE_DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET
+export AUTOMOBILE_ACCEPTANCE_DISCOVERY_CAPABILITY
 
 run_platform android --avd-name "${android_avd_name}" "${android_runtime}" "${android_device_type}" "${android_min_os_version}" "${android_max_os_version}" \
   --android-memory-mb "${android_memory_mb}" --android-cpu-cores "${android_cpu_cores}"

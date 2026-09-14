@@ -5,9 +5,11 @@ SCRIPT="scripts/run-live-device-acceptance.sh"
 setup() {
   MOCK_BIN="$(mktemp -d)"
   COMMAND_LOG="${MOCK_BIN}/commands.log"
+  RUN_SCOPE_LOG="${MOCK_BIN}/run-scope.log"
   OPERATOR_KEY="${MOCK_BIN}/operator.key"
   OWNERSHIP_MANIFEST="${MOCK_BIN}/ownership.json"
   export COMMAND_LOG
+  export RUN_SCOPE_LOG
   ORIGINAL_PATH="${PATH}"
 
   cat > "${MOCK_BIN}/bun" <<'EOF'
@@ -20,6 +22,11 @@ if [[ "$1" == "run" && "$2" == "build" ]]; then
 fi
 if [[ "${BUN_FAIL_ANDROID:-}" == "1" && "$*" == *"--platform android"* ]]; then
   exit 1
+fi
+if [[ "$*" == *"scripts/live-device-acceptance.ts --platform "* ]]; then
+  printf '%s\t%s\n' \
+    "${AUTOMOBILE_DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET}" \
+    "${AUTOMOBILE_ACCEPTANCE_DISCOVERY_CAPABILITY}" >> "${RUN_SCOPE_LOG}"
 fi
 EOF
   chmod +x "${MOCK_BIN}/bun"
@@ -95,7 +102,7 @@ run_harness() {
   [ ! -f "${COMMAND_LOG}" ]
 }
 
-@test "runs the full Android then iOS matrix with exact required arguments" {
+@test "runs the full Android then iOS matrix with one private run scope and exact required arguments" {
   run_harness
 
   [ "${status}" -eq 0 ]
@@ -127,6 +134,17 @@ run_harness() {
   grep -q -- "--entrypoint ${PWD}/dist/src/index.js" "${COMMAND_LOG}"
   grep -q -- '--timeout-ms 8000' "${COMMAND_LOG}"
   [ "$(grep -c '^timeout -k 2 8 bun ' "${COMMAND_LOG}")" -eq 2 ]
+  [ "$(wc -l < "${RUN_SCOPE_LOG}")" -eq 2 ]
+  IFS=$'\t' read -r android_startup_secret android_discovery_capability < "${RUN_SCOPE_LOG}"
+  IFS=$'\t' read -r ios_startup_secret ios_discovery_capability < <(tail -n 1 "${RUN_SCOPE_LOG}")
+  [ "${android_startup_secret}" = "${ios_startup_secret}" ]
+  [ "${android_discovery_capability}" = "${ios_discovery_capability}" ]
+  [ "${#android_startup_secret}" -eq 64 ]
+  [ "${#android_discovery_capability}" -eq 64 ]
+  [[ "${output}" != *"${android_startup_secret}"* ]]
+  [[ "${output}" != *"${android_discovery_capability}"* ]]
+  ! grep -Fq -- "${android_startup_secret}" "${COMMAND_LOG}"
+  ! grep -Fq -- "${android_discovery_capability}" "${COMMAND_LOG}"
 }
 
 @test "stops before iOS when Android exhausts its platform timeout" {

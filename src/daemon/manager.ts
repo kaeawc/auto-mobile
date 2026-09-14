@@ -381,13 +381,46 @@ export interface ExtractionCleaner {
  * unqualified success — precisely the split-brain #6260 describes.
  */
 export interface DaemonPortAvailabilityChecker {
-  isPortFree(port: number, host: string): Promise<boolean>;
+  /**
+   * `timeoutMs` caps the probe under the caller's remaining budget (issue #7001);
+   * the checker never waits longer than its own default probe timeout either way.
+   */
+  isPortFree(port: number, host: string, timeoutMs?: number): Promise<boolean>;
 }
 
-class NetDaemonPortAvailabilityChecker implements DaemonPortAvailabilityChecker {
-  isPortFree(port: number, host: string): Promise<boolean> {
+/**
+ * Minimal listener surface the port probe needs; `node:net`'s `Server` satisfies
+ * it and tests substitute an in-memory emitter.
+ */
+export interface ProbeListener {
+  once(event: "error", listener: (error: NodeJS.ErrnoException) => void): unknown;
+  listen(port: number, host: string, listeningListener: () => void): unknown;
+  close(callback: () => void): unknown;
+}
+
+/**
+ * Bind errors that mean the ADDRESS cannot host a listener at all (e.g. `::1`
+ * on a container without IPv6 loopback), so no incumbent can be bound there.
+ * Every other bind failure keeps the fail-closed "port is occupied" reading.
+ */
+const UNBINDABLE_ADDRESS_ERROR_CODES = new Set(["EADDRNOTAVAIL", "EAFNOSUPPORT"]);
+
+export class NetDaemonPortAvailabilityChecker implements DaemonPortAvailabilityChecker {
+  constructor(private readonly createListener: () => ProbeListener = createNetServer) {}
+
+  isPortFree(
+    port: number,
+    host: string,
+    timeoutMs: number = DAEMON_PORT_AVAILABILITY_PROBE_TIMEOUT_MS,
+  ): Promise<boolean> {
+    const probeTimeoutMs = Math.min(DAEMON_PORT_AVAILABILITY_PROBE_TIMEOUT_MS, timeoutMs);
+    if (probeTimeoutMs <= 0) {
+      // No budget left to learn anything: report the port as bound so callers
+      // fail closed rather than launching a second daemon on unverified state.
+      return Promise.resolve(false);
+    }
     return new Promise((resolvePromise) => {
-      const probeServer = createNetServer();
+      const probeServer = this.createListener();
       let settled = false;
       const finish = (result: boolean): void => {
         if (settled) {
@@ -397,11 +430,10 @@ class NetDaemonPortAvailabilityChecker implements DaemonPortAvailabilityChecker 
         defaultTimer.clearTimeout(timeoutHandle);
         probeServer.close(() => resolvePromise(result));
       };
-      const timeoutHandle = defaultTimer.setTimeout(
-        () => finish(false),
-        DAEMON_PORT_AVAILABILITY_PROBE_TIMEOUT_MS,
+      const timeoutHandle = defaultTimer.setTimeout(() => finish(false), probeTimeoutMs);
+      probeServer.once("error", (bindError) =>
+        finish(bindError.code !== undefined && UNBINDABLE_ADDRESS_ERROR_CODES.has(bindError.code)),
       );
-      probeServer.once("error", () => finish(false));
       probeServer.listen(port, host, () => finish(true));
     });
   }
@@ -455,6 +487,21 @@ const MAX_DAEMON_STARTUP_LOG_BYTES = 4000;
 
 /** An occupied port found by degraded process discovery has no known process-table PID. */
 const DAEMON_UNKNOWN_OWNER_PID = -1;
+
+/** Host a daemon binds when `--host` is not given; mirrors the CLI default. */
+const DEFAULT_DAEMON_HOST = "127.0.0.1";
+
+/**
+ * Loopback addresses the degraded start scan probes in addition to the
+ * configured host (issue #7001): a port bound on one is invisible from the other,
+ * so an incumbent on the default 127.0.0.1 must still be found by a `::1` start.
+ */
+const DEGRADED_START_PROBE_LOOPBACK_HOSTS = ["127.0.0.1", "::1"] as const;
+
+interface DaemonStartProbeTarget {
+  host: string;
+  port: number;
+}
 
 /**
  * Budget for the confirming socket probe once the process a readiness wait was
@@ -841,16 +888,23 @@ export class DaemonManager implements DaemonManagerLike {
 
     // A process-table scan can miss a daemon in another PID/socket namespace.
     // The probe's socket closes before it resolves, so it cannot atomically reserve
-    // a port for the child. Check every port this install could plausibly own before
-    // allowing strict child binding to arbitrate a free candidate.
-    const host = options.host ?? "127.0.0.1";
-    const occupiedPort = await this.findOccupiedDaemonStartPort(
-      this.degradedStartProbePorts(options),
-      host,
+    // a port for the child. Check every host:port this install could plausibly own
+    // before allowing strict child binding to arbitrate a free candidate. The same
+    // port binds independently on 127.0.0.1 and ::1, so a start on `--host ::1`
+    // must still look for an incumbent on the default 127.0.0.1 (issue #7001).
+    const probeBudget = this.remainingTime(startDeadline);
+    if (probeBudget <= 0) {
+      throw new ActionableError(
+        "Daemon startup deadline elapsed before the degraded port probe could run; refusing to launch a daemon after the client deadline.",
+      );
+    }
+    const occupied = await this.findOccupiedDaemonStartPort(
+      this.degradedStartProbeTargets(options),
+      probeBudget,
     );
-    if (occupiedPort !== undefined) {
+    if (occupied !== undefined) {
       logger.warn(
-        `[DaemonManager] process-table inspection timed out during daemon start and port ${occupiedPort} on ${host} is occupied; waiting for its daemon reachability before refusing a second start: ${errorMessage(error)}`,
+        `[DaemonManager] process-table inspection timed out during daemon start and port ${occupied.port} on ${occupied.host} is occupied; waiting for its daemon reachability before refusing a second start: ${errorMessage(error)}`,
         error,
       );
       return [DAEMON_UNKNOWN_OWNER_PID];
@@ -865,6 +919,20 @@ export class DaemonManager implements DaemonManagerLike {
       error,
     );
     return [];
+  }
+
+  /**
+   * Every (host, port) pair the degraded scan must probe: each candidate port on
+   * the configured host plus the loopback alternates, configured host first so
+   * the incumbent most likely to own this install's socket is reported.
+   */
+  private degradedStartProbeTargets(options: DaemonOptions): DaemonStartProbeTarget[] {
+    const hosts = [
+      ...new Set([options.host ?? DEFAULT_DAEMON_HOST, ...DEGRADED_START_PROBE_LOOPBACK_HOSTS]),
+    ];
+    return this.degradedStartProbePorts(options).flatMap((port) =>
+      hosts.map((host) => ({ host, port })),
+    );
   }
 
   private degradedStartProbePorts(options: DaemonOptions): number[] {
@@ -904,16 +972,22 @@ export class DaemonManager implements DaemonManagerLike {
     return undefined;
   }
 
+  /**
+   * Probes every target concurrently, each bounded by the SAME remaining start
+   * budget, so the whole set costs one probe's wall time and can never push the
+   * actionable result past the client deadline (issue #7001). The first occupied
+   * target in candidate order wins so the reported incumbent is deterministic.
+   */
   private async findOccupiedDaemonStartPort(
-    candidatePorts: number[],
-    host: string,
-  ): Promise<number | undefined> {
-    for (const port of candidatePorts) {
-      if (!(await this.portAvailabilityChecker.isPortFree(port, host))) {
-        return port;
-      }
-    }
-    return undefined;
+    targets: DaemonStartProbeTarget[],
+    budgetMs: number,
+  ): Promise<DaemonStartProbeTarget | undefined> {
+    const results = await Promise.all(
+      targets.map((target) =>
+        this.portAvailabilityChecker.isPortFree(target.port, target.host, budgetMs),
+      ),
+    );
+    return targets.find((_, index) => !results[index]);
   }
 
   private normalizeDaemonProcessRecords(records: DaemonProcessRecord[]): number[] {
@@ -1976,7 +2050,7 @@ export class DaemonManager implements DaemonManagerLike {
     }
 
     const port = options.port ?? DEFAULT_DAEMON_PORT;
-    const host = options.host ?? "127.0.0.1";
+    const host = options.host ?? DEFAULT_DAEMON_HOST;
     if (await this.portAvailabilityChecker.isPortFree(port, host)) {
       return;
     }

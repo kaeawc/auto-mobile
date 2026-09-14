@@ -37,10 +37,11 @@ export class HierarchyCollector {
     skipWaitForFresh: boolean = false,
     minTimestamp: number = 0,
     signal?: AbortSignal,
+    readOnly: boolean = false,
   ): Promise<void> {
     const { device, viewHierarchy, adb, timer } = this.opts;
     try {
-      if (device.platform === "android") {
+      if (device.platform === "android" && !readOnly) {
         await viewHierarchy.configureRecompositionTracking(true, perf, signal);
       }
 

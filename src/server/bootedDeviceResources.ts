@@ -5,6 +5,7 @@ import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceM
 import { logger } from "../utils/logger";
 import { BootedDevice, Platform } from "../models";
 import { DaemonState } from "../daemon/daemonState";
+import { reconcileDiscoveryObservation } from "../daemon/discoveryReconcile";
 import type { Session } from "../daemon/sessionManager";
 import type {
   DevicePool,
@@ -312,6 +313,11 @@ async function computeDeviceLockStates(): Promise<DeviceLockStatesResourceConten
       logger.warn(`[DeviceLockStates] Failed to enumerate ${platform} booted devices: ${error}`);
     }
   }
+  // FUNNEL 1: the probe below is device-addressed, and this poll can be the
+  // first discovery to see the `Unknown (<serial>)` placeholder or a different
+  // AVD on a reused serial. Fold it in so the admission gate at the client seam
+  // refuses on the pool's current knowledge rather than a stale label (#6923).
+  await reconcileDiscoveryObservation(devices, "device-lock-states");
 
   const lockStates: DeviceLockStateInfo[] = devices.map((device) => ({
     deviceId: device.deviceId,

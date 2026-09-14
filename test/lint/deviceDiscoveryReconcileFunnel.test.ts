@@ -110,6 +110,12 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
         "Picks a stream candidate across both platforms from the AVD-name-aware manager, then " +
         "reconciles before the admission gate reads pooled identity.",
     },
+    "src/daemon/testRecordingSocketServer.ts": {
+      calls: 1,
+      reason:
+        "Selects the recording target from the AVD-name-aware manager, reconciles before the " +
+        "admission gate reads pooled identity, and readies the device only after the gate (#6923).",
+    },
 
     // --- Consult no pooled identity -----------------------------------------
     "src/utils/DeviceSessionManager.ts": {
@@ -294,6 +300,7 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
       "src/server/deviceTools.ts",
       "src/daemon/webrtcStreamSocketServer.ts",
       "src/daemon/videoStreamSocketServer.ts",
+      "src/daemon/testRecordingSocketServer.ts",
       "src/server/resourceDeviceResolver.ts",
     ];
     for (const file of routed) {

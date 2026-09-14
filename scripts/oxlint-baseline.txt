@@ -55,7 +55,6 @@
 1	src/features/observe/GetAppMetadata.ts	eslint(complexity)
 1	src/features/observe/GetBackStack.ts	eslint(complexity)
 1	src/features/observe/Idle.ts	eslint(complexity)
-1	src/features/observe/ListInstalledApps.ts	eslint(complexity)
 1	src/features/observe/ObservePoll.ts	eslint(complexity)
 1	src/features/observe/ObserveScreen.ts	eslint(max-depth)
 1	src/features/observe/TakeScreenshot.ts	auto-mobile(catch-convention)

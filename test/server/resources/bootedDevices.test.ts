@@ -547,6 +547,45 @@ describe("MCP Booted Device Resources", () => {
       expect(data.lastUpdated).toBe(new Date(data.lastUpdated).toISOString());
     });
 
+    test("lock-states resource folds its discovery into the pool before probing (#6923)", async function () {
+      // The pool knows the serial by its AVD label; this poll's discovery reads
+      // the placeholder, so the entry must be quarantined by the time any
+      // device-addressed probe (or a later admission gate) consults the pool.
+      const timer = new FakeTimer();
+      const sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
+      const { FakeInstalledAppsRepository } =
+        await import("../../fakes/FakeInstalledAppsRepository");
+      fakeDeviceUtils.setBootedDevices("android", [mockAndroidDevice1]);
+      const pool = new DevicePool(
+        sessions,
+        "test-daemon",
+        timer,
+        new FakeInstalledAppsRepository(),
+        fakeDeviceUtils,
+      );
+      await pool.initializeWithDevices([mockAndroidDevice1]);
+      DaemonState.getInstance().initialize(sessions, pool);
+      fakeDeviceUtils.setBootedDevices("android", [
+        { ...mockAndroidDevice1, name: `Unknown (${mockAndroidDevice1.deviceId})` },
+      ]);
+      const probed: string[] = [];
+      setDeviceLockProbe(async (device) => {
+        probed.push(`${device.deviceId}:${pool.isPooledIdentityUnresolved(device.deviceId)}`);
+        return false;
+      });
+
+      const { client } = fixture.getContext();
+      try {
+        await client.request(
+          { method: "resources/read", params: { uri: "automobile:devices/lockStates" } },
+          z.object({ contents: z.array(z.object({ text: z.string() })) }),
+        );
+        expect(probed).toEqual([`${mockAndroidDevice1.deviceId}:true`]);
+      } finally {
+        sessions.stopCleanupTimer();
+      }
+    });
+
     test("lock-states resource omits lock for a device the probe cannot read", async function () {
       fakeDeviceUtils.setBootedDevices("ios", [mockIosDevice1]);
       setDeviceLockProbe(async () => undefined);

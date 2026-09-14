@@ -1326,7 +1326,11 @@ export class UnixSocketServer {
 
   private getMcpForwardRoute(request: DaemonRequest, socketSessionId: string): McpForwardRoute {
     if (request.method === "tools/call") {
-      return this.getToolsCallForwardRoute(request.params?.arguments, socketSessionId);
+      return this.getToolsCallForwardRoute(
+        request.params?.arguments,
+        socketSessionId,
+        request.params?.name,
+      );
     }
 
     const boundRoute = this.getBoundMcpClientRoute(socketSessionId);
@@ -1468,7 +1472,11 @@ export class UnixSocketServer {
     await pool.restoreAutolockSessionsForMcpSession?.([...new Set<string>(ids)], socketSessionId);
   }
 
-  private getToolsCallForwardRoute(args: unknown, socketSessionId: string): McpForwardRoute {
+  private getToolsCallForwardRoute(
+    args: unknown,
+    socketSessionId: string,
+    toolName?: unknown,
+  ): McpForwardRoute {
     this.throwIfReleasedBoundSession(args);
     const scopedKey = this.getRequestArgumentScopeKey(args);
     const boundRoute = this.getBoundMcpClientRoute(socketSessionId);
@@ -1485,11 +1493,22 @@ export class UnixSocketServer {
     }
 
     if (sessionUuid) {
-      return this.sessionScopedForwardRoute(
-        socketSessionId,
-        sessionUuid,
-        scopedKey,
-        toolSelectionProfileUuid,
+      return (
+        this.profileReaffirmForwardRoute(
+          args,
+          socketSessionId,
+          toolName,
+          sessionUuid,
+          toolSelectionProfileUuid,
+          scopedKey,
+          boundRoute,
+        ) ??
+        this.sessionScopedForwardRoute(
+          socketSessionId,
+          sessionUuid,
+          scopedKey,
+          toolSelectionProfileUuid,
+        )
       );
     }
     if (toolSelectionProfileUuid) {
@@ -1519,6 +1538,53 @@ export class UnixSocketServer {
     // The daemon injects __mcpSessionId before forwarding. Use the socket session as the
     // pre-forward key so separate daemon clients can autolock and run independently.
     return this.sharedMcpForwardRoute(`socket:${socketSessionId}`);
+  }
+
+  /**
+   * A `setToolEnabled` reaffirming the connection's own profile names no device
+   * route of its own. Seeding a loopback with the profile as its DEVICE binding
+   * made the update's label readback enumerate the profile (nothing) instead of
+   * the device session this socket acquired, so carry that acquired route
+   * through: the one the proxy sent alongside, else the one this socket is
+   * already bound to (#7005). Undefined for every other explicit-session call.
+   */
+  private profileReaffirmForwardRoute(
+    args: unknown,
+    socketSessionId: string,
+    toolName: unknown,
+    sessionUuid: string,
+    toolSelectionProfileUuid: string | undefined,
+    scopedKey: string | undefined,
+    boundRoute: McpForwardRoute | undefined,
+  ): McpForwardRoute | undefined {
+    if (toolName !== SET_TOOL_ENABLED_TOOL_NAME || sessionUuid !== toolSelectionProfileUuid) {
+      return undefined;
+    }
+    const acquiredDeviceSessionUuid =
+      this.getAcquiredDeviceSessionUuid(args, sessionUuid) ?? boundRoute?.sessionUuid;
+    if (!acquiredDeviceSessionUuid || !this.hasActiveDaemonSession(acquiredDeviceSessionUuid)) {
+      return undefined;
+    }
+    return this.sessionScopedForwardRoute(
+      socketSessionId,
+      acquiredDeviceSessionUuid,
+      scopedKey,
+      toolSelectionProfileUuid,
+    );
+  }
+
+  /**
+   * The acquired device session the proxy carries alongside a profile-addressed
+   * call (see `DaemonMcpProxy.withAcquiredDeviceRoute`). When the marker merely
+   * echoes the explicit session it is the ordinary bound-session replay tag, not
+   * a separate route.
+   */
+  private getAcquiredDeviceSessionUuid(args: unknown, sessionUuid: string): string | undefined {
+    if (!args || typeof args !== "object" || Array.isArray(args)) {
+      return undefined;
+    }
+    const carried = (args as Record<string, unknown>)[DAEMON_BOUND_SESSION_PARAM];
+    return isNonBlankSessionUuid(carried) && carried !== sessionUuid ? carried : undefined;
   }
 
   private selectorMcpForwardRoute(
@@ -1630,10 +1696,13 @@ export class UnixSocketServer {
       this.recordGeneratedToolSelectionProfile(request, response, socketSessionId, route);
       return;
     }
+    // A profile reaffirm routed onto the acquired device session binds the
+    // socket to THAT session's client (#7005); every other explicit-session
+    // route carries the request's own session.
     this.recordSessionBoundMcpClientKey(
       socketSessionId,
       route,
-      sessionUuid,
+      route.sessionUuid ?? sessionUuid,
       sessionWasActiveBeforeForward,
       request.params?.name,
       request.params?.arguments,

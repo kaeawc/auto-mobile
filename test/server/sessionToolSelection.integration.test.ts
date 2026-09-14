@@ -7,6 +7,7 @@ import {
   registerToolSelectionTools,
 } from "../../src/server/toolSelectionTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
+import { InMemoryToolSelectionProfileRegistry } from "../../src/server/toolSelectionProfileRegistry";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
 import { getToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 import { SessionReleaseBroadcaster } from "../../src/server/sessionReleaseBroadcast";
@@ -732,6 +733,82 @@ describe("per-session exact-tool selection", () => {
 
     expect(foreignEnabledTools).toContain("foreignObserve");
     expect(foreignEnabledTools).not.toContain("observe");
+  });
+
+  test("a loopback seeded with the acquired device route reads sibling label grants when reaffirming its profile (#7005)", async () => {
+    // The daemon-proxy loopback for a connection with BOTH an acquired device
+    // session and a connection profile is seeded with the device session as its
+    // binding and the profile as its profile. Reaffirming the profile must be
+    // routed as a profile update (not refused as cross-routing) and must read
+    // label grants from the acquired device session, not from the profile.
+    const overrides = new Map<string, Map<string, boolean>>([
+      ["acquired-session:B", new Map([["observe", true]])],
+    ]);
+    const profileService: Pick<
+      SessionToolSelectionService,
+      "isEnabled" | "getOverride" | "setEnabled"
+    > = {
+      isEnabled: async (sessionUuid, toolName, declaredDefault) =>
+        (sessionUuid ? overrides.get(sessionUuid)?.get(toolName) : undefined) ?? declaredDefault,
+      getOverride: async (sessionUuid, toolName) => overrides.get(sessionUuid)?.get(toolName),
+      setEnabled: async (sessionUuid, toolName, enabled) => {
+        const sessionOverrides = overrides.get(sessionUuid) ?? new Map<string, boolean>();
+        sessionOverrides.set(toolName, enabled);
+        overrides.set(sessionUuid, sessionOverrides);
+      },
+    };
+    const registry = new InMemoryToolSelectionProfileRegistry();
+    registry.record("profile-p");
+    fixture = new McpTestFixture({
+      daemonMode: true,
+      sessionContext: {
+        sessionId: "loopback-device-route",
+        initialSessionToolBinding: "acquired-session",
+        initialToolSelectionProfile: "profile-p",
+      },
+      toolSelectionProfileRegistry: registry,
+      sessionToolSelectionService: profileService,
+      toolSelectionSessionManager: {
+        getDeviceLabels: (sessionUuid) =>
+          sessionUuid === "acquired-session"
+            ? { A: "acquired-session", B: "acquired-session:B" }
+            : undefined,
+      },
+    });
+    await fixture.setup();
+
+    ToolRegistry.clearTools();
+    ToolRegistry.registerDeviceAware(
+      "observe",
+      "observe",
+      z.object({}),
+      async () => ({ content: [{ type: "text", text: "ran" }] }),
+      { defaultEnabled: false },
+    );
+    ToolRegistry.register(
+      "clipboard",
+      "clipboard",
+      z.object({}),
+      async () => ({ content: [{ type: "text", text: "ran" }] }),
+      { defaultEnabled: false },
+    );
+    registerToolSelectionTools();
+
+    const profileUpdate = await fixture.client.request(
+      {
+        method: "tools/call",
+        params: {
+          name: "setToolEnabled",
+          arguments: { toolName: "clipboard", enabled: false, sessionUuid: "profile-p" },
+        },
+      },
+      z.any(),
+    );
+
+    expect(profileUpdate.isError ?? false).toBe(false);
+    const readback = JSON.parse(profileUpdate.content[0]!.text);
+    expect(readback.sessionUuid).toBe("profile-p");
+    expect(readback.enabledTools).toContain("observe");
   });
 
   test("a derived routing binding retains the base session grant for discovery and calls", async () => {

@@ -1,5 +1,64 @@
 # Changelog
 
+## [v0.0.73] - 2026-09-14
+
+### Added
+
+- deleteDevice force: carry serial-only mode on the teardown context so restart checks and verification never probe consoles ([#6946](https://github.com/kaeawc/auto-mobile/issues/6946))
+- Observation-id-scoped screenshot resource so a hierarchy read can be paired with its exact capture ([#6940](https://github.com/kaeawc/auto-mobile/issues/6940))
+- testRecording socket: reconcile discovery and split device selection from readiness before the admission gate ([#6923](https://github.com/kaeawc/auto-mobile/issues/6923))
+- systemTray list: correlate scanned rows against a notification snapshot taken before the scan, not after ([#6921](https://github.com/kaeawc/auto-mobile/issues/6921))
+- observe: IME skeleton fold misses legacy captures with uncollected wrappers or cross-window keycap markers ([#6908](https://github.com/kaeawc/auto-mobile/issues/6908))
+
+### Changed
+
+- Dead Code Detection: Threshold Exceeded ([#7021](https://github.com/kaeawc/auto-mobile/issues/7021)) (automated, dead-code)
+
+### Fixed
+
+- Deferred Android recovery: one release fence and one finalizer for every reservation kind ([#6951](https://github.com/kaeawc/auto-mobile/issues/6951))
+- Embedded observation settle poll should be a side-effect-free hierarchy read ([#6932](https://github.com/kaeawc/auto-mobile/issues/6932))
+- tooling: bun run lint (oxlint --fix) rewrites CtrlProxyManager.ts:251 into output that fails bun run format:check ([#6907](https://github.com/kaeawc/auto-mobile/issues/6907))
+- ios: retire the tracked xcodebuild runner when the final shared-start waiter cancels during health polling ([#6905](https://github.com/kaeawc/auto-mobile/issues/6905)) (ios, bot-filed, routine:tracker-hygiene)
+- systemTray list: treat omitted `scrollable` as non-scrollable end-marker (pre-API-33 duplicate notifications) ([#6904](https://github.com/kaeawc/auto-mobile/issues/6904)) (android, bot-filed, routine:tracker-hygiene)
+- video(ios): thread abort signal into the terminal diagnostic state probe in FfmpegVideoProcessingBackend ([#6903](https://github.com/kaeawc/auto-mobile/issues/6903)) (ios, bot-filed, routine:tracker-hygiene)
+- ios: thread the injected environment through device-set-root launch-cwd resolution (SimulatorTccSqliteClient) ([#6901](https://github.com/kaeawc/auto-mobile/issues/6901)) (ios, bot-filed, routine:tracker-hygiene)
+- ios: forceStopForShutdown ownership probes can exhaust the shared/eviction deadline, skipping the KILL ([#6898](https://github.com/kaeawc/auto-mobile/issues/6898)) (ios, bot-filed, routine:tracker-hygiene)
+- ios: SDK capability waiters must decide from the same-generation probe result, not a replacement-generation cache (wrong-app highlight coordinates) ([#6896](https://github.com/kaeawc/auto-mobile/issues/6896)) (ios, bot-filed, routine:tracker-hygiene)
+- db: installed-apps cache release lifecycle — fence retired requests, bind late release to retired incarnation, release on never-settling notification ([#6894](https://github.com/kaeawc/auto-mobile/issues/6894)) (bot-filed, routine:tracker-hygiene)
+
+### Other
+
+- provisionDevice can leave a newly created Android AVD offline until readiness times out ([#7054](https://github.com/kaeawc/auto-mobile/issues/7054))
+- booted iOS device can be reported unavailable when BootedDeviceResources service-status check times out ([#7053](https://github.com/kaeawc/auto-mobile/issues/7053))
+- test(daemon): socketServer integration suites replace AndroidCtrlProxyClient.getInstance without restoring it ([#7052](https://github.com/kaeawc/auto-mobile/issues/7052))
+- Android device-images catalog must be installed-only and complete within caller deadlines ([#7046](https://github.com/kaeawc/auto-mobile/issues/7046))
+- prepush-shell: SC1091 helper resolver emits nothing under stock macOS bash 3.2 ([#7044](https://github.com/kaeawc/auto-mobile/issues/7044))
+- daemon(ios): startup CtrlProxy init races the bundle prefetch after a version bump and fails every sim with a false "possible TOCTOU tampering" error ([#7032](https://github.com/kaeawc/auto-mobile/issues/7032)) (bot-filed, routine:manual-test)
+- Follow-up: traverse sourced shell dependencies recursively in prepush-shell ([#7024](https://github.com/kaeawc/auto-mobile/issues/7024))
+- Follow-up: CtrlProxy version metadata — per-device iOS signal, Android installed gate, exact override assertion, ADB timeout and debug logging ([#7023](https://github.com/kaeawc/auto-mobile/issues/7023))
+- Follow-up: stamp quarantined replacement installs with the unresolved sighting and compare stamps before clearing unresolved evidence ([#7022](https://github.com/kaeawc/auto-mobile/issues/7022))
+- Follow-up (#6999 round 6): <sub><sub>![P2 Badge](https://img.shields.io/badge/P2-yellow?style=flat)</sub></sub> Update the terminal capture's existing cache entry ([#7020](https://github.com/kaeawc/auto-mobile/issues/7020))
+- Follow-up: bound ScreenshotJobTracker.completions with refcounted eviction ([#7019](https://github.com/kaeawc/auto-mobile/issues/7019))
+- Decision: return the resolved deviceId with observationId so clients can build the observation screenshot resource URI ([#7018](https://github.com/kaeawc/auto-mobile/issues/7018))
+- Follow-up: recovery exclusion for just-discovered replacements and identity-guarded cohort reservation cleanup ([#7017](https://github.com/kaeawc/auto-mobile/issues/7017))
+- Follow-up: resolve .js specifiers to .ts sources and preserve deleted alternate extensionless targets in tsImportDeps ([#7016](https://github.com/kaeawc/auto-mobile/issues/7016))
+- Follow-up: bound the pre-delete AVD identity lookup by the VM snapshot delete timeout ([#7014](https://github.com/kaeawc/auto-mobile/issues/7014))
+- Follow-up: guard the session-release commit itself by identity during runtime-identity replacement ([#7013](https://github.com/kaeawc/auto-mobile/issues/7013))
+- Follow-up: probe stale pooled serials absent from the initial scan during forced teardown ([#7012](https://github.com/kaeawc/auto-mobile/issues/7012))
+- feat(resources): include iOS simulator availability in device image catalog ([#7009](https://github.com/kaeawc/auto-mobile/issues/7009))
+- feat(diagnostics): expose host toolchain inventory resource ([#7008](https://github.com/kaeawc/auto-mobile/issues/7008))
+- feat(files): stage Android shared Downloads files in a device session ([#7007](https://github.com/kaeawc/auto-mobile/issues/7007))
+- feat(logs): expose session-scoped execution log collection ([#7006](https://github.com/kaeawc/auto-mobile/issues/7006))
+- Follow-up: carry the acquired device route through daemon-proxy profile forwarding ([#7005](https://github.com/kaeawc/auto-mobile/issues/7005))
+- BATS serial-tag guard: detect variable-target rm and git mv real-tree mutations ([#7003](https://github.com/kaeawc/auto-mobile/issues/7003))
+- Follow-up: recheck listApps cancellation after daemon-mode reconciliation ([#7002](https://github.com/kaeawc/auto-mobile/issues/7002))
+- Follow-up: daemon start degraded-scan probing (incumbent host, probe deadline, WHEP helper path filter) ([#7001](https://github.com/kaeawc/auto-mobile/issues/7001))
+- ios network-filter probe: build/sign both macOS arch slices; return nonzero exit for approval-required/restart-required activation ([#6897](https://github.com/kaeawc/auto-mobile/issues/6897)) (ios, bot-filed, routine:tracker-hygiene)
+- cache: single-flight in resolveContentHash may be ineffective (ensureBuildContext already coalesces by appId) + invalidate() full-cache scan ([#6892](https://github.com/kaeawc/auto-mobile/issues/6892)) (android, performance, bot-filed, routine:tracker-hygiene)
+- systemTray(list): notifications in the Silent (low-importance) section are reported as "Listed 0", because ownership is keyed on an app-name header SystemUI omits there ([#6875](https://github.com/kaeawc/auto-mobile/issues/6875)) (bot-filed, routine:manual-test)
+- killDevice(android): 'shell reboot -p' skips the emulator's snapshot-save, so the next quick-boot of that AVD hangs offline for the full readiness budget (#6845 fix regression) ([#6849](https://github.com/kaeawc/auto-mobile/issues/6849)) (bot-filed, routine:manual-test)
+
 ## [v0.0.72] - 2026-09-14
 
 ### Added

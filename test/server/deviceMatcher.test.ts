@@ -659,6 +659,13 @@ describe("DefaultDeviceMatcher.matchBootedDevice", () => {
     );
 
     expect(result?.deviceId).toBe("api34");
+    expect(
+      matcher.matchBootedDevice(
+        { platform: "android", minOsVersion: "23", maxOsVersion: "23" },
+        [bootedDevice({ deviceId: "api23", apiLevel: 23, osVersion: "6.0" })],
+        "LATEST",
+      ),
+    ).toBeNull();
   });
 });
 
@@ -819,5 +826,12 @@ describe("DefaultDeviceMatcher.matchDeviceImage", () => {
         "LATEST",
       )?.name,
     ).toBe("api34");
+    expect(
+      matcher.matchDeviceImage(
+        { platform: "android", minOsVersion: "23", maxOsVersion: "23" },
+        [deviceImage({ name: "api23", apiLevel: 23, osVersion: "6.0" })],
+        "LATEST",
+      ),
+    ).toBeNull();
   });
 });

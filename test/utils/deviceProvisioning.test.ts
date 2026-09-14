@@ -258,12 +258,14 @@ describe("pickAndroidSystemImage", () => {
     it("fails fast when the requested max cannot host the runner APK", () => {
       // maxOsVersion "6" is Android 6.0 (API 23): creating that AVD would fail
       // APK install later, so provisioning rejects it up front.
-      expect(() => pickAndroidSystemImage(withLegacy, { maxOsVersion: "6" }, "x64")).toThrow(
-        ActionableError,
-      );
-      expect(() => pickAndroidSystemImage(withLegacy, { maxOsVersion: "6" }, "x64")).toThrow(
-        /below API 24.*CtrlProxy runner APK/,
-      );
+      for (const maxOsVersion of ["6", "23"]) {
+        expect(() => pickAndroidSystemImage(withLegacy, { maxOsVersion }, "x64")).toThrow(
+          ActionableError,
+        );
+        expect(() => pickAndroidSystemImage(withLegacy, { maxOsVersion }, "x64")).toThrow(
+          /below API 24.*CtrlProxy runner APK/,
+        );
+      }
     });
 
     it("leaves a valid at-or-above-floor bound unaffected", () => {

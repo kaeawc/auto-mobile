@@ -4,7 +4,7 @@ import type {
   FormFactor,
   MatchingStrategy,
 } from "../models/DeviceMatchCriteria";
-import { parseAndroidApiLevelBound } from "./android-cmdline-tools/AvdConfigReader";
+import { CTRL_PROXY_APK_MIN_SDK, parseAndroidApiLevelBound } from "./androidVersionBounds";
 import { defaultRandom, type Random } from "./Random";
 
 /** Selects a booted device or device image for one boot request. */
@@ -225,7 +225,7 @@ function compareDeviceToVersionBound(
   if (item.platform === "android") {
     const apiLevelBound = parseAndroidApiLevelBound(bound);
     if (apiLevelBound !== undefined) {
-      if (item.apiLevel === undefined) {
+      if (item.apiLevel === undefined || item.apiLevel < CTRL_PROXY_APK_MIN_SDK) {
         return Number.NaN;
       }
       return item.apiLevel === apiLevelBound ? 0 : item.apiLevel < apiLevelBound ? -1 : 1;

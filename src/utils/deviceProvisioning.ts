@@ -15,10 +15,8 @@ import type { DeviceMatchCriteria } from "../models/DeviceMatchCriteria";
 import type { AppleDeviceType } from "./ios-cmdline-tools/SimCtlClient";
 import type { CreateAvdParams, SystemImage } from "./android-cmdline-tools/avdmanager";
 import { createAvd, listInstalledSystemImages } from "./android-cmdline-tools/avdmanager";
-import {
-  parseAndroidApiLevelBound,
-  versionToApiLevelRange,
-} from "./android-cmdline-tools/AvdConfigReader";
+import { versionToApiLevelRange } from "./android-cmdline-tools/AvdConfigReader";
+import { CTRL_PROXY_APK_MIN_SDK, parseAndroidApiLevelBound } from "./androidVersionBounds";
 import { SimCtlClient } from "./ios-cmdline-tools/SimCtlClient";
 import { CREATED_DEVICE_NAME_PREFIX } from "./deviceCreationGate";
 import { defaultIdGenerator, type IdGenerator } from "./IdGenerator";
@@ -320,18 +318,6 @@ function abiRank(abi: string, preferences: string[]): number {
   const index = preferences.indexOf(abi);
   return index === -1 ? preferences.length : index;
 }
-
-/**
- * Minimum API level the AutoMobile CtrlProxy runner APK can install on. This
- * mirrors `build-android-minSdk` in `android/gradle/libs.versions.toml` (the
- * value `android/control-proxy/build.gradle.kts` compiles the APK with). The
- * `startDevice` flow installs the runner APK during readiness prep, so an AVD
- * provisioned below this level boots but can never install the runner and
- * become automation-ready — provisioning must never select a sub-24 image
- * (#6187). Keep this in sync with the gradle version catalog if the APK's
- * `minSdk` ever changes.
- */
-export const CTRL_PROXY_APK_MIN_SDK = 24;
 
 /**
  * A bound shaped exactly like a release version `versionToApiLevelRange`

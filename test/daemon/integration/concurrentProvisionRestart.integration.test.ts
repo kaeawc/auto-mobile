@@ -80,6 +80,16 @@ describe("concurrent client restart during provisionDevice", () => {
       entryScript: daemonIdentity.entryScript,
     };
     writeFileSync(pidFilePath, JSON.stringify(pidFile));
+    const staleSnapshot: DaemonStatus = {
+      running: true,
+      pid: daemonIdentity.pid,
+      port: 0,
+      socketPath,
+      startedAt: daemonIdentity.startedAt,
+      version: daemonIdentity.version,
+      buildId: daemonIdentity.buildId,
+      entryScript: daemonIdentity.entryScript,
+    };
     const signalCalls: Array<{ pid: number; signal: NodeJS.Signals }> = [];
     const processSignaler: DaemonProcessSignaler = {
       signal(pid, signal) {
@@ -109,7 +119,10 @@ describe("concurrent client restart during provisionDevice", () => {
       allowRestart = resolve;
     });
     const competingManager: DaemonManagerLike = {
-      status: () => realManager.status(),
+      // Keep the competing client's observation independent from unrelated
+      // parallel tests using the process-global execution tracker. The real
+      // manager below still contacts the socket for its atomic admission.
+      status: async () => staleSnapshot,
       start: (options?: DaemonOptions) => realManager.start(options),
       async restart(options?: DaemonOptions, expectedDaemon?: DaemonStatus) {
         enterRestart();

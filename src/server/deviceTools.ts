@@ -468,6 +468,11 @@ export const provisionDeviceSchema = withJsonSchemaOverride(
             .object({
               platform: z.literal("ios"),
               name: z.string().min(1).describe("Exact simulator name"),
+              deviceId: z
+                .string()
+                .min(1)
+                .optional()
+                .describe("Exact simulator UDID; prevents same-named simulator selection"),
               spec: iosProvisionDeviceSpecSchema,
             })
             .strict(),
@@ -712,6 +717,7 @@ export interface ProvisionDeviceArgs {
   device: {
     platform: "android" | "ios";
     name: string;
+    deviceId?: string;
     spec: ExactDeviceSpecification;
   };
   boot: boolean;
@@ -7155,6 +7161,11 @@ export function registerDeviceTools() {
     devices: DeviceInfo[],
   ): DeviceInfo | undefined {
     const spec = args.device.spec;
+    if (args.device.deviceId) {
+      return devices.find(
+        (device) => device.platform === "ios" && device.deviceId === args.device.deviceId,
+      );
+    }
     const candidates = devices.filter(
       (device) =>
         device.platform === "ios" &&
@@ -7254,6 +7265,15 @@ export function registerDeviceTools() {
     totalDeadlineMs: number,
     signal: AbortSignal | undefined,
   ): Promise<VirtualDeviceLifecycleLease | undefined> {
+    if (args.device.deviceId) {
+      return await reserveIosProvisionDeviceLifecycle(
+        args,
+        deps,
+        { deviceId: args.device.deviceId },
+        totalDeadlineMs,
+        signal,
+      );
+    }
     const discovery = await runProvisionDeviceWithinDeadline(
       deps.timer,
       totalDeadlineMs,
@@ -7524,6 +7544,7 @@ export function registerDeviceTools() {
           await provisioner.provision({
             platform: args.device.platform,
             name: args.device.name,
+            ...(args.device.deviceId === undefined ? {} : { deviceId: args.device.deviceId }),
             spec: args.device.spec,
             reconcileExistingConfiguration,
             onBeforeCreate: markDeviceCreationStarted,

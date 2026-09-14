@@ -2260,22 +2260,26 @@ describe("provisionDevice handler", () => {
         deviceId: "other-udid",
       },
     ]);
+    let receivedProvisionRequest: Parameters<ExactDeviceProvisioner["provision"]>[0] | undefined;
     const exactIosProvisioner: ExactDeviceProvisioner = {
-      provision: async () => ({
-        created: false,
-        device: {
-          name: "phone-api-36-a",
-          platform: "ios",
-          deviceId: "requested-udid",
-          isRunning: false,
-          runtime: "com.apple.CoreSimulator.SimRuntime.iOS-26-0",
-          deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
-        },
-        resolvedSpec: {
-          runtime: "com.apple.CoreSimulator.SimRuntime.iOS-26-0",
-          deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
-        },
-      }),
+      provision: async (request) => {
+        receivedProvisionRequest = request;
+        return {
+          created: false,
+          device: {
+            name: "phone-api-36-a",
+            platform: "ios",
+            deviceId: "requested-udid",
+            isRunning: false,
+            runtime: "com.apple.CoreSimulator.SimRuntime.iOS-26-0",
+            deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
+          },
+          resolvedSpec: {
+            runtime: "com.apple.CoreSimulator.SimRuntime.iOS-26-0",
+            deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
+          },
+        };
+      },
     };
     setDeviceToolsDependencies({
       exactDeviceProvisionerFactory: () => exactIosProvisioner,
@@ -2293,6 +2297,7 @@ describe("provisionDevice handler", () => {
           device: {
             platform: "ios",
             name: "phone-api-36-a",
+            deviceId: "requested-udid",
             spec: {
               runtime: "com.apple.CoreSimulator.SimRuntime.iOS-26-0",
               deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
@@ -2317,6 +2322,7 @@ describe("provisionDevice handler", () => {
     expect(deviceManager.getExecutedOperations()).toContainEqual(
       expect.stringContaining("startDevice:phone-api-36-a"),
     );
+    expect(receivedProvisionRequest?.deviceId).toBe("requested-udid");
   });
 
   test("reports a contended iOS selector reservation as a timeout", async () => {

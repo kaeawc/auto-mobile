@@ -39,6 +39,8 @@ import {
   READINESS_PROBE_MAX_ATTEMPTS,
   READINESS_PROBE_BACKOFF_MS,
   DEFAULT_DAEMON_PORT,
+  CLI_SESSION_LIVENESS_POLICY,
+  getCliSessionIdleTimeoutMs,
 } from "./constants";
 import { DaemonStatus, PidFileData, DaemonOptions } from "./types";
 import {
@@ -3068,7 +3070,11 @@ export async function runDaemonCommand(
           const client = manager.createClient();
           try {
             await client.connect();
-            await client.callDaemonMethod("daemon/heartbeat", { sessionId });
+            await client.callDaemonMethod("daemon/heartbeat", {
+              sessionId,
+              livenessPolicy: CLI_SESSION_LIVENESS_POLICY,
+              idleTimeoutMs: getCliSessionIdleTimeoutMs(),
+            });
           } catch (error) {
             throw new ActionableError(`Failed to record session heartbeat: ${errorMessage(error)}`);
           } finally {

@@ -15,6 +15,7 @@ import type { ObserveResult } from "../../src/models/ObserveResult";
 import { setElementProvenance } from "../../src/features/observe/output/elementProvenance";
 import { logger } from "../../src/utils/logger";
 import { getDeviceSessionIdFromResult } from "../../src/server/deviceSessionResult";
+import { z } from "zod/v4";
 
 /**
  * Build a minimal ObserveResult whose hierarchy carries trimmable attributes:
@@ -2327,6 +2328,99 @@ describe("finalizeToolResponse", () => {
         expect(payloadBytes(finalized)).toBeLessThanOrEqual(DEFAULT_OBSERVATION_INLINE_MAX_BYTES);
         expect(structured.artifact).toMatchObject({ format: "json", tool: "tapOn" });
         expect(structured.rows).toBeUndefined();
+      });
+
+      test("keeps required output-schema fields inline after spilling an executePlan result", () => {
+        const writer = new FakeObservationArtifactWriter();
+        const outputSchema = z
+          .object({
+            success: z.boolean(),
+            executedSteps: z.number().int(),
+            totalSteps: z.number().int(),
+            error: z.string().optional(),
+          })
+          .passthrough();
+        const finalized = finalizeToolResponse(
+          createStructuredToolResponse({
+            success: false,
+            executedSteps: 2,
+            totalSteps: 3,
+            pad: "z".repeat(90_000),
+          }),
+          {
+            name: "executePlan",
+            artifactMode: "oversized",
+            artifactWriter: writer,
+            outputSchema,
+          },
+        );
+
+        const structured = finalized.structuredContent as any;
+        expect(writer.writes).toHaveLength(1);
+        expect(structured.executedSteps).toBe(2);
+        expect(structured.totalSteps).toBe(3);
+        expect(structured.pad).toBeUndefined();
+      });
+
+      test("keeps an oversized required setUIState fields residue schema-compatible", () => {
+        const writer = new FakeObservationArtifactWriter();
+        const outputSchema = z.object({
+          success: z.boolean(),
+          fields: z.array(
+            z.object({
+              selector: z.object({ text: z.string().optional(), elementId: z.string().optional() }),
+              success: z.boolean(),
+              attempts: z.number(),
+              verified: z.boolean().optional(),
+              error: z.string().optional(),
+              fieldType: z.enum(["text", "checkbox", "toggle", "dropdown", "unknown"]).optional(),
+              skipped: z.boolean().optional(),
+              notAttempted: z.boolean().optional(),
+              timedOut: z.boolean().optional(),
+            }),
+          ),
+          totalAttempts: z.number(),
+          error: z.string().optional(),
+        });
+        const fields = Array.from({ length: 600 }, (_, index) => ({
+          selector: { text: `field-${index}` },
+          success: false,
+          attempts: 1,
+          error: "field update failed: ".repeat(10),
+        }));
+        const finalized = finalizeToolResponse(
+          createStructuredToolResponse({ success: false, fields, totalAttempts: fields.length }),
+          {
+            name: "setUIState",
+            artifactMode: "oversized",
+            artifactWriter: writer,
+            outputSchema,
+          },
+        );
+
+        const structured = finalized.structuredContent as any;
+        expect(writer.writes).toHaveLength(1);
+        expect(Array.isArray(structured.fields)).toBe(true);
+        expect(outputSchema.safeParse(structured).success).toBe(true);
+        expect(structured.fields.length).toBeLessThan(fields.length);
+        expect(payloadBytes(finalized)).toBeLessThanOrEqual(DEFAULT_OBSERVATION_INLINE_MAX_BYTES);
+      });
+
+      test("uses only the fixed residue keys when no output schema is supplied", () => {
+        const writer = new FakeObservationArtifactWriter();
+        const finalized = finalizeToolResponse(
+          createStructuredToolResponse({
+            success: true,
+            requiredBySomeSchema: "must remain absent without that schema",
+            pad: "z".repeat(90_000),
+          }),
+          { name: "tapOn", artifactMode: "oversized", artifactWriter: writer },
+        );
+
+        const structured = finalized.structuredContent as any;
+        expect(writer.writes).toHaveLength(1);
+        expect(structured.success).toBe(true);
+        expect(structured.requiredBySomeSchema).toBeUndefined();
       });
 
       // The residue kept inline is itself unbounded unless it is capped: a

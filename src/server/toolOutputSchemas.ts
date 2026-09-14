@@ -168,7 +168,7 @@ const observationDiffMetadataSchema = z
   })
   .passthrough();
 
-const toolOutputArtifactDetailsSchema = z
+export const toolOutputArtifactDetailsSchema = z
   .object({
     path: z.string(),
     format: z.literal("json"),

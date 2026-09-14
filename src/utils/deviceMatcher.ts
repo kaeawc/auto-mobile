@@ -4,6 +4,7 @@ import type {
   FormFactor,
   MatchingStrategy,
 } from "../models/DeviceMatchCriteria";
+import { CTRL_PROXY_APK_MIN_SDK, parseAndroidApiLevelBound } from "./androidVersionBounds";
 import { defaultRandom, type Random } from "./Random";
 
 /** Selects a booted device or device image for one boot request. */
@@ -185,6 +186,7 @@ function matchesCriteria(
   item: {
     platform: Platform;
     name: string;
+    apiLevel?: number;
     osVersion?: string;
     formFactor?: FormFactor;
     screenWidth?: number;
@@ -206,17 +208,32 @@ function matchesPlatform(item: { platform: Platform }, criteria: DeviceMatchCrit
 }
 
 function matchesVersionRange(
-  item: { platform: Platform; osVersion?: string },
+  item: { platform: Platform; apiLevel?: number; osVersion?: string },
   criteria: DeviceMatchCriteria,
 ): boolean {
-  const version = item.osVersion;
   const meetsMinimum =
-    !criteria.minOsVersion ||
-    Boolean(version && compareVersionToBound(version, criteria.minOsVersion, item.platform) >= 0);
+    !criteria.minOsVersion || compareDeviceToVersionBound(item, criteria.minOsVersion) >= 0;
   const meetsMaximum =
-    !criteria.maxOsVersion ||
-    Boolean(version && compareVersionToBound(version, criteria.maxOsVersion, item.platform) <= 0);
+    !criteria.maxOsVersion || compareDeviceToVersionBound(item, criteria.maxOsVersion) <= 0;
   return meetsMinimum && meetsMaximum;
+}
+
+function compareDeviceToVersionBound(
+  item: { platform: Platform; apiLevel?: number; osVersion?: string },
+  bound: string,
+): number {
+  if (item.platform === "android") {
+    const apiLevelBound = parseAndroidApiLevelBound(bound);
+    if (apiLevelBound !== undefined) {
+      if (item.apiLevel === undefined || item.apiLevel < CTRL_PROXY_APK_MIN_SDK) {
+        return Number.NaN;
+      }
+      return item.apiLevel === apiLevelBound ? 0 : item.apiLevel < apiLevelBound ? -1 : 1;
+    }
+  }
+  return item.osVersion === undefined
+    ? Number.NaN
+    : compareVersionToBound(item.osVersion, bound, item.platform);
 }
 
 function compareVersionToBound(version: string, bound: string, platform: Platform): number {

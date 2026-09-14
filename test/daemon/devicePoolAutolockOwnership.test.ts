@@ -5,6 +5,7 @@ import type { ChildProcess } from "node:child_process";
 import { BunSqliteDialect } from "../../src/db/bunSqliteDialect";
 import { up } from "../../src/db/migrations/2026_04_02_000_device_sessions";
 import { up as addStableDeviceIdentity } from "../../src/db/migrations/2026_09_14_000_device_session_stable_identity";
+import { up as addStableDeviceIdentityWriterFence } from "../../src/db/migrations/2026_09_14_001_device_session_identity_writer_fence";
 import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
 import type { Database } from "../../src/db/types";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -35,6 +36,7 @@ async function harness(deviceUtils?: FakeDeviceUtils) {
   });
   await up(db as Kysely<unknown>);
   await addStableDeviceIdentity(db as Kysely<unknown>);
+  await addStableDeviceIdentityWriterFence(db as Kysely<unknown>);
   const repository = new DeviceSessionRepository(db);
   const timer = new FakeTimer();
   const barrier = new FakeDbWriteBarrier();

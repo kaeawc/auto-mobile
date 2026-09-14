@@ -495,6 +495,7 @@ export interface DeviceSessionsTable {
   session_uuid: string;
   device_id: string;
   stable_device_id?: string | null;
+  stable_identity_generation?: number;
   platform: "android" | "ios";
   status: DeviceSessionStatus;
   source: string | null;

@@ -1140,6 +1140,7 @@ export class DevicePool {
             iosVersion: device.iosVersion,
             simulatorType: this.criteriaMatcher.getBootedDeviceSimulatorType(device),
             ...(device.observedAt !== undefined ? { nameObservedAt: device.observedAt } : {}),
+            ...identityEvidenceFields(this.identityEvidenceForBootedDevice(device)),
             incarnation: this.nextDeviceIncarnation(),
           });
           this.deviceSessionStarts.set(device.deviceId, now);
@@ -8369,7 +8370,17 @@ export class DevicePool {
     if (!isAndroidEmulatorSerial(device.id)) {
       return device.id;
     }
-    return device.avdName ?? (device.identityUnresolved ? undefined : device.name);
+    return (
+      device.avdName ??
+      (device.identityUnresolved ||
+      isUnresolvedAndroidEmulatorName({
+        deviceId: device.id,
+        name: device.name,
+        platform: device.platform,
+      })
+        ? undefined
+        : device.name)
+    );
   }
 
   private getDevicesByPlatform(platform?: Platform): PooledDevice[] {

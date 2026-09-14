@@ -2451,6 +2451,16 @@ describe("DevicePool", () => {
   });
 
   describe("refreshDevices", () => {
+    test("marks a newly discovered Android placeholder identity unresolved", async () => {
+      fakeDeviceManager.bootedDevices = [
+        createBootedDevice("emulator-5554", "android", "Unknown (emulator-5554)"),
+      ];
+
+      await devicePool.refreshDevices();
+
+      expect(devicePool.isPooledIdentityUnresolved("emulator-5554")).toBe(true);
+    });
+
     test("does not query simctl during Linux Android-only refresh", async () => {
       await withProcessPlatform("linux", async () => {
         let simctlBootedCalls = 0;
@@ -3532,6 +3542,65 @@ describe("DevicePool", () => {
         ),
       ).rejects.toThrow(/cannot safely recover/i);
       expect(devicePool.getDevice("Original_AVD")).toMatchObject({
+        sessionId: null,
+        status: "idle",
+      });
+    });
+
+    test("does not recover an Android emulator session onto an unresolved placeholder", async () => {
+      const persisted: DeviceSession = {
+        session_uuid: "restarted-session",
+        device_id: "emulator-5554",
+        stable_device_id: "Unknown (emulator-5554)",
+        platform: "android",
+        status: "expired",
+        source: "session-manager",
+        autolock_enabled: 0,
+        mcp_session_id: null,
+        daemon_session_id: "old-daemon",
+        created_at_ms: 1,
+        last_used_at_ms: 20,
+        expires_at_ms: 30,
+        released_at_ms: 25,
+        release_reason: "daemon-restart",
+        session_timeout_ms: 10,
+        heartbeat_timeout_ms: 5,
+        has_received_heartbeat: 1,
+        created_at: "2026-09-14T00:00:00.000Z",
+        updated_at: "2026-09-14T00:00:00.000Z",
+      };
+      const persistence: DeviceSessionPersistence = {
+        async getSession() {
+          return persisted;
+        },
+        async upsertActiveSession() {},
+        async recordActivity() {},
+        async markReleased() {},
+      };
+      sessionManager.stopCleanupTimer();
+      sessionManager = new SessionManager(fakeTimer, persistence);
+      devicePool = new DevicePool(
+        sessionManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        fakeAppsRepo,
+        fakeDeviceManager,
+        new DefaultRetryExecutor(fakeTimer),
+      );
+      await initializeLiveDevices([
+        createBootedDevice("emulator-5554", "android", "Unknown (emulator-5554)"),
+      ]);
+
+      await expect(
+        sessionManager.getOrCreateSession(
+          "restarted-session",
+          devicePool,
+          "android",
+          undefined,
+          true,
+        ),
+      ).rejects.toThrow(/cannot safely recover/i);
+      expect(devicePool.getDevice("emulator-5554")).toMatchObject({
         sessionId: null,
         status: "idle",
       });

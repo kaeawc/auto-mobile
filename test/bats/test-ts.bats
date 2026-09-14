@@ -393,6 +393,51 @@ run_lane() {
   [[ "$output" == *"\\*\\*/\\*.integration.test.ts"* ]]
 }
 
+@test "coverage wall timeout is 480 seconds" {
+  cat > "$STUB_BIN/timeout" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" > "$BATS_TEST_TMPDIR/timeout-args"
+exit 124
+EOF
+  chmod +x "$STUB_BIN/timeout"
+
+  run env PATH="$STUB_BIN:$PATH" bash "$SCRIPT" coverage
+  [ "$status" -eq 124 ]
+  grep -q -- '-k 2 480 ' "$BATS_TEST_TMPDIR/timeout-args"
+}
+
+@test "coverage wall timeout prints a diagnostic on deadline" {
+  cat > "$STUB_BIN/timeout" <<'EOF'
+#!/usr/bin/env bash
+exit 124
+EOF
+  chmod +x "$STUB_BIN/timeout"
+
+  run env PATH="$STUB_BIN:$PATH" bash "$SCRIPT" coverage
+  [ "$status" -eq 124 ]
+  [[ "$output" == *"Coverage test run exceeded its 480s wall-clock budget"* ]]
+  [[ "$output" == *"#6969"* ]]
+}
+
+@test "wall timeout diagnostics are portable for coverage and stress modes" {
+  cat > "$STUB_BIN/timeout" <<'EOF'
+#!/usr/bin/env bash
+exit 124
+EOF
+  chmod +x "$STUB_BIN/timeout"
+
+  for mode in coverage stress; do
+    case "$mode" in
+      coverage) label="Coverage"; expected_budget=480 ;;
+      stress) label="Stress"; expected_budget=300 ;;
+    esac
+    run env PATH="$STUB_BIN:$PATH" bash "$SCRIPT" "$mode"
+    [ "$status" -eq 124 ]
+    [[ "$output" != *"bad substitution"* ]]
+    [[ "$output" == *"${label} test run exceeded its ${expected_budget}s wall-clock budget"* ]]
+  done
+}
+
 @test "rejects an invalid wall timeout before executing Bun" {
   run env \
     PATH="$STUB_BIN:$PATH" \

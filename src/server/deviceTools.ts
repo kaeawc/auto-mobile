@@ -4515,7 +4515,9 @@ async function validateRequestedAndroidSerialBeforeBoot(
       }
       // FUNNEL 1: the post-boot recheck this defers to decides with pool/incarnation
       // context, so the pool must have seen this observation (#6863 review).
-      await reconcileDiscoveryObservation(discovery.devices, "pre-boot-serial-validation");
+      await reconcileDiscoveryObservation(discovery.devices, "pre-boot-serial-validation", {
+        signal,
+      });
       return discovery;
     },
     undefined,

@@ -112,8 +112,15 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck disable=SC1091 # Resolved relative to this script's location.
 source "$ROOT_DIR/scripts/lib/shared-helper.sh"
 EOF
+  mkdir -p scripts/isolated-helper
+  cat > scripts/check-helper-consumer-deleted-helper.sh <<'EOF'
+#!/usr/bin/env bash
+# shellcheck disable=SC1091 # Resolved relative to this script's location.
+source "$(dirname "${BASH_SOURCE[0]}")/isolated-helper/only-helper.sh"
+EOF
   printf '%s\n' 'helper baseline' > scripts/lib/shared-helper.sh
-  git add scripts/check-helper-consumer-one.sh scripts/check-helper-consumer-two.sh scripts/check-helper-consumer-three.sh scripts/check-helper-consumer-four.sh scripts/lib/shared-helper.sh
+  printf '%s\n' 'isolated helper baseline' > scripts/isolated-helper/only-helper.sh
+  git add scripts/check-helper-consumer-one.sh scripts/check-helper-consumer-two.sh scripts/check-helper-consumer-three.sh scripts/check-helper-consumer-four.sh scripts/check-helper-consumer-deleted-helper.sh scripts/lib/shared-helper.sh scripts/isolated-helper/only-helper.sh
   git commit -qm "add helper consumers"
   git branch -M main
   git branch base
@@ -144,6 +151,7 @@ if [[ "${1:-}" == "--list-checks" ]]; then
   printf 'helper-consumer-two\tscripts/check-helper-consumer-two.sh\n'
   printf 'helper-consumer-three\tscripts/check-helper-consumer-three.sh\n'
   printf 'helper-consumer-four\tscripts/check-helper-consumer-four.sh\n'
+  printf 'helper-consumer-deleted-helper\tscripts/check-helper-consumer-deleted-helper.sh\n'
   exit 0
 fi
 printf '%s\n' "$*" >> "${PREPUSH_FAST_LOG}"
@@ -195,6 +203,66 @@ EOF
 
   [ "${status}" -eq 0 ]
   grep -Fqx -- '--only shellcheck,shell-portability,shell-sete,stdlib-first,helper-consumer-one,helper-consumer-two,helper-consumer-three,helper-consumer-four' "${FAST_LOG}"
+}
+
+@test "a deleted SC1091 helper in a removed directory still selects its consumer" {
+  install_registry_stub
+  git rm -q scripts/isolated-helper/only-helper.sh
+  [ ! -d scripts/isolated-helper ]
+  git commit -qm "delete isolated helper"
+
+  run bash scripts/prepush-shell.sh --base base
+
+  [ "${status}" -eq 0 ]
+  grep -Fqx -- '--only shellcheck,shell-portability,shell-sete,stdlib-first,helper-consumer-deleted-helper' "${FAST_LOG}"
+}
+
+@test "an SC1091 ROOT_DIR path never evaluates checkout path text" {
+  local unsafe_root pwned_path path_component
+  pwned_path="${TEST_ROOT}/pwned"
+  path_component='$(touch "'"${pwned_path}"'")'
+  unsafe_root="${TEST_ROOT}/${path_component}"
+  mkdir -p "${unsafe_root}/scripts/lib"
+  cp "${REPO_ROOT}/scripts/prepush-shell.sh" "${unsafe_root}/scripts/prepush-shell.sh"
+  cp "${REPO_ROOT}/scripts/lib/vcs-diff.sh" "${unsafe_root}/scripts/lib/vcs-diff.sh"
+  chmod +x "${unsafe_root}/scripts/prepush-shell.sh"
+  cat > "${unsafe_root}/scripts/all_fast_validate_checks.sh" <<'EOF'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--list-checks" ]]; then
+  printf 'helper-consumer-four\tscripts/check-helper-consumer-four.sh\n'
+  exit 0
+fi
+printf '%s\n' "$*" >> "${PREPUSH_FAST_LOG}"
+EOF
+  chmod +x "${unsafe_root}/scripts/all_fast_validate_checks.sh"
+  cat > "${unsafe_root}/scripts/check-helper-consumer-four.sh" <<'EOF'
+#!/usr/bin/env bash
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck disable=SC1091 # Resolved relative to this script's location.
+source "$ROOT_DIR/scripts/lib/shared-helper.sh"
+EOF
+  printf '%s\n' 'helper baseline' > "${unsafe_root}/scripts/lib/shared-helper.sh"
+
+  cd -- "${unsafe_root}"
+  git init -q
+  git config user.email test@example.com
+  git config user.name test
+  git config commit.gpgsign false
+  printf '%s\n' baseline > README.md
+  git add README.md scripts
+  git commit -qm baseline
+  git branch -M main
+  git branch base
+  git checkout -qb feature
+  printf '%s\n' 'helper changed' > scripts/lib/shared-helper.sh
+  git add scripts/lib/shared-helper.sh
+  git commit -qm "change helper"
+
+  run bash scripts/prepush-shell.sh --base base
+
+  [ "${status}" -eq 0 ]
+  [ ! -e "${pwned_path}" ]
+  grep -Fqx -- '--only shellcheck,shell-portability,shell-sete,stdlib-first,helper-consumer-four' "${FAST_LOG}"
 }
 
 @test "a jj workspace uses the VCS diff seam without a git checkout" {

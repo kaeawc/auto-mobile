@@ -69,12 +69,49 @@ binary_diff_for_path() {
   fi
 }
 
+lexically_normalize_path() {
+  local path="$1"
+  local segment normalized_path=""
+  local -a path_segments=()
+  local -a normalized_segments=()
+  local IFS='/'
+
+  read -r -a path_segments <<< "${path}"
+  for segment in ${path_segments[@]+"${path_segments[@]}"}; do
+    case "${segment}" in
+      ""|.)
+        ;;
+      ..)
+        if [[ "${#normalized_segments[@]}" -gt 0 ]]; then
+          normalized_segments=("${normalized_segments[@]:0:$((${#normalized_segments[@]} - 1))}")
+        fi
+        ;;
+      *)
+        normalized_segments+=("${segment}")
+        ;;
+    esac
+  done
+
+  for segment in ${normalized_segments[@]+"${normalized_segments[@]}"}; do
+    normalized_path+="/${segment}"
+  done
+  printf '%s\n' "${normalized_path:-/}"
+}
+
 resolved_shellcheck_disable_source_path() {
   local check_script="$1"
-  local line source_expr resolved_expr resolved_path
-  local awaiting_source=0 disable_codes variable assignment_value variable_value
+  local line source_expr="" resolved_expr unresolved_expr resolved_path
+  local check_script_dir check_script_dir_path
+  local awaiting_source=0 disable_codes variable assignment_value assignment_inner
+  local dots_suffix variable_value
   local bash_source_token="\${BASH_SOURCE[0]}"
+  local bash_source_dir_expr="\$(dirname \"\${BASH_SOURCE[0]}\")"
+  local assignment_prefix="\$(cd \"\$(dirname \"\${BASH_SOURCE[0]}\")"
+  local assignment_suffix='" && pwd)'
   local -a previous_lines=()
+  local -a resolved_variable_names=()
+  local -a resolved_variable_values=()
+  local idx
 
   while IFS= read -r line || [[ -n "${line}" ]]; do
     if [[ "${awaiting_source}" -eq 1 && ! "${line}" =~ ^[[:space:]]*$ ]]; then
@@ -97,25 +134,57 @@ resolved_shellcheck_disable_source_path() {
 
   [[ -n "${source_expr:-}" ]] || return 0
 
-  resolved_expr="${source_expr//\$\{BASH_SOURCE\[0\]\}/${check_script}}"
+  check_script_dir="${check_script%/*}"
+  [[ "${check_script_dir}" != "${check_script}" ]] || check_script_dir="."
+  check_script_dir_path="$(lexically_normalize_path "${PROJECT_ROOT}/${check_script_dir}")"
+
   for line in ${previous_lines[@]+"${previous_lines[@]}"}; do
     if [[ "${line}" =~ ^[[:space:]]*([a-zA-Z_][a-zA-Z0-9_]*)=(.*)$ ]]; then
       variable="${BASH_REMATCH[1]}"
       assignment_value="${BASH_REMATCH[2]}"
-      if [[ "${assignment_value}" != *"${bash_source_token}"* ]] || [[ "${resolved_expr}" != *"\$${variable}"* && "${resolved_expr}" != *"\${${variable}}"* ]]; then
+      if [[ "${assignment_value}" != *"${bash_source_token}"* ]] || [[ "${source_expr}" != *"\$${variable}"* && "${source_expr}" != *"\${${variable}}"* ]]; then
         continue
       fi
-      assignment_value="${assignment_value//\$\{BASH_SOURCE\[0\]\}/${check_script}}"
-      variable_value="$(cd "${PROJECT_ROOT}" && eval "printf '%s\\n' ${assignment_value}" 2>/dev/null)" || variable_value=""
-      [[ -n "${variable_value}" ]] || continue
-      resolved_expr="${resolved_expr//\$${variable}/${variable_value}}"
-      resolved_expr="${resolved_expr//\$\{${variable}\}/${variable_value}}"
+      assignment_inner="${assignment_value#\"}"
+      assignment_inner="${assignment_inner%\"}"
+      if [[ "${assignment_inner}" != "${assignment_prefix}"*"${assignment_suffix}" ]]; then
+        continue
+      fi
+      dots_suffix="${assignment_inner#"${assignment_prefix}"}"
+      dots_suffix="${dots_suffix%"${assignment_suffix}"}"
+      if [[ ! "${dots_suffix}" =~ ^(/\.\.)*$ ]]; then
+        continue
+      fi
+      variable_value="$(lexically_normalize_path "${check_script_dir_path}${dots_suffix}")"
+      resolved_variable_names+=("${variable}")
+      resolved_variable_values+=("${variable_value}")
     fi
   done
 
-  resolved_path="$(cd "${PROJECT_ROOT}" && eval "printf '%s\\n' \"${resolved_expr}\"" 2>/dev/null)" || resolved_path=""
-  [[ -n "${resolved_path}" ]] || return 0
-  resolved_path="$(cd "${PROJECT_ROOT}" && cd "$(dirname "${resolved_path}")" && printf '%s/%s\n' "$PWD" "$(basename "${resolved_path}")" 2>/dev/null)" || resolved_path=""
+  unresolved_expr="${source_expr//"${bash_source_dir_expr}"/}"
+  unresolved_expr="${unresolved_expr//\$\{PROJECT_ROOT\}/}"
+  unresolved_expr="${unresolved_expr//\$PROJECT_ROOT/}"
+  resolved_expr="${source_expr//"${bash_source_dir_expr}"/${check_script_dir_path}}"
+  resolved_expr="${resolved_expr//\$\{PROJECT_ROOT\}/${PROJECT_ROOT}}"
+  resolved_expr="${resolved_expr//\$PROJECT_ROOT/${PROJECT_ROOT}}"
+  for idx in "${!resolved_variable_names[@]}"; do
+    variable="${resolved_variable_names[$idx]}"
+    variable_value="${resolved_variable_values[$idx]}"
+    unresolved_expr="${unresolved_expr//\$\{${variable}\}/}"
+    unresolved_expr="${unresolved_expr//\$${variable}/}"
+    resolved_expr="${resolved_expr//\$\{${variable}\}/${variable_value}}"
+    resolved_expr="${resolved_expr//\$${variable}/${variable_value}}"
+  done
+  if [[ "${unresolved_expr}" == *'$'* ]]; then
+    printf 'Unable to resolve shellcheck source path in %s: %s\n' "${check_script}" "${source_expr}" >&2
+    return 0
+  fi
+
+  if [[ "${resolved_expr}" == /* ]]; then
+    resolved_path="$(lexically_normalize_path "${resolved_expr}")"
+  else
+    resolved_path="$(lexically_normalize_path "${PROJECT_ROOT}/${resolved_expr}")"
+  fi
   [[ "${resolved_path}" == "${PROJECT_ROOT}/"* ]] || return 0
   printf '%s\n' "${resolved_path#"${PROJECT_ROOT}/"}"
 }

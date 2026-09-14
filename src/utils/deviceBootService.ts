@@ -1,5 +1,5 @@
 import type { ChildProcess } from "child_process";
-import type { BootedDevice, DeviceInfo } from "../models";
+import type { BootedDevice, DeviceInfo, Platform } from "../models";
 import { ActionableError } from "../models";
 import type {
   DeviceMatchCriteria,
@@ -83,6 +83,19 @@ export function findUniqueBootedAndroidDeviceByName(
     throw new AndroidAvdIdentityConflictError(avdName, [...matchesBySerial.keys()].toSorted());
   }
   return matches[0];
+}
+
+function findEligibleExactBootedDevice(
+  platform: Platform,
+  devices: BootedDevice[],
+  name: string,
+  criteria: DeviceMatchCriteria,
+): BootedDevice | null {
+  const exact =
+    platform === "android"
+      ? findUniqueBootedAndroidDeviceByName(devices, name)
+      : devices.find((candidate) => candidate.name === name);
+  return exact && matchesDeviceCriteria(exact, criteria) ? exact : null;
 }
 
 /**
@@ -415,13 +428,17 @@ export class DeviceBootService {
     if (running) {
       return running;
     }
+    // An exact AVD name is already a complete identity choice, not a fuzzy
+    // matcher preference. Keep the discovered image object intact so its API
+    // and release metadata survives into session admission; the generic
+    // matcher is allowed to substitute a configured result, which loses that
+    // metadata and can incorrectly turn an exact selection into no match.
     const image =
       request.matchExactName && request.name
-        ? deviceMatcher.matchDeviceImage(
-            criteria,
-            matchingImages.filter((candidate) => candidate.name === request.name),
-            matchingStrategy,
-          )
+        ? (matchingImages.find(
+            (candidate) =>
+              candidate.name === request.name && matchesDeviceCriteria(candidate, criteria),
+          ) ?? null)
         : deviceMatcher.matchDeviceImage(criteria, matchingImages, matchingStrategy);
     if (image) {
       return this.bootMatchedImage(image, context, progress);
@@ -456,22 +473,9 @@ export class DeviceBootService {
           )
         : booted;
     const enriched = enrichBootedDevicesFromImages(matchingBooted, images);
-    const exactMatches =
-      request.matchExactName && request.name
-        ? request.platform === "android"
-          ? (() => {
-              const exact = findUniqueBootedAndroidDeviceByName(enriched, request.name);
-              return exact ? [exact] : [];
-            })()
-          : enriched.filter((candidate) => candidate.name === request.name)
-        : undefined;
     const match =
-      exactMatches !== undefined
-        ? this.dependencies.deviceMatcher.matchBootedDevice(
-            criteria,
-            exactMatches,
-            this.dependencies.matchingStrategy,
-          )
+      request.matchExactName && request.name
+        ? findEligibleExactBootedDevice(request.platform, enriched, request.name, criteria)
         : this.dependencies.deviceMatcher.matchBootedDevice(
             criteria,
             enriched,

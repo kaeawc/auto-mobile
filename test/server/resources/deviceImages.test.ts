@@ -407,6 +407,76 @@ describe("Device Image Resources with Fakes", () => {
       expect(calls[0].signal?.aborted).toBe(true);
     });
 
+    test("bounds the preceding device-image listing under the same deadline", async () => {
+      const timer = new FakeTimer();
+      fakeDeviceUtils.setDeviceImages("android", []);
+      // The device-image listing (appendAndroidImages -> readAvdInfo) hangs,
+      // BEFORE the provisioning-catalog enumeration is ever reached. The whole
+      // Android path must still be bounded by the single deadline.
+      fakeAvdManager.setListDeviceImagesHangs(true);
+
+      const handler = createDeviceImageResourcesHandler({
+        deviceManager: fakeDeviceUtils,
+        avdManager: fakeAvdManager,
+        timer,
+        androidCatalogBudgetMs: 5_000,
+      });
+
+      const pending = handler.getDeviceImagesForPlatforms(["android"]);
+      for (let i = 0; i < 20; i++) {
+        await Promise.resolve();
+      }
+      timer.advanceTime(5_001);
+      const result = await pending;
+
+      expect(result.catalogComplete).toBe(false);
+      expect(result.catalogObservations.android).toMatchObject({
+        catalogComplete: false,
+        error: {
+          code: "timeout",
+          message: expect.stringContaining("5000"),
+        },
+      });
+      // The hung listing child must have been aborted, not left running to its
+      // own independent 60s avdmanager timeout.
+      const calls = fakeAvdManager.getListDeviceImagesCalls();
+      expect(calls).toHaveLength(1);
+      expect(calls[0].signal?.aborted).toBe(true);
+    });
+
+    test("aborts profile enumeration too when the deadline wins", async () => {
+      const timer = new FakeTimer();
+      fakeDeviceUtils.setDeviceImages("android", []);
+      // listInstalledSystemImages would resolve, but the concurrently-raced
+      // profile enumeration hangs. The timeout must abort BOTH, so a stalled
+      // `avdmanager list device` child cannot run on to its own 60s timeout.
+      fakeAvdManager.setListInstalledSystemImagesResponse([]);
+      fakeAvdManager.setListDevicesHangs(true);
+
+      const handler = createDeviceImageResourcesHandler({
+        deviceManager: fakeDeviceUtils,
+        avdManager: fakeAvdManager,
+        timer,
+        androidCatalogBudgetMs: 5_000,
+      });
+
+      const pending = handler.getDeviceImagesForPlatforms(["android"]);
+      for (let i = 0; i < 20; i++) {
+        await Promise.resolve();
+      }
+      timer.advanceTime(5_001);
+      const result = await pending;
+
+      expect(result.catalogComplete).toBe(false);
+      expect(result.catalogObservations.android).toMatchObject({
+        catalogComplete: false,
+        error: { code: "timeout" },
+      });
+      const profileCalls = fakeAvdManager.getListDevicesCalls();
+      expect(profileCalls).toHaveLength(1);
+      expect(profileCalls[0].signal?.aborted).toBe(true);
+    });
+
     test("reports iOS catalog failure when strict simulator discovery fails", async () => {
       fakeDeviceUtils.setDeviceImages("ios", []);
       fakeSimCtl.setRuntimesError(new Error("malformed simctl runtimes JSON"));

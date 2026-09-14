@@ -58,9 +58,11 @@ export interface AvdManager {
 
   /**
    * List available AVDs
+   * @param signal - Optional abort signal so a bounded caller can cancel the
+   *   underlying avdmanager enumeration once its deadline elapses.
    * @returns Promise with array of AVD info
    */
-  listDeviceImages(): Promise<AvdInfo[]>;
+  listDeviceImages(signal?: AbortSignal): Promise<AvdInfo[]>;
 
   /**
    * Create a new AVD
@@ -85,7 +87,9 @@ export interface AvdManager {
 
   /**
    * List available device profiles
+   * @param signal - Optional abort signal so a bounded caller can cancel the
+   *   underlying avdmanager enumeration once its deadline elapses.
    * @returns Promise with array of device profiles
    */
-  listDevices(): Promise<DeviceProfile[]>;
+  listDevices(signal?: AbortSignal): Promise<DeviceProfile[]>;
 }

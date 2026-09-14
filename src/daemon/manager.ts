@@ -32,11 +32,15 @@ import {
   DAEMON_SHUTDOWN_TIMEOUT_MS,
   DAEMON_FORCED_STOP_TIMEOUT_MS,
   DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS,
+  DAEMON_START_PROCESS_TABLE_SCAN_MAX_ATTEMPTS,
+  DAEMON_START_PROCESS_TABLE_SCAN_RETRY_DELAYS_MS,
   DAEMON_PORT_AVAILABILITY_PROBE_TIMEOUT_MS,
   DAEMON_RESTART_HANDOFF_DELAY_MS,
   READINESS_PROBE_MAX_ATTEMPTS,
   READINESS_PROBE_BACKOFF_MS,
   DEFAULT_DAEMON_PORT,
+  CLI_SESSION_LIVENESS_POLICY,
+  getCliSessionIdleTimeoutMs,
 } from "./constants";
 import { DaemonStatus, PidFileData, DaemonOptions } from "./types";
 import {
@@ -59,6 +63,8 @@ import {
 } from "./buildIdentity";
 import { DaemonState, type DaemonStateLike } from "./daemonState";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
+import { sequenceBackoff } from "../utils/Backoff";
+import { DefaultRetryExecutor, type RetryExecutor } from "../utils/retry/RetryExecutor";
 import {
   cleanupDaemonFiles,
   clearDaemonLaunchLogOwnerTombstoneSync,
@@ -447,6 +453,9 @@ function hasProcessLivenessChecker(value: unknown): value is DaemonProcessLivene
 
 const MAX_DAEMON_STARTUP_LOG_BYTES = 4000;
 
+/** An occupied port found by degraded process discovery has no known process-table PID. */
+const DAEMON_UNKNOWN_OWNER_PID = -1;
+
 /**
  * Budget for the confirming socket probe once the process a readiness wait was
  * waiting on has died (issue #5878). A daemon that genuinely published its socket
@@ -601,6 +610,7 @@ export class DaemonManager implements DaemonManagerLike {
   private readonly processFinder: DaemonProcessFinder;
   private readonly processLivenessChecker: DaemonProcessLivenessChecker;
   private readonly processSignaler: DaemonProcessSignaler;
+  private readonly retryExecutor: RetryExecutor;
   private readonly portAvailabilityChecker: DaemonPortAvailabilityChecker;
   private readonly extractionCleaner: ExtractionCleaner;
   private readonly launcher: DaemonLauncher;
@@ -652,9 +662,11 @@ export class DaemonManager implements DaemonManagerLike {
     peerSocketReachability: DaemonSocketReachabilityLike | undefined = undefined,
     platformOverride: NodeJS.Platform = process.platform,
     portAvailabilityChecker: DaemonPortAvailabilityChecker = new NetDaemonPortAvailabilityChecker(),
+    retryExecutor: RetryExecutor = new DefaultRetryExecutor(timer),
   ) {
     this.platform = platformOverride;
     this.portAvailabilityChecker = portAvailabilityChecker;
+    this.retryExecutor = retryExecutor;
     this.startupLockOwnerToken = idGenerator.next();
     // Construct the reachability probe here (not in a field initializer) so its connect
     // timeout is bound to the injected timer — a field initializer would capture the
@@ -769,6 +781,139 @@ export class DaemonManager implements DaemonManagerLike {
    */
   findLiveDaemonProcesses(timeoutMs?: number): number[] {
     return this.findAllDaemonProcesses(timeoutMs).filter((pid) => this.isProcessRunning(pid));
+  }
+
+  /**
+   * Startup can still determine socket ownership through the PID/lock/readiness
+   * path when a loaded host times out while listing processes. A successful port
+   * probe forces strict-port launch because it closes its probe socket before the
+   * child binds; the child's own bind is the authoritative guard. Keep that narrowly
+   * scoped degradation out of the fail-closed lifecycle scans used elsewhere.
+   */
+  private async findLiveDaemonProcessesForStart(
+    options: DaemonOptions,
+    startDeadline: number,
+  ): Promise<number[]> {
+    const scanBudget = this.remainingTime(startDeadline);
+    if (scanBudget <= 0) {
+      throw new ActionableError(
+        "Daemon startup deadline elapsed before process-table inspection could complete; refusing to launch a daemon after the client deadline.",
+      );
+    }
+
+    // RetryExecutor already owns the retry/backoff policy. Limit each scan and
+    // each one of its existing sequence-backoff delays to time still available
+    // under this start request rather than beginning an independent timeout window.
+    const scanBackoff = sequenceBackoff(DAEMON_START_PROCESS_TABLE_SCAN_RETRY_DELAYS_MS);
+    const result = await this.retryExecutor.execute(
+      async () => {
+        const remaining = this.remainingTime(startDeadline);
+        if (remaining <= 0) {
+          throw new Error("Process-table inspection ETIMEDOUT before daemon startup deadline");
+        }
+        return this.findLiveDaemonProcesses(
+          Math.min(DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS, remaining),
+        );
+      },
+      {
+        maxAttempts: DAEMON_START_PROCESS_TABLE_SCAN_MAX_ATTEMPTS,
+        delays: (attempt) =>
+          Math.min(scanBackoff.delayForAttempt(attempt), this.remainingTime(startDeadline)),
+        shouldRetry: (error) =>
+          error.message.includes("ETIMEDOUT") && this.remainingTime(startDeadline) > 0,
+      },
+    );
+
+    if (this.remainingTime(startDeadline) <= 0) {
+      throw new ActionableError(
+        "Daemon startup deadline elapsed during process-table inspection; refusing to launch a daemon after the client deadline.",
+      );
+    }
+
+    if (result.success) {
+      return result.value ?? [];
+    }
+
+    const error = result.error ?? new Error("Process-table inspection failed without an error");
+    if (!error.message.includes("ETIMEDOUT")) {
+      throw error;
+    }
+
+    // A process-table scan can miss a daemon in another PID/socket namespace.
+    // The probe's socket closes before it resolves, so it cannot atomically reserve
+    // a port for the child. Check every port this install could plausibly own before
+    // allowing strict child binding to arbitrate a free candidate.
+    const host = options.host ?? "127.0.0.1";
+    const occupiedPort = await this.findOccupiedDaemonStartPort(
+      this.degradedStartProbePorts(options),
+      host,
+    );
+    if (occupiedPort !== undefined) {
+      logger.warn(
+        `[DaemonManager] process-table inspection timed out during daemon start and port ${occupiedPort} on ${host} is occupied; waiting for its daemon reachability before refusing a second start: ${errorMessage(error)}`,
+        error,
+      );
+      return [DAEMON_UNKNOWN_OWNER_PID];
+    }
+
+    options.strictPort = true;
+    // Every candidate port was free at probe time; strict child binding, socket
+    // readiness, and the ownership record protect startup while this best-effort
+    // host scan remains unavailable.
+    logger.warn(
+      `[DaemonManager] process-table inspection timed out during daemon start; proceeding with socket ownership checks: ${errorMessage(error)}`,
+      error,
+    );
+    return [];
+  }
+
+  private degradedStartProbePorts(options: DaemonOptions): number[] {
+    const configuredPort = options.port ?? DEFAULT_DAEMON_PORT;
+    const candidatePorts = [configuredPort];
+    if (DEFAULT_DAEMON_PORT !== configuredPort) {
+      candidatePorts.push(DEFAULT_DAEMON_PORT);
+    }
+    const persistedPort = this.readPersistedDaemonOwnerPortForStart();
+    if (persistedPort !== undefined && !candidatePorts.includes(persistedPort)) {
+      candidatePorts.push(persistedPort);
+    }
+    return candidatePorts;
+  }
+
+  private readPersistedDaemonOwnerPortForStart(): number | undefined {
+    if (!existsSync(this.pidFilePath)) {
+      logger.debug(
+        `[DaemonManager] no persisted daemon owner record was available while widening the degraded process-table scan probe: ${this.pidFilePath}`,
+      );
+      return undefined;
+    }
+    try {
+      const pidData: PidFileData = JSON.parse(readFileSync(this.pidFilePath, "utf8"));
+      if (typeof pidData.port === "number") {
+        return pidData.port;
+      }
+      logger.debug(
+        `[DaemonManager] persisted daemon owner record has no usable port while widening the degraded process-table scan probe: ${this.pidFilePath}`,
+      );
+    } catch (pidFileError) {
+      // Safe to continue: this is only a best-effort expansion of the ownership probe.
+      logger.debug(
+        `[DaemonManager] failed to read persisted daemon owner record while widening the degraded process-table scan probe: ${errorMessage(pidFileError)}`,
+      );
+    }
+    return undefined;
+  }
+
+  private async findOccupiedDaemonStartPort(
+    candidatePorts: number[],
+    host: string,
+  ): Promise<number | undefined> {
+    for (const port of candidatePorts) {
+      if (!(await this.portAvailabilityChecker.isPortFree(port, host))) {
+        return port;
+      }
+    }
+    return undefined;
   }
 
   private normalizeDaemonProcessRecords(records: DaemonProcessRecord[]): number[] {
@@ -936,7 +1081,7 @@ export class DaemonManager implements DaemonManagerLike {
     // reaches the shared socket during a long-running tool call and races a
     // transient availability probe. Reuse a responsive daemon; require an
     // explicit restart for a live but unreachable process.
-    const liveDaemons = this.findLiveDaemonProcesses();
+    const liveDaemons = await this.findLiveDaemonProcessesForStart(options, startDeadline);
     if (liveDaemons.length > 0) {
       stderrLog(
         `Found ${liveDaemons.length} live auto-mobile daemon process(es) without a usable PID record; waiting for one to become ready...`,
@@ -952,14 +1097,18 @@ export class DaemonManager implements DaemonManagerLike {
       // tools and no error text instead (issue #5871). A daemon that has not
       // become reachable within this shorter budget is one the client is better
       // off hearing about now than waiting on.
-      if (await this.waitForExistingDaemon(DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS)) {
+      const existingDaemonWaitBudget = Math.min(
+        DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS,
+        this.remainingTime(startDeadline),
+      );
+      if (await this.waitForExistingDaemon(existingDaemonWaitBudget)) {
         stderrLog("Reusing existing responsive daemon");
         return;
       }
 
       throw new ActionableError(
         `Found live AutoMobile daemon process(es) (${liveDaemons.join(", ")}) but none became reachable within ` +
-          `${DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS}ms. Refusing to terminate a live daemon during start; ` +
+          `${existingDaemonWaitBudget}ms. Refusing to terminate a live daemon during start; ` +
           `inspect it or run \`bunx ${resolveDaemonInstallSpecifier()} --daemon restart\` explicitly.`,
       );
     }
@@ -1028,6 +1177,12 @@ export class DaemonManager implements DaemonManagerLike {
     try {
       let retriedIncompleteExtraction = false;
       while (true) {
+        const attemptBudget = this.remainingTime(startDeadline);
+        if (attemptBudget <= 0) {
+          throw new ActionableError(
+            "Daemon startup deadline elapsed before launch; refusing to start a daemon after the client deadline.",
+          );
+        }
         try {
           await this.launcher.launchAndWait({
             command: autoMobileCmd,
@@ -1043,7 +1198,7 @@ export class DaemonManager implements DaemonManagerLike {
               env: childEnv,
             },
             onSpawn: logSink === "stderr" || logSink === "both" ? relayDaemonStderr : undefined,
-            timeoutMs: DAEMON_STARTUP_TIMEOUT_MS,
+            timeoutMs: attemptBudget,
             waitForReady: (timeoutMs, signal) => this.waitForReady(timeoutMs, signal),
             isReadyForLaunchedProcess: (pid, timeoutMs, signal) =>
               this.isLaunchedProcessReady(pid, timeoutMs, signal),
@@ -2915,7 +3070,11 @@ export async function runDaemonCommand(
           const client = manager.createClient();
           try {
             await client.connect();
-            await client.callDaemonMethod("daemon/heartbeat", { sessionId });
+            await client.callDaemonMethod("daemon/heartbeat", {
+              sessionId,
+              livenessPolicy: CLI_SESSION_LIVENESS_POLICY,
+              idleTimeoutMs: getCliSessionIdleTimeoutMs(),
+            });
           } catch (error) {
             throw new ActionableError(`Failed to record session heartbeat: ${errorMessage(error)}`);
           } finally {

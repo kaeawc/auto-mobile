@@ -4,13 +4,13 @@ import {
   diffObserveResult,
   isSameObservationScreen,
   type SanitizeObserveConfig,
-  type ObserveDiff,
 } from "../features/observe/output/ObserveResultOutput";
 import {
   applyObserveScopeExperiments,
   buildObserveScopeConfig,
 } from "../features/observe/output/ObserveScopeExperiments";
 import type { ObserveScopeInput } from "../models/ObserveScope";
+import { z } from "zod/v4";
 import { capLayoutWarnings } from "../features/observe/audits/SafeAreaAuditor";
 import {
   classifyObservationAction,
@@ -23,6 +23,7 @@ import { boundStructuredField, truncateBodyText } from "../utils/truncateBodyTex
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
 import { isDeviceSessionAcquisitionTool } from "./deviceSessionResult";
+import { isHostOutputTruncationReason } from "../features/observe/truncationReasons";
 
 /**
  * Read/write access to the per-session diff baseline — the "last observation
@@ -196,31 +197,37 @@ function resolveDiffContext(
 }
 
 /**
- * The `activeWindow` and `freshness` to attach to a diff response (issue
- * #6258), resolved the same way {@link resolveDiffSkeleton} resolves
- * `skeleton`: `diffObserveResult` never sees either field (both are top-level
- * on the post-transition observation, not part of the hierarchy it diffs), so
- * without this a diff-mode `observation` would carry no `activeWindow`/no
- * `freshness` at all — while a full-mode `observation` carries both — leaving
- * a client unable to write one accessor for "what screen am I on / is this
- * fresh" across modes. Sourced from `rawObservation` (the pre-sanitize
- * observation) rather than `servedObservation` so it is populated
- * unconditionally, regardless of projection.
- *
- * `settled` (issue #6866) rides along for the same reason: the embedded-observation
- * stability verdict is a top-level field the hierarchy diff never sees, and a client
- * that only ever receives diffs must still be able to tell a stability-checked
- * capture from an unchecked one.
+ * Top-level metadata a hierarchy diff cannot derive for itself, but which a
+ * diff-mode client needs with the same shape as a full observation. Sourced
+ * from the raw (pre-sanitize) observation so projection never suppresses it.
+ * Add a field here when it is a straight copy; the contract test walks this
+ * list. `skeleton`, `context`, `keyboard`, and `truncationReasons` are excluded
+ * because they require their existing fallback re-projection logic.
  */
-function resolveDiffScreenState(
-  rawObservation: ObserveResult,
-): Pick<ObserveDiff, "activeWindow" | "freshness" | "observationId" | "settled"> {
-  return {
-    activeWindow: rawObservation.activeWindow,
-    freshness: rawObservation.freshness,
-    observationId: rawObservation.observationId,
-    settled: rawObservation.settled,
-  };
+export const DIFF_PASSTHROUGH_METADATA_FIELDS = [
+  "activeWindow",
+  "freshness",
+  "observationId",
+  "settled",
+  "accessibilityAuditSkipped",
+] as const satisfies readonly (keyof ObserveResult)[];
+
+/**
+ * Copy only defined fields so absent metadata remains absent from the emitted
+ * diff and serializes exactly as it does in full mode.
+ */
+function copyDefinedFields<T extends object, K extends keyof T>(
+  source: T,
+  fields: readonly K[],
+): Partial<Pick<T, K>> {
+  const metadata: Partial<Pick<T, K>> = {};
+  for (const field of fields) {
+    const value = source[field];
+    if (value !== undefined) {
+      Object.assign(metadata, { [field]: value });
+    }
+  }
+  return metadata;
 }
 
 /**
@@ -230,16 +237,34 @@ function resolveDiffScreenState(
  * `viewHierarchy.truncationReasons` that never needed lifting — would be
  * dropped with the observation it replaced. Resolved from the served projection
  * first and otherwise from the raw observation's hierarchy, so the field is
- * populated in every projection mode. `undefined` (nothing was truncated)
- * serializes away exactly like an absent key.
+ * populated in every projection mode.
+ *
+ * Also folds in the BASELINE's own truncation provenance (issue #6933): the
+ * baseline this diffs against was stored capped (e.g. 70 rows trimmed to 64),
+ * so a subsequent capture that has since fallen below the cap carries no
+ * truncation reason of its own even though the diff still can't tell whether
+ * rows past the baseline's cap were added, removed, or unchanged. Without this,
+ * that transition silently reports a partial removal count with no warning.
+ * Reasons are de-duplicated (the same `max_children[...]` reason can appear on
+ * both sides) and `undefined` (nothing was ever truncated) serializes away
+ * exactly like an absent key.
  */
 function resolveDiffTruncationReasons(
+  baseline: ObserveResult,
   servedObservation: ObserveResult,
   rawObservation: ObserveResult,
 ): string[] | undefined {
-  const reasons =
-    servedObservation.truncationReasons ?? rawObservation.viewHierarchy?.truncationReasons;
-  return reasons && reasons.length > 0 ? [...reasons] : undefined;
+  const baselineReasons = baseline.truncationReasons ?? baseline.viewHierarchy?.truncationReasons;
+  const rawReasons = rawObservation.viewHierarchy?.truncationReasons;
+  const currentReasons = servedObservation.truncationReasons
+    ? [
+        ...servedObservation.truncationReasons,
+        ...(rawReasons?.filter(isHostOutputTruncationReason) ?? []),
+      ]
+    : rawReasons;
+  const merged = [...(baselineReasons ?? []), ...(currentReasons ?? [])];
+  const deduped = Array.from(new Set(merged));
+  return deduped.length > 0 ? deduped : undefined;
 }
 
 /**
@@ -252,6 +277,11 @@ function resolveDiffTruncationReasons(
  */
 export interface FinalizeToolResponseContext {
   name: string;
+  /**
+   * Registered tool output contract. Required top-level object fields remain in
+   * a bounded inline residue when the complete response spills to an artifact.
+   */
+  outputSchema?: unknown;
   args?: Record<string, unknown>;
   sessionUuid?: string;
   baselineStore?: ObservationBaselineStore;
@@ -529,14 +559,17 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
                   ...cfg,
                   project: "skeleton",
                 }).keyboard;
-          // Issue #6258: a diff must not silently drop `activeWindow`/`freshness`
-          // either — see resolveDiffScreenState. Both fields come through as
-          // `undefined` when the underlying observation lacks them, which drops
-          // out of the serialized diff the same way an absent key would.
-          Object.assign(diff, resolveDiffScreenState(payload.observation as ObserveResult));
+          Object.assign(
+            diff,
+            copyDefinedFields(
+              payload.observation as ObserveResult,
+              DIFF_PASSTHROUGH_METADATA_FIELDS,
+            ),
+          );
           // Issue #6601: nor may a diff silently drop the hierarchy's truncation
           // provenance — see resolveDiffTruncationReasons.
           diff.truncationReasons = resolveDiffTruncationReasons(
+            baseline,
             servedObservation,
             payload.observation as ObserveResult,
           );
@@ -678,10 +711,11 @@ function pickInlineResidue(
   ctx: FinalizeToolResponseContext,
   payload: Record<string, unknown>,
 ): Record<string, unknown> {
+  const requiredArrayKeys = new Set(requiredOutputSchemaArrayKeys(ctx.outputSchema));
   return Object.fromEntries(
     inlineResidueKeys(ctx)
       .filter((key) => payload[key] !== undefined)
-      .map((key) => [key, boundResidueField(payload[key])]),
+      .map((key) => [key, boundResidueField(payload[key], requiredArrayKeys.has(key))]),
   );
 }
 
@@ -708,15 +742,62 @@ function spillOversizedPayload(
 }
 
 function inlineResidueKeys(ctx: FinalizeToolResponseContext): readonly string[] {
-  return isDeviceSessionAcquisitionTool(ctx.name)
+  const fixedKeys = isDeviceSessionAcquisitionTool(ctx.name)
     ? [...INLINE_RESIDUE_KEYS, ...DEVICE_SESSION_RESIDUE_KEYS]
     : INLINE_RESIDUE_KEYS;
+  return [...new Set([...fixedKeys, ...requiredOutputSchemaKeys(ctx.outputSchema)])];
 }
 
 /**
- * The last-resort residue: every non-scalar field replaced with the
- * `{ _truncated, bytes }` marker, so the inline size is a fixed function of the
- * field COUNT rather than of the payload. Scalars (a `success` boolean, a
+ * Finds required top-level fields on an output Zod object without treating an
+ * absent or non-object schema as an error. Zod v4 keeps `.passthrough()` and
+ * refinements on ZodObject itself; pipes and transparent wrappers may instead
+ * expose their output or unwrapped schema separately.
+ */
+function requiredOutputSchemaKeys(schema: unknown): readonly string[] {
+  const objectSchema = unwrapOutputObjectSchema(schema);
+  if (!objectSchema) {
+    return [];
+  }
+  return Object.entries(objectSchema.shape)
+    .filter(([, fieldSchema]) => !fieldSchema.isOptional())
+    .map(([key]) => key);
+}
+
+/** Required output fields whose declared value is an array. */
+function requiredOutputSchemaArrayKeys(schema: unknown): readonly string[] {
+  const objectSchema = unwrapOutputObjectSchema(schema);
+  if (!objectSchema) {
+    return [];
+  }
+  return Object.entries(objectSchema.shape)
+    .filter(([, fieldSchema]) => !fieldSchema.isOptional() && fieldSchema instanceof z.ZodArray)
+    .map(([key]) => key);
+}
+
+function unwrapOutputObjectSchema(schema: unknown): z.ZodObject | undefined {
+  let candidate = schema;
+  const seen = new Set<unknown>();
+  while (candidate && typeof candidate === "object" && !seen.has(candidate)) {
+    seen.add(candidate);
+    if (candidate instanceof z.ZodObject) {
+      return candidate;
+    }
+    if (candidate instanceof z.ZodPipe) {
+      candidate = candidate.out;
+      continue;
+    }
+    const unwrap = (candidate as { unwrap?: unknown }).unwrap;
+    candidate = typeof unwrap === "function" ? unwrap.call(candidate) : undefined;
+  }
+  return undefined;
+}
+
+/**
+ * The last-resort residue: non-scalar fields are replaced with the
+ * `{ _truncated, bytes }` marker, except arrays become empty arrays to retain
+ * their declared schema shape. The inline size is therefore a fixed function of
+ * the field COUNT rather than of the payload. Scalars (a `success` boolean, a
  * `polls` count) are the headline a client actually acts on and are always tiny.
  */
 function markerResidue(
@@ -728,20 +809,47 @@ function markerResidue(
       .filter((key) => payload[key] !== undefined)
       .map((key) => [
         key,
-        typeof payload[key] === "object" || typeof payload[key] === "string"
-          ? boundStructuredField(payload[key], false, 0)
-          : payload[key],
+        Array.isArray(payload[key])
+          ? []
+          : typeof payload[key] === "object" || typeof payload[key] === "string"
+            ? boundStructuredField(payload[key], false, 0)
+            : payload[key],
       ]),
   );
 }
 
-function boundResidueField(value: unknown): unknown {
+function boundResidueField(value: unknown, preserveArrayShape: boolean = false): unknown {
   if (typeof value === "string") {
     return value.length <= INLINE_RESIDUE_FIELD_LIMIT
       ? value
       : `${truncateBodyText(value, INLINE_RESIDUE_FIELD_LIMIT)}${RESIDUE_TRUNCATION_SUFFIX}`;
   }
+  if (preserveArrayShape && Array.isArray(value)) {
+    return boundResidueArray(value);
+  }
   return boundStructuredField(value, false, INLINE_RESIDUE_FIELD_LIMIT);
+}
+
+function boundResidueArray(value: unknown[]): unknown[] {
+  if (boundStructuredField(value, false, INLINE_RESIDUE_FIELD_LIMIT) === value) {
+    return value;
+  }
+
+  // Required array fields must remain arrays after a #6950/#6981 spill, unlike
+  // boundStructuredField's telemetry marker behavior; retain real prefix values
+  // only, because the artifact already contains the complete untruncated array.
+  let low = 0;
+  let high = value.length;
+  while (low < high) {
+    const end = Math.ceil((low + high) / 2);
+    const serialized = JSON.stringify(value.slice(0, end));
+    if (serialized !== undefined && serialized.length <= INLINE_RESIDUE_FIELD_LIMIT) {
+      low = end;
+    } else {
+      high = end - 1;
+    }
+  }
+  return value.slice(0, low);
 }
 
 /** Marks a residue string as cut, so a client never reads a partial value as whole. */

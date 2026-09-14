@@ -98,16 +98,35 @@ add_registered_checks_for_script_path() {
     if [[ "${path}" == "${check_script}" ]]; then
       add_check "${check_name}"
     fi
-    if [[ "${check_script}" != *.sh || ! -f "${check_script}" ]]; then
+    if [[ ! -f "${check_script}" ]]; then
       continue
     fi
-    while IFS= read -r directive; do
-      helper_path="${directive#*source=}"
-      helper_path="${helper_path%%[[:space:]]*}"
-      if [[ "${path}" == "${helper_path}" ]]; then
-        add_check "${check_name}"
-      fi
-    done < <(grep -E '^[[:space:]]*#[[:space:]]*shellcheck[[:space:]]+source=[^[:space:]]+' "${check_script}" || true)
+    case "${check_script}" in
+      *.sh)
+        while IFS= read -r directive; do
+          helper_path="${directive#*source=}"
+          helper_path="${helper_path%%[[:space:]]*}"
+          if [[ "${path}" == "${helper_path}" ]]; then
+            add_check "${check_name}"
+          fi
+        done < <(grep -E '^[[:space:]]*#[[:space:]]*shellcheck[[:space:]]+source=[^[:space:]]+' "${check_script}" || true)
+        ;;
+      *.ts)
+        set +e
+        resolver_output="$(bun "${PROJECT_ROOT}/scripts/lib/tsImportDeps.ts" "${check_script}")"
+        resolver_status=$?
+        set -e
+        if [[ "${resolver_status}" -ne 0 ]]; then
+          echo "Failed to resolve TypeScript dependencies for ${check_script}." >&2
+          exit "${resolver_status}"
+        fi
+        while IFS= read -r helper_path; do
+          if [[ "${path}" == "${helper_path}" ]]; then
+            add_check "${check_name}"
+          fi
+        done <<< "${resolver_output}"
+        ;;
+    esac
   done
 }
 

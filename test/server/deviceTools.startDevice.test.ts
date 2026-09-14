@@ -338,6 +338,112 @@ describe("startDevice handler", () => {
     expect(fakeDeviceUtils.wasMethodCalled("startDevice")).toBe(true);
   });
 
+  it("does not select a recovering AVD for an unnamed Android start", async () => {
+    const timer = new FakeTimer();
+    daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      daemonSessionManager,
+      "daemon-session",
+      timer,
+      undefined,
+      fakeDeviceUtils,
+    );
+    const recoveringImage = {
+      ...androidImage,
+      name: "Pixel_10_API_35",
+      osVersion: "15",
+      deviceId: "emulator-5556",
+    };
+    const availableImage = { ...androidImage, name: "Pixel_9_API_34", osVersion: "14" };
+    (
+      pool as unknown as { recoveringAndroidImages: Map<string, DeviceInfo> }
+    ).recoveringAndroidImages.set(recoveringImage.name, recoveringImage);
+    DaemonState.getInstance().initialize(daemonSessionManager, pool);
+    fakeDeviceUtils.setDeviceImages("android", [recoveringImage, availableImage]);
+    setDeviceToolsDependencies({ deviceMatcherFactory: () => new DefaultDeviceMatcher() });
+
+    expect(pool.getRecoveringAndroidTargets()).toEqual({
+      names: new Set([recoveringImage.name]),
+      serials: new Set([recoveringImage.deviceId]),
+    });
+    fakeDeviceUtils.setBootedDevices("android", [
+      {
+        ...androidDevice,
+        name: `Unknown (${recoveringImage.deviceId})`,
+        deviceId: recoveringImage.deviceId,
+      },
+      { ...androidDevice, name: availableImage.name, deviceId: "emulator-5558" },
+    ]);
+    const result = await callStartDevice({ platform: "android" });
+
+    expect(result.name).toBe(availableImage.name);
+    expect(result.deviceId).toBe("emulator-5558");
+    expect(fakeDeviceUtils.getExecutedOperations()).not.toContain(
+      "startDevice:Pixel_10_API_35:180000",
+    );
+  });
+
+  it("rejects an Android device that enters recovery while boot is resolving", async () => {
+    const timer = new FakeTimer();
+    daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      daemonSessionManager,
+      "daemon-session",
+      timer,
+      undefined,
+      fakeDeviceUtils,
+    );
+    DaemonState.getInstance().initialize(daemonSessionManager, pool);
+    fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
+    fakeMatcher.setBootedResult(androidDevice);
+    const waitForDeviceReady = fakeDeviceUtils.waitForDeviceReady.bind(fakeDeviceUtils);
+    const readinessStarted = Promise.withResolvers<void>();
+    const releaseReadiness = Promise.withResolvers<void>();
+    fakeDeviceUtils.waitForDeviceReady = async (...args) => {
+      readinessStarted.resolve();
+      await releaseReadiness.promise;
+      return await waitForDeviceReady(...args);
+    };
+
+    const start = callStartDevice({ platform: "android" });
+    await readinessStarted.promise;
+    (pool as unknown as { recoveringAndroidDeviceIds: Set<string> }).recoveringAndroidDeviceIds.add(
+      androidDevice.deviceId,
+    );
+    releaseReadiness.resolve();
+
+    await expect(start).rejects.toThrow(
+      "Android device 'Pixel_7_API_34' entered recovery while booting; retry the request.",
+    );
+  });
+
+  it("rejects an Android device that enters recovery before its initial readiness reservation", async () => {
+    const timer = new FakeTimer();
+    daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      daemonSessionManager,
+      "daemon-session",
+      timer,
+      undefined,
+      fakeDeviceUtils,
+    );
+    await pool.initializeWithDevices([androidDevice]);
+    DaemonState.getInstance().initialize(daemonSessionManager, pool);
+    fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
+    fakeMatcher.setBootedResult(androidDevice);
+    const reserveDeviceForReadiness = pool.reserveDeviceForReadiness.bind(pool);
+    pool.reserveDeviceForReadiness = async (...args) => {
+      (
+        pool as unknown as { recoveringAndroidDeviceIds: Set<string> }
+      ).recoveringAndroidDeviceIds.add(androidDevice.deviceId);
+      return await reserveDeviceForReadiness(...args);
+    };
+
+    await expect(callStartDevice({ platform: "android" })).rejects.toThrow(
+      "Android device 'Pixel_7_API_34' entered recovery while awaiting its readiness reservation; retry the request.",
+    );
+  });
+
   it("cold-boots when discovery supplies a transport ID after boot readiness", async () => {
     const timer = new FakeTimer();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());

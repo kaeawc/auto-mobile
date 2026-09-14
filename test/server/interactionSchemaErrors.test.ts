@@ -116,6 +116,24 @@ describe("actionable interaction schema errors", () => {
       expect(message).not.toContain("Mutually exclusive");
     });
 
+    // #6931: the direct selector union reports the wrong-type `text` value in
+    // only its text arm; the other arms call text unrecognized. The conflict
+    // still needs that supplied value error alongside the mutually exclusive
+    // keys rather than dropping it as branch-discrimination noise.
+    test("a value error beside a direct selector conflict survives branch selection", () => {
+      const message = parseSelector({ text: 123, elementId: "id" });
+      expect(message).toContain("selector.text expected string, received number");
+      expect(message).toContain("selector Mutually exclusive keys");
+    });
+
+    // #6996 / PR review: preserve nested array-item value errors beside a
+    // direct selector conflict instead of requiring a second round trip.
+    test("a nested array-item value error beside a selector conflict survives branch selection", () => {
+      const message = parseSelector({ elementId: "id", textAny: [123] });
+      expect(message).toContain("selector Mutually exclusive keys");
+      expect(message).toContain("selector.textAny.0 expected string, received number");
+    });
+
     // PR #6882 review: the caller already passed `index` at the top level, so
     // the remedy is deleting the nested duplicate, not "did you mean".
     test("does not point at a top-level parameter the caller already supplied", () => {

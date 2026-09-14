@@ -177,14 +177,16 @@ export interface ObserveResult {
   viewHierarchy?: ViewHierarchyResult;
 
   /**
-   * Why the captured hierarchy is incomplete, lifted from
-   * `viewHierarchy.truncationReasons` by the skeleton projection (issue #6601),
-   * which removes the tree that otherwise carries it. Present only when
-   * something was actually dropped: a device-side stop (`max_nodes`,
-   * `max_depth`, a cancelled walk) or the host-side per-node child cap
-   * (`max_children[<node> kept N of M]`). Its presence means the rows in
-   * `skeleton` / `context` are a SUBSET of what is on screen, so an element
-   * missing from them is not evidence it is absent.
+   * Why a served observation or diff may be incomplete (issues #6601, #6933).
+   * On a non-diff skeleton projection, this contains only capture-fidelity
+   * reasons (device-side `max_nodes`, `max_depth`, or `cancelled`); its
+   * presence means `skeleton` / `context` omit rows. A host-output
+   * `max_children[<node> kept N of M]` cap trims only rendered `viewHierarchy`
+   * and is not lifted to a non-diff skeleton. On a diff, any reason — host-cap
+   * (`max_children[...]`) or capture-fidelity (`max_nodes`, `max_depth`,
+   * `cancelled`) — may originate from either comparison input (baseline or
+   * current capture), so its presence means the comparison may be incomplete,
+   * not that the current `skeleton` / `context` omit rows (issue #6933).
    */
   truncationReasons?: string[];
 

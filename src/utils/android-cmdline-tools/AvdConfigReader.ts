@@ -29,6 +29,8 @@ export interface AvdConfig {
   ramSizeMb?: number;
   /** Whether config.ini contains an unrecognized guest-memory value. */
   ramSizeInvalid?: boolean;
+  /** Whether the AVD's GPU is explicitly enabled in config.ini. */
+  gpuEnabled?: boolean;
   deviceName?: string;
   tag?: string;
   /** Stable hardware features derived from the AVD's local profile settings. */
@@ -322,6 +324,7 @@ export function parseAvdConfig(content: string): AvdConfig {
   }
   return {
     hardware: hardware as AndroidAvdConfiguration,
+    gpuEnabled: parseYesNo(props.get("hw.gpu.enabled")),
     ...parseScreenDimensions(props),
     ...parseRamSize(props),
     ...parseDeviceMetadata(props),
@@ -329,6 +332,10 @@ export function parseAvdConfig(content: string): AvdConfig {
     ...parseArchitecture(props),
     capabilityInventory: buildAndroidAvdCapabilityInventory(Object.fromEntries(props)),
   };
+}
+
+function parseYesNo(value: string | undefined): boolean | undefined {
+  return value === "yes" ? true : value === "no" ? false : undefined;
 }
 
 function parseKeyValueProperties(content: string): Map<string, string> {

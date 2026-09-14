@@ -232,6 +232,13 @@ wiring_requires_yq() {
   [[ "$bats_unit" != *"AUTOMOBILE_BATS_SERIAL_ONLY"* ]]
 }
 
+@test "PR TypeScript coverage has headroom beyond its wall-clock budget" {
+  wiring_requires_yq
+  run yq -r '.jobs."ts-code-coverage"."timeout-minutes" > 12' "$WF"
+  [ "$status" -eq 0 ]
+  [ "$output" = "true" ]
+}
+
 @test "merge workflow preserves the same four lane boundaries" {
   local workflow=".github/workflows/merge.yml"
   [[ "$(job_block node-unit-tests "$workflow")" == *"bash scripts/test-ts.sh unit"* ]]

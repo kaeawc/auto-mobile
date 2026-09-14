@@ -30,6 +30,7 @@ import type { DaemonStateLike } from "../../src/daemon/daemonState";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import type { DaemonClientLike } from "../../src/daemon/client";
 import { ActionableError } from "../../src/models";
+import { INCOMPLETE_EXTRACTION_CODE } from "../../src/db/migrationDependencyIntegrity";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { formatLockContent } from "../../src/utils/fileLock";
 import { logger } from "../../src/utils/logger";
@@ -723,11 +724,11 @@ class FakeDaemonProcessSignaler implements DaemonProcessSignaler {
 class FakeDaemonPortAvailabilityChecker implements DaemonPortAvailabilityChecker {
   public readonly checkedPorts: number[] = [];
 
-  constructor(private readonly free: boolean = true) {}
+  constructor(private readonly free: boolean | ((port: number) => boolean) = true) {}
 
   isPortFree(port: number): Promise<boolean> {
     this.checkedPorts.push(port);
-    return Promise.resolve(this.free);
+    return Promise.resolve(typeof this.free === "function" ? this.free(port) : this.free);
   }
 }
 
@@ -1379,17 +1380,235 @@ describe("Daemon manager process detection", () => {
       }
     ).findLiveDaemonProcessesForStart.bind(manager);
 
-    let caught: unknown;
-    try {
-      await findForStart({}, timer.now() + DAEMON_STARTUP_TIMEOUT_MS);
-    } catch (error) {
-      caught = error;
-    }
-    expect(caught).toBeInstanceOf(ActionableError);
-    expect((caught as Error).message).toContain("Failed to inspect daemon process table");
-    expect((caught as Error).message).toContain("Port 3000");
+    await expect(findForStart({}, timer.now() + DAEMON_STARTUP_TIMEOUT_MS)).resolves.toEqual([-1]);
     expect(processFinder.calls).toBe(3);
     expect(portChecker.checkedPorts).toEqual([3000]);
+  });
+
+  test("probes the persisted owner port after configured and default ports during timeout degradation", async () => {
+    const directory = mkdtempSync(
+      join(tmpdir(), "daemon-manager-timeout-persisted-owner-port-test-"),
+    );
+    const pidFilePath = join(directory, "daemon.pid");
+    writeFileSync(
+      pidFilePath,
+      JSON.stringify({
+        pid: 301,
+        socketPath: join(directory, "daemon.sock"),
+        port: 7654,
+        startedAt: 1,
+        version: "test",
+      }),
+    );
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const processFinder = new TimeoutThenSuccessDaemonProcessFinder(Number.POSITIVE_INFINITY);
+    const portChecker = new FakeDaemonPortAvailabilityChecker((port) => port !== 7654);
+    const manager = new DaemonManager(
+      undefined,
+      undefined,
+      timer,
+      join(directory, "daemon.lock"),
+      pidFilePath,
+      join(directory, "daemon.sock"),
+      processFinder,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      portChecker,
+    );
+
+    const findForStart = (
+      manager as unknown as {
+        findLiveDaemonProcessesForStart(
+          options: DaemonOptions,
+          startDeadline: number,
+        ): Promise<number[]>;
+      }
+    ).findLiveDaemonProcessesForStart.bind(manager);
+
+    try {
+      await expect(
+        findForStart({ port: 4567 }, timer.now() + DAEMON_STARTUP_TIMEOUT_MS),
+      ).resolves.toEqual([-1]);
+      expect(portChecker.checkedPorts).toEqual([4567, 3000, 7654]);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("does not spawn when timeout degradation finds the default port occupied", async () => {
+    const directory = mkdtempSync(
+      join(tmpdir(), "daemon-manager-timeout-default-port-owner-test-"),
+    );
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const processFinder = new TimeoutThenSuccessDaemonProcessFinder(Number.POSITIVE_INFINITY);
+    const portChecker = new FakeDaemonPortAvailabilityChecker((port) => port !== 3000);
+    const launcher = new DaemonLauncher({ entryScript: "daemon-entry.ts", timer });
+    const launchSpy = spyOn(launcher, "launchAndWait");
+
+    class TestDaemonManager extends DaemonManager {
+      override async status(): Promise<DaemonStatus> {
+        return { running: false };
+      }
+    }
+
+    try {
+      const manager = new TestDaemonManager(
+        () => ({
+          async connect() {
+            throw new Error("connection refused");
+          },
+          async close() {},
+          async callTool() {
+            return {};
+          },
+          async readResource() {
+            return {};
+          },
+          async callDaemonMethod() {
+            return {};
+          },
+        }),
+        undefined,
+        timer,
+        join(directory, "daemon.lock"),
+        join(directory, "daemon.pid"),
+        join(directory, "daemon.sock"),
+        processFinder,
+        undefined,
+        undefined,
+        launcher,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        portChecker,
+      );
+
+      await expect(manager.start({ port: 4567 })).rejects.toBeInstanceOf(ActionableError);
+      expect(portChecker.checkedPorts).toEqual([4567, 3000]);
+      expect(launchSpy).not.toHaveBeenCalled();
+    } finally {
+      launchSpy.mockRestore();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("reuses a reachable daemon when timeout degradation finds the default port occupied", async () => {
+    const directory = mkdtempSync(
+      join(tmpdir(), "daemon-manager-timeout-reachable-default-owner-test-"),
+    );
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const processFinder = new TimeoutThenSuccessDaemonProcessFinder(Number.POSITIVE_INFINITY);
+    const portChecker = new FakeDaemonPortAvailabilityChecker((port) => port !== 3000);
+    const launcher = new DaemonLauncher({ entryScript: "daemon-entry.ts", timer });
+    const launchSpy = spyOn(launcher, "launchAndWait");
+
+    class TestDaemonManager extends DaemonManager {
+      override async status(): Promise<DaemonStatus> {
+        return { running: false };
+      }
+    }
+
+    try {
+      const manager = new TestDaemonManager(
+        () => new FakeDaemonClient({}),
+        undefined,
+        timer,
+        join(directory, "daemon.lock"),
+        join(directory, "daemon.pid"),
+        join(directory, "daemon.sock"),
+        processFinder,
+        undefined,
+        undefined,
+        launcher,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        portChecker,
+      );
+
+      await expect(manager.start({ port: 4567 })).resolves.toBeUndefined();
+      expect(portChecker.checkedPorts).toEqual([4567, 3000]);
+      expect(launchSpy).not.toHaveBeenCalled();
+    } finally {
+      launchSpy.mockRestore();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("bounds an existing daemon reachability wait by the remaining startup deadline", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "daemon-manager-existing-daemon-deadline-test-"));
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const processFinder: DaemonProcessFinder & DaemonProcessLivenessChecker = {
+      findDaemonProcesses() {
+        timer.advanceTime(DAEMON_STARTUP_TIMEOUT_MS - 500);
+        return [
+          {
+            pid: 301,
+            ppid: 1,
+            command: "bun /worktree-b/dist/src/index.js --daemon-mode",
+          },
+        ];
+      },
+      isProcessRunning(pid) {
+        return pid === 301;
+      },
+    };
+
+    class TestDaemonManager extends DaemonManager {
+      override async status(): Promise<DaemonStatus> {
+        return { running: false };
+      }
+    }
+
+    try {
+      const manager = new TestDaemonManager(
+        () => ({
+          async connect() {
+            throw new Error("connection refused");
+          },
+          async close() {},
+          async callTool() {
+            return {};
+          },
+          async readResource() {
+            return {};
+          },
+          async callDaemonMethod() {
+            return {};
+          },
+        }),
+        undefined,
+        timer,
+        join(directory, "daemon.lock"),
+        join(directory, "daemon.pid"),
+        join(directory, "daemon.sock"),
+        processFinder,
+      );
+
+      const error = await manager.start().then(
+        () => {
+          throw new Error("expected start to reject");
+        },
+        (rejection: unknown) => rejection as Error,
+      );
+
+      expect(error).toBeInstanceOf(ActionableError);
+      expect(error.message).toContain("within 500ms");
+      expect(timer.now()).toBeLessThanOrEqual(DAEMON_STARTUP_TIMEOUT_MS);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   test("charges process-table retries and launch wait to one daemon startup deadline", async () => {
@@ -3105,6 +3324,65 @@ describe("Daemon manager process detection", () => {
       expect(spawnCalls[1].args).toContain("--port");
       expect(cleaner.entryScripts).toEqual([entryScript]);
     } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("recomputes the launch budget before retrying an incomplete extraction", async () => {
+    const dir = mkdtempSync(
+      join(tmpdir(), "daemon-manager-incomplete-extraction-retry-budget-test-"),
+    );
+    process.env.AUTOMOBILE_DATA_DIR = dir;
+    const fakeTimer = new FakeTimer();
+    const entryScript = join(
+      dir,
+      "bunx-extract",
+      "node_modules",
+      "@kaeawc",
+      "auto-mobile",
+      "dist",
+      "src",
+      "index.js",
+    );
+    const cleaner = new FakeExtractionCleaner();
+    const launcher = new DaemonLauncher({ entryScript, timer: fakeTimer });
+    const launchSpy = spyOn(launcher, "launchAndWait").mockImplementation(async () => {
+      if (launchSpy.mock.calls.length === 1) {
+        fakeTimer.advanceTime(12_345);
+        throw Object.assign(new Error("incomplete extraction"), {
+          code: INCOMPLETE_EXTRACTION_CODE,
+        });
+      }
+    });
+
+    class TestDaemonManager extends DaemonManager {
+      override async status(): Promise<DaemonStatus> {
+        return { running: false };
+      }
+    }
+
+    try {
+      const manager = new TestDaemonManager(
+        undefined,
+        undefined,
+        fakeTimer,
+        join(dir, "daemon.lock"),
+        join(dir, "daemon.pid"),
+        join(dir, "daemon.sock"),
+        new FakeDaemonProcessFinder([]),
+        undefined,
+        cleaner,
+        launcher,
+      );
+
+      await expect(manager.start()).resolves.toBeUndefined();
+
+      expect(launchSpy).toHaveBeenCalledTimes(2);
+      expect(launchSpy.mock.calls[0]?.[0].timeoutMs).toBe(DAEMON_STARTUP_TIMEOUT_MS);
+      expect(launchSpy.mock.calls[1]?.[0].timeoutMs).toBe(DAEMON_STARTUP_TIMEOUT_MS - 12_345);
+      expect(cleaner.entryScripts).toEqual([entryScript]);
+    } finally {
+      launchSpy.mockRestore();
       rmSync(dir, { recursive: true, force: true });
     }
   });

@@ -1844,6 +1844,10 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       return;
     }
 
+    // Publish before the remote RPC: shutdown's bounded force-stop stage must be
+    // able to find this runner even when the best-effort admission cleanup hangs.
+    this.xcTestProcessId = runnerPid;
+    this.xcTestProcess = null;
     const stopResult = await this.remoteRunner
       .stop({
         deviceId: this.device.deviceId,
@@ -1861,11 +1865,8 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
           `${stopResult.error ?? "remote runner reported an unsuccessful stop"}`,
       );
     }
-    if (!stopResult?.success) {
-      // Keep the PID visible to stopTrackedService()/forceStopForShutdown(), which
-      // gets a second cleanup attempt after this late-start admission fence fails.
-      this.xcTestProcessId = runnerPid;
-      this.xcTestProcess = null;
+    if (stopResult?.success && this.xcTestProcessId === runnerPid) {
+      this.xcTestProcessId = null;
     }
     throw startupAbort.reason ?? new Error("iOS CtrlProxy startup was cancelled by stop()");
   }

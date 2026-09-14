@@ -2937,6 +2937,7 @@ export class DevicePool {
       if (finalized) {
         const recovery = this.recoveringSessionLosses.get(session.sessionId);
         this.adbServerResetQuarantinedSessions.delete(session.sessionId);
+        this.failedTerminalRecoveryReleases.delete(session.sessionId);
         this.recoveringSessionLosses.delete(session.sessionId);
         if (recovery?.avdName) {
           this.clearRecoveringAndroidImage(recovery.avdName);

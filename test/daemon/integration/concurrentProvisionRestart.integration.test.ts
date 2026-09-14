@@ -136,6 +136,10 @@ describe("concurrent client restart during provisionDevice", () => {
     const competingProxy = new DaemonMcpProxy({
       clientFactory: () => new FakeDaemonClient(),
       daemonManager: competingManager,
+      // Keep availability probing on this test's isolated socket. The manager
+      // below is already scoped to it; the proxy's default would otherwise
+      // contend with other host-integration files through the global socket.
+      socketPath,
       autoStartDaemon: true,
       clientVersion: "9999.0.0",
     });

@@ -96,17 +96,24 @@ describe("SimulatorTccSqliteClient", () => {
     expect(permissionForTccService("kTCCServiceUnknown")).toBe("kTCCServiceUnknown");
   });
 
-  test("resolves a relative device set from the daemon launch directory", async () => {
-    const previous = process.env.AUTOMOBILE_DAEMON_LAUNCH_CWD;
+  test("anchors a relative device set at the INJECTED environment's launch directory, not process.env (#6901)", async () => {
+    // The injected environment is the single source of truth for both the
+    // device-set path and the launch cwd it resolves against. A different
+    // launch cwd on the real process env must not leak into the resolution.
+    const previous = process.env[DAEMON_LAUNCH_CWD_ENV];
     const launchDirectory = resolve("launch-project");
-    process.env.AUTOMOBILE_DAEMON_LAUNCH_CWD = launchDirectory;
+    const decoyLaunchDirectory = resolve("decoy-process-env-launch");
+    process.env[DAEMON_LAUNCH_CWD_ENV] = decoyLaunchDirectory;
     try {
       const fileSystem = new FakeTccFileSystem();
       fileSystem.error = Object.assign(new Error("absent"), { code: "ENOENT" });
       const client = new SimulatorTccSqliteClient({
         executor: new FakeSqliteExecutor(),
         fileSystem,
-        environment: { CORESIMULATOR_DEVICE_SET_PATH: "custom-devices" },
+        environment: {
+          CORESIMULATOR_DEVICE_SET_PATH: "custom-devices",
+          [DAEMON_LAUNCH_CWD_ENV]: launchDirectory,
+        },
       });
       await expect(client.readPermissions(DEVICE_ID, "com.example.app")).rejects.toThrow(
         "unavailable",
@@ -114,11 +121,40 @@ describe("SimulatorTccSqliteClient", () => {
       expect(fileSystem.paths).toEqual([
         join(launchDirectory, "custom-devices", DEVICE_ID, "data/Library/TCC/TCC.db"),
       ]);
+      expect(fileSystem.paths[0]).not.toStartWith(decoyLaunchDirectory);
     } finally {
       if (previous === undefined) {
-        delete process.env.AUTOMOBILE_DAEMON_LAUNCH_CWD;
+        delete process.env[DAEMON_LAUNCH_CWD_ENV];
       } else {
-        process.env.AUTOMOBILE_DAEMON_LAUNCH_CWD = previous;
+        process.env[DAEMON_LAUNCH_CWD_ENV] = previous;
+      }
+    }
+  });
+
+  test("anchors an injected relative deviceSetRoot at the injected launch directory too (#6901)", async () => {
+    const previous = process.env[DAEMON_LAUNCH_CWD_ENV];
+    const launchDirectory = resolve("launch-project");
+    process.env[DAEMON_LAUNCH_CWD_ENV] = resolve("decoy-process-env-launch");
+    try {
+      const fileSystem = new FakeTccFileSystem();
+      fileSystem.error = Object.assign(new Error("absent"), { code: "ENOENT" });
+      const client = new SimulatorTccSqliteClient({
+        executor: new FakeSqliteExecutor(),
+        fileSystem,
+        deviceSetRoot: "relative-devices",
+        environment: { [DAEMON_LAUNCH_CWD_ENV]: launchDirectory },
+      });
+      await expect(client.readPermissions(DEVICE_ID, "com.example.app")).rejects.toThrow(
+        "unavailable",
+      );
+      expect(fileSystem.paths).toEqual([
+        join(launchDirectory, "relative-devices", DEVICE_ID, "data/Library/TCC/TCC.db"),
+      ]);
+    } finally {
+      if (previous === undefined) {
+        delete process.env[DAEMON_LAUNCH_CWD_ENV];
+      } else {
+        process.env[DAEMON_LAUNCH_CWD_ENV] = previous;
       }
     }
   });

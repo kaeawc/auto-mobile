@@ -6,7 +6,10 @@ import { ActionableError } from "../../models/ActionableError";
 import { DefaultHostCommandExecutor, type HostCommandExecutor } from "../HostCommandExecutor";
 import { defaultTimer, type Timer } from "../SystemTimer";
 import { isIosSimulatorUdid } from "./iosDeviceType";
-import { resolvePathFromDaemonLaunchWorkingDirectory } from "../workingDirectory";
+import {
+  DAEMON_LAUNCH_CWD_ENV,
+  resolvePathFromDaemonLaunchWorkingDirectory,
+} from "../workingDirectory";
 
 const DEFAULT_TCC_QUERY_TIMEOUT_MS = 5_000;
 const TCC_SERVICE_BY_PERMISSION = new Map<string, string>([
@@ -58,13 +61,28 @@ export interface SimulatorTccSqliteClientDependencies {
    * (e.g. CI runners that isolate simulator state per job).
    */
   deviceSetRoot?: string;
-  /** Device-set selection only; launch-directory ownership remains with the daemon. */
-  environment?: { CORESIMULATOR_DEVICE_SET_PATH?: string };
+  /**
+   * Environment the device-set root is read from AND anchored against: a
+   * relative `CORESIMULATOR_DEVICE_SET_PATH` (or relative `deviceSetRoot`)
+   * resolves against this environment's `AUTOMOBILE_DAEMON_LAUNCH_CWD`, never
+   * the real process env, so an injected environment is the single source of
+   * truth (#6901). Launch-directory ownership remains with the daemon.
+   */
+  environment?: SimulatorDeviceSetEnvironment;
   timer?: Timer;
   timeoutMs?: number;
 }
 
 const nodeFileSystem: TccDatabaseFileSystem = { stat };
+
+/**
+ * A type alias (not an interface) so its implicit index signature keeps it
+ * assignable to `NodeJS.ProcessEnv`-typed parameters in `workingDirectory`.
+ */
+export type SimulatorDeviceSetEnvironment = {
+  CORESIMULATOR_DEVICE_SET_PATH?: string;
+  [DAEMON_LAUNCH_CWD_ENV]?: string;
+};
 
 /**
  * Resolve the CoreSimulator device set root: `CORESIMULATOR_DEVICE_SET_PATH`
@@ -211,14 +229,12 @@ export class SimulatorTccSqliteClient implements TccPermissionReader {
     this.executor = dependencies.executor ?? new DefaultHostCommandExecutor();
     this.fileSystem = dependencies.fileSystem ?? nodeFileSystem;
     this.homeDirectory = dependencies.homeDirectory ?? homedir();
+    // The same environment supplies both the device-set path and the launch
+    // cwd it is anchored at, so an injected environment is honoured end to end.
+    const environment: SimulatorDeviceSetEnvironment = dependencies.environment ?? process.env;
     this.deviceSetRoot = resolvePathFromDaemonLaunchWorkingDirectory(
-      dependencies.deviceSetRoot ??
-        defaultDeviceSetRoot(
-          this.homeDirectory,
-          dependencies.environment ?? {
-            CORESIMULATOR_DEVICE_SET_PATH: process.env.CORESIMULATOR_DEVICE_SET_PATH,
-          },
-        ),
+      dependencies.deviceSetRoot ?? defaultDeviceSetRoot(this.homeDirectory, environment),
+      environment,
     );
     this.timer = dependencies.timer ?? defaultTimer;
     this.timeoutMs = dependencies.timeoutMs ?? DEFAULT_TCC_QUERY_TIMEOUT_MS;

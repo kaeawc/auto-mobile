@@ -11,6 +11,7 @@ import {
   toolOutputArtifactMetadataSchema,
   viewHierarchyResultSchema,
 } from "../../src/server/toolOutputSchemas";
+import { applyJsonSchemaOverride } from "../../src/server/toolSchemaHelpers";
 
 const observeTruncationReasonsDescription =
   "Why a served observation or diff may be incomplete (issues #6601, #6933). " +
@@ -201,7 +202,9 @@ describe("accessibility audit skip metadata schema (#6926)", () => {
   const accessibilityAuditSkipped = "settled_capture_adopted" as const;
 
   test("observation summaries accept and preserve the skip reason", () => {
-    expect(observationSummarySchema.parse({ accessibilityAuditSkipped })).toMatchObject({
+    expect(
+      observationSummarySchema.parse({ observationId: "summary", accessibilityAuditSkipped }),
+    ).toMatchObject({
       accessibilityAuditSkipped,
     });
   });
@@ -209,6 +212,7 @@ describe("accessibility audit skip metadata schema (#6926)", () => {
   test("diff observations accept the skip reason", () => {
     expect(
       observeDiffSchema.parse({
+        observationId: "diff",
         isDiff: true,
         skeleton: [],
         added: [],
@@ -220,13 +224,20 @@ describe("accessibility audit skip metadata schema (#6926)", () => {
   });
 
   test("full observe results accept the skip reason", () => {
-    expect(observeResultSchema.parse({ accessibilityAuditSkipped })).toMatchObject({
+    expect(
+      observeResultSchema.parse({ observationId: "result", accessibilityAuditSkipped }),
+    ).toMatchObject({
       accessibilityAuditSkipped,
     });
   });
 
   test("rejects an invalid skip reason", () => {
-    expect(() => observationSummarySchema.parse({ accessibilityAuditSkipped: "bogus" })).toThrow();
+    expect(() =>
+      observationSummarySchema.parse({
+        observationId: "summary",
+        accessibilityAuditSkipped: "bogus",
+      }),
+    ).toThrow();
   });
 });
 
@@ -279,13 +290,14 @@ describe("elementBoundsSchema: fractional iOS point coordinates (#3206)", () => 
  */
 describe("observationOutputSchema: discriminated union of full observation vs diff (#6221 item 4)", () => {
   test("accepts a full observation (no `isDiff`)", () => {
-    const full = { activeWindow: { appId: "com.example" } };
+    const full = { observationId: "full", activeWindow: { appId: "com.example" } };
     const parsed = observationOutputSchema.parse(full);
     expect((parsed as Record<string, unknown>).isDiff).toBeUndefined();
   });
 
   test("accepts a diff (`isDiff: true`) that ALWAYS carries a `skeleton`", () => {
     const diff = {
+      observationId: "diff",
       isDiff: true,
       skeleton: [
         {
@@ -324,19 +336,31 @@ describe("observationOutputSchema: discriminated union of full observation vs di
 
   test("observationSummarySchema itself rejects `isDiff: true` — it is a genuinely-typed member, not just permissively passed through", () => {
     expect(() =>
-      observationSummarySchema.parse({ isDiff: true, activeWindow: { appId: "com.example" } }),
+      observationSummarySchema.parse({
+        observationId: "summary",
+        isDiff: true,
+        activeWindow: { appId: "com.example" },
+      }),
     ).toThrow();
     // `isDiff` absent, or explicitly `false`, both still validate.
     expect(() =>
-      observationSummarySchema.parse({ activeWindow: { appId: "com.example" } }),
+      observationSummarySchema.parse({
+        observationId: "summary",
+        activeWindow: { appId: "com.example" },
+      }),
     ).not.toThrow();
     expect(() =>
-      observationSummarySchema.parse({ isDiff: false, activeWindow: { appId: "com.example" } }),
+      observationSummarySchema.parse({
+        observationId: "summary",
+        isDiff: false,
+        activeWindow: { appId: "com.example" },
+      }),
     ).not.toThrow();
   });
 
   test("a diff's added/removed nodes carry their real selector fields directly in `attributes` (no redundant `selector`)", () => {
     const diff = {
+      observationId: "diff",
       isDiff: true,
       skeleton: [],
       added: [
@@ -357,6 +381,7 @@ describe("observationOutputSchema: discriminated union of full observation vs di
 
   test("a diff's `changed` entries carry a real `selector` distinct from the internal `key`", () => {
     const diff = {
+      observationId: "diff",
       isDiff: true,
       skeleton: [],
       added: [],
@@ -394,6 +419,7 @@ describe("observationOutputSchema: discriminated union of full observation vs di
 describe("observationSummarySchema: truncation reasons (#6601)", () => {
   test("declares and preserves truncation reasons on a full action observation", () => {
     const full = {
+      observationId: "summary",
       activeWindow: { appId: "com.example" },
       truncationReasons: ["max_children[root] kept 10 of 12"],
     };
@@ -408,6 +434,7 @@ describe("observationSummarySchema: truncation reasons (#6601)", () => {
 
   test("declares nested hierarchy truncation reasons on full/raw action observations", () => {
     const full = {
+      observationId: "summary",
       activeWindow: { appId: "com.example" },
       viewHierarchy: {
         hierarchy: { node: { bounds: [0, 0, 100, 50] } },
@@ -449,6 +476,7 @@ describe("viewHierarchyResultSchema: nested truncation reasons (#6601)", () => {
 describe("observeResultSchema: context array (#6221 item 1)", () => {
   test("accepts skeleton + context side by side", () => {
     const result = {
+      observationId: "result",
       skeleton: [
         {
           elementId: "com.example:id/btn",
@@ -471,7 +499,7 @@ describe("observeResultSchema: context array (#6221 item 1)", () => {
   });
 
   test("context is optional (omitted when nothing non-actionable survived)", () => {
-    const result = { skeleton: [] };
+    const result = { observationId: "result", skeleton: [] };
     const parsed = observeResultSchema.parse(result);
     expect(parsed.context).toBeUndefined();
   });
@@ -504,9 +532,12 @@ describe("observation arms advertise `settled` (#6866)", () => {
   });
 
   test("both arms still accept an observation carrying the flag", () => {
-    expect(observationSummarySchema.parse({ settled: true }).settled).toBe(true);
+    expect(
+      observationSummarySchema.parse({ observationId: "summary", settled: true }).settled,
+    ).toBe(true);
     expect(
       observeDiffSchema.parse({
+        observationId: "diff",
         isDiff: true,
         skeleton: [],
         added: [],
@@ -515,5 +546,58 @@ describe("observation arms advertise `settled` (#6866)", () => {
         settled: false,
       }).settled,
     ).toBe(false);
+  });
+});
+
+describe("observation arms advertise observationId resource join keys", () => {
+  test("the parse schema still accepts recorded captures that predate the join key", () => {
+    // Historical fixtures (test/fixtures/observe) were captured before
+    // `observationId` existed; the same zod schema validates them, so parsing
+    // must not require the field even though every emitted observation carries it.
+    expect(() => observeResultSchema.parse({})).not.toThrow();
+    expect(() => observationSummarySchema.parse({})).not.toThrow();
+    expect(() =>
+      observeDiffSchema.parse({ isDiff: true, skeleton: [], added: [], removed: [], changed: [] }),
+    ).not.toThrow();
+  });
+
+  test("full observe, full action summary, and diff schemas parse it as a string", () => {
+    const observationId = "observation-123";
+
+    expect(observeResultSchema.parse({ observationId }).observationId).toBe(observationId);
+    expect(observationSummarySchema.parse({ observationId }).observationId).toBe(observationId);
+    expect(
+      observeDiffSchema.parse({
+        isDiff: true,
+        skeleton: [],
+        added: [],
+        removed: [],
+        changed: [],
+        observationId,
+      }).observationId,
+    ).toBe(observationId);
+  });
+
+  test("each advertised schema requires the join key on the wire while parsing keeps it optional", () => {
+    for (const schema of [observeResultSchema, observationSummarySchema, observeDiffSchema]) {
+      const raw = toJSONSchema(schema) as Record<string, any>;
+      expect(raw.properties.observationId.type).toBe("string");
+      expect(raw.required ?? []).not.toContain("observationId");
+
+      // The registry advertises through the same `applyJsonSchemaOverride` seam.
+      const advertised = toJSONSchema(schema, {
+        override: ({ zodSchema, jsonSchema }) => applyJsonSchemaOverride(zodSchema, jsonSchema),
+      }) as Record<string, any>;
+      expect(advertised.properties.observationId.type).toBe("string");
+      expect(advertised.required).toContain("observationId");
+      // `required` follows property order so the generated tool definitions stay stable.
+      const propertyOrder = Object.keys(advertised.properties);
+      const requiredOrder = (advertised.required as string[]).map((key) =>
+        propertyOrder.indexOf(key),
+      );
+      expect(requiredOrder).toEqual([...requiredOrder].sort((a, b) => a - b));
+      const keyOrder = Object.keys(advertised);
+      expect(keyOrder.indexOf("required")).toBeLessThan(keyOrder.indexOf("additionalProperties"));
+    }
   });
 });

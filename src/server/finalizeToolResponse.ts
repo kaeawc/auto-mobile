@@ -207,6 +207,7 @@ function resolveDiffContext(
 export const DIFF_PASSTHROUGH_METADATA_FIELDS = [
   "activeWindow",
   "freshness",
+  "observationId",
   "settled",
   "accessibilityAuditSkipped",
 ] as const satisfies readonly (keyof ObserveResult)[];

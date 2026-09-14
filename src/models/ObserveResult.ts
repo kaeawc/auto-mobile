@@ -143,6 +143,9 @@ export interface ScreenIdentity {
  * Represents the result of observing the device state
  */
 export interface ObserveResult {
+  /** Server-generated identity for this exact observe invocation. */
+  observationId: string;
+
   /**
    * Timestamp when the screen state was captured on the device (milliseconds since epoch)
    * This comes from the CtrlProxy on Android or equivalent on iOS

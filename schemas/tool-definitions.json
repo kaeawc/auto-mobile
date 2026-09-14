@@ -3553,6 +3553,10 @@
           "required": ["visible", "package"],
           "additionalProperties": false
         },
+        "observationId": {
+          "description": "Observation-scoped screenshot resource URI join key.",
+          "type": "string"
+        },
         "screenSize": {
           "type": "object",
           "properties": {
@@ -6858,6 +6862,17 @@
           "required": ["path", "format", "payload", "bytes", "tool"],
           "additionalProperties": {}
         }
+      },
+      "if": {
+        "properties": {
+          "accessibilityAuditSkipped": {
+            "const": "settled_capture_adopted"
+          }
+        },
+        "required": ["accessibilityAuditSkipped"]
+      },
+      "then": {
+        "required": ["observationId"]
       }
     },
     "_meta": {
@@ -11355,6 +11370,10 @@
                   "type": "boolean",
                   "const": true
                 },
+                "observationId": {
+                  "description": "Observation-scoped screenshot resource URI join key.",
+                  "type": "string"
+                },
                 "skeleton": {
                   "description": "Always present alongside a diff (issue #6221 item 4.1): the same actionable-only selector surface a full observation's `skeleton` carries.",
                   "type": "array",
@@ -11725,7 +11744,7 @@
                   }
                 }
               },
-              "required": ["isDiff", "skeleton", "added", "removed", "changed"],
+              "required": ["isDiff", "observationId", "skeleton", "added", "removed", "changed"],
               "additionalProperties": {}
             },
             {
@@ -11734,6 +11753,10 @@
                 "isDiff": {
                   "type": "boolean",
                   "const": false
+                },
+                "observationId": {
+                  "description": "Observation-scoped screenshot resource URI join key.",
+                  "type": "string"
                 },
                 "selectedElements": {
                   "type": "array",
@@ -12913,6 +12936,7 @@
                   "const": "settled_capture_adopted"
                 }
               },
+              "required": ["observationId"],
               "additionalProperties": {}
             },
             {

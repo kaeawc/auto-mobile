@@ -190,6 +190,7 @@ export class ResultFaker {
     const elements = Array.from({ length: elementCount }, () => this.element());
 
     return {
+      observationId: overrides.observationId ?? faker.string.uuid(),
       updatedAt,
       screenSize,
       systemInsets,

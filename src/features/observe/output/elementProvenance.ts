@@ -12,6 +12,26 @@ export function getCapturedKeyboard(elements: object): ObserveResult["keyboard"]
   return (elements as { [CAPTURED_KEYBOARD]?: ObserveResult["keyboard"] })[CAPTURED_KEYBOARD];
 }
 
+const UNCOLLECTED_WRAPPERS = Symbol("auto-mobile.uncollectedWrappers");
+
+/**
+ * Parsed, resource-id-bearing nodes that reached NO `elements` category — a
+ * non-actionable, unlabelled `com.ime:id/keyboard_view` wrapper is the case
+ * that matters (issue #6908 item 1). They carry provenance like any collected
+ * node, so the legacy IME fold can widen its span to the wrapper the keys hang
+ * off instead of inferring it from the keycaps alone. Like the captured
+ * keyboard, this is output-projection metadata: a `Symbol`-keyed,
+ * non-enumerable property that never reaches the emitted `elements`.
+ */
+export function setUncollectedWrappers(elements: object, wrappers: readonly Element[]): void {
+  Object.defineProperty(elements, UNCOLLECTED_WRAPPERS, { value: wrappers });
+}
+
+/** The uncollected wrappers of a capture, or none when the collector recorded nothing. */
+export function getUncollectedWrappers(elements: object): readonly Element[] {
+  return (elements as { [UNCOLLECTED_WRAPPERS]?: readonly Element[] })[UNCOLLECTED_WRAPPERS] ?? [];
+}
+
 /**
  * Root/window ancestry provenance for a collected element (issue #5881).
  *

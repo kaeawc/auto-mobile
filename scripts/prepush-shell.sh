@@ -370,6 +370,8 @@ for path in "${changed_files[@]}"; do
     if [[ "${lfs_filter}" == "true" || "${binary_diff}" == "true" ]]; then
       add_check "lfs-pointers"
     fi
+  elif [[ "${is_jj_workspace_status}" -eq 0 ]]; then
+    add_check "lfs-pointers"
   fi
 done
 

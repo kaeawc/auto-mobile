@@ -58,7 +58,11 @@ case "$1 $2" in
     exit 0
     ;;
   "diff --from")
-    printf '%s\n' "scripts/example.sh" "test/bats/example.bats"
+    if [[ -n "${PREPUSH_JJ_CHANGED_FILES:-}" ]]; then
+      printf '%s\n' "${PREPUSH_JJ_CHANGED_FILES}"
+    else
+      printf '%s\n' "scripts/example.sh" "test/bats/example.bats"
+    fi
     ;;
   *)
     printf 'unexpected jj invocation: %s\n' "$*" >&2
@@ -204,8 +208,23 @@ EOF
   run bash scripts/prepush-shell.sh --base feature-base
 
   [ "${status}" -eq 0 ]
-  grep -Fqx -- '--only shellcheck,shell-portability,shell-sete,stdlib-first' "${FAST_LOG}"
+  grep -Fqx -- '--only shellcheck,shell-portability,shell-sete,stdlib-first,lfs-pointers' "${FAST_LOG}"
   grep -Fqx -- 'test/bats/example.bats' "${BATS_LOG}"
+}
+
+@test "a jj workspace selects LFS pointer validation for changed assets" {
+  install_registry_stub
+  rm -rf "${TEST_ROOT}/.git"
+  mkdir -p "${TEST_ROOT}/.jj" assets
+  printf '%s\n' "asset fixture" > assets/new.png
+  export PREPUSH_JJ_ROOT="${TEST_ROOT}"
+  export PREPUSH_JJ_CHANGED_FILES="assets/new.png"
+
+  run bash scripts/prepush-shell.sh --base feature-base
+
+  [ "${status}" -eq 0 ]
+  grep -Fq -- 'lfs-pointers' "${FAST_LOG}"
+  [[ "${output}" != *"nothing to validate"* ]]
 }
 
 @test "an unmatched scripts file selects no registered fast check" {

@@ -1049,19 +1049,26 @@ describe("DaemonManager control-state recovery", () => {
     expect(spawner.calls).toEqual([]);
   });
 
-  test("passes the remaining repair deadline to both synchronous process scans", async () => {
+  test("passes the remaining recovery budget to both scans and the port probe", async () => {
     const { lock, pid, socket } = paths();
+    const timer = new FakeTimer();
     const scanTimeouts: Array<number | undefined> = [];
+    const portProbeTimeouts: Array<number | undefined> = [];
+    let scans = 0;
     const manager = new DaemonManager(
       undefined,
       undefined,
-      new FakeTimer(),
+      timer,
       lock,
       pid,
       socket,
       {
         findDaemonProcesses: (timeoutMs) => {
           scanTimeouts.push(timeoutMs);
+          scans++;
+          if (scans === 2) {
+            timer.advanceTime(10);
+          }
           return [];
         },
         isProcessRunning: () => false,
@@ -1073,7 +1080,12 @@ describe("DaemonManager control-state recovery", () => {
       undefined,
       undefined,
       undefined,
-      { isPortFree: async () => false },
+      {
+        isPortFree: async (_port, _host, timeoutMs) => {
+          portProbeTimeouts.push(timeoutMs);
+          return false;
+        },
+      },
       undefined,
       async () => false,
     );
@@ -1082,6 +1094,7 @@ describe("DaemonManager control-state recovery", () => {
       "port 3000",
     );
     expect(scanTimeouts).toEqual([25, 25]);
+    expect(portProbeTimeouts).toEqual([15]);
   });
 
   test("recovers options from dead PID metadata without false CLI defaults erasing one-way flags", async () => {
@@ -1132,6 +1145,41 @@ describe("DaemonManager control-state recovery", () => {
       debug: true,
       embeddedSdk: true,
       noOcclusion: true,
+      strictPort: true,
+    });
+  });
+
+  test("uses last-requested-wins exact tool selections during doctor recovery", async () => {
+    const { lock, pid, socket } = paths();
+    const manager = new DaemonManager(undefined, undefined, new FakeTimer(), lock, pid, socket, {
+      findDaemonProcesses: () => [],
+      isProcessRunning: () => false,
+    });
+
+    const recoveryOptions = await (
+      manager as unknown as {
+        recoveryOptions(
+          status: { running: boolean; options: Record<string, unknown> },
+          options: Record<string, unknown>,
+        ): Promise<unknown>;
+      }
+    ).recoveryOptions(
+      {
+        running: false,
+        options: {
+          enabledTools: ["observe", "clipboard"],
+          disabledTools: ["tapOn"],
+        },
+      },
+      {
+        enabledTools: ["tapOn"],
+        disabledTools: ["observe"],
+      },
+    );
+
+    expect(recoveryOptions).toEqual({
+      enabledTools: ["clipboard", "tapOn"],
+      disabledTools: ["observe"],
       strictPort: true,
     });
   });

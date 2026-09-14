@@ -9,6 +9,7 @@ import {
   createDefaultDaemonProcessFinder,
   daemonBuildIdentityStatusLines,
   DaemonManager,
+  parseBusyBoxDaemonProcessTable,
   parseDarwinDaemonProcessTable,
   parseDaemonProcessTable,
   PsDaemonProcessFinder,
@@ -1253,6 +1254,22 @@ describe("Daemon manager process detection", () => {
     ]);
   });
 
+  test("parses BusyBox elapsed process creation times for PID-reuse protection", () => {
+    expect(
+      parseBusyBoxDaemonProcessTable(
+        "20 1 2-03:04:05 bunx -y @kaeawc/auto-mobile@0.0.38 --daemon-mode",
+        1_000_000_000,
+      ),
+    ).toEqual([
+      {
+        pid: 20,
+        ppid: 1,
+        command: "bunx -y @kaeawc/auto-mobile@0.0.38 --daemon-mode",
+        startedAt: 1_000_000_000 - (2 * 24 * 60 * 60 + 3 * 60 * 60 + 4 * 60 + 5) * 1000,
+      },
+    ]);
+  });
+
   test("parses Darwin lstart process creation times for PID-reuse protection", () => {
     expect(
       parseDarwinDaemonProcessTable(
@@ -1321,6 +1338,54 @@ describe("Daemon manager process detection", () => {
       timer,
     );
     expect(finder.findDaemonProcesses()[0]?.startedAt).toBe(60_000);
+  });
+
+  test("falls back to BusyBox etime under one scan deadline", () => {
+    const calls: Array<{
+      command: string;
+      options: { encoding: "utf-8"; maxBuffer: number; timeout: number };
+    }> = [];
+    const timer = new FakeTimer();
+    timer.advanceTime(1_000_000);
+    const finder = new PsDaemonProcessFinder(
+      (command, options) => {
+        calls.push({ command, options });
+        if (calls.length === 1) {
+          timer.advanceTime(2_000);
+          throw new Error("ps: invalid option -- 'e'");
+        }
+        return "20 1 00:00:12 bunx -y @kaeawc/auto-mobile@0.0.38 --daemon-mode";
+      },
+      "linux",
+      timer,
+    );
+
+    expect(finder.findDaemonProcesses()).toEqual([
+      {
+        pid: 20,
+        ppid: 1,
+        command: "bunx -y @kaeawc/auto-mobile@0.0.38 --daemon-mode",
+        startedAt: 990_000,
+      },
+    ]);
+    expect(calls).toEqual([
+      {
+        command: "ps -eo pid=,ppid=,etimes=,command=",
+        options: {
+          encoding: "utf-8",
+          maxBuffer: DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES,
+          timeout: DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS,
+        },
+      },
+      {
+        command: "ps -o pid,ppid,etime,args",
+        options: {
+          encoding: "utf-8",
+          maxBuffer: DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES,
+          timeout: DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS - 2_000,
+        },
+      },
+    ]);
   });
 
   test("reads absolute UTC Windows process birth independently of the host clock", () => {

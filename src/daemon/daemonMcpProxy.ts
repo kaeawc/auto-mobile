@@ -66,8 +66,10 @@ import {
 import { DeviceControlTransportError } from "./deviceControlTransportFailure";
 import { getStaticToolDefinitions } from "./staticToolDefinitions";
 import { DaemonRestartDeferredError } from "./daemonRestartAdmission";
+import { mergedExactToolSelections } from "./daemonOptionSelections";
 
 export { DaemonRestartDeferredError } from "./daemonRestartAdmission";
+export { REUSE_CRITICAL_ARRAY_OPTION_KEYS } from "./daemonOptionSelections";
 
 export type VersionMismatchReason =
   | "autoStartDisabled"
@@ -439,10 +441,6 @@ const REUSE_CRITICAL_STRING_OPTION_KEYS: (keyof DaemonOptions)[] = [
 ];
 
 const REUSE_CRITICAL_NUMBER_OPTION_KEYS: (keyof DaemonOptions)[] = ["runnerReadinessTimeoutMs"];
-export const REUSE_CRITICAL_ARRAY_OPTION_KEYS: (keyof DaemonOptions)[] = [
-  "enabledTools",
-  "disabledTools",
-];
 
 /** The value of a startup option when it is a string, else undefined. */
 function stringOption(
@@ -510,31 +508,6 @@ function exactToolSelectionDeficits(
             })`,
         ],
   );
-}
-
-function mergedExactToolSelections(
-  running: DaemonOptions | undefined,
-  requested: DaemonOptions | undefined,
-): Pick<DaemonOptions, "enabledTools" | "disabledTools"> | undefined {
-  const selectionsSpecified = REUSE_CRITICAL_ARRAY_OPTION_KEYS.some(
-    (key) =>
-      stringArrayOption(running, key) !== undefined ||
-      stringArrayOption(requested, key) !== undefined,
-  );
-  if (!selectionsSpecified) {
-    return undefined;
-  }
-  const assignments = new Map<string, boolean>();
-  applyExactToolSelections(assignments, running);
-  applyExactToolSelections(assignments, requested);
-  return {
-    enabledTools: Array.from(assignments)
-      .filter(([, enabled]) => enabled)
-      .map(([toolName]) => toolName),
-    disabledTools: Array.from(assignments)
-      .filter(([, enabled]) => !enabled)
-      .map(([toolName]) => toolName),
-  };
 }
 
 function requestedOptionDeficits<T>(

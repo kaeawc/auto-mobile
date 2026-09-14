@@ -104,6 +104,7 @@ import {
   RUNNER_READINESS_TIMEOUT_FLAG,
   parseRunnerReadinessTimeout,
 } from "../utils/runnerReadinessConfig";
+import { mergedExactToolSelections } from "./daemonOptionSelections";
 
 export type { DaemonLaunchCommand, DaemonProcessSpawner } from "./DaemonLauncher";
 
@@ -261,6 +262,58 @@ export function parseDaemonProcessTable(
       command,
       ...(elapsedSeconds === undefined ? {} : { startedAt: now - elapsedSeconds * 1000 }),
     });
+  }
+
+  return records;
+}
+
+function parseBusyBoxElapsedSeconds(value: string): number | undefined {
+  const match = value.match(/^(?:(\d+)-)?(?:(\d{1,2}):)?(\d{2}):(\d{2})$/);
+  if (!match) {
+    return undefined;
+  }
+  const days = match[1] === undefined ? 0 : parseInt(match[1], 10);
+  const hours = match[2] === undefined ? 0 : parseInt(match[2], 10);
+  const minutes = parseInt(match[3], 10);
+  const seconds = parseInt(match[4], 10);
+  if (
+    ![days, hours, minutes, seconds].every(Number.isFinite) ||
+    hours > 23 ||
+    minutes > 59 ||
+    seconds > 59
+  ) {
+    return undefined;
+  }
+  return ((days * 24 + hours) * 60 + minutes) * 60 + seconds;
+}
+
+/** Parse BusyBox `ps -o pid,ppid,etime,args` output. */
+export function parseBusyBoxDaemonProcessTable(
+  psOutput: string,
+  now: number = Date.now(),
+): DaemonProcessRecord[] {
+  const records: DaemonProcessRecord[] = [];
+
+  for (const line of psOutput.split("\n")) {
+    const match = line.match(/^\s*(\d+)\s+(\d+)\s+(\S+)\s+(.+?)\s*$/);
+    if (!match) {
+      continue;
+    }
+
+    const pid = parseInt(match[1], 10);
+    const ppid = parseInt(match[2], 10);
+    const elapsedSeconds = parseBusyBoxElapsedSeconds(match[3]);
+    const command = match[4];
+    if (
+      !Number.isFinite(pid) ||
+      !Number.isFinite(ppid) ||
+      elapsedSeconds === undefined ||
+      !isAutoMobileDaemonCommand(command)
+    ) {
+      continue;
+    }
+
+    records.push({ pid, ppid, command, startedAt: now - elapsedSeconds * 1000 });
   }
 
   return records;
@@ -445,6 +498,12 @@ function boundedProcessTableScanTimeout(timeoutMs: number | undefined): number {
   );
 }
 
+function isUnsupportedGnuProcessTableFormat(error: unknown): boolean {
+  return /(?:\betimes\b|\b(?:invalid|unrecognized|unknown|unsupported)\s+option\b|\bbad\s+-o\b)/i.test(
+    errorMessage(error),
+  );
+}
+
 export class PsDaemonProcessFinder implements DaemonProcessFinder, DaemonProcessLivenessChecker {
   constructor(
     private readonly runCommand: ProcessTableCommandRunner = execSync,
@@ -454,22 +513,41 @@ export class PsDaemonProcessFinder implements DaemonProcessFinder, DaemonProcess
 
   findDaemonProcesses(timeoutMs?: number): DaemonProcessRecord[] {
     const isDarwin = this.platform === "darwin";
-    // Relative ages belong to the scan snapshot, not to the later time at
-    // which a loaded host finishes returning the process table.
-    const snapshotAt = this.timer.now();
-    const psOutput = this.runCommand(
-      isDarwin
-        ? "LC_ALL=C ps -axo pid=,ppid=,lstart=,command="
-        : "ps -eo pid=,ppid=,etimes=,command=",
-      {
-        encoding: "utf-8",
-        maxBuffer: DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES,
-        timeout: boundedProcessTableScanTimeout(timeoutMs),
-      },
-    );
-    return isDarwin
-      ? parseDarwinDaemonProcessTable(psOutput)
-      : parseDaemonProcessTable(psOutput, snapshotAt);
+    const scanTimeoutMs = boundedProcessTableScanTimeout(timeoutMs);
+    const scanDeadline = this.timer.now() + scanTimeoutMs;
+    const runScan = (command: string): { output: string; scannedAt: number } => {
+      // Relative ages belong to the snapshot immediately before this scan, not
+      // to the later time at which a loaded host returns the process table.
+      const scannedAt = this.timer.now();
+      const remaining = scanDeadline - scannedAt;
+      if (remaining <= 0) {
+        throw new Error("Process-table inspection ETIMEDOUT before scan could begin");
+      }
+      return {
+        output: this.runCommand(command, {
+          encoding: "utf-8",
+          maxBuffer: DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES,
+          timeout: Math.max(MIN_PROCESS_TABLE_SCAN_TIMEOUT_MS, remaining),
+        }),
+        scannedAt,
+      };
+    };
+
+    if (isDarwin) {
+      const { output } = runScan("LC_ALL=C ps -axo pid=,ppid=,lstart=,command=");
+      return parseDarwinDaemonProcessTable(output);
+    }
+
+    try {
+      const { output, scannedAt } = runScan("ps -eo pid=,ppid=,etimes=,command=");
+      return parseDaemonProcessTable(output, scannedAt);
+    } catch (error) {
+      if (!isUnsupportedGnuProcessTableFormat(error)) {
+        throw error;
+      }
+      const { output, scannedAt } = runScan("ps -o pid,ppid,etime,args");
+      return parseBusyBoxDaemonProcessTable(output, scannedAt);
+    }
   }
 
   isProcessRunning(pid: number): boolean {
@@ -2199,7 +2277,12 @@ export class DaemonManager implements DaemonManagerLike {
     const requestedOptions = Object.fromEntries(
       Object.entries(options).filter(([, value]) => value !== undefined && value !== false),
     ) as DaemonOptions;
-    return { ...recordedOptions, ...requestedOptions, strictPort: true };
+    const recoveryOptions = { ...recordedOptions, ...requestedOptions, strictPort: true };
+    const exactToolSelections = mergedExactToolSelections(recordedOptions, requestedOptions);
+    if (exactToolSelections) {
+      Object.assign(recoveryOptions, exactToolSelections);
+    }
+    return recoveryOptions;
   }
 
   private async readRecoveryOptionsFromPidFile(): Promise<DaemonOptions> {

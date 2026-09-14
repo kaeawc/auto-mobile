@@ -910,8 +910,17 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       (DaemonState.getInstance().isInitialized()
         ? DaemonState.getInstance().getSessionManager()
         : undefined);
+    // `setToolEnabled` is a plain tool, so an explicit connection-profile UUID
+    // remains its routing session. Its readback still has to enumerate labels
+    // from this connection's acquired device session, not from that profile.
+    const routingSessionUuidForLabelLookup =
+      name === SET_TOOL_ENABLED_TOOL_NAME &&
+      requestedToolSelectionProfileUuid !== undefined &&
+      requestedToolSelectionProfileUuid === connectionProfileUuid
+        ? (sessionToolBinding.boundDeviceSessionUuid(sessionId) ?? routingSessionUuid)
+        : routingSessionUuid;
     const routingBaseSessionUuid = resolveToolSelectionBaseSessionUuid(
-      routingSessionUuid,
+      routingSessionUuidForLabelLookup,
       selectionSessionManager,
     );
     const derivedLabelSessionUuid =

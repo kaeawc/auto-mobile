@@ -622,6 +622,118 @@ describe("per-session exact-tool selection", () => {
     expect(result.content[0]?.text).toBe("ran");
   });
 
+  test("reads sibling label grants from an acquired binding when reaffirming its connection profile", async () => {
+    const overrides = new Map<string, Map<string, boolean>>([
+      ["acquired-session:B", new Map([["observe", true]])],
+      ["foreign-session:B", new Map([["foreignObserve", true]])],
+    ]);
+    const profileService: Pick<
+      SessionToolSelectionService,
+      "isEnabled" | "getOverride" | "setEnabled"
+    > = {
+      isEnabled: async (sessionUuid, toolName, declaredDefault) =>
+        (sessionUuid ? overrides.get(sessionUuid)?.get(toolName) : undefined) ?? declaredDefault,
+      getOverride: async (sessionUuid, toolName) => overrides.get(sessionUuid)?.get(toolName),
+      setEnabled: async (sessionUuid, toolName, enabled) => {
+        const sessionOverrides = overrides.get(sessionUuid) ?? new Map<string, boolean>();
+        sessionOverrides.set(toolName, enabled);
+        overrides.set(sessionUuid, sessionOverrides);
+      },
+    };
+    fixture = new McpTestFixture({
+      sessionToolSelectionService: profileService,
+      toolSelectionSessionManager: {
+        getDeviceLabels: (sessionUuid) => {
+          if (sessionUuid === "acquired-session") {
+            return { A: "acquired-session", B: "acquired-session:B" };
+          }
+          if (sessionUuid === "foreign-session") {
+            return { A: "foreign-session", B: "foreign-session:B" };
+          }
+          return undefined;
+        },
+      },
+    });
+    await fixture.setup();
+
+    ToolRegistry.clearTools();
+    ToolRegistry.register(
+      "getAndroid",
+      "acquire",
+      z.object({}),
+      async () => ({
+        content: [{ type: "text", text: JSON.stringify({ sessionUuid: "acquired-session" }) }],
+      }),
+      { defaultEnabled: true },
+    );
+    ToolRegistry.registerDeviceAware(
+      "observe",
+      "observe",
+      z.object({}),
+      async () => ({ content: [{ type: "text", text: "ran" }] }),
+      { defaultEnabled: false },
+    );
+    ToolRegistry.registerDeviceAware(
+      "foreignObserve",
+      "foreign observe",
+      z.object({}),
+      async () => ({ content: [{ type: "text", text: "ran" }] }),
+      { defaultEnabled: false },
+    );
+    ToolRegistry.register(
+      "clipboard",
+      "clipboard",
+      z.object({}),
+      async () => ({ content: [{ type: "text", text: "ran" }] }),
+      { defaultEnabled: false },
+    );
+    registerToolSelectionTools();
+
+    await fixture.client.request(
+      { method: "tools/call", params: { name: "getAndroid", arguments: {} } },
+      z.any(),
+    );
+    const initialUpdate = await fixture.client.request(
+      {
+        method: "tools/call",
+        params: { name: "setToolEnabled", arguments: { toolName: "clipboard" } },
+      },
+      z.any(),
+    );
+    const profileUuid = JSON.parse(initialUpdate.content[0]!.text).sessionUuid as string;
+
+    const profileUpdate = await fixture.client.request(
+      {
+        method: "tools/call",
+        params: {
+          name: "setToolEnabled",
+          arguments: { toolName: "clipboard", enabled: false, sessionUuid: profileUuid },
+        },
+      },
+      z.any(),
+    );
+    const profileEnabledTools = JSON.parse(profileUpdate.content[0]!.text).enabledTools as string[];
+    const listedTools = (await fixture.client.listTools()).tools.map((tool) => tool.name);
+
+    expect(profileEnabledTools).toContain("observe");
+    expect(listedTools).toContain("observe");
+
+    const foreignUpdate = await fixture.client.request(
+      {
+        method: "tools/call",
+        params: {
+          name: "setToolEnabled",
+          arguments: { toolName: "clipboard", sessionUuid: "foreign-session" },
+        },
+      },
+      z.any(),
+    );
+    const foreignEnabledTools = JSON.parse(foreignUpdate.content[0]!.text).enabledTools as string[];
+
+    expect(foreignEnabledTools).toContain("foreignObserve");
+    expect(foreignEnabledTools).not.toContain("observe");
+  });
+
   test("a derived routing binding retains the base session grant for discovery and calls", async () => {
     const profileService: Pick<SessionToolSelectionService, "isEnabled" | "getOverride"> = {
       isEnabled: async (sessionUuid, toolName, declaredDefault) =>

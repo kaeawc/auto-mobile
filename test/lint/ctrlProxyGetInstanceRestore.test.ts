@@ -122,16 +122,23 @@ describe("CtrlProxy getInstance mocks are restored in-file (issue #7052)", () =>
    * rejecting the established `afterEach(() => restore())` suite pattern.
    */
   function runsInTeardownCallback(node: ts.Node): boolean {
-    for (let current = node.parent; current; current = current.parent) {
-      if (!ts.isArrowFunction(current) && !ts.isFunctionExpression(current)) {
+    for (let current = node.parent; current;) {
+      if (!ts.isFunctionLike(current)) {
+        current = current.parent;
         continue;
       }
       const call = current.parent;
-      if (!ts.isCallExpression(call) || !call.arguments.includes(current)) {
-        continue;
+      if (!ts.isCallExpression(call) || !call.arguments.some((argument) => argument === current)) {
+        return false;
       }
       const callee = unwrap(call.expression);
-      return ts.isIdentifier(callee) && (callee.text === "afterEach" || callee.text === "afterAll");
+      if (ts.isIdentifier(callee) && (callee.text === "afterEach" || callee.text === "afterAll")) {
+        return true;
+      }
+      // A synchronous helper callback can be nested in a teardown callback.
+      // Resume outside its call so an enclosing afterEach/afterAll argument can
+      // still establish teardown ordering.
+      current = call.parent;
     }
     return false;
   }
@@ -265,23 +272,26 @@ describe("CtrlProxy getInstance mocks are restored in-file (issue #7052)", () =>
     const scopeIds = new Map<ts.Node, number>();
     const declaredBindings = new Set<string>();
     const ctrlProxyBindings = new Map<string, CtrlProxySymbol>();
+    const introducesLexicalScope = (node: ts.Node): boolean =>
+      ts.isBlock(node) ||
+      ts.isFunctionLike(node) ||
+      ts.isSourceFile(node) ||
+      // Loop declarations have a scope of their own, rather than belonging to
+      // their enclosing block.
+      ts.isForStatement(node) ||
+      ts.isForInStatement(node) ||
+      ts.isForOfStatement(node) ||
+      ts.isWhileStatement(node) ||
+      ts.isDoStatement(node) ||
+      // Catch parameters and switch clauses are lexical bindings, but neither
+      // node is a Block. Keep a switch's CaseBlock as one shared scope, as JS
+      // does, rather than pretending every case has an independent scope.
+      ts.isCatchClause(node) ||
+      ts.isCaseBlock(node);
     const scopeChain = (node: ts.Node): ts.Node[] => {
       const scopes: ts.Node[] = [];
       for (let current: ts.Node | undefined = node; current; current = current.parent) {
-        if (
-          ts.isBlock(current) ||
-          ts.isFunctionLike(current) ||
-          ts.isSourceFile(current) ||
-          // `let` and `const` declared by a loop initializer are scoped to that
-          // loop, not its enclosing block. Without the loop in this chain,
-          // predeclaration lets a loop-local CtrlProxy-alias look like it shadows
-          // the import throughout the enclosing function, including before the
-          // loop begins.
-          ts.isForStatement(current) ||
-          ts.isForInStatement(current) ||
-          ts.isForOfStatement(current) ||
-          ts.isWhileStatement(current)
-        ) {
+        if (introducesLexicalScope(current)) {
           scopes.push(current);
         }
       }
@@ -295,8 +305,11 @@ describe("CtrlProxy getInstance mocks are restored in-file (issue #7052)", () =>
       }
       return `${id}:${name}`;
     };
-    const isVarDeclaration = (name: ts.Identifier): boolean => {
+    const isFunctionScopedDeclaration = (name: ts.Identifier): boolean => {
       const declaration = name.parent;
+      if (ts.isFunctionDeclaration(declaration)) {
+        return true;
+      }
       if (
         !ts.isVariableDeclaration(declaration) ||
         !ts.isVariableDeclarationList(declaration.parent)
@@ -304,11 +317,21 @@ describe("CtrlProxy getInstance mocks are restored in-file (issue #7052)", () =>
         return false;
       }
       const flags = declaration.parent.flags;
-      return (flags & (ts.NodeFlags.Let | ts.NodeFlags.Const)) === 0;
+      return (
+        (flags &
+          (ts.NodeFlags.Let |
+            ts.NodeFlags.Const |
+            ts.NodeFlags.Using |
+            ts.NodeFlags.AwaitUsing)) ===
+        0
+      );
     };
     const declarationKey = (name: ts.Identifier): string => {
-      const scopes = scopeChain(name);
-      const scope = isVarDeclaration(name)
+      const declaration = name.parent;
+      // A function declaration binds in its enclosing function/source scope,
+      // not in the scope introduced by its own body.
+      const scopes = scopeChain(ts.isFunctionDeclaration(declaration) ? declaration.parent : name);
+      const scope = isFunctionScopedDeclaration(name)
         ? scopes.find((candidate) => ts.isFunctionLike(candidate) || ts.isSourceFile(candidate))
         : scopes[0];
       return keyForScope(scope, name.text);
@@ -330,7 +353,13 @@ describe("CtrlProxy getInstance mocks are restored in-file (issue #7052)", () =>
     }
 
     const predeclareWalk = (node: ts.Node): void => {
-      if ((ts.isVariableDeclaration(node) || ts.isParameter(node)) && ts.isIdentifier(node.name)) {
+      if (
+        (ts.isVariableDeclaration(node) ||
+          ts.isParameter(node) ||
+          ts.isFunctionDeclaration(node)) &&
+        node.name !== undefined &&
+        ts.isIdentifier(node.name)
+      ) {
         declaredBindings.add(declarationKey(node.name));
       }
       ts.forEachChild(node, predeclareWalk);
@@ -782,6 +811,120 @@ describe("CtrlProxy getInstance mocks are restored in-file (issue #7052)", () =>
     );
     expect([...f.installs]).toEqual([]);
     expect(leaksOf("loop-local.ts", f)).toEqual([]);
+  });
+
+  test("THREAD A: a catch-local alias cannot hide a prior imported-alias install", () => {
+    const f = analyzeSource(
+      `import { AndroidCtrlProxyClient as Client } from "some/path";\n` +
+        `function setup() {\n` +
+        `  Client.getInstance = mock(() => ({}));\n` +
+        `  try {} catch (Client) {\n` +
+        `    void Client;\n` +
+        `  }\n` +
+        `}\n`,
+    );
+    expect([...f.installs]).toEqual(["AndroidCtrlProxyClient"]);
+    expect(leaksOf("catch-shadow.ts", f)).toEqual([
+      "catch-shadow.ts: installs AndroidCtrlProxyClient.getInstance but never restores it",
+    ]);
+  });
+
+  test("THREAD A: a switch case-local alias cannot hide a prior imported-alias install", () => {
+    const f = analyzeSource(
+      `import { AndroidCtrlProxyClient as Client } from "some/path";\n` +
+        `function setup(value: unknown) {\n` +
+        `  Client.getInstance = mock(() => ({}));\n` +
+        `  switch (value) {\n` +
+        `    case 1:\n` +
+        `      const Client = other;\n` +
+        `      void Client;\n` +
+        `      break;\n` +
+        `  }\n` +
+        `}\n`,
+    );
+    expect([...f.installs]).toEqual(["AndroidCtrlProxyClient"]);
+    expect(leaksOf("case-shadow.ts", f)).toEqual([
+      "case-shadow.ts: installs AndroidCtrlProxyClient.getInstance but never restores it",
+    ]);
+  });
+
+  test("THREAD A: harmless catch- and case-local aliases are not misattributed", () => {
+    const f = analyzeSource(
+      `import { AndroidCtrlProxyClient as Client } from "some/path";\n` +
+        `function setup(value: unknown) {\n` +
+        `  try {} catch (Client) {\n` +
+        `    Client.getInstance = () => ({});\n` +
+        `  }\n` +
+        `  switch (value) {\n` +
+        `    case 1:\n` +
+        `      const Client = other;\n` +
+        `      Client.getInstance = () => ({});\n` +
+        `      break;\n` +
+        `  }\n` +
+        `}\n`,
+    );
+    expect([...f.installs]).toEqual([]);
+    expect(leaksOf("clean-local-aliases.ts", f)).toEqual([]);
+  });
+
+  test("THREAD B: nested using aliases cannot hide a prior imported-alias install", () => {
+    const f = analyzeSource(
+      `import { AndroidCtrlProxyClient as Client } from "some/path";\n` +
+        `async function setup() {\n` +
+        `  Client.getInstance = mock(() => ({}));\n` +
+        `  { using Client = someResource; void Client; }\n` +
+        `  { await using Client = anotherResource; void Client; }\n` +
+        `}\n`,
+    );
+    expect([...f.installs]).toEqual(["AndroidCtrlProxyClient"]);
+    expect(leaksOf("using-shadow.ts", f)).toEqual([
+      "using-shadow.ts: installs AndroidCtrlProxyClient.getInstance but never restores it",
+    ]);
+  });
+
+  test("THREAD B: a nested using alias is not misattributed", () => {
+    const f = analyzeSource(
+      `import { AndroidCtrlProxyClient as Client } from "some/path";\n` +
+        `async function setup() {\n` +
+        `  {\n` +
+        `    await using Client = someResource;\n` +
+        `    Client.getInstance = () => ({});\n` +
+        `  }\n` +
+        `}\n`,
+    );
+    expect([...f.installs]).toEqual([]);
+    expect(leaksOf("clean-using-local.ts", f)).toEqual([]);
+  });
+
+  test("THREAD C: nested helper callbacks inside afterEach restore teardown-ordered installs", () => {
+    const f = analyzeSource(
+      `const original = AndroidCtrlProxyClient.getInstance;\n` +
+        `AndroidCtrlProxyClient.getInstance = mock(() => ({}));\n` +
+        `afterEach(() => helper(() => helper(() => {\n` +
+        `  AndroidCtrlProxyClient.getInstance = original;\n` +
+        `})));\n`,
+    );
+    expect([...f.installs]).toEqual(["AndroidCtrlProxyClient"]);
+    expect([...f.restores]).toEqual(["AndroidCtrlProxyClient"]);
+    expect(leaksOf("nested-teardown-restore.ts", f)).toEqual([]);
+  });
+
+  test("THREAD C: a later teardown spy install remains a leak after a nested helper restore", () => {
+    const f = analyzeSource(
+      `const original = AndroidCtrlProxyClient.getInstance;\n` +
+        `afterEach(() => helper(() => helper(() => {\n` +
+        `  AndroidCtrlProxyClient.getInstance = original;\n` +
+        `})));\n` +
+        `afterEach(() => {\n` +
+        `  const getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance");\n` +
+        `  AndroidCtrlProxyClient.getInstance = getInstanceSpy;\n` +
+        `});\n`,
+    );
+    expect([...f.spyInstalls]).toEqual(["AndroidCtrlProxyClient"]);
+    expect([...f.restores]).toEqual(["AndroidCtrlProxyClient"]);
+    expect(leaksOf("restore-before-later-teardown-spy.ts", f)).toEqual([
+      "restore-before-later-teardown-spy.ts: installs AndroidCtrlProxyClient.getInstance but never restores it",
+    ]);
   });
 
   test("THREAD 1: a typed-cast install with no restore is flagged", () => {

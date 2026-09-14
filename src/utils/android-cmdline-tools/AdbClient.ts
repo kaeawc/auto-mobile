@@ -42,6 +42,11 @@ import {
 
 type ExecFileAsync = (file: string, args: string[], maxBuffer?: number) => Promise<ExecResult>;
 
+/** Read-only busy-state dependency for per-device ADB health notifications. */
+export interface AdbConsoleBusyRegistry {
+  isBusy(deviceId: string): boolean;
+}
+
 const PROCESS_SETTLEMENT_GRACE_MS = 1_000;
 
 /**
@@ -174,6 +179,7 @@ export class AdbClient implements AdbExecutor {
    * @param retryExecutor - retry executor for command retries (for testing)
    * @param timer - Timer for delays and time tracking
    * @param observationSequence - Monotonic discovery ordering source
+   * @param consoleBusyRegistry - Shared console-exclusive operation state
    */
   constructor(
     device: BootedDevice | null = null,
@@ -187,6 +193,7 @@ export class AdbClient implements AdbExecutor {
     private readonly systemDetectionFactory: () => SystemDetection = () =>
       new DefaultSystemDetection(),
     private readonly observationSequence: DiscoveryObservationSequence = defaultDiscoveryObservationSequence,
+    private readonly consoleBusyRegistry?: AdbConsoleBusyRegistry,
   ) {
     this.device = device;
     // Test mode if: custom execAsync provided OR global test mode flag is set
@@ -808,6 +815,12 @@ export class AdbClient implements AdbExecutor {
   private notifyMissingDeviceIfNeeded(error: unknown): void {
     const deviceId = this.device?.deviceId;
     if (!deviceId || !isAdbMissingDeviceError(error, deviceId)) {
+      return;
+    }
+    if (this.consoleBusyRegistry?.isBusy(deviceId)) {
+      logger.debug(
+        `[ADB] Suppressing missing-device notification for ${deviceId}: a console-exclusive operation is in flight`,
+      );
       return;
     }
     resetAdbDeviceListCache();

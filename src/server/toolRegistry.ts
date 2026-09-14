@@ -1369,7 +1369,10 @@ export class ToolRegistryClass {
                 });
               }
 
-              throwDeviceLostFromAbortSignal(signal);
+              // The handler has settled successfully. A device-loss abort that
+              // lands afterwards must not replace that completed response; a
+              // handler that observed the abort still throws through the catch
+              // below, where the device-loss outcome remains authoritative.
 
               const afterToolCallResult = await this.afterToolCall.handle({
                 name,

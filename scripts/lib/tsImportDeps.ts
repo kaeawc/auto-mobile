@@ -29,8 +29,7 @@ function relativeModuleSpecifiers(sourceFile: ts.SourceFile): string[] {
 
 function resolveRelativeSpecifier(importingFile: string, specifier: string): string | undefined {
   const literalPath = path.resolve(path.dirname(importingFile), specifier);
-  const candidate = path.extname(literalPath) === "" ? `${literalPath}.ts` : literalPath;
-  return existsSync(candidate) ? candidate : undefined;
+  return path.extname(literalPath) === "" ? `${literalPath}.ts` : literalPath;
 }
 
 /**

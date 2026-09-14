@@ -118,6 +118,28 @@ EOF
   grep -Fqx -- '--only stdlib-first' "${FAST_LOG}"
 }
 
+@test "a TypeScript dependency resolver failure stops prepush closed" {
+  install_registry_stub
+  mkdir -p scripts/release/lib
+  printf '%s\n' 'import "./lib/runtime-roots";' > scripts/release/pin-runtime-deps.ts
+  printf '%s\n' 'export const runtimeRoots = [];' > scripts/release/lib/runtime-roots.ts
+  git add scripts/release/pin-runtime-deps.ts scripts/release/lib/runtime-roots.ts
+  git commit -qm "add runtime pins fixtures"
+  git branch -f base HEAD
+  commit_change "scripts/release/lib/runtime-roots.ts" "export const runtimeRoots = [\"changed\"];"
+  cat > "${STUB_DIR}/bun" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "simulated TypeScript dependency resolver failure" >&2
+exit 19
+EOF
+  chmod +x "${STUB_DIR}/bun"
+
+  run bash scripts/prepush-shell.sh --base base
+
+  [ "${status}" -eq 19 ]
+  [[ "${output}" == *"Failed to resolve TypeScript dependencies for scripts/release/pin-runtime-deps.ts"* ]]
+}
+
 teardown() {
   rm -rf "${TEST_ROOT}"
 }

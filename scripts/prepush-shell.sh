@@ -112,11 +112,19 @@ add_registered_checks_for_script_path() {
         done < <(grep -E '^[[:space:]]*#[[:space:]]*shellcheck[[:space:]]+source=[^[:space:]]+' "${check_script}" || true)
         ;;
       *.ts)
+        set +e
+        resolver_output="$(bun "${PROJECT_ROOT}/scripts/lib/tsImportDeps.ts" "${check_script}")"
+        resolver_status=$?
+        set -e
+        if [[ "${resolver_status}" -ne 0 ]]; then
+          echo "Failed to resolve TypeScript dependencies for ${check_script}." >&2
+          exit "${resolver_status}"
+        fi
         while IFS= read -r helper_path; do
           if [[ "${path}" == "${helper_path}" ]]; then
             add_check "${check_name}"
           fi
-        done < <(bun "${PROJECT_ROOT}/scripts/lib/tsImportDeps.ts" "${check_script}")
+        done <<< "${resolver_output}"
         ;;
     esac
   done

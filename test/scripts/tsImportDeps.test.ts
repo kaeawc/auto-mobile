@@ -51,4 +51,13 @@ describe("resolveRelativeImportPaths", () => {
       "scripts/release/lib/runtime-roots.ts",
     ]);
   });
+
+  test("keeps a missing relative import in the dependency graph", () => {
+    const entryFile = path.join(repoRoot, "scripts/release/missing-consumer.ts");
+    writeFileSync(entryFile, 'import "./lib/deleted-helper";\n');
+
+    expect(resolveRelativeImportPaths(entryFile, { repoRoot })).toEqual([
+      "scripts/release/lib/deleted-helper.ts",
+    ]);
+  });
 });

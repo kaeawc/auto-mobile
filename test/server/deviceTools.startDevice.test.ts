@@ -71,6 +71,8 @@ describe("startDevice handler", () => {
       deviceManagerFactory: () => fakeDeviceUtils,
       deviceMatcherFactory: () => fakeMatcher,
       notifyResourcesChanged: async () => {},
+      notifyDeviceInventoryResourcesChanged: async () => {},
+      syncInstalledAppResourceRegistry: async () => false,
       ensureCtrlProxyReady: async () => {},
       timer: bootTimer,
     });
@@ -289,6 +291,8 @@ describe("startDevice handler", () => {
       deviceManagerFactory: () => fakeDeviceUtils,
       deviceMatcherFactory: () => fakeMatcher,
       notifyResourcesChanged: async () => {},
+      notifyDeviceInventoryResourcesChanged: async () => {},
+      syncInstalledAppResourceRegistry: async () => false,
       timer: new FakeTimer(),
       // deliberately no ensureCtrlProxyReady -> default closure with the check
     });
@@ -601,23 +605,31 @@ describe("startDevice handler", () => {
     });
     setDeviceToolsDependencies({
       idGenerator: new CountingIdGenerator("session"),
-      notifyResourcesChanged: async () => {
+      notifyDeviceInventoryResourcesChanged: async () => {
         signalResourcesStarted();
         await resourcesStarted;
       },
     });
 
-    const start = callStartDevice({ platform: "android" });
+    let startSettled = false;
+    const start = callStartDevice({ platform: "android" }).then((result) => {
+      startSettled = true;
+      return result;
+    });
     await waitForResources;
     try {
+      for (let attempt = 0; attempt < 50; attempt++) {
+        await Promise.resolve();
+      }
+      expect(startSettled).toBe(true);
       expect(readyDeviceIds).toEqual(["emulator-5554"]);
       expect(pool.getDevice("emulator-5554")?.status).toBe("busy");
       expect(pool.getDevice("emulator-5554")?.sessionId).toBe("session-1");
       expect(daemonSessionManager.getSession("session-1")).not.toBeNull();
+      expect((await start).sessionUuid).toBe("session-1");
     } finally {
       releaseResources();
-      const result = await start;
-      expect(result.sessionUuid).toBe("session-1");
+      await start;
     }
   });
 

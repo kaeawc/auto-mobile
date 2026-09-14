@@ -5,8 +5,14 @@ import {
   SubscribeRequestSchema,
   UnsubscribeRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
+import {
+  notifyInstalledAppResourceListChanged,
+  syncInstalledAppResourceRegistry,
+} from "../../src/server/appResources";
 import { getRequestedResourceUri, ResourceRegistry } from "../../src/server/resourceRegistry";
 import { ListChangedBroadcaster } from "../../src/server/listChangedBroadcast";
+import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
+import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 
 // Minimal MCP-server stand-in for ResourceRegistry: registerWithServer installs
 // request handlers on `server.server` and tracks the wrapper for notification
@@ -15,6 +21,8 @@ class FakeUnderlyingServer {
   notifications: Array<{ method: string; params?: unknown }> = [];
   handlersBySchema = new Map<unknown, (request: unknown, extra?: unknown) => Promise<unknown>>();
   shouldThrow = false;
+  notificationStarted?: () => void;
+  notificationGate?: Promise<void>;
   onclose?: () => void;
   setRequestHandler(
     schema: unknown,
@@ -27,6 +35,8 @@ class FakeUnderlyingServer {
       throw new Error("Not connected");
     }
     this.notifications.push(payload);
+    this.notificationStarted?.();
+    await this.notificationGate;
   }
 }
 
@@ -43,6 +53,47 @@ describe("ResourceRegistry list-changed fan-out (issue #3223)", () => {
     // The registry singleton is shared across suites; drop servers registered
     // by other tests so counts here are hermetic.
     ResourceRegistry.clearServersForTesting();
+  });
+
+  test("installed-app registry sync does not wait for list-change delivery", async () => {
+    const device = {
+      platform: "ios" as const,
+      name: "Pending Notification Simulator",
+      deviceId: "PENDING-NOTIFICATION-SIMULATOR",
+    };
+    const manager = new FakeDeviceUtils();
+    manager.setBootedDevices("ios", [device]);
+    PlatformDeviceManagerFactory.setInstance(manager);
+    const server = new FakeMcpServer();
+    const notificationStarted = Promise.withResolvers<void>();
+    const releaseNotification = Promise.withResolvers<void>();
+    server.server.notificationStarted = () => notificationStarted.resolve();
+    server.server.notificationGate = releaseNotification.promise;
+    ResourceRegistry.registerWithServer(server as unknown as McpServer);
+
+    let notificationSettled = false;
+    let notification: Promise<void> | undefined;
+    try {
+      expect(await syncInstalledAppResourceRegistry()).toBe(true);
+      expect(
+        ResourceRegistry.getResource(`automobile:devices/${device.deviceId}/apps`),
+      ).toBeDefined();
+
+      notification = notifyInstalledAppResourceListChanged().then(() => {
+        notificationSettled = true;
+      });
+      await notificationStarted.promise;
+      await Promise.resolve();
+
+      expect(notificationSettled).toBe(false);
+    } finally {
+      releaseNotification.resolve();
+      await notification;
+      ResourceRegistry.clearServersForTesting();
+      manager.setBootedDevices("ios", []);
+      await syncInstalledAppResourceRegistry();
+      PlatformDeviceManagerFactory.setInstance(null);
+    }
   });
 
   test("notifyResourceListChanged reaches every registered server", async () => {

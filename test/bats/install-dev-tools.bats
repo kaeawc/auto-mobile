@@ -53,6 +53,8 @@ STUB
 }
 
 @test "macOS development tools are installed in one Homebrew invocation" {
+  [[ "$(uname -s)" == "Darwin" ]] || skip "Homebrew batching is macOS-only"
+
   local brew_args="${TEST_DIR}/brew-args"
   local installed_formulae="${TEST_DIR}/installed-formulae"
 

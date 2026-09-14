@@ -4,6 +4,9 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+# shellcheck source=scripts/lib/vcs-diff.sh
+# shellcheck disable=SC1091 # Resolved relative to this script's location.
+source "${SCRIPT_DIR}/lib/vcs-diff.sh"
 DEFAULT_BASE="origin/main"
 BASE="${DEFAULT_BASE}"
 base_was_explicit=0
@@ -43,10 +46,6 @@ add_bats_file() {
   bats_files+=("${candidate}")
 }
 
-resolve_commit() {
-  git rev-parse --verify --quiet "${1}^{commit}" 2>/dev/null || true
-}
-
 lfs_filter_for_path() {
   local path="$1"
   local attributes
@@ -59,15 +58,66 @@ lfs_filter_for_path() {
 }
 
 binary_diff_for_path() {
-  local merge_base="$1"
+  local base_ref="$1"
   local path="$2"
   local numstat
-  numstat="$(git diff --numstat "${merge_base}" HEAD -- "${path}")"
+  numstat="$(git diff --numstat "${base_ref}"...HEAD -- "${path}")"
   if [[ "${numstat}" == -*$'\t'-* ]]; then
     printf '%s\n' "true"
   else
     printf '%s\n' "false"
   fi
+}
+
+resolved_shellcheck_disable_source_path() {
+  local check_script="$1"
+  local line source_expr resolved_expr resolved_path
+  local awaiting_source=0 disable_codes variable assignment_value variable_value
+  local bash_source_token="\${BASH_SOURCE[0]}"
+  local -a previous_lines=()
+
+  while IFS= read -r line || [[ -n "${line}" ]]; do
+    if [[ "${awaiting_source}" -eq 1 && ! "${line}" =~ ^[[:space:]]*$ ]]; then
+      if [[ "${line}" =~ ^[[:space:]]*(source|\.)[[:space:]]+\" ]]; then
+        source_expr="${line#*\"}"
+        source_expr="${source_expr%\"*}"
+        break
+      fi
+      awaiting_source=0
+    fi
+
+    if [[ "${line}" =~ ^[[:space:]]*#[[:space:]]*shellcheck[[:space:]]+disable=([^[:space:]#]+) ]]; then
+      disable_codes=",${BASH_REMATCH[1]},"
+      if [[ "${disable_codes}" == *",SC1091,"* ]]; then
+        awaiting_source=1
+      fi
+    fi
+    previous_lines+=("${line}")
+  done < "${check_script}"
+
+  [[ -n "${source_expr:-}" ]] || return 0
+
+  resolved_expr="${source_expr//\$\{BASH_SOURCE\[0\]\}/${check_script}}"
+  for line in "${previous_lines[@]}"; do
+    if [[ "${line}" =~ ^[[:space:]]*([a-zA-Z_][a-zA-Z0-9_]*)=(.*)$ ]]; then
+      variable="${BASH_REMATCH[1]}"
+      assignment_value="${BASH_REMATCH[2]}"
+      if [[ "${assignment_value}" != *"${bash_source_token}"* ]] || [[ "${resolved_expr}" != *"\$${variable}"* && "${resolved_expr}" != *"\${${variable}}"* ]]; then
+        continue
+      fi
+      assignment_value="${assignment_value//\$\{BASH_SOURCE\[0\]\}/${check_script}}"
+      variable_value="$(cd "${PROJECT_ROOT}" && eval "printf '%s\\n' ${assignment_value}" 2>/dev/null || true)"
+      [[ -n "${variable_value}" ]] || continue
+      resolved_expr="${resolved_expr//\$${variable}/${variable_value}}"
+      resolved_expr="${resolved_expr//\$\{${variable}\}/${variable_value}}"
+    fi
+  done
+
+  resolved_path="$(cd "${PROJECT_ROOT}" && eval "printf '%s\\n' \"${resolved_expr}\"" 2>/dev/null || true)"
+  [[ -n "${resolved_path}" ]] || return 0
+  resolved_path="$(cd "${PROJECT_ROOT}" && cd "$(dirname "${resolved_path}")" && printf '%s/%s\n' "$PWD" "$(basename "${resolved_path}")" 2>/dev/null || true)"
+  [[ "${resolved_path}" == "${PROJECT_ROOT}/"* ]] || return 0
+  printf '%s\n' "${resolved_path#"${PROJECT_ROOT}/"}"
 }
 
 load_fast_check_registry() {
@@ -108,6 +158,10 @@ add_registered_checks_for_script_path() {
         add_check "${check_name}"
       fi
     done < <(grep -E '^[[:space:]]*#[[:space:]]*shellcheck[[:space:]]+source=[^[:space:]]+' "${check_script}" || true)
+    helper_path="$(resolved_shellcheck_disable_source_path "${check_script}")"
+    if [[ "${path}" == "${helper_path}" ]]; then
+      add_check "${check_name}"
+    fi
   done
 }
 
@@ -138,32 +192,29 @@ done
 
 cd "${PROJECT_ROOT}"
 
-base_commit="$(resolve_commit "${BASE}")"
-if [[ -z "${base_commit}" && "${base_was_explicit}" -eq 0 ]]; then
+set +e
+vcs_base_exists "${BASE}"
+base_exists_status=$?
+set -e
+if [[ "${base_exists_status}" -ne 0 && "${base_was_explicit}" -eq 0 ]]; then
   BASE="main"
-  base_commit="$(resolve_commit "${BASE}")"
+  set +e
+  vcs_base_exists "${BASE}"
+  base_exists_status=$?
+  set -e
 fi
 
-if [[ -z "${base_commit}" ]]; then
+if [[ "${base_exists_status}" -ne 0 ]]; then
   echo "Base ref '${BASE}' does not resolve to a commit." >&2
   exit 1
 fi
 
 set +e
-merge_base="$(git merge-base "${BASE}" HEAD)"
-merge_base_status=$?
-set -e
-if [[ "${merge_base_status}" -ne 0 ]]; then
-  echo "Could not find a merge-base between '${BASE}' and HEAD." >&2
-  exit "${merge_base_status}"
-fi
-
-set +e
-changed_files_output="$(git diff --no-renames --name-only "${merge_base}" HEAD)"
+changed_files_output="$(vcs_changed_files_since_merge_base "${BASE}")"
 changed_files_status=$?
 set -e
 if [[ "${changed_files_status}" -ne 0 ]]; then
-  echo "Failed to list changed files between '${merge_base}' and HEAD." >&2
+  echo "Failed to list changed files since merge-base with '${BASE}'." >&2
   exit "${changed_files_status}"
 fi
 
@@ -184,6 +235,10 @@ bats_files=()
 hook_files=()
 registered_check_names=()
 registered_check_scripts=()
+set +e
+vcs_uses_jj
+is_jj_workspace_status=$?
+set -e
 has_changed_scripts=0
 for path in "${changed_files[@]}"; do
   case "${path}" in
@@ -309,10 +364,12 @@ for path in "${changed_files[@]}"; do
       ;;
   esac
 
-  lfs_filter="$(lfs_filter_for_path "${path}")"
-  binary_diff="$(binary_diff_for_path "${merge_base}" "${path}")"
-  if [[ "${lfs_filter}" == "true" || "${binary_diff}" == "true" ]]; then
-    add_check "lfs-pointers"
+  if [[ "${is_jj_workspace_status}" -ne 0 ]]; then
+    lfs_filter="$(lfs_filter_for_path "${path}")"
+    binary_diff="$(binary_diff_for_path "${BASE}" "${path}")"
+    if [[ "${lfs_filter}" == "true" || "${binary_diff}" == "true" ]]; then
+      add_check "lfs-pointers"
+    fi
   fi
 done
 

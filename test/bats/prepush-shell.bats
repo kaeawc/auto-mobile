@@ -8,7 +8,7 @@ setup() {
   BATS_LOG="${TEST_ROOT}/bats.log"
   SHELLCHECK_LOG="${TEST_ROOT}/shellcheck.log"
   REAL_GIT="$(command -v git)"
-  mkdir -p "${TEST_ROOT}/scripts" "${TEST_ROOT}/test/bats" "${STUB_DIR}"
+  mkdir -p "${TEST_ROOT}/scripts/lib" "${TEST_ROOT}/test/bats" "${STUB_DIR}"
 
   cat > "${TEST_ROOT}/scripts/all_fast_validate_checks.sh" <<'EOF'
 #!/usr/bin/env bash
@@ -40,7 +40,7 @@ EOF
 
   cat > "${STUB_DIR}/git" <<'EOF'
 #!/usr/bin/env bash
-if [[ "${PREPUSH_GIT_DIFF_FAIL:-}" == "1" && "$#" -ge 5 && "$1" == "diff" && "$2" == "--no-renames" && "$3" == "--name-only" && "${!#}" == "HEAD" ]]; then
+if [[ "${PREPUSH_GIT_DIFF_FAIL:-}" == "1" && "$#" -ge 5 && "$1" == "diff" && "$2" == "--no-renames" && "$3" == "--name-only" && "$4" == *"...HEAD" && "$5" == "--" ]]; then
   printf '%s\n' "simulated git diff failure" >&2
   exit 17
 fi
@@ -48,7 +48,28 @@ exec "${PREPUSH_REAL_GIT}" "$@"
 EOF
   chmod +x "${STUB_DIR}/git"
 
+  cat > "${STUB_DIR}/jj" <<'EOF'
+#!/usr/bin/env bash
+case "$1 $2" in
+  "workspace root")
+    printf '%s\n' "${PREPUSH_JJ_ROOT}"
+    ;;
+  "log -r")
+    exit 0
+    ;;
+  "diff --from")
+    printf '%s\n' "scripts/example.sh" "test/bats/example.bats"
+    ;;
+  *)
+    printf 'unexpected jj invocation: %s\n' "$*" >&2
+    exit 2
+    ;;
+esac
+EOF
+  chmod +x "${STUB_DIR}/jj"
+
   cp "${REPO_ROOT}/scripts/prepush-shell.sh" "${TEST_ROOT}/scripts/prepush-shell.sh"
+  cp "${REPO_ROOT}/scripts/lib/vcs-diff.sh" "${TEST_ROOT}/scripts/lib/vcs-diff.sh"
   chmod +x "${TEST_ROOT}/scripts/prepush-shell.sh"
 
   export PREPUSH_FAST_LOG="${FAST_LOG}"
@@ -76,8 +97,19 @@ EOF
   mkdir -p scripts/lib
   printf '%s\n' '# shellcheck source=scripts/lib/shared-helper.sh' > scripts/check-helper-consumer-one.sh
   printf '%s\n' '# shellcheck source=scripts/lib/shared-helper.sh' > scripts/check-helper-consumer-two.sh
+  cat > scripts/check-helper-consumer-three.sh <<'EOF'
+#!/usr/bin/env bash
+# shellcheck disable=SC1091 # Resolved relative to this script's location.
+source "$(dirname "${BASH_SOURCE[0]}")/lib/shared-helper.sh"
+EOF
+  cat > scripts/check-helper-consumer-four.sh <<'EOF'
+#!/usr/bin/env bash
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck disable=SC1091 # Resolved relative to this script's location.
+source "$ROOT_DIR/scripts/lib/shared-helper.sh"
+EOF
   printf '%s\n' 'helper baseline' > scripts/lib/shared-helper.sh
-  git add scripts/check-helper-consumer-one.sh scripts/check-helper-consumer-two.sh scripts/lib/shared-helper.sh
+  git add scripts/check-helper-consumer-one.sh scripts/check-helper-consumer-two.sh scripts/check-helper-consumer-three.sh scripts/check-helper-consumer-four.sh scripts/lib/shared-helper.sh
   git commit -qm "add helper consumers"
   git branch -M main
   git branch base
@@ -106,6 +138,8 @@ if [[ "${1:-}" == "--list-checks" ]]; then
   printf 'stdlib-first\tscripts/conventions/validate-stdlib-first.sh\n'
   printf 'helper-consumer-one\tscripts/check-helper-consumer-one.sh\n'
   printf 'helper-consumer-two\tscripts/check-helper-consumer-two.sh\n'
+  printf 'helper-consumer-three\tscripts/check-helper-consumer-three.sh\n'
+  printf 'helper-consumer-four\tscripts/check-helper-consumer-four.sh\n'
   exit 0
 fi
 printf '%s\n' "$*" >> "${PREPUSH_FAST_LOG}"
@@ -156,7 +190,22 @@ EOF
   run bash scripts/prepush-shell.sh --base base
 
   [ "${status}" -eq 0 ]
-  grep -Fqx -- '--only shellcheck,shell-portability,shell-sete,stdlib-first,helper-consumer-one,helper-consumer-two' "${FAST_LOG}"
+  grep -Fqx -- '--only shellcheck,shell-portability,shell-sete,stdlib-first,helper-consumer-one,helper-consumer-two,helper-consumer-three,helper-consumer-four' "${FAST_LOG}"
+}
+
+@test "a jj workspace uses the VCS diff seam without a git checkout" {
+  install_registry_stub
+  rm -rf "${TEST_ROOT}/.git"
+  mkdir -p "${TEST_ROOT}/.jj"
+  printf '%s\n' '#!/usr/bin/env bash' > scripts/example.sh
+  printf '%s\n' '# scripts/example.sh' > test/bats/example.bats
+  export PREPUSH_JJ_ROOT="${TEST_ROOT}"
+
+  run bash scripts/prepush-shell.sh --base feature-base
+
+  [ "${status}" -eq 0 ]
+  grep -Fqx -- '--only shellcheck,shell-portability,shell-sete,stdlib-first' "${FAST_LOG}"
+  grep -Fqx -- 'test/bats/example.bats' "${BATS_LOG}"
 }
 
 @test "an unmatched scripts file selects no registered fast check" {
@@ -368,6 +417,6 @@ EOF
   run bash scripts/prepush-shell.sh --base base
 
   [ "${status}" -ne 0 ]
-  [[ "${output}" == *"Failed to list changed files between"* ]]
+  [[ "${output}" == *"Failed to list changed files since merge-base"* ]]
   [[ "${output}" != *"nothing to validate"* ]]
 }

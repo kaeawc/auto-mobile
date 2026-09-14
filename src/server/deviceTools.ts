@@ -6789,6 +6789,14 @@ export function registerDeviceTools() {
     let provisioned: Awaited<ReturnType<ExactDeviceProvisioner["provision"]>> | undefined;
     let creationStarted = reconcileExistingConfiguration;
     const bootState: { unownedColdBootSettlement?: Promise<void> } = {};
+    const notifyResourcesChangedBestEffort = () => {
+      void deps.notifyResourcesChanged().catch((error: unknown) => {
+        logger.warn(
+          `[DeviceTools] Failed to notify resource changes after provisioning ${args.device.platform} device '${args.device.name}': ${errorMessage(error)}`,
+          error,
+        );
+      });
+    };
     try {
       if (args.device.platform === "android") {
         lifecycleLease = await reserveStableDeviceLifecycle(
@@ -6842,7 +6850,9 @@ export function registerDeviceTools() {
       const createdByOperation = reconcileExistingConfiguration || provisioned.created;
       if (!args.boot) {
         if (provisioned.created) {
-          await deps.notifyResourcesChanged();
+          // Device creation is committed. Do not make its response or rollback
+          // depend on an advisory resource notification.
+          notifyResourcesChangedBestEffort();
         }
         perf.end();
         return buildProvisionDeviceResult(args, provisioned, createdByOperation, perf, undefined);
@@ -6864,12 +6874,7 @@ export function registerDeviceTools() {
         // `bootExactProvisionedDevice`. A best-effort resource notification is
         // safe to swallow here: failing it must neither turn that committed
         // success into destructive rollback nor strand the bound session.
-        void deps.notifyResourcesChanged().catch((error: unknown) => {
-          logger.warn(
-            `[DeviceTools] Failed to notify resource changes after provisioning ${args.device.platform} device '${args.device.name}': ${errorMessage(error)}`,
-            error,
-          );
-        });
+        notifyResourcesChangedBestEffort();
       }
       perf.end();
       return buildProvisionDeviceResult(args, provisioned, createdByOperation, perf, booted);

@@ -216,20 +216,22 @@ function requestedAndroidRuntime(runtime: string):
       apiLevel: number;
       tag: string;
       architecture: string;
+      systemImagePackage: string;
     }
   | undefined {
   const parts = runtime.split(";");
   if (parts.length !== 4 || parts[0] !== "system-images") {
     return undefined;
   }
-  const apiMatch = /^android-(\d+)$/.exec(parts[1] ?? "");
+  const apiMatch = /^android-(\d+(?:\.\d+)*)$/.exec(parts[1] ?? "");
   if (!apiMatch || !parts[2] || !parts[3]) {
     return undefined;
   }
   return {
-    apiLevel: Number(apiMatch[1]),
+    apiLevel: Number.parseInt(apiMatch[1], 10),
     tag: parts[2],
     architecture: normalizeAndroidArchitecture(parts[3]) ?? parts[3],
+    systemImagePackage: runtime,
   };
 }
 
@@ -245,7 +247,8 @@ function sameAndroidDeviceIdentity(
     config.apiLevel !== runtime.apiLevel ||
     config.tag !== runtime.tag ||
     config.architecture !== runtime.architecture ||
-    config.deviceName !== spec.deviceType
+    config.deviceName !== spec.deviceType ||
+    config.systemImagePackage !== runtime.systemImagePackage
   ) {
     return false;
   }

@@ -318,6 +318,7 @@ describe("DefaultExactDeviceProvisioner", () => {
       androidConfigReader: {
         readConfig: async () => ({
           apiLevel: 36,
+          systemImagePackage: ANDROID_SPEC.runtime,
           tag: "google_apis",
           architecture: "x86_64",
           deviceName: "pixel_9",
@@ -416,6 +417,7 @@ describe("DefaultExactDeviceProvisioner", () => {
       androidConfigReader: {
         readConfig: async () => ({
           apiLevel: 36,
+          systemImagePackage: "system-images;android-36;google_apis;armeabi-v7a",
           tag: "google_apis",
           architecture: "arm",
           deviceName: "pixel_9",
@@ -438,6 +440,66 @@ describe("DefaultExactDeviceProvisioner", () => {
     expect(result).toMatchObject({ created: false, device: androidImage("phone-api-36-a") });
   });
 
+  test("adopts an existing Android AVD with a matching minor runtime", async () => {
+    const config = parseAvdConfig(
+      [
+        "image.sysdir.1=system-images/android-36.1/google_apis/arm64-v8a/",
+        "hw.device.name=pixel_9",
+        "tag.id=google_apis",
+        "abi.type=arm64-v8a",
+      ].join("\n"),
+    );
+    const provisioner = new DefaultExactDeviceProvisioner({
+      listDeviceImages: async () => [androidImage("minor-runtime")],
+      isCreationAllowed: () => true,
+      avdManager: {} as ExactAndroidAvdClient,
+      androidConfigReader: { readConfig: async () => config },
+      androidConfigWriter: {} as AndroidAvdConfigWriter,
+      iosSimulator: {} as ExactIosSimulatorClient,
+    });
+
+    const result = await provisioner.provision({
+      platform: "android",
+      name: "minor-runtime",
+      spec: {
+        runtime: "system-images;android-36.1;google_apis;arm64-v8a",
+        deviceType: "pixel_9",
+      },
+    });
+
+    expect(result).toMatchObject({ created: false, device: androidImage("minor-runtime") });
+  });
+
+  test("rejects an existing Android AVD with a different minor runtime", async () => {
+    const config = parseAvdConfig(
+      [
+        "image.sysdir.1=system-images/android-36.1/google_apis/arm64-v8a/",
+        "hw.device.name=pixel_9",
+        "tag.id=google_apis",
+        "abi.type=arm64-v8a",
+      ].join("\n"),
+    );
+    const provisioner = new DefaultExactDeviceProvisioner({
+      listDeviceImages: async () => [androidImage("minor-runtime")],
+      isCreationAllowed: () => true,
+      avdManager: {} as ExactAndroidAvdClient,
+      androidConfigReader: { readConfig: async () => config },
+      androidConfigWriter: {} as AndroidAvdConfigWriter,
+      iosSimulator: {} as ExactIosSimulatorClient,
+    });
+
+    await expect(
+      provisioner.provision({
+        platform: "android",
+        name: "minor-runtime",
+        spec: {
+          runtime: "system-images;android-36;google_apis;arm64-v8a",
+          deviceType: "pixel_9",
+        },
+      }),
+    ).rejects.toMatchObject({ code: "identity_conflict" });
+  });
+
   test("does not adopt an existing Android AVD when its resolved specification conflicts", async () => {
     const provisioner = new DefaultExactDeviceProvisioner({
       listDeviceImages: async () => [androidImage("phone-api-36-a")],
@@ -450,6 +512,7 @@ describe("DefaultExactDeviceProvisioner", () => {
       androidConfigReader: {
         readConfig: async () => ({
           apiLevel: 35,
+          systemImagePackage: ANDROID_SPEC.runtime,
           tag: "google_apis",
           architecture: "x86_64",
           deviceName: "pixel_9",
@@ -483,6 +546,7 @@ describe("DefaultExactDeviceProvisioner", () => {
       androidConfigReader: {
         readConfig: async () => ({
           apiLevel: 36,
+          systemImagePackage: ANDROID_SPEC.runtime,
           tag: "google_apis",
           architecture: "x86_64",
           deviceName: "pixel_9",
@@ -523,6 +587,7 @@ describe("DefaultExactDeviceProvisioner", () => {
       androidConfigReader: {
         readConfig: async () => ({
           apiLevel: 36,
+          systemImagePackage: ANDROID_SPEC.runtime,
           tag: "google_apis",
           architecture: "x86_64",
           deviceName: "pixel_9",
@@ -565,6 +630,7 @@ describe("DefaultExactDeviceProvisioner", () => {
         androidConfigReader: {
           readConfig: async () => ({
             apiLevel: 36,
+            systemImagePackage: ANDROID_SPEC.runtime,
             tag: "google_apis",
             architecture: "x86_64",
             deviceName: "pixel_9",
@@ -612,6 +678,7 @@ describe("DefaultExactDeviceProvisioner", () => {
       androidConfigReader: {
         readConfig: async () => ({
           apiLevel: 36,
+          systemImagePackage: ANDROID_SPEC.runtime,
           tag: "google_apis",
           architecture: "x86_64",
           deviceName: "pixel_9",

@@ -20,6 +20,8 @@ export interface AvdConfig {
   hardware?: AndroidAvdConfiguration;
   apiLevel?: number;
   osVersion?: string;
+  /** Exact Android SDK package identity derived from image.sysdir.1. */
+  systemImagePackage?: string;
   /** Normalized emulator CPU architecture used by the AVD. */
   architecture?: string;
   screenWidth?: number;
@@ -329,6 +331,7 @@ export function parseAvdConfig(content: string): AvdConfig {
     ...parseRamSize(props),
     ...parseDeviceMetadata(props),
     ...parseApiMetadata(props),
+    ...parseSystemImageMetadata(props),
     ...parseArchitecture(props),
     capabilityInventory: buildAndroidAvdCapabilityInventory(Object.fromEntries(props)),
   };
@@ -420,6 +423,18 @@ function parseApiMetadata(props: Map<string, string>): Pick<AvdConfig, "apiLevel
   }
   const level = Number.parseInt(match[1], 10);
   return { apiLevel: level, osVersion: apiLevelToVersion(level) ?? String(level) };
+}
+
+function parseSystemImageMetadata(
+  props: Map<string, string>,
+): Pick<AvdConfig, "systemImagePackage"> {
+  const segments = props.get("image.sysdir.1")?.split(/[\\/]/).filter(Boolean);
+  const systemImagesIndex = segments?.indexOf("system-images") ?? -1;
+  const systemImagePackage = segments?.slice(systemImagesIndex, systemImagesIndex + 4);
+  if (systemImagesIndex < 0 || systemImagePackage?.length !== 4) {
+    return {};
+  }
+  return { systemImagePackage: systemImagePackage.join(";") };
 }
 
 function parseArchitecture(props: Map<string, string>): Pick<AvdConfig, "architecture"> {

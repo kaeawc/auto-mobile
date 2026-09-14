@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import Ajv2020 from "ajv/dist/2020";
 import { createMcpServer } from "../../src/server/index";
 import {
   DEFAULT_OBSERVATION_INLINE_MAX_BYTES,
@@ -97,6 +98,41 @@ const OBJECT_OUTPUT_TOOLS = ToolRegistry.getToolDefinitions()
 describe("spilled output-schema residue contract (#6950)", () => {
   test("covers multiple registered object output schemas", () => {
     expect(OBJECT_OUTPUT_TOOLS.length).toBeGreaterThan(1);
+  });
+
+  test("advertises the optional artifact added to a spilled setUIState response", () => {
+    const generatedSchema = ToolRegistry.getToolDefinitions({ includeUnavailable: true }).find(
+      (definition) => definition.name === "setUIState",
+    )?.outputSchema as
+      | {
+          properties?: Record<string, unknown>;
+          required?: string[];
+        }
+      | undefined;
+    const tool = ToolRegistry.getRegisteredTool("setUIState");
+    expect(generatedSchema).toBeDefined();
+    expect(tool?.outputSchema).toBeDefined();
+
+    const finalized = finalizeToolResponse(
+      createStructuredToolResponse({
+        success: true,
+        fields: [],
+        totalAttempts: 1,
+        padding: "x".repeat(DEFAULT_OBSERVATION_INLINE_MAX_BYTES + 1_024),
+      }),
+      {
+        name: "setUIState",
+        outputSchema: tool!.outputSchema,
+        artifactMode: "oversized",
+        artifactWriter: new FakeArtifactWriter(),
+      },
+    );
+
+    expect(generatedSchema!.properties?.artifact).toBeDefined();
+    expect(generatedSchema!.required).not.toContain("artifact");
+    expect(
+      new Ajv2020({ strict: false }).compile(generatedSchema!)(finalized.structuredContent),
+    ).toBe(true);
   });
 
   test.each(

@@ -56,6 +56,7 @@ import {
   JsonToolOutputArtifactWriter,
   type ToolOutputArtifactRetention,
 } from "./toolOutputArtifactWriter";
+import { toolOutputArtifactDetailsSchema } from "./toolOutputSchemas";
 import { getDefaultToolOutputsDir } from "../utils/toolOutputArtifacts";
 import type { SessionToolSelectionService } from "../features/toolSelection/SessionToolSelectionService";
 import {
@@ -164,6 +165,48 @@ function toAdvertisedJsonSchema(schema: any): Record<string, unknown> {
   });
   canonicalizeDiscriminatedUnionJsonSchema(jsonSchema);
   return flattenTopLevelUnion(jsonSchema);
+}
+
+const advertisedToolOutputArtifactDetailsSchema = toJSONSchema(toolOutputArtifactDetailsSchema);
+
+/**
+ * A hard-ceiling spill retains required headline fields and appends an artifact
+ * pointer. Runtime Zod output schemas deliberately keep their normal unknown-key
+ * behavior, so advertise that one possible runtime addition without admitting
+ * arbitrary top-level output fields.
+ */
+function addSpillArtifactToAdvertisedOutputSchema(
+  jsonSchema: Record<string, unknown>,
+): Record<string, unknown> {
+  const addArtifactProperty = (node: unknown): void => {
+    if (!node || typeof node !== "object") {
+      return;
+    }
+    const objectNode = node as Record<string, unknown>;
+    if (objectNode.type !== "object" || objectNode.additionalProperties !== false) {
+      return;
+    }
+    const properties =
+      objectNode.properties && typeof objectNode.properties === "object"
+        ? (objectNode.properties as Record<string, unknown>)
+        : {};
+    if (Object.hasOwn(properties, "artifact")) {
+      return;
+    }
+    objectNode.properties = {
+      ...properties,
+      artifact: advertisedToolOutputArtifactDetailsSchema,
+    };
+  };
+
+  addArtifactProperty(jsonSchema);
+  for (const unionKey of ["oneOf", "anyOf"] as const) {
+    const branches = jsonSchema[unionKey];
+    if (Array.isArray(branches)) {
+      branches.forEach(addArtifactProperty);
+    }
+  }
+  return jsonSchema;
 }
 
 // Progress notification interface
@@ -1894,7 +1937,7 @@ export class ToolRegistryClass {
       const outputSchema =
         toolHasOutputSchema(tool) && !suppressOutputSchema
           ? (advertiseBoundsForCompact(
-              toAdvertisedJsonSchema(tool.outputSchema),
+              addSpillArtifactToAdvertisedOutputSchema(toAdvertisedJsonSchema(tool.outputSchema)),
               compactBounds,
             ) as Record<string, unknown>)
           : undefined;

@@ -1167,7 +1167,7 @@ describe("platform device preparation tools", () => {
       "E2F46BCE-4C97-4AA0-BD9D-544756FAB545",
     ],
   ] as const)(
-    "%s returns and releases reservations while its resource notification is pending",
+    "%s returns and releases reservations while installed-app resource sync is pending",
     async (operation, platform, image, target, expectedDeviceId) => {
       deviceUtils.setDeviceImages(platform, [image]);
       sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
@@ -1239,18 +1239,13 @@ describe("platform device preparation tools", () => {
         for (let attempt = 0; attempt < 50; attempt++) {
           await Promise.resolve();
         }
-        expect(requestSettled).toBe(false);
+        expect(requestSettled).toBe(true);
         expect(notificationStarted).toBe(false);
+        expect(readinessReleases).toBe(1);
+        expect(lifecycleReleases).toBe(1);
 
         releaseSync.resolve();
         await awaitPromptly(notificationEntered.promise, "resource notification");
-        timer.advanceTime(10_000);
-        for (let attempt = 0; attempt < 50; attempt++) {
-          await Promise.resolve();
-        }
-        expect(requestSettled).toBe(true);
-        expect(readinessReleases).toBe(1);
-        expect(lifecycleReleases).toBe(1);
         expect(installedAppResourceSyncs).toBe(1);
         expect(notifiedInstalledAppResourcesChanged).toBe(true);
         const [sessionId] = sessionManager.getAllSessionIds();

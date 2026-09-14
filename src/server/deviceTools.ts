@@ -139,6 +139,7 @@ import {
   ProvisionDeviceOperationConflictError,
   ProvisionDeviceOperationInProgressError,
   ProvisionDeviceOperationSupersededError,
+  type ProvisionDeviceOperationBeginResult,
   type ProvisionDeviceOperationStore,
 } from "../db/provisionDeviceOperationRepository";
 import {
@@ -4553,6 +4554,50 @@ async function runProvisionDeviceWithinDeadline<T>(
   );
 }
 
+async function awaitProvisionDeviceOperationBegin<T>(
+  timer: Pick<Timer, "now" | "setTimeout" | "clearTimeout">,
+  totalDeadlineMs: number,
+  requestSignal: AbortSignal | undefined,
+  begin: Promise<T>,
+): Promise<T> {
+  const remainingMs = Math.floor(totalDeadlineMs - timer.now());
+  if (remainingMs <= 0) {
+    throw provisionDeviceTimeoutError("starting provision operation");
+  }
+  let timeoutHandle: NodeJS.Timeout | undefined;
+  let removeAbortListener: (() => void) | undefined;
+  try {
+    return await Promise.race([
+      begin,
+      new Promise<never>((_resolve, reject) => {
+        timeoutHandle = timer.setTimeout(
+          () => reject(provisionDeviceTimeoutError("starting provision operation")),
+          remainingMs,
+        );
+      }),
+      ...(requestSignal
+        ? [
+            new Promise<never>((_resolve, reject) => {
+              const rejectForAbort = () => reject(requestSignal.reason);
+              if (requestSignal.aborted) {
+                rejectForAbort();
+                return;
+              }
+              requestSignal.addEventListener("abort", rejectForAbort, { once: true });
+              removeAbortListener = () =>
+                requestSignal.removeEventListener("abort", rejectForAbort);
+            }),
+          ]
+        : []),
+    ]);
+  } finally {
+    if (timeoutHandle) {
+      timer.clearTimeout(timeoutHandle);
+    }
+    removeAbortListener?.();
+  }
+}
+
 async function runOperationWithinDeadline<T>(
   timer: Pick<Timer, "now" | "setTimeout" | "clearTimeout">,
   totalDeadlineMs: number,
@@ -5432,37 +5477,37 @@ function deviceInventoryChangedAfterBoot(boot: DeviceBootResult): boolean {
   return boot.source === "cold-boot" || boot.provisioned;
 }
 
-async function refreshResourcesAfterCommittedBoot(
+function refreshResourcesAfterCommittedBoot(
   boot: DeviceBootResult,
   dependencies: Pick<
     DeviceToolsDependencies,
     "notifyDeviceInventoryResourcesChanged" | "syncInstalledAppResourceRegistry"
   >,
-): Promise<void> {
+): void {
   if (!deviceInventoryChangedAfterBoot(boot)) {
     return;
   }
-  let installedAppResourcesChanged = false;
-  try {
-    installedAppResourcesChanged = await dependencies.syncInstalledAppResourceRegistry();
-  } catch (error) {
-    // Session ownership is already committed, so local resource-sync failure
-    // is diagnostic and must not strand the acquired session.
-    logger.warn(
-      `[DeviceTools] Installed-app resource sync after device boot failed: ${errorMessage(error)}`,
-      error,
-    );
-  }
-  // Keep advisory transport delivery off the response and reservation-release
-  // path so notification latency cannot withhold the acquired session.
-  void dependencies
-    .notifyDeviceInventoryResourcesChanged(installedAppResourcesChanged)
-    .catch((error: unknown) => {
+  // Session ownership is already committed, so resource refresh and transport
+  // delivery are advisory: neither may withhold the acquired session.
+  void (async () => {
+    let installedAppResourcesChanged = false;
+    try {
+      installedAppResourcesChanged = await dependencies.syncInstalledAppResourceRegistry();
+    } catch (error) {
+      logger.warn(
+        `[DeviceTools] Installed-app resource sync after device boot failed: ${errorMessage(error)}`,
+        error,
+      );
+    }
+    try {
+      await dependencies.notifyDeviceInventoryResourcesChanged(installedAppResourcesChanged);
+    } catch (error) {
       logger.warn(
         `[DeviceTools] Resource notification after device boot failed: ${errorMessage(error)}`,
         error,
       );
-    });
+    }
+  })();
 }
 
 interface StartDeviceRunnerReadinessInput {
@@ -6086,58 +6131,85 @@ export function registerDeviceTools() {
     // row's TTL and past the daemon's queued-request deadline, which only the
     // `reserveRollbackTime` form respects.
     const totalDeadlineMs = provisionDeviceDeadlineMs(args, deps.timer, true);
-    const operation = await store.begin(
+    const begin = store.begin(
       args.operationId,
       fingerprint,
       attemptId,
       nowMs,
       nowMs + PROVISION_DEVICE_OPERATION_TTL_MS,
     );
-    if ("inProgress" in operation) {
-      // A live (non-expired) "running" row for this operationId/fingerprint --
-      // report in-progress instead of silently re-running the provisioning
-      // lifecycle (#6652 defect 1). Thrown before the try/catch below so this
-      // never reaches store.fail(), which would incorrectly overwrite the
-      // still-running attempt's row.
-      throw new ProvisionDeviceOperationInProgressError(args.operationId);
-    }
-    try {
-      if (
-        !operation.started &&
-        (await canReplayCompletedProvisionDeviceOperation(
-          args,
-          deps,
-          operation.result,
-          totalDeadlineMs,
-          signal,
-        ))
-      ) {
-        const replayResult = backfillProvisionDeviceCutout(args, operation.result);
-        // Unconditionally, even when the persisted result is byte-for-byte what
-        // we are about to return: begin() moved this row to the EXCLUSIVE
-        // non-terminal `replaying` status, so returning without completing it
-        // would leave the claim held and make every later identical call report
-        // operation_in_progress until the row's TTL (~30m) expires. Re-storing
-        // an identical result is harmless; leaving the claim open is not.
-        await completeProvisionDeviceOperation(
-          store,
-          args.operationId,
-          attemptId,
-          replayResult,
-          args,
-          deps.timer,
-          totalDeadlineMs,
-          signal,
-        );
-        return replayResult;
+    let admissionAbandoned = false;
+    let admissionError: unknown;
+    const runAdmittedOperation: (
+      operation: ProvisionDeviceOperationBeginResult,
+    ) => Promise<Record<string, unknown>> = async (operation) => {
+      if ("inProgress" in operation) {
+        // A live (non-expired) "running" row for this operationId/fingerprint --
+        // report in-progress instead of silently re-running the provisioning
+        // lifecycle (#6652 defect 1). Thrown before the try/catch below so this
+        // never reaches store.fail(), which would incorrectly overwrite the
+        // still-running attempt's row.
+        throw new ProvisionDeviceOperationInProgressError(args.operationId);
       }
-      if (!operation.started) {
-        await releaseErroredProvisionDeviceSession(operation.result);
+      try {
+        if (
+          !operation.started &&
+          (await canReplayCompletedProvisionDeviceOperation(
+            args,
+            deps,
+            operation.result,
+            totalDeadlineMs,
+            signal,
+          ))
+        ) {
+          const replayResult = backfillProvisionDeviceCutout(args, operation.result);
+          // Unconditionally, even when the persisted result is byte-for-byte what
+          // we are about to return: begin() moved this row to the EXCLUSIVE
+          // non-terminal `replaying` status, so returning without completing it
+          // would leave the claim held and make every later identical call report
+          // operation_in_progress until the row's TTL (~30m) expires. Re-storing
+          // an identical result is harmless; leaving the claim open is not.
+          await completeProvisionDeviceOperation(
+            store,
+            args.operationId,
+            attemptId,
+            replayResult,
+            args,
+            deps.timer,
+            totalDeadlineMs,
+            signal,
+          );
+          return replayResult;
+        }
+        if (!operation.started) {
+          await releaseErroredProvisionDeviceSession(operation.result);
 
-        // Sessions are daemon-local and are expired during daemon startup. A
-        // replay of a completed boot operation therefore runs the idempotent
-        // lifecycle again to bind a live session before reporting readiness.
-        const rebound = await runProvisionDeviceLifecycle(
+          // Sessions are daemon-local and are expired during daemon startup. A
+          // replay of a completed boot operation therefore runs the idempotent
+          // lifecycle again to bind a live session before reporting readiness.
+          const rebound = await runProvisionDeviceLifecycle(
+            args,
+            deps,
+            operation.reconcileExistingConfiguration,
+            () => markProvisionDeviceCreationStarted(store, args.operationId, attemptId),
+            totalDeadlineMs,
+            signal,
+          );
+          const refreshed = preserveProvisionDeviceOwnership(operation.result, rebound);
+          await completeProvisionDeviceOperation(
+            store,
+            args.operationId,
+            attemptId,
+            refreshed,
+            args,
+            deps.timer,
+            totalDeadlineMs,
+            signal,
+          );
+          return refreshed;
+        }
+
+        const result = await runProvisionDeviceLifecycle(
           args,
           deps,
           operation.reconcileExistingConfiguration,
@@ -6145,94 +6217,124 @@ export function registerDeviceTools() {
           totalDeadlineMs,
           signal,
         );
-        const refreshed = preserveProvisionDeviceOwnership(operation.result, rebound);
         await completeProvisionDeviceOperation(
           store,
           args.operationId,
           attemptId,
-          refreshed,
+          result,
           args,
           deps.timer,
           totalDeadlineMs,
           signal,
         );
-        return refreshed;
+        return result;
+      } catch (error) {
+        if (error instanceof FinalizedProvisionDeviceCompletionError) {
+          // Completion failures start an observed finalizer below. Do not await
+          // or duplicate its failure write here; either can share the stalled
+          // persistence boundary that made completion fail.
+          throw error.completionError;
+        }
+        if (error instanceof McpSessionRecoveryInProgressError) {
+          // Transient by construction ("cannot remap until recovery finishes"),
+          // so the client is told to retry. A retry only works if this attempt's
+          // row is terminal: an admitted attempt owns a "running" row, and
+          // leaving it running would make every retry report
+          // operation_in_progress for the whole operation TTL (~30m) with
+          // nothing executing. A replay (started === false) owns an exclusive
+          // "replaying" row, so it must be failed too or every retry would report
+          // operation_in_progress for the rest of the TTL; store.fail() reverts a
+          // replaying row to "succeeded" with its result intact, so this cannot
+          // destroy a valid completed result.
+          logger.warn(
+            `[DeviceTools] provisionDevice ${args.operationId} deferred by MCP session ` +
+              `recovery: ${errorMessage(error)}`,
+            error,
+          );
+          await persistFailedProvisionDeviceOperation(
+            store,
+            args,
+            attemptId,
+            PROVISION_DEVICE_SESSION_RECOVERY_ERROR_CODE,
+            errorMessage(error),
+            undefined,
+            deps.timer,
+            totalDeadlineMs,
+            signal,
+          );
+          throw error;
+        }
+        if (error instanceof DaemonHandoffInterruptionError) {
+          logger.warn(
+            `[DeviceTools] provisionDevice ${args.operationId} interrupted by daemon handoff: ${errorMessage(error)}`,
+            error,
+          );
+          await persistFailedProvisionDeviceOperation(
+            store,
+            args,
+            attemptId,
+            DAEMON_HANDOFF_INTERRUPTED_ERROR_CODE,
+            errorMessage(error),
+            undefined,
+            deps.timer,
+            totalDeadlineMs,
+            signal,
+          );
+          throw error;
+        }
+        if (error instanceof ProvisionDeviceOperationSupersededError) {
+          // The row belongs to a newer attempt now; stamping this attempt's
+          // failure on it would fail an operation that is still running.
+          throw error;
+        }
+        const provisionError = toProvisionDeviceError(args, error);
+        await persistFailedProvisionDeviceOperation(
+          store,
+          args,
+          attemptId,
+          provisionError.code,
+          provisionError.message,
+          {
+            clearCreationStarted:
+              error instanceof ProvisionDeviceRollbackError && error.cleanup.status === "succeeded",
+          },
+          deps.timer,
+          totalDeadlineMs,
+          signal,
+        );
+        throw provisionError;
       }
+    };
+    const lifecycle = begin.then(async (operation) => {
+      if (admissionAbandoned || deps.timer.now() >= totalDeadlineMs) {
+        retireLateProvisionDeviceOperationBegin(
+          store,
+          args,
+          attemptId,
+          operation,
+          admissionError ?? provisionDeviceTimeoutError("starting provision operation"),
+        );
+        throw admissionError ?? provisionDeviceTimeoutError("starting provision operation");
+      }
+      return await runAdmittedOperation(operation);
+    });
+    void lifecycle.catch(() => {});
 
-      const result = await runProvisionDeviceLifecycle(
-        args,
-        deps,
-        operation.reconcileExistingConfiguration,
-        () => markProvisionDeviceCreationStarted(store, args.operationId, attemptId),
-        totalDeadlineMs,
-        signal,
-      );
-      await completeProvisionDeviceOperation(
-        store,
-        args.operationId,
-        attemptId,
-        result,
-        args,
-        deps.timer,
-        totalDeadlineMs,
-        signal,
-      );
-      return result;
+    let admissionConfirmed = false;
+    try {
+      await awaitProvisionDeviceOperationBegin(deps.timer, totalDeadlineMs, signal, begin);
+      admissionConfirmed = true;
+      return await lifecycle;
     } catch (error) {
-      if (error instanceof FinalizedProvisionDeviceCompletionError) {
-        // Completion failures start an observed finalizer below. Do not await
-        // or duplicate its failure write here; either can share the stalled
-        // persistence boundary that made completion fail.
-        throw error.completionError;
+      if (!admissionConfirmed) {
+        // A storage call that ignores its deadline can still admit this attempt
+        // after the caller has received its timeout. The continuation retires
+        // that late claim under the same attempt fence before it can reach any
+        // device mutation; a newer retry safely wins over that finalizer.
+        admissionAbandoned = true;
+        admissionError = error;
       }
-      if (error instanceof McpSessionRecoveryInProgressError) {
-        // Transient by construction ("cannot remap until recovery finishes"),
-        // so the client is told to retry. A retry only works if this attempt's
-        // row is terminal: an admitted attempt owns a "running" row, and
-        // leaving it running would make every retry report
-        // operation_in_progress for the whole operation TTL (~30m) with
-        // nothing executing. A replay (started === false) owns an exclusive
-        // "replaying" row, so it must be failed too or every retry would report
-        // operation_in_progress for the rest of the TTL; store.fail() reverts a
-        // replaying row to "succeeded" with its result intact, so this cannot
-        // destroy a valid completed result.
-        logger.warn(
-          `[DeviceTools] provisionDevice ${args.operationId} deferred by MCP session ` +
-            `recovery: ${errorMessage(error)}`,
-          error,
-        );
-        await store.fail(
-          args.operationId,
-          attemptId,
-          PROVISION_DEVICE_SESSION_RECOVERY_ERROR_CODE,
-          errorMessage(error),
-        );
-        throw error;
-      }
-      if (error instanceof DaemonHandoffInterruptionError) {
-        logger.warn(
-          `[DeviceTools] provisionDevice ${args.operationId} interrupted by daemon handoff: ${errorMessage(error)}`,
-          error,
-        );
-        await store.fail(
-          args.operationId,
-          attemptId,
-          DAEMON_HANDOFF_INTERRUPTED_ERROR_CODE,
-          errorMessage(error),
-        );
-        throw error;
-      }
-      if (error instanceof ProvisionDeviceOperationSupersededError) {
-        // The row belongs to a newer attempt now; stamping this attempt's
-        // failure on it would fail an operation that is still running.
-        throw error;
-      }
-      const provisionError = toProvisionDeviceError(args, error);
-      await store.fail(args.operationId, attemptId, provisionError.code, provisionError.message, {
-        clearCreationStarted:
-          error instanceof ProvisionDeviceRollbackError && error.cleanup.status === "succeeded",
-      });
-      throw provisionError;
+      throw error;
     }
   }
 
@@ -6559,6 +6661,76 @@ export function registerDeviceTools() {
         );
       }
       throw new FinalizedProvisionDeviceCompletionError(error);
+    }
+  }
+
+  function retireLateProvisionDeviceOperationBegin(
+    store: ProvisionDeviceOperationStore,
+    args: ProvisionDeviceArgs,
+    attemptId: string,
+    operation: ProvisionDeviceOperationBeginResult,
+    admissionError: unknown,
+  ): void {
+    if ("inProgress" in operation) {
+      return;
+    }
+    const provisionError = toProvisionDeviceError(args, admissionError);
+    void store
+      .fail(args.operationId, attemptId, provisionError.code, provisionError.message)
+      .then((retired) => {
+        if (!retired) {
+          logger.debug(
+            `[DeviceTools] Late provisionDevice ${args.operationId} admission was superseded before finalization.`,
+          );
+        }
+      })
+      .catch((error: unknown) => {
+        logger.warn(
+          `[DeviceTools] Failed to retire late provisionDevice ${args.operationId} admission: ` +
+            `${errorMessage(error)}`,
+          error,
+        );
+      });
+  }
+
+  async function persistFailedProvisionDeviceOperation(
+    store: ProvisionDeviceOperationStore,
+    args: ProvisionDeviceArgs,
+    attemptId: string,
+    errorCode: string,
+    message: string,
+    options: { clearCreationStarted?: boolean } | undefined,
+    timer: Pick<Timer, "now" | "setTimeout" | "clearTimeout">,
+    totalDeadlineMs: number,
+    signal: AbortSignal | undefined,
+  ): Promise<void> {
+    // Start the fenced write even if no budget remains. A late settlement can
+    // only update its own attempt, while skipping it entirely leaves a running
+    // operation row that no retry may reclaim until TTL expiry.
+    const persistence = store.fail(args.operationId, attemptId, errorCode, message, options);
+    void persistence.catch((error: unknown) => {
+      logger.warn(
+        `[DeviceTools] Deferred provisionDevice ${args.operationId} failure persistence failed: ` +
+          `${errorMessage(error)}`,
+        error,
+      );
+    });
+    try {
+      await runProvisionDeviceWithinDeadline(
+        timer,
+        totalDeadlineMs,
+        signal,
+        "persisting failed operation result",
+        async () => await persistence,
+      );
+    } catch (error) {
+      // The caller receives the original provisioning failure. Persistence stays
+      // observed and fenced in the background rather than extending that error
+      // past the single request deadline.
+      logger.debug(
+        `[DeviceTools] Deferred provisionDevice ${args.operationId} failure persistence: ` +
+          `${errorMessage(error)}`,
+      );
     }
   }
 
@@ -8171,7 +8343,7 @@ export function registerDeviceTools() {
     });
     state.ownershipTransferred = true;
 
-    await refreshResourcesAfterCommittedBoot(state.boot, deps);
+    refreshResourcesAfterCommittedBoot(state.boot, deps);
     return await buildBootedResponse(
       state.boot.device,
       state.boot.source,

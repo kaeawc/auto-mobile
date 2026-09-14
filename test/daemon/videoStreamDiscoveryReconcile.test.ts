@@ -10,7 +10,7 @@ import type { BootedDevice } from "../../src/models";
 
 /**
  * FUNNEL 1 for the raw H.264 video-stream resolver, which runs its OWN fresh
- * discovery through `DeviceSessionManager.detectConnectedPlatforms`. Without
+ * discovery through `PlatformDeviceManager.getBootedDevices("either")`. Without
  * folding that observation into the pool, BOTH admission checks in
  * `handleSubscribe` -- the one on the named serial and the one on the resolved
  * device -- read pool state from BEFORE this discovery, so a capture is started
@@ -36,15 +36,35 @@ describe("resolveVideoStreamDevice folds its discovery into the pool", () => {
     return pool;
   }
 
-  const detecting = (devices: BootedDevice[]) => ({
-    detectConnectedPlatforms: async (): Promise<BootedDevice[]> => devices,
+  const discovering = (devices: BootedDevice[]) => ({
+    getBootedDevices: async (): Promise<BootedDevice[]> => devices,
+  });
+
+  test("keeps an AVD-resolved pooled emulator live when ADB reports its raw serial", async () => {
+    const pool = await livePool();
+    const resolved = { deviceId: SERIAL, name: "Pixel_8_API_35", platform: "android" } as const;
+
+    const device = await resolveVideoStreamDevice(
+      {
+        // This is the production split: DeviceSessionManager's ADB scan has
+        // the raw serial while PlatformDeviceManager resolves the AVD name.
+        detectConnectedPlatforms: async (): Promise<BootedDevice[]> => [
+          { deviceId: SERIAL, name: SERIAL, platform: "android" },
+        ],
+        getBootedDevices: async (): Promise<BootedDevice[]> => [resolved],
+      },
+      SERIAL,
+    );
+
+    expect(pool.isPooledIdentityUnresolved(SERIAL)).toBe(false);
+    expect(device).toEqual(resolved);
   });
 
   test("quarantines the pooled entry when its discovery reads the placeholder", async () => {
     const pool = await livePool();
 
     await resolveVideoStreamDevice(
-      detecting([{ deviceId: SERIAL, name: `Unknown (${SERIAL})`, platform: "android" }]),
+      discovering([{ deviceId: SERIAL, name: `Unknown (${SERIAL})`, platform: "android" }]),
       SERIAL,
     );
 
@@ -55,7 +75,7 @@ describe("resolveVideoStreamDevice folds its discovery into the pool", () => {
     const pool = await livePool();
 
     await resolveVideoStreamDevice(
-      detecting([{ deviceId: SERIAL, name: "Pixel_7_API_34", platform: "android" }]),
+      discovering([{ deviceId: SERIAL, name: "Pixel_7_API_34", platform: "android" }]),
       SERIAL,
     );
 
@@ -66,7 +86,7 @@ describe("resolveVideoStreamDevice folds its discovery into the pool", () => {
     const pool = await livePool();
 
     const device = await resolveVideoStreamDevice(
-      detecting([{ deviceId: SERIAL, name: "Pixel_8_API_35", platform: "android" }]),
+      discovering([{ deviceId: SERIAL, name: "Pixel_8_API_35", platform: "android" }]),
       SERIAL,
     );
 
@@ -79,7 +99,7 @@ describe("resolveVideoStreamDevice folds its discovery into the pool", () => {
 
     await expect(
       resolveVideoStreamDevice(
-        detecting([{ deviceId: SERIAL, name: `Unknown (${SERIAL})`, platform: "android" }]),
+        discovering([{ deviceId: SERIAL, name: `Unknown (${SERIAL})`, platform: "android" }]),
         "emulator-5556",
       ),
     ).rejects.toThrow("No connected device with id emulator-5556");

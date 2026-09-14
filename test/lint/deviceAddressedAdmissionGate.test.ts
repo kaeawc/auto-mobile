@@ -145,6 +145,7 @@ describe("device-addressed admission gate (issue #6863)", () => {
    */
   const RESOLVERS_ONLY: readonly string[] = [
     "src/daemon/webrtcStreamSocketServer.ts#resolveWebRtcStreamDevice",
+    "src/daemon/videoStreamSocketServer.ts#resolveVideoStreamDevice",
   ];
 
   /**

@@ -647,6 +647,18 @@ export class DevicePool {
     { device: PooledDevice; sessionId: string; assignmentCount: number; cleanup: Promise<void> }
   > = new Map();
   /**
+   * The freshest identity observed while an old pooled incarnation is removed
+   * before its replacement can be installed.
+   */
+  private readonly pendingIdentityReplacements: Map<string, BootedDevice> = new Map();
+  /**
+   * Newer unresolved observations seen after the current pending replacement.
+   * A later resolved observation clears this evidence without letting an
+   * unresolved observation itself become the replacement candidate.
+   */
+  private readonly pendingIdentityReplacementUnresolvedObservations: Map<string, number> =
+    new Map();
+  /**
    * Explicit session-release callbacks run before terminal persistence awaits.
    * Capture ownership there so the later caller-ordered pool release cannot
    * snapshot and free a same-UUID replacement assignment.
@@ -965,6 +977,7 @@ export class DevicePool {
     device: BootedDevice,
     sourceImage?: DeviceInfo,
     awaitSessionTracking: boolean = true,
+    identityUnresolved?: boolean,
   ): Promise<void> {
     this.clearAutoStartSuppressionForBootedDevice(device, sourceImage);
     if (sourceImage) {
@@ -1000,6 +1013,8 @@ export class DevicePool {
         iosVersion: device.iosVersion,
         simulatorType: this.criteriaMatcher.getBootedDeviceSimulatorType(device),
         ...(device.observedAt !== undefined ? { nameObservedAt: device.observedAt } : {}),
+        ...(device.observedAt !== undefined ? { identityObservedAt: device.observedAt } : {}),
+        ...(identityUnresolved ? { identityUnresolved: true } : {}),
         incarnation: this.nextDeviceIncarnation(),
       });
       this.recordSourceAndroidAvd(device.deviceId, sourceImage);
@@ -1042,15 +1057,31 @@ export class DevicePool {
     pooledDevice: PooledDevice,
     bootedDevice: BootedDevice,
   ): Promise<boolean> {
-    await this.evictMissingPooledDevice(
-      pooledDevice,
-      `runtime identity changed to ${bootedDevice.platform}:${bootedDevice.name}`,
-    );
-    if (this.devices.has(bootedDevice.deviceId)) {
-      return false;
+    this.pendingIdentityReplacements.set(bootedDevice.deviceId, bootedDevice);
+    this.pendingIdentityReplacementUnresolvedObservations.delete(bootedDevice.deviceId);
+    try {
+      await this.evictMissingPooledDevice(
+        pooledDevice,
+        `runtime identity changed to ${bootedDevice.platform}:${bootedDevice.name}`,
+        false,
+        undefined,
+        false,
+        undefined,
+        bootedDevice,
+      );
+      const replacement = this.pendingIdentityReplacements.get(bootedDevice.deviceId);
+      if (!replacement || this.devices.has(replacement.deviceId)) {
+        return false;
+      }
+      const identityUnresolved =
+        this.hasUnresolvedEmulatorName(replacement) ||
+        this.pendingIdentityReplacementUnresolvedObservations.has(replacement.deviceId);
+      await this.addDevice(replacement, undefined, true, identityUnresolved);
+      return true;
+    } finally {
+      this.pendingIdentityReplacements.delete(bootedDevice.deviceId);
+      this.pendingIdentityReplacementUnresolvedObservations.delete(bootedDevice.deviceId);
     }
-    await this.addDevice(bootedDevice);
-    return true;
   }
 
   /**
@@ -2387,6 +2418,9 @@ export class DevicePool {
       await this.reconcilePooledIdentityResolution(device, bootedDevice);
       return this.confirmLivePooledDevice(device);
     }
+    if (this.isStaleIdentityObservation(device, bootedDevice)) {
+      return this.confirmLivePooledDevice(device);
+    }
     const replaced = await this.replaceIdlePooledDeviceForLivenessCheck(
       device,
       bootedDevice,
@@ -2425,6 +2459,9 @@ export class DevicePool {
       ) {
         return false;
       }
+      if (this.isStaleIdentityObservation(device, bootedDevice)) {
+        return false;
+      }
       return await this.replacePooledDeviceForRuntimeIdentity(device, bootedDevice);
     };
     return assignmentLockHeld
@@ -2439,12 +2476,9 @@ export class DevicePool {
     incidentId?: string,
     incidentCaptureComplete: boolean = false,
     recoveryPreparation?: SessionRecoveryPreparation,
+    identityObservation?: Pick<BootedDevice, "name" | "observedAt">,
   ): Promise<void> {
-    if (this.isReservedForShutdown(device)) {
-      // killDevice alone owns a shutdown-reserved incarnation until it either
-      // retires it or atomically hands off a same-ID replacement. Discovery
-      // pruning must not remove it in the middle of that handoff.
-      logger.debug(`Deferring eviction of shutdown-reserved device ${device.id}: ${reason}`);
+    if (this.shouldAbortEvictionUpfront(device, reason, identityObservation)) {
       return;
     }
     logger.warn(`Evicting device ${device.id} from pool: ${reason}`);
@@ -2482,12 +2516,49 @@ export class DevicePool {
     }
     device.status = "idle";
     if (recoverAndroidEmulator && this.shouldRebootDisconnectedAndroidDevice(device)) {
+      if (this.shouldAbortEvictionForStaleIdentityObservation(device, identityObservation)) {
+        return;
+      }
       await this.removeDisconnectedDevice(device.id, false, correlatedIncidentId);
       return;
     }
     await this.completeEmulatorLossRecovery(correlatedIncidentId, "not-attempted");
+    if (this.shouldAbortEvictionForStaleIdentityObservation(device, identityObservation)) {
+      return;
+    }
     await this.removeDevice(device.id, true, device);
     this.settleEmulatorLossIncident(correlatedIncidentId);
+  }
+
+  private shouldAbortEvictionUpfront(
+    device: PooledDevice,
+    reason: string,
+    identityObservation?: Pick<BootedDevice, "name" | "observedAt">,
+  ): boolean {
+    if (this.shouldAbortEvictionForStaleIdentityObservation(device, identityObservation)) {
+      return true;
+    }
+    if (this.isReservedForShutdown(device)) {
+      // killDevice alone owns a shutdown-reserved incarnation until it either
+      // retires it or atomically hands off a same-ID replacement. Discovery
+      // pruning must not remove it in the middle of that handoff.
+      logger.debug(`Deferring eviction of shutdown-reserved device ${device.id}: ${reason}`);
+      return true;
+    }
+    return false;
+  }
+
+  private shouldAbortEvictionForStaleIdentityObservation(
+    device: PooledDevice,
+    identityObservation?: Pick<BootedDevice, "name" | "observedAt">,
+  ): boolean {
+    if (!identityObservation || !this.isStaleIdentityObservation(device, identityObservation)) {
+      return false;
+    }
+    logger.debug(
+      `[DevicePool] Aborting eviction of ${device.id}: a newer identity observation confirmed it during eviction`,
+    );
+    return true;
   }
 
   private async resolveMissingDeviceIncident(
@@ -6211,6 +6282,7 @@ export class DevicePool {
       }
       const pooled = this.devices.get(device.deviceId);
       if (!pooled) {
+        this.recordPendingIdentityReplacementObservation(device);
         continue;
       }
       if (this.describesPooledRuntime(device)) {
@@ -6524,6 +6596,41 @@ export class DevicePool {
     if (observedAt !== undefined && observedAt > (pooled.identityObservedAt ?? -Infinity)) {
       pooled.identityObservedAt = observedAt;
     }
+  }
+
+  /**
+   * Keep only a strictly newer stamped identity while removeDevice has made its
+   * serial temporarily absent from the pool during a runtime replacement.
+   */
+  private recordPendingIdentityReplacementObservation(device: BootedDevice): void {
+    const pending = this.pendingIdentityReplacements.get(device.deviceId);
+    if (!pending) {
+      return;
+    }
+    if (this.hasUnresolvedEmulatorName(device)) {
+      if (
+        device.observedAt !== undefined &&
+        pending.observedAt !== undefined &&
+        device.observedAt > pending.observedAt
+      ) {
+        this.pendingIdentityReplacementUnresolvedObservations.set(
+          device.deviceId,
+          device.observedAt,
+        );
+      }
+      return;
+    }
+    // A later successful name probe supersedes any preceding unreadable probe,
+    // even when its stamp cannot replace the current resolved candidate.
+    this.pendingIdentityReplacementUnresolvedObservations.delete(device.deviceId);
+    if (
+      pending.observedAt === undefined ||
+      device.observedAt === undefined ||
+      device.observedAt <= pending.observedAt
+    ) {
+      return;
+    }
+    this.pendingIdentityReplacements.set(device.deviceId, device);
   }
 
   /**

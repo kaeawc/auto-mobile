@@ -74,9 +74,12 @@ lexically_normalize_path() {
   local segment normalized_path=""
   local -a path_segments=()
   local -a normalized_segments=()
-  local IFS='/'
 
-  read -r -a path_segments <<< "${path}"
+  # Scope IFS to the read only. Under bash 3.2 a live custom IFS makes the
+  # "${arr[@]:o:l}" slice-pop below collapse to a single space-joined word
+  # (issue #7044); default IFS slices correctly, and the quoted ${arr[@]}
+  # expansions in the loops preserve any space-bearing path segment regardless.
+  IFS='/' read -r -a path_segments <<< "${path}"
   for segment in ${path_segments[@]+"${path_segments[@]}"}; do
     case "${segment}" in
       ""|.)

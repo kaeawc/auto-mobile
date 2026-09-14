@@ -62,6 +62,25 @@ describe("queryInstalledApps honest-failure contract (#6155)", () => {
     expect(content.totalCount).toBe(0);
   });
 
+  test("uses the device resolved for the query instead of rediscovering it on an uncached call", async () => {
+    setListInstalledAppsFactoryForTests(() => ({
+      executeDetailedResult: async () => ({
+        apps: { profiles: {}, system: [] },
+        successful: true,
+      }),
+      executeIosDetailedResult: async () => {
+        throw new Error("not exercised on android");
+      },
+    }));
+
+    await queryInstalledApps({ deviceId: device.deviceId });
+
+    const discoveryCalls = fakeDeviceUtils
+      .getExecutedOperations()
+      .filter((operation) => operation === "getBootedDevices:android");
+    expect(discoveryCalls).toHaveLength(1);
+  });
+
   test("forwards cancellation to Android catalog enrichment", async () => {
     const controller = new AbortController();
     let capturedSignal: AbortSignal | undefined;

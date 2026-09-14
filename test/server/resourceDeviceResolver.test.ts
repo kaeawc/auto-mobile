@@ -50,4 +50,23 @@ describe("listBootedDevicesForResource", () => {
     ).rejects.toThrow(/abort/i);
     expect(receivedSignal).toBe(controller.signal);
   });
+
+  test("propagates an abort swallowed by detailed discovery", async () => {
+    const controller = new AbortController();
+    const detailedManager = {
+      getBootedDevices: async () => {
+        throw new Error("legacy discovery should not be used with an abort signal");
+      },
+      getBootedDevicesDetailed: async (_platform: string, options?: { signal?: AbortSignal }) => {
+        expect(options?.signal).toBe(controller.signal);
+        return { devices: [], succeededPlatforms: new Set(["android"]) };
+      },
+    };
+    PlatformDeviceManagerFactory.setInstance(detailedManager as unknown as PlatformDeviceManager);
+
+    controller.abort();
+    await expect(
+      listBootedDevicesForResource("android", "test", { signal: controller.signal }),
+    ).rejects.toThrow(/abort/i);
+  });
 });

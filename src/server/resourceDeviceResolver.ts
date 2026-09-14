@@ -47,9 +47,14 @@ export async function listBootedDevicesForResource(
 ): Promise<BootedDevice[]> {
   try {
     const manager = PlatformDeviceManagerFactory.getInstance();
-    const devices = options?.signal
-      ? (await manager.getBootedDevicesDetailed(platform, { signal: options.signal })).devices
-      : await manager.getBootedDevices(platform);
+    let devices: BootedDevice[];
+    if (options?.signal) {
+      devices = (await manager.getBootedDevicesDetailed(platform, { signal: options.signal }))
+        .devices;
+      options.signal.throwIfAborted();
+    } else {
+      devices = await manager.getBootedDevices(platform);
+    }
     await reconcileDiscoveryObservation(devices, source);
     return devices;
   } catch (error) {

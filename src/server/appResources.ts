@@ -690,16 +690,17 @@ function launchabilityUnknownProfiles(queryApps: AppsQueryAppInfo[]): number[] {
 }
 
 async function ensureAppsCacheEntry(
-  deviceId: string,
+  deviceOrId: BootedDevice | string,
   timer: Timer = defaultTimer,
   signal?: AbortSignal,
 ): Promise<AppsCacheEntry | null> {
+  const deviceId = typeof deviceOrId === "string" ? deviceOrId : deviceOrId.deviceId;
   const cached = appCacheByDeviceId.get(deviceId);
   if (cached && cached.expiresAt > timer.now()) {
     return cached;
   }
 
-  const device = await findBootedDevice(deviceId);
+  const device = typeof deviceOrId === "string" ? await findBootedDevice(deviceOrId) : deviceOrId;
   if (!device) {
     return null;
   }
@@ -933,7 +934,7 @@ export async function queryInstalledApps(
   signal?: AbortSignal,
 ): Promise<AppsQueryResourceContent> {
   const device = await getAppsQueryDevice(options, signal);
-  const cacheEntry = await ensureAppsCacheEntry(device.deviceId, defaultTimer, signal);
+  const cacheEntry = await ensureAppsCacheEntry(device, defaultTimer, signal);
   if (!cacheEntry) {
     throw new Error(`Device not found or not booted: ${device.deviceId}`);
   }

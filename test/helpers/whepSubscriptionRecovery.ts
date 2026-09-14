@@ -18,6 +18,22 @@ export interface WhepSubscriptionRecoveryDependencies<Chrome, Cdp> {
 }
 
 /**
+ * Keep the browser-restart retry limited to iOS, where the hosted Chrome
+ * renderer flake occurs. Android failures must remain visible to its device lane.
+ */
+export async function subscribeWhepReaderForPlatform<Chrome, Cdp>(
+  platform: string | undefined,
+  reader: ChromeReader<Chrome, Cdp>,
+  dependencies: WhepSubscriptionRecoveryDependencies<Chrome, Cdp>,
+): Promise<WhepSubscriptionReader<Chrome, Cdp>> {
+  if (platform === "ios") {
+    return recoverWhepSubscription(reader, dependencies);
+  }
+  await dependencies.subscribe(reader.cdp);
+  return { ...reader, retried: false };
+}
+
+/**
  * Retry one failed WHEP subscription with a new browser and retain the live
  * replacement so its caller can own normal teardown.
  */

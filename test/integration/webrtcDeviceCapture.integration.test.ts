@@ -29,9 +29,8 @@ import {
   type SimulatorAppearanceClient,
 } from "../helpers/webrtcDeviceCaptureHelpers";
 import {
-  recoverWhepSubscription,
+  subscribeWhepReaderForPlatform,
   type ChromeReader,
-  type WhepSubscriptionReader,
 } from "../helpers/whepSubscriptionRecovery";
 
 const execFileAsync = promisify(execFile);
@@ -85,10 +84,6 @@ interface ReaderDiagnostics {
 }
 
 type DeviceChromeReader = ChromeReader<ChildProcessWithoutNullStreams, CdpClient>;
-type DeviceWhepSubscriptionReader = WhepSubscriptionReader<
-  ChildProcessWithoutNullStreams,
-  CdpClient
->;
 
 class CdpClient {
   private nextId = 1;
@@ -467,26 +462,6 @@ async function subscribeReader(cdp: CdpClient): Promise<void> {
       `${(error as Error).message}; reader diagnostics=${JSON.stringify(diagnostics ?? "unavailable")}`,
     );
   }
-}
-
-/**
- * The macOS hosted image can leave a healthy Chrome renderer unable to create
- * its next WHEP peer connection. A new browser/profile turns that browser-only
- * flake into one bounded retry while retaining whether it recovered, so a
- * recovered initial subscription does not feed capture-latency percentiles.
- */
-async function subscribeRecoveryReader(
-  reader: DeviceChromeReader,
-  logFile: string,
-  onChromeStarted: (chrome: ChildProcessWithoutNullStreams) => void,
-): Promise<DeviceWhepSubscriptionReader> {
-  return recoverWhepSubscription(reader, {
-    subscribe: subscribeReader,
-    launch: () => launchChromeReader(logFile, onChromeStarted),
-    close: (cdp) => cdp.close(),
-    stop,
-    timer: defaultTimer,
-  });
 }
 
 async function videoSample(
@@ -1190,17 +1165,19 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
           timeline.mark("firstEncodedFrame");
           return true;
         }, "capture source did not deliver H.264 frames to the WHIP publisher");
-        if (platform === "ios") {
-          const reader = await subscribeRecoveryReader(
-            { chrome: chrome!, cdp: cdp! },
-            join(artifactDir, "chrome.log"),
-            rememberChrome,
-          );
-          ({ chrome, cdp } = reader);
-          captureLatencySample = !reader.retried;
-        } else {
-          await subscribeReader(cdp);
-        }
+        const reader = await subscribeWhepReaderForPlatform(
+          platform,
+          { chrome: chrome!, cdp: cdp! },
+          {
+            subscribe: subscribeReader,
+            launch: () => launchChromeReader(join(artifactDir, "chrome.log"), rememberChrome),
+            close: (readerCdp) => readerCdp.close(),
+            stop,
+            timer: defaultTimer,
+          },
+        );
+        ({ chrome, cdp } = reader);
+        captureLatencySample = !reader.retried;
         timeline.mark("whepConnected");
         // #4383: the screen has been static since capture started (fixture launched, no further
         // input), so this exercises a late viewer joining an idle stream. The encoder's

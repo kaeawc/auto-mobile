@@ -7462,6 +7462,7 @@ export class DevicePool {
     readinessReservationOwners?: ReadonlySet<symbol>,
     verifiedAndroidAvdIdentity?: DeviceInfo,
     achievedReadiness: DeviceReadinessLevel = "automationReady",
+    collectCancellationSettlement?: (settlement: Promise<void>) => void,
   ): Promise<string | undefined> {
     if (!isDevicePoolAutolockEnabled()) {
       return undefined;
@@ -7477,6 +7478,7 @@ export class DevicePool {
         readinessReservationOwners,
         verifiedAndroidAvdIdentity,
         achievedReadiness,
+        collectCancellationSettlement,
       ),
     );
   }
@@ -7491,6 +7493,7 @@ export class DevicePool {
     readinessReservationOwners?: ReadonlySet<symbol>,
     verifiedAndroidAvdIdentity?: DeviceInfo,
     achievedReadiness: DeviceReadinessLevel = "automationReady",
+    collectCancellationSettlement?: (settlement: Promise<void>) => void,
   ): Promise<string> {
     throwIfRequestAborted();
     const androidAvdIdentity = verifiedAndroidAvdIdentity ?? sourceImage;
@@ -7607,7 +7610,13 @@ export class DevicePool {
       acquired.add(sessionId);
       this.mcpSessionAcquiredAutolocks.set(mcpSessionId, acquired);
     }
-    await this.persistAcquiredAutolockSession(device, session, assignmentSnapshot, mcpSessionId);
+    await this.persistAcquiredAutolockSession(
+      device,
+      session,
+      assignmentSnapshot,
+      mcpSessionId,
+      collectCancellationSettlement,
+    );
 
     logger.info(
       `Autolocked device ${deviceId} with session ${sessionId} (timeout: ${timeoutMs}ms)`,
@@ -7620,6 +7629,7 @@ export class DevicePool {
     session: Session,
     snapshot: SessionAssignmentSnapshot,
     mcpSessionId?: string,
+    collectCancellationSettlement?: (settlement: Promise<void>) => void,
   ): Promise<void> {
     const signal = getAbortSignal();
     const cancelPublishedSession = async () => {
@@ -7654,7 +7664,9 @@ export class DevicePool {
       // metadata write may hold the global assignment mutex after cancellation.
       // The repository's active-row guard prevents the late metadata write from
       // overwriting a completed terminal release.
-      void cancelPublishedSession().catch((releaseError) =>
+      const cancellationSettlement = cancelPublishedSession();
+      collectCancellationSettlement?.(cancellationSettlement);
+      void cancellationSettlement.catch((releaseError) =>
         logger.warn(`Cancelled autolock release failed: ${releaseError}`),
       );
       this.restoreCancelledAutolockAssignment(device, session, snapshot);

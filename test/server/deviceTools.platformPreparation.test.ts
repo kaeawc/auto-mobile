@@ -723,6 +723,104 @@ describe("platform device preparation tools", () => {
     });
   }
 
+  test("keeps acquisition leases until cancelled autolock release persistence settles", async () => {
+    const originalAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+    const metadataStarted = Promise.withResolvers<void>();
+    const metadataFinished = Promise.withResolvers<void>();
+    const releaseStarted = Promise.withResolvers<void>();
+    const releaseFinished = Promise.withResolvers<void>();
+    const persistence = new FakeDeviceSessionPersistence();
+    persistence.markReleased = async () => {
+      releaseStarted.resolve();
+      await releaseFinished.promise;
+    };
+    const repository = {
+      markAutolockSession: async () => {
+        metadataStarted.resolve();
+        await metadataFinished.promise;
+      },
+    };
+    const image = {
+      platform: "android" as const,
+      name: "Pixel_9_API_36",
+      isRunning: false,
+      source: "local" as const,
+    };
+    deviceUtils.setDeviceImages("android", [image]);
+    sessionManager = new SessionManager(timer, persistence);
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      deviceUtils,
+      new DefaultRetryExecutor(timer),
+      repository,
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    let readinessReleases = 0;
+    const reserveReadiness = pool.reserveDeviceForReadiness.bind(pool);
+    pool.reserveDeviceForReadiness = async (
+      ...args: Parameters<DevicePool["reserveDeviceForReadiness"]>
+    ) => {
+      const release = await reserveReadiness(...args);
+      const countedRelease = async () => {
+        readinessReleases++;
+        await release();
+      };
+      return Object.assign(countedRelease, { owner: release.owner });
+    };
+    let lifecycleReleases = 0;
+    setDeviceToolsDependencies({
+      ensureCtrlProxyReady: async () => {
+        timer.advanceTime(1_500);
+      },
+      lifecycleCoordinator: {
+        reserve: async () => ({
+          signal: new AbortController().signal,
+          identity: { kind: "selector", platform: "android", selector: image.name },
+          bindCanonicalIdentity: async () => {},
+          transitionToTeardown: () => {},
+          release: () => {
+            lifecycleReleases++;
+          },
+        }),
+      },
+    });
+    process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
+
+    try {
+      const result = callTool("getAndroid", {
+        avdName: image.name,
+        bootTimeoutMs: 1_000,
+        automationReadyTimeoutMs: 1_000,
+      }).catch((error: unknown) => error);
+      await metadataStarted.promise;
+
+      await timer.advanceTimeAsync(500);
+      const failure = await result;
+      expect(failure).toBeInstanceOf(ActionableError);
+      await releaseStarted.promise;
+      expect(readinessReleases).toBe(0);
+      expect(lifecycleReleases).toBe(0);
+
+      releaseFinished.resolve();
+      for (let attempt = 0; attempt < 50; attempt++) {
+        await Promise.resolve();
+      }
+      expect(readinessReleases).toBe(1);
+      expect(lifecycleReleases).toBe(1);
+    } finally {
+      metadataFinished.resolve();
+      releaseFinished.resolve();
+      if (originalAutolock === undefined) {
+        delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+      } else {
+        process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = originalAutolock;
+      }
+    }
+  });
+
   test("preserves a reused session when its activity write outlives the preparation deadline", async () => {
     const persistence = new DeferredActivityPersistence();
     const emulator: BootedDevice = {

@@ -1,6 +1,7 @@
 import type { DeviceControlTransportFailure } from "./deviceControlTransportFailure";
 import type { SessionReleaseSnapshot } from "./sessionManager";
 import type { DaemonHandshakeFailure } from "./daemonHandshake";
+import type { DaemonShuttingDownFailure } from "./daemonShutdownOutcome";
 
 /**
  * Request sent from CLI client to daemon
@@ -67,6 +68,8 @@ export interface DaemonResponse {
    * transport session and retried against a replacement daemon.
    */
   boundSessionLoss?: BoundSessionLoss;
+  /** Retryable daemon lifecycle transition that rejected new session admission. */
+  daemonShuttingDown?: DaemonShuttingDownFailure;
   /**
    * Number of leading characters delivered by a failed Android
    * `input/typeText` append request. Present only when the append operation

@@ -40,6 +40,7 @@ import {
   INTERNAL_LIVE_DEADLINE_KEY_PARAM,
   DAEMON_SHUTTING_DOWN_ERROR_MESSAGE,
 } from "./constants";
+import { daemonShuttingDownFailure, isDaemonShuttingDownToolResult } from "./daemonShutdownOutcome";
 import { registerLiveDeadline, unregisterLiveDeadline } from "./liveDeadlineRegistry";
 import {
   DaemonSocketReachability,
@@ -1000,6 +1001,7 @@ export class UnixSocketServer {
         type: "mcp_response",
         success: false,
         error: DAEMON_SHUTTING_DOWN_ERROR_MESSAGE,
+        daemonShuttingDown: daemonShuttingDownFailure(),
       };
     }
 
@@ -1124,6 +1126,16 @@ export class UnixSocketServer {
             }
           },
         );
+
+        if (isDaemonShuttingDownToolResult(result)) {
+          return {
+            id: request.id,
+            type: "mcp_response",
+            success: false,
+            error: DAEMON_SHUTTING_DOWN_ERROR_MESSAGE,
+            daemonShuttingDown: daemonShuttingDownFailure(),
+          };
+        }
 
         return {
           id: request.id,

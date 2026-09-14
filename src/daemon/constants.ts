@@ -236,6 +236,8 @@ export const DAEMON_SHUTDOWN_TIMEOUT_MS = 10000;
 
 /** Stable control-socket error used to signal a retryable shutdown transition. */
 export const DAEMON_SHUTTING_DOWN_ERROR_MESSAGE = "Daemon is shutting down";
+/** Machine-readable identity of a session creation rejected by daemon shutdown. */
+export const DAEMON_SHUTTING_DOWN_ERROR_CODE = "daemon_shutting_down";
 
 /** Bound on the post-SIGKILL process-exit confirmation. */
 export const DAEMON_FORCED_STOP_TIMEOUT_MS = 1_000;

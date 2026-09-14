@@ -16,7 +16,9 @@ import {
   DaemonMcpProxy,
   type DaemonMcpProxyConfig,
 } from "../daemon/daemonMcpProxy";
+import { DaemonShuttingDownError } from "../daemon/client";
 import { ActionableError } from "../models";
+import { daemonShuttingDownMcpOutcome } from "../daemon/daemonShutdownOutcome";
 import { getMcpServerVersion } from "../utils/mcpVersion";
 import {
   DeviceControlTransportError,
@@ -109,6 +111,15 @@ function noActiveDeviceSessionError(error: DaemonConnectionSessionReleasedError)
     noActiveDeviceSessionMessage(error),
     noActiveDeviceSessionPayload(error),
   );
+}
+
+function daemonShuttingDownResult() {
+  const shutdown = daemonShuttingDownMcpOutcome();
+  return {
+    content: [{ type: "text", text: JSON.stringify(shutdown) }],
+    structuredContent: shutdown,
+    isError: true,
+  };
 }
 
 export function deviceControlTransportFailureResult(
@@ -274,6 +285,9 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
       if (error instanceof DaemonConnectionSessionReleasedError) {
         logger.warn(`[ProxyServer] No active device session (released: ${error.reason})`);
         return noActiveDeviceSessionResult(error);
+      }
+      if (error instanceof DaemonShuttingDownError) {
+        return daemonShuttingDownResult();
       }
       if (error instanceof DeviceControlTransportError) {
         logger.warn(

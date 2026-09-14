@@ -1315,6 +1315,50 @@ describe("UnixSocketServer MCP session reconnect", () => {
     expect(response.transportFailure).toBeUndefined();
   });
 
+  test("maps a structured late getApple shutdown failure to the retryable daemon envelope", async () => {
+    let clientsCreated = 0;
+
+    server.mcpClientFactory = async () => {
+      clientsCreated++;
+      return createFakeMcpClient({
+        callTool: async () => ({
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                error: {
+                  code: "daemon_shutting_down",
+                  message: "Daemon is shutting down",
+                  retryable: true,
+                },
+              }),
+            },
+          ],
+          structuredContent: {
+            error: { code: "daemon_shutting_down", retryable: true },
+          },
+          isError: true,
+        }),
+      });
+    };
+
+    const response = await sendRequest(socketPath, "tools/call", {
+      name: "getApple",
+      arguments: { udid: "ios-simulator-a" },
+    });
+
+    expect(response).toMatchObject({
+      success: false,
+      error: "Daemon is shutting down",
+      daemonShuttingDown: {
+        code: "daemon_shutting_down",
+        retryable: true,
+      },
+    });
+    expect(response.transportFailure).toBeUndefined();
+    expect(clientsCreated).toBe(1);
+  });
+
   test("subsequent requests reuse the reconnected client without creating another", async () => {
     let clientsCreated = 0;
 

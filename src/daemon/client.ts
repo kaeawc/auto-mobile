@@ -23,6 +23,7 @@ import {
   DAEMON_NON_FINITE_ENCODED_PARAM,
   DAEMON_SHUTTING_DOWN_ERROR_MESSAGE,
 } from "./constants";
+import { isDaemonShuttingDownFailure } from "./daemonShutdownOutcome";
 import { type BuildIdentity, getCurrentBuildIdentity } from "./buildIdentity";
 import { resolveMcpRequestTimeoutMs, ProgressExtendableDeadline } from "./mcpRequestTimeout";
 import { McpTimeoutError } from "./McpTimeoutError";
@@ -652,15 +653,15 @@ export class DaemonClient {
               response.handshakeFailure,
               response.error || "Daemon identity mismatch",
             )
-          : boundSessionLoss
-            ? new DaemonBoundSessionLostError(boundSessionLoss)
-            : transportFailure
-              ? new DeviceControlTransportError(
-                  response.error || "Device-control transport failure",
-                  transportFailure,
-                )
-              : response.error === DAEMON_SHUTTING_DOWN_ERROR_MESSAGE
-                ? new DaemonShuttingDownError()
+          : isDaemonShuttingDownFailure(response.daemonShuttingDown)
+            ? new DaemonShuttingDownError()
+            : boundSessionLoss
+              ? new DaemonBoundSessionLostError(boundSessionLoss)
+              : transportFailure
+                ? new DeviceControlTransportError(
+                    response.error || "Device-control transport failure",
+                    transportFailure,
+                  )
                 : new ActionableError(response.error || "Unknown error from daemon"),
       );
     }

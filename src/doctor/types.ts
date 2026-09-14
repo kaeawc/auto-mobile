@@ -55,14 +55,17 @@ export interface DoctorReport {
 
 /**
  * Cancellation seam for a single probe (#7008). A caller that races a check
- * against its own deadline (the host/toolchain resource) hands the check a
- * signal to abort and a deadline for the commands it spawns, so the losing
- * probe's child processes are killed instead of accumulating across reads.
- * Callers that pass nothing get the historical unbounded behaviour.
+ * against its own deadline hands the check one signal and one absolute deadline
+ * for every subprocess, network read, and device probe it starts. Callers that
+ * pass nothing get the historical unbounded behaviour.
  */
 export interface DoctorProbeOptions {
   signal?: AbortSignal;
   timeoutMs?: number;
+  /** Absolute deadline on {@link timer}'s clock; internal orchestration only. */
+  deadlineMs?: number;
+  /** Injectable clock for the shared deadline; omitted by CLI/MCP callers. */
+  timer?: import("../utils/SystemTimer").Timer;
 }
 
 /**

@@ -15,6 +15,8 @@ import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import type { AdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
 import type { BootedDevice } from "../../src/models";
+import { createDoctorDeadline } from "../../src/doctor/deadline";
+import { FakeTimer } from "../fakes/FakeTimer";
 
 const baseDependencies: AndroidDoctorDependencies = {
   detectAndroidCommandLineTools: async () => [],
@@ -339,6 +341,43 @@ describe("checkAdbVersion", () => {
     const result = await checkAdbVersion(throwingFactory);
     expect(result.status).toBe("warn");
     expect(result.message).toContain("raw string error");
+  });
+});
+
+describe("Android doctor cancellation", () => {
+  test("aborts delayed emulator subprocess I/O without publishing a late pass", async () => {
+    const timer = new FakeTimer();
+    const deadline = createDoctorDeadline({ timeoutMs: 50, timer }, timer);
+    let observedSignal: AbortSignal | undefined;
+    let observedTimeoutMs: number | undefined;
+    let lateSuccess = false;
+    let settled = false;
+    const check = checkEmulator(deadline.probe, {
+      listAvds: async (probe) => {
+        observedSignal = probe?.signal;
+        observedTimeoutMs = probe?.timeoutMs;
+        await new Promise<void>((resolve) => {
+          probe?.signal?.addEventListener("abort", resolve, { once: true });
+        });
+        try {
+          probe?.signal?.throwIfAborted();
+          lateSuccess = true;
+          return [];
+        } finally {
+          settled = true;
+        }
+      },
+    });
+
+    timer.advanceTime(50);
+    const result = await check;
+    deadline.dispose();
+
+    expect(observedSignal?.aborted).toBe(true);
+    expect(observedTimeoutMs).toBe(50);
+    expect(settled).toBe(true);
+    expect(lateSuccess).toBe(false);
+    expect(result.status).toBe("warn");
   });
 });
 

@@ -1,4 +1,4 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import type { IosDoctorDependencies } from "../../src/doctor/checks/ios";
 import {
   checkAppleDeveloperAccount,
@@ -26,9 +26,10 @@ import type {
   IosRunnerInspectorHooks,
 } from "../../src/doctor/checks/ios";
 import type { ExecResult } from "../../src/models";
-import { DefaultHostCommandExecutor } from "../../src/utils/HostCommandExecutor";
 import type { SecurityClient } from "../../src/utils/ios-cmdline-tools/SecurityClient";
 import { FakeLogger } from "../fakes/FakeLogger";
+import { createDoctorDeadline } from "../../src/doctor/deadline";
+import { FakeTimer } from "../fakes/FakeTimer";
 
 const createExecResult = (stdout: string, stderr: string = ""): ExecResult => ({
   stdout,
@@ -236,7 +237,10 @@ describe("iOS doctor checks", () => {
     test("passes when xcrun works", async () => {
       const result = await checkXcrunAvailable({
         ...baseDependencies,
-        execFile: async () => createExecResult("xcrun version 75."),
+        createSimctlClient: () => ({
+          ...baseDependencies.createSimctlClient(),
+          isAvailable: async () => true,
+        }),
       });
 
       expect(result.status).toBe("pass");
@@ -246,35 +250,35 @@ describe("iOS doctor checks", () => {
     test("fails when xcrun fails", async () => {
       const result = await checkXcrunAvailable({
         ...baseDependencies,
-        execFile: async () => {
-          throw new Error("xcrun: error: unable to find utility");
-        },
+        createSimctlClient: () => ({
+          ...baseDependencies.createSimctlClient(),
+          isAvailable: async () => false,
+        }),
       });
 
       expect(result.status).toBe("fail");
       expect(result.message).toContain("xcrun not functional");
     });
 
-    test("force-kills a wedged xcrun process when using default dependencies", async () => {
-      const executeCommand = spyOn(
-        DefaultHostCommandExecutor.prototype,
-        "executeCommand",
-      ).mockResolvedValue(createExecResult(""));
-      try {
-        const result = await checkXcrunAvailable();
-        if (process.platform === "darwin") {
-          expect(result.status).toBe("pass");
-          expect(executeCommand).toHaveBeenCalledWith("xcrun", ["--version"], {
-            timeoutMs: 5000,
-            killSignal: "SIGKILL",
-          });
-        } else {
-          expect(result.status).toBe("skip");
-          expect(executeCommand).not.toHaveBeenCalled();
-        }
-      } finally {
-        executeCommand.mockRestore();
-      }
+    test("passes the shared cancellation options to the simctl-backed probe", async () => {
+      const controller = new AbortController();
+      let received: { signal?: AbortSignal; timeoutMs?: number } | undefined;
+      const result = await checkXcrunAvailable(
+        {
+          ...baseDependencies,
+          createSimctlClient: () => ({
+            ...baseDependencies.createSimctlClient(),
+            isAvailable: async (options) => {
+              received = options;
+              return true;
+            },
+          }),
+        },
+        { signal: controller.signal, timeoutMs: 123 },
+      );
+
+      expect(result.status).toBe("pass");
+      expect(received).toEqual({ signal: controller.signal, timeoutMs: 123 });
     });
 
     test("skips when not on darwin", async () => {
@@ -616,7 +620,9 @@ describe("iOS doctor checks", () => {
       const result = await checkXcrunAvailable({
         ...baseDependencies,
         logger,
-        execFile: throwingExecFile,
+        createSimctlClient: () => {
+          throw new Error("xcrun: command not found");
+        },
       });
 
       expect(result.status).toBe("fail");
@@ -713,6 +719,50 @@ describe("iOS doctor checks", () => {
       expect(result.status).toBe("skip");
       expect(logger.at("warn").length).toBeGreaterThan(0);
     });
+  });
+});
+
+describe("iOS doctor cancellation", () => {
+  test("aborts delayed simctl I/O without publishing a late pass", async () => {
+    const timer = new FakeTimer();
+    const deadline = createDoctorDeadline({ timeoutMs: 50, timer }, timer);
+    let observedSignal: AbortSignal | undefined;
+    let observedTimeoutMs: number | undefined;
+    let lateSuccess = false;
+    let settled = false;
+    const check = checkSimctlAvailable(
+      {
+        ...baseDependencies,
+        createSimctlClient: () => ({
+          ...baseDependencies.createSimctlClient(),
+          isAvailable: async (options) => {
+            observedSignal = options?.signal;
+            observedTimeoutMs = options?.timeoutMs;
+            await new Promise<void>((resolve) => {
+              options?.signal?.addEventListener("abort", resolve, { once: true });
+            });
+            try {
+              options?.signal?.throwIfAborted();
+              lateSuccess = true;
+              return true;
+            } finally {
+              settled = true;
+            }
+          },
+        }),
+      },
+      deadline.probe,
+    );
+
+    timer.advanceTime(50);
+    const result = await check;
+    deadline.dispose();
+
+    expect(observedSignal?.aborted).toBe(true);
+    expect(observedTimeoutMs).toBe(50);
+    expect(settled).toBe(true);
+    expect(lateSuccess).toBe(false);
+    expect(result.status).toBe("fail");
   });
 });
 

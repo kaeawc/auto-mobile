@@ -477,15 +477,22 @@ async function verifyRequestedDoctorChecks(
   if (!requested) {
     return undefined;
   }
-  return await attemptRecoveryStep("verification", deadline, timer, async (signal) => {
-    const report = await runDoctorChecks({
-      ...requested,
-      signal,
-      timeoutMs: Math.max(1, deadline - timer.now()),
-    });
-    assertRequestedDoctorSections(report, requested);
-    return requested;
-  });
+  return await attemptRecoveryStep(
+    "verification",
+    deadline,
+    timer,
+    async (signal) => {
+      const report = await runDoctorChecks({
+        ...requested,
+        signal,
+        deadlineMs: deadline,
+        timer,
+      });
+      assertRequestedDoctorSections(report, requested);
+      return requested;
+    },
+    true,
+  );
 }
 
 async function completeVerifiedRecovery(
@@ -515,6 +522,7 @@ async function completeVerifiedRecovery(
       postRepairDoctor.error,
       before,
       finalHealth.value,
+      postRepairDoctor.lifecycleCompletion,
     );
   }
 

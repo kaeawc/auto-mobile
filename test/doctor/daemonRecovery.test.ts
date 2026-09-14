@@ -105,7 +105,12 @@ describe("repairDaemon", () => {
   test.each(["android", "ios"] as const)(
     "runs requested %s diagnostics after repair under the shared deadline",
     async (platform) => {
-      const calls: Array<{ android?: boolean; ios?: boolean; timeoutMs?: number }> = [];
+      const calls: Array<{
+        android?: boolean;
+        ios?: boolean;
+        deadlineMs?: number;
+        signal?: AbortSignal;
+      }> = [];
       const result = await repairDaemon(
         { [platform]: true },
         dependencies([healthReport(true), healthReport(true)], {
@@ -123,7 +128,7 @@ describe("repairDaemon", () => {
       });
       expect(calls).toHaveLength(1);
       expect(calls[0]).toMatchObject({ [platform]: true });
-      expect(calls[0]?.timeoutMs).toBeGreaterThan(0);
+      expect(calls[0]?.deadlineMs).toBeGreaterThan(0);
       expect(calls[0]?.signal).toBeInstanceOf(AbortSignal);
     },
   );
@@ -172,6 +177,40 @@ describe("repairDaemon", () => {
       nextAction: expect.stringContaining("deadline"),
     });
     expect(cancelled).toBe(true);
+  });
+
+  test("waits for a cancellation-aware post-repair doctor lifecycle before reporting repair failure", async () => {
+    const timer = new FakeTimer();
+    let settled = false;
+    const repair = repairDaemon(
+      { ios: true, timeoutMs: 50 },
+      dependencies([healthReport(true), healthReport(true)], {
+        timer,
+        runDoctor: async ({ signal }) => {
+          await new Promise<void>((resolve) => {
+            signal?.addEventListener("abort", resolve, { once: true });
+          });
+          try {
+            signal?.throwIfAborted();
+            return doctorReport("ios");
+          } finally {
+            settled = true;
+          }
+        },
+      }),
+    );
+
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    timer.advanceTime(50);
+    const result = await repair;
+
+    expect(result).toMatchObject<Partial<DaemonRecoveryResult>>({
+      status: "failed",
+      phase: "verification",
+      action: "joined",
+    });
+    expect(settled).toBe(true);
+    await waitForDaemonRecoveryCompletion(result);
   });
 
   test("does not let a delayed metadata repair publish after the doctor deadline", async () => {

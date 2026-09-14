@@ -112,6 +112,7 @@ export interface AdbExecutor {
   getBootedAndroidDevices(options?: {
     bypassCache?: boolean;
     throwOnMissingAdb?: boolean;
+    timeoutMs?: number;
     signal?: AbortSignal;
   }): Promise<BootedDevice[]>;
 

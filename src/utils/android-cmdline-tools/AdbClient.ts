@@ -1209,7 +1209,12 @@ export class AdbClient implements AdbExecutor {
    * @returns Promise with an array of device IDs
    */
   async getBootedAndroidDevices(
-    options: { bypassCache?: boolean; throwOnMissingAdb?: boolean; signal?: AbortSignal } = {},
+    options: {
+      bypassCache?: boolean;
+      throwOnMissingAdb?: boolean;
+      timeoutMs?: number;
+      signal?: AbortSignal;
+    } = {},
   ): Promise<BootedDevice[]> {
     if (this.shouldSkipMissingAdbProbe()) {
       if (options.throwOnMissingAdb) {
@@ -1231,7 +1236,7 @@ export class AdbClient implements AdbExecutor {
     try {
       result = await this.executeCommand(
         "devices -l",
-        AdbClient.DEVICE_LIST_TIMEOUT_MS,
+        options.timeoutMs ?? AdbClient.DEVICE_LIST_TIMEOUT_MS,
         undefined,
         true,
         options.signal,

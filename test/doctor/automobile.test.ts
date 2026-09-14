@@ -4,6 +4,7 @@ import {
   checkCtrlProxy,
   checkCtrlProxyVersion,
   checkDaemonBuildIdentity,
+  checkDaemonConnectivity,
   checkDaemonStatus,
   checkDaemonVersion,
   runAutoMobileChecks,
@@ -24,6 +25,8 @@ import * as path from "path";
 import AdmZip from "adm-zip";
 import crypto from "crypto";
 import { FakeLogger } from "../fakes/FakeLogger";
+import { createDoctorDeadline } from "../../src/doctor/deadline";
+import { FakeTimer } from "../fakes/FakeTimer";
 
 describe("checkDaemonVersion", () => {
   test("returns pass status", () => {
@@ -238,6 +241,50 @@ describe("checkDaemonStatus", () => {
     // Issue #2746: floating @latest advice causes silent version drift.
     expect(result.recommendation).not.toContain("@latest");
     expect(result.recommendation).toContain(RELEASE_CHECKSUM_REGISTRY[0].version);
+  });
+});
+
+describe("AutoMobile doctor cancellation", () => {
+  test("aborts delayed daemon health I/O without publishing a late connectivity pass", async () => {
+    const timer = new FakeTimer();
+    const deadline = createDoctorDeadline({ timeoutMs: 50, timer }, timer);
+    let observedSignal: AbortSignal | undefined;
+    let observedTimeoutMs: number | undefined;
+    let lateSuccess = false;
+    let settled = false;
+    const check = checkDaemonConnectivity(async (probe) => {
+      observedSignal = probe?.signal;
+      observedTimeoutMs = probe?.timeoutMs;
+      await new Promise<void>((resolve) => {
+        probe?.signal?.addEventListener("abort", resolve, { once: true });
+      });
+      try {
+        probe?.signal?.throwIfAborted();
+        lateSuccess = true;
+        return {
+          timestamp: "2026-09-14T00:00:00.000Z",
+          daemonRunning: true,
+          socketExists: true,
+          socketAccessible: true,
+          pidFileExists: true,
+          pidFileValid: true,
+          socketConnectable: true,
+          recommendations: [],
+        };
+      } finally {
+        settled = true;
+      }
+    }, deadline.probe);
+
+    timer.advanceTime(50);
+    const result = await check;
+    deadline.dispose();
+
+    expect(observedSignal?.aborted).toBe(true);
+    expect(observedTimeoutMs).toBe(50);
+    expect(settled).toBe(true);
+    expect(lateSuccess).toBe(false);
+    expect(result.status).toBe("warn");
   });
 });
 

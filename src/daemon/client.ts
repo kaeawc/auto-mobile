@@ -278,7 +278,11 @@ export class DaemonClient {
    * here has no equivalent ownership proof and could delete a concurrent startup
    * winner's live socket.
    */
-  static async isAvailable(socketPath: string = SOCKET_PATH): Promise<boolean> {
+  static async isAvailable(
+    socketPath: string = SOCKET_PATH,
+    options: { signal?: AbortSignal; timeoutMs?: number; timer?: Timer } = {},
+  ): Promise<boolean> {
+    const timer = options.timer ?? defaultTimer;
     // On Unix, verify the path exists and is a socket (not a stale regular file).
     // On Windows, named pipes don't have filesystem entries — skip the stat check
     // and let createConnection determine reachability.
@@ -301,24 +305,35 @@ export class DaemonClient {
       const settle = (value: boolean) => {
         if (!settled) {
           settled = true;
+          options.signal?.removeEventListener("abort", onAbort);
           resolve(value);
         }
       };
+      const onAbort = () => {
+        timer.clearTimeout(timeout);
+        socket.destroy();
+        settle(false);
+      };
 
       const socket = createConnection(socketPath, () => {
-        defaultTimer.clearTimeout(timeout);
+        timer.clearTimeout(timeout);
         socket.destroy();
         settle(true);
       });
       socket.on("error", () => {
-        defaultTimer.clearTimeout(timeout);
+        timer.clearTimeout(timeout);
         socket.destroy();
         settle(false);
       });
-      const timeout = defaultTimer.setTimeout(() => {
+      const timeout = timer.setTimeout(() => {
         socket.destroy();
         settle(false);
-      }, 1000);
+      }, options.timeoutMs ?? 1000);
+      if (options.signal?.aborted) {
+        onAbort();
+      } else {
+        options.signal?.addEventListener("abort", onAbort, { once: true });
+      }
     });
   }
 

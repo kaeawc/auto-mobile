@@ -29,6 +29,8 @@ import {
   SecurityClient,
   type SecurityClientApi,
 } from "../../utils/ios-cmdline-tools/SecurityClient";
+import type { DoctorProbeOptions } from "../types";
+import { remainingDoctorProbe } from "../deadline";
 
 // Re-exported so doctor consumers (and tests) can reference the feature command
 // set without reaching into the runner client module.
@@ -58,7 +60,7 @@ export interface IosRunnerInspection {
 
 /** Source of booted-simulator runner identities (injectable for tests). */
 export interface IosCtrlProxyRunnerInspector {
-  inspectBootedRunners(): Promise<IosRunnerInspection[]>;
+  inspectBootedRunners(probe?: DoctorProbeOptions): Promise<IosRunnerInspection[]>;
 }
 
 /** Per-simulator result of a real iOS runner observe round trip. */
@@ -75,7 +77,9 @@ export interface IosObserveRoundTripInspection {
 
 /** Source of booted-simulator iOS observe round trips (injectable for tests). */
 export interface IosObserveRoundTripInspector {
-  inspectBootedObserveRoundTrips(): Promise<IosObserveRoundTripInspection[]>;
+  inspectBootedObserveRoundTrips(
+    probe?: DoctorProbeOptions,
+  ): Promise<IosObserveRoundTripInspection[]>;
 }
 
 type IosRunnerVersionStatus = "compatible" | "stale" | "unknown";
@@ -98,7 +102,11 @@ const hostCommandExecutor = new DefaultHostCommandExecutor();
 
 export interface IosDoctorDependencies {
   platform: () => NodeJS.Platform;
-  execFile: (file: string, args: string[]) => Promise<ExecResult>;
+  execFile: (
+    file: string,
+    args: string[],
+    options?: { signal?: AbortSignal; timeoutMs?: number },
+  ) => Promise<ExecResult>;
   xcodebuild: Pick<Xcodebuild, "executeCommand">;
   fileExists: (path: string) => boolean;
   readDir: (path: string) => Promise<string[]>;
@@ -193,15 +201,25 @@ export function createIosCtrlProxyRunnerInspector(
   hooks: IosRunnerInspectorHooks = defaultIosRunnerInspectorHooks,
 ): IosCtrlProxyRunnerInspector {
   return {
-    async inspectBootedRunners(): Promise<IosRunnerInspection[]> {
+    async inspectBootedRunners(probe: DoctorProbeOptions = {}): Promise<IosRunnerInspection[]> {
+      const currentProbe = remainingDoctorProbe(probe);
       const simctl = createSimctlClient();
-      if (!(await simctl.isAvailable())) {
+      if (
+        !(await simctl.isAvailable({
+          signal: currentProbe.signal,
+          timeoutMs: currentProbe.timeoutMs,
+        }))
+      ) {
         return [];
       }
 
-      const simulators = await simctl.getBootedSimulators();
+      const simulators = await simctl.getBootedSimulators(
+        currentProbe.timeoutMs,
+        currentProbe.signal,
+      );
       const inspections: IosRunnerInspection[] = [];
       for (const simulator of simulators) {
+        currentProbe.signal?.throwIfAborted();
         const device: BootedDevice = {
           name: simulator.name,
           platform: "ios",
@@ -224,6 +242,7 @@ export function createIosCtrlProxyRunnerInspector(
           const probe = existing ?? hooks.createClient(device);
           try {
             supportedCommands = await probe.getSupportedCommands();
+            currentProbe.signal?.throwIfAborted();
             supportedFeatures = await probe.getSupportedFeatures();
           } catch (error) {
             // Treated as an unreachable runner (versionStatus=unknown), not a hard
@@ -266,16 +285,28 @@ export function createIosObserveRoundTripInspector(
   hooks: IosObserveRoundTripInspectorHooks = defaultIosObserveRoundTripInspectorHooks,
 ): IosObserveRoundTripInspector {
   return {
-    async inspectBootedObserveRoundTrips(): Promise<IosObserveRoundTripInspection[]> {
+    async inspectBootedObserveRoundTrips(
+      probe: DoctorProbeOptions = {},
+    ): Promise<IosObserveRoundTripInspection[]> {
+      const currentProbe = remainingDoctorProbe(probe);
       const simctl = createSimctlClient();
-      if (!(await simctl.isAvailable())) {
+      if (
+        !(await simctl.isAvailable({
+          signal: currentProbe.signal,
+          timeoutMs: currentProbe.timeoutMs,
+        }))
+      ) {
         return [];
       }
 
-      const simulators = await simctl.getBootedSimulators();
+      const simulators = await simctl.getBootedSimulators(
+        currentProbe.timeoutMs,
+        currentProbe.signal,
+      );
       const inspections: IosObserveRoundTripInspection[] = [];
 
       for (const simulator of simulators) {
+        currentProbe.signal?.throwIfAborted();
         const device: BootedDevice = {
           name: simulator.name,
           platform: "ios",
@@ -316,7 +347,13 @@ export function createIosObserveRoundTripInspector(
             const client = existing ?? hooks.createClient(device, runnerPort);
             try {
               clientPort = client.getConnectionPortForDiagnostics();
-              const response = await client.requestHierarchySync(undefined, false, undefined, 5000);
+              const response = await client.requestHierarchySync(
+                undefined,
+                false,
+                currentProbe.signal,
+                currentProbe.timeoutMs,
+              );
+              currentProbe.signal?.throwIfAborted();
               clientPort = client.getConnectionPortForDiagnostics();
               connected = response !== null;
               if (!response?.hierarchy) {
@@ -370,9 +407,10 @@ export function createIosObserveRoundTripInspector(
 
 export const createIosDoctorDependencies = (): IosDoctorDependencies => ({
   platform: () => process.platform,
-  execFile: (file, args) =>
+  execFile: (file, args, options = {}) =>
     hostCommandExecutor.executeCommand(file, args, {
-      timeoutMs: DOCTOR_EXEC_TIMEOUT_MS,
+      timeoutMs: options.timeoutMs ?? DOCTOR_EXEC_TIMEOUT_MS,
+      signal: options.signal,
       killSignal: "SIGKILL",
     }),
   xcodebuild: new XcodebuildClient(),
@@ -416,6 +454,7 @@ function compareVersions(current: string, minimum: string): number {
 export async function checkXcodeInstallation(
   minimumVersion: string = MIN_XCODE_VERSION,
   dependencies = createIosDoctorDependencies(),
+  probe: DoctorProbeOptions = {},
 ): Promise<CheckResult> {
   if (dependencies.platform() !== "darwin") {
     return {
@@ -426,8 +465,10 @@ export async function checkXcodeInstallation(
   }
 
   try {
+    const currentProbe = remainingDoctorProbe(probe);
     const result = await dependencies.xcodebuild.executeCommand(["-version"], {
-      timeoutMs: DOCTOR_EXEC_TIMEOUT_MS,
+      timeoutMs: currentProbe.timeoutMs ?? DOCTOR_EXEC_TIMEOUT_MS,
+      signal: currentProbe.signal,
     });
     const version = parseXcodeVersion(result.stdout);
 
@@ -499,7 +540,7 @@ function isTimeoutError(error: unknown): boolean {
  * Check Xcode Command Line Tools
  */
 export async function checkXcodeCommandLineTools(
-  _options: DoctorOptions = {},
+  options: DoctorOptions = {},
   dependencies = createIosDoctorDependencies(),
 ): Promise<CheckResult> {
   const name = "Command Line Tools";
@@ -513,7 +554,8 @@ export async function checkXcodeCommandLineTools(
   }
 
   try {
-    const result = await dependencies.execFile("xcode-select", ["-p"]);
+    const probe = remainingDoctorProbe(options);
+    const result = await dependencies.execFile("xcode-select", ["-p"], probe);
     const developerDir = result.stdout.trim();
 
     if (!developerDir) {
@@ -560,6 +602,7 @@ export async function checkXcodeCommandLineTools(
  */
 export async function checkXcrunAvailable(
   dependencies = createIosDoctorDependencies(),
+  probe: DoctorProbeOptions = {},
 ): Promise<CheckResult> {
   if (dependencies.platform() !== "darwin") {
     return {
@@ -570,7 +613,11 @@ export async function checkXcrunAvailable(
   }
 
   try {
-    await dependencies.execFile("xcrun", ["--version"]);
+    const simctl = dependencies.createSimctlClient();
+    const available = await simctl.isAvailable(remainingDoctorProbe(probe));
+    if (!available) {
+      throw new Error("xcrun could not locate simctl");
+    }
     return {
       name: "xcrun",
       status: "pass",
@@ -592,6 +639,7 @@ export async function checkXcrunAvailable(
  */
 export async function checkSimctlAvailable(
   dependencies = createIosDoctorDependencies(),
+  probe: DoctorProbeOptions = {},
 ): Promise<CheckResult> {
   if (dependencies.platform() !== "darwin") {
     return {
@@ -603,7 +651,11 @@ export async function checkSimctlAvailable(
 
   try {
     const simctl = dependencies.createSimctlClient();
-    const available = await simctl.isAvailable();
+    const currentProbe = remainingDoctorProbe(probe);
+    const available = await simctl.isAvailable({
+      signal: currentProbe.signal,
+      timeoutMs: currentProbe.timeoutMs,
+    });
 
     if (available) {
       return {
@@ -635,6 +687,7 @@ export async function checkSimctlAvailable(
  */
 export async function checkSimulatorRuntimes(
   dependencies = createIosDoctorDependencies(),
+  probe: DoctorProbeOptions = {},
 ): Promise<CheckResult> {
   const name = "iOS Simulator Runtimes";
 
@@ -647,7 +700,13 @@ export async function checkSimulatorRuntimes(
   }
 
   const simctl = dependencies.createSimctlClient();
-  if (!(await simctl.isAvailable())) {
+  const currentProbe = remainingDoctorProbe(probe);
+  if (
+    !(await simctl.isAvailable({
+      signal: currentProbe.signal,
+      timeoutMs: currentProbe.timeoutMs,
+    }))
+  ) {
     return {
       name,
       status: "skip",
@@ -656,7 +715,7 @@ export async function checkSimulatorRuntimes(
   }
 
   try {
-    const runtimes = await simctl.getRuntimes();
+    const runtimes = await simctl.getRuntimes(currentProbe.timeoutMs, currentProbe.signal);
     const iosRuntimes = runtimes.filter((runtime) => runtime.name.startsWith("iOS"));
 
     if (iosRuntimes.length === 0) {
@@ -691,6 +750,7 @@ export async function checkSimulatorRuntimes(
  */
 export async function checkCodeSigning(
   dependencies = createIosDoctorDependencies(),
+  probe: DoctorProbeOptions = {},
 ): Promise<CheckResult> {
   const name = "Code Signing Identity";
 
@@ -703,8 +763,10 @@ export async function checkCodeSigning(
   }
 
   try {
+    const currentProbe = remainingDoctorProbe(probe);
     const identities = await dependencies.securityClient.listCodeSigningIdentities({
-      timeoutMs: DOCTOR_EXEC_TIMEOUT_MS,
+      signal: currentProbe.signal,
+      timeoutMs: currentProbe.timeoutMs ?? DOCTOR_EXEC_TIMEOUT_MS,
     });
     const count = identities.length;
 
@@ -737,6 +799,7 @@ export async function checkCodeSigning(
 /** Check that the centralized macOS security CLI boundary is available. */
 export async function checkSecurityCli(
   dependencies = createIosDoctorDependencies(),
+  probe: DoctorProbeOptions = {},
 ): Promise<CheckResult> {
   const name = "Security CLI";
   if (dependencies.platform() !== "darwin") {
@@ -744,8 +807,10 @@ export async function checkSecurityCli(
   }
 
   try {
+    const currentProbe = remainingDoctorProbe(probe);
     const diagnostics = await dependencies.securityClient.getDiagnostics({
-      timeoutMs: DOCTOR_EXEC_TIMEOUT_MS,
+      signal: currentProbe.signal,
+      timeoutMs: currentProbe.timeoutMs ?? DOCTOR_EXEC_TIMEOUT_MS,
     });
     if (diagnostics.available) {
       return {
@@ -874,6 +939,7 @@ export async function checkProvisioningProfiles(
  */
 export async function checkBootedSimulators(
   dependencies = createIosDoctorDependencies(),
+  probe: DoctorProbeOptions = {},
 ): Promise<CheckResult> {
   if (dependencies.platform() !== "darwin") {
     return {
@@ -885,8 +951,14 @@ export async function checkBootedSimulators(
 
   try {
     const simctl = dependencies.createSimctlClient();
+    const currentProbe = remainingDoctorProbe(probe);
 
-    if (!(await simctl.isAvailable())) {
+    if (
+      !(await simctl.isAvailable({
+        signal: currentProbe.signal,
+        timeoutMs: currentProbe.timeoutMs,
+      }))
+    ) {
       return {
         name: "Booted Simulators",
         status: "skip",
@@ -894,7 +966,10 @@ export async function checkBootedSimulators(
       };
     }
 
-    const simulators = await simctl.getBootedSimulators();
+    const simulators = await simctl.getBootedSimulators(
+      currentProbe.timeoutMs,
+      currentProbe.signal,
+    );
 
     if (simulators.length === 0) {
       return {
@@ -1030,6 +1105,7 @@ function classifyObserveRoundTrip(
  */
 export async function checkIosCtrlProxyRunner(
   dependencies = createIosDoctorDependencies(),
+  probe: DoctorProbeOptions = {},
 ): Promise<CheckResult> {
   const name = "iOS CtrlProxy Runner";
 
@@ -1042,7 +1118,9 @@ export async function checkIosCtrlProxyRunner(
   }
 
   try {
-    const inspections = await dependencies.runnerInspector.inspectBootedRunners();
+    const inspections = await dependencies.runnerInspector.inspectBootedRunners(
+      remainingDoctorProbe(probe),
+    );
 
     if (inspections.length === 0) {
       return {
@@ -1121,6 +1199,7 @@ export async function checkIosCtrlProxyRunner(
  */
 export async function checkIosObserveRoundTrip(
   dependencies = createIosDoctorDependencies(),
+  probe: DoctorProbeOptions = {},
 ): Promise<CheckResult> {
   const name = "iOS Observe Round Trip";
 
@@ -1133,8 +1212,9 @@ export async function checkIosObserveRoundTrip(
   }
 
   try {
-    const inspections =
-      await dependencies.observeRoundTripInspector.inspectBootedObserveRoundTrips();
+    const inspections = await dependencies.observeRoundTripInspector.inspectBootedObserveRoundTrips(
+      remainingDoctorProbe(probe),
+    );
 
     if (inspections.length === 0) {
       return {
@@ -1185,19 +1265,24 @@ export async function runIosChecks(
   dependencies = createIosDoctorDependencies(),
 ): Promise<CheckResult[]> {
   const results: CheckResult[] = [];
+  const run = async (check: () => Promise<CheckResult>): Promise<void> => {
+    remainingDoctorProbe(options);
+    results.push(await check());
+    remainingDoctorProbe(options);
+  };
 
-  results.push(await checkXcodeInstallation(MIN_XCODE_VERSION, dependencies));
-  results.push(await checkXcodeCommandLineTools(options, dependencies));
-  results.push(await checkXcrunAvailable(dependencies));
-  results.push(await checkSimctlAvailable(dependencies));
-  results.push(await checkSimulatorRuntimes(dependencies));
-  results.push(await checkSecurityCli(dependencies));
-  results.push(await checkCodeSigning(dependencies));
+  await run(() => checkXcodeInstallation(MIN_XCODE_VERSION, dependencies, options));
+  await run(() => checkXcodeCommandLineTools(options, dependencies));
+  await run(() => checkXcrunAvailable(dependencies, options));
+  await run(() => checkSimctlAvailable(dependencies, options));
+  await run(() => checkSimulatorRuntimes(dependencies, options));
+  await run(() => checkSecurityCli(dependencies, options));
+  await run(() => checkCodeSigning(dependencies, options));
   results.push(await checkAppleDeveloperAccount(dependencies));
   results.push(await checkProvisioningProfiles(dependencies));
-  results.push(await checkBootedSimulators(dependencies));
-  results.push(await checkIosCtrlProxyRunner(dependencies));
-  results.push(await checkIosObserveRoundTrip(dependencies));
+  await run(() => checkBootedSimulators(dependencies, options));
+  await run(() => checkIosCtrlProxyRunner(dependencies, options));
+  await run(() => checkIosObserveRoundTrip(dependencies, options));
 
   return results;
 }

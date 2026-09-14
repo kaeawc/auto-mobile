@@ -592,6 +592,78 @@ describe("UnixSocketServer MCP forward serialization", () => {
     expect(factoryArguments).toEqual([["device-session-a", "profile-a"]]);
   });
 
+  test("routes a connection-profile reaffirm onto the acquired device session it names (#7005)", async () => {
+    sessionDevices.set("device-session-a", "device-a");
+    const factoryArguments: Array<[string | undefined, string | undefined]> = [];
+    server.mcpClientFactory = async (sessionUuid, toolSelectionProfileUuid) => {
+      factoryArguments.push([sessionUuid, toolSelectionProfileUuid]);
+      return {
+        callTool: async () => ({ content: [] }),
+        listTools: async () => ({ tools: [] }),
+        listResources: async () => ({ resources: [] }),
+        readResource: async () => ({ contents: [] }),
+        listResourceTemplates: async () => ({ resourceTemplates: [] }),
+        close: async () => {},
+      };
+    };
+
+    // The proxy reaffirms its connection profile as `sessionUuid` and carries
+    // the acquired device session separately. The loopback must be seeded with
+    // the DEVICE session as its binding (and the profile as its profile), not
+    // with the profile as a device binding.
+    const response = await sendToolsCallWithArgs(socketPath, "setToolEnabled", {
+      toolName: "clipboard",
+      sessionUuid: "profile-a",
+      [DAEMON_TOOL_SELECTION_PROFILE_PARAM]: "profile-a",
+      [DAEMON_BOUND_SESSION_PARAM]: "device-session-a",
+    });
+
+    expect(response.success).toBe(true);
+    expect(factoryArguments).toEqual([["device-session-a", "profile-a"]]);
+  });
+
+  test("retains the bound route's device session for a profile reaffirm that carries none (#7005)", async () => {
+    sessionDevices.set("device-session-a", "device-a");
+    const factoryArguments: Array<[string | undefined, string | undefined]> = [];
+    server.mcpClientFactory = async (sessionUuid, toolSelectionProfileUuid) => {
+      factoryArguments.push([sessionUuid, toolSelectionProfileUuid]);
+      return {
+        callTool: async () => ({ content: [] }),
+        listTools: async () => ({ tools: [] }),
+        listResources: async () => ({ resources: [] }),
+        readResource: async () => ({ contents: [] }),
+        listResourceTemplates: async () => ({ resourceTemplates: [] }),
+        close: async () => {},
+      };
+    };
+
+    const client = new PersistentSocketClient();
+    await client.connect(socketPath);
+    try {
+      await client.request("tools/call", {
+        name: "observe",
+        arguments: {
+          sessionUuid: "device-session-a",
+          [DAEMON_TOOL_SELECTION_PROFILE_PARAM]: "profile-a",
+        },
+      });
+      const reaffirm = await client.request("tools/call", {
+        name: "setToolEnabled",
+        arguments: {
+          toolName: "clipboard",
+          sessionUuid: "profile-a",
+          [DAEMON_TOOL_SELECTION_PROFILE_PARAM]: "profile-a",
+        },
+      });
+
+      expect(reaffirm.success).toBe(true);
+      // One loopback client: the reaffirm reused the bound device route.
+      expect(factoryArguments).toEqual([["device-session-a", "profile-a"]]);
+    } finally {
+      client.close();
+    }
+  });
+
   test("routes sessionless calls through the client bound by an earlier session-aware call", async () => {
     await server.close();
     socketPath = join(tmpdir(), `mcp-session-list-${randomUUID()}.sock`);

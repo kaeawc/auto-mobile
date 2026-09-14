@@ -55,7 +55,13 @@ export async function listBootedDevicesForResource(
     } else {
       devices = await manager.getBootedDevices(platform);
     }
-    await reconcileDiscoveryObservation(devices, source);
+    // FUNNEL 1. In daemon mode this can await the identity quarantine, which
+    // cancels and drains the owning session's executions — so a cancellation
+    // that lands here is rechecked AFTER the wait, or a cancelled read would go
+    // on to act on the device it resolved (#7002). The signal also lets the
+    // pool stop walking the observation once this caller has settled.
+    await reconcileDiscoveryObservation(devices, source, { signal: options?.signal });
+    options?.signal?.throwIfAborted();
     return devices;
   } catch (error) {
     if (options?.signal?.aborted) {

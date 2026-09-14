@@ -54,6 +54,22 @@ describe("session-scoped tool discovery", () => {
     expect(binding.effectiveSessionUuid(undefined)).toBeUndefined();
   });
 
+  test("a seeded connection still routes its own tool-selection profile without cross-routing (#7005)", () => {
+    // The daemon-proxy loopback for an acquired device D carries the connection
+    // profile P as its second header. Reaffirming P names no device route, so it
+    // must not trip the seeded-binding cross-routing throw — while D stays the
+    // bound DEVICE session the label lookup reads.
+    const binding = new SessionToolBinding("device-session-d", "profile-p");
+
+    expect(binding.effectiveSessionUuid("transport", { sessionUuid: "profile-p" })).toBe(
+      "profile-p",
+    );
+    expect(binding.boundDeviceSessionUuid("transport")).toBe("device-session-d");
+    expect(() =>
+      binding.effectiveSessionUuid("transport", { sessionUuid: "device-session-x" }),
+    ).toThrow(/cannot route this call to device-session-x/);
+  });
+
   test("exposes a session acquired mid-connection as the bound device session (#6069)", () => {
     // The connection is NOT seeded with an initial session; it acquires one
     // mid-flight (getAndroid, or a device tool with a valid sessionUuid) which

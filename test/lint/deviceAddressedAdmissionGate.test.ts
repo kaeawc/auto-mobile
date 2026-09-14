@@ -130,7 +130,9 @@ describe("device-addressed admission gate (issue #6863)", () => {
     {
       file: "src/daemon/testRecordingSocketServer.ts",
       fn: "handleRequest",
-      what: "testRecording start — gated before resolveDevice readies the runtime",
+      what:
+        "testRecording start — gated on the SELECTED device before readyDevice performs any " +
+        "runner setup (#6923)",
     },
   ];
 
@@ -146,6 +148,7 @@ describe("device-addressed admission gate (issue #6863)", () => {
   const RESOLVERS_ONLY: readonly string[] = [
     "src/daemon/webrtcStreamSocketServer.ts#resolveWebRtcStreamDevice",
     "src/daemon/videoStreamSocketServer.ts#resolveVideoStreamDevice",
+    "src/daemon/testRecordingSocketServer.ts#resolveTestRecordingDevice",
   ];
 
   /**

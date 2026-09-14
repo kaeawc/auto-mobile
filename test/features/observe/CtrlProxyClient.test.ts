@@ -2333,6 +2333,111 @@ describe("AndroidCtrlProxyClient", function () {
       }
     });
 
+    test("a burst of events for one app yields ONE package-info + ONE content-hash computation (#6892)", async function () {
+      // Coalescing lives at this boundary (buildContextInFlight), not in the
+      // content-hash provider (#6892 removed the provider's single-flight). Events
+      // arriving both before the deferred resolve() starts and while the
+      // package-info round-trip is pending must all fold into the first resolution.
+      const testTimer = new FakeTimer();
+      testTimer.enableAutoAdvance();
+      const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
+      const testClient = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        factory,
+        testTimer,
+      );
+      const DIGEST = "b".repeat(64);
+      fakeAdb.setCommandResponse("pm path", { stdout: "package:/a/base.apk", stderr: "" });
+      fakeAdb.setCommandResponse("sha256sum", { stdout: `${DIGEST}  /a/base.apk`, stderr: "" });
+      let releasePackageInfo: () => void = () => {};
+      const pkgSpy = spyOn(testClient, "requestPackageInfo").mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            releasePackageInfo = () => resolve({ success: true, versionCode: 5 } as never);
+          }),
+      );
+      const setCtxSpy = spyOn(navHarness.manager, "setBuildContext");
+      const settle = async (): Promise<void> => {
+        for (let i = 0; i < 10; i++) {
+          await new Promise<void>((r) => setImmediate(r));
+          await testTimer.advanceTimersByTimeAsync(1);
+        }
+      };
+      const hashComputations = (): number =>
+        fakeAdb.getExecutedCommands().filter((cmd) => cmd.includes("sha256sum")).length;
+      let socket: Awaited<ReturnType<typeof waitForSocket>>;
+      const navEvent = (dest: string, seq: number): void =>
+        socket!.simulateMessage(
+          JSON.stringify({
+            type: "navigation_event",
+            event: {
+              destination: dest,
+              source: "s",
+              arguments: {},
+              metadata: {},
+              timestamp: testTimer.now(),
+              sequenceNumber: seq,
+              applicationId: "com.example.app",
+            },
+          }),
+        );
+
+      try {
+        const resultPromise = testClient.getLatestHierarchy(true, 2000);
+        socket = await waitForSocket(getSocket);
+        await waitForSocketOpen(socket);
+
+        // Burst 1: several events land synchronously before the deferred resolve() runs.
+        navEvent("Home", 1);
+        navEvent("Details", 2);
+        navEvent("Settings", 3);
+        socket!.simulateMessage(
+          JSON.stringify({
+            type: "hierarchy_update",
+            timestamp: testTimer.now(),
+            data: {
+              updatedAt: testTimer.now(),
+              packageName: "com.example.app",
+              hierarchy: { text: "Home" },
+            },
+          }),
+        );
+        await resultPromise;
+        await settle();
+        expect(pkgSpy).toHaveBeenCalledTimes(1);
+
+        // Burst 2: more events while the package-info round-trip is still pending.
+        navEvent("Profile", 4);
+        navEvent("Cart", 5);
+        await settle();
+        expect(pkgSpy).toHaveBeenCalledTimes(1);
+        expect(hashComputations()).toBe(0); // hash not started until package info lands
+
+        releasePackageInfo();
+        await settle();
+
+        // Exactly one hash computation served the whole burst, and it was applied.
+        expect(hashComputations()).toBe(1);
+        expect(pkgSpy).toHaveBeenCalledTimes(1);
+        expect(setCtxSpy).toHaveBeenCalledTimes(1);
+        expect(setCtxSpy.mock.calls[0][0]).toMatchObject({
+          appId: "com.example.app",
+          versionCode: 5,
+        });
+
+        // A later event re-applies the resolved context: no new resolution at all.
+        navEvent("Home", 6);
+        await settle();
+        expect(pkgSpy).toHaveBeenCalledTimes(1);
+        expect(hashComputations()).toBe(1);
+      } finally {
+        pkgSpy.mockRestore();
+        setCtxSpy.mockRestore();
+        await testClient.close();
+      }
+    });
+
     test("routes the navigation-graph write through the DB-write barrier for shutdown drain (#2885)", async function () {
       resetDbWriteBarrier();
       // The Android handler resolves getDbWriteBarrier() per write (#2912), so a

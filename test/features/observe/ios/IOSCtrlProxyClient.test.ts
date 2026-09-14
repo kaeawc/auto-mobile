@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { IOSCtrlProxyClient, CtrlProxyHierarchy } from "../../../../src/features/observe/ios";
 import {
   IOS_RUNNER_FEATURE_FLAGS,
+  SdkCapabilityProbeSupersededError,
   getRequiredIosRunnerFeatureFlags,
 } from "../../../../src/features/observe/ios/IOSCtrlProxyClient";
 import { BootedDevice, HighlightShape } from "../../../../src/models";
@@ -1507,6 +1508,219 @@ describe("IOSCtrlProxyClient", function () {
 
         const result = await requestPromise;
         expect(result.success).toBe(false);
+      } finally {
+        await testClient.close();
+      }
+    });
+  });
+
+  describe("SDK capability probe generation binding (#6896)", function () {
+    const sdkCapabilityResult = (
+      requestId: unknown,
+      bundleId: string,
+      capabilities: string[] = ["highlight"],
+    ): string =>
+      JSON.stringify({
+        type: "sdk_capabilities_result",
+        requestId,
+        success: true,
+        available: true,
+        bundleId,
+        capabilities,
+        totalTimeMs: 1,
+      });
+
+    const foregroundHierarchyUpdate = (packageName: string): string =>
+      JSON.stringify({
+        type: "hierarchy_update",
+        data: { updatedAt: 1, packageName, hierarchy: { text: packageName } },
+      });
+
+    const sdkCapabilityRequests = (socket: CapturingWebSocket): Record<string, unknown>[] =>
+      socket.sentMessages
+        .map((message) => JSON.parse(message))
+        .filter((payload) => payload.type === "get_sdk_capabilities");
+
+    const shape: HighlightShape = {
+      type: "rect",
+      bounds: { x: 1, y: 2, width: 3, height: 4 },
+    };
+
+    const connectWithSdkCommands = async (
+      testClient: IOSCtrlProxyClient,
+      getSocket: () => CapturingWebSocket | null,
+    ): Promise<CapturingWebSocket> => {
+      await testClient.ensureConnected();
+      const socket = (await waitForSocket(getSocket)) as CapturingWebSocket;
+      await waitForSocketOpen(socket);
+      socket.simulateMessage(
+        JSON.stringify({
+          type: "connected",
+          supportedCommands: ["get_sdk_capabilities", "add_highlight", "request_hierarchy"],
+        }),
+      );
+      await waitForMessageType(socket, "get_sdk_capabilities");
+      return socket;
+    };
+
+    test("rejects a pending highlight waiter as superseded when a hierarchy update completes a replacement-generation probe first", async function () {
+      const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer,
+      );
+
+      try {
+        const socket = await connectWithSdkCommands(testClient, getSocket);
+        // App A's waiter joins the generation-1 probe that the handshake started.
+        const highlightPromise = testClient.requestAddHighlight("highlight-a", shape, 2000);
+        await flushMicrotasks();
+        expect(sdkCapabilityRequests(socket)).toHaveLength(1);
+        const probeA = sdkCapabilityRequests(socket)[0];
+
+        // A foreground change to app B invalidates generation 1 and starts a generation-2 probe.
+        socket.simulateMessage(foregroundHierarchyUpdate("com.example.b"));
+        await flushMicrotasks();
+        expect(sdkCapabilityRequests(socket)).toHaveLength(2);
+        const probeB = sdkCapabilityRequests(socket)[1];
+
+        // B's probe completes first and advertises highlight; then A's stale response lands.
+        socket.simulateMessage(sdkCapabilityResult(probeB.requestId, "com.example.b"));
+        await flushMicrotasks();
+        socket.simulateMessage(sdkCapabilityResult(probeA.requestId, "com.example.a"));
+
+        const result = await highlightPromise;
+        expect(result.success).toBe(false);
+        expect(result.error).toContain("superseded");
+        const sentTypes = socket.sentMessages.map((message) => JSON.parse(message).type);
+        expect(sentTypes).not.toContain("add_highlight");
+      } finally {
+        await testClient.close();
+      }
+    });
+
+    test("rejects the waiter as superseded even when only the replacement probe ever completes", async function () {
+      const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer,
+      );
+
+      try {
+        const socket = await connectWithSdkCommands(testClient, getSocket);
+        const highlightPromise = testClient.requestAddHighlight("highlight-a", shape, 2000);
+        await flushMicrotasks();
+
+        socket.simulateMessage(foregroundHierarchyUpdate("com.example.b"));
+        await flushMicrotasks();
+        const probeB = sdkCapabilityRequests(socket)[1];
+        socket.simulateMessage(sdkCapabilityResult(probeB.requestId, "com.example.b"));
+
+        // Generation 1's probe never answers; its waiter must not borrow generation 2's result.
+        fakeTimer.advanceTime(1000);
+        await flushMicrotasks();
+
+        const result = await highlightPromise;
+        expect(result.success).toBe(false);
+        expect(result.error).toContain("superseded");
+        const sentTypes = socket.sentMessages.map((message) => JSON.parse(message).type);
+        expect(sentTypes).not.toContain("add_highlight");
+      } finally {
+        await testClient.close();
+      }
+    });
+
+    test("throwing callers receive the typed superseded error", async function () {
+      const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer,
+      );
+
+      try {
+        const socket = await connectWithSdkCommands(testClient, getSocket);
+        const waiter = (testClient as any).ensureSdkCapability("database", "com.example.a");
+        await flushMicrotasks();
+
+        socket.simulateMessage(foregroundHierarchyUpdate("com.example.b"));
+        await flushMicrotasks();
+        const [probeA, probeB] = sdkCapabilityRequests(socket);
+        socket.simulateMessage(
+          sdkCapabilityResult(probeB.requestId, "com.example.b", ["database"]),
+        );
+        await flushMicrotasks();
+        socket.simulateMessage(
+          sdkCapabilityResult(probeA.requestId, "com.example.a", ["database"]),
+        );
+
+        await expect(waiter).rejects.toBeInstanceOf(SdkCapabilityProbeSupersededError);
+      } finally {
+        await testClient.close();
+      }
+    });
+
+    test("resolves a waiter from its own generation's probe result and sends the highlight", async function () {
+      const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer,
+      );
+
+      try {
+        const socket = await connectWithSdkCommands(testClient, getSocket);
+        const highlightPromise = testClient.requestAddHighlight("highlight-a", shape, 2000);
+        await flushMicrotasks();
+        const probeA = sdkCapabilityRequests(socket)[0];
+        socket.simulateMessage(sdkCapabilityResult(probeA.requestId, "com.example.a"));
+
+        const highlightRequest = await waitForMessageType(socket, "add_highlight");
+        expect(highlightRequest.id).toBe("highlight-a");
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "highlight_response",
+            requestId: highlightRequest.requestId,
+            success: true,
+            error: null,
+          }),
+        );
+
+        expect((await highlightPromise).success).toBe(true);
+      } finally {
+        await testClient.close();
+      }
+    });
+
+    test("does not authorize a waiter from a same-generation probe that reports the capability missing", async function () {
+      const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer,
+      );
+
+      try {
+        const socket = await connectWithSdkCommands(testClient, getSocket);
+        const highlightPromise = testClient.requestAddHighlight("highlight-a", shape, 2000);
+        await flushMicrotasks();
+        const probeA = sdkCapabilityRequests(socket)[0];
+        socket.simulateMessage(
+          sdkCapabilityResult(probeA.requestId, "com.example.a", ["hierarchy"]),
+        );
+
+        const result = await highlightPromise;
+        expect(result.success).toBe(false);
+        expect(result.error).not.toContain("superseded");
+        const sentTypes = socket.sentMessages.map((message) => JSON.parse(message).type);
+        expect(sentTypes).not.toContain("add_highlight");
       } finally {
         await testClient.close();
       }

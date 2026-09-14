@@ -7,6 +7,7 @@ import type { Element, ScreenIdentity, ViewHierarchyResult } from "../../src/mod
  */
 export class FakeViewHierarchy implements ViewHierarchy {
   private calls: { skipWaitForFresh?: boolean; minTimestamp?: number }[] = [];
+  private recompositionTrackingCalls = 0;
   private configuredHierarchy: ViewHierarchyResult = { hierarchy: {} };
   private configuredHierarchySequence: ViewHierarchyResult[] = [];
   private configuredFocusedElement: Element | null = null;
@@ -41,7 +42,7 @@ export class FakeViewHierarchy implements ViewHierarchy {
     _perf?: any,
     _signal?: AbortSignal,
   ): Promise<void> {
-    // No-op for testing
+    this.recompositionTrackingCalls++;
   }
 
   getScreenIdentity(applicationId?: string): ScreenIdentity | undefined {
@@ -150,6 +151,10 @@ export class FakeViewHierarchy implements ViewHierarchy {
     return this.calls;
   }
 
+  getRecompositionTrackingCallCount(): number {
+    return this.recompositionTrackingCalls;
+  }
+
   /**
    * Check if getViewHierarchy() was called.
    */
@@ -162,6 +167,7 @@ export class FakeViewHierarchy implements ViewHierarchy {
    */
   reset(): void {
     this.calls = [];
+    this.recompositionTrackingCalls = 0;
     this.configuredHierarchy = { hierarchy: {} };
     this.configuredHierarchySequence = [];
     this.configuredFocusedElement = null;

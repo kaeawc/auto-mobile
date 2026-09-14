@@ -125,6 +125,8 @@ import { InstalledAppsRepository } from "../db/installedAppsRepository";
 import { DeviceSessionRepository } from "../db/deviceSessionRepository";
 import { EmulatorLossIncidentRepository } from "../db/emulatorLossIncidentRepository";
 import { DeviceSessionManager } from "../utils/DeviceSessionManager";
+import { IOSCtrlProxyBuilder } from "../utils/IOSCtrlProxyBuilder";
+import { initializeIosCtrlProxyAtStartup } from "./iosStartupInit";
 import {
   startAppearanceSyncScheduler,
   stopAppearanceSyncScheduler,
@@ -2468,35 +2470,17 @@ export class Daemon {
     logger.info(`[Daemon] Initializing CtrlProxy iOS for ${iosDevices.length} iOS device(s)...`);
     const deviceSessionManager = DeviceSessionManager.getInstance();
 
-    // Per-device timeout to prevent hanging on unresponsive devices
-    const PER_DEVICE_TIMEOUT_MS = 5000;
-
-    for (const device of iosDevices) {
-      try {
-        logger.info(`[Daemon] Setting up CtrlProxy iOS for iOS device ${device.id}`);
-
-        const controller = new AbortController();
-        const timer = defaultTimer.setTimeout(() => {
-          controller.abort(new Error(`Timeout after ${PER_DEVICE_TIMEOUT_MS}ms`));
-        }, PER_DEVICE_TIMEOUT_MS);
-        // Allow process to exit even if this timer is pending.
-        if (typeof (timer as { unref?: () => void }).unref === "function") {
-          (timer as { unref: () => void }).unref();
-        }
-        try {
-          await deviceSessionManager.verifyIosDevice(device.id, {
-            skipCtrlProxyDownload: true, // Skip app download during startup, use cached version
-            signal: controller.signal,
-          });
-        } finally {
-          defaultTimer.clearTimeout(timer);
-        }
-        logger.info(`[Daemon] CtrlProxy iOS ready for iOS device ${device.id}`);
-      } catch (error) {
-        // Log but don't fail - service will be set up on first tool call if needed
-        logger.warn(`[Daemon] Failed to initialize CtrlProxy iOS for ${device.id}: ${error}`);
-      }
-    }
+    await initializeIosCtrlProxyAtStartup(
+      iosDevices.map((device) => device.id),
+      {
+        timer: this.timer,
+        // Per-device timeout to prevent hanging on unresponsive devices
+        perDeviceTimeoutMs: 5000,
+        pendingPrefetch: () => IOSCtrlProxyBuilder.pendingPrefetch(),
+        verifyIosDevice: (deviceId, options) =>
+          deviceSessionManager.verifyIosDevice(deviceId, options),
+      },
+    );
   }
 
   /**

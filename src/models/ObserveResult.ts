@@ -143,7 +143,11 @@ export interface ScreenIdentity {
  * Represents the result of observing the device state
  */
 export interface ObserveResult {
-  /** Server-generated identity for this exact observe invocation. */
+  /**
+   * Server-generated identity for this exact observe invocation. It remains
+   * attached while deferred post-processing enriches the same result, allowing
+   * cache writes to update that capture in place.
+   */
   observationId: string;
 
   /**

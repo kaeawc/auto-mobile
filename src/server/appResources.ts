@@ -890,7 +890,11 @@ function matchesAppsQuerySearch(app: AppsQueryAppInfo, searchTerm: string | unde
   );
 }
 
-async function getAppsQueryDevice(options: AppsQueryOptions): Promise<BootedDevice> {
+async function getAppsQueryDevice(
+  options: AppsQueryOptions,
+  signal?: AbortSignal,
+): Promise<BootedDevice> {
+  signal?.throwIfAborted();
   if (!options.deviceId) {
     throw new Error("deviceId is required");
   }
@@ -898,7 +902,8 @@ async function getAppsQueryDevice(options: AppsQueryOptions): Promise<BootedDevi
   const platforms: Platform[] = options.platform ? [options.platform] : ["android", "ios"];
 
   for (const platform of platforms) {
-    const devices = await listBootedDevicesForResource(platform, "AppResources");
+    signal?.throwIfAborted();
+    const devices = await listBootedDevicesForResource(platform, "AppResources", { signal });
     const matched = devices.find((device) => device.deviceId === options.deviceId);
     if (matched) {
       return matched;
@@ -927,7 +932,7 @@ export async function queryInstalledApps(
   options: AppsQueryOptions,
   signal?: AbortSignal,
 ): Promise<AppsQueryResourceContent> {
-  const device = await getAppsQueryDevice(options);
+  const device = await getAppsQueryDevice(options, signal);
   const cacheEntry = await ensureAppsCacheEntry(device.deviceId, defaultTimer, signal);
   if (!cacheEntry) {
     throw new Error(`Device not found or not booted: ${device.deviceId}`);

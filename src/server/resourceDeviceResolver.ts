@@ -43,12 +43,20 @@ export async function findBootedDeviceForResource(
 export async function listBootedDevicesForResource(
   platform: Platform,
   source: string,
+  options?: { signal?: AbortSignal },
 ): Promise<BootedDevice[]> {
   try {
-    const devices = await PlatformDeviceManagerFactory.getInstance().getBootedDevices(platform);
+    const discovery = await PlatformDeviceManagerFactory.getInstance().getBootedDevicesDetailed(
+      platform,
+      { signal: options?.signal },
+    );
+    const devices = discovery.devices;
     await reconcileDiscoveryObservation(devices, source);
     return devices;
   } catch (error) {
+    if (options?.signal?.aborted) {
+      throw error;
+    }
     logger.warn(`[${source}] Failed to list booted ${platform} devices: ${error}`, error);
     return [];
   }

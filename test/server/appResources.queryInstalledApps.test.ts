@@ -82,6 +82,26 @@ describe("queryInstalledApps honest-failure contract (#6155)", () => {
     ).rejects.toThrow(/abort/i);
     expect(capturedSignal).toBe(controller.signal);
   });
+
+  test("forwards cancellation to initial device discovery", async () => {
+    fakeDeviceUtils.getBootedDevicesDetailed = async (_platform, options) => {
+      const signal = options?.signal;
+      return new Promise<never>((_, reject) => {
+        if (!signal) {
+          reject(new Error("expected an abort signal"));
+          return;
+        }
+        signal.throwIfAborted();
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+    };
+
+    const controller = new AbortController();
+    const promise = queryInstalledApps({ deviceId: device.deviceId }, controller.signal);
+    controller.abort();
+
+    await expect(promise).rejects.toThrow(/abort/i);
+  });
 });
 
 describe("queryInstalledApps rejects an unsupported type filter on a physical iOS device (#6216 review, round 5)", () => {

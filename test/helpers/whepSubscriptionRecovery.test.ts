@@ -36,12 +36,11 @@ function dependencies(
 describe("recoverWhepSubscription", () => {
   test("replaces a failed reader and retains the successful replacement", async () => {
     const timer = new FakeTimer();
-    timer.enableAutoAdvance();
     const events: string[] = [];
     const initial = reader("initial-chrome", { id: "initial-cdp" });
     const replacement = reader("replacement-chrome", { id: "replacement-cdp" });
 
-    const recovered = await recoverWhepSubscription(
+    const recovery = recoverWhepSubscription(
       initial,
       dependencies(
         timer,
@@ -59,7 +58,19 @@ describe("recoverWhepSubscription", () => {
       ),
     );
 
-    expect(recovered).toEqual({ ...replacement, retried: true });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(timer.getPendingSleeps()).toEqual([1_000]);
+    expect(events).toEqual(["subscribe:initial-cdp", "close:initial-cdp", "stop:initial-chrome"]);
+
+    timer.advanceTime(999);
+    expect(events).not.toContain("launch");
+    await timer.advanceTimeAsync(1);
+
+    const recovered = await recovery;
+    expect(recovered.retried).toBe(true);
+    expect(recovered.chrome).toBe(replacement.chrome);
+    expect(recovered.cdp).toBe(replacement.cdp);
     expect(events).toEqual([
       "subscribe:initial-cdp",
       "close:initial-cdp",

@@ -1883,15 +1883,29 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
       const startupAbort = this.sharedStart?.controller.signal;
       if (startupAbort?.aborted) {
+        let stopped = false;
         try {
-          await this.remoteRunner.stop({
+          const stopResult = await this.remoteRunner.stop({
             deviceId: this.device.deviceId,
             pid: result.data.pid,
           });
+          stopped = stopResult.success;
+          if (!stopped) {
+            logger.warn(
+              `[IOSCtrlProxy] Failed to stop remote runner that completed after shutdown: ` +
+                `${stopResult.error ?? "remote runner reported an unsuccessful stop"}`,
+            );
+          }
         } catch (error) {
           logger.warn(
             `[IOSCtrlProxy] Failed to stop remote runner that completed after shutdown: ${errorMessage(error)}`,
           );
+        }
+        if (!stopped) {
+          // Keep the PID visible to stopTrackedService()/forceStopForShutdown(), which
+          // gets a second cleanup attempt after this late-start admission fence fails.
+          this.xcTestProcessId = result.data.pid;
+          this.xcTestProcess = null;
         }
         throw startupAbort.reason ?? new Error("iOS CtrlProxy startup was cancelled by stop()");
       }

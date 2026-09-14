@@ -1324,12 +1324,12 @@ async function remeasureUnsizedVmSnapshots(
       }
 
       const current = await snapshotRepository.getSnapshot(record.snapshotName);
-      if (!current || current.createdAt !== record.createdAt) {
+      if (!current || !isSameSnapshotRecord(current, record)) {
         logger.warn(
           `[DeviceSnapshot] Concurrent replacement detected while re-measuring VM snapshot ` +
             `'${record.snapshotName}'; skipping stale size update.`,
         );
-        return current;
+        return undefined;
       }
 
       try {
@@ -1957,10 +1957,6 @@ export async function captureDeviceSnapshot(
 
   const baseConfig = await getDeviceSnapshotConfig();
 
-  // Cheapest possible hook for finishing reclaims that an offline emulator
-  // blocked: this device is live and we already know its AVD, so the sweep is
-  // one filtered row read plus one console delete per stranded snapshot (#6490).
-  await sweepPendingVmSnapshotReclaims(device);
   const snapshotName = args.snapshotName ?? snapshotStore.generateSnapshotName(device.name);
   // Reject a traversal/absolute name before any filesystem operation or capture
   // command can act on it (issue #5705).
@@ -1968,6 +1964,11 @@ export async function captureDeviceSnapshot(
   // Reject reserved scope-root names (#5707). An existing same-name snapshot is
   // deliberately allowed through — it is overwritten atomically below (#5713).
   assertSnapshotNameWritable(snapshotName);
+
+  // Cheapest possible hook for finishing reclaims that an offline emulator
+  // blocked: this device is live and we already know its AVD, so the sweep is
+  // one filtered row read plus one console delete per stranded snapshot (#6490).
+  await sweepPendingVmSnapshotReclaims(device);
   const pathOptions = getSnapshotPathOptions({
     platform: device.platform,
     deviceId: device.deviceId,

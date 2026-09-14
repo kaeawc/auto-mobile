@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { ListToolsRequestSchema, CallToolRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { timingSafeEqual } from "node:crypto";
 import { ActionableError } from "../models";
 import { formatToolParamError } from "./toolParamError";
 import { reviveNonFiniteArguments } from "../utils/nonFiniteJson";
@@ -17,6 +18,7 @@ import { daemonShuttingDownMcpOutcome } from "../daemon/daemonShutdownOutcome";
 import { DaemonRestartPendingError } from "../daemon/daemonRestartAdmission";
 import { resolveDirectSessionDevice, unregisterDirectSession } from "./directSessionDeviceRegistry";
 import {
+  INTERNAL_ACCEPTANCE_DISCOVERY_CAPABILITY_PARAM,
   INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM,
   INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
   INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
@@ -361,6 +363,11 @@ export interface McpServerOptions {
   };
   planExecutionLock?: PlanExecutionLock;
   daemonMode?: boolean;
+  /**
+   * Per-daemon live-acceptance capability captured at startup. Unlike tool
+   * arguments, this is a server-construction boundary clients cannot set.
+   */
+  acceptanceDiscoveryCapability?: string;
   sessionToolSelectionService?: Pick<SessionToolSelectionService, "isEnabled"> &
     Partial<Pick<SessionToolSelectionService, "setEnabled" | "deleteSession" | "getOverride">>;
   toolSelectionSessionManager?: ToolSelectionSessionManager;
@@ -442,11 +449,21 @@ function extractInternalLiveDeadlineKey(params: unknown): string | undefined {
 
 function extractInternalAcceptanceDiscoveryOrder(
   params: unknown,
+  expectedCapability: string | undefined,
 ): "forward" | "reverse" | undefined {
-  if (!params || typeof params !== "object" || Array.isArray(params)) {
+  if (!expectedCapability || !params || typeof params !== "object" || Array.isArray(params)) {
     return undefined;
   }
-  const value = (params as Record<string, unknown>)[INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM];
+  const values = params as Record<string, unknown>;
+  const suppliedCapability = values[INTERNAL_ACCEPTANCE_DISCOVERY_CAPABILITY_PARAM];
+  if (
+    typeof suppliedCapability !== "string" ||
+    suppliedCapability.length !== expectedCapability.length ||
+    !timingSafeEqual(Buffer.from(suppliedCapability), Buffer.from(expectedCapability))
+  ) {
+    return undefined;
+  }
+  const value = values[INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM];
   return value === "forward" || value === "reverse" ? value : undefined;
 }
 
@@ -995,7 +1012,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       ? extractInternalLiveDeadlineKey(toolParams)
       : undefined;
     const requestAcceptanceDiscoveryOrder = daemonMode
-      ? extractInternalAcceptanceDiscoveryOrder(toolParams)
+      ? extractInternalAcceptanceDiscoveryOrder(toolParams, options.acceptanceDiscoveryCapability)
       : undefined;
     const rawSessionUuid =
       toolParams && typeof toolParams === "object" && "sessionUuid" in toolParams

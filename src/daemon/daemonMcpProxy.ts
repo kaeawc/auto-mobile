@@ -22,6 +22,8 @@ import {
   DAEMON_BOUND_SESSION_PARAM,
   DAEMON_OWNED_SESSIONS_PARAM,
   DAEMON_RELEASED_SESSION_PARAM,
+  INTERNAL_ACCEPTANCE_DISCOVERY_CAPABILITY_PARAM,
+  INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM,
   DAEMON_SHUTDOWN_TIMEOUT_MS,
   DAEMON_RESTART_HANDOFF_DELAY_MS,
   DAEMON_RESTART_HANDOFF_TIMEOUT_MS,
@@ -370,6 +372,14 @@ export interface DaemonMcpProxyConfig {
    * `schemas/tool-definitions.json`; injectable for testing.
    */
   staticToolDefinitionsProvider?: () => ProxiedToolDefinition[];
+  /**
+   * Private live-acceptance presentation configuration. It is set only while
+   * constructing the dedicated harness proxy; MCP tool callers cannot set it.
+   */
+  acceptanceDiscovery?: {
+    order: "forward" | "reverse";
+    capability: string;
+  };
 }
 
 /**
@@ -2099,6 +2109,11 @@ export class DaemonMcpProxy {
     delete callerArgs[DAEMON_OWNED_SESSIONS_PARAM];
     delete callerArgs[DAEMON_RELEASED_SESSION_PARAM];
     delete callerArgs[DAEMON_TOOL_SELECTION_PROFILE_PARAM];
+    // The acceptance presentation controls are configuration of the dedicated
+    // harness proxy, never client-provided tool arguments. Remove both before
+    // routing so a caller cannot forge or override that configuration.
+    delete callerArgs[INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM];
+    delete callerArgs[INTERNAL_ACCEPTANCE_DISCOVERY_CAPABILITY_PARAM];
     // Device-session acquisition (including booted provisionDevice) mints a NEW
     // session in its RESULT and is never routed to — or fenced by — the connection's
     // bound session: it must be admitted even on a terminally fenced connection so
@@ -2108,11 +2123,12 @@ export class DaemonMcpProxy {
     // An omitted `sessionUuid` on the control tool means the connection profile,
     // not the proxy's retained device-routing session. Preserve that distinction
     // after a device has been bound.
-    const { forwardedArgs, allowReleasedSession } = this.prepareToolRoutingArgs(
+    const { forwardedArgs: routedArgs, allowReleasedSession } = this.prepareToolRoutingArgs(
       name,
       callerArgs,
       isSessionAcquisition,
     );
+    const forwardedArgs = this.withAcceptanceDiscoveryConfiguration(name, routedArgs);
     const forwardedSessionUuid = this.sessionUuidFromArgs(forwardedArgs);
     this.retainReleaseEpochReference(forwardedSessionUuid);
     // Snapshot the release epoch at forward time. If a session-released signal for
@@ -2195,6 +2211,24 @@ export class DaemonMcpProxy {
         this.progressListeners.delete(progressToken);
       }
     }
+  }
+
+  private withAcceptanceDiscoveryConfiguration(
+    name: string,
+    args: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const acceptanceDiscovery = this.config.acceptanceDiscovery;
+    if (
+      !acceptanceDiscovery ||
+      (name !== "listDevices" && name !== "getAndroid" && name !== "getApple")
+    ) {
+      return args;
+    }
+    return {
+      ...args,
+      [INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM]: acceptanceDiscovery.order,
+      [INTERNAL_ACCEPTANCE_DISCOVERY_CAPABILITY_PARAM]: acceptanceDiscovery.capability,
+    };
   }
 
   private prepareToolRoutingArgs(

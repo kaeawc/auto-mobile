@@ -23,6 +23,7 @@ import {
   DAEMON_PORT_RANGE_START,
   DAEMON_PORT_RANGE_END,
   DAEMON_LAUNCH_LOG_PATH_ENV,
+  ACCEPTANCE_DISCOVERY_CAPABILITY_ENV,
 } from "./constants";
 import { DaemonOptions, PidFileData } from "./types";
 import { mkdir, writeFile } from "node:fs/promises";
@@ -327,6 +328,7 @@ export class Daemon {
   private readonly navigationGraphListenerManagers = new WeakSet<NavigationGraphManager>();
   private unsubscribeAdbMissingDevice: (() => void) | null = null;
   private options: DaemonOptions;
+  private readonly acceptanceDiscoveryCapability = process.env[ACCEPTANCE_DISCOVERY_CAPABILITY_ENV];
   private shutdownHandlersRegistered: boolean = false;
   private shutdownInProgress: boolean = false;
   private shutdownSessionReleasesDrained = true;
@@ -993,6 +995,7 @@ export class Daemon {
               debug: this.debug,
               sessionContext,
               daemonMode: true,
+              acceptanceDiscoveryCapability: this.acceptanceDiscoveryCapability,
             });
           } catch (error) {
             logger.error("Failed to create MCP server:", error);

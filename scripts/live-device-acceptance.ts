@@ -21,7 +21,11 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { computeBuildIdentity, type BuildIdentity } from "../src/daemon/buildIdentity";
 import { DaemonClient } from "../src/daemon/client";
-import { DAEMON_VERSION, SOCKET_PATH } from "../src/daemon/constants";
+import {
+  ACCEPTANCE_DISCOVERY_CAPABILITY_ENV,
+  DAEMON_VERSION,
+  SOCKET_PATH,
+} from "../src/daemon/constants";
 import {
   DAEMON_COMPLETE_MAINTENANCE_METHOD,
   DAEMON_PREPARE_MAINTENANCE_METHOD,
@@ -1302,6 +1306,15 @@ export async function runAcceptanceMatrix(
   assertControlConfiguration(args.target, args.controls);
   assertLiveSafeguards(args, dependencies);
   assertProvisionSchemaMatrix(args);
+  // This is an opaque, per-matrix capability. Every harness-owned subprocess
+  // inherits it, including a daemon started before the controlled
+  // forward/reverse clients and a recovery restart. Ordinary MCP/daemon callers
+  // do not receive it and cannot turn a hidden tool argument into an accepted
+  // presentation-order request.
+  const previousAcceptanceDiscoveryCapability = process.env[ACCEPTANCE_DISCOVERY_CAPABILITY_ENV];
+  if (!dependencies.testOnly) {
+    process.env[ACCEPTANCE_DISCOVERY_CAPABILITY_ENV] = randomUUID();
+  }
   const timer = dependencies.timer ?? defaultTimer;
   const spawnCli =
     dependencies.spawnCli ??
@@ -2420,6 +2433,13 @@ export async function runAcceptanceMatrix(
         cleanupFailures.push(
           `MCP client close: ${error instanceof Error ? error.message : String(error)}`,
         );
+      }
+    }
+    if (!dependencies.testOnly) {
+      if (previousAcceptanceDiscoveryCapability === undefined) {
+        delete process.env[ACCEPTANCE_DISCOVERY_CAPABILITY_ENV];
+      } else {
+        process.env[ACCEPTANCE_DISCOVERY_CAPABILITY_ENV] = previousAcceptanceDiscoveryCapability;
       }
     }
   }

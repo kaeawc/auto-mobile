@@ -84,6 +84,48 @@ describe("DaemonManager control-state recovery", () => {
     };
   }
 
+  test.each([40, 50])(
+    "deducts the survivor scan from the port-probe budget: %s ms",
+    async (scanMs) => {
+      const { lock, pid, socket } = paths();
+      const timer = new FakeTimer();
+      const probes: Array<number | undefined> = [];
+      const processes = new SequencedDaemonProcesses([[], []], new Set(), (scanIndex) => {
+        if (scanIndex === 1) {
+          timer.advanceTime(scanMs);
+        }
+      });
+      const manager = new DaemonManager(
+        undefined,
+        undefined,
+        timer,
+        lock,
+        pid,
+        socket,
+        processes,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        {
+          isPortFree: async (_port, _host, timeoutMs) => {
+            probes.push(timeoutMs);
+            return false;
+          },
+        },
+        undefined,
+        async () => false,
+      );
+      await expect(
+        manager.recoverControlState({}, async () => false, undefined, 50),
+      ).rejects.toThrow(scanMs === 50 ? "deadline elapsed" : "still in use");
+      expect(probes).toEqual(scanMs === 50 ? [] : [10]);
+    },
+  );
+
   afterEach(() => {
     for (const dir of tempDirs) {
       rmSync(dir, { recursive: true, force: true });

@@ -1309,6 +1309,33 @@ describe("Daemon manager process detection", () => {
     },
   );
 
+  test("anchors Linux process ages before a delayed process-table scan", () => {
+    const timer = new FakeTimer();
+    timer.advanceTime(100_000);
+    const finder = new PsDaemonProcessFinder(
+      () => {
+        timer.advanceTime(4_000);
+        return "20 1 40 auto-mobile --daemon-mode";
+      },
+      "linux",
+      timer,
+    );
+    expect(finder.findDaemonProcesses()[0]?.startedAt).toBe(60_000);
+  });
+
+  test("reads absolute UTC Windows process birth independently of the host clock", () => {
+    const startedAt = Date.parse("2026-09-14T12:00:00-05:00");
+    const finder = new WindowsDaemonProcessFinder(() =>
+      JSON.stringify({
+        ProcessId: 30,
+        ParentProcessId: 1,
+        CommandLine: "auto-mobile --daemon-mode",
+        StartedAt: startedAt,
+      }),
+    );
+    expect(finder.findDaemonProcesses()[0]?.startedAt).toBe(Date.parse("2026-09-14T17:00:00Z"));
+  });
+
   // #6140 review: execSync's `timeout: 0` means NO timeout (unbounded), not
   // "expire immediately" — a computed remaining budget can legitimately be
   // exactly 0, so it must never be forwarded to execSync as-is or the intended
@@ -1417,7 +1444,7 @@ describe("Daemon manager process detection", () => {
     expect(calls).toEqual([
       {
         command:
-          "powershell.exe -NoProfile -NonInteractive -Command \"$now=[DateTime]::UtcNow; Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,CommandLine,@{Name='ElapsedSeconds';Expression={[int]($now-$_.CreationDate).TotalSeconds}} | ConvertTo-Json -Compress\"",
+          "powershell.exe -NoProfile -NonInteractive -Command \"Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,CommandLine,@{Name='StartedAt';Expression={([DateTimeOffset]$_.CreationDate.ToUniversalTime()).ToUnixTimeMilliseconds()}} | ConvertTo-Json -Compress\"",
         options: {
           encoding: "utf-8",
           maxBuffer: DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES,

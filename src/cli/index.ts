@@ -524,6 +524,10 @@ export async function runDoctorCommand(
 ): Promise<void> {
   const jsonOutput = params.json === true;
 
+  if (Object.hasOwn(params, "repair") && typeof params.repair !== "boolean") {
+    throw new ActionableError("--repair must be a boolean (true or false).");
+  }
+
   if (params.repair === true) {
     // Repair is intentionally host-local: a missing, stale, or wrong-protocol
     // control socket cannot serve the daemon's doctor tool.

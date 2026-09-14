@@ -355,7 +355,7 @@ interface WindowsProcessTableEntry {
   ProcessId?: unknown;
   ParentProcessId?: unknown;
   CommandLine?: unknown;
-  ElapsedSeconds?: unknown;
+  StartedAt?: unknown;
 }
 
 function parseWindowsProcessId(value: unknown): number | undefined {
@@ -369,7 +369,6 @@ function parseWindowsProcessId(value: unknown): number | undefined {
 
 function parseWindowsProcessTableEntry(
   entry: WindowsProcessTableEntry,
-  now: number,
 ): DaemonProcessRecord | undefined {
   const pid = parseWindowsProcessId(entry.ProcessId);
   const ppid = parseWindowsProcessId(entry.ParentProcessId);
@@ -384,22 +383,19 @@ function parseWindowsProcessTableEntry(
     return undefined;
   }
 
-  const elapsedSeconds =
-    typeof entry.ElapsedSeconds === "number" && Number.isFinite(entry.ElapsedSeconds)
-      ? entry.ElapsedSeconds
+  const startedAt =
+    typeof entry.StartedAt === "number" && Number.isFinite(entry.StartedAt)
+      ? entry.StartedAt
       : undefined;
   return {
     pid,
     ppid,
     command,
-    ...(elapsedSeconds === undefined ? {} : { startedAt: now - elapsedSeconds * 1000 }),
+    ...(startedAt === undefined ? {} : { startedAt }),
   };
 }
 
-export function parseWindowsDaemonProcessTable(
-  processTableJson: string,
-  now: number = Date.now(),
-): DaemonProcessRecord[] {
+export function parseWindowsDaemonProcessTable(processTableJson: string): DaemonProcessRecord[] {
   const parsed: unknown = JSON.parse(processTableJson);
   const entries = Array.isArray(parsed) ? parsed : [parsed];
   const records: DaemonProcessRecord[] = [];
@@ -409,7 +405,7 @@ export function parseWindowsDaemonProcessTable(
       continue;
     }
 
-    const record = parseWindowsProcessTableEntry(entry, now);
+    const record = parseWindowsProcessTableEntry(entry);
     if (record) {
       records.push(record);
     }
@@ -453,10 +449,14 @@ export class PsDaemonProcessFinder implements DaemonProcessFinder, DaemonProcess
   constructor(
     private readonly runCommand: ProcessTableCommandRunner = execSync,
     private readonly platform: NodeJS.Platform = process.platform,
+    private readonly timer: Timer = defaultTimer,
   ) {}
 
   findDaemonProcesses(timeoutMs?: number): DaemonProcessRecord[] {
     const isDarwin = this.platform === "darwin";
+    // Relative ages belong to the scan snapshot, not to the later time at
+    // which a loaded host finishes returning the process table.
+    const snapshotAt = this.timer.now();
     const psOutput = this.runCommand(
       isDarwin
         ? "LC_ALL=C ps -axo pid=,ppid=,lstart=,command="
@@ -467,7 +467,9 @@ export class PsDaemonProcessFinder implements DaemonProcessFinder, DaemonProcess
         timeout: boundedProcessTableScanTimeout(timeoutMs),
       },
     );
-    return isDarwin ? parseDarwinDaemonProcessTable(psOutput) : parseDaemonProcessTable(psOutput);
+    return isDarwin
+      ? parseDarwinDaemonProcessTable(psOutput)
+      : parseDaemonProcessTable(psOutput, snapshotAt);
   }
 
   isProcessRunning(pid: number): boolean {
@@ -481,8 +483,10 @@ export class WindowsDaemonProcessFinder
   constructor(private readonly runCommand: ProcessTableCommandRunner = execSync) {}
 
   findDaemonProcesses(timeoutMs?: number): DaemonProcessRecord[] {
+    // CIM returns local DateTime values. Publish absolute UTC birth times so
+    // neither the host time zone nor PowerShell startup/scan latency shifts them.
     const processTableJson = this.runCommand(
-      "powershell.exe -NoProfile -NonInteractive -Command \"$now=[DateTime]::UtcNow; Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,CommandLine,@{Name='ElapsedSeconds';Expression={[int]($now-$_.CreationDate).TotalSeconds}} | ConvertTo-Json -Compress\"",
+      "powershell.exe -NoProfile -NonInteractive -Command \"Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,CommandLine,@{Name='StartedAt';Expression={([DateTimeOffset]$_.CreationDate.ToUniversalTime()).ToUnixTimeMilliseconds()}} | ConvertTo-Json -Compress\"",
       {
         encoding: "utf-8",
         maxBuffer: DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES,
@@ -2074,10 +2078,7 @@ export class DaemonManager implements DaemonManagerLike {
     this.throwIfRecoveryCancelled(signal);
     const recoveryOptions = await this.recoveryOptions(status, options);
     this.throwIfRecoveryCancelled(signal);
-    await this.assertNoSurvivingDaemonBeforeRestart(
-      recoveryOptions,
-      this.remainingRecoveryTime(recoveryDeadline),
-    );
+    await this.assertNoSurvivingDaemonBeforeRestart(recoveryOptions, recoveryDeadline);
     this.throwIfRecoveryCancelled(signal);
     await this.timer.sleep(DAEMON_RESTART_HANDOFF_DELAY_MS);
     this.throwIfRecoveryCancelled(signal);
@@ -2610,9 +2611,9 @@ export class DaemonManager implements DaemonManagerLike {
    */
   private async assertNoSurvivingDaemonBeforeRestart(
     options: DaemonOptions,
-    timeoutMs?: number,
+    recoveryDeadline?: number,
   ): Promise<void> {
-    const survivors = this.findLiveDaemonProcesses(timeoutMs);
+    const survivors = this.findLiveDaemonProcesses(this.remainingRecoveryTime(recoveryDeadline));
     if (survivors.length > 0) {
       throw new ActionableError(
         `Restart could not confirm the previous AutoMobile daemon process(es) stopped: ` +
@@ -2628,7 +2629,13 @@ export class DaemonManager implements DaemonManagerLike {
 
     const port = options.port ?? DEFAULT_DAEMON_PORT;
     const host = options.host ?? DEFAULT_DAEMON_HOST;
-    if (await this.portAvailabilityChecker.isPortFree(port, host)) {
+    if (
+      await this.portAvailabilityChecker.isPortFree(
+        port,
+        host,
+        this.remainingRecoveryTime(recoveryDeadline),
+      )
+    ) {
       return;
     }
     throw new ActionableError(

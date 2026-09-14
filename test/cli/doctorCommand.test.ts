@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -6,14 +6,74 @@ import {
   handleDoctorResult,
   doctorToolParams,
   runCliCommand,
+  parseCliArgs,
   runDoctorCommand,
   resetCliOutputSinksForTesting,
   setCliOutputSinksForTesting,
 } from "../../src/cli";
 import { CLI_OUTPUT_INLINE_MAX_BYTES } from "../../src/cli/toolOutput";
 import { serverConfig } from "../../src/utils/ServerConfig";
+import { DaemonClient } from "../../src/daemon/client";
 
 describe("doctorToolParams", () => {
+  test.each(["yes", 1, 0, "true", null, undefined])(
+    "rejects an explicitly malformed repair flag before diagnosis: %s",
+    async (repair) => {
+      const diagnosis = spyOn(DaemonClient.prototype, "callTool").mockResolvedValue({
+        summary: { failed: 0 },
+      });
+      const close = spyOn(DaemonClient.prototype, "close").mockResolvedValue(undefined);
+      let repairCalls = 0;
+      setCliOutputSinksForTesting({ stdout: { write: () => {} }, stderr: { write: () => {} } });
+      try {
+        await expect(
+          runDoctorCommand(
+            { repair, json: true },
+            {
+              repairDaemon: async () => {
+                repairCalls++;
+                return { status: "repaired", phase: "complete", action: "joined" };
+              },
+            },
+          ),
+        ).rejects.toThrow("--repair must be a boolean");
+        expect(diagnosis).not.toHaveBeenCalled();
+        expect(repairCalls).toBe(0);
+      } finally {
+        diagnosis.mockRestore();
+        close.mockRestore();
+        resetCliOutputSinksForTesting();
+      }
+    },
+  );
+
+  test.each([{ args: ["doctor"] }, { args: ["doctor", "--repair", "false"] }])(
+    "retains ordinary diagnosis for valid non-repair arguments: %s",
+    async ({ args }) => {
+      const diagnosis = spyOn(DaemonClient.prototype, "callTool").mockResolvedValue({
+        summary: { failed: 0 },
+      });
+      const close = spyOn(DaemonClient.prototype, "close").mockResolvedValue(undefined);
+      setCliOutputSinksForTesting({ stdout: { write: () => {} }, stderr: { write: () => {} } });
+      try {
+        await runDoctorCommand(
+          { ...parseCliArgs(args).params, json: true },
+          {
+            repairDaemon: async () => {
+              throw new Error("Unexpected repair");
+            },
+          },
+        );
+        expect(diagnosis).toHaveBeenCalledTimes(1);
+        expect(diagnosis.mock.calls[0]).toEqual(["doctor", {}]);
+      } finally {
+        diagnosis.mockRestore();
+        close.mockRestore();
+        resetCliOutputSinksForTesting();
+      }
+    },
+  );
+
   test("keeps CLI JSON formatting out of the daemon doctor request", () => {
     expect(doctorToolParams({ ios: true, json: true })).toEqual({ ios: true });
   });

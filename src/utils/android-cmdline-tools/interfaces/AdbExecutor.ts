@@ -87,6 +87,7 @@ export interface AdbExecutor {
     maxBuffer?: number,
     noRetry?: boolean,
     signal?: AbortSignal,
+    waitForProcessSettlementAfterAbort?: boolean,
   ): Promise<ExecResult>;
 
   /**

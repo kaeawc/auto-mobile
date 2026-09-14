@@ -112,6 +112,15 @@ describe("SharedStorageService", () => {
       ),
     ).toBe(true);
     expect(commands.every((command) => !command.includes(".."))).toBe(true);
+    // A session release may cancel staging while a child is still exiting. Every
+    // shared-storage mutation must remain pending until that process settles,
+    // rather than rejecting immediately on abort.
+    expect(
+      executor
+        .getCommandCalls()
+        .filter((call) => /shell (?:rm -rf|mkdir -p|am broadcast)|^push /.test(call.command))
+        .every((call) => call.waitForProcessSettlementAfterAbort === true),
+    ).toBe(true);
   });
 
   test("uses the resolved active profile rather than assuming Android user zero", async () => {

@@ -1,4 +1,5 @@
 import { ActionableError } from "../models";
+import { DaemonState } from "../daemon/daemonState";
 import { resolveActiveSessionDevice, type ActiveSessionResolver } from "./activeSessionDevice";
 import {
   getSharedStorageService,
@@ -43,6 +44,7 @@ export interface DownloadsFixtureService {
 export interface DownloadsFixtureServiceDependencies {
   resolveActiveSession?: ActiveSessionResolver;
   sharedStorage?: () => SharedStorageService;
+  registerPendingDeviceCleanup?: (deviceId: string, cleanup: Promise<unknown>) => void;
 }
 
 let downloadsFixtureService: DownloadsFixtureService | null = null;
@@ -66,13 +68,25 @@ export function createDownloadsFixtureService(
   return new DefaultDownloadsFixtureService(
     deps.resolveActiveSession ?? resolveActiveSessionDevice,
     deps.sharedStorage ?? getSharedStorageService,
+    deps.registerPendingDeviceCleanup ?? registerPendingDeviceCleanup,
   );
+}
+
+function registerPendingDeviceCleanup(deviceId: string, cleanup: Promise<unknown>): void {
+  const daemonState = DaemonState.getInstance();
+  if (daemonState.isInitialized()) {
+    daemonState.getSessionManager().registerPendingDeviceCleanup(deviceId, cleanup);
+  }
 }
 
 class DefaultDownloadsFixtureService implements DownloadsFixtureService {
   constructor(
     private readonly resolveActiveSession: ActiveSessionResolver,
     private readonly sharedStorage: () => SharedStorageService,
+    private readonly registerPendingDeviceCleanup: (
+      deviceId: string,
+      cleanup: Promise<unknown>,
+    ) => void,
   ) {}
 
   async stage(request: StageSessionDownloadsRequest): Promise<StageSessionDownloadsResult> {
@@ -115,7 +129,12 @@ class DefaultDownloadsFixtureService implements DownloadsFixtureService {
       device: active.device,
       signal: request.signal,
     };
-    const staged = await this.sharedStorage().stage(stageRequest);
+    // Register before awaiting: if session release races cancellation, DevicePool
+    // observes this promise and keeps the device assigned until all staging work
+    // has settled.
+    const stagedPromise = this.sharedStorage().stage(stageRequest);
+    this.registerPendingDeviceCleanup(active.device.deviceId, stagedPromise);
+    const staged = await stagedPromise;
     return {
       success: true,
       sessionUuid,

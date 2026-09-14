@@ -7,6 +7,7 @@ import type {
   AdbExecutor,
 } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+import { FakeEmulatorConsoleBusyRegistry } from "../../fakes/FakeEmulatorConsoleBusyRegistry";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
 const result = (stdout = "", stderr = ""): ExecResult => ({
@@ -85,8 +86,23 @@ class ReadinessAdbFactory implements AdbClientFactory {
   }
 }
 
-function clientWith(adb: ReadinessAdbExecutor, timer: FakeTimer): AndroidEmulatorClient {
-  return new AndroidEmulatorClient(async () => result(), null, timer, new ReadinessAdbFactory(adb));
+function clientWith(
+  adb: ReadinessAdbExecutor,
+  timer: FakeTimer,
+  consoleBusyRegistry?: FakeEmulatorConsoleBusyRegistry,
+): AndroidEmulatorClient {
+  return new AndroidEmulatorClient(
+    async () => result(),
+    null,
+    timer,
+    new ReadinessAdbFactory(adb),
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    consoleBusyRegistry,
+  );
 }
 
 function configureReadyDevice(adb: ReadinessAdbExecutor): void {
@@ -320,6 +336,25 @@ describe("Android emulator readiness diagnostics", () => {
     );
 
     expect(device.deviceId).toBe("emulator-5554");
+  });
+
+  test("keeps a listed target out of absent state while its console is busy", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const adb = new ReadinessAdbExecutor();
+    configureReadyDevice(adb);
+    const consoleBusy = new FakeEmulatorConsoleBusyRegistry();
+    consoleBusy.setBusy("emulator-5554", true);
+
+    const device = await clientWith(adb, timer, consoleBusy).waitForEmulatorReady(
+      "Pixel_9_Pro",
+      5_000,
+      null,
+      "emulator-5554",
+    );
+
+    expect(device.deviceId).toBe("emulator-5554");
+    expect(adb.getExecutedCommands()).not.toContain("emu avd name");
   });
 
   for (const row of [

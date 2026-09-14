@@ -1475,10 +1475,21 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     consoleBusyDuringProbe?: boolean;
   }> {
     const deviceId = device.deviceId;
+    const busyBeforeDispatch = this.consoleBusyRegistry.isBusy(deviceId);
+    if (busyBeforeDispatch) {
+      // `adb devices` has already established that the serial exists. During a
+      // daemon-owned snapshot operation, both identity probes can transiently
+      // lose the ADB transport; leave identity unresolved instead of creating
+      // the false missing-device evidence that reaches the disconnect monitor.
+      logger.debug(
+        `Skipping AVD-name resolution for ${deviceId}: a console-exclusive operation is in flight`,
+      );
+      return { name: "", consoleBusyDuringProbe: true };
+    }
+
     const adbWithDevice = this.adbFactory.create(device);
     const deadlineMs = this.timer.now() + infoTimeoutMs;
     let diagnostic: ReadinessDiagnostic | undefined;
-    const busyBeforeDispatch = this.consoleBusyRegistry.isBusy(deviceId);
     const generationBeforeDispatch = this.consoleBusyRegistry.getGeneration(deviceId);
     try {
       const result = await adbWithDevice.executeCommand(

@@ -27,6 +27,7 @@ class FreshOfflineAdbExecutor extends FakeAdbExecutor {
   private recoverOnReconnect = false;
   private timer: FakeTimer | null = null;
   private recoverAtMs: number | null = null;
+  private readinessAtMs: number | null = null;
   private deviceStateCalls = 0;
   private rejectDeviceStatesAfter: number | null = null;
   private rejectOnceAfterReconnect = false;
@@ -39,6 +40,11 @@ class FreshOfflineAdbExecutor extends FakeAdbExecutor {
   configureRecoveryFlipsOnlineAt(timer: FakeTimer, recoverAtMs: number): void {
     this.timer = timer;
     this.recoverAtMs = recoverAtMs;
+  }
+
+  configureReadinessAfter(timer: FakeTimer, readinessAtMs: number): void {
+    this.timer = timer;
+    this.readinessAtMs = readinessAtMs;
   }
 
   /**
@@ -99,6 +105,13 @@ class FreshOfflineAdbExecutor extends FakeAdbExecutor {
     noRetry?: boolean,
     signal?: AbortSignal,
   ): Promise<ExecResult> {
+    if (
+      command === "shell getprop sys.boot_completed" &&
+      this.readinessAtMs !== null &&
+      (this.timer?.now() ?? 0) < this.readinessAtMs
+    ) {
+      return result("0\n");
+    }
     if (command.includes("reconnect offline")) {
       this.reconnectCalls += 1;
       if (this.rejectOnceAfterReconnect) {
@@ -239,7 +252,7 @@ describe("Android emulator fresh-provision offline recovery", () => {
     expect(timer.now()).toBeLessThan(35_000);
   });
 
-  test("observes a device that comes online after reconnect despite a large polling interval", async () => {
+  test("keeps polling after recovery while Android finishes booting", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const adb = new FreshOfflineAdbExecutor();
@@ -247,6 +260,7 @@ describe("Android emulator fresh-provision offline recovery", () => {
     adb.setDevices([]);
     configureReadyProbes(adb);
     adb.configureRecoveryFlipsOnlineAt(timer, 18_000);
+    adb.configureReadinessAfter(timer, 22_000);
     process.env.EMULATOR_POLLING_INTERVAL_MS = "60000";
 
     const device = await clientWith(adb, timer).waitForEmulatorReady(
@@ -260,7 +274,7 @@ describe("Android emulator fresh-provision offline recovery", () => {
 
     expect(device.deviceId).toBe("emulator-5554");
     expect(adb.reconnectCalls).toBe(1);
-    expect(timer.now()).toBeGreaterThanOrEqual(18_000);
+    expect(timer.now()).toBeGreaterThanOrEqual(22_000);
     expect(timer.now()).toBeLessThan(30_000);
   });
 

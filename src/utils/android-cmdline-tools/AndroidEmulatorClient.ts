@@ -1247,11 +1247,13 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     remainingPollingTimeMs: number,
   ): number {
     const currentDelayMs = Math.min(pollingIntervalMs, remainingPollingTimeMs);
+    // After the one-shot recovery, keep polling at this cadence for the rest
+    // of a fresh boot. The serial can leave `offline` before Android itself is ready.
+    if (options?.freshProvision === true && tracker.recoveryAttempted) {
+      return Math.min(currentDelayMs, FRESH_OFFLINE_POST_RECOVERY_POLL_INTERVAL_MS);
+    }
     if (!this.isFreshOfflineEpisode(tracker, options, deviceId)) {
       return currentDelayMs;
-    }
-    if (tracker.recoveryAttempted) {
-      return Math.min(currentDelayMs, FRESH_OFFLINE_POST_RECOVERY_POLL_INTERVAL_MS);
     }
     const thresholdAt = (tracker.since ?? now) + FRESH_OFFLINE_RECOVERY_THRESHOLD_MS;
     const timeUntilThresholdMs = Math.max(0, thresholdAt - now);

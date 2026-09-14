@@ -246,6 +246,13 @@ export const DAEMON_FORCED_STOP_TIMEOUT_MS = 1_000;
  */
 export const DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS = 5_000;
 
+/**
+ * Bounded recovery for a transient host process-table timeout during daemon start
+ * (issue #6969). Other daemon lifecycle paths remain fail-closed.
+ */
+export const DAEMON_START_PROCESS_TABLE_SCAN_MAX_ATTEMPTS = 3;
+export const DAEMON_START_PROCESS_TABLE_SCAN_RETRY_DELAYS_MS = [200, 500] as const;
+
 /** Bound on the explicit-restart canonical-port availability probe. */
 export const DAEMON_PORT_AVAILABILITY_PROBE_TIMEOUT_MS = 1_000;
 

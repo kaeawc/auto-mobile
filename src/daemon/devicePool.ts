@@ -1045,6 +1045,11 @@ export class DevicePool {
     await this.evictMissingPooledDevice(
       pooledDevice,
       `runtime identity changed to ${bootedDevice.platform}:${bootedDevice.name}`,
+      false,
+      undefined,
+      false,
+      undefined,
+      bootedDevice,
     );
     if (this.devices.has(bootedDevice.deviceId)) {
       return false;
@@ -2445,6 +2450,7 @@ export class DevicePool {
     incidentId?: string,
     incidentCaptureComplete: boolean = false,
     recoveryPreparation?: SessionRecoveryPreparation,
+    identityObservation?: Pick<BootedDevice, "name" | "observedAt">,
   ): Promise<void> {
     if (this.isReservedForShutdown(device)) {
       // killDevice alone owns a shutdown-reserved incarnation until it either
@@ -2488,12 +2494,31 @@ export class DevicePool {
     }
     device.status = "idle";
     if (recoverAndroidEmulator && this.shouldRebootDisconnectedAndroidDevice(device)) {
+      if (this.shouldAbortEvictionForStaleIdentityObservation(device, identityObservation)) {
+        return;
+      }
       await this.removeDisconnectedDevice(device.id, false, correlatedIncidentId);
       return;
     }
     await this.completeEmulatorLossRecovery(correlatedIncidentId, "not-attempted");
+    if (this.shouldAbortEvictionForStaleIdentityObservation(device, identityObservation)) {
+      return;
+    }
     await this.removeDevice(device.id, true, device);
     this.settleEmulatorLossIncident(correlatedIncidentId);
+  }
+
+  private shouldAbortEvictionForStaleIdentityObservation(
+    device: PooledDevice,
+    identityObservation?: Pick<BootedDevice, "name" | "observedAt">,
+  ): boolean {
+    if (!identityObservation || !this.isStaleIdentityObservation(device, identityObservation)) {
+      return false;
+    }
+    logger.debug(
+      `[DevicePool] Aborting eviction of ${device.id}: a newer identity observation confirmed it during eviction`,
+    );
+    return true;
   }
 
   private async resolveMissingDeviceIncident(

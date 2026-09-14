@@ -7345,6 +7345,68 @@ describe("DevicePool", () => {
       }
     });
 
+    test("abandons a liveness replacement made stale during eviction", async () => {
+      const device = poolDevice("emulator-5554", "Pixel_8_API_35");
+      const replacement = stamped(poolDevice("emulator-5554", "Pixel_7_API_34"), 2);
+      await initializeLiveDevices([device]);
+      await devicePool.reconcileDiscoveryObservation([stamped(device, 1)], "test:initial");
+      const pooled = devicePool.getDevice("emulator-5554");
+      if (!pooled) {
+        throw new Error("expected pooled device");
+      }
+
+      type DevicePoolInternals = {
+        addDevice(device: BootedDevice): Promise<void>;
+        reconcileDiscoveredPooledDevice(
+          pooledDevice: PooledDevice,
+          bootedDevice: BootedDevice,
+          assignmentLockHeld: boolean,
+        ): Promise<boolean>;
+        resolveMissingDeviceIncident(
+          pooledDevice: PooledDevice,
+          recoverAndroidEmulator: boolean,
+          incidentId: string | undefined,
+          incidentCaptureComplete: boolean,
+        ): Promise<string | undefined>;
+      };
+      const internals = devicePool as unknown as DevicePoolInternals;
+      const evictionEntered = Promise.withResolvers<void>();
+      const releaseEviction = Promise.withResolvers<void>();
+      const resolveMissingDeviceIncident = internals.resolveMissingDeviceIncident.bind(devicePool);
+      const addDevice = internals.addDevice.bind(devicePool);
+      let adds = 0;
+      internals.resolveMissingDeviceIncident = async (...args) => {
+        // This awaits within eviction before either destructive removal branch,
+        // unlike the assignment-mutex gate in the preceding regression test.
+        evictionEntered.resolve();
+        await releaseEviction.promise;
+        return await resolveMissingDeviceIncident(...args);
+      };
+      internals.addDevice = async (...args) => {
+        adds++;
+        return await addDevice(...args);
+      };
+      try {
+        // Stamp 2 passes the liveness replacement's initial stale-observation check.
+        const liveness = internals.reconcileDiscoveredPooledDevice(pooled, replacement, true);
+        await evictionEntered.promise;
+
+        // Discovery reconciliation is intentionally outside assignmentMutex and
+        // advances evidence on the same object eviction is still holding.
+        await devicePool.reconcileDiscoveryObservation([stamped(device, 3)], "test:newer");
+        releaseEviction.resolve();
+        await liveness;
+
+        expect(devicePool.getDevice("emulator-5554")).toBe(pooled);
+        expect(devicePool.getDevice("emulator-5554")?.name).toBe("Pixel_8_API_35");
+        expect(adds).toBe(0);
+      } finally {
+        internals.resolveMissingDeviceIncident = resolveMissingDeviceIncident;
+        internals.addDevice = addDevice;
+        releaseEviction.resolve();
+      }
+    });
+
     test("replaces a pooled identity for a newer liveness disagreement", async () => {
       const device = poolDevice("emulator-5554", "Pixel_8_API_35");
       await initializeLiveDevices([device]);

@@ -672,6 +672,116 @@ describe("DaemonManager control-state recovery", () => {
     expect(signals).toEqual([]);
   });
 
+  test("accepts a recorded daemon whose bootstrap began after OS process birth", async () => {
+    const { lock, pid, socket } = paths();
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const livePids = new Set([1234]);
+    const processes = new MutableDaemonProcesses(
+      [{ pid: 1234, ppid: 1, command: "auto-mobile --daemon-mode", startedAt: 1_000 }],
+      livePids,
+    );
+    writeFileSync(
+      pid,
+      JSON.stringify({
+        pid: 1234,
+        socketPath: socket,
+        port: 4321,
+        // Daemon metadata is created after a deliberately slow bootstrap.
+        startedAt: 6_000,
+        version: "test",
+      }),
+    );
+    const signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
+    const spawner = new CapturingDaemonSpawner();
+    const manager = new ImmediatelyReadyRecoveryManager(
+      undefined,
+      undefined,
+      timer,
+      lock,
+      pid,
+      socket,
+      processes,
+      spawner,
+      undefined,
+      () => ({ command: "auto-mobile", args: ["--daemon-mode"] }),
+      {
+        signal: (processId, signal) => {
+          signals.push({ pid: processId, signal });
+          livePids.delete(processId);
+        },
+      },
+      undefined,
+      undefined,
+      undefined,
+      { isPortFree: async () => true },
+      undefined,
+      async () => false,
+    );
+
+    await expect(manager.recoverControlState()).resolves.toBe("restarted");
+
+    expect(signals).toEqual([{ pid: 1234, signal: "SIGTERM" }]);
+    expect(spawner.calls).toHaveLength(1);
+  });
+
+  test("keeps lock-takeover recovery behind its canonical-port guard", async () => {
+    const { lock, pid, socket } = paths();
+    const timer = new FakeTimer();
+    let lockAttempts = 0;
+    let readinessWaits = 0;
+    const portChecks: Array<{ port: number; host: string }> = [];
+    const spawner = new CapturingDaemonSpawner();
+
+    class LockTakeoverRecoveryManager extends DaemonManager {
+      override acquireLock(): boolean {
+        lockAttempts++;
+        return lockAttempts >= 2;
+      }
+
+      override releaseLock(): void {}
+
+      override async waitForReady(): Promise<boolean> {
+        readinessWaits++;
+        return readinessWaits > 1;
+      }
+    }
+
+    const manager = new LockTakeoverRecoveryManager(
+      undefined,
+      undefined,
+      timer,
+      lock,
+      pid,
+      socket,
+      {
+        findDaemonProcesses: () => [],
+        isProcessRunning: () => false,
+      },
+      spawner,
+      undefined,
+      () => ({ command: "auto-mobile", args: ["--daemon-mode"] }),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        isPortFree: async (port, host) => {
+          portChecks.push({ port, host });
+          return false;
+        },
+      },
+      undefined,
+      async () => false,
+    );
+
+    await expect(manager.recoverControlState({ port: 4321 })).rejects.toThrow("port 4321");
+
+    expect(lockAttempts).toBe(2);
+    expect(portChecks).toEqual([{ port: 4321, host: "127.0.0.1" }]);
+    expect(spawner.calls).toEqual([]);
+  });
+
   test("passes the remaining repair deadline to both synchronous process scans", async () => {
     const { lock, pid, socket } = paths();
     const scanTimeouts: Array<number | undefined> = [];

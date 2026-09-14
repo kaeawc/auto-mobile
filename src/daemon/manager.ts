@@ -1239,6 +1239,7 @@ export class DaemonManager implements DaemonManagerLike {
   private async startByAwaitingLockHolder(
     options: DaemonOptions,
     recoverySignal?: AbortSignal,
+    onTakeover?: () => Promise<DaemonStartResult>,
   ): Promise<DaemonStartResult> {
     let holderLogPath: string | null = null;
     let waitedOnHolder = this.readStartupLockHolder();
@@ -1283,7 +1284,7 @@ export class DaemonManager implements DaemonManagerLike {
         stderrLog("Previous lock holder failed, taking over daemon start...");
         try {
           this.throwIfRecoveryCancelled(recoverySignal);
-          return await this.startUnlocked(options, recoverySignal);
+          return await (onTakeover?.() ?? this.startUnlocked(options, recoverySignal));
         } finally {
           this.releaseLock();
         }
@@ -2002,48 +2003,78 @@ export class DaemonManager implements DaemonManagerLike {
   ): Promise<DaemonRestartResult> {
     this.throwIfRecoveryCancelled(signal);
     if (!this.acquireLock()) {
-      return restartResultFromStart(await this.startByAwaitingLockHolder(options, signal));
+      return restartResultFromStart(
+        await this.startByAwaitingLockHolder(options, signal, async () => {
+          const result = await this.recoverControlStateWhileLocked(
+            options,
+            isProtocolHealthy,
+            signal,
+            recoveryDeadline,
+          );
+          return result === "restarted" ? "started" : "joined";
+        }),
+      );
     }
 
     try {
-      if (await isProtocolHealthy()) {
-        this.throwIfRecoveryCancelled(signal);
-        stderrLog("Daemon became healthy during control-state recovery; joining it.");
-        return "joined";
-      }
-
-      this.throwIfRecoveryCancelled(signal);
-      const status = await this.status();
-      this.throwIfRecoveryCancelled(signal);
-      const candidates = this.findLiveDaemonProcessRecords(
-        this.remainingRecoveryTime(recoveryDeadline),
+      return await this.recoverControlStateWhileLocked(
+        options,
+        isProtocolHealthy,
+        signal,
+        recoveryDeadline,
       );
-      const recordedCandidate = this.findRecoveryCandidate(status, candidates);
-      this.assertRecoveryCandidateIsScoped(
-        status,
-        candidates.map((candidate) => candidate.pid),
-        recordedCandidate,
-      );
-      this.throwIfRecoveryCancelled(signal);
-      await this.stopRecoveryCandidate(recordedCandidate, signal, recoveryDeadline);
-
-      // A cancellation after SIGTERM must still let the verified stop settle,
-      // but must never begin a replacement daemon that the caller will no
-      // longer wait to verify.
-      this.throwIfRecoveryCancelled(signal);
-      const recoveryOptions = await this.recoveryOptions(status, options);
-      this.throwIfRecoveryCancelled(signal);
-      await this.assertNoSurvivingDaemonBeforeRestart(
-        recoveryOptions,
-        this.remainingRecoveryTime(recoveryDeadline),
-      );
-      this.throwIfRecoveryCancelled(signal);
-      await this.timer.sleep(DAEMON_RESTART_HANDOFF_DELAY_MS);
-      this.throwIfRecoveryCancelled(signal);
-      return restartResultFromStart(await this.startUnlocked(recoveryOptions, signal));
     } finally {
       this.releaseLock();
     }
+  }
+
+  /**
+   * Recovery transition for a lifecycle lock that the caller already owns.
+   * Lock-contended recovery uses this after the prior holder exits so its
+   * takeover retains the same successor, process, port, and strict-port checks
+   * as an uncontended repair.
+   */
+  private async recoverControlStateWhileLocked(
+    options: DaemonOptions,
+    isProtocolHealthy: () => Promise<boolean>,
+    signal: AbortSignal | undefined,
+    recoveryDeadline: number | undefined,
+  ): Promise<DaemonRestartResult> {
+    if (await isProtocolHealthy()) {
+      this.throwIfRecoveryCancelled(signal);
+      stderrLog("Daemon became healthy during control-state recovery; joining it.");
+      return "joined";
+    }
+
+    this.throwIfRecoveryCancelled(signal);
+    const status = await this.status();
+    this.throwIfRecoveryCancelled(signal);
+    const candidates = this.findLiveDaemonProcessRecords(
+      this.remainingRecoveryTime(recoveryDeadline),
+    );
+    const recordedCandidate = this.findRecoveryCandidate(status, candidates);
+    this.assertRecoveryCandidateIsScoped(
+      status,
+      candidates.map((candidate) => candidate.pid),
+      recordedCandidate,
+    );
+    this.throwIfRecoveryCancelled(signal);
+    await this.stopRecoveryCandidate(recordedCandidate, signal, recoveryDeadline);
+
+    // A cancellation after SIGTERM must still let the verified stop settle,
+    // but must never begin a replacement daemon that the caller will no
+    // longer wait to verify.
+    this.throwIfRecoveryCancelled(signal);
+    const recoveryOptions = await this.recoveryOptions(status, options);
+    this.throwIfRecoveryCancelled(signal);
+    await this.assertNoSurvivingDaemonBeforeRestart(
+      recoveryOptions,
+      this.remainingRecoveryTime(recoveryDeadline),
+    );
+    this.throwIfRecoveryCancelled(signal);
+    await this.timer.sleep(DAEMON_RESTART_HANDOFF_DELAY_MS);
+    this.throwIfRecoveryCancelled(signal);
+    return restartResultFromStart(await this.startUnlocked(recoveryOptions, signal));
   }
 
   private findRecoveryCandidate(
@@ -2062,7 +2093,13 @@ export class DaemonManager implements DaemonManagerLike {
     if (
       !candidate ||
       candidate.startedAt === undefined ||
-      Math.abs(candidate.startedAt - status.startedAt) > 2_000
+      // The PID record is written by Daemon after process bootstrap, while
+      // process tables report OS process birth. A legitimate cold start can
+      // therefore predate its record by more than two seconds. PID reuse is
+      // still fenced: a daemon with the same PID born materially after the
+      // recorded generation cannot be that generation. Keep the existing
+      // two-second allowance for second-resolution process tables.
+      candidate.startedAt > status.startedAt + 2_000
     ) {
       return undefined;
     }

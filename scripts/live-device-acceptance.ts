@@ -1297,15 +1297,11 @@ export async function runAcceptanceMatrix(
       build: args.build ?? { entryScript: "/test/dist/src/index.js", buildId: "test-build" },
     };
   }
-  // The daemon captures this only during startup; it is never exposed through
-  // a daemon RPC. Short-lived CLI children inherit it so they can derive the
-  // generation-bound capability needed for the acceptance-only fault.
-  if (!dependencies.testOnly) {
-    process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV] = randomUUID();
-  }
   assertControlConfiguration(args.target, args.controls);
   assertLiveSafeguards(args, dependencies);
   assertProvisionSchemaMatrix(args);
+  const previousLiveAcceptanceStartupSecret =
+    process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV];
   // This is an opaque, per-matrix capability. Every harness-owned subprocess
   // inherits it, including a daemon started before the controlled
   // forward/reverse clients and a recovery restart. Ordinary MCP/daemon callers
@@ -1313,6 +1309,10 @@ export async function runAcceptanceMatrix(
   // presentation-order request.
   const previousAcceptanceDiscoveryCapability = process.env[ACCEPTANCE_DISCOVERY_CAPABILITY_ENV];
   if (!dependencies.testOnly) {
+    // The daemon captures this only during startup; it is never exposed through
+    // a daemon RPC. Short-lived CLI children inherit it so they can derive the
+    // generation-bound capability needed for the acceptance-only fault.
+    process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV] = randomUUID();
     process.env[ACCEPTANCE_DISCOVERY_CAPABILITY_ENV] = randomUUID();
   }
   const timer = dependencies.timer ?? defaultTimer;
@@ -2436,6 +2436,12 @@ export async function runAcceptanceMatrix(
       }
     }
     if (!dependencies.testOnly) {
+      if (previousLiveAcceptanceStartupSecret === undefined) {
+        delete process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV];
+      } else {
+        process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV] =
+          previousLiveAcceptanceStartupSecret;
+      }
       if (previousAcceptanceDiscoveryCapability === undefined) {
         delete process.env[ACCEPTANCE_DISCOVERY_CAPABILITY_ENV];
       } else {

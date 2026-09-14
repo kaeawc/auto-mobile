@@ -8,9 +8,8 @@ import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import { logger } from "../utils/logger";
 import { stringifyToolResponse } from "../utils/toolUtils";
 import { ScreenshotJobTracker } from "../utils/ScreenshotJobTracker";
-import { DaemonState } from "../daemon/daemonState";
 import { TakeScreenshot } from "../features/observe/TakeScreenshot";
-import { resolveDirectSessionDevice } from "./directSessionDeviceRegistry";
+import { resolveActiveSessionDevice, type ActiveSessionDevice } from "./activeSessionDevice";
 import type { TrackedScreenshotService } from "../features/observe/screenshot/ObserveScreenshotRecorder";
 import type { BootedDevice } from "../models";
 import * as realFs from "fs/promises";
@@ -34,61 +33,15 @@ export function resetScreenshotFileSystem(): void {
   screenshotFileSystem = realFs;
 }
 
-interface ActiveSessionDevice {
-  sessionUuid: string;
-  device: BootedDevice;
-  incarnation?: number;
-}
-
 interface SessionScreenshotResourceDependencies {
   resolveActiveSession(sessionUuid: string): ActiveSessionDevice | undefined;
   createScreenshotService(device: BootedDevice): TrackedScreenshotService;
 }
 
-let nextSessionIncarnation = 0;
-const sessionIncarnations = new WeakMap<object, number>();
 const SCREENSHOT_CAPTURE_WAIT_TIMEOUT_MS = 10_000;
 
-function getSessionIncarnation(session: object): number {
-  const existing = sessionIncarnations.get(session);
-  if (existing !== undefined) {
-    return existing;
-  }
-  const incarnation = ++nextSessionIncarnation;
-  sessionIncarnations.set(session, incarnation);
-  return incarnation;
-}
-
-function resolveActiveSession(sessionUuid: string): ActiveSessionDevice | undefined {
-  const daemonState = DaemonState.getInstance();
-  if (!daemonState.isInitialized()) {
-    return resolveDirectSessionDevice(sessionUuid);
-  }
-
-  const session = daemonState.getSessionManager().getSession(sessionUuid);
-  if (!session) {
-    return undefined;
-  }
-
-  const pooledDevice = daemonState.getDevicePool().getDevice(session.assignedDevice);
-  if (!pooledDevice || pooledDevice.sessionId !== sessionUuid) {
-    return undefined;
-  }
-
-  return {
-    sessionUuid,
-    incarnation: getSessionIncarnation(session),
-    device: {
-      deviceId: pooledDevice.id,
-      name: pooledDevice.name,
-      platform: pooledDevice.platform,
-      iosVersion: pooledDevice.iosVersion,
-    },
-  };
-}
-
 const defaultSessionScreenshotResourceDependencies: SessionScreenshotResourceDependencies = {
-  resolveActiveSession,
+  resolveActiveSession: resolveActiveSessionDevice,
   createScreenshotService: (device) => new TakeScreenshot(device),
 };
 

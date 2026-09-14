@@ -141,7 +141,7 @@ export interface AppFileServiceDependencies {
   iosSimulatorMediaClient?: IosSimulatorMediaClient;
 }
 
-const nodeAppFileFileSystem: AppFileFileSystem = {
+export const nodeAppFileFileSystem: AppFileFileSystem = {
   stat: async (path) => nodeFs.stat(path),
   lstat: async (path) => nodeFs.lstat(path),
   readdir: async (path) => nodeFs.readdir(path, { withFileTypes: true }),
@@ -1073,12 +1073,12 @@ function unsupportedAppFileOperation(
   );
 }
 
-type AndroidTarget =
+export type AndroidTarget =
   | { kind: "runAs"; relativePath: string }
   | { kind: "external"; absolutePath: string }
   | { kind: "unsupported"; message: string };
 
-function resolveAndroidTarget(
+export function resolveAndroidTarget(
   appId: string,
   container: AppFileContainer,
   path: string,
@@ -1102,7 +1102,7 @@ function resolveAndroidTarget(
   }
 }
 
-function iosContainerRelativePath(
+export function iosContainerRelativePath(
   container: AppFileContainer,
   operation: string,
   appId: string,
@@ -1128,9 +1128,9 @@ function iosContainerRelativePath(
   }
 }
 
-type LocalFileListEntry = Omit<AppFileListEntry, "resourceUri">;
+export type LocalFileListEntry = Omit<AppFileListEntry, "resourceUri">;
 
-async function listLocalFiles(
+export async function listLocalFiles(
   root: string,
   fileSystem: AppFileFileSystem,
 ): Promise<LocalFileListEntry[]> {
@@ -1180,12 +1180,13 @@ function buildLocalListEntry(
 interface IosAppContainerCommandContext {
   device: BootedDevice;
   appId: string;
-  container: AppFileContainer;
+  /** The logical container named in error messages (an app container or an App Group id). */
+  container: string;
   operation: string;
 }
 
-async function executeIosAppContainerCommand(
-  simctl: SimCtlClient,
+export async function executeIosAppContainerCommand(
+  simctl: Pick<SimCtlClient, "executeCommand">,
   command: string,
   context: IosAppContainerCommandContext,
 ): Promise<ExecResult> {
@@ -1289,7 +1290,7 @@ interface AndroidAppFileCommandContext {
   device: BootedDevice;
   appId: string;
   container: AppFileContainer;
-  operation: "write" | "list" | "read";
+  operation: "write" | "list" | "read" | "reset";
   access: "externalFiles" | "run-as";
 }
 
@@ -1300,7 +1301,7 @@ interface AndroidAppFileExecOptions {
   signal?: AbortSignal;
 }
 
-async function executeAndroidAppFileCommand(
+export async function executeAndroidAppFileCommand(
   adb: AdbExecutor,
   command: string,
   context: AndroidAppFileCommandContext,
@@ -1354,7 +1355,7 @@ function mapAndroidAppFileError(
   );
 }
 
-function decodeUtf8Text(buffer: Buffer): string | undefined {
+export function decodeUtf8Text(buffer: Buffer): string | undefined {
   try {
     const text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(buffer);
     return text.includes("\u0000") ? undefined : text;

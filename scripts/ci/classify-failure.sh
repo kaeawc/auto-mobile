@@ -7,6 +7,7 @@ set -euo pipefail
 REPO="kaeawc/auto-mobile"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SIGNATURES="$SCRIPT_DIR/known-flakes.txt"
+RETRY_MARKER='Starting emulator retry attempt 2.'
 # shellcheck disable=SC2016 # The jq program intentionally contains jq variables.
 FAILURE_CONCLUSIONS_JQ_DEF='def is_failed_conclusion: ((. // "") | ascii_downcase) as $conclusion | ($conclusion == "failure" or $conclusion == "cancelled" or $conclusion == "timed_out" or $conclusion == "startup_failure");'
 
@@ -56,10 +57,12 @@ match_signature() {
 
 terminal_attempt_evidence() {
   local evidence="$1"
-  local marker='First emulator attempt failed; captured diagnostics follow:'
+  local diagnostics_marker='First emulator attempt failed; captured diagnostics follow:'
 
-  if [[ "$evidence" == *"$marker"* ]]; then
-    printf '%s' "${evidence#*"$marker"}"
+  if [[ "$evidence" == *"$RETRY_MARKER"* ]]; then
+    printf '%s' "${evidence#*"$RETRY_MARKER"}"
+  elif [[ "$evidence" == *"$diagnostics_marker"* ]]; then
+    printf '%s' "${evidence#*"$diagnostics_marker"}"
   else
     printf '%s' "$evidence"
   fi

@@ -202,6 +202,7 @@ runs:
       shell: ${{ inputs.shell }}
       working-directory: ${{ inputs.working-directory }}
       run: |
+        echo "Starting emulator retry attempt 2."
         export AUTOMOBILE_EMULATOR_ARGS='["-no-snapshot-save","-no-window","-gpu","swiftshader_indirect","-noaudio","-no-boot-anim","-camera-back","none"]'
         export AUTOMOBILE_BOOT_PROGRESS=true
         export AUTOMOBILE_EMULATOR_DIAGNOSTICS_DIR="${{ github.workspace }}/android-emulator-diagnostics/attempt-2"

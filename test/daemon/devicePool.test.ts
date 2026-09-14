@@ -7517,6 +7517,77 @@ describe("DevicePool", () => {
       }
     });
 
+    test("rejects a stale identity observation while adding a newer replacement", async () => {
+      const device = stamped(poolDevice("emulator-5554", "Pixel_8_API_35"), 1);
+      const replacement = stamped(poolDevice("emulator-5554", "Pixel_7_API_34"), 2);
+      const newerReplacement = stamped(poolDevice("emulator-5554", "Pixel_6_API_33"), 5);
+      const delayedStraggler = stamped(poolDevice("emulator-5554", "Pixel_5_API_32"), 3);
+      await initializeLiveDevices([device]);
+      await devicePool.reconcileDiscoveryObservation([device], "test:initial");
+      const pooled = devicePool.getDevice(device.deviceId);
+      if (!pooled) {
+        throw new Error("expected pooled device");
+      }
+
+      type DevicePoolInternals = {
+        replacePooledDeviceForRuntimeIdentity(
+          pooledDevice: PooledDevice,
+          bootedDevice: BootedDevice,
+        ): Promise<boolean>;
+        clearDeviceSessionCache(deviceId: string): Promise<void>;
+        setDeviceSessionTracking(deviceId: string, sessionStart: number): Promise<void>;
+      };
+      const internals = devicePool as unknown as DevicePoolInternals;
+      const cacheCleanupStarted = Promise.withResolvers<void>();
+      const finishCacheCleanup = Promise.withResolvers<void>();
+      const sessionTrackingStarted = Promise.withResolvers<void>();
+      const finishSessionTracking = Promise.withResolvers<void>();
+      const clearDeviceSessionCache = internals.clearDeviceSessionCache.bind(devicePool);
+      const setDeviceSessionTracking = internals.setDeviceSessionTracking.bind(devicePool);
+      let pauseSessionTracking = true;
+      internals.clearDeviceSessionCache = async (deviceId) => {
+        cacheCleanupStarted.resolve();
+        await finishCacheCleanup.promise;
+        await clearDeviceSessionCache(deviceId);
+      };
+      internals.setDeviceSessionTracking = async (deviceId, sessionStart) => {
+        if (pauseSessionTracking) {
+          pauseSessionTracking = false;
+          sessionTrackingStarted.resolve();
+          await finishSessionTracking.promise;
+        }
+        await setDeviceSessionTracking(deviceId, sessionStart);
+      };
+      try {
+        const replacementPromise = internals.replacePooledDeviceForRuntimeIdentity(
+          pooled,
+          replacement,
+        );
+        await cacheCleanupStarted.promise;
+        await devicePool.reconcileDiscoveryObservation([newerReplacement], "test:newer");
+
+        finishCacheCleanup.resolve();
+        await sessionTrackingStarted.promise;
+        await devicePool.reconcileDiscoveryObservation(
+          [delayedStraggler],
+          "test:delayed-straggler",
+        );
+
+        finishSessionTracking.resolve();
+        await replacementPromise;
+
+        const installed = devicePool.getDevice(device.deviceId);
+        expect(installed?.name).toBe("Pixel_6_API_33");
+        expect(installed?.identityObservedAt).toBe(5);
+        expect(installed?.identityUnresolved).toBeUndefined();
+      } finally {
+        internals.clearDeviceSessionCache = clearDeviceSessionCache;
+        internals.setDeviceSessionTracking = setDeviceSessionTracking;
+        finishCacheCleanup.resolve();
+        finishSessionTracking.resolve();
+      }
+    });
+
     test("replaces a pooled identity for a newer liveness disagreement", async () => {
       const device = poolDevice("emulator-5554", "Pixel_8_API_35");
       await initializeLiveDevices([device]);

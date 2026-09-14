@@ -1005,6 +1005,7 @@ export class DevicePool {
         iosVersion: device.iosVersion,
         simulatorType: this.criteriaMatcher.getBootedDeviceSimulatorType(device),
         ...(device.observedAt !== undefined ? { nameObservedAt: device.observedAt } : {}),
+        ...(device.observedAt !== undefined ? { identityObservedAt: device.observedAt } : {}),
         incarnation: this.nextDeviceIncarnation(),
       });
       this.recordSourceAndroidAvd(device.deviceId, sourceImage);

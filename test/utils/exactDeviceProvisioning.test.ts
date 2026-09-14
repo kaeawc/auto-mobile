@@ -473,6 +473,86 @@ describe("DefaultExactDeviceProvisioner", () => {
     }
   });
 
+  test("reconciles a matching GPU mode when the existing AVD has GPU disabled", async () => {
+    let gpuEnabled = false;
+    let writes = 0;
+    const provisioner = new DefaultExactDeviceProvisioner({
+      listDeviceImages: async () => [androidImage("phone-api-36-a")],
+      isCreationAllowed: () => true,
+      avdManager: {} as ExactAndroidAvdClient,
+      androidConfigReader: {
+        readConfig: async () => ({
+          apiLevel: 36,
+          tag: "google_apis",
+          architecture: "x86_64",
+          deviceName: "pixel_9",
+          hardware: { gpuMode: "host" },
+          gpuEnabled,
+        }),
+      },
+      androidConfigWriter: {
+        setMemoryMb: async () => {},
+        setConfiguration: async (_name, configuration) => {
+          writes++;
+          gpuEnabled = configuration.gpuMode !== undefined;
+        },
+      },
+      iosSimulator: {} as ExactIosSimulatorClient,
+    });
+
+    const result = await provisioner.provision({
+      platform: "android",
+      name: "phone-api-36-a",
+      spec: {
+        ...ANDROID_SPEC,
+        configuration: { gpuMode: "host" },
+      },
+      reconcileExistingConfiguration: true,
+    });
+
+    expect(writes).toBe(1);
+    expect(result.created).toBe(false);
+  });
+
+  test("adopts an existing Android AVD when matching GPU mode is enabled", async () => {
+    let writes = 0;
+    const provisioner = new DefaultExactDeviceProvisioner({
+      listDeviceImages: async () => [androidImage("phone-api-36-a")],
+      isCreationAllowed: () => true,
+      avdManager: {} as ExactAndroidAvdClient,
+      androidConfigReader: {
+        readConfig: async () => ({
+          apiLevel: 36,
+          tag: "google_apis",
+          architecture: "x86_64",
+          deviceName: "pixel_9",
+          hardware: { gpuMode: "host" },
+          gpuEnabled: true,
+        }),
+      },
+      androidConfigWriter: {
+        setMemoryMb: async () => {},
+        setConfiguration: async () => {
+          writes++;
+        },
+      },
+      iosSimulator: {} as ExactIosSimulatorClient,
+    });
+
+    const result = await provisioner.provision({
+      platform: "android",
+      name: "phone-api-36-a",
+      spec: {
+        ...ANDROID_SPEC,
+        configuration: { gpuMode: "host" },
+      },
+      reconcileExistingConfiguration: true,
+    });
+
+    expect(writes).toBe(0);
+    expect(result.created).toBe(false);
+  });
+
   test.each([false, true])(
     "reconciles memory only on a stopped AVD (running=%s)",
     async (isRunning) => {

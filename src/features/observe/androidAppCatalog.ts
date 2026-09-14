@@ -109,29 +109,38 @@ export function needsLauncherProbe(
   return false;
 }
 
-/** Explain why the packages that need a launcher probe were not covered by CtrlProxy. */
+/**
+ * Explain why the packages that need a launcher probe were not covered by CtrlProxy.
+ * The label count distinguishes zero packages ever receiving a label (consistent
+ * with a stale pre-label-support build, whose versionName cannot prove freshness)
+ * from a handful of packages that individually failed resolution.
+ */
 export function launcherProbeFallbackReason(
   catalog: AndroidAppCatalog,
   packageNames: Iterable<string>,
 ): string | null {
-  let missingLaunchabilityHasLabel = false;
-  let missingLaunchability = false;
+  let missingLaunchabilityWithLabelCount = 0;
+  let missingLaunchabilityCount = 0;
   for (const packageName of packageNames) {
     const entry = catalog.get(packageName);
     if (entry === undefined) {
       return "CtrlProxy catalog does not cover all requested packages";
     }
     if (entry.launchable === undefined) {
-      missingLaunchability = true;
-      missingLaunchabilityHasLabel ||= entry.label !== undefined;
+      missingLaunchabilityCount += 1;
+      if (entry.label !== undefined) {
+        missingLaunchabilityWithLabelCount += 1;
+      }
     }
   }
-  if (!missingLaunchability) {
+  if (missingLaunchabilityCount === 0) {
     return null;
   }
-  return missingLaunchabilityHasLabel
-    ? "CtrlProxy catalog resolved labels but its launcher/launchability query did not answer"
-    : "CtrlProxy catalog predates labels or returned no labels";
+  const reason =
+    missingLaunchabilityWithLabelCount > 0
+      ? "CtrlProxy catalog resolved labels but its launcher/launchability query did not answer"
+      : "CtrlProxy catalog predates labels or returned no labels";
+  return `${reason} (${missingLaunchabilityWithLabelCount}/${missingLaunchabilityCount} packages have a label)`;
 }
 
 /**

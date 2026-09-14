@@ -4758,6 +4758,154 @@ describe("AndroidCtrlProxyClient", function () {
 
       await client.close();
     });
+
+    test("retires a dispatched request and discards its late screenshot response when cancelled", async function () {
+      const localTimer = new FakeTimer();
+      localTimer.enableAutoAdvance();
+      const fakeScheduler = new FakeScreenshotBackoffScheduler();
+      const { client, socket } = await createConnectedCapturingClient(localTimer, fakeScheduler);
+      const controller = new AbortController();
+      const pushSpy = spyOn(client as any, "pushScreenshotToObservationStream");
+
+      const before = socket.sentMessages.length;
+      const capture = client.requestScreenshot(500, undefined, false, controller.signal);
+      // Yield only microtasks: FakeTimer's auto-advance work runs on a later event-loop turn,
+      // which would otherwise fire this request's timeout before we exercise the abort window.
+      for (let attempt = 0; attempt < 5 && socket.sentMessages.length < before + 1; attempt += 1) {
+        await Promise.resolve();
+      }
+      expect(socket.sentMessages.length).toBe(before + 1);
+
+      const [frame] = screenshotFrames(socket) as Array<{ requestId: string }>;
+      expect(frame).toBeTruthy();
+      controller.abort();
+
+      const result = await capture;
+      expect(result).toMatchObject({ success: false, error: OPERATION_CANCELLED_MESSAGE });
+      expect((client as any).requestManager.isPending(frame.requestId)).toBe(false);
+
+      socket.emit(
+        "message",
+        JSON.stringify({
+          type: "screenshot",
+          requestId: frame.requestId,
+          data: "late-jpeg-base64",
+          format: "jpeg",
+          timestamp: 1,
+        }),
+      );
+
+      expect(pushSpy).not.toHaveBeenCalled();
+      await client.close();
+    });
+
+    test("retires a cancelled screenshot tombstone after a late screenshot error", async function () {
+      const localTimer = new FakeTimer();
+      localTimer.enableAutoAdvance();
+      const fakeScheduler = new FakeScreenshotBackoffScheduler();
+      const { client, socket } = await createConnectedCapturingClient(localTimer, fakeScheduler);
+      const controller = new AbortController();
+
+      try {
+        const before = socket.sentMessages.length;
+        const capture = client.requestScreenshot(500, undefined, false, controller.signal);
+        for (
+          let attempt = 0;
+          attempt < 5 && socket.sentMessages.length < before + 1;
+          attempt += 1
+        ) {
+          await Promise.resolve();
+        }
+        const [frame] = screenshotFrames(socket) as Array<{ requestId: string }>;
+        expect(frame).toBeTruthy();
+        controller.abort();
+        await capture;
+
+        socket.emit(
+          "message",
+          JSON.stringify({
+            type: "screenshot_error",
+            requestId: frame.requestId,
+            error: "late screenshot failure",
+          }),
+        );
+        await flushPromises();
+
+        expect((client as any).lateCancelledScreenshotRequestIds.has(frame.requestId)).toBe(false);
+      } finally {
+        await client.close();
+      }
+    });
+
+    test("retires a cancelled screenshot tombstone after a late correlated error", async function () {
+      const localTimer = new FakeTimer();
+      localTimer.enableAutoAdvance();
+      const fakeScheduler = new FakeScreenshotBackoffScheduler();
+      const { client, socket } = await createConnectedCapturingClient(localTimer, fakeScheduler);
+      const controller = new AbortController();
+
+      try {
+        const before = socket.sentMessages.length;
+        const capture = client.requestScreenshot(500, undefined, false, controller.signal);
+        for (
+          let attempt = 0;
+          attempt < 5 && socket.sentMessages.length < before + 1;
+          attempt += 1
+        ) {
+          await Promise.resolve();
+        }
+        const [frame] = screenshotFrames(socket) as Array<{ requestId: string }>;
+        expect(frame).toBeTruthy();
+        controller.abort();
+        await capture;
+
+        socket.emit(
+          "message",
+          JSON.stringify({
+            type: "error",
+            requestId: frame.requestId,
+            error: "late correlated failure",
+          }),
+        );
+        await flushPromises();
+
+        expect((client as any).lateCancelledScreenshotRequestIds.has(frame.requestId)).toBe(false);
+      } finally {
+        await client.close();
+      }
+    });
+
+    test("clears cancelled screenshot tombstones when the connection closes", async function () {
+      const localTimer = new FakeTimer();
+      localTimer.enableAutoAdvance();
+      const fakeScheduler = new FakeScreenshotBackoffScheduler();
+      const { client, socket } = await createConnectedCapturingClient(localTimer, fakeScheduler);
+      const controller = new AbortController();
+
+      try {
+        const before = socket.sentMessages.length;
+        const capture = client.requestScreenshot(500, undefined, false, controller.signal);
+        for (
+          let attempt = 0;
+          attempt < 5 && socket.sentMessages.length < before + 1;
+          attempt += 1
+        ) {
+          await Promise.resolve();
+        }
+        const [frame] = screenshotFrames(socket) as Array<{ requestId: string }>;
+        expect(frame).toBeTruthy();
+        controller.abort();
+        await capture;
+        expect((client as any).lateCancelledScreenshotRequestIds.has(frame.requestId)).toBe(true);
+
+        socket.close();
+        await flushPromises();
+
+        expect((client as any).lateCancelledScreenshotRequestIds).toHaveLength(0);
+      } finally {
+        await client.close();
+      }
+    });
   });
 
   describe("shared rate-limit floor accounting (issue #4927)", function () {

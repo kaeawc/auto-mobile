@@ -98,9 +98,9 @@ lexically_normalize_path() {
   printf '%s\n' "${normalized_path:-/}"
 }
 
-resolved_shellcheck_disable_source_path() {
+resolved_shellcheck_disable_source_paths() {
   local check_script="$1"
-  local line source_expr="" resolved_expr unresolved_expr resolved_path
+  local line source_expr resolved_expr unresolved_expr resolved_path
   local check_script_dir check_script_dir_path
   local awaiting_source=0 disable_codes variable assignment_value assignment_inner
   local dots_suffix variable_value
@@ -111,6 +111,7 @@ resolved_shellcheck_disable_source_path() {
   local assignment_prefix="\$(cd \"\$(dirname \"\${BASH_SOURCE[0]}\")"
   local assignment_suffix='" && pwd)'
   local -a previous_lines=()
+  local -a source_exprs=()
   local -a resolved_variable_names=()
   local -a resolved_variable_values=()
   local idx
@@ -138,9 +139,11 @@ resolved_shellcheck_disable_source_path() {
       if [[ "${line}" =~ ^[[:space:]]*(source|\.)[[:space:]]+\" ]]; then
         source_expr="${line#*\"}"
         source_expr="${source_expr%\"*}"
-        break
+        source_exprs+=("${source_expr}")
+        awaiting_source=0
+      else
+        awaiting_source=0
       fi
-      awaiting_source=0
     fi
 
     if [[ "${line}" =~ ^[[:space:]]*#[[:space:]]*shellcheck[[:space:]]+disable=([^[:space:]#]+) ]]; then
@@ -152,61 +155,65 @@ resolved_shellcheck_disable_source_path() {
     previous_lines+=("${line}")
   done < "${check_script}"
 
-  [[ -n "${source_expr:-}" ]] || return 0
+  [[ "${#source_exprs[@]}" -gt 0 ]] || return 0
 
   check_script_dir="${check_script%/*}"
   [[ "${check_script_dir}" != "${check_script}" ]] || check_script_dir="."
   check_script_dir_path="$(lexically_normalize_path "${PROJECT_ROOT}/${check_script_dir}")"
 
-  for line in ${previous_lines[@]+"${previous_lines[@]}"}; do
-    if [[ "${line}" =~ ^[[:space:]]*([a-zA-Z_][a-zA-Z0-9_]*)=(.*)$ ]]; then
-      variable="${BASH_REMATCH[1]}"
-      assignment_value="${BASH_REMATCH[2]}"
-      if [[ "${assignment_value}" != *"${bash_source_token}"* ]] || [[ "${source_expr}" != *"\$${variable}"* && "${source_expr}" != *"\${${variable}}"* ]]; then
-        continue
+  for source_expr in ${source_exprs[@]+"${source_exprs[@]}"}; do
+    resolved_variable_names=()
+    resolved_variable_values=()
+    for line in ${previous_lines[@]+"${previous_lines[@]}"}; do
+      if [[ "${line}" =~ ^[[:space:]]*([a-zA-Z_][a-zA-Z0-9_]*)=(.*)$ ]]; then
+        variable="${BASH_REMATCH[1]}"
+        assignment_value="${BASH_REMATCH[2]}"
+        if [[ "${assignment_value}" != *"${bash_source_token}"* ]] || [[ "${source_expr}" != *"\$${variable}"* && "${source_expr}" != *"\${${variable}}"* ]]; then
+          continue
+        fi
+        assignment_inner="${assignment_value#\"}"
+        assignment_inner="${assignment_inner%\"}"
+        if [[ "${assignment_inner}" != "${assignment_prefix}"*"${assignment_suffix}" ]]; then
+          continue
+        fi
+        dots_suffix="${assignment_inner#"${assignment_prefix}"}"
+        dots_suffix="${dots_suffix%"${assignment_suffix}"}"
+        if [[ ! "${dots_suffix}" =~ ^(/\.\.)*$ ]]; then
+          continue
+        fi
+        variable_value="$(lexically_normalize_path "${check_script_dir_path}${dots_suffix}")"
+        resolved_variable_names+=("${variable}")
+        resolved_variable_values+=("${variable_value}")
       fi
-      assignment_inner="${assignment_value#\"}"
-      assignment_inner="${assignment_inner%\"}"
-      if [[ "${assignment_inner}" != "${assignment_prefix}"*"${assignment_suffix}" ]]; then
-        continue
-      fi
-      dots_suffix="${assignment_inner#"${assignment_prefix}"}"
-      dots_suffix="${dots_suffix%"${assignment_suffix}"}"
-      if [[ ! "${dots_suffix}" =~ ^(/\.\.)*$ ]]; then
-        continue
-      fi
-      variable_value="$(lexically_normalize_path "${check_script_dir_path}${dots_suffix}")"
-      resolved_variable_names+=("${variable}")
-      resolved_variable_values+=("${variable_value}")
+    done
+
+    unresolved_expr="${source_expr//"${bash_source_dir_expr}"/}"
+    unresolved_expr="${unresolved_expr//\$\{PROJECT_ROOT\}/}"
+    unresolved_expr="${unresolved_expr//\$PROJECT_ROOT/}"
+    resolved_expr="$(replace_literal_all "${source_expr}" "${bash_source_dir_expr}" "${check_script_dir_path}")"
+    resolved_expr="$(replace_literal_all "${resolved_expr}" "${project_root_braced}" "${PROJECT_ROOT}")"
+    resolved_expr="$(replace_literal_all "${resolved_expr}" "${project_root_token}" "${PROJECT_ROOT}")"
+    for idx in "${!resolved_variable_names[@]}"; do
+      variable="${resolved_variable_names[$idx]}"
+      variable_value="${resolved_variable_values[$idx]}"
+      unresolved_expr="${unresolved_expr//\$\{${variable}\}/}"
+      unresolved_expr="${unresolved_expr//\$${variable}/}"
+      resolved_expr="$(replace_literal_all "${resolved_expr}" "\${${variable}}" "${variable_value}")"
+      resolved_expr="$(replace_literal_all "${resolved_expr}" "\$${variable}" "${variable_value}")"
+    done
+    if [[ "${unresolved_expr}" == *'$'* ]]; then
+      printf 'Unable to resolve shellcheck source path in %s: %s\n' "${check_script}" "${source_expr}" >&2
+      continue
     fi
-  done
 
-  unresolved_expr="${source_expr//"${bash_source_dir_expr}"/}"
-  unresolved_expr="${unresolved_expr//\$\{PROJECT_ROOT\}/}"
-  unresolved_expr="${unresolved_expr//\$PROJECT_ROOT/}"
-  resolved_expr="$(replace_literal_all "${source_expr}" "${bash_source_dir_expr}" "${check_script_dir_path}")"
-  resolved_expr="$(replace_literal_all "${resolved_expr}" "${project_root_braced}" "${PROJECT_ROOT}")"
-  resolved_expr="$(replace_literal_all "${resolved_expr}" "${project_root_token}" "${PROJECT_ROOT}")"
-  for idx in "${!resolved_variable_names[@]}"; do
-    variable="${resolved_variable_names[$idx]}"
-    variable_value="${resolved_variable_values[$idx]}"
-    unresolved_expr="${unresolved_expr//\$\{${variable}\}/}"
-    unresolved_expr="${unresolved_expr//\$${variable}/}"
-    resolved_expr="$(replace_literal_all "${resolved_expr}" "\${${variable}}" "${variable_value}")"
-    resolved_expr="$(replace_literal_all "${resolved_expr}" "\$${variable}" "${variable_value}")"
+    if [[ "${resolved_expr}" == /* ]]; then
+      resolved_path="$(lexically_normalize_path "${resolved_expr}")"
+    else
+      resolved_path="$(lexically_normalize_path "${PROJECT_ROOT}/${resolved_expr}")"
+    fi
+    [[ "${resolved_path}" == "${PROJECT_ROOT}/"* ]] || continue
+    printf '%s\n' "${resolved_path#"${PROJECT_ROOT}/"}"
   done
-  if [[ "${unresolved_expr}" == *'$'* ]]; then
-    printf 'Unable to resolve shellcheck source path in %s: %s\n' "${check_script}" "${source_expr}" >&2
-    return 0
-  fi
-
-  if [[ "${resolved_expr}" == /* ]]; then
-    resolved_path="$(lexically_normalize_path "${resolved_expr}")"
-  else
-    resolved_path="$(lexically_normalize_path "${PROJECT_ROOT}/${resolved_expr}")"
-  fi
-  [[ "${resolved_path}" == "${PROJECT_ROOT}/"* ]] || return 0
-  printf '%s\n' "${resolved_path#"${PROJECT_ROOT}/"}"
 }
 
 load_fast_check_registry() {
@@ -237,20 +244,40 @@ add_registered_checks_for_script_path() {
     if [[ "${path}" == "${check_script}" ]]; then
       add_check "${check_name}"
     fi
-    if [[ "${check_script}" != *.sh || ! -f "${check_script}" ]]; then
+    if [[ ! -f "${check_script}" ]]; then
       continue
     fi
-    while IFS= read -r directive; do
-      helper_path="${directive#*source=}"
-      helper_path="${helper_path%%[[:space:]]*}"
-      if [[ "${path}" == "${helper_path}" ]]; then
-        add_check "${check_name}"
-      fi
-    done < <(grep -E '^[[:space:]]*#[[:space:]]*shellcheck[[:space:]]+source=[^[:space:]]+' "${check_script}" || true)
-    helper_path="$(resolved_shellcheck_disable_source_path "${check_script}")"
-    if [[ "${path}" == "${helper_path}" ]]; then
-      add_check "${check_name}"
-    fi
+    case "${check_script}" in
+      *.sh)
+        while IFS= read -r directive; do
+          helper_path="${directive#*source=}"
+          helper_path="${helper_path%%[[:space:]]*}"
+          if [[ "${path}" == "${helper_path}" ]]; then
+            add_check "${check_name}"
+          fi
+        done < <(grep -E '^[[:space:]]*#[[:space:]]*shellcheck[[:space:]]+source=[^[:space:]]+' "${check_script}" || true)
+        while IFS= read -r helper_path; do
+          if [[ "${path}" == "${helper_path}" ]]; then
+            add_check "${check_name}"
+          fi
+        done < <(resolved_shellcheck_disable_source_paths "${check_script}")
+        ;;
+      *.ts)
+        set +e
+        resolver_output="$(bun "${PROJECT_ROOT}/scripts/lib/tsImportDeps.ts" "${check_script}")"
+        resolver_status=$?
+        set -e
+        if [[ "${resolver_status}" -ne 0 ]]; then
+          echo "Failed to resolve TypeScript dependencies for ${check_script}." >&2
+          exit "${resolver_status}"
+        fi
+        while IFS= read -r helper_path; do
+          if [[ "${path}" == "${helper_path}" ]]; then
+            add_check "${check_name}"
+          fi
+        done <<< "${resolver_output}"
+        ;;
+    esac
   done
 }
 

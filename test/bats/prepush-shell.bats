@@ -74,6 +74,8 @@ EOF
 
   cp "${REPO_ROOT}/scripts/prepush-shell.sh" "${TEST_ROOT}/scripts/prepush-shell.sh"
   cp "${REPO_ROOT}/scripts/lib/vcs-diff.sh" "${TEST_ROOT}/scripts/lib/vcs-diff.sh"
+  cp "${REPO_ROOT}/scripts/lib/tsImportDeps.ts" "${TEST_ROOT}/scripts/lib/tsImportDeps.ts"
+  ln -s "${REPO_ROOT}/node_modules" "${TEST_ROOT}/node_modules"
   chmod +x "${TEST_ROOT}/scripts/prepush-shell.sh"
 
   export PREPUSH_FAST_LOG="${FAST_LOG}"
@@ -112,6 +114,13 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck disable=SC1091 # Resolved relative to this script's location.
 source "$ROOT_DIR/scripts/lib/shared-helper.sh"
 EOF
+  cat > scripts/check-helper-consumer-five.sh <<'EOF'
+#!/usr/bin/env bash
+# shellcheck disable=SC1091 # Resolved relative to this script's location.
+source "$(dirname "${BASH_SOURCE[0]}")/lib/shared-helper.sh"
+# shellcheck disable=SC1091 # Resolved relative to this script's location.
+source "$(dirname "${BASH_SOURCE[0]}")/second-helper.sh"
+EOF
   mkdir -p scripts/isolated-helper
   cat > scripts/check-helper-consumer-deleted-helper.sh <<'EOF'
 #!/usr/bin/env bash
@@ -120,11 +129,66 @@ source "$(dirname "${BASH_SOURCE[0]}")/isolated-helper/only-helper.sh"
 EOF
   printf '%s\n' 'helper baseline' > scripts/lib/shared-helper.sh
   printf '%s\n' 'isolated helper baseline' > scripts/isolated-helper/only-helper.sh
-  git add scripts/check-helper-consumer-one.sh scripts/check-helper-consumer-two.sh scripts/check-helper-consumer-three.sh scripts/check-helper-consumer-four.sh scripts/check-helper-consumer-deleted-helper.sh scripts/lib/shared-helper.sh scripts/isolated-helper/only-helper.sh
+  printf '%s\n' 'second helper baseline' > scripts/second-helper.sh
+  git add scripts/check-helper-consumer-one.sh scripts/check-helper-consumer-two.sh scripts/check-helper-consumer-three.sh scripts/check-helper-consumer-four.sh scripts/check-helper-consumer-five.sh scripts/check-helper-consumer-deleted-helper.sh scripts/lib/shared-helper.sh scripts/isolated-helper/only-helper.sh scripts/second-helper.sh
   git commit -qm "add helper consumers"
   git branch -M main
   git branch base
   git checkout -qb feature
+}
+
+@test "a changed TypeScript dependency selects its registered check" {
+  install_registry_stub
+  mkdir -p scripts/release/lib
+  printf '%s\n' 'import "./lib/runtime-roots";' > scripts/release/pin-runtime-deps.ts
+  printf '%s\n' 'export const runtimeRoots = [];' > scripts/release/lib/runtime-roots.ts
+  git add scripts/release/pin-runtime-deps.ts scripts/release/lib/runtime-roots.ts
+  git commit -qm "add runtime pins fixtures"
+  git branch -f base HEAD
+  commit_change "scripts/release/lib/runtime-roots.ts" "export const runtimeRoots = [\"changed\"];"
+
+  run bash scripts/prepush-shell.sh --base base
+
+  [ "${status}" -eq 0 ]
+  grep -Fqx -- '--only stdlib-first,runtime-pins' "${FAST_LOG}"
+}
+
+@test "an unrelated TypeScript script does not select a registered TypeScript check" {
+  install_registry_stub
+  mkdir -p scripts/release/lib
+  printf '%s\n' 'import "./lib/runtime-roots";' > scripts/release/pin-runtime-deps.ts
+  printf '%s\n' 'export const runtimeRoots = [];' > scripts/release/lib/runtime-roots.ts
+  git add scripts/release/pin-runtime-deps.ts scripts/release/lib/runtime-roots.ts
+  git commit -qm "add runtime pins fixtures"
+  git branch -f base HEAD
+  commit_change "scripts/unrelated.ts" "export const unrelated = true;"
+
+  run bash scripts/prepush-shell.sh --base base
+
+  [ "${status}" -eq 0 ]
+  grep -Fqx -- '--only stdlib-first' "${FAST_LOG}"
+}
+
+@test "a TypeScript dependency resolver failure stops prepush closed" {
+  install_registry_stub
+  mkdir -p scripts/release/lib
+  printf '%s\n' 'import "./lib/runtime-roots";' > scripts/release/pin-runtime-deps.ts
+  printf '%s\n' 'export const runtimeRoots = [];' > scripts/release/lib/runtime-roots.ts
+  git add scripts/release/pin-runtime-deps.ts scripts/release/lib/runtime-roots.ts
+  git commit -qm "add runtime pins fixtures"
+  git branch -f base HEAD
+  commit_change "scripts/release/lib/runtime-roots.ts" "export const runtimeRoots = [\"changed\"];"
+  cat > "${STUB_DIR}/bun" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "simulated TypeScript dependency resolver failure" >&2
+exit 19
+EOF
+  chmod +x "${STUB_DIR}/bun"
+
+  run bash scripts/prepush-shell.sh --base base
+
+  [ "${status}" -eq 19 ]
+  [[ "${output}" == *"Failed to resolve TypeScript dependencies for scripts/release/pin-runtime-deps.ts"* ]]
 }
 
 teardown() {
@@ -151,7 +215,9 @@ if [[ "${1:-}" == "--list-checks" ]]; then
   printf 'helper-consumer-two\tscripts/check-helper-consumer-two.sh\n'
   printf 'helper-consumer-three\tscripts/check-helper-consumer-three.sh\n'
   printf 'helper-consumer-four\tscripts/check-helper-consumer-four.sh\n'
+  printf 'helper-consumer-five\tscripts/check-helper-consumer-five.sh\n'
   printf 'helper-consumer-deleted-helper\tscripts/check-helper-consumer-deleted-helper.sh\n'
+  printf 'runtime-pins\tscripts/release/pin-runtime-deps.ts\n'
   exit 0
 fi
 printf '%s\n' "$*" >> "${PREPUSH_FAST_LOG}"
@@ -202,7 +268,31 @@ EOF
   run bash scripts/prepush-shell.sh --base base
 
   [ "${status}" -eq 0 ]
-  grep -Fqx -- '--only shellcheck,shell-portability,shell-sete,stdlib-first,helper-consumer-one,helper-consumer-two,helper-consumer-three,helper-consumer-four' "${FAST_LOG}"
+  grep -Fqx -- '--only shellcheck,shell-portability,shell-sete,stdlib-first,helper-consumer-one,helper-consumer-two,helper-consumer-three,helper-consumer-four,helper-consumer-five' "${FAST_LOG}"
+}
+
+@test "a changed second SC1091 helper selects its multi-source consumer" {
+  install_registry_stub
+  printf '%s\n' 'second helper changed' > scripts/second-helper.sh
+  git add scripts/second-helper.sh
+  git commit -qm "change second isolated helper"
+
+  run bash scripts/prepush-shell.sh --base base
+
+  [ "${status}" -eq 0 ]
+  grep -Fqx -- '--only shellcheck,shell-portability,shell-sete,stdlib-first,helper-consumer-five' "${FAST_LOG}"
+}
+
+@test "a changed first SC1091 helper selects its multi-source consumer" {
+  install_registry_stub
+  printf '%s\n' 'first helper changed' > scripts/lib/shared-helper.sh
+  git add scripts/lib/shared-helper.sh
+  git commit -qm "change first helper"
+
+  run bash scripts/prepush-shell.sh --base base
+
+  [ "${status}" -eq 0 ]
+  grep -Fqx -- '--only shellcheck,shell-portability,shell-sete,stdlib-first,helper-consumer-one,helper-consumer-two,helper-consumer-three,helper-consumer-four,helper-consumer-five' "${FAST_LOG}"
 }
 
 @test "a deleted SC1091 helper in a removed directory still selects its consumer" {

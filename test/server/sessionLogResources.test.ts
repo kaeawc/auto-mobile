@@ -67,7 +67,7 @@ function read(uri: string, context: ResourceReadContext = { sessionUuid }) {
 }
 
 const baseUri = `automobile:device-session/${sessionUuid}/apps/com.example.app/logs`;
-const appLogPathsQuery = "paths=%5B%22app.log%22%5D";
+const appLogPathsQuery = "pathsJson=%5B%22app.log%22%5D";
 
 describe("session log resources (#7006)", () => {
   beforeEach(() => ResourceRegistry.clearResources());
@@ -139,7 +139,7 @@ describe("session log resources (#7006)", () => {
     const { service } = harness();
 
     for (const [query, message] of [
-      ["paths=%5B%22..%2Fshared%2Fapp.log%22%5D", "'..' segments"],
+      ["pathsJson=%5B%22..%2Fshared%2Fapp.log%22%5D", "'..' segments"],
       [`${appLogPathsQuery}&maxBytes=99999999`, "Invalid maxBytes"],
       ["lastSeconds=86400", "Invalid lastSeconds"],
       [`${appLogPathsQuery}&deviceId=other`, "Unknown session log query parameter: deviceId"],

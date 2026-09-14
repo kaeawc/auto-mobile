@@ -581,7 +581,10 @@ describe("provisionDevice handler", () => {
     expect(properties?.device.anyOf).toBeUndefined();
   });
 
-  test("rejects unbootable memory for modern Play Store Android images", () => {
+  test.each([
+    "system-images;android-36;google_apis_playstore;x86_64",
+    "system-images;android-36.1;google_apis_playstore;x86_64",
+  ])("rejects unbootable memory for modern Play Store Android image %s", (runtime) => {
     expect(() =>
       provisionDeviceSchema.parse({
         operationId: "operation-low-play-memory",
@@ -589,13 +592,34 @@ describe("provisionDevice handler", () => {
           platform: "android",
           name: "phone-api-36-play",
           spec: {
-            runtime: "system-images;android-36;google_apis_playstore;x86_64",
+            runtime,
             deviceType: "pixel_9",
             configuration: { memoryMb: 1024 },
           },
         },
       }),
     ).toThrow(/at least 2048/);
+  });
+
+  test.each([
+    ["system-images;android-36;google_apis_playstore;x86_64", 2048],
+    ["system-images;android-36.1;google_apis_playstore;x86_64", 2048],
+    ["system-images;android-36.1;google_apis;x86_64", 1024],
+  ] as const)("accepts supported memory for Android image %s", (runtime, memoryMb) => {
+    expect(
+      provisionDeviceSchema.parse({
+        operationId: "operation-supported-memory",
+        device: {
+          platform: "android",
+          name: "phone-api-36",
+          spec: {
+            runtime,
+            deviceType: "pixel_9",
+            configuration: { memoryMb },
+          },
+        },
+      }).device.spec.configuration?.memoryMb,
+    ).toBe(memoryMb);
   });
 
   test("creates the caller-specified device once and replays its structured result by operationId", async () => {

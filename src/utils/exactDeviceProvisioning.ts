@@ -211,14 +211,16 @@ export interface DefaultExactDeviceProvisionerDependencies {
   timer?: Pick<Timer, "now">;
 }
 
-function requestedAndroidRuntime(runtime: string):
-  | {
-      apiLevel: number;
-      tag: string;
-      architecture: string;
-      systemImagePackage: string;
-    }
-  | undefined {
+export interface ParsedAndroidSystemImageRuntime {
+  apiLevel: number;
+  tag: string;
+  architecture: string;
+  systemImagePackage: string;
+}
+
+export function parseAndroidSystemImageRuntime(
+  runtime: string,
+): ParsedAndroidSystemImageRuntime | undefined {
   const parts = runtime.split(";");
   if (parts.length !== 4 || parts[0] !== "system-images") {
     return undefined;
@@ -239,7 +241,7 @@ function sameAndroidDeviceIdentity(
   spec: AndroidDeviceSpecification,
   config: Awaited<ReturnType<AvdConfigReader["readConfig"]>>,
 ): boolean {
-  const runtime = requestedAndroidRuntime(spec.runtime);
+  const runtime = parseAndroidSystemImageRuntime(spec.runtime);
   if (!runtime || !config) {
     return false;
   }

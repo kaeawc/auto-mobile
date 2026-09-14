@@ -519,6 +519,34 @@ export interface DoctorCommandDependencies {
   repairDaemon?: (options: DoctorRepairOptions) => Promise<DaemonRecoveryResult>;
 }
 
+async function runDoctorRepairCommand(
+  params: Record<string, any>,
+  dependencies: DoctorCommandDependencies,
+  daemonOptions?: DaemonOptions,
+): Promise<void> {
+  if (params.androidDeviceId !== undefined && params.android !== true) {
+    throw new ActionableError("--android-device-id requires --repair --android.");
+  }
+  if (params.iosSimulatorUdid !== undefined && params.ios !== true) {
+    throw new ActionableError("--ios-simulator-udid requires --repair --ios.");
+  }
+  const recovery = await (dependencies.repairDaemon ?? repairDaemon)({
+    timeoutMs: params.timeoutMs,
+    android: params.android,
+    ios: params.ios,
+    androidDeviceId: params.androidDeviceId,
+    iosSimulatorUdid: params.iosSimulatorUdid,
+    daemonOptions,
+  });
+  writeCliToolOutput(recovery, "doctor");
+  if (recovery.status === "failed") {
+    // A deadline can be reported before an already-signalled manager lifecycle
+    // reaches its safe terminal state. Do not interrupt its final cleanup.
+    process.exitCode = 1;
+    await waitForDaemonRecoveryCompletion(recovery);
+  }
+}
+
 export async function runDoctorCommand(
   params: Record<string, any>,
   dependencies: DoctorCommandDependencies = {},
@@ -531,30 +559,9 @@ export async function runDoctorCommand(
   }
 
   if (params.repair === true) {
-    if (params.androidDeviceId !== undefined && params.android !== true) {
-      throw new ActionableError("--android-device-id requires --repair --android.");
-    }
-    if (params.iosSimulatorUdid !== undefined && params.ios !== true) {
-      throw new ActionableError("--ios-simulator-udid requires --repair --ios.");
-    }
     // Repair is intentionally host-local: a missing, stale, or wrong-protocol
     // control socket cannot serve the daemon's doctor tool.
-    const recovery = await (dependencies.repairDaemon ?? repairDaemon)({
-      timeoutMs: params.timeoutMs,
-      android: params.android,
-      ios: params.ios,
-      androidDeviceId: params.androidDeviceId,
-      iosSimulatorUdid: params.iosSimulatorUdid,
-      daemonOptions,
-    });
-    writeCliToolOutput(recovery, "doctor");
-    if (recovery.status === "failed") {
-      // A deadline can be reported before an already-signalled manager
-      // lifecycle reaches its safe terminal state. Do not let a hard exit
-      // interrupt that scoped recovery between SIGTERM and its final cleanup.
-      process.exitCode = 1;
-      await waitForDaemonRecoveryCompletion(recovery);
-    }
+    await runDoctorRepairCommand(params, dependencies, daemonOptions);
     return;
   }
 

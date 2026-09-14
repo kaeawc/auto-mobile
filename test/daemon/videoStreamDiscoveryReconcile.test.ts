@@ -42,22 +42,12 @@ describe("resolveVideoStreamDevice folds its discovery into the pool", () => {
 
   test("keeps an AVD-resolved pooled emulator live when ADB reports its raw serial", async () => {
     const pool = await livePool();
-    const resolved = { deviceId: SERIAL, name: "Pixel_8_API_35", platform: "android" } as const;
+    const raw = { deviceId: SERIAL, name: SERIAL, platform: "android" } as const;
 
-    const device = await resolveVideoStreamDevice(
-      {
-        // This is the production split: DeviceSessionManager's ADB scan has
-        // the raw serial while PlatformDeviceManager resolves the AVD name.
-        detectConnectedPlatforms: async (): Promise<BootedDevice[]> => [
-          { deviceId: SERIAL, name: SERIAL, platform: "android" },
-        ],
-        getBootedDevices: async (): Promise<BootedDevice[]> => [resolved],
-      },
-      SERIAL,
-    );
+    const device = await resolveVideoStreamDevice(discovering([raw]), SERIAL);
 
     expect(pool.isPooledIdentityUnresolved(SERIAL)).toBe(false);
-    expect(device).toEqual(resolved);
+    expect(device).toEqual(raw);
   });
 
   test("quarantines the pooled entry when its discovery reads the placeholder", async () => {

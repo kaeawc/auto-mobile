@@ -1310,6 +1310,85 @@ describe("SessionManager", () => {
       }
     });
 
+    test("re-checks the commit fence after awaiting tracked setup (#7031 round 2)", async () => {
+      // The daemon's pre-release fence passes, then release awaits pending
+      // setup work. A newer identity confirmation that lands during that await
+      // must still stop the stale eviction from retiring the live session.
+      let finishSetup!: () => void;
+      const setupFinished = new Promise<void>((resolve) => {
+        finishSetup = resolve;
+      });
+      const manager = new SessionManager(
+        fakeTimer,
+        {
+          async upsertActiveSession(): Promise<void> {},
+          async recordActivity(): Promise<void> {},
+          async markReleased(): Promise<void> {},
+          async markStaleActiveSessionsExpired(): Promise<void> {},
+        },
+        () => new FakeDbWriteBarrier(),
+      );
+      try {
+        const session = await manager.createSession("s1", "emulator-5554", "android");
+        const setup = manager.trackSessionSetup(session, () => setupFinished);
+        let superseded = false;
+        const release = manager.releaseSessionUnlessSuperseded(
+          "s1",
+          "device-disconnected:emulator-5554",
+          () => !superseded,
+        );
+
+        await Promise.resolve();
+        expect(manager.getSession("s1")).toBe(session);
+
+        superseded = true;
+        finishSetup();
+        await setup;
+        await expect(release).resolves.toEqual({ superseded: true });
+        expect(manager.getSession("s1")).toBe(session);
+        expect(manager.getSessionForDevice("emulator-5554")).toBe("s1");
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+
+    test("a fence that declines during terminal persistence leaves the session live", async () => {
+      const persistence = new DeferredReleaseDeviceSessionPersistence();
+      const manager = new SessionManager(fakeTimer, persistence);
+      try {
+        const session = await manager.createSession("s1", "emulator-5554", "android");
+        let superseded = false;
+        const release = manager.releaseSessionUnlessSuperseded(
+          "s1",
+          "device-disconnected:emulator-5554",
+          () => !superseded,
+        );
+        await persistence.releaseStarted.promise;
+
+        superseded = true;
+        persistence.finishRelease.resolve();
+        await expect(release).resolves.toEqual({ superseded: true });
+        expect(manager.getSession("s1")).toBe(session);
+        expect(manager.getSessionForDevice("emulator-5554")).toBe("s1");
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+
+    test("a fence that stays open commits the release and reports the device", async () => {
+      const manager = new SessionManager(fakeTimer, new FakeDeviceSessionPersistence());
+      try {
+        await manager.createSession("s1", "emulator-5554", "android");
+
+        await expect(
+          manager.releaseSessionUnlessSuperseded("s1", "explicit-release", () => true),
+        ).resolves.toEqual({ superseded: false, deviceId: "emulator-5554" });
+        expect(manager.getSession("s1")).toBeNull();
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+
     test("does not admit setup that arrives after release begins", async () => {
       let finishInitialSetup!: () => void;
       const initialSetup = new Promise<void>((resolve) => {

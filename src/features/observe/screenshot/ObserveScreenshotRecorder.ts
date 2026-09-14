@@ -93,11 +93,13 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
       {},
       {
         parentSignal: signal,
-        // Fire-and-forget: if a screencap is already in flight (e.g. mid-poll
-        // during observe waitFor), reuse it. Cancelling and restarting every
-        // ~100ms causes a self-inflicted cancel loop because screencap takes
+        // Fire-and-forget: coalesce work that has not started yet, but queue
+        // once a screencap runner is executing so its pixels cannot be paired
+        // with a later observation. Cancelling and restarting every ~100ms
+        // causes a self-inflicted cancel loop because screencap takes
         // ~200-300ms — no screenshot ever completes.
         coalesceWithPending: true,
+        queueAfterPendingIfRunning: true,
         onComplete: async (completion) => {
           this.completionByJob.set(completion.jobId, {
             aborted: completion.aborted,
@@ -259,6 +261,7 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
     handle: ScreenshotJobHandle,
     observationId: string,
   ): Promise<void> {
+    ScreenshotJobTracker.registerCompletionReader(handle.jobId);
     this.observationResultCountByJob.set(
       handle.jobId,
       (this.observationResultCountByJob.get(handle.jobId) ?? 0) + 1,
@@ -269,6 +272,7 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
         return;
       }
       released = true;
+      ScreenshotJobTracker.releaseCompletionReader(handle.jobId);
       const remaining = (this.observationResultCountByJob.get(handle.jobId) ?? 1) - 1;
       if (remaining <= 0) {
         this.observationResultCountByJob.delete(handle.jobId);

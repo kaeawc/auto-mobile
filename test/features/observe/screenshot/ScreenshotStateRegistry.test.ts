@@ -222,7 +222,7 @@ describe("module-level screenshot state store", () => {
   });
 
   test("setScreenshotStateStore swaps in a custom implementation", () => {
-    const fake = new FakeScreenshotStateStore();
+    const fake = new FakeScreenshotStateStore(new FakeTimer());
     setScreenshotStateStore(fake);
 
     const store = getScreenshotStateStore();
@@ -233,7 +233,7 @@ describe("module-level screenshot state store", () => {
   });
 
   test("resetScreenshotStateStore clears any swapped-in implementation", () => {
-    const fake = new FakeScreenshotStateStore();
+    const fake = new FakeScreenshotStateStore(new FakeTimer());
     setScreenshotStateStore(fake);
     resetScreenshotStateStore();
 

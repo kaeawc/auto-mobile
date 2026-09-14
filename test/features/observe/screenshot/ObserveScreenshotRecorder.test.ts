@@ -16,6 +16,7 @@ import {
   DefaultObserveScreenshotRecorder,
   TrackedScreenshotService,
 } from "../../../../src/features/observe/screenshot/ObserveScreenshotRecorder";
+import { FakeTimer } from "../../../fakes/FakeTimer";
 import { FakeScreenshotStateStore } from "../../../fakes/FakeScreenshotStateStore";
 
 /**
@@ -200,7 +201,7 @@ describe("DefaultObserveScreenshotRecorder.capture", () => {
 
   beforeEach(() => {
     ScreenshotJobTracker.clear();
-    store = new FakeScreenshotStateStore();
+    store = new FakeScreenshotStateStore(new FakeTimer());
     svc = new FakeTrackedScreenshotService();
     recorder = new DefaultObserveScreenshotRecorder(mockDevice, svc, store);
   });
@@ -402,7 +403,7 @@ describe("DefaultObserveScreenshotRecorder.start", () => {
 
   beforeEach(() => {
     ScreenshotJobTracker.clear();
-    store = new FakeScreenshotStateStore();
+    store = new FakeScreenshotStateStore(new FakeTimer());
     svc = new FakeTrackedScreenshotService();
     recorder = new DefaultObserveScreenshotRecorder(mockDevice, svc, store);
   });
@@ -491,6 +492,41 @@ describe("DefaultObserveScreenshotRecorder.start", () => {
     await svc.lastCapturePromise();
 
     expect(svc.lastTrackerOptions?.coalesceWithPending).toBe(true);
+  });
+
+  test("queues an overlapping observation behind a running capture", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "obs-rec-"));
+    const firstFile = path.join(dir, "first.png");
+    const secondFile = path.join(dir, "second.png");
+    writeFileSync(firstFile, "first");
+    writeFileSync(secondFile, "second");
+    const queued = createQueuedTrackedScreenshotService([
+      { success: true, path: firstFile },
+      { success: true, path: secondFile },
+    ]);
+    const queuedStore = new FakeScreenshotStateStore(new FakeTimer());
+    const queuedRecorder = new DefaultObserveScreenshotRecorder(
+      mockDevice,
+      queued.service,
+      queuedStore,
+    );
+
+    queuedRecorder.start("observation-first", new NoOpPerformanceTracker());
+    await queued.captureStarts[0]!.promise;
+    queuedRecorder.start("observation-second", new NoOpPerformanceTracker());
+    await Promise.resolve();
+
+    expect(queued.captureCount).toBe(1);
+    const firstSettled = queuedStore.waitForObservation("test-device", "observation-first", 10);
+    const secondSettled = queuedStore.waitForObservation("test-device", "observation-second", 10);
+    queued.captureGates[0]!.open();
+    await queued.captureStarts[1]!.promise;
+    queued.captureGates[1]!.open();
+    await Promise.all([firstSettled, secondSettled]);
+
+    expect(queued.captureCount).toBe(2);
+    expect(queuedStore.getPathForObservation("test-device", "observation-first")).toBe(firstFile);
+    expect(queuedStore.getPathForObservation("test-device", "observation-second")).toBe(secondFile);
   });
 
   test("start() tracks performance via startOperation/endOperation", async () => {

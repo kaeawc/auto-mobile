@@ -82,6 +82,83 @@ describe("ScreenshotJobTracker", () => {
     expect(ScreenshotJobTracker.getCompletion(job.jobId)).toBeUndefined();
   });
 
+  test("evicts a completion after its registered reader releases it", async () => {
+    const job = ScreenshotJobTracker.startJob("device-completion-reader", async () => ({
+      success: true,
+      path: "captured",
+    }));
+    ScreenshotJobTracker.registerCompletionReader(job.jobId);
+
+    await job.promise;
+
+    expect(ScreenshotJobTracker.getCompletion(job.jobId)).toEqual({
+      aborted: false,
+      isLatest: true,
+    });
+    ScreenshotJobTracker.releaseCompletionReader(job.jobId);
+    expect(ScreenshotJobTracker.getCompletion(job.jobId)).toBeUndefined();
+  });
+
+  test("retains a shared completion until every registered reader releases it", async () => {
+    const job = ScreenshotJobTracker.startJob("device-shared-completion", async () => ({
+      success: true,
+      path: "shared",
+    }));
+    ScreenshotJobTracker.registerCompletionReader(job.jobId);
+    ScreenshotJobTracker.registerCompletionReader(job.jobId);
+
+    await job.promise;
+
+    ScreenshotJobTracker.releaseCompletionReader(job.jobId);
+    expect(ScreenshotJobTracker.getCompletion(job.jobId)).toEqual({
+      aborted: false,
+      isLatest: true,
+    });
+    ScreenshotJobTracker.releaseCompletionReader(job.jobId);
+    expect(ScreenshotJobTracker.getCompletion(job.jobId)).toBeUndefined();
+  });
+
+  test("drains completions after every completed job reader releases", async () => {
+    const jobs = ["device-drain-a", "device-drain-b", "device-drain-c"].map((deviceId) =>
+      ScreenshotJobTracker.startJob(deviceId, async () => ({ success: true, path: deviceId })),
+    );
+    for (const job of jobs) {
+      ScreenshotJobTracker.registerCompletionReader(job.jobId);
+    }
+
+    await Promise.all(jobs.map((job) => job.promise));
+    for (const job of jobs) {
+      ScreenshotJobTracker.releaseCompletionReader(job.jobId);
+    }
+
+    for (const job of jobs) {
+      expect(ScreenshotJobTracker.getCompletion(job.jobId)).toBeUndefined();
+    }
+  });
+
+  test("cancelJob evicts only the cancelled device's completion state", async () => {
+    const cancelledDeviceJob = ScreenshotJobTracker.startJob(
+      "device-cancel-completion",
+      async () => ({ success: true, path: "cancelled-device" }),
+    );
+    const activeDeviceJob = ScreenshotJobTracker.startJob("device-keep-completion", async () => ({
+      success: true,
+      path: "active-device",
+    }));
+    ScreenshotJobTracker.registerCompletionReader(cancelledDeviceJob.jobId);
+    ScreenshotJobTracker.registerCompletionReader(activeDeviceJob.jobId);
+
+    await Promise.all([cancelledDeviceJob.promise, activeDeviceJob.promise]);
+
+    ScreenshotJobTracker.cancelJob("device-cancel-completion");
+
+    expect(ScreenshotJobTracker.getCompletion(cancelledDeviceJob.jobId)).toBeUndefined();
+    expect(ScreenshotJobTracker.getCompletion(activeDeviceJob.jobId)).toEqual({
+      aborted: false,
+      isLatest: true,
+    });
+  });
+
   test("waitForCompletion resolves with result when job completes", async () => {
     ScreenshotJobTracker.startJob("device-2", async (signal) => {
       return new Promise((resolve) => {

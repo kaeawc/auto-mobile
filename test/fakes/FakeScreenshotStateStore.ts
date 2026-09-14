@@ -1,5 +1,5 @@
 import type { ScreenshotStateStore } from "../../src/features/observe/screenshot/ScreenshotStateRegistry";
-import { defaultTimer, type Timer } from "../../src/utils/SystemTimer";
+import type { Timer } from "../../src/utils/SystemTimer";
 
 interface FakeScreenshotState {
   path: string | null;
@@ -19,7 +19,7 @@ export class FakeScreenshotStateStore implements ScreenshotStateStore {
   private pendingObservationWaiters: Map<string, Set<() => void>> = new Map();
   private currentTime: number = 0;
 
-  constructor(private readonly timer: Timer = defaultTimer) {}
+  constructor(private readonly timer: Timer) {}
 
   setNow(time: number): void {
     this.currentTime = time;

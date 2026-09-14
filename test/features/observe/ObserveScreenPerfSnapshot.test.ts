@@ -93,7 +93,7 @@ function createObserveScreen(): RealObserveScreen {
     new FakeAdbClientFactory(new FakeAdbExecutor()),
     {
       cacheStore: new FakeObserveCacheStore(fakeTimer),
-      screenshotStateStore: new FakeScreenshotStateStore(),
+      screenshotStateStore: new FakeScreenshotStateStore(fakeTimer),
       screenshotRecorder: new FakeScreenshotRecorder(),
       hierarchyCollector: new FakeHierarchyCollector() as unknown as HierarchyCollector,
       deviceStateCollector: new FakeDeviceStateCollector() as unknown as DeviceStateCollector,

@@ -68,6 +68,8 @@ export class ScreenshotJobTracker {
   private static jobs: Map<string, ScreenshotJobEntry[]> = new Map();
   private static latestJobIds: Map<string, string> = new Map();
   private static completions: Map<string, ScreenshotJobCompletionSnapshot> = new Map();
+  private static completionReaderCounts: Map<string, number> = new Map();
+  private static completionDeviceIds: Map<string, string> = new Map();
   private static runningJobIds: Set<string> = new Set();
   private static timer: Timer = defaultTimer;
   private static idGenerator: IdGenerator = defaultIdGenerator;
@@ -220,6 +222,7 @@ export class ScreenshotJobTracker {
           aborted: completion.aborted,
           isLatest: completion.isLatest,
         });
+        ScreenshotJobTracker.completionDeviceIds.set(jobId, deviceId);
         if (options.onComplete) {
           try {
             await options.onComplete(completion);
@@ -272,12 +275,16 @@ export class ScreenshotJobTracker {
 
   static cancelJob(deviceId: string): void {
     const entries = ScreenshotJobTracker.jobs.get(deviceId);
-    if (!entries) {
-      return;
+    if (entries) {
+      for (const entry of entries) {
+        if (!entry.abortController.signal.aborted) {
+          entry.abortController.abort();
+        }
+      }
     }
-    for (const entry of entries) {
-      if (!entry.abortController.signal.aborted) {
-        entry.abortController.abort();
+    for (const [jobId, completionDeviceId] of ScreenshotJobTracker.completionDeviceIds) {
+      if (completionDeviceId === deviceId) {
+        ScreenshotJobTracker.evictCompletion(jobId);
       }
     }
   }
@@ -292,6 +299,28 @@ export class ScreenshotJobTracker {
 
   static getCompletion(jobId: string): ScreenshotJobCompletionSnapshot | undefined {
     return ScreenshotJobTracker.completions.get(jobId);
+  }
+
+  static registerCompletionReader(jobId: string): void {
+    ScreenshotJobTracker.completionReaderCounts.set(
+      jobId,
+      (ScreenshotJobTracker.completionReaderCounts.get(jobId) ?? 0) + 1,
+    );
+  }
+
+  static releaseCompletionReader(jobId: string): void {
+    const readers = ScreenshotJobTracker.completionReaderCounts.get(jobId);
+    if (!readers) {
+      return;
+    }
+    if (readers > 1) {
+      ScreenshotJobTracker.completionReaderCounts.set(jobId, readers - 1);
+      return;
+    }
+    ScreenshotJobTracker.completionReaderCounts.delete(jobId);
+    if (ScreenshotJobTracker.completions.has(jobId)) {
+      ScreenshotJobTracker.evictCompletion(jobId);
+    }
   }
 
   static async waitForCompletion(
@@ -329,6 +358,14 @@ export class ScreenshotJobTracker {
     ScreenshotJobTracker.jobs.clear();
     ScreenshotJobTracker.latestJobIds.clear();
     ScreenshotJobTracker.completions.clear();
+    ScreenshotJobTracker.completionReaderCounts.clear();
+    ScreenshotJobTracker.completionDeviceIds.clear();
     ScreenshotJobTracker.runningJobIds.clear();
+  }
+
+  private static evictCompletion(jobId: string): void {
+    ScreenshotJobTracker.completions.delete(jobId);
+    ScreenshotJobTracker.completionDeviceIds.delete(jobId);
+    ScreenshotJobTracker.completionReaderCounts.delete(jobId);
   }
 }

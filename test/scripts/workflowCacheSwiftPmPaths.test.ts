@@ -32,37 +32,8 @@ function loadWorkflowCachePaths(workflowRelativePath: string) {
 }
 
 function globMatchesLiteral(segment: string, literal: string): boolean {
-  const opaqueSegment = segment.replace(/\$\{\{.*?\}\}/g, "<github-expression>");
-  let pattern = "";
-  for (let index = 0; index < opaqueSegment.length; index += 1) {
-    const character = opaqueSegment[index];
-    if (character === "*") {
-      pattern += ".*";
-    } else if (character === "?") {
-      pattern += ".";
-    } else if (character === "[") {
-      const closingBracket = opaqueSegment.indexOf("]", index + 1);
-      if (closingBracket === -1) {
-        pattern += "\\[";
-        continue;
-      }
-
-      const classBody = opaqueSegment.slice(index + 1, closingBracket);
-      const negated = classBody.startsWith("!") || classBody.startsWith("^");
-      const classCharacters = negated ? classBody.slice(1) : classBody;
-      if (classCharacters.length === 0) {
-        pattern += "\\[";
-        continue;
-      }
-
-      const escapedClass = classCharacters.replace(/[\\[\]^]/g, "\\$&");
-      pattern += `[${negated ? "^" : ""}${escapedClass}]`;
-      index = closingBracket;
-    } else {
-      pattern += character.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    }
-  }
-  return new RegExp(`^${pattern}$`).test(literal);
+  const pattern = segment.replace(/\$\{\{.*?\}\}/g, "<github-expression>");
+  return new Bun.Glob(pattern).match(literal);
 }
 
 function collectForbiddenCachePaths(entries: string[]): string[] {
@@ -149,6 +120,7 @@ jobs:
 
   test("supports bracket classes when matching forbidden cache paths", () => {
     expect(globMatchesLiteral("[.]build", ".build")).toBe(true);
+    expect(globMatchesLiteral("[].]build", ".build")).toBe(true);
     expect(globMatchesLiteral("[a-z]ourcePackages", "SourcePackages")).toBe(false);
     expect(globMatchesLiteral("[a-z]ourcePackages", "sourcePackages")).toBe(true);
     expect(globMatchesLiteral("[!.]build", ".build")).toBe(false);
@@ -157,5 +129,6 @@ jobs:
     expect(globMatchesLiteral(".b?ild", ".build")).toBe(true);
 
     expect(collectForbiddenCachePaths(["ios/**/[.]build/**"])).toEqual(["ios/**/[.]build/**"]);
+    expect(collectForbiddenCachePaths(["ios/**/[].]build/**"])).toEqual(["ios/**/[].]build/**"]);
   });
 });

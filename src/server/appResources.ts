@@ -1220,7 +1220,7 @@ function unregisterDeviceAppResource(deviceId: string): void {
   invalidateMetadataCacheForDevice(deviceId);
 }
 
-export async function syncInstalledAppResources(): Promise<void> {
+export async function syncInstalledAppResourceRegistry(): Promise<boolean> {
   let devices: BootedDevice[] = [];
   try {
     devices = await PlatformDeviceManagerFactory.getInstance().getBootedDevices("either");
@@ -1260,9 +1260,17 @@ export async function syncInstalledAppResources(): Promise<void> {
     }
   }
 
-  if (changed) {
-    await ResourceRegistry.notifyResourceListChanged();
-    await ResourceRegistry.notifyResourceUpdated(APPS_RESOURCE_URIS.BASE);
+  return changed;
+}
+
+export async function notifyInstalledAppResourceListChanged(): Promise<void> {
+  await ResourceRegistry.notifyResourceListChanged();
+  await ResourceRegistry.notifyResourceUpdated(APPS_RESOURCE_URIS.BASE);
+}
+
+export async function syncInstalledAppResources(): Promise<void> {
+  if (await syncInstalledAppResourceRegistry()) {
+    await notifyInstalledAppResourceListChanged();
   }
 }
 

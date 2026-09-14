@@ -38,7 +38,11 @@ import {
   DEVICE_IMAGE_RESOURCE_URIS,
   notifyDeviceImageResourcesUpdated,
 } from "./deviceImageResources";
-import { syncInstalledAppResources } from "./appResources";
+import {
+  notifyInstalledAppResourceListChanged,
+  syncInstalledAppResourceRegistry,
+  syncInstalledAppResources,
+} from "./appResources";
 import { listActiveVideoRecordings, stopVideoRecording } from "./videoRecordingManager";
 import { stopSegmentedVideoRecordingsForDevice } from "./videoRecordingTools";
 import { IOSCtrlProxyManager } from "../utils/IOSCtrlProxyManager";
@@ -896,6 +900,8 @@ export interface DeviceToolsDependencies {
   deviceManagerFactory: () => PlatformDeviceManager;
   deviceMatcherFactory: () => DeviceMatcher;
   notifyResourcesChanged: () => Promise<void>;
+  notifyDeviceInventoryResourcesChanged: (installedAppResourcesChanged: boolean) => Promise<void>;
+  syncInstalledAppResourceRegistry: () => Promise<boolean>;
   ensureCtrlProxyReady?: (request: RunnerReadinessRequest) => Promise<void>;
   deviceCreationGateFactory: () => DeviceCreationGate;
   deviceProvisionerFactory: () => DeviceProvisioner;
@@ -1020,9 +1026,18 @@ export async function defaultResolveRunningAndroidAvdName(
   }
 }
 
-async function defaultNotifyResourcesChanged(): Promise<void> {
+async function defaultNotifyDeviceInventoryResourcesChanged(
+  installedAppResourcesChanged: boolean,
+): Promise<void> {
   await notifyBootedDeviceResourcesUpdated();
   await notifyDeviceImageResourcesUpdated();
+  if (installedAppResourcesChanged) {
+    await notifyInstalledAppResourceListChanged();
+  }
+}
+
+async function defaultNotifyResourcesChanged(): Promise<void> {
+  await defaultNotifyDeviceInventoryResourcesChanged(false);
   await syncInstalledAppResources();
 }
 
@@ -4301,6 +4316,8 @@ function getDeviceToolsDependencies(): DeviceToolsDependencies {
       deviceManagerFactory: () => new MultiPlatformDeviceManager(),
       deviceMatcherFactory: () => new DefaultDeviceMatcher(),
       notifyResourcesChanged: defaultNotifyResourcesChanged,
+      notifyDeviceInventoryResourcesChanged: defaultNotifyDeviceInventoryResourcesChanged,
+      syncInstalledAppResourceRegistry,
       deviceCreationGateFactory: () => getDeviceCreationGate(),
       deviceProvisionerFactory: () => createDefaultDeviceProvisioner(),
       exactDeviceProvisionerFactory: (deviceManager, deviceCreationGate) =>
@@ -4334,6 +4351,25 @@ function provisionDeviceDependencyOverrides(
   };
 }
 
+function resourceNotificationDependencyOverrides(
+  deps: Partial<DeviceToolsDependencies>,
+  currentDeps: DeviceToolsDependencies,
+): Pick<
+  DeviceToolsDependencies,
+  | "notifyResourcesChanged"
+  | "notifyDeviceInventoryResourcesChanged"
+  | "syncInstalledAppResourceRegistry"
+> {
+  return {
+    notifyResourcesChanged: deps.notifyResourcesChanged ?? currentDeps.notifyResourcesChanged,
+    notifyDeviceInventoryResourcesChanged:
+      deps.notifyDeviceInventoryResourcesChanged ??
+      currentDeps.notifyDeviceInventoryResourcesChanged,
+    syncInstalledAppResourceRegistry:
+      deps.syncInstalledAppResourceRegistry ?? currentDeps.syncInstalledAppResourceRegistry,
+  };
+}
+
 function resolveDeviceToolsLifecycleCoordinator(
   deps: Partial<DeviceToolsDependencies>,
   currentDeps: DeviceToolsDependencies,
@@ -4355,7 +4391,7 @@ export function setDeviceToolsDependencies(deps: Partial<DeviceToolsDependencies
       deps.deviceResourceControllerFactory ?? currentDeps.deviceResourceControllerFactory,
     deviceManagerFactory: deps.deviceManagerFactory ?? currentDeps.deviceManagerFactory,
     deviceMatcherFactory: deps.deviceMatcherFactory ?? currentDeps.deviceMatcherFactory,
-    notifyResourcesChanged: deps.notifyResourcesChanged ?? currentDeps.notifyResourcesChanged,
+    ...resourceNotificationDependencyOverrides(deps, currentDeps),
     ensureCtrlProxyReady: deps.ensureCtrlProxyReady ?? currentDeps.ensureCtrlProxyReady,
     deviceCreationGateFactory:
       deps.deviceCreationGateFactory ?? currentDeps.deviceCreationGateFactory,
@@ -5322,17 +5358,41 @@ async function reserveInitialDeviceForReadiness(
   );
 }
 
-async function notifyResourcesAfterDeviceBoot(
+function deviceInventoryChangedAfterBoot(boot: DeviceBootResult): boolean {
+  return boot.source === "cold-boot" || boot.provisioned;
+}
+
+async function refreshResourcesAfterCommittedBoot(
   boot: DeviceBootResult,
-  perf: ReturnType<typeof createPerformanceTracker>,
-  notifyResourcesChanged: () => Promise<void>,
+  dependencies: Pick<
+    DeviceToolsDependencies,
+    "notifyDeviceInventoryResourcesChanged" | "syncInstalledAppResourceRegistry"
+  >,
 ): Promise<void> {
-  if (boot.source !== "cold-boot" && !boot.provisioned) {
+  if (!deviceInventoryChangedAfterBoot(boot)) {
     return;
   }
-  perf.startOperation("notifyResources");
-  await notifyResourcesChanged();
-  perf.endOperation("notifyResources");
+  let installedAppResourcesChanged = false;
+  try {
+    installedAppResourcesChanged = await dependencies.syncInstalledAppResourceRegistry();
+  } catch (error) {
+    // Session ownership is already committed, so local resource-sync failure
+    // is diagnostic and must not strand the acquired session.
+    logger.warn(
+      `[DeviceTools] Installed-app resource sync after device boot failed: ${errorMessage(error)}`,
+      error,
+    );
+  }
+  // Keep advisory transport delivery off the response and reservation-release
+  // path so notification latency cannot withhold the acquired session.
+  void dependencies
+    .notifyDeviceInventoryResourcesChanged(installedAppResourcesChanged)
+    .catch((error: unknown) => {
+      logger.warn(
+        `[DeviceTools] Resource notification after device boot failed: ${errorMessage(error)}`,
+        error,
+      );
+    });
 }
 
 interface StartDeviceRunnerReadinessInput {
@@ -7756,18 +7816,7 @@ export function registerDeviceTools() {
     });
     state.ownershipTransferred = true;
 
-    try {
-      await notifyResourcesAfterDeviceBoot(state.boot, perf, deps.notifyResourcesChanged);
-    } catch (error) {
-      // Best-effort: the acquisition is already committed (session bound, pooled
-      // device busy), so failing on an advisory resource notification would
-      // strand a session UUID the caller never receives. The shutdown path
-      // treats the same notification as fire-and-forget.
-      logger.warn(
-        `[DeviceTools] Resource notification after device boot failed: ${errorMessage(error)}`,
-        error,
-      );
-    }
+    await refreshResourcesAfterCommittedBoot(state.boot, deps);
     return await buildBootedResponse(
       state.boot.device,
       state.boot.source,

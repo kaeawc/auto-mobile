@@ -222,6 +222,8 @@ test("registered getAndroid preserves its caller's UUID and rejects a different 
       deviceMatcherFactory: () => matcher,
       ensureCtrlProxyReady: async () => {},
       notifyResourcesChanged: async () => {},
+      notifyDeviceInventoryResourcesChanged: async () => {},
+      syncInstalledAppResourceRegistry: async () => false,
       timer: h.timer,
       idGenerator: new FakeIdGenerator(),
       lifecycleCoordinator: new InMemoryVirtualDeviceLifecycleCoordinator(h.timer),
@@ -276,6 +278,8 @@ test.each(["agent-B", "agent-A"])(
         deviceMatcherFactory: () => matcher,
         timer: h.timer,
         notifyResourcesChanged: async () => {},
+        notifyDeviceInventoryResourcesChanged: async () => {},
+        syncInstalledAppResourceRegistry: async () => false,
         ensureCtrlProxyReady: async (request) => {
           ++readinessAttempts;
           if (readinessAttempts === 1) {
@@ -341,6 +345,8 @@ test("System UI recovery rejects a remapped client while its first target is idl
       deviceMatcherFactory: () => matcher,
       timer: h.timer,
       notifyResourcesChanged: async () => {},
+      notifyDeviceInventoryResourcesChanged: async () => {},
+      syncInstalledAppResourceRegistry: async () => false,
       ensureCtrlProxyReady: async (request) => {
         ++readinessAttempts;
         if (readinessAttempts === 1) {
@@ -402,6 +408,8 @@ test.each([false, true])(
         deviceMatcherFactory: () => matcher,
         timer: h.timer,
         notifyResourcesChanged: async () => {},
+        notifyDeviceInventoryResourcesChanged: async () => {},
+        syncInstalledAppResourceRegistry: async () => false,
         ensureCtrlProxyReady: async (request) => {
           ++readinessAttempts;
           if (readinessAttempts === 1) {

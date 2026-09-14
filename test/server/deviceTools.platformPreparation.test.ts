@@ -42,6 +42,8 @@ describe("platform device preparation tools", () => {
       deviceMatcherFactory: () => matcher,
       ensureCtrlProxyReady: async () => {},
       notifyResourcesChanged: async () => {},
+      notifyDeviceInventoryResourcesChanged: async () => {},
+      syncInstalledAppResourceRegistry: async () => false,
       timer,
     });
     registerDeviceTools();
@@ -65,6 +67,15 @@ describe("platform device preparation tools", () => {
     return JSON.parse(
       typeof result === "string" ? result : ((result as any).content?.[0]?.text ?? "{}"),
     );
+  }
+
+  async function awaitPromptly(promise: Promise<void>, label: string): Promise<void> {
+    await Promise.race([
+      promise,
+      new Promise<never>((_resolve, reject) => {
+        setImmediate(() => reject(new Error(`Timed out waiting for ${label}`)));
+      }),
+    ]);
   }
 
   for (const [operation, platform, target] of [
@@ -697,7 +708,7 @@ describe("platform device preparation tools", () => {
     );
     DaemonState.getInstance().initialize(sessionManager, pool);
     setDeviceToolsDependencies({
-      notifyResourcesChanged: async () => {
+      notifyDeviceInventoryResourcesChanged: async () => {
         throw new Error("resource sync failed");
       },
     });
@@ -712,6 +723,132 @@ describe("platform device preparation tools", () => {
       sessionId: result.sessionUuid,
     });
   });
+
+  test.each([
+    [
+      "getAndroid",
+      "android",
+      {
+        platform: "android" as const,
+        name: "Pixel_9_API_36",
+        isRunning: false,
+        source: "local" as const,
+      },
+      { avdName: "Pixel_9_API_36" },
+      "mock-Pixel_9_API_36",
+    ],
+    [
+      "getApple",
+      "ios",
+      {
+        platform: "ios" as const,
+        name: "iPhone 17",
+        deviceId: "E2F46BCE-4C97-4AA0-BD9D-544756FAB545",
+        isRunning: false,
+        source: "local" as const,
+      },
+      { udid: "E2F46BCE-4C97-4AA0-BD9D-544756FAB545" },
+      "E2F46BCE-4C97-4AA0-BD9D-544756FAB545",
+    ],
+  ] as const)(
+    "%s returns and releases reservations while its resource notification is pending",
+    async (operation, platform, image, target, expectedDeviceId) => {
+      deviceUtils.setDeviceImages(platform, [image]);
+      sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+      const pool = new DevicePool(
+        sessionManager,
+        "daemon-session",
+        timer,
+        new FakeInstalledAppsRepository(),
+        deviceUtils,
+        new DefaultRetryExecutor(timer),
+      );
+      DaemonState.getInstance().initialize(sessionManager, pool);
+
+      let readinessReleases = 0;
+      pool.reserveDeviceForReadiness = async () =>
+        Object.assign(
+          async () => {
+            readinessReleases++;
+          },
+          { owner: Symbol("pending-notification-readiness") },
+        );
+      let lifecycleReleases = 0;
+      const lifecycleLease: VirtualDeviceLifecycleLease = {
+        signal: new AbortController().signal,
+        identity: { kind: "selector", platform, selector: image.name },
+        bindCanonicalIdentity: async () => {},
+        transitionToTeardown: () => {},
+        release: () => {
+          lifecycleReleases++;
+        },
+      };
+      const syncEntered = Promise.withResolvers<void>();
+      const releaseSync = Promise.withResolvers<void>();
+      const notificationEntered = Promise.withResolvers<void>();
+      const notification = Promise.withResolvers<void>();
+      let installedAppResourceSyncs = 0;
+      let notifiedInstalledAppResourcesChanged: boolean | undefined;
+      let notificationStarted = false;
+      setDeviceToolsDependencies({
+        lifecycleCoordinator: {
+          reserve: async () => lifecycleLease,
+        },
+        syncInstalledAppResourceRegistry: async () => {
+          installedAppResourceSyncs++;
+          syncEntered.resolve();
+          await releaseSync.promise;
+          return true;
+        },
+        notifyDeviceInventoryResourcesChanged: async (installedAppResourcesChanged) => {
+          notificationStarted = true;
+          notifiedInstalledAppResourcesChanged = installedAppResourcesChanged;
+          notificationEntered.resolve();
+          await notification.promise;
+        },
+      });
+
+      let requestSettled = false;
+      const request = callTool(operation, {
+        ...target,
+        bootTimeoutMs: 1_000,
+        automationReadyTimeoutMs: 1_000,
+      }).then((result) => {
+        requestSettled = true;
+        return result;
+      });
+
+      try {
+        await awaitPromptly(syncEntered.promise, "installed-app resource sync");
+        for (let attempt = 0; attempt < 50; attempt++) {
+          await Promise.resolve();
+        }
+        expect(requestSettled).toBe(false);
+        expect(notificationStarted).toBe(false);
+
+        releaseSync.resolve();
+        await awaitPromptly(notificationEntered.promise, "resource notification");
+        timer.advanceTime(10_000);
+        for (let attempt = 0; attempt < 50; attempt++) {
+          await Promise.resolve();
+        }
+        expect(requestSettled).toBe(true);
+        expect(readinessReleases).toBe(1);
+        expect(lifecycleReleases).toBe(1);
+        expect(installedAppResourceSyncs).toBe(1);
+        expect(notifiedInstalledAppResourcesChanged).toBe(true);
+        const [sessionId] = sessionManager.getAllSessionIds();
+        expect(sessionId).toBeDefined();
+        const result = await request;
+        expect(result.sessionUuid).toBe(sessionId);
+        expect(sessionManager.getSession(sessionId!)?.assignedDevice).toBe(expectedDeviceId);
+      } finally {
+        releaseSync.resolve();
+        notification.resolve();
+        await request.catch(() => undefined);
+      }
+    },
+  );
 
   test("waits for a reset-cohort reservation before booting the requested AVD", async () => {
     const stale: BootedDevice = {

@@ -16,6 +16,7 @@ import type { AppleDeviceType } from "./ios-cmdline-tools/SimCtlClient";
 import type { CreateAvdParams, SystemImage } from "./android-cmdline-tools/avdmanager";
 import { createAvd, listInstalledSystemImages } from "./android-cmdline-tools/avdmanager";
 import { versionToApiLevelRange } from "./android-cmdline-tools/AvdConfigReader";
+import { CTRL_PROXY_APK_MIN_SDK, parseAndroidApiLevelBound } from "./androidVersionBounds";
 import { SimCtlClient } from "./ios-cmdline-tools/SimCtlClient";
 import { CREATED_DEVICE_NAME_PREFIX } from "./deviceCreationGate";
 import { defaultIdGenerator, type IdGenerator } from "./IdGenerator";
@@ -319,26 +320,6 @@ function abiRank(abi: string, preferences: string[]): number {
 }
 
 /**
- * Lowest API level the release table knows. A bare integer at or above it can
- * only be an API level (no Android release is numbered that high yet), so the
- * provisioner keeps accepting the `minOsVersion: "34"` form; anything below it,
- * or dotted / lettered, is a release version.
- */
-const LOWEST_KNOWN_API_LEVEL = 21;
-
-/**
- * Minimum API level the AutoMobile CtrlProxy runner APK can install on. This
- * mirrors `build-android-minSdk` in `android/gradle/libs.versions.toml` (the
- * value `android/control-proxy/build.gradle.kts` compiles the APK with). The
- * `startDevice` flow installs the runner APK during readiness prep, so an AVD
- * provisioned below this level boots but can never install the runner and
- * become automation-ready — provisioning must never select a sub-24 image
- * (#6187). Keep this in sync with the gradle version catalog if the APK's
- * `minSdk` ever changes.
- */
-export const CTRL_PROXY_APK_MIN_SDK = 24;
-
-/**
  * A bound shaped exactly like a release version `versionToApiLevelRange`
  * knows how to parse: an integer major, optional dotted point-release
  * components, and an optional single trailing release letter (`"17"`,
@@ -378,9 +359,10 @@ function resolveApiLevelBound(bound: string | undefined, edge: "min" | "max"): n
     return undefined;
   }
   const trimmed = bound.trim();
-  if (/^\d+$/.test(trimmed) && Number(trimmed) >= LOWEST_KNOWN_API_LEVEL) {
+  const apiLevelBound = parseAndroidApiLevelBound(trimmed);
+  if (apiLevelBound !== undefined) {
     logger.debug(`[DeviceProvisioner] Treating ${edge}OsVersion '${trimmed}' as an API level`);
-    return Number(trimmed);
+    return apiLevelBound;
   }
   const range = versionToApiLevelRange(trimmed);
   if (range) {

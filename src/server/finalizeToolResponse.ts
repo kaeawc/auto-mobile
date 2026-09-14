@@ -23,6 +23,7 @@ import { boundStructuredField, truncateBodyText } from "../utils/truncateBodyTex
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
 import { isDeviceSessionAcquisitionTool } from "./deviceSessionResult";
+import { isHostOutputTruncationReason } from "../features/observe/truncationReasons";
 
 /**
  * Read/write access to the per-session diff baseline — the "last observation
@@ -235,16 +236,34 @@ function copyDefinedFields<T extends object, K extends keyof T>(
  * `viewHierarchy.truncationReasons` that never needed lifting — would be
  * dropped with the observation it replaced. Resolved from the served projection
  * first and otherwise from the raw observation's hierarchy, so the field is
- * populated in every projection mode. `undefined` (nothing was truncated)
- * serializes away exactly like an absent key.
+ * populated in every projection mode.
+ *
+ * Also folds in the BASELINE's own truncation provenance (issue #6933): the
+ * baseline this diffs against was stored capped (e.g. 70 rows trimmed to 64),
+ * so a subsequent capture that has since fallen below the cap carries no
+ * truncation reason of its own even though the diff still can't tell whether
+ * rows past the baseline's cap were added, removed, or unchanged. Without this,
+ * that transition silently reports a partial removal count with no warning.
+ * Reasons are de-duplicated (the same `max_children[...]` reason can appear on
+ * both sides) and `undefined` (nothing was ever truncated) serializes away
+ * exactly like an absent key.
  */
 function resolveDiffTruncationReasons(
+  baseline: ObserveResult,
   servedObservation: ObserveResult,
   rawObservation: ObserveResult,
 ): string[] | undefined {
-  const reasons =
-    servedObservation.truncationReasons ?? rawObservation.viewHierarchy?.truncationReasons;
-  return reasons && reasons.length > 0 ? [...reasons] : undefined;
+  const baselineReasons = baseline.truncationReasons ?? baseline.viewHierarchy?.truncationReasons;
+  const rawReasons = rawObservation.viewHierarchy?.truncationReasons;
+  const currentReasons = servedObservation.truncationReasons
+    ? [
+        ...servedObservation.truncationReasons,
+        ...(rawReasons?.filter(isHostOutputTruncationReason) ?? []),
+      ]
+    : rawReasons;
+  const merged = [...(baselineReasons ?? []), ...(currentReasons ?? [])];
+  const deduped = Array.from(new Set(merged));
+  return deduped.length > 0 ? deduped : undefined;
 }
 
 /**
@@ -549,6 +568,7 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
           // Issue #6601: nor may a diff silently drop the hierarchy's truncation
           // provenance — see resolveDiffTruncationReasons.
           diff.truncationReasons = resolveDiffTruncationReasons(
+            baseline,
             servedObservation,
             payload.observation as ObserveResult,
           );

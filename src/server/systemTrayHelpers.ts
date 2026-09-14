@@ -18,7 +18,7 @@ import {
   Element,
   ObserveResult,
   ViewHierarchyResult,
-  isFalsy,
+  isTruthy,
 } from "../models";
 import type { ObserveScreenExecuteOptions } from "../features/observe/interfaces/ObserveScreen";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
@@ -33,6 +33,7 @@ import type { NotificationUIDetector } from "../utils/interfaces/NotificationUID
 import { createNotificationUIDetector } from "./system-tray/createNotificationUIDetector";
 import {
   attributeRowByDumpsys,
+  intersectDumpsysRecordsForRow,
   parseDumpsysNotificationRecords,
   type DumpsysNotificationRecord,
 } from "./system-tray/notificationDumpsys";
@@ -1684,8 +1685,7 @@ const trayPageOverlap = (previous: TrayObservedRow[], current: TrayObservedRow[]
 };
 
 // SystemUI reports the tray's scroll boundary through the existing hierarchy.
-// Unknown metadata still allows a bounded swipe; an explicit end avoids
-// repeatedly observing changing progress text when no new rows can be shown.
+// `true` means examine actions; `false` and omitted (pre-API-33) both mean end.
 const trayAtScrollEnd = (hierarchy: ViewHierarchyResult): boolean =>
   getHierarchyRoots(hierarchy).some((root) =>
     traverseForHint(root, (node) => {
@@ -1697,7 +1697,7 @@ const trayAtScrollEnd = (hierarchy: ViewHierarchyResult): boolean =>
       if (!resourceId.includes("notification_stack_scroller")) {
         return false;
       }
-      if (isFalsy(props.scrollable)) {
+      if (!isTruthy(props.scrollable)) {
         return true;
       }
       return Array.isArray(props.actions) && !props.actions.includes("scroll_forward");
@@ -1744,12 +1744,16 @@ const attributeTrayRow = (
   row: TrayObservedRow,
   appId: string,
   appLabel: string | null,
-  records: readonly DumpsysNotificationRecord[],
+  beforeRecords: readonly DumpsysNotificationRecord[] | undefined,
+  afterRecords: readonly DumpsysNotificationRecord[],
 ): TrayRowAttribution => {
   if (row.notification.appLabel !== null) {
     return appLabel && row.notification.appLabel === appLabel ? "header" : "other";
   }
-  const owner = attributeRowByDumpsys(records, new Set(row.correlationTexts));
+  const owner = attributeRowByDumpsys(
+    intersectDumpsysRecordsForRow(beforeRecords, afterRecords, new Set(row.correlationTexts)),
+    new Set(row.correlationTexts),
+  );
   if (owner === null) {
     return "unknown";
   }
@@ -1764,13 +1768,14 @@ const attributeTrayRows = (
   rows: TrayObservedRow[],
   appId: string,
   appLabel: string | null,
-  records: readonly DumpsysNotificationRecord[],
+  beforeRecords: readonly DumpsysNotificationRecord[] | undefined,
+  afterRecords: readonly DumpsysNotificationRecord[],
 ): { notifications: ListedTrayNotification[]; unattributedRows: number } => {
   const notifications: ListedTrayNotification[] = [];
   const nativeIds = new Map<string, number>();
   let unattributedRows = 0;
   for (const row of rows) {
-    const attribution = attributeTrayRow(row, appId, appLabel, records);
+    const attribution = attributeTrayRow(row, appId, appLabel, beforeRecords, afterRecords);
     if (attribution === "unknown") {
       unattributedRows++;
       continue;
@@ -1828,6 +1833,7 @@ export const listSystemTrayNotifications = async (
   );
   const rows: TrayObservedRow[] = [];
   let previousNotifications: TrayObservedRow[] = [];
+  let beforeRecords: DumpsysNotificationRecord[] | undefined;
   let swipes = 0;
   while (true) {
     signal?.throwIfAborted();
@@ -1838,6 +1844,14 @@ export const listSystemTrayNotifications = async (
     const overlap = trayPageOverlap(previousNotifications, pageNotifications);
     rows.splice(rows.length - overlap, overlap, ...pageNotifications);
     previousNotifications = pageNotifications;
+    // Capture as soon as a page needs correlation, before another swipe can
+    // remove a competing notification from the authoritative snapshot (#6921).
+    if (
+      beforeRecords === undefined &&
+      pageNotifications.some((row) => row.notification.appLabel === null)
+    ) {
+      beforeRecords = await readDumpsysNotificationRecords(adbFactory(device), signal);
+    }
     if (swipes === 3 || trayAtScrollEnd(observation.viewHierarchy)) {
       break;
     }
@@ -1880,10 +1894,22 @@ export const listSystemTrayNotifications = async (
   signal?.throwIfAborted();
   // Only pay for the dump when the shade actually rendered a row the header
   // rule cannot attribute.
-  const records = rows.some((row) => row.notification.appLabel === null)
+  const afterRecords = rows.some((row) => row.notification.appLabel === null)
     ? await readDumpsysNotificationRecords(adbFactory(device), signal)
     : [];
-  const { notifications, unattributedRows } = attributeTrayRows(rows, appId, appLabel, records);
+  const { notifications, unattributedRows } = attributeTrayRows(
+    rows,
+    appId,
+    appLabel,
+    beforeRecords,
+    afterRecords,
+  );
+  // Partial attribution stays useful; only zero attributed rows plus positive
+  // posting evidence is unsafe to present as a confident empty list (#6875).
+  const hasUnmatchedRequestedRecords =
+    beforeRecords !== undefined &&
+    afterRecords.some((record) => record.pkg === appId) &&
+    notifications.length === 0;
   signal?.throwIfAborted();
   await detector.collapseTray();
   signal?.throwIfAborted();
@@ -1892,6 +1918,11 @@ export const listSystemTrayNotifications = async (
     await detector.getObservationTimestamp(),
     signal,
   );
+  if (hasUnmatchedRequestedRecords) {
+    throw new ActionableError(
+      `Notification records exist for ${appId}, but no shade row could be matched to them. Retry the list operation; the row's rendered text may have changed.`,
+    );
+  }
   return { notifications, unattributedRows, observation, swipes, order: "encounter" };
 };
 

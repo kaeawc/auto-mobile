@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   attributeRowByDumpsys,
+  intersectDumpsysRecordsForRow,
   parseDumpsysNotificationRecords,
 } from "../../../src/server/system-tray/notificationDumpsys";
 
@@ -144,6 +145,43 @@ describe("dumpsys notification records", () => {
         ]),
       ),
     ).toBe("com.google.android.apps.wellbeing");
+  });
+
+  test("uses only package evidence that matched the row in both snapshots", () => {
+    const rowTexts = new Set(["Need better sleep?", "Keep the screen dark"]);
+    const before = [
+      {
+        pkg: "com.example.requested",
+        titles: ["Need better sleep?"],
+        bodies: ["Keep the screen dark"],
+        hasCustomLayout: false,
+      },
+      {
+        pkg: "com.example.dismissed",
+        titles: ["Need better sleep?"],
+        bodies: ["Keep the screen dark"],
+        hasCustomLayout: false,
+      },
+    ];
+    const after = [before[0]!, { ...before[1]!, pkg: "com.example.after-only" }];
+
+    expect(
+      intersectDumpsysRecordsForRow(before, after, rowTexts).map((record) => record.pkg),
+    ).toEqual(["com.example.requested"]);
+  });
+
+  test("falls back to the after snapshot when no before snapshot was captured", () => {
+    const after = parseDumpsysNotificationRecords(wellbeingRecord);
+    expect(
+      intersectDumpsysRecordsForRow(
+        undefined,
+        after,
+        new Set([
+          "Need better sleep?",
+          "Use Bedtime mode to silence your phone and keep the screen dark at bedtime",
+        ]),
+      ),
+    ).toEqual(after);
   });
 
   test("requires every populated extras category to be rendered by the row", () => {

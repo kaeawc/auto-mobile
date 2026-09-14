@@ -50,6 +50,14 @@ const page = (...rows: any[]): ObserveResult => ({
     hierarchy: { node: node("com.android.systemui:id/notification_stack_scroller", "", rows) },
   },
 });
+// API 35 includes this explicit scroll state on the notification scroller.
+const api35Page = (...rows: any[]): ObserveResult => {
+  const result = page(...rows);
+  Object.assign(result.viewHierarchy!.hierarchy!.node.$, { scrollable: true });
+  return result;
+};
+// Before API 33, the extractor omits `scrollable` when the scroller cannot move.
+const preApi33Page = (...rows: any[]): ObserveResult => page(...rows);
 function setup(pages: ObserveResult[], markScrollBoundary = true) {
   for (const [index, page] of pages.entries()) {
     if (markScrollBoundary && page.viewHierarchy!.hierarchy!.node.$.scrollable === undefined) {
@@ -378,7 +386,28 @@ describe("systemTray list", () => {
     setup([repeated], false);
     const result = await list();
     expect(result.notifications).toEqual([]);
-    expect(result.swipes).toBe(3);
+    // #6904: omitted pre-API-33 metadata means the notification scroller is at its end.
+    expect(result.swipes).toBe(0);
+  });
+
+  test("lists a pre-API-33 single-notification tray once without swiping", async () => {
+    const legacyTray = preApi33Page(row("Only once"));
+    setup([legacyTray], false);
+
+    const result = await list();
+
+    expect(result.swipes).toBe(0);
+    expect(result.notifications).toHaveLength(1);
+    expect(result.notifications[0]).toMatchObject({ title: "Only once" });
+  });
+
+  test("keeps scanning an API 35 tray whose scroller is explicitly scrollable", async () => {
+    const currentTray = api35Page(row("First"));
+    const end = page(row("Second"));
+    Object.assign(end.viewHierarchy!.hierarchy!.node.$, { scrollable: false });
+    setup([currentTray, end], false);
+
+    expect((await list()).swipes).toBe(1);
   });
   test("retains identical no-ID pages because they may represent different notifications", async () => {
     setup([page(positionedRow("Generic", 200)), page(positionedRow("Generic", 200))]);
@@ -597,6 +626,19 @@ describe("systemTray list silent-section ownership", () => {
     expect(adb.getExecutedCommands()).toContain("shell dumpsys notification --noredact");
   });
 
+  test("attributes a Silent-section row when before and after dumpsys snapshots agree", async () => {
+    const { adb } = setup([shade()]);
+    const snapshot = execResult(dumpsys(record(WELLBEING, SLEEP_TITLE, SLEEP_BODY)));
+    adb.setCommandResponseSequence("dumpsys notification", [snapshot, snapshot]);
+
+    const result = await listSystemTrayNotifications(device, WELLBEING, "Digital Wellbeing", 5000);
+
+    expect(result.notifications).toMatchObject([{ appId: WELLBEING, ownership: "dumpsys" }]);
+    expect(adb.getExecutedCommands().filter((command) => command.includes("dumpsys"))).toHaveLength(
+      2,
+    );
+  });
+
   test("keeps header evidence for rows SystemUI does label", async () => {
     const { adb } = setup([shade()]);
     adb.setCommandResponse(
@@ -628,9 +670,36 @@ describe("systemTray list silent-section ownership", () => {
         ),
       ),
     );
-    const result = await listSystemTrayNotifications(device, WELLBEING, "Digital Wellbeing", 5000);
-    expect(result.notifications).toEqual([]);
-    expect(result.unattributedRows).toBe(1);
+    // #6875: records for this package exist, so an ambiguous shade row is not a confident empty list.
+    await expect(
+      listSystemTrayNotifications(device, WELLBEING, "Digital Wellbeing", 5000),
+    ).rejects.toThrow(/com\.google\.android\.apps\.wellbeing.*no shade row could be matched/i);
+  });
+
+  test("throws when dumpsys proves the requested app posted but no rendered row matches", async () => {
+    const { adb } = setup([page(silentRow("Rendered later", "The shade text changed"))]);
+    adb.setCommandResponseSequence("dumpsys notification", [
+      execResult(dumpsys(record(WELLBEING, SLEEP_TITLE, SLEEP_BODY))),
+      execResult(dumpsys(record(WELLBEING, SLEEP_TITLE, SLEEP_BODY))),
+    ]);
+
+    await expect(
+      listSystemTrayNotifications(device, WELLBEING, "Digital Wellbeing", 5000),
+    ).rejects.toThrow(/notification records exist.*no shade row could be matched.*retry/i);
+  });
+
+  test("does not attribute a stale other-app row when only after-scan evidence remains", async () => {
+    const { adb } = setup([shade()]);
+    // The other app's stale row was visible when scanning started, then was dismissed.
+    // The requested app only appears in the after snapshot, so its record is not stable evidence.
+    adb.setCommandResponseSequence("dumpsys notification", [
+      execResult(dumpsys(record("com.example.dismissed", SLEEP_TITLE, SLEEP_BODY))),
+      execResult(dumpsys(record(WELLBEING, SLEEP_TITLE, SLEEP_BODY))),
+    ]);
+
+    await expect(
+      listSystemTrayNotifications(device, WELLBEING, "Digital Wellbeing", 5000),
+    ).rejects.toThrow(/com\.google\.android\.apps\.wellbeing.*no shade row could be matched/i);
   });
 
   test("does not read dumpsys when every row carries an app header", async () => {

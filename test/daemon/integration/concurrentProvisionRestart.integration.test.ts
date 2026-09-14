@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -37,11 +37,21 @@ function createFakeDaemonState() {
 describe("concurrent client restart during provisionDevice", () => {
   const cleanup: Array<() => Promise<void> | void> = [];
 
+  beforeEach(() => {
+    // Restart admission is process-global; this test must begin before any
+    // unrelated integration test's accepted restart can fence provisioning.
+    executionTracker.clearDaemonRestartPreparation();
+  });
+
   afterEach(async () => {
-    for (const dispose of cleanup.reverse()) {
-      await dispose();
+    try {
+      for (const dispose of cleanup.reverse()) {
+        await dispose();
+      }
+    } finally {
+      cleanup.length = 0;
+      executionTracker.clearDaemonRestartPreparation();
     }
-    cleanup.length = 0;
   });
 
   test("a stale compatibility snapshot cannot terminate provisioning admitted through the proxy", async () => {

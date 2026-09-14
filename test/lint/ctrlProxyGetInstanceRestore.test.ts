@@ -279,6 +279,27 @@ describe("CtrlProxy getInstance mocks are restored in-file (issue #7052)", () =>
       }
     }
 
+    const isTeardownHook = (callee: ts.Expression): boolean => {
+      const core = unwrap(callee);
+      if (!ts.isIdentifier(core) || (core.text !== "afterEach" && core.text !== "afterAll")) {
+        return false;
+      }
+      const binding = checker.getSymbolAtLocation(core);
+      if (binding === undefined) {
+        return true;
+      }
+      return (binding.declarations ?? []).some((declaration) => {
+        if (!ts.isImportSpecifier(declaration)) {
+          return false;
+        }
+        const importDeclaration = declaration.parent.parent.parent;
+        return (
+          ts.isImportDeclaration(importDeclaration) &&
+          ts.isStringLiteral(importDeclaration.moduleSpecifier) &&
+          importDeclaration.moduleSpecifier.text === "bun:test"
+        );
+      });
+    };
     const teardownCallbacks = new Set<ts.FunctionLikeDeclaration>();
     const addTeardownCallback = (argument: ts.Expression): void => {
       if (ts.isFunctionLike(argument)) {
@@ -303,11 +324,7 @@ describe("CtrlProxy getInstance mocks are restored in-file (issue #7052)", () =>
     };
     const teardownWalk = (node: ts.Node): void => {
       if (ts.isCallExpression(node)) {
-        const callee = unwrap(node.expression);
-        if (
-          ts.isIdentifier(callee) &&
-          (callee.text === "afterEach" || callee.text === "afterAll")
-        ) {
+        if (isTeardownHook(node.expression)) {
           for (const argument of node.arguments) {
             if (!ts.isSpreadElement(argument)) {
               addTeardownCallback(argument);
@@ -933,6 +950,20 @@ describe("CtrlProxy getInstance mocks are restored in-file (issue #7052)", () =>
     expect([...f.restores]).toEqual(["AndroidCtrlProxyClient"]);
     expect(leaksOf("ordinary-named-restore.ts", f)).toEqual([
       "ordinary-named-restore.ts: installs AndroidCtrlProxyClient.getInstance but never restores it",
+    ]);
+  });
+
+  test("a local afterEach helper does not make a restore teardown-ordered", () => {
+    const f = analyzeSource(
+      `const original = AndroidCtrlProxyClient.getInstance;\n` +
+        `function afterEach(callback: () => void) { callback(); }\n` +
+        `afterEach(() => { AndroidCtrlProxyClient.getInstance = original; });\n` +
+        `AndroidCtrlProxyClient.getInstance = mock(() => ({}));\n`,
+    );
+    expect([...f.installs]).toEqual(["AndroidCtrlProxyClient"]);
+    expect([...f.restores]).toEqual(["AndroidCtrlProxyClient"]);
+    expect(leaksOf("local-after-each.ts", f)).toEqual([
+      "local-after-each.ts: installs AndroidCtrlProxyClient.getInstance but never restores it",
     ]);
   });
 

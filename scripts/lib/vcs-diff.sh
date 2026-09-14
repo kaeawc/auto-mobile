@@ -80,8 +80,8 @@ vcs_touched_files_including_deleted() {
     return
   fi
   {
-    git diff --cached --name-only --diff-filter=ACMRD
-    git diff --name-only --diff-filter=ACMRD
+    git diff --no-renames --cached --name-only --diff-filter=ACMRD
+    git diff --no-renames --name-only --diff-filter=ACMRD
   } | sort | uniq
 }
 

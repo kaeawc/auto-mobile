@@ -6,8 +6,13 @@ FIXTURE="test/daemon/socketServerKeyValue.integration.test.ts"
 FIXTURE_BACKUP=""
 MODIFIED_FILES=()
 BACKUP_DIR=""
+RENAME_FROM=""
+RENAME_TO=""
 
 teardown() {
+  if [[ -n "$RENAME_TO" && -e "$RENAME_TO" ]]; then
+    git -C "$ROOT" mv "$RENAME_TO" "$RENAME_FROM"
+  fi
   if [[ -n "$FIXTURE_BACKUP" ]]; then
     cp "$FIXTURE_BACKUP" "$FIXTURE"
   fi
@@ -101,6 +106,40 @@ SHIM
 
   base_ref="$(git -C "$ROOT" rev-parse HEAD)"
   rm "$runtime_input"
+
+  run env PATH="$fake_bin:$PATH" AUTOMOBILE_INTEGRATION_TEST_BASE_REF="$base_ref" /bin/bash "$SCRIPT"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Pinned runtime graph: running"* ]]
+}
+
+@test "runs the pinned runtime graph audit when a runtime graph input is renamed" {
+  local runtime_input base_ref fake_bin renamed_input index_file
+  runtime_input="scripts/release/runtime-graph.json"
+  renamed_input="moved-runtime-graph.json"
+  RENAME_FROM="$runtime_input"
+  RENAME_TO="$renamed_input"
+
+  fake_bin="$BATS_TEST_TMPDIR/runtime-graph-rename-bin"
+  mkdir -p "$fake_bin"
+  cat > "$fake_bin/bash" <<'SHIM'
+#!/bin/bash
+if [[ "$1" == scripts/ci/verify-pinned-runtime-graph.sh ]]; then
+  exit 0
+fi
+exec /bin/bash "$@"
+SHIM
+  cat > "$fake_bin/bun" <<'SHIM'
+#!/bin/bash
+exit 0
+SHIM
+  chmod +x "$fake_bin/bash" "$fake_bin/bun"
+
+  index_file="$BATS_TEST_TMPDIR/runtime-graph-rename-index"
+  cp "$(git -C "$ROOT" rev-parse --git-path index)" "$index_file"
+  export GIT_INDEX_FILE="$index_file"
+  base_ref="$(git -C "$ROOT" rev-parse HEAD)"
+  git -C "$ROOT" mv "$runtime_input" "$renamed_input"
 
   run env PATH="$fake_bin:$PATH" AUTOMOBILE_INTEGRATION_TEST_BASE_REF="$base_ref" /bin/bash "$SCRIPT"
 

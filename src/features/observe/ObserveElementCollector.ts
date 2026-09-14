@@ -9,6 +9,7 @@ import {
   ElementProvenance,
   setElementProvenance,
   setCapturedKeyboard,
+  setUncollectedWrappers,
 } from "./output/elementProvenance";
 
 export interface ObserveElementCollector {
@@ -31,6 +32,7 @@ export class DefaultObserveElementCollector implements ObserveElementCollector {
     const clickable: Element[] = [];
     const scrollable: Element[] = [];
     const flattenedEntries: FlattenedElementEntry[] = [];
+    const uncollectedWrappers: Element[] = [];
     let currentIndex = 0;
     let keyboardPackage: string | undefined;
 
@@ -55,6 +57,7 @@ export class DefaultObserveElementCollector implements ObserveElementCollector {
           clickable,
           scrollable,
           flattenedEntries,
+          uncollectedWrappers,
           nextIndex: () => currentIndex++,
         }) ?? keyboardPackage;
     }
@@ -62,7 +65,7 @@ export class DefaultObserveElementCollector implements ObserveElementCollector {
     finalizeProvenanceExits(provenanceState.records);
 
     const text = flattenedEntries
-      .filter((entry) => typeof entry.text === "string" && entry.text.trim().length > 0)
+      .filter((entry) => hasCollectableText(entry.text))
       .map((entry) => entry.element);
     const media = this.mediaClassifier.classify(viewHierarchy, platform, flattenedEntries);
 
@@ -70,6 +73,9 @@ export class DefaultObserveElementCollector implements ObserveElementCollector {
     // Like element ancestry, this is output-projection metadata, not raw element content.
     if (keyboardPackage) {
       setCapturedKeyboard(elements, { visible: true, package: keyboardPackage });
+    }
+    if (uncollectedWrappers.length > 0) {
+      setUncollectedWrappers(elements, uncollectedWrappers);
     }
     return elements;
   }
@@ -83,6 +89,7 @@ export class DefaultObserveElementCollector implements ObserveElementCollector {
       clickable: Element[];
       scrollable: Element[];
       flattenedEntries: FlattenedElementEntry[];
+      uncollectedWrappers: Element[];
       nextIndex: () => number;
     },
   ): string | undefined {
@@ -128,7 +135,7 @@ export class DefaultObserveElementCollector implements ObserveElementCollector {
       provenanceState.records.push({ provenance, parent });
       ancestors.push({ depth, provenance });
 
-      collectActionableNode(parsedNode, nodeProperties, collections);
+      const actionable = collectActionableNode(parsedNode, nodeProperties, collections);
 
       const accessibilityText = nodeProperties.text || nodeProperties["content-desc"] || undefined;
       collections.flattenedEntries.push({
@@ -137,24 +144,53 @@ export class DefaultObserveElementCollector implements ObserveElementCollector {
         depth,
         text: accessibilityText,
       });
+      if (isUncollectedWrapper(parsedNode, actionable, accessibilityText)) {
+        collections.uncollectedWrappers.push(parsedNode);
+      }
     });
     return capturedKeyboardPackage;
   }
 }
 
-/** Categorize actions independently of traversal and IME ownership. */
+/**
+ * Categorize actions independently of traversal and IME ownership. Returns
+ * whether the node landed in any actionable category.
+ */
 function collectActionableNode(
   element: Element,
   properties: Element,
   collections: { clickable: Element[]; scrollable: Element[] },
-): void {
+): boolean {
+  let collected = false;
   // A non-clickable switch still needs its toggle affordance (issue #6257).
   if (isClickableElementProperties(properties) || isTruthy(properties.checkable)) {
     collections.clickable.push(element);
+    collected = true;
   }
   if (isTruthy(properties.scrollable)) {
     collections.scrollable.push(element);
+    collected = true;
   }
+  return collected;
+}
+
+/** The one test that admits a flattened entry into the `text` category. */
+function hasCollectableText(text: unknown): boolean {
+  return typeof text === "string" && text.trim().length > 0;
+}
+
+/**
+ * A bounded node that no `elements` category will carry, yet bears a
+ * `resource-id` — the only way a wrapper can be attributed to a package, and
+ * the only thing that can place a legacy IME's own wrapper (issue #6908).
+ */
+function isUncollectedWrapper(element: Element, actionable: boolean, text: unknown): boolean {
+  return (
+    !actionable &&
+    !hasCollectableText(text) &&
+    typeof element["resource-id"] === "string" &&
+    element["resource-id"].length > 0
+  );
 }
 
 /** Track IME ownership even through bounds-less wrappers, ending it at the next sibling. */

@@ -9,6 +9,7 @@ import {
   ElementProvenance,
   getElementProvenance,
   getCapturedKeyboard,
+  getUncollectedWrappers,
   isStrictAncestor,
 } from "./elementProvenance";
 
@@ -693,6 +694,13 @@ function idPackage(el: Element): string | undefined {
  */
 interface ImeWindow {
   package: string;
+  /**
+   * Whether the capture itself vouched for the package. On the fallback
+   * (keycap-id) path the span may also widen to an uncollected IME-owned
+   * wrapper (issue #6908 item 1); the authoritative path never needs to, since
+   * inherited `keyboardPackage` provenance already decides membership.
+   */
+  authoritative: boolean;
   group?: number;
   spanEnter: number;
   spanExit: number;
@@ -725,29 +733,47 @@ function authoritativeImePackage(elements: ObserveElements): string | undefined 
   return undefined;
 }
 
+/** A package's keycap markers, corroborated within ONE root/window group. */
+interface CorroboratedKeycaps {
+  package: string;
+  /** The group the markers sit in; absent for provenance-less input. */
+  group?: number;
+}
+
 /**
- * The first package that owns at least {@link MIN_FALLBACK_KEYCAPS} distinct
- * `key_pos_*` resource-ids, in collection order (issue #6871).
+ * The first (package, root/window group) pair that owns at least
+ * {@link MIN_FALLBACK_KEYCAPS} distinct `key_pos_*` resource-ids, in collection
+ * order (issue #6871).
  *
  * Distinct ids, not node count: the same element can reach this through more
  * than one category of {@link allElements}, and a repeated id is one marker
  * seen twice, not two keys.
+ *
+ * Scoped per group, not per package (issue #6908 item 2): a keyboard app
+ * showing its own `key_pos_preview` control in the main root while its IME is
+ * up in a window root would otherwise corroborate the decoy with the real keys,
+ * and {@link detectImeWindow} would then lock onto whichever group came first.
+ * Ancestry only exists within one group, so a keyboard is only ever evidenced
+ * by markers that share one.
  */
-function corroboratedKeycapPackage(elements: ObserveElements): string | undefined {
-  const keycapIdsByPackage = new Map<string, Set<string>>();
+function corroboratedKeycapPackage(elements: ObserveElements): CorroboratedKeycaps | undefined {
+  const keycapIdsByScope = new Map<string, { scope: CorroboratedKeycaps; ids: Set<string> }>();
   for (const el of allElements(elements)) {
     const id = deriveId(el) ?? "";
     const pkg = KEYCAP_ID_PATTERN.exec(id)?.[1];
     if (pkg === undefined) {
       continue;
     }
-    const ids = keycapIdsByPackage.get(pkg) ?? new Set<string>();
-    ids.add(id);
-    keycapIdsByPackage.set(pkg, ids);
+    const group = getElementProvenance(el)?.group;
+    // `:` cannot occur in a package name (see KEYCAP_ID_PATTERN), so the key is unambiguous.
+    const key = `${group ?? "-"}:${pkg}`;
+    const entry = keycapIdsByScope.get(key) ?? { scope: { package: pkg, group }, ids: new Set() };
+    entry.ids.add(id);
+    keycapIdsByScope.set(key, entry);
   }
-  for (const [pkg, ids] of keycapIdsByPackage) {
+  for (const { scope, ids } of keycapIdsByScope.values()) {
     if (ids.size >= MIN_FALLBACK_KEYCAPS) {
-      return pkg;
+      return scope;
     }
   }
   return undefined;
@@ -766,11 +792,22 @@ function corroboratedKeycapPackage(elements: ObserveElements): string | undefine
  * group/span of the nodes that actually belong to that one package.
  */
 function detectImeWindow(elements: ObserveElements): ImeWindow | undefined {
-  const detected = authoritativeImePackage(elements) ?? corroboratedKeycapPackage(elements);
-  if (!detected) {
+  const authoritative = authoritativeImePackage(elements);
+  const corroborated =
+    authoritative === undefined ? corroboratedKeycapPackage(elements) : undefined;
+  const detected = authoritative ?? corroborated?.package;
+  if (detected === undefined) {
     return undefined;
   }
-  const ime: ImeWindow = { package: detected, spanEnter: Infinity, spanExit: -Infinity };
+  const ime: ImeWindow = {
+    package: detected,
+    authoritative: authoritative !== undefined,
+    // The corroborated group is the window the markers were counted in, so the
+    // span can never lock onto a same-package marker in an earlier group.
+    group: corroborated?.group,
+    spanEnter: Infinity,
+    spanExit: -Infinity,
+  };
   for (const el of allElements(elements)) {
     const provenance = getElementProvenance(el);
     if (imeMarker(el) !== ime.package || !provenance) {
@@ -803,6 +840,13 @@ function detectImeWindow(elements: ObserveElements): ImeWindow | undefined {
  * nested in one another by construction — they are ancestors of the same nodes
  * — so taking the widest is well defined, and measuring every candidate against
  * the ORIGINAL marker span keeps it independent of collection order.
+ *
+ * The candidates include the wrappers the collector parsed but placed in no
+ * category (issue #6908 item 1): the usual legacy shape is a non-actionable,
+ * unlabelled `com.ime:id/keyboard_view` that never reaches
+ * {@link allElements}, and without it the span stayed keycap-only, leaving the
+ * anonymous keys before the first / after the last marker as stray tap rows
+ * and `<ime>` with a truncated box.
  */
 function widenToEnclosingImeSubtree(elements: ObserveElements, ime: ImeWindow): void {
   if (ime.group === undefined) {
@@ -810,7 +854,7 @@ function widenToEnclosingImeSubtree(elements: ObserveElements, ime: ImeWindow): 
   }
   const markerEnter = ime.spanEnter;
   const markerExit = ime.spanExit;
-  for (const el of allElements(elements)) {
+  for (const el of imeCandidates(elements, ime)) {
     const provenance = getElementProvenance(el);
     if (!provenance || provenance.group !== ime.group || idPackage(el) !== ime.package) {
       continue;
@@ -820,6 +864,18 @@ function widenToEnclosingImeSubtree(elements: ObserveElements, ime: ImeWindow): 
       ime.spanExit = Math.max(ime.spanExit, provenance.exit);
     }
   }
+}
+
+/**
+ * Every node that may place or bound the IME window. The fallback path also
+ * sees the collector's uncollected wrappers (issue #6908 item 1); the
+ * authoritative path is deliberately left as it was — inherited provenance
+ * already covers the whole IME subtree, and its row keeps the keys' own box.
+ */
+function imeCandidates(elements: ObserveElements, ime: ImeWindow): Element[] {
+  return ime.authoritative
+    ? allElements(elements)
+    : [...allElements(elements), ...getUncollectedWrappers(elements)];
 }
 
 /**
@@ -888,7 +944,7 @@ function imeAccumulator(
   if (!ime) {
     return undefined;
   }
-  const boxes = allElements(elements)
+  const boxes = imeCandidates(elements, ime)
     .filter((el) => isImeKeycap(el, ime))
     .map(boundsTuple)
     .filter((box): box is NonNullable<SkeletonElement["bounds"]> => box !== undefined);

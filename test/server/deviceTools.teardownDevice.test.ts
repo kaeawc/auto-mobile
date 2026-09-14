@@ -94,6 +94,9 @@ class TeardownDeviceManager extends FakeDeviceUtils {
   destroyError?: Error;
   killError?: Error;
   replacementAfterKill?: BootedDevice;
+  bootedDevicesAfterKill?: BootedDevice[];
+  bootedDevicesAfterDestroy?: BootedDevice[];
+  readonly serialOnlyRuntimeNames = new Map<string, string>();
   /**
    * Drop the booted list after this many discoveries following the kill, so a
    * test can model a device that is still listed for a poll or two while it
@@ -133,7 +136,11 @@ class TeardownDeviceManager extends FakeDeviceUtils {
       ...discovery,
       devices: discovery.devices.map((device) =>
         device.platform === "android" && device.deviceId.startsWith("emulator-")
-          ? { ...device, name: `Unknown (${device.deviceId})` }
+          ? {
+              ...device,
+              name:
+                this.serialOnlyRuntimeNames.get(device.deviceId) ?? `Unknown (${device.deviceId})`,
+            }
           : device,
       ),
     };
@@ -147,7 +154,7 @@ class TeardownDeviceManager extends FakeDeviceUtils {
     await this.killGate;
     this.setBootedDevices(
       device.platform,
-      this.replacementAfterKill ? [this.replacementAfterKill] : [],
+      this.bootedDevicesAfterKill ?? (this.replacementAfterKill ? [this.replacementAfterKill] : []),
     );
     if (this.killError) {
       throw this.killError;
@@ -161,6 +168,9 @@ class TeardownDeviceManager extends FakeDeviceUtils {
     await this.destroyGate;
     if (this.destroyError) {
       throw this.destroyError;
+    }
+    if (this.bootedDevicesAfterDestroy) {
+      this.setBootedDevices(device.platform, this.bootedDevicesAfterDestroy);
     }
     this.destroyedIdentities.add(this.inventoryIdentity(device));
   }
@@ -1857,6 +1867,149 @@ describe("deleteDevice handler", () => {
     );
     expect(manager.destroyRequests).toEqual([]);
     expect(runtimeAvdNameProbes).toEqual([peer.deviceId]);
+  });
+
+  test("force skips wedged peer probes when the target remains on its original serial", async () => {
+    const timer = new FakeTimer();
+    const target: BootedDevice = {
+      platform: "android",
+      name: "Pixel_8_API_35",
+      deviceId: "emulator-5554",
+    };
+    const peers: BootedDevice[] = ["5556", "5558", "5560"].map((suffix, index) => ({
+      platform: "android",
+      name: `Pixel_${index + 6}_API_34`,
+      deviceId: `emulator-${suffix}`,
+    }));
+    const targetImage: DeviceInfo = { platform: "android", name: target.name, isRunning: true };
+    const sessionManager = new SessionManager(timer);
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      manager,
+      new DefaultRetryExecutor(timer),
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    await pool.addDevice(target, targetImage);
+    manager.setBootedDevices("android", [target, ...peers]);
+    manager.setDeviceImages("android", [targetImage]);
+    const replacementOnTargetSerial = { ...target, name: "Pixel_9_API_36" };
+    manager.bootedDevicesAfterKill = [replacementOnTargetSerial, ...peers];
+    manager.bootedDevicesAfterDestroy = [];
+    manager.serialOnlyRuntimeNames.set(target.deviceId, replacementOnTargetSerial.name);
+
+    const body = responseBody(
+      await teardownTool().handler({
+        ...request("android", target.name, target.name),
+        force: true,
+      }),
+    );
+
+    expect(body.state).toBe("destroyed");
+    expect(runtimeAvdNameProbes).toEqual([]);
+    expect(manager.destroyRequests).toHaveLength(1);
+  });
+
+  test("force refuses when the missing target serial leaves one wedged peer unidentified", async () => {
+    const timer = new FakeTimer();
+    const target: BootedDevice = {
+      platform: "android",
+      name: "Pixel_8_API_35",
+      deviceId: "emulator-5554",
+    };
+    const peer: BootedDevice = {
+      platform: "android",
+      name: "Pixel_7_API_34",
+      deviceId: "emulator-5556",
+    };
+    const targetImage: DeviceInfo = { platform: "android", name: target.name, isRunning: true };
+    const sessionManager = new SessionManager(timer);
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      manager,
+      new DefaultRetryExecutor(timer),
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    await pool.addDevice(target, targetImage);
+    await pool.addDevice(peer, { platform: "android", name: peer.name, isRunning: true });
+    manager.setBootedDevices("android", [target, peer]);
+    manager.setDeviceImages("android", [targetImage]);
+    manager.bootedDevicesAfterKill = [peer];
+
+    const body = responseBody(
+      await teardownTool().handler({
+        ...request("android", target.name, target.name),
+        force: true,
+      }),
+    );
+
+    expect(body.state).toBe("failed");
+    expect(body.failure).toEqual(
+      expect.objectContaining({
+        code: "target_restarted",
+        phase: "stop",
+      }),
+    );
+    const failureMessage = String((body.failure as Record<string, unknown>).message);
+    expect(failureMessage).toContain(peer.deviceId);
+    expect(failureMessage).toContain("could not identify its AVD");
+    expect(failureMessage).not.toContain("restarted after shutdown confirmation");
+    expect(manager.destroyRequests).toEqual([]);
+    expect(runtimeAvdNameProbes).toEqual([peer.deviceId]);
+  });
+
+  test("force refuses after one unanswered peer probe when several peers are wedged", async () => {
+    const timer = new FakeTimer();
+    const target: BootedDevice = {
+      platform: "android",
+      name: "Pixel_8_API_35",
+      deviceId: "emulator-5554",
+    };
+    const peers: BootedDevice[] = ["5556", "5558", "5560"].map((suffix, index) => ({
+      platform: "android",
+      name: `Pixel_${index + 6}_API_34`,
+      deviceId: `emulator-${suffix}`,
+    }));
+    const targetImage: DeviceInfo = { platform: "android", name: target.name, isRunning: true };
+    const sessionManager = new SessionManager(timer);
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      manager,
+      new DefaultRetryExecutor(timer),
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    await pool.addDevice(target, targetImage);
+    for (const peer of peers) {
+      await pool.addDevice(peer, { platform: "android", name: peer.name, isRunning: true });
+    }
+    manager.setBootedDevices("android", [target, ...peers]);
+    manager.setDeviceImages("android", [targetImage]);
+    manager.bootedDevicesAfterKill = peers;
+
+    const body = responseBody(
+      await teardownTool().handler({
+        ...request("android", target.name, target.name),
+        force: true,
+      }),
+    );
+
+    expect(body.state).toBe("failed");
+    expect(body.failure).toEqual(
+      expect.objectContaining({
+        code: "target_restarted",
+        phase: "stop",
+      }),
+    );
+    expect(runtimeAvdNameProbes).toEqual([peers[0].deviceId]);
+    expect(manager.destroyRequests).toEqual([]);
   });
 
   test("fails closed when a new Android runtime appears without a resolvable AVD name", async () => {

@@ -4102,7 +4102,19 @@ async function checkForSerialOnlyAndroidTeardownRestart(
   if (!context.serialOnlyAndroidDiscovery || target.device.platform !== "android") {
     return undefined;
   }
+  // The stop check is the only point where a peer identity can prevent the
+  // destructive delete. destroy() only targets this teardown's serial/AVD, so
+  // a second peer probe during verification cannot reveal a destroy-caused move.
+  if (phase !== "stop") {
+    return undefined;
+  }
   const targetOriginalSerial = target.wasBooted ? target.bootedDevice.deviceId : undefined;
+  if (
+    targetOriginalSerial &&
+    booted.devices.some((device) => device.deviceId === targetOriginalSerial)
+  ) {
+    return undefined;
+  }
   const suspectPeers = booted.devices.filter(
     (device) =>
       device.platform === "android" &&
@@ -4121,19 +4133,49 @@ async function checkForSerialOnlyAndroidTeardownRestart(
       Math.min(POOLED_AVD_NAME_VERIFICATION_TIMEOUT_MS, remainingMs),
       context.requestAbortSignal,
     );
-    if (probedName === context.args.target.stableId) {
-      return createTeardownFailureResponse(
-        context.args,
-        phase,
-        phase === "stop" ? "target_restarted" : "target_still_running",
-        phase === "stop"
-          ? "The Android AVD restarted after shutdown confirmation; refusing deletion."
-          : "The Android AVD is still running after deletion.",
-        target.device,
-      );
+    const refusal = serialOnlyAndroidTeardownRestartFailure(
+      context,
+      target,
+      phase,
+      suspect,
+      probedName,
+    );
+    if (refusal) {
+      return refusal;
     }
   }
   return undefined;
+}
+
+function serialOnlyAndroidTeardownRestartFailure(
+  context: TeardownContext,
+  target: TeardownResolvedTarget,
+  phase: "stop" | "verification",
+  suspect: BootedDevice,
+  probedName: string | undefined,
+): TeardownToolResponse | undefined {
+  if (probedName === undefined) {
+    return createTeardownFailureResponse(
+      context.args,
+      phase,
+      "target_restarted",
+      `Android peer emulator '${suspect.deviceId}' could not identify its AVD while the target's ` +
+        "original serial disappeared; refusing deletion rather than assuming the target did not restart there.",
+      target.device,
+    );
+  }
+  if (probedName !== context.args.target.stableId) {
+    return undefined;
+  }
+  return createTeardownFailureResponse(
+    context.args,
+    phase,
+    phase === "stop" ? "target_restarted" : "target_still_running",
+    phase === "stop"
+      ? "The Android AVD restarted after shutdown confirmation; refusing deletion."
+      : "The Android AVD is still running after deletion.",
+    target.device,
+  );
 }
 
 async function verifyTeardownAbsence(

@@ -543,8 +543,15 @@ export class AdbClient implements AdbExecutor {
     maxBuffer?: number,
     noRetry?: boolean,
     signal?: AbortSignal,
+    waitForProcessSettlementAfterAbort?: boolean,
   ): Promise<ExecResult> {
-    return this.execute(this.parseCommandArgs(command), { timeoutMs, maxBuffer, noRetry, signal });
+    return this.execute(this.parseCommandArgs(command), {
+      timeoutMs,
+      maxBuffer,
+      noRetry,
+      signal,
+      waitForProcessSettlementAfterAbort,
+    });
   }
 
   async execute(args: string[], options: AdbExecuteOptions = {}): Promise<ExecResult> {

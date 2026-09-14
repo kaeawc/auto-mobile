@@ -240,7 +240,7 @@ interface PreparedSharedStorageFile {
 
 async function execute(adb: AdbExecutor, command: string, signal?: AbortSignal): Promise<void> {
   try {
-    await adb.executeCommand(command, undefined, undefined, true, signal);
+    await adb.executeCommand(command, undefined, undefined, true, signal, true);
   } catch (error) {
     throw new ActionableError(`Android shared-storage operation failed: ${errorMessage(error)}`);
   }
@@ -248,7 +248,7 @@ async function execute(adb: AdbExecutor, command: string, signal?: AbortSignal):
 
 async function executeArgs(adb: AdbExecutor, args: string[], signal?: AbortSignal): Promise<void> {
   try {
-    await adb.execute(args, { noRetry: true, signal });
+    await adb.execute(args, { noRetry: true, signal, waitForProcessSettlementAfterAbort: true });
   } catch (error) {
     throw new ActionableError(`Android shared-storage operation failed: ${errorMessage(error)}`);
   }
@@ -301,7 +301,7 @@ async function indexMediaFile(
 
 async function executeResult(adb: AdbExecutor, command: string, signal?: AbortSignal) {
   try {
-    return await adb.executeCommand(command, undefined, undefined, true, signal);
+    return await adb.executeCommand(command, undefined, undefined, true, signal, true);
   } catch (error) {
     throw new ActionableError(`Android shared-storage operation failed: ${errorMessage(error)}`);
   }

@@ -62,14 +62,17 @@ export type { SharedStorageIndexingResult, StagedSharedStorageFile };
 // rejects at runtime. Mirroring the constraints here turns those avoidable
 // runtime failures into up-front schema rejections.
 //
-// A single directory segment: non-empty, not `.`/`..`, no `/`, `\\` or NUL.
-const DIRECTORY_JSON_SCHEMA_PATTERN = "^(?!\\.\\.?$)[^/\\\\\\u0000]+$";
+// A single directory segment: non-blank, not `.`/`..` after trimming, no `/`, `\\` or NUL.
+const DIRECTORY_JSON_SCHEMA_PATTERN = "^(?!\\s*$)(?!\\s*\\.\\.?\\s*$)[^/\\\\\\u0000]+$";
 // A relative destination path: not absolute and with no `.`/`..` segment
 // (either separator). Slightly stricter than the runtime, which also tolerates
 // a leading `./`; advertising it as invalid only avoids a call, never a failure.
-const RELATIVE_PATH_JSON_SCHEMA_PATTERN = "^(?![/\\\\])(?!.*(?:^|[/\\\\])\\.{1,2}(?:[/\\\\]|$)).+$";
-// Non-empty base64 in the standard alphabet with optional `=` padding.
-const BASE64_JSON_SCHEMA_PATTERN = "^[A-Za-z0-9+/]+={0,2}$";
+const RELATIVE_PATH_JSON_SCHEMA_PATTERN =
+  "^(?![/\\\\])(?!.*[/\\\\]{2})(?!.*[/\\\\]$)(?!.*(?:^|[/\\\\])\\.{1,2}(?:[/\\\\]|$)).+$";
+// Canonical or unpadded standard-alphabet base64. The final quantum's unused
+// bits must be zero, matching sharedStorageFileSchema's decode/re-encode check.
+const BASE64_JSON_SCHEMA_PATTERN =
+  "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/][AQgw](?:==)?|[A-Za-z0-9+/]{2}[AEIMQUYcgkosw048]=?)?$";
 
 export const stageSessionDownloadsSchema = withJsonSchemaOverride(
   z

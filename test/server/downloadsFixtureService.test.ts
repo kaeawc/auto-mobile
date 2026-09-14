@@ -3,13 +3,22 @@ import {
   createDownloadsFixtureService,
   StageSessionDownloadsRefusal,
 } from "../../src/server/downloadsFixtureService";
-import { createSharedStorageServiceForTesting } from "../../src/server/sharedStorageService";
+import {
+  createSharedStorageServiceForTesting,
+  type StageSharedStorageResult,
+} from "../../src/server/sharedStorageService";
+import { DaemonState } from "../../src/daemon/daemonState";
+import { DevicePool } from "../../src/daemon/devicePool";
+import { SessionManager } from "../../src/daemon/sessionManager";
 import type {
   SharedStorageService,
   StageSharedStorageRequest,
 } from "../../src/server/sharedStorageService";
 import type { ActiveSessionDevice } from "../../src/server/activeSessionDevice";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
+import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
+import { FakeTimer } from "../fakes/FakeTimer";
 import type { AdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
 import type { BootedDevice } from "../../src/models";
 
@@ -218,5 +227,64 @@ describe("DownloadsFixtureService (#7007)", () => {
         "shared Downloads tree.",
     });
     expect(stageCalls).toBe(0);
+  });
+
+  test("keeps a released device quarantined until an in-flight stage settles", async () => {
+    const timer = new FakeTimer();
+    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const deviceUtils = new FakeDeviceUtils();
+    deviceUtils.setBootedDevices("android", [androidDevice]);
+    const devicePool = new DevicePool(sessionManager, "daemon-test", timer, undefined, deviceUtils);
+    const staging = Promise.withResolvers<StageSharedStorageResult>();
+    try {
+      await devicePool.initializeWithDevices([androidDevice]);
+      await devicePool.bindOrReuseDeviceSession("session-1", androidDevice.deviceId, "android");
+      DaemonState.getInstance().initialize(sessionManager, devicePool);
+      const service = createDownloadsFixtureService({
+        resolveActiveSession: () => activeAndroid("session-1"),
+        sharedStorage: () => ({ stage: async () => staging.promise }),
+      });
+
+      const stage = service.stage({
+        sessionUuid: "session-1",
+        directory: "run-42",
+        files: [{ contentText: "x", destinationPath: "a.txt" }],
+      });
+      expect(sessionManager.getPendingDeviceCleanup(androidDevice.deviceId)).not.toBeNull();
+
+      await sessionManager.releaseSession("session-1");
+      await devicePool.releaseDevice(androidDevice.deviceId, "session-1");
+      expect(devicePool.getDevice(androidDevice.deviceId)?.status).toBe("busy");
+
+      staging.resolve({
+        success: true,
+        deviceId: androidDevice.deviceId,
+        platform: "android",
+        namespace: "run-42",
+        userId: 0,
+        userSource: "primary",
+        destinationDirectory: "/storage/emulated/0/Download/run-42",
+        reset: false,
+        files: [],
+      });
+      await stage;
+      await sessionManager.getPendingDeviceCleanup(androidDevice.deviceId);
+      await Promise.resolve();
+      expect(devicePool.getDevice(androidDevice.deviceId)?.status).toBe("idle");
+    } finally {
+      staging.resolve({
+        success: true,
+        deviceId: androidDevice.deviceId,
+        platform: "android",
+        namespace: "run-42",
+        userId: 0,
+        userSource: "primary",
+        destinationDirectory: "/storage/emulated/0/Download/run-42",
+        reset: false,
+        files: [],
+      });
+      DaemonState.getInstance().reset();
+      sessionManager.stopCleanupTimer();
+    }
   });
 });

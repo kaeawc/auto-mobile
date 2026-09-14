@@ -82,14 +82,20 @@ describe("stageSessionDownloads tool (#7007)", () => {
     const validate = new Ajv2020({ strict: false }).compile(definition!.inputSchema);
     const base = { sessionUuid: "session-1", directory: "run-42" };
 
-    // Directory traversal / separators.
-    for (const directory of ["../escape", "a/b", "..", "."]) {
+    // Directory traversal / separators / values the runtime trims to blank.
+    for (const directory of ["../escape", "a/b", "..", ".", "   "]) {
       expect(
         validate({ ...base, directory, files: [{ contentText: "x", destinationPath: "a.txt" }] }),
       ).toBe(false);
     }
-    // Absolute / traversal destinationPath.
-    for (const destinationPath of ["/etc/passwd", "../secret.txt", "docs/../../escape.txt"]) {
+    // Absolute / traversal destinationPath, including empty path segments.
+    for (const destinationPath of [
+      "/etc/passwd",
+      "../secret.txt",
+      "docs/../../escape.txt",
+      "a//b",
+      "a/b/",
+    ]) {
       expect(validate({ ...base, files: [{ contentText: "x", destinationPath }] })).toBe(false);
     }
     // Zero content sources.
@@ -101,10 +107,12 @@ describe("stageSessionDownloads tool (#7007)", () => {
         files: [{ contentText: "x", contentBase64: "aGk=", destinationPath: "a.txt" }],
       }),
     ).toBe(false);
-    // Malformed base64.
-    expect(
-      validate({ ...base, files: [{ contentBase64: "not base64!!", destinationPath: "a.txt" }] }),
-    ).toBe(false);
+    // Malformed or non-canonical base64.
+    for (const contentBase64 of ["not base64!!", "A", "AB=="]) {
+      expect(validate({ ...base, files: [{ contentBase64, destinationPath: "a.txt" }] })).toBe(
+        false,
+      );
+    }
     // Empty base64.
     expect(validate({ ...base, files: [{ contentBase64: "", destinationPath: "a.txt" }] })).toBe(
       false,
@@ -116,6 +124,9 @@ describe("stageSessionDownloads tool (#7007)", () => {
     );
     expect(
       validate({ ...base, files: [{ contentBase64: "aGVsbG8=", destinationPath: "a.txt" }] }),
+    ).toBe(true);
+    expect(
+      validate({ ...base, files: [{ contentBase64: "aGVsbG8", destinationPath: "a.txt" }] }),
     ).toBe(true);
     expect(
       validate({ ...base, files: [{ sourcePath: "/host/f", destinationPath: "sub/dir/a.txt" }] }),

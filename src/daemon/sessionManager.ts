@@ -579,6 +579,17 @@ export class SessionManager {
     return this.pendingDeviceCleanups.get(deviceId) ?? null;
   }
 
+  /**
+   * Quarantine a device until externally-dispatched session work settles.
+   *
+   * Callers must register the promise synchronously after dispatching work so
+   * a concurrent session release observes the cleanup before returning the
+   * device to the pool.
+   */
+  registerPendingDeviceCleanup(deviceId: string, cleanup: Promise<unknown>): void {
+    this.trackPendingDeviceCleanup(deviceId, [cleanup]);
+  }
+
   /** Release owns the device until both bounded teardown and any overflow work settle. */
   hasDeviceCleanupInProgress(deviceId: string): boolean {
     return (
@@ -2636,7 +2647,7 @@ export class SessionManager {
     }
   }
 
-  private trackPendingDeviceCleanup(deviceId: string, cleanups: readonly Promise<void>[]): void {
+  private trackPendingDeviceCleanup(deviceId: string, cleanups: readonly Promise<unknown>[]): void {
     const previous = this.pendingDeviceCleanups.get(deviceId);
     const cleanup = Promise.allSettled(previous ? [previous, ...cleanups] : cleanups).then(
       () => undefined,

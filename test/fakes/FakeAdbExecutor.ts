@@ -26,6 +26,7 @@ export class FakeAdbExecutor implements AdbExecutor {
     maxBuffer?: number;
     noRetry?: boolean;
     signal?: AbortSignal;
+    waitForProcessSettlementAfterAbort?: boolean;
   }> = [];
 
   // Configurable state
@@ -264,6 +265,7 @@ export class FakeAdbExecutor implements AdbExecutor {
     maxBuffer?: number;
     noRetry?: boolean;
     signal?: AbortSignal;
+    waitForProcessSettlementAfterAbort?: boolean;
   }> {
     return [...this.commandCalls];
   }
@@ -327,6 +329,7 @@ export class FakeAdbExecutor implements AdbExecutor {
       options.maxBuffer,
       options.noRetry,
       options.signal,
+      options.waitForProcessSettlementAfterAbort,
     );
   }
 
@@ -336,9 +339,17 @@ export class FakeAdbExecutor implements AdbExecutor {
     maxBuffer?: number,
     noRetry?: boolean,
     signal?: AbortSignal,
+    waitForProcessSettlementAfterAbort?: boolean,
   ): Promise<ExecResult> {
     this.executedCommands.push(command);
-    this.commandCalls.push({ command, timeoutMs, maxBuffer, noRetry, signal });
+    this.commandCalls.push({
+      command,
+      timeoutMs,
+      maxBuffer,
+      noRetry,
+      signal,
+      waitForProcessSettlementAfterAbort,
+    });
 
     // Mimic AdbClient (opt-in): a command handed an already-aborted signal
     // rejects with a cancellation error rather than executing, so device-read

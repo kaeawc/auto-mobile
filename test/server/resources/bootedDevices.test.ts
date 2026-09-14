@@ -22,12 +22,14 @@ import {
   readinessFromServiceStatus,
   queryDeviceServiceStatus,
   type AndroidServiceStatusLookup,
+  type CtrlProxyVersionLookup,
 } from "../../../src/server/bootedDeviceResources";
 import { BootedDevice, Platform } from "../../../src/models";
 import { DaemonState } from "../../../src/daemon/daemonState";
 import { DevicePool } from "../../../src/daemon/devicePool";
 import { DeviceSessionRegistry } from "../../../src/daemon/deviceSessionRegistry";
 import { SessionManager } from "../../../src/daemon/sessionManager";
+import { IOSCtrlProxyManager } from "../../../src/utils/IOSCtrlProxyManager";
 import { z } from "zod/v4";
 
 describe("MCP Booted Device Resources", () => {
@@ -1472,6 +1474,109 @@ describe("booted device readiness", () => {
     expect(
       (await queryDeviceServiceStatus({ ...device, deviceId: "unseen" }, lookup))?.running,
     ).toBe(false);
+  });
+
+  test("adds Android CtrlProxy installed-artifact version without changing service compatibility", async () => {
+    const lookup: AndroidServiceStatusLookup = {
+      getManager: () => ({
+        isInstalled: async () => true,
+        isEnabled: async () => true,
+        getInstalledApkSha256: async () => "a".repeat(64),
+      }),
+      isConnected: () => true,
+    };
+    const versionLookup: CtrlProxyVersionLookup = {
+      getVersion: async () => ({
+        versionName: "1.2.3",
+        versionCode: "45",
+        source: "android-package",
+      }),
+    };
+
+    const device = {
+      name: "Pixel",
+      platform: "android" as const,
+      deviceId: "emulator-5554",
+      source: "local" as const,
+    };
+    const withoutVersion = await queryDeviceServiceStatus(device, lookup, {
+      getVersion: async () => undefined,
+    });
+
+    const status = await queryDeviceServiceStatus(device, lookup, versionLookup);
+
+    expect(status).toEqual({
+      ...withoutVersion,
+      version: { versionName: "1.2.3", versionCode: "45", source: "android-package" },
+    });
+  });
+
+  test("adds iOS CtrlProxy installed-artifact version", async () => {
+    const installedSpy = spyOn(IOSCtrlProxyManager.prototype, "isInstalled").mockResolvedValue(
+      true,
+    );
+    const runningSpy = spyOn(IOSCtrlProxyManager.prototype, "isRunning").mockResolvedValue(false);
+    const versionLookup: CtrlProxyVersionLookup = {
+      getVersion: async () => ({
+        versionName: "2.0.0",
+        build: "200",
+        source: "ios-runner-bundle",
+      }),
+    };
+    try {
+      const status = await queryDeviceServiceStatus(
+        {
+          name: "iPhone",
+          platform: "ios",
+          deviceId: "00000000-0000-0000-0000-000000000000",
+          source: "local",
+        },
+        undefined,
+        versionLookup,
+      );
+
+      expect(status?.version).toEqual({
+        versionName: "2.0.0",
+        build: "200",
+        source: "ios-runner-bundle",
+      });
+    } finally {
+      installedSpy.mockRestore();
+      runningSpy.mockRestore();
+    }
+  });
+
+  test("keeps Android service status when CtrlProxy version lookup is unavailable", async () => {
+    const lookup: AndroidServiceStatusLookup = {
+      getManager: () => ({
+        isInstalled: async () => true,
+        isEnabled: async () => true,
+        getInstalledApkSha256: async () => "a".repeat(64),
+      }),
+      isConnected: () => true,
+    };
+    const versionLookup: CtrlProxyVersionLookup = {
+      getVersion: async () => Promise.reject(new Error("metadata unavailable")),
+    };
+
+    const status = await queryDeviceServiceStatus(
+      {
+        name: "Pixel",
+        platform: "android",
+        deviceId: "emulator-5554",
+        source: "local",
+      },
+      lookup,
+      versionLookup,
+    );
+
+    expect(status).toMatchObject({
+      installed: true,
+      enabled: true,
+      running: true,
+      isCompatible: false,
+    });
+    expect(status?.version).toBeUndefined();
   });
 
   test("reports an unavailable Android service as not ready", () => {

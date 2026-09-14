@@ -1,9 +1,8 @@
 import { ResourceRegistry, ResourceContent, getRequestedResourceUri } from "./resourceRegistry";
 import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
 import { ListInstalledApps } from "../features/observe/ListInstalledApps";
-import { GetAppMetadata, IosAppMetadataSource } from "../features/observe/GetAppMetadata";
-import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
-import { DeviceAppManager } from "../utils/ios-cmdline-tools/DeviceAppManager";
+import { GetAppMetadata } from "../features/observe/GetAppMetadata";
+import { createIosMetadataSource } from "../utils/iosAppMetadataSource";
 import {
   BootedDevice,
   InstalledApp,
@@ -1343,18 +1342,6 @@ const appMetadataCacheByKey = new Map<string, AppMetadataCacheEntry>();
 
 function metadataCacheKey(deviceId: string, appId: string): string {
   return `${deviceId}:${appId}`;
-}
-
-function createIosMetadataSource(device: BootedDevice): IosAppMetadataSource {
-  const simctl = new SimCtlClient(device);
-  // Physical-device app metadata resolves through DeviceAppManager, the single
-  // typed devicectl boundary (issue #4053) — no direct xcrun composition here.
-  const deviceAppManager = new DeviceAppManager();
-  return {
-    listApps: (deviceId?: string) => simctl.listApps(deviceId),
-    getPhysicalDeviceAppInfo: (deviceId: string, bundleId: string) =>
-      deviceAppManager.getInstalledAppInfo(deviceId, bundleId),
-  };
 }
 
 async function getAppMetadataResource(

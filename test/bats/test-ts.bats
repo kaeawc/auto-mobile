@@ -31,6 +31,26 @@ write_junit_report() {
   } > "$outfile"
 }
 
+write_junit_report_with_lines() {
+  local outfile="$1" suite_file="$2" count
+  shift 2
+  count="$(($# / 4))"
+  {
+    printf '<?xml version="1.0" encoding="UTF-8"?>\n'
+    printf '<testsuites name="bun test" tests="%d" assertions="%d" failures="0" skipped="0" time="0.200236">\n' \
+      "$count" "$count"
+    printf '  <testsuite name="%s" file="%s" tests="%d" assertions="%d" failures="0" skipped="0" time="0" hostname="mac.lan">\n' \
+      "$suite_file" "$suite_file" "$count" "$count"
+    while [[ "$#" -gt 0 ]]; do
+      printf '    <testcase name="%s" classname="%s" time="%s" file="%s" line="%s" assertions="1" />\n' \
+        "$2" "$1" "$3" "$suite_file" "$4"
+      shift 4
+    done
+    printf '  </testsuite>\n'
+    printf '</testsuites>\n'
+  } > "$outfile"
+}
+
 setup() {
   STUB_BIN="$(mktemp -d)"
   REAL_BUN="$(command -v bun)"
@@ -61,7 +81,7 @@ printf '%s\n' "$*" >> "$BUN_ARGS_FILE"
 # Same shape the real `bun test --reporter=junit` writes: `file=` lands on the
 # <testcase>, not only on the enclosing <testsuite>.
 stub_junit_report() {
-  local outfile="$1" suite_file="$2" count
+  local outfile="$1" suite_file="$2" count line="${STUB_RECHECK_LINE:-1}"
   shift 2
   count="$(($# / 3))"
   {
@@ -71,9 +91,28 @@ stub_junit_report() {
     printf '  <testsuite name="%s" file="%s" tests="%d" assertions="%d" failures="0" skipped="0" time="0" hostname="mac.lan">\n' \
       "$suite_file" "$suite_file" "$count" "$count"
     while [[ "$#" -gt 0 ]]; do
-      printf '    <testcase name="%s" classname="%s" time="%s" file="%s" line="1" assertions="1" />\n' \
-        "$2" "$1" "$3" "$suite_file"
+      printf '    <testcase name="%s" classname="%s" time="%s" file="%s" line="%s" assertions="1" />\n' \
+        "$2" "$1" "$3" "$suite_file" "$line"
       shift 3
+    done
+    printf '  </testsuite>\n'
+    printf '</testsuites>\n'
+  } > "$outfile"
+}
+stub_junit_report_with_lines() {
+  local outfile="$1" suite_file="$2" count
+  shift 2
+  count="$(($# / 4))"
+  {
+    printf '<?xml version="1.0" encoding="UTF-8"?>\n'
+    printf '<testsuites name="bun test" tests="%d" assertions="%d" failures="0" skipped="0" time="0.200236">\n' \
+      "$count" "$count"
+    printf '  <testsuite name="%s" file="%s" tests="%d" assertions="%d" failures="0" skipped="0" time="0" hostname="mac.lan">\n' \
+      "$suite_file" "$suite_file" "$count" "$count"
+    while [[ "$#" -gt 0 ]]; do
+      printf '    <testcase name="%s" classname="%s" time="%s" file="%s" line="%s" assertions="1" />\n' \
+        "$2" "$1" "$3" "$suite_file" "$4"
+      shift 4
     done
     printf '  </testsuite>\n'
     printf '</testsuites>\n'
@@ -93,6 +132,16 @@ while [[ "$#" -gt 0 ]]; do
   shift
 done
 if [[ -z "$report" ]]; then
+  exit 0
+fi
+if [[ -n "${STUB_RECHECK_DUP_LINES:-}" ]]; then
+  read -r -a dup_times <<< "${STUB_RECHECK_DUP_TIMES:-0.001 0.001}"
+  read -r -a dup_lines <<< "$STUB_RECHECK_DUP_LINES"
+  dup_cases=()
+  for ((index = 0; index < ${#dup_lines[@]}; index += 1)); do
+    dup_cases+=(suite dup "${dup_times[$index]:-0.001}" "${dup_lines[$index]}")
+  done
+  stub_junit_report_with_lines "$report" "${target:-test/example.test.ts}" "${dup_cases[@]}"
   exit 0
 fi
 if [[ -n "${STUB_RECHECK_DUP_TIMES:-}" ]]; then
@@ -749,9 +798,9 @@ repeat_stub_times() {
 @test "timing gate keeps duplicate test names apart across recheck runs" {
   report_dir="$BATS_TEST_TMPDIR/unit-timing-reports"
   mkdir -p "$report_dir"
-  write_junit_report "$report_dir/shard-0.xml" "$OFFENDER_FILE" \
-    suite dup 0.010 \
-    suite dup 0.150
+  write_junit_report_with_lines "$report_dir/shard-0.xml" "$OFFENDER_FILE" \
+    suite dup 0.010 10 \
+    suite dup 0.150 42
 
   run env \
     PATH="$STUB_BIN:$PATH" \
@@ -759,9 +808,79 @@ repeat_stub_times() {
     BUN_TEST_TIMING_REPORT_DIR="$report_dir" \
     TIMING_CHANGED_FILES='src/example.ts\n' \
     STUB_RECHECK_DUP_TIMES="0.010 0.150" \
+    STUB_RECHECK_DUP_LINES="10 42" \
     bash "$TIMING_SCRIPT" "$BATS_TEST_TMPDIR/timings.xml"
   [ "$status" -eq 1 ]
   [[ "$output" == *"median 150.00ms of 3 isolated runs"* ]]
+  [[ "$output" != *"Recheck cleared suite.dup #2"* ]]
+}
+
+# Exact-name testcases minted from ONE parameterized declaration share
+# (file, classname, name, line) -- see test/features/utility/DisplayConfig.test.ts:130-132.
+# Keying `seen_run` by line alone kept only the first matching row per recheck
+# report, so a same-line duplicate's slow sample could be cleared by its fast
+# sibling's row landing first. Aggregating the MAXIMUM per identity per report
+# must keep this offender caught (review thread PRRT_kwDOP-GF5M6h9Pky on PR #6997).
+@test "timing gate aggregates same-line duplicate tuples by their maximum duration" {
+  report_dir="$BATS_TEST_TMPDIR/unit-timing-reports"
+  mkdir -p "$report_dir"
+  write_junit_report_with_lines "$report_dir/shard-0.xml" "$OFFENDER_FILE" \
+    suite dup 0.010 130 \
+    suite dup 0.150 130
+
+  run env \
+    PATH="$STUB_BIN:$PATH" \
+    BUN_TEST_TIMING_BASE_REF=origin/main \
+    BUN_TEST_TIMING_REPORT_DIR="$report_dir" \
+    TIMING_CHANGED_FILES='src/example.ts\n' \
+    STUB_RECHECK_DUP_TIMES="0.010 0.150" \
+    STUB_RECHECK_DUP_LINES="130 130" \
+    bash "$TIMING_SCRIPT" "$BATS_TEST_TMPDIR/timings.xml"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"median 150.00ms of 3 isolated runs"* ]]
+  [[ "$output" != *"Recheck cleared suite.dup"* ]]
+}
+
+# A recheck which omits a sibling from the same source-line identity is not a
+# complete sample. Keep the initial offender instead of letting its fast sibling
+# clear it (review thread PRRT_kwDOP-GF5M6h9WUu on PR #6997).
+@test "timing gate fails closed when a same-line duplicate recheck omits a sibling" {
+  report_dir="$BATS_TEST_TMPDIR/unit-timing-reports"
+  mkdir -p "$report_dir"
+  write_junit_report_with_lines "$report_dir/shard-0.xml" "$OFFENDER_FILE" \
+    suite dup 0.010 130 \
+    suite dup 0.150 130
+
+  run env \
+    PATH="$STUB_BIN:$PATH" \
+    BUN_TEST_TIMING_BASE_REF=origin/main \
+    BUN_TEST_TIMING_REPORT_DIR="$report_dir" \
+    TIMING_CHANGED_FILES='src/example.ts\n' \
+    STUB_RECHECK_DUP_TIMES="0.010" \
+    STUB_RECHECK_DUP_LINES="130" \
+    bash "$TIMING_SCRIPT" "$BATS_TEST_TMPDIR/timings.xml"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Test exceeded 100ms: suite.dup"* ]]
+  [[ "$output" != *"Recheck cleared suite.dup"* ]]
+}
+
+@test "timing gate attributes reordered line-identified duplicates across rechecks" {
+  report_dir="$BATS_TEST_TMPDIR/unit-timing-reports"
+  mkdir -p "$report_dir"
+  write_junit_report_with_lines "$report_dir/shard-0.xml" "$OFFENDER_FILE" \
+    suite dup 0.010 10 \
+    suite dup 0.150 42
+
+  run env \
+    PATH="$STUB_BIN:$PATH" \
+    BUN_TEST_TIMING_BASE_REF=origin/main \
+    BUN_TEST_TIMING_REPORT_DIR="$report_dir" \
+    TIMING_CHANGED_FILES='src/example.ts\n' \
+    STUB_RECHECK_DUP_TIMES="0.150 0.010" \
+    STUB_RECHECK_DUP_LINES="42 10" \
+    bash "$TIMING_SCRIPT" "$BATS_TEST_TMPDIR/timings.xml"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Test exceeded 100ms: suite.dup #2 (median 150.00ms of 3 isolated runs)"* ]]
   [[ "$output" != *"Recheck cleared suite.dup #2"* ]]
 }
 
@@ -804,7 +923,7 @@ repeat_stub_times() {
     printf '</testsuites>\n'
   } > "$report_dir/shard-0.xml"
 
-  run_timing_gate_with_recheck_times "0.010 0.012 0.011"
+  STUB_RECHECK_LINE=16 run_timing_gate_with_recheck_times "0.010 0.012 0.011"
   [ "$status" -eq 0 ]
   [[ "$output" == *"Rechecking 1 file(s)"* ]]
   [[ "$output" == *"Recheck cleared suite.slow"* ]]

@@ -278,6 +278,7 @@ import { registerStorageTools } from "./storageTools";
 import { registerPreferenceTools } from "./preferenceTools";
 import { registerAppFileTools } from "./appFileTools";
 import { registerSessionLogTools } from "./sessionLogTools";
+import { registerDownloadsFixtureTools } from "./downloadsFixtureTools";
 import { registerSharedStorageTools } from "./sharedStorageTools";
 import { registerFormTools } from "./formTools";
 import { registerAccessibilityTools } from "./accessibilityTools";
@@ -500,6 +501,7 @@ export function registerMcpTools(daemonMode: boolean): void {
   registerPreferenceTools();
   registerAppFileTools();
   registerSessionLogTools();
+  registerDownloadsFixtureTools();
   registerSharedStorageTools();
   registerFormTools();
   registerAccessibilityTools();

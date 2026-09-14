@@ -82,7 +82,7 @@ export function normalizeSharedStorageRelativePath(path: string): string {
   return normalized;
 }
 
-const sharedStorageFileSchema = z
+export const sharedStorageFileSchema = z
   .object({
     sourcePath: z.string().min(1).optional().describe("Host file path"),
     contentText: z.string().optional().describe("UTF-8 content"),

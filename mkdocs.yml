@@ -103,6 +103,7 @@ nav:
       - "UI tests": using/ui-tests.md
       - "Test prep tools": using/test-prep-tools.md
       - "Session execution logs": using/session-logs.md
+      - "Session Downloads fixtures": using/session-downloads.md
       - "Dynamic Tools": using/dynamic-tools.md
       - "Environment variables": using/environment-variables.md
       - "Screen control": using/screen-control.md

@@ -9,6 +9,13 @@ import { logger } from "../../../utils/logger";
  */
 export const OBSERVE_RESULT_CACHE_TTL_MS = 5 * 60 * 1000;
 export const MAX_OBSERVATION_SCREENSHOT_STATES_PER_DEVICE = 10;
+/**
+ * Backstop on cleared-observation tombstones per device. Only observations
+ * still pending at clear time are tombstoned, and each tombstone retires after
+ * `OBSERVE_RESULT_CACHE_TTL_MS`, so this cap is only reached by pathological
+ * clear storms; insertion-order eviction keeps the newest fences.
+ */
+export const MAX_CLEARED_OBSERVATION_TOMBSTONES_PER_DEVICE = 64;
 
 interface ScreenshotState {
   path: string | null;
@@ -60,8 +67,16 @@ export class InMemoryScreenshotStateStore implements ScreenshotStateStore {
   private states: Map<string, ScreenshotState> = new Map();
   private observationStates: Map<string, Map<string, ScreenshotState>> = new Map();
   private pendingObservationWaiters: Map<string, Map<string, Set<() => void>>> = new Map();
-  /** Observation IDs that were active when their device state was explicitly cleared. */
-  private clearedObservationIds: Map<string, Set<string>> = new Map();
+  /**
+   * Observation IDs that were still pending when their device state was
+   * explicitly cleared, keyed to the clear timestamp. A pending capture may
+   * still issue late callbacks (`updateForObservation` / `endObservation`,
+   * possibly more than one per job) that must not recreate cleared state;
+   * completed observations cannot call back, so they are never tombstoned.
+   * Tombstones retire after `OBSERVE_RESULT_CACHE_TTL_MS`, are consumed by a
+   * `beginObservation` that reuses the id, and are capped per device.
+   */
+  private clearedObservationIds: Map<string, Map<string, number>> = new Map();
   private timer: Timer;
 
   constructor(timer: Timer = defaultTimer) {
@@ -182,23 +197,28 @@ export class InMemoryScreenshotStateStore implements ScreenshotStateStore {
 
   clear(deviceId?: string): void {
     if (deviceId) {
-      this.markActiveObservationsCleared(deviceId);
+      this.markPendingObservationsCleared(deviceId);
       this.states.delete(deviceId);
       this.observationStates.delete(deviceId);
       this.completeAllObservationsForDevice(deviceId);
     } else {
-      for (const clearedDeviceId of new Set([
-        ...this.observationStates.keys(),
-        ...this.pendingObservationWaiters.keys(),
-      ])) {
-        this.markActiveObservationsCleared(clearedDeviceId);
-      }
       this.states.clear();
       this.observationStates.clear();
       for (const pendingDeviceId of [...this.pendingObservationWaiters.keys()]) {
+        this.markPendingObservationsCleared(pendingDeviceId);
         this.completeAllObservationsForDevice(pendingDeviceId);
       }
     }
+  }
+
+  /** Number of live (unexpired) cleared-observation tombstones for a device. */
+  clearedObservationCount(deviceId: string): number {
+    const clearedForDevice = this.clearedObservationIds.get(deviceId);
+    if (!clearedForDevice) {
+      return 0;
+    }
+    this.retireExpiredTombstones(deviceId, clearedForDevice);
+    return clearedForDevice.size;
   }
 
   private findLatest(deviceId?: string): { path: string | null; error: string | null } | null {
@@ -266,7 +286,17 @@ export class InMemoryScreenshotStateStore implements ScreenshotStateStore {
   }
 
   private isClearedObservation(deviceId: string, observationId: string): boolean {
-    return this.clearedObservationIds.get(deviceId)?.has(observationId) ?? false;
+    const clearedForDevice = this.clearedObservationIds.get(deviceId);
+    const clearedAt = clearedForDevice?.get(observationId);
+    if (clearedForDevice === undefined || clearedAt === undefined) {
+      return false;
+    }
+    if (this.timer.now() - clearedAt > OBSERVE_RESULT_CACHE_TTL_MS) {
+      // A capture job cannot call back this late; the fence has done its job.
+      this.clearObservationTombstone(deviceId, observationId);
+      return false;
+    }
+    return true;
   }
 
   private clearObservationTombstone(deviceId: string, observationId: string): void {
@@ -280,19 +310,40 @@ export class InMemoryScreenshotStateStore implements ScreenshotStateStore {
     }
   }
 
-  private markActiveObservationsCleared(deviceId: string): void {
-    const observationIds = new Set([
-      ...(this.observationStates.get(deviceId)?.keys() ?? []),
-      ...(this.pendingObservationWaiters.get(deviceId)?.keys() ?? []),
-    ]);
-    if (observationIds.size === 0) {
+  private markPendingObservationsCleared(deviceId: string): void {
+    const pendingObservationIds = this.pendingObservationWaiters.get(deviceId)?.keys() ?? [];
+    const clearedForDevice = this.clearedObservationIds.get(deviceId) ?? new Map<string, number>();
+    this.retireExpiredTombstones(deviceId, clearedForDevice);
+    const now = this.timer.now();
+    for (const observationId of pendingObservationIds) {
+      // Re-insert so a re-cleared id moves to the newest end of the eviction order.
+      clearedForDevice.delete(observationId);
+      clearedForDevice.set(observationId, now);
+    }
+    while (clearedForDevice.size > MAX_CLEARED_OBSERVATION_TOMBSTONES_PER_DEVICE) {
+      const oldestObservationId = clearedForDevice.keys().next().value;
+      if (oldestObservationId === undefined) {
+        break;
+      }
+      clearedForDevice.delete(oldestObservationId);
+    }
+    if (clearedForDevice.size === 0) {
+      this.clearedObservationIds.delete(deviceId);
       return;
     }
-    const clearedForDevice = this.clearedObservationIds.get(deviceId) ?? new Set<string>();
-    for (const observationId of observationIds) {
-      clearedForDevice.add(observationId);
-    }
     this.clearedObservationIds.set(deviceId, clearedForDevice);
+  }
+
+  private retireExpiredTombstones(deviceId: string, clearedForDevice: Map<string, number>): void {
+    const now = this.timer.now();
+    for (const [observationId, clearedAt] of [...clearedForDevice.entries()]) {
+      if (now - clearedAt > OBSERVE_RESULT_CACHE_TTL_MS) {
+        clearedForDevice.delete(observationId);
+      }
+    }
+    if (clearedForDevice.size === 0) {
+      this.clearedObservationIds.delete(deviceId);
+    }
   }
 
   private completeAllObservationsForDevice(deviceId: string): void {

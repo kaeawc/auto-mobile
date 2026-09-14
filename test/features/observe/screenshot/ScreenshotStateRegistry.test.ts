@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import {
   InMemoryScreenshotStateStore,
+  MAX_CLEARED_OBSERVATION_TOMBSTONES_PER_DEVICE,
   OBSERVE_RESULT_CACHE_TTL_MS,
   getScreenshotStateStore,
   resetScreenshotStateStore,
@@ -181,6 +182,59 @@ describe("InMemoryScreenshotStateStore", () => {
 
     expect(store.getPathForObservation("device-A", "observation-A")).toBeUndefined();
     expect(store.getErrorForObservation("device-A", "observation-A")).toBeUndefined();
+  });
+
+  test("tombstones only observations still pending at clear time", () => {
+    const store = new InMemoryScreenshotStateStore(new FakeTimer());
+
+    store.beginObservation("device-A", "completed-observation");
+    store.updateForObservation("device-A", "completed-observation", "/tmp/done.png");
+    store.beginObservation("device-A", "pending-observation");
+    store.clear("device-A");
+
+    expect(store.clearedObservationCount("device-A")).toBe(1);
+    // The pending job's late callbacks are dropped ...
+    store.updateForObservation("device-A", "pending-observation", "/tmp/late.png");
+    expect(store.getPathForObservation("device-A", "pending-observation")).toBeUndefined();
+    // ... while a completed id (which cannot call back late) is not fenced, so a
+    // fresh write under that id behaves like any other new observation.
+    store.updateForObservation("device-A", "completed-observation", "/tmp/again.png");
+    expect(store.getPathForObservation("device-A", "completed-observation")).toBe("/tmp/again.png");
+  });
+
+  test("retires tombstones once late callbacks can no longer arrive", () => {
+    const timer = new FakeTimer();
+    timer.setCurrentTime(1000);
+    const store = new InMemoryScreenshotStateStore(timer);
+
+    store.beginObservation("device-A", "observation-A");
+    store.clear("device-A");
+    expect(store.clearedObservationCount("device-A")).toBe(1);
+
+    timer.setCurrentTime(1000 + OBSERVE_RESULT_CACHE_TTL_MS + 1);
+    store.updateForObservation("device-A", "observation-A", "/tmp/late.png");
+
+    expect(store.clearedObservationCount("device-A")).toBe(0);
+    expect(store.getPathForObservation("device-A", "observation-A")).toBe("/tmp/late.png");
+  });
+
+  test("caps tombstones per device with insertion-order eviction across repeated clears", () => {
+    const store = new InMemoryScreenshotStateStore(new FakeTimer());
+    const total = MAX_CLEARED_OBSERVATION_TOMBSTONES_PER_DEVICE + 5;
+
+    for (let index = 0; index < total; index++) {
+      store.beginObservation("device-A", `observation-${index}`);
+      store.clear("device-A");
+    }
+
+    expect(store.clearedObservationCount("device-A")).toBe(
+      MAX_CLEARED_OBSERVATION_TOMBSTONES_PER_DEVICE,
+    );
+    // The oldest tombstones were evicted; the newest are still fenced.
+    store.updateForObservation("device-A", "observation-0", "/tmp/evicted.png");
+    expect(store.getPathForObservation("device-A", "observation-0")).toBe("/tmp/evicted.png");
+    store.updateForObservation("device-A", `observation-${total - 1}`, "/tmp/fenced.png");
+    expect(store.getPathForObservation("device-A", `observation-${total - 1}`)).toBeUndefined();
   });
 
   test("allows a new observation to write after a device clear", () => {

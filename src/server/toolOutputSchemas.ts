@@ -1,4 +1,5 @@
 import { z } from "zod/v4";
+import { withJsonSchemaOverride } from "./toolSchemaHelpers";
 
 // Android accessibility returns boolean attributes as strings ("true"/"false")
 // This schema accepts both for compatibility
@@ -492,6 +493,48 @@ export const viewHierarchyResultSchema = z
   })
   .passthrough();
 
+/**
+ * `observationId` is the join key for observation-scoped screenshot resources.
+ * The runtime mints it on every emitted observation (`RealObserveScreen`), so
+ * the advertised output contract lists it as required. The same zod schemas
+ * also validate recorded captures that predate the field, so the parse schema
+ * keeps it optional; {@link requireObservationIdOnTheWire} adds it to the
+ * advertised JSON Schema `required` list without touching runtime validation.
+ */
+const observationIdSchema = z
+  .string()
+  .optional()
+  .describe("Observation-scoped screenshot resource URI join key.");
+
+/**
+ * Advertise `observationId` as required (in property order, so the generated
+ * `required` list is stable) while the zod schema still parses captures that
+ * omit it. Registers by schema identity, so call it on the final exported
+ * schema object.
+ */
+function requireObservationIdOnTheWire(schema: z.ZodTypeAny): void {
+  withJsonSchemaOverride(schema, (jsonSchema) => {
+    const properties = jsonSchema.properties as Record<string, unknown> | undefined;
+    if (!properties || !Object.hasOwn(properties, "observationId")) {
+      return;
+    }
+    const required = new Set(Array.isArray(jsonSchema.required) ? jsonSchema.required : []);
+    required.add("observationId");
+    // Keep `additionalProperties` as the trailing key so the generated
+    // `schemas/tool-definitions.json` stays byte-stable.
+    const { additionalProperties, ...rest } = jsonSchema;
+    for (const key of Object.keys(jsonSchema)) {
+      delete jsonSchema[key];
+    }
+    Object.assign(jsonSchema, rest, {
+      required: Object.keys(properties).filter((key) => required.has(key)),
+    });
+    if (additionalProperties !== undefined) {
+      jsonSchema.additionalProperties = additionalProperties;
+    }
+  });
+}
+
 // This is one arm of the `observation` discriminated union documented on
 // `observationOutputSchema` further down this module (issue #6221 item 4): the
 // FULL-object arm, identified by the ABSENCE of `isDiff` (the diff arm,
@@ -512,7 +555,7 @@ export const viewHierarchyResultSchema = z
 export const observationSummarySchema = z
   .object({
     isDiff: z.literal(false).optional(),
-    observationId: z.string().describe("Observation-scoped screenshot resource URI join key."),
+    observationId: observationIdSchema,
     selectedElements: z.array(selectedElementSchema).optional(),
     focusedElement: elementSchema.optional(),
     accessibilityFocusedElement: elementSchema.optional(),
@@ -545,6 +588,7 @@ export const observationSummarySchema = z
       ),
   })
   .passthrough();
+requireObservationIdOnTheWire(observationSummarySchema);
 
 /**
  * A `MediaView` entry from the `elements.media` array. Real captures carry an
@@ -725,7 +769,7 @@ export const observeDiffSchema = z
   .object({
     keyboard: z.object({ visible: z.literal(true), package: z.string() }).optional(),
     isDiff: z.literal(true),
-    observationId: z.string().describe("Observation-scoped screenshot resource URI join key."),
+    observationId: observationIdSchema,
     skeleton: z
       .array(skeletonElementSchema)
       .describe(
@@ -795,6 +839,7 @@ export const observeDiffSchema = z
       .optional(),
   })
   .passthrough();
+requireObservationIdOnTheWire(observeDiffSchema);
 
 /**
  * `observation`, as embedded on an action tool result (issue #6221 item 4): a
@@ -909,7 +954,7 @@ const perfSnapshotSchema = z.object({
 export const observeResultSchema = z
   .object({
     keyboard: z.object({ visible: z.literal(true), package: z.string() }).optional(),
-    observationId: z.string().describe("Observation-scoped screenshot resource URI join key."),
+    observationId: observationIdSchema,
     screenSize: screenSizeSchema.optional(),
     systemInsets: systemInsetsSchema.optional(),
     insets: observationInsetsSchema.optional(),
@@ -974,6 +1019,7 @@ export const observeResultSchema = z
     observeScope: observeScopeMetadataSchema.optional(),
   })
   .passthrough();
+requireObservationIdOnTheWire(observeResultSchema);
 
 export const observeToolResultSchema = z.union([
   observeResultSchema,

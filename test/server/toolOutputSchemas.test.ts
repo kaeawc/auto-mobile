@@ -11,6 +11,7 @@ import {
   toolOutputArtifactMetadataSchema,
   viewHierarchyResultSchema,
 } from "../../src/server/toolOutputSchemas";
+import { applyJsonSchemaOverride } from "../../src/server/toolSchemaHelpers";
 
 const observeTruncationReasonsDescription =
   "Why a served observation or diff may be incomplete (issues #6601, #6933). " +
@@ -549,12 +550,15 @@ describe("observation arms advertise `settled` (#6866)", () => {
 });
 
 describe("observation arms advertise observationId resource join keys", () => {
-  test("rejects observation payloads that omit the join key", () => {
-    expect(() => observeResultSchema.parse({})).toThrow();
-    expect(() => observationSummarySchema.parse({})).toThrow();
+  test("the parse schema still accepts recorded captures that predate the join key", () => {
+    // Historical fixtures (test/fixtures/observe) were captured before
+    // `observationId` existed; the same zod schema validates them, so parsing
+    // must not require the field even though every emitted observation carries it.
+    expect(() => observeResultSchema.parse({})).not.toThrow();
+    expect(() => observationSummarySchema.parse({})).not.toThrow();
     expect(() =>
       observeDiffSchema.parse({ isDiff: true, skeleton: [], added: [], removed: [], changed: [] }),
-    ).toThrow();
+    ).not.toThrow();
   });
 
   test("full observe, full action summary, and diff schemas parse it as a string", () => {
@@ -574,12 +578,26 @@ describe("observation arms advertise observationId resource join keys", () => {
     ).toBe(observationId);
   });
 
-  test("each advertised schema requires the join key", () => {
+  test("each advertised schema requires the join key on the wire while parsing keeps it optional", () => {
     for (const schema of [observeResultSchema, observationSummarySchema, observeDiffSchema]) {
-      const json = toJSONSchema(schema) as Record<string, any>;
-      expect(json.properties.observationId).toBeDefined();
-      expect(json.properties.observationId.type).toBe("string");
-      expect(json.required ?? []).toContain("observationId");
+      const raw = toJSONSchema(schema) as Record<string, any>;
+      expect(raw.properties.observationId.type).toBe("string");
+      expect(raw.required ?? []).not.toContain("observationId");
+
+      // The registry advertises through the same `applyJsonSchemaOverride` seam.
+      const advertised = toJSONSchema(schema, {
+        override: ({ zodSchema, jsonSchema }) => applyJsonSchemaOverride(zodSchema, jsonSchema),
+      }) as Record<string, any>;
+      expect(advertised.properties.observationId.type).toBe("string");
+      expect(advertised.required).toContain("observationId");
+      // `required` follows property order so the generated tool definitions stay stable.
+      const propertyOrder = Object.keys(advertised.properties);
+      const requiredOrder = (advertised.required as string[]).map((key) =>
+        propertyOrder.indexOf(key),
+      );
+      expect(requiredOrder).toEqual([...requiredOrder].sort((a, b) => a - b));
+      const keyOrder = Object.keys(advertised);
+      expect(keyOrder.indexOf("required")).toBeLessThan(keyOrder.indexOf("additionalProperties"));
     }
   });
 });

@@ -98,8 +98,18 @@ interface DaemonDeferredRecoverySweepInternals {
 
 interface DevicePoolRecoveryInternals {
   adbServerResetQuarantinedSessions: Set<string>;
+  adbServerResetRecoveryReservations: Map<
+    string,
+    { sessionId?: string; recoveryGeneration?: number; resolve(): void }
+  >;
   recoveringAndroidImages: Map<string, DeviceInfo>;
-  recoveringSessionLosses: Map<string, unknown>;
+  recoveringSessionLosses: Map<string, { generation: number }>;
+  startAndroidRecoveryRecord(
+    sessionId: string,
+    details: { deviceId: string; avdName?: string },
+    reservations: readonly string[],
+    replace?: boolean,
+  ): { generation: number };
   completeEmulatorLossRecovery(
     incidentId: string | undefined,
     outcome: "recovered" | "exhausted" | "not-attempted",
@@ -555,6 +565,48 @@ test("release during shutdown confirmation finalizes session recovery instead of
 
     const releaseLease = await pool.reserveAndroidStartupLease(original.name, true);
     await releaseLease();
+  } finally {
+    sessions.stopCleanupTimer();
+  }
+});
+
+test("an old ADB-reset cohort sweep cannot clear a newer recovery record", async () => {
+  const { sessions, pool, captured } = await setup();
+  const internals = pool as unknown as DevicePoolRecoveryInternals;
+  try {
+    const oldRecord = internals.startAndroidRecoveryRecord(
+      "session",
+      { deviceId: original.deviceId, avdName: original.name },
+      ["quarantine", "loss", "reset-cohort"],
+      true,
+    );
+    captured.adbServerResetSessionId = "session";
+    captured.adbServerResetSession = sessions.getSession("session") ?? undefined;
+    captured.adbServerResetRecoveryGeneration = oldRecord.generation;
+    let resolved = false;
+    internals.adbServerResetRecoveryReservations.set(original.name, {
+      sessionId: "session",
+      recoveryGeneration: oldRecord.generation,
+      resolve: () => {
+        resolved = true;
+      },
+    });
+
+    const newRecord = internals.startAndroidRecoveryRecord(
+      "session",
+      { deviceId: "emulator-5560", avdName: original.name },
+      ["quarantine", "loss", "reset-cohort"],
+      true,
+    );
+    internals.adbServerResetRecoveryReservations.get(original.name)!.recoveryGeneration =
+      newRecord.generation;
+
+    await pool.releaseAdbServerResetCohortReservations([captured]);
+
+    expect(internals.recoveringSessionLosses.get("session")?.generation).toBe(newRecord.generation);
+    expect(internals.adbServerResetQuarantinedSessions.has("session")).toBe(true);
+    expect(internals.adbServerResetRecoveryReservations.has(original.name)).toBe(true);
+    expect(resolved).toBe(false);
   } finally {
     sessions.stopCleanupTimer();
   }

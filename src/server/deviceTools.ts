@@ -5220,6 +5220,9 @@ async function reserveRecoveredDeviceForReadiness(
         boot.device.deviceId,
         boot.device,
         boot.sourceImage?.name ?? boot.device.name,
+        undefined,
+        undefined,
+        boot.device.platform === "android",
       ),
     );
   }

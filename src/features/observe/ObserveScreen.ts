@@ -519,6 +519,20 @@ export class RealObserveScreen implements ObserveScreen {
     return getScreenshotStateStore().getError(deviceId);
   }
 
+  static getRecentCachedScreenshotPathForObservation(
+    deviceId: string,
+    observationId: string,
+  ): string | undefined {
+    return getScreenshotStateStore().getPathForObservation(deviceId, observationId);
+  }
+
+  static getRecentCachedScreenshotErrorForObservation(
+    deviceId: string,
+    observationId: string,
+  ): string | undefined {
+    return getScreenshotStateStore().getErrorForObservation(deviceId, observationId);
+  }
+
   /**
    * Clear the in-memory cache (and disk cache).
    * @param deviceId - If provided, only clears cache for that device. Otherwise clears all.
@@ -551,12 +565,13 @@ export class RealObserveScreen implements ObserveScreen {
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
     dependencies?: ObserveScreenDependencies,
     timer: Timer = defaultTimer,
+    idGenerator: IdGenerator = defaultIdGenerator,
   ) {
     this.device = device;
     this.adbFactory = adbFactory;
     this.adb = adbFactory.create(device);
     this.timer = timer;
-    this.idGenerator = dependencies?.idGenerator ?? defaultIdGenerator;
+    this.idGenerator = idGenerator;
 
     // Data sources (either injected or default)
     this.viewHierarchy = dependencies?.viewHierarchy ?? new ViewHierarchy(device, this.adbFactory);
@@ -668,23 +683,13 @@ export class RealObserveScreen implements ObserveScreen {
         return cached;
       }
       logger.debug(`[OBSERVE_CACHE] No cached observe result available (${duration}ms)`);
-      return {
-        updatedAt: new Date().toISOString(),
-        screenSize: { width: 0, height: 0 },
-        systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-        error: "No cached observe result available",
-      };
+      return { ...this.createBaseResult(), error: "No cached observe result available" };
     } catch (error) {
       const duration = this.timer.now() - startTime;
       logger.warn(
         `[OBSERVE_CACHE] Error getting cached observe result after ${duration}ms: ${error}`,
       );
-      return {
-        updatedAt: new Date().toISOString(),
-        screenSize: { width: 0, height: 0 },
-        systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-        error: "Failed to retrieve cached observe result",
-      };
+      return { ...this.createBaseResult(), error: "Failed to retrieve cached observe result" };
     }
   }
 
@@ -766,9 +771,9 @@ export class RealObserveScreen implements ObserveScreen {
       // (the audit needs the screenshot file on disk before it runs).
       if (!skipScreenshot) {
         if (serverConfig.getAccessibilityAuditConfig()) {
-          await this.screenshotRecorder.capture(perf, signal);
+          await this.screenshotRecorder.capture(result.observationId, perf, signal);
         } else {
-          this.screenshotRecorder.start(perf, signal);
+          this.screenshotRecorder.start(result.observationId, perf, signal);
         }
       }
 
@@ -893,11 +898,7 @@ export class RealObserveScreen implements ObserveScreen {
         undefined,
         `Observation failed: ${errorMessage}`,
       );
-      const fallback: ObserveResult = {
-        updatedAt: new Date().toISOString(),
-        screenSize: { width: 0, height: 0 },
-        systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-      };
+      const fallback = this.createBaseResult();
       appendObserveError(fallback, {
         phase: "critical",
         message: "Observation failed due to device access error",
@@ -924,7 +925,8 @@ export class RealObserveScreen implements ObserveScreen {
     signal?: AbortSignal,
     observation?: ObserveResult,
   ): Promise<void> {
-    await this.screenshotRecorder.captureFresh(perf, signal);
+    const screenshotObservation = observation ?? this.createBaseResult();
+    await this.screenshotRecorder.captureFresh(screenshotObservation.observationId, perf, signal);
     if (observation) {
       await this.runAccessibilityAudit(observation, perf);
     }
@@ -1037,8 +1039,7 @@ export class RealObserveScreen implements ObserveScreen {
     const currentResult = cacheStore.getRecentInMemoryForDevice(this.device.deviceId);
     const currentCachedAt = cacheStore.getRecentCachedAtForDevice(this.device.deviceId);
     if (
-      currentResult?.observationId !== undefined &&
-      observeResult.observationId !== undefined &&
+      currentResult !== undefined &&
       currentResult.observationId !== observeResult.observationId &&
       currentCachedAt !== undefined &&
       currentCachedAt > resolvedCachedAt

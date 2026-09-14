@@ -10,6 +10,7 @@ import { FakeObserveCacheStore } from "../../fakes/FakeObserveCacheStore";
 import { FakeViewHierarchy } from "../../fakes/FakeViewHierarchy";
 import { resetObserveCacheStore } from "../../../src/features/observe/cache/ObserveCacheRegistry";
 import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
+import { defaultTimer } from "../../../src/utils/SystemTimer";
 
 describe("ObserveScreen", function () {
   describe("Unit Tests for Extracted Methods", function () {
@@ -57,9 +58,13 @@ describe("ObserveScreen", function () {
 
     test("mints one stable observation identity per base result", function () {
       const idGenerator = new CountingIdGenerator("observation");
-      const screen = new RealObserveScreen(mockDevice, new FakeAdbClientFactory(fakeAdb), {
+      const screen = new RealObserveScreen(
+        mockDevice,
+        new FakeAdbClientFactory(fakeAdb),
+        undefined,
+        defaultTimer,
         idGenerator,
-      });
+      );
 
       expect(screen.createBaseResult().observationId).toBe("observation-1");
       expect(screen.createBaseResult().observationId).toBe("observation-2");

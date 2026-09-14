@@ -990,6 +990,29 @@ describe("finalizeToolResponse", () => {
       expect(parsed.observation.freshness).toEqual(obsSc.freshness);
     });
 
+    test("a diffed action observation carries its observationId resource join key", () => {
+      const { store } = makeStore();
+      finalizeToolResponse(createStructuredToolResponse(sameScreenObserve()), {
+        name: "observe",
+        sessionUuid: "s1",
+        baselineStore: store,
+      });
+
+      const next = { ...sameScreenObserve(), observationId: "post-action-observation" };
+      (next.viewHierarchy!.hierarchy.node as any).node[0].checked = "true";
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: next }),
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
+      );
+
+      const observation = (finalized.structuredContent as any).observation;
+      expect(observation.isDiff).toBe(true);
+      expect(observation.observationId).toBe(next.observationId);
+      expect(JSON.parse(finalized.content[0].text).observation.observationId).toBe(
+        next.observationId,
+      );
+    });
+
     test("a diffed observation carries `accessibilityAuditSkipped` with the same shape as full mode (issue #6926)", () => {
       const { store } = makeStore();
       const withAccessibilityAuditSkipped = (): ObserveResult => ({
@@ -1023,6 +1046,7 @@ describe("finalizeToolResponse", () => {
       const freshness = { actualTimestamp: 1000, ageMs: 5, isFresh: true };
       const withPassthroughMetadata = (): ObserveResult => ({
         ...sameScreenObserve(),
+        observationId: "passthrough-observation",
         freshness,
         settled: true,
         accessibilityAuditSkipped: "settled_capture_adopted",
@@ -1048,7 +1072,6 @@ describe("finalizeToolResponse", () => {
         expect(obsSc[field]).toEqual(next[field]);
       }
     });
-
     // A diff REPLACES the projected observation, so the truncation provenance
     // the skeleton projection lifts to the top level (issue #6601) is dropped
     // with it — review thread PRRT_kwDOP-GF5M6h4v0N on PR #6912. The agent then

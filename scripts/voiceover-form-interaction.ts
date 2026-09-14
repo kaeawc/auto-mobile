@@ -114,6 +114,7 @@ function makeFormScreenObserve(): ObserveResult {
   };
 
   return {
+    observationId: "voiceover-form-initial",
     updatedAt: Date.now(),
     screenSize: { width: 390, height: 844 },
     systemInsets: { top: 59, bottom: 34, left: 0, right: 0 },
@@ -185,6 +186,7 @@ function makeAfterNameInputObserve(): ObserveResult {
   };
 
   return {
+    observationId: "voiceover-form-name-entered",
     updatedAt: Date.now(),
     screenSize: { width: 390, height: 844 },
     systemInsets: { top: 59, bottom: 34, left: 0, right: 0 },
@@ -259,6 +261,7 @@ function makeAfterTermsToggleObserve(): ObserveResult {
   };
 
   return {
+    observationId: "voiceover-form-terms-enabled",
     updatedAt: Date.now(),
     screenSize: { width: 390, height: 844 },
     systemInsets: { top: 59, bottom: 34, left: 0, right: 0 },
@@ -293,6 +296,7 @@ function makeConfirmationObserve(): ObserveResult {
   };
 
   return {
+    observationId: "voiceover-form-confirmation",
     updatedAt: Date.now(),
     screenSize: { width: 390, height: 844 },
     systemInsets: { top: 59, bottom: 34, left: 0, right: 0 },

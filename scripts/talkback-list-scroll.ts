@@ -92,6 +92,7 @@ function makeListScreenObserve(): ObserveResult {
 
   // TalkBack places its cursor on Item 1 when the screen loads.
   return {
+    observationId: "talkback-list-initial",
     updatedAt: Date.now(),
     screenSize: { width: 720, height: 1280 },
     systemInsets: { top: 48, bottom: 80, left: 0, right: 0 },
@@ -177,6 +178,7 @@ function makeAfterScrollObserve(): ObserveResult {
   const visibleItems = [11, 12, 13, 14, 15].map((n) => makeListItem(n));
 
   return {
+    observationId: "talkback-list-after-scroll",
     updatedAt: Date.now(),
     screenSize: { width: 720, height: 1280 },
     systemInsets: { top: 48, bottom: 80, left: 0, right: 0 },
@@ -230,6 +232,7 @@ function makeDetailScreenObserve(): ObserveResult {
   };
 
   return {
+    observationId: "talkback-list-detail",
     updatedAt: Date.now(),
     screenSize: { width: 720, height: 1280 },
     systemInsets: { top: 48, bottom: 80, left: 0, right: 0 },

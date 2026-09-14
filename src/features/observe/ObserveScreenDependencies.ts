@@ -12,16 +12,12 @@ import type { PerformanceAuditor } from "./audits/PerformanceAuditor";
 import type { AccessibilityAuditor } from "./audits/AccessibilityAuditor";
 import type { AccessibilityStateDetector } from "./audits/AccessibilityStateDetector";
 import type { HierarchyPlatformValidator } from "./HierarchyPlatformValidator";
-import type { IdGenerator } from "../../utils/IdGenerator";
 
 /**
  * Dependencies for ObserveScreen that can be injected for testing.
  * All properties are optional - defaults will be created if not provided.
  */
 export interface ObserveScreenDependencies {
-  /** Stable identity source for each observation capture. */
-  idGenerator?: IdGenerator;
-
   // Data sources
   viewHierarchy?: ViewHierarchy;
   window?: Window;

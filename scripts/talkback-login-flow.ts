@@ -102,6 +102,7 @@ function makeLoginScreenObserve(): ObserveResult {
   };
 
   return {
+    observationId: "talkback-login-initial",
     updatedAt: Date.now(),
     screenSize: { width: 720, height: 1280 },
     systemInsets: { top: 48, bottom: 96, left: 0, right: 0 },
@@ -148,6 +149,7 @@ function makeUsernameFieldFocusedObserve(): ObserveResult {
   };
 
   return {
+    observationId: "talkback-login-username-focused",
     updatedAt: Date.now(),
     screenSize: { width: 720, height: 1280 },
     systemInsets: { top: 48, bottom: 96, left: 0, right: 0 },
@@ -186,6 +188,7 @@ function makePostLoginObserve(): ObserveResult {
 
   // On navigation to a new screen, TalkBack auto-focuses the first element.
   return {
+    observationId: "talkback-login-complete",
     updatedAt: Date.now(),
     screenSize: { width: 720, height: 1280 },
     systemInsets: { top: 48, bottom: 96, left: 0, right: 0 },

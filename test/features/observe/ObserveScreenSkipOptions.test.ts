@@ -115,7 +115,7 @@ function createObserveScreen(foregroundActivity: string | null = "com.example/.M
     new FakeAdbClientFactory(new FakeAdbExecutor()),
     {
       cacheStore: new FakeObserveCacheStore(fakeTimer),
-      screenshotStateStore: new FakeScreenshotStateStore(),
+      screenshotStateStore: new FakeScreenshotStateStore(fakeTimer),
       screenshotRecorder: fakeScreenshotRecorder,
       hierarchyCollector: new FakeHierarchyCollector(
         foregroundActivity,

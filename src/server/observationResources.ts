@@ -1,4 +1,9 @@
-import { ResourceRegistry, ResourceContent, type ResourceReadContext } from "./resourceRegistry";
+import {
+  getRequestedResourceUri,
+  ResourceRegistry,
+  ResourceContent,
+  type ResourceReadContext,
+} from "./resourceRegistry";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import { logger } from "../utils/logger";
 import { stringifyToolResponse } from "../utils/toolUtils";
@@ -12,6 +17,7 @@ import * as realFs from "fs/promises";
 import { errorMessage } from "../utils/describeUnknownError";
 import { OPERATION_CANCELLED_MESSAGE } from "../utils/constants";
 import { detectImageMimeType } from "../utils/screenshot/imageHeaderDimensions";
+import { getScreenshotStateStore } from "../features/observe/screenshot/ScreenshotStateRegistry";
 
 interface ScreenshotFileSystem {
   stat(path: string): Promise<{ isFile(): boolean }>;
@@ -41,6 +47,7 @@ interface SessionScreenshotResourceDependencies {
 
 let nextSessionIncarnation = 0;
 const sessionIncarnations = new WeakMap<object, number>();
+const SCREENSHOT_CAPTURE_WAIT_TIMEOUT_MS = 10_000;
 
 function getSessionIncarnation(session: object): number {
   const existing = sessionIncarnations.get(session);
@@ -115,6 +122,8 @@ function screenshotMimeType(path: string, imageBuffer: Buffer): string {
 export const RESOURCE_URIS = {
   LATEST_OBSERVATION: "automobile:observation/latest",
   LATEST_SCREENSHOT: "automobile:observation/latest/screenshot",
+  /** This immutable device-and-capture identity is readable without session ownership. */
+  OBSERVATION_SCREENSHOT: "automobile:observation/{deviceId}/{observationId}/screenshot",
   SESSION_OBSERVATION: "automobile:observation/session/{sessionUuid}/latest",
   SESSION_SCREENSHOT: "automobile:observation/session/{sessionUuid}/latest/screenshot",
   FRESH_SESSION_SCREENSHOT: "automobile:device-session/{sessionUuid}/screenshot",
@@ -131,9 +140,10 @@ export const RESOURCE_URIS = {
 // The pair is consequently a best-effort point-in-time snapshot, not a hard
 // cross-read guarantee: a new observation can land in the small window between
 // the two reads. Callers that need a guaranteed hierarchy/screenshot match from
-// exactly one device need an observation-id-scoped resource, which does not
-// exist yet — tracked as a follow-up; see the follow-up issue linked from PR
-// #6914.
+// exactly one device can use the observation-id-scoped screenshot resource.
+// It is keyed by immutable device and capture identities, is readable by any
+// client (unlike session-scoped resources), and errors when that observation
+// has been superseded or evicted from the device cache.
 
 function resolveLatestScreenshotDeviceId(): string | undefined {
   return RealObserveScreen.getRecentCachedObservation()?.deviceId;
@@ -266,6 +276,178 @@ async function getLatestScreenshot(): Promise<ResourceContent> {
       text: JSON.stringify(
         {
           error: `Failed to retrieve screenshot: ${error}`,
+        },
+        null,
+        2,
+      ),
+    };
+  }
+}
+
+function observationScreenshotUnknownError(
+  uri: string,
+  deviceId: string,
+  observationId: string,
+): ResourceContent {
+  return {
+    uri,
+    mimeType: "application/json",
+    text: JSON.stringify(
+      {
+        error: `Observation id ${observationId} is unknown or has been superseded or evicted by a newer observation for device ${deviceId}. Call the 'observe' tool again.`,
+      },
+      null,
+      2,
+    ),
+  };
+}
+
+function observationScreenshotNotReadyError(uri: string, observationId: string): ResourceContent {
+  return {
+    uri,
+    mimeType: "application/json",
+    text: JSON.stringify(
+      {
+        error: `Screenshot for observation id ${observationId} is not ready yet. Call the resource again after the capture completes.`,
+      },
+      null,
+      2,
+    ),
+  };
+}
+
+function observationScreenshotMalformedUriError(uri: string): ResourceContent {
+  return {
+    uri,
+    mimeType: "application/json",
+    text: JSON.stringify(
+      { error: "Malformed resource URI: a path segment is not valid percent-encoding." },
+      null,
+      2,
+    ),
+  };
+}
+
+function safeDecodeSegment(value: string): string | null {
+  try {
+    return decodeURIComponent(value);
+  } catch (error) {
+    // A malformed client URI is expected input validation, so preserve the typed envelope.
+    logger.debug(`[ObservationResources] Malformed URI segment '${value}': ${error}`);
+    return null;
+  }
+}
+
+function matchesObservationId(deviceId: string, observationId: string): boolean {
+  const cachedResult = RealObserveScreen.getRecentCachedResultForDevice(deviceId);
+  return cachedResult?.observationId === observationId;
+}
+
+async function waitForObservationScreenshot(
+  uri: string,
+  deviceId: string,
+  observationId: string,
+): Promise<ResourceContent | undefined> {
+  const store = getScreenshotStateStore();
+  await store.waitForObservation(deviceId, observationId, SCREENSHOT_CAPTURE_WAIT_TIMEOUT_MS);
+  if (!matchesObservationId(deviceId, observationId)) {
+    return observationScreenshotUnknownError(uri, deviceId, observationId);
+  }
+  if (store.isObservationPending(deviceId, observationId)) {
+    return observationScreenshotNotReadyError(uri, observationId);
+  }
+  return undefined;
+}
+
+// Resolves an immutable observation's cached screenshot without waiting on an
+// unrelated capture for the same device.
+async function resolveObservationScreenshotPath(
+  uri: string,
+  deviceId: string,
+  observationId: string,
+): Promise<{ path: string | undefined } | ResourceContent> {
+  let path = RealObserveScreen.getRecentCachedScreenshotPathForObservation(deviceId, observationId);
+  if (!matchesObservationId(deviceId, observationId)) {
+    return observationScreenshotUnknownError(uri, deviceId, observationId);
+  }
+
+  if (path) {
+    return { path };
+  }
+
+  const pendingResult = await waitForObservationScreenshot(uri, deviceId, observationId);
+  if (pendingResult) {
+    return pendingResult;
+  }
+  path = RealObserveScreen.getRecentCachedScreenshotPathForObservation(deviceId, observationId);
+  if (!matchesObservationId(deviceId, observationId)) {
+    return observationScreenshotUnknownError(uri, deviceId, observationId);
+  }
+  return { path };
+}
+
+// Handler for the screenshot captured alongside one immutable device observation.
+async function getObservationScreenshot(params: Record<string, string>): Promise<ResourceContent> {
+  const uri =
+    getRequestedResourceUri(params) ??
+    `automobile:observation/${params.deviceId}/${params.observationId}/screenshot`;
+  const deviceId = safeDecodeSegment(params.deviceId);
+  const observationId = safeDecodeSegment(params.observationId);
+
+  if (deviceId === null || observationId === null) {
+    return observationScreenshotMalformedUriError(uri);
+  }
+
+  try {
+    if (!matchesObservationId(deviceId, observationId)) {
+      return observationScreenshotUnknownError(uri, deviceId, observationId);
+    }
+
+    const screenshotPathResult = await resolveObservationScreenshotPath(
+      uri,
+      deviceId,
+      observationId,
+    );
+    if (!("path" in screenshotPathResult)) {
+      return screenshotPathResult;
+    }
+    const { path: screenshotPath } = screenshotPathResult;
+
+    if (!screenshotPath) {
+      const screenshotError = RealObserveScreen.getRecentCachedScreenshotErrorForObservation(
+        deviceId,
+        observationId,
+      );
+      const errorMessage = screenshotError
+        ? `No screenshot available for observation id ${observationId}: ${screenshotError}`
+        : "No screenshot available. Call the 'observe' tool again to capture a screenshot.";
+      return {
+        uri,
+        mimeType: "application/json",
+        text: JSON.stringify({ error: errorMessage }, null, 2),
+      };
+    }
+
+    const imageBuffer = await screenshotFileSystem.readFile(screenshotPath);
+    if (!matchesObservationId(deviceId, observationId)) {
+      return observationScreenshotUnknownError(uri, deviceId, observationId);
+    }
+
+    return {
+      uri,
+      mimeType: screenshotMimeType(screenshotPath, imageBuffer),
+      blob: imageBuffer.toString("base64"),
+    };
+  } catch (error) {
+    logger.error(
+      `[ObservationResources] Failed to get screenshot for observation ${observationId} on device ${deviceId}: ${error}`,
+    );
+    return {
+      uri,
+      mimeType: "application/json",
+      text: JSON.stringify(
+        {
+          error: `Failed to retrieve screenshot for observation id ${observationId}: ${error}`,
         },
         null,
         2,
@@ -650,6 +832,16 @@ export function registerObservationResources(): void {
     "The most recent screen capture as a PNG or WebP image. Updated automatically after each observe() call.",
     "image/png",
     getLatestScreenshot,
+  );
+
+  // This template has no read context: a known observation identity is readable
+  // by any client, but becomes unavailable after a newer device observation evicts it.
+  ResourceRegistry.registerTemplate(
+    RESOURCE_URIS.OBSERVATION_SCREENSHOT,
+    "Observation Screenshot",
+    "Screen capture paired with one immutable device observation identity. Readable by any client and unavailable after that observation is superseded or evicted.",
+    "image/png",
+    getObservationScreenshot,
   );
 
   // Register session-scoped observation template

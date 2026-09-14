@@ -144,11 +144,11 @@ export interface ScreenIdentity {
  */
 export interface ObserveResult {
   /**
-   * Stable host-side identity for this single observation capture. It remains
+   * Server-generated identity for this exact observe invocation. It remains
    * attached while deferred post-processing enriches the same result, allowing
    * cache writes to update that capture in place.
    */
-  observationId?: string;
+  observationId: string;
 
   /**
    * Timestamp when the screen state was captured on the device (milliseconds since epoch)

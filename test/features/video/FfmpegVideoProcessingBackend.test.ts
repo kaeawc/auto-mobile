@@ -535,6 +535,53 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
     expect(probeBudgets).toEqual([3000]);
   });
 
+  test("reports shutdown cancellation from the terminal simulator diagnostic probe (#6903)", async function () {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const controller = new AbortController();
+    let diagnosticStarted = false;
+    let probeSignal: AbortSignal | undefined;
+    const simctl = {
+      isAvailable: async () => true,
+      startCommandArgs: async () => makeCaptureChild(false, timer),
+      executeCommandArgs: async (_args: string[], _timeoutMs?: number, signal?: AbortSignal) => {
+        diagnosticStarted = true;
+        probeSignal = signal;
+        return await new Promise<never>((_resolve, reject) => {
+          const abort = () => reject(signal?.reason ?? new Error("diagnostic probe aborted"));
+          if (signal?.aborted) {
+            abort();
+            return;
+          }
+          signal?.addEventListener("abort", abort, { once: true });
+        });
+      },
+    } as unknown as SimCtl;
+    backend = new FfmpegVideoProcessingBackend(
+      undefined,
+      () => simctl,
+      undefined,
+      undefined,
+      undefined,
+      timer,
+    );
+    (backend as any).ensureFfmpegAvailable = async () => {};
+    (backend as any).iosRecordingStartTimeoutMs = 25;
+    (backend as any).iosRecordingStartMaxAttempts = 1;
+    mockConfig.device = { ...mockDevice, platform: "ios", deviceId: "ios-diagnostic-abort-udid" };
+    mockConfig.abortSignal = controller.signal;
+
+    const starting = backend.start(mockConfig);
+    for (let attempt = 0; attempt < 20 && !diagnosticStarted; attempt++) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    expect(diagnosticStarted).toBe(true);
+    expect(probeSignal).toBe(controller.signal);
+    controller.abort(new Error("shutdown requested"));
+
+    await expect(starting).rejects.toThrow("simulator state probe cancelled by shutdown");
+  });
+
   test("still reports a definitive simctl failure as an unavailable state (#6857)", async function () {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();

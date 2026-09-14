@@ -265,6 +265,51 @@ EOF
   grep -Fqx -- '--only shellcheck,shell-portability,shell-sete,stdlib-first,helper-consumer-four' "${FAST_LOG}"
 }
 
+@test "an SC1091 helper in an ampersand checkout selects its consumer" {
+  local ampersand_root
+  ampersand_root="${TEST_ROOT}/a&b"
+  mkdir -p "${ampersand_root}/scripts/lib"
+  cp "${REPO_ROOT}/scripts/prepush-shell.sh" "${ampersand_root}/scripts/prepush-shell.sh"
+  cp "${REPO_ROOT}/scripts/lib/vcs-diff.sh" "${ampersand_root}/scripts/lib/vcs-diff.sh"
+  chmod +x "${ampersand_root}/scripts/prepush-shell.sh"
+  cat > "${ampersand_root}/scripts/all_fast_validate_checks.sh" <<'EOF'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--list-checks" ]]; then
+  printf 'helper-consumer-four\tscripts/check-helper-consumer-four.sh\n'
+  exit 0
+fi
+printf '%s\n' "$*" >> "${PREPUSH_FAST_LOG}"
+EOF
+  chmod +x "${ampersand_root}/scripts/all_fast_validate_checks.sh"
+  cat > "${ampersand_root}/scripts/check-helper-consumer-four.sh" <<'EOF'
+#!/usr/bin/env bash
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck disable=SC1091 # Resolved relative to this script's location.
+source "$ROOT_DIR/scripts/lib/shared-helper.sh"
+EOF
+  printf '%s\n' 'helper baseline' > "${ampersand_root}/scripts/lib/shared-helper.sh"
+
+  cd -- "${ampersand_root}"
+  git init -q
+  git config user.email test@example.com
+  git config user.name test
+  git config commit.gpgsign false
+  printf '%s\n' baseline > README.md
+  git add README.md scripts
+  git commit -qm baseline
+  git branch -M main
+  git branch base
+  git checkout -qb feature
+  printf '%s\n' 'helper changed' > scripts/lib/shared-helper.sh
+  git add scripts/lib/shared-helper.sh
+  git commit -qm "change helper"
+
+  run bash scripts/prepush-shell.sh --base base
+
+  [ "${status}" -eq 0 ]
+  grep -Fqx -- '--only shellcheck,shell-portability,shell-sete,stdlib-first,helper-consumer-four' "${FAST_LOG}"
+}
+
 @test "a jj workspace uses the VCS diff seam without a git checkout" {
   install_registry_stub
   rm -rf "${TEST_ROOT}/.git"

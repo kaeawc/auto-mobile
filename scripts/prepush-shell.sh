@@ -106,12 +106,32 @@ resolved_shellcheck_disable_source_path() {
   local dots_suffix variable_value
   local bash_source_token="\${BASH_SOURCE[0]}"
   local bash_source_dir_expr="\$(dirname \"\${BASH_SOURCE[0]}\")"
+  local project_root_braced="\${PROJECT_ROOT}"
+  local project_root_token="\$PROJECT_ROOT"
   local assignment_prefix="\$(cd \"\$(dirname \"\${BASH_SOURCE[0]}\")"
   local assignment_suffix='" && pwd)'
   local -a previous_lines=()
   local -a resolved_variable_names=()
   local -a resolved_variable_values=()
   local idx
+
+  # Bash 5.2+ expands '&' in // replacement operands; concatenation avoids that
+  # unsafe behavior without managing patsub_replacement shell-option state.
+  replace_literal_all() {
+    local haystack="$1" needle="$2" replacement="$3"
+    local result="" before remainder
+    [[ -n "${needle}" ]] || {
+      printf '%s\n' "${haystack}"
+      return 0
+    }
+    while [[ "${haystack}" == *"${needle}"* ]]; do
+      before="${haystack%%"${needle}"*}"
+      remainder="${haystack#*"${needle}"}"
+      result+="${before}${replacement}"
+      haystack="${remainder}"
+    done
+    printf '%s%s\n' "${result}" "${haystack}"
+  }
 
   while IFS= read -r line || [[ -n "${line}" ]]; do
     if [[ "${awaiting_source}" -eq 1 && ! "${line}" =~ ^[[:space:]]*$ ]]; then
@@ -164,16 +184,16 @@ resolved_shellcheck_disable_source_path() {
   unresolved_expr="${source_expr//"${bash_source_dir_expr}"/}"
   unresolved_expr="${unresolved_expr//\$\{PROJECT_ROOT\}/}"
   unresolved_expr="${unresolved_expr//\$PROJECT_ROOT/}"
-  resolved_expr="${source_expr//"${bash_source_dir_expr}"/${check_script_dir_path}}"
-  resolved_expr="${resolved_expr//\$\{PROJECT_ROOT\}/${PROJECT_ROOT}}"
-  resolved_expr="${resolved_expr//\$PROJECT_ROOT/${PROJECT_ROOT}}"
+  resolved_expr="$(replace_literal_all "${source_expr}" "${bash_source_dir_expr}" "${check_script_dir_path}")"
+  resolved_expr="$(replace_literal_all "${resolved_expr}" "${project_root_braced}" "${PROJECT_ROOT}")"
+  resolved_expr="$(replace_literal_all "${resolved_expr}" "${project_root_token}" "${PROJECT_ROOT}")"
   for idx in "${!resolved_variable_names[@]}"; do
     variable="${resolved_variable_names[$idx]}"
     variable_value="${resolved_variable_values[$idx]}"
     unresolved_expr="${unresolved_expr//\$\{${variable}\}/}"
     unresolved_expr="${unresolved_expr//\$${variable}/}"
-    resolved_expr="${resolved_expr//\$\{${variable}\}/${variable_value}}"
-    resolved_expr="${resolved_expr//\$${variable}/${variable_value}}"
+    resolved_expr="$(replace_literal_all "${resolved_expr}" "\${${variable}}" "${variable_value}")"
+    resolved_expr="$(replace_literal_all "${resolved_expr}" "\$${variable}" "${variable_value}")"
   done
   if [[ "${unresolved_expr}" == *'$'* ]]; then
     printf 'Unable to resolve shellcheck source path in %s: %s\n' "${check_script}" "${source_expr}" >&2

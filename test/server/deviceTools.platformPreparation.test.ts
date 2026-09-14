@@ -591,6 +591,62 @@ describe("platform device preparation tools", () => {
     expect(result.deviceIdentity).toMatchObject({ avdName: exact.name, adbSerial: exact.deviceId });
   });
 
+  test.each([false, true])(
+    "getAndroid rejects ambiguous AVD name regardless of discovery order, reverse=%s",
+    async (reverse) => {
+      const devices: BootedDevice[] = [
+        { name: "Duplicate_AVD", platform: "android", deviceId: "emulator-5554" },
+        { name: "Duplicate_AVD", platform: "android", deviceId: "emulator-5556" },
+      ];
+      deviceUtils.setBootedDevices("android", reverse ? devices.toReversed() : devices);
+      deviceUtils.setDeviceImages("android", [
+        { name: "Duplicate_AVD", platform: "android", isRunning: true },
+      ]);
+
+      const failure = await callTool("getAndroid", { avdName: "Duplicate_AVD" }).catch(
+        (error: unknown) => error,
+      );
+
+      expect(failure).toBeInstanceOf(ActionableError);
+      expect((failure as ActionableError).message).toContain("identity_conflict");
+      expect((failure as ActionableError).message).toContain("emulator-5554");
+      expect((failure as ActionableError).message).toContain("emulator-5556");
+      expect(deviceUtils.wasMethodCalled("waitForDeviceReady")).toBe(false);
+    },
+  );
+
+  test("getAndroid does not let a pooled AVD hide a competing live serial", async () => {
+    const pooled: BootedDevice = {
+      name: "Duplicate_AVD",
+      platform: "android",
+      deviceId: "emulator-5554",
+    };
+    sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      deviceUtils,
+      new DefaultRetryExecutor(timer),
+    );
+    await pool.addDevice(pooled);
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    deviceUtils.setBootedDevices("android", [
+      pooled,
+      { name: pooled.name, platform: "android", deviceId: "emulator-5556" },
+    ]);
+
+    const failure = await callTool("getAndroid", { avdName: pooled.name }).catch(
+      (error: unknown) => error,
+    );
+
+    expect(failure).toBeInstanceOf(ActionableError);
+    expect((failure as ActionableError).message).toContain("identity_conflict");
+    expect((failure as ActionableError).message).toContain("emulator-5556");
+    expect(deviceUtils.wasMethodCalled("waitForDeviceReady")).toBe(false);
+  });
+
   test("reuses the existing session for repeated warm getAndroid calls", async () => {
     const emulator: BootedDevice = {
       platform: "android",

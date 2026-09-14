@@ -45,6 +45,41 @@ export class DeviceBootTimeoutError extends ActionableError {
   }
 }
 
+/** More than one live emulator claims the requested stable AVD identity. */
+export class AndroidAvdIdentityConflictError extends ActionableError {
+  readonly code = "identity_conflict";
+
+  constructor(
+    readonly avdName: string,
+    readonly candidateSerials: readonly string[],
+  ) {
+    super(
+      `identity_conflict: Android AVD '${avdName}' is claimed by multiple running ` +
+        `emulators: ${candidateSerials.join(", ")}. Pass an explicit adbSerial to select one.`,
+    );
+  }
+}
+
+/**
+ * Resolves an exact Android AVD name only when it maps to one live ADB serial.
+ * Repeated discovery rows for the same serial do not make the identity ambiguous.
+ */
+export function findUniqueBootedAndroidDeviceByName(
+  devices: readonly BootedDevice[],
+  avdName: string,
+): BootedDevice | undefined {
+  const matchesBySerial = new Map(
+    devices
+      .filter((device) => device.platform === "android" && device.name === avdName)
+      .map((device): [string, BootedDevice] => [device.deviceId, device]),
+  );
+  const matches = [...matchesBySerial.values()];
+  if (matches.length > 1) {
+    throw new AndroidAvdIdentityConflictError(avdName, [...matchesBySerial.keys()].toSorted());
+  }
+  return matches[0];
+}
+
 /**
  * True for an `AbortSignal.reason` that carries no caller-supplied context: a
  * literal `undefined` (used by synthetic/fake signals in tests), or the
@@ -361,7 +396,9 @@ export class DeviceBootService {
     const enriched = enrichBootedDevicesFromImages(matchingBooted, images);
     const match =
       request.matchExactName && request.name
-        ? (enriched.find((candidate) => candidate.name === request.name) ?? null)
+        ? ((request.platform === "android"
+            ? findUniqueBootedAndroidDeviceByName(enriched, request.name)
+            : enriched.find((candidate) => candidate.name === request.name)) ?? null)
         : this.dependencies.deviceMatcher.matchBootedDevice(
             criteria,
             enriched,
@@ -389,9 +426,9 @@ export class DeviceBootService {
     // identity. Android `deviceId` may instead name an AVD image, where name
     // fallback is required because the booted device carries an ADB serial.
     const running =
-      booted.find((device) => device.deviceId === image.deviceId) ??
+      (image.deviceId ? booted.find((device) => device.deviceId === image.deviceId) : undefined) ??
       (image.platform === "android"
-        ? booted.find((device) => device.name === image.name)
+        ? findUniqueBootedAndroidDeviceByName(booted, image.name)
         : undefined);
     if (!running) {
       return this.bootImage(image, context, progress, false);

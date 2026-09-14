@@ -477,6 +477,43 @@ describe("DeviceBootService", () => {
     expect(devices.getExecutedOperations().join("|")).not.toContain("startDevice:");
   });
 
+  it("rejects an ambiguous running Android AVD when reusing an image by name", async () => {
+    const devices = new FakeDeviceUtils();
+    devices.setDeviceImages("android", [{ ...image, isRunning: true }]);
+    devices.setBootedDevices("android", [
+      { name: image.name, platform: "android", deviceId: "emulator-5554" },
+      { name: image.name, platform: "android", deviceId: "emulator-5556" },
+    ]);
+
+    await expect(
+      service(devices).boot({
+        platform: "android",
+        deviceId: image.name,
+        preferRunning: true,
+      }),
+    ).rejects.toThrow(/identity_conflict.*emulator-5554.*emulator-5556/);
+    expect(devices.wasMethodCalled("waitForDeviceReady")).toBe(false);
+  });
+
+  it("deduplicates repeated discovery of the same running Android serial", async () => {
+    const devices = new FakeDeviceUtils();
+    const running: BootedDevice = {
+      name: image.name,
+      platform: "android",
+      deviceId: "emulator-5554",
+    };
+    devices.setDeviceImages("android", [{ ...image, isRunning: true }]);
+    devices.setBootedDevices("android", [running, { ...running }]);
+
+    const result = await service(devices).boot({
+      platform: "android",
+      deviceId: image.name,
+      preferRunning: true,
+    });
+
+    expect(result.device.deviceId).toBe(running.deviceId);
+  });
+
   // Simulators may share a display name, so the running lookup inside
   // `bootMatchedImage` must not settle for a same-name sibling when the request
   // named an exact UDID: the caller's identity check rejects the wrong UDID and

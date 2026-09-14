@@ -124,6 +124,7 @@ import {
   createDefaultExactDeviceProvisioner,
   type ExactDeviceProvisioner,
   type ExactDeviceSpecification,
+  parseAndroidSystemImageRuntime,
   ProvisionDeviceError,
 } from "../utils/exactDeviceProvisioning";
 import { MIN_AVD_RAM_MB } from "../utils/android-cmdline-tools/AvdConfigReader";
@@ -364,13 +365,10 @@ export const getAppleSchema = devicePreparationTimeoutSchema
 const MODERN_PLAY_IMAGE_MIN_API_LEVEL = 30;
 
 function isModernPlayStoreRuntime(runtime: string): boolean {
-  const [kind, apiIdentifier, tag] = runtime.split(";");
-  const apiMatch = /^android-(\d+)$/.exec(apiIdentifier ?? "");
+  const parsedRuntime = parseAndroidSystemImageRuntime(runtime);
   return (
-    kind === "system-images" &&
-    tag === "google_apis_playstore" &&
-    apiMatch !== null &&
-    Number(apiMatch[1]) >= MODERN_PLAY_IMAGE_MIN_API_LEVEL
+    parsedRuntime?.tag === "google_apis_playstore" &&
+    parsedRuntime.apiLevel >= MODERN_PLAY_IMAGE_MIN_API_LEVEL
   );
 }
 

@@ -17,6 +17,7 @@ import { daemonShuttingDownMcpOutcome } from "../daemon/daemonShutdownOutcome";
 import { DaemonRestartPendingError } from "../daemon/daemonRestartAdmission";
 import { resolveDirectSessionDevice, unregisterDirectSession } from "./directSessionDeviceRegistry";
 import {
+  INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM,
   INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
   INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
   INTERNAL_EXECUTION_START_TIME_PARAM,
@@ -437,6 +438,16 @@ function extractInternalLiveDeadlineKey(params: unknown): string | undefined {
   }
   const value = (params as Record<string, unknown>)[INTERNAL_LIVE_DEADLINE_KEY_PARAM];
   return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function extractInternalAcceptanceDiscoveryOrder(
+  params: unknown,
+): "forward" | "reverse" | undefined {
+  if (!params || typeof params !== "object" || Array.isArray(params)) {
+    return undefined;
+  }
+  const value = (params as Record<string, unknown>)[INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM];
+  return value === "forward" || value === "reverse" ? value : undefined;
 }
 
 function stripInternalToolParams(params: unknown): unknown {
@@ -983,6 +994,9 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     const requestLiveDeadlineKey = daemonMode
       ? extractInternalLiveDeadlineKey(toolParams)
       : undefined;
+    const requestAcceptanceDiscoveryOrder = daemonMode
+      ? extractInternalAcceptanceDiscoveryOrder(toolParams)
+      : undefined;
     const rawSessionUuid =
       toolParams && typeof toolParams === "object" && "sessionUuid" in toolParams
         ? (toolParams as { sessionUuid?: string }).sessionUuid
@@ -1099,6 +1113,9 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
             // snapshot (issue #6222 P1 reopen).
             ...(requestLiveDeadlineKey !== undefined
               ? { [INTERNAL_LIVE_DEADLINE_KEY_PARAM]: requestLiveDeadlineKey }
+              : {}),
+            ...(requestAcceptanceDiscoveryOrder !== undefined
+              ? { [INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM]: requestAcceptanceDiscoveryOrder }
               : {}),
           }
         : parsedParams;

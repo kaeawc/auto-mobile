@@ -82,7 +82,7 @@ function createHarness(
     writeFile?: MatrixDependencies["writeFile"];
     activeSessions?: number;
     activeExecutions?: number;
-    reverseDiscoveryOrder?: boolean;
+    honorDiscoveryOrderSeam?: boolean;
     keepAndroidDuplicateAfterKill?: boolean;
     removeAndroidSiblingAfterDuplicateCleanup?: boolean;
     removeIosSiblingAfterProvision?: boolean;
@@ -96,19 +96,21 @@ function createHarness(
   const evidence: string[] = [];
   const timer = new FakeTimer();
   let startCount = 0;
-  let listCount = 0;
   let androidDuplicatePresent = true;
   let iosRunnerRestarted = false;
   let androidTargetSerial = "emulator-5556";
   let androidSiblingPresent = true;
   let iosSiblingPresent = true;
 
-  const createMcpClient = async (owner: string): Promise<McpSessionClient> => ({
+  const createMcpClient = async (
+    owner: string,
+    _signal?: AbortSignal,
+    presentationOrder?: "forward" | "reverse",
+  ): Promise<McpSessionClient> => ({
     async callTool(name, arguments_) {
       calls.push({ owner, name, arguments: arguments_ });
       events.push(`${owner}:${name}`);
       if (name === "listDevices") {
-        listCount += 1;
         const isIos = arguments_.platform === "ios";
         const devices = isIos
           ? [
@@ -145,9 +147,9 @@ function createHarness(
         return {
           structuredContent: {
             devices:
-              options.reverseDiscoveryOrder === false || listCount !== 2
-                ? devices
-                : devices.toReversed(),
+              presentationOrder === "reverse" && options.honorDiscoveryOrderSeam !== false
+                ? devices.toReversed()
+                : devices,
           },
         };
       }
@@ -176,7 +178,11 @@ function createHarness(
         };
       }
       if (name === "getAndroid" || name === "getApple" || name === "startDevice") {
-        if (name === "getAndroid" && owner === "controlled-discovery" && androidDuplicatePresent) {
+        if (
+          name === "getAndroid" &&
+          owner.startsWith("controlled-discovery-") &&
+          androidDuplicatePresent
+        ) {
           return {
             isError: true,
             structuredContent: {
@@ -409,7 +415,7 @@ describe("live device acceptance harness", () => {
       ),
     ).toBe(true);
     const exactAcquisitions = harness.calls.filter(
-      (call) => call.name === "getAndroid" && call.owner !== "controlled-discovery",
+      (call) => call.name === "getAndroid" && !call.owner.startsWith("controlled-discovery-"),
     );
     expect(exactAcquisitions.map((call) => call.arguments)).toEqual([
       { avdName: "Pixel_8_API_35", enableTools: ["observe", "getDeviceState"] },
@@ -461,25 +467,27 @@ describe("live device acceptance harness", () => {
     });
     for (const sessionUuid of [
       "start-1",
-      "provision-1",
       "start-2",
+      "provision-1",
       "start-3",
       "start-4",
       "start-5",
       "start-6",
       "start-7",
+      "start-8",
     ]) {
       assertReadinessImmediatelyFollowsSuccess(harness, sessionUuid);
     }
     expect(harness.releases).toEqual([
       "start-1",
-      "provision-1",
       "start-2",
+      "provision-1",
       "start-3",
       "start-4",
       "start-5",
       "start-6",
       "start-7",
+      "start-8",
     ]);
     expect(evidence.checks).toMatchObject({
       stableIdentityPreserved: true,
@@ -487,7 +495,7 @@ describe("live device acceptance harness", () => {
       androidSerialChanged: true,
       androidConsolePortChanged: true,
       controlledDiscoveryPasses: true,
-      controlledDiscoveryOrderReversed: true,
+      controlledDiscoveryOrderDeterministicallyReversed: true,
       controlledSiblingUntouched: true,
       signedAndroidDuplicateRemoved: true,
       exactAndroidControlSelected: true,
@@ -497,7 +505,7 @@ describe("live device acceptance harness", () => {
       harness.calls.find(
         (call) =>
           call.name === "getAndroid" &&
-          call.owner === "controlled-discovery" &&
+          call.owner === "controlled-discovery-forward" &&
           (call.arguments.deviceId as string | undefined) === "emulator-5556",
       )?.arguments,
     ).toEqual({
@@ -573,11 +581,10 @@ describe("live device acceptance harness", () => {
     expect(
       harness.calls.filter((call) => call.name === "getApple").map((call) => call.arguments),
     ).toEqual([
-      { deviceId: IOS_UDID, enableTools: ["observe", "getDeviceState"] },
-      { deviceId: IOS_UDID, enableTools: ["observe", "getDeviceState"] },
-      { deviceId: IOS_UDID, enableTools: ["observe", "getDeviceState"] },
-      { deviceId: IOS_UDID, enableTools: ["observe", "getDeviceState"] },
-      { deviceId: IOS_UDID, enableTools: ["observe", "getDeviceState"] },
+      ...Array.from({ length: 6 }, () => ({
+        deviceId: IOS_UDID,
+        enableTools: ["observe", "getDeviceState"],
+      })),
     ]);
     expect(harness.calls.find((call) => call.name === "provisionDevice")?.arguments).toMatchObject({
       device: { deviceId: IOS_UDID, name: "iPhone 16 Pro", platform: "ios" },
@@ -593,7 +600,7 @@ describe("live device acceptance harness", () => {
       iosRunnerGenerationChanged: true,
       iosRunnerIdentityChanged: true,
       controlledDiscoveryPasses: true,
-      controlledDiscoveryOrderReversed: true,
+      controlledDiscoveryOrderDeterministicallyReversed: true,
       controlledSiblingUntouched: true,
       exactIosUuidAndSameNameSiblingRetained: true,
       destructiveControlChecks: true,
@@ -643,11 +650,11 @@ describe("live device acceptance harness", () => {
     expect(harness.events).toContain(`ios-runner-restart:${IOS_UDID}`);
   });
 
-  test("fails before mutation when the public discovery passes do not reverse order", async () => {
-    const harness = createHarness({ reverseDiscoveryOrder: false });
+  test("fails before mutation when the deterministic discovery-order seam is not honored", async () => {
+    const harness = createHarness({ honorDiscoveryOrderSeam: false });
 
     await expect(runAcceptanceMatrix(androidArgs, harness.dependencies)).rejects.toThrow(
-      "Controlled discovery order was not demonstrably reversed",
+      "Acceptance discovery-order seam did not present the same public discovery data in reverse",
     );
     expect(harness.calls.some((call) => call.name === "killDevice")).toBe(false);
     expect(harness.calls.some((call) => call.name === "provisionDevice")).toBe(false);
@@ -683,7 +690,7 @@ describe("live device acceptance harness", () => {
     };
 
     await expect(runAcceptanceMatrix(iosArgs, harness.dependencies)).rejects.toThrow(
-      "Controlled iOS same-name sibling must appear exactly once",
+      "Exact iOS UUID target and same-name sibling must remain the only two named controls",
     );
     expect(harness.calls.filter((call) => call.name === "killDevice")).toHaveLength(0);
     expect(
@@ -800,12 +807,13 @@ describe("live device acceptance harness", () => {
     );
     expect(harness.releases).toEqual([
       "start-1",
-      "provision-1",
       "start-2",
+      "provision-1",
       "start-3",
       "start-4",
       "start-5",
       "start-6",
+      "start-7",
     ]);
   });
 
@@ -815,7 +823,7 @@ describe("live device acceptance harness", () => {
     await expect(runAcceptanceMatrix(androidArgs, harness.dependencies)).rejects.toThrow(
       "Android serial did not change across the required kill/reacquire transition",
     );
-    expect(harness.releases).toEqual(["start-1", "provision-1", "start-2", "start-3"]);
+    expect(harness.releases).toEqual(["start-1", "start-2", "provision-1", "start-3", "start-4"]);
   });
 
   test("requires an exact resolved Android configuration", async () => {
@@ -824,7 +832,7 @@ describe("live device acceptance harness", () => {
     await expect(runAcceptanceMatrix(androidArgs, harness.dependencies)).rejects.toThrow(
       "resolvedSpec.configuration did not exactly match",
     );
-    expect(harness.releases).toEqual(["start-1", "provision-1"]);
+    expect(harness.releases).toEqual(["start-1", "start-2", "provision-1"]);
   });
 
   test("releases every minted session before clients close when readiness fails", async () => {
@@ -834,11 +842,11 @@ describe("live device acceptance harness", () => {
       "observe failed for start-2",
     );
 
-    expect(harness.releases).toEqual(["start-1", "provision-1", "start-2"]);
+    expect(harness.releases).toEqual(["start-1", "start-2"]);
     expect(harness.events.indexOf("release:start-2")).toBeLessThan(
       harness.events.findIndex((event) => event.startsWith("close:")),
     );
-    expect(harness.events.filter((event) => event.startsWith("close:"))).toHaveLength(4);
+    expect(harness.events.filter((event) => event.startsWith("close:"))).toHaveLength(3);
     expect(harness.evidence[0]).not.toContain("start-2");
     const evidence = JSON.parse(harness.evidence[0]);
     expect(evidence.checks.readinessObserveThenState).toBe(false);
@@ -914,7 +922,7 @@ describe("live device acceptance harness", () => {
       "release failed for provision-1",
     );
 
-    expect(harness.releaseAttempts).toEqual(["start-1", "provision-1", "provision-1"]);
+    expect(harness.releaseAttempts).toEqual(["start-1", "start-2", "provision-1", "provision-1"]);
     expect(harness.events).toContain("close:daemon");
     expect(harness.events).toContain("close:provision");
     expect(harness.evidence[0]).not.toContain("provision-1");
@@ -956,9 +964,9 @@ describe("live device acceptance harness", () => {
     const harness = createHarness();
     const createMcpClient = harness.dependencies.createMcpClient!;
     harness.dependencies.timer = timer;
-    harness.dependencies.createMcpClient = async (owner, signal) => {
+    harness.dependencies.createMcpClient = async (owner, signal, presentationOrder) => {
       if (owner !== "provision") {
-        return await createMcpClient(owner, signal);
+        return await createMcpClient(owner, signal, presentationOrder);
       }
       signal.addEventListener("abort", () => {
         aborted = true;

@@ -92,6 +92,12 @@ export const INTERNAL_MCP_REQUEST_DEADLINE_PARAM = "__mcpRequestDeadlineMs";
 export const INTERNAL_LIVE_DEADLINE_KEY_PARAM = "__mcpLiveDeadlineKey";
 
 /**
+ * Per-request, non-mutating acceptance control that changes only the order in
+ * which the daemon presents freshly discovered devices.
+ */
+export const INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM = "__acceptanceDiscoveryOrder";
+
+/**
  * Port range to try if default port is unavailable
  */
 export const DAEMON_PORT_RANGE_START = 3000;
@@ -352,6 +358,7 @@ export const INTERNAL_TOOL_PARAM_NAMES = [
   INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
   INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
   INTERNAL_LIVE_DEADLINE_KEY_PARAM,
+  INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM,
   DAEMON_NON_FINITE_ENCODED_PARAM,
 ] as const;
 

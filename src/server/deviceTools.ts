@@ -18,6 +18,7 @@ import type {
 } from "../models/DeviceResourceConfiguration";
 import {
   type BootedDeviceDiscovery,
+  type BootedDeviceDiscoveryOptions,
   type DeviceImageDiscovery,
   MultiPlatformDeviceManager,
   PlatformDeviceManager,
@@ -58,7 +59,10 @@ import {
 } from "./toolSchemaHelpers";
 import { DefaultDeviceMatcher, type DeviceMatcher } from "../utils/deviceMatcher";
 import { DEVICE_POOL_MATCHING, isDevicePoolAutolockEnabled } from "../daemon/poolConfig";
-import { deleteInternalToolParams } from "../daemon/constants";
+import {
+  deleteInternalToolParams,
+  INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM,
+} from "../daemon/constants";
 import { formatToolParamError } from "./toolParamError";
 import {
   DEVICE_CREATE_ENV_VAR,
@@ -753,6 +757,8 @@ export interface StartDeviceArgs {
   runnerReadinessTimeoutMs?: number;
   createIfMissing?: boolean;
   __mcpSessionId?: string;
+  /** Acceptance-only, non-mutating discovery presentation control. */
+  presentationOrder?: "forward" | "reverse";
   /** Internal exact runtime identity used by getAndroid. */
   matchExactName?: boolean;
 }
@@ -993,6 +999,19 @@ export interface ListDeviceImagesArgs {
 
 export interface ListDevicesArgs {
   platform?: "android" | "ios";
+}
+
+function acceptancePresentationOrder(
+  args: Record<string, unknown>,
+): "forward" | "reverse" | undefined {
+  const order = args[INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM];
+  return order === "forward" || order === "reverse" ? order : undefined;
+}
+
+function detailedDiscoveryOptions(
+  presentationOrder: "forward" | "reverse" | undefined,
+): BootedDeviceDiscoveryOptions {
+  return presentationOrder === undefined ? {} : { presentationOrder };
 }
 
 export interface DeviceToolsDependencies {
@@ -6001,12 +6020,13 @@ export function registerDeviceTools() {
     }
   };
 
-  const listDevicesHandler = async (args: ListDevicesArgs) => {
+  const listDevicesHandler = async (args: ListDevicesArgs & Record<string, unknown>) => {
     // #5870: a tool named `listDevices` returns the devices. The data is right
     // here — enumerate booted devices directly instead of forcing a modality
     // switch to resources. The resource pointers (which also cover not-yet-booted
     // images and richer per-device detail) survive as a `note`.
     const platform: SomePlatform = args.platform ?? "either";
+    const presentationOrder = acceptancePresentationOrder(args);
     const requestedPlatforms: Platform[] = platform === "either" ? ["android", "ios"] : [platform];
     const deviceManager = getDeviceToolsDependencies().deviceManagerFactory();
     let booted: BootedDevice[] = [];
@@ -6024,7 +6044,10 @@ export function registerDeviceTools() {
     let succeededSources: Set<DiscoverySource> | undefined;
     let discoveryErrors: BootedDeviceDiscovery["discoveryErrors"];
     try {
-      const discovery = await deviceManager.getBootedDevicesDetailed(platform);
+      const discovery = await deviceManager.getBootedDevicesDetailed(
+        platform,
+        detailedDiscoveryOptions(presentationOrder),
+      );
       // FUNNEL 1: listDevices publishes each entry's pool-derived label/epoch
       // through the same join the booted-devices resource uses (#6863 review).
       await reconcileDiscoveryObservation(discovery.devices, "listDevices");
@@ -8593,6 +8616,7 @@ export function registerDeviceTools() {
     delete externalArgs.__mcpRequestTimeoutMs;
     delete externalArgs.__mcpRequestDeadlineMs;
     delete externalArgs.__mcpLiveDeadlineKey;
+    delete externalArgs[INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM];
     return externalArgs;
   };
 
@@ -8637,6 +8661,7 @@ export function registerDeviceTools() {
     signal?: AbortSignal,
   ) => {
     const { __mcpSessionId } = rawArgs;
+    const presentationOrder = acceptancePresentationOrder(rawArgs);
     const externalArgs = stripInternalAcquisitionParams(rawArgs);
     const args = getAndroidSchema.parse(externalArgs);
     const bootTimeoutMs = args.bootTimeoutMs ?? DEFAULT_DEVICE_READY_TIMEOUT_MS;
@@ -8656,6 +8681,7 @@ export function registerDeviceTools() {
           name: args.avdName,
           ...(explicitAdbSerial ? { deviceId: explicitAdbSerial } : {}),
           matchExactName: true,
+          ...(presentationOrder !== undefined ? { presentationOrder } : {}),
           preferRunning: true,
           createIfMissing: false,
           __mcpSessionId: mcpSessionId,
@@ -8700,6 +8726,7 @@ export function registerDeviceTools() {
     signal?: AbortSignal,
   ) => {
     const { __mcpSessionId } = rawArgs;
+    const presentationOrder = acceptancePresentationOrder(rawArgs);
     const externalArgs = stripInternalAcquisitionParams(rawArgs);
     const args = getAppleSchema.parse(externalArgs);
     // #5870: `deviceId` is an accepted alias for `udid` on iOS.
@@ -8713,6 +8740,7 @@ export function registerDeviceTools() {
         platform: "ios",
         deviceId: udid,
         preferRunning: true,
+        ...(presentationOrder !== undefined ? { presentationOrder } : {}),
         createIfMissing: false,
         __mcpSessionId: typeof __mcpSessionId === "string" ? __mcpSessionId : undefined,
       },

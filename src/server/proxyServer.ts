@@ -33,6 +33,29 @@ import {
   DEVICE_SESSION_RECOVERY_PROMPT,
   DEVICE_SESSION_RECOVERY_TOOLS,
 } from "./deviceSessionResult";
+import { INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM } from "../daemon/constants";
+
+const LIVE_ACCEPTANCE_ENV = "AUTOMOBILE_ACCEPTANCE_LIVE";
+const ACCEPTANCE_DISCOVERY_ORDER_ENV = "AUTOMOBILE_ACCEPTANCE_DISCOVERY_ORDER";
+
+function acceptanceDiscoveryOrder(): "forward" | "reverse" | undefined {
+  if (process.env[LIVE_ACCEPTANCE_ENV] !== "1") {
+    return undefined;
+  }
+  const order = process.env[ACCEPTANCE_DISCOVERY_ORDER_ENV];
+  return order === "forward" || order === "reverse" ? order : undefined;
+}
+
+function acceptanceToolArguments(
+  name: string,
+  args: Record<string, unknown>,
+): Record<string, unknown> {
+  if (name !== "listDevices" && name !== "getAndroid" && name !== "getApple") {
+    return args;
+  }
+  const order = acceptanceDiscoveryOrder();
+  return order ? { ...args, [INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM]: order } : args;
+}
 
 /**
  * Options for creating a proxy MCP server
@@ -311,7 +334,12 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
         : undefined;
 
     try {
-      const result = await proxy.callTool(name, args, requestProgressToken, onProgress);
+      const result = await proxy.callTool(
+        name,
+        acceptanceToolArguments(name, args),
+        requestProgressToken,
+        onProgress,
+      );
       return result;
     } catch (error) {
       if (error instanceof DaemonBoundSessionExpiredError) {

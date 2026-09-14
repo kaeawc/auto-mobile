@@ -10,6 +10,7 @@ import type { DeviceCreationGate } from "./deviceCreationGate";
 import { isAndroidEmulatorSerial } from "./androidSerial";
 import {
   DEFAULT_DEVICE_READY_TIMEOUT_MS,
+  type BootedDeviceDiscoveryOptions,
   type PlatformDeviceManager,
   waitForDeviceReadyOrCancel,
 } from "./deviceUtils";
@@ -149,6 +150,8 @@ export interface DeviceBootRequest {
   excludeDeviceNames?: ReadonlySet<string>;
   /** Recovery snapshots keep preserved Android serials out of a concurrent startup match. */
   excludeDeviceIds?: ReadonlySet<string>;
+  /** Non-mutating acceptance control for deterministic discovery-order coverage. */
+  presentationOrder?: BootedDeviceDiscoveryOptions["presentationOrder"];
 }
 
 export interface DeviceBootProgress {
@@ -315,14 +318,18 @@ export class DeviceBootService {
     phase: string,
     bypassAndroidCache = false,
     awaitAbortSettlement = true,
+    presentationOrder?: BootedDeviceDiscoveryOptions["presentationOrder"],
   ): Promise<BootedDevice[]> {
-    if (platform === "android" && bypassAndroidCache) {
+    if ((platform === "android" && bypassAndroidCache) || presentationOrder !== undefined) {
       const discovery = await this.runPhase(
         context,
         phase,
         async () =>
-          await this.dependencies.deviceManager.getBootedDevicesDetailed("android", {
-            bypassAndroidDeviceListCache: true,
+          await this.dependencies.deviceManager.getBootedDevicesDetailed(platform, {
+            ...(platform === "android" && bypassAndroidCache
+              ? { bypassAndroidDeviceListCache: true }
+              : {}),
+            ...(presentationOrder !== undefined ? { presentationOrder } : {}),
           }),
         awaitAbortSettlement,
       );
@@ -354,6 +361,9 @@ export class DeviceBootService {
       request.platform,
       context,
       "discovering running devices",
+      false,
+      true,
+      request.presentationOrder,
     );
     const hasExplicitConstraints =
       request.minOsVersion !== undefined ||
@@ -397,7 +407,7 @@ export class DeviceBootService {
     // Route through the same reuse-before-cold-boot path as the name matcher so
     // both spellings of the same target resolve identically (#3334): booting a
     // live image is rejected by the platform, or spawns a doomed second child.
-    return this.bootMatchedImage(image, context, progress);
+    return this.bootMatchedImage(image, context, progress, request.presentationOrder);
   }
 
   private async bootMatchingDevice(
@@ -447,7 +457,7 @@ export class DeviceBootService {
           ) ?? null)
         : deviceMatcher.matchDeviceImage(criteria, matchingImages, matchingStrategy);
     if (image) {
-      return this.bootMatchedImage(image, context, progress);
+      return this.bootMatchedImage(image, context, progress, request.presentationOrder);
     }
     return this.provisionAndBoot(request, provisionCriteria, matchingImages, context, progress);
   }
@@ -468,6 +478,7 @@ export class DeviceBootService {
       "discovering running devices",
       request.matchExactName && request.name !== undefined,
       false,
+      request.presentationOrder,
     );
     const excludedDeviceNames = request.excludeDeviceNames;
     const excludedDeviceIds = request.excludeDeviceIds;
@@ -498,6 +509,7 @@ export class DeviceBootService {
     image: DeviceInfo,
     context: BootDeadlineContext,
     progress?: DeviceBootProgress,
+    presentationOrder?: BootedDeviceDiscoveryOptions["presentationOrder"],
   ): Promise<DeviceBootResult> {
     if (!image.isRunning) {
       return this.bootImage(image, context, progress, false);
@@ -507,6 +519,8 @@ export class DeviceBootService {
       context,
       "resolving the running device image",
       image.platform === "android",
+      true,
+      presentationOrder,
     );
     // iOS simulators can share a display name, so only their UDID is lifecycle
     // identity. Android `deviceId` may instead name an AVD image, where name

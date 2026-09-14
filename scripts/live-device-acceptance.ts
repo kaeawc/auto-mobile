@@ -51,6 +51,7 @@ type Scenario = "full" | "recovery";
 type JsonObject = Record<string, unknown>;
 type Budget = "work" | "cleanup" | "evidence";
 type AcquisitionKind = "platform" | "generic";
+type DiscoveryPresentationOrder = "forward" | "reverse";
 
 export interface AcceptanceArgs {
   platform: Platform;
@@ -136,7 +137,11 @@ export interface MatrixDependencies {
   testOnly?: boolean;
   timer?: Timer;
   spawnCli?: (command: string[], timeoutMs: number, signal: AbortSignal) => Promise<void>;
-  createMcpClient?: (owner: string, signal: AbortSignal) => Promise<McpSessionClient>;
+  createMcpClient?: (
+    owner: string,
+    signal: AbortSignal,
+    presentationOrder?: DiscoveryPresentationOrder,
+  ) => Promise<McpSessionClient>;
   createDaemonClient?: (signal: AbortSignal) => Promise<DaemonSessionClient>;
   restartDaemon?: (
     maintenanceToken: string,
@@ -159,7 +164,7 @@ interface MaintenanceAdmission {
 }
 
 interface Evidence {
-  schemaVersion: 7;
+  schemaVersion: 8;
   generatedAt: string;
   scenario: Scenario;
   platform: Platform;
@@ -957,6 +962,7 @@ async function defaultCreateMcpClient(
   owner: string,
   build: BuildIdentity,
   signal: AbortSignal,
+  presentationOrder?: DiscoveryPresentationOrder,
 ): Promise<McpSessionClient> {
   const client = new Client({
     name: `live-device-acceptance-${owner}`,
@@ -966,6 +972,15 @@ async function defaultCreateMcpClient(
     command: process.execPath,
     args: [build.entryScript],
     stderr: "inherit",
+    ...(presentationOrder
+      ? {
+          env: {
+            ...process.env,
+            AUTOMOBILE_ACCEPTANCE_LIVE: "1",
+            AUTOMOBILE_ACCEPTANCE_DISCOVERY_ORDER: presentationOrder,
+          },
+        }
+      : {}),
   });
   const abort = () => void client.close();
   signal.addEventListener("abort", abort, { once: true });
@@ -1287,8 +1302,8 @@ export async function runAcceptanceMatrix(
       await defaultSpawnCli(command, timeoutMs, signal, timer));
   const createMcpClient =
     dependencies.createMcpClient ??
-    (async (owner: string, signal: AbortSignal) =>
-      await defaultCreateMcpClient(owner, args.build, signal));
+    (async (owner: string, signal: AbortSignal, presentationOrder?: DiscoveryPresentationOrder) =>
+      await defaultCreateMcpClient(owner, args.build, signal, presentationOrder));
   const createDaemonClient =
     dependencies.createDaemonClient ??
     (async (signal: AbortSignal) => await defaultCreateDaemonClient(args.build, signal));
@@ -1688,13 +1703,16 @@ export async function runAcceptanceMatrix(
     }
     return matches[0]!;
   };
-  const assertReversedOrder = (first: DiscoveryDevice[], second: DiscoveryDevice[]): void => {
+  const assertDeterministicReversedOrder = (
+    forward: DiscoveryDevice[],
+    reverse: DiscoveryDevice[],
+  ): void => {
     if (
-      first.length !== second.length ||
-      first.some((device, index) => !sameDevice(device, second[first.length - index - 1]!))
+      forward.length !== reverse.length ||
+      forward.some((device, index) => !sameDevice(device, reverse[forward.length - index - 1]!))
     ) {
       throw new Error(
-        "Controlled discovery order was not demonstrably reversed between the two pre-mutation passes",
+        "Acceptance discovery-order seam did not present the same public discovery data in reverse",
       );
     }
     reversedDiscoveryOrder = true;
@@ -1786,11 +1804,16 @@ export async function runAcceptanceMatrix(
         (device) => device.name === androidControls!.target.name,
         "Intended Android target",
       );
-      const sibling = findExactlyOne(
-        devices,
-        (device) => sameDevice(device, androidControls!.sibling),
-        "Controlled Android sibling",
-      );
+      const siblings = devices.filter((device) => device.name === androidControls!.sibling.name);
+      if (siblings.length !== 1) {
+        throw new Error(
+          `Controlled Android sibling must appear exactly once after ${stage}, found ${siblings.length}`,
+        );
+      }
+      const sibling = siblings[0]!;
+      if (!sameDevice(sibling, androidControls.sibling)) {
+        throw new Error(`Controlled Android sibling changed during ${stage}`);
+      }
       if (!sameDevice(target, androidControls.target)) {
         throw new Error(`Intended Android target changed during ${stage}`);
       }
@@ -1799,13 +1822,19 @@ export async function runAcceptanceMatrix(
       if (!iosControls) {
         throw new Error("iOS discovery controls were not initialized");
       }
+      const sameNamed = devices.filter((device) => device.name === iosControls!.target.name);
+      if (sameNamed.length !== 2) {
+        throw new Error(
+          `Exact iOS UUID target and same-name sibling must remain the only two named controls after ${stage}, found ${sameNamed.length}`,
+        );
+      }
       const target = findExactlyOne(
-        devices,
+        sameNamed,
         (device) => sameDevice(device, iosControls!.target),
         "Exact iOS UUID target",
       );
       const sibling = findExactlyOne(
-        devices,
+        sameNamed,
         (device) => sameDevice(device, iosControls!.sibling),
         "Controlled iOS same-name sibling",
       );
@@ -1824,20 +1853,25 @@ export async function runAcceptanceMatrix(
   const assertControlledDiscovery = async (): Promise<void> => {
     const phase = "controlled-discovery";
     const start = timer.now();
-    const client = await bounded(
-      `${phase} MCP connect`,
+    const forwardClient = await bounded(
+      `${phase} forward MCP connect`,
       "work",
-      async (signal) => await createMcpClient(phase, signal),
+      async (signal) => await createMcpClient(`${phase}-forward`, signal, "forward"),
     );
-    controlClient = client;
-    clients.push(client);
-    const first = await listControlledDevices(client, `${phase}-first`);
-    const second = await listControlledDevices(client, `${phase}-second`);
-    assertReversedOrder(first, second);
+    const reverseClient = await bounded(
+      `${phase} reverse MCP connect`,
+      "work",
+      async (signal) => await createMcpClient(`${phase}-reverse`, signal, "reverse"),
+    );
+    controlClient = forwardClient;
+    clients.push(forwardClient, reverseClient);
+    const forward = await listControlledDevices(forwardClient, `${phase}-forward-list`);
+    const reverse = await listControlledDevices(reverseClient, `${phase}-reverse-list`);
+    assertDeterministicReversedOrder(forward, reverse);
 
     if (args.platform === "android") {
-      androidControls = captureAndroidControls(first);
-      const reversedControls = captureAndroidControls(second);
+      androidControls = captureAndroidControls(forward);
+      const reversedControls = captureAndroidControls(reverse);
       if (
         !sameDevice(androidControls.target, reversedControls.target) ||
         !sameDevice(androidControls.sibling, reversedControls.sibling) ||
@@ -1845,25 +1879,39 @@ export async function runAcceptanceMatrix(
       ) {
         throw new Error("Android discovery controls changed while proving reversed order");
       }
-      const ambiguous = await callTool(
-        client,
-        "getAndroid",
-        { avdName: args.target.avdName, enableTools: [...ENABLED_TOOLS] },
-        phase,
+      const ambiguousDiagnostics = await Promise.all(
+        [
+          ["forward", forwardClient],
+          ["reverse", reverseClient],
+        ].map(async ([order, client]) => {
+          const ambiguous = await callTool(
+            client as McpSessionClient,
+            "getAndroid",
+            { avdName: args.target.avdName, enableTools: [...ENABLED_TOOLS] },
+            `${phase}-${order}-ambiguous-selection`,
+          );
+          const diagnostic = toolDiagnostic(ambiguous, "getAndroid");
+          if (
+            !ambiguous.isError ||
+            !diagnostic.includes("identity_conflict") ||
+            !diagnostic.includes(androidControls!.duplicate.deviceId) ||
+            !diagnostic.includes(androidControls!.target.deviceId)
+          ) {
+            throw new Error(
+              `Controlled duplicate Android AVD did not fail with identity_conflict under ${order} discovery`,
+            );
+          }
+          return diagnostic;
+        }),
       );
-      if (
-        !ambiguous.isError ||
-        !toolDiagnostic(ambiguous, "getAndroid").includes("identity_conflict") ||
-        !toolDiagnostic(ambiguous, "getAndroid").includes(androidControls.duplicate.deviceId) ||
-        !toolDiagnostic(ambiguous, "getAndroid").includes(androidControls.target.deviceId)
-      ) {
+      if (ambiguousDiagnostics[0] !== ambiguousDiagnostics[1]) {
         throw new Error(
-          "Controlled duplicate Android AVD did not fail with the required identity_conflict",
+          "Controlled duplicate Android AVD produced different identity_conflict diagnostics by discovery order",
         );
       }
       toolPayload(
         await callTool(
-          client,
+          forwardClient,
           "killDevice",
           {
             device: {
@@ -1877,7 +1925,7 @@ export async function runAcceptanceMatrix(
         "killDevice",
       );
       const afterDuplicateCleanup = await listControlledDevices(
-        client,
+        forwardClient,
         `${phase}-after-duplicate-cleanup`,
       );
       if (afterDuplicateCleanup.some((device) => sameDevice(device, androidControls!.duplicate))) {
@@ -1888,7 +1936,7 @@ export async function runAcceptanceMatrix(
         (device) => sameDevice(device, androidControls!.target),
         "Intended Android target",
       );
-      findExactlyOne(
+      const sibling = findExactlyOne(
         afterDuplicateCleanup,
         (device) => sameDevice(device, androidControls!.sibling),
         "Controlled Android sibling",
@@ -1901,64 +1949,91 @@ export async function runAcceptanceMatrix(
       }
       recordControlSnapshot(
         "after-signed-android-duplicate-cleanup",
-        { ...androidControls, target },
+        { ...androidControls, target, sibling },
         false,
       );
-      const selected = toolPayload(
-        await callTool(
-          client,
-          "getAndroid",
-          {
-            avdName: androidControls.target.name,
-            deviceId: androidControls.target.deviceId,
-            enableTools: [...ENABLED_TOOLS],
-          },
-          `${phase}-exact-target-selection`,
-        ),
-        "getAndroid",
-      );
-      const selectedSessionUuid = stringField(selected, "sessionUuid", "getAndroid");
-      mint(`${phase}-exact-target-selection`, selectedSessionUuid);
-      await verifyReadiness(client, selectedSessionUuid, `${phase}-exact-target-selection`);
-      const selectedIdentity = acquiredIdentity(selected, args);
-      if (
-        selectedIdentity.device.deviceId !== androidControls.target.deviceId ||
-        selectedIdentity.identity.stableIdentity !== androidControls.target.name
-      ) {
-        throw new Error(
-          "Exact Android control selection did not retain the intended stable identity",
-        );
-      }
-      runtimeIdentities.push({
-        phase: `${phase}-exact-target-selection`,
-        ...selectedIdentity.identity,
-      });
-      acquisitionRequests.push({
-        phase: `${phase}-exact-target-selection`,
-        range: "exact",
-        kind: "platform",
-        tool: "getAndroid",
-        request: {
+      for (const [order, client] of [
+        ["forward", forwardClient],
+        ["reverse", reverseClient],
+      ] as const) {
+        const selectionPhase = `${phase}-${order}-exact-target-selection`;
+        const request = {
           avdName: androidControls.target.name,
           deviceId: androidControls.target.deviceId,
           enableTools: [...ENABLED_TOOLS],
-        },
-      });
-      await release(selectedSessionUuid, `${phase}-exact-target-selection`);
+        };
+        const selected = toolPayload(
+          await callTool(client, "getAndroid", request, selectionPhase),
+          "getAndroid",
+        );
+        const selectedSessionUuid = stringField(selected, "sessionUuid", "getAndroid");
+        mint(selectionPhase, selectedSessionUuid);
+        await verifyReadiness(client, selectedSessionUuid, selectionPhase);
+        const selectedIdentity = acquiredIdentity(selected, args);
+        if (
+          selectedIdentity.device.deviceId !== androidControls.target.deviceId ||
+          selectedIdentity.identity.stableIdentity !== androidControls.target.name
+        ) {
+          throw new Error(
+            `Exact Android control selection did not retain the intended stable identity under ${order} discovery`,
+          );
+        }
+        runtimeIdentities.push({ phase: selectionPhase, ...selectedIdentity.identity });
+        acquisitionRequests.push({
+          phase: selectionPhase,
+          range: "exact",
+          kind: "platform",
+          tool: "getAndroid",
+          request,
+        });
+        await release(selectedSessionUuid, selectionPhase);
+      }
     } else {
-      iosControls = captureIosControls(first);
-      const reversedControls = captureIosControls(second);
+      iosControls = captureIosControls(forward);
+      const reversedControls = captureIosControls(reverse);
       if (
         !sameDevice(iosControls.target, reversedControls.target) ||
         !sameDevice(iosControls.sibling, reversedControls.sibling)
       ) {
         throw new Error("iOS discovery controls changed while proving reversed order");
       }
-      recordControlSnapshot("pre-mutation-reversed-discovery", iosControls);
+      recordControlSnapshot("pre-mutation-deterministic-reversed-discovery", iosControls);
+      for (const [order, client] of [
+        ["forward", forwardClient],
+        ["reverse", reverseClient],
+      ] as const) {
+        const selectionPhase = `${phase}-${order}-exact-uuid-selection`;
+        const request = { deviceId: iosControls.target.deviceId, enableTools: [...ENABLED_TOOLS] };
+        const selected = toolPayload(
+          await callTool(client, "getApple", request, selectionPhase),
+          "getApple",
+        );
+        const selectedSessionUuid = stringField(selected, "sessionUuid", "getApple");
+        mint(selectionPhase, selectedSessionUuid);
+        await verifyReadiness(client, selectedSessionUuid, selectionPhase);
+        const selectedIdentity = acquiredIdentity(selected, args);
+        if (
+          selectedIdentity.device.deviceId !== iosControls.target.deviceId ||
+          selectedIdentity.identity.stableIdentity !== iosControls.target.deviceId
+        ) {
+          throw new Error(
+            `Exact iOS UUID selection did not retain the intended stable identity under ${order} discovery`,
+          );
+        }
+        runtimeIdentities.push({ phase: selectionPhase, ...selectedIdentity.identity });
+        acquisitionRequests.push({
+          phase: selectionPhase,
+          range: "exact",
+          kind: "platform",
+          tool: "getApple",
+          request,
+        });
+        await release(selectedSessionUuid, selectionPhase);
+      }
     }
     recordStep(steps, timer, phase, start, {
       discoveryPasses: discoveryOrders.length,
-      orderReversed: true,
+      deterministicOrderReversed: true,
       targetPresent: true,
       siblingPresentAndUntouched: true,
       ...(args.platform === "android"
@@ -2362,7 +2437,7 @@ export async function runAcceptanceMatrix(
         ? undefined
         : String(primaryError);
   const evidence: Evidence = {
-    schemaVersion: 7,
+    schemaVersion: 8,
     generatedAt: new Date().toISOString(),
     scenario: args.scenario,
     platform: args.platform,
@@ -2394,7 +2469,7 @@ export async function runAcceptanceMatrix(
       allMintedSessionsReleased,
       singleBuildIdentity: true,
       controlledDiscoveryPasses: discoveryOrders.length >= 2,
-      controlledDiscoveryOrderReversed: reversedDiscoveryOrder,
+      controlledDiscoveryOrderDeterministicallyReversed: reversedDiscoveryOrder,
       controlledSiblingUntouched: steps.some(
         (step) => step.name === "controlled-discovery" && step.passed,
       ),
@@ -2406,7 +2481,7 @@ export async function runAcceptanceMatrix(
             ),
             exactAndroidControlSelected: runtimeIdentities.some(
               (identity) =>
-                identity.phase === "controlled-discovery-exact-target-selection" &&
+                identity.phase === "controlled-discovery-forward-exact-target-selection" &&
                 identity.stableIdentity === targetIdentity(args),
             ),
           }

@@ -1255,7 +1255,7 @@ describe("Daemon manager process detection", () => {
     ]);
     expect(calls).toEqual([
       {
-        command: "ps -eo pid=,ppid=,command=",
+        command: "ps -eo pid=,ppid=,etimes=,command=",
         options: {
           encoding: "utf-8",
           maxBuffer: DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES,
@@ -1374,7 +1374,7 @@ describe("Daemon manager process detection", () => {
     expect(calls).toEqual([
       {
         command:
-          'powershell.exe -NoProfile -NonInteractive -Command "Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,CommandLine | ConvertTo-Json -Compress"',
+          "powershell.exe -NoProfile -NonInteractive -Command \"$now=[DateTime]::UtcNow; Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,CommandLine,@{Name='ElapsedSeconds';Expression={[int]($now-$_.CreationDate).TotalSeconds}} | ConvertTo-Json -Compress\"",
         options: {
           encoding: "utf-8",
           maxBuffer: DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES,

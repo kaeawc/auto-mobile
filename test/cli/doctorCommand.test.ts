@@ -5,6 +5,7 @@ import path from "node:path";
 import {
   handleDoctorResult,
   doctorToolParams,
+  runCliCommand,
   runDoctorCommand,
   resetCliOutputSinksForTesting,
   setCliOutputSinksForTesting,
@@ -133,6 +134,18 @@ describe("doctorToolParams", () => {
     }
 
     expect(receivedTimeoutMs).toBe("not-a-number");
+  });
+
+  test("documents repair-only doctor flags without adding them to the MCP schema", async () => {
+    const lines: string[] = [];
+    await runCliCommand(["help", "doctor"], undefined, {
+      log: (message) => lines.push(message),
+      error: () => {},
+    });
+
+    const help = lines.join("\n");
+    expect(help).toContain("--repair (optional)");
+    expect(help).toContain("--timeout-ms (optional)");
   });
 
   test("renders a normal doctor report as pretty JSON", async () => {

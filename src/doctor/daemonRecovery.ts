@@ -48,6 +48,7 @@ export interface DaemonRecoveryDependencies {
     daemonOptions: DaemonOptions,
     isProtocolHealthy: () => Promise<boolean>,
     signal?: AbortSignal,
+    deadline?: number,
   ) => Promise<DaemonRestartResult>;
   /**
    * A successful MCP tools/list round trip verifies the socket protocol and,
@@ -168,12 +169,12 @@ function failedRecovery(
   const message = errorMessage(error);
   const nextAction =
     error instanceof DaemonRecoveryDeadlineError
-      ? `Recovery deadline elapsed during ${phase}. Retry doctor --repair when the host is less busy.`
+      ? `Recovery deadline elapsed during ${phase}. Retry --cli doctor --repair when the host is less busy.`
       : phase === "recovery"
-        ? `Daemon recovery could not start a usable daemon: ${message}. Verify the AutoMobile installation, then retry doctor --repair.`
+        ? `Daemon recovery could not start a usable daemon: ${message}. Verify the AutoMobile installation, then retry --cli doctor --repair.`
         : phase === "verification"
-          ? `Daemon recovery did not produce a usable daemon: ${message}. Retry doctor --repair; if it persists, inspect --daemon diagnose.`
-          : `Daemon diagnosis failed: ${message}. Retry doctor --repair.`;
+          ? `Daemon recovery did not produce a usable daemon: ${message}. Retry --cli doctor --repair; if it persists, inspect --daemon diagnose.`
+          : `Daemon diagnosis failed: ${message}. Retry --cli doctor --repair.`;
   return attachLifecycleCompletion(
     {
       status: "failed",
@@ -188,8 +189,10 @@ function failedRecovery(
 }
 
 function assertUsableHealth(report: DaemonHealthReport): void {
-  if (!report.daemonRunning || !report.socketConnectable) {
-    throw new Error("daemon is not running and serving the control socket");
+  if (!report.daemonRunning || !report.socketConnectable || !report.pidFileValid) {
+    throw new Error(
+      "daemon is not running with valid control metadata and serving the control socket",
+    );
   }
 }
 
@@ -225,6 +228,7 @@ interface ResolvedRecoveryDependencies {
     daemonOptions: DaemonOptions,
     isProtocolHealthy: () => Promise<boolean>,
     signal?: AbortSignal,
+    deadline?: number,
   ) => Promise<DaemonRestartResult>;
   verifyProtocol: () => Promise<void>;
   isProtocolHealthy: () => Promise<boolean>;
@@ -239,8 +243,13 @@ function resolveRecoveryDependencies(
     getHealthReport: dependencies.getHealthReport ?? getDaemonHealthReport,
     recoverControlState:
       dependencies.recoverControlState ??
-      ((daemonOptions, isProtocolHealthy, signal) =>
-        new DaemonManager().recoverControlState(daemonOptions, isProtocolHealthy, signal)),
+      ((daemonOptions, isProtocolHealthy, signal, deadline) =>
+        new DaemonManager().recoverControlState(
+          daemonOptions,
+          isProtocolHealthy,
+          signal,
+          deadline,
+        )),
     verifyProtocol,
     isProtocolHealthy: protocolHealthProbe(verifyProtocol),
   };
@@ -277,6 +286,7 @@ async function recoverUnusableSocket(
     daemonOptions: DaemonOptions,
     isProtocolHealthy: () => Promise<boolean>,
     signal?: AbortSignal,
+    deadline?: number,
   ) => Promise<DaemonRestartResult>,
   daemonOptions: DaemonOptions,
   isProtocolHealthy: () => Promise<boolean>,
@@ -288,7 +298,7 @@ async function recoverUnusableSocket(
     "recovery",
     deadline,
     timer,
-    (signal) => recoverControlState(daemonOptions, isProtocolHealthy, signal),
+    (signal) => recoverControlState(daemonOptions, isProtocolHealthy, signal, deadline),
     true,
   );
 }
@@ -301,6 +311,7 @@ async function verifyProtocolWithRecovery(
     daemonOptions: DaemonOptions,
     isProtocolHealthy: () => Promise<boolean>,
     signal?: AbortSignal,
+    deadline?: number,
   ) => Promise<DaemonRestartResult>,
   daemonOptions: DaemonOptions,
   isProtocolHealthy: () => Promise<boolean>,
@@ -309,7 +320,11 @@ async function verifyProtocolWithRecovery(
   const initialVerification = await attemptRecoveryStep("verification", deadline, timer, () =>
     verifyProtocol(),
   );
-  if (initialVerification.ok || initialAction === "restarted") {
+  if (
+    initialVerification.ok ||
+    initialAction === "restarted" ||
+    initialVerification.error instanceof DaemonRecoveryDeadlineError
+  ) {
     return initialVerification.ok
       ? { ok: true, value: initialAction }
       : {
@@ -324,7 +339,7 @@ async function verifyProtocolWithRecovery(
     "recovery",
     deadline,
     timer,
-    (signal) => recoverControlState(daemonOptions, isProtocolHealthy, signal),
+    (signal) => recoverControlState(daemonOptions, isProtocolHealthy, signal, deadline),
     true,
   );
   if (!restartResult.ok) {
@@ -399,8 +414,6 @@ export async function repairDaemon(
     return failedRecovery("diagnosis", undefined, diagnosis.error);
   }
   const before = diagnosis.value;
-  const action: DaemonRecoveryAction = "joined";
-
   const socketRecovery = await recoverUnusableSocket(
     before,
     deadline,
@@ -412,7 +425,7 @@ export async function repairDaemon(
   if (!socketRecovery.ok) {
     return failedRecovery(
       "recovery",
-      action,
+      undefined,
       socketRecovery.error,
       before,
       undefined,

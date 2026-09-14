@@ -951,6 +951,14 @@ function showToolHelp(toolName: string, output: CliOutput): void {
     } else {
       output.log("  No parameters required");
     }
+    if (toolName === "doctor") {
+      output.log("  --repair (optional)");
+      output.log("    Type: boolean");
+      output.log("    Run bounded host-local daemon control-state recovery.");
+      output.log("  --timeout-ms (optional)");
+      output.log("    Type: number");
+      output.log("    Total recovery deadline in milliseconds (used with --repair).");
+    }
   } catch (error) {
     output.log("  Could not parse parameter schema");
   }

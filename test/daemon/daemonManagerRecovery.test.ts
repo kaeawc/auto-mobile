@@ -235,7 +235,7 @@ describe("DaemonManager control-state recovery", () => {
     timer.enableAutoAdvance();
     const livePids = new Set([1234]);
     const processes = new MutableDaemonProcesses(
-      [{ pid: 1234, ppid: 1, command: "auto-mobile --daemon-mode" }],
+      [{ pid: 1234, ppid: 1, command: "auto-mobile --daemon-mode", startedAt: 1 }],
       livePids,
     );
     writeFileSync(
@@ -337,7 +337,14 @@ describe("DaemonManager control-state recovery", () => {
     const timer = new FakeTimer();
     const livePids = new Set([1234]);
     const processes = new MutableDaemonProcesses(
-      [{ pid: 1234, ppid: 1, command: "bun /worktree/dist/src/index.js --daemon-mode" }],
+      [
+        {
+          pid: 1234,
+          ppid: 1,
+          command: "bun /worktree/dist/src/index.js --daemon-mode",
+          startedAt: 1,
+        },
+      ],
       livePids,
     );
     let signals = 0;
@@ -566,7 +573,14 @@ describe("DaemonManager control-state recovery", () => {
     const timer = new FakeTimer();
     const livePids = new Set([1234]);
     const processes = new MutableDaemonProcesses(
-      [{ pid: 1234, ppid: 1, command: "bun /worktree/dist/src/index.js --daemon-mode" }],
+      [
+        {
+          pid: 1234,
+          ppid: 1,
+          command: "bun /worktree/dist/src/index.js --daemon-mode",
+          startedAt: 1,
+        },
+      ],
       livePids,
     );
     writeFileSync(
@@ -616,6 +630,81 @@ describe("DaemonManager control-state recovery", () => {
     await expect(manager.recoverControlState()).rejects.toThrow("port 4321");
     expect(signals).toEqual([{ pid: 1234, signal: "SIGTERM" }]);
     expect(portChecks).toEqual([{ port: 4321, host: "127.0.0.1" }]);
+  });
+
+  test("refuses a reused PID whose process generation differs from the PID record", async () => {
+    const { lock, pid, socket } = paths();
+    writeFileSync(
+      pid,
+      JSON.stringify({
+        pid: 1234,
+        socketPath: socket,
+        port: 4321,
+        startedAt: 1,
+        version: "test",
+      }),
+    );
+    const signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
+    const manager = new DaemonManager(
+      undefined,
+      undefined,
+      new FakeTimer(),
+      lock,
+      pid,
+      socket,
+      new MutableDaemonProcesses(
+        [{ pid: 1234, ppid: 1, command: "auto-mobile --daemon-mode", startedAt: 10_000 }],
+        new Set([1234]),
+      ),
+      undefined,
+      undefined,
+      undefined,
+      { signal: (processId, signal) => signals.push({ pid: processId, signal }) },
+      undefined,
+      undefined,
+      undefined,
+      { isPortFree: async () => true },
+      undefined,
+      async () => false,
+    );
+
+    await expect(manager.recoverControlState()).rejects.toThrow("could not correlate");
+    expect(signals).toEqual([]);
+  });
+
+  test("passes the remaining repair deadline to both synchronous process scans", async () => {
+    const { lock, pid, socket } = paths();
+    const scanTimeouts: Array<number | undefined> = [];
+    const manager = new DaemonManager(
+      undefined,
+      undefined,
+      new FakeTimer(),
+      lock,
+      pid,
+      socket,
+      {
+        findDaemonProcesses: (timeoutMs) => {
+          scanTimeouts.push(timeoutMs);
+          return [];
+        },
+        isProcessRunning: () => false,
+      },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { isPortFree: async () => false },
+      undefined,
+      async () => false,
+    );
+
+    await expect(manager.recoverControlState({}, async () => false, undefined, 25)).rejects.toThrow(
+      "port 3000",
+    );
+    expect(scanTimeouts).toEqual([25, 25]);
   });
 
   test("recovers options from dead PID metadata without false CLI defaults erasing one-way flags", async () => {

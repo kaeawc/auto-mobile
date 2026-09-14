@@ -59,6 +59,18 @@ describe("repairDaemon", () => {
     expect(restartCalls).toBe(0);
   });
 
+  test("does not report repaired joined when responsive socket metadata is invalid", async () => {
+    const invalidMetadata = { ...healthReport(true), pidFileValid: false };
+    const result = await repairDaemon({}, dependencies([invalidMetadata, invalidMetadata]));
+
+    expect(result).toMatchObject<Partial<DaemonRecoveryResult>>({
+      status: "failed",
+      phase: "verification",
+      action: "joined",
+      after: { pidFileValid: false },
+    });
+  });
+
   test("restarts a daemon with unusable control state and verifies the replacement", async () => {
     let protocolChecks = 0;
     const result = await repairDaemon(
@@ -219,6 +231,41 @@ describe("repairDaemon", () => {
       phase: "recovery",
       nextAction: expect.stringContaining("no usable daemon executable"),
     });
+    expect(result.action).toBeUndefined();
+  });
+
+  test("keeps an expired initial verification in the verification phase", async () => {
+    const timer = new FakeTimer();
+    let recoverCalls = 0;
+    let beginVerification: (() => void) | undefined;
+    const verificationBegan = new Promise<void>((resolve) => {
+      beginVerification = resolve;
+    });
+    const repair = repairDaemon(
+      { timeoutMs: 50 },
+      dependencies([healthReport(true)], {
+        timer,
+        verifyProtocol: async () => {
+          beginVerification?.();
+          return await new Promise<void>(() => {});
+        },
+        recoverControlState: async () => {
+          recoverCalls++;
+          return "restarted";
+        },
+      }),
+    );
+
+    await verificationBegan;
+    timer.advanceTime(50);
+
+    await expect(repair).resolves.toMatchObject<Partial<DaemonRecoveryResult>>({
+      status: "failed",
+      phase: "verification",
+      action: "joined",
+      nextAction: expect.stringContaining("--cli doctor --repair"),
+    });
+    expect(recoverCalls).toBe(0);
   });
 
   test("reports recovery when replacement after a wrong-protocol socket fails", async () => {

@@ -123,9 +123,9 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
         "caller (deviceTools) reconciles its own post-boot discovery.",
     },
     "src/utils/android-cmdline-tools/AvdSnapshotService.ts": {
-      calls: 2,
+      calls: 1,
       reason:
-        "Snapshot reclaim checks whether an AVD is live in findLiveEmulatorSerial and re-verifies the serial's AVD identity before each console deletion attempt; both read no pool state.",
+        "findLiveEmulatorSerial remains a full scan and reads no pool state; the pre-delete identity check now uses the bounded serial-targeted resolveAvdNameForSerial probe, a read-only confirmation rather than discovery.",
     },
     "src/features/observe/ios/IOSCtrlProxyClient.ts": {
       calls: 1,

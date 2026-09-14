@@ -61,6 +61,26 @@ describe("resolveRelativeImportPaths", () => {
     ]);
   });
 
+  test("preserves an existing explicit non-TypeScript extension", () => {
+    writeFileSync(path.join(repoRoot, "scripts/release/config.json"), "{}\n");
+    writeFileSync(path.join(repoRoot, "scripts/release/config.json.ts"), "export {};");
+    const entryFile = path.join(repoRoot, "scripts/release/config-consumer.ts");
+    writeFileSync(entryFile, 'import "./config.json";\n');
+
+    expect(resolveRelativeImportPaths(entryFile, { repoRoot })).toEqual([
+      "scripts/release/config.json",
+    ]);
+  });
+
+  test("preserves a missing explicit TypeScript extension", () => {
+    const entryFile = path.join(repoRoot, "scripts/release/deleted-consumer.ts");
+    writeFileSync(entryFile, 'import "./helper.ts";\n');
+
+    expect(resolveRelativeImportPaths(entryFile, { repoRoot })).toEqual([
+      "scripts/release/helper.ts",
+    ]);
+  });
+
   test("resolves extensionless dotted imports to an existing TypeScript file", () => {
     writeFileSync(
       path.join(repoRoot, "scripts/release/lib/foo.test.ts"),
@@ -102,6 +122,31 @@ describe("resolveRelativeImportPaths", () => {
     writeFileSync(entryFile, 'import dep = require("./dep");\nvoid dep;\n');
 
     expect(resolveRelativeImportPaths(entryFile, { repoRoot })).toEqual(["scripts/release/dep.ts"]);
+  });
+
+  test("records ordinary CommonJS require relative dependencies", () => {
+    writeFileSync(path.join(repoRoot, "scripts/release/dep.ts"), "export const value = 1;\n");
+    const entryFile = path.join(repoRoot, "scripts/release/require-consumer.ts");
+    writeFileSync(entryFile, 'const dep = require("./dep");\nvoid dep;\n');
+
+    expect(resolveRelativeImportPaths(entryFile, { repoRoot })).toEqual(["scripts/release/dep.ts"]);
+  });
+
+  test("expands a diamond through the shallower path", () => {
+    writeFileSync(
+      path.join(repoRoot, "scripts/release/check.ts"),
+      'import "./a";\nimport "./b";\n',
+    );
+    writeFileSync(path.join(repoRoot, "scripts/release/a.ts"), 'import "./b";\n');
+    writeFileSync(path.join(repoRoot, "scripts/release/b.ts"), 'import "./c";\n');
+    writeFileSync(path.join(repoRoot, "scripts/release/c.ts"), "export const value = 1;\n");
+
+    expect(
+      resolveRelativeImportPaths(path.join(repoRoot, "scripts/release/check.ts"), {
+        repoRoot,
+        maxDepth: 2,
+      }),
+    ).toEqual(["scripts/release/a.ts", "scripts/release/b.ts", "scripts/release/c.ts"]);
   });
 
   test("records dynamic relative imports", () => {

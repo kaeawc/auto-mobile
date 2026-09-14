@@ -8,6 +8,15 @@ interface ResolveRelativeImportPathsOptions {
   repoRoot?: string;
 }
 
+function isRuntimeRequire(node: ts.CallExpression): boolean {
+  return (
+    ts.isIdentifier(node.expression) &&
+    node.expression.text === "require" &&
+    node.arguments.length === 1 &&
+    ts.isStringLiteralLike(node.arguments[0])
+  );
+}
+
 function relativeModuleSpecifiers(sourceFile: ts.SourceFile): string[] {
   const specifiers: string[] = [];
 
@@ -37,6 +46,13 @@ function relativeModuleSpecifiers(sourceFile: ts.SourceFile): string[] {
     ) {
       specifiers.push(node.arguments[0].text);
     }
+    if (
+      ts.isCallExpression(node) &&
+      isRuntimeRequire(node) &&
+      node.arguments[0].text.startsWith(".")
+    ) {
+      specifiers.push(node.arguments[0].text);
+    }
     ts.forEachChild(node, visit);
   };
 
@@ -46,8 +62,20 @@ function relativeModuleSpecifiers(sourceFile: ts.SourceFile): string[] {
 
 function resolveRelativeSpecifier(importingFile: string, specifier: string): string | undefined {
   const literalPath = path.resolve(path.dirname(importingFile), specifier);
-  const knownExtensions = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts"]);
-  if (knownExtensions.has(path.extname(literalPath)) && existsSync(literalPath)) {
+  const knownExtensions = new Set([
+    ".ts",
+    ".tsx",
+    ".js",
+    ".jsx",
+    ".mjs",
+    ".cjs",
+    ".mts",
+    ".cts",
+    ".json",
+  ]);
+  const extension = path.extname(specifier);
+  // A known explicit extension is trusted literally without a filesystem probe; anything else (no extension or an unrecognized dotted suffix) uses extensionless resolution.
+  if (extension && knownExtensions.has(extension)) {
     return literalPath;
   }
   return (
@@ -67,15 +95,16 @@ export function resolveRelativeImportPaths(
 ): string[] {
   const maxDepth = options.maxDepth ?? 2;
   const repoRoot = path.resolve(options.repoRoot ?? process.cwd());
-  const visited = new Set<string>();
+  const visited = new Map<string, number>();
   const dependencies = new Set<string>();
 
   const visit = (filePath: string, depth: number): void => {
     const absolutePath = path.resolve(filePath);
-    if (visited.has(absolutePath) || !existsSync(absolutePath)) {
+    const visitedDepth = visited.get(absolutePath);
+    if ((visitedDepth !== undefined && visitedDepth <= depth) || !existsSync(absolutePath)) {
       return;
     }
-    visited.add(absolutePath);
+    visited.set(absolutePath, depth);
 
     let source: string;
     try {

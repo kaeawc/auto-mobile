@@ -9,11 +9,13 @@ import {
 } from "../../src/models";
 import {
   captureDeviceSnapshot,
+  getDeviceSnapshotConfig,
   listDeviceSnapshots,
   resetDeviceSnapshotManagerDependencies,
   restoreDeviceSnapshot,
   setDeviceSnapshotManagerDependencies,
   updateDeviceSnapshotConfig,
+  withVmRetentionSnapshotProtection,
 } from "../../src/server/deviceSnapshotManager";
 import { DEVICE_SNAPSHOT_RESOURCE_URIS } from "../../src/server/deviceSnapshotResourceUris";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
@@ -157,6 +159,40 @@ describe("deviceSnapshotManager VM snapshot sizing and reclaim (#6490)", () => {
     const record = await repository.getSnapshot("vm-1");
     expect(record?.snapshotType).toBe("vm");
     expect(record?.sizeBytes).toBe(2 * 1024 * MB);
+  });
+
+  test("concurrent config updates retain both independently changed limits", async () => {
+    const getConfig = configRepository.getConfig.bind(configRepository);
+    let releaseFirstRead = (): void => {};
+    const firstReadGate = new Promise<void>((resolve) => {
+      releaseFirstRead = resolve;
+    });
+    let firstReadReached = (): void => {};
+    const firstReadAtGate = new Promise<void>((resolve) => {
+      firstReadReached = resolve;
+    });
+    let reads = 0;
+    const gatedRepository = Object.create(configRepository) as typeof configRepository;
+    gatedRepository.getConfig = async () => {
+      reads += 1;
+      if (reads === 1) {
+        firstReadReached();
+        await firstReadGate;
+      }
+      return getConfig();
+    };
+    gatedRepository.setConfig = configRepository.setConfig.bind(configRepository);
+    await setDeviceSnapshotManagerDependencies({ configRepository: gatedRepository as any });
+
+    const first = updateDeviceSnapshotConfig({ maxVmSnapshotsPerAvd: 1 });
+    await firstReadAtGate;
+    const second = updateDeviceSnapshotConfig({ maxArchiveSizeMb: 42 });
+    releaseFirstRead();
+    await Promise.all([first, second]);
+
+    const stored = await getDeviceSnapshotConfig();
+    expect(stored.maxVmSnapshotsPerAvd).toBe(1);
+    expect(stored.maxArchiveSizeMb).toBe(42);
   });
 
   test("notifies archive subscribers when a dispatched VM save persists a pending reclaim", async () => {
@@ -1175,6 +1211,79 @@ describe("deviceSnapshotManager VM snapshot sizing and reclaim (#6490)", () => {
     expect(avdSnapshots.getDeleteCalls().map((call) => call.snapshotName)).not.toContain(
       "vm-second",
     );
+  });
+
+  test("same-name VM retention protections remain active until every outer scope completes", async () => {
+    await updateDeviceSnapshotConfig({ maxVmSnapshotsPerAvd: 2 });
+    const sharedTimestamp = new Date(fakeTimer.now()).toISOString();
+    avdSnapshots.setVmSnapshot(AVD_NAME, "shared", 2 * MB);
+    await repository.insertSnapshot({
+      snapshotName: "shared",
+      deviceId: EMULATOR.deviceId,
+      deviceName: AVD_NAME,
+      platform: "android",
+      snapshotType: "vm",
+      includeAppData: true,
+      includeSettings: false,
+      createdAt: sharedTimestamp,
+      lastAccessedAt: sharedTimestamp,
+      sizeBytes: 2 * MB,
+      manifest: vmManifest("shared", sharedTimestamp),
+    });
+    const oldTimestamp = new Date(fakeTimer.now() + 1_000).toISOString();
+    avdSnapshots.setVmSnapshot(AVD_NAME, "vm-old", 2 * MB);
+    await repository.insertSnapshot({
+      snapshotName: "vm-old",
+      deviceId: EMULATOR.deviceId,
+      deviceName: AVD_NAME,
+      platform: "android",
+      snapshotType: "vm",
+      includeAppData: true,
+      includeSettings: false,
+      createdAt: oldTimestamp,
+      lastAccessedAt: oldTimestamp,
+      sizeBytes: 2 * MB,
+      manifest: vmManifest("vm-old", oldTimestamp),
+    });
+
+    let releaseFirst = (): void => {};
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    let firstEntered = (): void => {};
+    const firstAtGate = new Promise<void>((resolve) => {
+      firstEntered = resolve;
+    });
+    let releaseSecond = (): void => {};
+    const secondGate = new Promise<void>((resolve) => {
+      releaseSecond = resolve;
+    });
+    let secondEntered = (): void => {};
+    const secondAtGate = new Promise<void>((resolve) => {
+      secondEntered = resolve;
+    });
+    const first = withVmRetentionSnapshotProtection(EMULATOR, "shared", true, async () => {
+      firstEntered();
+      await firstGate;
+    });
+    await firstAtGate;
+    const second = withVmRetentionSnapshotProtection(EMULATOR, "shared", true, async () => {
+      secondEntered();
+      await secondGate;
+    });
+    await secondAtGate;
+    releaseFirst();
+    await first;
+
+    await updateDeviceSnapshotConfig({ maxVmSnapshotsPerAvd: 1 });
+
+    expect(await repository.getSnapshot("shared")).not.toBeNull();
+    expect(await repository.getSnapshot("vm-old")).toBeNull();
+    expect(avdSnapshots.getDeleteCalls().map((call) => call.snapshotName)).toEqual(["vm-old"]);
+
+    releaseSecond();
+    await second;
+    expect(await repository.getSnapshot("shared")).not.toBeNull();
   });
 
   test("a capture enforces VM retention configured while capture was in flight", async () => {

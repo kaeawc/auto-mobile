@@ -1,15 +1,18 @@
 #!/usr/bin/env bun
 
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
+import { spawn, type ChildProcess } from "node:child_process";
 import {
   chmodSync,
   closeSync,
   existsSync,
+  linkSync,
   mkdirSync,
   openSync,
   readFileSync,
   renameSync,
   statSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { chmod, mkdir, writeFile } from "node:fs/promises";
@@ -41,6 +44,7 @@ import { defaultTimer, type Timer } from "../src/utils/SystemTimer";
 const ENABLED_TOOLS = ["observe", "getDeviceState"] as const;
 const MAX_CLEANUP_RESERVE_MS = 15_000;
 const MAX_EVIDENCE_RESERVE_MS = 5_000;
+const MAX_REAP_RESERVE_MS = 1_000;
 
 type Platform = "android" | "ios";
 type Scenario = "full" | "recovery";
@@ -54,6 +58,11 @@ export interface AcceptanceArgs {
     avdName?: string;
     simulatorName?: string;
     simulatorUdid?: string;
+  };
+  controls: {
+    androidSiblingAvdName: string;
+    androidDuplicateSerial: string;
+    iosSameNameSiblingUdid: string;
   };
   runtime: string;
   deviceType: string;
@@ -157,6 +166,7 @@ interface Evidence {
 
 interface OwnershipManifestTarget {
   target: AcceptanceArgs["target"];
+  controls: AcceptanceArgs["controls"];
   runtime: string;
   deviceType: string;
   osVersionRange: AcceptanceArgs["osVersionRange"];
@@ -224,6 +234,7 @@ function manifestMac(payload: OwnershipManifestPayload, key: Buffer): string {
 function targetManifestEntry(args: AcceptanceArgs): OwnershipManifestTarget {
   return {
     target: args.target,
+    controls: args.controls,
     runtime: args.runtime,
     deviceType: args.deviceType,
     osVersionRange: args.osVersionRange,
@@ -371,6 +382,11 @@ export function parseArgs(argv: string[]): AcceptanceArgs {
   return {
     platform,
     target,
+    controls: {
+      androidSiblingAvdName: requiredFlag(values, "android-sibling-avd-name"),
+      androidDuplicateSerial: requiredFlag(values, "android-duplicate-serial"),
+      iosSameNameSiblingUdid: requiredFlag(values, "ios-same-name-sibling-uuid"),
+    },
     runtime: requiredFlag(values, "runtime"),
     deviceType: requiredFlag(values, "device-type"),
     osVersionRange: {
@@ -402,6 +418,14 @@ function asObject(value: unknown, context: string): JsonObject {
     throw new Error(`${context} must be an object`);
   }
   return value as JsonObject;
+}
+
+function objectArrayField(value: JsonObject, field: string, context: string): JsonObject[] {
+  const candidate = value[field];
+  if (!Array.isArray(candidate) || candidate.some((item) => !item || typeof item !== "object")) {
+    throw new Error(`${context}.${field} must be an array of objects`);
+  }
+  return candidate as JsonObject[];
 }
 
 function stringField(value: JsonObject, field: string, context: string): string {
@@ -743,14 +767,18 @@ async function defaultSpawnCli(
   signal: AbortSignal,
   timer: Timer = defaultTimer,
 ): Promise<void> {
-  const child = Bun.spawn(command, { stdout: "inherit", stderr: "inherit" });
-  const abort = () => child.kill();
+  const child = spawn(command[0]!, command.slice(1), {
+    detached: process.platform !== "win32",
+    stdio: "inherit",
+  });
+  const exited = waitForChildExit(child);
+  const abort = () => terminateOwnedProcessTree(child);
   signal.addEventListener("abort", abort, { once: true });
   const timeout = timer.setTimeout(() => {
-    child.kill();
+    terminateOwnedProcessTree(child);
   }, timeoutMs);
   try {
-    const exitCode = await child.exited;
+    const exitCode = await exited;
     if (signal.aborted) {
       signal.throwIfAborted();
     }
@@ -760,6 +788,33 @@ async function defaultSpawnCli(
   } finally {
     timer.clearTimeout(timeout);
     signal.removeEventListener("abort", abort);
+  }
+}
+
+function waitForChildExit(child: ChildProcess): Promise<number | null> {
+  return new Promise((resolve, reject) => {
+    child.once("error", reject);
+    child.once("close", (code) => resolve(code));
+  });
+}
+
+/**
+ * Every driver-owned CLI is a detached POSIX process group. Group-directed
+ * SIGKILL reaps the command and helpers it spawned before a timed-out doctor
+ * can write daemon state after the matrix has moved on. The direct-handle
+ * fallback covers Windows and unusual spawn implementations.
+ */
+function terminateOwnedProcessTree(child: ChildProcess): void {
+  if (child.pid !== undefined && process.platform !== "win32") {
+    try {
+      process.kill(-child.pid, "SIGKILL");
+      return;
+    } catch {
+      // The group can already be gone, or a platform spawn can ignore detached.
+    }
+  }
+  if (!child.killed && child.exitCode === null) {
+    child.kill("SIGKILL");
   }
 }
 
@@ -839,15 +894,34 @@ export async function defaultWriteEvidence(
   assertMode(dirname(path), SECURE_DIRECTORY_MODE, "Evidence directory");
   signal.throwIfAborted();
   const temporaryPath = `${path}.${randomUUID()}.tmp`;
-  await writeFile(temporaryPath, content, { mode: SECURE_FILE_MODE, flag: "wx" });
-  await chmod(temporaryPath, SECURE_FILE_MODE);
-  signal.throwIfAborted();
-  // The final publication is deliberately synchronous. Once the last abort
-  // check passes, no event-loop turn can observe a deadline and publish this
-  // stale temporary file afterward.
-  renameSync(temporaryPath, path);
-  chmodSync(path, SECURE_FILE_MODE);
-  assertMode(path, SECURE_FILE_MODE, "Evidence file");
+  let published = false;
+  try {
+    await writeFile(temporaryPath, content, { mode: SECURE_FILE_MODE, flag: "wx" });
+    await chmod(temporaryPath, SECURE_FILE_MODE);
+    signal.throwIfAborted();
+    // link(2) is an atomic create-if-absent fence. rename would replace an
+    // existing final path, allowing a late matrix to overwrite newer evidence.
+    // A linked final file retains the temporary inode's 0600 mode.
+    linkSync(temporaryPath, path);
+    published = true;
+    unlinkSync(temporaryPath);
+    assertMode(path, SECURE_FILE_MODE, "Evidence file");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+      throw new Error(`Evidence final path already exists; refusing to overwrite: ${path}`);
+    }
+    throw error;
+  } finally {
+    if (!published) {
+      try {
+        unlinkSync(temporaryPath);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+          throw error;
+        }
+      }
+    }
+  }
 }
 
 function assertProvisionedIdentity(payload: JsonObject, args: AcceptanceArgs): void {
@@ -892,8 +966,16 @@ function assertProvisionedIdentity(payload: JsonObject, args: AcceptanceArgs): v
   }
 }
 
-function doctorRepairCommand(build: BuildIdentity): string[] {
-  return [process.execPath, build.entryScript, "--cli", "doctor", "--repair"];
+function doctorRepairCommand(build: BuildIdentity, remainingBudgetMs: number): string[] {
+  return [
+    process.execPath,
+    build.entryScript,
+    "--cli",
+    "doctor",
+    "--repair",
+    "--timeout-ms",
+    String(remainingBudgetMs),
+  ];
 }
 
 function oldSessionDiagnostic(sessionUuid: string): string {
@@ -941,6 +1023,45 @@ function assertLiveSafeguards(args: AcceptanceArgs, dependencies: MatrixDependen
     );
   }
   assertOwnershipManifest(args);
+}
+
+function closeLateOwnedHandle(value: unknown): Promise<void> | undefined {
+  if (!value || typeof value !== "object" || !("close" in value)) {
+    return undefined;
+  }
+  const close = (value as { close?: unknown }).close;
+  if (typeof close !== "function") {
+    return undefined;
+  }
+  try {
+    return Promise.resolve((close as () => unknown).call(value)).then(() => undefined);
+  } catch {
+    return undefined;
+  }
+}
+
+async function settleWithin(
+  work: Promise<unknown>,
+  timeoutMs: number,
+  timer: Timer,
+): Promise<void> {
+  let timeout: NodeJS.Timeout | undefined;
+  const timeoutReached = new Promise<void>((resolve) => {
+    timeout = timer.setTimeout(resolve, timeoutMs);
+  });
+  try {
+    await Promise.race([
+      work.then(
+        () => undefined,
+        () => undefined,
+      ),
+      timeoutReached,
+    ]);
+  } finally {
+    if (timeout !== undefined) {
+      timer.clearTimeout(timeout);
+    }
+  }
 }
 
 export async function runAcceptanceMatrix(
@@ -1003,6 +1124,7 @@ export async function runAcceptanceMatrix(
     phase: string,
     budget: Budget,
     run: (signal: AbortSignal) => Promise<T>,
+    onAbort?: () => void | Promise<void>,
   ): Promise<T> => {
     const phaseDeadline =
       budget === "work" ? workDeadline : budget === "cleanup" ? cleanupDeadline : deadline;
@@ -1010,6 +1132,12 @@ export async function runAcceptanceMatrix(
     if (remaining <= 0) {
       throw new Error(`Acceptance deadline elapsed before ${phase}`);
     }
+    // Reserve time to reap a child/transport that ignores AbortSignal. A
+    // timeout therefore starts cancellation before, never after, the phase's
+    // absolute deadline. This is intentionally charged to every awaited
+    // operation rather than trusting cooperative cancellation.
+    const reapReserveMs = Math.min(MAX_REAP_RESERVE_MS, Math.max(1, Math.floor(remaining / 4)));
+    const operationBudgetMs = Math.max(1, remaining - reapReserveMs);
     const controller = new AbortController();
     let timeout: NodeJS.Timeout | undefined;
     let deadlineError: Error | undefined;
@@ -1018,19 +1146,32 @@ export async function runAcceptanceMatrix(
         const error = new Error(`Acceptance deadline elapsed during ${phase}`);
         deadlineError = error;
         controller.abort(error);
+        void Promise.resolve(onAbort?.()).catch(() => undefined);
         reject(error);
-      }, remaining);
+      }, operationBudgetMs);
     });
     const work = Promise.resolve().then(() => run(controller.signal));
+    // A late connection can still hand us a closeable client after the matrix
+    // has abandoned its result. Close it immediately, but never let that late
+    // completion resume the matrix or publish state.
+    void work.then(
+      (result) => {
+        if (controller.signal.aborted) {
+          void closeLateOwnedHandle(result);
+        }
+      },
+      () => undefined,
+    );
     try {
       return await Promise.race([work, timedOut]);
     } catch (error) {
       if (!deadlineError) {
         throw error;
       }
-      // Every injected operation accepts this signal. Do not let the matrix
-      // return while a late MCP call, connection, or child still owns work.
-      await work.catch(() => undefined);
+      // Cancellation itself must not become an unbounded second operation.
+      // Give a real child/transport the reserved reaping slice, then return the
+      // deadline failure even if an injected operation never settles.
+      await settleWithin(work, reapReserveMs, timer);
       throw deadlineError;
     } finally {
       if (timeout !== undefined) {
@@ -1045,6 +1186,7 @@ export async function runAcceptanceMatrix(
   const clients: McpSessionClient[] = [];
   const minted: MintedSession[] = [];
   const cleanupFailures: string[] = [];
+  const discoveryOrders: string[][] = [];
   let daemonClient: DaemonSessionClient | undefined;
   let primaryError: unknown;
 
@@ -1065,6 +1207,7 @@ export async function runAcceptanceMatrix(
       `${phase} ${tool}`,
       budget,
       async (signal) => await client.callTool(tool, request, signal),
+      () => client.close(),
     );
 
   const release = async (
@@ -1090,6 +1233,7 @@ export async function runAcceptanceMatrix(
           { sessionId: sessionUuid },
           signal,
         ),
+      () => daemonClient!.close(),
     );
     session.released = true;
     const start = timer.now();
@@ -1237,6 +1381,112 @@ export async function runAcceptanceMatrix(
     });
   };
 
+  const listControlledDevices = async (
+    client: McpSessionClient,
+    phase: string,
+  ): Promise<JsonObject[]> => {
+    const payload = toolPayload(
+      await callTool(client, "listDevices", { platform: args.platform }, phase),
+      "listDevices",
+    );
+    const devices = objectArrayField(payload, "devices", "listDevices");
+    discoveryOrders.push(
+      devices.map(
+        (device) =>
+          `${stringField(device, "name", "listDevices.devices")}:${stringField(
+            device,
+            "deviceId",
+            "listDevices.devices",
+          )}`,
+      ),
+    );
+    return devices;
+  };
+
+  const assertControlledDiscovery = async (): Promise<void> => {
+    const phase = "controlled-discovery";
+    const start = timer.now();
+    const client = await bounded(
+      `${phase} MCP connect`,
+      "work",
+      async (signal) => await createMcpClient(phase, signal),
+    );
+    clients.push(client);
+    const first = await listControlledDevices(client, `${phase}-first`);
+    const second = await listControlledDevices(client, `${phase}-second`);
+    const hasDevice = (devices: JsonObject[], name: string, deviceId?: string): boolean =>
+      devices.some(
+        (device) =>
+          device.name === name &&
+          (device.platform === args.platform || device.platform === undefined) &&
+          (deviceId === undefined || device.deviceId === deviceId),
+      );
+
+    if (args.platform === "android") {
+      for (const devices of [first, second]) {
+        if (!hasDevice(devices, args.controls.androidSiblingAvdName)) {
+          throw new Error("Controlled Android sibling was absent from discovery");
+        }
+        if (!hasDevice(devices, args.target.avdName!, args.controls.androidDuplicateSerial)) {
+          throw new Error("Controlled Android duplicate serial was absent from discovery");
+        }
+      }
+      const ambiguous = await callTool(
+        client,
+        "getAndroid",
+        { avdName: args.target.avdName, enableTools: [...ENABLED_TOOLS] },
+        phase,
+      );
+      if (
+        !ambiguous.isError ||
+        !toolDiagnostic(ambiguous, "getAndroid").includes("identity_conflict") ||
+        !toolDiagnostic(ambiguous, "getAndroid").includes(args.controls.androidDuplicateSerial)
+      ) {
+        throw new Error(
+          "Controlled duplicate Android AVD did not fail with the required identity_conflict",
+        );
+      }
+      toolPayload(
+        await callTool(
+          client,
+          "killDevice",
+          {
+            device: {
+              name: args.target.avdName,
+              deviceId: args.controls.androidDuplicateSerial,
+              platform: "android",
+            },
+          },
+          `${phase}-duplicate-cleanup`,
+        ),
+        "killDevice",
+      );
+      const afterDuplicateCleanup = await listControlledDevices(
+        client,
+        `${phase}-after-duplicate-cleanup`,
+      );
+      if (!hasDevice(afterDuplicateCleanup, args.controls.androidSiblingAvdName)) {
+        throw new Error("Controlled Android sibling changed during duplicate cleanup");
+      }
+    } else {
+      for (const devices of [first, second]) {
+        if (
+          !hasDevice(devices, args.target.simulatorName!, args.target.simulatorUdid) ||
+          !hasDevice(devices, args.target.simulatorName!, args.controls.iosSameNameSiblingUdid)
+        ) {
+          throw new Error("Controlled same-display-name iOS sibling was absent from discovery");
+        }
+      }
+    }
+    recordStep(steps, timer, phase, start, {
+      discoveryPasses: discoveryOrders.length,
+      siblingUntouched: true,
+      ...(args.platform === "android"
+        ? { duplicateRejected: true, duplicateSerial: args.controls.androidDuplicateSerial }
+        : { sameDisplayNameSiblingUuid: args.controls.iosSameNameSiblingUdid }),
+    });
+  };
+
   const admitMaintenance = async (phase: string, budget: Budget): Promise<JsonObject> => {
     daemonClient ??= await bounded(
       `${phase} maintenance daemon connect`,
@@ -1248,6 +1498,7 @@ export async function runAcceptanceMatrix(
         `${phase} maintenance build identity check`,
         budget,
         async (signal) => await daemonClient!.callDaemonMethod("ide/status", {}, signal),
+        () => daemonClient!.close(),
       ),
       "ide/status",
     );
@@ -1260,6 +1511,7 @@ export async function runAcceptanceMatrix(
         budget,
         async (signal) =>
           await daemonClient!.callDaemonMethod(DAEMON_PREPARE_MAINTENANCE_METHOD, status, signal),
+        () => daemonClient!.close(),
       ),
       DAEMON_PREPARE_MAINTENANCE_METHOD,
     );
@@ -1284,6 +1536,7 @@ export async function runAcceptanceMatrix(
         budget,
         async (signal) =>
           await daemonClient!.callDaemonMethod(DAEMON_COMPLETE_MAINTENANCE_METHOD, status, signal),
+        () => daemonClient!.close(),
       ),
       DAEMON_COMPLETE_MAINTENANCE_METHOD,
     );
@@ -1297,9 +1550,10 @@ export async function runAcceptanceMatrix(
     const status = await admitMaintenance("host-wide doctor repair", "work");
     try {
       await bounded("host-wide doctor repair", "work", async (signal) => {
+        const remainingBudgetMs = Math.max(1, workDeadline - timer.now());
         await spawnCli(
-          doctorRepairCommand(args.build),
-          Math.max(1, workDeadline - timer.now()),
+          doctorRepairCommand(args.build, remainingBudgetMs),
+          remainingBudgetMs,
           signal,
         );
       });
@@ -1353,6 +1607,7 @@ export async function runAcceptanceMatrix(
   };
 
   try {
+    await assertControlledDiscovery();
     if (args.platform === "ios") {
       const preflight = await acquire("preflight-ios-uuid-ownership", "exact", "platform");
       await release(preflight.sessionUuid, "preflight-ios-uuid-ownership");
@@ -1568,6 +1823,10 @@ export async function runAcceptanceMatrix(
       readinessObserveThenState,
       allMintedSessionsReleased,
       singleBuildIdentity: true,
+      controlledDiscoveryPasses: discoveryOrders.length >= 2,
+      controlledSiblingUntouched: steps.some(
+        (step) => step.name === "controlled-discovery" && step.passed,
+      ),
       androidSerialExposed: args.platform === "android" && androidSerials.length > 0,
       androidSerialChanged:
         args.platform === "android" &&

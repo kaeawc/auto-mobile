@@ -35,6 +35,11 @@ const IOS_UDID = "00000000-0000-0000-0000-000000000001";
 const androidArgs: AcceptanceArgs = {
   platform: "android",
   target: { avdName: "Pixel_8_API_35" },
+  controls: {
+    androidSiblingAvdName: "Pixel_8_Sibling",
+    androidDuplicateSerial: "emulator-5554",
+    iosSameNameSiblingUdid: "00000000-0000-0000-0000-000000000002",
+  },
   runtime: "35",
   deviceType: "pixel_8",
   osVersionRange: { min: "34", max: "35" },
@@ -85,11 +90,46 @@ function createHarness(
   const evidence: string[] = [];
   const timer = new FakeTimer();
   let startCount = 0;
+  let listCount = 0;
+  let androidDuplicatePresent = true;
 
   const createMcpClient = async (owner: string): Promise<McpSessionClient> => ({
     async callTool(name, arguments_) {
       calls.push({ owner, name, arguments: arguments_ });
       events.push(`${owner}:${name}`);
+      if (name === "listDevices") {
+        listCount += 1;
+        const isIos = arguments_.platform === "ios";
+        const devices = isIos
+          ? [
+              {
+                platform: "ios",
+                name: "iPhone 16 Pro",
+                deviceId: IOS_UDID,
+              },
+              {
+                platform: "ios",
+                name: "iPhone 16 Pro",
+                deviceId: "00000000-0000-0000-0000-000000000002",
+              },
+            ]
+          : [
+              { platform: "android", name: "Pixel_8_Sibling", deviceId: "emulator-5558" },
+              ...(androidDuplicatePresent
+                ? [
+                    {
+                      platform: "android",
+                      name: "Pixel_8_API_35",
+                      deviceId: "emulator-5554",
+                    },
+                  ]
+                : []),
+              { platform: "android", name: "Pixel_8_API_35", deviceId: "emulator-5556" },
+            ];
+        return {
+          structuredContent: { devices: listCount % 2 === 0 ? devices.toReversed() : devices },
+        };
+      }
       if (name === "provisionDevice") {
         const device = arguments_.device as Record<string, unknown>;
         const spec = device.spec as Record<string, unknown>;
@@ -112,6 +152,15 @@ function createHarness(
         };
       }
       if (name === "getAndroid" || name === "getApple" || name === "startDevice") {
+        if (name === "getAndroid" && owner === "controlled-discovery" && androidDuplicatePresent) {
+          return {
+            isError: true,
+            structuredContent: {
+              error:
+                "identity_conflict: multiple matching AVDs include emulator-5554 and emulator-5556; provide deviceId",
+            },
+          };
+        }
         const isIos = name === "getApple" || arguments_.platform === "ios";
         const min = arguments_.minOsVersion;
         const max = arguments_.maxOsVersion;
@@ -181,6 +230,10 @@ function createHarness(
         return { structuredContent: { state: "ready" } };
       }
       if (name === "killDevice") {
+        const device = arguments_.device as Record<string, unknown>;
+        if (device.deviceId === "emulator-5554") {
+          androidDuplicatePresent = false;
+        }
         return { structuredContent: { killed: true } };
       }
       throw new Error(`Unexpected tool ${name}`);
@@ -299,14 +352,18 @@ describe("live device acceptance harness", () => {
       },
       enableTools: ["observe", "getDeviceState"],
     });
-    expect(harness.cliCommands).toContainEqual([
-      process.execPath,
-      "/test/dist/src/index.js",
-      "--cli",
-      "doctor",
-      "--repair",
-    ]);
-    const exactAcquisitions = harness.calls.filter((call) => call.name === "getAndroid");
+    expect(
+      harness.cliCommands.some(
+        (command) =>
+          command.slice(0, 5).join(" ") ===
+            `${process.execPath} /test/dist/src/index.js --cli doctor --repair` &&
+          command.at(-2) === "--timeout-ms" &&
+          Number(command.at(-1)) > 0,
+      ),
+    ).toBe(true);
+    const exactAcquisitions = harness.calls.filter(
+      (call) => call.name === "getAndroid" && call.owner !== "controlled-discovery",
+    );
     expect(exactAcquisitions.map((call) => call.arguments)).toEqual([
       { avdName: "Pixel_8_API_35", enableTools: ["observe", "getDeviceState"] },
       { avdName: "Pixel_8_API_35", enableTools: ["observe", "getDeviceState"] },
@@ -342,7 +399,13 @@ describe("live device acceptance harness", () => {
       },
       { platform: "android", avdName: "Pixel_8_API_35", preferRunning: true },
     ]);
-    expect(harness.calls.find((call) => call.name === "killDevice")?.arguments).toEqual({
+    expect(
+      harness.calls.find(
+        (call) =>
+          call.name === "killDevice" &&
+          (call.arguments.device as Record<string, unknown>).deviceId === "emulator-5556",
+      )?.arguments,
+    ).toEqual({
       device: {
         name: "Pixel_8_API_35",
         deviceId: "emulator-5556",
@@ -374,7 +437,16 @@ describe("live device acceptance harness", () => {
       allMintedSessionsReleased: true,
       androidSerialChanged: true,
       androidConsolePortChanged: true,
+      controlledDiscoveryPasses: true,
+      controlledSiblingUntouched: true,
     });
+    expect(
+      harness.calls.some(
+        (call) =>
+          call.name === "killDevice" &&
+          (call.arguments.device as Record<string, unknown>).deviceId === "emulator-5558",
+      ),
+    ).toBe(false);
   });
 
   test("uses getApple for exact iOS readiness and UUID generic selectors for exact/min/max coverage", async () => {
@@ -444,7 +516,16 @@ describe("live device acceptance harness", () => {
       stableIdentityPreserved: true,
       iosServiceEndpointExposed: false,
       iosServiceEndpointChanged: false,
+      controlledDiscoveryPasses: true,
+      controlledSiblingUntouched: true,
     });
+    expect(
+      harness.calls.some(
+        (call) =>
+          (call.name === "getApple" || call.name === "killDevice") &&
+          JSON.stringify(call.arguments).includes("00000000-0000-0000-0000-000000000002"),
+      ),
+    ).toBe(false);
   });
 
   test("releases the owned session before maintenance restart and requires the terminal diagnostic", async () => {
@@ -514,7 +595,7 @@ describe("live device acceptance harness", () => {
     expect(harness.events.indexOf("release:start-1")).toBeLessThan(
       harness.events.findIndex((event) => event.startsWith("close:")),
     );
-    expect(harness.events.filter((event) => event.startsWith("close:"))).toHaveLength(3);
+    expect(harness.events.filter((event) => event.startsWith("close:"))).toHaveLength(4);
     expect(harness.evidence[0]).not.toContain("start-1");
     const evidence = JSON.parse(harness.evidence[0]);
     expect(evidence.checks.readinessObserveThenState).toBe(false);
@@ -608,7 +689,7 @@ describe("live device acceptance harness", () => {
     );
 
     expect(harness.events).toContain("close:daemon");
-    expect(harness.events.filter((event) => event.startsWith("close:"))).toHaveLength(12);
+    expect(harness.events.filter((event) => event.startsWith("close:"))).toHaveLength(13);
     expect(harness.evidence[0]).not.toContain("daemon close failed");
     expect(harness.evidence[0]).not.toContain("client close failed");
   });
@@ -625,18 +706,60 @@ describe("live device acceptance harness", () => {
     expect(harness.evidence[0]).toContain("hmac-sha256:");
   });
 
-  test("uses FakeTimer to abort and reap a stalled MCP connection before it can report success", async () => {
+  test("returns by the absolute deadline when an injected MCP connection ignores AbortSignal", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
-    const connecting = Promise.withResolvers<McpSessionClient>();
+    let aborted = false;
     const result = runAcceptanceMatrix(
       { ...androidArgs, timeoutMs: 100 },
       {
         testOnly: true,
         timer,
-        createMcpClient: async (_owner, signal) => {
-          signal.addEventListener("abort", () => connecting.reject(signal.reason), { once: true });
-          return await connecting.promise;
+        createMcpClient: async (owner, signal) => {
+          if (owner === "controlled-discovery") {
+            return {
+              callTool: async (name, arguments_) => {
+                if (name === "listDevices") {
+                  return {
+                    structuredContent: {
+                      devices: [
+                        {
+                          platform: "android",
+                          name: "Pixel_8_Sibling",
+                          deviceId: "emulator-5558",
+                        },
+                        {
+                          platform: "android",
+                          name: "Pixel_8_API_35",
+                          deviceId: "emulator-5554",
+                        },
+                        {
+                          platform: "android",
+                          name: "Pixel_8_API_35",
+                          deviceId: "emulator-5556",
+                        },
+                      ],
+                    },
+                  };
+                }
+                if (name === "getAndroid") {
+                  return {
+                    isError: true,
+                    structuredContent: { error: "identity_conflict: emulator-5554" },
+                  };
+                }
+                if (name === "killDevice") {
+                  return { structuredContent: { killed: true } };
+                }
+                throw new Error(`Unexpected controlled tool ${name} ${String(arguments_)}`);
+              },
+              close: async () => {},
+            };
+          }
+          signal.addEventListener("abort", () => {
+            aborted = true;
+          });
+          return await new Promise<McpSessionClient>(() => {});
         },
         createDaemonClient: async () => {
           throw new Error("should not create daemon client");
@@ -647,10 +770,16 @@ describe("live device acceptance harness", () => {
       },
     );
 
-    const rejection = expect(result).rejects.toThrow(
-      "Acceptance deadline elapsed during provision MCP connect",
-    );
-    await rejection;
+    await expect(
+      Promise.race([
+        result,
+        Bun.sleep(500).then(() => {
+          throw new Error("real outer bound elapsed");
+        }),
+      ]),
+    ).rejects.toThrow("Acceptance deadline elapsed during provision MCP connect");
+    expect(aborted).toBe(true);
+    expect(timer.now()).toBeLessThanOrEqual(100);
   });
 
   test("uses the evidence reserve and abort signal so a late writer cannot turn timeout into success", async () => {
@@ -701,6 +830,28 @@ describe("live device acceptance harness", () => {
       await defaultWriteEvidence(path, "published", new AbortController().signal);
       expect(existsSync(path)).toBe(true);
       expect(readFileSync(path, "utf8")).toBe("published");
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("fences concurrent and late evidence writers without overwriting a final path", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "automobile-evidence-"));
+    const path = join(directory, "evidence.json");
+    try {
+      const results = await Promise.allSettled([
+        defaultWriteEvidence(path, "first", new AbortController().signal),
+        defaultWriteEvidence(path, "second", new AbortController().signal),
+      ]);
+      expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+      expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
+      const published = readFileSync(path, "utf8");
+      expect(["first", "second"]).toContain(published);
+
+      await expect(
+        defaultWriteEvidence(path, "late", new AbortController().signal),
+      ).rejects.toThrow("refusing to overwrite");
+      expect(readFileSync(path, "utf8")).toBe(published);
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }

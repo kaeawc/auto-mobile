@@ -8,6 +8,8 @@ REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 source "${SCRIPT_DIR}/ios/run_with_timeout.sh"
 
 android_avd_name=""
+android_sibling_avd_name=""
+android_duplicate_serial=""
 android_runtime=""
 android_device_type=""
 android_memory_mb=""
@@ -16,6 +18,7 @@ android_min_os_version=""
 android_max_os_version=""
 ios_simulator_name=""
 ios_simulator_uuid=""
+ios_same_name_sibling_uuid=""
 ios_runtime=""
 ios_device_type=""
 ios_min_os_version=""
@@ -39,9 +42,11 @@ Usage:
   AUTOMOBILE_ACCEPTANCE_LIVE=1 bash scripts/run-live-device-acceptance.sh \
     --confirm-live --test-owned-devices \
     --android-avd-name <dedicated-avd> --android-runtime <system-image> --android-device-type <profile> \
+    --android-sibling-avd-name <dedicated-sibling-avd> --android-duplicate-serial <controlled-duplicate-serial> \
     --android-memory-mb <memory-mb> --android-cpu-cores <cpu-cores> \
     --android-min-os-version <minimum-os> --android-max-os-version <maximum-os> \
     --ios-simulator-name <dedicated-simulator-name> --ios-simulator-uuid <dedicated-simulator-uuid> \
+    --ios-same-name-sibling-uuid <dedicated-same-name-sibling-uuid> \
     --ios-runtime <runtime> --ios-device-type <device-type> \
     --ios-min-os-version <minimum-os> --ios-max-os-version <maximum-os> \
     --ownership-manifest <path> --operator-key-file <path> \
@@ -77,10 +82,12 @@ while [[ "$#" -gt 0 ]]; do
     --create-operator-key) create_operator_key=true; shift ;;
     --record-ownership-manifest) record_ownership_manifest=true; shift ;;
     --dry-run) dry_run=true; shift ;;
-    --android-avd-name|--android-runtime|--android-device-type|--android-memory-mb|--android-cpu-cores|--android-min-os-version|--android-max-os-version|--ios-simulator-name|--ios-simulator-uuid|--ios-runtime|--ios-device-type|--ios-min-os-version|--ios-max-os-version|--evidence-dir|--ownership-manifest|--operator-key-file|--total-timeout-seconds|--platform-timeout-seconds|--scenario)
+    --android-avd-name|--android-sibling-avd-name|--android-duplicate-serial|--android-runtime|--android-device-type|--android-memory-mb|--android-cpu-cores|--android-min-os-version|--android-max-os-version|--ios-simulator-name|--ios-simulator-uuid|--ios-same-name-sibling-uuid|--ios-runtime|--ios-device-type|--ios-min-os-version|--ios-max-os-version|--evidence-dir|--ownership-manifest|--operator-key-file|--total-timeout-seconds|--platform-timeout-seconds|--scenario)
       require_value "$1" "${2:-}"
       case "$1" in
         --android-avd-name) android_avd_name="$2" ;;
+        --android-sibling-avd-name) android_sibling_avd_name="$2" ;;
+        --android-duplicate-serial) android_duplicate_serial="$2" ;;
         --android-runtime) android_runtime="$2" ;;
         --android-device-type) android_device_type="$2" ;;
         --android-memory-mb) android_memory_mb="$2" ;;
@@ -89,6 +96,7 @@ while [[ "$#" -gt 0 ]]; do
         --android-max-os-version) android_max_os_version="$2" ;;
         --ios-simulator-name) ios_simulator_name="$2" ;;
         --ios-simulator-uuid) ios_simulator_uuid="$2" ;;
+        --ios-same-name-sibling-uuid) ios_same_name_sibling_uuid="$2" ;;
         --ios-runtime) ios_runtime="$2" ;;
         --ios-device-type) ios_device_type="$2" ;;
         --ios-min-os-version) ios_min_os_version="$2" ;;
@@ -118,7 +126,7 @@ if [[ "${dry_run}" != true && "${record_ownership_manifest}" != true && ( "${con
   echo "error: live mutation requires --confirm-live, --test-owned-devices, and AUTOMOBILE_ACCEPTANCE_LIVE=1." >&2
   exit 2
 fi
-for value in "${android_avd_name}" "${android_runtime}" "${android_device_type}" "${android_memory_mb}" "${android_cpu_cores}" "${android_min_os_version}" "${android_max_os_version}" "${ios_simulator_name}" "${ios_simulator_uuid}" "${ios_runtime}" "${ios_device_type}" "${ios_min_os_version}" "${ios_max_os_version}"; do
+for value in "${android_avd_name}" "${android_sibling_avd_name}" "${android_duplicate_serial}" "${android_runtime}" "${android_device_type}" "${android_memory_mb}" "${android_cpu_cores}" "${android_min_os_version}" "${android_max_os_version}" "${ios_simulator_name}" "${ios_simulator_uuid}" "${ios_same_name_sibling_uuid}" "${ios_runtime}" "${ios_device_type}" "${ios_min_os_version}" "${ios_max_os_version}"; do
   if [[ -z "${value}" ]]; then
     echo "error: every explicit Android and iOS target, runtime, device type, and OS bound argument is required." >&2
     exit 2
@@ -191,6 +199,9 @@ run_platform() {
     --evidence "${evidence_path}" --timeout-ms "$((budget * 1000))"
     --entrypoint "${entrypoint}" --operator-key-file "${operator_key_file}"
     --ownership-manifest "${ownership_manifest}"
+    --android-sibling-avd-name "${android_sibling_avd_name}"
+    --android-duplicate-serial "${android_duplicate_serial}"
+    --ios-same-name-sibling-uuid "${ios_same_name_sibling_uuid}"
   )
   if [[ "${record_ownership_manifest}" == true ]]; then
     driver_args+=(--record-ownership-manifest)

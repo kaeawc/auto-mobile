@@ -48,6 +48,8 @@ run_harness() {
     --confirm-live \
     --test-owned-devices \
     --android-avd-name "acceptance-android" \
+    --android-sibling-avd-name "acceptance-android-sibling" \
+    --android-duplicate-serial "emulator-5556" \
     --android-runtime "system-images;android-36;google_apis;x86_64" \
     --android-device-type "pixel_9" \
     --android-memory-mb "4096" \
@@ -56,6 +58,7 @@ run_harness() {
     --android-max-os-version "36" \
     --ios-simulator-name "Acceptance iPhone 17" \
     --ios-simulator-uuid "ACCEPTANCE-IOS-UUID" \
+    --ios-same-name-sibling-uuid "ACCEPTANCE-IOS-SIBLING-UUID" \
     --ios-runtime "com.apple.CoreSimulator.SimRuntime.iOS-26-0" \
     --ios-device-type "com.apple.CoreSimulator.SimDeviceType.iPhone-17" \
     --ios-min-os-version "25.0" \
@@ -70,6 +73,8 @@ run_harness() {
 @test "requires explicit confirmation, opt-in, and test-owned-device acknowledgement" {
   run env PATH="${MOCK_BIN}:${PATH}" bash "${SCRIPT}" \
     --android-avd-name "acceptance-android" \
+    --android-sibling-avd-name "acceptance-android-sibling" \
+    --android-duplicate-serial "emulator-5556" \
     --android-runtime "system-image" \
     --android-device-type "pixel" \
     --android-memory-mb "4096" \
@@ -78,6 +83,7 @@ run_harness() {
     --android-max-os-version "36" \
     --ios-simulator-name "Acceptance iPhone" \
     --ios-simulator-uuid "acceptance-ios" \
+    --ios-same-name-sibling-uuid "acceptance-ios-sibling" \
     --ios-runtime "ios-runtime" \
     --ios-device-type "iphone" \
     --ios-min-os-version "25.0" \
@@ -98,6 +104,8 @@ run_harness() {
   ios_line="$(grep -n -- '--platform ios' "${COMMAND_LOG}" | head -n 1 | cut -d: -f1)"
   [ "${android_line}" -lt "${ios_line}" ]
   grep -q -- '--avd-name acceptance-android' "${COMMAND_LOG}"
+  grep -q -- '--android-sibling-avd-name acceptance-android-sibling' "${COMMAND_LOG}"
+  grep -q -- '--android-duplicate-serial emulator-5556' "${COMMAND_LOG}"
   grep -q -- '--runtime system-images;android-36;google_apis;x86_64' "${COMMAND_LOG}"
   grep -q -- '--device-type pixel_9' "${COMMAND_LOG}"
   grep -q -- '--min-os-version 35' "${COMMAND_LOG}"
@@ -106,6 +114,7 @@ run_harness() {
   grep -q -- '--android-cpu-cores 4' "${COMMAND_LOG}"
   grep -q -- '--simulator-name Acceptance iPhone 17' "${COMMAND_LOG}"
   grep -q -- '--simulator-uuid ACCEPTANCE-IOS-UUID' "${COMMAND_LOG}"
+  grep -q -- '--ios-same-name-sibling-uuid ACCEPTANCE-IOS-SIBLING-UUID' "${COMMAND_LOG}"
   grep -q -- '--runtime com.apple.CoreSimulator.SimRuntime.iOS-26-0' "${COMMAND_LOG}"
   grep -q -- '--device-type com.apple.CoreSimulator.SimDeviceType.iPhone-17' "${COMMAND_LOG}"
   grep -q -- '--min-os-version 25.0' "${COMMAND_LOG}"
@@ -124,6 +133,8 @@ run_harness() {
     --confirm-live \
     --test-owned-devices \
     --android-avd-name "acceptance-android" \
+    --android-sibling-avd-name "acceptance-android-sibling" \
+    --android-duplicate-serial "emulator-5556" \
     --android-runtime "system-image" \
     --android-device-type "pixel" \
     --android-memory-mb "4096" \
@@ -132,6 +143,7 @@ run_harness() {
     --android-max-os-version "36" \
     --ios-simulator-name "Acceptance iPhone" \
     --ios-simulator-uuid "acceptance-ios" \
+    --ios-same-name-sibling-uuid "acceptance-ios-sibling" \
     --ios-runtime "ios-runtime" \
     --ios-device-type "iphone" \
     --ios-min-os-version "25.0" \

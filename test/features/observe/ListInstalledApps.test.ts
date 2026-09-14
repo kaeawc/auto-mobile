@@ -31,6 +31,28 @@ class FakeInstalledPackageSource implements AndroidInstalledPackageSource {
   }
 }
 
+/** Gates the cache lookup so a test can retire the device mid-request. */
+class GatedCacheLookupInstalledAppsRepository extends FakeInstalledAppsRepository {
+  private open!: () => void;
+  readonly gate = new Promise<void>((resolve) => {
+    this.open = resolve;
+  });
+  lookupStarted!: () => void;
+  readonly started = new Promise<void>((resolve) => {
+    this.lookupStarted = resolve;
+  });
+
+  override async getCacheVerifiedAt(deviceId: string): Promise<number | null> {
+    this.lookupStarted();
+    await this.gate;
+    return super.getCacheVerifiedAt(deviceId);
+  }
+
+  release(): void {
+    this.open();
+  }
+}
+
 class FailsFirstInstalledAppsReplaceRepository extends FakeInstalledAppsRepository {
   private failNextReplace = true;
 
@@ -1302,6 +1324,46 @@ describe("ListInstalledApps", function () {
       });
       expect(fakeAdb.wasCommandExecuted("shell pm list packages --user 0")).toBe(true);
       expect(getInstalledAppsCacheWriteCoordinator().isDirty(device.deviceId)).toBe(false);
+    });
+
+    test("a listing that resumes after its device was retired returns live data without persisting rows (#6894)", async function () {
+      const device: BootedDevice = {
+        deviceId: "retired-mid-listing-device",
+        platform: "android",
+      } as BootedDevice;
+      const repo = new GatedCacheLookupInstalledAppsRepository();
+      const timer = new FakeTimer();
+      timer.advanceTime(1_000);
+      fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 13, running: true }]);
+      fakeAdb.setCommandResponse("shell pm list packages --user 0", {
+        stdout: "package:com.example.live\n",
+        stderr: "",
+      });
+      fakeAdb.setCommandResponse("shell pm list packages -s --user 0", { stdout: "", stderr: "" });
+      const list = new ListInstalledApps(device, new FakeAdbClientFactory(fakeAdb), null, {
+        cacheEnabled: true,
+        installedAppsRepository: repo,
+        timer,
+      });
+
+      const listing = list.executeDetailed();
+      await repo.started;
+      // Shutdown retires the device and starts releasing while the request's
+      // cache lookup is still awaiting.
+      const coordinator = getInstalledAppsCacheWriteCoordinator();
+      const retired = coordinator.retireIncarnation(device.deviceId);
+      const release = coordinator.releaseDevice(device.deviceId, retired);
+      repo.release();
+
+      await expect(listing).resolves.toMatchObject({
+        profiles: { 0: [{ packageName: "com.example.live" }] },
+      });
+      await release;
+      // The retired request must not have been promoted onto a fresh
+      // incarnation: no rows for the dead device, and no bookkeeping left.
+      expect(await repo.listInstalledApps(device.deviceId)).toEqual([]);
+      expect(coordinator.isDirty(device.deviceId)).toBe(false);
+      expect(coordinator.beginRebuild(device.deviceId, retired)).toBeUndefined();
     });
 
     test("returns the live result and retries after a cache replacement failure", async function () {

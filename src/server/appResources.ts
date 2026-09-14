@@ -699,16 +699,23 @@ async function ensureAppsCacheEntry(
     return cached;
   }
 
+  // Captured before discovery awaits: a request that resumes after the device
+  // was retired must be fenced, not promoted onto a reused id (#6894).
+  const incarnation = getInstalledAppsCacheWriteCoordinator().captureIncarnation(deviceId);
   const device = typeof deviceOrId === "string" ? await findBootedDevice(deviceOrId) : deviceOrId;
   if (!device) {
     return null;
   }
 
   signal?.throwIfAborted();
-  const cacheGeneration = getInstalledAppsCacheWriteCoordinator().beginRebuild(deviceId);
+  const cacheGeneration = getInstalledAppsCacheWriteCoordinator().beginRebuild(
+    deviceId,
+    incarnation,
+  );
   const result = await fetchAppsForDevice(device, timer, signal);
   if (
     result.cacheable &&
+    cacheGeneration !== undefined &&
     (device.platform !== "android" || !getInstalledAppsCacheWriteCoordinator().isDirty(deviceId))
   ) {
     await getInstalledAppsCacheWriteCoordinator().commitRebuild(
@@ -1358,6 +1365,9 @@ async function getAppMetadataResource(
     return cached.content;
   }
 
+  // Captured before discovery awaits: a request that resumes while shutdown
+  // drains this device must not populate the cache after retirement (#6894).
+  const incarnation = getInstalledAppsCacheWriteCoordinator().captureIncarnation(deviceId);
   const device = await findBootedDevice(deviceId);
   if (!device) {
     return {
@@ -1367,7 +1377,10 @@ async function getAppMetadataResource(
     };
   }
 
-  const cacheGeneration = getInstalledAppsCacheWriteCoordinator().beginRebuild(deviceId);
+  const cacheGeneration = getInstalledAppsCacheWriteCoordinator().beginRebuild(
+    deviceId,
+    incarnation,
+  );
   try {
     const iosSource = device.platform === "ios" ? createIosMetadataSource(device) : null;
     const getMetadata = new GetAppMetadata(device, undefined, iosSource);
@@ -1387,17 +1400,19 @@ async function getAppMetadataResource(
       text: JSON.stringify(metadata, null, 2),
     };
 
-    await getInstalledAppsCacheWriteCoordinator().commitRebuild(
-      deviceId,
-      cacheGeneration,
-      async () => {
-        appMetadataCacheByKey.set(cacheKey, {
-          deviceId,
-          expiresAt: timer.now() + APP_METADATA_CACHE_TTL_MS,
-          content,
-        });
-      },
-    );
+    if (cacheGeneration !== undefined) {
+      await getInstalledAppsCacheWriteCoordinator().commitRebuild(
+        deviceId,
+        cacheGeneration,
+        async () => {
+          appMetadataCacheByKey.set(cacheKey, {
+            deviceId,
+            expiresAt: timer.now() + APP_METADATA_CACHE_TTL_MS,
+            content,
+          });
+        },
+      );
+    }
 
     return content;
   } catch (error) {

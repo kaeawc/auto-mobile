@@ -27,6 +27,7 @@ import {
 } from "./ios/IOSHostPortAvailabilityChecker";
 import { IOSCtrlProxyHealthClient, isValidCtrlProxyPort } from "./ios/IOSCtrlProxyHealthClient";
 import { IOSCtrlProxyProcessClient, type RunnerOwnership } from "./ios/IOSCtrlProxyProcessClient";
+import { withRemainingBudget } from "./withRemainingBudget";
 import type { ProxyManager, ProxySetupResult } from "./interfaces/ProxyManager";
 
 export const MAX_STARTUP_ORPHAN_RUNNER_CANDIDATES = 20;
@@ -40,6 +41,9 @@ const SHUTDOWN_FORCE_STOP_TIMEOUT_MS = 250;
 // A fraction of SHUTDOWN_FORCE_STOP_TIMEOUT_MS: the ownership re-verify in
 // forceStopForShutdown must not itself consume the budget the tree kill needs.
 const FORCE_STOP_OWNERSHIP_CHECK_TIMEOUT_MS = 100;
+// Keep this budget exclusively for descendant-free SIGKILL commands after both
+// ownership checks; those probes are advisory, but force-stop must always signal.
+const FORCE_STOP_KILL_RESERVE_MS = 50;
 const IPROXY_GRACEFUL_STOP_TIMEOUT_MS = 1_000;
 // `stop()` tears the runner's process tree down, but its HTTP listener can keep
 // answering /health for a moment while the process drains. A single probe fired
@@ -668,12 +672,17 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       logger.debug(`[IOSCtrlProxy] Forced iproxy termination was already complete: ${error}`);
     }
     if (runnerPid) {
-      const mayTerminate = await this.isRunnerStillOwnedWithinShutdownDeadline(runnerPid);
+      const preKillDeadlineMs = deadline - FORCE_STOP_KILL_RESERVE_MS;
+      const mayTerminate = await this.isRunnerStillOwnedWithinShutdownDeadline(
+        runnerPid,
+        preKillDeadlineMs,
+      );
       if (mayTerminate) {
         await this.processClient
           .terminateProcessTree(runnerPid, deadline, {
             skipGraceful: true,
             expectedDeviceId: this.device.deviceId,
+            preKillDeadlineMs,
           })
           .catch((error) => {
             logger.warn(`[IOSCtrlProxy] Forced CtrlProxy runner termination failed: ${error}`);
@@ -697,24 +706,32 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
    * shutdown behavior rather than silently skip a genuinely hung runner. An absent
    * root also proceeds because its original process group may still have live members.
    */
-  private async isRunnerStillOwnedWithinShutdownDeadline(runnerPid: number): Promise<boolean> {
+  private async isRunnerStillOwnedWithinShutdownDeadline(
+    runnerPid: number,
+    deadlineMs: number,
+  ): Promise<boolean> {
     let timeout: NodeJS.Timeout | undefined;
-    const fallbackToOwned = new Promise<RunnerOwnership>((resolve) => {
-      timeout = this.timer.setTimeout(
-        () => resolve("owned"),
-        FORCE_STOP_OWNERSHIP_CHECK_TIMEOUT_MS,
-      );
-    });
     try {
-      const ownership = await Promise.race([
-        this.processClient.checkRunnerOwnership(
-          runnerPid,
-          this.device.deviceId,
-          this.timer.now() + FORCE_STOP_OWNERSHIP_CHECK_TIMEOUT_MS,
-        ),
-        fallbackToOwned,
-      ]);
-      return ownership !== "foreign";
+      return await withRemainingBudget(
+        deadlineMs,
+        this.timer,
+        undefined,
+        async (_signal, remainingMs) => {
+          const probeBudgetMs = Math.min(FORCE_STOP_OWNERSHIP_CHECK_TIMEOUT_MS, remainingMs);
+          const fallbackToOwned = new Promise<RunnerOwnership>((resolve) => {
+            timeout = this.timer.setTimeout(() => resolve("owned"), probeBudgetMs);
+          });
+          const ownership = await Promise.race([
+            this.processClient.checkRunnerOwnership(
+              runnerPid,
+              this.device.deviceId,
+              this.timer.now() + probeBudgetMs,
+            ),
+            fallbackToOwned,
+          ]);
+          return ownership !== "foreign";
+        },
+      );
     } catch (error) {
       // A failed ownership check (exec error) is treated the same as "cannot
       // disprove ownership": fail open so a genuinely hung runner still gets
@@ -1088,7 +1105,10 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         completed: false,
       };
       this.sharedStart = createdStart;
-      createdStart.completion = this.startInternal(createdStart);
+      createdStart.completion = this.startInternal(createdStart).catch(async (error) => {
+        await this.retireRunnerAfterFinalSharedStartCancellation(createdStart);
+        throw error;
+      });
       void createdStart.completion
         .finally(() => {
           createdStart.completed = true;
@@ -1127,6 +1147,28 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       this.sharedStart = null;
     }
     return this.sharedStart;
+  }
+
+  private async retireRunnerAfterFinalSharedStartCancellation(
+    sharedStart: SharedCtrlProxyStart,
+  ): Promise<void> {
+    if (
+      !sharedStart.controller.signal.aborted ||
+      sharedStart.waitingCallers !== 0 ||
+      sharedStart.teardownCommitted
+    ) {
+      return;
+    }
+    sharedStart.teardownCommitted = true;
+    logger.info("[IOSCtrlProxy] Final shared startup waiter cancelled; retiring the runner");
+    try {
+      await this.forceStopForShutdown(this.timer.now() + SHUTDOWN_FORCE_STOP_TIMEOUT_MS);
+    } catch (error) {
+      // Cancellation remains the caller-visible outcome even if best-effort retirement fails.
+      logger.warn(
+        `[IOSCtrlProxy] Failed to retire cancelled CtrlProxy startup: ${errorMessage(error)}`,
+      );
+    }
   }
 
   /**

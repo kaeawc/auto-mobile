@@ -2035,6 +2035,70 @@ describe("IOSCtrlProxyManager", function () {
       expect(ownedRunner.alive).toBe(false);
     });
 
+    test("forceStopForShutdown reserves SIGKILL time when the termination ownership probe times out (#6898)", async function () {
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        fakeTimer,
+        undefined,
+        fakeExecutor,
+      );
+      const runnerPid = 912353;
+      (manager as unknown as { xcTestProcessId: number }).xcTestProcessId = runnerPid;
+      const ownedRunner = { ...ownRunnerProcess(runnerPid), ppid: process.pid };
+      installListeningProcessFakes(fakeExecutor, [ownedRunner]);
+
+      const processClient = (manager as unknown as { processClient: IOSCtrlProxyProcessClient })
+        .processClient;
+      let ownershipChecks = 0;
+      processClient.checkRunnerOwnership = async (_pid, _deviceId, deadline) => {
+        ownershipChecks++;
+        if (ownershipChecks === 1) {
+          return "owned";
+        }
+        // Model an exec boundary that consumes exactly the bounded second-probe
+        // window before reporting its timeout. SIGKILL must still have its reserve.
+        fakeTimer.advanceTime((deadline ?? fakeTimer.now()) - fakeTimer.now());
+        throw new Error("runner ownership probe timed out");
+      };
+
+      await (
+        manager as unknown as { forceStopForShutdown(deadline: number): Promise<void> }
+      ).forceStopForShutdown(250);
+
+      expect(ownershipChecks).toBe(2);
+      expect(fakeTimer.now()).toBeLessThan(250);
+      expect(fakeExecutor.wasCommandExecuted(`kill -KILL -- -${runnerPid}`)).toBe(true);
+      expect(ownedRunner.alive).toBe(false);
+    });
+
+    test("forceStopForShutdown skips ownership probes when an eviction leaves only kill time (#6898)", async function () {
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        fakeTimer,
+        undefined,
+        fakeExecutor,
+      );
+      const runnerPid = 912356;
+      (manager as unknown as { xcTestProcessId: number }).xcTestProcessId = runnerPid;
+      const ownedRunner = { ...ownRunnerProcess(runnerPid), ppid: process.pid };
+      installListeningProcessFakes(fakeExecutor, [ownedRunner]);
+      const processClient = (manager as unknown as { processClient: IOSCtrlProxyProcessClient })
+        .processClient;
+      let ownershipChecks = 0;
+      processClient.checkRunnerOwnership = async () => {
+        ownershipChecks++;
+        return "owned";
+      };
+
+      await (
+        manager as unknown as { forceStopForShutdown(deadline: number): Promise<void> }
+      ).forceStopForShutdown(40);
+
+      expect(ownershipChecks).toBe(0);
+      expect(fakeExecutor.wasCommandExecuted(`kill -KILL -- -${runnerPid}`)).toBe(true);
+      expect(ownedRunner.alive).toBe(false);
+    });
+
     test("forceStopForShutdown kills a surviving owned process group after its root exits (#6579)", async function () {
       const manager = IOSCtrlProxyManager.createForTestingWithDeps(
         testDevice,
@@ -2430,6 +2494,74 @@ describe("IOSCtrlProxyManager", function () {
       });
 
       expect(fakeExecutor.getSpawnedProcesses()).toHaveLength(1);
+    });
+
+    test("retires the tracked runner and iproxy when the final health-poll waiter cancels (#6905)", async function () {
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        physicalDevice,
+        fakeTimer,
+        createFakeBuilder(),
+        fakeExecutor,
+      );
+      const runnerPid = 912354;
+      const runner = {
+        pid: runnerPid,
+        port: 8765,
+        command:
+          `xcodebuild CtrlProxy -destination id=${physicalDevice.deviceId} ` +
+          "-only-testing:CtrlProxyUITests/CtrlProxyUITests/testRunService",
+        alive: true,
+        ppid: process.pid,
+      };
+      installListeningProcessFakes(fakeExecutor, [runner]);
+      const iproxy = new FakeChildProcess(fakeTimer);
+      iproxy.pid = 912355;
+      const healthPollingEntered = deferred();
+      const internal = manager as unknown as {
+        xcTestProcessId: number | null;
+        xcTestProcess: FakeChildProcess | null;
+        iproxyProcessId: number | null;
+        iproxyProcess: FakeChildProcess | null;
+        awaitStartupOrphanRunnerReap: () => Promise<void>;
+        isCtrlProxyProcessAlive: () => Promise<boolean>;
+        isRunning: () => Promise<boolean>;
+        startOnDevice: () => Promise<void>;
+        waitForHealthEndpoint: (start: { controller: AbortController }) => Promise<boolean>;
+      };
+      internal.awaitStartupOrphanRunnerReap = async () => {};
+      internal.isCtrlProxyProcessAlive = async () => false;
+      internal.isRunning = async () => false;
+      internal.startOnDevice = async () => {
+        internal.xcTestProcessId = runnerPid;
+        internal.xcTestProcess = new FakeChildProcess(fakeTimer);
+        internal.iproxyProcessId = iproxy.pid!;
+        internal.iproxyProcess = iproxy;
+      };
+      internal.waitForHealthEndpoint = async (start) => {
+        healthPollingEntered.resolve();
+        return await new Promise<boolean>((_resolve, reject) => {
+          start.controller.signal.addEventListener(
+            "abort",
+            () => reject(start.controller.signal.reason),
+            { once: true },
+          );
+        });
+      };
+
+      const caller = new AbortController();
+      const starting = manager.start({ signal: caller.signal });
+      await healthPollingEntered.promise;
+      caller.abort(new Error("last caller cancelled"));
+      await expect(starting).rejects.toThrow("last caller cancelled");
+      for (let attempt = 0; attempt < 20 && !iproxy.killed; attempt++) {
+        await Promise.resolve();
+      }
+      fakeTimer.advanceTime(0);
+
+      expect(fakeExecutor.wasCommandExecuted(`kill -KILL -- -${runnerPid}`)).toBe(true);
+      expect(runner.alive).toBe(false);
+      expect(iproxy.killed).toBe(true);
+      expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
     });
 
     test("a retry starts fresh after the prior sole caller aborts", async function () {

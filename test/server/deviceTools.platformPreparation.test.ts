@@ -661,6 +661,9 @@ describe("platform device preparation tools", () => {
       };
       let lifecycleReleases = 0;
       setDeviceToolsDependencies({
+        ensureCtrlProxyReady: async () => {
+          timer.advanceTime(1_500);
+        },
         lifecycleCoordinator: {
           reserve: async () => ({
             signal: new AbortController().signal,
@@ -674,17 +677,24 @@ describe("platform device preparation tools", () => {
         },
       });
 
+      let resultSettled = false;
       const result = callTool(operation, {
         ...target,
         bootTimeoutMs: 1_000,
         automationReadyTimeoutMs: 1_000,
-      }).then(
-        () => undefined,
-        (error: unknown) => error,
-      );
+      })
+        .then(
+          () => undefined,
+          (error: unknown) => error,
+        )
+        .finally(() => {
+          resultSettled = true;
+        });
       await persistence.activeSessionWriteStarted;
 
-      await timer.advanceTimeAsync(10_000);
+      await timer.advanceTimeAsync(499);
+      expect(resultSettled).toBe(false);
+      await timer.advanceTimeAsync(1);
       const failure = await result;
 
       expect(failure).toBeInstanceOf(ActionableError);

@@ -1833,6 +1833,43 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     return this.remoteRunnerAvailability;
   }
 
+  /**
+   * Rejects a remote start that completes after stop() cancels the shared start.
+   * The fence must run before a returned port is adopted or a physical-device
+   * tunnel is reconfigured, because shutdown has already begun clearing ownership.
+   */
+  private async fenceLateRemoteStartAfterShutdown(runnerPid: number): Promise<void> {
+    const startupAbort = this.sharedStart?.controller.signal;
+    if (!startupAbort?.aborted) {
+      return;
+    }
+
+    const stopResult = await this.remoteRunner
+      .stop({
+        deviceId: this.device.deviceId,
+        pid: runnerPid,
+      })
+      .catch((error): null => {
+        logger.warn(
+          `[IOSCtrlProxy] Failed to stop remote runner that completed after shutdown: ${errorMessage(error)}`,
+        );
+        return null;
+      });
+    if (stopResult && !stopResult.success) {
+      logger.warn(
+        `[IOSCtrlProxy] Failed to stop remote runner that completed after shutdown: ` +
+          `${stopResult.error ?? "remote runner reported an unsuccessful stop"}`,
+      );
+    }
+    if (!stopResult?.success) {
+      // Keep the PID visible to stopTrackedService()/forceStopForShutdown(), which
+      // gets a second cleanup attempt after this late-start admission fence fails.
+      this.xcTestProcessId = runnerPid;
+      this.xcTestProcess = null;
+    }
+    throw startupAbort.reason ?? new Error("iOS CtrlProxy startup was cancelled by stop()");
+  }
+
   private async restartDeviceProcessAfterHostPortCollision(): Promise<void> {
     // This replacement runs inside startInternal()'s shared completion, so it must
     // not wait for that same completion through public stop() or it would deadlock.
@@ -1881,33 +1918,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         throw new Error(result.error || "Remote runner failed to start CtrlProxy");
       }
 
-      const startupAbort = this.sharedStart?.controller.signal;
-      if (startupAbort?.aborted) {
-        const stopResult = await this.remoteRunner
-          .stop({
-            deviceId: this.device.deviceId,
-            pid: result.data.pid,
-          })
-          .catch((error): null => {
-            logger.warn(
-              `[IOSCtrlProxy] Failed to stop remote runner that completed after shutdown: ${errorMessage(error)}`,
-            );
-            return null;
-          });
-        if (stopResult && !stopResult.success) {
-          logger.warn(
-            `[IOSCtrlProxy] Failed to stop remote runner that completed after shutdown: ` +
-              `${stopResult.error ?? "remote runner reported an unsuccessful stop"}`,
-          );
-        }
-        if (!stopResult?.success) {
-          // Keep the PID visible to stopTrackedService()/forceStopForShutdown(), which
-          // gets a second cleanup attempt after this late-start admission fence fails.
-          this.xcTestProcessId = result.data.pid;
-          this.xcTestProcess = null;
-        }
-        throw startupAbort.reason ?? new Error("iOS CtrlProxy startup was cancelled by stop()");
-      }
+      await this.fenceLateRemoteStartAfterShutdown(result.data.pid);
 
       if (typeof result.data.port === "number") {
         this.adoptServicePort(result.data.port);
@@ -3070,6 +3081,8 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       if (!result.success || !result.data) {
         throw new Error(result.error || "Remote runner failed to start CtrlProxy");
       }
+
+      await this.fenceLateRemoteStartAfterShutdown(result.data.pid);
 
       const resultDevicePort = result.data.port;
       if (typeof resultDevicePort === "number" && resultDevicePort !== this.servicePort) {

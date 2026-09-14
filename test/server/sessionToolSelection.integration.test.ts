@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import type { SessionToolSelectionService } from "../../src/features/toolSelection/SessionToolSelectionService";
+import { buildToolSelectionCandidateRoutes } from "../../src/features/toolSelection/toolSelectionPolicy";
 import {
   listEnabledToolNames,
   registerToolSelectionTools,
@@ -57,6 +58,49 @@ describe("per-session exact-tool selection", () => {
     ]);
 
     expect(enabledTools).toContain("labelAwareTool");
+  });
+
+  test("reports a device-aware tool enabled by a sibling label when bound to a disabled derived route", async () => {
+    ToolRegistry.clearTools();
+    ToolRegistry.registerDeviceAware(
+      "labelAwareTool",
+      "label-aware test tool",
+      z.object({}),
+      async () => ({ content: [] }),
+      { defaultEnabled: true },
+    );
+    const overrides = new Map<string, boolean>([["base:A", false]]);
+    const service: Pick<SessionToolSelectionService, "isEnabled" | "getOverride"> = {
+      isEnabled: async (_sessionUuid, _toolName, declaredDefault) => declaredDefault,
+      getOverride: async (sessionUuid) => overrides.get(sessionUuid),
+    };
+
+    const enabledTools = await listEnabledToolNames(
+      service,
+      ["base:A"],
+      undefined,
+      ["base:A", "base:B"],
+      "base",
+    );
+
+    expect(enabledTools).toContain("labelAwareTool");
+    const listSessionToolsRoutes = buildToolSelectionCandidateRoutes(
+      true,
+      "base",
+      ["base:A", "base:B"],
+      ["base", "base:A"],
+    );
+    const enabledToolReadbackRoutes = buildToolSelectionCandidateRoutes(
+      true,
+      "base",
+      ["base:A", "base:B"],
+      ["base:A"],
+    );
+    expect(enabledToolReadbackRoutes).toEqual(listSessionToolsRoutes);
+    expect(enabledToolReadbackRoutes).toEqual([
+      ["base", "base:A"],
+      ["base", "base:B"],
+    ]);
   });
 
   for (const acquisition of ["getAndroid", "getApple"]) {

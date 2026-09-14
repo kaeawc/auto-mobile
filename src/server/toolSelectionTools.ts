@@ -3,7 +3,10 @@ import type { SessionToolSelectionService } from "../features/toolSelection/Sess
 import { SET_TOOL_ENABLED_TOOL_NAME } from "../features/toolSelection/toolSelectionControl";
 import { getSessionToolSelectionService } from "../features/toolSelection/SessionToolSelectionService";
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
-import { isToolEnabledForAnyRoute } from "../features/toolSelection/toolSelectionPolicy";
+import {
+  buildToolSelectionCandidateRoutes,
+  isToolEnabledForAnyRoute,
+} from "../features/toolSelection/toolSelectionPolicy";
 import { ActionableError } from "../models";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
@@ -191,23 +194,27 @@ export async function applyToolSelection(
  * update writes to the connection profile, and a connection-profile grant when
  * a freshly minted session (provisionDevice) carries no override of its own.
  * Derived `${base}:${label}` device-label sessions stay a discovery-only
- * refinement: only `tools/list` knows the caller's label map.
+ * refinement: readback mirrors `tools/list`'s independent label routes.
+ * @param baseSessionUuid The resolved base profile for device-label routes.
  */
 export async function listEnabledToolNames(
   service: ToolSelectionServiceLike,
   sessionUuids: ReadonlyArray<string | undefined>,
   connectionProfileUuid?: string,
   labelSessionUuids: readonly string[] = [],
+  baseSessionUuid?: string,
 ): Promise<string[]> {
   const resolved = service ?? getSessionToolSelectionService();
   const names = await Promise.all(
     ToolRegistry.getAllTools()
       .filter((tool) => ToolRegistry.isUserConfigurableTool(tool.name))
       .map(async (tool) => {
-        const candidateRoutes =
-          tool.requiresDevice && labelSessionUuids.length > 0
-            ? labelSessionUuids.map((labelSessionUuid) => [...sessionUuids, labelSessionUuid])
-            : [sessionUuids];
+        const candidateRoutes = buildToolSelectionCandidateRoutes(
+          tool.requiresDevice ?? false,
+          baseSessionUuid,
+          labelSessionUuids,
+          sessionUuids,
+        );
         return (await isToolEnabledForAnyRoute(
           tool.name,
           tool.defaultEnabled ?? true,
@@ -233,6 +240,7 @@ async function getEnabledToolsResponse(
         [sessionUuid, context?.routingSessionUuid],
         context?.toolSelectionProfileUuid,
         context?.labelSessionUuids ?? [],
+        context?.routingBaseSessionUuid,
       ),
     };
   } catch (error) {

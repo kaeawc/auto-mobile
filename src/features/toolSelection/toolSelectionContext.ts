@@ -20,6 +20,8 @@ export type ToolSelectionContext = {
   toolSelectionProfileUuid?: string;
   /** Derived device-label selection profiles for the current routing base. */
   labelSessionUuids?: readonly string[];
+  /** Resolved base profile for the current routing session. */
+  routingBaseSessionUuid?: string;
   sessionToolSelectionService?: Pick<SessionToolSelectionService, "isEnabled"> &
     Partial<Pick<SessionToolSelectionService, "setEnabled" | "deleteSession">>;
 };
@@ -31,6 +33,13 @@ function resolveLabelSessionUuids(
   parent: ToolSelectionContext | undefined,
 ): readonly string[] | undefined {
   return context.labelSessionUuids ?? parent?.labelSessionUuids;
+}
+
+function resolveRoutingBaseSessionUuid(
+  context: ToolSelectionContext,
+  parent: ToolSelectionContext | undefined,
+): string | undefined {
+  return context.routingBaseSessionUuid ?? parent?.routingBaseSessionUuid;
 }
 
 export const runWithToolSelectionContext = async <T>(
@@ -46,6 +55,7 @@ export const runWithToolSelectionContext = async <T>(
       toolSelectionProfileUuid:
         context.toolSelectionProfileUuid ?? parent?.toolSelectionProfileUuid,
       labelSessionUuids: resolveLabelSessionUuids(context, parent),
+      routingBaseSessionUuid: resolveRoutingBaseSessionUuid(context, parent),
       sessionToolSelectionService:
         context.sessionToolSelectionService ?? parent?.sessionToolSelectionService,
     },

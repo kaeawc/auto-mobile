@@ -183,7 +183,13 @@ async function enrichProvisionDeviceResult<
       // the call gate apply, and the session this call just minted carries no
       // override of its own — so a capability enabled on the profile is
       // callable and belongs in this report (#6886 review).
-      enabledTools: await listEnabledToolNames(service, [sessionUuid], connectionProfileUuid),
+      enabledTools: await listEnabledToolNames(
+        service,
+        [sessionUuid],
+        connectionProfileUuid,
+        [],
+        undefined,
+      ),
       ...failure,
     });
   } catch (error) {
@@ -324,6 +330,7 @@ import {
 } from "../features/toolSelection/SessionToolSelectionService";
 import {
   assertToolEnabledForAnySession,
+  buildToolSelectionCandidateRoutes,
   isToolEnabledForAnyRoute,
 } from "../features/toolSelection/toolSelectionPolicy";
 import { runWithToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
@@ -676,13 +683,12 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
           definitions.map(async (definition) => {
             const registeredTool = ToolRegistry.getTool(definition.name);
             const deviceAware = registeredTool?.requiresDevice ?? false;
-            const candidateRoutes =
-              deviceAware && labelSessionUuids.length > 0
-                ? labelSessionUuids.map((labelSessionUuid) => [
-                    routingBaseSessionUuid,
-                    labelSessionUuid,
-                  ])
-                : [[routingBaseSessionUuid, routingSessionUuid]];
+            const candidateRoutes = buildToolSelectionCandidateRoutes(
+              deviceAware,
+              routingBaseSessionUuid,
+              labelSessionUuids,
+              [routingBaseSessionUuid, routingSessionUuid],
+            );
             return (await isToolEnabledForAnyRoute(
               definition.name,
               registeredTool?.defaultEnabled ?? true,
@@ -1168,6 +1174,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
             // cannot suppress that derived-label resolution.
             toolSelectionProfileUuid: connectionProfileUuid,
             labelSessionUuids,
+            routingBaseSessionUuid,
             // Keep profile persistence lazy for ordinary core-tool calls while
             // giving an admitted plan its service instance for release cleanup.
             sessionToolSelectionService:

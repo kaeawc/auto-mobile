@@ -287,7 +287,7 @@ export async function checkAdbVersion(
 /**
  * Check Android emulator availability
  */
-async function checkEmulator(): Promise<CheckResult> {
+export async function checkEmulator(): Promise<CheckResult> {
   try {
     const emulator = new AndroidEmulatorClient();
     // Try to list AVDs - this will fail if emulator is not available

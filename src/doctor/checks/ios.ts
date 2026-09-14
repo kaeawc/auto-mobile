@@ -88,7 +88,7 @@ type IosRunnerVersionStatus = "compatible" | "stale" | "unknown";
  * a clean `fail` result. Overridable for slow CI hosts via
  * AUTOMOBILE_DOCTOR_TIMEOUT_MS.
  */
-const DOCTOR_EXEC_TIMEOUT_MS = Number(process.env.AUTOMOBILE_DOCTOR_TIMEOUT_MS) || 5000;
+export const DOCTOR_EXEC_TIMEOUT_MS = Number(process.env.AUTOMOBILE_DOCTOR_TIMEOUT_MS) || 5000;
 
 // Route generic host-command execution through the shared HostCommandExecutor
 // seam rather than a raw child_process execFile. The exec leaf lives in
@@ -368,7 +368,7 @@ export function createIosObserveRoundTripInspector(
   };
 }
 
-const createIosDoctorDependencies = (): IosDoctorDependencies => ({
+export const createIosDoctorDependencies = (): IosDoctorDependencies => ({
   platform: () => process.platform,
   execFile: (file, args) =>
     hostCommandExecutor.executeCommand(file, args, {

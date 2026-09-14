@@ -62,14 +62,21 @@ describe("daemon health probes are non-destructive", () => {
     expect(existsSync(pidFilePath)).toBe(true);
   });
 
-  test("getDaemonHealthReport invokes isAvailable with just the socket path", async () => {
+  test("getDaemonHealthReport forwards only bounded probe options", async () => {
     const { socketPath, pidFilePath } = createTempPaths();
     writeFileSync(socketPath, "");
 
     const isAvailable = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
     try {
       await getDaemonHealthReport(undefined, { socketPath, pidFilePath });
-      expect(isAvailable).toHaveBeenCalledWith(socketPath);
+      expect(isAvailable).toHaveBeenCalledWith(
+        socketPath,
+        expect.objectContaining({
+          signal: undefined,
+          timeoutMs: undefined,
+          timer: expect.anything(),
+        }),
+      );
     } finally {
       isAvailable.mockRestore();
     }

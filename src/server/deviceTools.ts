@@ -4509,9 +4509,26 @@ async function runProvisionDeviceWithinDeadline<T>(
   phase: string,
   operation: (signal: AbortSignal) => Promise<T>,
 ): Promise<T> {
+  return await runOperationWithinDeadline(
+    timer,
+    totalDeadlineMs,
+    requestSignal,
+    () => provisionDeviceTimeoutError(phase),
+    operation,
+  );
+}
+
+async function runOperationWithinDeadline<T>(
+  timer: Pick<Timer, "now" | "setTimeout" | "clearTimeout">,
+  totalDeadlineMs: number,
+  requestSignal: AbortSignal | undefined,
+  timeoutError: () => Error,
+  operation: (signal: AbortSignal) => Promise<T>,
+  onOrphan?: (pending: Promise<unknown>) => void,
+): Promise<T> {
   const remainingMs = Math.floor(totalDeadlineMs - timer.now());
   if (remainingMs <= 0) {
-    throw provisionDeviceTimeoutError(phase);
+    throw timeoutError();
   }
 
   const controller = new AbortController();
@@ -4520,7 +4537,10 @@ async function runProvisionDeviceWithinDeadline<T>(
     : controller.signal;
   let timeoutHandle: NodeJS.Timeout | undefined;
   let removeAbortListener: (() => void) | undefined;
-  const operationPromise = runWithAbortSignal(signal, () => operation(signal));
+  let operationSettled = false;
+  const operationPromise = runWithAbortSignal(signal, () => operation(signal)).finally(() => {
+    operationSettled = true;
+  });
   void operationPromise.catch(() => {});
 
   try {
@@ -4528,7 +4548,7 @@ async function runProvisionDeviceWithinDeadline<T>(
       operationPromise,
       new Promise<never>((_resolve, reject) => {
         timeoutHandle = timer.setTimeout(() => {
-          const error = provisionDeviceTimeoutError(phase);
+          const error = timeoutError();
           controller.abort(error);
           reject(error);
         }, remainingMs);
@@ -4548,6 +4568,11 @@ async function runProvisionDeviceWithinDeadline<T>(
           ]
         : []),
     ]);
+  } catch (error) {
+    if (!operationSettled) {
+      onOrphan?.(operationPromise);
+    }
+    throw error;
   } finally {
     if (timeoutHandle) {
       timer.clearTimeout(timeoutHandle);
@@ -7625,6 +7650,7 @@ export function registerDeviceTools() {
       // Every unowned cold boot this request cancelled, recovery included. The
       // lifecycle lease is released only once all of them have settled.
       coldBootSettlements: Promise<void>[];
+      bindingSettlements: Promise<unknown>[];
     },
   ) => {
     const bootService = new DeviceBootService({
@@ -7774,16 +7800,31 @@ export function registerDeviceTools() {
         const boundSessionId =
           readinessResult.preservedSessionId && !autolockEnabled
             ? readinessResult.preservedSessionId
-            : await bindBootedDeviceSession(
-                state.boot.device,
-                args,
-                state.boot.source === "cold-boot" && !readinessResult.preservedSessionId
-                  ? sourceImage
-                  : undefined,
-                // Recovery already registered this process and its output tail.
-                readinessResult.preservedSessionId ? undefined : state.boot.processHandle,
-                new Set(releaseReadinessReservations.map((reservation) => reservation.owner)),
-                verifiedWarmAndroidAvdIdentity,
+            : await runOperationWithinDeadline(
+                deps.timer,
+                budgets.automationDeadlineMs,
+                signal,
+                () =>
+                  acquisitionLifecycleTimeoutError(
+                    budgets,
+                    requestedIdentity,
+                    "binding the device session",
+                  ),
+                async () =>
+                  await bindBootedDeviceSession(
+                    state.boot!.device,
+                    args,
+                    state.boot!.source === "cold-boot" && !readinessResult.preservedSessionId
+                      ? sourceImage
+                      : undefined,
+                    // Recovery already registered this process and its output tail.
+                    readinessResult.preservedSessionId ? undefined : state.boot!.processHandle,
+                    new Set(releaseReadinessReservations.map((reservation) => reservation.owner)),
+                    verifiedWarmAndroidAvdIdentity,
+                  ),
+                (settlement) => {
+                  state.bindingSettlements.push(settlement);
+                },
               );
         if (readinessResult.preservedSessionId && !autolockEnabled) {
           // #6227 round 7: without autolock, System UI ANR recovery bypasses
@@ -7847,10 +7888,12 @@ export function registerDeviceTools() {
       // a pre-boot reconcile still in flight when its deadline fired. The
       // lifecycle lease is released only once all of them have settled.
       coldBootSettlements: Promise<void>[];
+      bindingSettlements: Promise<unknown>[];
     } = {
       boot: undefined,
       ownershipTransferred: false,
       coldBootSettlements: [],
+      bindingSettlements: [],
     };
     const releaseReadinessReservations: DeviceReadinessReservation[] = [];
     let lifecycleReservations:
@@ -7917,28 +7960,52 @@ export function registerDeviceTools() {
       }
       throw new ActionableError(`Failed to start ${args.platform} device: ${error}`);
     } finally {
-      for (const releaseReservation of releaseReadinessReservations.reverse()) {
-        await releaseReservation();
-      }
-      if (state.coldBootSettlements.length > 0) {
-        // Release exactly once whatever the settlements do — the bounded wait in
-        // `cancelUnownedColdBoot` guarantees each completes, and `finally`
-        // guarantees the lease is not stranded if one completes by rejecting.
-        // A System UI ANR replacement retired mid-recovery settles here too, so
-        // the AVD's key cannot be handed to the next request while the emulator
-        // this one only signalled is still running.
-        void Promise.allSettled(state.coldBootSettlements)
-          .finally(() => lifecycleReservations?.lifecycleLease.release())
+      const releaseReadiness = async () => {
+        for (const releaseReservation of releaseReadinessReservations.reverse()) {
+          await releaseReservation();
+        }
+      };
+      if (state.bindingSettlements.length > 0) {
+        // A cancelled binding may still hold the assignment mutex while its
+        // persistence write drains. Keep identity reservations until rollback
+        // settles, but do not make the timed-out caller wait for that write.
+        void Promise.allSettled([...state.bindingSettlements, ...state.coldBootSettlements])
+          .then(async () => {
+            try {
+              await releaseReadiness();
+            } finally {
+              lifecycleReservations?.lifecycleLease.release();
+              await lifecycleReservations?.releaseAndroidStartupLease?.();
+            }
+          })
           .catch((error: unknown) => {
             logger.warn(
-              `[DeviceTools] Deferred lifecycle lease release failed: ${errorMessage(error)}`,
+              `[DeviceTools] Deferred binding reservation release failed: ${errorMessage(error)}`,
               error,
             );
           });
       } else {
-        lifecycleReservations?.lifecycleLease.release();
+        await releaseReadiness();
+        if (state.coldBootSettlements.length > 0) {
+          // Release exactly once whatever the settlements do — the bounded wait in
+          // `cancelUnownedColdBoot` guarantees each completes, and `finally`
+          // guarantees the lease is not stranded if one completes by rejecting.
+          // A System UI ANR replacement retired mid-recovery settles here too, so
+          // the AVD's key cannot be handed to the next request while the emulator
+          // this one only signalled is still running.
+          void Promise.allSettled(state.coldBootSettlements)
+            .finally(() => lifecycleReservations?.lifecycleLease.release())
+            .catch((error: unknown) => {
+              logger.warn(
+                `[DeviceTools] Deferred lifecycle lease release failed: ${errorMessage(error)}`,
+                error,
+              );
+            });
+        } else {
+          lifecycleReservations?.lifecycleLease.release();
+        }
+        await lifecycleReservations?.releaseAndroidStartupLease?.();
       }
-      await lifecycleReservations?.releaseAndroidStartupLease?.();
     }
   };
 

@@ -47,18 +47,24 @@ export interface AppContentHasher {
  * Caches by `(deviceId, packageId, versionCode)` (computed once per install) and
  * degrades to `null` on any hashing failure so a mutation never blocks on — or
  * fails because of — content hashing.
+ *
+ * Overlapping `resolveContentHash` calls for the same key are NOT coalesced here:
+ * the sole runtime caller, `AndroidCtrlProxyClient.ensureBuildContext`, already
+ * admits one resolution per app (`buildContextInFlight`) at the outer boundary that
+ * also covers the package-info round-trip, so a provider-level single-flight never
+ * observed a second concurrent caller (#6892, superseding #6654). Overlapping calls
+ * remain safe — each computes and the generation guard keeps stale results out of
+ * the cache — just not deduplicated.
  */
 export class CachingContentHashProvider implements ContentHashProvider {
-  private readonly cache = new Map<string, string>();
+  // Indexed by the invalidation key `(deviceId, packageId)` first, then versionCode,
+  // so invalidate() drops exactly that package's entries instead of scanning every
+  // cached key on the device (#6892).
+  private readonly cache = new Map<string, Map<number, string>>();
   // Per-(device,package) generation, bumped by invalidate(). A computeHash that
   // started before an invalidate must NOT repopulate the cache with a stale hash,
   // so a result is only cached when the generation is unchanged since it began.
   private readonly generation = new Map<string, number>();
-  // Single-flight: concurrent resolveContentHash calls for the same key share this
-  // in-flight promise instead of each starting their own (expensive) computeHash
-  // (#6654). Cleared once the computation settles (success or failure) so a later
-  // call recomputes rather than being poisoned by a stale/failed entry.
-  private readonly inFlight = new Map<string, Promise<string | null>>();
 
   constructor(private readonly hasher: AppContentHasher) {}
 
@@ -67,41 +73,18 @@ export class CachingContentHashProvider implements ContentHashProvider {
     packageId: string,
     versionCode: number,
   ): Promise<string | null> {
-    const key = `${device.deviceId}::${packageId}::${versionCode}`;
-    const cached = this.cache.get(key);
+    const genKey = packageKey(device.deviceId, packageId);
+    const cached = this.cache.get(genKey)?.get(versionCode);
     if (cached !== undefined) {
       return cached;
     }
-    const existing = this.inFlight.get(key);
-    if (existing !== undefined) {
-      return existing;
-    }
-    const promise = this.computeAndCache(device, packageId, versionCode, key).finally(() => {
-      // An invalidation can remove this entry and a later caller can start a
-      // fresh computation for the same key. Do not let the older computation's
-      // cleanup erase that newer in-flight promise.
-      if (this.inFlight.get(key) === promise) {
-        this.inFlight.delete(key);
-      }
-    });
-    this.inFlight.set(key, promise);
-    return promise;
-  }
-
-  private async computeAndCache(
-    device: BootedDevice,
-    packageId: string,
-    versionCode: number,
-    key: string,
-  ): Promise<string | null> {
-    const genKey = `${device.deviceId}::${packageId}`;
     const startGeneration = this.generation.get(genKey) ?? 0;
     try {
       const hash = await this.hasher.computeHash(device, packageId, versionCode);
       // Only cache if the package wasn't invalidated (updated/reinstalled) while
       // this computation was in flight — otherwise the entry would be stale.
       if ((this.generation.get(genKey) ?? 0) === startGeneration) {
-        this.cache.set(key, hash);
+        this.cacheHash(genKey, versionCode, hash);
       }
       return hash;
     } catch (error) {
@@ -114,24 +97,23 @@ export class CachingContentHashProvider implements ContentHashProvider {
     }
   }
 
-  invalidate(deviceId: string, packageId: string): void {
-    const genKey = `${deviceId}::${packageId}`;
-    this.generation.set(genKey, (this.generation.get(genKey) ?? 0) + 1);
-    const prefix = `${genKey}::`;
-    for (const key of this.cache.keys()) {
-      if (key.startsWith(prefix)) {
-        this.cache.delete(key);
-      }
-    }
-    // A post-invalidation caller must not share work that began against the
-    // previous install generation. The older caller can still receive its own
-    // best-effort result, but new callers recompute from the updated package.
-    for (const key of this.inFlight.keys()) {
-      if (key.startsWith(prefix)) {
-        this.inFlight.delete(key);
-      }
-    }
+  private cacheHash(genKey: string, versionCode: number, hash: string): void {
+    const byVersion = this.cache.get(genKey) ?? new Map<number, string>();
+    byVersion.set(versionCode, hash);
+    this.cache.set(genKey, byVersion);
   }
+
+  invalidate(deviceId: string, packageId: string): void {
+    const genKey = packageKey(deviceId, packageId);
+    this.generation.set(genKey, (this.generation.get(genKey) ?? 0) + 1);
+    // Every versionCode for this (device, package) lives under one index entry, so
+    // this is O(1) in the number of other cached packages.
+    this.cache.delete(genKey);
+  }
+}
+
+function packageKey(deviceId: string, packageId: string): string {
+  return `${deviceId}::${packageId}`;
 }
 
 const SHA256_HEX = /^[0-9a-f]{64}$/i;

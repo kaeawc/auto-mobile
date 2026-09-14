@@ -16,6 +16,8 @@ export interface DumpsysNotificationRecord {
   titles: string[];
   /** Body-ish extras values (`android.text`, big text, sub text, ...). */
   bodies: string[];
+  /** Whether a custom `RemoteViews` layout can render unrelated text. */
+  hasCustomLayout: boolean;
 }
 
 const TITLE_EXTRAS = ["android.title", "android.title.big", "android.conversationTitle"];
@@ -26,6 +28,7 @@ const BODY_EXTRAS = [
   "android.infoText",
   "android.subText",
 ];
+const CUSTOM_LAYOUT_TEMPLATE = /^android\.app\.Notification\$Decorated(?:Media)?CustomViewStyle$/;
 
 // `NotificationRecord.dump` prints `<key>=<SimpleClassName> (<value>)` for
 // CharSequence extras, and `<SimpleClassName> [<n> chars]` when the dump is
@@ -37,6 +40,7 @@ const RECORD_LINE = /NotificationRecord\(.*?\bpkg=([^\s]+)/;
 // Every extras entry is printed as `<key>=<value>`, whatever the value's type,
 // so a key-shaped line is where the previous entry ended.
 const EXTRA_KEY_LINE = /^[A-Za-z][A-Za-z0-9_$.]*=/;
+const CUSTOM_LAYOUT_FIELD = /^(?:contentView|bigContentView|headsUpContentView)=(?!null$).+$/;
 
 // The dump prints several record-bearing sections: the active `Notification
 // List:` the shade renders, plus snoozed and enqueued records it does not. A
@@ -54,6 +58,9 @@ interface PendingExtra {
 }
 
 const addExtra = (record: DumpsysNotificationRecord, key: string, value: string): void => {
+  if (key === "android.template" && CUSTOM_LAYOUT_TEMPLATE.test(value)) {
+    record.hasCustomLayout = true;
+  }
   // An extras value the row could never render is not evidence: hierarchy
   // extraction drops empty strings, so keeping an empty `android.text` would
   // leave the record permanently unmatchable (#6875).
@@ -70,12 +77,17 @@ const addExtra = (record: DumpsysNotificationRecord, key: string, value: string)
 // A pending value ends where its entry ends: at the next extras key, at the
 // end of the extras block, or at the next record. A `)` anywhere earlier is
 // part of the printed text, not the dump's closing delimiter (#6875).
-const endsExtrasEntry = (line: string | undefined): boolean => {
+const leadingWhitespace = (line: string): string => /^\s*/.exec(line)?.[0] ?? "";
+
+const isExtrasKeyLine = (line: string, keyIndentation: string): boolean =>
+  leadingWhitespace(line) === keyIndentation && EXTRA_KEY_LINE.test(line.trim());
+
+const endsExtrasEntry = (line: string | undefined, keyIndentation: string): boolean => {
   if (line === undefined) {
     return true;
   }
   const trimmed = line.trim();
-  return trimmed === "}" || EXTRA_KEY_LINE.test(trimmed) || RECORD_LINE.test(trimmed);
+  return trimmed === "}" || isExtrasKeyLine(line, keyIndentation) || RECORD_LINE.test(trimmed);
 };
 
 // Read one record's `extras={...}` body. A value containing newlines spans
@@ -84,14 +96,15 @@ const endsExtrasEntry = (line: string | undefined): boolean => {
 // swallowing it.
 const applyExtras = (record: DumpsysNotificationRecord, lines: readonly string[]): void => {
   let pending: PendingExtra | null = null;
+  const keyIndentation = lines[0] === undefined ? "" : leadingWhitespace(lines[0]);
   for (const [index, line] of lines.entries()) {
     const trimmed = line.trim();
     if (pending) {
-      if (EXTRA_KEY_LINE.test(trimmed)) {
+      if (isExtrasKeyLine(line, keyIndentation)) {
         // The value never reached its closing delimiter; drop it rather than
         // swallow the extra that starts here.
         pending = null;
-      } else if (endsExtrasEntry(lines[index + 1]) && line.endsWith(")")) {
+      } else if (endsExtrasEntry(lines[index + 1], keyIndentation) && line.endsWith(")")) {
         addExtra(record, pending.key, [...pending.lines, line.slice(0, -1)].join("\n"));
         pending = null;
         continue;
@@ -104,7 +117,7 @@ const applyExtras = (record: DumpsysNotificationRecord, lines: readonly string[]
     if (!extra) {
       continue;
     }
-    if (endsExtrasEntry(lines[index + 1]) && extra[2].endsWith(")")) {
+    if (endsExtrasEntry(lines[index + 1], keyIndentation) && extra[2].endsWith(")")) {
       addExtra(record, extra[1], extra[2].slice(0, -1));
     } else {
       pending = { key: extra[1], lines: [extra[2]] };
@@ -138,7 +151,9 @@ export const parseDumpsysNotificationRecords = (output: string): DumpsysNotifica
     const record = RECORD_LINE.exec(trimmed);
     if (record) {
       flushExtras();
-      current = inActiveSection ? { pkg: record[1], titles: [], bodies: [] } : null;
+      current = inActiveSection
+        ? { pkg: record[1], titles: [], bodies: [], hasCustomLayout: false }
+        : null;
       if (current) {
         records.push(current);
       }
@@ -148,6 +163,7 @@ export const parseDumpsysNotificationRecords = (output: string): DumpsysNotifica
       continue;
     }
     if (extrasLines === null) {
+      current.hasCustomLayout ||= CUSTOM_LAYOUT_FIELD.test(trimmed);
       if (trimmed.startsWith("extras={")) {
         extrasLines = [];
       }
@@ -218,7 +234,8 @@ export const attributeRowByDumpsys = (
 ): string | null => {
   const plausible = packagesMatching(
     records,
-    (record) => recordIsOpaque(record) || recordSharesRowEvidence(record, rowTexts),
+    (record) =>
+      recordIsOpaque(record) || record.hasCustomLayout || recordSharesRowEvidence(record, rowTexts),
   );
   if (plausible.size !== 1) {
     return null;

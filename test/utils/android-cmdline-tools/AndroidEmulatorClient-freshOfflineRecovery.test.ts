@@ -239,16 +239,17 @@ describe("Android emulator fresh-provision offline recovery", () => {
     expect(timer.now()).toBeLessThan(35_000);
   });
 
-  test("caps a large polling interval at the fresh-offline recovery thresholds", async () => {
+  test("observes a device that comes online after reconnect despite a large polling interval", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const adb = new FreshOfflineAdbExecutor();
     adb.setDeviceStates(OFFLINE_STATE);
     adb.setDevices([]);
     configureReadyProbes(adb);
+    adb.configureRecoveryFlipsOnlineAt(timer, 18_000);
     process.env.EMULATOR_POLLING_INTERVAL_MS = "60000";
 
-    const readiness = clientWith(adb, timer).waitForEmulatorReady(
+    const device = await clientWith(adb, timer).waitForEmulatorReady(
       "Pixel_9_Pro",
       30_000,
       null,
@@ -257,12 +258,10 @@ describe("Android emulator fresh-provision offline recovery", () => {
       { freshProvision: true },
     );
 
-    await expect(readiness).rejects.toThrow("state=offline");
-    await expect(readiness).rejects.not.toThrow("adb reconnect offline");
-    await readiness.catch(() => undefined);
+    expect(device.deviceId).toBe("emulator-5554");
     expect(adb.reconnectCalls).toBe(1);
-    expect(timer.now()).toBeGreaterThanOrEqual(30_000);
-    expect(timer.now()).toBeLessThan(35_000);
+    expect(timer.now()).toBeGreaterThanOrEqual(18_000);
+    expect(timer.now()).toBeLessThan(30_000);
   });
 
   test("leaves the default polling interval's non-fresh offline wait unchanged", async () => {

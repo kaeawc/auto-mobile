@@ -49,6 +49,9 @@ const MAX_POLLING_SLEEP_CHUNK_MS = 500;
 // normal readiness polling continues through the caller's full budget.
 const FRESH_OFFLINE_RECOVERY_THRESHOLD_MS = 15_000;
 const FRESH_OFFLINE_RECOVERY_COMMAND_TIMEOUT_MS = 5_000;
+// Continue checking at a bounded cadence after recovery so a device that
+// becomes ready before the deadline is observed despite a large configured interval.
+const FRESH_OFFLINE_POST_RECOVERY_POLL_INTERVAL_MS = 5_000;
 const MIN_EMULATOR_CONSOLE_PORT = 5554;
 const MAX_EMULATOR_CONSOLE_PORT = 5682;
 const EMULATOR_CONSOLE_PORT_STEP = 2;
@@ -1248,7 +1251,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       return currentDelayMs;
     }
     if (tracker.recoveryAttempted) {
-      return currentDelayMs;
+      return Math.min(currentDelayMs, FRESH_OFFLINE_POST_RECOVERY_POLL_INTERVAL_MS);
     }
     const thresholdAt = (tracker.since ?? now) + FRESH_OFFLINE_RECOVERY_THRESHOLD_MS;
     const timeUntilThresholdMs = Math.max(0, thresholdAt - now);

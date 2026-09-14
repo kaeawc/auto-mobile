@@ -408,7 +408,8 @@ class ResourceRegistryClass {
           `  - automobile:devices/booted/{platform} - List devices by platform (android|ios)\n` +
           `  - automobile:devices/{deviceId}/apps - List apps for a device\n` +
           `  - automobile:apps?deviceId={deviceId} - Query apps with filters\n` +
-          `  - automobile:observation/latest - Latest screen observation\n\n` +
+          `  - automobile:observation/latest - Latest screen observation\n` +
+          `  - automobile:observation/{deviceId}/{observationId}/screenshot - Screenshot for a specific observation\n\n` +
           `Use the listApps tool to list apps directly (params: device, type, search, profile; default type=launchable).`,
       );
     });

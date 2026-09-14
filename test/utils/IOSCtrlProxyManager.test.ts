@@ -416,77 +416,180 @@ describe("IOSCtrlProxyManager", function () {
       expect(IOSCtrlProxyManager.getInstance(testDevice)).not.toBe(first);
     });
 
-    for (const firstStopFailure of ["rejects", "reports failure"] as const) {
-      test(`retries a late remote start cleanup when the first stop ${firstStopFailure} (#7093)`, async function () {
-        const remoteStart = Promise.withResolvers<{
-          success: boolean;
-          error?: string;
-          data?: { pid: number; message: string; port?: number };
-        }>();
-        const startCalled = Promise.withResolvers<void>();
-        const pidsWhenStopped: Array<number | null> = [];
-        const remoteRunner = {
-          isEnabled: () => true,
-          isRunningInDocker: () => true,
-          isAvailable: async () => true,
-          getHost: () => "remote-host",
-          runIdeviceId: async () => ({ success: true, data: { stdout: "" } }),
-          runIdeviceInstaller: async () => ({ success: true, data: { stdout: "" } }),
-          runSimctl: async () => ({ success: true, data: { stdout: "" } }),
-          startIproxy: async () => ({ success: true, data: { pid: 99 } }),
-          stopIproxy: async () => ({ success: true }),
-          getIproxyStatus: async () => ({ success: true, data: { running: false } }),
-          start: () => {
-            startCalled.resolve();
-            return remoteStart.promise;
-          },
-          stop: async () => {
-            pidsWhenStopped.push(
-              (manager as unknown as { xcTestProcessId: number | null }).xcTestProcessId,
-            );
-            if (pidsWhenStopped.length === 1) {
-              if (firstStopFailure === "rejects") {
-                throw new Error("remote stop unavailable");
+    for (const deviceKind of ["simulator", "physical device"] as const) {
+      for (const firstStopFailure of ["rejects", "reports failure"] as const) {
+        test(`retries ${deviceKind} late remote start cleanup when the first stop ${firstStopFailure} (#7093, #7108)`, async function () {
+          const remoteStart = Promise.withResolvers<{
+            success: boolean;
+            error?: string;
+            data?: { pid: number; message: string; port?: number };
+          }>();
+          const startCalled = Promise.withResolvers<void>();
+          const stoppedPids: number[] = [];
+          const iproxyDevicePorts: Array<number | undefined> = [];
+          const remoteRunner = {
+            isEnabled: () => true,
+            isRunningInDocker: () => true,
+            isAvailable: async () => true,
+            getHost: () => "remote-host",
+            runIdeviceId: async () => ({ success: true, data: { stdout: "" } }),
+            runIdeviceInstaller: async () => ({ success: true, data: { stdout: "" } }),
+            runSimctl: async () => ({ success: true, data: { stdout: "" } }),
+            startIproxy: async ({ devicePort }: { devicePort?: number }) => {
+              iproxyDevicePorts.push(devicePort);
+              return { success: true, data: { pid: 99 } };
+            },
+            stopIproxy: async () => ({ success: true }),
+            getIproxyStatus: async () => ({ success: true, data: { running: true } }),
+            start: () => {
+              startCalled.resolve();
+              return remoteStart.promise;
+            },
+            stop: async ({ pid }: { pid: number }) => {
+              stoppedPids.push(pid);
+              if (stoppedPids.length === 1) {
+                if (firstStopFailure === "rejects") {
+                  throw new Error("remote stop unavailable");
+                }
+                return { success: false, error: "remote stop unavailable" };
               }
-              return { success: false, error: "remote stop unavailable" };
-            }
-            return { success: true };
-          },
-          status: async () => ({ success: true, data: { running: false } }),
-        };
-        const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-          testDevice,
-          fakeTimer,
-          createFakeBuilder(),
-          new FakeProcessExecutor(),
-          undefined,
-          undefined,
-          remoteRunner,
-          { isAvailable: async () => true },
-        );
-        spyOn(manager, "isRunning").mockResolvedValue(false);
-        spyOn(
-          manager as unknown as { isCtrlProxyProcessAlive: () => Promise<boolean> },
-          "isCtrlProxyProcessAlive",
-        ).mockResolvedValue(false);
-        (
-          IOSCtrlProxyManager as unknown as { instances: Map<string, IOSCtrlProxyManager> }
-        ).instances.set(testDevice.deviceId, manager);
+              return { success: true };
+            },
+            status: async () => ({ success: true, data: { running: false } }),
+          };
+          const device =
+            deviceKind === "physical device"
+              ? { ...testDevice, deviceId: "00008030-001E28C11E" }
+              : testDevice;
+          const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+            device,
+            fakeTimer,
+            createFakeBuilder(),
+            new FakeProcessExecutor(),
+            undefined,
+            undefined,
+            remoteRunner,
+            { isAvailable: async () => true },
+          );
+          spyOn(manager, "isRunning").mockResolvedValue(false);
+          spyOn(
+            manager as unknown as { isCtrlProxyProcessAlive: () => Promise<boolean> },
+            "isCtrlProxyProcessAlive",
+          ).mockResolvedValue(false);
+          (
+            IOSCtrlProxyManager as unknown as { instances: Map<string, IOSCtrlProxyManager> }
+          ).instances.set(device.deviceId, manager);
 
-        const startup = manager.start();
-        await startCalled.promise;
-        const shutdown = IOSCtrlProxyManager.shutdownAll(fakeTimer);
+          const startup = manager.start();
+          await startCalled.promise;
+          const shutdown = IOSCtrlProxyManager.shutdownAll(fakeTimer);
 
-        remoteStart.resolve({ success: true, data: { pid: 42, message: "started" } });
+          remoteStart.resolve({
+            success: true,
+            data: {
+              pid: 42,
+              message: "started",
+              port: deviceKind === "physical device" ? 8100 : undefined,
+            },
+          });
 
-        await expect(startup).rejects.toThrow("cancelled by stop()");
-        await expect(shutdown).resolves.toBeUndefined();
-        expect(pidsWhenStopped).toEqual([null, 42]);
-        expect(
-          (manager as unknown as { xcTestProcessId: number | null }).xcTestProcessId,
-        ).toBeNull();
-      });
+          await expect(startup).rejects.toThrow("cancelled by stop()");
+          await expect(shutdown).resolves.toBeUndefined();
+          expect(stoppedPids).toEqual([42, 42]);
+          expect(iproxyDevicePorts).toEqual(deviceKind === "physical device" ? [8765] : []);
+          expect(
+            (manager as unknown as { xcTestProcessId: number | null }).xcTestProcessId,
+          ).toBeNull();
+        });
+      }
     }
+
+    test("force-stops a late remote runner when admission cleanup never settles (#7108)", async function () {
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        { ...testDevice, deviceId: "00008030-001E28C11E" },
+        fakeTimer,
+        undefined,
+        new FakeProcessExecutor(),
+      );
+      const controller = new AbortController();
+      const stoppedPids: number[] = [];
+      const internal = manager as unknown as {
+        sharedStart: { controller: AbortController } | null;
+        xcTestProcessId: number | null;
+        remoteRunner: {
+          stop: (options: { deviceId: string; pid: number }) => Promise<{ success: boolean }>;
+        };
+        useRemoteRunner: () => boolean;
+        fenceLateRemoteStartAfterShutdown: (runnerPid: number) => Promise<void>;
+        forceStopForShutdown: (deadline: number) => Promise<void>;
+      };
+      const firstStop = new Promise<{ success: boolean }>(() => {});
+      internal.remoteRunner.stop = async ({ pid }) => {
+        stoppedPids.push(pid);
+        return stoppedPids.length === 1 ? firstStop : { success: true };
+      };
+      spyOn(internal, "useRemoteRunner").mockReturnValue(true);
+      internal.sharedStart = {
+        controller,
+      };
+      controller.abort(new Error("iOS CtrlProxy startup was cancelled by stop()"));
+
+      const fence = internal.fenceLateRemoteStartAfterShutdown(42);
+      void fence.catch(() => {});
+      await Promise.resolve();
+
+      expect(internal.xcTestProcessId).toBe(42);
+      await internal.forceStopForShutdown(fakeTimer.now() + 250);
+
+      expect(stoppedPids).toEqual([42, 42]);
+      expect(internal.xcTestProcessId).toBeNull();
+    });
+
+    test("publishes a physical remote runner before yielding to its late-start fence (#7108)", async function () {
+      const fenceEntered = Promise.withResolvers<void>();
+      const releaseFence = Promise.withResolvers<void>();
+      const remoteRunner = {
+        isEnabled: () => true,
+        isRunningInDocker: () => true,
+        isAvailable: async () => true,
+        getHost: () => "remote-host",
+        runIdeviceId: async () => ({ success: true, data: { stdout: "" } }),
+        runIdeviceInstaller: async () => ({ success: true, data: { stdout: "" } }),
+        runSimctl: async () => ({ success: true, data: { stdout: "" } }),
+        startIproxy: async () => ({ success: true, data: { pid: 99 } }),
+        stopIproxy: async () => ({ success: true }),
+        getIproxyStatus: async () => ({ success: true, data: { running: true } }),
+        start: async () => ({ success: true, data: { pid: 42, message: "started" } }),
+        stop: async () => ({ success: true }),
+        status: async () => ({ success: true, data: { running: false } }),
+      };
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        { ...testDevice, deviceId: "00008030-001E28C11E" },
+        fakeTimer,
+        createFakeBuilder(),
+        new FakeProcessExecutor(),
+        undefined,
+        undefined,
+        remoteRunner,
+        { isAvailable: async () => true },
+      );
+      const internal = manager as unknown as {
+        xcTestProcessId: number | null;
+        startOnDevice: () => Promise<void>;
+        fenceLateRemoteStartAfterShutdown: () => Promise<void>;
+      };
+      spyOn(internal, "fenceLateRemoteStartAfterShutdown").mockImplementation(async () => {
+        fenceEntered.resolve();
+        await releaseFence.promise;
+      });
+
+      const startup = internal.startOnDevice();
+      await fenceEntered.promise;
+      expect(internal.xcTestProcessId).toBe(42);
+
+      releaseFence.resolve();
+      await startup;
+    });
   });
 
   describe("evict", function () {

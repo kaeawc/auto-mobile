@@ -413,13 +413,18 @@ describe("logPruner enumeration-uncertainty retention (issue #6194)", () => {
   test("prunes a launch log when discovery is confident (uncertain=false) and no daemon is alive", async () => {
     await withTempLogDir(async (dir) => {
       const launchLog = "daemon-launch-4242.log";
-      await writeFile(path.join(dir, launchLog), "old bootstrap output");
+      const launchLogPath = path.join(dir, launchLog);
+      await writeFile(launchLogPath, "old bootstrap output");
+      const { mtimeMs } = await stat(launchLogPath);
 
       await pruneLogFiles({
         dir,
         ownPrefix: "stdio-111",
         maxOwnFiles: 10,
         abandonedMaxAgeMs: -1,
+        // A fresh Windows mtime can be ahead of Date.now(), which would skip
+        // the intentional -1ms stale-file path before unlink is exercised.
+        now: mtimeMs,
         isProcessAlive: () => false,
         // Complete enumeration and every namespace's daemon confidently dead.
         daemonPidFiles: () => ({ pidFiles: [ownPidFile], uncertain: false }),
@@ -659,13 +664,18 @@ describe("logPruner transient unlink failures (Windows EBUSY/EPERM)", () => {
   test("treats ENOENT as success without retrying", async () => {
     await withTempLogDir(async (dir) => {
       const launchLog = "daemon-launch-4242.log";
-      await writeFile(path.join(dir, launchLog), "x");
+      const launchLogPath = path.join(dir, launchLog);
+      await writeFile(launchLogPath, "x");
+      const { mtimeMs } = await stat(launchLogPath);
 
       const attempts: string[] = [];
 
       await pruneLogFiles({
         ...deadNamespace,
         dir,
+        // The stale-file precondition must not depend on filesystem and wall
+        // clocks agreeing on Windows.
+        now: mtimeMs,
         unlink: async (filePath) => {
           attempts.push(filePath);
           throw errnoError("ENOENT");

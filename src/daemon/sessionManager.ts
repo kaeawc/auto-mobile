@@ -309,6 +309,15 @@ class UnissuedSessionError extends ActionableError {}
  */
 export type ReleaseCommitFence = () => boolean;
 
+/** DevicePool may defer or retry automatic release of a retained recovery fence. */
+export interface RecoveryExpiryReleaseHandler {
+  release(
+    sessionId: string,
+    releaseReason: string,
+    attempt: () => Promise<string | null>,
+  ): Promise<string | null> | undefined;
+}
+
 export type ConditionalSessionRelease =
   | { superseded: true }
   | { superseded: false; deviceId: string | null };
@@ -531,6 +540,12 @@ export class SessionManager {
     this.networkConditionRestorerFactory = networkConditionRestorerFactory;
     // Start periodic cleanup of expired sessions
     this.startCleanupTimer();
+  }
+
+  private recoveryExpiryReleaseHandler?: RecoveryExpiryReleaseHandler;
+
+  setRecoveryExpiryReleaseHandler(handler: RecoveryExpiryReleaseHandler): void {
+    this.recoveryExpiryReleaseHandler = handler;
   }
 
   /**
@@ -1301,6 +1316,27 @@ export class SessionManager {
     sessionId: string,
     releaseReason: string = "explicit-release",
     allowExpired: boolean = false,
+    shouldCommit?: ReleaseCommitFence,
+  ): Promise<string | null> {
+    const attempt = () =>
+      this.releaseSessionAttempt(sessionId, releaseReason, allowExpired, shouldCommit);
+    if (EXPIRY_RELEASE_REASONS.has(releaseReason)) {
+      const recoveryRelease = this.recoveryExpiryReleaseHandler?.release(
+        sessionId,
+        releaseReason,
+        attempt,
+      );
+      if (recoveryRelease) {
+        return await recoveryRelease;
+      }
+    }
+    return await attempt();
+  }
+
+  private async releaseSessionAttempt(
+    sessionId: string,
+    releaseReason: string,
+    allowExpired: boolean,
     shouldCommit?: ReleaseCommitFence,
   ): Promise<string | null> {
     const session =

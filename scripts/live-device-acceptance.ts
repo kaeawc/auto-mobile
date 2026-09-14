@@ -7,6 +7,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { DaemonClient } from "../src/daemon/client";
 import { SOCKET_PATH } from "../src/daemon/constants";
 import {
+  getAppleSchema,
   getAndroidSchema,
   killDeviceSchema,
   provisionDeviceSchema,
@@ -22,6 +23,7 @@ type Platform = "android" | "ios";
 type Scenario = "full" | "recovery";
 type JsonObject = Record<string, unknown>;
 type Budget = "work" | "cleanup" | "evidence";
+type AcquisitionKind = "platform" | "generic";
 
 export interface AcceptanceArgs {
   platform: Platform;
@@ -358,19 +360,39 @@ function provisionRequest(args: AcceptanceArgs): JsonObject {
   };
 }
 
-function acquisitionTool(args: AcceptanceArgs): "getAndroid" | "startDevice" {
-  return args.platform === "android" ? "getAndroid" : "startDevice";
+function acquisitionTool(
+  args: AcceptanceArgs,
+  kind: AcquisitionKind,
+): "getAndroid" | "getApple" | "startDevice" {
+  if (kind === "generic") {
+    return "startDevice";
+  }
+  return args.platform === "android" ? "getAndroid" : "getApple";
 }
 
-function acquisitionRequest(args: AcceptanceArgs, range: "exact" | "min" | "max"): JsonObject {
-  if (args.platform === "android") {
-    return { avdName: args.target.avdName, enableTools: [...ENABLED_TOOLS] };
+function acquisitionRequest(
+  args: AcceptanceArgs,
+  range: "exact" | "min" | "max",
+  kind: AcquisitionKind,
+): JsonObject {
+  if (kind === "platform") {
+    if (args.platform === "android") {
+      return { avdName: args.target.avdName, enableTools: [...ENABLED_TOOLS] };
+    }
+    return { deviceId: args.target.simulatorUdid, enableTools: [...ENABLED_TOOLS] };
   }
-  const request: JsonObject = {
-    platform: "ios",
-    deviceId: args.target.simulatorUdid,
-    preferRunning: true,
-  };
+  const request: JsonObject =
+    args.platform === "android"
+      ? {
+          platform: "android",
+          name: args.target.avdName,
+          preferRunning: true,
+        }
+      : {
+          platform: "ios",
+          deviceId: args.target.simulatorUdid,
+          preferRunning: true,
+        };
   if (range === "min") {
     request.minOsVersion = args.osVersionRange.min;
   }
@@ -378,6 +400,30 @@ function acquisitionRequest(args: AcceptanceArgs, range: "exact" | "min" | "max"
     request.maxOsVersion = args.osVersionRange.max;
   }
   return request;
+}
+
+function assertGenericSelectorSchemaMatrix(args: AcceptanceArgs): void {
+  const exact = startDeviceSchema.safeParse(acquisitionRequest(args, "exact", "generic"));
+  const min = startDeviceSchema.safeParse(acquisitionRequest(args, "min", "generic"));
+  const max = startDeviceSchema.safeParse(acquisitionRequest(args, "max", "generic"));
+  if (!exact.success || !min.success || !max.success) {
+    throw new Error("startDevice schema rejected an exact, min, or max request");
+  }
+  if (
+    min.data.minOsVersion !== args.osVersionRange.min ||
+    max.data.maxOsVersion !== args.osVersionRange.max
+  ) {
+    throw new Error("startDevice schema did not preserve the requested OS bounds");
+  }
+  if (args.platform === "android") {
+    if (exact.data.name !== args.target.avdName) {
+      throw new Error("startDevice schema did not preserve the exact Android AVD selector");
+    }
+    return;
+  }
+  if (exact.data.deviceId !== args.target.simulatorUdid) {
+    throw new Error("startDevice schema did not preserve the exact iOS selector");
+  }
 }
 
 function redact(value: unknown): unknown {
@@ -417,25 +463,17 @@ function assertProvisionSchemaMatrix(args: AcceptanceArgs): void {
     throw new Error(`provisionDevice schema rejected harness request: ${provision.error.message}`);
   }
   if (args.platform === "android") {
-    const android = getAndroidSchema.safeParse(acquisitionRequest(args, "exact"));
+    const android = getAndroidSchema.safeParse(acquisitionRequest(args, "exact", "platform"));
     if (!android.success) {
       throw new Error(`getAndroid schema rejected exact AVD request: ${android.error.message}`);
     }
-    return;
+  } else {
+    const apple = getAppleSchema.safeParse(acquisitionRequest(args, "exact", "platform"));
+    if (!apple.success) {
+      throw new Error(`getApple schema rejected exact simulator request: ${apple.error.message}`);
+    }
   }
-  const exact = startDeviceSchema.safeParse(acquisitionRequest(args, "exact"));
-  const min = startDeviceSchema.safeParse(acquisitionRequest(args, "min"));
-  const max = startDeviceSchema.safeParse(acquisitionRequest(args, "max"));
-  if (!exact.success || !min.success || !max.success) {
-    throw new Error("startDevice schema rejected an exact, min, or max iOS request");
-  }
-  if (
-    min.data.minOsVersion !== args.osVersionRange.min ||
-    max.data.maxOsVersion !== args.osVersionRange.max ||
-    exact.data.deviceId !== args.target.simulatorUdid
-  ) {
-    throw new Error("startDevice schema did not preserve the exact iOS selector and OS bounds");
-  }
+  assertGenericSelectorSchemaMatrix(args);
 }
 
 async function defaultSpawnCli(command: string[], timeoutMs: number): Promise<void> {
@@ -722,6 +760,7 @@ export async function runAcceptanceMatrix(
   const acquire = async (
     phase: string,
     range: "exact" | "min" | "max",
+    kind: AcquisitionKind,
   ): Promise<AcquiredSession> => {
     const start = timer.now();
     const client = await bounded(
@@ -730,9 +769,9 @@ export async function runAcceptanceMatrix(
       async () => await createMcpClient(phase),
     );
     clients.push(client);
-    const request = acquisitionRequest(args, range);
-    const tool = acquisitionTool(args);
-    acquisitionRequests.push({ phase, range, tool, request });
+    const request = acquisitionRequest(args, range, kind);
+    const tool = acquisitionTool(args, kind);
+    acquisitionRequests.push({ phase, range, kind, tool, request });
     const payload = toolPayload(await callTool(client, tool, request, phase), tool);
     const sessionUuid = stringField(payload, "sessionUuid", tool);
     mint(phase, sessionUuid);
@@ -783,11 +822,11 @@ export async function runAcceptanceMatrix(
       async () => await createMcpClient("unrelated-owner"),
     );
     clients.push(client);
-    const tool = acquisitionTool(args);
+    const tool = acquisitionTool(args, "generic");
     const response = await callTool(
       client,
       tool,
-      acquisitionRequest(args, "exact"),
+      acquisitionRequest(args, "exact", "generic"),
       "unrelated-owner",
     );
     if (!response.isError) {
@@ -814,7 +853,7 @@ export async function runAcceptanceMatrix(
 
   try {
     if (args.platform === "ios") {
-      const preflight = await acquire("preflight-ios-uuid-ownership", "exact");
+      const preflight = await acquire("preflight-ios-uuid-ownership", "exact", "platform");
       await release(preflight.sessionUuid, "preflight-ios-uuid-ownership");
     }
     const provisionStart = timer.now();
@@ -838,15 +877,21 @@ export async function runAcceptanceMatrix(
       resolvedSpec: asObject(provisionPayload.resolvedSpec, "provisionDevice.resolvedSpec"),
     });
 
-    const prepared = await acquire("prepare-stopped", "exact");
+    const prepared = await acquire("prepare-stopped", "exact", "platform");
     await kill(prepared, "prepare-stopped");
     await release(prepared.sessionUuid, "prepare-stopped");
 
-    const stopped = await acquire("acquire-stopped", args.platform === "ios" ? "min" : "exact");
+    const stopped = await acquire("acquire-stopped", "exact", "platform");
     assertAndroidTransitionEvidence(prepared, stopped);
     await release(stopped.sessionUuid, "acquire-stopped");
 
-    const running = await acquire("acquire-running", args.platform === "ios" ? "max" : "exact");
+    const genericExact = await acquire("acquire-generic-exact", "exact", "generic");
+    await release(genericExact.sessionUuid, "acquire-generic-exact");
+
+    const genericMinimum = await acquire("acquire-generic-min", "min", "generic");
+    await release(genericMinimum.sessionUuid, "acquire-generic-min");
+
+    const running = await acquire("acquire-running", "max", "generic");
     await expectUnrelatedOwnerConflict(running);
 
     const cliStart = timer.now();
@@ -923,7 +968,7 @@ export async function runAcceptanceMatrix(
 
     await release(running.sessionUuid, "acquire-running");
     await repairHost();
-    const repaired = await acquire("reacquire-after-repair", "exact");
+    const repaired = await acquire("reacquire-after-repair", "exact", "platform");
     await release(repaired.sessionUuid, "reacquire-after-repair");
   } catch (error) {
     primaryError = error;

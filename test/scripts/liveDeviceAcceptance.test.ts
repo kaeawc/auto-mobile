@@ -104,9 +104,12 @@ function createHarness(
           },
         };
       }
-      if (name === "getAndroid" || name === "startDevice") {
+      if (name === "getAndroid" || name === "getApple" || name === "startDevice") {
         if (owner === "unrelated-owner") {
-          const deviceId = arguments_.platform === "ios" ? IOS_UDID : "emulator-5560";
+          const deviceId =
+            name === "getApple" || arguments_.platform === "ios"
+              ? IOS_UDID
+              : `emulator-${5554 + startCount * 2}`;
           return {
             isError: true,
             structuredContent: { error: options.ownerDiagnostic ?? ownerDiagnostic(deviceId) },
@@ -114,7 +117,7 @@ function createHarness(
         }
         startCount += 1;
         const sessionUuid = `start-${startCount}`;
-        if (arguments_.platform === "ios") {
+        if (name === "getApple" || arguments_.platform === "ios") {
           return {
             structuredContent: {
               sessionUuid,
@@ -148,7 +151,9 @@ function createHarness(
           return {
             isError: true,
             structuredContent: {
-              error: options.oldSessionDiagnostic ?? oldSessionDiagnostic("start-3"),
+              error:
+                options.oldSessionDiagnostic ??
+                oldSessionDiagnostic(String(arguments_.sessionUuid)),
             },
           };
         }
@@ -253,13 +258,29 @@ describe("live device acceptance harness", () => {
       enableTools: ["observe", "getDeviceState"],
     });
     expect(harness.cliCommands).toContainEqual(["auto-mobile", "--cli", "doctor", "--repair"]);
-    const acquisitions = harness.calls.filter((call) => call.name === "getAndroid");
-    expect(acquisitions.map((call) => call.arguments)).toEqual([
+    const exactAcquisitions = harness.calls.filter((call) => call.name === "getAndroid");
+    expect(exactAcquisitions.map((call) => call.arguments)).toEqual([
       { avdName: "Pixel_8_API_35", enableTools: ["observe", "getDeviceState"] },
       { avdName: "Pixel_8_API_35", enableTools: ["observe", "getDeviceState"] },
       { avdName: "Pixel_8_API_35", enableTools: ["observe", "getDeviceState"] },
-      { avdName: "Pixel_8_API_35", enableTools: ["observe", "getDeviceState"] },
-      { avdName: "Pixel_8_API_35", enableTools: ["observe", "getDeviceState"] },
+    ]);
+    expect(
+      harness.calls.filter((call) => call.name === "startDevice").map((call) => call.arguments),
+    ).toEqual([
+      { platform: "android", name: "Pixel_8_API_35", preferRunning: true },
+      {
+        platform: "android",
+        name: "Pixel_8_API_35",
+        preferRunning: true,
+        minOsVersion: "34",
+      },
+      {
+        platform: "android",
+        name: "Pixel_8_API_35",
+        preferRunning: true,
+        maxOsVersion: "35",
+      },
+      { platform: "android", name: "Pixel_8_API_35", preferRunning: true },
     ]);
     expect(harness.calls.find((call) => call.name === "killDevice")?.arguments).toEqual({
       device: {
@@ -268,10 +289,26 @@ describe("live device acceptance harness", () => {
         platform: "android",
       },
     });
-    for (const sessionUuid of ["provision-1", "start-1", "start-2", "start-3", "start-4"]) {
+    for (const sessionUuid of [
+      "provision-1",
+      "start-1",
+      "start-2",
+      "start-3",
+      "start-4",
+      "start-5",
+      "start-6",
+    ]) {
       assertReadinessImmediatelyFollowsSuccess(harness, sessionUuid);
     }
-    expect(harness.releases).toEqual(["provision-1", "start-1", "start-2", "start-3", "start-4"]);
+    expect(harness.releases).toEqual([
+      "provision-1",
+      "start-1",
+      "start-2",
+      "start-3",
+      "start-4",
+      "start-5",
+      "start-6",
+    ]);
     expect(evidence.checks).toMatchObject({
       stableIdentityPreserved: true,
       allMintedSessionsReleased: true,
@@ -280,7 +317,7 @@ describe("live device acceptance harness", () => {
     });
   });
 
-  test("uses the simulator UUID as the generic iOS selector for exact/min/max coverage", async () => {
+  test("uses getApple for exact iOS readiness and UUID generic selectors for exact/min/max coverage", async () => {
     const harness = createHarness();
     const iosArgs: AcceptanceArgs = {
       ...androidArgs,
@@ -298,11 +335,17 @@ describe("live device acceptance harness", () => {
       harness.calls.filter((call) => call.name === "startDevice").map((call) => call.arguments),
     ).toEqual([
       { platform: "ios", deviceId: IOS_UDID, preferRunning: true },
-      { platform: "ios", deviceId: IOS_UDID, preferRunning: true },
       { platform: "ios", deviceId: IOS_UDID, preferRunning: true, minOsVersion: "17.0" },
       { platform: "ios", deviceId: IOS_UDID, preferRunning: true, maxOsVersion: "18.0" },
       { platform: "ios", deviceId: IOS_UDID, preferRunning: true },
-      { platform: "ios", deviceId: IOS_UDID, preferRunning: true },
+    ]);
+    expect(
+      harness.calls.filter((call) => call.name === "getApple").map((call) => call.arguments),
+    ).toEqual([
+      { deviceId: IOS_UDID, enableTools: ["observe", "getDeviceState"] },
+      { deviceId: IOS_UDID, enableTools: ["observe", "getDeviceState"] },
+      { deviceId: IOS_UDID, enableTools: ["observe", "getDeviceState"] },
+      { deviceId: IOS_UDID, enableTools: ["observe", "getDeviceState"] },
     ]);
     expect(harness.calls.find((call) => call.name === "provisionDevice")?.arguments).toMatchObject({
       device: { deviceId: IOS_UDID, name: "iPhone 16 Pro", platform: "ios" },
@@ -324,7 +367,7 @@ describe("live device acceptance harness", () => {
 
     const restart = harness.events.indexOf("restart-daemon");
     const oldSession = harness.events.indexOf("old-session:getDeviceState");
-    const release = harness.events.indexOf("release:start-3");
+    const release = harness.events.indexOf("release:start-5");
     expect(restart).toBeLessThan(oldSession);
     expect(oldSession).toBeLessThan(release);
     expect(harness.events).toContain("reacquire-after-repair:getAndroid");
@@ -336,7 +379,7 @@ describe("live device acceptance harness", () => {
     await expect(
       runAcceptanceMatrix({ ...androidArgs, scenario: "recovery" }, harness.dependencies),
     ).rejects.toThrow("Old session did not return the required terminal diagnostic");
-    expect(harness.releases).toContain("start-3");
+    expect(harness.releases).toContain("start-5");
   });
 
   test("rejects a generic unrelated-owner error instead of the product conflict diagnostic", async () => {
@@ -345,7 +388,14 @@ describe("live device acceptance harness", () => {
     await expect(runAcceptanceMatrix(androidArgs, harness.dependencies)).rejects.toThrow(
       "Unexpected unrelated-owner diagnostic",
     );
-    expect(harness.releases).toEqual(["provision-1", "start-1", "start-2", "start-3"]);
+    expect(harness.releases).toEqual([
+      "provision-1",
+      "start-1",
+      "start-2",
+      "start-3",
+      "start-4",
+      "start-5",
+    ]);
   });
 
   test("fails a full acceptance when exposed Android serial or console identity does not change", async () => {
@@ -462,7 +512,7 @@ describe("live device acceptance harness", () => {
     );
 
     expect(harness.events).toContain("close:daemon");
-    expect(harness.events.filter((event) => event.startsWith("close:"))).toHaveLength(8);
+    expect(harness.events.filter((event) => event.startsWith("close:"))).toHaveLength(10);
     expect(harness.evidence[0]).not.toContain("daemon close failed");
     expect(harness.evidence[0]).not.toContain("client close failed");
   });

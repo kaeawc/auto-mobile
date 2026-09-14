@@ -3860,90 +3860,96 @@ describe("provisionDevice handler", () => {
     expect(operationStore.getStoredResult(args.operationId)).toEqual(persistedRetry);
   });
 
-  test("bounds a blocked operation admission without starting a device mutation", async () => {
-    const timer = new FakeTimer();
-    setDeviceToolsDependencies({ timer });
-    registerDeviceTools();
-    const begin = blockNextBegin(operationStore);
-    const args = {
-      ...provisionTestArgs("android", "pending-operation-begin"),
-      readiness: "none" as const,
-      timeoutMs: 1_000,
-    };
-    let payload: Record<string, any> | undefined;
-    const request = ToolRegistry.getTool("provisionDevice")!
-      .handler(args)
-      .then((response) => {
-        payload = JSON.parse((response as any).content[0].text);
-        return response;
-      });
+  test.each(["android", "ios"] as const)(
+    "%s bounds a blocked operation admission without starting a device mutation",
+    async (platform) => {
+      const timer = new FakeTimer();
+      setDeviceToolsDependencies({ timer });
+      registerDeviceTools();
+      const begin = blockNextBegin(operationStore);
+      const args = {
+        ...provisionTestArgs(platform, `pending-operation-begin-${platform}`),
+        readiness: "none" as const,
+        timeoutMs: 1_000,
+      };
+      let payload: Record<string, any> | undefined;
+      const request = ToolRegistry.getTool("provisionDevice")!
+        .handler(args)
+        .then((response) => {
+          payload = JSON.parse((response as any).content[0].text);
+          return response;
+        });
 
-    await begin.entered;
-    timer.advanceTime(1_000);
-    await flushMicrotasks();
-    const payloadAtDeadline = payload;
-    try {
-      expect(payloadAtDeadline?.error).toMatchObject({
-        code: "timeout",
-        message: expect.stringContaining("starting provision operation"),
-      });
+      await begin.entered;
+      timer.advanceTime(1_000);
+      await flushMicrotasks();
+      const payloadAtDeadline = payload;
+      try {
+        expect(payloadAtDeadline?.error).toMatchObject({
+          code: "timeout",
+          message: expect.stringContaining("starting provision operation"),
+        });
+        expect(exactProvisioner.requests).toHaveLength(0);
+        expect(deviceManager.wasMethodCalled("startDevice")).toBe(false);
+      } finally {
+        begin.release();
+        await request;
+        await begin.settled;
+        await flushMicrotasks();
+      }
+
       expect(exactProvisioner.requests).toHaveLength(0);
       expect(deviceManager.wasMethodCalled("startDevice")).toBe(false);
-    } finally {
-      begin.release();
-      await request;
-      await begin.settled;
+      expect(operationStore.failures).toEqual([
+        { operationId: args.operationId, errorCode: "timeout" },
+      ]);
+    },
+  );
+
+  test.each(["android", "ios"] as const)(
+    "%s does not hold a failed provision open for persistence and fences its late settlement",
+    async (platform) => {
+      const timer = new FakeTimer();
+      exactProvisioner.provision = async () => {
+        throw new Error("provisioning backend failed");
+      };
+      setDeviceToolsDependencies({ timer });
+      registerDeviceTools();
+      const failure = blockNextFailure(operationStore);
+      const args = {
+        ...provisionTestArgs(platform, `pending-failure-persistence-${platform}`),
+        boot: false,
+        readiness: "none" as const,
+        timeoutMs: 1_000,
+      };
+      let payload: Record<string, any> | undefined;
+      const request = ToolRegistry.getTool("provisionDevice")!
+        .handler(args)
+        .then((response) => {
+          payload = JSON.parse((response as any).content[0].text);
+          return response;
+        });
+
+      await failure.entered;
+      timer.advanceTime(1_000);
       await flushMicrotasks();
-    }
+      const payloadAtDeadline = payload;
+      try {
+        expect(payloadAtDeadline?.error).toMatchObject({
+          code: "platform_command_failed",
+          message: expect.stringContaining("provisioning backend failed"),
+        });
 
-    expect(exactProvisioner.requests).toHaveLength(0);
-    expect(deviceManager.wasMethodCalled("startDevice")).toBe(false);
-    expect(operationStore.failures).toEqual([
-      { operationId: args.operationId, errorCode: "timeout" },
-    ]);
-  });
+        operationStore.takeOverAttempt(args.operationId, "replacement-attempt");
+      } finally {
+        failure.release();
+        await request;
+        await failure.settled;
+      }
 
-  test("does not hold a failed provision open for persistence and fences its late settlement", async () => {
-    const timer = new FakeTimer();
-    exactProvisioner.provision = async () => {
-      throw new Error("provisioning backend failed");
-    };
-    setDeviceToolsDependencies({ timer });
-    registerDeviceTools();
-    const failure = blockNextFailure(operationStore);
-    const args = {
-      ...provisionTestArgs("android", "pending-failure-persistence"),
-      boot: false,
-      readiness: "none" as const,
-      timeoutMs: 1_000,
-    };
-    let payload: Record<string, any> | undefined;
-    const request = ToolRegistry.getTool("provisionDevice")!
-      .handler(args)
-      .then((response) => {
-        payload = JSON.parse((response as any).content[0].text);
-        return response;
-      });
-
-    await failure.entered;
-    timer.advanceTime(1_000);
-    await flushMicrotasks();
-    const payloadAtDeadline = payload;
-    try {
-      expect(payloadAtDeadline?.error).toMatchObject({
-        code: "platform_command_failed",
-        message: expect.stringContaining("provisioning backend failed"),
-      });
-
-      operationStore.takeOverAttempt(args.operationId, "replacement-attempt");
-    } finally {
-      failure.release();
-      await request;
-      await failure.settled;
-    }
-
-    expect(operationStore.failCalls).toBe(0);
-  });
+      expect(operationStore.failCalls).toBe(0);
+    },
+  );
 
   test("releases a booted session when final completion exceeds the original deadline", async () => {
     const timer = new FakeTimer();

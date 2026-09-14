@@ -9,7 +9,7 @@ import { DaemonManager, type DaemonRestartResult } from "../daemon/manager";
 import type { DaemonOptions } from "../daemon/types";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
-import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import { defaultTimer, MAX_SETTIMEOUT_DELAY_MS, type Timer } from "../utils/SystemTimer";
 
 const DEFAULT_DAEMON_RECOVERY_TIMEOUT_MS = 45_000;
 
@@ -22,7 +22,7 @@ export interface DoctorRepairOptions {
    * It is intentionally independent of platform selection: the daemon and its
    * control socket are shared host infrastructure.
    */
-  timeoutMs?: number;
+  timeoutMs?: unknown;
   /** Daemon options parsed from the current CLI invocation. */
   daemonOptions?: DaemonOptions;
 }
@@ -31,7 +31,8 @@ export interface DaemonRecoveryResult {
   status: "repaired" | "failed";
   phase: DaemonRecoveryPhase;
   before?: DaemonHealthReport;
-  action: DaemonRecoveryAction;
+  /** Undefined when diagnosis did not complete and no action was selected. */
+  action?: DaemonRecoveryAction;
   after?: DaemonHealthReport;
   nextAction?: string;
 }
@@ -46,6 +47,7 @@ export interface DaemonRecoveryDependencies {
   recoverControlState?: (
     daemonOptions: DaemonOptions,
     isProtocolHealthy: () => Promise<boolean>,
+    signal?: AbortSignal,
   ) => Promise<DaemonRestartResult>;
   /**
    * A successful MCP tools/list round trip verifies the socket protocol and,
@@ -56,10 +58,36 @@ export interface DaemonRecoveryDependencies {
 }
 
 class DaemonRecoveryDeadlineError extends Error {
+  lifecycleCompletion: Promise<void> | undefined;
+
   constructor(readonly phase: Exclude<DaemonRecoveryPhase, "complete">) {
     super(`Daemon recovery deadline elapsed during ${phase}`);
     this.name = "DaemonRecoveryDeadlineError";
   }
+}
+
+const lifecycleCompletion = Symbol("daemonRecoveryLifecycleCompletion");
+
+type RecoveryResultWithCompletion = DaemonRecoveryResult & {
+  [lifecycleCompletion]?: Promise<void>;
+};
+
+/**
+ * Wait for a cancelled recovery lifecycle before explicitly ending the CLI
+ * process. Symbol storage keeps this implementation detail out of JSON output.
+ */
+export async function waitForDaemonRecoveryCompletion(result: DaemonRecoveryResult): Promise<void> {
+  await (result as RecoveryResultWithCompletion)[lifecycleCompletion];
+}
+
+function attachLifecycleCompletion(
+  result: DaemonRecoveryResult,
+  completion: Promise<void> | undefined,
+): DaemonRecoveryResult {
+  if (completion) {
+    (result as RecoveryResultWithCompletion)[lifecycleCompletion] = completion;
+  }
+  return result;
 }
 
 async function verifyDaemonProtocol(): Promise<void> {
@@ -90,25 +118,36 @@ async function withDeadline<T>(
   phase: Exclude<DaemonRecoveryPhase, "complete">,
   deadline: number,
   timer: Timer,
-  operation: () => Promise<T>,
-  settleOnTimeout = false,
+  operation: (signal: AbortSignal) => Promise<T>,
+  preserveLifecycleOnTimeout = false,
 ): Promise<T> {
   const remaining = deadline - timer.now();
   if (remaining <= 0) {
     throw new DaemonRecoveryDeadlineError(phase);
   }
 
+  const abortController = new AbortController();
+  const deadlineError = new DaemonRecoveryDeadlineError(phase);
   let timeout: NodeJS.Timeout | undefined;
   const expired = new Promise<never>((_resolve, reject) => {
-    timeout = timer.setTimeout(() => reject(new DaemonRecoveryDeadlineError(phase)), remaining);
+    timeout = timer.setTimeout(() => {
+      abortController.abort();
+      reject(deadlineError);
+    }, remaining);
   });
-  const task = operation();
+  const task = Promise.resolve().then(() => operation(abortController.signal));
 
   try {
     return await Promise.race([task, expired]);
   } catch (error) {
-    if (settleOnTimeout && error instanceof DaemonRecoveryDeadlineError) {
-      await task.catch(() => undefined);
+    if (preserveLifecycleOnTimeout && error === deadlineError) {
+      // The manager observes this signal before each destructive transition.
+      // If SIGTERM was already sent, it completes that scoped stop but does not
+      // start a replacement. The CLI waits for this completion before exit.
+      deadlineError.lifecycleCompletion = task.then(
+        () => undefined,
+        () => undefined,
+      );
     }
     throw error;
   } finally {
@@ -120,10 +159,11 @@ async function withDeadline<T>(
 
 function failedRecovery(
   phase: Exclude<DaemonRecoveryPhase, "complete">,
-  action: DaemonRecoveryAction,
+  action: DaemonRecoveryAction | undefined,
   error: unknown,
   before?: DaemonHealthReport,
   after?: DaemonHealthReport,
+  completion?: Promise<void>,
 ): DaemonRecoveryResult {
   const message = errorMessage(error);
   const nextAction =
@@ -132,9 +172,19 @@ function failedRecovery(
       : phase === "recovery"
         ? `Daemon recovery could not start a usable daemon: ${message}. Verify the AutoMobile installation, then retry doctor --repair.`
         : phase === "verification"
-          ? `Daemon recovery did not produce a usable daemon: ${message}. Retry doctor --repair; if it persists, inspect --daemon diagnostics.`
+          ? `Daemon recovery did not produce a usable daemon: ${message}. Retry doctor --repair; if it persists, inspect --daemon diagnose.`
           : `Daemon diagnosis failed: ${message}. Retry doctor --repair.`;
-  return { status: "failed", phase, before, action, after, nextAction };
+  return attachLifecycleCompletion(
+    {
+      status: "failed",
+      phase,
+      before,
+      ...(action === undefined ? {} : { action }),
+      after,
+      nextAction,
+    },
+    completion,
+  );
 }
 
 function assertUsableHealth(report: DaemonHealthReport): void {
@@ -143,7 +193,18 @@ function assertUsableHealth(report: DaemonHealthReport): void {
   }
 }
 
-type RecoveryAttempt<T> = { ok: true; value: T } | { ok: false; error: unknown };
+function isUsableRecoveryTimeout(timeoutMs: unknown): timeoutMs is number {
+  return (
+    typeof timeoutMs === "number" &&
+    Number.isFinite(timeoutMs) &&
+    timeoutMs > 0 &&
+    timeoutMs <= MAX_SETTIMEOUT_DELAY_MS
+  );
+}
+
+type RecoveryAttempt<T> =
+  | { ok: true; value: T }
+  | { ok: false; error: unknown; lifecycleCompletion?: Promise<void> };
 type ProtocolRecoveryAttempt =
   | { ok: true; value: DaemonRecoveryAction }
   | {
@@ -151,6 +212,7 @@ type ProtocolRecoveryAttempt =
       phase: "recovery" | "verification";
       action: DaemonRecoveryAction;
       error: unknown;
+      lifecycleCompletion?: Promise<void>;
     };
 type FinalHealthAttempt =
   | { ok: true; value: DaemonHealthReport }
@@ -162,6 +224,7 @@ interface ResolvedRecoveryDependencies {
   recoverControlState: (
     daemonOptions: DaemonOptions,
     isProtocolHealthy: () => Promise<boolean>,
+    signal?: AbortSignal,
   ) => Promise<DaemonRestartResult>;
   verifyProtocol: () => Promise<void>;
   isProtocolHealthy: () => Promise<boolean>;
@@ -176,8 +239,8 @@ function resolveRecoveryDependencies(
     getHealthReport: dependencies.getHealthReport ?? getDaemonHealthReport,
     recoverControlState:
       dependencies.recoverControlState ??
-      ((daemonOptions, isProtocolHealthy) =>
-        new DaemonManager().recoverControlState(daemonOptions, isProtocolHealthy)),
+      ((daemonOptions, isProtocolHealthy, signal) =>
+        new DaemonManager().recoverControlState(daemonOptions, isProtocolHealthy, signal)),
     verifyProtocol,
     isProtocolHealthy: protocolHealthProbe(verifyProtocol),
   };
@@ -187,16 +250,22 @@ async function attemptRecoveryStep<T>(
   phase: Exclude<DaemonRecoveryPhase, "complete">,
   deadline: number,
   timer: Timer,
-  operation: () => Promise<T>,
-  settleOnTimeout = false,
+  operation: (signal: AbortSignal) => Promise<T>,
+  preserveLifecycleOnTimeout = false,
 ): Promise<RecoveryAttempt<T>> {
   try {
     return {
       ok: true,
-      value: await withDeadline(phase, deadline, timer, operation, settleOnTimeout),
+      value: await withDeadline(phase, deadline, timer, operation, preserveLifecycleOnTimeout),
     };
   } catch (error) {
-    return { ok: false, error };
+    return {
+      ok: false,
+      error,
+      ...(error instanceof DaemonRecoveryDeadlineError && error.lifecycleCompletion
+        ? { lifecycleCompletion: error.lifecycleCompletion }
+        : {}),
+    };
   }
 }
 
@@ -207,6 +276,7 @@ async function recoverUnusableSocket(
   recoverControlState: (
     daemonOptions: DaemonOptions,
     isProtocolHealthy: () => Promise<boolean>,
+    signal?: AbortSignal,
   ) => Promise<DaemonRestartResult>,
   daemonOptions: DaemonOptions,
   isProtocolHealthy: () => Promise<boolean>,
@@ -218,7 +288,7 @@ async function recoverUnusableSocket(
     "recovery",
     deadline,
     timer,
-    () => recoverControlState(daemonOptions, isProtocolHealthy),
+    (signal) => recoverControlState(daemonOptions, isProtocolHealthy, signal),
     true,
   );
 }
@@ -230,16 +300,14 @@ async function verifyProtocolWithRecovery(
   recoverControlState: (
     daemonOptions: DaemonOptions,
     isProtocolHealthy: () => Promise<boolean>,
+    signal?: AbortSignal,
   ) => Promise<DaemonRestartResult>,
   daemonOptions: DaemonOptions,
   isProtocolHealthy: () => Promise<boolean>,
   verifyProtocol: () => Promise<void>,
 ): Promise<ProtocolRecoveryAttempt> {
-  const initialVerification = await attemptRecoveryStep(
-    "verification",
-    deadline,
-    timer,
-    verifyProtocol,
+  const initialVerification = await attemptRecoveryStep("verification", deadline, timer, () =>
+    verifyProtocol(),
   );
   if (initialVerification.ok || initialAction === "restarted") {
     return initialVerification.ok
@@ -256,17 +324,20 @@ async function verifyProtocolWithRecovery(
     "recovery",
     deadline,
     timer,
-    () => recoverControlState(daemonOptions, isProtocolHealthy),
+    (signal) => recoverControlState(daemonOptions, isProtocolHealthy, signal),
     true,
   );
   if (!restartResult.ok) {
-    return { ok: false, phase: "recovery", action: initialAction, error: restartResult.error };
+    return {
+      ok: false,
+      phase: "recovery",
+      action: initialAction,
+      error: restartResult.error,
+      lifecycleCompletion: restartResult.lifecycleCompletion,
+    };
   }
-  const replacementVerification = await attemptRecoveryStep(
-    "verification",
-    deadline,
-    timer,
-    verifyProtocol,
+  const replacementVerification = await attemptRecoveryStep("verification", deadline, timer, () =>
+    verifyProtocol(),
   );
   return replacementVerification.ok
     ? { ok: true, value: restartResult.value }
@@ -283,7 +354,9 @@ async function verifyFinalHealth(
   timer: Timer,
   getHealthReport: () => Promise<DaemonHealthReport>,
 ): Promise<FinalHealthAttempt> {
-  const health = await attemptRecoveryStep("verification", deadline, timer, getHealthReport);
+  const health = await attemptRecoveryStep("verification", deadline, timer, () =>
+    getHealthReport(),
+  );
   if (!health.ok) {
     return { ok: false, error: health.error };
   }
@@ -305,12 +378,13 @@ export async function repairDaemon(
   dependencies: DaemonRecoveryDependencies = {},
 ): Promise<DaemonRecoveryResult> {
   const timeoutMs = options.timeoutMs ?? DEFAULT_DAEMON_RECOVERY_TIMEOUT_MS;
-  const action: DaemonRecoveryAction = "joined";
-  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+  if (!isUsableRecoveryTimeout(timeoutMs)) {
     return failedRecovery(
       "diagnosis",
-      action,
-      new Error("recovery timeout must be a positive finite number"),
+      undefined,
+      new Error(
+        `recovery timeout must be a positive finite number no greater than ${MAX_SETTIMEOUT_DELAY_MS}ms`,
+      ),
     );
   }
 
@@ -318,11 +392,14 @@ export async function repairDaemon(
     resolveRecoveryDependencies(dependencies);
   const daemonOptions = options.daemonOptions ?? {};
   const deadline = timer.now() + timeoutMs;
-  const diagnosis = await attemptRecoveryStep("diagnosis", deadline, timer, getHealthReport);
+  const diagnosis = await attemptRecoveryStep("diagnosis", deadline, timer, () =>
+    getHealthReport(),
+  );
   if (!diagnosis.ok) {
-    return failedRecovery("diagnosis", action, diagnosis.error);
+    return failedRecovery("diagnosis", undefined, diagnosis.error);
   }
   const before = diagnosis.value;
+  const action: DaemonRecoveryAction = "joined";
 
   const socketRecovery = await recoverUnusableSocket(
     before,
@@ -333,7 +410,14 @@ export async function repairDaemon(
     isProtocolHealthy,
   );
   if (!socketRecovery.ok) {
-    return failedRecovery("recovery", action, socketRecovery.error, before);
+    return failedRecovery(
+      "recovery",
+      action,
+      socketRecovery.error,
+      before,
+      undefined,
+      socketRecovery.lifecycleCompletion,
+    );
   }
 
   // A socket can accept a raw connection but belong to an incompatible or stale
@@ -354,6 +438,8 @@ export async function repairDaemon(
       protocolRecovery.action,
       protocolRecovery.error,
       before,
+      undefined,
+      protocolRecovery.lifecycleCompletion,
     );
   }
 

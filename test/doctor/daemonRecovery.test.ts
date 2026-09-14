@@ -1,10 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import {
   repairDaemon,
+  waitForDaemonRecoveryCompletion,
   type DaemonRecoveryDependencies,
   type DaemonRecoveryResult,
 } from "../../src/doctor/daemonRecovery";
 import type { DaemonHealthReport } from "../../src/daemon/debugTools";
+import { MAX_SETTIMEOUT_DELAY_MS } from "../../src/utils/SystemTimer";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 function healthReport(connectable: boolean): DaemonHealthReport {
@@ -136,15 +138,19 @@ describe("repairDaemon", () => {
     });
   });
 
-  test("waits for destructive recovery to settle after its deadline", async () => {
+  test("bounds the recovery response while retaining cancellation until lifecycle settlement", async () => {
     const timer = new FakeTimer();
     let resolveRecovery: ((result: "restarted") => void) | undefined;
     let settled = false;
+    let cancellationObserved = false;
     const repair = repairDaemon(
       { timeoutMs: 50 },
       dependencies([healthReport(false)], {
         timer,
-        recoverControlState: async () => {
+        recoverControlState: async (_options, _isProtocolHealthy, signal) => {
+          signal?.addEventListener("abort", () => {
+            cancellationObserved = true;
+          });
           const result = await new Promise<"restarted">((resolve) => {
             resolveRecovery = resolve;
           });
@@ -157,16 +163,45 @@ describe("repairDaemon", () => {
     await new Promise<void>((resolve) => setImmediate(resolve));
     expect(resolveRecovery).toBeDefined();
     timer.advanceTime(50);
-    await Promise.resolve();
-    expect(settled).toBe(false);
-    resolveRecovery!("restarted");
-
-    await expect(repair).resolves.toMatchObject<Partial<DaemonRecoveryResult>>({
+    const result = await repair;
+    expect(result).toMatchObject<Partial<DaemonRecoveryResult>>({
       status: "failed",
       phase: "recovery",
       nextAction: expect.stringContaining("deadline"),
     });
+    expect(cancellationObserved).toBe(true);
+    expect(settled).toBe(false);
+    resolveRecovery!("restarted");
+    await waitForDaemonRecoveryCompletion(result);
     expect(settled).toBe(true);
+  });
+
+  test("rejects a timeout beyond the setTimeout ceiling before diagnosis", async () => {
+    const result = await repairDaemon({ timeoutMs: MAX_SETTIMEOUT_DELAY_MS + 1 });
+
+    expect(result).toMatchObject<Partial<DaemonRecoveryResult>>({
+      status: "failed",
+      phase: "diagnosis",
+      nextAction: expect.stringContaining("positive finite"),
+    });
+    expect(result.action).toBeUndefined();
+  });
+
+  test("reports no action when diagnosis fails", async () => {
+    const result = await repairDaemon(
+      {},
+      dependencies([], {
+        getHealthReport: async () => {
+          throw new Error("diagnostic unavailable");
+        },
+      }),
+    );
+
+    expect(result).toMatchObject<Partial<DaemonRecoveryResult>>({
+      status: "failed",
+      phase: "diagnosis",
+    });
+    expect(result.action).toBeUndefined();
   });
 
   test("returns a recovery-phase failure instead of claiming repair when restart fails", async () => {
@@ -221,6 +256,7 @@ describe("repairDaemon", () => {
       status: "failed",
       phase: "verification",
       action: "restarted",
+      nextAction: expect.stringContaining("--daemon diagnose"),
     });
   });
 

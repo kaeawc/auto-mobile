@@ -15,6 +15,7 @@ import type { DaemonOptions } from "../daemon/types";
 import { resolveDaemonInstallSpecifier } from "../constants/release";
 import {
   repairDaemon,
+  waitForDaemonRecoveryCompletion,
   type DaemonRecoveryResult,
   type DoctorRepairOptions,
 } from "../doctor/daemonRecovery";
@@ -532,7 +533,11 @@ export async function runDoctorCommand(
     });
     writeCliToolOutput(recovery, "doctor");
     if (recovery.status === "failed") {
-      process.exit(1);
+      // A deadline can be reported before an already-signalled manager
+      // lifecycle reaches its safe terminal state. Do not let a hard exit
+      // interrupt that scoped recovery between SIGTERM and its final cleanup.
+      process.exitCode = 1;
+      await waitForDaemonRecoveryCompletion(recovery);
     }
     return;
   }

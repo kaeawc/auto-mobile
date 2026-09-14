@@ -4508,6 +4508,7 @@ async function runProvisionDeviceWithinDeadline<T>(
   requestSignal: AbortSignal | undefined,
   phase: string,
   operation: (signal: AbortSignal) => Promise<T>,
+  onPendingSettlement?: (settlement: Promise<unknown>) => void,
 ): Promise<T> {
   return await runOperationWithinDeadline(
     timer,
@@ -4515,6 +4516,7 @@ async function runProvisionDeviceWithinDeadline<T>(
     requestSignal,
     () => provisionDeviceTimeoutError(phase),
     operation,
+    onPendingSettlement,
   );
 }
 
@@ -6602,13 +6604,57 @@ export function registerDeviceTools() {
     };
   }
 
+  async function provisionMutationSettledWithinRollbackBudget(
+    deps: DeviceToolsDependencies,
+    settlement: Promise<unknown>,
+    rollbackDeadlineMs: number,
+  ): Promise<boolean> {
+    const remainingMs = Math.floor(rollbackDeadlineMs - deps.timer.now());
+    if (remainingMs <= 0) {
+      return false;
+    }
+    let timeoutHandle: NodeJS.Timeout | undefined;
+    try {
+      return await Promise.race([
+        settlement.then(
+          () => true,
+          () => true,
+        ),
+        new Promise<boolean>((resolve) => {
+          timeoutHandle = deps.timer.setTimeout(() => resolve(false), remainingMs);
+        }),
+      ]);
+    } finally {
+      if (timeoutHandle) {
+        deps.timer.clearTimeout(timeoutHandle);
+      }
+    }
+  }
+
+  function retainProvisionLifecycleUntilMutationSettles(
+    lifecycleLease: VirtualDeviceLifecycleLease,
+    settlement: Promise<unknown>,
+    stableId: string,
+  ): void {
+    void settlement
+      .finally(() => lifecycleLease.release())
+      .catch((error: unknown) => {
+        logger.warn(
+          `[DeviceTools] Deferred provision mutation for '${stableId}' rejected after rollback timed out: ${errorMessage(error)}`,
+          error,
+        );
+      });
+  }
+
   async function cleanupFailedProvisionDevice(
     args: ProvisionDeviceArgs,
     deps: DeviceToolsDependencies,
     createdDevice: DeviceInfo,
     provisionFailure: ProvisionDeviceError,
     lifecycleLease: VirtualDeviceLifecycleLease | undefined,
+    pendingMutationSettlement?: Promise<unknown>,
   ): Promise<ProvisionDeviceRollbackError> {
+    const rollbackDeadlineMs = deps.timer.now() + DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS;
     const stableId =
       createdDevice.platform === "android" ? createdDevice.name : createdDevice.deviceId;
     if (!stableId) {
@@ -6659,6 +6705,47 @@ export function registerDeviceTools() {
           },
         });
       }
+      if (
+        pendingMutationSettlement &&
+        !(await provisionMutationSettledWithinRollbackBudget(
+          deps,
+          pendingMutationSettlement,
+          rollbackDeadlineMs,
+        ))
+      ) {
+        lifecycleLeaseTransferred = true;
+        retainProvisionLifecycleUntilMutationSettles(
+          lifecycleLease,
+          pendingMutationSettlement,
+          stableId,
+        );
+        return new ProvisionDeviceRollbackError(provisionFailure, {
+          status: "failed",
+          operationId: cleanupArgs.operationId,
+          target: cleanupArgs.target,
+          failure: {
+            code: "mutation_settlement_timeout",
+            phase: "precondition",
+            message:
+              "Cancelled provisioning mutation did not settle within the rollback budget; " +
+              "cleanup was not attempted and lifecycle ownership remains until it settles.",
+          },
+        });
+      }
+      const remainingRollbackMs = Math.floor(rollbackDeadlineMs - deps.timer.now());
+      if (remainingRollbackMs <= 0) {
+        return new ProvisionDeviceRollbackError(provisionFailure, {
+          status: "failed",
+          operationId: cleanupArgs.operationId,
+          target: cleanupArgs.target,
+          failure: {
+            code: "rollback_budget_exhausted",
+            phase: "precondition",
+            message: "The rollback budget was exhausted before device cleanup could start.",
+          },
+        });
+      }
+      cleanupArgs.timeoutMs = remainingRollbackMs;
       lifecycleLease.transitionToTeardown();
       await lifecycleLease.bindCanonicalIdentity({
         platform: createdDevice.platform,
@@ -6763,6 +6850,7 @@ export function registerDeviceTools() {
     takeLifecycleLease: () => VirtualDeviceLifecycleLease | undefined,
     error: unknown,
     unownedColdBootSettlement: Promise<void> | undefined,
+    pendingMutationSettlement: Promise<unknown> | undefined,
   ): Promise<never> {
     if (
       error instanceof McpSessionRecoveryInProgressError ||
@@ -6792,6 +6880,7 @@ export function registerDeviceTools() {
       createdDevice,
       toProvisionDeviceError(args, error),
       takeLifecycleLease(),
+      pendingMutationSettlement,
     );
   }
 
@@ -6905,7 +6994,10 @@ export function registerDeviceTools() {
     let lifecycleLease: VirtualDeviceLifecycleLease | undefined;
     let provisioned: Awaited<ReturnType<ExactDeviceProvisioner["provision"]>> | undefined;
     let creationStarted = reconcileExistingConfiguration;
-    const bootState: { unownedColdBootSettlement?: Promise<void> } = {};
+    const settlementState: {
+      exactProvisioning?: Promise<unknown>;
+      unownedColdBootSettlement?: Promise<void>;
+    } = {};
     const notifyResourcesChangedBestEffort = () => {
       void deps.notifyResourcesChanged().catch((error: unknown) => {
         logger.warn(
@@ -6962,6 +7054,9 @@ export function registerDeviceTools() {
           creationStarted = true;
         },
         lifecycleLease,
+        (settlement) => {
+          settlementState.exactProvisioning = settlement;
+        },
         signal,
       );
       const createdByOperation = reconcileExistingConfiguration || provisioned.created;
@@ -6984,7 +7079,7 @@ export function registerDeviceTools() {
         totalDeadlineMs,
         lifecycleLease,
         signal,
-        bootState,
+        settlementState,
       );
       if (provisioned.created || booted.source === "cold-boot") {
         // Session and pool ownership are already committed by
@@ -7009,14 +7104,15 @@ export function registerDeviceTools() {
           return rollbackLease;
         },
         error,
-        bootState.unownedColdBootSettlement,
+        settlementState.unownedColdBootSettlement,
+        settlementState.exactProvisioning,
       );
     } finally {
-      if (bootState.unownedColdBootSettlement) {
+      if (settlementState.unownedColdBootSettlement) {
         // Release exactly once whatever the settlement does -- `finally`
         // guarantees the lease is not stranded if it completes by rejecting
         // (mirrors `prepareDevice`'s deferred release).
-        void bootState.unownedColdBootSettlement
+        void settlementState.unownedColdBootSettlement
           .finally(() => lifecycleLease?.release())
           .catch((error: unknown) => {
             logger.warn(
@@ -7039,6 +7135,7 @@ export function registerDeviceTools() {
     reconcileExistingConfiguration: boolean,
     markDeviceCreationStarted: () => Promise<void>,
     lifecycleLease: VirtualDeviceLifecycleLease,
+    collectPendingSettlement: (settlement: Promise<unknown>) => void,
     signal: AbortSignal | undefined,
   ): Promise<Awaited<ReturnType<ExactDeviceProvisioner["provision"]>>> {
     perf.startOperation("provisionExactDevice");
@@ -7059,6 +7156,7 @@ export function registerDeviceTools() {
             deadlineMs: totalDeadlineMs,
             signal: deadlineSignal,
           }),
+        collectPendingSettlement,
       );
     } finally {
       perf.endOperation("provisionExactDevice");

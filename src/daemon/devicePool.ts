@@ -2428,6 +2428,9 @@ export class DevicePool {
       ) {
         return false;
       }
+      if (this.isStaleIdentityObservation(device, bootedDevice)) {
+        return false;
+      }
       return await this.replacePooledDeviceForRuntimeIdentity(device, bootedDevice);
     };
     return assignmentLockHeld

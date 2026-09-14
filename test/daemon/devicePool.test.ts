@@ -7285,6 +7285,66 @@ describe("DevicePool", () => {
       });
     });
 
+    test("abandons a liveness replacement made stale while waiting for the assignment mutex", async () => {
+      const device = poolDevice("emulator-5554", "Pixel_8_API_35");
+      const replacement = stamped(poolDevice("emulator-5554", "Pixel_7_API_34"), 2);
+      await initializeLiveDevices([device]);
+      await devicePool.reconcileDiscoveryObservation([stamped(device, 1)], "test:initial");
+      const pooled = devicePool.getDevice("emulator-5554");
+      if (!pooled) {
+        throw new Error("expected pooled device");
+      }
+
+      type DevicePoolInternals = {
+        assignmentMutex: {
+          runExclusive<T>(callback: () => Promise<T>): Promise<T>;
+        };
+        reconcileDiscoveredPooledDevice(
+          pooledDevice: PooledDevice,
+          bootedDevice: BootedDevice,
+          assignmentLockHeld: boolean,
+        ): Promise<boolean>;
+        replacePooledDeviceForRuntimeIdentity(
+          pooledDevice: PooledDevice,
+          bootedDevice: BootedDevice,
+        ): Promise<boolean>;
+      };
+      const internals = devicePool as unknown as DevicePoolInternals;
+      const mutexEntered = Promise.withResolvers<void>();
+      const releaseMutex = Promise.withResolvers<void>();
+      const mutexOwner = internals.assignmentMutex.runExclusive(async () => {
+        mutexEntered.resolve();
+        await releaseMutex.promise;
+      });
+      await mutexEntered.promise;
+
+      let replacements = 0;
+      const replacePooledDeviceForRuntimeIdentity =
+        internals.replacePooledDeviceForRuntimeIdentity.bind(devicePool);
+      internals.replacePooledDeviceForRuntimeIdentity = async (pooledDevice, bootedDevice) => {
+        replacements++;
+        return await replacePooledDeviceForRuntimeIdentity(pooledDevice, bootedDevice);
+      };
+      try {
+        // The early liveness check accepts stamp 2, then blocks on the mutex.
+        const liveness = internals.reconcileDiscoveredPooledDevice(pooled, replacement, false);
+
+        // Discovery is intentionally outside the assignment mutex. Its newer
+        // confirmation must invalidate the queued liveness replacement.
+        await devicePool.reconcileDiscoveryObservation([stamped(device, 3)], "test:newer");
+        releaseMutex.resolve();
+        await mutexOwner;
+        await liveness;
+
+        expect(devicePool.getDevice("emulator-5554")).toBe(pooled);
+        expect(replacements).toBe(0);
+      } finally {
+        internals.replacePooledDeviceForRuntimeIdentity = replacePooledDeviceForRuntimeIdentity;
+        releaseMutex.resolve();
+        await mutexOwner;
+      }
+    });
+
     test("replaces a pooled identity for a newer liveness disagreement", async () => {
       const device = poolDevice("emulator-5554", "Pixel_8_API_35");
       await initializeLiveDevices([device]);

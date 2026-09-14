@@ -27,6 +27,8 @@
         "scripts/oxlint-baseline.txt",
         ".oxlintrc.json",
         "oxlint-plugins/**",
+        ".oxfmtrc.json",
+        ".editorconfig",
         "tsconfig.json"
       ],
       "outputs": [],

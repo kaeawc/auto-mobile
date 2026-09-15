@@ -2,6 +2,7 @@ import type { ChildProcess } from "child_process";
 import { logger } from "../utils/logger";
 import {
   SessionManager,
+  SessionRecoveryIdentityLossError,
   type Session,
   type SessionExecutionMetadata,
   type SessionRecoveryTarget,
@@ -4958,6 +4959,13 @@ export class DevicePool {
           return assignResult.deviceId!;
         }
 
+        if (recoveryTarget) {
+          const recoveryFailure = this.recoveryFailure(sessionId, recoveryTarget);
+          if (recoveryFailure) {
+            throw recoveryFailure;
+          }
+        }
+
         // No device available - check if we should wait or fail
         if (assignResult.livenessUnknown) {
           throw new DevicePoolError(
@@ -8361,6 +8369,41 @@ export class DevicePool {
     // A recovery target must prove one exact runtime. A duplicate stable identity
     // is ambiguous and must not collapse back to normal pool selection.
     return matches.length === 1 ? matches : [];
+  }
+
+  /**
+   * Recovery is an identity operation, not ordinary pool allocation. Once an
+   * exact target is absent, busy, or replaced at its old transport address,
+   * fail immediately rather than allowing retry timing or discovery order to
+   * choose another signed device.
+   */
+  private recoveryFailure(
+    sessionId: string,
+    target: SessionRecoveryTarget,
+  ): SessionRecoveryIdentityLossError | undefined {
+    const platformDevices = this.getDevicesByPlatform(target.platform);
+    const exactMatches = platformDevices.filter(
+      (device) =>
+        this.stableDeviceIdFor(device) === target.stableDeviceId &&
+        (target.androidEmulator === undefined ||
+          isAndroidEmulatorSerial(device.id) === target.androidEmulator),
+    );
+    if (exactMatches.length !== 1) {
+      const transportReused = platformDevices.some(
+        (device) =>
+          device.id === target.deviceId && this.stableDeviceIdFor(device) !== target.stableDeviceId,
+      );
+      return new SessionRecoveryIdentityLossError(
+        sessionId,
+        target,
+        transportReused || exactMatches.length > 1 ? "identity-continuity-lost" : "target-absent",
+      );
+    }
+    const exact = exactMatches[0];
+    if (exact.status === "busy" || this.isReservedForAssignment(exact)) {
+      return new SessionRecoveryIdentityLossError(sessionId, target, "target-busy");
+    }
+    return undefined;
   }
 
   private stableDeviceIdFor(device: PooledDevice): string | undefined {

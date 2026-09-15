@@ -1782,6 +1782,26 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     });
   }
 
+  /**
+   * A forced restart must publish a new endpoint. stop() releases its
+   * allocation, so reserve the retired value while choosing the replacement
+   * instead of allowing first-free allocation to reclaim it.
+   */
+  private allocateReplacementServicePort(retiredServicePort: number): void {
+    PortManager.release(this.device.deviceId);
+    const replacementPort = this.allocateServicePort([retiredServicePort]);
+    if (replacementPort === retiredServicePort) {
+      throw new Error(
+        `iOS CtrlProxy replacement allocation reused retired service port ${retiredServicePort}`,
+      );
+    }
+    this.servicePort = replacementPort;
+    this.clearCaches();
+    logger.info(
+      `[IOSCtrlProxy] Allocated replacement service port ${replacementPort} after retiring ${retiredServicePort}`,
+    );
+  }
+
   private ensureLocalServicePortAllocatedAndAvailable(): void {
     const currentAllocation = PortManager.getPort(this.device.deviceId);
     const currentPortIsAvailable = PortManager.isPortAvailable(this.servicePort);
@@ -2150,6 +2170,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     // behind this barrier until teardown settles, even if the initiating
     // readiness phase has already timed out.
     this.forceRestartGeneration += 1;
+    const retiredServicePort = this.servicePort;
     const restart = (async () => {
       try {
         await this.stop();
@@ -2163,12 +2184,18 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
             "iOS CtrlProxy is still running after forced teardown; refusing to reuse a potentially unresponsive runner",
           );
         }
+        this.allocateReplacementServicePort(retiredServicePort);
         await this.startAfterForceRestart({
           ...options,
           minimumHealthPollDurationMs: this.maximumForceRestartHealthPollDurationMs(
             options.minimumHealthPollDurationMs,
           ),
         });
+        if (this.servicePort === retiredServicePort) {
+          throw new Error(
+            `iOS CtrlProxy force restart reused retired service port ${retiredServicePort}`,
+          );
+        }
         this.runnerGeneration += 1;
       } catch (error) {
         if (options.signal?.aborted && !(error instanceof ForceRestartCancelledError)) {

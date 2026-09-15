@@ -40,6 +40,7 @@ import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import type { DaemonClientLike } from "../../src/daemon/client";
 import { ActionableError } from "../../src/models";
 import {
+  DAEMON_APPLY_ACCEPTANCE_DOCTOR_FAULT_METHOD,
   DAEMON_CORRUPT_CONTROL_METADATA_METHOD,
   DAEMON_RESTART_ADMITTED_METHOD,
 } from "../../src/daemon/daemonRestartAdmission";
@@ -568,6 +569,97 @@ describe("DaemonManager control metadata repair", () => {
       }
     }
   });
+
+  test.each([
+    {
+      fault: "missing-daemon" as const,
+      controlState: "daemon-missing" as const,
+      expectedMetadataPresent: false,
+    },
+    {
+      fault: "dead-daemon" as const,
+      controlState: "daemon-dead" as const,
+      expectedMetadataPresent: true,
+    },
+  ])(
+    "$fault confirms $controlState and leaves the expected pre-recovery control state",
+    async ({ fault, controlState, expectedMetadataPresent }) => {
+      const originalSecret = process.env.AUTOMOBILE_DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET;
+      process.env.AUTOMOBILE_DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET =
+        "live-acceptance-startup-secret-123456";
+      const directory = mkdtempSync(join(tmpdir(), `daemon-manager-${fault}-`));
+      const pidFilePath = join(directory, "daemon.pid");
+      const socketPath = join(directory, "daemon.sock");
+      const pid = 1001;
+      const livePids = new Set([pid]);
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      writeFileSync(
+        pidFilePath,
+        JSON.stringify({ pid, socketPath, startedAt: 100, version: "test" }),
+      );
+      writeFileSync(socketPath, "socket");
+      const signaler = new FakeDaemonProcessSignaler((signaledPid, signal) => {
+        if (signaledPid === pid && signal === "SIGKILL") {
+          livePids.delete(pid);
+        }
+      });
+      const client = new FakeDaemonClient({});
+      const rpcSpy = spyOn(client, "callDaemonMethod").mockResolvedValue({
+        accepted: true,
+        controlState,
+      });
+      const manager = new DaemonManager(
+        () => client,
+        undefined,
+        timer,
+        join(directory, "daemon.lock"),
+        pidFilePath,
+        socketPath,
+        {
+          findDaemonProcesses: () => [],
+          isProcessRunning: (candidatePid) => livePids.has(candidatePid),
+        },
+        undefined,
+        undefined,
+        undefined,
+        signaler,
+      );
+      const statusSpy = spyOn(manager, "status").mockResolvedValue({
+        running: true,
+        pid,
+        startedAt: 100,
+        processGenerationToken: "generation-1",
+        version: "0.0.73",
+        buildId: "acceptance-build",
+        entryScript: "/acceptance/dist/src/index.js",
+        socketPath,
+      });
+
+      try {
+        await expect(
+          manager.applyAcceptanceDoctorFault(fault, "maintenance-token", 10_000),
+        ).resolves.toBeUndefined();
+
+        expect(rpcSpy).toHaveBeenCalledWith(
+          DAEMON_APPLY_ACCEPTANCE_DOCTOR_FAULT_METHOD,
+          expect.objectContaining({ fault, maintenanceToken: "maintenance-token" }),
+        );
+        expect(signaler.signals).toEqual([{ pid, signal: "SIGKILL" }]);
+        expect(existsSync(pidFilePath)).toBe(expectedMetadataPresent);
+        expect(existsSync(socketPath)).toBe(expectedMetadataPresent);
+      } finally {
+        rpcSpy.mockRestore();
+        statusSpy.mockRestore();
+        rmSync(directory, { recursive: true, force: true });
+        if (originalSecret === undefined) {
+          delete process.env.AUTOMOBILE_DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET;
+        } else {
+          process.env.AUTOMOBILE_DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET = originalSecret;
+        }
+      }
+    },
+  );
 
   test("passes the shared deadline and abort signal through connect and both control RPCs", async () => {
     const timer = new FakeTimer();

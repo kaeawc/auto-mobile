@@ -2,6 +2,7 @@ import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import { describe, expect, test, beforeEach, afterEach } from "bun:test";
 import {
   SessionManager,
+  SessionRecoveryIdentityLossError,
   type BiometricEnrollmentRestorer,
   type KeepScreenAwakeRestorer,
   type NetworkConditionRestorer,
@@ -492,7 +493,9 @@ describe("SessionManager", () => {
         async markReleased() {},
       };
       const restarted = new SessionManager(fakeTimer, persistence);
-      let recoveryTarget: { platform: string; stableDeviceId: string } | undefined;
+      let recoveryTarget:
+        | { platform: string; stableDeviceId: string; deviceId: string }
+        | undefined;
       const devicePool: SessionDeviceAssigner = {
         async assignDeviceToSession(sessionId, _platform, target): Promise<string> {
           recoveryTarget = target;
@@ -514,12 +517,97 @@ describe("SessionManager", () => {
         expect(recoveryTarget).toEqual({
           platform: "android",
           stableDeviceId: "Pixel_8_API_35",
+          deviceId: "emulator-5560",
           androidEmulator: true,
         });
       } finally {
         restarted.stopCleanupTimer();
       }
     });
+
+    test.each([
+      ["android", "target-absent", "Original_AVD", "emulator-5554"],
+      ["android", "target-busy", "Original_AVD", "emulator-5554"],
+      ["ios", "target-absent", "original-simulator-uuid", "original-simulator-uuid"],
+      ["ios", "target-busy", "original-simulator-uuid", "original-simulator-uuid"],
+    ] as const)(
+      "fences a persisted %s session after %s without assigning a sibling",
+      async (platform, reason, stableDeviceId, deviceId) => {
+        const persisted: DeviceSession = {
+          session_uuid: `${platform}-${reason}`,
+          device_id: deviceId,
+          stable_device_id: stableDeviceId,
+          platform,
+          status: "expired",
+          source: "session-manager",
+          autolock_enabled: 0,
+          mcp_session_id: null,
+          daemon_session_id: "old-daemon",
+          created_at_ms: 1,
+          last_used_at_ms: 20,
+          expires_at_ms: 30,
+          released_at_ms: 25,
+          release_reason: "daemon-restart",
+          session_timeout_ms: 10,
+          heartbeat_timeout_ms: 5,
+          has_received_heartbeat: 1,
+          created_at: "2026-09-15T00:00:00.000Z",
+          updated_at: "2026-09-15T00:00:00.000Z",
+        };
+        const releases: string[] = [];
+        const persistence: DeviceSessionPersistence = {
+          async getSession() {
+            return persisted;
+          },
+          async upsertActiveSession() {
+            throw new Error("a recovery conflict must not assign a sibling");
+          },
+          async recordActivity() {},
+          async markReleased(_sessionUuid, _status, _releasedAtMs, releaseReason) {
+            releases.push(releaseReason);
+            persisted.release_reason = releaseReason;
+          },
+        };
+        const restarted = new SessionManager(fakeTimer, persistence);
+        let assignments = 0;
+        const devicePool: SessionDeviceAssigner = {
+          async assignDeviceToSession(sessionUuid, _requestedPlatform, target): Promise<string> {
+            assignments++;
+            if (!target) {
+              throw new Error("persisted recovery target was not supplied");
+            }
+            throw new SessionRecoveryIdentityLossError(sessionUuid, target, reason);
+          },
+        };
+
+        try {
+          await expect(
+            restarted.getOrCreateSession(
+              persisted.session_uuid,
+              devicePool,
+              platform,
+              undefined,
+              true,
+            ),
+          ).rejects.toThrow(`Cannot safely recover session ${persisted.session_uuid}`);
+          expect(assignments).toBe(1);
+          expect(releases).toEqual([`identity-recovery-${reason}`]);
+
+          await expect(
+            restarted.getOrCreateSession(
+              persisted.session_uuid,
+              devicePool,
+              platform,
+              undefined,
+              true,
+            ),
+          ).rejects.toThrow(`terminal after identity-recovery-${reason}`);
+          expect(assignments).toBe(1);
+        } finally {
+          restarted.stopCleanupTimer();
+        }
+      },
+    );
 
     // Regression: a terminal persisted row keeps yielding TerminalSessionError,
     // never a pooled assignment, under requireIssuedSession.
@@ -3665,7 +3753,7 @@ describe("SessionManager", () => {
       async recordActivity() {},
       async markReleased() {},
     });
-    let recoveryTarget: { platform: string; stableDeviceId: string } | undefined;
+    let recoveryTarget: { platform: string; stableDeviceId: string; deviceId: string } | undefined;
     const devicePool: SessionDeviceAssigner = {
       async assignDeviceToSession(sessionId, _platform, target): Promise<string> {
         recoveryTarget = target;
@@ -3691,6 +3779,7 @@ describe("SessionManager", () => {
       expect(recoveryTarget).toEqual({
         platform: "ios",
         stableDeviceId: "simulator-uuid",
+        deviceId: "simulator-uuid",
       });
     } finally {
       restarted.stopCleanupTimer();
@@ -3728,7 +3817,12 @@ describe("SessionManager", () => {
       async markReleased() {},
     });
     let recoveryTarget:
-      | { platform: string; stableDeviceId: string; androidEmulator?: boolean }
+      | {
+          platform: string;
+          stableDeviceId: string;
+          deviceId: string;
+          androidEmulator?: boolean;
+        }
       | undefined;
     const devicePool: SessionDeviceAssigner = {
       async assignDeviceToSession(sessionId, _platform, target): Promise<string> {
@@ -3761,6 +3855,7 @@ describe("SessionManager", () => {
       expect(recoveryTarget).toEqual({
         platform: "android",
         stableDeviceId: "Pixel_8_API_35",
+        deviceId: "emulator-5554",
         androidEmulator: true,
       });
     } finally {

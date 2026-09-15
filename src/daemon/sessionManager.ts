@@ -291,8 +291,44 @@ export interface SessionDeviceAssigner {
 export interface SessionRecoveryTarget {
   platform: Platform;
   stableDeviceId: string;
+  /** Transport identity recorded before the daemon restart. */
+  deviceId: string;
   /** Distinguishes an Android AVD name from a physical-device serial. */
   androidEmulator?: boolean;
+}
+
+export type SessionRecoveryFailureReason =
+  | "target-absent"
+  | "target-busy"
+  | "identity-continuity-lost";
+
+/**
+ * The persisted target cannot be recovered without assigning an unrelated
+ * device. SessionManager fences the UUID when this reaches it.
+ */
+export class SessionRecoveryIdentityLossError extends ActionableError {
+  readonly terminalReleaseReason: string;
+
+  constructor(
+    readonly sessionUuid: string,
+    readonly target: SessionRecoveryTarget,
+    readonly reason: SessionRecoveryFailureReason,
+  ) {
+    const detail =
+      reason === "target-busy"
+        ? "is already in use"
+        : reason === "identity-continuity-lost"
+          ? "lost identity continuity"
+          : "is unavailable";
+    super(
+      `Cannot safely recover session ${sessionUuid}: ${target.platform} device ` +
+        `'${target.stableDeviceId}' ${detail} (recovery reason: ${reason}). ` +
+        "The persisted session is terminal; " +
+        "acquire a new device with getAndroid or getApple.",
+    );
+    this.name = "SessionRecoveryIdentityLossError";
+    this.terminalReleaseReason = `identity-recovery-${reason}`;
+  }
 }
 
 export interface RebindSessionOptions {
@@ -367,6 +403,7 @@ function isTerminalReleaseReason(releaseReason: string): boolean {
     releaseReason === "cli-idle-timeout" ||
     releaseReason === "device-killed" ||
     releaseReason === "session-creation-cancelled" ||
+    releaseReason.startsWith("identity-recovery-") ||
     releaseReason.startsWith("device-disconnected:")
   );
 }
@@ -1106,8 +1143,13 @@ export class SessionManager {
       );
     }
 
-    // DevicePool will call createSession() with assigned device
-    await devicePool.assignDeviceToSession(sessionId, platform, recoveryTarget);
+    await this.assignUnseenSessionToDevicePool(
+      sessionId,
+      devicePool,
+      platform,
+      recoveryTarget,
+      persisted,
+    );
 
     // Session now exists, return it
     const session = this.getSession(sessionId);
@@ -1119,6 +1161,48 @@ export class SessionManager {
       `[SessionManager] Successfully created session ${sessionId} with device ${session.assignedDevice}`,
     );
     return session;
+  }
+
+  /**
+   * A recovery conflict is terminal for this UUID. Keep the fencing work out
+   * of createUnseenSession so ordinary allocation stays easy to audit.
+   */
+  private async assignUnseenSessionToDevicePool(
+    sessionId: string,
+    devicePool: SessionDeviceAssigner,
+    platform: Platform | undefined,
+    recoveryTarget: SessionRecoveryTarget | undefined,
+    persisted: DeviceSession | undefined,
+  ): Promise<void> {
+    try {
+      await devicePool.assignDeviceToSession(sessionId, platform, recoveryTarget);
+    } catch (error) {
+      if (error instanceof SessionRecoveryIdentityLossError && persisted) {
+        await this.terminalizePersistedRecoveryFailure(sessionId, persisted, error);
+      }
+      throw error;
+    }
+  }
+
+  private async terminalizePersistedRecoveryFailure(
+    sessionId: string,
+    persisted: DeviceSession,
+    error: SessionRecoveryIdentityLossError,
+  ): Promise<void> {
+    const releasedAtMs = this.timer.now();
+    await this.persistTerminalReleaseIfNeeded({
+      sessionId,
+      deviceId: persisted.device_id,
+      releaseReason: error.terminalReleaseReason,
+      releasedAtMs,
+      terminal: true,
+      heartbeat: {
+        lastHeartbeatMs: persisted.last_used_at_ms,
+        hasReceivedHeartbeat: persisted.has_received_heartbeat === 1,
+        timeoutMs: persisted.heartbeat_timeout_ms,
+        ageMs: Math.max(0, releasedAtMs - persisted.last_used_at_ms),
+      },
+    });
   }
 
   async rebindSession(
@@ -3417,6 +3501,7 @@ export class SessionManager {
     return {
       platform: persisted.platform,
       stableDeviceId,
+      deviceId: persisted.device_id,
       ...(persisted.platform === "android"
         ? { androidEmulator: isAndroidEmulatorSerial(persisted.device_id) }
         : {}),

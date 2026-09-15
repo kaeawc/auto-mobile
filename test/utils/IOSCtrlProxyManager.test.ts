@@ -733,6 +733,76 @@ describe("IOSCtrlProxyManager", function () {
   });
 
   describe("forceRestart", function () {
+    test("allocates a distinct service port for a successful targeted restart", async function () {
+      const manager = IOSCtrlProxyManager.getInstance(testDevice);
+      const retiredPort = manager.getServicePort();
+      spyOn(manager, "stop").mockResolvedValue();
+      spyOn(
+        manager as unknown as {
+          isRunnerStillHealthyAfterForcedTeardown(signal?: AbortSignal): Promise<boolean>;
+        },
+        "isRunnerStillHealthyAfterForcedTeardown",
+      ).mockResolvedValue(false);
+      spyOn(
+        manager as unknown as {
+          startAfterForceRestart(options: CtrlProxyStartOptions): Promise<void>;
+        },
+        "startAfterForceRestart",
+      ).mockResolvedValue();
+
+      await manager.forceRestart();
+
+      expect(manager.getServicePort()).not.toBe(retiredPort);
+      expect(PortManager.getPort(testDevice.deviceId)).toBe(manager.getServicePort());
+      expect(manager.getRunnerGeneration()).toBe(1);
+    });
+
+    test("releases the retired allocation when replacement allocation fails", async function () {
+      const manager = IOSCtrlProxyManager.getInstance(testDevice);
+      const retiredPort = manager.getServicePort();
+      spyOn(manager, "stop").mockResolvedValue();
+      spyOn(
+        manager as unknown as {
+          isRunnerStillHealthyAfterForcedTeardown(signal?: AbortSignal): Promise<boolean>;
+        },
+        "isRunnerStillHealthyAfterForcedTeardown",
+      ).mockResolvedValue(false);
+      spyOn(
+        manager as unknown as { allocateServicePort(additionalReservedPorts?: number[]): number },
+        "allocateServicePort",
+      ).mockImplementation(() => {
+        throw new Error("no replacement port available");
+      });
+
+      await expect(manager.forceRestart()).rejects.toThrow("no replacement port available");
+
+      expect(manager.getServicePort()).toBe(retiredPort);
+      expect(PortManager.getPort(testDevice.deviceId)).toBeUndefined();
+    });
+
+    test("keeps a failed replacement start assigned to its manager for a retry", async function () {
+      const manager = IOSCtrlProxyManager.getInstance(testDevice);
+      const retiredPort = manager.getServicePort();
+      spyOn(manager, "stop").mockResolvedValue();
+      spyOn(
+        manager as unknown as {
+          isRunnerStillHealthyAfterForcedTeardown(signal?: AbortSignal): Promise<boolean>;
+        },
+        "isRunnerStillHealthyAfterForcedTeardown",
+      ).mockResolvedValue(false);
+      spyOn(
+        manager as unknown as {
+          startAfterForceRestart(options: CtrlProxyStartOptions): Promise<void>;
+        },
+        "startAfterForceRestart",
+      ).mockRejectedValue(new Error("replacement start failed"));
+
+      await expect(manager.forceRestart()).rejects.toThrow("replacement start failed");
+
+      expect(manager.getServicePort()).not.toBe(retiredPort);
+      expect(PortManager.getPort(testDevice.deviceId)).toBe(manager.getServicePort());
+    });
+
     test("forwards caller startup options after stopping", async function () {
       const manager = IOSCtrlProxyManager.getInstance(testDevice);
       const controller = new AbortController();

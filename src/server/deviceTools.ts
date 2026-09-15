@@ -652,6 +652,12 @@ export const teardownDeviceSchema = z
       .max(MAX_DEVICE_READY_TIMEOUT_MS)
       .optional()
       .describe("Total bounded teardown timeout in ms"),
+    cancellationPolicy: z
+      .literal("cancel-on-request-abort")
+      .optional()
+      .describe(
+        "Cancel the accepted teardown if this MCP request is aborted. Use only for deadline-critical, caller-owned cleanup that must not continue in the background after its caller stops waiting.",
+      ),
     force: z.boolean().default(false).describe(FORCE_SKIP_AVD_VERIFICATION_DESCRIPTION),
   })
   .strict();
@@ -819,6 +825,11 @@ export interface TeardownDeviceArgs {
   mode: "destroy";
   verifyAbsence: true;
   timeoutMs?: number;
+  /**
+   * Opt into cancellation of the accepted teardown on request abort. The
+   * default preserves ordinary idempotent teardown continuation semantics.
+   */
+  cancellationPolicy?: "cancel-on-request-abort";
   /**
    * Drop the AVD-name comparisons on the way to the kill -- the kill-time
    * emulator-console probe here, and the platform kill's own re-discovery check
@@ -3564,6 +3575,7 @@ export function teardownOperationFingerprint(args: TeardownDeviceArgs): string {
     mode: args.mode,
     verifyAbsence: args.verifyAbsence,
     timeoutMs: args.timeoutMs,
+    cancellationPolicy: args.cancellationPolicy,
     // A forced teardown is a materially different request from a verified one,
     // so reusing an operationId across the two is a fingerprint mismatch rather
     // than an idempotent replay of the other (#6864).
@@ -3605,6 +3617,7 @@ interface TeardownContext {
   deadlineDevice: BootedDevice;
   deadlineMs: number;
   timeoutMs: number;
+  cancelOnRequestAbort: boolean;
   lifecycleLease?: VirtualDeviceLifecycleLease;
   /** Android runtime and pool state captured by the first teardown booted scan. */
   initialScan: TeardownInitialAndroidScan;
@@ -4216,13 +4229,20 @@ async function destroyTeardownTarget(
   } catch (error) {
     if (destroy) {
       retainStableLifecycleUntil(destroy);
-      void destroy.then(
-        () => onLateSuccess(),
-        () => {
-          // A rejected late destroy did not remove the platform device, so no eviction is safe.
-          logger.debug("[DeviceTools] Late platform deletion rejected; retaining teardown state");
-        },
-      );
+      if (!context.cancelOnRequestAbort) {
+        void destroy.then(
+          () => onLateSuccess(),
+          () => {
+            // A rejected late destroy did not remove the platform device, so no eviction is safe.
+            logger.debug("[DeviceTools] Late platform deletion rejected; retaining teardown state");
+          },
+        );
+      } else {
+        // This deadline-critical path keeps the identity reservation until the
+        // platform command has settled, but a late completion can neither turn
+        // the returned failure into success nor evict a later replacement.
+        void destroy.catch(() => undefined);
+      }
     }
     throw error;
   }
@@ -9012,6 +9032,7 @@ export function registerDeviceTools() {
           identity: args.target,
           deadlineMs,
           callerSignal,
+          cancellationPolicy: args.cancellationPolicy ? "cancel-on-caller-abort" : undefined,
           lifecycleLease,
         },
         {
@@ -9024,6 +9045,7 @@ export function registerDeviceTools() {
               deadlineDevice: teardownDeadlineDevice(args),
               deadlineMs,
               timeoutMs,
+              cancelOnRequestAbort: args.cancellationPolicy === "cancel-on-request-abort",
               lifecycleLease,
               mode: args.force === true ? "serial-only" : "named",
               initialScan: { serials: new Set(), pooledEntries: [] },

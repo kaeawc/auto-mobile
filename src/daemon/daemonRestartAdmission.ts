@@ -6,6 +6,8 @@ export const DAEMON_COMPLETE_MAINTENANCE_METHOD = "ide/completeMaintenance";
 export const DAEMON_RESTART_ADMITTED_METHOD = "ide/restartAdmitted";
 export const DAEMON_REPAIR_CONTROL_METADATA_METHOD = "ide/repairControlMetadata";
 export const DAEMON_CORRUPT_CONTROL_METADATA_METHOD = "ide/corruptControlMetadata";
+export const DAEMON_RESTART_ACCEPTANCE_SESSION_METHOD = "ide/restartAcceptanceSession";
+export const DAEMON_APPLY_ACCEPTANCE_DOCTOR_FAULT_METHOD = "ide/applyAcceptanceDoctorFault";
 const ACTIVE_PROVISIONING_RESTART_RETRY_MS = 1_000;
 
 export interface DaemonRestartPreparation {
@@ -59,6 +61,66 @@ export interface DaemonControlMetadataCorruption {
     | "generation_changed"
     | "maintenance_token_invalid"
     | "acceptance_capability_invalid"
+    | "active_sessions"
+    | "fault_unavailable";
+}
+
+/**
+ * Signed in the operator harness and MAC-bound to one daemon generation. The
+ * daemon additionally verifies the live session's immutable platform identity
+ * before permitting the acceptance-only crash/restart path.
+ */
+export interface AcceptanceSessionRestartScope {
+  sessionUuid: string;
+  platform: "android" | "ios";
+  stableDeviceId: string;
+  controls: {
+    androidSiblingAvdName: string;
+    androidDuplicateSerial: string;
+    iosSameNameSiblingUdid: string;
+  };
+  expiresAt: number;
+}
+
+export interface DaemonAcceptanceSessionRestart {
+  accepted: boolean;
+  reason?:
+    | "generation_changed"
+    | "acceptance_capability_invalid"
+    | "scope_invalid"
+    | "scope_expired"
+    | "session_not_found"
+    | "session_identity_mismatch"
+    | "unrelated_sessions"
+    | "active_operations"
+    | "restart_pending"
+    | "shutdown_unavailable";
+}
+
+/** Host-local faults exercised only by the operator-run live acceptance matrix. */
+export type AcceptanceDoctorFault =
+  | "missing-daemon"
+  | "dead-daemon"
+  | "unresponsive-daemon"
+  | "missing-control-metadata"
+  | "corrupt-control-metadata"
+  | "missing-socket"
+  | "stale-socket";
+
+export interface DaemonAcceptanceDoctorFault {
+  accepted: boolean;
+  /**
+   * Only daemon-liveness faults expose a control state. The distinction makes
+   * the acceptance doctor prove whether it must recover absent metadata or
+   * diagnose a dead process with stale control metadata.
+   */
+  controlState?: "daemon-missing" | "daemon-dead";
+  reason?:
+    | "generation_changed"
+    | "maintenance_token_invalid"
+    | "acceptance_capability_invalid"
+    | "fault_invalid"
+    | "scope_expired"
     | "active_sessions"
     | "fault_unavailable";
 }

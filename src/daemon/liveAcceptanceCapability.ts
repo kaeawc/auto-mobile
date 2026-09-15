@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { stableStringify } from "../utils/stableStringify";
 
 /**
  * A live-acceptance harness creates this secret before it starts a daemon. It
@@ -73,10 +74,44 @@ export function daemonLiveAcceptanceCapabilityMatches(
   identity: DaemonGenerationIdentity,
   capability: unknown,
 ): boolean {
+  return daemonLiveAcceptanceScopedCapabilityMatches(
+    startupSecret,
+    identity,
+    undefined,
+    capability,
+  );
+}
+
+/**
+ * A live-acceptance operation can additionally bind authority to an immutable
+ * request scope (for example one persisted session and its signed control set).
+ * The daemon validates the scope before acting; a capability for one scope
+ * cannot be replayed for another session, target, or generation.
+ */
+export function createDaemonLiveAcceptanceScopedCapability(
+  startupSecret: string,
+  identity: DaemonGenerationIdentity,
+  scope: unknown,
+): string {
+  return createHmac("sha256", startupSecret)
+    .update(`${generationCapabilityPayload(identity)}\0${stableStringify(scope)}`)
+    .digest("base64url");
+}
+
+export function daemonLiveAcceptanceScopedCapabilityMatches(
+  startupSecret: string | undefined,
+  identity: DaemonGenerationIdentity,
+  scope: unknown,
+  capability: unknown,
+): boolean {
   if (!startupSecret || typeof capability !== "string") {
     return false;
   }
-  const expected = Buffer.from(createDaemonLiveAcceptanceCapability(startupSecret, identity));
+  const expected = Buffer.from(
+    scope === undefined
+      ? createDaemonLiveAcceptanceCapability(startupSecret, identity)
+      : createDaemonLiveAcceptanceScopedCapability(startupSecret, identity, scope),
+  );
   const supplied = Buffer.from(capability);
   return supplied.length === expected.length && timingSafeEqual(supplied, expected);
 }

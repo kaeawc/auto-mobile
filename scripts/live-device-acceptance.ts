@@ -29,6 +29,8 @@ import {
 import {
   DAEMON_COMPLETE_MAINTENANCE_METHOD,
   DAEMON_PREPARE_MAINTENANCE_METHOD,
+  type AcceptanceDoctorFault,
+  type AcceptanceSessionRestartScope,
 } from "../src/daemon/daemonRestartAdmission";
 import {
   daemonLiveAcceptanceStartupSecret,
@@ -118,6 +120,8 @@ interface AcquiredSession {
   device: ExactDevice;
 }
 
+type CliAcquiredSession = Omit<AcquiredSession, "phase" | "client">;
+
 interface MintedSession {
   phase: string;
   sessionUuid: string;
@@ -128,6 +132,10 @@ interface ToolResponse {
   isError?: boolean;
   structuredContent?: JsonObject;
   content?: Array<{ type?: string; text?: string }>;
+}
+
+interface CliResult {
+  stdout: string;
 }
 
 export interface McpSessionClient {
@@ -144,7 +152,7 @@ export interface MatrixDependencies {
   /** Explicit test seam; production calls must satisfy the live safeguards below. */
   testOnly?: boolean;
   timer?: Timer;
-  spawnCli?: (command: string[], timeoutMs: number, signal: AbortSignal) => Promise<void>;
+  spawnCli?: (command: string[], timeoutMs: number, signal: AbortSignal) => Promise<CliResult>;
   createMcpClient?: (
     owner: string,
     signal: AbortSignal,
@@ -153,6 +161,11 @@ export interface MatrixDependencies {
   createDaemonClient?: (signal: AbortSignal) => Promise<DaemonSessionClient>;
   restartDaemon?: (
     maintenanceToken: string,
+    timeoutMs: number,
+    signal: AbortSignal,
+  ) => Promise<void>;
+  restartAcceptanceSession?: (
+    scope: AcceptanceSessionRestartScope,
     timeoutMs: number,
     signal: AbortSignal,
   ) => Promise<void>;
@@ -173,6 +186,7 @@ interface MaintenanceAdmission {
 
 interface Evidence {
   schemaVersion: 8;
+  authentication: EvidenceAuthentication;
   generatedAt: string;
   scenario: Scenario;
   platform: Platform;
@@ -187,6 +201,27 @@ interface Evidence {
   cleanup: JsonObject;
   outcome: JsonObject;
   steps: Step[];
+}
+
+interface EvidenceAuthentication {
+  schemaVersion: 1;
+  algorithm: "hmac-sha256";
+  binding: JsonObject;
+  mac: string;
+}
+
+interface EvidenceManifestIdentity {
+  schemaVersion: 1;
+  runId: string;
+  mac: string;
+}
+
+export interface EvidenceVerificationArgs {
+  evidencePath: string;
+  ownershipManifestPath: string;
+  operatorKeyPath: string;
+  operatorKey: Buffer;
+  build: BuildIdentity;
 }
 
 interface OwnershipManifestTarget {
@@ -267,6 +302,56 @@ function manifestPayload(
 
 function manifestMac(payload: OwnershipManifestPayload, key: Buffer): string {
   return createHmac("sha256", key).update(stableStringify(payload)).digest("hex");
+}
+
+function manifestIdentity(manifest: OwnershipManifest): EvidenceManifestIdentity {
+  return {
+    schemaVersion: manifest.schemaVersion,
+    runId: manifest.runId,
+    mac: manifest.mac,
+  };
+}
+
+function evidenceAuthenticationBinding(
+  build: BuildIdentity,
+  manifest: OwnershipManifest,
+): JsonObject {
+  return {
+    build: {
+      entryScript: build.entryScript,
+      buildId: build.buildId,
+    },
+    ownershipManifest: manifestIdentity(manifest),
+  };
+}
+
+function evidenceMac(
+  evidence: Evidence,
+  build: BuildIdentity,
+  manifest: OwnershipManifest,
+  key: Buffer,
+): string {
+  const { schemaVersion, algorithm, binding } = evidence.authentication;
+  const authentication = { schemaVersion, algorithm, binding };
+  return createHmac("sha256", key)
+    .update(
+      stableStringify({
+        authenticationBinding: evidenceAuthenticationBinding(build, manifest),
+        evidence: {
+          ...evidence,
+          authentication,
+        },
+      }),
+    )
+    .digest("hex");
+}
+
+function assertMatchingMac(receivedMac: string, expectedMac: string, description: string): void {
+  const received = Buffer.from(receivedMac, "hex");
+  const expected = Buffer.from(expectedMac, "hex");
+  if (received.length !== expected.length || !timingSafeEqual(received, expected)) {
+    throw new Error(`${description} authentication failed`);
+  }
 }
 
 function targetManifestEntry(args: AcceptanceArgs): OwnershipManifestTarget {
@@ -375,11 +460,7 @@ function parseOwnershipManifest(path: string, key: Buffer): OwnershipManifest {
     throw new Error("Ownership manifest has an invalid shape");
   }
   const payload = manifestPayload(manifest.targets, manifest.runId);
-  const expected = Buffer.from(manifestMac(payload, key), "hex");
-  const received = Buffer.from(manifest.mac, "hex");
-  if (received.length !== expected.length || !timingSafeEqual(received, expected)) {
-    throw new Error("Ownership manifest authentication failed");
-  }
+  assertMatchingMac(manifest.mac, manifestMac(payload, key), "Ownership manifest");
   return manifest;
 }
 
@@ -435,6 +516,50 @@ export function recordOwnershipManifest(args: AcceptanceArgs): void {
     mac: manifestMac(payload, args.operatorKey),
   };
   writeSecureFile(args.ownershipManifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+}
+
+function parseEvidence(path: string): JsonObject {
+  assertMode(path, SECURE_FILE_MODE, "Evidence file");
+  let candidate: unknown;
+  try {
+    candidate = JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    throw new Error(`Evidence is not valid JSON: ${path}`);
+  }
+  const evidence = asObject(candidate, "evidence");
+  if (evidence.schemaVersion !== 8) {
+    throw new Error("Evidence has an unsupported schema version");
+  }
+  return evidence;
+}
+
+export function verifyEvidenceFile(args: EvidenceVerificationArgs): Evidence {
+  if (args.build.buildId === "unknown") {
+    throw new Error(`Cannot compute a build identity for --entrypoint ${args.build.entryScript}`);
+  }
+  const manifest = parseOwnershipManifest(args.ownershipManifestPath, args.operatorKey);
+  const evidence = parseEvidence(args.evidencePath);
+  const authentication = asObject(evidence.authentication, "evidence.authentication");
+  if (
+    authentication.schemaVersion !== 1 ||
+    authentication.algorithm !== "hmac-sha256" ||
+    typeof authentication.mac !== "string"
+  ) {
+    throw new Error("Evidence authentication has an invalid shape");
+  }
+  const binding = asObject(authentication.binding, "evidence.authentication.binding");
+  const expectedBinding = redact(
+    evidenceAuthenticationBinding(args.build, manifest),
+    args.operatorKey,
+  );
+  if (!sameJson(binding, expectedBinding)) {
+    throw new Error(
+      "Evidence authentication binding does not match the build or ownership manifest",
+    );
+  }
+  const expectedMac = evidenceMac(evidence as Evidence, args.build, manifest, args.operatorKey);
+  assertMatchingMac(authentication.mac, expectedMac, "Evidence");
+  return evidence as Evidence;
 }
 
 function writeSecureFile(path: string, content: string): void {
@@ -538,6 +663,44 @@ export function parseArgs(argv: string[]): AcceptanceArgs {
   };
   assertControlConfiguration(args.target, args.controls);
   return args;
+}
+
+export function parseEvidenceVerificationArgs(argv: string[]): EvidenceVerificationArgs {
+  const values = new Map<string, string>();
+  const supported = new Set([
+    "verify-evidence",
+    "ownership-manifest",
+    "operator-key-file",
+    "entrypoint",
+  ]);
+  for (let index = 0; index < argv.length; index += 2) {
+    const flag = argv[index];
+    const value = argv[index + 1];
+    if (
+      !flag?.startsWith("--") ||
+      !value ||
+      value.startsWith("--") ||
+      !supported.has(flag.slice(2))
+    ) {
+      throw new Error(
+        "Evidence verification requires --verify-evidence, --ownership-manifest, --operator-key-file, and --entrypoint",
+      );
+    }
+    values.set(flag.slice(2), value);
+  }
+  const operatorKeyPath = requiredFlag(values, "operator-key-file");
+  const entrypoint = requiredFlag(values, "entrypoint");
+  const build = computeBuildIdentity(entrypoint);
+  if (build.buildId === "unknown") {
+    throw new Error(`Cannot compute a build identity for --entrypoint ${entrypoint}`);
+  }
+  return {
+    evidencePath: requiredFlag(values, "verify-evidence"),
+    ownershipManifestPath: requiredFlag(values, "ownership-manifest"),
+    operatorKeyPath,
+    operatorKey: readOperatorKey(operatorKeyPath),
+    build,
+  };
 }
 
 function asObject(value: unknown, context: string): JsonObject {
@@ -921,10 +1084,15 @@ async function defaultSpawnCli(
   timeoutMs: number,
   signal: AbortSignal,
   timer: Timer = defaultTimer,
-): Promise<void> {
+): Promise<CliResult> {
   const child = spawn(command[0]!, command.slice(1), {
     detached: process.platform !== "win32",
-    stdio: "inherit",
+    stdio: ["ignore", "pipe", "inherit"],
+  });
+  let stdout = "";
+  child.stdout?.setEncoding("utf8");
+  child.stdout?.on("data", (chunk: string) => {
+    stdout += chunk;
   });
   const exited = waitForChildExit(child);
   const abort = () => terminateOwnedProcessTree(child);
@@ -940,6 +1108,7 @@ async function defaultSpawnCli(
     if (exitCode !== 0) {
       throw new Error(`CLI exited with ${exitCode}`);
     }
+    return { stdout };
   } finally {
     timer.clearTimeout(timeout);
     signal.removeEventListener("abort", abort);
@@ -1159,22 +1328,104 @@ function doctorRepairCommand(
   ];
 }
 
-function corruptControlMetadataCommand(build: BuildIdentity, maintenanceToken: string): string[] {
+function acceptanceDoctorFaultCommand(
+  build: BuildIdentity,
+  fault: AcceptanceDoctorFault,
+  maintenanceToken: string,
+  expiresAt: number,
+): string[] {
   return [
     process.execPath,
     build.entryScript,
     "--daemon",
-    "corrupt-control-metadata-admitted",
+    "acceptance-doctor-fault",
+    "--fault",
+    fault,
     "--maintenance-token",
     maintenanceToken,
+    "--expires-at",
+    String(expiresAt),
   ];
 }
 
-function oldSessionDiagnostic(sessionUuid: string): string {
-  return (
-    `Session ${sessionUuid} is not an active daemon session (not found). ` +
-    "Acquire a device with getAndroid or getApple before using its sessionUuid."
-  );
+function acceptanceSessionRestartScope(
+  args: AcceptanceArgs,
+  sessionUuid: string,
+  expiresAt: number,
+): AcceptanceSessionRestartScope {
+  return {
+    sessionUuid,
+    platform: args.platform,
+    stableDeviceId: targetIdentity(args),
+    controls: {
+      androidSiblingAvdName: args.controls.androidSiblingAvdName,
+      androidDuplicateSerial: args.controls.androidDuplicateSerial,
+      iosSameNameSiblingUdid: args.controls.iosSameNameSiblingUdid,
+    },
+    expiresAt,
+  };
+}
+
+function restartAcceptanceSessionCommand(
+  build: BuildIdentity,
+  scope: AcceptanceSessionRestartScope,
+): string[] {
+  return [
+    process.execPath,
+    build.entryScript,
+    "--daemon",
+    "restart-acceptance-session",
+    "--session-uuid",
+    scope.sessionUuid,
+    "--platform",
+    scope.platform,
+    "--stable-device-id",
+    scope.stableDeviceId,
+    "--android-sibling-avd-name",
+    scope.controls.androidSiblingAvdName,
+    "--android-duplicate-serial",
+    scope.controls.androidDuplicateSerial,
+    "--ios-same-name-sibling-uuid",
+    scope.controls.iosSameNameSiblingUdid,
+    "--expires-at",
+    String(scope.expiresAt),
+  ];
+}
+
+function cliAcquisitionCommand(args: AcceptanceArgs): string[] {
+  const tool = acquisitionTool(args, "platform");
+  return [
+    process.execPath,
+    args.build.entryScript,
+    "--cli",
+    tool,
+    ...(args.platform === "android"
+      ? ["--avd-name", args.target.avdName!]
+      : ["--device-id", args.target.simulatorUdid!]),
+    "--enable-tools",
+    JSON.stringify(ENABLED_TOOLS),
+  ];
+}
+
+function acquiredCliSession(
+  result: CliResult,
+  args: AcceptanceArgs,
+): {
+  sessionUuid: string;
+  identity: RuntimeIdentity;
+  device: ExactDevice;
+} {
+  let response: ToolResponse;
+  try {
+    response = JSON.parse(result.stdout) as ToolResponse;
+  } catch {
+    throw new Error("CLI acquisition did not return a parseable JSON tool response");
+  }
+  const tool = acquisitionTool(args, "platform");
+  const payload = toolPayload(response, tool);
+  const sessionUuid = stringField(payload, "sessionUuid", tool);
+  const { identity, device } = acquiredIdentity(payload, args);
+  return { sessionUuid, identity, device };
 }
 
 function unrelatedOwnerDiagnostic(deviceId: string): string {
@@ -1217,15 +1468,21 @@ function assertIosRunnerTransitionEvidence(
   const afterGeneration = after.identity.iosRunnerGeneration;
   const serviceEndpointExposed = beforePort !== undefined && afterPort !== undefined;
   const runnerGenerationExposed = beforeGeneration !== undefined && afterGeneration !== undefined;
-  if (!serviceEndpointExposed && !runnerGenerationExposed) {
-    throw new Error(
-      "iOS runner restart did not expose a service endpoint or runner generation identity",
-    );
+  if (!serviceEndpointExposed) {
+    throw new Error("iOS runner restart did not expose a daemon-owned CtrlProxy service port");
+  }
+  if (!runnerGenerationExposed) {
+    throw new Error("iOS runner restart did not expose runner generation evidence");
   }
   const serviceEndpointChanged = serviceEndpointExposed && beforePort !== afterPort;
   const runnerGenerationChanged = runnerGenerationExposed && beforeGeneration !== afterGeneration;
-  if (!serviceEndpointChanged && !runnerGenerationChanged) {
-    throw new Error("iOS runner identity did not change across the required targeted restart");
+  if (!serviceEndpointChanged) {
+    throw new Error(
+      "iOS CtrlProxy service port did not change across the required targeted restart",
+    );
+  }
+  if (!runnerGenerationChanged) {
+    throw new Error("iOS runner generation did not change across the required targeted restart");
   }
   return {
     serviceEndpointExposed,
@@ -1236,9 +1493,12 @@ function assertIosRunnerTransitionEvidence(
   };
 }
 
-function assertLiveSafeguards(args: AcceptanceArgs, dependencies: MatrixDependencies): void {
+function assertLiveSafeguards(
+  args: AcceptanceArgs,
+  dependencies: MatrixDependencies,
+): OwnershipManifest | undefined {
   if (dependencies.testOnly) {
-    return;
+    return undefined;
   }
   if (
     !args.confirmLive ||
@@ -1249,7 +1509,18 @@ function assertLiveSafeguards(args: AcceptanceArgs, dependencies: MatrixDependen
       "Live mutation requires --confirm-live, --test-owned-devices, and AUTOMOBILE_ACCEPTANCE_LIVE=1.",
     );
   }
-  assertOwnershipManifest(args);
+  return assertOwnershipManifest(args);
+}
+
+function testOnlyManifestForEvidence(args: AcceptanceArgs): OwnershipManifest {
+  if (existsSync(args.ownershipManifestPath)) {
+    return assertOwnershipManifest(args);
+  }
+  const payload = manifestPayload({}, "test-only-ownership-manifest");
+  return {
+    ...payload,
+    mac: manifestMac(payload, args.operatorKey),
+  };
 }
 
 function closeLateOwnedHandle(value: unknown): Promise<void> | undefined {
@@ -1348,7 +1619,8 @@ export async function runAcceptanceMatrix(
     };
   }
   assertControlConfiguration(args.target, args.controls);
-  assertLiveSafeguards(args, dependencies);
+  const ownershipManifest =
+    assertLiveSafeguards(args, dependencies) ?? testOnlyManifestForEvidence(args);
   assertProvisionSchemaMatrix(args);
   const restoreAcceptanceRunScope = dependencies.testOnly
     ? () => {}
@@ -1365,18 +1637,11 @@ export async function runAcceptanceMatrix(
   const createDaemonClient =
     dependencies.createDaemonClient ??
     (async (signal: AbortSignal) => await defaultCreateDaemonClient(args.build, signal));
-  const restartDaemon =
-    dependencies.restartDaemon ??
-    (async (maintenanceToken: string, timeoutMs: number, signal: AbortSignal) => {
+  const restartAcceptanceSession =
+    dependencies.restartAcceptanceSession ??
+    (async (scope: AcceptanceSessionRestartScope, timeoutMs: number, signal: AbortSignal) => {
       await defaultSpawnCli(
-        [
-          process.execPath,
-          args.build.entryScript,
-          "--daemon",
-          "restart-admitted",
-          "--maintenance-token",
-          maintenanceToken,
-        ],
+        restartAcceptanceSessionCommand(args.build, scope),
         timeoutMs,
         signal,
         timer,
@@ -1500,6 +1765,30 @@ export async function runAcceptanceMatrix(
       async (signal) => await client.callTool(tool, request, signal),
       () => client.close(),
     );
+
+  /**
+   * Destructive device tools are opt-in. Grant only the specific capability to
+   * the new MCP connection that will invoke it.
+   */
+  const enableDestructiveTool = async (
+    client: McpSessionClient,
+    tool: "provisionDevice" | "deleteDevice",
+    phase: string,
+  ): Promise<void> => {
+    const response = await callTool(
+      client,
+      "setToolEnabled",
+      { toolName: tool, enabled: true },
+      `${phase}-enable-${tool}`,
+    );
+    if (response.isError) {
+      throw new Error(`Could not enable ${tool} for ${phase}`);
+    }
+    const payload = toolPayload(response, "setToolEnabled");
+    if (stringField(payload, "toolName", "setToolEnabled") !== tool || payload.enabled !== true) {
+      throw new Error(`setToolEnabled did not confirm ${tool} for ${phase}`);
+    }
+  };
 
   const release = async (
     sessionUuid: string,
@@ -1908,6 +2197,245 @@ export async function runAcceptanceMatrix(
     });
   };
 
+  const assertTargetAbsentFromPlatformInventory = async (stage: string): Promise<void> => {
+    if (!controlClient) {
+      throw new Error("Controlled discovery client was not initialized");
+    }
+    const start = timer.now();
+    const controls = args.platform === "android" ? androidControls : iosControls;
+    if (!controls) {
+      throw new Error(`${args.platform} discovery controls were not initialized`);
+    }
+    const payload = toolPayload(
+      await callTool(
+        controlClient,
+        "listDeviceImages",
+        { platform: args.platform },
+        `control-${stage}`,
+      ),
+      "listDeviceImages",
+    );
+    const images = objectArrayField(payload, "images", "listDeviceImages");
+    const targetRemains = images.some(
+      (image) =>
+        image.platform === args.platform &&
+        (args.platform === "android"
+          ? image.name === targetIdentity(args)
+          : image.deviceId === targetIdentity(args)),
+    );
+    if (targetRemains) {
+      throw new Error(`Original signed target remained in platform inventory during ${stage}`);
+    }
+    const siblingPresent = images.some(
+      (image) =>
+        image.platform === args.platform &&
+        (args.platform === "android"
+          ? image.name === controls.sibling.name
+          : image.deviceId === controls.sibling.deviceId),
+    );
+    if (!siblingPresent) {
+      throw new Error(`Signed sibling was absent from platform inventory during ${stage}`);
+    }
+    controlSnapshots.push({
+      stage,
+      target: controls.target,
+      sibling: controls.sibling,
+      targetPresentInPlatformInventory: false,
+      siblingPresentInPlatformInventory: true,
+    });
+    destructiveControlChecks += 1;
+    recordStep(steps, timer, `controls-${stage}`, start, {
+      targetPresentInPlatformInventory: false,
+      siblingPresentInPlatformInventory: true,
+    });
+  };
+
+  const discardDaemonClient = async (phase: string): Promise<void> => {
+    if (!daemonClient) {
+      return;
+    }
+    try {
+      await bounded(`${phase} daemon close`, "cleanup", async () => await daemonClient!.close());
+    } catch (error) {
+      cleanupFailures.push(
+        `${phase} daemon close: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    } finally {
+      daemonClient = undefined;
+    }
+  };
+
+  const acquireCli = async (phase: string): Promise<CliAcquiredSession> => {
+    const start = timer.now();
+    const acquired = await bounded(`${phase} CLI acquisition`, "work", async (signal) => {
+      return acquiredCliSession(
+        await spawnCli(
+          cliAcquisitionCommand(args),
+          Math.max(1, workDeadline - timer.now()),
+          signal,
+        ),
+        args,
+      );
+    });
+    mint(phase, acquired.sessionUuid);
+    runtimeIdentities.push({ phase, ...acquired.identity });
+    acquisitionRequests.push({
+      phase,
+      range: "exact",
+      kind: "platform",
+      tool: acquisitionTool(args, "platform"),
+      request: acquisitionRequest(args, "exact", "platform"),
+    });
+    recordStep(steps, timer, phase, start, {
+      sessionUuid: acquired.sessionUuid,
+      identity: acquired.identity,
+      device: acquired.device,
+      processExited: true,
+    });
+    return acquired;
+  };
+
+  const expectPersistedSessionTerminal = async (
+    sessionUuid: string,
+    reason: "target-absent" | "target-busy",
+  ): Promise<void> => {
+    const phase = `persisted-${reason}-old-uuid`;
+    const client = await bounded(
+      `${phase} MCP connect`,
+      "work",
+      async (signal) => await createMcpClient(phase, signal),
+    );
+    clients.push(client);
+    const first = await callTool(client, "getDeviceState", { sessionUuid }, phase);
+    if (!first.isError) {
+      throw new Error(
+        `Persisted session ${sessionUuid} operated after ${reason}; it must never bind the sibling`,
+      );
+    }
+    const firstDiagnostic = toolDiagnostic(first, "getDeviceState");
+    if (
+      !firstDiagnostic.includes(`Cannot safely recover session ${sessionUuid}`) ||
+      !firstDiagnostic.includes(`recovery reason: ${reason}`)
+    ) {
+      throw new Error(
+        `Persisted ${reason} rejection did not report the exact old-session recovery reason: ${firstDiagnostic}`,
+      );
+    }
+    const second = await callTool(client, "getDeviceState", { sessionUuid }, `${phase}-terminal`);
+    if (
+      !second.isError ||
+      !toolDiagnostic(second, "getDeviceState").includes(
+        `terminal after identity-recovery-${reason}`,
+      )
+    ) {
+      throw new Error(
+        `Persisted ${reason} UUID was not durably terminal after its first rejection`,
+      );
+    }
+    recordStep(steps, timer, `persisted-session-${reason}-terminal`, timer.now(), {
+      sessionUuid,
+      reason,
+      firstDiagnostic,
+      terminalDiagnostic: toolDiagnostic(second, "getDeviceState"),
+      siblingFallbackRejected: true,
+    });
+  };
+
+  const deleteExactSignedTarget = async (): Promise<void> => {
+    const controls = args.platform === "android" ? androidControls : iosControls;
+    if (!controls) {
+      throw new Error(`${args.platform} discovery controls were not initialized`);
+    }
+    const client = await bounded(
+      "persisted-target-absent delete MCP connect",
+      "work",
+      async (signal) => await createMcpClient("persisted-target-absent-delete", signal),
+    );
+    clients.push(client);
+    await enableDestructiveTool(client, "deleteDevice", "persisted-target-absent-delete");
+    const request = {
+      operationId: randomUUID(),
+      target: {
+        platform: args.platform,
+        isVirtual: true,
+        stableId: targetIdentity(args),
+        stableName: targetDeviceName(args),
+      },
+      mode: "destroy" as const,
+      verifyAbsence: true,
+      timeoutMs: Math.max(1, workDeadline - timer.now()),
+      cancellationPolicy: "cancel-on-request-abort" as const,
+    };
+    if (
+      request.target.stableId !== targetIdentity(args) ||
+      request.target.stableName !== targetDeviceName(args) ||
+      request.target.platform !== args.platform
+    ) {
+      throw new Error("deleteDevice request escaped the signed target identity");
+    }
+    const deletion = toolPayload(
+      await callTool(client, "deleteDevice", request, "persisted-target-absent-delete"),
+      "deleteDevice",
+    );
+    if (stringField(deletion, "state", "deleteDevice") !== "destroyed") {
+      throw new Error("deleteDevice did not confirm destruction of the signed target");
+    }
+    const verification = asObject(deletion.verification, "deleteDevice.verification");
+    if (
+      stringField(verification, "notRunning", "deleteDevice.verification") !== "confirmed" ||
+      stringField(verification, "inventory", "deleteDevice.verification") !==
+        "complete_absence_confirmed"
+    ) {
+      throw new Error("deleteDevice did not confirm complete platform-inventory absence");
+    }
+    recordStep(steps, timer, "persisted-target-absent-delete-target", timer.now(), {
+      target: controls.target,
+      signedTargetOnly: true,
+      verifiedInventoryAbsence: true,
+    });
+  };
+
+  const acquireSignedSiblingAfterTargetAbsence = async (): Promise<void> => {
+    const controls = args.platform === "android" ? androidControls : iosControls;
+    if (!controls) {
+      throw new Error(`${args.platform} discovery controls were not initialized`);
+    }
+    const phase = "persisted-target-absent-explicit-sibling-reacquire";
+    const client = await bounded(
+      `${phase} MCP connect`,
+      "work",
+      async (signal) => await createMcpClient(phase, signal),
+    );
+    clients.push(client);
+    const tool = args.platform === "android" ? "getAndroid" : "getApple";
+    const request =
+      args.platform === "android"
+        ? {
+            avdName: controls.sibling.name,
+            deviceId: controls.sibling.deviceId,
+            enableTools: [...ENABLED_TOOLS],
+          }
+        : { deviceId: controls.sibling.deviceId, enableTools: [...ENABLED_TOOLS] };
+    const payload = toolPayload(await callTool(client, tool, request, phase), tool);
+    const sessionUuid = stringField(payload, "sessionUuid", tool);
+    mint(phase, sessionUuid);
+    await verifyReadiness(client, sessionUuid, phase);
+    const identity = asObject(payload.deviceIdentity, `${tool}.deviceIdentity`);
+    const returnedId =
+      args.platform === "android"
+        ? stringField(identity, "adbSerial", `${tool}.deviceIdentity`)
+        : stringField(identity, "simulatorUdid", `${tool}.deviceIdentity`);
+    if (returnedId !== controls.sibling.deviceId || sessionUuid.length === 0) {
+      throw new Error("Explicit sibling reacquisition did not return the signed sibling identity");
+    }
+    await release(sessionUuid, phase);
+    recordStep(steps, timer, phase, timer.now(), {
+      sessionUuid,
+      sibling: controls.sibling,
+      explicitFreshUuid: true,
+    });
+  };
+
   const assertControlledDiscovery = async (): Promise<void> => {
     const phase = "controlled-discovery";
     const start = timer.now();
@@ -2171,7 +2699,15 @@ export async function runAcceptanceMatrix(
     }
   };
 
-  const verifyDaemonProtocolAfterRepair = async (): Promise<void> => {
+  const sameDaemonGeneration = (left: JsonObject, right: JsonObject): boolean =>
+    ["pid", "startedAt", "processGenerationToken"].every(
+      (field) =>
+        typeof left[field] !== "undefined" &&
+        typeof right[field] !== "undefined" &&
+        left[field] === right[field],
+    );
+
+  const verifyDaemonProtocolAfterRepair = async (): Promise<JsonObject> => {
     const start = timer.now();
     const client = await bounded(
       "post-doctor daemon protocol connect",
@@ -2194,6 +2730,7 @@ export async function runAcceptanceMatrix(
       recordStep(steps, timer, "post-doctor-daemon-protocol", start, {
         buildIdentityVerified: true,
       });
+      return status;
     } finally {
       try {
         await bounded(
@@ -2210,25 +2747,34 @@ export async function runAcceptanceMatrix(
   };
 
   const exerciseOwnedDoctorRepair = async (): Promise<void> => {
-    const admission = await admitMaintenance("owned control metadata fault", "work");
-    try {
+    const faults: AcceptanceDoctorFault[] = [
+      "corrupt-control-metadata",
+      "missing-control-metadata",
+      "missing-socket",
+      "stale-socket",
+      "unresponsive-daemon",
+      "missing-daemon",
+      "dead-daemon",
+    ];
+    for (const fault of faults) {
+      const admission = await admitMaintenance(`owned ${fault} fault`, "work");
       const faultStart = timer.now();
-      await bounded("owned control metadata fault", "work", async (signal) => {
+      await bounded(`owned ${fault} fault`, "work", async (signal) => {
         const remainingBudgetMs = Math.max(1, workDeadline - timer.now());
         await spawnCli(
-          corruptControlMetadataCommand(args.build, admission.maintenanceToken),
+          acceptanceDoctorFaultCommand(args.build, fault, admission.maintenanceToken, workDeadline),
           remainingBudgetMs,
           signal,
         );
       });
-      recordStep(steps, timer, "owned-corrupt-control-metadata", faultStart, {
+      recordStep(steps, timer, `owned-${fault}`, faultStart, {
         maintenanceAdmission: true,
-        faultScope: "responsive-daemon-pid-metadata-only",
+        faultScope: "acceptance-only-host-control",
         buildIdentityVerified: true,
       });
 
       const repairStart = timer.now();
-      await bounded("host-wide doctor repair", "work", async (signal) => {
+      await bounded(`host-wide doctor repair after ${fault}`, "work", async (signal) => {
         const remainingBudgetMs = Math.max(1, workDeadline - timer.now());
         await spawnCli(
           doctorRepairCommand(args.build, args.platform, remainingBudgetMs),
@@ -2236,20 +2782,71 @@ export async function runAcceptanceMatrix(
           signal,
         );
       });
-      recordStep(steps, timer, "host-wide-doctor-repair", repairStart, {
+      recordStep(steps, timer, `host-wide-doctor-repair-${fault}`, repairStart, {
         platform: args.platform,
         platformFlagScope: "requested-filter",
         repairScope: "host-wide",
         buildIdentityVerified: true,
         maintenanceAdmission: true,
       });
-      await verifyDaemonProtocolAfterRepair();
-    } finally {
-      await completeMaintenance("owned control metadata fault", admission, "cleanup");
+      const repairedStatus = await verifyDaemonProtocolAfterRepair();
+      if (sameDaemonGeneration(admission.status, repairedStatus)) {
+        await completeMaintenance(`owned ${fault} fault`, admission, "cleanup");
+      } else {
+        // The doctor intentionally replaced the admitted generation. Its
+        // single-use token cannot complete on a successor, so drop this client
+        // before the next generation is admitted.
+        try {
+          await bounded(
+            `owned ${fault} daemon close`,
+            "cleanup",
+            async () => await daemonClient!.close(),
+          );
+        } catch (error) {
+          cleanupFailures.push(
+            `owned ${fault} daemon close: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        } finally {
+          daemonClient = undefined;
+        }
+      }
+
+      const cliStart = timer.now();
+      const recovered = await bounded(
+        `post-doctor ${fault} CLI acquisition`,
+        "work",
+        async (signal) =>
+          acquiredCliSession(
+            await spawnCli(
+              cliAcquisitionCommand(args),
+              Math.max(1, workDeadline - timer.now()),
+              signal,
+            ),
+            args,
+          ),
+      );
+      mint(`post-doctor-${fault}-cli`, recovered.sessionUuid);
+      const client = await bounded(
+        `post-doctor ${fault} MCP connect`,
+        "work",
+        async (signal) => await createMcpClient(`post-doctor-${fault}`, signal),
+      );
+      clients.push(client);
+      await verifyReadiness(client, recovered.sessionUuid, `post-doctor-${fault}`);
+      await release(recovered.sessionUuid, `post-doctor-${fault}-cli`);
+      recordStep(steps, timer, `post-doctor-cli-mcp-${fault}`, cliStart, {
+        sessionUuid: recovered.sessionUuid,
+        freshCliAcquisition: true,
+        independentMcpReadiness: true,
+      });
     }
   };
 
-  const expectUnrelatedOwnerConflict = async (held: AcquiredSession): Promise<void> => {
+  const expectUnrelatedOwnerConflict = async (
+    held: Pick<AcquiredSession, "sessionUuid" | "device">,
+  ): Promise<void> => {
     const start = timer.now();
     const client = await bounded(
       "unrelated-owner MCP connect",
@@ -2300,6 +2897,7 @@ export async function runAcceptanceMatrix(
       async (signal) => await createMcpClient("provision", signal),
     );
     clients.push(provisionClient);
+    await enableDestructiveTool(provisionClient, "provisionDevice", "provision");
     const provisionPayload = toolPayload(
       await callTool(provisionClient, "provisionDevice", provisionRequest(args), "provision"),
       "provisionDevice",
@@ -2342,25 +2940,8 @@ export async function runAcceptanceMatrix(
     }
     await expectIncompatibleIosFamily();
 
-    const running = await acquire("acquire-running", "max", "generic");
-    await expectUnrelatedOwnerConflict(running);
-
-    const cliStart = timer.now();
-    await bounded("short-lived CLI", "work", async (signal) => {
-      await spawnCli(
-        [
-          process.execPath,
-          args.build.entryScript,
-          "--cli",
-          "--session-uuid",
-          running.sessionUuid,
-          "getDeviceState",
-        ],
-        Math.max(1, workDeadline - timer.now()),
-        signal,
-      );
-    });
-    recordStep(steps, timer, "short-lived-cli", cliStart, { sessionUuid: running.sessionUuid });
+    const cliAcquired = await acquireCli("short-lived-cli-acquisition");
+    await expectUnrelatedOwnerConflict(cliAcquired);
 
     const independentStart = timer.now();
     const independent = await bounded(
@@ -2369,83 +2950,83 @@ export async function runAcceptanceMatrix(
       async (signal) => await createMcpClient("independent-mcp", signal),
     );
     clients.push(independent);
-    toolPayload(
-      await callTool(
-        independent,
-        "getDeviceState",
-        { sessionUuid: running.sessionUuid },
-        "independent-mcp",
-      ),
-      "getDeviceState",
-    );
+    await verifyReadiness(independent, cliAcquired.sessionUuid, "independent-mcp");
     recordStep(steps, timer, "independent-mcp-client", independentStart, {
-      sessionUuid: running.sessionUuid,
+      sessionUuid: cliAcquired.sessionUuid,
+      acquiredBy: "short-lived-cli",
     });
-
-    await release(running.sessionUuid, "acquire-running");
+    await release(cliAcquired.sessionUuid, "short-lived-cli-acquisition");
 
     if (args.platform === "ios") {
-      await restartIosRunner(running.device);
+      await restartIosRunner(cliAcquired.device);
       const restarted = await acquire("reacquire-after-ios-runner-restart", "exact", "platform");
-      iosRunnerRestartEvidence = assertIosRunnerTransitionEvidence(running, restarted);
+      iosRunnerRestartEvidence = assertIosRunnerTransitionEvidence(
+        { ...cliAcquired, phase: "short-lived-cli-acquisition", client: independent },
+        restarted,
+      );
       await release(restarted.sessionUuid, "reacquire-after-ios-runner-restart");
     }
 
-    if (args.scenario === "recovery") {
+    const restartPersistedSession = async (
+      state: "target-absent" | "target-busy",
+    ): Promise<CliAcquiredSession> => {
+      const persisted = await acquireCli(`persisted-${state}-cli-acquisition`);
       const restartStart = timer.now();
-      await assertCurrentControls("before-daemon-restart");
-      const maintenanceAdmission = await admitMaintenance("daemon restart", "work");
-      try {
-        await bounded("daemon restart", "work", async (signal) => {
-          await restartDaemon(
-            maintenanceAdmission.maintenanceToken,
-            Math.max(1, workDeadline - timer.now()),
-            signal,
-          );
-        });
-      } catch (error) {
-        await completeMaintenance("daemon restart", maintenanceAdmission, "cleanup");
-        throw error;
-      }
-      recordStep(steps, timer, "daemon-restart", restartStart, {
-        maintenanceAdmission: true,
-        restartScope: "same-generation",
+      await assertCurrentControls(`before-persisted-${state}-restart`);
+      const scope = acceptanceSessionRestartScope(args, persisted.sessionUuid, workDeadline);
+      await bounded(`persisted-${state} daemon restart`, "work", async (signal) => {
+        await restartAcceptanceSession(scope, Math.max(1, workDeadline - timer.now()), signal);
       });
-      await assertCurrentControls("after-daemon-restart");
+      await discardDaemonClient(`persisted-${state} restart`);
+      recordStep(steps, timer, `persisted-${state}-daemon-restart`, restartStart, {
+        acceptanceCapability: true,
+        restartScope: "one-signed-session-generation",
+        stableDeviceId: scope.stableDeviceId,
+        controlsBound: true,
+        state,
+      });
+      return persisted;
+    };
 
-      const oldSessionStart = timer.now();
-      const oldSessionClient = await bounded(
-        "old-session MCP connect",
-        "work",
-        async (signal) => await createMcpClient("old-session", signal),
-      );
-      clients.push(oldSessionClient);
-      const oldSession = await callTool(
-        oldSessionClient,
-        "getDeviceState",
-        { sessionUuid: running.sessionUuid },
-        "old-session",
-      );
-      const expectedDiagnostic = oldSessionDiagnostic(running.sessionUuid);
-      if (
-        !oldSession.isError ||
-        toolDiagnostic(oldSession, "getDeviceState") !== expectedDiagnostic
-      ) {
-        throw new Error(
-          `Old session did not return the required terminal diagnostic: '${expectedDiagnostic}'`,
-        );
-      }
-      recordStep(steps, timer, "old-session-rejected", oldSessionStart, {
-        sessionUuid: running.sessionUuid,
-        diagnostic: expectedDiagnostic,
-      });
+    const busy = await restartPersistedSession("target-busy");
+    const busyHolder = await acquire(
+      "persisted-target-busy-exact-target-holder",
+      "exact",
+      "platform",
+    );
+    if (busyHolder.sessionUuid === busy.sessionUuid) {
+      throw new Error("Busy-holder acquisition reused the persisted UUID");
     }
+    await assertCurrentControls("persisted-target-busy-holder-active");
+    await expectPersistedSessionTerminal(busy.sessionUuid, "target-busy");
+    await release(busyHolder.sessionUuid, "persisted-target-busy-exact-target-holder");
+    const busyReacquired = await acquire(
+      "persisted-target-busy-explicit-target-reacquire",
+      "exact",
+      "platform",
+    );
+    if (busyReacquired.sessionUuid === busy.sessionUuid) {
+      throw new Error("Explicit target reacquisition reused the terminal persisted UUID");
+    }
+    await release(busyReacquired.sessionUuid, "persisted-target-busy-explicit-target-reacquire");
 
     await assertCurrentControls("before-host-wide-doctor-repair");
     await exerciseOwnedDoctorRepair();
     await assertCurrentControls("after-host-wide-doctor-repair");
     const repaired = await acquire("reacquire-after-repair", "exact", "platform");
     await release(repaired.sessionUuid, "reacquire-after-repair");
+
+    const absent = await restartPersistedSession("target-absent");
+    await deleteExactSignedTarget();
+    await assertTargetAbsentFromPlatformInventory("persisted-target-absent");
+    await expectPersistedSessionTerminal(absent.sessionUuid, "target-absent");
+    if (args.platform === "ios") {
+      recordStep(steps, timer, "ios-same-transport-replacement-inapplicable", timer.now(), {
+        reason: "simulator UDID is both the stable identity and daemon transport key",
+        deletionClassifiedAs: "target-absent",
+      });
+    }
+    await acquireSignedSiblingAfterTargetAbsence();
   } catch (error) {
     primaryError = error;
   } finally {
@@ -2500,6 +3081,15 @@ export async function runAcceptanceMatrix(
         : String(primaryError);
   const evidence: Evidence = {
     schemaVersion: 8,
+    authentication: {
+      schemaVersion: 1,
+      algorithm: "hmac-sha256",
+      binding: redact(
+        evidenceAuthenticationBinding(args.build, ownershipManifest),
+        args.operatorKey,
+      ) as JsonObject,
+      mac: "",
+    },
     generatedAt: new Date().toISOString(),
     scenario: args.scenario,
     platform: args.platform,
@@ -2535,7 +3125,7 @@ export async function runAcceptanceMatrix(
       controlledSiblingUntouched: steps.some(
         (step) => step.name === "controlled-discovery" && step.passed,
       ),
-      destructiveControlChecks: destructiveControlChecks >= (args.scenario === "recovery" ? 8 : 6),
+      destructiveControlChecks: destructiveControlChecks >= 8,
       ...(args.platform === "android"
         ? {
             signedAndroidDuplicateRemoved: steps.some(
@@ -2548,8 +3138,7 @@ export async function runAcceptanceMatrix(
             ),
           }
         : {
-            exactIosUuidAndSameNameSiblingRetained:
-              destructiveControlChecks >= (args.scenario === "recovery" ? 8 : 6),
+            exactIosUuidAndSameNameSiblingRetained: destructiveControlChecks >= 8,
           }),
       androidSerialExposed: args.platform === "android" && androidSerials.length > 0,
       androidSerialChanged:
@@ -2583,6 +3172,12 @@ export async function runAcceptanceMatrix(
     },
     steps: redact(steps, args.operatorKey) as Step[],
   };
+  evidence.authentication.mac = evidenceMac(
+    evidence,
+    args.build,
+    ownershipManifest,
+    args.operatorKey,
+  );
 
   let evidenceError: unknown;
   try {
@@ -2614,16 +3209,28 @@ export function evidenceFileName(args: AcceptanceArgs): string {
 
 if (import.meta.main) {
   try {
-    const args = parseArgs(Bun.argv.slice(2));
-    if (args.recordOwnershipManifest) {
-      recordOwnershipManifest(args);
-      console.log(`Recorded ${args.platform} ownership in ${basename(args.ownershipManifestPath)}`);
+    const argv = Bun.argv.slice(2);
+    if (argv.includes("--verify-evidence")) {
+      const verification = parseEvidenceVerificationArgs(argv);
+      const evidence = verifyEvidenceFile(verification);
+      console.log(
+        `Verified live-device acceptance evidence (${evidence.platform}/${evidence.scenario}); evidence=${basename(verification.evidencePath)}`,
+      );
       process.exitCode = 0;
     } else {
-      const evidence = await runAcceptanceMatrix(args);
-      console.log(
-        `Live-device acceptance passed (${evidence.platform}/${evidence.scenario}); evidence=${evidenceFileName(args)}`,
-      );
+      const args = parseArgs(argv);
+      if (args.recordOwnershipManifest) {
+        recordOwnershipManifest(args);
+        console.log(
+          `Recorded ${args.platform} ownership in ${basename(args.ownershipManifestPath)}`,
+        );
+        process.exitCode = 0;
+      } else {
+        const evidence = await runAcceptanceMatrix(args);
+        console.log(
+          `Live-device acceptance passed (${evidence.platform}/${evidence.scenario}); evidence=${evidenceFileName(args)}`,
+        );
+      }
     }
   } catch (error) {
     console.error(error);

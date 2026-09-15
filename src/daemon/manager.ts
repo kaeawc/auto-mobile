@@ -58,9 +58,15 @@ import {
 } from "./client";
 import {
   DAEMON_PREPARE_RESTART_METHOD,
+  DAEMON_APPLY_ACCEPTANCE_DOCTOR_FAULT_METHOD,
   DAEMON_CORRUPT_CONTROL_METADATA_METHOD,
   DAEMON_REPAIR_CONTROL_METADATA_METHOD,
+  DAEMON_RESTART_ACCEPTANCE_SESSION_METHOD,
   DAEMON_RESTART_ADMITTED_METHOD,
+  type AcceptanceSessionRestartScope,
+  type AcceptanceDoctorFault,
+  type DaemonAcceptanceDoctorFault,
+  type DaemonAcceptanceSessionRestart,
   DaemonRestartDeferredError,
   type DaemonAdmittedRestart,
   type DaemonControlMetadataCorruption,
@@ -69,6 +75,7 @@ import {
 } from "./daemonRestartAdmission";
 import {
   createDaemonLiveAcceptanceCapability,
+  createDaemonLiveAcceptanceScopedCapability,
   daemonGenerationIdentityFromStatus,
   daemonLiveAcceptanceStartupSecret,
 } from "./liveAcceptanceCapability";
@@ -741,6 +748,25 @@ const MAX_DAEMON_STARTUP_LOG_BYTES = 4000;
 
 /** An occupied port found by degraded process discovery has no known process-table PID. */
 const DAEMON_UNKNOWN_OWNER_PID = -1;
+
+const ACCEPTANCE_DOCTOR_CONTROL_STATES: Readonly<
+  Partial<Record<AcceptanceDoctorFault, NonNullable<DaemonAcceptanceDoctorFault["controlState"]>>>
+> = {
+  "missing-daemon": "daemon-missing",
+  "dead-daemon": "daemon-dead",
+};
+
+function assertAcceptanceDoctorControlState(
+  fault: AcceptanceDoctorFault,
+  result: Partial<DaemonAcceptanceDoctorFault> | null,
+): void {
+  const expectedControlState = ACCEPTANCE_DOCTOR_CONTROL_STATES[fault];
+  if (expectedControlState !== undefined && result?.controlState !== expectedControlState) {
+    throw new ActionableError(
+      `Daemon acceptance doctor fault did not confirm ${expectedControlState} control state.`,
+    );
+  }
+}
 
 /** Host a daemon binds when `--host` is not given; mirrors the CLI default. */
 const DEFAULT_DAEMON_HOST = "127.0.0.1";
@@ -2839,6 +2865,156 @@ export class DaemonManager implements DaemonManagerLike {
     }
   }
 
+  /**
+   * Crash and replace one verified live-acceptance daemon generation without a
+   * graceful shutdown. This preserves precisely one authenticated persisted
+   * session row for recovery testing; the admission RPC rejects unrelated
+   * sessions and active operations before this manager signals the process.
+   */
+  async restartAcceptanceSession(
+    scope: AcceptanceSessionRestartScope,
+  ): Promise<DaemonRestartResult> {
+    const startupSecret = daemonLiveAcceptanceStartupSecret();
+    if (!startupSecret) {
+      throw new ActionableError(
+        "restart-acceptance-session requires a live-acceptance daemon startup capability.",
+      );
+    }
+    const status = await this.status();
+    if (!status.running) {
+      throw new ActionableError(
+        "restart-acceptance-session requires the admitted daemon generation to be running.",
+      );
+    }
+    const generation = daemonGenerationIdentityFromStatus(status);
+    if (!generation) {
+      throw new ActionableError(
+        "restart-acceptance-session requires the admitted daemon generation identity.",
+      );
+    }
+    const client = this.createClient({ clientIdentity: null });
+    try {
+      await client.connect();
+      const result: unknown = await client.callDaemonMethod(
+        DAEMON_RESTART_ACCEPTANCE_SESSION_METHOD,
+        {
+          ...status,
+          scope,
+          acceptanceCapability: createDaemonLiveAcceptanceScopedCapability(
+            startupSecret,
+            generation,
+            scope,
+          ),
+        },
+      );
+      if ((result as Partial<DaemonAcceptanceSessionRestart> | null)?.accepted !== true) {
+        throw new ActionableError(
+          `Daemon declined the acceptance-session restart (${(result as { reason?: string } | null)?.reason ?? "unknown"}).`,
+        );
+      }
+    } finally {
+      await client.close();
+    }
+
+    // SIGKILL is intentional and narrowly authorized by the RPC above. A
+    // graceful SIGTERM would terminally release the session that this recovery
+    // scenario is designed to exercise.
+    this.processSignaler.signal(status.pid!, "SIGKILL");
+    if (!(await this.waitForStop(status.pid!, DAEMON_FORCED_STOP_TIMEOUT_MS))) {
+      throw new ActionableError(
+        `Acceptance-session restart daemon process ${status.pid} did not exit after SIGKILL.`,
+      );
+    }
+    await cleanupDaemonFiles({
+      pidFilePath: this.pidFilePath,
+      socketPaths: this.cleanupSocketPaths(status.socketPath),
+      expectedPid: status.pid!,
+    });
+    await this.timer.sleep(DAEMON_RESTART_HANDOFF_DELAY_MS);
+    return restartResultFromStart(
+      await this.start({ ...(status.options ?? {}), strictPort: true }),
+    );
+  }
+
+  async applyAcceptanceDoctorFault(
+    fault: AcceptanceDoctorFault,
+    maintenanceToken: string,
+    expiresAt: number,
+  ): Promise<void> {
+    if (!maintenanceToken) {
+      throw new ActionableError("acceptance-doctor-fault requires a maintenance admission token.");
+    }
+    const startupSecret = daemonLiveAcceptanceStartupSecret();
+    if (!startupSecret) {
+      throw new ActionableError(
+        "acceptance-doctor-fault requires a live-acceptance daemon startup capability.",
+      );
+    }
+    const status = await this.status();
+    const generation = status.running ? daemonGenerationIdentityFromStatus(status) : undefined;
+    if (!generation) {
+      throw new ActionableError(
+        "acceptance-doctor-fault requires the admitted daemon generation to be running.",
+      );
+    }
+    const scope = { fault, expiresAt };
+    const client = this.createClient({ clientIdentity: null });
+    try {
+      await client.connect();
+      const result: unknown = await client.callDaemonMethod(
+        DAEMON_APPLY_ACCEPTANCE_DOCTOR_FAULT_METHOD,
+        {
+          ...status,
+          maintenanceToken,
+          fault,
+          expiresAt,
+          acceptanceCapability: createDaemonLiveAcceptanceScopedCapability(
+            startupSecret,
+            generation,
+            scope,
+          ),
+        },
+      );
+      if ((result as Partial<DaemonAcceptanceDoctorFault> | null)?.accepted !== true) {
+        throw new ActionableError(
+          `Daemon declined the acceptance doctor fault (${(result as { reason?: string } | null)?.reason ?? "unknown"}).`,
+        );
+      }
+      assertAcceptanceDoctorControlState(
+        fault,
+        result as Partial<DaemonAcceptanceDoctorFault> | null,
+      );
+    } finally {
+      await client.close();
+    }
+    await this.applyAcceptanceDoctorLivenessFault(fault, status);
+  }
+
+  private async applyAcceptanceDoctorLivenessFault(
+    fault: AcceptanceDoctorFault,
+    status: DaemonStatus,
+  ): Promise<void> {
+    if (fault === "missing-daemon" || fault === "dead-daemon") {
+      this.processSignaler.signal(status.pid!, "SIGKILL");
+      if (!(await this.waitForStop(status.pid!, DAEMON_FORCED_STOP_TIMEOUT_MS))) {
+        throw new ActionableError(
+          `Acceptance doctor fault daemon process ${status.pid} did not exit after SIGKILL.`,
+        );
+      }
+    }
+    if (fault === "missing-daemon") {
+      // A missing daemon has no control plane: remove its metadata so doctor
+      // performs fresh daemon discovery. A dead daemon intentionally leaves
+      // that metadata behind so doctor diagnoses and repairs stale control
+      // state instead of treating it as absent.
+      await cleanupDaemonFiles({
+        pidFilePath: this.pidFilePath,
+        socketPaths: this.cleanupSocketPaths(status.socketPath),
+        expectedPid: status.pid!,
+      });
+    }
+  }
+
   private async prepareDaemonForConditionalRestart(
     expected: DaemonStatus,
   ): Promise<DaemonRestartPreparation> {
@@ -3947,6 +4123,66 @@ export function parseRestartAdmittedMaintenanceToken(args: string[]): string {
   return token;
 }
 
+export function parseAcceptanceSessionRestartScope(args: string[]): AcceptanceSessionRestartScope {
+  const read = (flag: string): string => {
+    const index = args.indexOf(flag);
+    const value = index === -1 ? undefined : args[index + 1];
+    if (!value || value.startsWith("--")) {
+      throw new ActionableError(`${flag} requires a non-empty value`);
+    }
+    return value;
+  };
+  const platform = read("--platform");
+  if (platform !== "android" && platform !== "ios") {
+    throw new ActionableError("--platform must be android or ios");
+  }
+  const expiresAt = Number(read("--expires-at"));
+  if (!Number.isFinite(expiresAt) || expiresAt <= 0) {
+    throw new ActionableError("--expires-at must be a positive finite timestamp");
+  }
+  return {
+    sessionUuid: read("--session-uuid"),
+    platform,
+    stableDeviceId: read("--stable-device-id"),
+    controls: {
+      androidSiblingAvdName: read("--android-sibling-avd-name"),
+      androidDuplicateSerial: read("--android-duplicate-serial"),
+      iosSameNameSiblingUdid: read("--ios-same-name-sibling-uuid"),
+    },
+    expiresAt,
+  };
+}
+
+export function parseAcceptanceDoctorFaultArgs(args: string[]): {
+  fault: AcceptanceDoctorFault;
+  maintenanceToken: string;
+  expiresAt: number;
+} {
+  const faultIndex = args.indexOf("--fault");
+  const fault = faultIndex === -1 ? undefined : args[faultIndex + 1];
+  if (
+    fault !== "missing-daemon" &&
+    fault !== "dead-daemon" &&
+    fault !== "unresponsive-daemon" &&
+    fault !== "missing-control-metadata" &&
+    fault !== "corrupt-control-metadata" &&
+    fault !== "missing-socket" &&
+    fault !== "stale-socket"
+  ) {
+    throw new ActionableError("--fault must name a supported acceptance doctor fault");
+  }
+  const expiresIndex = args.indexOf("--expires-at");
+  const expiresAt = expiresIndex === -1 ? NaN : Number(args[expiresIndex + 1]);
+  if (!Number.isFinite(expiresAt) || expiresAt <= 0) {
+    throw new ActionableError("--expires-at must be a positive finite timestamp");
+  }
+  return {
+    fault,
+    maintenanceToken: parseRestartAdmittedMaintenanceToken(args),
+    expiresAt,
+  };
+}
+
 /**
  * Build the `--daemon status` lines that surface the running daemon's build
  * identity (`buildId` + `entryScript`) and flag wrong-build skew against this
@@ -4045,6 +4281,21 @@ export async function runDaemonCommand(
 
       case "corrupt-control-metadata-admitted": {
         await manager.corruptControlMetadataAdmitted(parseRestartAdmittedMaintenanceToken(args));
+        break;
+      }
+
+      case "restart-acceptance-session": {
+        await manager.restartAcceptanceSession(parseAcceptanceSessionRestartScope(args));
+        break;
+      }
+
+      case "acceptance-doctor-fault": {
+        const fault = parseAcceptanceDoctorFaultArgs(args);
+        await manager.applyAcceptanceDoctorFault(
+          fault.fault,
+          fault.maintenanceToken,
+          fault.expiresAt,
+        );
         break;
       }
 

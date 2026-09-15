@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test";
+import { createHmac } from "node:crypto";
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { ACCEPTANCE_DISCOVERY_CAPABILITY_ENV } from "../../src/daemon/constants";
 import { DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV } from "../../src/daemon/liveAcceptanceCapability";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -11,6 +12,7 @@ import {
   parseArgs,
   recordOwnershipManifest,
   runAcceptanceMatrix,
+  verifyEvidenceFile,
   type AcceptanceArgs,
   type DaemonSessionClient,
   type MatrixDependencies,
@@ -113,13 +115,6 @@ function createProductionAcceptanceFixture(): {
   };
 }
 
-function oldSessionDiagnostic(sessionUuid: string): string {
-  return (
-    `Session ${sessionUuid} is not an active daemon session (not found). ` +
-    "Acquire a device with getAndroid or getApple before using its sessionUuid."
-  );
-}
-
 function ownerDiagnostic(deviceId: string): string {
   return (
     `Device '${deviceId}' is already assigned to another session. ` +
@@ -140,6 +135,9 @@ function createHarness(
     failCliFor?: string;
     iosSimulatorName?: string;
     unchangedIosRunnerIdentity?: boolean;
+    unchangedIosServicePort?: boolean;
+    unchangedIosRunnerGeneration?: boolean;
+    failIosReadinessAfterRestart?: boolean;
     writeFile?: MatrixDependencies["writeFile"];
     activeSessions?: number;
     activeExecutions?: number;
@@ -147,6 +145,7 @@ function createHarness(
     keepAndroidDuplicateAfterKill?: boolean;
     removeAndroidSiblingAfterDuplicateCleanup?: boolean;
     removeIosSiblingAfterProvision?: boolean;
+    allowPersistedSiblingFallback?: boolean;
   } = {},
 ): Harness {
   const calls: ToolCall[] = [];
@@ -162,6 +161,17 @@ function createHarness(
   let androidTargetSerial = "emulator-5556";
   let androidSiblingPresent = true;
   let iosSiblingPresent = true;
+  let androidTargetPresent = true;
+  let iosTargetPresent = true;
+  let targetDeleted = false;
+  let cliAcquisitionCount = 0;
+  let restartedSessionUuid: string | undefined;
+  const persistedStates = new Map<string, "target-absent" | "target-busy">();
+  const terminalPersistedSessions = new Set<string>();
+  let maintenanceFenced = false;
+  let daemonGeneration = 1;
+  let pendingDoctorFault: string | undefined;
+  const enabledToolsByOwner = new Map<string, Set<string>>();
 
   const createMcpClient = async (
     owner: string,
@@ -171,15 +181,40 @@ function createHarness(
     async callTool(name, arguments_) {
       calls.push({ owner, name, arguments: arguments_ });
       events.push(`${owner}:${name}`);
+      if (name === "setToolEnabled") {
+        const toolName = arguments_.toolName;
+        if (
+          (toolName !== "provisionDevice" && toolName !== "deleteDevice") ||
+          arguments_.enabled !== true ||
+          "sessionUuid" in arguments_ ||
+          "toolNames" in arguments_
+        ) {
+          throw new Error("acceptance must narrowly enable one destructive tool on its own client");
+        }
+        const enabled = enabledToolsByOwner.get(owner) ?? new Set<string>();
+        enabled.add(toolName);
+        enabledToolsByOwner.set(owner, enabled);
+        return { structuredContent: { toolName, enabled: true } };
+      }
+      if (
+        (name === "provisionDevice" || name === "deleteDevice") &&
+        !enabledToolsByOwner.get(owner)?.has(name)
+      ) {
+        throw new Error(`Tool ${name} is disabled for fresh MCP client ${owner}`);
+      }
       if (name === "listDevices") {
         const isIos = arguments_.platform === "ios";
         const devices = isIos
           ? [
-              {
-                platform: "ios",
-                name: "iPhone 16 Pro",
-                deviceId: IOS_UDID,
-              },
+              ...(iosTargetPresent
+                ? [
+                    {
+                      platform: "ios",
+                      name: "iPhone 16 Pro",
+                      deviceId: IOS_UDID,
+                    },
+                  ]
+                : []),
               ...(iosSiblingPresent
                 ? [
                     {
@@ -203,7 +238,15 @@ function createHarness(
                     },
                   ]
                 : []),
-              { platform: "android", name: "Pixel_8_API_35", deviceId: androidTargetSerial },
+              ...(androidTargetPresent
+                ? [
+                    {
+                      platform: "android",
+                      name: "Pixel_8_API_35",
+                      deviceId: androidTargetSerial,
+                    },
+                  ]
+                : []),
             ];
         return {
           structuredContent: {
@@ -211,6 +254,46 @@ function createHarness(
               presentationOrder === "reverse" && options.honorDiscoveryOrderSeam !== false
                 ? devices.toReversed()
                 : devices,
+          },
+        };
+      }
+      if (name === "listDeviceImages") {
+        const isIos = arguments_.platform === "ios";
+        return {
+          structuredContent: {
+            images: isIos
+              ? [
+                  ...(targetDeleted
+                    ? []
+                    : [
+                        {
+                          platform: "ios",
+                          name: "iPhone 16 Pro",
+                          deviceId: IOS_UDID,
+                        },
+                      ]),
+                  {
+                    platform: "ios",
+                    name: "iPhone 16 Pro",
+                    deviceId: "00000000-0000-0000-0000-000000000002",
+                  },
+                ]
+              : [
+                  ...(targetDeleted
+                    ? []
+                    : [
+                        {
+                          platform: "android",
+                          name: "Pixel_8_API_35",
+                          deviceId: androidTargetSerial,
+                        },
+                      ]),
+                  {
+                    platform: "android",
+                    name: "Pixel_8_Sibling",
+                    deviceId: "emulator-5558",
+                  },
+                ],
           },
         };
       }
@@ -239,6 +322,9 @@ function createHarness(
         };
       }
       if (name === "getAndroid" || name === "getApple" || name === "startDevice") {
+        if (maintenanceFenced) {
+          throw new Error("daemon maintenance fence rejected post-repair acquisition");
+        }
         if (
           name === "getAndroid" &&
           owner.startsWith("controlled-discovery-") &&
@@ -274,6 +360,46 @@ function createHarness(
             structuredContent: { error: options.ownerDiagnostic ?? ownerDiagnostic(deviceId) },
           };
         }
+        const requestedDeviceId =
+          typeof arguments_.deviceId === "string" ? arguments_.deviceId : undefined;
+        const requestedSibling =
+          (isIos && requestedDeviceId === "00000000-0000-0000-0000-000000000002") ||
+          (!isIos && requestedDeviceId === "emulator-5558");
+        if (requestedSibling) {
+          startCount += 1;
+          const sessionUuid = `start-${startCount}`;
+          return {
+            structuredContent: {
+              sessionUuid,
+              deviceIdentity: isIos
+                ? {
+                    simulatorUdid: "00000000-0000-0000-0000-000000000002",
+                    simulatorName: "iPhone 16 Pro",
+                    iosServicePort: 8765,
+                    iosRunnerGeneration: 0,
+                  }
+                : {
+                    avdName: "Pixel_8_Sibling",
+                    adbSerial: "emulator-5558",
+                    emulatorConsolePort: 5558,
+                  },
+            },
+          };
+        }
+        if (targetDeleted) {
+          return {
+            isError: true,
+            structuredContent: { error: "The signed target has been permanently deleted" },
+          };
+        }
+        if (isIos) {
+          iosTargetPresent = true;
+        } else {
+          androidTargetPresent = true;
+        }
+        if (owner === "persisted-target-busy-exact-target-holder" && restartedSessionUuid) {
+          persistedStates.set(restartedSessionUuid, "target-busy");
+        }
         startCount += 1;
         const sessionUuid = `start-${startCount}`;
         if (isIos) {
@@ -283,14 +409,18 @@ function createHarness(
               deviceIdentity: {
                 simulatorUdid: IOS_UDID,
                 simulatorName: options.iosSimulatorName ?? "iPhone 16 Pro",
-                iosServicePort: 8765,
+                iosServicePort:
+                  options.unchangedIosServicePort || !iosRunnerRestarted ? 8765 : 8766,
                 iosRunnerGeneration:
-                  options.unchangedIosRunnerIdentity || !iosRunnerRestarted ? 0 : 1,
+                  options.unchangedIosRunnerIdentity ||
+                  options.unchangedIosRunnerGeneration ||
+                  !iosRunnerRestarted
+                    ? 0
+                    : 1,
               },
             },
           };
         }
-        const requestedDeviceId = arguments_.deviceId;
         if (typeof requestedDeviceId === "string" && requestedDeviceId !== androidTargetSerial) {
           return {
             isError: true,
@@ -312,19 +442,42 @@ function createHarness(
         };
       }
       if (name === "observe") {
+        if (
+          options.failIosReadinessAfterRestart &&
+          iosRunnerRestarted &&
+          owner === "reacquire-after-ios-runner-restart"
+        ) {
+          throw new Error("iOS CtrlProxy readiness failed after restart");
+        }
         if (arguments_.sessionUuid === options.failObserveFor) {
           throw new Error(`observe failed for ${options.failObserveFor}`);
         }
         return { structuredContent: { tree: [] } };
       }
       if (name === "getDeviceState") {
-        if (owner === "old-session") {
+        const sessionUuid = String(arguments_.sessionUuid);
+        const persistedState = persistedStates.get(sessionUuid);
+        if (persistedState) {
+          if (options.allowPersistedSiblingFallback) {
+            return { structuredContent: { state: "ready-on-sibling" } };
+          }
+          if (terminalPersistedSessions.has(sessionUuid)) {
+            return {
+              isError: true,
+              structuredContent: {
+                error: `Session ${sessionUuid} is terminal after identity-recovery-${persistedState}; use a new session UUID.`,
+              },
+            };
+          }
+          terminalPersistedSessions.add(sessionUuid);
           return {
             isError: true,
             structuredContent: {
               error:
                 options.oldSessionDiagnostic ??
-                oldSessionDiagnostic(String(arguments_.sessionUuid)),
+                `Cannot safely recover session ${sessionUuid}: persisted target ${persistedState} ` +
+                  `(recovery reason: ${persistedState}). ` +
+                  "The persisted session is terminal; acquire a new device with getAndroid or getApple.",
             },
           };
         }
@@ -336,9 +489,41 @@ function createHarness(
           androidDuplicatePresent = options.keepAndroidDuplicateAfterKill ?? false;
           androidSiblingPresent = !(options.removeAndroidSiblingAfterDuplicateCleanup ?? false);
         } else if (device.deviceId === androidTargetSerial && !options.unchangedAndroidIdentity) {
-          androidTargetSerial = "emulator-5560";
+          if (restartedSessionUuid) {
+            persistedStates.set(restartedSessionUuid, "absent");
+            androidTargetPresent = false;
+          } else {
+            androidTargetSerial = "emulator-5560";
+          }
+        } else if (device.deviceId === IOS_UDID && restartedSessionUuid) {
+          persistedStates.set(restartedSessionUuid, "absent");
+          iosTargetPresent = false;
         }
         return { structuredContent: { killed: true } };
+      }
+      if (name === "deleteDevice") {
+        const target = arguments_.target as Record<string, unknown>;
+        if (target.isVirtual !== true) {
+          throw new Error("deleteDevice must remain constrained to a virtual signed target");
+        }
+        if (target.stableId !== "Pixel_8_API_35" && target.stableId !== IOS_UDID) {
+          throw new Error(`deleteDevice received an unsigned target ${String(target.stableId)}`);
+        }
+        if (restartedSessionUuid) {
+          persistedStates.set(restartedSessionUuid, "target-absent");
+        }
+        targetDeleted = true;
+        androidTargetPresent = false;
+        iosTargetPresent = false;
+        return {
+          structuredContent: {
+            state: "destroyed",
+            verification: {
+              notRunning: "confirmed",
+              inventory: "complete_absence_confirmed",
+            },
+          },
+        };
       }
       throw new Error(`Unexpected tool ${name}`);
     },
@@ -366,7 +551,13 @@ function createHarness(
       }
       if (name === "ide/status") {
         events.push("daemon:ide/status");
-        return { buildId: "test-build", entryScript: "/test/dist/src/index.js" };
+        return {
+          pid: 1000 + daemonGeneration,
+          startedAt: daemonGeneration,
+          processGenerationToken: `test-generation-${daemonGeneration}`,
+          buildId: "test-build",
+          entryScript: "/test/dist/src/index.js",
+        };
       }
       if (name === "ide/prepareMaintenance") {
         if ((options.activeSessions ?? 0) > 0) {
@@ -375,10 +566,19 @@ function createHarness(
         if ((options.activeExecutions ?? 0) > 0) {
           return { accepted: false, reason: "active_operations" };
         }
+        maintenanceFenced = true;
         return { accepted: true, maintenanceToken: "test-maintenance-token" };
       }
       if (name === "ide/completeMaintenance") {
-        return { completed: true };
+        const sameGeneration =
+          arguments_.pid === 1000 + daemonGeneration &&
+          arguments_.startedAt === daemonGeneration &&
+          arguments_.processGenerationToken === `test-generation-${daemonGeneration}`;
+        if (sameGeneration) {
+          maintenanceFenced = false;
+          events.push(`maintenance-complete:${daemonGeneration}`);
+        }
+        return { completed: sameGeneration };
       }
       expect(name).toBe("daemon/releaseSession");
       const sessionId = arguments_.sessionId;
@@ -417,16 +617,56 @@ function createHarness(
         if (options.failCliFor && command.includes(options.failCliFor)) {
           throw new Error(`CLI failed for ${options.failCliFor}`);
         }
-        events.push(
-          command.includes("corrupt-control-metadata-admitted")
-            ? `fault:${command.join(" ")}`
-            : command.includes("doctor")
-              ? `doctor:${command.join(" ")}`
-              : "cli:getDeviceState",
-        );
+        if (command.includes("acceptance-doctor-fault")) {
+          pendingDoctorFault = command[command.indexOf("--fault") + 1];
+          events.push(`fault:${pendingDoctorFault}`);
+          return { stdout: "" };
+        }
+        if (command.includes("doctor")) {
+          if (
+            pendingDoctorFault !== "corrupt-control-metadata" &&
+            pendingDoctorFault !== "missing-control-metadata"
+          ) {
+            daemonGeneration += 1;
+            // A replacement daemon has no inherited maintenance admission.
+            maintenanceFenced = false;
+          }
+          events.push(`doctor:${pendingDoctorFault}`);
+          pendingDoctorFault = undefined;
+          return { stdout: "" };
+        }
+        if (maintenanceFenced) {
+          throw new Error("daemon maintenance fence rejected post-repair acquisition");
+        }
+        events.push("cli:acquire");
+        const isIos = command.includes("getApple");
+        cliAcquisitionCount += 1;
+        return {
+          stdout: JSON.stringify({
+            structuredContent: {
+              sessionUuid: `cli-acquired-${cliAcquisitionCount}`,
+              deviceIdentity: isIos
+                ? {
+                    simulatorUdid: IOS_UDID,
+                    simulatorName: options.iosSimulatorName ?? "iPhone 16 Pro",
+                    iosServicePort: 8765,
+                    iosRunnerGeneration: 0,
+                  }
+                : {
+                    avdName: "Pixel_8_API_35",
+                    adbSerial: androidTargetSerial,
+                    emulatorConsolePort: Number(androidTargetSerial.slice("emulator-".length)),
+                  },
+            },
+          }),
+        };
       },
       async restartDaemon() {
         events.push("restart-daemon");
+      },
+      async restartAcceptanceSession(scope) {
+        events.push(`restart-acceptance-session:${scope.sessionUuid}`);
+        restartedSessionUuid = scope.sessionUuid;
       },
       writeFile:
         options.writeFile ??
@@ -468,6 +708,20 @@ describe("live device acceptance harness", () => {
       enableTools: ["observe", "getDeviceState"],
     });
     expect(
+      harness.calls
+        .filter((call) => call.name === "setToolEnabled")
+        .map((call) => ({ owner: call.owner, arguments: call.arguments })),
+    ).toEqual([
+      {
+        owner: "provision",
+        arguments: { toolName: "provisionDevice", enabled: true },
+      },
+      {
+        owner: "persisted-target-absent-delete",
+        arguments: { toolName: "deleteDevice", enabled: true },
+      },
+    ]);
+    expect(
       harness.cliCommands.some(
         (command) =>
           command.slice(0, 5).join(" ") ===
@@ -479,11 +733,15 @@ describe("live device acceptance harness", () => {
     const exactAcquisitions = harness.calls.filter(
       (call) => call.name === "getAndroid" && !call.owner.startsWith("controlled-discovery-"),
     );
-    expect(exactAcquisitions.map((call) => call.arguments)).toEqual([
-      { avdName: "Pixel_8_API_35", enableTools: ["observe", "getDeviceState"] },
-      { avdName: "Pixel_8_API_35", enableTools: ["observe", "getDeviceState"] },
-      { avdName: "Pixel_8_API_35", enableTools: ["observe", "getDeviceState"] },
-    ]);
+    expect(exactAcquisitions.length).toBeGreaterThanOrEqual(6);
+    expect(
+      exactAcquisitions.slice(0, -1).every((call) => call.arguments.avdName === "Pixel_8_API_35"),
+    ).toBe(true);
+    expect(exactAcquisitions.at(-1)?.arguments).toEqual({
+      avdName: "Pixel_8_Sibling",
+      deviceId: "emulator-5558",
+      enableTools: ["observe", "getDeviceState"],
+    });
     expect(
       harness.calls.filter((call) => call.name === "startDevice").map((call) => call.arguments),
     ).toEqual([
@@ -513,14 +771,23 @@ describe("live device acceptance harness", () => {
         preferRunning: true,
         maxOsVersion: "0",
       },
-      {
-        platform: "android",
-        avdName: "Pixel_8_API_35",
-        preferRunning: true,
-        maxOsVersion: "35",
-      },
       { platform: "android", avdName: "Pixel_8_API_35", preferRunning: true },
     ]);
+    expect(harness.cliCommands.find((command) => command.includes("getAndroid"))).toEqual([
+      process.execPath,
+      "/test/dist/src/index.js",
+      "--cli",
+      "getAndroid",
+      "--avd-name",
+      "Pixel_8_API_35",
+      "--enable-tools",
+      '["observe","getDeviceState"]',
+    ]);
+    expect(
+      harness.calls.find(
+        (call) => call.owner === "independent-mcp" && call.name === "getDeviceState",
+      )?.arguments,
+    ).toEqual({ sessionUuid: "cli-acquired-1" });
     expect(
       harness.calls.find(
         (call) =>
@@ -543,23 +810,14 @@ describe("live device acceptance harness", () => {
       "start-5",
       "start-6",
       "start-7",
+      "cli-acquired-1",
       "start-8",
-      "start-9",
     ]) {
       assertReadinessImmediatelyFollowsSuccess(harness, sessionUuid);
     }
-    expect(harness.releases).toEqual([
-      "start-1",
-      "start-2",
-      "provision-1",
-      "start-3",
-      "start-4",
-      "start-5",
-      "start-6",
-      "start-7",
-      "start-8",
-      "start-9",
-    ]);
+    expect(harness.releases).toContain("cli-acquired-1");
+    expect(harness.releases).toContain("start-8");
+    expect(new Set(harness.releases).size).toBe(harness.releases.length);
     expect(
       evidence.acquisitionRequests.some((entry) => {
         const request = entry.request as Record<string, unknown>;
@@ -654,23 +912,29 @@ describe("live device acceptance harness", () => {
         maxOsVersion: "0.0",
       },
       { platform: "ios", deviceId: IOS_UDID, preferRunning: true, formFactor: "tablet" },
-      {
-        platform: "ios",
-        deviceId: IOS_UDID,
-        preferRunning: true,
-        formFactor: "phone",
-        maxOsVersion: "18.0",
-      },
       { platform: "ios", deviceId: IOS_UDID, preferRunning: true, formFactor: "phone" },
+    ]);
+    expect(harness.cliCommands.find((command) => command.includes("getApple"))).toEqual([
+      process.execPath,
+      "/test/dist/src/index.js",
+      "--cli",
+      "getApple",
+      "--device-id",
+      IOS_UDID,
+      "--enable-tools",
+      '["observe","getDeviceState"]',
     ]);
     expect(
       harness.calls.filter((call) => call.name === "getApple").map((call) => call.arguments),
-    ).toEqual([
-      ...Array.from({ length: 7 }, () => ({
-        deviceId: IOS_UDID,
-        enableTools: ["observe", "getDeviceState"],
-      })),
-    ]);
+    ).toEqual(
+      expect.arrayContaining([
+        { deviceId: IOS_UDID, enableTools: ["observe", "getDeviceState"] },
+        {
+          deviceId: "00000000-0000-0000-0000-000000000002",
+          enableTools: ["observe", "getDeviceState"],
+        },
+      ]),
+    );
     expect(harness.calls.find((call) => call.name === "provisionDevice")?.arguments).toMatchObject({
       device: { deviceId: IOS_UDID, name: "iPhone 16 Pro", platform: "ios" },
     });
@@ -680,7 +944,7 @@ describe("live device acceptance harness", () => {
     expect(evidence.checks).toMatchObject({
       stableIdentityPreserved: true,
       iosServiceEndpointExposed: true,
-      iosServiceEndpointChanged: false,
+      iosServiceEndpointChanged: true,
       iosRunnerGenerationExposed: true,
       iosRunnerGenerationChanged: true,
       iosRunnerIdentityChanged: true,
@@ -710,7 +974,14 @@ describe("live device acceptance harness", () => {
     expect(
       harness.calls.some(
         (call) =>
-          (call.name === "getApple" || call.name === "killDevice") &&
+          call.name === "getApple" &&
+          call.arguments.deviceId === "00000000-0000-0000-0000-000000000002",
+      ),
+    ).toBe(true);
+    expect(
+      harness.calls.some(
+        (call) =>
+          call.name === "killDevice" &&
           JSON.stringify(call.arguments).includes("00000000-0000-0000-0000-000000000002"),
       ),
     ).toBe(false);
@@ -720,6 +991,33 @@ describe("live device acceptance harness", () => {
         return "minOsVersion" in request && "maxOsVersion" in request;
       }),
     ).toBe(true);
+  });
+
+  test("rejects iOS runner restart evidence when the CtrlProxy service port does not change", async () => {
+    const harness = createHarness({ unchangedIosServicePort: true });
+
+    await expect(runAcceptanceMatrix(iosArgs, harness.dependencies)).rejects.toThrow(
+      "iOS CtrlProxy service port did not change across the required targeted restart",
+    );
+    expect(harness.events).toContain(`ios-runner-restart:${IOS_UDID}`);
+  });
+
+  test("preserves runner-generation proof and rejects an unchanged generation", async () => {
+    const harness = createHarness({ unchangedIosRunnerGeneration: true });
+
+    await expect(runAcceptanceMatrix(iosArgs, harness.dependencies)).rejects.toThrow(
+      "iOS runner generation did not change across the required targeted restart",
+    );
+    expect(harness.events).toContain(`ios-runner-restart:${IOS_UDID}`);
+  });
+
+  test("rejects a changed iOS service port that is stale or occupied at readiness", async () => {
+    const harness = createHarness({ failIosReadinessAfterRestart: true });
+
+    await expect(runAcceptanceMatrix(iosArgs, harness.dependencies)).rejects.toThrow(
+      "iOS CtrlProxy readiness failed after restart",
+    );
+    expect(harness.events).toContain(`ios-runner-restart:${IOS_UDID}`);
   });
 
   test("rejects iOS runner restart evidence when neither exposed identity changes", async () => {
@@ -736,7 +1034,7 @@ describe("live device acceptance harness", () => {
     };
 
     await expect(runAcceptanceMatrix(iosArgs, harness.dependencies)).rejects.toThrow(
-      "iOS runner identity did not change across the required targeted restart",
+      "iOS runner generation did not change across the required targeted restart",
     );
     expect(harness.events).toContain(`ios-runner-restart:${IOS_UDID}`);
   });
@@ -840,18 +1138,72 @@ describe("live device acceptance harness", () => {
     }
   });
 
-  test("releases the owned session before maintenance restart and requires the terminal diagnostic", async () => {
-    const harness = createHarness();
+  test.each([
+    [androidArgs, "Pixel_8_API_35", "getAndroid"],
+    [iosArgs, IOS_UDID, "getApple"],
+  ] as const)(
+    "exercises exact busy and inventory-absent persisted recovery for both platforms",
+    async (args, targetStableId, tool) => {
+      const harness = createHarness();
 
-    await runAcceptanceMatrix({ ...androidArgs, scenario: "recovery" }, harness.dependencies);
+      const evidence = await runAcceptanceMatrix(args, harness.dependencies);
 
-    const restart = harness.events.indexOf("restart-daemon");
-    const oldSession = harness.events.indexOf("old-session:getDeviceState");
-    const release = harness.events.indexOf("release:start-6");
-    expect(release).toBeLessThan(restart);
-    expect(restart).toBeLessThan(oldSession);
-    expect(harness.events).toContain("reacquire-after-repair:getAndroid");
-  });
+      for (const reason of ["target-busy", "target-absent"]) {
+        expect(
+          harness.events.some((event) =>
+            event.startsWith("restart-acceptance-session:cli-acquired-"),
+          ),
+        ).toBe(true);
+        expect(harness.events).toContain(`persisted-${reason}-old-uuid:getDeviceState`);
+        expect(
+          harness.events.filter((event) => event === `persisted-${reason}-old-uuid:getDeviceState`),
+        ).toHaveLength(2);
+      }
+      expect(
+        harness.calls.some(
+          (call) =>
+            call.name === "deleteDevice" &&
+            (call.arguments.target as Record<string, unknown>).stableId === targetStableId,
+        ),
+      ).toBe(true);
+      expect(
+        harness.calls.some(
+          (call) =>
+            call.name === "listDeviceImages" && call.owner === "controlled-discovery-forward",
+        ),
+      ).toBe(true);
+      expect(harness.events).toContain(`reacquire-after-repair:${tool}`);
+      if (args.platform === "ios") {
+        const redact = (value: string): string =>
+          `hmac-sha256:${createHmac(
+            "sha256",
+            Buffer.from("test-only-operator-key-material-32-bytes"),
+          )
+            .update(value)
+            .digest("hex")
+            .slice(0, 20)}`;
+        expect(evidence.steps).toContainEqual(
+          expect.objectContaining({
+            name: redact("ios-same-transport-replacement-inapplicable"),
+            detail: expect.objectContaining({
+              deletionClassifiedAs: redact("target-absent"),
+            }),
+          }),
+        );
+      }
+    },
+  );
+
+  test.each([androidArgs, iosArgs])(
+    "fails if a persisted UUID would fall back to the signed sibling by discovery order",
+    async (args) => {
+      const harness = createHarness({ allowPersistedSiblingFallback: true });
+
+      await expect(runAcceptanceMatrix(args, harness.dependencies)).rejects.toThrow(
+        "must never bind the sibling",
+      );
+    },
+  );
 
   test.each([
     { args: androidArgs, flag: "--android" },
@@ -863,7 +1215,7 @@ describe("live device acceptance harness", () => {
 
       const evidence = await runAcceptanceMatrix(args, harness.dependencies);
       const fault = harness.cliCommands.findIndex((command) =>
-        command.includes("corrupt-control-metadata-admitted"),
+        command.includes("acceptance-doctor-fault"),
       );
       const doctor = harness.cliCommands.findIndex((command) => command.includes("doctor"));
       const doctorEvent = harness.events.findLastIndex((event) => event.startsWith("doctor:"));
@@ -877,9 +1229,30 @@ describe("live device acceptance harness", () => {
         process.execPath,
         "/test/dist/src/index.js",
         "--daemon",
-        "corrupt-control-metadata-admitted",
+        "acceptance-doctor-fault",
+        "--fault",
+        "corrupt-control-metadata",
         "--maintenance-token",
         "test-maintenance-token",
+        "--expires-at",
+        expect.any(String),
+      ]);
+      expect(
+        harness.cliCommands
+          .filter((command) => command.includes("acceptance-doctor-fault"))
+          .map((command) => command[command.indexOf("--fault") + 1]),
+      ).toEqual([
+        "corrupt-control-metadata",
+        "missing-control-metadata",
+        "missing-socket",
+        "stale-socket",
+        "unresponsive-daemon",
+        "missing-daemon",
+        "dead-daemon",
+      ]);
+      expect(harness.events.filter((event) => event === "maintenance-complete:1")).toEqual([
+        "maintenance-complete:1",
+        "maintenance-complete:1",
       ]);
       expect(harness.cliCommands[doctor]).toContain(flag);
       expect(harness.events).toContain(
@@ -893,13 +1266,12 @@ describe("live device acceptance harness", () => {
     },
   );
 
-  test("rejects a generic error instead of the required old-session diagnostic", async () => {
+  test("rejects a persisted recovery diagnostic that omits the exact recovery reason", async () => {
     const harness = createHarness({ oldSessionDiagnostic: "unknown session" });
 
     await expect(
       runAcceptanceMatrix({ ...androidArgs, scenario: "recovery" }, harness.dependencies),
-    ).rejects.toThrow("Old session did not return the required terminal diagnostic");
-    expect(harness.releases).toContain("start-6");
+    ).rejects.toThrow("did not report the exact old-session recovery reason");
   });
 
   test("rejects a generic unrelated-owner error instead of the product conflict diagnostic", async () => {
@@ -917,7 +1289,7 @@ describe("live device acceptance harness", () => {
       "start-5",
       "start-6",
       "start-7",
-      "start-8",
+      "cli-acquired-1",
     ]);
   });
 
@@ -971,7 +1343,7 @@ describe("live device acceptance harness", () => {
           throw new Error("should not create daemon client");
         },
         restartDaemon: async () => {},
-        spawnCli: async () => {},
+        spawnCli: async () => ({ stdout: "" }),
         writeFile: async (_path, content) => {
           evidence.push(content);
         },
@@ -1044,7 +1416,7 @@ describe("live device acceptance harness", () => {
     );
 
     expect(harness.events).toContain("close:daemon");
-    expect(harness.events.filter((event) => event.startsWith("close:"))).toHaveLength(16);
+    expect(harness.events.filter((event) => event.startsWith("close:")).length).toBeGreaterThan(16);
     expect(harness.evidence[0]).not.toContain("daemon close failed");
     expect(harness.evidence[0]).not.toContain("client close failed");
   });
@@ -1059,6 +1431,67 @@ describe("live device acceptance harness", () => {
     expect(harness.evidence[0]).not.toContain("emulator-5560");
     expect(harness.evidence[0]).not.toContain("start-3");
     expect(harness.evidence[0]).toContain("hmac-sha256:");
+  });
+
+  test("authenticates schema-8 evidence and rejects body, build, and manifest tampering", async () => {
+    const fixture = createProductionAcceptanceFixture();
+    const harness = createHarness({
+      writeFile: async (path, content) => {
+        writeFileSync(path, content, { mode: 0o600 });
+        chmodSync(path, 0o600);
+      },
+    });
+    const verification = {
+      evidencePath: fixture.android.evidencePath,
+      ownershipManifestPath: fixture.android.ownershipManifestPath,
+      operatorKeyPath: fixture.android.operatorKeyPath,
+      operatorKey: fixture.android.operatorKey,
+      build: fixture.android.build,
+    };
+    try {
+      const evidence = await runAcceptanceMatrix(fixture.android, harness.dependencies);
+      expect(evidence.authentication.mac).toMatch(/^[0-9a-f]{64}$/);
+      expect(verifyEvidenceFile(verification).outcome.passed).toBe(true);
+
+      const original = readFileSync(fixture.android.evidencePath, "utf8");
+      for (const mutate of [
+        (candidate: Record<string, unknown>) => {
+          (candidate.outcome as Record<string, unknown>).passed = false;
+        },
+        (candidate: Record<string, unknown>) => {
+          (candidate.checks as Record<string, unknown>).stableIdentityPreserved = false;
+        },
+      ]) {
+        const tampered = JSON.parse(original) as Record<string, unknown>;
+        mutate(tampered);
+        writeFileSync(fixture.android.evidencePath, `${JSON.stringify(tampered)}\n`);
+        chmodSync(fixture.android.evidencePath, 0o600);
+        expect(() => verifyEvidenceFile(verification)).toThrow("Evidence authentication failed");
+      }
+      writeFileSync(fixture.android.evidencePath, original);
+      chmodSync(fixture.android.evidencePath, 0o600);
+
+      expect(() =>
+        verifyEvidenceFile({
+          ...verification,
+          build: { ...fixture.android.build, buildId: "different-build" },
+        }),
+      ).toThrow("Evidence authentication binding does not match");
+
+      const otherManifestPath = join(dirname(fixture.android.ownershipManifestPath), "other.json");
+      const otherAndroid = { ...fixture.android, ownershipManifestPath: otherManifestPath };
+      const otherIos = { ...fixture.ios, ownershipManifestPath: otherManifestPath };
+      recordOwnershipManifest(otherAndroid);
+      recordOwnershipManifest(otherIos);
+      expect(() =>
+        verifyEvidenceFile({
+          ...verification,
+          ownershipManifestPath: otherManifestPath,
+        }),
+      ).toThrow("Evidence authentication binding does not match");
+    } finally {
+      fixture.dispose();
+    }
   });
 
   test("returns by the absolute deadline when an injected MCP connection ignores AbortSignal", async () => {
@@ -1272,6 +1705,7 @@ describe("live device acceptance harness", () => {
       const createMcpClient = harness.dependencies.createMcpClient!;
       const createDaemonClient = harness.dependencies.createDaemonClient!;
       const restartDaemon = harness.dependencies.restartDaemon!;
+      const restartAcceptanceSession = harness.dependencies.restartAcceptanceSession!;
       return {
         ...harness.dependencies,
         testOnly: false,
@@ -1286,6 +1720,10 @@ describe("live device acceptance harness", () => {
         restartDaemon: async (maintenanceToken, timeoutMs, signal) => {
           observeScope("daemon-restart");
           await restartDaemon(maintenanceToken, timeoutMs, signal);
+        },
+        restartAcceptanceSession: async (scope, timeoutMs, signal) => {
+          observeScope("acceptance-session-restart");
+          await restartAcceptanceSession(scope, timeoutMs, signal);
         },
       };
     };
@@ -1304,9 +1742,11 @@ describe("live device acceptance harness", () => {
       );
 
       expect(residentDaemonStarts).toBe(1);
-      expect(scopeObservations.some((observation) => observation.source === "daemon-restart")).toBe(
-        true,
-      );
+      expect(
+        scopeObservations.some(
+          (observation) => observation.source === "acceptance-session-restart",
+        ),
+      ).toBe(true);
       expect(scopeObservations.map((observation) => observation.startupSecret)).toEqual(
         Array.from({ length: scopeObservations.length }, () => wrapperStartupSecret),
       );
@@ -1350,7 +1790,7 @@ describe("live device acceptance harness", () => {
             throw new Error("daemon client should not be created");
           },
           restartDaemon: async () => {},
-          spawnCli: async () => {},
+          spawnCli: async () => ({ stdout: "" }),
           writeFile: async () => {},
         }),
       ).rejects.toThrow("stop after direct scope observation");

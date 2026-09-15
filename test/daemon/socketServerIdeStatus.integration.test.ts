@@ -14,13 +14,18 @@ import type { BootedDevice } from "../../src/models";
 import { RELEASE_CHECKSUM_REGISTRY, IOS_CTRL_PROXY_APP_HASH } from "../../src/constants/release";
 import { executionTracker } from "../../src/server/executionTracker";
 import {
+  DAEMON_APPLY_ACCEPTANCE_DOCTOR_FAULT_METHOD,
   DAEMON_COMPLETE_MAINTENANCE_METHOD,
   DAEMON_CORRUPT_CONTROL_METADATA_METHOD,
   DAEMON_PREPARE_MAINTENANCE_METHOD,
   DAEMON_PREPARE_RESTART_METHOD,
+  DAEMON_RESTART_ACCEPTANCE_SESSION_METHOD,
   DAEMON_RESTART_ADMITTED_METHOD,
 } from "../../src/daemon/daemonRestartAdmission";
-import { createDaemonLiveAcceptanceCapability } from "../../src/daemon/liveAcceptanceCapability";
+import {
+  createDaemonLiveAcceptanceCapability,
+  createDaemonLiveAcceptanceScopedCapability,
+} from "../../src/daemon/liveAcceptanceCapability";
 
 const SHA256_HEX = /^[0-9a-f]{64}$/;
 
@@ -36,6 +41,24 @@ function createFakeDaemonState() {
       refreshDevices: async () => 0,
       getStats: () => ({ total: 0, idle: 0, assigned: 0, error: 0 }),
       releaseDevice: async () => {},
+    }),
+  };
+}
+
+function createFakeDaemonStateWithSessions(
+  sessions: Array<{
+    sessionId: string;
+    platform: "android" | "ios";
+    stableDeviceId?: string;
+  }>,
+) {
+  return {
+    ...createFakeDaemonState(),
+    getSessionManager: () => ({
+      getSession: (sessionId: string) =>
+        sessions.find((session) => session.sessionId === sessionId),
+      getAllSessions: () => sessions,
+      releaseSession: async () => null,
     }),
   };
 }
@@ -396,6 +419,161 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
         await unlink(acceptanceSocketPath);
       }
       executionTracker.clearDaemonMaintenancePreparation();
+    }
+  });
+
+  test.each([
+    ["missing-daemon", "daemon-missing"],
+    ["dead-daemon", "daemon-dead"],
+  ] as const)(
+    "acceptance doctor reports the distinct %s control state",
+    async (fault, controlState) => {
+      const startupSecret = "live-acceptance-startup-secret-123456";
+      const acceptanceSocketPath = join(
+        tmpdir(),
+        `t-acceptance-doctor-${randomUUID().slice(0, 8)}.sock`,
+      );
+      const timer = new FakeTimer();
+      const acceptanceServer = new UnixSocketServer(
+        acceptanceSocketPath,
+        "http://localhost:0/mcp",
+        createFakeDaemonState(),
+        timer,
+        null,
+        {
+          processGenerationToken: "acceptance-generation-1",
+          liveAcceptanceStartupSecret: startupSecret,
+        },
+      );
+
+      try {
+        await acceptanceServer.start();
+        const status = (await sendRequest(acceptanceSocketPath, "ide/status")).result!;
+        const admitted = await sendRequest(
+          acceptanceSocketPath,
+          DAEMON_PREPARE_MAINTENANCE_METHOD,
+          status,
+        );
+        const maintenanceToken = (admitted.result as { maintenanceToken: string }).maintenanceToken;
+        const expiresAt = timer.now() + 1_000;
+        const acceptanceCapability = createDaemonLiveAcceptanceScopedCapability(
+          startupSecret,
+          {
+            pid: status.pid as number,
+            startedAt: status.startedAt as number,
+            processGenerationToken: status.processGenerationToken as string,
+            version: status.version as string,
+            buildId: status.buildId as string,
+            entryScript: status.entryScript as string,
+          },
+          { fault, expiresAt },
+        );
+
+        expect(
+          (
+            await sendRequest(acceptanceSocketPath, DAEMON_APPLY_ACCEPTANCE_DOCTOR_FAULT_METHOD, {
+              ...status,
+              maintenanceToken,
+              fault,
+              expiresAt,
+              acceptanceCapability,
+            })
+          ).result,
+        ).toEqual({ accepted: true, controlState });
+      } finally {
+        await acceptanceServer.close();
+        if (existsSync(acceptanceSocketPath)) {
+          await unlink(acceptanceSocketPath);
+        }
+        executionTracker.clearDaemonMaintenancePreparation();
+      }
+    },
+  );
+
+  test("acceptance persisted-session restart is generation, deadline, target, and control bound", async () => {
+    const startupSecret = "live-acceptance-startup-secret-123456";
+    const acceptanceSocketPath = join(
+      tmpdir(),
+      `t-acceptance-session-${randomUUID().slice(0, 8)}.sock`,
+    );
+    const timer = new FakeTimer();
+    const acceptanceServer = new UnixSocketServer(
+      acceptanceSocketPath,
+      "http://localhost:0/mcp",
+      createFakeDaemonStateWithSessions([
+        {
+          sessionId: "owned-session",
+          platform: "android",
+          stableDeviceId: "Acceptance_AVD",
+        },
+      ]),
+      timer,
+      null,
+      {
+        processGenerationToken: "acceptance-generation-1",
+        liveAcceptanceStartupSecret: startupSecret,
+      },
+    );
+    const scope = {
+      sessionUuid: "owned-session",
+      platform: "android" as const,
+      stableDeviceId: "Acceptance_AVD",
+      controls: {
+        androidSiblingAvdName: "Acceptance_Sibling",
+        androidDuplicateSerial: "emulator-5554",
+        iosSameNameSiblingUdid: "00000000-0000-0000-0000-000000000002",
+      },
+      expiresAt: 1_000,
+    };
+    try {
+      await acceptanceServer.start();
+      const status = (await sendRequest(acceptanceSocketPath, "ide/status")).result!;
+      const generation = {
+        pid: status.pid as number,
+        startedAt: status.startedAt as number,
+        processGenerationToken: status.processGenerationToken as string,
+        version: status.version as string,
+        buildId: status.buildId as string,
+        entryScript: status.entryScript as string,
+      };
+      const capability = createDaemonLiveAcceptanceScopedCapability(
+        startupSecret,
+        generation,
+        scope,
+      );
+      expect(
+        (
+          await sendRequest(acceptanceSocketPath, DAEMON_RESTART_ACCEPTANCE_SESSION_METHOD, {
+            ...status,
+            scope: { ...scope, stableDeviceId: "Other_AVD" },
+            acceptanceCapability: capability,
+          })
+        ).result,
+      ).toEqual({ accepted: false, reason: "acceptance_capability_invalid" });
+      expect(
+        (
+          await sendRequest(acceptanceSocketPath, DAEMON_RESTART_ACCEPTANCE_SESSION_METHOD, {
+            ...status,
+            scope,
+            acceptanceCapability: capability,
+          })
+        ).result,
+      ).toEqual({ accepted: true });
+      expect(
+        (
+          await sendRequest(acceptanceSocketPath, DAEMON_RESTART_ACCEPTANCE_SESSION_METHOD, {
+            ...status,
+            scope,
+            acceptanceCapability: capability,
+          })
+        ).result,
+      ).toEqual({ accepted: false, reason: "restart_pending" });
+    } finally {
+      await acceptanceServer.close();
+      if (existsSync(acceptanceSocketPath)) {
+        await unlink(acceptanceSocketPath);
+      }
+      executionTracker.clearDaemonRestartPreparation();
     }
   });
 

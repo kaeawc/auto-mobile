@@ -131,11 +131,17 @@ import type { DeviceService } from "../features/observe/DeviceService";
 import { executionTracker } from "../server/executionTracker";
 import {
   DAEMON_COMPLETE_MAINTENANCE_METHOD,
+  DAEMON_APPLY_ACCEPTANCE_DOCTOR_FAULT_METHOD,
   DAEMON_CORRUPT_CONTROL_METADATA_METHOD,
   DAEMON_PREPARE_MAINTENANCE_METHOD,
   DAEMON_PREPARE_RESTART_METHOD,
   DAEMON_REPAIR_CONTROL_METADATA_METHOD,
+  DAEMON_RESTART_ACCEPTANCE_SESSION_METHOD,
   DAEMON_RESTART_ADMITTED_METHOD,
+  type AcceptanceSessionRestartScope,
+  type AcceptanceDoctorFault,
+  type DaemonAcceptanceDoctorFault,
+  type DaemonAcceptanceSessionRestart,
   type DaemonAdmittedRestart,
   type DaemonControlMetadataCorruption,
   type DaemonControlMetadataRepair,
@@ -144,6 +150,7 @@ import {
 } from "./daemonRestartAdmission";
 import {
   daemonLiveAcceptanceCapabilityMatches,
+  daemonLiveAcceptanceScopedCapabilityMatches,
   type DaemonGenerationIdentity,
 } from "./liveAcceptanceCapability";
 import {
@@ -573,9 +580,17 @@ export class UnixSocketServer {
   private readonly onRestartAccepted?: () => void;
   private readonly onControlMetadataRepair?: (signal?: AbortSignal) => Promise<void>;
   private readonly onControlMetadataCorruption?: (signal?: AbortSignal) => Promise<void>;
+  private readonly onAcceptanceDoctorFault?: (
+    fault: Exclude<
+      AcceptanceDoctorFault,
+      "missing-daemon" | "dead-daemon" | "unresponsive-daemon" | "stale-socket"
+    >,
+    signal?: AbortSignal,
+  ) => Promise<void>;
   private readonly liveAcceptanceStartupSecret: string | undefined;
   private maintenanceAdmissionToken: string | undefined;
   private maintenanceRestartConsumed = false;
+  private acceptanceFaultUnresponsive = false;
   private readonly sessionToolSelectionService?: Pick<
     SessionToolSelectionService,
     "isEnabled" | "setEnabled"
@@ -650,6 +665,13 @@ export class UnixSocketServer {
       onRestartAccepted?: () => void;
       onControlMetadataRepair?: (signal?: AbortSignal) => Promise<void>;
       onControlMetadataCorruption?: (signal?: AbortSignal) => Promise<void>;
+      onAcceptanceDoctorFault?: (
+        fault: Exclude<
+          AcceptanceDoctorFault,
+          "missing-daemon" | "dead-daemon" | "unresponsive-daemon" | "stale-socket"
+        >,
+        signal?: AbortSignal,
+      ) => Promise<void>;
       liveAcceptanceStartupSecret?: string;
       sessionToolSelectionService?: Pick<SessionToolSelectionService, "isEnabled" | "setEnabled">;
     } = {},
@@ -690,6 +712,7 @@ export class UnixSocketServer {
     this.onRestartAccepted = handshakeConfig.onRestartAccepted;
     this.onControlMetadataRepair = handshakeConfig.onControlMetadataRepair;
     this.onControlMetadataCorruption = handshakeConfig.onControlMetadataCorruption;
+    this.onAcceptanceDoctorFault = handshakeConfig.onAcceptanceDoctorFault;
     this.liveAcceptanceStartupSecret = handshakeConfig.liveAcceptanceStartupSecret;
     logger.info(`UnixSocketServer initialized with endpoint: "${mcpEndpoint}"`);
     if (!mcpEndpoint) {
@@ -1008,7 +1031,8 @@ export class UnixSocketServer {
   ): Promise<any | undefined> {
     const mutatesControlMetadata =
       request.method === DAEMON_REPAIR_CONTROL_METADATA_METHOD ||
-      request.method === DAEMON_CORRUPT_CONTROL_METADATA_METHOD;
+      request.method === DAEMON_CORRUPT_CONTROL_METADATA_METHOD ||
+      request.method === DAEMON_APPLY_ACCEPTANCE_DOCTOR_FAULT_METHOD;
     if (!mutatesControlMetadata) {
       return await this.handleLocalSocketRequest(request, sessionId);
     }
@@ -1170,6 +1194,12 @@ export class UnixSocketServer {
         error: DAEMON_SHUTTING_DOWN_ERROR_MESSAGE,
         daemonShuttingDown: daemonShuttingDownFailure(),
       };
+    }
+    if (this.acceptanceFaultUnresponsive) {
+      // Acceptance-only stale/unresponsive control state. Do not close the
+      // connection: doctor must distinguish a listening but non-responsive
+      // socket from a missing daemon under its own absolute deadline.
+      return await new Promise<DaemonResponse>(() => {});
     }
 
     const handshakeError = this.rejectOnHandshakeMismatch(request);
@@ -3147,6 +3177,118 @@ export class UnixSocketServer {
     }
   }
 
+  /**
+   * Acceptance-only crash admission for one persisted session. Unlike host
+   * maintenance, this intentionally permits exactly the signed session to
+   * survive in storage so the successor must prove stable-identity recovery.
+   * It never touches a device; the manager kills only this verified daemon
+   * generation after this RPC returns.
+   */
+  // eslint-disable-next-line complexity -- each refusal is a distinct security fence for this one-shot control RPC.
+  private restartAcceptanceSession(
+    params: Record<string, unknown>,
+  ): DaemonAcceptanceSessionRestart {
+    if (!this.daemonGenerationMatches(params)) {
+      return { accepted: false, reason: "generation_changed" };
+    }
+    const scope = this.acceptanceSessionRestartScope(params.scope);
+    if (!scope) {
+      return { accepted: false, reason: "scope_invalid" };
+    }
+    if (scope.expiresAt <= this.timer.now()) {
+      return { accepted: false, reason: "scope_expired" };
+    }
+    const identity: DaemonGenerationIdentity = {
+      pid: process.pid,
+      startedAt: this.identityStartedAt,
+      ...(this.processGenerationToken === undefined
+        ? {}
+        : { processGenerationToken: this.processGenerationToken }),
+      version: this.daemonIdentity.version,
+      buildId: this.daemonIdentity.build.buildId,
+      entryScript: this.daemonIdentity.build.entryScript,
+    };
+    if (
+      !daemonLiveAcceptanceScopedCapabilityMatches(
+        this.liveAcceptanceStartupSecret,
+        identity,
+        scope,
+        params.acceptanceCapability,
+      )
+    ) {
+      return { accepted: false, reason: "acceptance_capability_invalid" };
+    }
+    const sessions = this.daemonState.getSessionManager().getAllSessions?.();
+    if (!sessions) {
+      return { accepted: false, reason: "session_not_found" };
+    }
+    const session = sessions.find((candidate) => candidate.sessionId === scope.sessionUuid);
+    if (!session) {
+      return { accepted: false, reason: "session_not_found" };
+    }
+    if (
+      session.platform !== scope.platform ||
+      session.stableDeviceId !== scope.stableDeviceId ||
+      sessions.length !== 1
+    ) {
+      return {
+        accepted: false,
+        reason:
+          sessions.length !== 1 &&
+          sessions.some((candidate) => candidate.sessionId !== scope.sessionUuid)
+            ? "unrelated_sessions"
+            : "session_identity_mismatch",
+      };
+    }
+    const admission = executionTracker.prepareForDaemonRestart();
+    if (admission !== "accepted") {
+      return {
+        accepted: false,
+        reason: admission === "active_operations" ? "active_operations" : "restart_pending",
+      };
+    }
+    // Keep the tracker fenced until process exit. There is deliberately no
+    // onRestartAccepted callback here: graceful shutdown would terminally
+    // release the persisted session and invalidate this recovery scenario.
+    return { accepted: true };
+  }
+
+  // eslint-disable-next-line complexity -- validate every untrusted scope field before HMAC authorization.
+  private acceptanceSessionRestartScope(value: unknown): AcceptanceSessionRestartScope | undefined {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return undefined;
+    }
+    const scope = value as Partial<AcceptanceSessionRestartScope>;
+    const controls = scope.controls;
+    if (
+      typeof scope.sessionUuid !== "string" ||
+      scope.sessionUuid.length === 0 ||
+      (scope.platform !== "android" && scope.platform !== "ios") ||
+      typeof scope.stableDeviceId !== "string" ||
+      scope.stableDeviceId.length === 0 ||
+      typeof scope.expiresAt !== "number" ||
+      !Number.isFinite(scope.expiresAt) ||
+      !controls ||
+      typeof controls !== "object" ||
+      typeof controls.androidSiblingAvdName !== "string" ||
+      typeof controls.androidDuplicateSerial !== "string" ||
+      typeof controls.iosSameNameSiblingUdid !== "string"
+    ) {
+      return undefined;
+    }
+    return {
+      sessionUuid: scope.sessionUuid,
+      platform: scope.platform,
+      stableDeviceId: scope.stableDeviceId,
+      controls: {
+        androidSiblingAvdName: controls.androidSiblingAvdName,
+        androidDuplicateSerial: controls.androidDuplicateSerial,
+        iosSameNameSiblingUdid: controls.iosSameNameSiblingUdid,
+      },
+      expiresAt: scope.expiresAt,
+    };
+  }
+
   private async repairControlMetadata(
     params: Record<string, unknown>,
     signal?: AbortSignal,
@@ -3203,6 +3345,80 @@ export class UnixSocketServer {
     await this.onControlMetadataCorruption(signal);
     signal?.throwIfAborted();
     return { corrupted: true };
+  }
+
+  // eslint-disable-next-line complexity -- fault selection is deliberately fail-closed and host-control-only.
+  private async applyAcceptanceDoctorFault(
+    params: Record<string, unknown>,
+    signal?: AbortSignal,
+  ): Promise<DaemonAcceptanceDoctorFault> {
+    if (!this.daemonGenerationMatches(params)) {
+      return { accepted: false, reason: "generation_changed" };
+    }
+    if (params.maintenanceToken !== this.maintenanceAdmissionToken) {
+      return { accepted: false, reason: "maintenance_token_invalid" };
+    }
+    const fault = params.fault;
+    if (
+      fault !== "missing-daemon" &&
+      fault !== "dead-daemon" &&
+      fault !== "unresponsive-daemon" &&
+      fault !== "missing-control-metadata" &&
+      fault !== "corrupt-control-metadata" &&
+      fault !== "missing-socket" &&
+      fault !== "stale-socket"
+    ) {
+      return { accepted: false, reason: "fault_invalid" };
+    }
+    const expiresAt = params.expiresAt;
+    if (typeof expiresAt !== "number" || !Number.isFinite(expiresAt)) {
+      return { accepted: false, reason: "scope_expired" };
+    }
+    if (expiresAt <= this.timer.now()) {
+      return { accepted: false, reason: "scope_expired" };
+    }
+    const identity: DaemonGenerationIdentity = {
+      pid: process.pid,
+      startedAt: this.identityStartedAt,
+      ...(this.processGenerationToken === undefined
+        ? {}
+        : { processGenerationToken: this.processGenerationToken }),
+      version: this.daemonIdentity.version,
+      buildId: this.daemonIdentity.build.buildId,
+      entryScript: this.daemonIdentity.build.entryScript,
+    };
+    const scope = { fault, expiresAt };
+    if (
+      !daemonLiveAcceptanceScopedCapabilityMatches(
+        this.liveAcceptanceStartupSecret,
+        identity,
+        scope,
+        params.acceptanceCapability,
+      )
+    ) {
+      return { accepted: false, reason: "acceptance_capability_invalid" };
+    }
+    const sessions = this.daemonState.getSessionManager().getAllSessions?.();
+    if (!sessions || sessions.length > 0) {
+      return { accepted: false, reason: "active_sessions" };
+    }
+    signal?.throwIfAborted();
+    if (fault === "unresponsive-daemon" || fault === "stale-socket") {
+      this.acceptanceFaultUnresponsive = true;
+      return { accepted: true };
+    }
+    if (fault === "missing-daemon") {
+      return { accepted: true, controlState: "daemon-missing" };
+    }
+    if (fault === "dead-daemon") {
+      return { accepted: true, controlState: "daemon-dead" };
+    }
+    if (!this.onAcceptanceDoctorFault) {
+      return { accepted: false, reason: "fault_unavailable" };
+    }
+    await this.onAcceptanceDoctorFault(fault, signal);
+    signal?.throwIfAborted();
+    return { accepted: true };
   }
 
   private requireFeatureFlagService(): FeatureFlagService {
@@ -3307,11 +3523,17 @@ export class UnixSocketServer {
       case DAEMON_RESTART_ADMITTED_METHOD: {
         return this.restartAdmittedDaemon(request.params);
       }
+      case DAEMON_RESTART_ACCEPTANCE_SESSION_METHOD: {
+        return this.restartAcceptanceSession(request.params);
+      }
       case DAEMON_REPAIR_CONTROL_METADATA_METHOD: {
         return await this.repairControlMetadata(request.params, signal);
       }
       case DAEMON_CORRUPT_CONTROL_METADATA_METHOD: {
         return await this.corruptControlMetadata(request.params, signal);
+      }
+      case DAEMON_APPLY_ACCEPTANCE_DOCTOR_FAULT_METHOD: {
+        return await this.applyAcceptanceDoctorFault(request.params, signal);
       }
       case "ide/status": {
         return {

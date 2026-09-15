@@ -515,24 +515,21 @@ async function verifyRequestedDoctorChecks(
   if (!requested) {
     return undefined;
   }
-  return await attemptRecoveryStep(
-    "verification",
-    deadline,
-    timer,
-    async (signal) => {
-      const { profile: diagnosticProfile, ...platforms } = requested;
-      const report = await runDoctorChecks({
-        ...platforms,
-        diagnosticProfile,
-        signal,
-        deadlineMs: deadline,
-        timer,
-      });
-      assertRequestedDoctorSections(report, requested);
-      return requested;
-    },
-    true,
-  );
+  // These checks are read-only verification, not a daemon lifecycle transition.
+  // They receive the recovery abort signal, but an ignored cancellation must not
+  // keep `--cli doctor --repair` alive after its deadline.
+  return await attemptRecoveryStep("verification", deadline, timer, async (signal) => {
+    const { profile: diagnosticProfile, ...platforms } = requested;
+    const report = await runDoctorChecks({
+      ...platforms,
+      diagnosticProfile,
+      signal,
+      deadlineMs: deadline,
+      timer,
+    });
+    assertRequestedDoctorSections(report, requested);
+    return requested;
+  });
 }
 
 async function completeVerifiedRecovery(

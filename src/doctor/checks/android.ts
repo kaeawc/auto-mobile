@@ -116,11 +116,13 @@ function normalizePath(value: string): string {
   return value.replace(/\\/g, "/");
 }
 
-/** Only the cancellation half of a mixed options bag, with absent keys left absent. */
+/** Keep one caller-owned absolute deadline across Android subprocess probes. */
 function probeOptions(options: DoctorProbeOptions): DoctorProbeOptions {
   return {
     ...(options.signal ? { signal: options.signal } : {}),
     ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
+    ...(options.deadlineMs === undefined ? {} : { deadlineMs: options.deadlineMs }),
+    ...(options.timer === undefined ? {} : { timer: options.timer }),
   };
 }
 
@@ -575,11 +577,16 @@ export async function runPostRepairAndroidChecks(
 ): Promise<CheckResult[]> {
   const probe = probeOptions(options);
   const results: CheckResult[] = [];
+  const run = async (check: () => Promise<CheckResult>): Promise<void> => {
+    remainingDoctorProbe(options);
+    results.push(await check());
+    remainingDoctorProbe(options);
+  };
 
-  results.push(await checkAndroidCommandLineTools(options, dependencies));
-  results.push(await checkJavaHome());
-  results.push(await checkAdbInstallation(dependencies.adbFactory, probe));
-  results.push(await checkAdbVersion(dependencies.adbFactory, probe));
+  await run(() => checkAndroidCommandLineTools(options, dependencies));
+  await run(() => checkJavaHome());
+  await run(() => checkAdbInstallation(dependencies.adbFactory, probe));
+  await run(() => checkAdbVersion(dependencies.adbFactory, probe));
 
   return results;
 }

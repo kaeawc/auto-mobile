@@ -159,6 +159,53 @@ describe("post-repair Android doctor checks", () => {
       "ADB Version",
     ]);
   });
+
+  test("aborts a stalled host-tool probe at the shared repair deadline", async () => {
+    const timer = new FakeTimer();
+    const deadline = createDoctorDeadline({ timeoutMs: 50 }, timer);
+    const location = {
+      path: "/test/android-sdk/cmdline-tools/latest",
+      source: "android_sdk_root" as const,
+      available_tools: ["sdkmanager"],
+    };
+    let cancellationObserved = false;
+    let adbFactoryCalls = 0;
+    const checks = runPostRepairAndroidChecks(
+      { ...deadline.probe },
+      {
+        ...baseDependencies,
+        detectAndroidCommandLineTools: async () => [location],
+        getBestAndroidToolsLocation: () => location,
+        getCmdlineToolsVersion: async (_location, probe) => {
+          await new Promise<void>((resolve) => {
+            probe?.signal?.addEventListener(
+              "abort",
+              () => {
+                cancellationObserved = true;
+                resolve();
+              },
+              { once: true },
+            );
+          });
+          return null;
+        },
+        adbFactory: {
+          create: () => {
+            adbFactoryCalls++;
+            throw new Error("post-deadline Android probes must not start");
+          },
+        } as unknown as AdbClientFactory,
+      },
+    );
+
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    timer.advanceTime(50);
+
+    await expect(checks).rejects.toThrow("Doctor diagnostic deadline elapsed");
+    expect(cancellationObserved).toBe(true);
+    expect(adbFactoryCalls).toBe(0);
+    deadline.dispose();
+  });
 });
 
 describe("checkJavaHome", () => {

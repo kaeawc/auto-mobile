@@ -156,12 +156,12 @@ describe("repairDaemon", () => {
     expect(result.postRepairDoctor).toBeUndefined();
   });
 
-  test("returns by the shared deadline when post-repair diagnostics ignore cancellation", async () => {
+  test("returns promptly when a post-repair diagnostic stalls after an unresponsive daemon replacement", async () => {
     const timer = new FakeTimer();
     let cancelled = false;
     const repair = repairDaemon(
       { android: true, timeoutMs: 50 },
-      dependencies([healthReport(true), healthReport(true)], {
+      dependencies([healthReport(false), healthReport(true)], {
         timer,
         runDoctor: async ({ signal }) => {
           signal?.addEventListener("abort", () => {
@@ -175,16 +175,18 @@ describe("repairDaemon", () => {
     await new Promise<void>((resolve) => setImmediate(resolve));
     timer.advanceTime(50);
 
-    await expect(repair).resolves.toMatchObject<Partial<DaemonRecoveryResult>>({
+    const result = await repair;
+    expect(result).toMatchObject<Partial<DaemonRecoveryResult>>({
       status: "failed",
       phase: "verification",
-      action: "joined",
+      action: "restarted",
       nextAction: expect.stringContaining("deadline"),
     });
     expect(cancelled).toBe(true);
+    await waitForDaemonRecoveryCompletion(result);
   });
 
-  test("waits for a cancellation-aware post-repair doctor lifecycle before reporting repair failure", async () => {
+  test("does not retain a read-only post-repair doctor probe as a lifecycle", async () => {
     const timer = new FakeTimer();
     let settled = false;
     const repair = repairDaemon(

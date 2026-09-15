@@ -51,7 +51,7 @@ import { inferIosFormFactor } from "../src/utils/ios-cmdline-tools/iosDeviceType
 import { stableStringify } from "../src/utils/stableStringify";
 import { defaultTimer, type Timer } from "../src/utils/SystemTimer";
 
-const ENABLED_TOOLS = ["observe", "getDeviceState"] as const;
+const ENABLED_TOOLS = ["observe", "getDeviceState", "killDevice"] as const;
 const MAX_CLEANUP_RESERVE_MS = 15_000;
 const MAX_EVIDENCE_RESERVE_MS = 5_000;
 const MAX_REAP_RESERVE_MS = 1_000;
@@ -1791,7 +1791,7 @@ export async function runAcceptanceMatrix(
    */
   const enableDestructiveTool = async (
     client: McpSessionClient,
-    tool: "provisionDevice" | "deleteDevice",
+    tool: "provisionDevice" | "deleteDevice" | "killDevice",
     phase: string,
   ): Promise<void> => {
     const response = await callTool(
@@ -2514,6 +2514,7 @@ export async function runAcceptanceMatrix(
           "Controlled duplicate Android AVD produced different identity_conflict diagnostics by discovery order",
         );
       }
+      await enableDestructiveTool(forwardClient, "killDevice", `${phase}-duplicate-cleanup`);
       toolPayload(
         await callTool(
           forwardClient,

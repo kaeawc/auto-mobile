@@ -178,6 +178,7 @@ function createHarness(
   let pendingDoctorFault: string | undefined;
   const enabledToolsByOwner = new Map<string, Set<string>>();
   const enabledToolsByMintedSession = new Map<string, Set<string>>();
+  const mintedSessionByOwner = new Map<string, string>();
 
   const recordMintedSessionCapabilities = (
     sessionUuid: string,
@@ -195,9 +196,7 @@ function createHarness(
   };
 
   const requireMintedSessionCapability = (sessionUuid: string, toolName: string): void => {
-    // Every synthetic getAndroid/getApple/startDevice response carries this
-    // prefix. CLI and provision responses deliberately use different ids.
-    if (!sessionUuid.startsWith("start-")) {
+    if (!enabledToolsByMintedSession.has(sessionUuid)) {
       return;
     }
     if (!enabledToolsByMintedSession.get(sessionUuid)?.has(toolName)) {
@@ -216,7 +215,9 @@ function createHarness(
       if (name === "setToolEnabled") {
         const toolName = arguments_.toolName;
         if (
-          (toolName !== "provisionDevice" && toolName !== "deleteDevice") ||
+          (toolName !== "provisionDevice" &&
+            toolName !== "deleteDevice" &&
+            toolName !== "killDevice") ||
           arguments_.enabled !== true ||
           "sessionUuid" in arguments_ ||
           "toolNames" in arguments_
@@ -333,6 +334,8 @@ function createHarness(
         const device = arguments_.device as Record<string, unknown>;
         const spec = device.spec as Record<string, unknown>;
         const isIos = device.platform === "ios";
+        recordMintedSessionCapabilities("provision-1", arguments_);
+        mintedSessionByOwner.set(owner, "provision-1");
         if (isIos && options.removeIosSiblingAfterProvision) {
           iosSiblingPresent = false;
         }
@@ -401,6 +404,7 @@ function createHarness(
           startCount += 1;
           const sessionUuid = `start-${startCount}`;
           recordMintedSessionCapabilities(sessionUuid, arguments_);
+          mintedSessionByOwner.set(owner, sessionUuid);
           return {
             structuredContent: {
               sessionUuid,
@@ -436,6 +440,7 @@ function createHarness(
         startCount += 1;
         const sessionUuid = `start-${startCount}`;
         recordMintedSessionCapabilities(sessionUuid, arguments_);
+        mintedSessionByOwner.set(owner, sessionUuid);
         if (isIos) {
           return {
             structuredContent: {
@@ -520,6 +525,12 @@ function createHarness(
         return { structuredContent: { state: "ready" } };
       }
       if (name === "killDevice") {
+        const boundSessionUuid = mintedSessionByOwner.get(owner);
+        if (boundSessionUuid) {
+          requireMintedSessionCapability(boundSessionUuid, "killDevice");
+        } else if (!enabledToolsByOwner.get(owner)?.has("killDevice")) {
+          throw new Error(`Tool killDevice is disabled for fresh MCP client ${owner}`);
+        }
         const device = arguments_.device as Record<string, unknown>;
         if (device.deviceId === "emulator-5554") {
           androidDuplicatePresent = options.keepAndroidDuplicateAfterKill ?? false;
@@ -741,13 +752,17 @@ describe("live device acceptance harness", () => {
           configuration: { memoryMb: 4096, cpuCores: 4 },
         },
       },
-      enableTools: ["observe", "getDeviceState"],
+      enableTools: ["observe", "getDeviceState", "killDevice"],
     });
     expect(
       harness.calls
         .filter((call) => call.name === "setToolEnabled")
         .map((call) => ({ owner: call.owner, arguments: call.arguments })),
     ).toEqual([
+      {
+        owner: "controlled-discovery-forward",
+        arguments: { toolName: "killDevice", enabled: true },
+      },
       {
         owner: "provision",
         arguments: { toolName: "provisionDevice", enabled: true },
@@ -776,7 +791,7 @@ describe("live device acceptance harness", () => {
     expect(exactAcquisitions.at(-1)?.arguments).toEqual({
       avdName: "Pixel_8_Sibling",
       deviceId: "emulator-5558",
-      enableTools: ["observe", "getDeviceState"],
+      enableTools: ["observe", "getDeviceState", "killDevice"],
     });
     expect(
       harness.calls.filter((call) => call.name === "startDevice").map((call) => call.arguments),
@@ -785,14 +800,14 @@ describe("live device acceptance harness", () => {
         platform: "android",
         avdName: "Pixel_8_API_35",
         preferRunning: true,
-        enableTools: ["observe", "getDeviceState"],
+        enableTools: ["observe", "getDeviceState", "killDevice"],
       },
       {
         platform: "android",
         avdName: "Pixel_8_API_35",
         preferRunning: true,
         minOsVersion: "34",
-        enableTools: ["observe", "getDeviceState"],
+        enableTools: ["observe", "getDeviceState", "killDevice"],
       },
       {
         platform: "android",
@@ -800,27 +815,27 @@ describe("live device acceptance harness", () => {
         preferRunning: true,
         minOsVersion: "34",
         maxOsVersion: "35",
-        enableTools: ["observe", "getDeviceState"],
+        enableTools: ["observe", "getDeviceState", "killDevice"],
       },
       {
         platform: "android",
         avdName: "Pixel_8_API_35",
         preferRunning: true,
         minOsVersion: "9999",
-        enableTools: ["observe", "getDeviceState"],
+        enableTools: ["observe", "getDeviceState", "killDevice"],
       },
       {
         platform: "android",
         avdName: "Pixel_8_API_35",
         preferRunning: true,
         maxOsVersion: "0",
-        enableTools: ["observe", "getDeviceState"],
+        enableTools: ["observe", "getDeviceState", "killDevice"],
       },
       {
         platform: "android",
         avdName: "Pixel_8_API_35",
         preferRunning: true,
-        enableTools: ["observe", "getDeviceState"],
+        enableTools: ["observe", "getDeviceState", "killDevice"],
       },
     ]);
     expect(harness.cliCommands.find((command) => command.includes("getAndroid"))).toEqual([
@@ -831,7 +846,7 @@ describe("live device acceptance harness", () => {
       "--avd-name",
       "Pixel_8_API_35",
       "--enable-tools",
-      '["observe","getDeviceState"]',
+      '["observe","getDeviceState","killDevice"]',
     ]);
     expect(
       harness.calls.find(
@@ -896,7 +911,7 @@ describe("live device acceptance harness", () => {
     ).toEqual({
       avdName: "Pixel_8_API_35",
       deviceId: "emulator-5556",
-      enableTools: ["observe", "getDeviceState"],
+      enableTools: ["observe", "getDeviceState", "killDevice"],
     });
     expect(
       harness.calls.some(
@@ -936,7 +951,7 @@ describe("live device acceptance harness", () => {
         deviceId: IOS_UDID,
         preferRunning: true,
         formFactor: "phone",
-        enableTools: ["observe", "getDeviceState"],
+        enableTools: ["observe", "getDeviceState", "killDevice"],
       },
       {
         platform: "ios",
@@ -944,7 +959,7 @@ describe("live device acceptance harness", () => {
         preferRunning: true,
         formFactor: "phone",
         minOsVersion: "17.0",
-        enableTools: ["observe", "getDeviceState"],
+        enableTools: ["observe", "getDeviceState", "killDevice"],
       },
       {
         platform: "ios",
@@ -953,7 +968,7 @@ describe("live device acceptance harness", () => {
         formFactor: "phone",
         minOsVersion: "17.0",
         maxOsVersion: "18.0",
-        enableTools: ["observe", "getDeviceState"],
+        enableTools: ["observe", "getDeviceState", "killDevice"],
       },
       {
         platform: "ios",
@@ -961,7 +976,7 @@ describe("live device acceptance harness", () => {
         preferRunning: true,
         formFactor: "phone",
         minOsVersion: "9999.0",
-        enableTools: ["observe", "getDeviceState"],
+        enableTools: ["observe", "getDeviceState", "killDevice"],
       },
       {
         platform: "ios",
@@ -969,21 +984,21 @@ describe("live device acceptance harness", () => {
         preferRunning: true,
         formFactor: "phone",
         maxOsVersion: "0.0",
-        enableTools: ["observe", "getDeviceState"],
+        enableTools: ["observe", "getDeviceState", "killDevice"],
       },
       {
         platform: "ios",
         deviceId: IOS_UDID,
         preferRunning: true,
         formFactor: "tablet",
-        enableTools: ["observe", "getDeviceState"],
+        enableTools: ["observe", "getDeviceState", "killDevice"],
       },
       {
         platform: "ios",
         deviceId: IOS_UDID,
         preferRunning: true,
         formFactor: "phone",
-        enableTools: ["observe", "getDeviceState"],
+        enableTools: ["observe", "getDeviceState", "killDevice"],
       },
     ]);
     expect(harness.cliCommands.find((command) => command.includes("getApple"))).toEqual([
@@ -994,16 +1009,16 @@ describe("live device acceptance harness", () => {
       "--device-id",
       IOS_UDID,
       "--enable-tools",
-      '["observe","getDeviceState"]',
+      '["observe","getDeviceState","killDevice"]',
     ]);
     expect(
       harness.calls.filter((call) => call.name === "getApple").map((call) => call.arguments),
     ).toEqual(
       expect.arrayContaining([
-        { deviceId: IOS_UDID, enableTools: ["observe", "getDeviceState"] },
+        { deviceId: IOS_UDID, enableTools: ["observe", "getDeviceState", "killDevice"] },
         {
           deviceId: "00000000-0000-0000-0000-000000000002",
-          enableTools: ["observe", "getDeviceState"],
+          enableTools: ["observe", "getDeviceState", "killDevice"],
         },
       ]),
     );

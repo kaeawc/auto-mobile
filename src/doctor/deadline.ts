@@ -92,3 +92,34 @@ export function remainingDoctorProbe(options: DoctorProbeOptions = {}): DoctorPr
     timeoutMs: remainingMs,
   };
 }
+
+/**
+ * Await one diagnostic read only while its caller-owned Doctor probe remains
+ * live. This fences in-process reads (such as daemon PID status) that cannot
+ * accept a timeout themselves, while preserving the same absolute deadline
+ * used by subprocess and socket probes.
+ */
+export async function awaitDoctorProbe<T>(
+  options: DoctorProbeOptions,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const probe = remainingDoctorProbe(options);
+  const work = operation();
+  if (!probe.signal) {
+    return await work;
+  }
+
+  let removeAbortListener: (() => void) | undefined;
+  try {
+    return await Promise.race([
+      work,
+      new Promise<never>((_resolve, reject) => {
+        const abort = () => reject(probe.signal?.reason ?? new DoctorDeadlineError());
+        probe.signal?.addEventListener("abort", abort, { once: true });
+        removeAbortListener = () => probe.signal?.removeEventListener("abort", abort);
+      }),
+    ]);
+  } finally {
+    removeAbortListener?.();
+  }
+}

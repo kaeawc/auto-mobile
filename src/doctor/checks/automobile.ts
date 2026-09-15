@@ -6,7 +6,7 @@
 import { errorMessage } from "../../utils/describeUnknownError";
 import { CheckResult } from "../types";
 import type { DoctorOptions, DoctorProbeOptions } from "../types";
-import { remainingDoctorProbe } from "../deadline";
+import { awaitDoctorProbe, remainingDoctorProbe } from "../deadline";
 import { runWithAbortSignal } from "../../utils/AbortContext";
 import { platform as getHostPlatform } from "node:os";
 import { DaemonManager } from "../../daemon/manager";
@@ -299,10 +299,11 @@ export async function checkDaemonConnectivity(
  */
 export async function checkDaemonBuildIdentity(
   dependencies: DaemonBuildIdentityDependencies = {},
+  probe: DoctorProbeOptions = {},
 ): Promise<CheckResult> {
   try {
     const manager = dependencies.daemonManager ?? new DaemonManager();
-    const status = await manager.status();
+    const status = await awaitDoctorProbe(probe, () => manager.status());
 
     if (!status.running) {
       return {
@@ -658,7 +659,9 @@ export async function runAutoMobileChecks(
     )(options),
   );
   await run(() =>
-    (dependencies.checkDaemonBuildIdentity ?? (() => checkDaemonBuildIdentity()))(options),
+    (dependencies.checkDaemonBuildIdentity ?? ((probe) => checkDaemonBuildIdentity({}, probe)))(
+      options,
+    ),
   );
 
   if (options.ios === true && options.android !== true) {
@@ -712,7 +715,9 @@ export async function runPostRepairAutoMobileChecks(
     )(options),
   );
   await run(() =>
-    (dependencies.checkDaemonBuildIdentity ?? (() => checkDaemonBuildIdentity()))(options),
+    (dependencies.checkDaemonBuildIdentity ?? ((probe) => checkDaemonBuildIdentity({}, probe)))(
+      options,
+    ),
   );
   return results;
 }

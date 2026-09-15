@@ -365,6 +365,34 @@ describe("checkDaemonBuildIdentity", () => {
     expect(result.message).toContain("PID file unreadable");
   });
 
+  test("bounds a stalled daemon status read with the shared doctor deadline", async () => {
+    const timer = new FakeTimer();
+    const deadline = createDoctorDeadline({ timeoutMs: 50, timer }, timer);
+    let settled = false;
+    const check = checkDaemonBuildIdentity(
+      {
+        daemonManager: {
+          status: () => new Promise(() => {}),
+        },
+        getClientBuildIdentity: () => client,
+      },
+      deadline.probe,
+    ).then((result) => {
+      settled = true;
+      return result;
+    });
+
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    timer.advanceTime(50);
+    const result = await check;
+    deadline.dispose();
+
+    expect(settled).toBe(true);
+    expect(result.status).toBe("warn");
+    expect(result.message).toContain("Doctor diagnostic deadline elapsed");
+  });
+
   test("does not report a false skew for a legacy daemon without build identity", async () => {
     const result = await checkDaemonBuildIdentity({
       daemonManager: {
@@ -704,6 +732,41 @@ describe("post-repair read-only Android verification", () => {
     };
 
     await runPostRepairAutoMobileChecks({}, commonDependencies);
+  });
+
+  test("forwards the shared probe to post-repair build identity verification", async () => {
+    const timer = new FakeTimer();
+    const deadline = createDoctorDeadline({ timeoutMs: 50, timer }, timer);
+    let receivedProbe: unknown;
+
+    await runPostRepairAutoMobileChecks(deadline.probe, {
+      checkDaemonStatus: async () => ({
+        name: "Daemon Status",
+        status: "pass",
+        message: "",
+      }),
+      checkDaemonConnectivity: async () => ({
+        name: "Daemon Connectivity",
+        status: "pass",
+        message: "",
+      }),
+      checkDaemonBuildIdentity: async (probe) => {
+        receivedProbe = probe;
+        return {
+          name: "Daemon Build Identity",
+          status: "pass",
+          message: "",
+        };
+      },
+    });
+    deadline.dispose();
+
+    expect(receivedProbe).toMatchObject({
+      signal: deadline.probe.signal,
+      deadlineMs: 50,
+      timeoutMs: 50,
+      timer,
+    });
   });
 });
 

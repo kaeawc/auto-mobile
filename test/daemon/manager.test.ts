@@ -42,6 +42,7 @@ import { ActionableError } from "../../src/models";
 import {
   DAEMON_APPLY_ACCEPTANCE_DOCTOR_FAULT_METHOD,
   DAEMON_CORRUPT_CONTROL_METADATA_METHOD,
+  DAEMON_RESTART_ACCEPTANCE_SESSION_METHOD,
   DAEMON_RESTART_ADMITTED_METHOD,
 } from "../../src/daemon/daemonRestartAdmission";
 import { createDaemonLiveAcceptanceCapability } from "../../src/daemon/liveAcceptanceCapability";
@@ -617,7 +618,18 @@ describe("DaemonManager control metadata repair", () => {
         pidFilePath,
         socketPath,
         {
-          findDaemonProcesses: () => [],
+          findDaemonProcesses: () =>
+            livePids.has(pid)
+              ? [
+                  {
+                    pid,
+                    ppid: 1,
+                    command: "bun /acceptance/dist/src/index.js --daemon-mode",
+                    startedAt: 100,
+                    processGenerationToken: "generation-1",
+                  },
+                ]
+              : [],
           isProcessRunning: (candidatePid) => livePids.has(candidatePid),
         },
         undefined,
@@ -660,6 +672,190 @@ describe("DaemonManager control metadata repair", () => {
       }
     },
   );
+
+  test("acceptance doctor never SIGKILLs a reused admitted PID", async () => {
+    const originalSecret = process.env.AUTOMOBILE_DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET;
+    process.env.AUTOMOBILE_DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET =
+      "live-acceptance-startup-secret-123456";
+    const pid = 1001;
+    const client = new FakeDaemonClient({});
+    const rpcSpy = spyOn(client, "callDaemonMethod").mockResolvedValue({
+      accepted: true,
+      controlState: "daemon-dead",
+    });
+    const signaler = new FakeDaemonProcessSignaler();
+    const manager = new DaemonManager(
+      () => client,
+      undefined,
+      new FakeTimer(),
+      undefined,
+      undefined,
+      undefined,
+      {
+        findDaemonProcesses: () => [
+          {
+            pid,
+            ppid: 1,
+            command: "bun /unrelated/dist/src/index.js --daemon-mode",
+            startedAt: 200,
+            processGenerationToken: "generation-2",
+          },
+        ],
+        isProcessRunning: () => true,
+      },
+      undefined,
+      undefined,
+      undefined,
+      signaler,
+    );
+    const statusSpy = spyOn(manager, "status").mockResolvedValue({
+      running: true,
+      pid,
+      startedAt: 100,
+      processGenerationToken: "generation-1",
+      version: "0.0.73",
+      buildId: "acceptance-build",
+      entryScript: "/acceptance/dist/src/index.js",
+    });
+
+    try {
+      await expect(
+        manager.applyAcceptanceDoctorFault("dead-daemon", "maintenance-token", 10_000),
+      ).rejects.toThrow("verified daemon PID was reused");
+      expect(signaler.signals).toEqual([]);
+    } finally {
+      rpcSpy.mockRestore();
+      statusSpy.mockRestore();
+      if (originalSecret === undefined) {
+        delete process.env.AUTOMOBILE_DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET;
+      } else {
+        process.env.AUTOMOBILE_DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET = originalSecret;
+      }
+    }
+  });
+
+  test("acceptance doctor treats an exited admitted generation as already stopped", async () => {
+    const originalSecret = process.env.AUTOMOBILE_DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET;
+    process.env.AUTOMOBILE_DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET =
+      "live-acceptance-startup-secret-123456";
+    const client = new FakeDaemonClient({});
+    const rpcSpy = spyOn(client, "callDaemonMethod").mockResolvedValue({
+      accepted: true,
+      controlState: "daemon-dead",
+    });
+    const signaler = new FakeDaemonProcessSignaler();
+    const manager = new DaemonManager(
+      () => client,
+      undefined,
+      new FakeTimer(),
+      undefined,
+      undefined,
+      undefined,
+      {
+        findDaemonProcesses: () => [],
+        isProcessRunning: () => false,
+      },
+      undefined,
+      undefined,
+      undefined,
+      signaler,
+    );
+    const statusSpy = spyOn(manager, "status").mockResolvedValue({
+      running: true,
+      pid: 1001,
+      startedAt: 100,
+      processGenerationToken: "generation-1",
+      version: "0.0.73",
+      buildId: "acceptance-build",
+      entryScript: "/acceptance/dist/src/index.js",
+    });
+
+    try {
+      await expect(
+        manager.applyAcceptanceDoctorFault("dead-daemon", "maintenance-token", 10_000),
+      ).resolves.toBeUndefined();
+      expect(signaler.signals).toEqual([]);
+    } finally {
+      rpcSpy.mockRestore();
+      statusSpy.mockRestore();
+      if (originalSecret === undefined) {
+        delete process.env.AUTOMOBILE_DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET;
+      } else {
+        process.env.AUTOMOBILE_DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET = originalSecret;
+      }
+    }
+  });
+
+  test("acceptance-session restart never SIGKILLs a reused admitted PID", async () => {
+    const originalSecret = process.env.AUTOMOBILE_DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET;
+    process.env.AUTOMOBILE_DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET =
+      "live-acceptance-startup-secret-123456";
+    const pid = 1001;
+    const client = new FakeDaemonClient({});
+    const rpcSpy = spyOn(client, "callDaemonMethod").mockImplementation(async (method) => {
+      expect(method).toBe(DAEMON_RESTART_ACCEPTANCE_SESSION_METHOD);
+      return { accepted: true };
+    });
+    const signaler = new FakeDaemonProcessSignaler();
+    const manager = new DaemonManager(
+      () => client,
+      undefined,
+      new FakeTimer(),
+      undefined,
+      undefined,
+      undefined,
+      {
+        findDaemonProcesses: () => [
+          {
+            pid,
+            ppid: 1,
+            command: "bun /unrelated/dist/src/index.js --daemon-mode",
+            startedAt: 200,
+            processGenerationToken: "generation-2",
+          },
+        ],
+        isProcessRunning: () => true,
+      },
+      undefined,
+      undefined,
+      undefined,
+      signaler,
+    );
+    const statusSpy = spyOn(manager, "status").mockResolvedValue({
+      running: true,
+      pid,
+      startedAt: 100,
+      processGenerationToken: "generation-1",
+      version: "0.0.73",
+      buildId: "acceptance-build",
+      entryScript: "/acceptance/dist/src/index.js",
+    });
+
+    try {
+      await expect(
+        manager.restartAcceptanceSession({
+          sessionUuid: "session-1",
+          platform: "ios",
+          stableDeviceId: "simulator-1",
+          controls: {
+            androidSiblingAvdName: "sibling",
+            androidDuplicateSerial: "emulator-5556",
+            iosSameNameSiblingUdid: "simulator-2",
+          },
+          expiresAt: 10_000,
+        }),
+      ).rejects.toThrow("verified daemon PID was reused");
+      expect(signaler.signals).toEqual([]);
+    } finally {
+      rpcSpy.mockRestore();
+      statusSpy.mockRestore();
+      if (originalSecret === undefined) {
+        delete process.env.AUTOMOBILE_DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET;
+      } else {
+        process.env.AUTOMOBILE_DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET = originalSecret;
+      }
+    }
+  });
 
   test("passes the shared deadline and abort signal through connect and both control RPCs", async () => {
     const timer = new FakeTimer();

@@ -79,6 +79,7 @@ import {
   daemonGenerationIdentityFromStatus,
   daemonLiveAcceptanceStartupSecret,
 } from "./liveAcceptanceCapability";
+import type { DaemonGenerationIdentity } from "./liveAcceptanceCapability";
 import {
   DaemonSocketReachability,
   type DaemonSocketReachabilityLike,
@@ -2919,11 +2920,13 @@ export class DaemonManager implements DaemonManagerLike {
     // SIGKILL is intentional and narrowly authorized by the RPC above. A
     // graceful SIGTERM would terminally release the session that this recovery
     // scenario is designed to exercise.
-    this.processSignaler.signal(status.pid!, "SIGKILL");
-    if (!(await this.waitForStop(status.pid!, DAEMON_FORCED_STOP_TIMEOUT_MS))) {
-      throw new ActionableError(
-        `Acceptance-session restart daemon process ${status.pid} did not exit after SIGKILL.`,
-      );
+    if (this.verifyAcceptanceGenerationBeforeSignal(status, generation)) {
+      this.processSignaler.signal(status.pid!, "SIGKILL");
+      if (!(await this.waitForStop(status.pid!, DAEMON_FORCED_STOP_TIMEOUT_MS))) {
+        throw new ActionableError(
+          `Acceptance-session restart daemon process ${status.pid} did not exit after SIGKILL.`,
+        );
+      }
     }
     await cleanupDaemonFiles({
       pidFilePath: this.pidFilePath,
@@ -2987,14 +2990,18 @@ export class DaemonManager implements DaemonManagerLike {
     } finally {
       await client.close();
     }
-    await this.applyAcceptanceDoctorLivenessFault(fault, status);
+    await this.applyAcceptanceDoctorLivenessFault(fault, status, generation);
   }
 
   private async applyAcceptanceDoctorLivenessFault(
     fault: AcceptanceDoctorFault,
     status: DaemonStatus,
+    generation: DaemonGenerationIdentity,
   ): Promise<void> {
-    if (fault === "missing-daemon" || fault === "dead-daemon") {
+    if (
+      (fault === "missing-daemon" || fault === "dead-daemon") &&
+      this.verifyAcceptanceGenerationBeforeSignal(status, generation)
+    ) {
       this.processSignaler.signal(status.pid!, "SIGKILL");
       if (!(await this.waitForStop(status.pid!, DAEMON_FORCED_STOP_TIMEOUT_MS))) {
         throw new ActionableError(
@@ -3013,6 +3020,30 @@ export class DaemonManager implements DaemonManagerLike {
         expectedPid: status.pid!,
       });
     }
+  }
+
+  /**
+   * Revalidate the OS process generation immediately before an acceptance-only
+   * SIGKILL. Admission authenticates the daemon that handled the RPC, but that
+   * generation may exit before this manager signals its formerly owned PID.
+   */
+  private verifyAcceptanceGenerationBeforeSignal(
+    status: DaemonStatus,
+    generation: DaemonGenerationIdentity,
+  ): boolean {
+    return this.verifyDaemonGenerationBeforeSignal(
+      {
+        pid: generation.pid,
+        ppid: 0,
+        command: "",
+        startedAt: status.processStartedAt ?? generation.startedAt,
+        ...(generation.processGenerationToken === undefined
+          ? {}
+          : { processGenerationToken: generation.processGenerationToken }),
+      },
+      undefined,
+      "Live acceptance",
+    );
   }
 
   private async prepareDaemonForConditionalRestart(
@@ -3309,10 +3340,11 @@ export class DaemonManager implements DaemonManagerLike {
   private verifyDaemonGenerationBeforeSignal(
     expected: DaemonProcessRecord,
     recoveryDeadline: number | undefined,
+    context: string = "Doctor repair",
   ): boolean {
     if (expected.startedAt === undefined) {
       throw new ActionableError(
-        "Doctor repair could not verify the recorded daemon process generation before signalling it.",
+        `${context} could not verify the recorded daemon process generation before signalling it.`,
       );
     }
     const currentCandidates = this.findLiveDaemonProcessRecords(
@@ -3329,7 +3361,7 @@ export class DaemonManager implements DaemonManagerLike {
     }
     if (currentCandidates.some((candidate) => candidate.pid === expected.pid)) {
       throw new ActionableError(
-        "Doctor repair found that the verified daemon PID was reused before signalling it.",
+        `${context} found that the verified daemon PID was reused before signalling it.`,
       );
     }
     return false;

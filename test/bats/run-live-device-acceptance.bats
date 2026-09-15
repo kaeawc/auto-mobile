@@ -1,9 +1,10 @@
 #!/usr/bin/env bats
 
-SCRIPT="scripts/run-live-device-acceptance.sh"
+SOURCE_SCRIPT="scripts/run-live-device-acceptance.sh"
 
 setup() {
   MOCK_BIN="$(mktemp -d)"
+  TEST_REPO="$(mktemp -d)"
   COMMAND_LOG="${MOCK_BIN}/commands.log"
   RUN_SCOPE_LOG="${MOCK_BIN}/run-scope.log"
   OPERATOR_KEY="${MOCK_BIN}/operator.key"
@@ -11,6 +12,12 @@ setup() {
   export COMMAND_LOG
   export RUN_SCOPE_LOG
   ORIGINAL_PATH="${PATH}"
+  # The harness builds after changing to its repository root. Copy its minimal
+  # script tree so the mocked build output stays inside this BATS fixture.
+  mkdir -p "${TEST_REPO}/scripts/ios"
+  cp "${SOURCE_SCRIPT}" "${TEST_REPO}/scripts/"
+  cp "scripts/ios/run_with_timeout.sh" "${TEST_REPO}/scripts/ios/"
+  SCRIPT="${TEST_REPO}/scripts/run-live-device-acceptance.sh"
 
   cat > "${MOCK_BIN}/bun" <<'EOF'
 #!/usr/bin/env bash
@@ -66,7 +73,7 @@ EOF
 }
 
 teardown() {
-  rm -rf "${MOCK_BIN}"
+  rm -rf "${MOCK_BIN}" "${TEST_REPO}"
   export PATH="${ORIGINAL_PATH}"
 }
 
@@ -151,7 +158,7 @@ run_harness() {
   grep -q -- '--confirm-live --test-owned-devices' "${COMMAND_LOG}"
   grep -q -- "--ownership-manifest ${OWNERSHIP_MANIFEST}" "${COMMAND_LOG}"
   grep -q -- "--operator-key-file ${OPERATOR_KEY}" "${COMMAND_LOG}"
-  grep -q -- "--entrypoint ${PWD}/dist/src/index.js" "${COMMAND_LOG}"
+  grep -q -- "--entrypoint ${TEST_REPO}/dist/src/index.js" "${COMMAND_LOG}"
   grep -q -- '--timeout-ms 8000' "${COMMAND_LOG}"
   [ "$(grep -c '^timeout -k 2 8 bun ' "${COMMAND_LOG}")" -eq 2 ]
   [ "$(wc -l < "${RUN_SCOPE_LOG}")" -eq 2 ]

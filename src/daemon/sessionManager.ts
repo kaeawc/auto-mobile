@@ -331,6 +331,47 @@ export class SessionRecoveryIdentityLossError extends ActionableError {
   }
 }
 
+type SessionRecoveryIdentityLoss = Pick<
+  SessionRecoveryIdentityLossError,
+  "sessionUuid" | "target" | "reason" | "terminalReleaseReason"
+>;
+
+function isSessionRecoveryFailureReason(reason: unknown): reason is SessionRecoveryFailureReason {
+  return (
+    reason === "target-absent" || reason === "target-busy" || reason === "identity-continuity-lost"
+  );
+}
+
+function isSessionRecoveryTarget(target: unknown): target is SessionRecoveryTarget {
+  if (!target || typeof target !== "object") {
+    return false;
+  }
+  const candidate = target as Partial<SessionRecoveryTarget>;
+  if (candidate.platform !== "android" && candidate.platform !== "ios") {
+    return false;
+  }
+  return typeof candidate.stableDeviceId === "string" && typeof candidate.deviceId === "string";
+}
+
+/**
+ * `SessionDeviceAssigner` is an injected boundary. A recovery error can retain
+ * its product payload while originating from another loaded bundle, in which
+ * case `instanceof` alone would skip terminalizing an already-rejected UUID.
+ */
+function isSessionRecoveryIdentityLossError(error: unknown): error is SessionRecoveryIdentityLoss {
+  if (!(error instanceof Error) || error.name !== "SessionRecoveryIdentityLossError") {
+    return false;
+  }
+  const candidate = error as Partial<SessionRecoveryIdentityLoss>;
+  return (
+    typeof candidate.sessionUuid === "string" &&
+    typeof candidate.terminalReleaseReason === "string" &&
+    isSessionRecoveryFailureReason(candidate.reason) &&
+    candidate.terminalReleaseReason === `identity-recovery-${candidate.reason}` &&
+    isSessionRecoveryTarget(candidate.target)
+  );
+}
+
 export interface RebindSessionOptions {
   /**
    * The runtime behind the same device ID restarted, so device-scoped session
@@ -1177,7 +1218,11 @@ export class SessionManager {
     try {
       await devicePool.assignDeviceToSession(sessionId, platform, recoveryTarget);
     } catch (error) {
-      if (error instanceof SessionRecoveryIdentityLossError && persisted) {
+      if (
+        persisted &&
+        isSessionRecoveryIdentityLossError(error) &&
+        error.sessionUuid === sessionId
+      ) {
         await this.terminalizePersistedRecoveryFailure(sessionId, persisted, error);
       }
       throw error;
@@ -1187,7 +1232,7 @@ export class SessionManager {
   private async terminalizePersistedRecoveryFailure(
     sessionId: string,
     persisted: DeviceSession,
-    error: SessionRecoveryIdentityLossError,
+    error: Pick<SessionRecoveryIdentityLossError, "terminalReleaseReason">,
   ): Promise<void> {
     const releasedAtMs = this.timer.now();
     await this.persistTerminalReleaseIfNeeded({

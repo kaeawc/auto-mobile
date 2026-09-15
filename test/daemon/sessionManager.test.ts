@@ -609,6 +609,97 @@ describe("SessionManager", () => {
       },
     );
 
+    test.each(["target-absent", "target-busy", "identity-continuity-lost"] as const)(
+      "durably fences a persisted recovery failure from a separately loaded assigner: %s",
+      async (reason) => {
+        const persisted: DeviceSession = {
+          session_uuid: `detached-${reason}`,
+          device_id: "emulator-5554",
+          stable_device_id: "Original_AVD",
+          platform: "android",
+          status: "expired",
+          source: "session-manager",
+          autolock_enabled: 0,
+          mcp_session_id: null,
+          daemon_session_id: "old-daemon",
+          created_at_ms: 1,
+          last_used_at_ms: 20,
+          expires_at_ms: 30,
+          released_at_ms: 25,
+          release_reason: "daemon-restart",
+          session_timeout_ms: 10,
+          heartbeat_timeout_ms: 5,
+          has_received_heartbeat: 1,
+          created_at: "2026-09-15T00:00:00.000Z",
+          updated_at: "2026-09-15T00:00:00.000Z",
+        };
+        const persistence: DeviceSessionPersistence = {
+          async getSession() {
+            return persisted;
+          },
+          async upsertActiveSession() {
+            throw new Error("a recovery conflict must not assign a sibling");
+          },
+          async recordActivity() {},
+          async markReleased(_sessionUuid, status, releasedAtMs, releaseReason) {
+            persisted.status = status;
+            persisted.released_at_ms = releasedAtMs;
+            persisted.release_reason = releaseReason;
+          },
+        };
+        const firstManager = new SessionManager(fakeTimer, persistence);
+        let assignments = 0;
+        const devicePool: SessionDeviceAssigner = {
+          async assignDeviceToSession(sessionUuid, _requestedPlatform, target): Promise<string> {
+            assignments++;
+            if (!target) {
+              throw new Error("persisted recovery target was not supplied");
+            }
+            const recoveryError = new SessionRecoveryIdentityLossError(sessionUuid, target, reason);
+            throw Object.assign(new Error(recoveryError.message), {
+              name: recoveryError.name,
+              sessionUuid: recoveryError.sessionUuid,
+              target: recoveryError.target,
+              reason: recoveryError.reason,
+              terminalReleaseReason: recoveryError.terminalReleaseReason,
+            });
+          },
+        };
+
+        try {
+          await expect(
+            firstManager.getOrCreateSession(
+              persisted.session_uuid,
+              devicePool,
+              "android",
+              undefined,
+              true,
+            ),
+          ).rejects.toThrow(`recovery reason: ${reason}`);
+          expect(assignments).toBe(1);
+          expect(persisted.release_reason).toBe(`identity-recovery-${reason}`);
+
+          const restartedManager = new SessionManager(fakeTimer, persistence);
+          try {
+            await expect(
+              restartedManager.getOrCreateSession(
+                persisted.session_uuid,
+                devicePool,
+                "android",
+                undefined,
+                true,
+              ),
+            ).rejects.toThrow(`terminal after identity-recovery-${reason}`);
+            expect(assignments).toBe(1);
+          } finally {
+            restartedManager.stopCleanupTimer();
+          }
+        } finally {
+          firstManager.stopCleanupTimer();
+        }
+      },
+    );
+
     // Regression: a terminal persisted row keeps yielding TerminalSessionError,
     // never a pooled assignment, under requireIssuedSession.
     test("requireIssuedSession preserves TerminalSessionError for a terminal persisted row", async () => {

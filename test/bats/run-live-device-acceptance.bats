@@ -41,6 +41,26 @@ fi
 "$@"
 EOF
   chmod +x "${MOCK_BIN}/timeout"
+
+  cat > "${MOCK_BIN}/stat" <<'EOF'
+#!/usr/bin/env bash
+case "${STAT_STYLE:-}" in
+  gnu)
+    case "$1" in
+      -c) printf '600\n'; exit 0 ;;
+      -f) printf 'mock filesystem\n'; exit 0 ;;
+    esac
+    ;;
+  bsd)
+    case "$1" in
+      -c) exit 1 ;;
+      -f) printf '600\n'; exit 0 ;;
+    esac
+    ;;
+esac
+exec /usr/bin/stat "$@"
+EOF
+  chmod +x "${MOCK_BIN}/stat"
   dd if=/dev/zero of="${OPERATOR_KEY}" bs=32 count=1 status=none
   chmod 600 "${OPERATOR_KEY}"
 }
@@ -177,6 +197,22 @@ run_harness() {
   [[ "${output}" == *"android full failed"* ]]
   grep -q -- '--platform android' "${COMMAND_LOG}"
   ! grep -q -- '--platform ios' "${COMMAND_LOG}"
+}
+
+@test "reads operator-key permissions with GNU stat before a successful non-mode -f probe" {
+  export STAT_STYLE=gnu
+
+  run_harness
+
+  [ "${status}" -eq 0 ]
+}
+
+@test "falls back to BSD stat when GNU permission formatting is unavailable" {
+  export STAT_STYLE=bsd
+
+  run_harness
+
+  [ "${status}" -eq 0 ]
 }
 
 @test "rejects overlapping signed controls before build or live-driver invocation" {

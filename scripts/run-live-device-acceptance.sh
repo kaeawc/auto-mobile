@@ -176,7 +176,7 @@ if [[ ! -f "${operator_key_file}" ]]; then
   echo "error: operator key file does not exist: ${operator_key_file}" >&2
   exit 2
 fi
-if [[ "$(stat -f '%Lp' "${operator_key_file}" 2>/dev/null || stat -c '%a' "${operator_key_file}")" != "600" ]]; then
+if [[ "$(stat -c '%a' "${operator_key_file}" 2>/dev/null || stat -f '%Lp' "${operator_key_file}")" != "600" ]]; then
   echo "error: operator key file must have mode 600: ${operator_key_file}" >&2
   exit 2
 fi

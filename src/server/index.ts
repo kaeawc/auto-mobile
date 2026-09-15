@@ -297,7 +297,6 @@ import {
   SET_TOOL_ENABLED_TOOL_NAME,
 } from "./toolSelectionTools";
 import {
-  DEVICE_SESSION_RECOVERY_PROMPT,
   DEVICE_SESSION_RECOVERY_TOOLS,
   getDeviceSessionIdFromResult,
   isDeviceSessionAcquisitionTool,
@@ -1433,9 +1432,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         const sessionOwnershipLost = {
           error: {
             code: "session_ownership_lost",
-            message:
-              `Session ownership lost for ${error.sessionUuid}: ${error.release.releaseReason}. ` +
-              DEVICE_SESSION_RECOVERY_PROMPT,
+            message: error.message,
             sessionUuid: error.sessionUuid,
             reason: error.release.releaseReason,
             retryable: true,

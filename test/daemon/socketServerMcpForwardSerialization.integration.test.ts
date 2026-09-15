@@ -322,6 +322,48 @@ describe("UnixSocketServer MCP forward serialization", () => {
     }
   });
 
+  test("preserves a terminal persisted-session MCP diagnostic through the daemon socket", async () => {
+    const sessionUuid = "persisted-target-busy-session";
+    const diagnostic =
+      `Session ${sessionUuid} is terminal after identity-recovery-target-busy and cannot be reused. ` +
+      "Acquire a new device with getAndroid or getApple.";
+    server.mcpClientFactory = async () => ({
+      callTool: async () => ({
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              error: {
+                code: "session_ownership_lost",
+                message: diagnostic,
+                sessionUuid,
+                reason: "identity-recovery-target-busy",
+              },
+            }),
+          },
+        ],
+        isError: true,
+      }),
+      listTools: async () => ({ tools: [] }),
+      listResources: async () => ({ resources: [] }),
+      readResource: async () => ({ contents: [] }),
+      listResourceTemplates: async () => ({ resourceTemplates: [] }),
+      close: async () => {},
+    });
+    const client = new DaemonClient(socketPath, 1_000, undefined, {}, null);
+
+    try {
+      const result = await client.callTool("getDeviceState", { sessionUuid });
+
+      expect(result).toMatchObject({
+        isError: true,
+        content: [{ type: "text", text: expect.stringContaining(diagnostic) }],
+      });
+    } finally {
+      await client.close();
+    }
+  });
+
   afterEach(async () => {
     await server.close();
     if (existsSync(socketPath)) {

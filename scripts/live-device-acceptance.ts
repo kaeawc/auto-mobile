@@ -2379,12 +2379,10 @@ export async function runAcceptanceMatrix(
       );
     }
     const second = await callTool(client, "getDeviceState", { sessionUuid }, `${phase}-terminal`);
-    if (
-      !second.isError ||
-      !toolDiagnostic(second, "getDeviceState").includes(
-        `terminal after identity-recovery-${reason}`,
-      )
-    ) {
+    const terminalDiagnostic =
+      `Session ${sessionUuid} is terminal after identity-recovery-${reason} and cannot be reused. ` +
+      "Acquire a new device with getAndroid or getApple.";
+    if (!second.isError || toolDiagnostic(second, "getDeviceState") !== terminalDiagnostic) {
       throw new Error(
         `Persisted ${reason} UUID was not durably terminal after its first rejection`,
       );
@@ -2393,7 +2391,7 @@ export async function runAcceptanceMatrix(
       sessionUuid,
       reason,
       firstDiagnostic,
-      terminalDiagnostic: toolDiagnostic(second, "getDeviceState"),
+      terminalDiagnostic,
       siblingFallbackRejected: true,
     });
   };

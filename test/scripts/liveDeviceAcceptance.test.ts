@@ -516,7 +516,9 @@ function createHarness(
             return {
               isError: true,
               structuredContent: {
-                error: `Session ${sessionUuid} is terminal after identity-recovery-${persistedState}; use a new session UUID.`,
+                error:
+                  `Session ${sessionUuid} is terminal after identity-recovery-${persistedState} ` +
+                  "and cannot be reused. Acquire a new device with getAndroid or getApple.",
               },
             };
           }

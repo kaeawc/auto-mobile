@@ -207,7 +207,8 @@ export class TerminalSessionError extends Error {
     readonly release: SessionReleaseSnapshot,
   ) {
     super(
-      `Session ${sessionUuid} is terminal after ${release.releaseReason}; use a new session UUID.`,
+      `Session ${sessionUuid} is terminal after ${release.releaseReason} and cannot be reused. ` +
+        "Acquire a new device with getAndroid or getApple.",
     );
     this.name = "TerminalSessionError";
   }

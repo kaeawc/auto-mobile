@@ -594,14 +594,11 @@ describe("SessionManager", () => {
           expect(releases).toEqual([`identity-recovery-${reason}`]);
 
           await expect(
-            restarted.getOrCreateSession(
-              persisted.session_uuid,
-              devicePool,
-              platform,
-              undefined,
-              true,
-            ),
-          ).rejects.toThrow(`terminal after identity-recovery-${reason}`);
+            restarted.admitIssuedSessionForAutomation(persisted.session_uuid),
+          ).rejects.toThrow(
+            `Session ${persisted.session_uuid} is terminal after identity-recovery-${reason} ` +
+              "and cannot be reused. Acquire a new device with getAndroid or getApple.",
+          );
           expect(assignments).toBe(1);
         } finally {
           restarted.stopCleanupTimer();

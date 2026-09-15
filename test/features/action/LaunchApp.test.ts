@@ -20,6 +20,7 @@ import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { IOSCtrlProxyManager } from "../../../src/utils/IOSCtrlProxyManager";
 import { DeviceLostError } from "../../../src/server/deviceLossOutcome";
 import { PortManager } from "../../../src/utils/PortManager";
+import { AdbClient } from "../../../src/utils/android-cmdline-tools/AdbClient";
 
 describe("LaunchApp", () => {
   let device: BootedDevice;
@@ -173,9 +174,55 @@ describe("LaunchApp", () => {
         "processes",
         packageName,
       ]);
+      expect(
+        fakeAdb
+          .getCommandCalls()
+          .filter(({ command }) => command === `shell dumpsys activity processes ${packageName}`)
+          .every(({ noRetry }) => noRetry === undefined),
+      ).toBe(true);
     } finally {
       executeSpy.mockRestore();
     }
+  });
+
+  test("preserves AdbClient retries for a non-offline transient process-check failure", async () => {
+    let dispatches = 0;
+    const adb = new AdbClient(device, async () => {
+      dispatches += 1;
+      if (dispatches === 1) {
+        throw new Error("adb transient blip");
+      }
+      return {
+        stdout: "123:com.example.app/u0a123\n",
+        stderr: "",
+        toString: () => "123:com.example.app/u0a123\n",
+        trim: () => "123:com.example.app/u0a123",
+        includes: (searchString: string) => "123:com.example.app/u0a123\n".includes(searchString),
+      };
+    });
+    (
+      adb as unknown as {
+        getBaseCommandParts(): Promise<{ adbPath: string; baseArgs: string[] }>;
+      }
+    ).getBaseCommandParts = async () => ({ adbPath: "adb", baseArgs: [] });
+    const retryingLaunch = new LaunchApp(device, adb, null, fakeTimer);
+
+    const result = await (
+      retryingLaunch as unknown as {
+        readAndroidProcessStateWithOfflineRecovery(args: string[]): Promise<{ stdout: string }>;
+      }
+    ).readAndroidProcessStateWithOfflineRecovery([
+      "shell",
+      "dumpsys",
+      "activity",
+      "processes",
+      packageName,
+    ]);
+
+    expect(result.stdout).toContain(packageName);
+    expect(dispatches).toBe(2);
+    expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
+    expect(fakeTimer.getPendingSleepCount()).toBe(0);
   });
 
   test("bounds Android offline process recovery", async () => {
@@ -210,6 +257,106 @@ describe("LaunchApp", () => {
     try {
       await expect(launchApp.execute(packageName, false, false)).rejects.toThrow("device offline");
       expect(processChecks).toBe(3);
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
+
+  test("cancels and cleans up while waiting to retry an offline process check", async () => {
+    const controller = new AbortController();
+    const deviceLoss = new DeviceLostError(device.deviceId, "device-disconnected:retry-delay");
+    let processChecks = 0;
+    const originalExecuteCommand = fakeAdb.executeCommand.bind(fakeAdb);
+    const executeSpy = spyOn(fakeAdb, "executeCommand").mockImplementation(
+      async (
+        command,
+        timeoutMs,
+        maxBuffer,
+        noRetry,
+        signal,
+        waitForProcessSettlementAfterAbort,
+      ) => {
+        if (command === `shell dumpsys activity processes ${packageName}`) {
+          processChecks += 1;
+          throw new Error("adb: device offline");
+        }
+        return originalExecuteCommand(
+          command,
+          timeoutMs,
+          maxBuffer,
+          noRetry,
+          signal,
+          waitForProcessSettlementAfterAbort,
+        );
+      },
+    );
+
+    try {
+      const resultPromise = launchApp.execute(
+        packageName,
+        false,
+        false,
+        undefined,
+        undefined,
+        undefined,
+        controller.signal,
+      );
+      for (let i = 0; i < 50 && fakeTimer.getPendingTimeoutCount() === 0; i += 1) {
+        await Promise.resolve();
+      }
+      expect(fakeTimer.getPendingTimeouts()).toEqual([250]);
+
+      controller.abort(deviceLoss);
+
+      await expect(resultPromise).rejects.toBe(deviceLoss);
+      expect(processChecks).toBe(1);
+      expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
+
+  test("prefers an abort reason that arrives with the ADB rejection", async () => {
+    const controller = new AbortController();
+    const deviceLoss = new DeviceLostError(device.deviceId, "device-disconnected:adb-race");
+    const originalExecuteCommand = fakeAdb.executeCommand.bind(fakeAdb);
+    const executeSpy = spyOn(fakeAdb, "executeCommand").mockImplementation(
+      async (
+        command,
+        timeoutMs,
+        maxBuffer,
+        noRetry,
+        signal,
+        waitForProcessSettlementAfterAbort,
+      ) => {
+        if (command === `shell dumpsys activity processes ${packageName}`) {
+          controller.abort(deviceLoss);
+          throw new Error("adb: device offline");
+        }
+        return originalExecuteCommand(
+          command,
+          timeoutMs,
+          maxBuffer,
+          noRetry,
+          signal,
+          waitForProcessSettlementAfterAbort,
+        );
+      },
+    );
+
+    try {
+      await expect(
+        launchApp.execute(
+          packageName,
+          false,
+          false,
+          undefined,
+          undefined,
+          undefined,
+          controller.signal,
+        ),
+      ).rejects.toBe(deviceLoss);
+      expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
     } finally {
       executeSpy.mockRestore();
     }

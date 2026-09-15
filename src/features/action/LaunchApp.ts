@@ -982,12 +982,15 @@ export class LaunchApp extends BaseVisualChange {
       try {
         // The launch path owns this bounded retry so a brief emulator transport
         // reset after APK installation does not become a daemon-wide device-loss
-        // verdict. Other ADB failures retain their existing fail-fast behavior.
-        return await this.adb.execute(args, { noRetry: true, signal });
+        // verdict. AdbClient still owns its normal retries for other transient
+        // failures; it already classifies "device offline" as non-retryable.
+        return await this.adb.execute(args, { signal });
       } catch (error) {
+        // Cancellation can race with command rejection. Preserve the signal's
+        // typed reason (not the stale ADB error) before classifying the failure.
+        this.assertLaunchNotAborted(signal);
         const delayMs = ANDROID_OFFLINE_RECOVERY_DELAYS_MS[attempt];
         if (
-          signal?.aborted ||
           delayMs === undefined ||
           !errorMessage(error).toLowerCase().includes("device offline")
         ) {
@@ -996,8 +999,45 @@ export class LaunchApp extends BaseVisualChange {
         logger.warn(
           `[LaunchApp] Android device briefly offline while checking process state; retrying in ${delayMs}ms`,
         );
-        await this.timer.sleep(delayMs);
-        this.assertLaunchNotAborted(signal);
+        await this.waitForAndroidOfflineRecovery(delayMs, signal);
+      }
+    }
+  }
+
+  private async waitForAndroidOfflineRecovery(
+    delayMs: number,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    if (!signal) {
+      await this.timer.sleep(delayMs);
+      return;
+    }
+
+    this.assertLaunchNotAborted(signal);
+    let timeoutHandle: NodeJS.Timeout | undefined;
+    let abortListener: (() => void) | undefined;
+    try {
+      await new Promise<void>((resolve, reject) => {
+        abortListener = () => {
+          try {
+            signal.throwIfAborted();
+          } catch (error) {
+            reject(error);
+          }
+        };
+        signal.addEventListener("abort", abortListener, { once: true });
+        if (signal.aborted) {
+          abortListener();
+          return;
+        }
+        timeoutHandle = this.timer.setTimeout(resolve, delayMs);
+      });
+    } finally {
+      if (timeoutHandle !== undefined) {
+        this.timer.clearTimeout(timeoutHandle);
+      }
+      if (abortListener) {
+        signal.removeEventListener("abort", abortListener);
       }
     }
   }

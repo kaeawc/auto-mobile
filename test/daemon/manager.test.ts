@@ -3031,7 +3031,7 @@ describe("Daemon manager process detection", () => {
         "Refusing to terminate a live daemon during start",
       );
 
-      expect(killCalls).toEqual([]);
+      expect(killCalls.filter(({ signal }) => signal !== 0)).toEqual([]);
     } finally {
       killSpy.mockRestore();
       rmSync(dir, { recursive: true, force: true });

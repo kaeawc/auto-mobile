@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { DevicePoolStats, handleDaemonRequest } from "../../src/daemon/daemonRequestHandlers";
-import { SessionManager } from "../../src/daemon/sessionManager";
+import { SessionManager, type SessionDeviceAssigner } from "../../src/daemon/sessionManager";
 import { DaemonRequest } from "../../src/daemon/types";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
+import type { DeviceSessionPersistence } from "../../src/db/deviceSessionRepository";
+import type { DeviceSession } from "../../src/db/types";
 import type {
   DeviceRecoveryEligibility,
   DeviceRecoveryPolicy,
@@ -11,6 +13,7 @@ import type {
 } from "../../src/daemon/devicePool";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
+import { CLI_SESSION_LIVENESS_POLICY } from "../../src/daemon/constants";
 
 class FakeDevicePool {
   stats: DevicePoolStats;
@@ -184,6 +187,148 @@ describe("handleDaemonRequest", () => {
       result: { sessionId },
     });
     expect(sessionManager.getSession(sessionId)?.lastHeartbeat).toBeGreaterThan(initialHeartbeat);
+  });
+
+  test("fences token-bearing stale keepers while retaining tokenless heartbeat compatibility", async () => {
+    const devicePool = new FakeDevicePool({ total: 1, idle: 0, assigned: 1, error: 0 });
+    const state = new FakeDaemonState(sessionManager, devicePool);
+    const sessionId = "liveness-owner-session";
+    await sessionManager.createSession(sessionId, "emulator-5554", "android", 10_000);
+
+    await handleDaemonRequest(
+      buildRequest("daemon/heartbeat", {
+        sessionId,
+        livenessPolicy: "heartbeat",
+        livenessOwnerToken: "mcp-owner",
+        claimLivenessOwnership: true,
+      }),
+      state,
+    );
+    fakeTimer.advanceTime(1_000);
+    await handleDaemonRequest(
+      buildRequest("daemon/heartbeat", {
+        sessionId,
+        livenessPolicy: CLI_SESSION_LIVENESS_POLICY,
+        livenessOwnerToken: "cli-owner",
+        claimLivenessOwnership: true,
+      }),
+      state,
+    );
+    const cliOwned = sessionManager.getSession(sessionId)!;
+    expect(cliOwned).toMatchObject({
+      livenessPolicy: "cli-idle",
+      livenessOwnerToken: "cli-owner",
+      lastHeartbeat: fakeTimer.now(),
+      lastUsedAt: fakeTimer.now(),
+    });
+    const beforeStaleKeeper = {
+      livenessPolicy: cliOwned.livenessPolicy,
+      livenessOwnerToken: cliOwned.livenessOwnerToken,
+      lastUsedAt: cliOwned.lastUsedAt,
+      lastHeartbeat: cliOwned.lastHeartbeat,
+      expiresAt: cliOwned.expiresAt,
+    };
+
+    fakeTimer.advanceTime(1_000);
+    await expect(
+      handleDaemonRequest(
+        buildRequest("daemon/heartbeat", {
+          sessionId,
+          livenessPolicy: "heartbeat",
+          livenessOwnerToken: "mcp-owner",
+        }),
+        state,
+      ),
+    ).resolves.toEqual({ success: true, result: { sessionId } });
+    expect(sessionManager.getSession(sessionId)).toMatchObject(beforeStaleKeeper);
+
+    await handleDaemonRequest(
+      buildRequest("daemon/heartbeat", { sessionId, livenessPolicy: "heartbeat" }),
+      state,
+    );
+    expect(sessionManager.getSession(sessionId)).toMatchObject({
+      livenessPolicy: "heartbeat",
+      lastHeartbeat: fakeTimer.now(),
+    });
+  });
+
+  test("lets a surviving token keeper refresh a recovered session with no daemon-local owner", async () => {
+    const sessionId = "recovered-liveness-owner-session";
+    const persisted: DeviceSession = {
+      session_uuid: sessionId,
+      device_id: "emulator-5560",
+      stable_device_id: "Pixel_8_API_35",
+      platform: "android",
+      status: "active",
+      source: null,
+      autolock_enabled: 0,
+      mcp_session_id: null,
+      daemon_session_id: "old-daemon",
+      created_at_ms: 1,
+      last_used_at_ms: 20,
+      expires_at_ms: 30,
+      released_at_ms: 25,
+      release_reason: "daemon-restart",
+      session_timeout_ms: 10_000,
+      heartbeat_timeout_ms: 5_000,
+      has_received_heartbeat: 1,
+      created_at: "2026-09-14T00:00:00.000Z",
+      updated_at: "2026-09-14T00:00:00.000Z",
+    };
+    const persistence: DeviceSessionPersistence = {
+      async getSession() {
+        return persisted;
+      },
+      async upsertActiveSession() {},
+      async recordActivity() {},
+      async markReleased() {},
+    };
+    const restartedManager = new SessionManager(fakeTimer, persistence);
+    const recoverer: SessionDeviceAssigner = {
+      async assignDeviceToSession(recoveredSessionId, _platform, target): Promise<string> {
+        await restartedManager.createSession(
+          recoveredSessionId,
+          "emulator-5560",
+          "android",
+          undefined,
+          undefined,
+          target?.stableDeviceId,
+        );
+        return "emulator-5560";
+      },
+    };
+
+    try {
+      await restartedManager.getOrCreateSession(sessionId, recoverer, "android", undefined, true);
+      const state = new FakeDaemonState(
+        restartedManager,
+        new FakeDevicePool({ total: 1, idle: 0, assigned: 1, error: 0 }),
+      );
+      const beforeHeartbeat = restartedManager.getSession(sessionId)!;
+      expect(beforeHeartbeat.livenessOwnerToken).toBeUndefined();
+      expect(beforeHeartbeat.hasReceivedHeartbeat).toBe(false);
+
+      fakeTimer.advanceTime(1_000);
+      await expect(
+        handleDaemonRequest(
+          buildRequest("daemon/heartbeat", {
+            sessionId,
+            livenessPolicy: "heartbeat",
+            livenessOwnerToken: "surviving-proxy-token",
+          }),
+          state,
+        ),
+      ).resolves.toEqual({ success: true, result: { sessionId } });
+
+      expect(restartedManager.getSession(sessionId)).toMatchObject({
+        livenessOwnerToken: "surviving-proxy-token",
+        hasReceivedHeartbeat: true,
+        lastHeartbeat: fakeTimer.now(),
+        lastUsedAt: fakeTimer.now(),
+      });
+    } finally {
+      restartedManager.stopCleanupTimer();
+    }
   });
 
   test("returns error when sessionId is missing", async () => {

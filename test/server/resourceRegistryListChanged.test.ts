@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from "bun:test";
+import { beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {
   ReadResourceRequestSchema,
@@ -8,9 +8,11 @@ import {
 import {
   notifyInstalledAppResourceListChanged,
   syncInstalledAppResourceRegistry,
+  syncInstalledAppResources,
 } from "../../src/server/appResources";
 import { getRequestedResourceUri, ResourceRegistry } from "../../src/server/resourceRegistry";
 import { ListChangedBroadcaster } from "../../src/server/listChangedBroadcast";
+import { InstalledAppsRepository } from "../../src/db/installedAppsRepository";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 
@@ -92,6 +94,124 @@ describe("ResourceRegistry list-changed fan-out (issue #3223)", () => {
       ResourceRegistry.clearServersForTesting();
       manager.setBootedDevices("ios", []);
       await syncInstalledAppResourceRegistry();
+      PlatformDeviceManagerFactory.setInstance(null);
+    }
+  });
+
+  test("does not apply or announce a stale boot snapshot after a newer inventory refresh", async () => {
+    const oldDevice = {
+      platform: "android" as const,
+      name: "Old Booted Device",
+      deviceId: "STALE-BOOTED-DEVICE",
+    };
+    const newestDevice = {
+      platform: "ios" as const,
+      name: "Newest Inventory Device",
+      deviceId: "NEWEST-INVENTORY-DEVICE",
+    };
+    const manager = new FakeDeviceUtils();
+    const oldDiscovery = Promise.withResolvers<readonly (typeof oldDevice)[]>();
+    const getBootedDevices = manager.getBootedDevices.bind(manager);
+    let discoveryCalls = 0;
+    manager.getBootedDevices = async () => {
+      discoveryCalls++;
+      if (discoveryCalls === 1) {
+        return await oldDiscovery.promise;
+      }
+      return [newestDevice];
+    };
+    PlatformDeviceManagerFactory.setInstance(manager);
+    const server = new FakeMcpServer();
+    ResourceRegistry.registerWithServer(server as unknown as McpServer);
+
+    try {
+      const oldRefresh = syncInstalledAppResources();
+      await Promise.resolve();
+
+      await syncInstalledAppResources();
+      expect(
+        ResourceRegistry.getResource(`automobile:devices/${newestDevice.deviceId}/apps`),
+      ).toBeDefined();
+      expect(
+        ResourceRegistry.getResource(`automobile:devices/${oldDevice.deviceId}/apps`),
+      ).toBeUndefined();
+      expect(methodsSent(server)).toEqual(["notifications/resources/list_changed"]);
+
+      oldDiscovery.resolve([oldDevice]);
+      await oldRefresh;
+
+      expect(
+        ResourceRegistry.getResource(`automobile:devices/${newestDevice.deviceId}/apps`),
+      ).toBeDefined();
+      expect(
+        ResourceRegistry.getResource(`automobile:devices/${oldDevice.deviceId}/apps`),
+      ).toBeUndefined();
+      expect(methodsSent(server)).toEqual(["notifications/resources/list_changed"]);
+    } finally {
+      oldDiscovery.resolve([]);
+      ResourceRegistry.clearServersForTesting();
+      manager.getBootedDevices = getBootedDevices;
+      manager.setBootedDevices("android", []);
+      manager.setBootedDevices("ios", []);
+      await syncInstalledAppResourceRegistry();
+      PlatformDeviceManagerFactory.setInstance(null);
+    }
+  });
+
+  test("newer refresh publishes a registry change while older cleanup is blocked", async () => {
+    const disappearedDevice = {
+      platform: "android" as const,
+      name: "Disappeared Device",
+      deviceId: "DISAPPEARED-DEVICE",
+    };
+    const currentDevice = {
+      platform: "ios" as const,
+      name: "Current Device",
+      deviceId: "CURRENT-DEVICE",
+    };
+    const manager = new FakeDeviceUtils();
+    manager.setBootedDevices("android", [disappearedDevice]);
+    PlatformDeviceManagerFactory.setInstance(manager);
+    const server = new FakeMcpServer();
+    ResourceRegistry.registerWithServer(server as unknown as McpServer);
+    const cleanupStarted = Promise.withResolvers<void>();
+    const releaseCleanup = Promise.withResolvers<void>();
+    const clearDeviceSession = spyOn(
+      InstalledAppsRepository.prototype,
+      "clearDeviceSession",
+    ).mockImplementation(async () => {
+      cleanupStarted.resolve();
+      await releaseCleanup.promise;
+    });
+
+    try {
+      expect(await syncInstalledAppResourceRegistry()).toBe(true);
+      manager.setBootedDevices("android", []);
+      manager.setBootedDevices("ios", [currentDevice]);
+
+      const oldRefresh = syncInstalledAppResources();
+      await cleanupStarted.promise;
+      expect(
+        ResourceRegistry.getResource(`automobile:devices/${currentDevice.deviceId}/apps`),
+      ).toBeDefined();
+      expect(
+        ResourceRegistry.getResource(`automobile:devices/${disappearedDevice.deviceId}/apps`),
+      ).toBeUndefined();
+
+      await syncInstalledAppResources();
+      expect(methodsSent(server)).toEqual(["notifications/resources/list_changed"]);
+
+      releaseCleanup.resolve();
+      await oldRefresh;
+
+      expect(methodsSent(server)).toEqual(["notifications/resources/list_changed"]);
+    } finally {
+      releaseCleanup.resolve();
+      ResourceRegistry.clearServersForTesting();
+      manager.setBootedDevices("android", []);
+      manager.setBootedDevices("ios", []);
+      await syncInstalledAppResourceRegistry();
+      clearDeviceSession.mockRestore();
       PlatformDeviceManagerFactory.setInstance(null);
     }
   });

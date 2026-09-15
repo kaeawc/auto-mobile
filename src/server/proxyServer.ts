@@ -33,6 +33,23 @@ import {
   DEVICE_SESSION_RECOVERY_PROMPT,
   DEVICE_SESSION_RECOVERY_TOOLS,
 } from "./deviceSessionResult";
+import { ACCEPTANCE_DISCOVERY_CAPABILITY_ENV } from "../daemon/constants";
+
+const LIVE_ACCEPTANCE_ENV = "AUTOMOBILE_ACCEPTANCE_LIVE";
+const ACCEPTANCE_DISCOVERY_ORDER_ENV = "AUTOMOBILE_ACCEPTANCE_DISCOVERY_ORDER";
+
+function acceptanceDiscoveryConfiguration():
+  | { order: "forward" | "reverse"; capability: string }
+  | undefined {
+  if (process.env[LIVE_ACCEPTANCE_ENV] !== "1") {
+    return undefined;
+  }
+  const order = process.env[ACCEPTANCE_DISCOVERY_ORDER_ENV];
+  const capability = process.env[ACCEPTANCE_DISCOVERY_CAPABILITY_ENV];
+  return (order === "forward" || order === "reverse") && capability
+    ? { order, capability }
+    : undefined;
+}
 
 /**
  * Options for creating a proxy MCP server
@@ -190,7 +207,11 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
   server: McpServer;
   proxy: DaemonMcpProxy;
 } {
-  const proxy = new DaemonMcpProxy(options.proxyConfig);
+  const acceptanceDiscovery = acceptanceDiscoveryConfiguration();
+  const proxy = new DaemonMcpProxy({
+    ...options.proxyConfig,
+    ...(acceptanceDiscovery ? { acceptanceDiscovery } : {}),
+  });
   const advertisedToolOutputSchemas = new Map<string, boolean>();
 
   // Create the MCP server

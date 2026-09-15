@@ -3490,6 +3490,73 @@ describe("DevicePool", () => {
       },
     );
 
+    test("fences an Android same-serial replacement with the exact continuity-loss reason", async () => {
+      const persisted: DeviceSession = {
+        session_uuid: "restarted-session",
+        device_id: "emulator-5554",
+        stable_device_id: "Original_AVD",
+        platform: "android",
+        status: "expired",
+        source: "session-manager",
+        autolock_enabled: 0,
+        mcp_session_id: null,
+        daemon_session_id: "old-daemon",
+        created_at_ms: 1,
+        last_used_at_ms: 20,
+        expires_at_ms: 30,
+        released_at_ms: 25,
+        release_reason: "daemon-restart",
+        session_timeout_ms: 10,
+        heartbeat_timeout_ms: 5,
+        has_received_heartbeat: 1,
+        created_at: "2026-09-14T00:00:00.000Z",
+        updated_at: "2026-09-14T00:00:00.000Z",
+      };
+      const releaseReasons: string[] = [];
+      const persistence: DeviceSessionPersistence = {
+        async getSession() {
+          return persisted;
+        },
+        async upsertActiveSession() {
+          throw new Error("same-serial replacement must not create a recovered session");
+        },
+        async recordActivity() {},
+        async markReleased(_sessionUuid, _status, _releasedAtMs, releaseReason) {
+          releaseReasons.push(releaseReason);
+          persisted.release_reason = releaseReason;
+        },
+      };
+      sessionManager.stopCleanupTimer();
+      sessionManager = new SessionManager(fakeTimer, persistence);
+      devicePool = new DevicePool(
+        sessionManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        fakeAppsRepo,
+        fakeDeviceManager,
+        new DefaultRetryExecutor(fakeTimer),
+      );
+      await initializeLiveDevices([
+        createBootedDevice("emulator-5554", "android", "Replacement_AVD"),
+      ]);
+
+      await expect(
+        sessionManager.getOrCreateSession(
+          persisted.session_uuid,
+          devicePool,
+          "android",
+          undefined,
+          true,
+        ),
+      ).rejects.toThrow("recovery reason: identity-continuity-lost");
+      expect(releaseReasons).toEqual(["identity-recovery-identity-continuity-lost"]);
+      expect(devicePool.getDevice("emulator-5554")).toMatchObject({
+        name: "Replacement_AVD",
+        sessionId: null,
+        status: "idle",
+      });
+    });
+
     test("does not recover an Android emulator session onto a physical device with the same identifier", async () => {
       const persisted: DeviceSession = {
         session_uuid: "restarted-session",

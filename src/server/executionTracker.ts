@@ -51,6 +51,11 @@ export interface ActiveExecutionQuery {
 }
 
 export type DaemonRestartAdmission = "accepted" | "active_operations" | "restart_pending";
+export type DaemonMaintenanceAdmission =
+  | "accepted"
+  | "active_operations"
+  | "active_sessions"
+  | "maintenance_pending";
 
 export class ExecutionTracker {
   private executions = new Map<string, ActiveExecution>();
@@ -61,6 +66,7 @@ export class ExecutionTracker {
   private timer: Timer;
   private idGenerator: IdGenerator;
   private daemonRestartPrepared = false;
+  private daemonMaintenancePrepared = false;
 
   constructor(timer: Timer = defaultTimer, idGenerator: IdGenerator = defaultIdGenerator) {
     this.timer = timer;
@@ -73,7 +79,7 @@ export class ExecutionTracker {
     sessionUuid?: string,
     transportSessionId?: string,
   ): ActiveExecution {
-    if (this.isDaemonRestartPrepared()) {
+    if (this.isDaemonRestartPrepared() || this.isDaemonMaintenancePrepared()) {
       throw new DaemonRestartPendingError();
     }
     const id = this.idGenerator.next();
@@ -126,8 +132,36 @@ export class ExecutionTracker {
     this.daemonRestartPrepared = false;
   }
 
+  /**
+   * Atomically fences new tool work for an explicit maintenance operation.
+   * Callers pass the daemon's current session count in the same synchronous
+   * turn as this check, so a new tool cannot start between the idle proof and
+   * the fence becoming visible to startExecution().
+   */
+  prepareForDaemonMaintenance(activeSessions: number): DaemonMaintenanceAdmission {
+    if (this.daemonMaintenancePrepared) {
+      return "maintenance_pending";
+    }
+    if (activeSessions > 0) {
+      return "active_sessions";
+    }
+    if (this.executions.size > 0 || this.daemonRestartPrepared) {
+      return "active_operations";
+    }
+    this.daemonMaintenancePrepared = true;
+    return "accepted";
+  }
+
+  clearDaemonMaintenancePreparation(): void {
+    this.daemonMaintenancePrepared = false;
+  }
+
   private isDaemonRestartPrepared(): boolean {
     return this.daemonRestartPrepared;
+  }
+
+  private isDaemonMaintenancePrepared(): boolean {
+    return this.daemonMaintenancePrepared;
   }
 
   endExecution(executionId: string): void {
@@ -160,6 +194,11 @@ export class ExecutionTracker {
     for (const listener of this.executionEndListeners) {
       listener();
     }
+  }
+
+  /** Number of currently admitted tool executions, for fail-closed host maintenance checks. */
+  getActiveExecutionCount(): number {
+    return this.executions.size;
   }
 
   /**

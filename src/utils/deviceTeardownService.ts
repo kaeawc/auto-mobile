@@ -20,6 +20,11 @@ export interface DeviceTeardownRequest {
   identity: StableVirtualDeviceIdentity;
   deadlineMs: number;
   callerSignal?: AbortSignal;
+  /**
+   * Ordinary teardown outlives a disconnected caller. Deadline-critical,
+   * caller-owned cleanup can instead cancel the accepted workflow too.
+   */
+  cancellationPolicy?: "continue" | "cancel-on-caller-abort";
   /** An already-held reservation transferred atomically from failed provisioning. */
   lifecycleLease?: VirtualDeviceLifecycleLease;
 }
@@ -88,9 +93,10 @@ export interface DeviceTeardownServiceDependencies {
 /**
  * Owns accepted teardown state and the stop -> destroy -> verify state machine.
  *
- * Caller cancellation only stops that caller waiting. The accepted operation
- * receives its own signal and remains authoritative until platform mutation
- * settles, including commands that outlive the request deadline.
+ * Caller cancellation normally only stops that caller waiting. The narrowly
+ * typed cancel-on-caller-abort policy instead cancels the accepted workflow,
+ * while ordinary teardown remains authoritative until platform mutation
+ * settles.
  */
 export class DeviceTeardownService {
   private readonly operations = new Map<string, AcceptedTeardown<unknown>>();
@@ -221,14 +227,57 @@ export class DeviceTeardownService {
       this.startRenewal(request, ownerToken, operationStore, nowMs + this.dependencies.resultTtlMs);
     }
 
-    const controller = new AbortController();
-    const response = await this.execute(
+    const response = await this.executeAcceptedWorkflow(
       request,
-      controller.signal,
       workflow,
       execution,
       leaseTransfer,
     );
+    return await this.persistTerminalResult(
+      request,
+      workflow,
+      execution,
+      ownerToken,
+      operationStore,
+      response,
+    );
+  }
+
+  private async executeAcceptedWorkflow<TTarget, TStop, TResponse>(
+    request: DeviceTeardownRequest,
+    workflow: DeviceTeardownWorkflow<TTarget, TStop, TResponse>,
+    execution: { destructionStarted: boolean },
+    leaseTransfer: TransferredLeaseOwnership,
+  ): Promise<TResponse> {
+    const controller = new AbortController();
+    const cancelAcceptedOperation = () => {
+      controller.abort(
+        request.callerSignal?.reason ??
+          new ActionableError("Device teardown caller cancelled the accepted operation"),
+      );
+    };
+    if (request.cancellationPolicy === "cancel-on-caller-abort") {
+      if (request.callerSignal?.aborted) {
+        cancelAcceptedOperation();
+      } else {
+        request.callerSignal?.addEventListener("abort", cancelAcceptedOperation, { once: true });
+      }
+    }
+    try {
+      return await this.execute(request, controller.signal, workflow, execution, leaseTransfer);
+    } finally {
+      request.callerSignal?.removeEventListener("abort", cancelAcceptedOperation);
+    }
+  }
+
+  private async persistTerminalResult<TTarget, TStop, TResponse>(
+    request: DeviceTeardownRequest,
+    workflow: DeviceTeardownWorkflow<TTarget, TStop, TResponse>,
+    execution: { destructionStarted: boolean },
+    ownerToken: string,
+    operationStore: DeviceTeardownOperationStore | undefined,
+    response: TResponse,
+  ): Promise<TResponse> {
     if (!operationStore) {
       return response;
     }
@@ -290,7 +339,9 @@ export class DeviceTeardownService {
           },
         );
       }
+      signal.throwIfAborted();
       const resolution = await workflow.resolve(signal, lease);
+      signal.throwIfAborted();
       if ("response" in resolution) {
         return resolution.response;
       }
@@ -304,12 +355,19 @@ export class DeviceTeardownService {
       };
       phase = "stop";
       const stop = await workflow.stop(target, signal, retainLeaseUntil);
+      signal.throwIfAborted();
       phase = "destroy";
       await workflow.destroy(target, signal, retainLeaseUntil, () => {
         execution.destructionStarted = true;
       });
+      // A deadline-critical caller may have stopped waiting while platform I/O
+      // ignored its abort signal. Never let that late settlement publish a
+      // successful verification result for the cancelled accepted operation.
+      signal.throwIfAborted();
       phase = "verification";
-      return await workflow.verify(target, stop, signal);
+      const response = await workflow.verify(target, stop, signal);
+      signal.throwIfAborted();
+      return response;
     } catch (error) {
       return workflow.failure(phase, error, target);
     } finally {

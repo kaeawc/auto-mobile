@@ -117,6 +117,24 @@ describe("MultiPlatformDeviceManager", () => {
       });
     });
 
+    test("acceptance presentation order reverses a fresh discovery without changing its members", async () => {
+      await withProcessPlatform("darwin", async () => {
+        const manager = makeManager({ simulators: [simulator], physical: [physicalDevice] });
+
+        const forward = await manager.getBootedDevicesDetailed("ios", {
+          presentationOrder: "forward",
+        });
+        const reverse = await manager.getBootedDevicesDetailed("ios", {
+          presentationOrder: "reverse",
+        });
+
+        expect(reverse.devices).toEqual(forward.devices.toReversed());
+        expect(reverse.succeededPlatforms).toEqual(forward.succeededPlatforms);
+        expect(reverse.succeededSources).toEqual(forward.succeededSources);
+        expect(reverse.freshDeviceIds).toEqual(forward.freshDeviceIds);
+      });
+    });
+
     test("a simulator discovery failure still surfaces connected physical devices", async () => {
       await withProcessPlatform("darwin", async () => {
         const manager = makeManager({

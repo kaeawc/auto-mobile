@@ -464,6 +464,25 @@ describe("generated tool definitions", () => {
     // the top level no longer requires it.
     expect(changeLocalization?.inputSchema?.required).toBeUndefined();
   });
+
+  test("deleteDevice generated schema accepts cancellation-safe teardown requests", () => {
+    const schemas = JSON.parse(readFileSync("schemas/tool-definitions.json", "utf8")) as Array<{
+      name: string;
+      inputSchema?: {
+        additionalProperties?: boolean;
+        properties?: Record<string, unknown>;
+      };
+    }>;
+    const deleteDevice = schemas.find((schema) => schema.name === "deleteDevice");
+
+    expect(deleteDevice?.inputSchema?.additionalProperties).toBe(false);
+    expect(deleteDevice?.inputSchema?.properties?.cancellationPolicy).toEqual({
+      description:
+        "Cancel the accepted teardown if this MCP request is aborted. Use only for deadline-critical, caller-owned cleanup that must not continue in the background after its caller stops waiting.",
+      type: "string",
+      const: "cancel-on-request-abort",
+    });
+  });
 });
 
 describe("platform field accepted by all device-targeting tool schemas", () => {

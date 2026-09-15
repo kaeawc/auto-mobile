@@ -79,9 +79,13 @@ describe("doctorToolParams", () => {
   });
 
   test("keeps recovery-only flags out of the daemon doctor request", () => {
-    expect(doctorToolParams({ android: true, repair: true, timeoutMs: 12_000 })).toEqual({
-      android: true,
-    });
+    expect(
+      doctorToolParams({
+        android: true,
+        repair: true,
+        timeoutMs: 12_000,
+      }),
+    ).toEqual({ android: true });
   });
 
   test("runs repair locally and renders its structured result", async () => {
@@ -94,7 +98,7 @@ describe("doctorToolParams", () => {
     });
 
     try {
-      await runDoctorCommand(
+      const termination = await runDoctorCommand(
         { repair: true, timeoutMs: 12_000 },
         {
           repairDaemon: async (options) => {
@@ -129,6 +133,7 @@ describe("doctorToolParams", () => {
         },
         { host: "127.0.0.1", port: 4321 },
       );
+      expect(termination).toBeUndefined();
     } finally {
       resetCliOutputSinksForTesting();
     }
@@ -143,7 +148,39 @@ describe("doctorToolParams", () => {
     });
   });
 
-  test("keeps android and ios filters diagnostic-only while repair remains host-wide", async () => {
+  test("requests executable termination after a failed repair writes its result", async () => {
+    const written: string[] = [];
+    setCliOutputSinksForTesting({
+      stdout: { write: (text) => written.push(text) },
+      stderr: { write: () => {} },
+    });
+
+    try {
+      const termination = await runDoctorCommand(
+        { repair: true, android: true },
+        {
+          repairDaemon: async () => ({
+            status: "failed",
+            phase: "verification",
+            action: "restarted",
+            nextAction: "Recovery deadline elapsed during verification.",
+          }),
+        },
+      );
+
+      expect(termination).toEqual({ exitCode: 1 });
+    } finally {
+      resetCliOutputSinksForTesting();
+    }
+
+    expect(JSON.parse(written[0])).toMatchObject({
+      status: "failed",
+      phase: "verification",
+      action: "restarted",
+    });
+  });
+
+  test("threads Android and iOS filters into host-wide repair's post-repair diagnostics", async () => {
     const receivedOptions: unknown[] = [];
     setCliOutputSinksForTesting({
       stdout: { write: () => {} },
@@ -167,8 +204,8 @@ describe("doctorToolParams", () => {
     }
 
     expect(receivedOptions).toEqual([
-      { timeoutMs: undefined, daemonOptions: undefined },
-      { timeoutMs: undefined, daemonOptions: undefined },
+      { timeoutMs: undefined, android: true, ios: undefined, daemonOptions: undefined },
+      { timeoutMs: undefined, android: undefined, ios: true, daemonOptions: undefined },
     ]);
   });
 

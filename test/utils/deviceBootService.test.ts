@@ -478,6 +478,30 @@ describe("DeviceBootService", () => {
     expect(devices.getExecutedOperations().join("|")).not.toContain("startDevice:");
   });
 
+  it("never aliases an exact iOS UDID to an image display name", async () => {
+    const devices = new FakeDeviceUtils();
+    const requestedUdid = "00000000-0000-0000-0000-000000000001";
+    devices.setDeviceImages("ios", [
+      {
+        platform: "ios",
+        // This synthetic collision is deliberate: display names are not an
+        // identity namespace, even when one happens to look like a UDID.
+        name: requestedUdid,
+        deviceId: "00000000-0000-0000-0000-000000000002",
+        isRunning: false,
+      },
+    ]);
+
+    await expect(
+      service(devices).boot({
+        platform: "ios",
+        deviceId: requestedUdid,
+        preferRunning: true,
+      }),
+    ).rejects.toThrow(`Device '${requestedUdid}' not found`);
+    expect(devices.getExecutedOperations().join("|")).not.toContain("startDevice:");
+  });
+
   it("rejects an ambiguous running Android AVD when reusing an image by name", async () => {
     const devices = new FakeDeviceUtils();
     devices.setDeviceImages("android", [{ ...image, isRunning: true }]);

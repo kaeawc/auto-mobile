@@ -44,6 +44,7 @@ const socketStatusSchema = z.object({
   entryScript: z.string().optional(),
   releaseVersion: z.string().optional(),
   startedAt: z.number().finite().optional(),
+  processGenerationToken: z.string().optional(),
   activeProvisioning: z.boolean().optional(),
 });
 
@@ -135,6 +136,16 @@ export interface DaemonClientRecoveryOptions {
 }
 
 /**
+ * Per-RPC transport budget. Lifecycle callers use this to share one absolute
+ * deadline across connect and every control request instead of silently
+ * resetting to the client's default for each hop.
+ */
+export interface DaemonMethodCallOptions {
+  timeoutMs?: number;
+  signal?: AbortSignal;
+}
+
+/**
  * CLI Client for communicating with the daemon via Unix socket
  *
  * Responsibilities:
@@ -170,6 +181,7 @@ export class DaemonClient {
       progressToken?: string | number;
       deadline?: ProgressExtendableDeadline;
       requestTimeoutMs?: number;
+      removeAbortListener?: () => void;
     }
   > = new Map();
   private buffer: string = "";
@@ -266,7 +278,11 @@ export class DaemonClient {
    * here has no equivalent ownership proof and could delete a concurrent startup
    * winner's live socket.
    */
-  static async isAvailable(socketPath: string = SOCKET_PATH): Promise<boolean> {
+  static async isAvailable(
+    socketPath: string = SOCKET_PATH,
+    options: { signal?: AbortSignal; timeoutMs?: number; timer?: Timer } = {},
+  ): Promise<boolean> {
+    const timer = options.timer ?? defaultTimer;
     // On Unix, verify the path exists and is a socket (not a stale regular file).
     // On Windows, named pipes don't have filesystem entries — skip the stat check
     // and let createConnection determine reachability.
@@ -289,24 +305,35 @@ export class DaemonClient {
       const settle = (value: boolean) => {
         if (!settled) {
           settled = true;
+          options.signal?.removeEventListener("abort", onAbort);
           resolve(value);
         }
       };
+      const onAbort = () => {
+        timer.clearTimeout(timeout);
+        socket.destroy();
+        settle(false);
+      };
 
       const socket = createConnection(socketPath, () => {
-        defaultTimer.clearTimeout(timeout);
+        timer.clearTimeout(timeout);
         socket.destroy();
         settle(true);
       });
       socket.on("error", () => {
-        defaultTimer.clearTimeout(timeout);
+        timer.clearTimeout(timeout);
         socket.destroy();
         settle(false);
       });
-      const timeout = defaultTimer.setTimeout(() => {
+      const timeout = timer.setTimeout(() => {
         socket.destroy();
         settle(false);
-      }, 1000);
+      }, options.timeoutMs ?? 1000);
+      if (options.signal?.aborted) {
+        onAbort();
+      } else {
+        options.signal?.addEventListener("abort", onAbort, { once: true });
+      }
     });
   }
 
@@ -398,8 +425,9 @@ export class DaemonClient {
       let removeAbortListener = () => {};
 
       const rejectPendingRequests = (error: Error) => {
-        for (const [, { reject, timeout }] of this.pendingRequests) {
+        for (const [, { reject, timeout, removeAbortListener }] of this.pendingRequests) {
           this.timer.clearTimeout(timeout);
+          removeAbortListener?.();
           reject(error);
         }
         this.pendingRequests.clear();
@@ -641,6 +669,7 @@ export class DaemonClient {
     }
 
     this.timer.clearTimeout(pending.timeout);
+    pending.removeAbortListener?.();
     this.pendingRequests.delete(response.id);
 
     if (response.success) {
@@ -790,9 +819,20 @@ export class DaemonClient {
   /**
    * Call a daemon method directly over the socket
    */
-  async callDaemonMethod(method: string, params: Record<string, any> = {}): Promise<any> {
+  async callDaemonMethod(
+    method: string,
+    params: Record<string, any> = {},
+    options: DaemonMethodCallOptions = {},
+  ): Promise<any> {
+    const timeoutMs = options.timeoutMs ?? this.connectionTimeout;
+    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+      throw new DaemonUnavailableError(`Daemon request ${method} has no remaining timeout`);
+    }
+    if (options.signal?.aborted) {
+      throw new DaemonUnavailableError(`Daemon request ${method} aborted`);
+    }
     if (!this.connected) {
-      await this.connect();
+      await this.connect(timeoutMs, options.signal);
     }
 
     const requestId = this.idGenerator.next();
@@ -802,20 +842,39 @@ export class DaemonClient {
       type: "daemon_request",
       method,
       params,
+      timeoutMs,
       ...this.handshakeFields(),
     };
 
     return new Promise((resolve, reject) => {
+      let removeAbortListener = () => {};
       const timeout = this.timer.setTimeout(() => {
+        removeAbortListener();
         this.pendingRequests.delete(requestId);
         reject(
           new McpTimeoutError({
             toolName: method,
-            timeoutMs: this.connectionTimeout,
+            timeoutMs,
             origin: "DaemonClient.callDaemonMethod",
           }),
         );
-      }, this.connectionTimeout);
+      }, timeoutMs);
+
+      if (options.signal) {
+        const onAbort = () => {
+          this.timer.clearTimeout(timeout);
+          this.pendingRequests.delete(requestId);
+          removeAbortListener();
+          // Destroying this dedicated lifecycle connection tells the daemon to
+          // abandon a still-queued local control RPC. Merely rejecting the
+          // caller would leave a delayed metadata repair free to publish after
+          // doctor has already reported its deadline.
+          this.socket?.destroy();
+          reject(new DaemonUnavailableError(`Daemon request ${method} aborted`));
+        };
+        options.signal.addEventListener("abort", onAbort, { once: true });
+        removeAbortListener = () => options.signal?.removeEventListener("abort", onAbort);
+      }
 
       this.pendingRequests.set(requestId, {
         resolve: (response) => {
@@ -824,10 +883,12 @@ export class DaemonClient {
         reject,
         timeout,
         toolName: method,
+        removeAbortListener,
       });
 
       if (!this.socket) {
         this.timer.clearTimeout(timeout);
+        removeAbortListener();
         this.pendingRequests.delete(requestId);
         reject(new DaemonUnavailableError("Socket connection lost"));
         return;
@@ -850,8 +911,9 @@ export class DaemonClient {
 
     // Reject all pending requests
     const closeError = new DaemonUnavailableError("Socket connection closed");
-    for (const [, { timeout, reject }] of this.pendingRequests) {
+    for (const [, { timeout, reject, removeAbortListener }] of this.pendingRequests) {
       this.timer.clearTimeout(timeout);
+      removeAbortListener?.();
       reject(closeError);
     }
     this.pendingRequests.clear();
@@ -869,7 +931,11 @@ export interface DaemonClientLike {
     progressToken?: string | number,
   ): Promise<any>;
   readResource(uri: string, params?: Record<string, any>): Promise<any>;
-  callDaemonMethod(method: string, params: Record<string, any>): Promise<any>;
+  callDaemonMethod(
+    method: string,
+    params: Record<string, any>,
+    options?: DaemonMethodCallOptions,
+  ): Promise<any>;
   /**
    * Optional daemon-push capability (issue #3223). Clients that cannot surface
    * server-pushed frames omit both members and the proxy skips notification

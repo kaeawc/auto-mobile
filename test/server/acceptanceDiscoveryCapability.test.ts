@@ -17,6 +17,7 @@ import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 
 const TOOL = "__acceptance_discovery_capability_probe_7144__";
+const NO_SCHEMA_TOOL = "__acceptance_discovery_no_schema_probe_7144__";
 const CAPABILITY = "acceptance-harness-capability";
 
 let isAvailableSpy: ReturnType<typeof spyOn> | undefined;
@@ -50,6 +51,16 @@ describe("acceptance discovery presentation capability (issue #7144)", () => {
         }),
       },
     );
+    ToolRegistry.register(
+      NO_SCHEMA_TOOL,
+      "reports whether an authenticated acceptance request retains a no-schema payload",
+      z.object({}).strict(),
+      async () =>
+        createStructuredToolResponse({
+          success: true,
+          source: "no-schema",
+        }),
+    );
     configuredFixture = new McpTestFixture({
       daemonMode: true,
       acceptanceDiscoveryCapability: CAPABILITY,
@@ -61,6 +72,7 @@ describe("acceptance discovery presentation capability (issue #7144)", () => {
   afterAll(async () => {
     await Promise.all([configuredFixture.teardown(), unconfiguredFixture.teardown()]);
     (ToolRegistry as unknown as { tools: Map<string, unknown> }).tools.delete(TOOL);
+    (ToolRegistry as unknown as { tools: Map<string, unknown> }).tools.delete(NO_SCHEMA_TOOL);
   });
 
   afterEach(() => {
@@ -152,5 +164,25 @@ describe("acceptance discovery presentation capability (issue #7144)", () => {
     });
 
     expect(getStructuredField(result, "receivedOrder")).toBe("reverse");
+  });
+
+  test("retains no-schema structuredContent only for an authenticated acceptance request", async () => {
+    const accepted = await configuredFixture.client.callTool({
+      name: NO_SCHEMA_TOOL,
+      arguments: {
+        [INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM]: "forward",
+        [INTERNAL_ACCEPTANCE_DISCOVERY_CAPABILITY_PARAM]: CAPABILITY,
+      },
+    });
+    const ordinary = await configuredFixture.client.callTool({
+      name: NO_SCHEMA_TOOL,
+      arguments: {
+        [INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM]: "forward",
+        [INTERNAL_ACCEPTANCE_DISCOVERY_CAPABILITY_PARAM]: "ordinary-client-guess",
+      },
+    });
+
+    expect(accepted.structuredContent).toEqual({ success: true, source: "no-schema" });
+    expect(ordinary.structuredContent).toBeUndefined();
   });
 });

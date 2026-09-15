@@ -2576,6 +2576,14 @@ export class Daemon {
    * This establishes WebSocket connections early so first observe calls are fast
    */
   private async initializeIosServices(): Promise<void> {
+    // A live-acceptance daemon discovers a controlled target before it performs
+    // any device mutation. Warming every already-booted simulator here would
+    // launch CtrlProxy on unrelated devices before that authenticated selection.
+    // The later, explicit acquisition path still initializes its chosen target.
+    if (this.liveAcceptanceStartupSecret) {
+      logger.info("[Daemon] Skipping pool-wide iOS CtrlProxy warm-up for live acceptance");
+      return;
+    }
     const allDevices = this.devicePool.getAllDevices();
     const iosDevices = allDevices.filter((device) => device.platform === "ios");
     if (iosDevices.length === 0) {

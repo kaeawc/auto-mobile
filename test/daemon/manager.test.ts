@@ -1626,16 +1626,22 @@ describe("Daemon manager process detection", () => {
   ] as const)(
     "uses the %s process table command with an expanded buffer and bounded timeout",
     (platform, command) => {
+      const linuxProcessGenerationToken = "linux:boot-id:424242";
       const calls: Array<{
         command: string;
         options: { encoding: "utf-8"; maxBuffer: number; timeout: number };
       }> = [];
-      const finder = new PsDaemonProcessFinder((command, options) => {
-        calls.push({ command, options });
-        return platform === "darwin"
-          ? "20 1 Sun Sep 13 10:57:04 2026 bunx -y @kaeawc/auto-mobile@0.0.38 --daemon-mode"
-          : "20 1 bunx -y @kaeawc/auto-mobile@0.0.38 --daemon-mode";
-      }, platform);
+      const finder = new PsDaemonProcessFinder(
+        (command, options) => {
+          calls.push({ command, options });
+          return platform === "darwin"
+            ? "20 1 Sun Sep 13 10:57:04 2026 bunx -y @kaeawc/auto-mobile@0.0.38 --daemon-mode"
+            : "20 1 bunx -y @kaeawc/auto-mobile@0.0.38 --daemon-mode";
+        },
+        platform,
+        new FakeTimer(),
+        () => linuxProcessGenerationToken,
+      );
 
       expect(finder.findDaemonProcesses()).toEqual([
         {
@@ -1648,6 +1654,7 @@ describe("Daemon manager process detection", () => {
           ...(platform === "darwin"
             ? { processGenerationToken: "darwin:Sun Sep 13 10:57:04 2026" }
             : {}),
+          ...(platform === "linux" ? { processGenerationToken: linuxProcessGenerationToken } : {}),
         },
       ]);
       expect(calls).toEqual([
@@ -1679,6 +1686,7 @@ describe("Daemon manager process detection", () => {
   });
 
   test("falls back to BusyBox etime under one scan deadline", () => {
+    const linuxProcessGenerationToken = "linux:boot-id:424242";
     const calls: Array<{
       command: string;
       options: { encoding: "utf-8"; maxBuffer: number; timeout: number };
@@ -1696,6 +1704,7 @@ describe("Daemon manager process detection", () => {
       },
       "linux",
       timer,
+      () => linuxProcessGenerationToken,
     );
 
     expect(finder.findDaemonProcesses()).toEqual([
@@ -1704,6 +1713,7 @@ describe("Daemon manager process detection", () => {
         ppid: 1,
         command: "bunx -y @kaeawc/auto-mobile@0.0.38 --daemon-mode",
         startedAt: 990_000,
+        processGenerationToken: linuxProcessGenerationToken,
       },
     ]);
     expect(calls).toEqual([

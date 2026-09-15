@@ -233,6 +233,12 @@ export class SwipeOn extends BaseVisualChange {
 
     const normalizedOptions: SwipeOnResolvedOptions = {
       ...options,
+      container: options.container
+        ? { selectionStrategy: options.selectionStrategy, ...options.container }
+        : undefined,
+      lookFor: options.lookFor
+        ? { selectionStrategy: options.selectionStrategy, ...options.lookFor }
+        : undefined,
       direction: resolvedDirection.direction as SwipeDirection,
     };
 
@@ -386,9 +392,11 @@ export class SwipeOn extends BaseVisualChange {
   private validateOptions(options: SwipeOnOptions): string | null {
     // Validate container if specified
     if (options.container) {
-      const containerFieldCount = [options.container.elementId, options.container.text].filter(
-        Boolean,
-      ).length;
+      const containerFieldCount = [
+        options.container.elementId,
+        options.container.text,
+        options.container.testTag,
+      ].filter(Boolean).length;
       if (containerFieldCount === 0) {
         return "container must specify exactly one of elementId or text";
       }
@@ -399,11 +407,13 @@ export class SwipeOn extends BaseVisualChange {
 
     // If lookFor is specified, validate it
     if (options.lookFor) {
-      const lookForFieldCount = [options.lookFor.elementId, options.lookFor.text].filter(
-        Boolean,
-      ).length;
+      const lookForFieldCount = [
+        options.lookFor.elementId,
+        options.lookFor.text,
+        options.lookFor.testTag,
+      ].filter(Boolean).length;
       if (lookForFieldCount !== 1) {
-        return "lookFor must specify exactly one of elementId or text";
+        return "lookFor must specify exactly one of elementId, text or testTag";
       }
     }
 
@@ -540,6 +550,16 @@ export class SwipeOn extends BaseVisualChange {
         const element = await perf.track("findElement", () =>
           this.scrollUntilVisible.findTargetElement(options, viewHierarchy),
         );
+        if (
+          options.container?.container &&
+          this.device.platform === "android" &&
+          (await this.accessibilityDetector.detectMethod(this.device.deviceId, this.adb)) ===
+            "talkback"
+        ) {
+          throw new ActionableError(
+            "target_not_actionable: nested scrolling requires coordinate input; TalkBack identifier-only scrolling cannot preserve ancestry",
+          );
+        }
 
         const { startX, startY, endX, endY, warning } = this.resolveContainerSwipeCoordinates(
           options,
@@ -555,6 +575,7 @@ export class SwipeOn extends BaseVisualChange {
           scrollMode: options.scrollMode,
         };
 
+        gestureOptions.frameContext = options.container ? viewHierarchy.frameContext : undefined;
         const swipeResult = await perf.track("executeElementSwipe", () =>
           this.device.platform === "ios"
             ? this.voiceOverExecutor.executeSwipeGesture(
@@ -590,11 +611,13 @@ export class SwipeOn extends BaseVisualChange {
         };
       },
       {
-        queryOptions: {
-          text: options.container?.text,
-          elementId: options.container?.elementId,
-          containerElementId: undefined, // No nested container restriction
-        },
+        queryOptions: options.container?.container
+          ? undefined
+          : {
+              text: options.container?.text,
+              elementId: options.container?.elementId,
+              containerElementId: undefined, // No nested container restriction
+            },
         changeExpected: false,
         timeoutMs: 500,
         progress,

@@ -1,3 +1,4 @@
+import type { ElementQuery } from "../../models/ElementQuery";
 import type { ElementSelectionResult } from "../../models/ElementSelectionResult";
 import type { ViewHierarchyResult } from "../../models/ViewHierarchyResult";
 import type { ElementSelectionStrategy } from "../../models/ElementSelectionStrategy";
@@ -7,7 +8,7 @@ export interface ElementSelector {
     viewHierarchy: ViewHierarchyResult,
     text: string,
     options?: {
-      container?: { elementId?: string; text?: string } | null;
+      container?: ElementQuery | null;
       partialMatch?: boolean;
       caseSensitive?: boolean;
       strategy?: ElementSelectionStrategy;
@@ -20,7 +21,7 @@ export interface ElementSelector {
     viewHierarchy: ViewHierarchyResult,
     resourceId: string,
     options?: {
-      container?: { elementId?: string; text?: string } | null;
+      container?: ElementQuery | null;
       partialMatch?: boolean;
       strategy?: ElementSelectionStrategy;
       /** 0-based position among on-screen matches; overrides strategy. Out of range → null. */
@@ -32,7 +33,7 @@ export interface ElementSelector {
     viewHierarchy: ViewHierarchyResult,
     testTag: string,
     options?: {
-      container?: { elementId?: string; text?: string } | null;
+      container?: ElementQuery | null;
       strategy?: ElementSelectionStrategy;
       /** 0-based position among on-screen matches; overrides strategy. Out of range → null. */
       index?: number;
@@ -42,7 +43,7 @@ export interface ElementSelector {
   selectClickable(
     viewHierarchy: ViewHierarchyResult,
     options?: {
-      container?: { elementId?: string; text?: string } | null;
+      container?: ElementQuery | null;
       strategy?: ElementSelectionStrategy;
       scrollableContainer?: boolean;
     },
@@ -52,7 +53,7 @@ export interface ElementSelector {
     viewHierarchy: ViewHierarchyResult,
     text: string,
     options?: {
-      container?: { elementId?: string; text?: string } | null;
+      container?: ElementQuery | null;
       fuzzyMatch?: boolean;
       caseSensitive?: boolean;
       strategy?: ElementSelectionStrategy;
@@ -65,7 +66,7 @@ export interface ElementSelector {
     viewHierarchy: ViewHierarchyResult,
     resourceId: string,
     options?: {
-      container?: { elementId?: string; text?: string } | null;
+      container?: ElementQuery | null;
       partialMatch?: boolean;
       strategy?: ElementSelectionStrategy;
       /** 0-based position among on-screen matches; overrides strategy. Out of range → null. */

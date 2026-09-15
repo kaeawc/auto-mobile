@@ -1,3 +1,4 @@
+import type { ElementQuery } from "../models/ElementQuery";
 /**
  * Type definitions for interaction tools.
  * Extracted from interactionTools.ts for maintainability.
@@ -52,6 +53,9 @@ export interface InputTextSelector {
 }
 
 export interface InputTextArgs {
+  container?: ElementQuery;
+  selectionStrategy?: ElementSelectionStrategy;
+  index?: number;
   text: string;
   selector?: InputTextSelector;
   mode?: "a11y" | "eventLast" | "eventAll" | "eventOnly";
@@ -63,6 +67,9 @@ export interface InputTextArgs {
 }
 
 export interface SendKeysArgs {
+  container?: ElementQuery;
+  selectionStrategy?: ElementSelectionStrategy;
+  index?: number;
   commands: SendKeysCommand[];
   selector?: SendKeysSelector;
   platform?: Platform;
@@ -91,10 +98,7 @@ export interface TapOnArgs {
     accessibilityLink?: string;
   };
   sibling?: boolean;
-  container?: {
-    elementId?: string;
-    text?: string;
-  };
+  container?: ElementQuery;
   selectionStrategy?: ElementSelectionStrategy;
   index?: number;
   action: "tap" | "doubleTap" | "longPress" | "focus";
@@ -115,10 +119,7 @@ export interface TapOnArgs {
 }
 
 export interface TapAnyArgs {
-  container?: {
-    elementId?: string;
-    text?: string;
-  };
+  container?: ElementQuery;
   selectionStrategy?: ElementSelectionStrategy;
   action: "tap" | "doubleTap" | "longPress";
   duration?: number;
@@ -130,14 +131,9 @@ export interface TapAnyArgs {
 }
 
 export interface DragAndDropArgs {
-  source: {
-    text?: string;
-    elementId?: string;
-  };
-  target: {
-    text?: string;
-    elementId?: string;
-  };
+  source: ElementQuery;
+  target: ElementQuery;
+  selectionStrategy?: ElementSelectionStrategy;
   pressDurationMs?: number;
   dragDurationMs?: number;
   holdDurationMs?: number;
@@ -145,18 +141,13 @@ export interface DragAndDropArgs {
 }
 
 export interface SwipeOnArgs {
+  selectionStrategy?: ElementSelectionStrategy;
   includeSystemInsets?: boolean;
-  container?: {
-    elementId?: string;
-    text?: string;
-  };
+  container?: ElementQuery;
   autoTarget?: boolean;
   direction: "up" | "down" | "left" | "right";
   gestureType?: "swipeFingerTowardsDirection" | "scrollTowardsDirection";
-  lookFor?: {
-    elementId?: string;
-    text?: string;
-  };
+  lookFor?: ElementQuery;
   boomerang?: boolean;
   apexPause?: number;
   returnSpeed?: number;
@@ -165,6 +156,7 @@ export interface SwipeOnArgs {
 }
 
 export interface PinchOnArgs {
+  selectionStrategy?: ElementSelectionStrategy;
   direction: "in" | "out";
   distanceStart?: number;
   distanceEnd?: number;
@@ -172,10 +164,7 @@ export interface PinchOnArgs {
   duration?: number;
   rotationDegrees?: number;
   includeSystemInsets?: boolean;
-  container?: {
-    elementId?: string;
-    text?: string;
-  };
+  container?: ElementQuery;
   autoTarget?: boolean;
   platform?: Platform;
 }

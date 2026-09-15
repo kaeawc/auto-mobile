@@ -66,7 +66,7 @@ final class RewriteFakeGesturePerformer: GesturePerforming {
         throws {}
     func pinch(
         centerX _: Double, centerY _: Double, distanceStart _: Double, distanceEnd _: Double,
-        rotationDegrees _: Double, duration _: TimeInterval
+        rotationDegrees _: Double, duration _: TimeInterval, requireExactCenter _: Bool
     )
         throws -> PinchGesturePath { .eventPath }
     func typeText(text _: String) throws {}

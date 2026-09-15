@@ -17,4 +17,6 @@ export interface GestureOptions {
   pressure?: number; // Touch pressure (0.0-1.0)
   includeSystemInsets?: boolean; // Whether the gesture should be bounded by system insets
   scrollMode?: ScrollMode; // Execution mode for scroll/swipe gestures (default: "adb")
+  /** Internal capture identity for scoped gestures; native rejection must not fall back to ADB. */
+  frameContext?: string;
 }

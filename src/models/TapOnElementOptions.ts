@@ -1,3 +1,4 @@
+import type { ElementQuery } from "./ElementQuery";
 import type { ElementSelectionStrategy } from "./ElementSelectionStrategy";
 
 export interface TapOnSubtextTarget {
@@ -29,10 +30,7 @@ export interface TapOnElementOptions {
   index?: number;
 
   // Container to restrict search
-  container?: {
-    elementId?: string;
-    text?: string;
-  };
+  container?: ElementQuery;
 
   // Action to perform
   action: "tap" | "doubleTap" | "longPress" | "focus";

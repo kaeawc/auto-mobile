@@ -62,7 +62,8 @@ public protocol GesturePerforming: Sendable {
         distanceStart: Double,
         distanceEnd: Double,
         rotationDegrees: Double,
-        duration: TimeInterval
+        duration: TimeInterval,
+        requireExactCenter: Bool
     )
         throws -> PinchGesturePath
 

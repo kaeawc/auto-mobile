@@ -6,6 +6,8 @@ import type { ElementSelector } from "../../utils/interfaces/ElementSelector";
 import type { ElementFinder } from "../../utils/interfaces/ElementFinder";
 import { defaultRandom } from "../../utils/Random";
 import { DefaultElementFinder } from "./ElementFinder";
+import type { ElementQuery } from "../../models/ElementQuery";
+import { ActionableError } from "../../models/ActionableError";
 
 function shouldIncludeWindowsForTextSelection(
   index: number | undefined,
@@ -26,76 +28,119 @@ export class DefaultElementSelector implements ElementSelector {
     this.random = random;
   }
 
+  resolve(
+    viewHierarchy: ViewHierarchyResult,
+    query: ElementQuery,
+    actionable: boolean = true,
+  ): ElementSelectionResult {
+    const result = this.finder.resolveQuery(viewHierarchy, query, {
+      actionable,
+      random: this.random,
+    });
+    const leaf = result.levels.at(-1);
+    return {
+      element: result.element,
+      totalMatches: result.diagnostic?.matchCount ?? leaf?.matchCount ?? 0,
+      indexInMatches: result.element ? (leaf?.selectedIndex ?? 0) : -1,
+      strategy: query.selectionStrategy ?? "first",
+      query: result,
+    };
+  }
+
+  require(viewHierarchy: ViewHierarchyResult, query: ElementQuery, actionable: boolean = true) {
+    const selection = this.resolve(viewHierarchy, query, actionable);
+    if (!selection.element) {
+      throw new ActionableError(
+        `Element query failed: ${JSON.stringify(selection.query?.diagnostic)}`,
+      );
+    }
+    return selection.element;
+  }
+
   selectByText(
     viewHierarchy: ViewHierarchyResult,
     text: string,
-    options?: {
-      container?: { elementId?: string; text?: string } | null;
-      partialMatch?: boolean;
-      caseSensitive?: boolean;
-      strategy?: ElementSelectionStrategy;
-      index?: number;
-    },
+    options: Parameters<ElementSelector["selectByText"]>[2] = {},
   ): ElementSelectionResult {
-    const strategy = options?.strategy ?? "first";
-    const includeWindows = shouldIncludeWindowsForTextSelection(options?.index, strategy);
+    const {
+      container,
+      strategy = "first",
+      index,
+      partialMatch = true,
+      caseSensitive = false,
+    } = options;
+    if (container || strategy === "unique") {
+      return this.resolve(viewHierarchy, {
+        text,
+        container: container ?? undefined,
+        selectionStrategy: strategy,
+        index,
+      });
+    }
     const matches = this.finder.findElementsByText(
       viewHierarchy,
       text,
-      options?.container ?? null,
-      options?.partialMatch ?? true,
-      options?.caseSensitive ?? false,
-      options?.index !== undefined,
-      includeWindows,
+      null,
+      partialMatch,
+      caseSensitive,
+      index !== undefined,
+      shouldIncludeWindowsForTextSelection(index, strategy),
     );
-    return this.pickMatch(matches, strategy, viewHierarchy, options?.index);
+    return this.pickMatch(matches, strategy, viewHierarchy, index);
   }
 
   selectByResourceId(
     viewHierarchy: ViewHierarchyResult,
     resourceId: string,
-    options?: {
-      container?: { elementId?: string; text?: string } | null;
-      partialMatch?: boolean;
-      strategy?: ElementSelectionStrategy;
-      index?: number;
-    },
+    options: Parameters<ElementSelector["selectByResourceId"]>[2] = {},
   ): ElementSelectionResult {
-    const strategy = options?.strategy ?? "first";
+    const { container, strategy = "first", index, partialMatch = false } = options;
+    if (container || strategy === "unique") {
+      return this.resolve(viewHierarchy, {
+        elementId: resourceId,
+        container: container ?? undefined,
+        selectionStrategy: strategy,
+        index,
+      });
+    }
     const matches = this.finder.findElementsByResourceId(
       viewHierarchy,
       resourceId,
-      options?.container ?? null,
-      options?.partialMatch ?? false,
-      options?.index !== undefined,
+      null,
+      partialMatch,
+      index !== undefined,
     );
-    return this.pickMatch(matches, strategy, viewHierarchy, options?.index);
+    return this.pickMatch(matches, strategy, viewHierarchy, index);
   }
 
   selectByTestTag(
     viewHierarchy: ViewHierarchyResult,
     testTag: string,
-    options?: {
-      container?: { elementId?: string; text?: string } | null;
-      strategy?: ElementSelectionStrategy;
-      index?: number;
-    },
+    options: Parameters<ElementSelector["selectByTestTag"]>[2] = {},
   ): ElementSelectionResult {
-    const strategy = options?.strategy ?? "first";
+    const { container, strategy = "first", index } = options;
+    if (container || strategy === "unique") {
+      return this.resolve(viewHierarchy, {
+        testTag,
+        container: container ?? undefined,
+        selectionStrategy: strategy,
+        index,
+      });
+    }
     const matches = this.finder.findElementsByTestTag(
       viewHierarchy,
       testTag,
-      options?.container ?? null,
-      options?.index !== undefined,
+      null,
+      index !== undefined,
     );
-    return this.pickMatch(matches, strategy, viewHierarchy, options?.index);
+    return this.pickMatch(matches, strategy, viewHierarchy, index);
   }
 
   selectClickableParentByText(
     viewHierarchy: ViewHierarchyResult,
     text: string,
     options?: {
-      container?: { elementId?: string; text?: string } | null;
+      container?: ElementQuery | null;
       fuzzyMatch?: boolean;
       caseSensitive?: boolean;
       strategy?: ElementSelectionStrategy;
@@ -115,7 +160,7 @@ export class DefaultElementSelector implements ElementSelector {
   selectClickable(
     viewHierarchy: ViewHierarchyResult,
     options?: {
-      container?: { elementId?: string; text?: string } | null;
+      container?: ElementQuery | null;
       strategy?: ElementSelectionStrategy;
       scrollableContainer?: boolean;
     },
@@ -132,43 +177,71 @@ export class DefaultElementSelector implements ElementSelector {
   selectClickableSiblingOfText(
     viewHierarchy: ViewHierarchyResult,
     text: string,
-    options?: {
-      container?: { elementId?: string; text?: string } | null;
-      fuzzyMatch?: boolean;
-      caseSensitive?: boolean;
-      strategy?: ElementSelectionStrategy;
-      index?: number;
-    },
+    options: Parameters<ElementSelector["selectClickableSiblingOfText"]>[2] = {},
   ): ElementSelectionResult {
-    const strategy = options?.strategy ?? "first";
+    const {
+      container,
+      strategy = "first",
+      index,
+      fuzzyMatch = true,
+      caseSensitive = false,
+    } = options;
+    if (container || strategy === "unique") {
+      return this.selectScopedSibling(viewHierarchy, {
+        text,
+        container: container ?? undefined,
+        selectionStrategy: strategy,
+        index,
+      });
+    }
     const matches = this.finder.findClickableSiblingsOfText(
       viewHierarchy,
       text,
-      options?.container ?? null,
-      options?.fuzzyMatch ?? true,
-      options?.caseSensitive ?? false,
+      null,
+      fuzzyMatch,
+      caseSensitive,
     );
-    return this.pickMatch(matches, strategy, viewHierarchy, options?.index);
+    return this.pickMatch(matches, strategy, viewHierarchy, index);
   }
 
   selectClickableSiblingOfResourceId(
     viewHierarchy: ViewHierarchyResult,
     resourceId: string,
-    options?: {
-      container?: { elementId?: string; text?: string } | null;
-      partialMatch?: boolean;
-      strategy?: ElementSelectionStrategy;
-      index?: number;
-    },
+    options: Parameters<ElementSelector["selectClickableSiblingOfResourceId"]>[2] = {},
   ): ElementSelectionResult {
-    const strategy = options?.strategy ?? "first";
+    const { container, strategy = "first", index, partialMatch = false } = options;
+    if (container || strategy === "unique") {
+      return this.selectScopedSibling(viewHierarchy, {
+        elementId: resourceId,
+        container: container ?? undefined,
+        selectionStrategy: strategy,
+        index,
+      });
+    }
     const matches = this.finder.findClickableSiblingsOfResourceId(
       viewHierarchy,
       resourceId,
-      options?.container ?? null,
-      options?.partialMatch ?? false,
+      null,
+      partialMatch,
     );
-    return this.pickMatch(matches, strategy, viewHierarchy, options?.index);
+    return this.pickMatch(matches, strategy, viewHierarchy, index);
+  }
+
+  private selectScopedSibling(
+    hierarchy: ViewHierarchyResult,
+    query: ElementQuery,
+  ): ElementSelectionResult {
+    const anchor = this.resolve(hierarchy, query, false);
+    if (!anchor.query?.node) {
+      return anchor;
+    }
+    const matches = this.finder.findClickableSiblingsOfNode(
+      hierarchy,
+      anchor.query.node,
+      anchor.query.scopeNodes?.at(-1),
+    );
+    const selected = this.pickMatch(matches, anchor.strategy, hierarchy);
+    return { ...selected, query: { ...anchor.query, element: selected.element } };
   }
 
   private isElementCenterOffScreen(element: Element, viewHierarchy: ViewHierarchyResult): boolean {
@@ -214,6 +287,10 @@ export class DefaultElementSelector implements ElementSelector {
       }
       const chosen = visibleMatches[index];
       return { element: chosen.element, indexInMatches: chosen.index, totalMatches, strategy };
+    }
+
+    if (strategy === "unique" && visibleMatches.length !== 1) {
+      throw new ActionableError(`target_ambiguous: ${visibleMatches.length} eligible matches`);
     }
 
     let selectedVisibleIndex = 0;

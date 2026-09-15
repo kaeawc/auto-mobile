@@ -1,11 +1,22 @@
 import type { Element } from "../../models/Element";
 import type { ViewHierarchyNode, ViewHierarchyResult } from "../../models";
+import type { ElementQuery, ElementQueryResult } from "../../models/ElementQuery";
 
 export interface ElementFinder {
+  findClickableSiblingsOfNode(
+    hierarchy: ViewHierarchyResult,
+    target: ViewHierarchyNode,
+    scope?: ViewHierarchyNode,
+  ): Element[];
+  resolveQuery(
+    viewHierarchy: ViewHierarchyResult,
+    query: ElementQuery,
+    options?: { actionable?: boolean; random?: () => number; withinNode?: ViewHierarchyNode },
+  ): ElementQueryResult;
   findElementsByText(
     viewHierarchy: ViewHierarchyResult,
     text: string,
-    container?: { elementId?: string; text?: string } | null,
+    container?: ElementQuery | null,
     partialMatch?: boolean,
     caseSensitive?: boolean,
     preserveTraversalOrder?: boolean,
@@ -15,7 +26,7 @@ export interface ElementFinder {
   findElementByText(
     viewHierarchy: ViewHierarchyResult,
     text: string,
-    container?: { elementId?: string; text?: string } | null,
+    container?: ElementQuery | null,
     partialMatch?: boolean,
     caseSensitive?: boolean,
   ): Element | null;
@@ -23,7 +34,7 @@ export interface ElementFinder {
   findElementsByResourceId(
     viewHierarchy: ViewHierarchyResult,
     resourceId: string,
-    container?: { elementId?: string; text?: string } | null,
+    container?: ElementQuery | null,
     partialMatch?: boolean,
     preserveTraversalOrder?: boolean,
   ): Element[];
@@ -31,26 +42,23 @@ export interface ElementFinder {
   findElementByResourceId(
     viewHierarchy: ViewHierarchyResult,
     resourceId: string,
-    container?: { elementId?: string; text?: string } | null,
+    container?: ElementQuery | null,
     partialMatch?: boolean,
   ): Element | null;
 
   findElementsByTestTag(
     viewHierarchy: ViewHierarchyResult,
     testTag: string,
-    container?: { elementId?: string; text?: string } | null,
+    container?: ElementQuery | null,
     preserveTraversalOrder?: boolean,
   ): Element[];
 
   findContainerNode(
     viewHierarchy: ViewHierarchyResult,
-    container: { elementId?: string; text?: string },
+    container: ElementQuery,
   ): ViewHierarchyNode | null;
 
-  hasContainerElement(
-    viewHierarchy: ViewHierarchyResult,
-    container?: { elementId?: string; text?: string },
-  ): boolean;
+  hasContainerElement(viewHierarchy: ViewHierarchyResult, container?: ElementQuery): boolean;
 
   findElementByIndex(
     viewHierarchy: ViewHierarchyResult,
@@ -60,6 +68,7 @@ export interface ElementFinder {
   findScrollableElements(viewHierarchy: ViewHierarchyResult): Element[];
 
   findScrollableContainer(viewHierarchy: ViewHierarchyResult): Element | null;
+  findScrollableContainerNode(viewHierarchy: ViewHierarchyResult): ViewHierarchyNode | null;
 
   findClickableElements(viewHierarchy: ViewHierarchyResult): Element[];
 
@@ -72,7 +81,7 @@ export interface ElementFinder {
    */
   findClickableElementsInContainer(
     viewHierarchy: ViewHierarchyResult,
-    container?: { elementId?: string; text?: string } | null,
+    container?: ElementQuery | null,
     scrollableContainer?: boolean,
   ): Element[];
 
@@ -80,7 +89,7 @@ export interface ElementFinder {
   findClickableParentsContainingText(
     viewHierarchy: ViewHierarchyResult,
     text: string,
-    container?: { elementId?: string; text?: string } | null,
+    container?: ElementQuery | null,
     fuzzyMatch?: boolean,
     caseSensitive?: boolean,
   ): Element[];
@@ -89,7 +98,7 @@ export interface ElementFinder {
   findClickableSiblingsOfText(
     viewHierarchy: ViewHierarchyResult,
     text: string,
-    container?: { elementId?: string; text?: string } | null,
+    container?: ElementQuery | null,
     fuzzyMatch?: boolean,
     caseSensitive?: boolean,
   ): Element[];
@@ -98,7 +107,7 @@ export interface ElementFinder {
   findClickableSiblingsOfResourceId(
     viewHierarchy: ViewHierarchyResult,
     resourceId: string,
-    container?: { elementId?: string; text?: string } | null,
+    container?: ElementQuery | null,
     partialMatch?: boolean,
   ): Element[];
 

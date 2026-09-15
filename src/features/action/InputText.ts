@@ -35,11 +35,12 @@ import {
 } from "./asciiKeyEvents";
 import { Keyboard } from "./Keyboard";
 import { TapOnElement } from "./TapOnElement";
+import type { ElementQuery } from "../../models/ElementQuery";
 
 export type InputTextMode = "a11y" | "eventLast" | "eventAll" | "eventOnly" | "append";
 
 /** Selector variants that identify a field to focus before typing (issue #5872). */
-export interface TextInputTargetSelector {
+export interface TextInputTargetSelector extends ElementQuery {
   elementId?: string;
   testTag?: string;
   text?: string;

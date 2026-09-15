@@ -1,3 +1,4 @@
+import type { ElementQuery } from "../../models/ElementQuery";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
 import {
@@ -9,6 +10,7 @@ import {
   TapOnElementResult,
   TapOnSelectedElement,
   ViewHierarchyResult,
+  ViewHierarchyNode,
 } from "../../models";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { TapOnElementOptions } from "../../models/TapOnElementOptions";
@@ -283,6 +285,13 @@ export class TapOnElement extends BaseVisualChange {
   }
 
   private validateOptions(options: TapOnElementOptions): string | null {
+    if (
+      (options.accessibilityLink || options.subtext) &&
+      options.container &&
+      (options.container.container || options.selectionStrategy === "unique")
+    ) {
+      return "semantic link activation cannot preserve a nested or unique container query";
+    }
     const selectorCount = [
       options.text,
       options.elementId,
@@ -299,9 +308,11 @@ export class TapOnElement extends BaseVisualChange {
     }
 
     if (options.container) {
-      const containerSelectorCount = [options.container.elementId, options.container.text].filter(
-        Boolean,
-      ).length;
+      const containerSelectorCount = [
+        options.container.elementId,
+        options.container.text,
+        options.container.testTag,
+      ].filter(Boolean).length;
       if (containerSelectorCount !== 1) {
         return "tapOn container must specify exactly one of elementId or text";
       }
@@ -1144,6 +1155,7 @@ export class TapOnElement extends BaseVisualChange {
     timeoutMs: number,
     screenSize?: ObserveResult["screenSize"],
     signal?: AbortSignal,
+    forceFresh: boolean = false,
   ): Promise<ViewHierarchyResult | null> {
     throwIfAborted(signal);
     const effectiveTimeoutMs = Math.max(0, timeoutMs);
@@ -1163,6 +1175,9 @@ export class TapOnElement extends BaseVisualChange {
       }
       case "ios": {
         const xcTestClient = IOSCtrlProxyClient.getInstance(this.device);
+        if (forceFresh) {
+          xcTestClient.invalidateCache();
+        }
         const rawHierarchy = await xcTestClient.getAccessibilityHierarchy(
           undefined,
           undefined,
@@ -1324,6 +1339,7 @@ export class TapOnElement extends BaseVisualChange {
         freshHierarchy,
         action,
         requireResourceId,
+        refind.selection.query?.scopeNodes?.at(-1),
       );
       const b = refreshed.element.bounds;
       if (b === undefined || b === null) {
@@ -1538,6 +1554,7 @@ export class TapOnElement extends BaseVisualChange {
       indexInMatches: selection.indexInMatches,
       totalMatches: selection.totalMatches,
       selectionStrategy: selection.strategy,
+      ...(selection.query ? { queryLevels: selection.query.levels } : {}),
     };
   }
 
@@ -1615,7 +1632,7 @@ export class TapOnElement extends BaseVisualChange {
 
   private isContainerAvailable(
     viewHierarchy: ViewHierarchyResult,
-    container?: { elementId?: string; text?: string },
+    container?: ElementQuery,
   ): boolean {
     if (!container) {
       return true;
@@ -1626,23 +1643,12 @@ export class TapOnElement extends BaseVisualChange {
 
   private resolveContainerElement(
     viewHierarchy: ViewHierarchyResult,
-    container?: { elementId?: string; text?: string },
+    container?: ElementQuery,
   ): Element | undefined {
     if (!container) {
       return undefined;
     }
-    if (container.elementId) {
-      return this.elementSelector.selectByResourceId(viewHierarchy, container.elementId).element as
-        | Element
-        | undefined;
-    }
-    if (container.text) {
-      return this.elementSelector.selectByText(viewHierarchy, container.text, {
-        partialMatch: false,
-        caseSensitive: false,
-      }).element as Element | undefined;
-    }
-    return undefined;
+    return this.finder.resolveQuery(viewHierarchy, container).element ?? undefined;
   }
 
   private isClickableElement(element: Element): boolean {
@@ -1790,6 +1796,7 @@ export class TapOnElement extends BaseVisualChange {
     viewHierarchy: ViewHierarchyResult | null,
     action: string,
     requireResourceId: boolean,
+    scopeNode?: ViewHierarchyNode,
   ): { element: Element; usedParent: boolean } {
     if (this.device.platform !== "android" || !viewHierarchy) {
       return { element, usedParent: false };
@@ -1807,12 +1814,19 @@ export class TapOnElement extends BaseVisualChange {
       return { element, usedParent: false };
     }
 
-    const chain = this.findAncestorChain(viewHierarchy, element);
+    const scopedHierarchy = scopeNode
+      ? { ...viewHierarchy, windows: undefined, hierarchy: { node: scopeNode } }
+      : viewHierarchy;
+    const chain = this.findAncestorChain(scopedHierarchy, element);
     if (!chain) {
       return { element, usedParent: false };
     }
 
-    const ancestor = this.selectAncestorForAction(chain, action, requireResourceId);
+    const ancestor = this.selectAncestorForAction(
+      scopeNode ? chain.slice(1) : chain,
+      action,
+      requireResourceId,
+    );
     if (ancestor) {
       return { element: ancestor, usedParent: true };
     }
@@ -1839,6 +1853,7 @@ export class TapOnElement extends BaseVisualChange {
     progress?: ProgressCallback,
     signal?: AbortSignal,
   ): Promise<TapOnElementResult> {
+    const scopedFocus = options.action === "focus" && options.container !== undefined;
     if (!options.action) {
       return this.createErrorResult(options.action, "tap on action is required");
     }
@@ -1909,6 +1924,11 @@ export class TapOnElement extends BaseVisualChange {
           );
           viewHierarchy = searchOutcome.viewHierarchy;
           if (!searchOutcome.selection.element) {
+            if (searchOutcome.selection.query?.diagnostic) {
+              throw new ActionableError(
+                `Element query failed: ${JSON.stringify(searchOutcome.selection.query.diagnostic)}`,
+              );
+            }
             await this.handleElementNotFound(
               options,
               observeResult,
@@ -1916,8 +1936,8 @@ export class TapOnElement extends BaseVisualChange {
               signal,
             );
           }
-          const selection = searchOutcome.selection;
-          const element = selection.element as Element;
+          let selection = searchOutcome.selection;
+          let element = selection.element as Element;
           let selectedElementMetadata = this.buildSelectedElementMetadata(selection);
           if (options.subtext) {
             const occurrence = options.subtext.occurrence ?? 0;
@@ -1947,7 +1967,7 @@ export class TapOnElement extends BaseVisualChange {
             // Check if element is already focused
             const isFocused = this.finder.isElementFocused(element);
 
-            if (isFocused) {
+            if (isFocused && !options.container) {
               logger.info(`Element is already focused, no action needed`);
               perf.end();
               return {
@@ -1972,6 +1992,34 @@ export class TapOnElement extends BaseVisualChange {
           // Android, VoiceOver on iOS. Downstream call paths are split by
           // the platform switch below, so a single flag suffices.
           const isAccessibilityServiceEnabled = await this.strategy.isAccessibilityServiceEnabled();
+          if (options.container && isAccessibilityServiceEnabled) {
+            throw new ActionableError(
+              "target_not_actionable: scoped gestures require coordinate input; a global screen-reader label or identifier cannot preserve this scope",
+            );
+          }
+          if (options.container) {
+            const fresh = await this.refreshViewHierarchy(
+              5000,
+              observeResult.screenSize,
+              signal,
+              true,
+            );
+            if (!fresh) {
+              throw new ActionableError(
+                "target_not_actionable: scoped target could not be refreshed before dispatch",
+              );
+            }
+            selection = this.findElementInHierarchy(options, fresh).selection;
+            if (!selection.element) {
+              throw new ActionableError(
+                `Element query failed before dispatch: ${JSON.stringify(selection.query?.diagnostic)}`,
+              );
+            }
+            element = selection.element;
+            viewHierarchy = fresh;
+            this.replaceObservationHierarchy(observeResult, fresh, true);
+            selectedElementMetadata = this.buildSelectedElementMetadata(selection);
+          }
           const requireResourceId = isAccessibilityServiceEnabled;
           let tapElement: Element;
           let usedParent: boolean;
@@ -1980,6 +2028,7 @@ export class TapOnElement extends BaseVisualChange {
             viewHierarchy,
             action,
             requireResourceId,
+            selection.query?.scopeNodes?.at(-1),
           );
           tapElement = initialTapTarget.element;
           usedParent = initialTapTarget.usedParent;
@@ -2045,6 +2094,7 @@ export class TapOnElement extends BaseVisualChange {
                   signal,
                   options,
                   isAccessibilityServiceEnabled,
+                  options.container ? viewHierarchy.frameContext : undefined,
                 );
                 break;
               case "ios":
@@ -2055,6 +2105,7 @@ export class TapOnElement extends BaseVisualChange {
                   longPressDuration,
                   tapElement,
                   isAccessibilityServiceEnabled,
+                  options.container ? viewHierarchy.frameContext : undefined,
                 );
                 break;
               default:
@@ -2087,11 +2138,12 @@ export class TapOnElement extends BaseVisualChange {
           };
         },
         {
-          queryOptions: {
-            text: options.text ?? options.textAny?.[0],
-            elementId: options.elementId,
-            containerElementId: options.container?.elementId,
-          },
+          queryOptions: options.container
+            ? undefined
+            : {
+                text: options.text ?? options.textAny?.[0],
+                elementId: options.elementId,
+              },
           changeExpected: false,
           timeoutMs: 800, // Reduce timeout for faster execution
           progress,
@@ -2151,6 +2203,26 @@ export class TapOnElement extends BaseVisualChange {
           ...metadata,
         };
       }
+      if (scopedFocus && result.success) {
+        const hierarchy = await this.refreshViewHierarchy(
+          5000,
+          result.observation?.screenSize,
+          signal,
+          true,
+        );
+        const focused = hierarchy
+          ? this.findElementInHierarchy(options, hierarchy).selection
+          : undefined;
+        const props = focused?.element;
+        if (
+          !props ||
+          ![props.focused, props.isFocused, props["has-keyboard-focus"]].some(isTruthyFlag)
+        ) {
+          throw new ActionableError(
+            "target_not_actionable: the scoped field did not receive keyboard focus; no text was sent",
+          );
+        }
+      }
       return result;
     } catch (error) {
       perf.end();
@@ -2196,7 +2268,13 @@ export class TapOnElement extends BaseVisualChange {
     signal?: AbortSignal,
     options?: TapOnElementOptions,
     isTalkBackEnabled?: boolean,
+    frameContext?: string,
   ): Promise<ScreenReaderNavigationResult | undefined> {
+    if (options?.container) {
+      // A scoped match must never be reduced to a global resource-id action.
+      await this.executeScopedCoordinateTap(action, x, y, durationMs, frameContext);
+      return undefined;
+    }
     // XML-only candidates have no CtrlProxy node identity, even if their resource
     // ID also exists in the incomplete native tree. Never retarget semantic actions.
     if (element["hierarchy-source"] === "uiautomator") {
@@ -2229,6 +2307,37 @@ export class TapOnElement extends BaseVisualChange {
     return undefined;
   }
 
+  private async executeScopedCoordinateTap(
+    action: string,
+    x: number,
+    y: number,
+    durationMs: number,
+    frameContext?: string,
+  ): Promise<void> {
+    const client =
+      this.device.platform === "ios"
+        ? IOSCtrlProxyClient.getInstance(this.device)
+        : this.accessibilityService;
+    for (let tap = 0; tap < (action === "doubleTap" ? 2 : 1); tap++) {
+      if (tap > 0) {
+        await this.timer.sleep(200);
+      }
+      const result = await client.requestTapCoordinates(
+        x,
+        y,
+        action === "longPress" ? durationMs : 50,
+        5000,
+        undefined,
+        frameContext,
+      );
+      if (!result.success) {
+        throw new ActionableError(
+          `target_not_actionable: scoped gesture rejected: ${result.error}`,
+        );
+      }
+    }
+  }
+
   /**
    * Execute tap using CtrlProxy's dispatchGesture API with ADB fallback.
    * dispatchGesture bypasses the ADB input pipeline, reducing ghost-tap rate.
@@ -2244,6 +2353,7 @@ export class TapOnElement extends BaseVisualChange {
   ): Promise<void> {
     if (action === "tap") {
       if (
+        !skipSemanticLongPress &&
         isAndroidDocumentsUiRow(element) &&
         (await this.tryDocumentsUiRowActivation(element, signal))
       ) {
@@ -2376,6 +2486,27 @@ export class TapOnElement extends BaseVisualChange {
 
     await this.timer.sleep(PRE_RETRY_DELAY_MS);
 
+    let retryFrameContext: string | undefined;
+    if (options.container) {
+      const refreshed = await this.refreshViewHierarchy(
+        POST_TAP_REFRESH_TIMEOUT_MS,
+        screenSize,
+        signal,
+      );
+      if (!refreshed) {
+        throw new ActionableError("Scoped retry aborted: no fresh hierarchy");
+      }
+      const selection = this.findElementInHierarchy(options, refreshed).selection;
+      if (!selection.element) {
+        throw new ActionableError(
+          `Scoped retry aborted: ${JSON.stringify(selection.query?.diagnostic)}`,
+        );
+      }
+      tapElement = selection.element;
+      tapPoint = this.resolveTapPoint(tapElement);
+      retryFrameContext = refreshed.frameContext;
+    }
+
     await this.executeAndroidTap(
       action,
       tapPoint.x,
@@ -2385,6 +2516,7 @@ export class TapOnElement extends BaseVisualChange {
       signal,
       options,
       isTalkBackEnabled,
+      retryFrameContext,
     );
   }
 
@@ -2521,7 +2653,12 @@ export class TapOnElement extends BaseVisualChange {
     durationMs: number,
     element?: Element,
     isVoiceOverEnabled?: boolean,
+    frameContext?: string,
   ): Promise<void> {
+    if (frameContext) {
+      await this.executeScopedCoordinateTap(action, x, y, durationMs, frameContext);
+      return;
+    }
     if (isVoiceOverEnabled && element) {
       await this.executeIOSTapWithVoiceOver(action, element, x, y, durationMs);
       return;

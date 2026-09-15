@@ -1,4 +1,6 @@
 import { errorMessage } from "../../utils/describeUnknownError";
+import type { ElementQuery } from "../../models/ElementQuery";
+import { DefaultElementSelector } from "../utility/DefaultElementSelector";
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
 import {
   ActionableError,
@@ -139,8 +141,22 @@ export class DragAndDrop extends BaseVisualChange {
             return { success: false, error: "Unable to get view hierarchy, cannot drag and drop" };
           }
 
-          const source = this.resolveTarget(viewHierarchy, options.source, "source");
-          const target = this.resolveTarget(viewHierarchy, options.target, "target");
+          const source = this.resolveTarget(
+            viewHierarchy,
+            {
+              selectionStrategy: options.selectionStrategy,
+              ...options.source,
+            },
+            "source",
+          );
+          const target = this.resolveTarget(
+            viewHierarchy,
+            {
+              selectionStrategy: options.selectionStrategy,
+              ...options.target,
+            },
+            "target",
+          );
           const sourcePoint = this.geometry.getElementCenter(source);
           const targetPoint = this.geometry.getElementCenter(target);
 
@@ -153,6 +169,9 @@ export class DragAndDrop extends BaseVisualChange {
             dragDurationMs,
             holdDurationMs,
             signal,
+            options.source.container || options.target.container
+              ? viewHierarchy.frameContext
+              : undefined,
           );
 
           await this.timer.sleep(DROP_DURATION_MS);
@@ -237,15 +256,19 @@ export class DragAndDrop extends BaseVisualChange {
     if (!options?.source || !options?.target) {
       return "dragAndDrop requires source and target";
     }
-    const sourceSelectorCount = [options.source.text, options.source.elementId].filter(
-      Boolean,
-    ).length;
+    const sourceSelectorCount = [
+      options.source.text,
+      options.source.elementId,
+      options.source.testTag,
+    ].filter(Boolean).length;
     if (sourceSelectorCount !== 1) {
       return "dragAndDrop source must specify exactly one of text or elementId";
     }
-    const targetSelectorCount = [options.target.text, options.target.elementId].filter(
-      Boolean,
-    ).length;
+    const targetSelectorCount = [
+      options.target.text,
+      options.target.elementId,
+      options.target.testTag,
+    ].filter(Boolean).length;
     if (targetSelectorCount !== 1) {
       return "dragAndDrop target must specify exactly one of text or elementId";
     }
@@ -269,9 +292,17 @@ export class DragAndDrop extends BaseVisualChange {
 
   private resolveTarget(
     viewHierarchy: ViewHierarchyResult,
-    target: { text?: string; elementId?: string },
+    target: ElementQuery,
     label: "source" | "target",
   ) {
+    if (
+      target.container ||
+      target.selectionStrategy ||
+      target.index !== undefined ||
+      target.testTag
+    ) {
+      return new DefaultElementSelector(this.finder).require(viewHierarchy, target);
+    }
     const selectorCount = [target.elementId, target.text].filter(Boolean).length;
     if (selectorCount !== 1) {
       throw new ActionableError(
@@ -338,7 +369,10 @@ export class DragAndDrop extends BaseVisualChange {
     if (!synced?.hierarchy) {
       return null;
     }
-    return client.convertToViewHierarchyResult(synced.hierarchy);
+    return {
+      ...client.convertToViewHierarchyResult(synced.hierarchy),
+      frameContext: synced.frameContext,
+    };
   }
 
   private async refreshViewHierarchy(signal?: AbortSignal): Promise<ViewHierarchyResult | null> {
@@ -416,6 +450,7 @@ export class DragAndDrop extends BaseVisualChange {
     dragDurationMs: number,
     holdDurationMs: number,
     signal?: AbortSignal,
+    frameContext?: string,
   ): Promise<{
     success: boolean;
     error?: string;
@@ -440,6 +475,7 @@ export class DragAndDrop extends BaseVisualChange {
             dragDurationMs,
             holdDurationMs,
             timeoutMs,
+            frameContext,
           )
         : await this.accessibilityService.requestDrag(
             startX,
@@ -450,6 +486,7 @@ export class DragAndDrop extends BaseVisualChange {
             dragDurationMs,
             holdDurationMs,
             timeoutMs,
+            frameContext,
           );
 
     if (result.success) {

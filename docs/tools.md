@@ -9,6 +9,8 @@ This page reflects the current tool schema. Availability can still vary by
 platform, runner, and enabled feature gates; inspect the registered schema for
 the exact arguments supported by your connection.
 
+For repeated controls, see [nested containers and scoped discovery](using/nested-selectors.md).
+
 ## Observe & navigate
 
 | Tool                                 | What it does                                               |

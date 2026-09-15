@@ -78,11 +78,7 @@ import {
   responseShapeControlFields,
 } from "./toolSchemaHelpers";
 import { serverConfig } from "../utils/ServerConfig";
-import {
-  createElementIdTextSelectorSchema,
-  elementContainerSchema,
-  elementSelectionStrategySchema,
-} from "./elementSelectorSchemas";
+import { elementContainerSchema, elementSelectionStrategySchema } from "./elementSelectorSchemas";
 import { tapOnResultSchema } from "./toolOutputSchemas";
 
 // Import from extracted modules
@@ -315,6 +311,11 @@ export const tapOnSchema = withJsonSchemaOverride(
       "accessibilityLink and subtext cannot be used together",
       ["subtext"],
     );
+    addIssue(
+      value.container && (value.container.container || value.selectionStrategy === "unique"),
+      "semantic link activation cannot preserve a nested or unique container query",
+      ["container"],
+    );
     addIssue(value.action !== "tap", "semantic link activation supports only the tap action", [
       "action",
     ]);
@@ -357,6 +358,18 @@ export const tapOnSchema = withJsonSchemaOverride(
         searchUntil: { not: {} },
       },
       allOf: [
+        {
+          not: {
+            required: ["container"],
+            anyOf: [
+              { properties: { container: { required: ["container"] } } },
+              {
+                required: ["selectionStrategy"],
+                properties: { selectionStrategy: { const: "unique" } },
+              },
+            ],
+          },
+        },
         {
           not: {
             required: ["subtext"],
@@ -424,15 +437,9 @@ export const tapAnySchema = withJsonSchemaOverride(
 );
 
 const dragAndDropSelectorSchema = (label: "Source" | "Target") =>
-  createElementIdTextSelectorSchema({
-    elementId: `${label} ID`,
-    text: `${label} text`,
-  }).describe(`${label} element`);
+  elementContainerSchema.describe(`${label} element with its own ancestor chain`);
 
-const swipeOnLookForSchema = createElementIdTextSelectorSchema({
-  elementId: "ID of the element to look for",
-  text: "Text to look for",
-});
+const swipeOnLookForSchema = elementContainerSchema;
 
 // #6613: dragAndDrop/swipeOn/pinchOn/inputText advertised
 // `additionalProperties: false` but were not `.strict()`, so an undeclared
@@ -444,6 +451,7 @@ export const dragAndDropSchema = withJsonSchemaOverride(
       .object({
         source: dragAndDropSelectorSchema("Source"),
         target: dragAndDropSelectorSchema("Target"),
+        selectionStrategy: elementSelectionStrategySchema.optional(),
         pressDurationMs: z
           .number()
           .min(600)
@@ -487,6 +495,7 @@ export const swipeOnSchema = withJsonSchemaOverride(
           .optional()
           .describe("Auto-target scrollable containers (default: true)"),
         direction: z.enum(["up", "down", "left", "right"]).describe("Swipe/scroll direction"),
+        selectionStrategy: elementSelectionStrategySchema.optional(),
         gestureType: z
           .enum(["swipeFingerTowardsDirection", "scrollTowardsDirection"])
           .optional()
@@ -524,6 +533,7 @@ export const pinchOnSchema = withJsonSchemaOverride(
     z
       .object({
         direction: z.enum(["in", "out"]).describe("Pinch direction"),
+        selectionStrategy: elementSelectionStrategySchema.optional(),
         distanceStart: z.number().optional().describe("Initial finger distance (px, default: 400)"),
         distanceEnd: z.number().optional().describe("Final finger distance (px, default: 100)"),
         scale: z.number().optional().describe("Scale factor (overrides distances)"),
@@ -717,34 +727,53 @@ const inputTextSelectorSchema = z
     "Field to focus before typing: elementId, Android testTag, text, or ordered text variants",
   );
 
-export const inputTextSchema = addDeviceTargetingToSchema(
-  z
-    .object({
-      text: z.string().min(1),
-      selector: inputTextSelectorSchema
-        .optional()
-        .describe(
-          "Focus this field before typing, collapsing the mandatory focus-then-type pair into " +
-            "one call. Without it, text goes to whatever is currently focused.",
-        ),
-      mode: z
-        .enum(["a11y", "eventLast", "eventAll", "eventOnly"])
-        .optional()
-        .describe(
-          "Android text mode: a11y default; eventLast and eventAll start with accessibility setText; eventOnly clears and types supported ASCII with key events only",
-        ),
-      imeAction: z
-        .enum(["done", "next", "search", "send", "go", "previous"])
-        .optional()
-        .describe("IME action after input"),
-      dismissKeyboard: z.boolean().optional().describe("Android: dismiss keyboard after input"),
-      // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
-      // not required — a device handle from getAndroid/getApple is sufficient on
-      // its own.
-      platform: platformSchema.optional(),
-      ...responseShapeControlFields,
-    })
-    .strict(),
+export const inputTextSchema = withJsonSchemaOverride(
+  addDeviceTargetingToSchema(
+    z
+      .object({
+        text: z.string().min(1),
+        container: elementContainerSchema.optional(),
+        selectionStrategy: elementSelectionStrategySchema.optional(),
+        index: z.number().int().nonnegative().optional(),
+        selector: inputTextSelectorSchema
+          .optional()
+          .describe(
+            "Focus this field before typing, collapsing the mandatory focus-then-type pair into " +
+              "one call. Without it, text goes to whatever is currently focused.",
+          ),
+        mode: z
+          .enum(["a11y", "eventLast", "eventAll", "eventOnly"])
+          .optional()
+          .describe(
+            "Android text mode: a11y default; eventLast and eventAll start with accessibility setText; eventOnly clears and types supported ASCII with key events only",
+          ),
+        imeAction: z
+          .enum(["done", "next", "search", "send", "go", "previous"])
+          .optional()
+          .describe("IME action after input"),
+        dismissKeyboard: z.boolean().optional().describe("Android: dismiss keyboard after input"),
+        // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
+        // not required — a device handle from getAndroid/getApple is sufficient on
+        // its own.
+        platform: platformSchema.optional(),
+        ...responseShapeControlFields,
+      })
+      .strict(),
+  ).refine(
+    (value) =>
+      value.selector !== undefined ||
+      (value.container === undefined &&
+        value.selectionStrategy === undefined &&
+        value.index === undefined),
+    { message: "container, selectionStrategy and index require a target selector" },
+  ),
+  (schema) => {
+    schema.dependentRequired = {
+      container: ["selector"],
+      selectionStrategy: ["selector"],
+      index: ["selector"],
+    };
+  },
 );
 
 const sendKeysKeyValues = [...SUPPORTED_INPUT_KEYS, ...SEND_KEYS_SEMANTIC_KEYS] as const;
@@ -786,20 +815,41 @@ const sendKeysCommandSchema = withCanonicalDiscriminatedUnionJsonSchema(
   ]),
 );
 
-export const sendKeysSchema = addDeviceTargetingToSchema(
-  z.object({
-    selector: inputTextSelectorSchema
-      .optional()
-      .describe("Field to focus once before executing the ordered command sequence"),
-    commands: z
-      .array(sendKeysCommandSchema)
-      .min(1)
-      .max(100)
-      .describe("One to 100 commands executed serially; execution stops on the first failure"),
-    // #5870: Device or session targeting resolves the platform.
-    platform: platformSchema.optional(),
-    ...responseShapeControlFields,
-  }),
+export const sendKeysSchema = withJsonSchemaOverride(
+  addDeviceTargetingToSchema(
+    z
+      .object({
+        container: elementContainerSchema.optional(),
+        selectionStrategy: elementSelectionStrategySchema.optional(),
+        index: z.number().int().nonnegative().optional(),
+        selector: inputTextSelectorSchema
+          .optional()
+          .describe("Field to focus once before executing the ordered command sequence"),
+        commands: z
+          .array(sendKeysCommandSchema)
+          .min(1)
+          .max(100)
+          .describe("One to 100 commands executed serially; execution stops on the first failure"),
+        // #5870: Device or session targeting resolves the platform.
+        platform: platformSchema.optional(),
+        ...responseShapeControlFields,
+      })
+      .strict(),
+  ).refine(
+    (value) =>
+      value.selector !== undefined ||
+      (value.container === undefined &&
+        value.selectionStrategy === undefined &&
+        value.index === undefined),
+    { message: "container, selectionStrategy and index require a target selector" },
+  ),
+  (schema) => {
+    schema.dependentRequired = {
+      container: ["selector"],
+      selectionStrategy: ["selector"],
+      index: ["selector"],
+    };
+  },
 );
 
 export interface SendKeysRunnerCommandSource {
@@ -1074,6 +1124,7 @@ export async function swipeOnHandler(
   const result = await swipeOn.execute(
     {
       container: args.container,
+      selectionStrategy: args.selectionStrategy,
       autoTarget: args.autoTarget ?? true,
       direction: resolvedDirection.direction,
       lookFor: args.lookFor,
@@ -1141,6 +1192,7 @@ export async function pinchOnHandler(
       scale: args.scale,
       duration: args.duration,
       rotationDegrees: args.rotationDegrees,
+      selectionStrategy: args.selectionStrategy,
       includeSystemInsets: args.includeSystemInsets,
       container: args.container,
       autoTarget: args.autoTarget,
@@ -1199,7 +1251,14 @@ export async function inputTextHandler(
     dismissKeyboard,
     mode,
     signal,
-    args.selector,
+    args.selector
+      ? {
+          ...args.selector,
+          container: args.container,
+          selectionStrategy: args.selectionStrategy,
+          index: args.index,
+        }
+      : undefined,
   );
   const response = createJSONToolResponse({
     message: buildInputTextResultMessage(result),
@@ -1458,6 +1517,7 @@ export async function dragAndDropHandler(
     {
       source: args.source,
       target: args.target,
+      selectionStrategy: args.selectionStrategy,
       pressDurationMs: args.pressDurationMs,
       dragDurationMs: args.dragDurationMs,
       holdDurationMs: args.holdDurationMs,
@@ -2001,7 +2061,19 @@ export function registerInteractionTools() {
     await assertSendKeysRunnerCompatible(device);
     RecompositionTracker.getInstance().recordInteraction();
     const sendKeys = new SendKeys(device);
-    const result = await sendKeys.execute(args.commands, args.selector, progress, signal);
+    const result = await sendKeys.execute(
+      args.commands,
+      args.selector
+        ? {
+            ...args.selector,
+            container: args.container,
+            selectionStrategy: args.selectionStrategy,
+            index: args.index,
+          }
+        : undefined,
+      progress,
+      signal,
+    );
     const response = createJSONToolResponse({
       message: result.success
         ? `Executed ${result.completedCommands} sendKeys command(s)`

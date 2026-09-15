@@ -917,30 +917,7 @@
         },
         "container": {
           "description": "Container element to scope the search - specify elementId or text to locate it",
-          "anyOf": [
-            {
-              "type": "object",
-              "properties": {
-                "elementId": {
-                  "description": "Container resource ID",
-                  "type": "string"
-                }
-              },
-              "required": ["elementId"],
-              "additionalProperties": false
-            },
-            {
-              "type": "object",
-              "properties": {
-                "text": {
-                  "description": "Container text",
-                  "type": "string"
-                }
-              },
-              "required": ["text"],
-              "additionalProperties": false
-            }
-          ]
+          "$ref": "#/$defs/ElementQuery"
         },
         "partialMatch": {
           "description": "Whether to use partial matching (substring containment, default: true)",
@@ -970,7 +947,92 @@
           "type": "string"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "$defs": {
+        "ElementQuery": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "elementId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "container": {
+                  "description": "Strict ancestor scope; wrappers may intervene",
+                  "$ref": "#/$defs/ElementQuery"
+                },
+                "index": {
+                  "description": "Zero-based scoped occurrence; overrides uniqueness at this level",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "selectionStrategy": {
+                  "description": "Inherited from the query; unique is recommended",
+                  "type": "string",
+                  "enum": ["first", "random", "unique"]
+                }
+              },
+              "required": ["elementId"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "container": {
+                  "description": "Strict ancestor scope; wrappers may intervene",
+                  "$ref": "#/$defs/ElementQuery"
+                },
+                "index": {
+                  "description": "Zero-based scoped occurrence; overrides uniqueness at this level",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "selectionStrategy": {
+                  "description": "Inherited from the query; unique is recommended",
+                  "type": "string",
+                  "enum": ["first", "random", "unique"]
+                }
+              },
+              "required": ["text"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "testTag": {
+                  "description": "Android accessibility test tag",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "container": {
+                  "description": "Strict ancestor scope; wrappers may intervene",
+                  "$ref": "#/$defs/ElementQuery"
+                },
+                "index": {
+                  "description": "Zero-based scoped occurrence; overrides uniqueness at this level",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "selectionStrategy": {
+                  "description": "Inherited from the query; unique is recommended",
+                  "type": "string",
+                  "enum": ["first", "random", "unique"]
+                }
+              },
+              "required": ["testTag"],
+              "additionalProperties": false
+            }
+          ]
+        }
+      }
     }
   },
   {
@@ -1206,50 +1268,16 @@
       "type": "object",
       "properties": {
         "source": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "elementId": {
-              "description": "Source ID",
-              "type": "string"
-            },
-            "text": {
-              "description": "Source text",
-              "type": "string"
-            }
-          },
-          "oneOf": [
-            {
-              "required": ["elementId"]
-            },
-            {
-              "required": ["text"]
-            }
-          ],
-          "description": "Source element"
+          "description": "Source element with its own ancestor chain",
+          "$ref": "#/$defs/ElementQuery"
         },
         "target": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "elementId": {
-              "description": "Target ID",
-              "type": "string"
-            },
-            "text": {
-              "description": "Target text",
-              "type": "string"
-            }
-          },
-          "oneOf": [
-            {
-              "required": ["elementId"]
-            },
-            {
-              "required": ["text"]
-            }
-          ],
-          "description": "Target element"
+          "description": "Target element with its own ancestor chain",
+          "$ref": "#/$defs/ElementQuery"
+        },
+        "selectionStrategy": {
+          "type": "string",
+          "enum": ["first", "random", "unique"]
         },
         "pressDurationMs": {
           "description": "Press duration ms (min: 600, max: 3000, default: 600)",
@@ -1295,7 +1323,92 @@
         }
       },
       "required": ["source", "target"],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "$defs": {
+        "ElementQuery": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "elementId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "container": {
+                  "description": "Strict ancestor scope; wrappers may intervene",
+                  "$ref": "#/$defs/ElementQuery"
+                },
+                "index": {
+                  "description": "Zero-based scoped occurrence; overrides uniqueness at this level",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "selectionStrategy": {
+                  "description": "Inherited from the query; unique is recommended",
+                  "type": "string",
+                  "enum": ["first", "random", "unique"]
+                }
+              },
+              "required": ["elementId"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "container": {
+                  "description": "Strict ancestor scope; wrappers may intervene",
+                  "$ref": "#/$defs/ElementQuery"
+                },
+                "index": {
+                  "description": "Zero-based scoped occurrence; overrides uniqueness at this level",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "selectionStrategy": {
+                  "description": "Inherited from the query; unique is recommended",
+                  "type": "string",
+                  "enum": ["first", "random", "unique"]
+                }
+              },
+              "required": ["text"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "testTag": {
+                  "description": "Android accessibility test tag",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "container": {
+                  "description": "Strict ancestor scope; wrappers may intervene",
+                  "$ref": "#/$defs/ElementQuery"
+                },
+                "index": {
+                  "description": "Zero-based scoped occurrence; overrides uniqueness at this level",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "selectionStrategy": {
+                  "description": "Inherited from the query; unique is recommended",
+                  "type": "string",
+                  "enum": ["first", "random", "unique"]
+                }
+              },
+              "required": ["testTag"],
+              "additionalProperties": false
+            }
+          ]
+        }
+      }
     }
   },
   {
@@ -2347,30 +2460,7 @@
         },
         "container": {
           "description": "Scope search to a container",
-          "anyOf": [
-            {
-              "type": "object",
-              "properties": {
-                "elementId": {
-                  "description": "Container resource ID",
-                  "type": "string"
-                }
-              },
-              "required": ["elementId"],
-              "additionalProperties": false
-            },
-            {
-              "type": "object",
-              "properties": {
-                "text": {
-                  "description": "Container text",
-                  "type": "string"
-                }
-              },
-              "required": ["text"],
-              "additionalProperties": false
-            }
-          ]
+          "$ref": "#/$defs/ElementQuery"
         },
         "containerOf": {
           "description": "Highlight selected element's container",
@@ -2379,7 +2469,7 @@
         "selectionStrategy": {
           "description": "Selection strategy when multiple match (default: first)",
           "type": "string",
-          "enum": ["first", "random"]
+          "enum": ["first", "random", "unique"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -2393,7 +2483,92 @@
           "type": "string"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "$defs": {
+        "ElementQuery": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "elementId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "container": {
+                  "description": "Strict ancestor scope; wrappers may intervene",
+                  "$ref": "#/$defs/ElementQuery"
+                },
+                "index": {
+                  "description": "Zero-based scoped occurrence; overrides uniqueness at this level",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "selectionStrategy": {
+                  "description": "Inherited from the query; unique is recommended",
+                  "type": "string",
+                  "enum": ["first", "random", "unique"]
+                }
+              },
+              "required": ["elementId"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "container": {
+                  "description": "Strict ancestor scope; wrappers may intervene",
+                  "$ref": "#/$defs/ElementQuery"
+                },
+                "index": {
+                  "description": "Zero-based scoped occurrence; overrides uniqueness at this level",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "selectionStrategy": {
+                  "description": "Inherited from the query; unique is recommended",
+                  "type": "string",
+                  "enum": ["first", "random", "unique"]
+                }
+              },
+              "required": ["text"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "testTag": {
+                  "description": "Android accessibility test tag",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "container": {
+                  "description": "Strict ancestor scope; wrappers may intervene",
+                  "$ref": "#/$defs/ElementQuery"
+                },
+                "index": {
+                  "description": "Zero-based scoped occurrence; overrides uniqueness at this level",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "selectionStrategy": {
+                  "description": "Inherited from the query; unique is recommended",
+                  "type": "string",
+                  "enum": ["first", "random", "unique"]
+                }
+              },
+              "required": ["testTag"],
+              "additionalProperties": false
+            }
+          ]
+        }
+      }
     }
   },
   {
@@ -2555,6 +2730,18 @@
           "type": "string",
           "minLength": 1
         },
+        "container": {
+          "$ref": "#/$defs/ElementQuery"
+        },
+        "selectionStrategy": {
+          "type": "string",
+          "enum": ["first", "random", "unique"]
+        },
+        "index": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
         "selector": {
           "description": "Focus this field before typing, collapsing the mandatory focus-then-type pair into one call. Without it, text goes to whatever is currently focused.",
           "anyOf": [
@@ -2652,7 +2839,97 @@
         }
       },
       "required": ["text"],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "dependentRequired": {
+        "container": ["selector"],
+        "selectionStrategy": ["selector"],
+        "index": ["selector"]
+      },
+      "$defs": {
+        "ElementQuery": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "elementId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "container": {
+                  "description": "Strict ancestor scope; wrappers may intervene",
+                  "$ref": "#/$defs/ElementQuery"
+                },
+                "index": {
+                  "description": "Zero-based scoped occurrence; overrides uniqueness at this level",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "selectionStrategy": {
+                  "description": "Inherited from the query; unique is recommended",
+                  "type": "string",
+                  "enum": ["first", "random", "unique"]
+                }
+              },
+              "required": ["elementId"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "container": {
+                  "description": "Strict ancestor scope; wrappers may intervene",
+                  "$ref": "#/$defs/ElementQuery"
+                },
+                "index": {
+                  "description": "Zero-based scoped occurrence; overrides uniqueness at this level",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "selectionStrategy": {
+                  "description": "Inherited from the query; unique is recommended",
+                  "type": "string",
+                  "enum": ["first", "random", "unique"]
+                }
+              },
+              "required": ["text"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "testTag": {
+                  "description": "Android accessibility test tag",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "container": {
+                  "description": "Strict ancestor scope; wrappers may intervene",
+                  "$ref": "#/$defs/ElementQuery"
+                },
+                "index": {
+                  "description": "Zero-based scoped occurrence; overrides uniqueness at this level",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "selectionStrategy": {
+                  "description": "Inherited from the query; unique is recommended",
+                  "type": "string",
+                  "enum": ["first", "random", "unique"]
+                }
+              },
+              "required": ["testTag"],
+              "additionalProperties": false
+            }
+          ]
+        }
+      }
     }
   },
   {
@@ -3202,33 +3479,61 @@
               ]
             },
             "container": {
-              "type": "object",
-              "properties": {
-                "elementId": {
-                  "type": "string"
-                },
-                "text": {
-                  "type": "string"
-                }
-              },
-              "additionalProperties": false,
-              "oneOf": [
-                {
-                  "required": ["elementId"]
-                },
-                {
-                  "required": ["text"]
-                }
-              ]
+              "$ref": "#/$defs/ElementQuery"
             },
             "timeout": {
               "type": "number"
             },
             "timeoutMs": {
               "type": "number"
+            },
+            "query": {
+              "$ref": "#/$defs/ElementQuery"
             }
           },
           "anyOf": [
+            {
+              "required": ["for", "query"],
+              "properties": {
+                "for": {
+                  "enum": ["appear", "disappear", "clickable"]
+                }
+              },
+              "not": {
+                "anyOf": [
+                  {
+                    "required": ["elementId"]
+                  },
+                  {
+                    "required": ["text"]
+                  },
+                  {
+                    "required": ["container"]
+                  },
+                  {
+                    "required": ["textAny"]
+                  },
+                  {
+                    "required": ["absent"]
+                  },
+                  {
+                    "required": ["activeWindow"]
+                  },
+                  {
+                    "required": ["className"]
+                  },
+                  {
+                    "required": ["contentDescription"]
+                  },
+                  {
+                    "required": ["matchType"]
+                  },
+                  {
+                    "required": ["textMatch"]
+                  }
+                ]
+              }
+            },
             {
               "properties": {
                 "for": {
@@ -3317,6 +3622,55 @@
                 }
               ]
             }
+          ],
+          "allOf": [
+            {
+              "if": {
+                "required": ["query"]
+              },
+              "then": {
+                "required": ["for", "query"],
+                "properties": {
+                  "for": {
+                    "enum": ["appear", "disappear", "clickable"]
+                  }
+                },
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": ["elementId"]
+                    },
+                    {
+                      "required": ["text"]
+                    },
+                    {
+                      "required": ["container"]
+                    },
+                    {
+                      "required": ["textAny"]
+                    },
+                    {
+                      "required": ["absent"]
+                    },
+                    {
+                      "required": ["activeWindow"]
+                    },
+                    {
+                      "required": ["className"]
+                    },
+                    {
+                      "required": ["contentDescription"]
+                    },
+                    {
+                      "required": ["matchType"]
+                    },
+                    {
+                      "required": ["textMatch"]
+                    }
+                  ]
+                }
+              }
+            }
           ]
         },
         "settled": {
@@ -3355,6 +3709,16 @@
               "anyOf": [
                 {
                   "type": "boolean"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "query": {
+                      "$ref": "#/$defs/ElementQuery"
+                    }
+                  },
+                  "required": ["query"],
+                  "additionalProperties": false
                 },
                 {
                   "type": "object",
@@ -3459,6 +3823,91 @@
       "then": false,
       "dependentRequired": {
         "settled": ["waitFor"]
+      },
+      "$defs": {
+        "ElementQuery": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "elementId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "container": {
+                  "description": "Strict ancestor scope; wrappers may intervene",
+                  "$ref": "#/$defs/ElementQuery"
+                },
+                "index": {
+                  "description": "Zero-based scoped occurrence; overrides uniqueness at this level",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "selectionStrategy": {
+                  "description": "Inherited from the query; unique is recommended",
+                  "type": "string",
+                  "enum": ["first", "random", "unique"]
+                }
+              },
+              "required": ["elementId"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "container": {
+                  "description": "Strict ancestor scope; wrappers may intervene",
+                  "$ref": "#/$defs/ElementQuery"
+                },
+                "index": {
+                  "description": "Zero-based scoped occurrence; overrides uniqueness at this level",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "selectionStrategy": {
+                  "description": "Inherited from the query; unique is recommended",
+                  "type": "string",
+                  "enum": ["first", "random", "unique"]
+                }
+              },
+              "required": ["text"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "testTag": {
+                  "description": "Android accessibility test tag",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "container": {
+                  "description": "Strict ancestor scope; wrappers may intervene",
+                  "$ref": "#/$defs/ElementQuery"
+                },
+                "index": {
+                  "description": "Zero-based scoped occurrence; overrides uniqueness at this level",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "selectionStrategy": {
+                  "description": "Inherited from the query; unique is recommended",
+                  "type": "string",
+                  "enum": ["first", "random", "unique"]
+                }
+              },
+              "required": ["testTag"],
+              "additionalProperties": false
+            }
+          ]
+        }
       }
     },
     "outputSchema": {
@@ -7014,33 +7463,61 @@
               ]
             },
             "container": {
-              "type": "object",
-              "properties": {
-                "elementId": {
-                  "type": "string"
-                },
-                "text": {
-                  "type": "string"
-                }
-              },
-              "additionalProperties": false,
-              "oneOf": [
-                {
-                  "required": ["elementId"]
-                },
-                {
-                  "required": ["text"]
-                }
-              ]
+              "$ref": "#/$defs/ElementQuery"
             },
             "timeout": {
               "type": "number"
             },
             "timeoutMs": {
               "type": "number"
+            },
+            "query": {
+              "$ref": "#/$defs/ElementQuery"
             }
           },
           "anyOf": [
+            {
+              "required": ["for", "query"],
+              "properties": {
+                "for": {
+                  "enum": ["appear", "disappear", "clickable"]
+                }
+              },
+              "not": {
+                "anyOf": [
+                  {
+                    "required": ["elementId"]
+                  },
+                  {
+                    "required": ["text"]
+                  },
+                  {
+                    "required": ["container"]
+                  },
+                  {
+                    "required": ["textAny"]
+                  },
+                  {
+                    "required": ["absent"]
+                  },
+                  {
+                    "required": ["activeWindow"]
+                  },
+                  {
+                    "required": ["className"]
+                  },
+                  {
+                    "required": ["contentDescription"]
+                  },
+                  {
+                    "required": ["matchType"]
+                  },
+                  {
+                    "required": ["textMatch"]
+                  }
+                ]
+              }
+            },
             {
               "properties": {
                 "for": {
@@ -7129,6 +7606,55 @@
                 }
               ]
             }
+          ],
+          "allOf": [
+            {
+              "if": {
+                "required": ["query"]
+              },
+              "then": {
+                "required": ["for", "query"],
+                "properties": {
+                  "for": {
+                    "enum": ["appear", "disappear", "clickable"]
+                  }
+                },
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": ["elementId"]
+                    },
+                    {
+                      "required": ["text"]
+                    },
+                    {
+                      "required": ["container"]
+                    },
+                    {
+                      "required": ["textAny"]
+                    },
+                    {
+                      "required": ["absent"]
+                    },
+                    {
+                      "required": ["activeWindow"]
+                    },
+                    {
+                      "required": ["className"]
+                    },
+                    {
+                      "required": ["contentDescription"]
+                    },
+                    {
+                      "required": ["matchType"]
+                    },
+                    {
+                      "required": ["textMatch"]
+                    }
+                  ]
+                }
+              }
+            }
           ]
         },
         "settled": {
@@ -7200,6 +7726,91 @@
       "then": false,
       "dependentRequired": {
         "settled": ["waitFor"]
+      },
+      "$defs": {
+        "ElementQuery": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "elementId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "container": {
+                  "description": "Strict ancestor scope; wrappers may intervene",
+                  "$ref": "#/$defs/ElementQuery"
+                },
+                "index": {
+                  "description": "Zero-based scoped occurrence; overrides uniqueness at this level",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "selectionStrategy": {
+                  "description": "Inherited from the query; unique is recommended",
+                  "type": "string",
+                  "enum": ["first", "random", "unique"]
+                }
+              },
+              "required": ["elementId"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "container": {
+                  "description": "Strict ancestor scope; wrappers may intervene",
+                  "$ref": "#/$defs/ElementQuery"
+                },
+                "index": {
+                  "description": "Zero-based scoped occurrence; overrides uniqueness at this level",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "selectionStrategy": {
+                  "description": "Inherited from the query; unique is recommended",
+                  "type": "string",
+                  "enum": ["first", "random", "unique"]
+                }
+              },
+              "required": ["text"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "testTag": {
+                  "description": "Android accessibility test tag",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "container": {
+                  "description": "Strict ancestor scope; wrappers may intervene",
+                  "$ref": "#/$defs/ElementQuery"
+                },
+                "index": {
+                  "description": "Zero-based scoped occurrence; overrides uniqueness at this level",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "selectionStrategy": {
+                  "description": "Inherited from the query; unique is recommended",
+                  "type": "string",
+                  "enum": ["first", "random", "unique"]
+                }
+              },
+              "required": ["testTag"],
+              "additionalProperties": false
+            }
+          ]
+        }
       }
     }
   },
@@ -7251,6 +7862,10 @@
           "type": "string",
           "enum": ["in", "out"]
         },
+        "selectionStrategy": {
+          "type": "string",
+          "enum": ["first", "random", "unique"]
+        },
         "distanceStart": {
           "description": "Initial finger distance (px, default: 400)",
           "type": "number"
@@ -7276,27 +7891,8 @@
           "type": "boolean"
         },
         "container": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "elementId": {
-              "description": "Container resource ID",
-              "type": "string"
-            },
-            "text": {
-              "description": "Container text",
-              "type": "string"
-            }
-          },
-          "oneOf": [
-            {
-              "required": ["elementId"]
-            },
-            {
-              "required": ["text"]
-            }
-          ],
-          "description": "Scope search to a container"
+          "description": "Scope search to a container",
+          "$ref": "#/$defs/ElementQuery"
         },
         "autoTarget": {
           "description": "Auto-target pinchable containers",
@@ -7328,7 +7924,92 @@
         }
       },
       "required": ["direction"],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "$defs": {
+        "ElementQuery": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "elementId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "container": {
+                  "description": "Strict ancestor scope; wrappers may intervene",
+                  "$ref": "#/$defs/ElementQuery"
+                },
+                "index": {
+                  "description": "Zero-based scoped occurrence; overrides uniqueness at this level",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "selectionStrategy": {
+                  "description": "Inherited from the query; unique is recommended",
+                  "type": "string",
+                  "enum": ["first", "random", "unique"]
+                }
+              },
+              "required": ["elementId"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "container": {
+                  "description": "Strict ancestor scope; wrappers may intervene",
+                  "$ref": "#/$defs/ElementQuery"
+                },
+                "index": {
+                  "description": "Zero-based scoped occurrence; overrides uniqueness at this level",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "selectionStrategy": {
+                  "description": "Inherited from the query; unique is recommended",
+                  "type": "string",
+                  "enum": ["first", "random", "unique"]
+                }
+              },
+              "required": ["text"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "testTag": {
+                  "description": "Android accessibility test tag",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "container": {
+                  "description": "Strict ancestor scope; wrappers may intervene",
+                  "$ref": "#/$defs/ElementQuery"
+                },
+                "index": {
+                  "description": "Zero-based scoped occurrence; overrides uniqueness at this level",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "selectionStrategy": {
+                  "description": "Inherited from the query; unique is recommended",
+                  "type": "string",
+                  "enum": ["first", "random", "unique"]
+                }
+              },
+              "required": ["testTag"],
+              "additionalProperties": false
+            }
+          ]
+        }
+      }
     }
   },
   {
@@ -8531,6 +9212,18 @@
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
+        "container": {
+          "$ref": "#/$defs/ElementQuery"
+        },
+        "selectionStrategy": {
+          "type": "string",
+          "enum": ["first", "random", "unique"]
+        },
+        "index": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
         "selector": {
           "description": "Field to focus once before executing the ordered command sequence",
           "anyOf": [
@@ -8704,7 +9397,97 @@
         }
       },
       "required": ["commands"],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "dependentRequired": {
+        "container": ["selector"],
+        "selectionStrategy": ["selector"],
+        "index": ["selector"]
+      },
+      "$defs": {
+        "ElementQuery": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "elementId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "container": {
+                  "description": "Strict ancestor scope; wrappers may intervene",
+                  "$ref": "#/$defs/ElementQuery"
+                },
+                "index": {
+                  "description": "Zero-based scoped occurrence; overrides uniqueness at this level",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "selectionStrategy": {
+                  "description": "Inherited from the query; unique is recommended",
+                  "type": "string",
+                  "enum": ["first", "random", "unique"]
+                }
+              },
+              "required": ["elementId"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "container": {
+                  "description": "Strict ancestor scope; wrappers may intervene",
+                  "$ref": "#/$defs/ElementQuery"
+                },
+                "index": {
+                  "description": "Zero-based scoped occurrence; overrides uniqueness at this level",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "selectionStrategy": {
+                  "description": "Inherited from the query; unique is recommended",
+                  "type": "string",
+                  "enum": ["first", "random", "unique"]
+                }
+              },
+              "required": ["text"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "testTag": {
+                  "description": "Android accessibility test tag",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "container": {
+                  "description": "Strict ancestor scope; wrappers may intervene",
+                  "$ref": "#/$defs/ElementQuery"
+                },
+                "index": {
+                  "description": "Zero-based scoped occurrence; overrides uniqueness at this level",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "selectionStrategy": {
+                  "description": "Inherited from the query; unique is recommended",
+                  "type": "string",
+                  "enum": ["first", "random", "unique"]
+                }
+              },
+              "required": ["testTag"],
+              "additionalProperties": false
+            }
+          ]
+        }
+      }
     }
   },
   {
@@ -10459,27 +11242,8 @@
           "type": "boolean"
         },
         "container": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "elementId": {
-              "description": "Container resource ID",
-              "type": "string"
-            },
-            "text": {
-              "description": "Container text",
-              "type": "string"
-            }
-          },
-          "oneOf": [
-            {
-              "required": ["elementId"]
-            },
-            {
-              "required": ["text"]
-            }
-          ],
-          "description": "Scope search to a container"
+          "description": "Scope search to a container",
+          "$ref": "#/$defs/ElementQuery"
         },
         "autoTarget": {
           "description": "Auto-target scrollable containers (default: true)",
@@ -10490,33 +11254,18 @@
           "type": "string",
           "enum": ["up", "down", "left", "right"]
         },
+        "selectionStrategy": {
+          "type": "string",
+          "enum": ["first", "random", "unique"]
+        },
         "gestureType": {
           "description": "Finger direction or content scroll direction; default: scrollTowardsDirection",
           "type": "string",
           "enum": ["swipeFingerTowardsDirection", "scrollTowardsDirection"]
         },
         "lookFor": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "elementId": {
-              "description": "ID of the element to look for",
-              "type": "string"
-            },
-            "text": {
-              "description": "Text to look for",
-              "type": "string"
-            }
-          },
-          "oneOf": [
-            {
-              "required": ["elementId"]
-            },
-            {
-              "required": ["text"]
-            }
-          ],
-          "description": "Element to look for during swipe"
+          "description": "Element to look for during swipe",
+          "$ref": "#/$defs/ElementQuery"
         },
         "boomerang": {
           "description": "Return to start position after swipe apex",
@@ -10565,7 +11314,92 @@
         }
       },
       "required": ["direction"],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "$defs": {
+        "ElementQuery": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "elementId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "container": {
+                  "description": "Strict ancestor scope; wrappers may intervene",
+                  "$ref": "#/$defs/ElementQuery"
+                },
+                "index": {
+                  "description": "Zero-based scoped occurrence; overrides uniqueness at this level",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "selectionStrategy": {
+                  "description": "Inherited from the query; unique is recommended",
+                  "type": "string",
+                  "enum": ["first", "random", "unique"]
+                }
+              },
+              "required": ["elementId"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "container": {
+                  "description": "Strict ancestor scope; wrappers may intervene",
+                  "$ref": "#/$defs/ElementQuery"
+                },
+                "index": {
+                  "description": "Zero-based scoped occurrence; overrides uniqueness at this level",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "selectionStrategy": {
+                  "description": "Inherited from the query; unique is recommended",
+                  "type": "string",
+                  "enum": ["first", "random", "unique"]
+                }
+              },
+              "required": ["text"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "testTag": {
+                  "description": "Android accessibility test tag",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "container": {
+                  "description": "Strict ancestor scope; wrappers may intervene",
+                  "$ref": "#/$defs/ElementQuery"
+                },
+                "index": {
+                  "description": "Zero-based scoped occurrence; overrides uniqueness at this level",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "selectionStrategy": {
+                  "description": "Inherited from the query; unique is recommended",
+                  "type": "string",
+                  "enum": ["first", "random", "unique"]
+                }
+              },
+              "required": ["testTag"],
+              "additionalProperties": false
+            }
+          ]
+        }
+      }
     }
   },
   {
@@ -10886,32 +11720,13 @@
       "type": "object",
       "properties": {
         "container": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "elementId": {
-              "description": "Container resource ID",
-              "type": "string"
-            },
-            "text": {
-              "description": "Container text",
-              "type": "string"
-            }
-          },
-          "oneOf": [
-            {
-              "required": ["elementId"]
-            },
-            {
-              "required": ["text"]
-            }
-          ],
-          "description": "Scope search to a container"
+          "description": "Scope search to a container",
+          "$ref": "#/$defs/ElementQuery"
         },
         "selectionStrategy": {
           "description": "Element selection strategy: 'first' (default) or 'random'",
           "type": "string",
-          "enum": ["first", "random"]
+          "enum": ["first", "random", "unique"]
         },
         "scrollableContainer": {
           "description": "Search only scrollable containers/lists",
@@ -10966,7 +11781,92 @@
           "type": "string"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "$defs": {
+        "ElementQuery": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "elementId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "container": {
+                  "description": "Strict ancestor scope; wrappers may intervene",
+                  "$ref": "#/$defs/ElementQuery"
+                },
+                "index": {
+                  "description": "Zero-based scoped occurrence; overrides uniqueness at this level",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "selectionStrategy": {
+                  "description": "Inherited from the query; unique is recommended",
+                  "type": "string",
+                  "enum": ["first", "random", "unique"]
+                }
+              },
+              "required": ["elementId"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "container": {
+                  "description": "Strict ancestor scope; wrappers may intervene",
+                  "$ref": "#/$defs/ElementQuery"
+                },
+                "index": {
+                  "description": "Zero-based scoped occurrence; overrides uniqueness at this level",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "selectionStrategy": {
+                  "description": "Inherited from the query; unique is recommended",
+                  "type": "string",
+                  "enum": ["first", "random", "unique"]
+                }
+              },
+              "required": ["text"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "testTag": {
+                  "description": "Android accessibility test tag",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "container": {
+                  "description": "Strict ancestor scope; wrappers may intervene",
+                  "$ref": "#/$defs/ElementQuery"
+                },
+                "index": {
+                  "description": "Zero-based scoped occurrence; overrides uniqueness at this level",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "selectionStrategy": {
+                  "description": "Inherited from the query; unique is recommended",
+                  "type": "string",
+                  "enum": ["first", "random", "unique"]
+                }
+              },
+              "required": ["testTag"],
+              "additionalProperties": false
+            }
+          ]
+        }
+      }
     }
   },
   {
@@ -11034,27 +11934,8 @@
           "type": "boolean"
         },
         "container": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "elementId": {
-              "description": "Container resource ID",
-              "type": "string"
-            },
-            "text": {
-              "description": "Container text",
-              "type": "string"
-            }
-          },
-          "oneOf": [
-            {
-              "required": ["elementId"]
-            },
-            {
-              "required": ["text"]
-            }
-          ],
-          "description": "Scope search to a container"
+          "description": "Scope search to a container",
+          "$ref": "#/$defs/ElementQuery"
         },
         "action": {
           "description": "Action type (default: tap)",
@@ -11065,7 +11946,7 @@
         "selectionStrategy": {
           "description": "Selection strategy when multiple match (default: first)",
           "type": "string",
-          "enum": ["first", "random"]
+          "enum": ["first", "random", "unique"]
         },
         "index": {
           "description": "0-based index to tap the Nth on-screen match (in hierarchy order, i.e. top-to-bottom for a vertical list) instead of applying selectionStrategy — for repeated controls with no unique text. Out of range → no match.",
@@ -11223,6 +12104,91 @@
             }
           }
         ]
+      },
+      "$defs": {
+        "ElementQuery": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "elementId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "container": {
+                  "description": "Strict ancestor scope; wrappers may intervene",
+                  "$ref": "#/$defs/ElementQuery"
+                },
+                "index": {
+                  "description": "Zero-based scoped occurrence; overrides uniqueness at this level",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "selectionStrategy": {
+                  "description": "Inherited from the query; unique is recommended",
+                  "type": "string",
+                  "enum": ["first", "random", "unique"]
+                }
+              },
+              "required": ["elementId"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "container": {
+                  "description": "Strict ancestor scope; wrappers may intervene",
+                  "$ref": "#/$defs/ElementQuery"
+                },
+                "index": {
+                  "description": "Zero-based scoped occurrence; overrides uniqueness at this level",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "selectionStrategy": {
+                  "description": "Inherited from the query; unique is recommended",
+                  "type": "string",
+                  "enum": ["first", "random", "unique"]
+                }
+              },
+              "required": ["text"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "testTag": {
+                  "description": "Android accessibility test tag",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "container": {
+                  "description": "Strict ancestor scope; wrappers may intervene",
+                  "$ref": "#/$defs/ElementQuery"
+                },
+                "index": {
+                  "description": "Zero-based scoped occurrence; overrides uniqueness at this level",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "selectionStrategy": {
+                  "description": "Inherited from the query; unique is recommended",
+                  "type": "string",
+                  "enum": ["first", "random", "unique"]
+                }
+              },
+              "required": ["testTag"],
+              "additionalProperties": false
+            }
+          ]
+        }
       }
     },
     "outputSchema": {

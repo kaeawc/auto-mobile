@@ -118,6 +118,7 @@ export interface StructuredToolResponse<T = unknown> {
   structuredContent: T;
   success?: boolean;
   error?: string;
+  isError?: true;
 }
 
 /**

@@ -62,6 +62,7 @@ type JsonObject = Record<string, unknown>;
 type Budget = "work" | "cleanup" | "evidence";
 type AcquisitionKind = "platform" | "generic";
 type DiscoveryPresentationOrder = "forward" | "reverse";
+const DEFAULT_ACCEPTANCE_DISCOVERY_ORDER: DiscoveryPresentationOrder = "forward";
 
 export interface AcceptanceArgs {
   platform: Platform;
@@ -1157,7 +1158,7 @@ async function defaultCreateMcpClient(
   owner: string,
   build: BuildIdentity,
   signal: AbortSignal,
-  presentationOrder?: DiscoveryPresentationOrder,
+  presentationOrder: DiscoveryPresentationOrder = DEFAULT_ACCEPTANCE_DISCOVERY_ORDER,
 ): Promise<McpSessionClient> {
   const client = new Client({
     name: `live-device-acceptance-${owner}`,
@@ -1167,15 +1168,15 @@ async function defaultCreateMcpClient(
     command: process.execPath,
     args: [build.entryScript],
     stderr: "inherit",
-    ...(presentationOrder
-      ? {
-          env: {
-            ...process.env,
-            AUTOMOBILE_ACCEPTANCE_LIVE: "1",
-            AUTOMOBILE_ACCEPTANCE_DISCOVERY_ORDER: presentationOrder,
-          },
-        }
-      : {}),
+    // Every harness-owned proxy needs the signed acceptance configuration, not
+    // only the two clients that prove reverse discovery. In particular, a
+    // fresh client created after a persisted-session restart owns the
+    // connection-level tool-selection profile used by setToolEnabled.
+    env: {
+      ...process.env,
+      AUTOMOBILE_ACCEPTANCE_LIVE: "1",
+      AUTOMOBILE_ACCEPTANCE_DISCOVERY_ORDER: presentationOrder,
+    },
   });
   const abort = () => void client.close();
   signal.addEventListener("abort", abort, { once: true });
@@ -1641,10 +1642,15 @@ export async function runAcceptanceMatrix(
     dependencies.spawnCli ??
     (async (command: string[], timeoutMs: number, signal: AbortSignal) =>
       await defaultSpawnCli(command, timeoutMs, signal, timer));
-  const createMcpClient =
+  const createMcpClientFactory =
     dependencies.createMcpClient ??
     (async (owner: string, signal: AbortSignal, presentationOrder?: DiscoveryPresentationOrder) =>
       await defaultCreateMcpClient(owner, args.build, signal, presentationOrder));
+  const createMcpClient = async (
+    owner: string,
+    signal: AbortSignal,
+    presentationOrder: DiscoveryPresentationOrder = DEFAULT_ACCEPTANCE_DISCOVERY_ORDER,
+  ): Promise<McpSessionClient> => await createMcpClientFactory(owner, signal, presentationOrder);
   const createDaemonClient =
     dependencies.createDaemonClient ??
     (async (signal: AbortSignal) => await defaultCreateDaemonClient(args.build, signal));

@@ -26,6 +26,10 @@ interface ToolCall {
   arguments: Record<string, unknown>;
 }
 
+interface ForwardedToolCall extends ToolCall {
+  structuredContent: boolean;
+}
+
 interface Harness {
   calls: ToolCall[];
   events: string[];
@@ -1776,6 +1780,88 @@ describe("live device acceptance harness", () => {
       );
       expect(process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV]).toBe(wrapperStartupSecret);
       expect(process.env[ACCEPTANCE_DISCOVERY_CAPABILITY_ENV]).toBe(wrapperDiscoveryCapability);
+    } finally {
+      fixture.dispose();
+      restoreEnvironmentVariable(LIVE_ACCEPTANCE_ENV, previousLiveAcceptance);
+      restoreEnvironmentVariable(DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV, previousStartupSecret);
+      restoreEnvironmentVariable(ACCEPTANCE_DISCOVERY_CAPABILITY_ENV, previousDiscoveryCapability);
+    }
+  });
+
+  test("keeps signed acceptance markers on a fresh profile client after persisted-session recovery", async () => {
+    const fixture = createProductionAcceptanceFixture();
+    const previousLiveAcceptance = process.env[LIVE_ACCEPTANCE_ENV];
+    const previousStartupSecret = process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV];
+    const previousDiscoveryCapability = process.env[ACCEPTANCE_DISCOVERY_CAPABILITY_ENV];
+    const startupSecret = "wrapper-startup-secret-012345678901234567890";
+    const discoveryCapability = "wrapper-discovery-capability-012345678901234";
+    const forwardedCalls: ForwardedToolCall[] = [];
+    const harness = createHarness();
+    const createMcpClient = harness.dependencies.createMcpClient!;
+
+    try {
+      process.env[LIVE_ACCEPTANCE_ENV] = "1";
+      process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV] = startupSecret;
+      process.env[ACCEPTANCE_DISCOVERY_CAPABILITY_ENV] = discoveryCapability;
+
+      await runAcceptanceMatrix(fixture.android, {
+        ...harness.dependencies,
+        testOnly: false,
+        createMcpClient: async (owner, signal, presentationOrder) => {
+          const client = await createMcpClient(owner, signal, presentationOrder);
+          return {
+            async callTool(name, arguments_, callSignal) {
+              const signed =
+                presentationOrder !== undefined &&
+                process.env[ACCEPTANCE_DISCOVERY_CAPABILITY_ENV] === discoveryCapability;
+              const forwardedArguments = signed
+                ? {
+                    ...arguments_,
+                    __acceptanceDiscoveryOrder: presentationOrder,
+                    __acceptanceDiscoveryCapability: discoveryCapability,
+                  }
+                : arguments_;
+              const response = await client.callTool(name, arguments_, callSignal);
+              if (owner === "persisted-target-absent-delete" && name === "setToolEnabled") {
+                forwardedCalls.push({
+                  owner,
+                  name,
+                  arguments: forwardedArguments,
+                  structuredContent: response.structuredContent !== undefined,
+                });
+                // Model the daemon response boundary: an unconfigured fresh
+                // proxy omits structuredContent even though text still exists.
+                if (!signed) {
+                  return {
+                    content: [
+                      {
+                        type: "text",
+                        text: JSON.stringify(response.structuredContent),
+                      },
+                    ],
+                  };
+                }
+              }
+              return response;
+            },
+            close: async () => await client.close(),
+          };
+        },
+      });
+
+      expect(forwardedCalls).toEqual([
+        {
+          owner: "persisted-target-absent-delete",
+          name: "setToolEnabled",
+          arguments: {
+            toolName: "deleteDevice",
+            enabled: true,
+            __acceptanceDiscoveryOrder: "forward",
+            __acceptanceDiscoveryCapability: discoveryCapability,
+          },
+          structuredContent: true,
+        },
+      ]);
     } finally {
       fixture.dispose();
       restoreEnvironmentVariable(LIVE_ACCEPTANCE_ENV, previousLiveAcceptance);

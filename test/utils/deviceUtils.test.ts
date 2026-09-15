@@ -673,6 +673,7 @@ describe("MultiPlatformDeviceManager", () => {
     } as unknown as SimCtlClient;
     const fakeEmulator = {
       listAvds: async () => [androidImage],
+      getBootedDevices: async () => [],
     } as unknown as AndroidEmulatorClient;
     const manager = new MultiPlatformDeviceManager(
       new FakeAdbClient() as unknown as AdbClient,
@@ -694,6 +695,11 @@ describe("MultiPlatformDeviceManager", () => {
     const controller = new AbortController();
     let androidSignal: AbortSignal | undefined;
     let iosOptions: { bypassCache?: boolean } | undefined;
+    const androidImage: DeviceInfo = {
+      name: "Pixel_8",
+      platform: "android",
+      isRunning: false,
+    };
     const fakeSimctl = {
       isAvailable: async () => true,
       listSimulatorImages: async (
@@ -707,8 +713,11 @@ describe("MultiPlatformDeviceManager", () => {
     const fakeEmulator = {
       listAvds: async (options?: { signal?: AbortSignal }): Promise<DeviceInfo[]> => {
         androidSignal = options?.signal;
-        return [];
+        return [androidImage];
       },
+      getBootedDevices: async (): Promise<BootedDevice[]> => [
+        { name: "Pixel_8", platform: "android", deviceId: "emulator-5554" },
+      ],
     } as unknown as AndroidEmulatorClient;
     const manager = new MultiPlatformDeviceManager(
       new FakeAdbClient() as unknown as AdbClient,
@@ -722,6 +731,7 @@ describe("MultiPlatformDeviceManager", () => {
     });
 
     expect(result.succeededPlatforms).toEqual(new Set(["android", "ios"]));
+    expect(result.devices).toEqual([{ ...androidImage, isRunning: true }]);
     expect(androidSignal).toBe(controller.signal);
     expect(iosOptions).toEqual({ bypassCache: true });
   });

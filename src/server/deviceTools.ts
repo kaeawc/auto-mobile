@@ -35,11 +35,13 @@ import {
   notifyBootedDeviceResourcesUpdated,
 } from "./bootedDeviceResources";
 import {
-  createConfiguredInventoryContract,
   DEVICE_IMAGE_RESOURCE_URIS,
   notifyDeviceImageResourcesUpdated,
-  projectConfiguredDeviceInventory,
 } from "./deviceImageResources";
+import {
+  createConfiguredInventoryContract,
+  projectConfiguredDeviceInventory,
+} from "../utils/configuredDeviceInventory";
 import {
   notifyInstalledAppResourceListChanged,
   syncInstalledAppResourceRegistry,
@@ -916,7 +918,7 @@ function initializedDevicePool(): DevicePool | undefined {
 }
 
 export interface ListDeviceImagesArgs {
-  platform: SomePlatform;
+  platform: Platform;
 }
 
 export interface ListDevicesArgs {
@@ -5873,24 +5875,17 @@ export function registerDeviceTools() {
       const deps = getDeviceToolsDependencies();
       const deviceUtils = deps.deviceManagerFactory();
       const discovery = await deviceUtils.getDeviceImagesDetailed(args.platform, {
-        bypassIosDeviceListCache: args.platform !== "android",
+        bypassIosDeviceListCache: args.platform === "ios",
       });
-      const platforms: Platform[] =
-        args.platform === "either" ? ["android", "ios"] : [args.platform];
-      const projections = platforms.map((platform) => ({
-        platform,
-        projection: projectConfiguredDeviceInventory(platform, discovery),
-      }));
-      const observations = Object.fromEntries(
-        projections.map(({ platform, projection }) => [platform, projection.observation]),
-      );
-      const images = projections.flatMap(({ projection }) => projection.images);
-      const configuredInventory = createConfiguredInventoryContract(platforms, observations);
+      const projection = projectConfiguredDeviceInventory(args.platform, discovery);
+      const configuredInventory = createConfiguredInventoryContract([args.platform], {
+        [args.platform]: projection.observation,
+      });
 
       return createJSONToolResponse({
-        message: `Found ${images.length} configured ${args.platform} device images`,
-        images,
-        count: images.length,
+        message: `Found ${projection.images.length} configured ${args.platform} device images`,
+        images: projection.images,
+        count: projection.images.length,
         platform: args.platform,
         configuredInventory,
       });

@@ -1,11 +1,17 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import {
+  listDeviceImagesSchema,
   registerDeviceTools,
   resetDeviceToolsDependencies,
   setDeviceToolsDependencies,
 } from "../../src/server/deviceTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
+import { MultiPlatformDeviceManager } from "../../src/utils/deviceUtils";
+import { FakeAdbClient } from "../fakes/FakeAdbClient";
+import type { AdbClient } from "../../src/utils/android-cmdline-tools/AdbClient";
+import type { AndroidEmulatorClient } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
+import type { BootedDevice, DeviceInfo } from "../../src/models";
 
 describe("listDeviceImages", function () {
   afterEach(function () {
@@ -95,6 +101,87 @@ describe("listDeviceImages", function () {
           error: {
             code: "unavailable",
             message: "Android device inventory is unavailable.",
+          },
+        },
+      },
+    });
+  });
+
+  test("reports live Android isRunning state through detailed discovery", async function () {
+    const image: DeviceInfo = {
+      name: "Pixel_9",
+      platform: "android",
+      isRunning: false,
+    };
+    const emulator = {
+      listAvds: async () => [image],
+      getBootedDevices: async (): Promise<BootedDevice[]> => [
+        {
+          name: "Pixel_9",
+          platform: "android",
+          deviceId: "emulator-5554",
+        },
+      ],
+    } as unknown as AndroidEmulatorClient;
+    const deviceManager = new MultiPlatformDeviceManager(
+      new FakeAdbClient() as unknown as AdbClient,
+      undefined,
+      emulator,
+    );
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => deviceManager,
+    });
+    registerDeviceTools();
+
+    const response = await ToolRegistry.getRegisteredTool("listDeviceImages")!.handler({
+      platform: "android",
+    });
+    const payload = JSON.parse(response.content[0].text);
+
+    expect(payload.images).toEqual([
+      expect.objectContaining({
+        stableId: "Pixel_9",
+        name: "Pixel_9",
+        platform: "android",
+        isRunning: true,
+      }),
+    ]);
+  });
+
+  test("rejects the internal either platform from the public schema", function () {
+    expect(listDeviceImagesSchema.safeParse({ platform: "either" }).success).toBe(false);
+  });
+
+  test("rejects an iOS inventory entry without a stable UDID", async function () {
+    const fakeDeviceManager = new FakeDeviceManager([
+      {
+        name: "iPhone Without UDID",
+        platform: "ios",
+        isRunning: false,
+      },
+    ]);
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => fakeDeviceManager,
+    });
+    registerDeviceTools();
+
+    const response = await ToolRegistry.getRegisteredTool("listDeviceImages")!.handler({
+      platform: "ios",
+    });
+    const payload = JSON.parse(response.content[0].text);
+
+    expect(payload.images).toEqual([]);
+    expect(payload.count).toBe(0);
+    expect(payload.configuredInventory).toEqual({
+      schemaVersion: 1,
+      complete: false,
+      observations: {
+        ios: {
+          complete: false,
+          error: {
+            code: "failed",
+            message:
+              "iOS configured-device inventory contained simulator 'iPhone Without UDID' without a UDID.",
           },
         },
       },

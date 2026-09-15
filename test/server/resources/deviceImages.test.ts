@@ -13,6 +13,8 @@ import type {
   AppleDeviceRuntime,
   AppleDeviceType,
 } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
+import type { AvdManager } from "../../../src/utils/android-cmdline-tools/interfaces/AvdManager";
+import type { DeviceImageDiscovery, PlatformDeviceManager } from "../../../src/utils/deviceUtils";
 
 describe("Device Image Resources with Fakes", () => {
   let fakeDeviceUtils: FakeDeviceUtils;
@@ -406,9 +408,19 @@ describe("Device Image Resources with Fakes", () => {
       });
       expect(result.configuredInventory).toEqual({
         schemaVersion: 1,
-        complete: true,
-        observations: { android: { complete: true } },
+        complete: false,
+        observations: {
+          android: {
+            complete: false,
+            error: {
+              code: "timeout",
+              message: expect.stringContaining("5000"),
+            },
+          },
+        },
       });
+      expect(result.totalCount).toBe(result.androidCount);
+      expect(result.androidCount).toBe(result.images.length);
       // The hung enumeration must have been cancelled, not left running.
       const calls = fakeAvdManager.getListInstalledSystemImagesCalls();
       expect(calls).toHaveLength(1);
@@ -507,6 +519,112 @@ describe("Device Image Resources with Fakes", () => {
       const androidCall = calls.find((call) => call.platform === "android");
       expect(androidCall).toBeDefined();
       expect(androidCall?.signal?.aborted).toBe(true);
+    });
+
+    test("does not publish a configured device that resolves after the deadline", async () => {
+      const timer = new FakeTimer();
+      const lateDiscovery = Promise.withResolvers<DeviceImageDiscovery>();
+      const deviceManager = {
+        getDeviceImagesDetailed: async () => await lateDiscovery.promise,
+      } as unknown as PlatformDeviceManager;
+      const handler = createDeviceImageResourcesHandler({
+        deviceManager,
+        avdManager: fakeAvdManager,
+        timer,
+        androidCatalogBudgetMs: 5_000,
+      });
+
+      const pending = handler.getDeviceImagesForPlatforms(["android"]);
+      await Promise.resolve();
+      timer.advanceTime(5_001);
+      const result = await pending;
+      const returnedSnapshot = JSON.stringify(result);
+
+      expect(result.totalCount).toBe(result.androidCount);
+      expect(result.androidCount).toBe(result.images.length);
+      expect(result.configuredInventory.observations.android).toMatchObject({
+        complete: false,
+        error: { code: "timeout" },
+      });
+
+      lateDiscovery.resolve({
+        devices: [
+          {
+            name: "Pixel_9_Late",
+            platform: "android",
+            deviceId: "late-avd",
+            isRunning: false,
+          },
+        ],
+        succeededPlatforms: new Set(["android"]),
+      });
+      for (let i = 0; i < 10; i++) {
+        await Promise.resolve();
+      }
+
+      expect(JSON.stringify(result)).toBe(returnedSnapshot);
+      expect(result.totalCount).toBe(0);
+      expect(result.androidCount).toBe(0);
+      expect(result.images).toEqual([]);
+    });
+
+    test("does not publish images or metadata that resolve after the deadline", async () => {
+      const timer = new FakeTimer();
+      const lateMetadata = Promise.withResolvers<AvdInfo[]>();
+      let metadataSignal: AbortSignal | undefined;
+      fakeDeviceUtils.setDeviceImages("android", [
+        {
+          name: "Pixel_9_Late_Metadata",
+          platform: "android",
+          deviceId: "late-metadata-avd",
+          isRunning: false,
+        },
+      ]);
+      const avdManager = {
+        listDeviceImages: async (signal?: AbortSignal) => {
+          metadataSignal = signal;
+          return await lateMetadata.promise;
+        },
+        listInstalledSystemImages: async () => [],
+        listDevices: async () => [],
+      } as unknown as AvdManager;
+      const handler = createDeviceImageResourcesHandler({
+        deviceManager: fakeDeviceUtils,
+        avdManager,
+        timer,
+        androidCatalogBudgetMs: 5_000,
+      });
+
+      const pending = handler.getDeviceImagesForPlatforms(["android"]);
+      for (let i = 0; i < 10; i++) {
+        await Promise.resolve();
+      }
+      timer.advanceTime(5_001);
+      const result = await pending;
+      const returnedSnapshot = JSON.stringify(result);
+
+      expect(metadataSignal?.aborted).toBe(true);
+      expect(result.totalCount).toBe(result.androidCount);
+      expect(result.androidCount).toBe(result.images.length);
+      expect(result.configuredInventory.observations.android).toMatchObject({
+        complete: false,
+        error: { code: "timeout" },
+      });
+
+      lateMetadata.resolve([
+        {
+          name: "Pixel_9_Late_Metadata",
+          path: "/late/Pixel_9_Late_Metadata.avd",
+        },
+      ]);
+      for (let i = 0; i < 10; i++) {
+        await Promise.resolve();
+      }
+
+      expect(JSON.stringify(result)).toBe(returnedSnapshot);
+      expect(result.totalCount).toBe(0);
+      expect(result.androidCount).toBe(0);
+      expect(result.images).toEqual([]);
     });
 
     test("aborts profile enumeration too when the deadline wins", async () => {

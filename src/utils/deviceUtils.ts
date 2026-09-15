@@ -590,7 +590,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
 
     if (platform === "android" || platform === "either") {
       try {
-        devices.push(...(await this.emulator.listAvds({ signal: options.signal })));
+        devices.push(...(await this.listAndroidDeviceImages(options.signal)));
         succeededPlatforms.add("android");
       } catch (error) {
         logger.warn(`[DeviceManager] Android device inventory failed: ${error}`);

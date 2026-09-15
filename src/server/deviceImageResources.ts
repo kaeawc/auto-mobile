@@ -1,7 +1,11 @@
 import { errorMessage } from "../utils/describeUnknownError";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { ResourceRegistry, ResourceContent } from "./resourceRegistry";
-import { MultiPlatformDeviceManager, PlatformDeviceManager } from "../utils/deviceUtils";
+import {
+  type DeviceImageDiscovery,
+  MultiPlatformDeviceManager,
+  PlatformDeviceManager,
+} from "../utils/deviceUtils";
 import { AvdManagerService } from "../utils/android-cmdline-tools/AvdManagerService";
 import { AvdManager } from "../utils/android-cmdline-tools/interfaces/AvdManager";
 import { logger } from "../utils/logger";
@@ -31,10 +35,9 @@ import {
 /**
  * Wall-clock budget for the COMPLETE Android resource path — the device-image
  * listing (avdmanager `list avd`) AND the installed-only provisioning-catalog
- * enumeration (sdkmanager + avdmanager `list device`). A readiness/health
- * client gives this resource a 10-second deadline; we bound the whole slow
- * Android path comfortably inside it and return an explicit incomplete
- * diagnostic rather than blowing the deadline when the host toolchain stalls.
+ * enumeration (sdkmanager + avdmanager `list device`). This operation-specific
+ * resource budget returns an explicit incomplete diagnostic when the host
+ * toolchain stalls.
  * The deadline is armed BEFORE the first Android await so a stall in the
  * device-image listing is bounded too, and its AbortSignal cancels every
  * in-flight avdmanager/sdkmanager child on timeout.
@@ -48,7 +51,9 @@ export const DEVICE_IMAGE_RESOURCE_URIS = {
 } as const;
 
 // Device image info for resource response
-interface DeviceImageInfo {
+export interface DeviceImageInfo {
+  /** Exact AVD name on Android; exact simulator UDID on iOS. */
+  stableId: string;
   name: string;
   platform: Platform;
   deviceId?: string;
@@ -128,6 +133,74 @@ interface ProvisioningCatalogObservation {
   };
 }
 
+export const CONFIGURED_DEVICE_INVENTORY_SCHEMA_VERSION = 1 as const;
+
+export type ConfiguredDeviceInventoryErrorCode = "unavailable" | "failed" | "timeout";
+
+export interface ConfiguredDeviceInventoryError {
+  code: ConfiguredDeviceInventoryErrorCode;
+  message: string;
+}
+
+export type ConfiguredDeviceInventoryObservation =
+  | { complete: true; error?: never }
+  | { complete: false; error: ConfiguredDeviceInventoryError };
+
+export interface ConfiguredDeviceInventoryContract {
+  schemaVersion: typeof CONFIGURED_DEVICE_INVENTORY_SCHEMA_VERSION;
+  complete: boolean;
+  observations: Partial<Record<Platform, ConfiguredDeviceInventoryObservation>>;
+}
+
+export type StableConfiguredDeviceImage = DeviceInfo & { stableId: string };
+
+export interface ConfiguredDeviceInventoryProjection {
+  images: StableConfiguredDeviceImage[];
+  observation: ConfiguredDeviceInventoryObservation;
+}
+
+export function projectConfiguredDeviceInventory(
+  platform: Platform,
+  discovery: DeviceImageDiscovery,
+): ConfiguredDeviceInventoryProjection {
+  const observation = configuredInventoryObservation(platform, discovery);
+  if (!observation.complete) {
+    return { images: [], observation };
+  }
+
+  const devices = discovery.devices.filter((device) => device.platform === platform);
+  const missingStableIdentity =
+    platform === "ios" ? devices.find((device) => !device.deviceId?.trim()) : undefined;
+  if (missingStableIdentity) {
+    return {
+      images: [],
+      observation: failedConfiguredInventoryObservation(
+        "failed",
+        `iOS configured-device inventory contained simulator '${missingStableIdentity.name}' without a UDID.`,
+      ),
+    };
+  }
+
+  return {
+    images: devices.map((device) => ({
+      ...device,
+      stableId: device.platform === "android" ? device.name : device.deviceId!,
+    })),
+    observation,
+  };
+}
+
+export function createConfiguredInventoryContract(
+  platforms: Platform[],
+  observations: Partial<Record<Platform, ConfiguredDeviceInventoryObservation>>,
+): ConfiguredDeviceInventoryContract {
+  return {
+    schemaVersion: CONFIGURED_DEVICE_INVENTORY_SCHEMA_VERSION,
+    complete: platforms.every((platform) => observations[platform]?.complete === true),
+    observations,
+  };
+}
+
 // Resource content schema
 export interface DeviceImagesResourceContent {
   totalCount: number;
@@ -137,6 +210,7 @@ export interface DeviceImagesResourceContent {
   catalogComplete: boolean;
   catalogObservations: Partial<Record<Platform, ProvisioningCatalogObservation>>;
   provisioningCatalog: ProvisioningCatalog;
+  configuredInventory: ConfiguredDeviceInventoryContract;
   images: DeviceImageInfo[];
 }
 
@@ -181,6 +255,9 @@ export function createDeviceImageResourcesHandler(
       profiles: [],
     };
     const catalogObservations: Partial<Record<Platform, ProvisioningCatalogObservation>> = {};
+    const configuredInventoryObservations: Partial<
+      Record<Platform, ConfiguredDeviceInventoryObservation>
+    > = {};
     let androidCount = 0;
     if (platforms.includes("android")) {
       const android = await generateAndroidResource(
@@ -192,11 +269,15 @@ export function createDeviceImageResourcesHandler(
         androidCatalogBudgetMs,
       );
       androidCount = android.androidCount;
-      catalogObservations.android = android.observation;
+      catalogObservations.android = android.catalogObservation;
+      configuredInventoryObservations.android = android.inventoryObservation;
     }
 
-    const iosCount = platforms.includes("ios") ? await appendIosImages(deviceManager, images) : 0;
+    let iosCount = 0;
     if (platforms.includes("ios")) {
+      const ios = await appendIosImages(deviceManager, images);
+      iosCount = ios.iosCount;
+      configuredInventoryObservations.ios = ios.observation;
       catalogObservations.ios = await buildIosProvisioningCatalog(simctl, provisioningCatalog);
     }
 
@@ -210,6 +291,10 @@ export function createDeviceImageResourcesHandler(
       ),
       catalogObservations,
       provisioningCatalog,
+      configuredInventory: createConfiguredInventoryContract(
+        platforms,
+        configuredInventoryObservations,
+      ),
       images,
     };
   };
@@ -263,27 +348,47 @@ async function appendAndroidImages(
   avdManager: AvdManager,
   images: DeviceImageInfo[],
   signal?: AbortSignal,
-): Promise<number> {
+): Promise<{
+  androidCount: number;
+  observation: ConfiguredDeviceInventoryObservation;
+}> {
   try {
-    const [androidDevices, avdInfoList] = await Promise.all([
-      deviceManager.listDeviceImages("android", signal),
-      readAvdInfo(avdManager, signal),
-    ]);
+    const discovery = await deviceManager.getDeviceImagesDetailed("android", { signal });
     // The deadline may have fired while the primary discovery was in flight
     // (e.g. an all-platform request still awaiting iOS). Do not mutate the
     // shared images array once androidCount was finalized as incomplete: a late
     // append would add images the caller already reported as absent.
     if (signal?.aborted) {
-      return 0;
+      return {
+        androidCount: 0,
+        observation: failedConfiguredInventoryObservation(
+          "timeout",
+          "Android configured-device inventory discovery was cancelled.",
+        ),
+      };
     }
+    const projection = projectConfiguredDeviceInventory("android", discovery);
+    if (!projection.observation.complete) {
+      return { androidCount: 0, observation: projection.observation };
+    }
+    const avdInfoList = await readAvdInfo(avdManager, signal);
     const avdInfoByName = new Map(avdInfoList.map((avd) => [avd.name, avd]));
-    for (const device of androidDevices) {
+    for (const device of projection.images) {
       images.push(toDeviceImageInfo(device, avdInfoByName.get(device.name)));
     }
-    return androidDevices.length;
+    return {
+      androidCount: projection.images.length,
+      observation: projection.observation,
+    };
   } catch (error) {
-    logger.warn(`[DeviceImageResources] Failed to list Android device images: ${error}`);
-    return 0;
+    logger.warn(`[DeviceImageResources] Failed to list Android configured devices: ${error}`);
+    return {
+      androidCount: 0,
+      observation: failedConfiguredInventoryObservation(
+        "failed",
+        `Android configured-device inventory failed: ${errorMessage(error)}`,
+      ),
+    };
   }
 }
 
@@ -299,16 +404,28 @@ async function readAvdInfo(avdManager: AvdManager, signal?: AbortSignal): Promis
 async function appendIosImages(
   deviceManager: PlatformDeviceManager,
   images: DeviceImageInfo[],
-): Promise<number> {
+): Promise<{ iosCount: number; observation: ConfiguredDeviceInventoryObservation }> {
   try {
-    const iosDevices = await deviceManager.listDeviceImages("ios");
-    for (const device of iosDevices) {
+    const discovery = await deviceManager.getDeviceImagesDetailed("ios", {
+      bypassIosDeviceListCache: true,
+    });
+    const projection = projectConfiguredDeviceInventory("ios", discovery);
+    if (!projection.observation.complete) {
+      return { iosCount: 0, observation: projection.observation };
+    }
+    for (const device of projection.images) {
       images.push(toDeviceImageInfo(device));
     }
-    return iosDevices.length;
+    return { iosCount: projection.images.length, observation: projection.observation };
   } catch (error) {
-    logger.warn(`[DeviceImageResources] Failed to list iOS simulator images: ${error}`);
-    return 0;
+    logger.warn(`[DeviceImageResources] Failed to list iOS configured devices: ${error}`);
+    return {
+      iosCount: 0,
+      observation: failedConfiguredInventoryObservation(
+        "failed",
+        `iOS configured-device inventory failed: ${errorMessage(error)}`,
+      ),
+    };
   }
 }
 
@@ -319,7 +436,11 @@ async function generateAndroidResource(
   catalog: ProvisioningCatalog,
   timer: Timer,
   budgetMs: number,
-): Promise<{ androidCount: number; observation: ProvisioningCatalogObservation }> {
+): Promise<{
+  androidCount: number;
+  catalogObservation: ProvisioningCatalogObservation;
+  inventoryObservation: ConfiguredDeviceInventoryObservation;
+}> {
   // Bound the COMPLETE Android path under ONE deadline: the device-image
   // listing (appendAndroidImages -> avdmanager `list avd`) AND the
   // provisioning-catalog enumeration. The deadline is armed before the first
@@ -338,14 +459,20 @@ async function generateAndroidResource(
   let timeoutHandle: NodeJS.Timeout | undefined;
   let timedOut = false;
   let androidCount = 0;
+  let inventoryObservation = failedConfiguredInventoryObservation(
+    "failed",
+    "Android configured-device inventory did not complete.",
+  );
   try {
     const generate = (async () => {
-      androidCount = await appendAndroidImages(
+      const android = await appendAndroidImages(
         deviceManager,
         avdManager,
         images,
         controller.signal,
       );
+      androidCount = android.androidCount;
+      inventoryObservation = android.observation;
       const [installedSystemImages, profiles] = await Promise.all([
         avdManager.listInstalledSystemImages(undefined, controller.signal),
         avdManager.listDevices(controller.signal),
@@ -369,7 +496,11 @@ async function generateAndroidResource(
         }, budgetMs);
       }),
     ]);
-    return { androidCount, observation: { catalogComplete: true } };
+    return {
+      androidCount,
+      catalogObservation: { catalogComplete: true },
+      inventoryObservation,
+    };
   } catch (error) {
     if (timedOut) {
       logger.warn(
@@ -377,17 +508,27 @@ async function generateAndroidResource(
       );
       return {
         androidCount,
-        observation: {
+        catalogObservation: {
           catalogComplete: false,
           error: {
             code: "timeout",
             message: `Android device-image resource generation exceeded the ${budgetMs}ms budget; catalog is incomplete.`,
           },
         },
+        inventoryObservation: inventoryObservation.complete
+          ? inventoryObservation
+          : failedConfiguredInventoryObservation(
+              "timeout",
+              `Android configured-device inventory exceeded the ${budgetMs}ms resource budget.`,
+            ),
       };
     }
     logger.warn(`[DeviceImageResources] Failed to build Android provisioning catalog: ${error}`);
-    return { androidCount, observation: failedCatalogObservation("Android", error) };
+    return {
+      androidCount,
+      catalogObservation: failedCatalogObservation("Android", error),
+      inventoryObservation,
+    };
   } finally {
     if (timeoutHandle) {
       timer.clearTimeout(timeoutHandle);
@@ -432,6 +573,31 @@ function failedCatalogObservation(
       code: "failed",
       message: `${platform} provisioning catalog failed: ${errorMessage(error)}`,
     },
+  };
+}
+
+function configuredInventoryObservation(
+  platform: Platform,
+  discovery: DeviceImageDiscovery,
+): ConfiguredDeviceInventoryObservation {
+  if (discovery.succeededPlatforms.has(platform)) {
+    return { complete: true };
+  }
+  const error = discovery.discoveryErrors?.[platform];
+  return failedConfiguredInventoryObservation(
+    error?.code ?? "failed",
+    error?.message ??
+      `${platform === "ios" ? "iOS" : "Android"} configured-device inventory did not complete.`,
+  );
+}
+
+function failedConfiguredInventoryObservation(
+  code: ConfiguredDeviceInventoryErrorCode,
+  message: string,
+): ConfiguredDeviceInventoryObservation {
+  return {
+    complete: false,
+    error: { code, message },
   };
 }
 
@@ -557,8 +723,12 @@ function appendIosProvisioningCatalog(
 }
 
 // Convert DeviceInfo to DeviceImageInfo, merging with AvdInfo for Android
-function toDeviceImageInfo(device: DeviceInfo, avdInfo?: AvdInfo): DeviceImageInfo {
+function toDeviceImageInfo(
+  device: StableConfiguredDeviceImage,
+  avdInfo?: AvdInfo,
+): DeviceImageInfo {
   return {
+    stableId: device.stableId,
     name: device.name,
     platform: device.platform,
     deviceId: device.deviceId,
@@ -598,7 +768,7 @@ export function registerDeviceImageResources(): void {
   ResourceRegistry.register(
     DEVICE_IMAGE_RESOURCE_URIS.ALL_IMAGES,
     "Device Images",
-    "List of all available device images (AVDs and simulators) that can be used to start devices.",
+    "Configured AVD and simulator inventory with versioned per-platform completeness evidence.",
     "application/json",
     handler.getAllDeviceImages,
   );
@@ -607,7 +777,7 @@ export function registerDeviceImageResources(): void {
   ResourceRegistry.registerTemplate(
     DEVICE_IMAGE_RESOURCE_URIS.PLATFORM_TEMPLATE,
     "Platform-specific Device Images",
-    "List of available device images for a specific platform (android or ios).",
+    "Configured device inventory and completeness evidence for android or ios.",
     "application/json",
     handler.getDeviceImagesByPlatform,
   );

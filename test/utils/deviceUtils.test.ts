@@ -690,6 +690,42 @@ describe("MultiPlatformDeviceManager", () => {
     });
   });
 
+  test("getDeviceImagesDetailed propagates Android cancellation and iOS cache bypass", async () => {
+    const controller = new AbortController();
+    let androidSignal: AbortSignal | undefined;
+    let iosOptions: { bypassCache?: boolean } | undefined;
+    const fakeSimctl = {
+      isAvailable: async () => true,
+      listSimulatorImages: async (
+        _sessionId?: string,
+        options?: { bypassCache?: boolean },
+      ): Promise<DeviceInfo[]> => {
+        iosOptions = options;
+        return [];
+      },
+    } as unknown as SimCtlClient;
+    const fakeEmulator = {
+      listAvds: async (options?: { signal?: AbortSignal }): Promise<DeviceInfo[]> => {
+        androidSignal = options?.signal;
+        return [];
+      },
+    } as unknown as AndroidEmulatorClient;
+    const manager = new MultiPlatformDeviceManager(
+      new FakeAdbClient() as unknown as AdbClient,
+      fakeSimctl,
+      fakeEmulator,
+    );
+
+    const result = await manager.getDeviceImagesDetailed("either", {
+      signal: controller.signal,
+      bypassIosDeviceListCache: true,
+    });
+
+    expect(result.succeededPlatforms).toEqual(new Set(["android", "ios"]));
+    expect(androidSignal).toBe(controller.signal);
+    expect(iosOptions).toEqual({ bypassCache: true });
+  });
+
   test("destroyDevice deletes an iOS simulator by its exact UDID with the caller deadline", async () => {
     const controller = new AbortController();
     let request:

@@ -6,6 +6,7 @@ import {
   BootedDeviceDiscoveryOptions,
   DeviceDestroyOptions,
   DeviceImageDiscovery,
+  DeviceImageDiscoveryOptions,
   PlatformDeviceManager,
 } from "../../src/utils/deviceUtils";
 import {
@@ -22,6 +23,10 @@ export class FakeDeviceUtils implements PlatformDeviceManager {
   private deviceImages: Map<Platform, DeviceInfo[]> = new Map();
   private hangingDeviceImagePlatforms: Set<Platform> = new Set();
   private listDeviceImagesCalls: Array<{ platform: SomePlatform; signal?: AbortSignal }> = [];
+  private getDeviceImagesDetailedCalls: Array<{
+    platform: SomePlatform;
+    options: DeviceImageDiscoveryOptions;
+  }> = [];
   private bootedDevices: Map<Platform, BootedDevice[]> = new Map();
   private runningDeviceNames: Set<string> = new Set();
   private executedOperations: string[] = [];
@@ -63,6 +68,13 @@ export class FakeDeviceUtils implements PlatformDeviceManager {
    */
   getListDeviceImagesCalls(): Array<{ platform: SomePlatform; signal?: AbortSignal }> {
     return [...this.listDeviceImagesCalls];
+  }
+
+  getGetDeviceImagesDetailedCalls(): Array<{
+    platform: SomePlatform;
+    options: DeviceImageDiscoveryOptions;
+  }> {
+    return [...this.getDeviceImagesDetailedCalls];
   }
 
   /**
@@ -287,7 +299,11 @@ export class FakeDeviceUtils implements PlatformDeviceManager {
     };
   }
 
-  async getDeviceImagesDetailed(platform: SomePlatform): Promise<DeviceImageDiscovery> {
+  async getDeviceImagesDetailed(
+    platform: SomePlatform,
+    options: DeviceImageDiscoveryOptions = {},
+  ): Promise<DeviceImageDiscovery> {
+    this.getDeviceImagesDetailedCalls.push({ platform, options });
     const requested: Platform[] = platform === "either" ? ["android", "ios"] : [platform];
     const devices: DeviceInfo[] = [];
     const succeededPlatforms = new Set<Platform>();
@@ -300,7 +316,7 @@ export class FakeDeviceUtils implements PlatformDeviceManager {
         };
         continue;
       }
-      devices.push(...(await this.listDeviceImages(p)));
+      devices.push(...(await this.listDeviceImages(p, options.signal)));
       succeededPlatforms.add(p);
     }
     return { devices, succeededPlatforms, discoveryErrors };

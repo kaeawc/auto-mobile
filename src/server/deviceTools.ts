@@ -35,8 +35,10 @@ import {
   notifyBootedDeviceResourcesUpdated,
 } from "./bootedDeviceResources";
 import {
+  createConfiguredInventoryContract,
   DEVICE_IMAGE_RESOURCE_URIS,
   notifyDeviceImageResourcesUpdated,
+  projectConfiguredDeviceInventory,
 } from "./deviceImageResources";
 import {
   notifyInstalledAppResourceListChanged,
@@ -5870,13 +5872,27 @@ export function registerDeviceTools() {
     try {
       const deps = getDeviceToolsDependencies();
       const deviceUtils = deps.deviceManagerFactory();
-      const imageList = await deviceUtils.listDeviceImages(args.platform);
+      const discovery = await deviceUtils.getDeviceImagesDetailed(args.platform, {
+        bypassIosDeviceListCache: args.platform !== "android",
+      });
+      const platforms: Platform[] =
+        args.platform === "either" ? ["android", "ios"] : [args.platform];
+      const projections = platforms.map((platform) => ({
+        platform,
+        projection: projectConfiguredDeviceInventory(platform, discovery),
+      }));
+      const observations = Object.fromEntries(
+        projections.map(({ platform, projection }) => [platform, projection.observation]),
+      );
+      const images = projections.flatMap(({ projection }) => projection.images);
+      const configuredInventory = createConfiguredInventoryContract(platforms, observations);
 
       return createJSONToolResponse({
-        message: `Found ${imageList.length} available ${args.platform} AVDs`,
-        images: imageList,
-        count: imageList.length,
+        message: `Found ${images.length} configured ${args.platform} device images`,
+        images,
+        count: images.length,
         platform: args.platform,
+        configuredInventory,
       });
     } catch (error) {
       throw new ActionableError(`Failed to list ${args.platform} AVDs: ${error}`);

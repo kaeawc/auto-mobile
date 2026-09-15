@@ -109,6 +109,8 @@ export interface DeviceImageDiscovery {
 export interface DeviceImageDiscoveryOptions {
   /** Bypass simulator inventory caching when durable absence must be proven. */
   bypassIosDeviceListCache?: boolean;
+  /** Cancels short-lived platform image discovery work. */
+  signal?: AbortSignal;
 }
 /** Bounds and cancels a platform shutdown command. */
 export interface DeviceShutdownOptions {
@@ -588,7 +590,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
 
     if (platform === "android" || platform === "either") {
       try {
-        devices.push(...(await this.emulator.listAvds()));
+        devices.push(...(await this.emulator.listAvds({ signal: options.signal })));
         succeededPlatforms.add("android");
       } catch (error) {
         logger.warn(`[DeviceManager] Android device inventory failed: ${error}`);

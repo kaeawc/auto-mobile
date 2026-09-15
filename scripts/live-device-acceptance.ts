@@ -275,7 +275,18 @@ function parseInteger(value: string, name: string): number {
   return parsed;
 }
 
-function assertMode(path: string, expectedMode: number, description: string): void {
+export function assertMode(
+  path: string,
+  expectedMode: number,
+  description: string,
+  platform: NodeJS.Platform = process.platform,
+): void {
+  // Windows ACLs, rather than POSIX permission bits, protect these files. Bun
+  // reports synthetic mode bits there, so treating them as authoritative would
+  // reject valid evidence before its authenticated contents can be verified.
+  if (platform === "win32") {
+    return;
+  }
   const mode = statSync(path).mode & 0o777;
   if (mode !== expectedMode) {
     throw new Error(

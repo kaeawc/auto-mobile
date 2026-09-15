@@ -8,6 +8,7 @@ import { ACCEPTANCE_DISCOVERY_CAPABILITY_ENV } from "../../src/daemon/constants"
 import { DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV } from "../../src/daemon/liveAcceptanceCapability";
 import { FakeTimer } from "../fakes/FakeTimer";
 import {
+  assertMode,
   defaultWriteEvidence,
   parseArgs,
   recordOwnershipManifest,
@@ -1102,6 +1103,26 @@ describe("live device acceptance harness", () => {
       ),
     ).rejects.toThrow("Android ownership sibling must not use the target AVD name");
     expect(harness.calls).toHaveLength(0);
+  });
+
+  test("uses Windows ACLs while keeping POSIX mode checks fail-closed", () => {
+    const directory = mkdtempSync(join(tmpdir(), "automobile-permissions-"));
+    const file = join(directory, "operator.key");
+    writeFileSync(file, "x".repeat(32));
+    chmodSync(directory, 0o755);
+    chmodSync(file, 0o644);
+    try {
+      expect(() => assertMode(directory, 0o700, "Evidence directory", "win32")).not.toThrow();
+      expect(() => assertMode(file, 0o600, "Operator key", "win32")).not.toThrow();
+      expect(() => assertMode(directory, 0o700, "Evidence directory", "linux")).toThrow(
+        "Evidence directory must have mode 700",
+      );
+      expect(() => assertMode(file, 0o600, "Operator key", "linux")).toThrow(
+        "Operator key must have mode 600",
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   test("refuses a signed manifest whose platform entries bind different control sets", () => {

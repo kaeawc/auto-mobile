@@ -3,7 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { DaemonMcpProxy } from "../daemon/daemonMcpProxy";
+import { DaemonClient } from "../daemon/client";
+import { DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS } from "../daemon/constants";
 import { getDaemonHealthReport, type DaemonHealthReport } from "../daemon/debugTools";
 import { DaemonManager, type DaemonRestartResult } from "../daemon/manager";
 import type { DaemonOptions } from "../daemon/types";
@@ -80,13 +81,19 @@ export interface DaemonRecoveryDependencies {
     deadline?: number,
   ) => Promise<DaemonRestartResult>;
   /**
-   * A successful MCP tools/list round trip verifies the socket protocol and,
-   * through DaemonMcpProxy, the daemon's version and build identity.
+   * A successful authenticated `tools/list` round trip verifies the socket
+   * protocol plus the daemon's version and build identity.
    */
-  verifyProtocol?: (signal?: AbortSignal) => Promise<void>;
+  verifyProtocol?: (options: DaemonProtocolProbeOptions) => Promise<void>;
   /** Runs the requested platform doctor checks after host metadata repair. */
   runDoctor?: (options: DoctorOptions) => Promise<DoctorReport>;
   timer?: Timer;
+}
+
+export interface DaemonProtocolProbeOptions {
+  signal: AbortSignal;
+  timeoutMs: number;
+  timer: Timer;
 }
 
 class DaemonRecoveryDeadlineError extends Error {
@@ -122,48 +129,55 @@ function attachLifecycleCompletion(
   return result;
 }
 
-async function verifyDaemonProtocol(signal?: AbortSignal): Promise<void> {
+async function verifyDaemonProtocol(options: DaemonProtocolProbeOptions): Promise<void> {
   // Verification must not reconcile identity itself; explicit repair owns all
-  // mutation so its deadline waits for a replacement to settle.
-  const proxy = new DaemonMcpProxy({ autoStartDaemon: false });
-  let closePromise: Promise<void> | undefined;
-  const closeProxy = (): Promise<void> => (closePromise ??= proxy.close());
-  let removeAbortListener: (() => void) | undefined;
+  // mutation so its deadline waits for a replacement to settle. Use one
+  // authenticated daemon RPC rather than DaemonMcpProxy: proxy connection
+  // setup makes several 120-second identity requests, which lets an
+  // accepts-but-unresponsive daemon consume the whole repair budget.
+  const client = new DaemonClient(undefined, options.timeoutMs, options.timer);
   try {
-    signal?.throwIfAborted();
-    await Promise.race([
-      proxy.listTools(),
-      new Promise<never>((_resolve, reject) => {
-        if (!signal) {
-          return;
-        }
-        const rejectForAbort = () => {
-          void closeProxy();
-          reject(signal.reason);
-        };
-        signal.addEventListener("abort", rejectForAbort, { once: true });
-        removeAbortListener = () => signal.removeEventListener("abort", rejectForAbort);
-      }),
-    ]);
+    await client.callDaemonMethod("tools/list", {}, options);
   } finally {
-    removeAbortListener?.();
-    await closeProxy();
+    await client.close();
   }
 }
 
 function protocolHealthProbe(
-  verifyProtocol: (signal?: AbortSignal) => Promise<void>,
-  signal?: AbortSignal,
+  verifyProtocol: (options: DaemonProtocolProbeOptions) => Promise<void>,
+  deadline: number,
+  timer: Timer,
+  signal: AbortSignal,
 ): () => Promise<boolean> {
   return async () => {
     try {
-      await verifyProtocol(signal);
+      await verifyProtocol(protocolProbeOptions("recovery", deadline, timer, signal));
       return true;
     } catch (error) {
+      if (error instanceof DaemonRecoveryDeadlineError) {
+        throw error;
+      }
       // A failed compatibility probe is the explicit repair precondition.
       logger.debug(`Daemon repair compatibility probe failed: ${errorMessage(error)}`);
       return false;
     }
+  };
+}
+
+function protocolProbeOptions(
+  phase: Exclude<DaemonRecoveryPhase, "complete">,
+  deadline: number,
+  timer: Timer,
+  signal: AbortSignal,
+): DaemonProtocolProbeOptions {
+  const remaining = deadline - timer.now();
+  if (remaining <= 0) {
+    throw new DaemonRecoveryDeadlineError(phase);
+  }
+  return {
+    signal,
+    timeoutMs: Math.min(DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS, remaining),
+    timer,
   };
 }
 
@@ -283,7 +297,7 @@ interface ResolvedRecoveryDependencies {
     signal?: AbortSignal,
     deadline?: number,
   ) => Promise<DaemonRestartResult>;
-  verifyProtocol: (signal?: AbortSignal) => Promise<void>;
+  verifyProtocol: (options: DaemonProtocolProbeOptions) => Promise<void>;
   runDoctor: (options: DoctorOptions) => Promise<DoctorReport>;
 }
 
@@ -346,7 +360,7 @@ async function recoverUnusableSocket(
     deadline?: number,
   ) => Promise<DaemonRestartResult>,
   daemonOptions: DaemonOptions,
-  verifyProtocol: (signal?: AbortSignal) => Promise<void>,
+  verifyProtocol: (options: DaemonProtocolProbeOptions) => Promise<void>,
 ): Promise<RecoveryAttempt<DaemonRecoveryAction>> {
   if (before.socketConnectable) {
     return { ok: true, value: "joined" };
@@ -358,7 +372,7 @@ async function recoverUnusableSocket(
     (signal) =>
       recoverControlState(
         daemonOptions,
-        protocolHealthProbe(verifyProtocol, signal),
+        protocolHealthProbe(verifyProtocol, deadline, timer, signal),
         signal,
         deadline,
       ),
@@ -377,10 +391,10 @@ async function verifyProtocolWithRecovery(
     deadline?: number,
   ) => Promise<DaemonRestartResult>,
   daemonOptions: DaemonOptions,
-  verifyProtocol: (signal?: AbortSignal) => Promise<void>,
+  verifyProtocol: (options: DaemonProtocolProbeOptions) => Promise<void>,
 ): Promise<ProtocolRecoveryAttempt> {
   const initialVerification = await attemptRecoveryStep("verification", deadline, timer, (signal) =>
-    verifyProtocol(signal),
+    verifyProtocol(protocolProbeOptions("verification", deadline, timer, signal)),
   );
   if (
     initialVerification.ok ||
@@ -404,7 +418,7 @@ async function verifyProtocolWithRecovery(
     (signal) =>
       recoverControlState(
         daemonOptions,
-        protocolHealthProbe(verifyProtocol, signal),
+        protocolHealthProbe(verifyProtocol, deadline, timer, signal),
         signal,
         deadline,
       ),
@@ -423,7 +437,7 @@ async function verifyProtocolWithRecovery(
     "verification",
     deadline,
     timer,
-    (signal) => verifyProtocol(signal),
+    (signal) => verifyProtocol(protocolProbeOptions("verification", deadline, timer, signal)),
   );
   return replacementVerification.ok
     ? { ok: true, value: restartResult.value }

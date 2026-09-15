@@ -280,6 +280,43 @@ describe("repairDaemon", () => {
     expect(protocolChecks).toBe(1);
   });
 
+  test("caps an unresponsive control-protocol probe before restarting within the shared deadline", async () => {
+    const timer = new FakeTimer();
+    const probeTimeouts: number[] = [];
+    let recoveryStarted = false;
+    let probeCalls = 0;
+    const repair = repairDaemon(
+      { timeoutMs: 60_000 },
+      dependencies([healthReport(false), healthReport(true)], {
+        timer,
+        verifyProtocol: async ({ timeoutMs }) => {
+          probeTimeouts.push(timeoutMs);
+          probeCalls++;
+          if (probeCalls === 1) {
+            await timer.sleep(timeoutMs);
+            throw new Error("unresponsive daemon");
+          }
+        },
+        recoverControlState: async (_daemonOptions, isProtocolHealthy) => {
+          expect(await isProtocolHealthy()).toBe(false);
+          recoveryStarted = true;
+          return "restarted";
+        },
+      }),
+    );
+
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    timer.advanceTime(10_000);
+
+    await expect(repair).resolves.toMatchObject<Partial<DaemonRecoveryResult>>({
+      status: "repaired",
+      phase: "complete",
+      action: "restarted",
+    });
+    expect(recoveryStarted).toBe(true);
+    expect(probeTimeouts).toEqual([10_000, 10_000]);
+  });
+
   test("threads invocation daemon options into recovery", async () => {
     let receivedOptions: { host?: string; port?: number } | undefined;
     const result = await repairDaemon(
@@ -461,7 +498,7 @@ describe("repairDaemon", () => {
       { timeoutMs: 50 },
       dependencies([healthReport(true)], {
         timer,
-        verifyProtocol: async (signal) => {
+        verifyProtocol: async ({ signal }) => {
           observedSignal = signal;
           beginVerification?.();
           await new Promise<void>((resolve) => {
@@ -497,7 +534,7 @@ describe("repairDaemon", () => {
     const result = await repairDaemon(
       {},
       dependencies([healthReport(true)], {
-        verifyProtocol: async (signal) => {
+        verifyProtocol: async ({ signal }) => {
           if (signal) {
             protocolSignals.push(signal);
           }

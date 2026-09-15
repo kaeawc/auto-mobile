@@ -1,4 +1,6 @@
 import { z } from "zod/v4";
+import type { ElementQuery } from "../models/ElementQuery";
+import { withJsonSchemaOverride } from "./toolSchemaHelpers";
 
 type ElementIdTextDescriptions = {
   elementId: string;
@@ -19,10 +21,44 @@ export const createElementIdTextSelectorSchema = (descriptions: ElementIdTextDes
       .strict(),
   ]);
 
-export const elementContainerSchema = createElementIdTextSelectorSchema({
-  elementId: "Container resource ID",
-  text: "Container text",
-});
+export const elementSelectionStrategySchema = z.enum(["first", "random", "unique"]);
+
+/** Reused by every public scoped selector, including recursive ancestors. */
+export const elementContainerSchema: z.ZodType<ElementQuery> = withJsonSchemaOverride(
+  z
+    .lazy(() => {
+      const scopeFields = {
+        container: elementContainerSchema
+          .optional()
+          .describe("Strict ancestor scope; wrappers may intervene"),
+        index: z
+          .number()
+          .int()
+          .nonnegative()
+          .optional()
+          .describe("Zero-based scoped occurrence; overrides uniqueness at this level"),
+        selectionStrategy: elementSelectionStrategySchema
+          .optional()
+          .describe("Inherited from the query; unique is recommended"),
+      };
+      return z.union([
+        z.object({ elementId: z.string().min(1), ...scopeFields }).strict(),
+        z.object({ text: z.string().min(1), ...scopeFields }).strict(),
+        z
+          .object({
+            testTag: z.string().min(1).describe("Android accessibility test tag"),
+            ...scopeFields,
+          })
+          .strict(),
+      ]);
+    })
+    .meta({ id: "ElementQuery" }),
+  (schema) => {
+    // Zod 3.25's v4 registry name also leaks as draft-04 `id`; retain the
+    // generated $defs key, but do not advertise that obsolete keyword.
+    delete schema.id;
+  },
+);
 
 export const elementIdTextFieldsSchema = z
   .object({
@@ -30,8 +66,6 @@ export const elementIdTextFieldsSchema = z
     text: z.string().describe("Text, content-desc, or placeholder").optional(),
   })
   .strict();
-
-export const elementSelectionStrategySchema = z.enum(["first", "random"]);
 
 export const validateElementIdTextSelector = (
   value: { elementId?: string; text?: string },

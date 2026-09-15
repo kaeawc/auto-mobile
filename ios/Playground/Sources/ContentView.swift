@@ -6,6 +6,7 @@ enum Tab: String, Hashable {
     case demos
     case files
     case settings
+    case selectors
 }
 
 struct ContentView: View {
@@ -19,6 +20,7 @@ struct ContentView: View {
         case "demos": return .demos
         case "files": return .files
         case "settings": return .settings
+        case "selectors": return .selectors
         default: return .discover
         }
     }
@@ -51,6 +53,10 @@ struct ContentView: View {
                     Label("Settings", systemImage: "gearshape.fill")
                 }
                 .tag(Tab.settings)
+
+            NestedSelectorsView()
+                .tabItem { Label("Selectors", systemImage: "scope") }
+                .tag(Tab.selectors)
         }
         // Tab bar accent flows from the design-system theme (marker red) applied
         // by `.autoMobileTheme()` at the app root — no hard-coded override here.

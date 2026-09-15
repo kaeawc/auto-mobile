@@ -1,3 +1,5 @@
+import type { ElementQuery } from "../../../models/ElementQuery";
+import { DefaultElementSelector } from "../../utility/DefaultElementSelector";
 import {
   ActionableError,
   BootedDevice,
@@ -117,7 +119,7 @@ export class ScrollUntilVisible {
     }
 
     // Find the scrollable container
-    const containerElement = await perf.track("findContainer", () =>
+    let containerElement = await perf.track("findContainer", () =>
       this.findScrollableContainer(options, lastObservation),
     );
 
@@ -180,6 +182,11 @@ export class ScrollUntilVisible {
       );
       return accessibilityService === "talkback";
     });
+    if (isTalkBackEnabled && options.container) {
+      throw new ActionableError(
+        "target_not_actionable: scoped scrolling requires coordinate input; TalkBack identifier-only scrolling cannot preserve ancestry",
+      );
+    }
 
     // First check if element is already visible within the container bounds
     foundElement = await perf.track("initialSearch", () =>
@@ -269,7 +276,19 @@ export class ScrollUntilVisible {
       );
 
       // Perform scroll
-      const activeCoords = reverseMode ? reverseSwipeCoords : swipeCoordinates;
+      if (options.container) {
+        containerElement = await this.findScrollableContainer(options, lastObservation);
+      }
+      const activeCoords = options.container
+        ? this.resolveContainerSwipeCoordinates(
+            { ...options, direction: reverseMode ? reverseDirection : options.direction },
+            lastObservation.viewHierarchy!,
+            containerElement,
+            lastObservation,
+          )
+        : reverseMode
+          ? reverseSwipeCoords
+          : swipeCoordinates;
       const activeDirection = reverseMode ? reverseDirection : options.direction;
       const activeDuration = this.deps.getDuration(reverseMode ? reverseOptions : lookForOptions);
       const { startX, startY, endX, endY } = activeCoords;
@@ -285,7 +304,21 @@ export class ScrollUntilVisible {
 
       // Execute swipe with observedInteraction
       const swipeResult = await this.deps.observedInteraction(
-        async () => {
+        async (currentObservation) => {
+          let dispatchCoords = { startX, startY, endX, endY };
+          if (options.container) {
+            if (!currentObservation.viewHierarchy) {
+              throw new ActionableError("container_not_found: no fresh hierarchy before scrolling");
+            }
+            containerElement = await this.findScrollableContainer(options, currentObservation);
+            gestureOptions.frameContext = currentObservation.viewHierarchy.frameContext;
+            dispatchCoords = this.resolveContainerSwipeCoordinates(
+              { ...options, direction: activeDirection },
+              currentObservation.viewHierarchy,
+              containerElement,
+              currentObservation,
+            );
+          }
           const swipeRunner =
             this.deps.device.platform === "ios"
               ? this.deps.voiceOverExecutor
@@ -296,10 +329,10 @@ export class ScrollUntilVisible {
             );
           }
           return await swipeRunner.executeSwipeGesture(
-            Math.floor(startX),
-            Math.floor(startY),
-            Math.floor(endX),
-            Math.floor(endY),
+            Math.floor(dispatchCoords.startX),
+            Math.floor(dispatchCoords.startY),
+            Math.floor(dispatchCoords.endX),
+            Math.floor(dispatchCoords.endY),
             activeDirection,
             containerElement,
             gestureOptions,
@@ -312,7 +345,7 @@ export class ScrollUntilVisible {
           timeoutMs: 500,
           progress,
           perf,
-          skipPreviousObserve: scrollIteration > 1,
+          skipPreviousObserve: !options.container && scrollIteration > 1,
           deferPostActionScreenshot: true,
           predictionContext: {
             toolName: "swipeOn",
@@ -404,6 +437,7 @@ export class ScrollUntilVisible {
       logger.info(`[SwipeOn] Iteration ${scrollIteration}: searching for ${target}`);
 
       // Check if target element is now visible within the container bounds
+      containerElement = await this.findScrollableContainer(options, lastObservation);
       foundElement = await this.findElementInHierarchy(
         options.lookFor!,
         lastObservation.viewHierarchy!,
@@ -468,6 +502,19 @@ export class ScrollUntilVisible {
 
     if (!options.container) {
       throw new ActionableError("Container must be specified for element swipe");
+    }
+
+    if (
+      options.container.container ||
+      options.selectionStrategy ||
+      options.container.selectionStrategy ||
+      options.container.index !== undefined ||
+      options.container.testTag
+    ) {
+      return new DefaultElementSelector(this.deps.finder).require(viewHierarchy, {
+        selectionStrategy: options.selectionStrategy,
+        ...options.container,
+      });
     }
 
     if (options.container.text) {
@@ -549,18 +596,13 @@ export class ScrollUntilVisible {
     let element: Element | null = null;
     const viewHierarchy = observeResult.viewHierarchy!;
 
-    // Try to find container by elementId or text
-    if (options.container?.elementId) {
-      element = this.deps.finder.findElementByResourceId(
+    if (options.container) {
+      return new DefaultElementSelector(this.deps.finder).require(
         viewHierarchy,
-        options.container.elementId,
-      );
-    } else if (options.container?.text) {
-      element = this.deps.finder.findElementByText(
-        viewHierarchy,
-        options.container.text,
-        undefined,
-        true,
+        {
+          selectionStrategy: options.selectionStrategy,
+          ...options.container,
+        },
         false,
       );
     }
@@ -589,10 +631,42 @@ export class ScrollUntilVisible {
   }
 
   async findElementInHierarchy(
-    lookFor: { text?: string; elementId?: string },
+    lookFor: ElementQuery,
     viewHierarchy: ViewHierarchyResult,
-    container?: { elementId?: string; text?: string },
+    container?: ElementQuery,
   ): Promise<Element | null> {
+    const autoScope = container
+      ? undefined
+      : (this.deps.finder.findScrollableContainerNode(viewHierarchy) ?? undefined);
+    if (
+      [
+        container,
+        autoScope,
+        lookFor.container,
+        lookFor.selectionStrategy,
+        lookFor.testTag,
+        lookFor.index,
+      ].some((value) => value !== undefined)
+    ) {
+      const query = structuredClone(lookFor);
+      let outer = query;
+      while (outer.container) {
+        outer = outer.container;
+      }
+      outer.container = container;
+      const result = this.deps.finder.resolveQuery(viewHierarchy, query, {
+        actionable: true,
+        withinNode: autoScope,
+      });
+      if (
+        result.diagnostic &&
+        result.diagnostic.code !== "target_not_found" &&
+        result.diagnostic.code !== "target_not_actionable"
+      ) {
+        throw new ActionableError(`Element query failed: ${JSON.stringify(result.diagnostic)}`);
+      }
+      return result.element;
+    }
     if (lookFor.text) {
       return this.deps.finder.findElementByText(
         viewHierarchy,
@@ -606,7 +680,7 @@ export class ScrollUntilVisible {
         viewHierarchy,
         lookFor.elementId,
         container,
-        true,
+        false,
       );
     }
     return null;

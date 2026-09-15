@@ -1,4 +1,7 @@
+import type { ElementQuery } from "./ElementQuery";
+import type { ElementSelectionStrategy } from "./ElementSelectionStrategy";
 export interface PinchOnOptions {
+  selectionStrategy?: ElementSelectionStrategy;
   direction: "in" | "out";
   distanceStart?: number;
   distanceEnd?: number;
@@ -14,9 +17,6 @@ export interface PinchOnOptions {
    */
   rotationDegrees?: number;
   includeSystemInsets?: boolean;
-  container?: {
-    elementId?: string;
-    text?: string;
-  };
+  container?: ElementQuery;
   autoTarget?: boolean;
 }

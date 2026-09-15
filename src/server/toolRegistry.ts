@@ -155,6 +155,9 @@ function toAdvertisedJsonSchema(schema: any): Record<string, unknown> {
   const jsonSchema = toJSONSchema(schema, {
     override: ({ zodSchema, jsonSchema }) => {
       applyJsonSchemaOverride(zodSchema, jsonSchema);
+      // Registry names create reusable $defs, but this Zod version also emits
+      // draft-04 `id` metadata on described copies. Draft 2020-12 uses $id.
+      delete jsonSchema.id;
       dropDefaultedKeysFromRequired(jsonSchema);
       if (isInjectedDeviceIdSchema(zodSchema)) {
         const properties = jsonSchema.properties as Record<string, unknown> | undefined;
@@ -164,6 +167,10 @@ function toAdvertisedJsonSchema(schema: any): Record<string, unknown> {
       }
     },
   });
+  // Shared definitions are assembled after the per-node callback.
+  for (const definition of Object.values(jsonSchema.$defs ?? {})) {
+    delete definition.id;
+  }
   canonicalizeDiscriminatedUnionJsonSchema(jsonSchema);
   const flattened = flattenTopLevelUnion(jsonSchema);
   // Re-assert any wire contract that must survive union flattening (e.g. the

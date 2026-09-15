@@ -1,4 +1,7 @@
 import type { ObserveResult } from "../../../models/ObserveResult";
+import { DefaultElementFinder } from "../../utility/ElementFinder";
+import { ObserveElementsBuilder } from "../ObserveElementsBuilder";
+import { ActionableError } from "../../../models/ActionableError";
 import type { LayoutWarnings } from "../../../models/ObservationInsets";
 import type { ElementBounds } from "../../../models/ElementBounds";
 import type {
@@ -300,6 +303,36 @@ export function scopeToFocus(
 ): { result: ObserveResult; focus: NonNullable<ObserveScopeMetadata["focus"]> } {
   const obs = clone(input);
   const roots = rootNodes(obs);
+
+  if (anchor?.query) {
+    if (!input.viewHierarchy) {
+      throw new ActionableError("No hierarchy is available for the scoped query");
+    }
+    const query = { selectionStrategy: "unique" as const, ...anchor.query };
+    const result = new DefaultElementFinder().resolveQuery(input.viewHierarchy, query);
+    if (!result.node) {
+      throw new ActionableError(`Element query failed: ${JSON.stringify(result.diagnostic)}`);
+    }
+    const scopedNode: unknown = clone(result.node);
+    setRootNodes(obs, [scopedNode as NodeRecord]);
+    {
+      const hierarchy = obs.viewHierarchy!;
+      delete hierarchy.windows;
+      obs.elements = new ObserveElementsBuilder().build(
+        hierarchy,
+        obs.screenIdentity?.platform ?? "android",
+      );
+    }
+    return {
+      result: obs,
+      focus: {
+        by: "anchor",
+        matched: true,
+        query,
+        levels: result.levels,
+      },
+    };
+  }
 
   if (anchor && (anchor.resourceId !== undefined || anchor.text !== undefined)) {
     const matched = findAnchor(roots, anchor);

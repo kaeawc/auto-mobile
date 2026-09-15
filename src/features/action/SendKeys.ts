@@ -1,4 +1,5 @@
 import type { BootedDevice, ImeAction, ObserveResult } from "../../models";
+import type { ElementQuery } from "../../models/ElementQuery";
 import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
@@ -69,7 +70,7 @@ export const SEND_KEYS_SEMANTIC_KEYS = [
 export type SendKeysSemanticKey = (typeof SEND_KEYS_SEMANTIC_KEYS)[number];
 export type SendKeysKey = InputKeyName | SendKeysSemanticKey;
 
-export interface SendKeysSelector {
+export interface SendKeysSelector extends ElementQuery {
   elementId?: string;
   testTag?: string;
   text?: string;

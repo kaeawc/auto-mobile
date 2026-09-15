@@ -93,6 +93,7 @@ const OBSERVE_WAIT_METADATA_KEYS = [
   "waitMs",
   "matchedElement",
   "candidates",
+  "queryResult",
 ] as const;
 
 /**
@@ -466,7 +467,16 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
     // requested it wins. It re-projects from the original payload so it still sees
     // `elements` even under --observe-result-drop-elements.
     let served: ObserveResult = sanitized;
-    if (resolveObserveProjection(ctx.args) === "skeleton") {
+    if (scopeActive && scopeConfig.focusAnchor?.query) {
+      // Resolve ancestry before compaction can remove identifiers/wrappers.
+      // Rebuild the scoped element buckets before projecting, preserving scope
+      // metadata even when the hierarchy itself is replaced by the skeleton.
+      const scoped = applyObserveScopeExperiments(observeResult, scopeConfig);
+      served = sanitizeObserveResult(scoped, {
+        ...cfg,
+        project: resolveObserveProjection(ctx.args),
+      });
+    } else if (resolveObserveProjection(ctx.args) === "skeleton") {
       served = sanitizeObserveResult(observeResult, { ...cfg, project: "skeleton" });
       // Skeleton replaces the hierarchy, so scope's structural transforms cannot
       // run afterward. Preserve only the requested dimensions withheld by flags.

@@ -38,6 +38,7 @@ fun DiscoverVideoScreen(
         "Media" to { VideoListScreen(onNavigateToVideoPlayer = onNavigateToVideoPlayer) },
         "Text" to { InputTextScreen() },
         "Chat" to { ChatScreen() },
+        "Selectors" to { NestedSelectorsScreen() },
       )
     val tabPageMap: Map<Int, @Composable () -> Unit> =
       tabs.map { it.value }.mapIndexed { index, entry -> index to entry }.toMap()

@@ -204,7 +204,12 @@
           "$comment": "Generic (all tools): params.device (when present) overrides inline device at normalization (PlanNormalizer's `{ ...inlineParams, ...paramsFromStep }` merge, params precedence), so the inline sibling is discarded and must NOT be type-checked in that case -- e.g. a nested criticalSection/barrier sub-step with an invalid inline device but a valid params.device must not be false-rejected. Conversely, when params DOES declare device, its own value must still be validated (non-blank string) -- most tools have no tool-specific params schema to catch an invalid params.device otherwise, so a plan with e.g. params.device: 456 would normalize to an invalid device and only fail at the daemon (#6215 review).",
           "if": {
             "required": ["params"],
-            "properties": { "params": { "type": "object", "required": ["device"] } }
+            "properties": {
+              "params": {
+                "type": "object",
+                "required": ["device"]
+              }
+            }
           },
           "then": {
             "properties": {
@@ -355,7 +360,7 @@
               },
               "selectionStrategy": {
                 "type": "string",
-                "enum": ["first", "random"],
+                "enum": ["first", "random", "unique"],
                 "description": "Element selection strategy when multiple matches are found (default: first)"
               },
               "platform": {
@@ -808,7 +813,11 @@
                 "$comment": "Apply criticalSectionParams' shape ONLY when params is actually an object. PlanNormalizer.isRecord treats a non-object params (e.g. null) as absent ({}), so an inline-form step with params: null must still validate via its inline fields below, not fail the unconditional object-shaped $ref (#6215 review).",
                 "if": {
                   "required": ["params"],
-                  "properties": { "params": { "type": "object" } }
+                  "properties": {
+                    "params": {
+                      "type": "object"
+                    }
+                  }
                 },
                 "then": {
                   "properties": {
@@ -822,11 +831,16 @@
                 "$comment": "__lockNamespace is a reserved internal field injected by PlanExecutor at runtime to scope a plan's lock state -- an authored plan must never set it, inline or under params. Rejected explicitly here because criticalSectionParams' additionalProperties stays true, so simply omitting it from the declared properties would not block it. The params branch requires params to be an object before trusting its 'required' check -- required vacuously passes against a non-object value like params: null, which would otherwise misfire this rejection on every step with params: null (#6215 review).",
                 "not": {
                   "anyOf": [
-                    { "required": ["__lockNamespace"] },
+                    {
+                      "required": ["__lockNamespace"]
+                    },
                     {
                       "required": ["params"],
                       "properties": {
-                        "params": { "type": "object", "required": ["__lockNamespace"] }
+                        "params": {
+                          "type": "object",
+                          "required": ["__lockNamespace"]
+                        }
                       }
                     }
                   ]
@@ -834,28 +848,49 @@
               },
               {
                 "anyOf": [
-                  { "required": ["lock"] },
+                  {
+                    "required": ["lock"]
+                  },
                   {
                     "required": ["params"],
-                    "properties": { "params": { "type": "object", "required": ["lock"] } }
+                    "properties": {
+                      "params": {
+                        "type": "object",
+                        "required": ["lock"]
+                      }
+                    }
                   }
                 ]
               },
               {
                 "anyOf": [
-                  { "required": ["deviceCount"] },
+                  {
+                    "required": ["deviceCount"]
+                  },
                   {
                     "required": ["params"],
-                    "properties": { "params": { "type": "object", "required": ["deviceCount"] } }
+                    "properties": {
+                      "params": {
+                        "type": "object",
+                        "required": ["deviceCount"]
+                      }
+                    }
                   }
                 ]
               },
               {
                 "anyOf": [
-                  { "required": ["steps"] },
+                  {
+                    "required": ["steps"]
+                  },
                   {
                     "required": ["params"],
-                    "properties": { "params": { "type": "object", "required": ["steps"] } }
+                    "properties": {
+                      "params": {
+                        "type": "object",
+                        "required": ["steps"]
+                      }
+                    }
                   }
                 ]
               },
@@ -863,7 +898,12 @@
                 "$comment": "params.lock (when present) overrides inline lock at normalization; validate the inline form only when params.lock is absent, otherwise a valid params override would false-reject the discarded inline value.",
                 "if": {
                   "required": ["params"],
-                  "properties": { "params": { "type": "object", "required": ["lock"] } }
+                  "properties": {
+                    "params": {
+                      "type": "object",
+                      "required": ["lock"]
+                    }
+                  }
                 },
                 "then": true,
                 "else": {
@@ -880,7 +920,12 @@
                 "$comment": "params.deviceCount override, same rule as lock above.",
                 "if": {
                   "required": ["params"],
-                  "properties": { "params": { "type": "object", "required": ["deviceCount"] } }
+                  "properties": {
+                    "params": {
+                      "type": "object",
+                      "required": ["deviceCount"]
+                    }
+                  }
                 },
                 "then": true,
                 "else": {
@@ -897,7 +942,12 @@
                 "$comment": "params.steps override, same rule as lock above.",
                 "if": {
                   "required": ["params"],
-                  "properties": { "params": { "type": "object", "required": ["steps"] } }
+                  "properties": {
+                    "params": {
+                      "type": "object",
+                      "required": ["steps"]
+                    }
+                  }
                 },
                 "then": true,
                 "else": {
@@ -917,7 +967,12 @@
                 "$comment": "params.timeout override, same rule as lock above.",
                 "if": {
                   "required": ["params"],
-                  "properties": { "params": { "type": "object", "required": ["timeout"] } }
+                  "properties": {
+                    "params": {
+                      "type": "object",
+                      "required": ["timeout"]
+                    }
+                  }
                 },
                 "then": true,
                 "else": {
@@ -936,7 +991,12 @@
                 "$comment": "params.platform override, same rule as lock above -- addDeviceTargetingToSchema restricts this to android/ios at runtime, so the inline form must be validated only when params does not override it.",
                 "if": {
                   "required": ["params"],
-                  "properties": { "params": { "type": "object", "required": ["platform"] } }
+                  "properties": {
+                    "params": {
+                      "type": "object",
+                      "required": ["platform"]
+                    }
+                  }
                 },
                 "then": true,
                 "else": {
@@ -953,7 +1013,12 @@
                 "$comment": "params.sessionUuid override, same rule as lock above.",
                 "if": {
                   "required": ["params"],
-                  "properties": { "params": { "type": "object", "required": ["sessionUuid"] } }
+                  "properties": {
+                    "params": {
+                      "type": "object",
+                      "required": ["sessionUuid"]
+                    }
+                  }
                 },
                 "then": true,
                 "else": {
@@ -969,7 +1034,12 @@
                 "$comment": "params.keepScreenAwake override, same rule as lock above.",
                 "if": {
                   "required": ["params"],
-                  "properties": { "params": { "type": "object", "required": ["keepScreenAwake"] } }
+                  "properties": {
+                    "params": {
+                      "type": "object",
+                      "required": ["keepScreenAwake"]
+                    }
+                  }
                 },
                 "then": true,
                 "else": {
@@ -985,7 +1055,12 @@
                 "$comment": "params.deviceId override, same rule as lock above.",
                 "if": {
                   "required": ["params"],
-                  "properties": { "params": { "type": "object", "required": ["deviceId"] } }
+                  "properties": {
+                    "params": {
+                      "type": "object",
+                      "required": ["deviceId"]
+                    }
+                  }
                 },
                 "then": true,
                 "else": {
@@ -1016,7 +1091,11 @@
                 "$comment": "Apply barrierParams' shape ONLY when params is actually an object. PlanNormalizer.isRecord treats a non-object params (e.g. null) as absent ({}), so an inline-form step with params: null must still validate via its inline fields below, not fail the unconditional object-shaped $ref (#6215 review).",
                 "if": {
                   "required": ["params"],
-                  "properties": { "params": { "type": "object" } }
+                  "properties": {
+                    "params": {
+                      "type": "object"
+                    }
+                  }
                 },
                 "then": {
                   "properties": {
@@ -1030,11 +1109,16 @@
                 "$comment": "__lockNamespace is a reserved internal field injected by PlanExecutor at runtime to scope a plan's lock state -- an authored plan must never set it, inline or under params. Rejected explicitly here because barrierParams' additionalProperties stays true, so simply omitting it from the declared properties would not block it. The params branch requires params to be an object before trusting its 'required' check -- required vacuously passes against a non-object value like params: null, which would otherwise misfire this rejection on every step with params: null (#6215 review).",
                 "not": {
                   "anyOf": [
-                    { "required": ["__lockNamespace"] },
+                    {
+                      "required": ["__lockNamespace"]
+                    },
                     {
                       "required": ["params"],
                       "properties": {
-                        "params": { "type": "object", "required": ["__lockNamespace"] }
+                        "params": {
+                          "type": "object",
+                          "required": ["__lockNamespace"]
+                        }
                       }
                     }
                   ]
@@ -1042,19 +1126,33 @@
               },
               {
                 "anyOf": [
-                  { "required": ["lock"] },
+                  {
+                    "required": ["lock"]
+                  },
                   {
                     "required": ["params"],
-                    "properties": { "params": { "type": "object", "required": ["lock"] } }
+                    "properties": {
+                      "params": {
+                        "type": "object",
+                        "required": ["lock"]
+                      }
+                    }
                   }
                 ]
               },
               {
                 "anyOf": [
-                  { "required": ["deviceCount"] },
+                  {
+                    "required": ["deviceCount"]
+                  },
                   {
                     "required": ["params"],
-                    "properties": { "params": { "type": "object", "required": ["deviceCount"] } }
+                    "properties": {
+                      "params": {
+                        "type": "object",
+                        "required": ["deviceCount"]
+                      }
+                    }
                   }
                 ]
               },
@@ -1062,7 +1160,12 @@
                 "$comment": "params.lock (when present) overrides inline lock at normalization; validate the inline form only when params.lock is absent, otherwise a valid params override would false-reject the discarded inline value.",
                 "if": {
                   "required": ["params"],
-                  "properties": { "params": { "type": "object", "required": ["lock"] } }
+                  "properties": {
+                    "params": {
+                      "type": "object",
+                      "required": ["lock"]
+                    }
+                  }
                 },
                 "then": true,
                 "else": {
@@ -1079,7 +1182,12 @@
                 "$comment": "params.deviceCount override, same rule as lock above.",
                 "if": {
                   "required": ["params"],
-                  "properties": { "params": { "type": "object", "required": ["deviceCount"] } }
+                  "properties": {
+                    "params": {
+                      "type": "object",
+                      "required": ["deviceCount"]
+                    }
+                  }
                 },
                 "then": true,
                 "else": {
@@ -1096,7 +1204,12 @@
                 "$comment": "params.timeout override, same rule as lock above.",
                 "if": {
                   "required": ["params"],
-                  "properties": { "params": { "type": "object", "required": ["timeout"] } }
+                  "properties": {
+                    "params": {
+                      "type": "object",
+                      "required": ["timeout"]
+                    }
+                  }
                 },
                 "then": true,
                 "else": {
@@ -1115,7 +1228,12 @@
                 "$comment": "params.platform override, same rule as lock above -- addDeviceTargetingToSchema restricts this to android/ios at runtime, so the inline form must be validated only when params does not override it.",
                 "if": {
                   "required": ["params"],
-                  "properties": { "params": { "type": "object", "required": ["platform"] } }
+                  "properties": {
+                    "params": {
+                      "type": "object",
+                      "required": ["platform"]
+                    }
+                  }
                 },
                 "then": true,
                 "else": {
@@ -1132,7 +1250,12 @@
                 "$comment": "params.sessionUuid override, same rule as lock above.",
                 "if": {
                   "required": ["params"],
-                  "properties": { "params": { "type": "object", "required": ["sessionUuid"] } }
+                  "properties": {
+                    "params": {
+                      "type": "object",
+                      "required": ["sessionUuid"]
+                    }
+                  }
                 },
                 "then": true,
                 "else": {
@@ -1148,7 +1271,12 @@
                 "$comment": "params.keepScreenAwake override, same rule as lock above.",
                 "if": {
                   "required": ["params"],
-                  "properties": { "params": { "type": "object", "required": ["keepScreenAwake"] } }
+                  "properties": {
+                    "params": {
+                      "type": "object",
+                      "required": ["keepScreenAwake"]
+                    }
+                  }
                 },
                 "then": true,
                 "else": {
@@ -1164,7 +1292,12 @@
                 "$comment": "params.deviceId override, same rule as lock above.",
                 "if": {
                   "required": ["params"],
-                  "properties": { "params": { "type": "object", "required": ["deviceId"] } }
+                  "properties": {
+                    "params": {
+                      "type": "object",
+                      "required": ["deviceId"]
+                    }
+                  }
                 },
                 "then": true,
                 "else": {
@@ -1182,29 +1315,7 @@
       ]
     },
     "dragAndDropSelector": {
-      "type": "object",
-      "properties": {
-        "text": {
-          "type": "string",
-          "description": "Element text",
-          "minLength": 1
-        },
-        "elementId": {
-          "type": "string",
-          "description": "Element ID",
-          "minLength": 1
-        }
-      },
-      "additionalProperties": false,
-      "description": "Selector for dragAndDrop elements",
-      "oneOf": [
-        {
-          "required": ["text"]
-        },
-        {
-          "required": ["elementId"]
-        }
-      ]
+      "$ref": "#/$defs/ElementQuery"
     },
     "dragAndDropParams": {
       "type": "object",
@@ -1251,6 +1362,10 @@
         "device": {
           "type": "string",
           "description": "Device label for multi-device plans (e.g., \"A\", \"B\")"
+        },
+        "selectionStrategy": {
+          "type": "string",
+          "enum": ["first", "random", "unique"]
         }
       },
       "additionalProperties": true,
@@ -1365,29 +1480,7 @@
       ]
     },
     "highlightContainer": {
-      "type": "object",
-      "properties": {
-        "elementId": {
-          "type": "string",
-          "description": "Container element ID",
-          "minLength": 1
-        },
-        "text": {
-          "type": "string",
-          "description": "Container text",
-          "minLength": 1
-        }
-      },
-      "additionalProperties": false,
-      "description": "Container selector to scope highlight search",
-      "oneOf": [
-        {
-          "required": ["elementId"]
-        },
-        {
-          "required": ["text"]
-        }
-      ]
+      "$ref": "#/$defs/ElementQuery"
     },
     "highlightParams": {
       "type": "object",
@@ -1416,7 +1509,7 @@
         },
         "selectionStrategy": {
           "type": "string",
-          "enum": ["first", "random"],
+          "enum": ["first", "random", "unique"],
           "description": "Element selection strategy when multiple matches are found (default: first)"
         },
         "platform": {
@@ -1579,41 +1672,85 @@
         },
         {
           "required": ["cancel"],
-          "properties": { "cancel": { "const": true } }
+          "properties": {
+            "cancel": {
+              "const": true
+            }
+          }
         },
         {
           "required": ["reset"],
-          "properties": { "reset": { "const": true } }
+          "properties": {
+            "reset": {
+              "const": true
+            }
+          }
         },
         {
           "required": ["delayMs"],
-          "properties": { "delayMs": { "not": { "const": 0 } } }
+          "properties": {
+            "delayMs": {
+              "not": {
+                "const": 0
+              }
+            }
+          }
         },
         {
           "required": ["downloadKbps"],
-          "properties": { "downloadKbps": { "not": { "const": 0 } } }
+          "properties": {
+            "downloadKbps": {
+              "not": {
+                "const": 0
+              }
+            }
+          }
         },
         {
           "required": ["uploadKbps"],
-          "properties": { "uploadKbps": { "not": { "const": 0 } } }
+          "properties": {
+            "uploadKbps": {
+              "not": {
+                "const": 0
+              }
+            }
+          }
         },
         {
           "required": ["packetLossPercent"],
-          "properties": { "packetLossPercent": { "not": { "const": 0 } } }
+          "properties": {
+            "packetLossPercent": {
+              "not": {
+                "const": 0
+              }
+            }
+          }
         }
       ],
       "if": {
         "required": ["profile"],
-        "properties": { "profile": { "const": "offline" } },
+        "properties": {
+          "profile": {
+            "const": "offline"
+          }
+        },
         "not": {
           "anyOf": [
             {
               "required": ["cancel"],
-              "properties": { "cancel": { "const": true } }
+              "properties": {
+                "cancel": {
+                  "const": true
+                }
+              }
             },
             {
               "required": ["reset"],
-              "properties": { "reset": { "const": true } }
+              "properties": {
+                "reset": {
+                  "const": true
+                }
+              }
             }
           ]
         }
@@ -1621,9 +1758,15 @@
       "then": {
         "not": {
           "anyOf": [
-            { "required": ["delayMs"] },
-            { "required": ["downloadKbps"] },
-            { "required": ["uploadKbps"] }
+            {
+              "required": ["delayMs"]
+            },
+            {
+              "required": ["downloadKbps"]
+            },
+            {
+              "required": ["uploadKbps"]
+            }
           ]
         }
       },
@@ -1958,6 +2101,89 @@
         }
       },
       "description": "Parameters for barrier tool: a pure synchronization point with no serialized section. additionalProperties stays true for any genuinely-unknown extra field, but the device-targeting fields injected by addDeviceTargetingToSchema (device, sessionUuid, platform, deviceId, keepScreenAwake) are explicitly typed so a malformed value (e.g. platform: windows) is rejected here instead of only failing at execution (#6215 review). lock/deviceCount are intentionally NOT required here for the same reason as criticalSectionParams -- required-ness is enforced against the inline+params union in the planStep if/then block. __lockNamespace is deliberately NOT declared here (and is explicitly rejected in the criticalSection/barrier if/then blocks below): it is injected internally by PlanExecutor at runtime to scope a plan's lock state, and an authored plan must never set it -- two participants authoring different truthy __lockNamespace values for the same lock would pass every per-lock feasibility check yet wait in separate namespaced barriers at runtime until timeout."
+    },
+    "ElementQuery": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "elementId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "container": {
+              "description": "Strict ancestor scope; wrappers may intervene",
+              "$ref": "#/$defs/ElementQuery"
+            },
+            "index": {
+              "description": "Zero-based scoped occurrence; overrides uniqueness at this level",
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "selectionStrategy": {
+              "description": "Inherited from the query; unique is recommended",
+              "type": "string",
+              "enum": ["first", "random", "unique"]
+            }
+          },
+          "required": ["elementId"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string",
+              "minLength": 1
+            },
+            "container": {
+              "description": "Strict ancestor scope; wrappers may intervene",
+              "$ref": "#/$defs/ElementQuery"
+            },
+            "index": {
+              "description": "Zero-based scoped occurrence; overrides uniqueness at this level",
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "selectionStrategy": {
+              "description": "Inherited from the query; unique is recommended",
+              "type": "string",
+              "enum": ["first", "random", "unique"]
+            }
+          },
+          "required": ["text"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "testTag": {
+              "description": "Android accessibility test tag",
+              "type": "string",
+              "minLength": 1
+            },
+            "container": {
+              "description": "Strict ancestor scope; wrappers may intervene",
+              "$ref": "#/$defs/ElementQuery"
+            },
+            "index": {
+              "description": "Zero-based scoped occurrence; overrides uniqueness at this level",
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "selectionStrategy": {
+              "description": "Inherited from the query; unique is recommended",
+              "type": "string",
+              "enum": ["first", "random", "unique"]
+            }
+          },
+          "required": ["testTag"],
+          "additionalProperties": false
+        }
+      ]
     }
   }
 }

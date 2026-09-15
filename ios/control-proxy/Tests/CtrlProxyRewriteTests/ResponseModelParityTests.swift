@@ -10,6 +10,17 @@ import XCTest
 /// for the Codable round-trips, and direct shape/sanity assertions for the connected handshake
 /// and the error builder.
 final class ResponseModelParityTests: XCTestCase {
+    func testScopedPinchDecodesExactCenterAndFrameIdentity() throws {
+        let data =
+            Data(
+                #"{"centerX":10,"centerY":20,"distanceStart":30,"distanceEnd":60,"requireExactCenter":true,"frameContext":"capture-42"}"#
+                    .utf8
+            )
+        let request = try JSONDecoder().decode(RequestPinch.self, from: data)
+        XCTAssertEqual(request.requireExactCenter, true)
+        XCTAssertEqual(request.frameContext, "capture-42")
+    }
+
     // MARK: - connected handshake (supportedCommands is the runner-version signal)
 
     func testConnectedEventMatches() {
@@ -25,7 +36,7 @@ final class ResponseModelParityTests: XCTestCase {
         // The handshake also advertises optional runner features (RunnerFeature.allCases,
         // sorted); the daemon reads it to gate feature use, so `display_cutout_info` is a
         // load-bearing wire identifier (#5787).
-        XCTAssertEqual(object["supportedFeatures"] as? [String], ["display_cutout_info"])
+        XCTAssertEqual(object["supportedFeatures"] as? [String], ["display_cutout_info", "exact_center_pinch"])
     }
 
     func testSdkCapabilitiesResponseDistinguishesRunnerSupportFromForegroundSdkAvailability() {

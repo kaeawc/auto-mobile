@@ -5,6 +5,8 @@ import { ResourceRegistry } from "./resourceRegistry";
 import { RESOURCE_URIS } from "./observationResources";
 import { OBSERVE_APP_RESOURCE_URI } from "./observeAppResource";
 import { ActionableError } from "../models/ActionableError";
+import type { ElementQuery, ElementQueryResult } from "../models/ElementQuery";
+import { isClickableElementProperties } from "../utils/elementProperties";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import type { ObserveScreen } from "../features/observe/interfaces/ObserveScreen";
 import { RealSettleObserve } from "../features/observe/SettleObserve";
@@ -116,6 +118,7 @@ const absentPredicatePresenceSchema = z.union([
 const absentPredicateSchema = absentPredicateBaseSchema.and(absentPredicatePresenceSchema);
 
 const waitForCommonShape = {
+  query: z.never().optional(),
   activeWindow: activeWindowWaitForSchema.optional().describe("Foreground app/window predicates"),
   absent: absentPredicateSchema
     .optional()
@@ -232,6 +235,9 @@ const WAIT_FOR_DSL_KINDS = [...WAIT_FOR_CONDITION_KINDS, "stable"] as const;
 
 const waitForConditionDslSchema = z
   .object({
+    query: elementContainerSchema
+      .optional()
+      .describe("Scoped query; use with appear, disappear or clickable. Default: unique."),
     for: z.enum(WAIT_FOR_DSL_KINDS).describe("Declarative condition to wait for"),
     elementId: z.string().optional().describe("Element resource ID / accessibility identifier"),
     text: z
@@ -257,6 +263,21 @@ const waitForConditionDslSchema = z
   .strict()
   .superRefine((value, ctx) => {
     validateWaitForTimeoutAliases(value, ctx);
+    if (value.query) {
+      if (
+        !["appear", "disappear", "clickable"].includes(value.for) ||
+        value.elementId !== undefined ||
+        value.text !== undefined ||
+        value.container !== undefined
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message:
+            "query requires for: appear, disappear or clickable and cannot be mixed with legacy selectors",
+        });
+      }
+      return;
+    }
     if (value.for === "stable") {
       if (value.container !== undefined) {
         ctx.addIssue({
@@ -414,10 +435,13 @@ const COMPACT_WAITFOR_ADVERTISED_SCHEMA: Record<string, unknown> = {
 const observeScopeFocusSchema = z
   .union([
     z.boolean(),
-    z.object({
-      resourceId: z.string().optional().describe("Anchor by exact resource-id"),
-      text: z.string().optional().describe("Anchor by substring text match"),
-    }),
+    z.object({ query: elementContainerSchema }).strict(),
+    z
+      .object({
+        resourceId: z.string().optional().describe("Anchor by exact resource-id"),
+        text: z.string().optional().describe("Anchor by substring text match"),
+      })
+      .strict(),
   ])
   .describe("Scope to a subtree: true = foreground app; {resourceId|text} = anchor.");
 
@@ -533,7 +557,31 @@ export const overrideWaitForJsonSchema: JsonSchemaOverride = (jsonSchema) => {
   // unaffected.
   const props = jsonSchema.properties as Record<string, unknown> | undefined;
   if (props && props.waitFor) {
-    props.waitFor = COMPACT_WAITFOR_ADVERTISED_SCHEMA;
+    const compact = structuredClone(COMPACT_WAITFOR_ADVERTISED_SCHEMA);
+    const fields = compact.properties as Record<string, unknown>;
+    fields.container = { $ref: "#/$defs/ElementQuery" };
+    fields.query = { $ref: "#/$defs/ElementQuery" };
+    const scopedQueryBranch = {
+      required: ["for", "query"],
+      properties: { for: { enum: ["appear", "disappear", "clickable"] } },
+      not: {
+        anyOf: [
+          "elementId",
+          "text",
+          "container",
+          "textAny",
+          "absent",
+          "activeWindow",
+          "className",
+          "contentDescription",
+          "matchType",
+          "textMatch",
+        ].map((field) => ({ required: [field] })),
+      },
+    };
+    (compact.anyOf as unknown[]).unshift(scopedQueryBranch);
+    compact.allOf = [{ if: { required: ["query"] }, then: scopedQueryBranch }];
+    props.waitFor = compact;
   }
 };
 
@@ -610,6 +658,7 @@ type WaitForConditionKind = (typeof WAIT_FOR_CONDITION_KINDS)[number];
 
 /** Metadata produced by an `observe.waitFor` poll. */
 export interface WaitForObservationOutcome {
+  queryResult?: Omit<ElementQueryResult, "node">;
   observation: ObserveResult;
   awaitedElement?: Element;
   awaitDuration: number;
@@ -701,18 +750,60 @@ const runWaitForConditionDsl = async (
   }
 
   const finder = new DefaultElementFinder();
-  const predicate = buildConditionPredicate(
-    finder,
-    waitFor.for,
-    { elementId: waitFor.elementId, text: waitFor.text, container: waitFor.container },
-    { stableReads: waitFor.stableReads },
-  );
+  let queryResult: ElementQueryResult | undefined;
+  const predicate: ConditionPredicate = waitFor.query
+    ? (observation) => {
+        if (!observation.viewHierarchy) {
+          return { matched: false };
+        }
+        const query = { selectionStrategy: "unique" as const, ...waitFor.query! };
+        // Absence proves something about a specific ancestor, so every unindexed
+        // level must be unique even if a caller requested a legacy first policy.
+        if (waitFor.for === "disappear") {
+          let level: ElementQuery | undefined = structuredClone(query);
+          const strictQuery = level;
+          while (level) {
+            level.selectionStrategy = "unique";
+            level = level.container;
+          }
+          queryResult = finder.resolveQuery(observation.viewHierarchy, strictQuery);
+        } else {
+          queryResult = finder.resolveQuery(observation.viewHierarchy, query, {
+            actionable: waitFor.for === "clickable",
+          });
+        }
+        const element = queryResult.element;
+        const matched =
+          waitFor.for === "disappear"
+            ? queryResult.diagnostic?.code === "target_not_found"
+            : queryResult.node !== null &&
+              (waitFor.for !== "clickable" ||
+                (element !== null && isClickableElementProperties(element)));
+        return {
+          matched,
+          matchedElement: matched ? (element ?? undefined) : undefined,
+          candidates: element ? [element] : [],
+        };
+      }
+    : buildConditionPredicate(
+        finder,
+        waitFor.for,
+        { elementId: waitFor.elementId, text: waitFor.text, container: waitFor.container },
+        { stableReads: waitFor.stableReads },
+      );
   const result = await new RealWaitForCondition(observeScreen, timer).execute(predicate, {
     timeoutMs: waitFor.timeout ?? waitFor.timeoutMs,
     pollMs,
     signal,
   });
   return {
+    queryResult: queryResult
+      ? {
+          element: queryResult.element,
+          levels: queryResult.levels,
+          diagnostic: queryResult.diagnostic,
+        }
+      : undefined,
     observation: result.observation,
     awaitedElement: result.matchedElement,
     awaitDuration: result.waitMs,
@@ -726,15 +817,11 @@ const runWaitForConditionDsl = async (
   };
 };
 
-const waitForContainerForFinder = (
-  waitFor: ObserveWaitForOptions,
-): { elementId?: string; text?: string } | null => {
+const waitForContainerForFinder = (waitFor: ObserveWaitForOptions): ElementQuery | null => {
   if (!waitFor.container) {
     return null;
   }
-  return "elementId" in waitFor.container
-    ? { elementId: waitFor.container.elementId }
-    : { text: waitFor.container.text };
+  return waitFor.container;
 };
 
 const isElementCenterOffScreen = (
@@ -1295,11 +1382,13 @@ export function registerObserveTools() {
           waitMs: waitOutcome.waitMs,
           matchedElement: waitOutcome.matchedElement,
           candidates: waitOutcome.candidates,
+          queryResult: waitOutcome.queryResult,
         };
-        return createStructuredToolResponse({
+        const response = createStructuredToolResponse({
           ...result,
           ...waitMetadata,
         });
+        return waitFor?.query && waitOutcome.timedOut ? { ...response, isError: true } : response;
       }
 
       return createStructuredToolResponse(result);

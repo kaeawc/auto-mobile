@@ -134,6 +134,7 @@ export class SharedGestureDelegate {
     duration: number = 300,
     timeoutMs: number = 5000,
     perf?: PerformanceTracker,
+    targeting?: { requireExactCenter?: boolean; frameContext?: string },
   ): Promise<GestureTimingResult> {
     return sendCommand<GestureTimingResult>(this.context, {
       idPrefix: "pinch",
@@ -146,6 +147,7 @@ export class SharedGestureDelegate {
         distanceEnd: this.coord(distanceEnd),
         rotationDegrees,
         duration,
+        ...targeting,
       },
       timeoutMs,
       perf,

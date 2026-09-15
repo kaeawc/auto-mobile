@@ -9,6 +9,7 @@ import {
   DAEMON_HEARTBEAT_METHOD,
   DAEMON_LIST_DEVICE_SESSIONS_METHOD,
 } from "./constants";
+import { executionTracker } from "../server/executionTracker";
 
 /** Socket endpoint clients may query before sending optional newer parameters. */
 export const DAEMON_CAPABILITIES_METHOD = "daemon/capabilities";
@@ -27,8 +28,15 @@ export interface DaemonStateAccess {
   isInitialized(): boolean;
   getSessionManager(): {
     getSession(sessionId: string): Session | null;
+    getAllSessions?(): Session[];
     getTerminalReleaseSnapshot?(sessionId: string): SessionReleaseSnapshot | undefined;
     recordHeartbeat?(sessionId: string): void;
+    /** Claim the token permitted to refresh this session's liveness. */
+    claimLivenessOwnership?(sessionId: string, ownerToken: string): boolean;
+    /** Verify that a keeper still owns the token permitted to refresh liveness. */
+    hasLivenessOwnership?(sessionId: string, ownerToken: string): boolean;
+    /** Recover daemon-local ownership only when no token is currently recorded. */
+    claimUnownedLivenessOwnership?(sessionId: string, ownerToken: string): boolean;
     /** Opt a one-shot `--cli`-owned session out of the heartbeat contract (#6870). */
     adoptCliLivenessPolicy?(sessionId: string, idleTimeoutMs?: number): boolean;
     /** Put a CLI-adopted session back on the strict heartbeat contract (#6870). */
@@ -39,6 +47,10 @@ export interface DaemonStateAccess {
   };
   getDevicePool(): {
     restoreAutolockSessionsForMcpSession?(
+      sessionIds: readonly string[],
+      mcpSessionId: string,
+    ): Promise<void>;
+    restoreOwnedDeviceSessionsForMcpSession?(
       sessionIds: readonly string[],
       mcpSessionId: string,
     ): Promise<void>;
@@ -113,7 +125,13 @@ export async function handleDaemonRequest(
   switch (request.method) {
     case DAEMON_HEARTBEAT_METHOD: {
       const heartbeatParams = request.params as
-        | { sessionId?: string; livenessPolicy?: string; idleTimeoutMs?: number }
+        | {
+            sessionId?: string;
+            livenessPolicy?: string;
+            idleTimeoutMs?: number;
+            livenessOwnerToken?: string;
+            claimLivenessOwnership?: boolean;
+          }
         | undefined;
       const sessionId = heartbeatParams?.sessionId;
       if (!sessionId) {
@@ -128,6 +146,29 @@ export async function handleDaemonRequest(
           success: false,
           error: `Session not found: ${sessionId}`,
         };
+      }
+      const livenessOwnerToken =
+        typeof heartbeatParams?.livenessOwnerToken === "string" &&
+        heartbeatParams.livenessOwnerToken.length > 0
+          ? heartbeatParams.livenessOwnerToken
+          : undefined;
+      const claimsLivenessOwnership = heartbeatParams?.claimLivenessOwnership === true;
+      if (livenessOwnerToken) {
+        const ownsLiveness = claimsLivenessOwnership
+          ? (manager.claimLivenessOwnership?.(sessionId, livenessOwnerToken) ?? false)
+          : (manager.hasLivenessOwnership?.(sessionId, livenessOwnerToken) ?? false) ||
+            (manager.claimUnownedLivenessOwnership?.(sessionId, livenessOwnerToken) ?? false);
+        if (!ownsLiveness) {
+          // A stale reconnect must be a complete liveness no-op: it cannot
+          // restore a policy or extend lastUsedAt/lastHeartbeat/expiresAt.
+          return { success: true, result: { sessionId } };
+        }
+        if (!claimsLivenessOwnership) {
+          // A verified keeper proves only that its current owner is still
+          // alive. Policy changes are explicit claims, never recurring ticks.
+          manager.recordHeartbeat?.(sessionId);
+          return { success: true, result: { sessionId } };
+        }
       }
       // A one-shot `--cli` client declares itself here (issue #6870) so the
       // daemon stops holding its session to the 10 s heartbeat contract no
@@ -231,6 +272,16 @@ export async function handleDaemonRequest(
           lastUsedAt: session.lastUsedAt,
           expiresAt: session.expiresAt,
           cacheSize: JSON.stringify(session.cacheData).length,
+        },
+      };
+    }
+    case "daemon/activeSessions": {
+      const sessions = state.getSessionManager().getAllSessions?.() ?? [];
+      return {
+        success: true,
+        result: {
+          activeSessions: sessions.length,
+          activeExecutions: executionTracker.getActiveExecutionCount(),
         },
       };
     }

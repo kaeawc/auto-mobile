@@ -90,6 +90,23 @@ describe("ExecutionTracker", function () {
     expect(tracker.startExecution("provisionDevice", "after-clear").id).toBe("after-clear");
   });
 
+  test("rejects active sessions before atomically fencing explicit maintenance work", function () {
+    const tracker = new ExecutionTracker(
+      new FakeTimer(),
+      new FakeIdGenerator(["blocked", "after-maintenance"]),
+    );
+
+    expect(tracker.prepareForDaemonMaintenance(1)).toBe("active_sessions");
+    expect(tracker.prepareForDaemonMaintenance(0)).toBe("accepted");
+    expect(tracker.prepareForDaemonMaintenance(0)).toBe("maintenance_pending");
+    expect(() => tracker.startExecution("startDevice", "blocked")).toThrow(
+      "Daemon restart is pending",
+    );
+
+    tracker.clearDaemonMaintenancePreparation();
+    expect(tracker.startExecution("startDevice", "after-maintenance").id).toBe("blocked");
+  });
+
   test("cancels and drains active provisioning before daemon shutdown continues", async function () {
     const tracker = new ExecutionTracker(
       new FakeTimer(),

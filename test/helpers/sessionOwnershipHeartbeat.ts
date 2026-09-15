@@ -15,6 +15,26 @@ export interface SessionOwnershipHeartbeatOptions {
   stopTimeoutMs?: number;
 }
 
+/**
+ * Wraps a keeper renewal so its ownership claim is attempted once. The daemon
+ * can accept a later token-only renewal when the session is still unowned, but
+ * a response lost after a successful claim must not let a retry take ownership
+ * back from a newer owner.
+ */
+export function createSingleClaimSessionOwnershipRenewal(
+  renew: (claimLivenessOwnership: boolean, signal: AbortSignal) => Promise<void>,
+): (signal: AbortSignal) => Promise<void> {
+  let claimLivenessOwnership = true;
+
+  return async (signal) => {
+    const shouldClaimLivenessOwnership = claimLivenessOwnership;
+    // Mark the attempt before awaiting: a daemon may apply a request whose
+    // client-side response is subsequently lost.
+    claimLivenessOwnership = false;
+    await renew(shouldClaimLivenessOwnership, signal);
+  };
+}
+
 function asError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
 }

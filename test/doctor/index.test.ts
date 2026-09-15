@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { applyClientBuildIdentity, runDoctor } from "../../src/doctor";
 import { formatConsoleOutput, formatJsonOutput } from "../../src/doctor/formatter";
 import type { DoctorReport, CheckResult, DoctorSummary } from "../../src/doctor/types";
+import { FakeTimer } from "../fakes/FakeTimer";
 
 async function withProcessPlatform<T>(platform: NodeJS.Platform, fn: () => Promise<T>): Promise<T> {
   const original = process.platform;
@@ -438,6 +439,59 @@ describe("runDoctor", () => {
     });
   });
 
+  test("runs Android and autoMobile but not iOS for an Android-only run", async () => {
+    await withProcessPlatform("darwin", async () => {
+      const report = await runDoctor({ android: true }, fakeDeps());
+
+      expect(report.android?.checks.map((c) => c.name)).toEqual(["Android SDK"]);
+      expect(report.ios).toBeUndefined();
+    });
+  });
+
+  test("uses only the filtered read-only runners for post-repair verification", async () => {
+    const calls: string[] = [];
+    const report = await runDoctor(
+      { diagnosticProfile: "post-repair-read-only", ios: true },
+      {
+        runSystemChecks: () => {
+          calls.push("system");
+          return [];
+        },
+        runAndroidChecks: async () => {
+          calls.push("android");
+          return [];
+        },
+        runIosChecks: async () => {
+          calls.push("ios");
+          return [];
+        },
+        runAutoMobileChecks: async () => {
+          calls.push("automobile");
+          return [];
+        },
+        runPostRepairAndroidChecks: async () => {
+          calls.push("post-repair-android");
+          return [];
+        },
+        runPostRepairIosChecks: async () => {
+          calls.push("post-repair-ios");
+          return [makeCheck({ name: "simctl", status: "pass" })];
+        },
+        runPostRepairAutoMobileChecks: async () => {
+          calls.push("post-repair-automobile");
+          return [makeCheck({ name: "Daemon Connectivity", status: "pass" })];
+        },
+      },
+    );
+
+    expect(calls).toEqual(["post-repair-ios", "post-repair-automobile"]);
+    expect(report.diagnosticProfile).toBe("post-repair-read-only");
+    expect(report.system.checks).toEqual([]);
+    expect(report.android).toBeUndefined();
+    expect(report.ios?.checks.map((check) => check.name)).toEqual(["simctl"]);
+    expect(report.autoMobile.checks.map((check) => check.name)).toEqual(["Daemon Connectivity"]);
+  });
+
   test("summary.total counts every check across all rendered sections", async () => {
     await withProcessPlatform("linux", async () => {
       const report = await runDoctor({ ios: true }, fakeDeps());
@@ -468,6 +522,82 @@ describe("runDoctor", () => {
         }
       }
     });
+  });
+
+  test("shares one absolute deadline and AbortSignal across Android, iOS, and AutoMobile runners", async () => {
+    const timer = new FakeTimer();
+    const calls: Array<{ deadlineMs?: number; signal?: AbortSignal }> = [];
+    const doctor = runDoctor(
+      { android: true, ios: true, timeoutMs: 50 },
+      {
+        timer,
+        runSystemChecks: () => [],
+        runAndroidChecks: async (options) => {
+          calls.push(options);
+          await timer.sleep(20);
+          options.signal?.throwIfAborted();
+          return [makeCheck({ name: "Android", status: "pass" })];
+        },
+        runIosChecks: async (options) => {
+          calls.push(options);
+          options.signal?.throwIfAborted();
+          return [makeCheck({ name: "iOS", status: "pass" })];
+        },
+        runAutoMobileChecks: async (options) => {
+          calls.push(options);
+          options.signal?.throwIfAborted();
+          return [makeCheck({ name: "AutoMobile", status: "pass" })];
+        },
+      },
+    );
+
+    await Promise.resolve();
+    await timer.advanceTimeAsync(20);
+    await doctor;
+
+    expect(calls).toHaveLength(3);
+    expect(calls.map((call) => call.deadlineMs)).toEqual([50, 50, 50]);
+    expect(calls[0]?.signal).toBe(calls[1]?.signal);
+    expect(calls[1]?.signal).toBe(calls[2]?.signal);
+  });
+
+  test("cancels delayed diagnostics without publishing a late success or starting later checks", async () => {
+    const timer = new FakeTimer();
+    let autoMobileStarted = false;
+    let lateSuccess = false;
+    let settled = false;
+    const doctor = runDoctor(
+      { android: true, timeoutMs: 50 },
+      {
+        timer,
+        runSystemChecks: () => [],
+        runAndroidChecks: async (options) => {
+          await new Promise<void>((resolve) => {
+            options.signal?.addEventListener("abort", resolve, { once: true });
+          });
+          try {
+            options.signal?.throwIfAborted();
+            lateSuccess = true;
+            return [makeCheck({ name: "Android", status: "pass" })];
+          } finally {
+            settled = true;
+          }
+        },
+        runIosChecks: async () => [],
+        runAutoMobileChecks: async () => {
+          autoMobileStarted = true;
+          return [];
+        },
+      },
+    );
+
+    await Promise.resolve();
+    timer.advanceTime(50);
+
+    await expect(doctor).rejects.toThrow("Doctor diagnostic deadline elapsed");
+    expect(settled).toBe(true);
+    expect(lateSuccess).toBe(false);
+    expect(autoMobileStarted).toBe(false);
   });
 });
 

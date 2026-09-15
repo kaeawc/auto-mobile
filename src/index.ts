@@ -35,6 +35,7 @@ import { ScreenCaptureHelperProvider } from "./features/screen-stream/ScreenCapt
 import { WEBRTC_ENV } from "./features/webrtc/webrtcStreamingConfig";
 import { EVENT_ALL_MARKERS_FLAG } from "./utils/eventAllMarkers";
 import { parseArgs } from "./cli/parseArgs";
+import { terminateCliProcess } from "./cli/termination";
 import {
   installProcessLifecycleHandlers,
   installStdinShutdownHandlers,
@@ -573,11 +574,21 @@ async function main() {
       // Run in CLI mode
       logger.info("Running in CLI mode");
       // logger.enableStdoutLogging();
-      await runCliCommand(cliArgs, daemonStartupOptions);
+      const termination = await runCliCommand(cliArgs, daemonStartupOptions);
       // CRITICAL: Exit explicitly after CLI command completes to prevent process from hanging
       // The event loop may have pending operations (ADB connections, file descriptors) that
       // prevent Node.js from exiting naturally. Force exit with code 0 to ensure clean termination.
       await logger.closeAfterFlush();
+      if (termination) {
+        // A failed bounded repair has already reported its complete structured
+        // result and waited for destructive lifecycle cleanup. Its abandoned
+        // read-only diagnostic work may still own sockets, so this executable
+        // boundary must not wait for the event loop to become empty.
+        terminateCliProcess(termination, {
+          terminate: (exitCode) => process.exit(exitCode),
+        });
+        return;
+      }
       process.exit(process.exitCode ?? 0);
     } else {
       // In proxy mode (default), the MCP server proxies requests to the daemon

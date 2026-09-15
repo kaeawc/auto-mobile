@@ -21,6 +21,10 @@ interface Violation {
   text: string;
 }
 
+export function repositoryPath(file: string): string {
+  return file.replaceAll("\\", "/");
+}
+
 function sourceFiles(directory: string): string[] {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     const path = join(directory, entry.name);
@@ -145,18 +149,23 @@ function violationsIn(file: string): Violation[] {
   return violations;
 }
 
-const violations = sourceFiles(SOURCE_ROOT)
-  .filter((file) => file !== OWNER)
-  .flatMap(violationsIn);
-
-if (violations.length > 0) {
-  console.error("error: daemon execution must use DaemonLauncher:");
-  for (const violation of violations) {
-    console.error(
-      `${relative(SOURCE_ROOT, violation.file)}:${violation.line}:${violation.column}: ${violation.text}`,
-    );
-  }
-  process.exit(1);
+export function findViolations(): Violation[] {
+  return sourceFiles(SOURCE_ROOT)
+    .filter((file) => repositoryPath(file) !== OWNER)
+    .flatMap(violationsIn);
 }
 
-console.log("daemon-launcher-boundary: no direct production daemon invocations.");
+if (import.meta.main) {
+  const violations = findViolations();
+  if (violations.length > 0) {
+    console.error("error: daemon execution must use DaemonLauncher:");
+    for (const violation of violations) {
+      console.error(
+        `${repositoryPath(relative(SOURCE_ROOT, violation.file))}:${violation.line}:${violation.column}: ${violation.text}`,
+      );
+    }
+    process.exit(1);
+  }
+
+  console.log("daemon-launcher-boundary: no direct production daemon invocations.");
+}

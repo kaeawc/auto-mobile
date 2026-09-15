@@ -383,6 +383,72 @@ describe("proxy binds and heartbeats a result-minted device session (issue #5689
     }
   });
 
+  test.each([
+    {
+      acquisitionTool: "getAndroid" as const,
+      initialArgs: { avdName: "am-api34-ga-arm64" },
+      platform: "android",
+      deviceId: "emulator-5554",
+    },
+    {
+      acquisitionTool: "getApple" as const,
+      initialArgs: { deviceId: "B5C42D72-7C55-4D02-990F-B8976DF530AD" },
+      platform: "ios",
+      deviceId: "B5C42D72-7C55-4D02-990F-B8976DF530AD",
+    },
+  ])(
+    "allows sessionless discovery after release before stable $acquisitionTool reacquisition",
+    async ({ acquisitionTool, initialArgs, platform, deviceId }) => {
+      const M1 = `${platform}-minted-session-1`;
+      const M2 = `${platform}-minted-session-2`;
+      const { client } = acquiringClient(sessionManager, [M1, M2], {
+        acquisitionTool,
+        platform,
+        deviceId,
+      });
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => client,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+        timer,
+      });
+
+      try {
+        await proxy.callTool(acquisitionTool, initialArgs);
+        client.emitNotification(SESSION_RELEASED_NOTIFICATION_METHOD, M1, "explicit-release");
+
+        // Inventory is safe to route without the released UUID. It lets a
+        // caller find its stable target, but does not clear the terminal fence.
+        await proxy.callTool("listDevices", { platform });
+        expect(client.callToolCalls.at(-1)).toEqual({
+          toolName: "listDevices",
+          params: { platform },
+        });
+        await expect(proxy.callTool("observe", { deviceId })).rejects.toThrow(
+          /acquire a new device session/i,
+        );
+        await expect(proxy.callTool("observe", { sessionUuid: M1, deviceId })).rejects.toThrow(
+          new RegExp(`${M1}.*(?:expired|released)`, "i"),
+        );
+
+        await expect(proxy.callTool(acquisitionTool, initialArgs)).resolves.toEqual(
+          deviceStartResult(M2),
+        );
+        await proxy.callTool("observe", {});
+
+        expect(client.callToolCalls).toEqual([
+          { toolName: acquisitionTool, params: initialArgs },
+          { toolName: "listDevices", params: { platform } },
+          { toolName: acquisitionTool, params: initialArgs },
+          { toolName: "observe", params: { sessionUuid: M2 } },
+        ]);
+        expect(sessionManager.getSession(M2)?.hasReceivedHeartbeat).toBe(true);
+      } finally {
+        await proxy.close();
+      }
+    },
+  );
+
   test("waits for the shutting-down daemon to disconnect before reacquiring (#6336)", async () => {
     const M1 = "shutdown-session";
     const M2 = "replacement-session";

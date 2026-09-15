@@ -1,11 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import { execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { promises as fsPromises } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { defaultTimer } from "../../src/utils/SystemTimer";
 import {
+  createSingleClaimSessionOwnershipRenewal,
   startSessionOwnershipHeartbeat,
   type SessionOwnershipHeartbeat,
 } from "../helpers/sessionOwnershipHeartbeat";
@@ -115,15 +117,24 @@ async function runLocalCli(args: string[], signal?: AbortSignal): Promise<ToolTe
 async function startVideoRecordingSessionHeartbeat(
   sessionUuid: string,
 ): Promise<SessionOwnershipHeartbeat> {
+  // Each renewal is a new one-shot process, so the keeper—not an individual
+  // command—owns this stable token. The first tick explicitly takes ownership;
+  // later ticks only prove it, and therefore cannot take it back after another
+  // client takes over the session.
+  const livenessOwnerToken = `ios-video-keeper-${randomUUID()}`;
   return startSessionOwnershipHeartbeat({
     intervalMs: SESSION_HEARTBEAT_INTERVAL_MS,
-    renew: async (signal) => {
-      await runLocalCliOutput(
-        ["--daemon", "heartbeat", sessionUuid],
-        signal,
-        SESSION_HEARTBEAT_COMMAND_TIMEOUT_MS,
-      );
-    },
+    renew: createSingleClaimSessionOwnershipRenewal(async (claimLivenessOwnership, signal) => {
+      const heartbeatArgs = [
+        "--daemon",
+        "heartbeat",
+        sessionUuid,
+        "--liveness-owner-token",
+        livenessOwnerToken,
+        ...(claimLivenessOwnership ? ["--claim-liveness-ownership"] : []),
+      ];
+      await runLocalCliOutput(heartbeatArgs, signal, SESSION_HEARTBEAT_COMMAND_TIMEOUT_MS);
+    }),
   });
 }
 

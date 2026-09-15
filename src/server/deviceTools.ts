@@ -18,12 +18,13 @@ import type {
 } from "../models/DeviceResourceConfiguration";
 import {
   type BootedDeviceDiscovery,
+  type BootedDeviceDiscoveryOptions,
   type DeviceImageDiscovery,
   MultiPlatformDeviceManager,
   PlatformDeviceManager,
 } from "../utils/deviceUtils";
 import { type DiscoverySource, sourcesForPlatform } from "../utils/discoverySource";
-import { createJSONToolResponse } from "../utils/toolUtils";
+import { createStructuredToolResponse } from "../utils/toolUtils";
 import { ActionableError, BootedDevice, DeviceInfo, Platform, SomePlatform } from "../models";
 import type {
   DeviceMatchCriteria,
@@ -58,7 +59,10 @@ import {
 } from "./toolSchemaHelpers";
 import { DefaultDeviceMatcher, type DeviceMatcher } from "../utils/deviceMatcher";
 import { DEVICE_POOL_MATCHING, isDevicePoolAutolockEnabled } from "../daemon/poolConfig";
-import { deleteInternalToolParams } from "../daemon/constants";
+import {
+  deleteInternalToolParams,
+  INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM,
+} from "../daemon/constants";
 import { formatToolParamError } from "./toolParamError";
 import {
   DEVICE_CREATE_ENV_VAR,
@@ -139,6 +143,7 @@ import {
   ProvisionDeviceOperationConflictError,
   ProvisionDeviceOperationInProgressError,
   ProvisionDeviceOperationSupersededError,
+  type ProvisionDeviceOperationBeginResult,
   type ProvisionDeviceOperationStore,
 } from "../db/provisionDeviceOperationRepository";
 import {
@@ -203,6 +208,13 @@ const startDeviceParametersSchema = z.object({
     .optional()
     .describe("Maximum OS version, inclusive (e.g., '15', '18.0')"),
   name: z.string().optional().describe("Device name to match (e.g., 'iPhone 16e', 'Pixel_9_Pro')"),
+  avdName: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      "Exact Android Virtual Device name. Unlike name, this never selects a substring-matching AVD.",
+    ),
   formFactor: z.enum(["phone", "tablet"]).optional().describe("Device form factor"),
   screenSize: z
     .object({
@@ -237,26 +249,48 @@ const startDeviceParametersSchema = z.object({
       `Create a device when nothing matches (CLI: --create-if-missing). Default off; ` +
         `${DEVICE_CREATE_ENV_VAR}=1 enables it when this flag is not supplied, and the flag wins.`,
     ),
+  // startDevice mints a session just like getAndroid/getApple. Keep its
+  // hidden compatibility surface capability-complete so a fresh/reconnected
+  // client can declare the tools needed by its newly minted session.
+  enableTools: enableToolsSchemaField,
 });
 
-export const startDeviceSchema = z.preprocess((input) => {
-  if (!input || typeof input !== "object" || Array.isArray(input)) {
-    return input;
-  }
+export const startDeviceSchema = z.preprocess(
+  (input) => {
+    if (!input || typeof input !== "object" || Array.isArray(input)) {
+      return input;
+    }
 
-  const parsed = input as Record<string, unknown>;
-  const legacyDevice = parsed.device;
-  if (!legacyDevice || typeof legacyDevice !== "object" || Array.isArray(legacyDevice)) {
-    return input;
-  }
+    const parsed = input as Record<string, unknown>;
+    const legacyDevice = parsed.device;
+    if (!legacyDevice || typeof legacyDevice !== "object" || Array.isArray(legacyDevice)) {
+      return input;
+    }
 
-  // Accept both the legacy { device: {...} } payload and the new top-level shape.
-  // Top-level fields win so mixed callers can override nested values intentionally.
-  return {
-    ...(legacyDevice as Record<string, unknown>),
-    ...parsed,
-  };
-}, startDeviceParametersSchema);
+    // Accept both the legacy { device: {...} } payload and the new top-level shape.
+    // Top-level fields win so mixed callers can override nested values intentionally.
+    return {
+      ...(legacyDevice as Record<string, unknown>),
+      ...parsed,
+    };
+  },
+  startDeviceParametersSchema.superRefine((value, context) => {
+    if (value.avdName !== undefined && value.platform !== "android") {
+      context.addIssue({
+        code: "custom",
+        path: ["avdName"],
+        message: "avdName is only supported for Android startDevice requests",
+      });
+    }
+    if (value.avdName !== undefined && value.name !== undefined && value.avdName !== value.name) {
+      context.addIssue({
+        code: "custom",
+        path: ["avdName"],
+        message: "avdName and name must identify the same Android device when both are supplied",
+      });
+    }
+  }),
+);
 
 const devicePreparationTimeoutSchema = z
   .object({
@@ -393,6 +427,8 @@ export const getAppleSchema = devicePreparationTimeoutSchema
   });
 
 const MODERN_PLAY_IMAGE_MIN_API_LEVEL = 30;
+const CORE_SIMULATOR_IDENTIFIER_PREFIX = "com.apple.CoreSimulator.";
+const ANDROID_SYSTEM_IMAGE_PREFIX = "system-images;";
 
 function isModernPlayStoreRuntime(runtime: string): boolean {
   const parsedRuntime = parseAndroidSystemImageRuntime(runtime);
@@ -416,6 +452,20 @@ const androidProvisionDeviceSpecSchema = z
   })
   .strict()
   .superRefine((spec, context) => {
+    if (spec.runtime.startsWith(CORE_SIMULATOR_IDENTIFIER_PREFIX)) {
+      context.addIssue({
+        code: "custom",
+        message: "Android runtime must be an Android system-image identifier",
+        path: ["runtime"],
+      });
+    }
+    if (spec.deviceType.startsWith(CORE_SIMULATOR_IDENTIFIER_PREFIX)) {
+      context.addIssue({
+        code: "custom",
+        message: "Android deviceType must be an Android avdmanager device profile identifier",
+        path: ["deviceType"],
+      });
+    }
     const memoryMb = spec.configuration?.memoryMb;
     if (
       memoryMb !== undefined &&
@@ -443,7 +493,23 @@ const iosProvisionDeviceSpecSchema = z
         "Required display cutout class for the exact device type; 'any' accepts every class",
       ),
   })
-  .strict();
+  .strict()
+  .superRefine((spec, context) => {
+    if (spec.runtime.startsWith(ANDROID_SYSTEM_IMAGE_PREFIX)) {
+      context.addIssue({
+        code: "custom",
+        message: "iOS runtime must be a CoreSimulator runtime identifier",
+        path: ["runtime"],
+      });
+    }
+    if (!spec.deviceType.startsWith(CORE_SIMULATOR_IDENTIFIER_PREFIX)) {
+      context.addIssue({
+        code: "custom",
+        message: "iOS deviceType must be a CoreSimulator device-type identifier",
+        path: ["deviceType"],
+      });
+    }
+  });
 
 export const provisionDeviceSchema = withJsonSchemaOverride(
   z
@@ -467,6 +533,11 @@ export const provisionDeviceSchema = withJsonSchemaOverride(
             .object({
               platform: z.literal("ios"),
               name: z.string().min(1).describe("Exact simulator name"),
+              deviceId: z
+                .string()
+                .min(1)
+                .optional()
+                .describe("Exact simulator UDID; prevents same-named simulator selection"),
               spec: iosProvisionDeviceSpecSchema,
             })
             .strict(),
@@ -585,6 +656,12 @@ export const teardownDeviceSchema = z
       .max(MAX_DEVICE_READY_TIMEOUT_MS)
       .optional()
       .describe("Total bounded teardown timeout in ms"),
+    cancellationPolicy: z
+      .literal("cancel-on-request-abort")
+      .optional()
+      .describe(
+        "Cancel the accepted teardown if this MCP request is aborted. Use only for deadline-critical, caller-owned cleanup that must not continue in the background after its caller stops waiting.",
+      ),
     force: z.boolean().default(false).describe(FORCE_SKIP_AVD_VERIFICATION_DESCRIPTION),
   })
   .strict();
@@ -665,7 +742,7 @@ function createKillDeviceResponse(
     return createToolErrorResponse(DEVICE_ALREADY_STOPPED_ERROR_CODE, alreadyStoppedMessage);
   }
 
-  return createJSONToolResponse({
+  return createStructuredToolResponse({
     message: `${args.device.platform} '${args.device.name}' shutdown successfully`,
     udid: args.device.deviceId,
     name: args.device.name,
@@ -680,6 +757,8 @@ export interface StartDeviceArgs {
   minOsVersion?: string;
   maxOsVersion?: string;
   name?: string;
+  /** Exact Android AVD identity for callers that must never match a sibling by substring. */
+  avdName?: string;
   formFactor?: FormFactor;
   screenSize?: { width: number; height: number };
   deviceId?: string;
@@ -688,6 +767,8 @@ export interface StartDeviceArgs {
   runnerReadinessTimeoutMs?: number;
   createIfMissing?: boolean;
   __mcpSessionId?: string;
+  /** Acceptance-only, non-mutating discovery presentation control. */
+  presentationOrder?: "forward" | "reverse";
   /** Internal exact runtime identity used by getAndroid. */
   matchExactName?: boolean;
 }
@@ -711,6 +792,7 @@ export interface ProvisionDeviceArgs {
   device: {
     platform: "android" | "ios";
     name: string;
+    deviceId?: string;
     spec: ExactDeviceSpecification;
   };
   boot: boolean;
@@ -747,6 +829,11 @@ export interface TeardownDeviceArgs {
   mode: "destroy";
   verifyAbsence: true;
   timeoutMs?: number;
+  /**
+   * Opt into cancellation of the accepted teardown on request abort. The
+   * default preserves ordinary idempotent teardown continuation semantics.
+   */
+  cancellationPolicy?: "cancel-on-request-abort";
   /**
    * Drop the AVD-name comparisons on the way to the kill -- the kill-time
    * emulator-console probe here, and the platform kill's own re-discovery check
@@ -826,10 +913,18 @@ function deviceIdentityPayload(
     return androidDeviceIdentityPayload(device, sourceImage);
   }
 
+  const ctrlProxy = IOSCtrlProxyManager.getInstance(device);
   return {
     platform: "ios",
     simulatorUdid: device.deviceId,
     simulatorName: device.name,
+    // Runner readiness has already completed before startDevice/getApple
+    // builds this response. Expose the daemon-owned runner's current endpoint
+    // and successful-restart generation so callers can prove a targeted
+    // restart reached a fresh runner without conflating simulator display
+    // names with identity.
+    iosServicePort: ctrlProxy.getServicePort(),
+    iosRunnerGeneration: ctrlProxy.getRunnerGeneration(),
   };
 }
 
@@ -919,6 +1014,19 @@ export interface ListDeviceImagesArgs {
 
 export interface ListDevicesArgs {
   platform?: "android" | "ios";
+}
+
+function acceptancePresentationOrder(
+  args: Record<string, unknown>,
+): "forward" | "reverse" | undefined {
+  const order = args[INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM];
+  return order === "forward" || order === "reverse" ? order : undefined;
+}
+
+function detailedDiscoveryOptions(
+  presentationOrder: "forward" | "reverse" | undefined,
+): BootedDeviceDiscoveryOptions {
+  return presentationOrder === undefined ? {} : { presentationOrder };
 }
 
 export interface DeviceToolsDependencies {
@@ -3265,7 +3373,7 @@ function createTeardownResponse(
   resolved?: DeviceInfo,
   timing?: unknown,
 ) {
-  return createJSONToolResponse({
+  return createStructuredToolResponse({
     operationId: args.operationId,
     mode: args.mode,
     state,
@@ -3471,6 +3579,7 @@ export function teardownOperationFingerprint(args: TeardownDeviceArgs): string {
     mode: args.mode,
     verifyAbsence: args.verifyAbsence,
     timeoutMs: args.timeoutMs,
+    cancellationPolicy: args.cancellationPolicy,
     // A forced teardown is a materially different request from a verified one,
     // so reusing an operationId across the two is a fingerprint mismatch rather
     // than an idempotent replay of the other (#6864).
@@ -3512,6 +3621,7 @@ interface TeardownContext {
   deadlineDevice: BootedDevice;
   deadlineMs: number;
   timeoutMs: number;
+  cancelOnRequestAbort: boolean;
   lifecycleLease?: VirtualDeviceLifecycleLease;
   /** Android runtime and pool state captured by the first teardown booted scan. */
   initialScan: TeardownInitialAndroidScan;
@@ -4123,13 +4233,20 @@ async function destroyTeardownTarget(
   } catch (error) {
     if (destroy) {
       retainStableLifecycleUntil(destroy);
-      void destroy.then(
-        () => onLateSuccess(),
-        () => {
-          // A rejected late destroy did not remove the platform device, so no eviction is safe.
-          logger.debug("[DeviceTools] Late platform deletion rejected; retaining teardown state");
-        },
-      );
+      if (!context.cancelOnRequestAbort) {
+        void destroy.then(
+          () => onLateSuccess(),
+          () => {
+            // A rejected late destroy did not remove the platform device, so no eviction is safe.
+            logger.debug("[DeviceTools] Late platform deletion rejected; retaining teardown state");
+          },
+        );
+      } else {
+        // This deadline-critical path keeps the identity reservation until the
+        // platform command has settled, but a late completion can neither turn
+        // the returned failure into success nor evict a later replacement.
+        void destroy.catch(() => undefined);
+      }
     }
     throw error;
   }
@@ -4553,6 +4670,50 @@ async function runProvisionDeviceWithinDeadline<T>(
   );
 }
 
+async function awaitProvisionDeviceOperationBegin<T>(
+  timer: Pick<Timer, "now" | "setTimeout" | "clearTimeout">,
+  totalDeadlineMs: number,
+  requestSignal: AbortSignal | undefined,
+  begin: Promise<T>,
+): Promise<T> {
+  const remainingMs = Math.floor(totalDeadlineMs - timer.now());
+  if (remainingMs <= 0) {
+    throw provisionDeviceTimeoutError("starting provision operation");
+  }
+  let timeoutHandle: NodeJS.Timeout | undefined;
+  let removeAbortListener: (() => void) | undefined;
+  try {
+    return await Promise.race([
+      begin,
+      new Promise<never>((_resolve, reject) => {
+        timeoutHandle = timer.setTimeout(
+          () => reject(provisionDeviceTimeoutError("starting provision operation")),
+          remainingMs,
+        );
+      }),
+      ...(requestSignal
+        ? [
+            new Promise<never>((_resolve, reject) => {
+              const rejectForAbort = () => reject(requestSignal.reason);
+              if (requestSignal.aborted) {
+                rejectForAbort();
+                return;
+              }
+              requestSignal.addEventListener("abort", rejectForAbort, { once: true });
+              removeAbortListener = () =>
+                requestSignal.removeEventListener("abort", rejectForAbort);
+            }),
+          ]
+        : []),
+    ]);
+  } finally {
+    if (timeoutHandle) {
+      timer.clearTimeout(timeoutHandle);
+    }
+    removeAbortListener?.();
+  }
+}
+
 async function runOperationWithinDeadline<T>(
   timer: Pick<Timer, "now" | "setTimeout" | "clearTimeout">,
   totalDeadlineMs: number,
@@ -4660,7 +4821,7 @@ function createProvisionDeviceResponse(result: Record<string, unknown>) {
   const resourceFailure = resources?.success === false;
   const sessionId = typeof result.sessionId === "string" ? result.sessionId : undefined;
   return {
-    ...createJSONToolResponse({
+    ...createStructuredToolResponse({
       message: `${device.platform} '${device.name}' provisioned (${result.lifecycleState})${resourceFailure ? "; requested resource configuration was not fully applied" : ""}`,
       ...result,
       // `sessionId` remains the persisted daemon-internal handle for replay and
@@ -5432,37 +5593,37 @@ function deviceInventoryChangedAfterBoot(boot: DeviceBootResult): boolean {
   return boot.source === "cold-boot" || boot.provisioned;
 }
 
-async function refreshResourcesAfterCommittedBoot(
+function refreshResourcesAfterCommittedBoot(
   boot: DeviceBootResult,
   dependencies: Pick<
     DeviceToolsDependencies,
     "notifyDeviceInventoryResourcesChanged" | "syncInstalledAppResourceRegistry"
   >,
-): Promise<void> {
+): void {
   if (!deviceInventoryChangedAfterBoot(boot)) {
     return;
   }
-  let installedAppResourcesChanged = false;
-  try {
-    installedAppResourcesChanged = await dependencies.syncInstalledAppResourceRegistry();
-  } catch (error) {
-    // Session ownership is already committed, so local resource-sync failure
-    // is diagnostic and must not strand the acquired session.
-    logger.warn(
-      `[DeviceTools] Installed-app resource sync after device boot failed: ${errorMessage(error)}`,
-      error,
-    );
-  }
-  // Keep advisory transport delivery off the response and reservation-release
-  // path so notification latency cannot withhold the acquired session.
-  void dependencies
-    .notifyDeviceInventoryResourcesChanged(installedAppResourcesChanged)
-    .catch((error: unknown) => {
+  // Session ownership is already committed, so resource refresh and transport
+  // delivery are advisory: neither may withhold the acquired session.
+  void (async () => {
+    let installedAppResourcesChanged = false;
+    try {
+      installedAppResourcesChanged = await dependencies.syncInstalledAppResourceRegistry();
+    } catch (error) {
+      logger.warn(
+        `[DeviceTools] Installed-app resource sync after device boot failed: ${errorMessage(error)}`,
+        error,
+      );
+    }
+    try {
+      await dependencies.notifyDeviceInventoryResourcesChanged(installedAppResourcesChanged);
+    } catch (error) {
       logger.warn(
         `[DeviceTools] Resource notification after device boot failed: ${errorMessage(error)}`,
         error,
       );
-    });
+    }
+  })();
 }
 
 interface StartDeviceRunnerReadinessInput {
@@ -5872,7 +6033,7 @@ export function registerDeviceTools() {
       const deviceUtils = deps.deviceManagerFactory();
       const imageList = await deviceUtils.listDeviceImages(args.platform);
 
-      return createJSONToolResponse({
+      return createStructuredToolResponse({
         message: `Found ${imageList.length} available ${args.platform} AVDs`,
         images: imageList,
         count: imageList.length,
@@ -5883,12 +6044,13 @@ export function registerDeviceTools() {
     }
   };
 
-  const listDevicesHandler = async (args: ListDevicesArgs) => {
+  const listDevicesHandler = async (args: ListDevicesArgs & Record<string, unknown>) => {
     // #5870: a tool named `listDevices` returns the devices. The data is right
     // here — enumerate booted devices directly instead of forcing a modality
     // switch to resources. The resource pointers (which also cover not-yet-booted
     // images and richer per-device detail) survive as a `note`.
     const platform: SomePlatform = args.platform ?? "either";
+    const presentationOrder = acceptancePresentationOrder(args);
     const requestedPlatforms: Platform[] = platform === "either" ? ["android", "ios"] : [platform];
     const deviceManager = getDeviceToolsDependencies().deviceManagerFactory();
     let booted: BootedDevice[] = [];
@@ -5906,7 +6068,10 @@ export function registerDeviceTools() {
     let succeededSources: Set<DiscoverySource> | undefined;
     let discoveryErrors: BootedDeviceDiscovery["discoveryErrors"];
     try {
-      const discovery = await deviceManager.getBootedDevicesDetailed(platform);
+      const discovery = await deviceManager.getBootedDevicesDetailed(
+        platform,
+        detailedDiscoveryOptions(presentationOrder),
+      );
       // FUNNEL 1: listDevices publishes each entry's pool-derived label/epoch
       // through the same join the booted-devices resource uses (#6863 review).
       await reconcileDiscoveryObservation(discovery.devices, "listDevices");
@@ -5941,7 +6106,7 @@ export function registerDeviceTools() {
     const devices = listDevicePayloads(booted, initializedDevicePool());
     const platformFilter = args.platform ? ` (${args.platform} only)` : "";
 
-    return createJSONToolResponse({
+    return createStructuredToolResponse({
       message: `Found ${devices.length} booted device${devices.length === 1 ? "" : "s"}${platformFilter}`,
       devices,
       count: devices.length,
@@ -6086,58 +6251,85 @@ export function registerDeviceTools() {
     // row's TTL and past the daemon's queued-request deadline, which only the
     // `reserveRollbackTime` form respects.
     const totalDeadlineMs = provisionDeviceDeadlineMs(args, deps.timer, true);
-    const operation = await store.begin(
+    const begin = store.begin(
       args.operationId,
       fingerprint,
       attemptId,
       nowMs,
       nowMs + PROVISION_DEVICE_OPERATION_TTL_MS,
     );
-    if ("inProgress" in operation) {
-      // A live (non-expired) "running" row for this operationId/fingerprint --
-      // report in-progress instead of silently re-running the provisioning
-      // lifecycle (#6652 defect 1). Thrown before the try/catch below so this
-      // never reaches store.fail(), which would incorrectly overwrite the
-      // still-running attempt's row.
-      throw new ProvisionDeviceOperationInProgressError(args.operationId);
-    }
-    try {
-      if (
-        !operation.started &&
-        (await canReplayCompletedProvisionDeviceOperation(
-          args,
-          deps,
-          operation.result,
-          totalDeadlineMs,
-          signal,
-        ))
-      ) {
-        const replayResult = backfillProvisionDeviceCutout(args, operation.result);
-        // Unconditionally, even when the persisted result is byte-for-byte what
-        // we are about to return: begin() moved this row to the EXCLUSIVE
-        // non-terminal `replaying` status, so returning without completing it
-        // would leave the claim held and make every later identical call report
-        // operation_in_progress until the row's TTL (~30m) expires. Re-storing
-        // an identical result is harmless; leaving the claim open is not.
-        await completeProvisionDeviceOperation(
-          store,
-          args.operationId,
-          attemptId,
-          replayResult,
-          args,
-          deps.timer,
-          totalDeadlineMs,
-          signal,
-        );
-        return replayResult;
+    let admissionAbandoned = false;
+    let admissionError: unknown;
+    const runAdmittedOperation: (
+      operation: ProvisionDeviceOperationBeginResult,
+    ) => Promise<Record<string, unknown>> = async (operation) => {
+      if ("inProgress" in operation) {
+        // A live (non-expired) "running" row for this operationId/fingerprint --
+        // report in-progress instead of silently re-running the provisioning
+        // lifecycle (#6652 defect 1). Thrown before the try/catch below so this
+        // never reaches store.fail(), which would incorrectly overwrite the
+        // still-running attempt's row.
+        throw new ProvisionDeviceOperationInProgressError(args.operationId);
       }
-      if (!operation.started) {
-        await releaseErroredProvisionDeviceSession(operation.result);
+      try {
+        if (
+          !operation.started &&
+          (await canReplayCompletedProvisionDeviceOperation(
+            args,
+            deps,
+            operation.result,
+            totalDeadlineMs,
+            signal,
+          ))
+        ) {
+          const replayResult = backfillProvisionDeviceCutout(args, operation.result);
+          // Unconditionally, even when the persisted result is byte-for-byte what
+          // we are about to return: begin() moved this row to the EXCLUSIVE
+          // non-terminal `replaying` status, so returning without completing it
+          // would leave the claim held and make every later identical call report
+          // operation_in_progress until the row's TTL (~30m) expires. Re-storing
+          // an identical result is harmless; leaving the claim open is not.
+          await completeProvisionDeviceOperation(
+            store,
+            args.operationId,
+            attemptId,
+            replayResult,
+            args,
+            deps.timer,
+            totalDeadlineMs,
+            signal,
+          );
+          return replayResult;
+        }
+        if (!operation.started) {
+          await releaseErroredProvisionDeviceSession(operation.result);
 
-        // Sessions are daemon-local and are expired during daemon startup. A
-        // replay of a completed boot operation therefore runs the idempotent
-        // lifecycle again to bind a live session before reporting readiness.
-        const rebound = await runProvisionDeviceLifecycle(
+          // Sessions are daemon-local and are expired during daemon startup. A
+          // replay of a completed boot operation therefore runs the idempotent
+          // lifecycle again to bind a live session before reporting readiness.
+          const rebound = await runProvisionDeviceLifecycle(
+            args,
+            deps,
+            operation.reconcileExistingConfiguration,
+            () => markProvisionDeviceCreationStarted(store, args.operationId, attemptId),
+            totalDeadlineMs,
+            signal,
+          );
+          const refreshed = preserveProvisionDeviceOwnership(operation.result, rebound);
+          await completeProvisionDeviceOperation(
+            store,
+            args.operationId,
+            attemptId,
+            refreshed,
+            args,
+            deps.timer,
+            totalDeadlineMs,
+            signal,
+          );
+          return refreshed;
+        }
+
+        const result = await runProvisionDeviceLifecycle(
           args,
           deps,
           operation.reconcileExistingConfiguration,
@@ -6145,94 +6337,124 @@ export function registerDeviceTools() {
           totalDeadlineMs,
           signal,
         );
-        const refreshed = preserveProvisionDeviceOwnership(operation.result, rebound);
         await completeProvisionDeviceOperation(
           store,
           args.operationId,
           attemptId,
-          refreshed,
+          result,
           args,
           deps.timer,
           totalDeadlineMs,
           signal,
         );
-        return refreshed;
+        return result;
+      } catch (error) {
+        if (error instanceof FinalizedProvisionDeviceCompletionError) {
+          // Completion failures start an observed finalizer below. Do not await
+          // or duplicate its failure write here; either can share the stalled
+          // persistence boundary that made completion fail.
+          throw error.completionError;
+        }
+        if (error instanceof McpSessionRecoveryInProgressError) {
+          // Transient by construction ("cannot remap until recovery finishes"),
+          // so the client is told to retry. A retry only works if this attempt's
+          // row is terminal: an admitted attempt owns a "running" row, and
+          // leaving it running would make every retry report
+          // operation_in_progress for the whole operation TTL (~30m) with
+          // nothing executing. A replay (started === false) owns an exclusive
+          // "replaying" row, so it must be failed too or every retry would report
+          // operation_in_progress for the rest of the TTL; store.fail() reverts a
+          // replaying row to "succeeded" with its result intact, so this cannot
+          // destroy a valid completed result.
+          logger.warn(
+            `[DeviceTools] provisionDevice ${args.operationId} deferred by MCP session ` +
+              `recovery: ${errorMessage(error)}`,
+            error,
+          );
+          await persistFailedProvisionDeviceOperation(
+            store,
+            args,
+            attemptId,
+            PROVISION_DEVICE_SESSION_RECOVERY_ERROR_CODE,
+            errorMessage(error),
+            undefined,
+            deps.timer,
+            totalDeadlineMs,
+            signal,
+          );
+          throw error;
+        }
+        if (error instanceof DaemonHandoffInterruptionError) {
+          logger.warn(
+            `[DeviceTools] provisionDevice ${args.operationId} interrupted by daemon handoff: ${errorMessage(error)}`,
+            error,
+          );
+          await persistFailedProvisionDeviceOperation(
+            store,
+            args,
+            attemptId,
+            DAEMON_HANDOFF_INTERRUPTED_ERROR_CODE,
+            errorMessage(error),
+            undefined,
+            deps.timer,
+            totalDeadlineMs,
+            signal,
+          );
+          throw error;
+        }
+        if (error instanceof ProvisionDeviceOperationSupersededError) {
+          // The row belongs to a newer attempt now; stamping this attempt's
+          // failure on it would fail an operation that is still running.
+          throw error;
+        }
+        const provisionError = toProvisionDeviceError(args, error);
+        await persistFailedProvisionDeviceOperation(
+          store,
+          args,
+          attemptId,
+          provisionError.code,
+          provisionError.message,
+          {
+            clearCreationStarted:
+              error instanceof ProvisionDeviceRollbackError && error.cleanup.status === "succeeded",
+          },
+          deps.timer,
+          totalDeadlineMs,
+          signal,
+        );
+        throw provisionError;
       }
+    };
+    const lifecycle = begin.then(async (operation) => {
+      if (admissionAbandoned || deps.timer.now() >= totalDeadlineMs) {
+        retireLateProvisionDeviceOperationBegin(
+          store,
+          args,
+          attemptId,
+          operation,
+          admissionError ?? provisionDeviceTimeoutError("starting provision operation"),
+        );
+        throw admissionError ?? provisionDeviceTimeoutError("starting provision operation");
+      }
+      return await runAdmittedOperation(operation);
+    });
+    void lifecycle.catch(() => {});
 
-      const result = await runProvisionDeviceLifecycle(
-        args,
-        deps,
-        operation.reconcileExistingConfiguration,
-        () => markProvisionDeviceCreationStarted(store, args.operationId, attemptId),
-        totalDeadlineMs,
-        signal,
-      );
-      await completeProvisionDeviceOperation(
-        store,
-        args.operationId,
-        attemptId,
-        result,
-        args,
-        deps.timer,
-        totalDeadlineMs,
-        signal,
-      );
-      return result;
+    let admissionConfirmed = false;
+    try {
+      await awaitProvisionDeviceOperationBegin(deps.timer, totalDeadlineMs, signal, begin);
+      admissionConfirmed = true;
+      return await lifecycle;
     } catch (error) {
-      if (error instanceof FinalizedProvisionDeviceCompletionError) {
-        // Completion failures start an observed finalizer below. Do not await
-        // or duplicate its failure write here; either can share the stalled
-        // persistence boundary that made completion fail.
-        throw error.completionError;
+      if (!admissionConfirmed) {
+        // A storage call that ignores its deadline can still admit this attempt
+        // after the caller has received its timeout. The continuation retires
+        // that late claim under the same attempt fence before it can reach any
+        // device mutation; a newer retry safely wins over that finalizer.
+        admissionAbandoned = true;
+        admissionError = error;
       }
-      if (error instanceof McpSessionRecoveryInProgressError) {
-        // Transient by construction ("cannot remap until recovery finishes"),
-        // so the client is told to retry. A retry only works if this attempt's
-        // row is terminal: an admitted attempt owns a "running" row, and
-        // leaving it running would make every retry report
-        // operation_in_progress for the whole operation TTL (~30m) with
-        // nothing executing. A replay (started === false) owns an exclusive
-        // "replaying" row, so it must be failed too or every retry would report
-        // operation_in_progress for the rest of the TTL; store.fail() reverts a
-        // replaying row to "succeeded" with its result intact, so this cannot
-        // destroy a valid completed result.
-        logger.warn(
-          `[DeviceTools] provisionDevice ${args.operationId} deferred by MCP session ` +
-            `recovery: ${errorMessage(error)}`,
-          error,
-        );
-        await store.fail(
-          args.operationId,
-          attemptId,
-          PROVISION_DEVICE_SESSION_RECOVERY_ERROR_CODE,
-          errorMessage(error),
-        );
-        throw error;
-      }
-      if (error instanceof DaemonHandoffInterruptionError) {
-        logger.warn(
-          `[DeviceTools] provisionDevice ${args.operationId} interrupted by daemon handoff: ${errorMessage(error)}`,
-          error,
-        );
-        await store.fail(
-          args.operationId,
-          attemptId,
-          DAEMON_HANDOFF_INTERRUPTED_ERROR_CODE,
-          errorMessage(error),
-        );
-        throw error;
-      }
-      if (error instanceof ProvisionDeviceOperationSupersededError) {
-        // The row belongs to a newer attempt now; stamping this attempt's
-        // failure on it would fail an operation that is still running.
-        throw error;
-      }
-      const provisionError = toProvisionDeviceError(args, error);
-      await store.fail(args.operationId, attemptId, provisionError.code, provisionError.message, {
-        clearCreationStarted:
-          error instanceof ProvisionDeviceRollbackError && error.cleanup.status === "succeeded",
-      });
-      throw provisionError;
+      throw error;
     }
   }
 
@@ -6559,6 +6781,76 @@ export function registerDeviceTools() {
         );
       }
       throw new FinalizedProvisionDeviceCompletionError(error);
+    }
+  }
+
+  function retireLateProvisionDeviceOperationBegin(
+    store: ProvisionDeviceOperationStore,
+    args: ProvisionDeviceArgs,
+    attemptId: string,
+    operation: ProvisionDeviceOperationBeginResult,
+    admissionError: unknown,
+  ): void {
+    if ("inProgress" in operation) {
+      return;
+    }
+    const provisionError = toProvisionDeviceError(args, admissionError);
+    void store
+      .fail(args.operationId, attemptId, provisionError.code, provisionError.message)
+      .then((retired) => {
+        if (!retired) {
+          logger.debug(
+            `[DeviceTools] Late provisionDevice ${args.operationId} admission was superseded before finalization.`,
+          );
+        }
+      })
+      .catch((error: unknown) => {
+        logger.warn(
+          `[DeviceTools] Failed to retire late provisionDevice ${args.operationId} admission: ` +
+            `${errorMessage(error)}`,
+          error,
+        );
+      });
+  }
+
+  async function persistFailedProvisionDeviceOperation(
+    store: ProvisionDeviceOperationStore,
+    args: ProvisionDeviceArgs,
+    attemptId: string,
+    errorCode: string,
+    message: string,
+    options: { clearCreationStarted?: boolean } | undefined,
+    timer: Pick<Timer, "now" | "setTimeout" | "clearTimeout">,
+    totalDeadlineMs: number,
+    signal: AbortSignal | undefined,
+  ): Promise<void> {
+    // Start the fenced write even if no budget remains. A late settlement can
+    // only update its own attempt, while skipping it entirely leaves a running
+    // operation row that no retry may reclaim until TTL expiry.
+    const persistence = store.fail(args.operationId, attemptId, errorCode, message, options);
+    void persistence.catch((error: unknown) => {
+      logger.warn(
+        `[DeviceTools] Deferred provisionDevice ${args.operationId} failure persistence failed: ` +
+          `${errorMessage(error)}`,
+        error,
+      );
+    });
+    try {
+      await runProvisionDeviceWithinDeadline(
+        timer,
+        totalDeadlineMs,
+        signal,
+        "persisting failed operation result",
+        async () => await persistence,
+      );
+    } catch (error) {
+      // The caller receives the original provisioning failure. Persistence stays
+      // observed and fenced in the background rather than extending that error
+      // past the single request deadline.
+      logger.debug(
+        `[DeviceTools] Deferred provisionDevice ${args.operationId} failure persistence: ` +
+          `${errorMessage(error)}`,
+      );
     }
   }
 
@@ -6983,6 +7275,11 @@ export function registerDeviceTools() {
     devices: DeviceInfo[],
   ): DeviceInfo | undefined {
     const spec = args.device.spec;
+    if (args.device.deviceId) {
+      return devices.find(
+        (device) => device.platform === "ios" && device.deviceId === args.device.deviceId,
+      );
+    }
     const candidates = devices.filter(
       (device) =>
         device.platform === "ios" &&
@@ -7082,6 +7379,15 @@ export function registerDeviceTools() {
     totalDeadlineMs: number,
     signal: AbortSignal | undefined,
   ): Promise<VirtualDeviceLifecycleLease | undefined> {
+    if (args.device.deviceId) {
+      return await reserveIosProvisionDeviceLifecycle(
+        args,
+        deps,
+        { deviceId: args.device.deviceId },
+        totalDeadlineMs,
+        signal,
+      );
+    }
     const discovery = await runProvisionDeviceWithinDeadline(
       deps.timer,
       totalDeadlineMs,
@@ -7352,6 +7658,7 @@ export function registerDeviceTools() {
           await provisioner.provision({
             platform: args.device.platform,
             name: args.device.name,
+            ...(args.device.deviceId === undefined ? {} : { deviceId: args.device.deviceId }),
             spec: args.device.spec,
             reconcileExistingConfiguration,
             onBeforeCreate: markDeviceCreationStarted,
@@ -7727,7 +8034,7 @@ export function registerDeviceTools() {
     operationName: string;
     androidAvdName?: string;
     stableTarget?: StableDeviceTarget;
-    /** getAndroid's `avdName` + `deviceId` pair, validated after discovery. */
+    /** Android `avdName` + `deviceId` pair, validated before and after discovery. */
     requestedAndroidIdentifierPair?: { avdName: string; deviceId: string };
   };
 
@@ -8171,7 +8478,7 @@ export function registerDeviceTools() {
     });
     state.ownershipTransferred = true;
 
-    await refreshResourcesAfterCommittedBoot(state.boot, deps);
+    refreshResourcesAfterCommittedBoot(state.boot, deps);
     return await buildBootedResponse(
       state.boot.device,
       state.boot.source,
@@ -8230,7 +8537,7 @@ export function registerDeviceTools() {
         coordinatedSignals.length === 1
           ? coordinatedSignals[0]
           : AbortSignal.any(coordinatedSignals);
-      // Reject a contradictory getAndroid avdName + serial pair before booting,
+      // Reject a contradictory Android avdName + serial pair before booting,
       // so a stopped AVD is not cold-booted and killed just to report it. Run
       // after its lifecycle lease, however, so a serial not yet visible during
       // reset recovery gets a chance to appear before discovery decides.
@@ -8333,6 +8640,7 @@ export function registerDeviceTools() {
     delete externalArgs.__mcpRequestTimeoutMs;
     delete externalArgs.__mcpRequestDeadlineMs;
     delete externalArgs.__mcpLiveDeadlineKey;
+    delete externalArgs[INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM];
     return externalArgs;
   };
 
@@ -8346,20 +8654,34 @@ export function registerDeviceTools() {
       ...startDeviceSchema.parse(stripInternalAcquisitionParams(rawArgs)),
       __mcpSessionId: internalSessionId,
     };
+    const exactAndroidAvdName = args.platform === "android" ? args.avdName : undefined;
+    const target = {
+      ...args,
+      ...(exactAndroidAvdName ? { name: exactAndroidAvdName, matchExactName: true } : {}),
+    };
     const totalTimeoutMs = args.timeoutMs ?? DEFAULT_START_DEVICE_TIMEOUT_MS;
     return await prepareDevice(
-      args,
+      target,
       {
         bootTimeoutMs: totalTimeoutMs,
         automationReadyTimeoutMs: resolveRunnerReadinessTimeoutMs(args),
         automationDeadlineMs: getDeviceToolsDependencies().timer.now() + totalTimeoutMs,
         operationName: "startDevice",
         stableTarget:
-          args.platform === "android" && args.name && !args.deviceId
-            ? { platform: "android", stableId: args.name }
+          args.platform === "android" && target.name && !args.deviceId
+            ? { platform: "android", stableId: target.name }
             : args.platform === "ios" && args.deviceId
               ? { platform: "ios", stableId: args.deviceId }
               : undefined,
+        ...(args.platform === "android" && args.avdName && args.deviceId
+          ? {
+              androidAvdName: args.avdName,
+              requestedAndroidIdentifierPair: {
+                avdName: args.avdName,
+                deviceId: args.deviceId,
+              },
+            }
+          : {}),
       },
       progress,
       signal,
@@ -8372,6 +8694,7 @@ export function registerDeviceTools() {
     signal?: AbortSignal,
   ) => {
     const { __mcpSessionId } = rawArgs;
+    const presentationOrder = acceptancePresentationOrder(rawArgs);
     const externalArgs = stripInternalAcquisitionParams(rawArgs);
     const args = getAndroidSchema.parse(externalArgs);
     const bootTimeoutMs = args.bootTimeoutMs ?? DEFAULT_DEVICE_READY_TIMEOUT_MS;
@@ -8391,6 +8714,7 @@ export function registerDeviceTools() {
           name: args.avdName,
           ...(explicitAdbSerial ? { deviceId: explicitAdbSerial } : {}),
           matchExactName: true,
+          ...(presentationOrder !== undefined ? { presentationOrder } : {}),
           preferRunning: true,
           createIfMissing: false,
           __mcpSessionId: mcpSessionId,
@@ -8435,6 +8759,7 @@ export function registerDeviceTools() {
     signal?: AbortSignal,
   ) => {
     const { __mcpSessionId } = rawArgs;
+    const presentationOrder = acceptancePresentationOrder(rawArgs);
     const externalArgs = stripInternalAcquisitionParams(rawArgs);
     const args = getAppleSchema.parse(externalArgs);
     // #5870: `deviceId` is an accepted alias for `udid` on iOS.
@@ -8448,6 +8773,7 @@ export function registerDeviceTools() {
         platform: "ios",
         deviceId: udid,
         preferRunning: true,
+        ...(presentationOrder !== undefined ? { presentationOrder } : {}),
         createIfMissing: false,
         __mcpSessionId: typeof __mcpSessionId === "string" ? __mcpSessionId : undefined,
       },
@@ -8529,6 +8855,8 @@ export function registerDeviceTools() {
         false,
         readinessReservationOwners,
         verifiedAndroidAvdIdentity,
+        undefined,
+        args.__mcpSessionId,
       );
     recordAcquiredSessionReadiness(daemonState, boundSessionId, achievedReadiness);
     return boundSessionId;
@@ -8605,7 +8933,7 @@ export function registerDeviceTools() {
     // #5870: emit the session handle as `sessionUuid` — the key every consumer
     // tool's schema declares — so the obvious copy-paste is correct.
     const { sessionId: sessionUuid, ...resultWithoutSessionId } = result;
-    return createJSONToolResponse({
+    return createStructuredToolResponse({
       message: `${device.platform} '${device.name}' is ready (${source})`,
       ...resultWithoutSessionId,
       sessionUuid,
@@ -8710,6 +9038,7 @@ export function registerDeviceTools() {
           identity: args.target,
           deadlineMs,
           callerSignal,
+          cancellationPolicy: args.cancellationPolicy ? "cancel-on-caller-abort" : undefined,
           lifecycleLease,
         },
         {
@@ -8722,6 +9051,7 @@ export function registerDeviceTools() {
               deadlineDevice: teardownDeadlineDevice(args),
               deadlineMs,
               timeoutMs,
+              cancelOnRequestAbort: args.cancellationPolicy === "cancel-on-request-abort",
               lifecycleLease,
               mode: args.force === true ? "serial-only" : "named",
               initialScan: { serials: new Set(), pooledEntries: [] },

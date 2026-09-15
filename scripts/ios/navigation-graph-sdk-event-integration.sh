@@ -40,10 +40,10 @@ renew_session_ownership() {
 }
 
 ctrl_proxy_port_for_device() {
-  # CtrlProxy allocates a per-device host port; 8765 is only its preferred
-  # default and may already belong to another local service. `doctor` can exit
-  # non-zero for unrelated diagnostics, but still emits the JSON round-trip
-  # report that contains this ready runner's port.
+  # CtrlProxy allocates a daemon-owned per-device host port; 8765 is only the
+  # runner's preferred internal default and may already belong to another local
+  # service. `doctor` can exit non-zero for unrelated diagnostics, but still
+  # emits the JSON round-trip report that contains this ready client's port.
   local session_uuid="${1:-}"
   local doctor_report ctrl_proxy_port renew_status=0
   if [[ -z "${session_uuid}" ]]; then
@@ -81,7 +81,7 @@ ctrl_proxy_port_for_device() {
       | split(" | ")
       | map(select(contains("device=" + $device_id + ";")))
       | .[0]
-      | capture("runnerPort=(?<port>[0-9]+)")
+      | capture("clientPort=(?<port>[0-9]+)")
       | .port
     ' <<<"${doctor_report}")"; then
     echo "error: could not determine CtrlProxy port for simulator ${device_id}" >&2

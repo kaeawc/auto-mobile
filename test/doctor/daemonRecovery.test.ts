@@ -6,6 +6,7 @@ import {
   type DaemonRecoveryResult,
 } from "../../src/doctor/daemonRecovery";
 import type { DaemonHealthReport } from "../../src/daemon/debugTools";
+import type { DoctorReport } from "../../src/doctor/types";
 import { MAX_SETTIMEOUT_DELAY_MS } from "../../src/utils/SystemTimer";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -36,6 +37,21 @@ function dependencies(
   };
 }
 
+function doctorReport(platform: "android" | "ios"): DoctorReport {
+  return {
+    timestamp: "2026-09-14T00:00:00.000Z",
+    version: "0.0.0-test",
+    platform: "darwin",
+    arch: "arm64",
+    diagnosticProfile: "post-repair-read-only",
+    system: { checks: [] },
+    autoMobile: { checks: [] },
+    ...(platform === "android" ? { android: { checks: [] } } : { ios: { checks: [] } }),
+    summary: { total: 0, passed: 0, warnings: 0, failed: 0, skipped: 0 },
+    recommendations: [],
+  };
+}
+
 describe("repairDaemon", () => {
   test("joins a healthy daemon without restarting device work", async () => {
     let restartCalls = 0;
@@ -59,16 +75,188 @@ describe("repairDaemon", () => {
     expect(restartCalls).toBe(0);
   });
 
-  test("does not report repaired joined when responsive socket metadata is invalid", async () => {
+  test("repairs corrupt metadata from a responsive daemon and verifies the post-repair protocol", async () => {
     const invalidMetadata = { ...healthReport(true), pidFileValid: false };
-    const result = await repairDaemon({}, dependencies([invalidMetadata, invalidMetadata]));
+    let metadataRepairs = 0;
+    let protocolChecks = 0;
+    const result = await repairDaemon(
+      {},
+      dependencies([invalidMetadata, healthReport(true)], {
+        repairControlMetadata: async () => {
+          metadataRepairs++;
+          return true;
+        },
+        verifyProtocol: async () => {
+          protocolChecks++;
+        },
+      }),
+    );
+
+    expect(result).toMatchObject<Partial<DaemonRecoveryResult>>({
+      status: "repaired",
+      phase: "complete",
+      action: "joined",
+      before: { pidFileValid: false },
+      after: { pidFileValid: true, socketConnectable: true },
+    });
+    expect(metadataRepairs).toBe(1);
+    expect(protocolChecks).toBe(1);
+  });
+
+  test.each(["android", "ios"] as const)(
+    "runs requested %s diagnostics after repair under the shared deadline",
+    async (platform) => {
+      const calls: Array<{
+        diagnosticProfile?: string;
+        android?: boolean;
+        ios?: boolean;
+        deadlineMs?: number;
+        signal?: AbortSignal;
+      }> = [];
+      const result = await repairDaemon(
+        { [platform]: true },
+        dependencies([healthReport(true), healthReport(true)], {
+          runDoctor: async (options) => {
+            calls.push(options);
+            return doctorReport(platform);
+          },
+        }),
+      );
+
+      expect(result).toMatchObject<Partial<DaemonRecoveryResult>>({
+        status: "repaired",
+        phase: "complete",
+        postRepairDoctor: { profile: "post-repair-read-only", [platform]: true },
+      });
+      expect(calls).toHaveLength(1);
+      expect(calls[0]).toMatchObject({
+        diagnosticProfile: "post-repair-read-only",
+        [platform]: true,
+      });
+      expect(calls[0]?.deadlineMs).toBeGreaterThan(0);
+      expect(calls[0]?.signal).toBeInstanceOf(AbortSignal);
+    },
+  );
+
+  test("rejects a repair result when requested diagnostics do not run the selected platform", async () => {
+    const result = await repairDaemon(
+      { android: true },
+      dependencies([healthReport(true), healthReport(true)], {
+        runDoctor: async () => doctorReport("ios"),
+      }),
+    );
 
     expect(result).toMatchObject<Partial<DaemonRecoveryResult>>({
       status: "failed",
       phase: "verification",
       action: "joined",
-      after: { pidFileValid: false },
+      after: { socketConnectable: true },
+      nextAction: expect.stringContaining("post-repair doctor did not run"),
     });
+    expect(result.postRepairDoctor).toBeUndefined();
+  });
+
+  test("returns promptly when a post-repair diagnostic stalls after an unresponsive daemon replacement", async () => {
+    const timer = new FakeTimer();
+    let cancelled = false;
+    const repair = repairDaemon(
+      { android: true, timeoutMs: 50 },
+      dependencies([healthReport(false), healthReport(true)], {
+        timer,
+        runDoctor: async ({ signal }) => {
+          signal?.addEventListener("abort", () => {
+            cancelled = true;
+          });
+          return await new Promise<DoctorReport>(() => {});
+        },
+      }),
+    );
+
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    timer.advanceTime(50);
+
+    const result = await repair;
+    expect(result).toMatchObject<Partial<DaemonRecoveryResult>>({
+      status: "failed",
+      phase: "verification",
+      action: "restarted",
+      nextAction: expect.stringContaining("deadline"),
+    });
+    expect(cancelled).toBe(true);
+    await waitForDaemonRecoveryCompletion(result);
+  });
+
+  test("does not retain a read-only post-repair doctor probe as a lifecycle", async () => {
+    const timer = new FakeTimer();
+    let settled = false;
+    const repair = repairDaemon(
+      { ios: true, timeoutMs: 50 },
+      dependencies([healthReport(true), healthReport(true)], {
+        timer,
+        runDoctor: async ({ signal }) => {
+          await new Promise<void>((resolve) => {
+            signal?.addEventListener("abort", resolve, { once: true });
+          });
+          try {
+            signal?.throwIfAborted();
+            return doctorReport("ios");
+          } finally {
+            settled = true;
+          }
+        },
+      }),
+    );
+
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    timer.advanceTime(50);
+    const result = await repair;
+
+    expect(result).toMatchObject<Partial<DaemonRecoveryResult>>({
+      status: "failed",
+      phase: "verification",
+      action: "joined",
+    });
+    expect(settled).toBe(true);
+    await waitForDaemonRecoveryCompletion(result);
+  });
+
+  test("does not let a delayed metadata repair publish after the doctor deadline", async () => {
+    const timer = new FakeTimer();
+    let observedDeadline: number | undefined;
+    let metadataWrites = 0;
+    let repairStarted: (() => void) | undefined;
+    const started = new Promise<void>((resolve) => {
+      repairStarted = resolve;
+    });
+    const repair = repairDaemon(
+      { timeoutMs: 50 },
+      dependencies([{ ...healthReport(true), pidFileValid: false }], {
+        timer,
+        repairControlMetadata: async (signal, deadline) => {
+          observedDeadline = deadline;
+          repairStarted?.();
+          await new Promise<void>((resolve) => {
+            signal?.addEventListener("abort", resolve, { once: true });
+          });
+          signal?.throwIfAborted();
+          metadataWrites++;
+          return true;
+        },
+      }),
+    );
+
+    await started;
+    timer.advanceTime(50);
+    const result = await repair;
+
+    expect(result).toMatchObject<Partial<DaemonRecoveryResult>>({
+      status: "failed",
+      phase: "recovery",
+      action: "joined",
+    });
+    expect(observedDeadline).toBe(50);
+    await waitForDaemonRecoveryCompletion(result);
+    expect(metadataWrites).toBe(0);
   });
 
   test("restarts a daemon with unusable control state and verifies the replacement", async () => {
@@ -90,6 +278,43 @@ describe("repairDaemon", () => {
       after: { socketConnectable: true },
     });
     expect(protocolChecks).toBe(1);
+  });
+
+  test("caps an unresponsive control-protocol probe before restarting within the shared deadline", async () => {
+    const timer = new FakeTimer();
+    const probeTimeouts: number[] = [];
+    let recoveryStarted = false;
+    let probeCalls = 0;
+    const repair = repairDaemon(
+      { timeoutMs: 60_000 },
+      dependencies([healthReport(false), healthReport(true)], {
+        timer,
+        verifyProtocol: async ({ timeoutMs }) => {
+          probeTimeouts.push(timeoutMs);
+          probeCalls++;
+          if (probeCalls === 1) {
+            await timer.sleep(timeoutMs);
+            throw new Error("unresponsive daemon");
+          }
+        },
+        recoverControlState: async (_daemonOptions, isProtocolHealthy) => {
+          expect(await isProtocolHealthy()).toBe(false);
+          recoveryStarted = true;
+          return "restarted";
+        },
+      }),
+    );
+
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    timer.advanceTime(10_000);
+
+    await expect(repair).resolves.toMatchObject<Partial<DaemonRecoveryResult>>({
+      status: "repaired",
+      phase: "complete",
+      action: "restarted",
+    });
+    expect(recoveryStarted).toBe(true);
+    expect(probeTimeouts).toEqual([10_000, 10_000]);
   });
 
   test("threads invocation daemon options into recovery", async () => {
@@ -199,6 +424,32 @@ describe("repairDaemon", () => {
     expect(result.action).toBeUndefined();
   });
 
+  test("rejects an explicit null timeout before diagnosis can mutate control state", async () => {
+    let healthChecks = 0;
+    let recoveryCalls = 0;
+    const result = await repairDaemon(
+      { timeoutMs: null },
+      dependencies([], {
+        getHealthReport: async () => {
+          healthChecks++;
+          return healthReport(false);
+        },
+        recoverControlState: async () => {
+          recoveryCalls++;
+          return "restarted";
+        },
+      }),
+    );
+
+    expect(result).toMatchObject<Partial<DaemonRecoveryResult>>({
+      status: "failed",
+      phase: "diagnosis",
+      nextAction: expect.stringContaining("positive finite"),
+    });
+    expect(healthChecks).toBe(0);
+    expect(recoveryCalls).toBe(0);
+  });
+
   test("reports no action when diagnosis fails", async () => {
     const result = await repairDaemon(
       {},
@@ -237,6 +488,8 @@ describe("repairDaemon", () => {
   test("keeps an expired initial verification in the verification phase", async () => {
     const timer = new FakeTimer();
     let recoverCalls = 0;
+    let observedSignal: AbortSignal | undefined;
+    let lateSuccess = false;
     let beginVerification: (() => void) | undefined;
     const verificationBegan = new Promise<void>((resolve) => {
       beginVerification = resolve;
@@ -245,9 +498,15 @@ describe("repairDaemon", () => {
       { timeoutMs: 50 },
       dependencies([healthReport(true)], {
         timer,
-        verifyProtocol: async () => {
+        verifyProtocol: async ({ signal }) => {
+          observedSignal = signal;
           beginVerification?.();
-          return await new Promise<void>(() => {});
+          await new Promise<void>((resolve) => {
+            signal?.addEventListener("abort", resolve, { once: true });
+          });
+          // A non-cooperative verifier could still resolve after its deadline.
+          // The recovery result must remain failed, not turn into late success.
+          lateSuccess = true;
         },
         recoverControlState: async () => {
           recoverCalls++;
@@ -265,18 +524,25 @@ describe("repairDaemon", () => {
       action: "joined",
       nextAction: expect.stringContaining("--cli doctor --repair"),
     });
+    expect(observedSignal?.aborted).toBe(true);
+    expect(lateSuccess).toBe(true);
     expect(recoverCalls).toBe(0);
   });
 
   test("reports recovery when replacement after a wrong-protocol socket fails", async () => {
+    const protocolSignals: AbortSignal[] = [];
     const result = await repairDaemon(
       {},
       dependencies([healthReport(true)], {
-        verifyProtocol: async () => {
+        verifyProtocol: async ({ signal }) => {
+          if (signal) {
+            protocolSignals.push(signal);
+          }
           throw new Error("unexpected socket protocol");
         },
-        recoverControlState: async (_daemonOptions, isProtocolHealthy) => {
+        recoverControlState: async (_daemonOptions, isProtocolHealthy, signal) => {
           expect(await isProtocolHealthy()).toBe(false);
+          expect(protocolSignals[1]).toBe(signal);
           throw new Error("replacement launch failed");
         },
       }),

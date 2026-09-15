@@ -1,4 +1,9 @@
-import { spawn as nodeSpawn, type ChildProcess, type SpawnOptions } from "node:child_process";
+import {
+  execFileSync as nodeExecFileSync,
+  spawn as nodeSpawn,
+  type ChildProcess,
+  type SpawnOptions,
+} from "node:child_process";
 import { existsSync } from "node:fs";
 import { posix, win32 } from "node:path";
 import { ActionableError } from "../models";
@@ -16,6 +21,26 @@ export interface DaemonLaunchCommand {
 export interface DaemonProcessSpawner {
   spawn(command: string, args: string[], options: SpawnOptions): ChildProcess;
 }
+
+/** Injectable synchronous argv-first boundary for bounded daemon process probes. */
+export type DaemonProcessCommandRunner = (
+  command: string,
+  args: readonly string[],
+  options: { timeout: number; env: NodeJS.ProcessEnv },
+) => string;
+
+/**
+ * Runs a bounded daemon process probe without a shell.
+ *
+ * Daemon execution belongs here so callers retain narrow test seams without
+ * introducing direct child-process invocations elsewhere in `src/daemon`.
+ */
+export const runDaemonProcessCommand: DaemonProcessCommandRunner = (command, args, options) =>
+  nodeExecFileSync(command, args, {
+    encoding: "utf-8",
+    timeout: options.timeout,
+    env: options.env,
+  });
 
 /** Signals or probes the dedicated process group created by a detached POSIX spawn. */
 export type DaemonProcessGroupKiller = (pid: number, signal: NodeJS.Signals | 0) => void;

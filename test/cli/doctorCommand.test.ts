@@ -98,7 +98,7 @@ describe("doctorToolParams", () => {
     });
 
     try {
-      await runDoctorCommand(
+      const termination = await runDoctorCommand(
         { repair: true, timeoutMs: 12_000 },
         {
           repairDaemon: async (options) => {
@@ -133,6 +133,7 @@ describe("doctorToolParams", () => {
         },
         { host: "127.0.0.1", port: 4321 },
       );
+      expect(termination).toBeUndefined();
     } finally {
       resetCliOutputSinksForTesting();
     }
@@ -144,6 +145,38 @@ describe("doctorToolParams", () => {
       action: "restarted",
       before: { socketConnectable: false },
       after: { socketConnectable: true },
+    });
+  });
+
+  test("requests executable termination after a failed repair writes its result", async () => {
+    const written: string[] = [];
+    setCliOutputSinksForTesting({
+      stdout: { write: (text) => written.push(text) },
+      stderr: { write: () => {} },
+    });
+
+    try {
+      const termination = await runDoctorCommand(
+        { repair: true, android: true },
+        {
+          repairDaemon: async () => ({
+            status: "failed",
+            phase: "verification",
+            action: "restarted",
+            nextAction: "Recovery deadline elapsed during verification.",
+          }),
+        },
+      );
+
+      expect(termination).toEqual({ exitCode: 1 });
+    } finally {
+      resetCliOutputSinksForTesting();
+    }
+
+    expect(JSON.parse(written[0])).toMatchObject({
+      status: "failed",
+      phase: "verification",
+      action: "restarted",
     });
   });
 

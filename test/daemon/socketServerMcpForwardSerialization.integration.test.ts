@@ -6,6 +6,7 @@ import { unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
+import { DaemonClient } from "../../src/daemon/client";
 import { SOCKET_REQUEST_DEADLINE_MS, sendRawSocketRequest } from "./helpers/socketRequest";
 import { defaultTimer } from "../../src/utils/SystemTimer";
 import {
@@ -19,6 +20,7 @@ import { DEFAULT_OBSERVE_MCP_TIMEOUT_MS } from "../../src/daemon/mcpRequestTimeo
 import { FakeTimer } from "../fakes/FakeTimer";
 import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
 import type { DeviceLabelMap, Session } from "../../src/daemon/sessionManager";
+import { createStructuredToolResponse } from "../../src/utils/toolUtils";
 
 interface FakeMcpClient {
   callTool: (...args: unknown[]) => Promise<unknown>;
@@ -280,6 +282,44 @@ describe("UnixSocketServer MCP forward serialization", () => {
       fakeTimer,
     );
     await server.start();
+  });
+
+  test("round-trips structured tool output through the real daemon socket client", async () => {
+    server.mcpClientFactory = async () => ({
+      callTool: async () =>
+        createStructuredToolResponse({
+          count: 1,
+          devices: [{ deviceId: "emulator-5554", platform: "android" }],
+        }),
+      listTools: async () => ({ tools: [] }),
+      listResources: async () => ({ resources: [] }),
+      readResource: async () => ({ contents: [] }),
+      listResourceTemplates: async () => ({ resourceTemplates: [] }),
+      close: async () => {},
+    });
+    const client = new DaemonClient(socketPath, 1_000, undefined, {}, null);
+
+    try {
+      const result = await client.callTool("listDevices", { platform: "android" });
+
+      expect(result).toEqual({
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              count: 1,
+              devices: [{ deviceId: "emulator-5554", platform: "android" }],
+            }),
+          },
+        ],
+        structuredContent: {
+          count: 1,
+          devices: [{ deviceId: "emulator-5554", platform: "android" }],
+        },
+      });
+    } finally {
+      await client.close();
+    }
   });
 
   afterEach(async () => {

@@ -24,7 +24,7 @@ import {
   PlatformDeviceManager,
 } from "../utils/deviceUtils";
 import { type DiscoverySource, sourcesForPlatform } from "../utils/discoverySource";
-import { createJSONToolResponse } from "../utils/toolUtils";
+import { createJSONToolResponse, createStructuredToolResponse } from "../utils/toolUtils";
 import { ActionableError, BootedDevice, DeviceInfo, Platform, SomePlatform } from "../models";
 import type {
   DeviceMatchCriteria,
@@ -6102,7 +6102,7 @@ export function registerDeviceTools() {
     const devices = listDevicePayloads(booted, initializedDevicePool());
     const platformFilter = args.platform ? ` (${args.platform} only)` : "";
 
-    return createJSONToolResponse({
+    return createStructuredToolResponse({
       message: `Found ${devices.length} booted device${devices.length === 1 ? "" : "s"}${platformFilter}`,
       devices,
       count: devices.length,

@@ -13,6 +13,7 @@ import {
   parseArgs,
   recordOwnershipManifest,
   runAcceptanceMatrix,
+  normalizeMcpTransportDiagnostic,
   verifyEvidenceFile,
   type AcceptanceArgs,
   type DaemonSessionClient,
@@ -136,6 +137,7 @@ function createHarness(
     unchangedAndroidIdentity?: boolean;
     oldSessionDiagnostic?: string;
     ownerDiagnostic?: string;
+    ownerDiagnosticTransportWrapped?: boolean;
     resolvedConfiguration?: Record<string, unknown>;
     failCliFor?: string;
     iosSimulatorName?: string;
@@ -391,9 +393,16 @@ function createHarness(
         if (owner === "unrelated-owner") {
           const deviceId =
             name === "getApple" || arguments_.platform === "ios" ? IOS_UDID : androidTargetSerial;
+          const diagnostic = options.ownerDiagnostic ?? ownerDiagnostic(deviceId);
+          if (options.ownerDiagnosticTransportWrapped) {
+            return {
+              isError: true,
+              content: [{ type: "text", text: `Error: MCP error -32603: ${diagnostic}` }],
+            };
+          }
           return {
             isError: true,
-            structuredContent: { error: options.ownerDiagnostic ?? ownerDiagnostic(deviceId) },
+            structuredContent: { error: diagnostic },
           };
         }
         const requestedDeviceId =
@@ -1423,8 +1432,25 @@ describe("live device acceptance harness", () => {
     ).rejects.toThrow("did not report the exact old-session recovery reason");
   });
 
-  test("rejects a generic unrelated-owner error instead of the product conflict diagnostic", async () => {
-    const harness = createHarness({ ownerDiagnostic: "owned by another session" });
+  test.each([
+    ["unwrapped", false],
+    ["standard MCP transport wrapped", true],
+  ])(
+    "requires the exact unrelated-owner diagnostic when %s",
+    async (_form, ownerDiagnosticTransportWrapped) => {
+      const harness = createHarness({ ownerDiagnosticTransportWrapped });
+
+      const evidence = await runAcceptanceMatrix(androidArgs, harness.dependencies);
+
+      expect(evidence.outcome.passed).toBe(true);
+    },
+  );
+
+  test("rejects a wrapped unrelated-owner message instead of the product conflict diagnostic", async () => {
+    const harness = createHarness({
+      ownerDiagnostic: "owned by another session",
+      ownerDiagnosticTransportWrapped: true,
+    });
 
     await expect(runAcceptanceMatrix(androidArgs, harness.dependencies)).rejects.toThrow(
       "Unexpected unrelated-owner diagnostic",
@@ -1440,6 +1466,12 @@ describe("live device acceptance harness", () => {
       "start-7",
       "cli-acquired-1",
     ]);
+  });
+
+  test.each(["unknown", "-32603.0"])("leaves non-standard MCP code %s unchanged", (code) => {
+    const diagnostic = `Error: MCP error ${code}: ${ownerDiagnostic("emulator-5556")}`;
+
+    expect(normalizeMcpTransportDiagnostic(diagnostic)).toBe(diagnostic);
   });
 
   test("fails a full acceptance when exposed Android serial or console identity does not change", async () => {

@@ -790,6 +790,32 @@ function toolDiagnostic(response: ToolResponse, tool: string): string {
   return `${tool} returned no diagnostic`;
 }
 
+/**
+ * Direct MCP SDK calls may render a JSON-RPC failure as an Error string instead
+ * of the usual structured `isError` tool envelope. Preserve exact product
+ * diagnostics while removing only that leading, validated transport rendering.
+ */
+export function normalizeMcpTransportDiagnostic(diagnostic: string): string {
+  const renderedErrorPrefix = "Error: ";
+  const mcpErrorPrefix = "MCP error ";
+  const candidate = diagnostic.startsWith(renderedErrorPrefix)
+    ? diagnostic.slice(renderedErrorPrefix.length)
+    : diagnostic;
+  if (!candidate.startsWith(mcpErrorPrefix)) {
+    return diagnostic;
+  }
+  const separator = candidate.indexOf(": ", mcpErrorPrefix.length);
+  if (separator === -1) {
+    return diagnostic;
+  }
+  const code = candidate.slice(mcpErrorPrefix.length, separator);
+  const parsedCode = Number(code);
+  if (!code.startsWith("-") || !Number.isInteger(parsedCode) || String(parsedCode) !== code) {
+    return diagnostic;
+  }
+  return candidate.slice(separator + 2);
+}
+
 function toolPayload(response: ToolResponse, tool: string): JsonObject {
   if (response.isError) {
     throw new Error(`${tool} returned an MCP error: ${toolDiagnostic(response, tool)}`);
@@ -2902,7 +2928,7 @@ export async function runAcceptanceMatrix(
         `Unrelated owner unexpectedly acquired ${accidentalSession} while ${held.sessionUuid} was held`,
       );
     }
-    const actualDiagnostic = toolDiagnostic(response, tool);
+    const actualDiagnostic = normalizeMcpTransportDiagnostic(toolDiagnostic(response, tool));
     const expectedDiagnostic = unrelatedOwnerDiagnostic(held.device.deviceId);
     if (actualDiagnostic !== expectedDiagnostic) {
       throw new Error(

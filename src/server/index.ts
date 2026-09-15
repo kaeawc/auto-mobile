@@ -1263,7 +1263,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       // its old binding, and a concurrent acquisition may publish another one.
       // Reuse the same route/label union as tools/list without publishing yet.
       if (
-        (name === "getAndroid" || name === "getApple") &&
+        (name === "getAndroid" || name === "getApple" || name === "startDevice") &&
         !result?.isError &&
         acquiredSessionUuid
       ) {

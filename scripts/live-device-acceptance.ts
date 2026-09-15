@@ -930,12 +930,14 @@ function acquisitionRequest(
           platform: "android",
           avdName: args.target.avdName,
           preferRunning: true,
+          enableTools: [...ENABLED_TOOLS],
         }
       : {
           platform: "ios",
           deviceId: args.target.simulatorUdid,
           preferRunning: true,
           formFactor: inferIosFormFactor(args.deviceType),
+          enableTools: [...ENABLED_TOOLS],
         };
   if (range === "min") {
     request.minOsVersion = args.osVersionRange.min;

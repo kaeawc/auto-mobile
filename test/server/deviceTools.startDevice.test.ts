@@ -2419,6 +2419,23 @@ describe("startDevice handler", () => {
     expect(parsed.name).toBe("Pixel_7_API_34");
   });
 
+  it("accepts capability declarations for the session it mints", () => {
+    const parsed = startDeviceSchema.parse({
+      platform: "android",
+      avdName: "Pixel_7_API_34",
+      enableTools: ["observe", "getDeviceState"],
+    });
+
+    expect(parsed.enableTools).toEqual(["observe", "getDeviceState"]);
+    expect(
+      startDeviceSchema.safeParse({
+        platform: "android",
+        avdName: "Pixel_7_API_34",
+        enableTools: [],
+      }).success,
+    ).toBe(false);
+  });
+
   it("bounds runner readiness timeout overrides", () => {
     expect(() =>
       startDeviceSchema.parse({

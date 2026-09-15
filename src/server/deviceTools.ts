@@ -249,6 +249,10 @@ const startDeviceParametersSchema = z.object({
       `Create a device when nothing matches (CLI: --create-if-missing). Default off; ` +
         `${DEVICE_CREATE_ENV_VAR}=1 enables it when this flag is not supplied, and the flag wins.`,
     ),
+  // startDevice mints a session just like getAndroid/getApple. Keep its
+  // hidden compatibility surface capability-complete so a fresh/reconnected
+  // client can declare the tools needed by its newly minted session.
+  enableTools: enableToolsSchemaField,
 });
 
 export const startDeviceSchema = z.preprocess(

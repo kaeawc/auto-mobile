@@ -177,6 +177,33 @@ function createHarness(
   let daemonGeneration = 1;
   let pendingDoctorFault: string | undefined;
   const enabledToolsByOwner = new Map<string, Set<string>>();
+  const enabledToolsByMintedSession = new Map<string, Set<string>>();
+
+  const recordMintedSessionCapabilities = (
+    sessionUuid: string,
+    arguments_: Record<string, unknown>,
+  ): void => {
+    const requested = arguments_.enableTools;
+    enabledToolsByMintedSession.set(
+      sessionUuid,
+      new Set(
+        Array.isArray(requested)
+          ? requested.filter((tool): tool is string => typeof tool === "string")
+          : [],
+      ),
+    );
+  };
+
+  const requireMintedSessionCapability = (sessionUuid: string, toolName: string): void => {
+    // Every synthetic getAndroid/getApple/startDevice response carries this
+    // prefix. CLI and provision responses deliberately use different ids.
+    if (!sessionUuid.startsWith("start-")) {
+      return;
+    }
+    if (!enabledToolsByMintedSession.get(sessionUuid)?.has(toolName)) {
+      throw new Error(`Tool ${toolName} is disabled for newly minted session ${sessionUuid}`);
+    }
+  };
 
   const createMcpClient = async (
     owner: string,
@@ -373,6 +400,7 @@ function createHarness(
         if (requestedSibling) {
           startCount += 1;
           const sessionUuid = `start-${startCount}`;
+          recordMintedSessionCapabilities(sessionUuid, arguments_);
           return {
             structuredContent: {
               sessionUuid,
@@ -407,6 +435,7 @@ function createHarness(
         }
         startCount += 1;
         const sessionUuid = `start-${startCount}`;
+        recordMintedSessionCapabilities(sessionUuid, arguments_);
         if (isIos) {
           return {
             structuredContent: {
@@ -447,6 +476,7 @@ function createHarness(
         };
       }
       if (name === "observe") {
+        requireMintedSessionCapability(String(arguments_.sessionUuid), "observe");
         if (
           options.failIosReadinessAfterRestart &&
           iosRunnerRestarted &&
@@ -461,6 +491,7 @@ function createHarness(
       }
       if (name === "getDeviceState") {
         const sessionUuid = String(arguments_.sessionUuid);
+        requireMintedSessionCapability(sessionUuid, "getDeviceState");
         const persistedState = persistedStates.get(sessionUuid);
         if (persistedState) {
           if (options.allowPersistedSiblingFallback) {
@@ -750,12 +781,18 @@ describe("live device acceptance harness", () => {
     expect(
       harness.calls.filter((call) => call.name === "startDevice").map((call) => call.arguments),
     ).toEqual([
-      { platform: "android", avdName: "Pixel_8_API_35", preferRunning: true },
+      {
+        platform: "android",
+        avdName: "Pixel_8_API_35",
+        preferRunning: true,
+        enableTools: ["observe", "getDeviceState"],
+      },
       {
         platform: "android",
         avdName: "Pixel_8_API_35",
         preferRunning: true,
         minOsVersion: "34",
+        enableTools: ["observe", "getDeviceState"],
       },
       {
         platform: "android",
@@ -763,20 +800,28 @@ describe("live device acceptance harness", () => {
         preferRunning: true,
         minOsVersion: "34",
         maxOsVersion: "35",
+        enableTools: ["observe", "getDeviceState"],
       },
       {
         platform: "android",
         avdName: "Pixel_8_API_35",
         preferRunning: true,
         minOsVersion: "9999",
+        enableTools: ["observe", "getDeviceState"],
       },
       {
         platform: "android",
         avdName: "Pixel_8_API_35",
         preferRunning: true,
         maxOsVersion: "0",
+        enableTools: ["observe", "getDeviceState"],
       },
-      { platform: "android", avdName: "Pixel_8_API_35", preferRunning: true },
+      {
+        platform: "android",
+        avdName: "Pixel_8_API_35",
+        preferRunning: true,
+        enableTools: ["observe", "getDeviceState"],
+      },
     ]);
     expect(harness.cliCommands.find((command) => command.includes("getAndroid"))).toEqual([
       process.execPath,
@@ -886,13 +931,20 @@ describe("live device acceptance harness", () => {
     expect(
       harness.calls.filter((call) => call.name === "startDevice").map((call) => call.arguments),
     ).toEqual([
-      { platform: "ios", deviceId: IOS_UDID, preferRunning: true, formFactor: "phone" },
+      {
+        platform: "ios",
+        deviceId: IOS_UDID,
+        preferRunning: true,
+        formFactor: "phone",
+        enableTools: ["observe", "getDeviceState"],
+      },
       {
         platform: "ios",
         deviceId: IOS_UDID,
         preferRunning: true,
         formFactor: "phone",
         minOsVersion: "17.0",
+        enableTools: ["observe", "getDeviceState"],
       },
       {
         platform: "ios",
@@ -901,6 +953,7 @@ describe("live device acceptance harness", () => {
         formFactor: "phone",
         minOsVersion: "17.0",
         maxOsVersion: "18.0",
+        enableTools: ["observe", "getDeviceState"],
       },
       {
         platform: "ios",
@@ -908,6 +961,7 @@ describe("live device acceptance harness", () => {
         preferRunning: true,
         formFactor: "phone",
         minOsVersion: "9999.0",
+        enableTools: ["observe", "getDeviceState"],
       },
       {
         platform: "ios",
@@ -915,9 +969,22 @@ describe("live device acceptance harness", () => {
         preferRunning: true,
         formFactor: "phone",
         maxOsVersion: "0.0",
+        enableTools: ["observe", "getDeviceState"],
       },
-      { platform: "ios", deviceId: IOS_UDID, preferRunning: true, formFactor: "tablet" },
-      { platform: "ios", deviceId: IOS_UDID, preferRunning: true, formFactor: "phone" },
+      {
+        platform: "ios",
+        deviceId: IOS_UDID,
+        preferRunning: true,
+        formFactor: "tablet",
+        enableTools: ["observe", "getDeviceState"],
+      },
+      {
+        platform: "ios",
+        deviceId: IOS_UDID,
+        preferRunning: true,
+        formFactor: "phone",
+        enableTools: ["observe", "getDeviceState"],
+      },
     ]);
     expect(harness.cliCommands.find((command) => command.includes("getApple"))).toEqual([
       process.execPath,

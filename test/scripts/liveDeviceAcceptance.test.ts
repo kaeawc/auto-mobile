@@ -151,6 +151,7 @@ function createHarness(
     removeAndroidSiblingAfterDuplicateCleanup?: boolean;
     removeIosSiblingAfterProvision?: boolean;
     allowPersistedSiblingFallback?: boolean;
+    suppressCliStructuredContent?: boolean;
   } = {},
 ): Harness {
   const calls: ToolCall[] = [];
@@ -688,23 +689,26 @@ function createHarness(
         events.push("cli:acquire");
         const isIos = command.includes("getApple");
         cliAcquisitionCount += 1;
+        const acquisition = {
+          sessionUuid: `cli-acquired-${cliAcquisitionCount}`,
+          deviceIdentity: isIos
+            ? {
+                simulatorUdid: IOS_UDID,
+                simulatorName: options.iosSimulatorName ?? "iPhone 16 Pro",
+                iosServicePort: 8765,
+                iosRunnerGeneration: 0,
+              }
+            : {
+                avdName: "Pixel_8_API_35",
+                adbSerial: androidTargetSerial,
+                emulatorConsolePort: Number(androidTargetSerial.slice("emulator-".length)),
+              },
+        };
         return {
           stdout: JSON.stringify({
-            structuredContent: {
-              sessionUuid: `cli-acquired-${cliAcquisitionCount}`,
-              deviceIdentity: isIos
-                ? {
-                    simulatorUdid: IOS_UDID,
-                    simulatorName: options.iosSimulatorName ?? "iPhone 16 Pro",
-                    iosServicePort: 8765,
-                    iosRunnerGeneration: 0,
-                  }
-                : {
-                    avdName: "Pixel_8_API_35",
-                    adbSerial: androidTargetSerial,
-                    emulatorConsolePort: Number(androidTargetSerial.slice("emulator-".length)),
-                  },
-            },
+            ...(options.suppressCliStructuredContent
+              ? { content: [{ type: "text", text: JSON.stringify(acquisition) }] }
+              : { structuredContent: acquisition }),
           }),
         };
       },
@@ -736,6 +740,44 @@ function assertReadinessImmediatelyFollowsSuccess(harness: Harness, sessionUuid:
 }
 
 describe("live device acceptance harness", () => {
+  test.each([
+    {
+      label: "Android",
+      args: androidArgs,
+      tool: "getAndroid",
+      checks: {
+        stableIdentityPreserved: true,
+        androidSerialExposed: true,
+        androidConsolePortExposed: true,
+      },
+    },
+    {
+      label: "iOS",
+      args: iosArgs,
+      tool: "getApple",
+      checks: {
+        stableIdentityPreserved: true,
+        iosServiceEndpointExposed: true,
+        iosRunnerGenerationExposed: true,
+      },
+    },
+  ])(
+    "continues $label CLI acquisition from text when structuredContent is suppressed",
+    async ({ args, tool, checks }) => {
+      const harness = createHarness({ suppressCliStructuredContent: true });
+
+      const evidence = await runAcceptanceMatrix(args, harness.dependencies);
+
+      expect(evidence.checks).toMatchObject(checks);
+      expect(
+        harness.calls.find(
+          (call) => call.owner === "independent-mcp" && call.name === "getDeviceState",
+        )?.arguments,
+      ).toEqual({ sessionUuid: "cli-acquired-1" });
+      expect(harness.cliCommands.some((command) => command.includes(tool))).toBe(true);
+    },
+  );
+
   test("uses exact getAndroid acquisition, real killDevice objects, and session readiness", async () => {
     const harness = createHarness();
 

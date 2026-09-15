@@ -43,6 +43,7 @@ import {
   provisionDeviceSchema,
   startDeviceSchema,
 } from "../src/server/deviceTools";
+import { readToolEnvelopePayload } from "../src/server/toolEnvelopePayload";
 import { MIN_AVD_RAM_MB } from "../src/utils/android-cmdline-tools/AvdConfigReader";
 import { parseAndroidSystemImageRuntime } from "../src/utils/android-cmdline-tools/AndroidSystemImageRuntime";
 import { parseAndroidApiLevelBound } from "../src/utils/androidVersionBounds";
@@ -1436,7 +1437,18 @@ function acquiredCliSession(
     throw new Error("CLI acquisition did not return a parseable JSON tool response");
   }
   const tool = acquisitionTool(args, "platform");
-  const payload = toolPayload(response, tool);
+  if (response.isError) {
+    throw new Error(`${tool} returned an MCP error: ${toolDiagnostic(response, tool)}`);
+  }
+  // The CLI writes the daemon's public tool envelope verbatim. With output
+  // reduction enabled, that envelope retains the authoritative JSON text but
+  // intentionally omits its duplicate structuredContent field. Read both
+  // representations through the shared envelope contract; do not synthesize
+  // session or device identity from the command-line arguments.
+  const payload = readToolEnvelopePayload(response)?.payload;
+  if (!payload) {
+    throw new Error(`${tool} did not return an acquisition payload`);
+  }
   const sessionUuid = stringField(payload, "sessionUuid", tool);
   const { identity, device } = acquiredIdentity(payload, args);
   return { sessionUuid, identity, device };

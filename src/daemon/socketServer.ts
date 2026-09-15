@@ -1691,7 +1691,13 @@ export class UnixSocketServer {
       return;
     }
     const pool = this.daemonState.getDevicePool();
-    // Restoration accepts only live autolocks and does not reallocate a released UUID.
+    // Restoration attaches only live sessions. It restores both explicit
+    // acquisition ownership and autolock routing without reallocating a
+    // released UUID.
+    await pool.restoreOwnedDeviceSessionsForMcpSession?.(
+      [...new Set<string>(ids)],
+      socketSessionId,
+    );
     await pool.restoreAutolockSessionsForMcpSession?.([...new Set<string>(ids)], socketSessionId);
   }
 

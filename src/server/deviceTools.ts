@@ -8855,6 +8855,8 @@ export function registerDeviceTools() {
         false,
         readinessReservationOwners,
         verifiedAndroidAvdIdentity,
+        undefined,
+        args.__mcpSessionId,
       );
     recordAcquiredSessionReadiness(daemonState, boundSessionId, achievedReadiness);
     return boundSessionId;

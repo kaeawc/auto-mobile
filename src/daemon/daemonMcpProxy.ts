@@ -2253,7 +2253,7 @@ export class DaemonMcpProxy {
           : this.withBoundSessionUuid(callerArgs, usesDeviceSelector);
     const canUseSurvivingSession = this.canUseSurvivingSession(callerArgs, usesDeviceSelector);
     const forwardedArgs = this.withToolSelectionProfile(
-      this.withOwnedSessionCapabilities(routingArgs, usesDeviceSelector && !isSessionAcquisition),
+      this.withOwnedSessionCapabilities(routingArgs, usesDeviceSelector || isSessionAcquisition),
     );
     return {
       forwardedArgs,

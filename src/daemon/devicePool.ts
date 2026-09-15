@@ -616,6 +616,15 @@ export class DevicePool {
   private readonly idGenerator: IdGenerator;
   private lastUsedAtMarker = 0;
   private lastReleasedDeviceId: string | null = null;
+  /**
+   * Every daemon-MCP connection that acquired a result-minted device session.
+   *
+   * This is deliberately separate from the autolock routing maps below:
+   * ordinary acquisitions do not opt into implicit autolock routing, but they
+   * still own their exact device session and must not let another connection
+   * adopt it through an idempotent getAndroid/getApple/startDevice call.
+   */
+  private readonly mcpSessionAcquiredDeviceSessions = new Map<string, Set<string>>();
   private readonly mcpSessionAcquiredAutolocks = new Map<string, Set<string>>();
   private readonly mcpSessionAutolockMap: Map<string, string> = new Map();
   private readonly mcpSessionRecoveryDevices: Map<string, McpSessionRecoveryLease> = new Map();
@@ -808,8 +817,10 @@ export class DevicePool {
 
     // Expiry has no caller available to return the device to the pool. Explicit
     // release callers retain their ordered cleanup and release flow, while
-    // autolock metadata is still removed when their session ends.
+    // connection ownership and autolock metadata are removed when their session
+    // ends.
     this.sessionManager.onSessionRelease((sessionId, deviceId, releaseReason) => {
+      this.clearMcpSessionOwnership(sessionId);
       if (releaseReason === "lazy-expiry" || releaseReason === "cleanup-expired") {
         this.releaseExpiredSessionDevice(sessionId, deviceId);
       } else {
@@ -6511,6 +6522,7 @@ export class DevicePool {
     readinessReservationOwners?: ReadonlySet<symbol>,
     verifiedAndroidAvdIdentity?: DeviceInfo,
     expectedExistingSessionDeviceId?: string,
+    mcpSessionId?: string,
   ): Promise<string> {
     return await this.assignmentMutex.runExclusive(async () => {
       throwIfRequestAborted();
@@ -6583,6 +6595,7 @@ export class DevicePool {
             deviceId,
             expectedExistingSessionDeviceId,
           );
+          this.assertMcpSessionOwnsDeviceSession(mcpSessionId, existingSession, device);
           return this.reuseExistingDeviceSession(deviceId, existingSession.sessionId, sourceImage);
         }
 
@@ -6625,6 +6638,7 @@ export class DevicePool {
           this.stableDeviceIdFor(device),
         ),
       );
+      this.recordMcpSessionOwnership(mcpSessionId, sessionId);
       logger.info(`Bound device ${deviceId} to session ${sessionId}`);
       return sessionId;
     });
@@ -6750,6 +6764,33 @@ export class DevicePool {
     const refreshedSession = await this.sessionManager.getOrCreateSession(existingSessionId);
     logger.info(`Reusing existing session ${refreshedSession.sessionId} for device ${deviceId}`);
     return refreshedSession.sessionId;
+  }
+
+  private assertMcpSessionOwnsDeviceSession(
+    mcpSessionId: string | undefined,
+    session: Session,
+    device: PooledDevice,
+  ): void {
+    if (
+      mcpSessionId !== undefined &&
+      (!this.mcpSessionAcquiredDeviceSessions.get(mcpSessionId)?.has(session.sessionId) ||
+        !this.isSessionAssignmentCurrent(device, session) ||
+        !this.sessionManager.isAdmittedForAutomation(session))
+    ) {
+      throw new ActionableError(
+        `Device '${device.id}' is already assigned to another session. ` +
+          "Acquire a different device or wait for its owner to release it.",
+      );
+    }
+  }
+
+  private recordMcpSessionOwnership(mcpSessionId: string | undefined, sessionId: string): void {
+    if (!mcpSessionId) {
+      return;
+    }
+    const acquired = this.mcpSessionAcquiredDeviceSessions.get(mcpSessionId) ?? new Set<string>();
+    acquired.add(sessionId);
+    this.mcpSessionAcquiredDeviceSessions.set(mcpSessionId, acquired);
   }
 
   private assertRuntimeIdentity(
@@ -7664,6 +7705,7 @@ export class DevicePool {
       const acquired = this.mcpSessionAcquiredAutolocks.get(mcpSessionId) ?? new Set<string>();
       acquired.add(sessionId);
       this.mcpSessionAcquiredAutolocks.set(mcpSessionId, acquired);
+      this.recordMcpSessionOwnership(mcpSessionId, sessionId);
     }
     await this.persistAcquiredAutolockSession(
       device,
@@ -7998,6 +8040,31 @@ export class DevicePool {
   }
 
   /**
+   * Restore ownership of live result-minted sessions after a daemon socket
+   * reconnect. Unlike autolock restoration, this intentionally does not select
+   * an implicit routing default or mutate persisted autolock metadata.
+   */
+  async restoreOwnedDeviceSessionsForMcpSession(
+    sessionIds: readonly string[],
+    mcpSessionId: string,
+  ): Promise<void> {
+    await this.assignmentMutex.runExclusive(() => {
+      for (const sessionId of sessionIds) {
+        const session = this.sessionManager.getSession(sessionId);
+        const device = session ? this.devices.get(session.assignedDevice) : undefined;
+        if (
+          session &&
+          device &&
+          this.isSessionAssignmentCurrent(device, session) &&
+          this.sessionManager.isAdmittedForAutomation(session)
+        ) {
+          this.recordMcpSessionOwnership(mcpSessionId, sessionId);
+        }
+      }
+    });
+  }
+
+  /**
    * Associate a live autolock session with a reconnected MCP client session.
    */
   async attachAutolockSessionToMcpSession(
@@ -8114,6 +8181,15 @@ export class DevicePool {
     for (const [mcpSessionId, mappedSessionId] of this.mcpSessionAutolockMap) {
       if (mappedSessionId === sessionId) {
         this.mcpSessionAutolockMap.delete(mcpSessionId);
+      }
+    }
+  }
+
+  private clearMcpSessionOwnership(sessionId: string): void {
+    for (const [mcpSessionId, acquired] of this.mcpSessionAcquiredDeviceSessions) {
+      acquired.delete(sessionId);
+      if (acquired.size === 0) {
+        this.mcpSessionAcquiredDeviceSessions.delete(mcpSessionId);
       }
     }
   }

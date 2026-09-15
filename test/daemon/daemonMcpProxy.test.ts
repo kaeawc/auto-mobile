@@ -146,6 +146,12 @@ describe("DaemonMcpProxy", () => {
       await proxy.callTool("getApple", {});
       await proxy.callTool("setActiveDevice", { deviceId: "free-device-c" });
 
+      expect(fakeClient.callToolCalls[1]).toEqual({
+        toolName: "getApple",
+        params: {
+          [DAEMON_OWNED_SESSIONS_PARAM]: ["session-a"],
+        },
+      });
       expect(fakeClient.callToolCalls.at(-1)).toEqual({
         toolName: "setActiveDevice",
         params: {

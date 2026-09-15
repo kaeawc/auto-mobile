@@ -411,6 +411,79 @@ describe("platform device preparation tools", () => {
     expect(result.deviceIdentity).toMatchObject({ simulatorUdid: simulator.deviceId });
   });
 
+  test.each([
+    [
+      "getAndroid",
+      { deviceId: "emulator-5554" },
+      { platform: "android" as const, name: "Pixel", deviceId: "emulator-5554" },
+    ],
+    [
+      "getApple",
+      { deviceId: "ios-owner-fence" },
+      { platform: "ios" as const, name: "iPhone", deviceId: "ios-owner-fence" },
+    ],
+    [
+      "startDevice",
+      { platform: "android" as const, deviceId: "emulator-5554" },
+      { platform: "android" as const, name: "Pixel", deviceId: "emulator-5554" },
+    ],
+  ] as const)(
+    "%s fences an exact live device session to its MCP owner when autolock is disabled",
+    async (toolName, request, device) => {
+      sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+      const pool = new DevicePool(
+        sessionManager,
+        "daemon-session",
+        timer,
+        new FakeInstalledAppsRepository(),
+        deviceUtils,
+        new DefaultRetryExecutor(timer),
+      );
+      await pool.initializeWithDevices([device]);
+      DaemonState.getInstance().initialize(sessionManager, pool);
+      deviceUtils.setBootedDevices(device.platform, [device]);
+      matcher.setBootedResult(device);
+
+      const owner = await callTool(toolName, {
+        ...request,
+        __mcpSessionId: "owner-connection",
+      });
+      const sameOwner = await callTool(toolName, {
+        ...request,
+        __mcpSessionId: "owner-connection",
+      });
+
+      expect(sameOwner.sessionUuid).toBe(owner.sessionUuid);
+      await pool.restoreOwnedDeviceSessionsForMcpSession(
+        [owner.sessionUuid as string],
+        "reconnected-owner-connection",
+      );
+      const reconnectedOwner = await callTool(toolName, {
+        ...request,
+        __mcpSessionId: "reconnected-owner-connection",
+      });
+      expect(reconnectedOwner.sessionUuid).toBe(owner.sessionUuid);
+      await expect(
+        callTool(toolName, {
+          ...request,
+          __mcpSessionId: "unrelated-connection",
+        }),
+      ).rejects.toThrow(
+        `Device '${device.deviceId}' is already assigned to another session. ` +
+          "Acquire a different device or wait for its owner to release it.",
+      );
+
+      await sessionManager.releaseSession(owner.sessionUuid as string, "explicit-release");
+      await pool.releaseDevice(device.deviceId, owner.sessionUuid as string);
+
+      const successor = await callTool(toolName, {
+        ...request,
+        __mcpSessionId: "unrelated-connection",
+      });
+      expect(successor.sessionUuid).not.toBe(owner.sessionUuid);
+    },
+  );
+
   test("getApple ignores daemon deadline provenance before strict schema validation", async () => {
     const simulator: DeviceInfo = {
       platform: "ios",

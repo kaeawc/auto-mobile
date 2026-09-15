@@ -50,6 +50,10 @@ export interface DaemonStateAccess {
       sessionIds: readonly string[],
       mcpSessionId: string,
     ): Promise<void>;
+    restoreOwnedDeviceSessionsForMcpSession?(
+      sessionIds: readonly string[],
+      mcpSessionId: string,
+    ): Promise<void>;
     refreshDevices(): Promise<number>;
     getStats(): DevicePoolStats;
     releaseDevice(deviceId: string, expectedSessionId: string): Promise<void>;

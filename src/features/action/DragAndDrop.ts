@@ -369,7 +369,10 @@ export class DragAndDrop extends BaseVisualChange {
     if (!synced?.hierarchy) {
       return null;
     }
-    return client.convertToViewHierarchyResult(synced.hierarchy);
+    return {
+      ...client.convertToViewHierarchyResult(synced.hierarchy),
+      frameContext: synced.frameContext,
+    };
   }
 
   private async refreshViewHierarchy(signal?: AbortSignal): Promise<ViewHierarchyResult | null> {

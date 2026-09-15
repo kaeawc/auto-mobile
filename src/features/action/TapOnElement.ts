@@ -1155,6 +1155,7 @@ export class TapOnElement extends BaseVisualChange {
     timeoutMs: number,
     screenSize?: ObserveResult["screenSize"],
     signal?: AbortSignal,
+    forceFresh: boolean = false,
   ): Promise<ViewHierarchyResult | null> {
     throwIfAborted(signal);
     const effectiveTimeoutMs = Math.max(0, timeoutMs);
@@ -1174,6 +1175,9 @@ export class TapOnElement extends BaseVisualChange {
       }
       case "ios": {
         const xcTestClient = IOSCtrlProxyClient.getInstance(this.device);
+        if (forceFresh) {
+          xcTestClient.invalidateCache();
+        }
         const rawHierarchy = await xcTestClient.getAccessibilityHierarchy(
           undefined,
           undefined,
@@ -1963,7 +1967,7 @@ export class TapOnElement extends BaseVisualChange {
             // Check if element is already focused
             const isFocused = this.finder.isElementFocused(element);
 
-            if (isFocused) {
+            if (isFocused && !options.container) {
               logger.info(`Element is already focused, no action needed`);
               perf.end();
               return {
@@ -1994,7 +1998,12 @@ export class TapOnElement extends BaseVisualChange {
             );
           }
           if (options.container) {
-            const fresh = await this.refreshViewHierarchy(5000, observeResult.screenSize, signal);
+            const fresh = await this.refreshViewHierarchy(
+              5000,
+              observeResult.screenSize,
+              signal,
+              true,
+            );
             if (!fresh) {
               throw new ActionableError(
                 "target_not_actionable: scoped target could not be refreshed before dispatch",
@@ -2195,7 +2204,12 @@ export class TapOnElement extends BaseVisualChange {
         };
       }
       if (scopedFocus && result.success) {
-        const hierarchy = result.observation?.viewHierarchy;
+        const hierarchy = await this.refreshViewHierarchy(
+          5000,
+          result.observation?.screenSize,
+          signal,
+          true,
+        );
         const focused = hierarchy
           ? this.findElementInHierarchy(options, hierarchy).selection
           : undefined;

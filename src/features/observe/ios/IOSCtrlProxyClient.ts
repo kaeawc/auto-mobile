@@ -2423,7 +2423,11 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     disableAllFiltering?: boolean,
     signal?: AbortSignal,
     timeoutMs?: number,
-  ): Promise<{ hierarchy: XCTestHierarchy; perfTiming?: CtrlProxyPerfTiming } | null> {
+  ): Promise<{
+    hierarchy: XCTestHierarchy;
+    perfTiming?: CtrlProxyPerfTiming;
+    frameContext?: string;
+  } | null> {
     return this.hierarchy.requestHierarchySync(perf, disableAllFiltering, signal, timeoutMs);
   }
 

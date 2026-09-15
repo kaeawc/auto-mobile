@@ -40,6 +40,35 @@ describe.each(["android", "ios"] as const)("%s scoped action conformance", (plat
   const timer = new FakeTimer();
   const finder = new DefaultElementFinder();
 
+  test.each([true, false])("focus verifies a fresh scoped field, focused=%s", async (focused) => {
+    const focusTimer = new FakeTimer();
+    focusTimer.enableAutoAdvance();
+    const tap = new TapOnElement(device, adb, {
+      timer: focusTimer,
+      tapStrategy: new FakeTapStrategy(),
+      elementSelector: new DefaultElementSelector(finder),
+    });
+    const after = structuredClone(hierarchy);
+    finder.resolveQuery(after, query).node!.$.focused = focused;
+    const action = tap as any;
+    let reads = 0;
+    const initial = { viewHierarchy: hierarchy, screenSize: { width: 100, height: 100 } };
+    action.observedInteraction = async (block: (value: unknown) => Promise<unknown>) => ({
+      ...(await block(initial)),
+      observation: initial,
+    });
+    action.refreshViewHierarchy = async () => (++reads === 1 ? hierarchy : after);
+    action.prepareSelectionCapture = async () => null;
+    action.executeAndroidTap = async () => undefined;
+    action.executeiOSTap = async () => undefined;
+    const result = await tap.execute({ ...query, action: "focus" });
+    expect(reads).toBe(2);
+    expect(result.success).toBe(focused);
+    if (!focused) {
+      expect(result.error).toContain("no text was sent");
+    }
+  });
+
   test.each(["tap", "doubleTap", "longPress", "focus"] as const)(
     "%s resolves the same descendant",
     (action) => {
@@ -144,4 +173,29 @@ describe.each(["android", "ios"] as const)("%s scoped action conformance", (plat
       }
     },
   );
+});
+
+test("a native scoped tap rejection preserves its frame identity and sends no ADB fallback", async () => {
+  const adb = new FakeAdbClient();
+  const tap = new TapOnElement(
+    { deviceId: "scoped-native", platform: "android", name: "test" },
+    adb,
+    {
+      timer: new FakeTimer(),
+      tapStrategy: new FakeTapStrategy(),
+    },
+  );
+  const calls: unknown[][] = [];
+  const action = tap as any;
+  action.accessibilityService = {
+    requestTapCoordinates: async (...args: unknown[]) => {
+      calls.push(args);
+      return { success: false, error: "Stale frame context" };
+    },
+  };
+  await expect(action.executeScopedCoordinateTap("tap", 20, 30, 50, "capture-42")).rejects.toThrow(
+    "scoped gesture rejected",
+  );
+  expect(calls).toEqual([[20, 30, 50, 5000, undefined, "capture-42"]]);
+  expect(adb.getCommandCalls()).toHaveLength(0);
 });

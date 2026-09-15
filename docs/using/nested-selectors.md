@@ -175,13 +175,13 @@ Pixel_9 emulator and an iPhone 16 / iOS 26.5 simulator using the Playground
 fixtures in this change. The server used an isolated database and real native
 CtrlProxy/XCTest dispatch.
 
-| Check                                                     | Android | iOS                                 |
-| --------------------------------------------------------- | ------- | ----------------------------------- |
-| Scoped skeleton preserves `cart_A/item_42` ancestry       | Passed  | Passed                              |
-| Scoped input and clear change only the requested quantity | Passed  | Passed                              |
-| Scoped tap removes only `cart_A/item_42/remove`           | Passed  | Passed                              |
-| Peer `cart_A/item_73` and `cart_B/item_42` stay unchanged | Passed  | Passed                              |
-| Scoped absence resolves existing ancestors                | Passed  | Covered by deterministic wait tests |
+| Check                                                     | Android | iOS    |
+| --------------------------------------------------------- | ------- | ------ |
+| Scoped skeleton preserves `cart_A/item_42` ancestry       | Passed  | Passed |
+| Scoped input and clear change only the requested quantity | Passed  | Passed |
+| Scoped tap removes only `cart_A/item_42/remove`           | Passed  | Passed |
+| Peer `cart_A/item_73` and `cart_B/item_42` stay unchanged | Passed  | Passed |
+| Scoped absence resolves existing ancestors                | Passed  | Passed |
 
 The shared conformance/property tests additionally cover nested noninteractive
 ancestors, wrappers, overlapping peers, windows, indices, ambiguity, missing

@@ -44,6 +44,7 @@ describe("listDeviceImages", function () {
     });
     const payload = JSON.parse(response.content[0].text);
 
+    expect(response.structuredContent).toEqual(payload);
     expect(payload.images).toHaveLength(1);
     expect(payload.images[0].capabilityInventory).toEqual({
       schemaVersion: 1,

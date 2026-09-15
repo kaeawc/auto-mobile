@@ -104,7 +104,7 @@ describe("acceptance discovery presentation capability (issue #7144)", () => {
     expect(getStructuredField(result, "receivedOrder")).toBeNull();
   });
 
-  test("the live harness proxy overwrites a client-forged order with its configured capability", async () => {
+  test("the live harness proxy overwrites a client-forged order and authenticates every acceptance call", async () => {
     const priorLive = process.env.AUTOMOBILE_ACCEPTANCE_LIVE;
     const priorOrder = process.env.AUTOMOBILE_ACCEPTANCE_DISCOVERY_ORDER;
     const priorCapability = process.env[ACCEPTANCE_DISCOVERY_CAPABILITY_ENV];
@@ -136,10 +136,32 @@ describe("acceptance discovery presentation capability (issue #7144)", () => {
           [INTERNAL_ACCEPTANCE_DISCOVERY_CAPABILITY_PARAM]: "forged-by-client",
         },
       });
+      await client.callTool({
+        name: "killDevice",
+        arguments: {
+          device: {
+            platform: "android",
+            name: "acceptance-duplicate",
+            deviceId: "emulator-5562",
+          },
+        },
+      });
 
       expect(daemon.callToolCalls).toContainEqual({
         toolName: "listDevices",
         params: {
+          [INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM]: "reverse",
+          [INTERNAL_ACCEPTANCE_DISCOVERY_CAPABILITY_PARAM]: CAPABILITY,
+        },
+      });
+      expect(daemon.callToolCalls).toContainEqual({
+        toolName: "killDevice",
+        params: {
+          device: {
+            platform: "android",
+            name: "acceptance-duplicate",
+            deviceId: "emulator-5562",
+          },
           [INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM]: "reverse",
           [INTERNAL_ACCEPTANCE_DISCOVERY_CAPABILITY_PARAM]: CAPABILITY,
         },

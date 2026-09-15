@@ -24,7 +24,7 @@ import {
   PlatformDeviceManager,
 } from "../utils/deviceUtils";
 import { type DiscoverySource, sourcesForPlatform } from "../utils/discoverySource";
-import { createJSONToolResponse, createStructuredToolResponse } from "../utils/toolUtils";
+import { createStructuredToolResponse } from "../utils/toolUtils";
 import { ActionableError, BootedDevice, DeviceInfo, Platform, SomePlatform } from "../models";
 import type {
   DeviceMatchCriteria,
@@ -738,7 +738,7 @@ function createKillDeviceResponse(
     return createToolErrorResponse(DEVICE_ALREADY_STOPPED_ERROR_CODE, alreadyStoppedMessage);
   }
 
-  return createJSONToolResponse({
+  return createStructuredToolResponse({
     message: `${args.device.platform} '${args.device.name}' shutdown successfully`,
     udid: args.device.deviceId,
     name: args.device.name,
@@ -3369,7 +3369,7 @@ function createTeardownResponse(
   resolved?: DeviceInfo,
   timing?: unknown,
 ) {
-  return createJSONToolResponse({
+  return createStructuredToolResponse({
     operationId: args.operationId,
     mode: args.mode,
     state,
@@ -4817,7 +4817,7 @@ function createProvisionDeviceResponse(result: Record<string, unknown>) {
   const resourceFailure = resources?.success === false;
   const sessionId = typeof result.sessionId === "string" ? result.sessionId : undefined;
   return {
-    ...createJSONToolResponse({
+    ...createStructuredToolResponse({
       message: `${device.platform} '${device.name}' provisioned (${result.lifecycleState})${resourceFailure ? "; requested resource configuration was not fully applied" : ""}`,
       ...result,
       // `sessionId` remains the persisted daemon-internal handle for replay and
@@ -6029,7 +6029,7 @@ export function registerDeviceTools() {
       const deviceUtils = deps.deviceManagerFactory();
       const imageList = await deviceUtils.listDeviceImages(args.platform);
 
-      return createJSONToolResponse({
+      return createStructuredToolResponse({
         message: `Found ${imageList.length} available ${args.platform} AVDs`,
         images: imageList,
         count: imageList.length,
@@ -8927,7 +8927,7 @@ export function registerDeviceTools() {
     // #5870: emit the session handle as `sessionUuid` — the key every consumer
     // tool's schema declares — so the obvious copy-paste is correct.
     const { sessionId: sessionUuid, ...resultWithoutSessionId } = result;
-    return createJSONToolResponse({
+    return createStructuredToolResponse({
       message: `${device.platform} '${device.name}' is ready (${source})`,
       ...resultWithoutSessionId,
       sessionUuid,

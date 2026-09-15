@@ -373,8 +373,11 @@ export interface DaemonMcpProxyConfig {
    */
   staticToolDefinitionsProvider?: () => ProxiedToolDefinition[];
   /**
-   * Private live-acceptance presentation configuration. It is set only while
-   * constructing the dedicated harness proxy; MCP tool callers cannot set it.
+   * Private live-acceptance configuration. It is set only while constructing
+   * the dedicated harness proxy; MCP tool callers cannot set it.
+   *
+   * Its signed internal arguments control discovery presentation where needed
+   * and retain structured tool payloads for the acceptance contract.
    */
   acceptanceDiscovery?: {
     order: "forward" | "reverse";
@@ -2109,9 +2112,9 @@ export class DaemonMcpProxy {
     delete callerArgs[DAEMON_OWNED_SESSIONS_PARAM];
     delete callerArgs[DAEMON_RELEASED_SESSION_PARAM];
     delete callerArgs[DAEMON_TOOL_SELECTION_PROFILE_PARAM];
-    // The acceptance presentation controls are configuration of the dedicated
-    // harness proxy, never client-provided tool arguments. Remove both before
-    // routing so a caller cannot forge or override that configuration.
+    // The acceptance controls are configuration of the dedicated harness proxy,
+    // never client-provided tool arguments. Remove both before routing so a
+    // caller cannot forge or override that configuration.
     delete callerArgs[INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM];
     delete callerArgs[INTERNAL_ACCEPTANCE_DISCOVERY_CAPABILITY_PARAM];
     // Device-session acquisition (including booted provisionDevice) mints a NEW
@@ -2128,7 +2131,7 @@ export class DaemonMcpProxy {
       callerArgs,
       isSessionAcquisition,
     );
-    const forwardedArgs = this.withAcceptanceDiscoveryConfiguration(name, routedArgs);
+    const forwardedArgs = this.withAcceptanceConfiguration(routedArgs);
     const forwardedSessionUuid = this.sessionUuidFromArgs(forwardedArgs);
     this.retainReleaseEpochReference(forwardedSessionUuid);
     // Snapshot the release epoch at forward time. If a session-released signal for
@@ -2213,15 +2216,9 @@ export class DaemonMcpProxy {
     }
   }
 
-  private withAcceptanceDiscoveryConfiguration(
-    name: string,
-    args: Record<string, unknown>,
-  ): Record<string, unknown> {
+  private withAcceptanceConfiguration(args: Record<string, unknown>): Record<string, unknown> {
     const acceptanceDiscovery = this.config.acceptanceDiscovery;
-    if (
-      !acceptanceDiscovery ||
-      (name !== "listDevices" && name !== "getAndroid" && name !== "getApple")
-    ) {
+    if (!acceptanceDiscovery) {
       return args;
     }
     return {

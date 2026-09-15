@@ -85,6 +85,11 @@ export type BuildMismatchReason = "autoStartDisabled" | "cooldown" | "restartMis
 
 const DAEMON_MCP_HEARTBEAT_INTERVAL_MS = 2_000;
 const COLD_RESOURCE_CONNECT_RETRY_DELAYS_MS = [250, 1_000, 4_000] as const;
+// These inventory tools never operate a device or mint a device session. They
+// normally retain a live binding's policy, but after that binding is terminally
+// released they must be able to discover the stable target for an explicit
+// getAndroid/getApple reacquisition (#7144).
+const SESSIONLESS_DEVICE_DISCOVERY_TOOLS = ["listDevices", "listDeviceImages"] as const;
 
 /** A transport failed before dispatch, rather than a reconciliation policy gate. */
 class DaemonPreflightConnectionError extends DaemonUnavailableError {
@@ -2233,20 +2238,28 @@ export class DaemonMcpProxy {
     callerArgs: Record<string, unknown>,
     isSessionAcquisition: boolean,
   ): { forwardedArgs: Record<string, unknown>; allowReleasedSession: boolean } {
+    const isTerminalSessionlessDiscovery =
+      this.terminalBoundSession !== undefined &&
+      this.sessionUuidFromArgs(callerArgs) === undefined &&
+      (SESSIONLESS_DEVICE_DISCOVERY_TOOLS as readonly string[]).includes(name);
     const usesDeviceSelector =
       this.toolTargetsDevice(name) &&
       this.hasImplicitDeviceSelector(callerArgs, name === "setActiveDevice");
     const routingArgs =
       name === SET_TOOL_ENABLED_TOOL_NAME
         ? this.withAcquiredDeviceRoute(callerArgs)
-        : isSessionAcquisition
+        : isSessionAcquisition || isTerminalSessionlessDiscovery
           ? callerArgs
           : this.withBoundSessionUuid(callerArgs, usesDeviceSelector);
     const canUseSurvivingSession = this.canUseSurvivingSession(callerArgs, usesDeviceSelector);
     const forwardedArgs = this.withToolSelectionProfile(
       this.withOwnedSessionCapabilities(routingArgs, usesDeviceSelector && !isSessionAcquisition),
     );
-    return { forwardedArgs, allowReleasedSession: isSessionAcquisition || canUseSurvivingSession };
+    return {
+      forwardedArgs,
+      allowReleasedSession:
+        isSessionAcquisition || isTerminalSessionlessDiscovery || canUseSurvivingSession,
+    };
   }
 
   private toolTargetsDevice(name: string): boolean {

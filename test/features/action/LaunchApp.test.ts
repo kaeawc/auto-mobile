@@ -123,6 +123,98 @@ describe("LaunchApp", () => {
     expect(fakeAwaitIdle.wasMethodCalled("initializeUiStabilityTracking")).toBe(true);
   });
 
+  test("retries a transient Android offline process check", async () => {
+    fakeTimer.enableAutoAdvance();
+    fakeAdb.setForegroundApp({ packageName, userId: 0 });
+    fakeAdb.setCommandResponse("shell dumpsys activity processes", {
+      stdout: "123:com.example.app/u0a123\n",
+      stderr: "",
+    });
+    fakeObserveScreen.setObserveResult(createObserveResult(packageName));
+
+    let processChecks = 0;
+    const originalExecuteCommand = fakeAdb.executeCommand.bind(fakeAdb);
+    const executeSpy = spyOn(fakeAdb, "executeCommand").mockImplementation(
+      async (
+        command,
+        timeoutMs,
+        maxBuffer,
+        noRetry,
+        signal,
+        waitForProcessSettlementAfterAbort,
+      ) => {
+        if (
+          command === `shell dumpsys activity processes ${packageName}` &&
+          processChecks++ === 0
+        ) {
+          throw new Error("adb: device offline");
+        }
+        return originalExecuteCommand(
+          command,
+          timeoutMs,
+          maxBuffer,
+          noRetry,
+          signal,
+          waitForProcessSettlementAfterAbort,
+        );
+      },
+    );
+
+    try {
+      const result = await launchApp.execute(packageName, false, false);
+
+      expect(result.success).toBe(true);
+      expect(result.alreadyForeground).toBe(true);
+      expect(processChecks).toBe(2);
+      expect(fakeAdb.getExecutedArgv()).toContainEqual([
+        "shell",
+        "dumpsys",
+        "activity",
+        "processes",
+        packageName,
+      ]);
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
+
+  test("bounds Android offline process recovery", async () => {
+    fakeTimer.enableAutoAdvance();
+
+    let processChecks = 0;
+    const originalExecuteCommand = fakeAdb.executeCommand.bind(fakeAdb);
+    const executeSpy = spyOn(fakeAdb, "executeCommand").mockImplementation(
+      async (
+        command,
+        timeoutMs,
+        maxBuffer,
+        noRetry,
+        signal,
+        waitForProcessSettlementAfterAbort,
+      ) => {
+        if (command === `shell dumpsys activity processes ${packageName}`) {
+          processChecks += 1;
+          throw new Error("adb: device offline");
+        }
+        return originalExecuteCommand(
+          command,
+          timeoutMs,
+          maxBuffer,
+          noRetry,
+          signal,
+          waitForProcessSettlementAfterAbort,
+        );
+      },
+    );
+
+    try {
+      await expect(launchApp.execute(packageName, false, false)).rejects.toThrow("device offline");
+      expect(processChecks).toBe(3);
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
+
   // The already-foreground branch reads the foreground app and THEN observes, so
   // another app (or a system surface) can take over in between. Reconcile that
   // observation through the same validation path a real launch uses instead of
@@ -693,6 +785,30 @@ describe("LaunchApp", () => {
     expect(result.success).toBe(false);
     expect(result.observation).toBeUndefined();
     expect(fakeObserveScreen.getExecuteCallCount()).toBeGreaterThan(1);
+  });
+
+  test("waits through the Android CtrlProxy reconnect cooldown", async () => {
+    fakeTimer.enableAutoAdvance();
+    const unverifiedObservation = {
+      ...createObserveResult(packageName),
+      freshness: {
+        isFresh: false,
+        verified: false,
+        warning: "Accessibility service is reconnecting after a transient ADB reset",
+      },
+    };
+
+    fakeAdb.setForegroundApp({ packageName, userId: 0 });
+    fakeAdb.setCommandResponse("shell dumpsys activity processes", { stdout: "0\n", stderr: "" });
+    fakeObserveScreen.setObserveResult(() =>
+      fakeTimer.now() < 10_500 ? unverifiedObservation : createObserveResult(packageName),
+    );
+
+    const result = await launchApp.execute(packageName, false, false);
+
+    expect(result.success).toBe(true);
+    expect(result.observation?.freshness?.verified).not.toBe(false);
+    expect(fakeTimer.now()).toBeGreaterThanOrEqual(10_500);
   });
 
   // Issue #6220 follow-up (P1 review finding on #6239): a launch observation

@@ -1296,6 +1296,34 @@ describe("createIosCtrlProxyRunnerInspector lifecycle", () => {
     expect(created).toBe(false);
   });
 
+  test("treats a reachable pre-existing client as running when manager port state is stale", async () => {
+    const existing = {
+      getSupportedCommands: async () => [...IOS_RUNNER_FEATURE_COMMANDS],
+      getSupportedFeatures: async () => [...IOS_RUNNER_FEATURE_FLAGS],
+      close: async () => {},
+    };
+    const hooks: IosRunnerInspectorHooks = {
+      getManager: () => ({
+        ...runningManager,
+        isRunning: async () => false,
+      }),
+      getExistingClient: () => existing,
+      createClient: () => {
+        throw new Error("should use the resident client");
+      },
+    };
+
+    const inspector = createIosCtrlProxyRunnerInspector(
+      () => simctlReturning([{ name: "iPhone 15", deviceId: "SIM-1" }]) as any,
+      new FakeLogger(),
+      hooks,
+    );
+    const inspections = await inspector.inspectBootedRunners();
+
+    expect(inspections[0].running).toBe(true);
+    expect(inspections[0].supportedCommands).toEqual([...IOS_RUNNER_FEATURE_COMMANDS]);
+  });
+
   test("closes the created probe client even when the command read throws", async () => {
     let closes = 0;
     const probe = {
@@ -1466,6 +1494,45 @@ describe("createIosObserveRoundTripInspector lifecycle", () => {
     expect(closes).toBe(0);
     expect(inspections[0].runnerPort).toBe(8790);
     expect(inspections[0].clientPort).toBe(8765);
+  });
+
+  test("uses a healthy resident client when manager port state no longer reaches its runner", async () => {
+    const existing = {
+      getConnectionPortForDiagnostics: () => 8765,
+      requestHierarchySync: async () => ({
+        hierarchy: { updatedAt: 1, packageName: "SpringBoard", hierarchy: {} } as any,
+      }),
+      convertToViewHierarchyResult: () => viewHierarchy as any,
+      close: async () => {},
+    };
+    const hooks: IosObserveRoundTripInspectorHooks = {
+      getManager: () => ({
+        isInstalled: async () => true,
+        isRunning: async () => false,
+        getServicePort: () => 8767,
+        getReportedRunnerPort: async () => 8765,
+      }),
+      getExistingClient: () => existing,
+      createClient: () => {
+        throw new Error("should use the resident client");
+      },
+      elementsBuilder,
+    };
+
+    const inspector = createIosObserveRoundTripInspector(
+      () => simctlReturning([{ name: "iPhone 15", deviceId: "SIM-1" }]) as any,
+      new FakeLogger(),
+      hooks,
+    );
+    const inspections = await inspector.inspectBootedObserveRoundTrips();
+
+    expect(inspections[0]).toMatchObject({
+      runnerPort: 8765,
+      clientPort: 8765,
+      connected: true,
+      hierarchyError: null,
+      elementCount: 2,
+    });
   });
 
   test("reports the client port after the hierarchy request can resync it", async () => {

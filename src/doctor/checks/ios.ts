@@ -148,6 +148,25 @@ interface IosRunnerProbeClient {
   close(): Promise<void>;
 }
 
+interface SelectedIosRunnerProbe {
+  client: IosRunnerProbeClient;
+  closeAfterUse: boolean;
+}
+
+function selectIosRunnerProbe(
+  existing: IosRunnerProbeClient | null,
+  managerReportsRunning: boolean,
+  create: () => IosRunnerProbeClient,
+): SelectedIosRunnerProbe | null {
+  if (existing !== null) {
+    return { client: existing, closeAfterUse: false };
+  }
+  if (managerReportsRunning) {
+    return { client: create(), closeAfterUse: true };
+  }
+  return null;
+}
+
 /** Minimal iOS runner client surface for the doctor observe round-trip check. */
 interface IosObserveRoundTripClient {
   getConnectionPortForDiagnostics(): number;
@@ -237,22 +256,25 @@ export function createIosCtrlProxyRunnerInspector(
         };
         const manager = hooks.getManager(device);
         const installed = await manager.isInstalled();
-        const running = installed ? await manager.isRunning() : false;
+        let running = installed ? await manager.isRunning() : false;
 
         let supportedCommands: string[] | null = null;
         let supportedFeatures: string[] | null = null;
-        if (running) {
+        const existing = hooks.getExistingClient(device.deviceId);
+        const selectedProbe = selectIosRunnerProbe(existing, running, () =>
+          hooks.createClient(device),
+        );
+        if (selectedProbe !== null) {
           // Don't disturb a client someone else owns (e.g. the daemon's live
           // session): if one already exists, read through it and leave its
           // lifecycle alone. Otherwise open a throwaway probe client and close it
           // afterwards so doctor leaves no persistent runner connection or SDK
           // polling timer behind (especially for the one-shot CLI invocation).
-          const existing = hooks.getExistingClient(device.deviceId);
-          const probe = existing ?? hooks.createClient(device);
           try {
-            supportedCommands = await probe.getSupportedCommands();
+            supportedCommands = await selectedProbe.client.getSupportedCommands();
             currentProbe.signal?.throwIfAborted();
-            supportedFeatures = await probe.getSupportedFeatures();
+            supportedFeatures = await selectedProbe.client.getSupportedFeatures();
+            running = running || supportedCommands !== null;
           } catch (error) {
             // Treated as an unreachable runner (versionStatus=unknown), not a hard
             // failure: doctor still reports installed/running for the simulator.
@@ -261,8 +283,8 @@ export function createIosCtrlProxyRunnerInspector(
               error,
             );
           } finally {
-            if (existing === null) {
-              await probe.close();
+            if (selectedProbe.closeAfterUse) {
+              await selectedProbe.client.close();
             }
           }
         }
@@ -327,14 +349,16 @@ export function createIosObserveRoundTripInspector(
         };
         const manager = hooks.getManager(device);
         const servicePort = manager.getServicePort();
+        const existing = hooks.getExistingClient(device.deviceId);
+        let clientPort = existing?.getConnectionPortForDiagnostics() ?? servicePort;
         // The runner's *actual* bound port, read from its /health self-report, so
         // a runner that bound the wrong port surfaces as a real mismatch instead
         // of the service port being compared to itself (issue #2735). Falls back
-        // to the service port when no runner reports a port (older or unreachable
-        // runner) so a healthy runner is never falsely flagged.
+        // to the already-connected client's port before the manager's service
+        // port. A resident client remains authoritative when manager allocation
+        // bookkeeping was rebuilt in a different multi-simulator order.
         const reportedRunnerPort = await manager.getReportedRunnerPort();
-        const runnerPort = reportedRunnerPort ?? servicePort;
-        let clientPort = servicePort;
+        let runnerPort = reportedRunnerPort ?? clientPort;
         let connected = false;
         let screenSize = { width: 0, height: 0 };
         let hierarchyError: string | null = null;
@@ -343,10 +367,10 @@ export function createIosObserveRoundTripInspector(
         try {
           const installed = await manager.isInstalled();
           const running = installed ? await manager.isRunning() : false;
-          if (!installed || !running) {
-            if (!installed) {
-              hierarchyError = "iOS CtrlProxy runner is not installed";
-            } else if (reportedRunnerPort !== null && reportedRunnerPort !== servicePort) {
+          if (!installed) {
+            hierarchyError = "iOS CtrlProxy runner is not installed";
+          } else if (!running && existing === null) {
+            if (reportedRunnerPort !== null && reportedRunnerPort !== servicePort) {
               // The runner is alive but bound to a different port than the client
               // expects — the #2731 failure mode. Surface it explicitly rather
               // than the misleading "not running".
@@ -355,7 +379,6 @@ export function createIosObserveRoundTripInspector(
               hierarchyError = "iOS CtrlProxy runner is not running";
             }
           } else {
-            const existing = hooks.getExistingClient(device.deviceId);
             const client = existing ?? hooks.createClient(device, runnerPort);
             try {
               clientPort = client.getConnectionPortForDiagnostics();
@@ -367,6 +390,7 @@ export function createIosObserveRoundTripInspector(
               );
               currentProbe.signal?.throwIfAborted();
               clientPort = client.getConnectionPortForDiagnostics();
+              runnerPort = reportedRunnerPort ?? clientPort;
               connected = response !== null;
               if (!response?.hierarchy) {
                 hierarchyError = "No iOS hierarchy returned from CtrlProxy runner";

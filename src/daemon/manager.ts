@@ -61,6 +61,7 @@ import {
   DAEMON_APPLY_ACCEPTANCE_DOCTOR_FAULT_METHOD,
   DAEMON_CORRUPT_CONTROL_METADATA_METHOD,
   DAEMON_REPAIR_CONTROL_METADATA_METHOD,
+  DAEMON_RELEASE_ACCEPTANCE_RESTART_METHOD,
   DAEMON_RESTART_ACCEPTANCE_SESSION_METHOD,
   DAEMON_RESTART_ADMITTED_METHOD,
   type AcceptanceSessionRestartScope,
@@ -2481,6 +2482,7 @@ export class DaemonManager implements DaemonManagerLike {
     pid: number,
   ): Promise<void> {
     if (error instanceof DaemonGenerationExitedBeforeSignalError) {
+      await this.removeConfirmedDeadPidFile();
       stderrLog(error.message);
       return;
     }
@@ -2938,39 +2940,38 @@ export class DaemonManager implements DaemonManagerLike {
       );
     }
     const client = this.createClient({ clientIdentity: null });
+    let restartToken: string | undefined;
+    let signalSent = false;
+    let primaryError: unknown;
     try {
       await client.connect();
-      const result: unknown = await client.callDaemonMethod(
-        DAEMON_RESTART_ACCEPTANCE_SESSION_METHOD,
-        {
-          ...status,
-          scope,
-          acceptanceCapability: createDaemonLiveAcceptanceScopedCapability(
-            startupSecret,
-            generation,
-            scope,
-          ),
-        },
+      restartToken = await this.requestAcceptanceRestartAdmission(
+        client,
+        status,
+        generation,
+        scope,
+        startupSecret,
       );
-      if ((result as Partial<DaemonAcceptanceSessionRestart> | null)?.accepted !== true) {
-        throw new ActionableError(
-          `Daemon declined the acceptance-session restart (${(result as { reason?: string } | null)?.reason ?? "unknown"}).`,
-        );
-      }
-    } finally {
-      await client.close();
-    }
 
-    // SIGKILL is intentional and narrowly authorized by the RPC above. A
-    // graceful SIGTERM would terminally release the session that this recovery
-    // scenario is designed to exercise.
-    if (this.verifyAcceptanceGenerationBeforeSignal(status, generation)) {
-      this.processSignaler.signal(status.pid!, "SIGKILL");
-      if (!(await this.waitForStop(status.pid!, DAEMON_FORCED_STOP_TIMEOUT_MS))) {
-        throw new ActionableError(
-          `Acceptance-session restart daemon process ${status.pid} did not exit after SIGKILL.`,
-        );
+      // Keep the admission-owning socket open through the signal. Closing it
+      // earlier rolls back the fence before generation verification finishes.
+      if (this.verifyAcceptanceGenerationBeforeSignal(status, generation)) {
+        this.processSignaler.signal(status.pid!, "SIGKILL");
+        signalSent = true;
+        if (!(await this.waitForStop(status.pid!, DAEMON_FORCED_STOP_TIMEOUT_MS))) {
+          throw new ActionableError(
+            `Acceptance-session restart daemon process ${status.pid} did not exit after SIGKILL.`,
+          );
+        }
       }
+    } catch (error) {
+      primaryError = error;
+      if (restartToken && !signalSent) {
+        await this.rollbackAcceptanceRestartAdmission(client, status, restartToken);
+      }
+      throw error;
+    } finally {
+      await this.closeAcceptanceRestartClient(client, primaryError);
     }
     await cleanupDaemonFiles({
       pidFilePath: this.pidFilePath,
@@ -2981,6 +2982,72 @@ export class DaemonManager implements DaemonManagerLike {
     return restartResultFromStart(
       await this.start({ ...(status.options ?? {}), strictPort: true }),
     );
+  }
+
+  private async requestAcceptanceRestartAdmission(
+    client: DaemonClientLike,
+    status: DaemonStatus,
+    generation: DaemonGenerationIdentity,
+    scope: AcceptanceSessionRestartScope,
+    startupSecret: string,
+  ): Promise<string> {
+    const result: unknown = await client.callDaemonMethod(
+      DAEMON_RESTART_ACCEPTANCE_SESSION_METHOD,
+      {
+        ...status,
+        scope,
+        acceptanceCapability: createDaemonLiveAcceptanceScopedCapability(
+          startupSecret,
+          generation,
+          scope,
+        ),
+      },
+    );
+    const admission = result as Partial<DaemonAcceptanceSessionRestart> | null;
+    if (admission?.accepted !== true) {
+      throw new ActionableError(
+        `Daemon declined the acceptance-session restart (${admission?.reason ?? "unknown"}).`,
+      );
+    }
+    if (!admission.restartToken) {
+      throw new ActionableError(
+        "Daemon accepted the acceptance-session restart without a rollback token.",
+      );
+    }
+    return admission.restartToken;
+  }
+
+  private async rollbackAcceptanceRestartAdmission(
+    client: DaemonClientLike,
+    status: DaemonStatus,
+    restartToken: string,
+  ): Promise<void> {
+    try {
+      await client.callDaemonMethod(DAEMON_RELEASE_ACCEPTANCE_RESTART_METHOD, {
+        ...status,
+        restartToken,
+      });
+    } catch (rollbackError) {
+      logger.warn(
+        `Failed to explicitly roll back acceptance restart admission: ${errorMessage(rollbackError)}`,
+      );
+    }
+  }
+
+  private async closeAcceptanceRestartClient(
+    client: DaemonClientLike,
+    primaryError: unknown,
+  ): Promise<void> {
+    try {
+      await client.close();
+    } catch (closeError) {
+      if (primaryError === undefined) {
+        throw closeError;
+      }
+      logger.warn(
+        `Failed to close acceptance restart control client after primary failure: ${errorMessage(closeError)}`,
+      );
+    }
   }
 
   async applyAcceptanceDoctorFault(

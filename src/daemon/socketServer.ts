@@ -136,11 +136,13 @@ import {
   DAEMON_PREPARE_MAINTENANCE_METHOD,
   DAEMON_PREPARE_RESTART_METHOD,
   DAEMON_REPAIR_CONTROL_METADATA_METHOD,
+  DAEMON_RELEASE_ACCEPTANCE_RESTART_METHOD,
   DAEMON_RESTART_ACCEPTANCE_SESSION_METHOD,
   DAEMON_RESTART_ADMITTED_METHOD,
   type AcceptanceSessionRestartScope,
   type AcceptanceDoctorFault,
   type DaemonAcceptanceDoctorFault,
+  type DaemonAcceptanceRestartRelease,
   type DaemonAcceptanceSessionRestart,
   type DaemonAdmittedRestart,
   type DaemonControlMetadataCorruption,
@@ -176,6 +178,12 @@ const MCP_CLIENT_IDLE_CLOSE_MS = 5 * 60 * 1000;
  * under nine minutes, leaving a one-minute margin for valid fault/repair work.
  */
 export const DAEMON_MAINTENANCE_ADMISSION_TTL_MS = 10 * 60 * 1000;
+/**
+ * Acceptance crash admission only spans generation revalidation and SIGKILL.
+ * Keep enough margin for a loaded process-table scan while bounding an
+ * abandoned process-global tool fence.
+ */
+export const DAEMON_ACCEPTANCE_RESTART_ADMISSION_TTL_MS = 15_000;
 /** Keep shutdown bounded if a request handler ignores its disconnected peer. */
 const DAEMON_REQUEST_HANDLER_DRAIN_TIMEOUT_MS = 1_000;
 /** Keep shutdown bounded if a client cannot flush a release notification. */
@@ -599,6 +607,10 @@ export class UnixSocketServer {
   private maintenanceAdmissionExpiresAt: number | undefined;
   private maintenanceAdmissionExpiryTimer: NodeJS.Timeout | undefined;
   private maintenanceRestartConsumed = false;
+  private acceptanceRestartAdmissionToken: string | undefined;
+  private acceptanceRestartAdmissionOwnerSessionId: string | undefined;
+  private acceptanceRestartAdmissionExpiresAt: number | undefined;
+  private acceptanceRestartAdmissionExpiryTimer: NodeJS.Timeout | undefined;
   private acceptanceFaultUnresponsive = false;
   private readonly sessionToolSelectionService?: Pick<
     SessionToolSelectionService,
@@ -926,6 +938,7 @@ export class UnixSocketServer {
     }
     this.abortLocalRequests(sessionId);
     this.abortMcpRequests(sessionId);
+    this.releaseAcceptanceRestartAdmissionForOwner(sessionId);
     this.sessions.delete(sessionId);
     this.clientSockets.delete(sessionId);
     this.notificationSubscribers.delete(sessionId);
@@ -3268,10 +3281,15 @@ export class UnixSocketServer {
   // eslint-disable-next-line complexity -- each refusal is a distinct security fence for this one-shot control RPC.
   private restartAcceptanceSession(
     params: Record<string, unknown>,
+    ownerSessionId: string | undefined,
   ): DaemonAcceptanceSessionRestart {
     if (!this.daemonGenerationMatches(params)) {
       return { accepted: false, reason: "generation_changed" };
     }
+    if (ownerSessionId === undefined) {
+      return { accepted: false, reason: "restart_pending" };
+    }
+    this.expireAcceptanceRestartAdmission();
     const scope = this.acceptanceSessionRestartScope(params.scope);
     if (!scope) {
       return { accepted: false, reason: "scope_invalid" };
@@ -3328,10 +3346,80 @@ export class UnixSocketServer {
         reason: admission === "active_operations" ? "active_operations" : "restart_pending",
       };
     }
-    // Keep the tracker fenced until process exit. There is deliberately no
-    // onRestartAccepted callback here: graceful shutdown would terminally
-    // release the persisted session and invalidate this recovery scenario.
-    return { accepted: true };
+    const restartToken = this.idGenerator.next();
+    const admissionTtlMs = Math.min(
+      DAEMON_ACCEPTANCE_RESTART_ADMISSION_TTL_MS,
+      scope.expiresAt - this.timer.now(),
+    );
+    this.acceptanceRestartAdmissionToken = restartToken;
+    this.acceptanceRestartAdmissionOwnerSessionId = ownerSessionId;
+    this.acceptanceRestartAdmissionExpiresAt = this.timer.now() + admissionTtlMs;
+    this.acceptanceRestartAdmissionExpiryTimer = this.timer.setTimeout(
+      () => this.releaseAcceptanceRestartAdmission(restartToken),
+      admissionTtlMs,
+    );
+    // Graceful shutdown would terminally release the persisted session. The
+    // manager keeps this socket open through generation verification and
+    // SIGKILL; disconnect or lease expiry rolls the fence back if it exits first.
+    return { accepted: true, restartToken };
+  }
+
+  private releaseAcceptanceRestart(
+    params: Record<string, unknown>,
+    ownerSessionId: string | undefined,
+  ): DaemonAcceptanceRestartRelease {
+    if (
+      !this.daemonGenerationMatches(params) ||
+      !this.acceptanceRestartAdmissionMatches(params.restartToken, ownerSessionId)
+    ) {
+      return { released: false };
+    }
+    this.releaseAcceptanceRestartAdmission(params.restartToken);
+    return { released: true };
+  }
+
+  private acceptanceRestartAdmissionMatches(
+    token: unknown,
+    ownerSessionId: string | undefined,
+  ): token is string {
+    this.expireAcceptanceRestartAdmission();
+    return (
+      typeof token === "string" &&
+      ownerSessionId !== undefined &&
+      token === this.acceptanceRestartAdmissionToken &&
+      ownerSessionId === this.acceptanceRestartAdmissionOwnerSessionId
+    );
+  }
+
+  private expireAcceptanceRestartAdmission(): void {
+    if (
+      this.acceptanceRestartAdmissionToken !== undefined &&
+      this.acceptanceRestartAdmissionExpiresAt !== undefined &&
+      this.acceptanceRestartAdmissionExpiresAt <= this.timer.now()
+    ) {
+      this.releaseAcceptanceRestartAdmission(this.acceptanceRestartAdmissionToken);
+    }
+  }
+
+  private releaseAcceptanceRestartAdmissionForOwner(ownerSessionId: string): void {
+    if (ownerSessionId !== this.acceptanceRestartAdmissionOwnerSessionId) {
+      return;
+    }
+    this.releaseAcceptanceRestartAdmission(this.acceptanceRestartAdmissionToken);
+  }
+
+  private releaseAcceptanceRestartAdmission(token: unknown): void {
+    if (typeof token !== "string" || token !== this.acceptanceRestartAdmissionToken) {
+      return;
+    }
+    if (this.acceptanceRestartAdmissionExpiryTimer !== undefined) {
+      this.timer.clearTimeout(this.acceptanceRestartAdmissionExpiryTimer);
+    }
+    executionTracker.clearDaemonRestartPreparation();
+    this.acceptanceRestartAdmissionToken = undefined;
+    this.acceptanceRestartAdmissionOwnerSessionId = undefined;
+    this.acceptanceRestartAdmissionExpiresAt = undefined;
+    this.acceptanceRestartAdmissionExpiryTimer = undefined;
   }
 
   // eslint-disable-next-line complexity -- validate every untrusted scope field before HMAC authorization.
@@ -3605,7 +3693,10 @@ export class UnixSocketServer {
         return this.restartAdmittedDaemon(request.params);
       }
       case DAEMON_RESTART_ACCEPTANCE_SESSION_METHOD: {
-        return this.restartAcceptanceSession(request.params);
+        return this.restartAcceptanceSession(request.params, socketSessionId);
+      }
+      case DAEMON_RELEASE_ACCEPTANCE_RESTART_METHOD: {
+        return this.releaseAcceptanceRestart(request.params, socketSessionId);
       }
       case DAEMON_REPAIR_CONTROL_METADATA_METHOD: {
         return await this.repairControlMetadata(request.params, signal);
@@ -5962,6 +6053,7 @@ export class UnixSocketServer {
     this.acceptingRequests = false;
     this.lifecycleGeneration += 1;
     this.releaseDaemonMaintenanceAdmission(this.maintenanceAdmissionToken);
+    this.releaseAcceptanceRestartAdmission(this.acceptanceRestartAdmissionToken);
 
     // Stop receiving list-changed events (mirrors the subscribe in start()).
     this.listChangedUnsubscribe?.();

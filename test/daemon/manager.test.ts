@@ -42,6 +42,7 @@ import { ActionableError } from "../../src/models";
 import {
   DAEMON_APPLY_ACCEPTANCE_DOCTOR_FAULT_METHOD,
   DAEMON_CORRUPT_CONTROL_METADATA_METHOD,
+  DAEMON_RELEASE_ACCEPTANCE_RESTART_METHOD,
   DAEMON_RESTART_ACCEPTANCE_SESSION_METHOD,
   DAEMON_RESTART_ADMITTED_METHOD,
 } from "../../src/daemon/daemonRestartAdmission";
@@ -786,15 +787,18 @@ describe("DaemonManager control metadata repair", () => {
     }
   });
 
-  test("acceptance-session restart never SIGKILLs a reused admitted PID", async () => {
+  test("acceptance-session restart preserves PID-reuse failure when rollback also fails", async () => {
     const originalSecret = process.env.AUTOMOBILE_DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET;
     process.env.AUTOMOBILE_DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET =
       "live-acceptance-startup-secret-123456";
     const pid = 1001;
     const client = new FakeDaemonClient({});
     const rpcSpy = spyOn(client, "callDaemonMethod").mockImplementation(async (method) => {
-      expect(method).toBe(DAEMON_RESTART_ACCEPTANCE_SESSION_METHOD);
-      return { accepted: true };
+      if (method === DAEMON_RESTART_ACCEPTANCE_SESSION_METHOD) {
+        return { accepted: true, restartToken: "acceptance-restart-1" };
+      }
+      expect(method).toBe(DAEMON_RELEASE_ACCEPTANCE_RESTART_METHOD);
+      throw new Error("rollback transport failed");
     });
     const signaler = new FakeDaemonProcessSignaler();
     const manager = new DaemonManager(
@@ -846,9 +850,109 @@ describe("DaemonManager control metadata repair", () => {
         }),
       ).rejects.toThrow("verified daemon PID was reused");
       expect(signaler.signals).toEqual([]);
+      expect(rpcSpy).toHaveBeenCalledWith(
+        DAEMON_RELEASE_ACCEPTANCE_RESTART_METHOD,
+        expect.objectContaining({ restartToken: "acceptance-restart-1" }),
+      );
     } finally {
       rpcSpy.mockRestore();
       statusSpy.mockRestore();
+      if (originalSecret === undefined) {
+        delete process.env.AUTOMOBILE_DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET;
+      } else {
+        process.env.AUTOMOBILE_DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET = originalSecret;
+      }
+    }
+  });
+
+  test("acceptance-session restart keeps admission socket open through verified SIGKILL", async () => {
+    const originalSecret = process.env.AUTOMOBILE_DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET;
+    process.env.AUTOMOBILE_DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET =
+      "live-acceptance-startup-secret-123456";
+    const directory = mkdtempSync(join(tmpdir(), "acceptance-session-restart-test-"));
+    const pid = 1001;
+    const livePids = new Set([pid]);
+    const events: string[] = [];
+    const client = new FakeDaemonClient({});
+    const rpcSpy = spyOn(client, "callDaemonMethod").mockImplementation(async (method) => {
+      expect(method).toBe(DAEMON_RESTART_ACCEPTANCE_SESSION_METHOD);
+      events.push("admitted");
+      return { accepted: true, restartToken: "acceptance-restart-1" };
+    });
+    const closeSpy = spyOn(client, "close").mockImplementation(async () => {
+      events.push("closed");
+    });
+    const signaler = new FakeDaemonProcessSignaler((signaledPid, signal) => {
+      expect(signaledPid).toBe(pid);
+      expect(signal).toBe("SIGKILL");
+      events.push("signaled");
+      livePids.delete(signaledPid);
+    });
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const socketPath = join(directory, "daemon.sock");
+    const manager = new DaemonManager(
+      () => client,
+      undefined,
+      timer,
+      join(directory, "daemon.lock"),
+      join(directory, "daemon.pid"),
+      socketPath,
+      {
+        findDaemonProcesses: () =>
+          livePids.has(pid)
+            ? [
+                {
+                  pid,
+                  ppid: 1,
+                  command: "bun /acceptance/dist/src/index.js --daemon-mode",
+                  startedAt: 100,
+                  processGenerationToken: "generation-1",
+                },
+              ]
+            : [],
+        isProcessRunning: (candidatePid) => livePids.has(candidatePid),
+      },
+      undefined,
+      undefined,
+      undefined,
+      signaler,
+    );
+    const statusSpy = spyOn(manager, "status").mockResolvedValue({
+      running: true,
+      pid,
+      startedAt: 100,
+      processGenerationToken: "generation-1",
+      version: "0.0.73",
+      buildId: "acceptance-build",
+      entryScript: "/acceptance/dist/src/index.js",
+      socketPath,
+    });
+    const startSpy = spyOn(manager, "start").mockResolvedValue("started");
+
+    try {
+      await expect(
+        manager.restartAcceptanceSession({
+          sessionUuid: "session-1",
+          platform: "ios",
+          stableDeviceId: "simulator-1",
+          controls: {
+            androidSiblingAvdName: "sibling",
+            androidDuplicateSerial: "emulator-5556",
+            iosSameNameSiblingUdid: "simulator-2",
+          },
+          expiresAt: 10_000,
+        }),
+      ).resolves.toBe("restarted");
+      expect(events).toEqual(["admitted", "signaled", "closed"]);
+      expect(signaler.signals).toEqual([{ pid, signal: "SIGKILL" }]);
+      expect(startSpy).toHaveBeenCalledWith({ strictPort: true });
+    } finally {
+      rpcSpy.mockRestore();
+      closeSpy.mockRestore();
+      statusSpy.mockRestore();
+      startSpy.mockRestore();
+      rmSync(directory, { recursive: true, force: true });
       if (originalSecret === undefined) {
         delete process.env.AUTOMOBILE_DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET;
       } else {
@@ -1091,6 +1195,88 @@ describe("DaemonManager stop", () => {
     }
   });
 
+  test("removes stale PID metadata when the observed daemon exits before pre-signal verification", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "daemon-manager-stop-pre-signal-exit-"));
+    const pidFilePath = join(directory, "daemon.pid");
+    const socketPath = join(directory, "daemon.sock");
+    const pid = 4247;
+    const livePids = new Set([pid]);
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    writeStopPidFile(pidFilePath, pid, socketPath);
+    writeFileSync(socketPath, "socket");
+    let livenessChecks = 0;
+    const signaler = new FakeDaemonProcessSignaler();
+    const manager = createManagerForStop(
+      livePids,
+      timer,
+      pidFilePath,
+      socketPath,
+      () => {
+        livenessChecks++;
+        if (livenessChecks === 2) {
+          livePids.delete(pid);
+        }
+      },
+      join(directory, "daemon.lock"),
+      signaler,
+    );
+
+    try {
+      await expect(manager.stop()).resolves.toBeUndefined();
+
+      expect(signaler.signals).toEqual([]);
+      expect(existsSync(pidFilePath)).toBe(false);
+      expect(existsSync(socketPath)).toBe(true);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("preserves a concurrent startup winner after the observed daemon exits before signaling", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "daemon-manager-stop-pre-signal-winner-"));
+    const pidFilePath = join(directory, "daemon.pid");
+    const socketPath = join(directory, "daemon.sock");
+    const exitedPid = 4248;
+    const winnerPid = 4249;
+    const livePids = new Set([exitedPid]);
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    writeStopPidFile(pidFilePath, exitedPid, socketPath);
+    writeFileSync(socketPath, "old socket");
+    let livenessChecks = 0;
+    const signaler = new FakeDaemonProcessSignaler();
+    const manager = createManagerForStop(
+      livePids,
+      timer,
+      pidFilePath,
+      socketPath,
+      () => {
+        livenessChecks++;
+        if (livenessChecks === 2) {
+          livePids.delete(exitedPid);
+        } else if (livenessChecks === 3) {
+          livePids.add(winnerPid);
+          writeStopPidFile(pidFilePath, winnerPid, socketPath);
+          writeFileSync(socketPath, "winner socket");
+        }
+      },
+      join(directory, "daemon.lock"),
+      signaler,
+    );
+
+    try {
+      await expect(manager.stop()).resolves.toBeUndefined();
+
+      expect(signaler.signals).toEqual([]);
+      const survivingPidData = JSON.parse(readFileSync(pidFilePath, "utf-8")) as { pid: number };
+      expect(survivingPidData.pid).toBe(winnerPid);
+      expect(readFileSync(socketPath, "utf-8")).toBe("winner socket");
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   test("never signals a replacement that reused the PID-file PID", async () => {
     const directory = mkdtempSync(join(tmpdir(), "daemon-manager-stop-pid-reuse-"));
     const pidFilePath = join(directory, "daemon.pid");
@@ -1130,6 +1316,8 @@ describe("DaemonManager stop", () => {
     try {
       await expect(manager.stop()).rejects.toThrow("verified daemon PID was reused");
       expect(signaler.signals).toEqual([]);
+      expect(existsSync(pidFilePath)).toBe(true);
+      expect(existsSync(socketPath)).toBe(true);
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }

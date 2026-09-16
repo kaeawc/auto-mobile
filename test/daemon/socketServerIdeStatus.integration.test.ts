@@ -5,10 +5,11 @@ import { unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  DAEMON_ACCEPTANCE_RESTART_ADMISSION_TTL_MS,
   DAEMON_MAINTENANCE_ADMISSION_TTL_MS,
   UnixSocketServer,
 } from "../../src/daemon/socketServer";
-import { sendSocketRequest } from "./helpers/socketRequest";
+import { sendPersistentSocketRequest, sendSocketRequest } from "./helpers/socketRequest";
 import { FakeTimer } from "../fakes/FakeTimer";
 import type { DaemonResponse } from "../../src/daemon/types";
 import { AndroidCtrlProxyManager } from "../../src/utils/CtrlProxyManager";
@@ -676,15 +677,19 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
           })
         ).result,
       ).toEqual({ accepted: false, reason: "acceptance_capability_invalid" });
-      expect(
-        (
-          await sendRequest(acceptanceSocketPath, DAEMON_RESTART_ACCEPTANCE_SESSION_METHOD, {
-            ...status,
-            scope,
-            acceptanceCapability: capability,
-          })
-        ).result,
-      ).toEqual({ accepted: true });
+      const admitted = await sendPersistentSocketRequest(
+        acceptanceSocketPath,
+        DAEMON_RESTART_ACCEPTANCE_SESSION_METHOD,
+        {
+          ...status,
+          scope,
+          acceptanceCapability: capability,
+        },
+      );
+      expect(admitted.response.result).toEqual({
+        accepted: true,
+        restartToken: expect.any(String),
+      });
       expect(
         (
           await sendRequest(acceptanceSocketPath, DAEMON_RESTART_ACCEPTANCE_SESSION_METHOD, {
@@ -694,7 +699,111 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
           })
         ).result,
       ).toEqual({ accepted: false, reason: "restart_pending" });
+
+      const disconnected = new Promise<void>((resolve) => admitted.socket.once("close", resolve));
+      admitted.socket.destroy();
+      await disconnected;
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      const afterDisconnect = executionTracker.startExecution("tapOn", "after-disconnect");
+      executionTracker.endExecution(afterDisconnect.id);
     } finally {
+      await acceptanceServer.close();
+      if (existsSync(acceptanceSocketPath)) {
+        await unlink(acceptanceSocketPath);
+      }
+      executionTracker.clearDaemonRestartPreparation();
+    }
+  });
+
+  test("acceptance restart timeout rolls back and stale admission callbacks cannot clear its successor", async () => {
+    const startupSecret = "live-acceptance-startup-secret-123456";
+    const acceptanceSocketPath = join(
+      tmpdir(),
+      `t-acceptance-lease-${randomUUID().slice(0, 8)}.sock`,
+    );
+    const timer = new LateCallbackFakeTimer();
+    const acceptanceServer = new UnixSocketServer(
+      acceptanceSocketPath,
+      "http://localhost:0/mcp",
+      createFakeDaemonStateWithSessions([
+        {
+          sessionId: "owned-session",
+          platform: "android",
+          stableDeviceId: "Acceptance_AVD",
+        },
+      ]),
+      timer,
+      null,
+      {
+        processGenerationToken: "acceptance-generation-1",
+        liveAcceptanceStartupSecret: startupSecret,
+      },
+    );
+    const scope = {
+      sessionUuid: "owned-session",
+      platform: "android" as const,
+      stableDeviceId: "Acceptance_AVD",
+      controls: {
+        androidSiblingAvdName: "Acceptance_Sibling",
+        androidDuplicateSerial: "emulator-5554",
+        iosSameNameSiblingUdid: "00000000-0000-0000-0000-000000000002",
+      },
+      expiresAt: DAEMON_ACCEPTANCE_RESTART_ADMISSION_TTL_MS * 3,
+    };
+    let firstSocket: import("node:net").Socket | undefined;
+    let secondSocket: import("node:net").Socket | undefined;
+    try {
+      await acceptanceServer.start();
+      const status = (await sendRequest(acceptanceSocketPath, "ide/status")).result!;
+      const capability = createDaemonLiveAcceptanceScopedCapability(
+        startupSecret,
+        {
+          pid: status.pid as number,
+          startedAt: status.startedAt as number,
+          processGenerationToken: status.processGenerationToken as string,
+          version: status.version as string,
+          buildId: status.buildId as string,
+          entryScript: status.entryScript as string,
+        },
+        scope,
+      );
+      const params = { ...status, scope, acceptanceCapability: capability };
+      const first = await sendPersistentSocketRequest(
+        acceptanceSocketPath,
+        DAEMON_RESTART_ACCEPTANCE_SESSION_METHOD,
+        params,
+      );
+      firstSocket = first.socket;
+      const firstToken = (first.response.result as { restartToken: string }).restartToken;
+
+      const disconnected = new Promise<void>((resolve) => first.socket.once("close", resolve));
+      first.socket.destroy();
+      await disconnected;
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      timer.advanceTime(1);
+
+      const second = await sendPersistentSocketRequest(
+        acceptanceSocketPath,
+        DAEMON_RESTART_ACCEPTANCE_SESSION_METHOD,
+        params,
+      );
+      secondSocket = second.socket;
+      const secondToken = (second.response.result as { restartToken: string }).restartToken;
+      expect(secondToken).not.toBe(firstToken);
+
+      // clearTimeout intentionally leaves the first callback queued. At its
+      // original deadline, token matching must preserve the successor fence.
+      timer.advanceTime(DAEMON_ACCEPTANCE_RESTART_ADMISSION_TTL_MS - 1);
+      expect(() => executionTracker.startExecution("tapOn", "still-fenced")).toThrow(
+        "Daemon restart is pending",
+      );
+
+      timer.advanceTime(1);
+      const afterTimeout = executionTracker.startExecution("tapOn", "after-timeout");
+      executionTracker.endExecution(afterTimeout.id);
+    } finally {
+      firstSocket?.destroy();
+      secondSocket?.destroy();
       await acceptanceServer.close();
       if (existsSync(acceptanceSocketPath)) {
         await unlink(acceptanceSocketPath);

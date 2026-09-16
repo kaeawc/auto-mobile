@@ -1162,17 +1162,17 @@ export class TapOnElement extends BaseVisualChange {
         return rawHierarchy ? this.prepareViewHierarchyForResponse(rawHierarchy, screenSize) : null;
       }
       case "ios": {
-        const xcTestClient = IOSCtrlProxyClient.getInstance(this.device);
-        const rawHierarchy = await xcTestClient.getAccessibilityHierarchy(
+        // Match the observe projection exactly. Going through CtrlProxy's
+        // alternate conversion here lets a selector observed from one tree be
+        // resolved against a differently-pruned tree on refresh.
+        const rawHierarchy = await this.viewHierarchy.getiOSViewHierarchy(
           undefined,
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          signal,
+          false,
+          0,
           effectiveTimeoutMs,
+          signal,
         );
-        return rawHierarchy ? this.prepareViewHierarchyForResponse(rawHierarchy, screenSize) : null;
+        return this.prepareViewHierarchyForResponse(rawHierarchy, screenSize);
       }
       default:
         throw new ActionableError(`Unsupported platform: ${this.device.platform}`);

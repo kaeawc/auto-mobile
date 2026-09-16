@@ -527,6 +527,52 @@ describe("ViewHierarchy", function () {
       }
     });
 
+    test("normalizes generated iOS viewId values in the public observe hierarchy", async function () {
+      const iosDevice: BootedDevice = {
+        deviceId: "test-ios-device",
+        name: "Test iPhone",
+        platform: "ios",
+      };
+      const fakeIosClient = {
+        getLatestHierarchy: async () => ({
+          hierarchy: {
+            updatedAt: 1750934585218,
+            packageName: "com.example.app",
+            hierarchy: {
+              className: "XCUIApplication",
+              node: {
+                className: "UIButton",
+                viewId: "3f2a1c4b-0000-0000-0000-000000000000",
+                clickable: "true",
+                bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+              },
+            },
+          },
+          fresh: true,
+          updatedAt: 1750934585218,
+        }),
+      };
+      const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
+        fakeIosClient as any,
+      );
+
+      try {
+        const viewHierarchyWithMocks = new ViewHierarchy(
+          iosDevice,
+          new FakeAdbClientFactory(fakeAdb),
+          mockCtrlProxyClient,
+        );
+
+        const result = await viewHierarchyWithMocks.getiOSViewHierarchy();
+        const button = (result.hierarchy as any).node;
+
+        expect(button.viewId).toBeUndefined();
+        expect(button["view-id"]).toMatch(/^s2-[0-9a-f]{16}$/);
+      } finally {
+        getInstanceSpy.mockRestore();
+      }
+    });
+
     test("fences the iOS hierarchy read with the caller's abort signal (#6890)", async function () {
       const iosDevice: BootedDevice = {
         deviceId: "test-ios-device",

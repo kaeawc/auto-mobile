@@ -11,7 +11,6 @@ import {
 } from "../../../models";
 import { logger } from "../../../utils/logger";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
-import { IOSCtrlProxyClient } from "../../observe/ios";
 import type { ElementFinder } from "../../../utils/interfaces/ElementFinder";
 import type { ElementGeometry } from "../../../utils/interfaces/ElementGeometry";
 import type { ObserveScreen } from "../../observe/interfaces/ObserveScreen";
@@ -513,9 +512,15 @@ export class ScrollUntilVisible {
           );
           break;
         case "ios":
-          latestViewHierarchy =
-            (await IOSCtrlProxyClient.getInstance(this.deps.device).getAccessibilityHierarchy()) ??
-            undefined;
+          // Refresh through ObserveScreen so retrying a selector sees the same
+          // cleaned iOS projection that introduced it, rather than CtrlProxy's
+          // separate action-only conversion.
+          latestViewHierarchy = (
+            await this.deps.observeScreen.execute({
+              skipScreenshot: true,
+              skipAccessibilityAudit: true,
+            })
+          ).viewHierarchy;
           break;
         default:
           throw new ActionableError(`Unsupported platform: ${this.deps.device.platform}`);

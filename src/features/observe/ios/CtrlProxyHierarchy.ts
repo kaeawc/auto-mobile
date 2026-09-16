@@ -14,6 +14,7 @@ import { logger } from "../../../utils/logger";
 import { throwIfAborted } from "../../../utils/toolUtils";
 import { hasIosHeaderTrait } from "./semanticRoles";
 import { maxObservationAgeMs } from "../observationFreshness";
+import { assignStableViewIds } from "../android/StableNodeIdentity";
 import type {
   HierarchyDelegateContext,
   CtrlProxyNode,
@@ -471,6 +472,12 @@ export class CtrlProxyHierarchy {
 
     // Apply filtering to reduce hierarchy size (similar to Android's optimizeHierarchy)
     const filteredNode = this.filterHierarchyNode(convertedNode, true);
+
+    // CtrlProxy emits a path-derived UUID for nodes without an accessibility
+    // identifier. Rewrite those generated ids at ingest just as the Android
+    // converter does, so an iOS skeleton elementId is directly resolvable by
+    // the shared element selector rather than advertising an opaque UUID.
+    assignStableViewIds(filteredNode);
 
     return {
       hierarchy: {

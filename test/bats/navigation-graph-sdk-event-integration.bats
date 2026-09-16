@@ -16,6 +16,7 @@ setup() {
   export HEARTBEAT_FILE="${MOCK_BIN}/heartbeats"
   export TARGET_APP_LAUNCHED_FILE="${MOCK_BIN}/target-app-launched"
   export INVOCATION_FILE="${MOCK_BIN}/invocations"
+  export ACQUIRE_ATTEMPTS_FILE="${MOCK_BIN}/acquire-attempts"
 }
 
 teardown() {
@@ -125,6 +126,14 @@ if [ "$1" = "--cli" ] && [ "$2" = "doctor" ]; then
   exit 0
 fi
 if [ "$1" = "--debug" ] && [ "$2" = "--embedded-sdk" ] && [ "$3" = "--cli" ] && [ "$4" = "getApple" ] && [ "$5" = "--deviceId" ] && [ "$6" = "simulator-udid" ]; then
+  acquire_attempts=0
+  [ -f "$ACQUIRE_ATTEMPTS_FILE" ] && acquire_attempts="$(cat "$ACQUIRE_ATTEMPTS_FILE")"
+  acquire_attempts=$((acquire_attempts + 1))
+  printf "%s\\n" "$acquire_attempts" > "$ACQUIRE_ATTEMPTS_FILE"
+  if [ "$acquire_attempts" -eq 1 ]; then
+    echo "Device simulator-udid is already assigned to another session" >&2
+    exit 1
+  fi
   printf "{\"sessionUuid\":\"44600000-0000-4000-8000-000000000000\"}\\n"
   exit 0
 fi
@@ -172,6 +181,7 @@ fi
 
   [ "$status" -eq 0 ]
   [ "$(cat "$GRAPH_ATTEMPTS_FILE")" = "2" ]
+  [ "$(cat "$ACQUIRE_ATTEMPTS_FILE")" = "2" ]
   [ "$(cat "$DOCTOR_CALLS_FILE")" = "2" ]
   [ "$(cat "$HEALTH_ATTEMPTS_FILE")" = "4" ]
   [ -f "$POST_BIND_DOCTOR_FILE" ]
@@ -179,6 +189,7 @@ fi
   [ -f "$TARGET_APP_LAUNCHED_FILE" ]
   grep -qx "http://127.0.0.1:8768/health" "$CURL_URL_FILE"
   [[ "$output" == *"getNavigationGraph attempt 1 failed"* ]]
+  [[ "$output" == *"preceding integration session; retrying in 2s"* ]]
   # Regression for issue #4579: the graph read must be scoped to the fixture
   # bundle so a concurrent SpringBoard hierarchy push cannot redirect the query.
   grep -q -- "getNavigationGraph --platform ios --deviceId simulator-udid --appId com.apple.reminders" "$INVOCATION_FILE"

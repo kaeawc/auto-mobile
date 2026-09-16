@@ -716,10 +716,7 @@ describe("LaunchApp", () => {
       let settled = false;
       const wait = (
         iosLaunchApp as unknown as {
-          waitForIosHierarchyReady(
-            timeoutMs: number,
-            expectedPackageName: string,
-          ): Promise<void>;
+          waitForIosHierarchyReady(timeoutMs: number, expectedPackageName: string): Promise<void>;
         }
       ).waitForIosHierarchyReady(60_000, packageName);
       void wait.then(() => {
@@ -1521,6 +1518,7 @@ describe("LaunchApp", () => {
 
       return {
         iosLaunchApp,
+        fakeCtrlProxy,
         targetBundleIdCalls,
         cleanup: () => {
           ctrlProxySpy.mockRestore();
@@ -1592,6 +1590,23 @@ describe("LaunchApp", () => {
       } finally {
         ctrlProxySpy.mockRestore();
         managerSpy.mockRestore();
+      }
+    });
+
+    test("retargets a resident CtrlProxy runner after simctl foregrounds the app", async () => {
+      fakeTimer.enableAutoAdvance();
+      const { iosLaunchApp, fakeCtrlProxy, cleanup } = createIOSTestHarness({
+        bundleId: userBundleId,
+        launchSuccess: true,
+      });
+
+      try {
+        const result = await iosLaunchApp.execute(userBundleId, false, false);
+
+        expect(result.success).toBe(true);
+        expect(fakeCtrlProxy.getLaunchAppHistory()).toEqual([userBundleId]);
+      } finally {
+        cleanup();
       }
     });
 

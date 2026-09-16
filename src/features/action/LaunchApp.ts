@@ -433,6 +433,7 @@ export class LaunchApp extends BaseVisualChange {
         if (!isSystemBundleId) {
           IOSCtrlProxyManager.getInstance(this.device).setTargetBundleId(bundleId);
         }
+        const ctrlProxyClient = IOSCtrlProxyClient.getInstance(this.device);
 
         let launchResult: { success: boolean; pid?: number; error?: string };
 
@@ -496,7 +497,6 @@ export class LaunchApp extends BaseVisualChange {
           // need here: invalidateCache() (fixed in #4193) forces a refetch, but the
           // invalidated entry is still served as a stale fallback if that refetch
           // fails — and pre-terminate data for a wiped app must never be served.
-          const ctrlProxyClient = IOSCtrlProxyClient.getInstance(this.device);
           ctrlProxyClient.clearCache();
           IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.clearSdkScreenIdentity(
             bundleId,
@@ -573,6 +573,28 @@ export class LaunchApp extends BaseVisualChange {
             packageName: bundleId,
             error: launchResult.error,
           };
+        }
+
+        if (simulator) {
+          // A resident CtrlProxy runner may still be tracking SpringBoard from
+          // daemon startup. simctl foregrounds the app but cannot replace the
+          // runner's XCUIApplication target, so synchronize that target through
+          // the runner before requiring an app-specific hierarchy.
+          const ctrlProxyLaunchResult = await ctrlProxyClient.requestLaunchApp(
+            bundleId,
+            undefined,
+            perf,
+            false,
+          );
+          this.assertLaunchNotAborted(signal);
+          if (!ctrlProxyLaunchResult.success) {
+            perf.end();
+            return {
+              success: false,
+              packageName: bundleId,
+              error: ctrlProxyLaunchResult.error ?? "CtrlProxy failed to track the launched app",
+            };
+          }
         }
 
         signal?.throwIfAborted();

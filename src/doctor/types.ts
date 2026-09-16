@@ -88,8 +88,6 @@ export interface DoctorOptions extends DoctorProbeOptions {
   android?: boolean;
   /** Run iOS-specific checks only */
   ios?: boolean;
-  /** Restrict device-specific checks to one selected device */
-  deviceId?: string;
   /** Output in JSON format */
   json?: boolean;
   /**

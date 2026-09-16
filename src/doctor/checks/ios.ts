@@ -1329,8 +1329,8 @@ export async function runIosChecks(
   await run(() => checkAppleDeveloperAccount(dependencies, options));
   await run(() => checkProvisioningProfiles(dependencies, options));
   await run(() => checkBootedSimulators(dependencies, options));
-  await run(() => checkIosCtrlProxyRunner(dependencies, options, options.deviceId));
-  await run(() => checkIosObserveRoundTrip(dependencies, options, options.deviceId));
+  await run(() => checkIosCtrlProxyRunner(dependencies, options));
+  await run(() => checkIosObserveRoundTrip(dependencies, options));
 
   return results;
 }

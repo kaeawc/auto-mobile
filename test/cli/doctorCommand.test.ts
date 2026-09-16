@@ -75,10 +75,7 @@ describe("doctorToolParams", () => {
   );
 
   test("keeps CLI JSON formatting out of the daemon doctor request", () => {
-    expect(doctorToolParams({ ios: true, deviceId: "SIM-TARGET", json: true })).toEqual({
-      ios: true,
-      deviceId: "SIM-TARGET",
-    });
+    expect(doctorToolParams({ ios: true, json: true })).toEqual({ ios: true });
   });
 
   test("keeps recovery-only flags out of the daemon doctor request", () => {

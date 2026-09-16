@@ -405,6 +405,7 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
     timeoutMs?: number,
     perf?: PerformanceTracker,
     coldBoot?: boolean,
+    signal?: AbortSignal,
   ): Promise<CtrlProxyLaunchAppResult>;
 
   requestResetPermissions(
@@ -2713,9 +2714,16 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     timeoutMs?: number,
     perf?: PerformanceTracker,
     coldBoot?: boolean,
+    signal?: AbortSignal,
   ): Promise<CtrlProxyLaunchAppResult> {
     this.invalidateSdkCapabilities();
-    const result = await this.navigation.requestLaunchApp(bundleId, timeoutMs, perf, coldBoot);
+    const result = await this.navigation.requestLaunchApp(
+      bundleId,
+      timeoutMs,
+      perf,
+      coldBoot,
+      signal,
+    );
     if (result.success) {
       await this.refreshSdkCapabilitiesAndSync().catch((error) => {
         // A launched app without AutoMobileSDK is normal; the launch itself succeeded.

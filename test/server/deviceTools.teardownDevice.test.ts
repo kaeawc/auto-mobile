@@ -2618,6 +2618,62 @@ describe("deleteDevice handler", () => {
     expect(manager.destroyRequests).toHaveLength(1);
   });
 
+  test("evicts iOS state when a cancelled destroy later succeeds", async () => {
+    const timer = new FakeTimer();
+    const device: DeviceInfo = {
+      platform: "ios",
+      name: "iPhone 16",
+      deviceId: "IOS-CANCELLED-DEVICE-1",
+      isRunning: false,
+    };
+    const proxy = IOSCtrlProxyManager.getInstance(device);
+    const forceStop = spyOn(
+      proxy as unknown as { forceStopForShutdown: () => Promise<void> },
+      "forceStopForShutdown",
+    ).mockResolvedValue();
+    const controller = new AbortController();
+    let releaseDestroy!: () => void;
+    const destroyStarted = Promise.withResolvers<void>();
+    manager.destroyStarted = () => destroyStarted.resolve();
+    manager.destroyGate = new Promise<void>((resolve) => {
+      releaseDestroy = resolve;
+    });
+    manager.setDeviceImages("ios", [device]);
+    registerDirectSessionDevice("late-cancelled-destroy-session", device);
+    setDeviceToolsDependencies({ timer });
+
+    try {
+      const teardown = runWithAbortSignal(controller.signal, async () =>
+        teardownTool().handler({
+          ...request("ios", device.deviceId!, device.name),
+          cancellationPolicy: "cancel-on-request-abort",
+        }),
+      );
+      await destroyStarted.promise;
+      controller.abort(new Error("acceptance deadline elapsed"));
+
+      expect(responseBody(await teardown).failure).toEqual(
+        expect.objectContaining({ code: "operation_cancelled" }),
+      );
+      expect(IOSCtrlProxyManager.getInstance(device)).toBe(proxy);
+      expect(resolveDirectSessionDevice("late-cancelled-destroy-session")).toBeDefined();
+
+      releaseDestroy();
+      for (let attempt = 0; attempt < 10; attempt++) {
+        await Promise.resolve();
+      }
+
+      expect(forceStop).toHaveBeenCalledTimes(1);
+      expect(PortManager.getPort(device.deviceId!)).toBeUndefined();
+      expect((IOSCtrlProxyManager as any).instances.get(device.deviceId)).toBeUndefined();
+      expect(resolveDirectSessionDevice("late-cancelled-destroy-session")).toBeUndefined();
+    } finally {
+      forceStop.mockRestore();
+      IOSCtrlProxyManager.resetInstances();
+      PortManager.release(device.deviceId!);
+    }
+  });
+
   test("evicts the CtrlProxy manager after a timed-out destroy later succeeds", async () => {
     const timer = new FakeTimer();
     const device: DeviceInfo = {

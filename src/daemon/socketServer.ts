@@ -133,6 +133,7 @@ import { executionTracker } from "../server/executionTracker";
 import {
   DAEMON_COMPLETE_MAINTENANCE_METHOD,
   DAEMON_APPLY_ACCEPTANCE_DOCTOR_FAULT_METHOD,
+  DAEMON_COMMIT_ACCEPTANCE_RESTART_METHOD,
   DAEMON_CORRUPT_CONTROL_METADATA_METHOD,
   DAEMON_PREPARE_MAINTENANCE_METHOD,
   DAEMON_PREPARE_RESTART_METHOD,
@@ -143,6 +144,7 @@ import {
   type AcceptanceSessionRestartScope,
   type AcceptanceDoctorFault,
   type DaemonAcceptanceDoctorFault,
+  type DaemonAcceptanceRestartCommit,
   type DaemonAcceptanceRestartRelease,
   type DaemonAcceptanceSessionRestart,
   type DaemonAdmittedRestart,
@@ -612,6 +614,7 @@ export class UnixSocketServer {
   private maintenanceRestartConsumed = false;
   private acceptanceRestartAdmissionToken: string | undefined;
   private acceptanceRestartAdmissionOwnerSessionId: string | undefined;
+  private acceptanceRestartAdmissionCommitted = false;
   private acceptanceRestartAdmissionExpiresAt: number | undefined;
   private acceptanceRestartAdmissionExpiryTimer: NodeJS.Timeout | undefined;
   private acceptanceFaultUnresponsive = false;
@@ -3371,14 +3374,16 @@ export class UnixSocketServer {
     );
     this.acceptanceRestartAdmissionToken = restartToken;
     this.acceptanceRestartAdmissionOwnerSessionId = ownerSessionId;
+    this.acceptanceRestartAdmissionCommitted = false;
     this.acceptanceRestartAdmissionExpiresAt = this.timer.now() + admissionTtlMs;
     this.acceptanceRestartAdmissionExpiryTimer = this.timer.setTimeout(
       () => this.releaseAcceptanceRestartAdmission(restartToken),
       admissionTtlMs,
     );
     // Graceful shutdown would terminally release the persisted session. The
-    // manager keeps this socket open through generation verification and
-    // SIGKILL; disconnect or lease expiry rolls the fence back if it exits first.
+    // manager commits the token before SIGKILL. Disconnect rolls back only an
+    // uncommitted fence; after commit the lease keeps new work fenced through
+    // the signal even if the control socket drops.
     return { accepted: true, restartToken };
   }
 
@@ -3394,6 +3399,20 @@ export class UnixSocketServer {
     }
     this.releaseAcceptanceRestartAdmission(params.restartToken);
     return { released: true };
+  }
+
+  private commitAcceptanceRestart(
+    params: Record<string, unknown>,
+    ownerSessionId: string | undefined,
+  ): DaemonAcceptanceRestartCommit {
+    if (
+      !this.daemonGenerationMatches(params) ||
+      !this.acceptanceRestartAdmissionMatches(params.restartToken, ownerSessionId)
+    ) {
+      return { committed: false };
+    }
+    this.acceptanceRestartAdmissionCommitted = true;
+    return { committed: true };
   }
 
   private acceptanceRestartAdmissionMatches(
@@ -3420,7 +3439,10 @@ export class UnixSocketServer {
   }
 
   private releaseAcceptanceRestartAdmissionForOwner(ownerSessionId: string): void {
-    if (ownerSessionId !== this.acceptanceRestartAdmissionOwnerSessionId) {
+    if (
+      this.acceptanceRestartAdmissionCommitted ||
+      ownerSessionId !== this.acceptanceRestartAdmissionOwnerSessionId
+    ) {
       return;
     }
     this.releaseAcceptanceRestartAdmission(this.acceptanceRestartAdmissionToken);
@@ -3436,6 +3458,7 @@ export class UnixSocketServer {
     executionTracker.clearDaemonRestartPreparation();
     this.acceptanceRestartAdmissionToken = undefined;
     this.acceptanceRestartAdmissionOwnerSessionId = undefined;
+    this.acceptanceRestartAdmissionCommitted = false;
     this.acceptanceRestartAdmissionExpiresAt = undefined;
     this.acceptanceRestartAdmissionExpiryTimer = undefined;
   }
@@ -3724,6 +3747,9 @@ export class UnixSocketServer {
       }
       case DAEMON_RESTART_ACCEPTANCE_SESSION_METHOD: {
         return this.restartAcceptanceSession(request.params, socketSessionId);
+      }
+      case DAEMON_COMMIT_ACCEPTANCE_RESTART_METHOD: {
+        return this.commitAcceptanceRestart(request.params, socketSessionId);
       }
       case DAEMON_RELEASE_ACCEPTANCE_RESTART_METHOD: {
         return this.releaseAcceptanceRestart(request.params, socketSessionId);

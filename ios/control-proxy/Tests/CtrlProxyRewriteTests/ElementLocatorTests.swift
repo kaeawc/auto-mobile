@@ -959,7 +959,7 @@ final class ElementLocatorTests: XCTestCase {
         XCTAssertNil(ElementLocator.computePixelDimensions(pointWidth: 375, pointHeight: 812, nativeScale: .nan))
     }
 
-    // MARK: - Per-extraction device-load reduction (#5474)
+    // MARK: - Per-extraction hierarchy decisions
 
     // AC1: the live keyboard-focus requery is skipped on the no-text-field path.
     func testShouldQueryKeyboardFocus_skipsWhenNoTextInputPresent() {
@@ -971,28 +971,18 @@ final class ElementLocatorTests: XCTestCase {
         XCTAssertTrue(ElementLocator.shouldQueryKeyboardFocus(textInputSnapshotCount: 5))
     }
 
-    // AC2: the second SpringBoard full snapshot is gated behind a cheap precondition.
     func testShouldSnapshotSpringboardForAlerts_skipsWhenForegroundIsSpringboard() {
-        // SpringBoard's tree is already the app snapshot — never take a second one,
-        // regardless of whether it shows an alert.
+        // SpringBoard's tree is already the app snapshot — never take a second one.
         XCTAssertFalse(
-            ElementLocator.shouldSnapshotSpringboardForAlerts(foregroundIsSpringboard: true, appHasAlert: false)
-        )
-        XCTAssertFalse(
-            ElementLocator.shouldSnapshotSpringboardForAlerts(foregroundIsSpringboard: true, appHasAlert: true)
+            ElementLocator.shouldSnapshotSpringboardForAlerts(foregroundIsSpringboard: true)
         )
     }
 
-    func testShouldSnapshotSpringboardForAlerts_runsOnlyWhenAppShowsAlert() {
-        // Common per-extraction case: real app, no alert in its tree → skip the
-        // second serialization.
-        XCTAssertFalse(
-            ElementLocator.shouldSnapshotSpringboardForAlerts(foregroundIsSpringboard: false, appHasAlert: false)
-        )
-        // Real app whose own snapshot already shows an alert → a co-presented
-        // system dialog may exist in SpringBoard's tree, so pay for the snapshot.
+    func testShouldSnapshotSpringboardForAlerts_runsForForegroundApp() {
+        // A SpringBoard-owned alert can cover a still-foreground app while the
+        // app's own snapshot remains unchanged, so inspect the system window.
         XCTAssertTrue(
-            ElementLocator.shouldSnapshotSpringboardForAlerts(foregroundIsSpringboard: false, appHasAlert: true)
+            ElementLocator.shouldSnapshotSpringboardForAlerts(foregroundIsSpringboard: false)
         )
     }
 

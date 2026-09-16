@@ -145,6 +145,11 @@ interface PlatformResourceResult {
   inventoryObservation: ConfiguredDeviceInventoryObservation;
 }
 
+interface AndroidConfiguredInventoryResult {
+  images: DeviceImageInfo[];
+  observation: ConfiguredDeviceInventoryObservation;
+}
+
 // Resource content schema
 export interface DeviceImagesResourceContent {
   totalCount: number;
@@ -276,10 +281,7 @@ async function buildAndroidImages(
   deviceManager: PlatformDeviceManager,
   avdManager: AvdManager,
   signal?: AbortSignal,
-): Promise<{
-  images: DeviceImageInfo[];
-  observation: ConfiguredDeviceInventoryObservation;
-}> {
+): Promise<AndroidConfiguredInventoryResult> {
   try {
     const discovery = await deviceManager.getDeviceImagesDetailed("android", { signal });
     if (signal?.aborted) {
@@ -389,9 +391,12 @@ async function generateAndroidResource(
   const controller = new AbortController();
   let timeoutHandle: NodeJS.Timeout | undefined;
   let timedOut = false;
+  let completedInventory: AndroidConfiguredInventoryResult | undefined;
   try {
     return await Promise.race([
-      buildAndroidResourceResult(deviceManager, avdManager, controller.signal),
+      buildAndroidResourceResult(deviceManager, avdManager, controller.signal, (inventory) => {
+        completedInventory = inventory;
+      }),
       new Promise<never>((_resolve, reject) => {
         timeoutHandle = timer.setTimeout(() => {
           timedOut = true;
@@ -411,7 +416,7 @@ async function generateAndroidResource(
       );
       return {
         platform: "android",
-        images: [],
+        images: completedInventory?.images ?? [],
         provisioningCatalog: emptyProvisioningCatalog(),
         catalogObservation: {
           catalogComplete: false,
@@ -420,10 +425,12 @@ async function generateAndroidResource(
             message: `Android device-image resource generation exceeded the ${budgetMs}ms budget; catalog is incomplete.`,
           },
         },
-        inventoryObservation: failedConfiguredInventoryObservation(
-          "timeout",
-          `Android configured-device inventory exceeded the ${budgetMs}ms resource budget.`,
-        ),
+        inventoryObservation:
+          completedInventory?.observation ??
+          failedConfiguredInventoryObservation(
+            "timeout",
+            `Android configured-device inventory exceeded the ${budgetMs}ms resource budget.`,
+          ),
       };
     }
     logger.warn(`[DeviceImageResources] Failed to build Android provisioning catalog: ${error}`);
@@ -448,8 +455,10 @@ async function buildAndroidResourceResult(
   deviceManager: PlatformDeviceManager,
   avdManager: AvdManager,
   signal: AbortSignal,
+  onInventoryComplete: (inventory: AndroidConfiguredInventoryResult) => void,
 ): Promise<PlatformResourceResult> {
   const android = await buildAndroidImages(deviceManager, avdManager, signal);
+  onInventoryComplete(android);
   try {
     const [installedSystemImages, profiles] = await Promise.all([
       avdManager.listInstalledSystemImages(undefined, signal),

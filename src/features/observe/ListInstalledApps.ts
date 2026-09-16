@@ -262,7 +262,8 @@ export class ListInstalledApps {
    * List all installed packages on the device
    * @returns Promise with list of package names
    */
-  async execute(): Promise<string[]> {
+  async execute(signal?: AbortSignal): Promise<string[]> {
+    signal?.throwIfAborted();
     try {
       switch (this.device.platform) {
         case "ios":
@@ -273,12 +274,13 @@ export class ListInstalledApps {
           // For backward compatibility, just return package names. Names-only
           // callers (LaunchApp's installed-package check) must not pay for the
           // label/launchability catalog or its adb probe (#6798).
-          const detailedApps = await this.executeDetailed(undefined, { namesOnly: true });
+          const detailedApps = await this.executeDetailed(signal, { namesOnly: true });
           return this.flattenPackageNames(detailedApps);
         default:
           throw new ActionableError(`Unsupported platform: ${this.device.platform}`);
       }
     } catch (error) {
+      signal?.throwIfAborted();
       logger.warn("Failed to list installed apps:", error);
       return []; // Return empty array on error
     }

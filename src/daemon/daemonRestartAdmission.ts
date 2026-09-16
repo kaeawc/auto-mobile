@@ -7,6 +7,7 @@ export const DAEMON_RESTART_ADMITTED_METHOD = "ide/restartAdmitted";
 export const DAEMON_REPAIR_CONTROL_METADATA_METHOD = "ide/repairControlMetadata";
 export const DAEMON_CORRUPT_CONTROL_METADATA_METHOD = "ide/corruptControlMetadata";
 export const DAEMON_RESTART_ACCEPTANCE_SESSION_METHOD = "ide/restartAcceptanceSession";
+export const DAEMON_COMMIT_ACCEPTANCE_RESTART_METHOD = "ide/commitAcceptanceRestart";
 export const DAEMON_RELEASE_ACCEPTANCE_RESTART_METHOD = "ide/releaseAcceptanceRestart";
 export const DAEMON_APPLY_ACCEPTANCE_DOCTOR_FAULT_METHOD = "ide/applyAcceptanceDoctorFault";
 const ACTIVE_PROVISIONING_RESTART_RETRY_MS = 1_000;
@@ -102,6 +103,10 @@ export interface DaemonAcceptanceSessionRestart {
 
 export interface DaemonAcceptanceRestartRelease {
   released: boolean;
+}
+
+export interface DaemonAcceptanceRestartCommit {
+  committed: boolean;
 }
 
 /** Host-local faults exercised only by the operator-run live acceptance matrix. */

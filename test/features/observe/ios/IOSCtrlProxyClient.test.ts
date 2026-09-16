@@ -2282,6 +2282,45 @@ describe("IOSCtrlProxyClient", function () {
         await testClient.close();
       }
     });
+
+    test("cancels an in-flight launch request with the caller's abort reason", async function () {
+      const testTimer = fakeTimer;
+      const controller = new AbortController();
+      const cancellation = new Error("launch retarget cancelled");
+      const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        testTimer,
+      );
+
+      try {
+        const resultPromise = testClient.requestLaunchApp(
+          "com.apple.Preferences",
+          5000,
+          undefined,
+          false,
+          controller.signal,
+        );
+        const socket = await waitForSocket(getSocket);
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+        await waitForSentMessages(socket, 1);
+
+        const requestManager = (testClient as any).requestManager as {
+          getPendingCount(): number;
+        };
+        expect(requestManager.getPendingCount()).toBe(1);
+
+        controller.abort(cancellation);
+
+        await expect(resultPromise).rejects.toBe(cancellation);
+        expect(requestManager.getPendingCount()).toBe(0);
+      } finally {
+        await testClient.close();
+      }
+    });
   });
 
   describe("requestPressBack", function () {

@@ -271,9 +271,13 @@ export function createIosCtrlProxyRunnerInspector(
           // afterwards so doctor leaves no persistent runner connection or SDK
           // polling timer behind (especially for the one-shot CLI invocation).
           try {
-            supportedCommands = await selectedProbe.client.getSupportedCommands();
+            supportedCommands = await awaitDoctorProbe(currentProbe, () =>
+              selectedProbe.client.getSupportedCommands(),
+            );
             currentProbe.signal?.throwIfAborted();
-            supportedFeatures = await selectedProbe.client.getSupportedFeatures();
+            supportedFeatures = await awaitDoctorProbe(currentProbe, () =>
+              selectedProbe.client.getSupportedFeatures(),
+            );
             running = running || supportedCommands !== null;
           } catch (error) {
             // Treated as an unreachable runner (versionStatus=unknown), not a hard

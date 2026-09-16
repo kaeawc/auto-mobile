@@ -367,6 +367,9 @@ describe("IOSCtrlProxyClient auto-setup", function () {
     // Frozen manual timer: the cooldown window never elapses on its own, so only a
     // budget reset (not the passage of time) can let the new-port connect through.
     const manualTimer = new FakeTimer();
+    // This test drives connectWebSocket directly to isolate its per-endpoint
+    // budget. Keep the separate threshold-restart path from resetting that budget.
+    fakeManager.setForceRestartShouldFail(true);
     const wsFactory = (url: string): WebSocket => {
       // The old port fails instantly (exhausting the budget); the new port connects.
       const mode: "none" | "instant" = url.includes(":8767") ? "none" : "instant";

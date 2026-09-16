@@ -59,6 +59,7 @@ import {
 import {
   DAEMON_PREPARE_RESTART_METHOD,
   DAEMON_APPLY_ACCEPTANCE_DOCTOR_FAULT_METHOD,
+  DAEMON_COMMIT_ACCEPTANCE_RESTART_METHOD,
   DAEMON_CORRUPT_CONTROL_METADATA_METHOD,
   DAEMON_REPAIR_CONTROL_METADATA_METHOD,
   DAEMON_RELEASE_ACCEPTANCE_RESTART_METHOD,
@@ -67,6 +68,7 @@ import {
   type AcceptanceSessionRestartScope,
   type AcceptanceDoctorFault,
   type DaemonAcceptanceDoctorFault,
+  type DaemonAcceptanceRestartCommit,
   type DaemonAcceptanceSessionRestart,
   DaemonRestartDeferredError,
   type DaemonAdmittedRestart,
@@ -2792,6 +2794,20 @@ export class DaemonManager implements DaemonManagerLike {
     if (!maintenanceToken) {
       throw new ActionableError("restart-admitted requires a maintenance admission token.");
     }
+    if (!this.acquireLock()) {
+      throw new DaemonRestartDeferredError("another daemon lifecycle transition is in progress");
+    }
+    try {
+      return await this.restartAdmittedWhileLocked(options, maintenanceToken);
+    } finally {
+      this.releaseLock();
+    }
+  }
+
+  private async restartAdmittedWhileLocked(
+    options: DaemonOptions,
+    maintenanceToken: string,
+  ): Promise<DaemonRestartResult> {
     const status = await this.status();
     if (!status.running) {
       throw new ActionableError(
@@ -2816,7 +2832,7 @@ export class DaemonManager implements DaemonManagerLike {
     // a later status read could name its replacement instead.
     await this.stopRunningDaemon(status, DAEMON_SHUTDOWN_TIMEOUT_MS, false);
     await this.timer.sleep(DAEMON_RESTART_HANDOFF_DELAY_MS);
-    return restartResultFromStart(await this.start(restartOptions));
+    return restartResultFromStart(await this.startUnlocked(restartOptions));
   }
 
   private isSameDaemonGeneration(current: DaemonStatus, expected: DaemonStatus): boolean {
@@ -2993,6 +3009,7 @@ export class DaemonManager implements DaemonManagerLike {
         scope,
         startupSecret,
       );
+      await this.commitAcceptanceRestartAdmission(client, status, restartToken);
       if (this.verifyAcceptanceGenerationBeforeSignal(status, generation)) {
         this.processSignaler.signal(status.pid!, "SIGKILL");
         signalSent = true;
@@ -3055,6 +3072,22 @@ export class DaemonManager implements DaemonManagerLike {
     return admission.restartToken;
   }
 
+  private async commitAcceptanceRestartAdmission(
+    client: DaemonClientLike,
+    status: DaemonStatus,
+    restartToken: string,
+  ): Promise<void> {
+    const result: unknown = await client.callDaemonMethod(DAEMON_COMMIT_ACCEPTANCE_RESTART_METHOD, {
+      ...status,
+      restartToken,
+    });
+    if ((result as Partial<DaemonAcceptanceRestartCommit> | null)?.committed !== true) {
+      throw new ActionableError(
+        "Daemon acceptance-session restart admission expired before it could be committed.",
+      );
+    }
+  }
+
   private async rollbackAcceptanceRestartAdmission(
     client: DaemonClientLike,
     status: DaemonStatus,
@@ -3102,6 +3135,29 @@ export class DaemonManager implements DaemonManagerLike {
         "acceptance-doctor-fault requires a live-acceptance daemon startup capability.",
       );
     }
+    if (!this.acquireLock()) {
+      throw new ActionableError(
+        "acceptance-doctor-fault could not acquire the daemon startup lock.",
+      );
+    }
+    try {
+      await this.applyAcceptanceDoctorFaultWhileLocked(
+        fault,
+        maintenanceToken,
+        expiresAt,
+        startupSecret,
+      );
+    } finally {
+      this.releaseLock();
+    }
+  }
+
+  private async applyAcceptanceDoctorFaultWhileLocked(
+    fault: AcceptanceDoctorFault,
+    maintenanceToken: string,
+    expiresAt: number,
+    startupSecret: string,
+  ): Promise<void> {
     const status = await this.status();
     const generation = status.running ? daemonGenerationIdentityFromStatus(status) : undefined;
     if (!generation) {

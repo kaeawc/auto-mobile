@@ -28,6 +28,7 @@ interface Harness {
   timer: FakeTimer;
   /** Number of `request_hierarchy*` messages that reached the socket. */
   fetchCount: () => number;
+  requestTypes: () => string[];
   getCached: () => CtrlProxyCachedHierarchy | null;
   setCached: (entry: CtrlProxyCachedHierarchy | null) => void;
   /** Simulate a disconnected/reconnecting runner, so no fetch can succeed. */
@@ -47,6 +48,7 @@ function createHarness(): Harness {
   const requestManager = new RequestManager(timer);
   let cached: CtrlProxyCachedHierarchy | null = null;
   let fetches = 0;
+  const requestTypes: string[] = [];
   let connected = true;
 
   const context: HierarchyDelegateContext = {
@@ -54,8 +56,9 @@ function createHarness(): Harness {
       ({
         readyState: 1,
         send: (data: string) => {
-          const message = JSON.parse(data) as { requestId: string };
+          const message = JSON.parse(data) as { requestId: string; type: string };
           fetches += 1;
+          requestTypes.push(message.type);
           // Respond immediately with a hierarchy stamped at the current fake time,
           // so each fetch is distinguishable from the previously cached one.
           requestManager.resolve(message.requestId, {
@@ -78,6 +81,7 @@ function createHarness(): Harness {
     hierarchy: new CtrlProxyHierarchy(context),
     timer,
     fetchCount: () => fetches,
+    requestTypes: () => requestTypes,
     getCached: () => cached,
     setCached: (entry) => {
       cached = entry;
@@ -110,6 +114,7 @@ describe("CtrlProxyHierarchy cache invalidation (iOS)", () => {
     const result = await h.hierarchy.getLatestHierarchy(true, 1000);
 
     expect(h.fetchCount()).toBe(2);
+    expect(h.requestTypes()).toEqual(["request_hierarchy", "request_hierarchy"]);
     expect(result.fresh).toBe(true);
     expect(result.updatedAt).toBe(CACHE_TTL_MS / 2);
   });
@@ -134,6 +139,24 @@ describe("CtrlProxyHierarchy cache invalidation (iOS)", () => {
     // The replacement entry is fresh again, so the next in-TTL call is a cache hit.
     await h.hierarchy.getLatestHierarchy(true, 1000);
     expect(h.fetchCount()).toBe(2);
+  });
+
+  test("a fresh SpringBoard cache forces a full capture for system dialogs", async () => {
+    h.setCached({
+      hierarchy: {
+        ...makeHierarchy(0, "pre-dialog"),
+        packageName: "com.apple.springboard",
+      },
+      receivedAt: h.timer.now(),
+      captureReceivedAt: h.timer.now(),
+      fresh: true,
+    });
+
+    const result = await h.hierarchy.getLatestHierarchy(true, 1000);
+
+    expect(h.fetchCount()).toBe(1);
+    expect(h.requestTypes()).toEqual(["request_hierarchy"]);
+    expect(result.fresh).toBe(true);
   });
 
   test("the raw-observe invalidate keeps the unfiltered snapshot out of the next read", async () => {
@@ -166,6 +189,14 @@ describe("CtrlProxyHierarchy cache invalidation (iOS)", () => {
     expect(h.fetchCount()).toBe(2);
     expect(next.fresh).toBe(true);
     expect(next.hierarchy).not.toBe(rawResult!.hierarchy);
+  });
+
+  test("a missing cache forces a full fetch on the skipWaitForFresh observe path", async () => {
+    const result = await h.hierarchy.getLatestHierarchy(false, 1000, undefined, true, 0);
+
+    expect(h.fetchCount()).toBe(1);
+    expect(h.requestTypes()).toEqual(["request_hierarchy"]);
+    expect(result.fresh).toBe(true);
   });
 
   test("skipWaitForFresh still skips the fetch when the cache was not invalidated", async () => {

@@ -377,9 +377,16 @@ describe("Device Image Resources with Fakes", () => {
       expect(result.provisioningCatalog.systemImages).toHaveLength(acceptedIds.size);
     });
 
-    test("returns an incomplete diagnostic within budget when enumeration hangs", async () => {
+    test("preserves completed configured inventory when later catalog enumeration times out", async () => {
       const timer = new FakeTimer();
-      fakeDeviceUtils.setDeviceImages("android", []);
+      fakeDeviceUtils.setDeviceImages("android", [
+        {
+          name: "Pixel_9_API_35",
+          platform: "android",
+          deviceId: "Pixel_9_API_35",
+          isRunning: false,
+        },
+      ]);
       fakeAvdManager.setListInstalledSystemImagesHangs(true);
 
       const handler = createDeviceImageResourcesHandler({
@@ -408,19 +415,27 @@ describe("Device Image Resources with Fakes", () => {
       });
       expect(result.configuredInventory).toEqual({
         schemaVersion: 1,
-        complete: false,
+        complete: true,
         observations: {
           android: {
-            complete: false,
-            error: {
-              code: "timeout",
-              message: expect.stringContaining("5000"),
-            },
+            complete: true,
           },
         },
       });
-      expect(result.totalCount).toBe(result.androidCount);
-      expect(result.androidCount).toBe(result.images.length);
+      expect(result.androidCount).toBe(1);
+      expect(result.images).toEqual([
+        expect.objectContaining({
+          stableId: "Pixel_9_API_35",
+          name: "Pixel_9_API_35",
+          platform: "android",
+        }),
+      ]);
+      expect(result.provisioningCatalog).toEqual({
+        runtimes: [],
+        deviceTypes: [],
+        systemImages: [],
+        profiles: [],
+      });
       // The hung enumeration must have been cancelled, not left running.
       const calls = fakeAvdManager.getListInstalledSystemImagesCalls();
       expect(calls).toHaveLength(1);

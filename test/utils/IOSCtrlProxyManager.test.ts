@@ -757,7 +757,7 @@ describe("IOSCtrlProxyManager", function () {
       expect(manager.getRunnerGeneration()).toBe(1);
     });
 
-    test("releases the retired allocation when replacement allocation fails", async function () {
+    test("reuses the retired port when the configured range has no spare capacity", async function () {
       const manager = IOSCtrlProxyManager.getInstance(testDevice);
       const retiredPort = manager.getServicePort();
       spyOn(manager, "stop").mockResolvedValue();
@@ -773,11 +773,19 @@ describe("IOSCtrlProxyManager", function () {
       ).mockImplementation(() => {
         throw new Error("no replacement port available");
       });
+      const start = spyOn(
+        manager as unknown as {
+          startAfterForceRestart(options: CtrlProxyStartOptions): Promise<void>;
+        },
+        "startAfterForceRestart",
+      ).mockResolvedValue();
 
-      await expect(manager.forceRestart()).rejects.toThrow("no replacement port available");
+      await manager.forceRestart();
 
       expect(manager.getServicePort()).toBe(retiredPort);
-      expect(PortManager.getPort(testDevice.deviceId)).toBeUndefined();
+      expect(PortManager.getPort(testDevice.deviceId)).toBe(retiredPort);
+      expect(start).toHaveBeenCalledTimes(1);
+      expect(manager.getRunnerGeneration()).toBe(1);
     });
 
     test("keeps a failed replacement start assigned to its manager for a retry", async function () {

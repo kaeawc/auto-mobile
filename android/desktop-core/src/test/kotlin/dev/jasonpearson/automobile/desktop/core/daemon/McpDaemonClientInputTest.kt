@@ -19,6 +19,7 @@ import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
@@ -111,6 +112,36 @@ class McpDaemonClientInputTest {
         )
         assertFalse(
           "sessionUuid" in (requests[2].params["arguments"]?.jsonObject ?: JsonObject(emptyMap()))
+        )
+      }
+  }
+
+  @Test
+  fun `result minted ownership is restored across per-request sockets`() {
+    val acquisitionResult =
+      """{"content":[{"type":"text","text":"{\"success\":true,\"deviceId\":\"emulator-5554\",\"sessionUuid\":\"owned-session\"}"}]}"""
+    TestDaemonSocket(
+        responses =
+          listOf(
+            SocketResponse(resultJson = acquisitionResult),
+            SocketResponse(resultJson = acquisitionResult),
+          )
+      )
+      .use { server ->
+        val client = McpDaemonClient(socketPathValue = server.socketPath.toString())
+
+        assertTrue(client.startDevice("Pixel_9_API_35", "android").success)
+        assertTrue(client.startDevice("Pixel_9_API_35", "android").success)
+
+        val requests = server.awaitRequests()
+        val firstArguments = requests[0].params.getValue("arguments").jsonObject
+        val secondArguments = requests[1].params.getValue("arguments").jsonObject
+        assertFalse("__autoMobileOwnedSessionUuids" in firstArguments)
+        assertEquals(
+          listOf("owned-session"),
+          secondArguments.getValue("__autoMobileOwnedSessionUuids").jsonArray.map {
+            it.jsonPrimitive.content
+          },
         )
       }
   }

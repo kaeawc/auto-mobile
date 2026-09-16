@@ -939,6 +939,24 @@ public final class GesturePerformer: GesturePerforming {
         // MARK: - Actions
 
         public func performAction(_ action: String, resourceId: String? = nil, label: String? = nil) throws {
+            if action.caseInsensitiveCompare("system_alert_tap") == .orderedSame {
+                guard let label, !label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                    throw GestureError.elementNotFound("system alert button label")
+                }
+                try catchingObjCException {
+                    // iOS 26.5 can render a SpringBoard confirmation that is
+                    // absent even from a fresh SpringBoard snapshot. Query the
+                    // exact live button only for this explicit system action;
+                    // normal app actions remain foreground-first.
+                    let button = self.springboard.buttons[label].firstMatch
+                    guard button.waitForExistence(timeout: 1.0), button.isHittable else {
+                        throw GestureError.elementNotFound("system alert button '\(label)'")
+                    }
+                    button.tap()
+                }
+                return
+            }
+
             var element: XCUIElement?
             if let resourceId = resourceId {
                 element = elementLocator.findElement(byResourceId: resourceId) as? XCUIElement

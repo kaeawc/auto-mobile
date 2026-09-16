@@ -420,11 +420,16 @@ export class DeviceBootService {
     context: BootDeadlineContext,
     progress: DeviceBootProgress | undefined,
   ): Promise<DeviceBootResult> {
-    // Resolve all inventory metadata before matching constraints. Runtime alone
-    // does not imply that form factor and screen dimensions are also present.
+    // Exact identity is already authoritative when no metadata constraints were
+    // requested. Avoid a second inventory listing when the running iOS row also
+    // carries the runtime metadata required by CtrlProxy readiness (#7160).
+    const needsIosRuntimeMetadata =
+      running.platform === "ios" &&
+      running.iosVersion === undefined &&
+      running.osVersion === undefined;
     const resolvedRunning =
-      running.platform === "ios"
-        ? await this.enrichIosBootedDeviceFromImage(running, context)
+      hasExplicitConstraints || needsIosRuntimeMetadata
+        ? await this.enrichBootedDeviceFromImage(running, context)
         : running;
     if (hasExplicitConstraints && !matchesDeviceCriteria(resolvedRunning, criteria)) {
       throw new ActionableError(
@@ -434,12 +439,14 @@ export class DeviceBootService {
     return this.waitForRunningDevice(resolvedRunning, context, progress);
   }
 
-  private async enrichIosBootedDeviceFromImage(
+  private async enrichBootedDeviceFromImage(
     device: BootedDevice,
     context: BootDeadlineContext,
   ): Promise<BootedDevice> {
-    const images = await this.runPhase(context, "resolving iOS simulator metadata", (signal) =>
-      this.dependencies.deviceManager.listDeviceImages("ios", signal),
+    const images = await this.runPhase(
+      context,
+      `resolving ${device.platform} device metadata`,
+      (signal) => this.dependencies.deviceManager.listDeviceImages(device.platform, signal),
     );
     return enrichBootedDevicesFromImages([device], images)[0]!;
   }

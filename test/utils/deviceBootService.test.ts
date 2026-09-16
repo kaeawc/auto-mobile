@@ -86,6 +86,73 @@ describe("DeviceBootService", () => {
     });
   });
 
+  it("skips image enrichment for an unconstrained exact running iOS simulator", async () => {
+    const devices = new FakeDeviceUtils();
+    const running: BootedDevice = {
+      name: "iPhone",
+      platform: "ios",
+      deviceId: "UDID-A",
+      iosVersion: "18.0",
+      osVersion: "18.0",
+    };
+    devices.setBootedDevices("ios", [running]);
+    devices.listDeviceImages = async () => {
+      throw new Error("image inventory should not be read");
+    };
+
+    const result = await service(devices).boot({
+      platform: "ios",
+      deviceId: running.deviceId,
+    });
+
+    expect(result.source).toBe("booted");
+    expect(result.device.deviceId).toBe(running.deviceId);
+    expect(devices.getExecutedOperations()).toEqual([
+      "getBootedDevices:ios",
+      `waitForDeviceReady:${running.name}:180000`,
+    ]);
+  });
+
+  it("enriches an exact running Android emulator before applying metadata constraints", async () => {
+    const devices = new FakeDeviceUtils();
+    const running: BootedDevice = {
+      name: "Pixel_9_API_35",
+      platform: "android",
+      deviceId: "emulator-5554",
+    };
+    devices.setBootedDevices("android", [running]);
+    devices.setDeviceImages("android", [
+      {
+        name: running.name,
+        platform: "android",
+        isRunning: true,
+        osVersion: "35",
+        apiLevel: "35",
+        formFactor: "phone",
+        screenWidth: 1080,
+        screenHeight: 2400,
+      },
+    ]);
+
+    const result = await service(devices).boot({
+      platform: "android",
+      deviceId: running.deviceId,
+      minOsVersion: "35",
+      formFactor: "phone",
+      screenSize: { width: 1080, height: 2400 },
+    });
+
+    expect(result.source).toBe("booted");
+    expect(result.device).toMatchObject({
+      deviceId: running.deviceId,
+      osVersion: "35",
+      apiLevel: "35",
+      formFactor: "phone",
+      screenWidth: 1080,
+      screenHeight: 2400,
+    });
+  });
+
   it("rejects incompatible enriched iOS metadata before waiting for readiness", async () => {
     const devices = new FakeDeviceUtils();
     const running: BootedDevice = { name: "iPhone", platform: "ios", deviceId: "UDID-A" };

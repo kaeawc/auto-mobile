@@ -4244,7 +4244,7 @@ async function destroyTeardownTarget(
   } catch (error) {
     if (destroy) {
       retainStableLifecycleUntil(destroy);
-      if (!context.cancelOnRequestAbort) {
+      if (!context.cancelOnRequestAbort || target.device.platform === "ios") {
         void destroy.then(
           () => onLateSuccess(),
           () => {
@@ -4253,9 +4253,10 @@ async function destroyTeardownTarget(
           },
         );
       } else {
-        // This deadline-critical path keeps the identity reservation until the
-        // platform command has settled, but a late completion can neither turn
-        // the returned failure into success nor evict a later replacement.
+        // A deadline-critical Android teardown keeps the identity reservation
+        // until the command settles, but a late completion cannot safely evict a
+        // later AVD incarnation with the same replaceable name. iOS uses an
+        // immutable UDID, so its late-success path still finalizes stale state.
         void destroy.catch(() => undefined);
       }
     }

@@ -1353,6 +1353,55 @@ describe("createIosCtrlProxyRunnerInspector lifecycle", () => {
     expect(closes).toBe(1);
   });
 
+  test.each(["commands", "features"] as const)(
+    "bounds a never-settling runner %s handshake read",
+    async (stalledRead) => {
+      const timer = new FakeTimer();
+      const deadline = createDoctorDeadline({ timeoutMs: 50, timer }, timer);
+      const readStarted = Promise.withResolvers<void>();
+      let closes = 0;
+      const probe = {
+        getSupportedCommands: async () => {
+          if (stalledRead === "commands") {
+            readStarted.resolve();
+            return await new Promise<never>(() => {});
+          }
+          return [...IOS_RUNNER_FEATURE_COMMANDS];
+        },
+        getSupportedFeatures: async () => {
+          if (stalledRead === "features") {
+            readStarted.resolve();
+            return await new Promise<never>(() => {});
+          }
+          return [...IOS_RUNNER_FEATURE_FLAGS];
+        },
+        close: async () => {
+          closes += 1;
+        },
+      };
+      const hooks: IosRunnerInspectorHooks = {
+        getManager: () => runningManager,
+        getExistingClient: () => null,
+        createClient: () => probe,
+      };
+      const inspector = createIosCtrlProxyRunnerInspector(
+        () => simctlReturning([{ name: "iPhone 15", deviceId: "SIM-1" }]) as any,
+        new FakeLogger(),
+        hooks,
+      );
+
+      const inspection = inspector.inspectBootedRunners(undefined, deadline.probe);
+      await readStarted.promise;
+      timer.advanceTime(50);
+      const inspections = await inspection;
+      deadline.dispose();
+
+      expect(deadline.probe.signal?.aborted).toBe(true);
+      expect(inspections[0]?.supportedFeatures).toBeNull();
+      expect(closes).toBe(1);
+    },
+  );
+
   test("filters unrelated booted simulators before creating a runner manager or client", async () => {
     const managerDevices: string[] = [];
     const clientDevices: string[] = [];

@@ -58,6 +58,34 @@ class DeferredDeviceSessionPersistence implements DeviceSessionPersistence {
   async markReleased(): Promise<void> {}
 }
 
+class DeferredLivenessRebindPersistence implements DeviceSessionPersistence {
+  readonly upsertStarted = Promise.withResolvers<void>();
+  readonly finishUpsert = Promise.withResolvers<void>();
+  persistedOwnerToken: string | null = null;
+  deferUpsert = false;
+
+  async upsertActiveSession(): Promise<void> {
+    if (!this.deferUpsert) {
+      return;
+    }
+    this.deferUpsert = false;
+    this.upsertStarted.resolve();
+    await this.finishUpsert.promise;
+  }
+
+  async recordActivity(): Promise<void> {}
+
+  async recordLivenessOwnership(_sessionUuid: string, ownerToken: string | null): Promise<void> {
+    this.persistedOwnerToken = ownerToken;
+  }
+
+  async replaceLivenessOwnership(_sessionUuid: string, ownerToken: string | null): Promise<void> {
+    this.persistedOwnerToken = ownerToken;
+  }
+
+  async markReleased(): Promise<void> {}
+}
+
 class DeferredReleaseDeviceSessionPersistence extends FakeDeviceSessionPersistence {
   readonly reasons: string[] = [];
   readonly releaseStarted = Promise.withResolvers<void>();
@@ -1295,6 +1323,37 @@ describe("SessionManager", () => {
         expect(manager.getDeviceLabels("session-1")).toEqual(labels);
         expect(manager.getSession("session-1")?.cacheData).toEqual({ deviceLabels: labels });
       } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+
+    test("serializes rebind persistence with liveness ownership claims", async () => {
+      const repository = new DeferredLivenessRebindPersistence();
+      const manager = new SessionManager(fakeTimer, repository);
+
+      try {
+        await manager.createSession("session-1", "emulator-old", "android");
+        await manager.claimLivenessOwnership("session-1", "owner-a");
+        repository.deferUpsert = true;
+
+        const rebinding = manager.rebindSession("session-1", "emulator-new", "android");
+        await repository.upsertStarted.promise;
+        let claimSettled = false;
+        const claim = manager
+          .claimLivenessOwnership("session-1", "owner-b")
+          .finally(() => (claimSettled = true));
+        await Promise.resolve();
+
+        expect(claimSettled).toBe(false);
+        expect(repository.persistedOwnerToken).toBe("owner-a");
+        repository.finishUpsert.resolve();
+
+        await expect(rebinding).resolves.toMatchObject({ assignedDevice: "emulator-new" });
+        await expect(claim).resolves.toBe(true);
+        expect(manager.hasLivenessOwnership("session-1", "owner-b")).toBe(true);
+        expect(repository.persistedOwnerToken).toBe("owner-b");
+      } finally {
+        repository.finishUpsert.resolve();
         manager.stopCleanupTimer();
       }
     });

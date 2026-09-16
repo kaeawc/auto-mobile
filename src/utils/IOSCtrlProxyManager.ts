@@ -1783,17 +1783,27 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   }
 
   /**
-   * A forced restart must publish a new endpoint. stop() releases its
-   * allocation, so reserve the retired value while choosing the replacement
-   * instead of allowing first-free allocation to reclaim it.
+   * Prefer a new endpoint for a forced restart, but retain the retired port as
+   * a fallback when the configured range has no spare capacity. The successful
+   * runner generation remains the authoritative restart identity when the port
+   * must be reused.
    */
   private allocateReplacementServicePort(retiredServicePort: number): void {
     PortManager.release(this.device.deviceId);
-    const replacementPort = this.allocateServicePort([retiredServicePort]);
-    if (replacementPort === retiredServicePort) {
-      throw new Error(
-        `iOS CtrlProxy replacement allocation reused retired service port ${retiredServicePort}`,
+    let replacementPort: number;
+    try {
+      replacementPort = this.allocateServicePort([retiredServicePort]);
+    } catch (error) {
+      if (!PortManager.isPortAvailable(retiredServicePort)) {
+        throw error;
+      }
+      // Exhausting a bounded range is safe to recover by reusing the now-free
+      // retired port; runnerGeneration distinguishes the replacement.
+      logger.debug(
+        `[IOSCtrlProxy] No distinct replacement service port is available; reusing ${retiredServicePort}: ${errorMessage(error)}`,
       );
+      PortManager.reserve(this.device.deviceId, retiredServicePort);
+      replacementPort = retiredServicePort;
     }
     this.servicePort = replacementPort;
     this.clearCaches();
@@ -2198,11 +2208,6 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
             options.minimumHealthPollDurationMs,
           ),
         });
-        if (this.servicePort === retiredServicePort) {
-          throw new Error(
-            `iOS CtrlProxy force restart reused retired service port ${retiredServicePort}`,
-          );
-        }
         this.runnerGeneration += 1;
       } catch (error) {
         if (options.signal?.aborted && !(error instanceof ForceRestartCancelledError)) {

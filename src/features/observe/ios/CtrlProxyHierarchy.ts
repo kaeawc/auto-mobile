@@ -153,6 +153,7 @@ export class CtrlProxyHierarchy {
     // Check cache first
     const cachedHierarchy = this.context.getCachedHierarchy();
     let cachedCaptureAgeMs: number | undefined;
+    const cachedIsSpringboard = cachedHierarchy?.hierarchy.packageName === "com.apple.springboard";
     if (cachedHierarchy) {
       // `updatedAt` identifies a capture but lives in the device clock domain,
       // so it cannot safely be subtracted from host time. Instead, age the first
@@ -174,7 +175,7 @@ export class CtrlProxyHierarchy {
       const meetsMinTimestamp =
         minTimestamp === 0 || cachedHierarchy.hierarchy.updatedAt >= minTimestamp;
 
-      if (isFresh && meetsMinTimestamp) {
+      if (isFresh && meetsMinTimestamp && !cachedIsSpringboard) {
         if (cachedHierarchy.hierarchy.packageName) {
           this.lastKnownPackageName = cachedHierarchy.hierarchy.packageName;
         }
@@ -198,6 +199,7 @@ export class CtrlProxyHierarchy {
     // Nulling the cache instead is not an option here: under skipWaitForFresh a
     // missing cache yields no hierarchy at all rather than a refetch.
     const cacheInvalidated = cachedHierarchy !== null && !cachedHierarchy.fresh;
+    const cacheMissing = cachedHierarchy === null;
     // A cache whose CAPTURE timestamp is past the freshness budget must be
     // re-verified before it may be served, even on the `skipWaitForFresh` path —
     // which is `observe`'s default (ObserveScreen.execute: `skipWaitForFresh ??
@@ -212,13 +214,25 @@ export class CtrlProxyHierarchy {
     // tree" symptom: there was no code path that asked.
     const cacheStale =
       cachedCaptureAgeMs !== undefined && cachedCaptureAgeMs > maxObservationAgeMs();
-    if (!skipWaitForFresh || cacheInvalidated || cacheStale) {
+    if (
+      !skipWaitForFresh ||
+      cacheMissing ||
+      cacheInvalidated ||
+      cacheStale ||
+      cachedIsSpringboard
+    ) {
       if (cacheStale && skipWaitForFresh && !cacheInvalidated) {
         logger.debug(
           `[CTRL_PROXY] Cached hierarchy is ${cachedCaptureAgeMs}ms old (budget ${maxObservationAgeMs()}ms); forcing a synchronous re-verification`,
         );
       }
-      const result = await this.requestHierarchySync(perf, false, signal, timeout);
+      // A client-invalidated tree follows a state-changing action, and a
+      // SpringBoard tree may have gained a system-owned dialog without emitting
+      // a hierarchy update. `request_hierarchy_if_stale` trusts the runner cache
+      // in both cases and can return the same pre-dialog tree. Force a real
+      // capture so normal observe sees the same current window as raw observe.
+      const forceCapture = cacheMissing || cacheInvalidated || cachedIsSpringboard;
+      const result = await this.requestHierarchySync(perf, forceCapture, signal, timeout);
       if (result) {
         if (result.hierarchy.packageName) {
           this.lastKnownPackageName = result.hierarchy.packageName;

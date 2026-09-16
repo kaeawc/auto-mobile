@@ -26,7 +26,6 @@ require_command auto-mobile
 require_command base64
 require_command curl
 require_command jq
-require_command mktemp
 require_command xcrun
 
 xcrun simctl getenv "${device_id}" HOME > /dev/null
@@ -39,65 +38,21 @@ renew_session_ownership() {
   fi
 }
 
-ctrl_proxy_port_for_device() {
-  # CtrlProxy allocates a daemon-owned per-device host port; 8765 is only the
-  # runner's preferred internal default and may already belong to another local
-  # service. `doctor` can exit non-zero for unrelated diagnostics, but still
-  # emits the JSON round-trip report that contains this ready client's port.
-  local session_uuid="${1:-}"
-  local doctor_report ctrl_proxy_port renew_status=0
-  if [[ -z "${session_uuid}" ]]; then
-    doctor_report="$(auto-mobile --cli doctor --ios --json || true)"
-  else
-    local doctor_report_file doctor_pid
-    # Renew once before spawning doctor as well as during its run. A fast doctor
-    # can exit before the polling loop observes its PID, while a slow one still
-    # needs the recurring renewals below.
-    set +e
-    renew_session_ownership "${session_uuid}"
-    renew_status=$?
-    set -e
-    if [[ "${renew_status}" -ne 0 ]]; then
-      return 1
-    fi
-    doctor_report_file="$(mktemp)"
-    # Doctor can run multiple iOS diagnostics longer than the session heartbeat
-    # window, so renew ownership while its JSON report is still being collected.
-    auto-mobile --cli doctor --ios --json > "${doctor_report_file}" &
-    doctor_pid=$!
-    while kill -0 "${doctor_pid}" 2> /dev/null; do
-      sleep 2
-      if kill -0 "${doctor_pid}" 2> /dev/null; then
-        set +e
-        renew_session_ownership "${session_uuid}"
-        renew_status=$?
-        set -e
-      fi
-      if [[ "${renew_status:-0}" -ne 0 ]]; then
-        kill "${doctor_pid}" 2> /dev/null || true
-        wait "${doctor_pid}" 2> /dev/null || true
-        rm -f "${doctor_report_file}"
-        return 1
-      fi
-    done
-    wait "${doctor_pid}" 2> /dev/null || true
-    doctor_report="$(< "${doctor_report_file}")"
-    rm -f "${doctor_report_file}"
-  fi
-  if ! ctrl_proxy_port="$(jq -er --arg device_id "${device_id}" '
-      .ios.checks[]
-      | select(.name == "iOS Observe Round Trip")
-      | .message
-      | split(" | ")
-      | map(select(contains("device=" + $device_id + ";")))
-      | .[0]
-      | capture("clientPort=(?<port>[0-9]+)")
-      | .port
-    ' <<< "${doctor_report}")"; then
-    echo "error: could not determine CtrlProxy port for simulator ${device_id}" >&2
-    return 1
-  fi
-  printf '%s\n' "${ctrl_proxy_port}"
+ctrl_proxy_port_from_acquisition() {
+  jq -er '
+    def acquisition:
+      if (.content? | type) == "array" then
+        .content[]
+        | select(.type == "text")
+        | .text
+        | fromjson
+      else
+        .
+      end;
+    acquisition
+    | .deviceIdentity.iosServicePort
+    | select(type == "number" and . > 0 and . <= 65535)
+  '
 }
 
 wait_for_ctrl_proxy_health() {
@@ -155,6 +110,10 @@ if ! session_uuid="$(
   echo "error: could not acquire navigation graph session for simulator ${device_id}" >&2
   exit 1
 fi
+if ! ctrl_proxy_port="$(ctrl_proxy_port_from_acquisition <<< "${session_result}")"; then
+  echo "error: getApple did not report the CtrlProxy port for simulator ${device_id}" >&2
+  exit 1
+fi
 
 # The graph query selects the target device's latest observed foreground app.
 # Keep the injected SDK events and the following observations scoped to the
@@ -171,17 +130,14 @@ for attempt in 1 2 3; do
   sleep 2
 done
 
-# `doctor` above may have started the shared CtrlProxy client while it was
-# unbound. Bind it to this graph session before posting events so its SDK-event
-# poller cannot consume them into the global NavigationGraphManager.
+# Bind the shared CtrlProxy client to this graph session before posting events
+# so its SDK-event poller cannot consume them into the global
+# NavigationGraphManager.
 if ! auto-mobile --debug --embedded-sdk --cli --session-uuid "${session_uuid}" observe --platform ios --deviceId "${device_id}" > /dev/null; then
   echo "error: could not bind iOS SDK events to navigation graph session" >&2
   exit 1
 fi
 
-# Requesting debug and embedded-SDK tools can restart the daemon. That restart
-# creates a new CtrlProxy client, so the prior daemon's reported port is stale.
-ctrl_proxy_port="$(ctrl_proxy_port_for_device "${session_uuid}")"
 wait_for_ctrl_proxy_health "${ctrl_proxy_port}" "${session_uuid}"
 
 event_payload() {

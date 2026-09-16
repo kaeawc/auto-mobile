@@ -9,7 +9,11 @@ import {
   DAEMON_MAINTENANCE_ADMISSION_TTL_MS,
   UnixSocketServer,
 } from "../../src/daemon/socketServer";
-import { sendPersistentSocketRequest, sendSocketRequest } from "./helpers/socketRequest";
+import {
+  sendPersistentSocketRequest,
+  sendRequestOnPersistentSocket,
+  sendSocketRequest,
+} from "./helpers/socketRequest";
 import { FakeTimer } from "../fakes/FakeTimer";
 import type { DaemonResponse } from "../../src/daemon/types";
 import { AndroidCtrlProxyManager } from "../../src/utils/CtrlProxyManager";
@@ -19,6 +23,7 @@ import { RELEASE_CHECKSUM_REGISTRY, IOS_CTRL_PROXY_APP_HASH } from "../../src/co
 import { executionTracker } from "../../src/server/executionTracker";
 import {
   DAEMON_APPLY_ACCEPTANCE_DOCTOR_FAULT_METHOD,
+  DAEMON_COMMIT_ACCEPTANCE_RESTART_METHOD,
   DAEMON_COMPLETE_MAINTENANCE_METHOD,
   DAEMON_CORRUPT_CONTROL_METADATA_METHOD,
   DAEMON_PREPARE_MAINTENANCE_METHOD,
@@ -884,6 +889,46 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
       await new Promise<void>((resolve) => setImmediate(resolve));
       const afterDisconnect = executionTracker.startExecution("tapOn", "after-disconnect");
       executionTracker.endExecution(afterDisconnect.id);
+
+      const committedAdmission = await sendPersistentSocketRequest(
+        acceptanceSocketPath,
+        DAEMON_RESTART_ACCEPTANCE_SESSION_METHOD,
+        {
+          ...status,
+          scope,
+          acceptanceCapability: capability,
+        },
+      );
+      const restartToken = (committedAdmission.response.result as { restartToken: string })
+        .restartToken;
+      expect(
+        (
+          await sendRequestOnPersistentSocket(
+            committedAdmission.socket,
+            DAEMON_COMMIT_ACCEPTANCE_RESTART_METHOD,
+            {
+              ...status,
+              restartToken,
+            },
+          )
+        ).result,
+      ).toEqual({ committed: true });
+      const committedDisconnect = new Promise<void>((resolve) =>
+        committedAdmission.socket.once("close", resolve),
+      );
+      committedAdmission.socket.destroy();
+      await committedDisconnect;
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(() => executionTracker.startExecution("tapOn", "after-committed-disconnect")).toThrow(
+        "Daemon restart is pending",
+      );
+
+      timer.advanceTime(DAEMON_ACCEPTANCE_RESTART_ADMISSION_TTL_MS);
+      const afterCommittedTimeout = executionTracker.startExecution(
+        "tapOn",
+        "after-committed-timeout",
+      );
+      executionTracker.endExecution(afterCommittedTimeout.id);
     } finally {
       await acceptanceServer.close();
       if (existsSync(acceptanceSocketPath)) {

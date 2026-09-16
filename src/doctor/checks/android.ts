@@ -138,7 +138,7 @@ export async function checkAndroidCommandLineTools(
 
   let locations: Awaited<ReturnType<typeof detectAndroidCommandLineTools>>;
   try {
-    locations = await dependencies.detectAndroidCommandLineTools();
+    locations = await awaitDoctorProbe(probe, () => dependencies.detectAndroidCommandLineTools());
   } catch (error) {
     dependencies.logger.warn(
       `Failed to detect Android command line tools: ${errorMessage(error)}`,

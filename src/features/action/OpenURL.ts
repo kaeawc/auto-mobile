@@ -13,6 +13,7 @@ import { logger } from "../../utils/logger";
 import { shellQuote } from "../../utils/shellQuote";
 import { LaunchApp } from "./LaunchApp";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
+import { IOSCtrlProxyClient } from "../observe/ios/IOSCtrlProxyClient";
 
 const SAFARI_BUNDLE_ID = "com.apple.mobilesafari";
 
@@ -199,6 +200,10 @@ export class OpenURL extends BaseVisualChange {
       // execFile byte-for-byte. The string path re-splits its command, which
       // mangles quotes and backslashes (issue #4213 / #4196).
       await simctl.executeCommandArgs(["openurl", this.device.deviceId, url]);
+      // `simctl openurl` can present a SpringBoard-owned confirmation without
+      // changing the tracked app hierarchy. Retire the pre-link cache so the
+      // post-action observation performs a real cross-window capture.
+      IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.invalidateCache();
 
       return {
         success: true,

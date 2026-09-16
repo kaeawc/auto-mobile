@@ -165,6 +165,7 @@ export class CtrlProxyNavigation {
     timeoutMs: number = 10000,
     perf?: PerformanceTracker,
     coldBoot: boolean = false,
+    signal?: AbortSignal,
   ): Promise<CtrlProxyLaunchAppResult> {
     return sendCommand<CtrlProxyLaunchAppResult>(this.context, {
       idPrefix: "launchApp",
@@ -174,6 +175,7 @@ export class CtrlProxyNavigation {
       timeoutMs,
       perf,
       cancelScreenshotBackoff: false,
+      abortSignal: signal,
       notConnectedMessage: "Not connected to CtrlProxy",
       errorLabel: "Launch app",
     });

@@ -469,12 +469,77 @@ describe("LaunchApp", () => {
     expect(fakeAdb.wasCommandExecuted("shell dumpsys activity processes")).toBe(true);
   });
 
-  test("stops launch when device loss cancels the operation during preflight", async () => {
+  test("keeps sampling paused until cancelled Android preflight work settles", async () => {
     const controller = new AbortController();
     const deviceLoss = new DeviceLostError(
       device.deviceId,
       `device-disconnected:${device.deviceId}`,
     );
+    const installedApps = Promise.withResolvers<string[]>();
+    const events: string[] = [];
+    const receivedSignals: AbortSignal[] = [];
+    const cancellableLaunch = new LaunchApp(device, fakeAdb as unknown as any, null, fakeTimer, {
+      targetUserDetector: {
+        async detectTargetUserId(_packageName, _userId, signal) {
+          if (signal) {
+            receivedSignals.push(signal);
+          }
+          controller.abort(deviceLoss);
+          return 0;
+        },
+      },
+      installedAppsProvider: {
+        async listInstalledApps(signal) {
+          if (signal) {
+            receivedSignals.push(signal);
+          }
+          return await installedApps.promise;
+        },
+      },
+      performanceSamplingCoordinator: {
+        async withDeviceSamplingPaused(_deviceId, operation) {
+          events.push("paused");
+          try {
+            return await operation();
+          } finally {
+            events.push("resumed");
+          }
+        },
+      },
+    });
+    (cancellableLaunch as any).awaitIdle = fakeAwaitIdle;
+    (cancellableLaunch as any).observeScreen = fakeObserveScreen;
+    (cancellableLaunch as any).window = fakeWindow;
+
+    const result = cancellableLaunch.execute(
+      packageName,
+      false,
+      false,
+      undefined,
+      undefined,
+      undefined,
+      controller.signal,
+    );
+    for (let attempt = 0; attempt < 10 && receivedSignals.length < 2; attempt++) {
+      await Promise.resolve();
+    }
+
+    expect(receivedSignals).toEqual([controller.signal, controller.signal]);
+    expect(events).toEqual(["paused"]);
+
+    installedApps.resolve([]);
+    await expect(result).rejects.toBe(deviceLoss);
+    expect(events).toEqual(["paused", "resumed"]);
+    expect(hasStartedAppLaunch()).toBe(false);
+  });
+
+  test("bounds sampling pause when cancelled Android preflight ignores abort", async () => {
+    const controller = new AbortController();
+    const deviceLoss = new DeviceLostError(
+      device.deviceId,
+      `device-disconnected:${device.deviceId}`,
+    );
+    const events: string[] = [];
     const cancellableLaunch = new LaunchApp(device, fakeAdb as unknown as any, null, fakeTimer, {
       targetUserDetector: {
         async detectTargetUserId() {
@@ -487,23 +552,38 @@ describe("LaunchApp", () => {
           return await new Promise<never>(() => {});
         },
       },
+      performanceSamplingCoordinator: {
+        async withDeviceSamplingPaused(_deviceId, operation) {
+          events.push("paused");
+          try {
+            return await operation();
+          } finally {
+            events.push("resumed");
+          }
+        },
+      },
     });
-    (cancellableLaunch as any).awaitIdle = fakeAwaitIdle;
-    (cancellableLaunch as any).observeScreen = fakeObserveScreen;
-    (cancellableLaunch as any).window = fakeWindow;
 
-    await expect(
-      cancellableLaunch.execute(
-        packageName,
-        false,
-        false,
-        undefined,
-        undefined,
-        undefined,
-        controller.signal,
-      ),
-    ).rejects.toBe(deviceLoss);
-    expect(hasStartedAppLaunch()).toBe(false);
+    const result = cancellableLaunch.execute(
+      packageName,
+      false,
+      false,
+      undefined,
+      undefined,
+      undefined,
+      controller.signal,
+    );
+    for (let attempt = 0; attempt < 20 && fakeTimer.getPendingTimeoutCount() === 0; attempt++) {
+      await Promise.resolve();
+    }
+
+    expect(fakeTimer.getPendingTimeouts()).toEqual([1_000]);
+    expect(events).toEqual(["paused"]);
+
+    fakeTimer.advanceTime(1_000);
+    await expect(result).rejects.toBe(deviceLoss);
+    expect(events).toEqual(["paused", "resumed"]);
+    expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
   });
 
   test("does not clear Android app data after device loss during the running check", async () => {
@@ -1605,6 +1685,50 @@ describe("LaunchApp", () => {
 
         expect(result.success).toBe(true);
         expect(fakeCtrlProxy.getLaunchAppHistory()).toEqual([userBundleId]);
+      } finally {
+        cleanup();
+      }
+    });
+
+    test("cancels the resident CtrlProxy retarget request", async () => {
+      fakeTimer.enableAutoAdvance();
+      const controller = new AbortController();
+      const cancellation = new Error("launch request cancelled");
+      const { iosLaunchApp, fakeCtrlProxy, cleanup } = createIOSTestHarness({
+        bundleId: userBundleId,
+        launchSuccess: true,
+      });
+      let receivedSignal: AbortSignal | undefined;
+      let hierarchyWaits = 0;
+      fakeCtrlProxy.requestLaunchApp = async (_bundleId, _timeoutMs, _perf, _coldBoot, signal) => {
+        receivedSignal = signal;
+        return await new Promise((resolve, reject) => {
+          signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+        });
+      };
+      (iosLaunchApp as any).waitForIosHierarchyReady = async () => {
+        hierarchyWaits += 1;
+      };
+
+      try {
+        const result = iosLaunchApp.execute(
+          userBundleId,
+          false,
+          false,
+          undefined,
+          undefined,
+          undefined,
+          controller.signal,
+        );
+        for (let attempt = 0; attempt < 20 && !receivedSignal; attempt++) {
+          await Promise.resolve();
+        }
+        expect(receivedSignal).toBe(controller.signal);
+
+        controller.abort(cancellation);
+
+        await expect(result).rejects.toBe(cancellation);
+        expect(hierarchyWaits).toBe(0);
       } finally {
         cleanup();
       }

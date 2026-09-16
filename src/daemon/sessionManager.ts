@@ -1355,13 +1355,11 @@ export class SessionManager {
     platform: Platform,
     stableDeviceId: string | undefined,
   ): Promise<Session> {
-    const replacement = this.createReboundSession(
-      existing,
-      assignedDevice,
-      platform,
-      stableDeviceId,
-    );
-    await this.persistSession(replacement);
+    await this.livenessOwnershipClaimMutexFor(existing).runExclusive(async () => {
+      await this.persistSession(
+        this.createReboundSession(existing, assignedDevice, platform, stableDeviceId),
+      );
+    });
     const activeSetups = Array.from(this.sessionSetupPromises, (setup) =>
       setup.session === existing ? setup.promise : null,
     ).filter((setup): setup is Promise<void> => setup !== null);

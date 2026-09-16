@@ -430,6 +430,28 @@ describe("checkAdbVersion", () => {
 });
 
 describe("Android doctor cancellation", () => {
+  test("bounds never-settling command-line-tool discovery", async () => {
+    const timer = new FakeTimer();
+    const deadline = createDoctorDeadline({ timeoutMs: 50, timer }, timer);
+    const discoveryStarted = Promise.withResolvers<void>();
+    const check = checkAndroidCommandLineTools(deadline.probe, {
+      ...baseDependencies,
+      detectAndroidCommandLineTools: async () => {
+        discoveryStarted.resolve();
+        return await new Promise<never>(() => {});
+      },
+    });
+
+    await discoveryStarted.promise;
+    timer.advanceTime(50);
+    const result = await check;
+    deadline.dispose();
+
+    expect(deadline.probe.signal?.aborted).toBe(true);
+    expect(result.status).toBe("warn");
+    expect(result.message).toBe("Failed to detect Android command line tools.");
+  });
+
   test("aborts delayed emulator subprocess I/O without publishing a late pass", async () => {
     const timer = new FakeTimer();
     const deadline = createDoctorDeadline({ timeoutMs: 50, timer }, timer);

@@ -40,13 +40,14 @@ const LAUNCH_OBSERVATION_TIMEOUT_MS = 5000;
 const LAUNCH_OBSERVATION_POLL_INTERVAL_MS = 200;
 const ANDROID_OFFLINE_RECOVERY_DELAYS_MS = [250, 500] as const;
 const ANDROID_LAUNCH_OBSERVATION_TIMEOUT_MS = 15_000;
+const ANDROID_PREFLIGHT_ABORT_SETTLEMENT_GRACE_MS = 1_000;
 
 export interface TargetUserDetector {
-  detectTargetUserId(packageName: string, userId?: number): Promise<number>;
+  detectTargetUserId(packageName: string, userId?: number, signal?: AbortSignal): Promise<number>;
 }
 
 export interface InstalledAppsProvider {
-  listInstalledApps(): Promise<string[]>;
+  listInstalledApps(signal?: AbortSignal): Promise<string[]>;
 }
 
 export interface IosClearAppDataRunner {
@@ -130,11 +131,11 @@ export class LaunchApp extends BaseVisualChange {
     this.simctl = simctl || new SimCtlClient(this.device);
     this.deviceAppLauncher = dependencies.deviceAppLauncher ?? new DeviceAppManager();
     this.targetUserDetector = dependencies.targetUserDetector ?? {
-      detectTargetUserId: (packageName: string, userId?: number) =>
-        this.detectTargetUserId(packageName, userId),
+      detectTargetUserId: (packageName: string, userId?: number, signal?: AbortSignal) =>
+        this.detectTargetUserId(packageName, userId, signal),
     };
     this.installedAppsProvider = dependencies.installedAppsProvider ?? {
-      listInstalledApps: () => this.listInstalledApps(),
+      listInstalledApps: (signal?: AbortSignal) => this.listInstalledApps(signal),
     };
     this.performanceTrackerFactory =
       dependencies.performanceTrackerFactory ?? createGlobalPerformanceTracker;
@@ -532,7 +533,7 @@ export class LaunchApp extends BaseVisualChange {
             // a physical device, where devicectl's launch error is authoritative.
             if (!isSystemBundleId && simulator) {
               const installedApps = await perf.track("checkInstalled", () =>
-                this.installedAppsProvider.listInstalledApps(),
+                this.installedAppsProvider.listInstalledApps(signal),
               );
               this.assertLaunchNotAborted(signal);
               if (installedApps.length > 0 && !installedApps.includes(bundleId)) {
@@ -585,6 +586,7 @@ export class LaunchApp extends BaseVisualChange {
             undefined,
             perf,
             false,
+            signal,
           );
           this.assertLaunchNotAborted(signal);
           if (!ctrlProxyLaunchResult.success) {
@@ -746,17 +748,22 @@ export class LaunchApp extends BaseVisualChange {
     );
   }
 
-  private async detectTargetUserId(packageName: string, userId?: number): Promise<number> {
+  private async detectTargetUserId(
+    packageName: string,
+    userId?: number,
+    signal?: AbortSignal,
+  ): Promise<number> {
     const target = await new AndroidUserTargetResolver(this.adb).resolve({
       packageName,
       explicitUserId: userId,
+      signal,
     });
     logger.info(`[LaunchApp] Using ${target.source}: user ${target.userId}`);
     return target.userId;
   }
 
-  private async listInstalledApps(): Promise<string[]> {
-    return new ListInstalledApps(this.device, this.adbFactory).execute();
+  private async listInstalledApps(signal?: AbortSignal): Promise<string[]> {
+    return new ListInstalledApps(this.device, this.adbFactory).execute(signal);
   }
 
   /**
@@ -785,11 +792,11 @@ export class LaunchApp extends BaseVisualChange {
     const preflight = Promise.allSettled([
       // Auto-detect target user if not specified
       perf.track("detectTargetUser", async () => {
-        return this.targetUserDetector.detectTargetUserId(packageName, userId);
+        return this.targetUserDetector.detectTargetUserId(packageName, userId, signal);
       }),
       // Check app status (installation and running)
       perf.track("checkInstalled", async () => {
-        return this.installedAppsProvider.listInstalledApps();
+        return this.installedAppsProvider.listInstalledApps(signal);
       }),
     ]);
     const [targetUserResult, installedAppsResult] = await this.waitForAndroidPreflight(
@@ -1116,26 +1123,51 @@ export class LaunchApp extends BaseVisualChange {
     if (!signal) {
       return await preflight;
     }
-    signal.throwIfAborted();
     let abortListener: (() => void) | undefined;
-    const aborted = new Promise<never>((_resolve, reject) => {
-      abortListener = () => {
-        try {
-          signal.throwIfAborted();
-        } catch (error) {
-          reject(error);
-        }
-      };
-      signal.addEventListener("abort", abortListener, { once: true });
-      if (signal.aborted) {
-        abortListener();
-      }
-    });
     try {
+      signal.throwIfAborted();
+      const aborted = new Promise<never>((_resolve, reject) => {
+        abortListener = () => {
+          try {
+            signal.throwIfAborted();
+          } catch (error) {
+            reject(error);
+          }
+        };
+        signal.addEventListener("abort", abortListener, { once: true });
+        if (signal.aborted) {
+          abortListener();
+        }
+      });
       return await Promise.race([preflight, aborted]);
+    } catch (error) {
+      await this.awaitAndroidPreflightSettlement(preflight);
+      throw error;
     } finally {
       if (abortListener) {
         signal.removeEventListener("abort", abortListener);
+      }
+    }
+  }
+
+  private async awaitAndroidPreflightSettlement(preflight: Promise<unknown>): Promise<void> {
+    let timeoutHandle: NodeJS.Timeout | undefined;
+    try {
+      await Promise.race([
+        preflight.then(
+          () => undefined,
+          () => undefined,
+        ),
+        new Promise<void>((resolve) => {
+          timeoutHandle = this.timer.setTimeout(
+            resolve,
+            ANDROID_PREFLIGHT_ABORT_SETTLEMENT_GRACE_MS,
+          );
+        }),
+      ]);
+    } finally {
+      if (timeoutHandle) {
+        this.timer.clearTimeout(timeoutHandle);
       }
     }
   }

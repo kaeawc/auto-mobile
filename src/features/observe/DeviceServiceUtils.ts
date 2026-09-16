@@ -247,11 +247,9 @@ interface SendCommandBaseOptions {
   /**
    * Aborted by a caller-owned deadline that started before `ensureConnected()`
    * was awaited (#6249 follow-up). `ensureConnected()` itself is not
-   * cancellable, so this cannot interrupt an in-flight reconnect/auto-setup —
-   * but it IS checked right after that await resolves and before the request
-   * is registered/sent, so a request whose deadline already expired while
-   * `ensureConnected()` was running is never dispatched to the device (no
-   * phantom action after the caller has already given up and returned).
+   * cancellable, but the signal is checked before dispatch and rejects a
+   * registered in-flight request so its timer and pending state settle
+   * immediately when the caller goes away.
    */
   abortSignal?: AbortSignal;
   /**
@@ -353,14 +351,31 @@ export async function sendCommand<T>(
     responseErrorFactory,
   );
 
+  let abortListener: (() => void) | undefined;
+  if (options.abortSignal) {
+    abortListener = () => {
+      const reason = options.abortSignal?.reason;
+      context.requestManager.reject(
+        requestId,
+        reason instanceof Error ? reason : new Error("Operation cancelled"),
+      );
+    };
+    options.abortSignal.addEventListener("abort", abortListener, { once: true });
+    if (options.abortSignal.aborted) {
+      abortListener();
+    }
+  }
+
   const msg = createMessage(options.messageType, requestId, options.params);
   try {
-    const ws = context.getWebSocket();
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
-      throw new Error("WebSocket not connected");
+    if (!options.abortSignal?.aborted) {
+      const ws = context.getWebSocket();
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        throw new Error("WebSocket not connected");
+      }
+      ws.send(msg);
+      options.onDispatch?.();
     }
-    ws.send(msg);
-    options.onDispatch?.();
   } catch (error) {
     context.requestManager.reject(
       requestId,
@@ -368,9 +383,15 @@ export async function sendCommand<T>(
     );
   }
 
-  return options.perf
-    ? options.perf.track(`${options.idPrefix}.awaitResponse`, () => promise)
-    : promise;
+  try {
+    return await (options.perf
+      ? options.perf.track(`${options.idPrefix}.awaitResponse`, () => promise)
+      : promise);
+  } finally {
+    if (options.abortSignal && abortListener) {
+      options.abortSignal.removeEventListener("abort", abortListener);
+    }
+  }
 }
 
 // =============================================================================

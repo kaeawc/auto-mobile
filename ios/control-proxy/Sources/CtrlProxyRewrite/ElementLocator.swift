@@ -755,15 +755,16 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
                 buildElementInfoFromSnapshot(snapshot, depth: 0, screenBounds: snapshot.frame, keyboardFocusFrame: keyboardFocusFrame)
             }
 
-            // Also check SpringBoard for alerts not in the app's tree — but only pay
-            // for the second full-tree serialization when an alert may actually exist.
+            // Also check SpringBoard for alerts not in the app's tree. A system-owned
+            // sheet can cover a still-foreground app without appearing anywhere in the
+            // app snapshot (for example, iOS's "Open in <app>?" confirmation). In that
+            // state the app provides no precondition that can safely prove SpringBoard
+            // has no alert, so every non-SpringBoard capture must inspect both windows.
             // When the foreground app IS SpringBoard, `appSnapshot` already is
-            // SpringBoard's tree, so its alerts were collected above without a second
-            // snapshot (issue #5474).
+            // SpringBoard's tree and a second snapshot would be redundant.
             let foregroundIsSpringboard = (foregroundBundleId ?? "com.apple.springboard") == "com.apple.springboard"
             let runSpringboardSnapshot = Self.shouldSnapshotSpringboardForAlerts(
-                foregroundIsSpringboard: foregroundIsSpringboard,
-                appHasAlert: !appAlertSnapshots.isEmpty
+                foregroundIsSpringboard: foregroundIsSpringboard
             )
             let springboardCapture = try getAlertsFromSpringboard(
                 runSnapshot: runSpringboardSnapshot,
@@ -838,12 +839,16 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
             return (alerts, capture.rotation)
         }
 
-        /// Recursively collect alert-type element snapshots from a snapshot tree.
-        /// Used instead of .alerts query which can hang on system permission dialogs.
+        /// Recursively collect system-dialog snapshots from a snapshot tree.
+        ///
+        /// iOS exposes classic permission dialogs as `.alert`, but newer
+        /// SpringBoard confirmations such as "Open in <app>?" as `.sheet`.
+        /// Used instead of live `.alerts` / `.sheets` queries, which can hang on
+        /// system-owned dialogs.
         private func collectAlertElements(from snapshot: XCUIElementSnapshot) -> [XCUIElementSnapshot] {
-            if snapshot.elementType == .alert {
-                // Found an alert - return it without recursing into children
-                // (buildElementInfoFromSnapshot will handle the alert's children)
+            if snapshot.elementType == .alert || snapshot.elementType == .sheet {
+                // Found a dialog - return it without recursing into children
+                // (buildElementInfoFromSnapshot will handle its children).
                 return [snapshot]
             }
             var alerts: [XCUIElementSnapshot] = []
@@ -895,18 +900,18 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
 
             // Get children from snapshot (already captured - fast!)
             // Filter out offscreen and zero-area children
-            // Alert-type elements are SKIPPED here because they are extracted separately
-            // by collectAlertElements() and added as top-level system alerts. This ensures
-            // permission dialogs are always visible and never lost to hierarchy optimization.
+            // Alert/sheet elements are SKIPPED here because they are extracted separately
+            // by collectAlertElements() and added as top-level system dialogs. This ensures
+            // system confirmations are always visible and never lost to hierarchy optimization.
             let parentClassName = mapElementType(snapshot.elementType)
             var childNodes: [UIElementInfo]?
             if depth < ElementLocator.maxDepth {
                 let children = snapshot.children
                 if !children.isEmpty {
                     var filteredChildren = children.enumerated().compactMap { (idx, child) -> UIElementInfo? in
-                        // Skip alert elements - they are extracted separately as system alerts
-                        // to ensure they're always visible as top-level children
-                        if child.elementType == .alert {
+                        // Skip dialog elements - they are extracted separately to ensure
+                        // they're always visible as top-level children.
+                        if child.elementType == .alert || child.elementType == .sheet {
                             return nil
                         }
 
@@ -1579,22 +1584,16 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
         return textInputSnapshotCount > 0
     }
 
-    /// Whether the second, SpringBoard full-tree snapshot should be taken to look
-    /// for system alerts (issue #5474).
+    /// Whether a second SpringBoard snapshot is required to discover system-owned
+    /// windows that can overlay a still-foreground app.
     ///
-    /// When the foreground app IS SpringBoard, the app snapshot already is
-    /// SpringBoard's tree, so a second serialization would be redundant. Otherwise
-    /// the extra snapshot is only warranted when the app's own snapshot already
-    /// shows an alert element (a co-presented system dialog may exist in
-    /// SpringBoard's tree); the common no-alert case skips it.
+    /// The app snapshot cannot prove that SpringBoard has no alert: iOS custom-URL
+    /// confirmations are visible on screen while the underlying app hierarchy remains
+    /// unchanged. Skip only when the foreground snapshot is already SpringBoard.
     nonisolated static func shouldSnapshotSpringboardForAlerts(
-        foregroundIsSpringboard: Bool,
-        appHasAlert: Bool
+        foregroundIsSpringboard: Bool
     ) -> Bool {
-        if foregroundIsSpringboard {
-            return false
-        }
-        return appHasAlert
+        return !foregroundIsSpringboard
     }
 
     /// Whether the last-resort ~40-app `checkSystemApps` foreground sweep should

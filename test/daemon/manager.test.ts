@@ -41,6 +41,7 @@ import type { DaemonClientLike } from "../../src/daemon/client";
 import { ActionableError } from "../../src/models";
 import {
   DAEMON_APPLY_ACCEPTANCE_DOCTOR_FAULT_METHOD,
+  DAEMON_COMMIT_ACCEPTANCE_RESTART_METHOD,
   DAEMON_CORRUPT_CONTROL_METADATA_METHOD,
   DAEMON_RELEASE_ACCEPTANCE_RESTART_METHOD,
   DAEMON_RESTART_ACCEPTANCE_SESSION_METHOD,
@@ -462,6 +463,77 @@ describe("DaemonManager restart", () => {
     }
   });
 
+  test("restart-admitted holds the startup lock through admission, cleanup, and replacement", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "daemon-manager-admitted-lock-"));
+    const lockPath = join(directory, "daemon.lock");
+    const pidFilePath = join(directory, "daemon.pid");
+    const socketPath = join(directory, "daemon.sock");
+    const pid = 1001;
+    const livePids = new Set([pid]);
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    writeFileSync(pidFilePath, JSON.stringify({ pid, socketPath, startedAt: 100 }));
+    writeFileSync(socketPath, "socket");
+    const processFinder: DaemonProcessFinder & DaemonProcessLivenessChecker = {
+      findDaemonProcesses: () => [],
+      isProcessRunning: (candidatePid) =>
+        candidatePid === process.pid || livePids.has(candidatePid),
+    };
+    const contender = new DaemonManager(
+      () => new FakeDaemonClient({}),
+      undefined,
+      timer,
+      lockPath,
+      pidFilePath,
+      socketPath,
+      processFinder,
+    );
+    const client = new FakeDaemonClient({});
+    const admissionSpy = spyOn(client, "callDaemonMethod").mockImplementation(async (method) => {
+      expect(method).toBe(DAEMON_RESTART_ADMITTED_METHOD);
+      expect(contender.acquireLock()).toBe(false);
+      livePids.delete(pid);
+      return { accepted: true };
+    });
+    const manager = new DaemonManager(
+      () => client,
+      undefined,
+      timer,
+      lockPath,
+      pidFilePath,
+      socketPath,
+      processFinder,
+    );
+    const statusSpy = spyOn(manager, "status").mockResolvedValue({
+      running: true,
+      pid,
+      startedAt: 100,
+      socketPath,
+    });
+    const startSpy = spyOn(
+      manager as unknown as {
+        startUnlocked(options: { strictPort: boolean }): Promise<"started">;
+      },
+      "startUnlocked",
+    ).mockImplementation(async () => {
+      expect(contender.acquireLock()).toBe(false);
+      expect(existsSync(pidFilePath)).toBe(false);
+      expect(existsSync(socketPath)).toBe(false);
+      return "started";
+    });
+
+    try {
+      await expect(manager.restartAdmitted({}, "maintenance-token")).resolves.toBe("restarted");
+      expect(contender.acquireLock()).toBe(true);
+      contender.releaseLock();
+    } finally {
+      admissionSpy.mockRestore();
+      statusSpy.mockRestore();
+      startSpy.mockRestore();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   test("conditional restart fails closed when a legacy daemon lacks restart admission", async () => {
     const expected: DaemonStatus = {
       running: true,
@@ -600,6 +672,7 @@ describe("DaemonManager control metadata repair", () => {
       const directory = mkdtempSync(join(tmpdir(), `daemon-manager-${fault}-`));
       const pidFilePath = join(directory, "daemon.pid");
       const socketPath = join(directory, "daemon.sock");
+      const lockPath = join(directory, "daemon.lock");
       const pid = 1001;
       const livePids = new Set([pid]);
       const timer = new FakeTimer();
@@ -609,21 +682,38 @@ describe("DaemonManager control metadata repair", () => {
         JSON.stringify({ pid, socketPath, startedAt: 100, version: "test" }),
       );
       writeFileSync(socketPath, "socket");
+      const contender = new DaemonManager(
+        () => new FakeDaemonClient({}),
+        undefined,
+        timer,
+        lockPath,
+        pidFilePath,
+        socketPath,
+        {
+          findDaemonProcesses: () => [],
+          isProcessRunning: (candidatePid) =>
+            candidatePid === process.pid || livePids.has(candidatePid),
+        },
+      );
       const signaler = new FakeDaemonProcessSignaler((signaledPid, signal) => {
         if (signaledPid === pid && signal === "SIGKILL") {
+          expect(contender.acquireLock()).toBe(false);
           livePids.delete(pid);
         }
       });
       const client = new FakeDaemonClient({});
-      const rpcSpy = spyOn(client, "callDaemonMethod").mockResolvedValue({
-        accepted: true,
-        controlState,
+      const rpcSpy = spyOn(client, "callDaemonMethod").mockImplementation(async () => {
+        expect(contender.acquireLock()).toBe(false);
+        return {
+          accepted: true,
+          controlState,
+        };
       });
       const manager = new DaemonManager(
         () => client,
         undefined,
         timer,
-        join(directory, "daemon.lock"),
+        lockPath,
         pidFilePath,
         socketPath,
         {
@@ -639,7 +729,8 @@ describe("DaemonManager control metadata repair", () => {
                   },
                 ]
               : [],
-          isProcessRunning: (candidatePid) => livePids.has(candidatePid),
+          isProcessRunning: (candidatePid) =>
+            candidatePid === process.pid || livePids.has(candidatePid),
         },
         undefined,
         undefined,
@@ -669,6 +760,8 @@ describe("DaemonManager control metadata repair", () => {
         expect(signaler.signals).toEqual([{ pid, signal: "SIGKILL" }]);
         expect(existsSync(pidFilePath)).toBe(expectedPidFilePresent);
         expect(existsSync(socketPath)).toBe(expectedSocketPresent);
+        expect(contender.acquireLock()).toBe(true);
+        contender.releaseLock();
       } finally {
         rpcSpy.mockRestore();
         statusSpy.mockRestore();
@@ -805,6 +898,9 @@ describe("DaemonManager control metadata repair", () => {
       if (method === DAEMON_RESTART_ACCEPTANCE_SESSION_METHOD) {
         return { accepted: true, restartToken: "acceptance-restart-1" };
       }
+      if (method === DAEMON_COMMIT_ACCEPTANCE_RESTART_METHOD) {
+        return { committed: true };
+      }
       expect(method).toBe(DAEMON_RELEASE_ACCEPTANCE_RESTART_METHOD);
       throw new Error("rollback transport failed");
     });
@@ -873,6 +969,98 @@ describe("DaemonManager control metadata repair", () => {
     }
   });
 
+  test("acceptance-session restart does not SIGKILL after its socket-owned token expires", async () => {
+    const originalSecret = process.env.AUTOMOBILE_DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET;
+    process.env.AUTOMOBILE_DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET =
+      "live-acceptance-startup-secret-123456";
+    const directory = mkdtempSync(join(tmpdir(), "acceptance-session-token-expired-"));
+    const pid = 1001;
+    const client = new FakeDaemonClient({});
+    const rpcSpy = spyOn(client, "callDaemonMethod").mockImplementation(async (method) => {
+      if (method === DAEMON_RESTART_ACCEPTANCE_SESSION_METHOD) {
+        return { accepted: true, restartToken: "acceptance-restart-1" };
+      }
+      if (method === DAEMON_COMMIT_ACCEPTANCE_RESTART_METHOD) {
+        return { committed: false };
+      }
+      expect(method).toBe(DAEMON_RELEASE_ACCEPTANCE_RESTART_METHOD);
+      return { released: false };
+    });
+    const signaler = new FakeDaemonProcessSignaler();
+    const manager = new DaemonManager(
+      () => client,
+      undefined,
+      new FakeTimer(),
+      join(directory, "daemon.lock"),
+      join(directory, "daemon.pid"),
+      join(directory, "daemon.sock"),
+      {
+        findDaemonProcesses: () => [
+          {
+            pid,
+            ppid: 1,
+            command: "bun /acceptance/dist/src/index.js --daemon-mode",
+            startedAt: 100,
+            processGenerationToken: "generation-1",
+          },
+        ],
+        isProcessRunning: (candidatePid) => candidatePid === pid || candidatePid === process.pid,
+      },
+      undefined,
+      undefined,
+      undefined,
+      signaler,
+    );
+    const statusSpy = spyOn(manager, "status").mockResolvedValue({
+      running: true,
+      pid,
+      startedAt: 100,
+      processGenerationToken: "generation-1",
+      version: "0.0.73",
+      buildId: "acceptance-build",
+      entryScript: "/acceptance/dist/src/index.js",
+    });
+    const startSpy = spyOn(
+      manager as unknown as {
+        startUnlocked(options: { strictPort: boolean }): Promise<"started">;
+      },
+      "startUnlocked",
+    ).mockResolvedValue("started");
+
+    try {
+      await expect(
+        manager.restartAcceptanceSession({
+          sessionUuid: "session-1",
+          platform: "ios",
+          stableDeviceId: "simulator-1",
+          controls: {
+            androidSiblingAvdName: "sibling",
+            androidDuplicateSerial: "emulator-5556",
+            iosSameNameSiblingUdid: "simulator-2",
+          },
+          expiresAt: 10_000,
+        }),
+      ).rejects.toThrow("expired before it could be committed");
+      expect(signaler.signals).toEqual([]);
+      expect(startSpy).not.toHaveBeenCalled();
+      expect(rpcSpy.mock.calls.map(([method]) => method)).toEqual([
+        DAEMON_RESTART_ACCEPTANCE_SESSION_METHOD,
+        DAEMON_COMMIT_ACCEPTANCE_RESTART_METHOD,
+        DAEMON_RELEASE_ACCEPTANCE_RESTART_METHOD,
+      ]);
+    } finally {
+      rpcSpy.mockRestore();
+      statusSpy.mockRestore();
+      startSpy.mockRestore();
+      rmSync(directory, { recursive: true, force: true });
+      if (originalSecret === undefined) {
+        delete process.env.AUTOMOBILE_DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET;
+      } else {
+        process.env.AUTOMOBILE_DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET = originalSecret;
+      }
+    }
+  });
+
   test("acceptance-session restart keeps admission socket open through verified SIGKILL", async () => {
     const originalSecret = process.env.AUTOMOBILE_DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET;
     process.env.AUTOMOBILE_DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET =
@@ -883,9 +1071,13 @@ describe("DaemonManager control metadata repair", () => {
     const events: string[] = [];
     const client = new FakeDaemonClient({});
     const rpcSpy = spyOn(client, "callDaemonMethod").mockImplementation(async (method) => {
-      expect(method).toBe(DAEMON_RESTART_ACCEPTANCE_SESSION_METHOD);
-      events.push("admitted");
-      return { accepted: true, restartToken: "acceptance-restart-1" };
+      if (method === DAEMON_RESTART_ACCEPTANCE_SESSION_METHOD) {
+        events.push("admitted");
+        return { accepted: true, restartToken: "acceptance-restart-1" };
+      }
+      expect(method).toBe(DAEMON_COMMIT_ACCEPTANCE_RESTART_METHOD);
+      events.push("committed");
+      return { committed: true };
     });
     const closeSpy = spyOn(client, "close").mockImplementation(async () => {
       events.push("closed");
@@ -961,7 +1153,7 @@ describe("DaemonManager control metadata repair", () => {
           expiresAt: 10_000,
         }),
       ).resolves.toBe("restarted");
-      expect(events).toEqual(["admitted", "signaled", "closed"]);
+      expect(events).toEqual(["admitted", "committed", "signaled", "closed"]);
       expect(signaler.signals).toEqual([{ pid, signal: "SIGKILL" }]);
       expect(startSpy).toHaveBeenCalledWith({ strictPort: true });
       expect(existsSync(lockPath)).toBe(false);

@@ -18,6 +18,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
@@ -38,6 +39,9 @@ private const val UNSUPPORTED_APPEND_MODE_ERROR =
   "The connected daemon does not support input/typeText mode:append. Restart or update the daemon before typing into the device."
 private const val SET_TOOL_ENABLED_TOOL_NAME = "setToolEnabled"
 private const val DAEMON_TOOL_SELECTION_PROFILE_PARAM = "__autoMobileToolSelectionProfileUuid"
+private const val DAEMON_OWNED_SESSIONS_PARAM = "__autoMobileOwnedSessionUuids"
+private val DEVICE_SESSION_ACQUISITION_TOOLS =
+  setOf("getAndroid", "getApple", "startDevice", "provisionDevice")
 
 class McpDaemonClient(
   private val socketPathValue: String = DaemonSocketPaths.socketPath(),
@@ -78,6 +82,8 @@ class McpDaemonClient(
 
   private val testRecordingClient = TestRecordingSocketClient()
   private var daemonCapabilities: CachedDaemonCapabilities? = null
+  private val ownedSessionUuids =
+    ConcurrentHashMap.newKeySet<String>().apply { sessionUuid?.let(::add) }
   private var toolSelectionProfileUuid: String? = null
 
   override fun ping() {
@@ -749,12 +755,24 @@ class McpDaemonClient(
       } else {
         arguments
       }
-    val profileUuid = toolSelectionProfileUuid
-    val routedArguments =
-      if (name == SET_TOOL_ENABLED_TOOL_NAME || profileUuid == null) sessionArguments
-      else
+    val ownershipArguments =
+      if (name != SET_TOOL_ENABLED_TOOL_NAME && ownedSessionUuids.isNotEmpty()) {
         buildJsonObject {
           sessionArguments.forEach { (key, value) -> put(key, value) }
+          put(
+            DAEMON_OWNED_SESSIONS_PARAM,
+            JsonArray(ownedSessionUuids.toList().sorted().map(::JsonPrimitive)),
+          )
+        }
+      } else {
+        sessionArguments
+      }
+    val profileUuid = toolSelectionProfileUuid
+    val routedArguments =
+      if (name == SET_TOOL_ENABLED_TOOL_NAME || profileUuid == null) ownershipArguments
+      else
+        buildJsonObject {
+          ownershipArguments.forEach { (key, value) -> put(key, value) }
           put(DAEMON_TOOL_SELECTION_PROFILE_PARAM, JsonPrimitive(profileUuid))
         }
     val response =
@@ -766,7 +784,28 @@ class McpDaemonClient(
         },
       )
     ensureSuccess(response)
-    return response.result ?: JsonObject(emptyMap())
+    val result = response.result ?: JsonObject(emptyMap())
+    recordResultMintedSession(name, result)
+    return result
+  }
+
+  private fun recordResultMintedSession(toolName: String, result: JsonElement) {
+    if (toolName !in DEVICE_SESSION_ACQUISITION_TOOLS) return
+    val content = (result as? JsonObject)?.get("content") as? JsonArray ?: return
+    val text =
+      content
+        .mapNotNull { it as? JsonObject }
+        .firstOrNull { it["type"]?.jsonPrimitive?.contentOrNull == "text" }
+        ?.get("text")
+        ?.jsonPrimitive
+        ?.contentOrNull ?: return
+    val payload = runCatching { json.parseToJsonElement(text) as? JsonObject }.getOrNull() ?: return
+    val minted =
+      payload["sessionUuid"]?.jsonPrimitive?.contentOrNull
+        ?: payload["sessionId"]?.jsonPrimitive?.contentOrNull
+    if (!minted.isNullOrBlank()) {
+      ownedSessionUuids.add(minted)
+    }
   }
 
   /** Releases this client's daemon session, if it owns one. */
@@ -778,6 +817,7 @@ class McpDaemonClient(
         buildJsonObject { put("sessionId", JsonPrimitive(sessionId)) },
       )
     ensureSuccess(response)
+    ownedSessionUuids.remove(sessionId)
   }
 
   /** Refreshes the heartbeat for this client's daemon session, if it owns one. */

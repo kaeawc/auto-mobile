@@ -972,8 +972,12 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     bundleId: string,
     timeoutMs: number = 5000,
     perf?: PerformanceTracker,
+    _coldBoot?: boolean,
+    signal?: AbortSignal,
   ): Promise<CtrlProxyLaunchAppResult> {
+    signal?.throwIfAborted();
     await this.applyDelay("launchApp");
+    signal?.throwIfAborted();
     this.checkFailure("launchApp");
     this.launchAppHistory.push(bundleId);
 

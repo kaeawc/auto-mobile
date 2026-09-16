@@ -5,6 +5,14 @@ import { promises as fsPromises } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
+import { computeBuildIdentity } from "../../src/daemon/buildIdentity";
+import { DaemonClient } from "../../src/daemon/client";
+import {
+  CLI_SESSION_LIVENESS_POLICY,
+  DAEMON_VERSION,
+  DAEMON_HEARTBEAT_METHOD,
+  getCliSessionIdleTimeoutMs,
+} from "../../src/daemon/constants";
 import { defaultTimer } from "../../src/utils/SystemTimer";
 import {
   cleanupIosVideoRecordingSession,
@@ -25,7 +33,7 @@ const LOCAL_CLI_ENTRYPOINT = fileURLToPath(new URL("../../dist/src/index.js", im
 const DEFAULT_WAIT_MS = 10000;
 const DEFAULT_TEST_TIMEOUT_MS = 420000;
 // The daemon's default ownership timeout is 10s. Renew well within that window
-// while one-shot CLI calls are doing iOS setup or leaving a recording active.
+// while CLI calls are doing iOS setup or leaving a recording active.
 const SESSION_HEARTBEAT_INTERVAL_MS = 2_000;
 const SESSION_HEARTBEAT_COMMAND_TIMEOUT_MS = 5_000;
 const SESSION_RELEASE_COMMAND_TIMEOUT_MS = 5_000;
@@ -128,25 +136,50 @@ async function runLocalCli(
 async function startVideoRecordingSessionHeartbeat(
   sessionUuid: string,
 ): Promise<SessionOwnershipHeartbeat> {
-  // Each renewal is a new one-shot process, so the keeper—not an individual
-  // command—owns this stable token. The first tick explicitly takes ownership;
-  // later ticks only prove it, and therefore cannot take it back after another
-  // client takes over the session.
+  // Keep one daemon socket open for the lifetime of the recording. Spawning a
+  // fresh CLI process every two seconds can exceed the command deadline on a
+  // loaded macOS runner even after the daemon accepted the heartbeat.
   const livenessOwnerToken = `ios-video-keeper-${randomUUID()}`;
-  return startSessionOwnershipHeartbeat({
-    intervalMs: SESSION_HEARTBEAT_INTERVAL_MS,
-    renew: createSingleClaimSessionOwnershipRenewal(async (claimLivenessOwnership, signal) => {
-      const heartbeatArgs = [
-        "--daemon",
-        "heartbeat",
-        sessionUuid,
-        "--liveness-owner-token",
-        livenessOwnerToken,
-        ...(claimLivenessOwnership ? ["--claim-liveness-ownership"] : []),
-      ];
-      await runLocalCliOutput(heartbeatArgs, signal, SESSION_HEARTBEAT_COMMAND_TIMEOUT_MS);
-    }),
-  });
+  const client = new DaemonClient(
+    undefined,
+    undefined,
+    defaultTimer,
+    {},
+    {
+      version: DAEMON_VERSION,
+      build: computeBuildIdentity(LOCAL_CLI_ENTRYPOINT),
+    },
+  );
+  await client.connect();
+  try {
+    const heartbeat = await startSessionOwnershipHeartbeat({
+      intervalMs: SESSION_HEARTBEAT_INTERVAL_MS,
+      renew: createSingleClaimSessionOwnershipRenewal(async (claimLivenessOwnership, signal) => {
+        await client.callDaemonMethod(
+          DAEMON_HEARTBEAT_METHOD,
+          {
+            sessionId: sessionUuid,
+            livenessPolicy: CLI_SESSION_LIVENESS_POLICY,
+            idleTimeoutMs: getCliSessionIdleTimeoutMs(),
+            livenessOwnerToken,
+            ...(claimLivenessOwnership ? { claimLivenessOwnership: true } : {}),
+          },
+          { signal, timeoutMs: SESSION_HEARTBEAT_COMMAND_TIMEOUT_MS },
+        );
+      }),
+    });
+    return {
+      assertHealthy: () => heartbeat.assertHealthy(),
+      stop: async () => {
+        const error = await heartbeat.stop();
+        await client.close();
+        return error;
+      },
+    };
+  } catch (error) {
+    await client.close();
+    throw error;
+  }
 }
 
 async function runVideoRecordingCli(
@@ -188,6 +221,15 @@ async function acquireVideoRecordingSession(deviceId: string): Promise<string> {
 }
 
 async function bindVideoRecordingSession(sessionUuid: string, deviceId: string): Promise<void> {
+  await runLocalCli([
+    "--session-uuid",
+    sessionUuid,
+    "setToolEnabled",
+    "--toolName",
+    "setActiveDevice",
+    "--enabled",
+    "true",
+  ]);
   await runLocalCli([
     "--session-uuid",
     sessionUuid,

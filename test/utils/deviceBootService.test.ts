@@ -1458,7 +1458,7 @@ describe("DeviceBootService", () => {
 
     await bootService.boot({
       platform: "ios",
-      name: "AutoMobile CI iPhone (com.apple.CoreSimulator.SimRuntime.iOS-26-3)",
+      name: "AutoMobile CI iPhone (26.3)",
       minOsVersion: "26.3",
       maxOsVersion: "26.3",
       matchNamedDeviceIgnoringOsVersion: true,

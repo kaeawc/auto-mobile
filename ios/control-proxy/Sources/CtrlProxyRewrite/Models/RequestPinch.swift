@@ -8,6 +8,8 @@ public struct RequestPinch: Decodable, Sendable {
     public var distanceEnd: Double
     public var rotationDegrees: Float?
     public var duration: Int?
+    public var requireExactCenter: Bool?
+    public var frameContext: String?
 }
 
 extension RequestPinch: CommandPayload {}

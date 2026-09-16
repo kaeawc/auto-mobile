@@ -1,5 +1,6 @@
 import { z } from "zod/v4";
 import { withJsonSchemaOverride, withPostFlattenJsonSchemaOverride } from "./toolSchemaHelpers";
+import { elementContainerSchema } from "./elementSelectorSchemas";
 
 // Android accessibility returns boolean attributes as strings ("true"/"false")
 // This schema accepts both for compatibility
@@ -95,6 +96,31 @@ const selectedElementStateSchema = z.object({
   reason: z.string().optional(),
 });
 
+const queryLevelSchema = z.object({
+  selector: elementContainerSchema,
+  matchCount: z.number().int().nonnegative(),
+  selectedIndex: z.number().int().nonnegative(),
+  element: elementSchema.partial(),
+});
+const queryDiagnosticSchema = z.object({
+  code: z.enum([
+    "container_not_found",
+    "container_ambiguous",
+    "target_not_found",
+    "target_ambiguous",
+    "index_out_of_range",
+    "target_not_actionable",
+  ]),
+  level: z.number().int().nonnegative(),
+  matchCount: z.number().int().nonnegative(),
+  candidates: z.array(elementSchema.partial()).max(5),
+});
+const queryResultSchema = z.object({
+  element: elementSchema.nullable(),
+  levels: z.array(queryLevelSchema),
+  diagnostic: queryDiagnosticSchema.optional(),
+});
+
 export const selectedElementSchema = z
   .object({
     text: z.string().optional(),
@@ -106,6 +132,7 @@ export const selectedElementSchema = z
     totalMatches: z.number().int().optional(),
     selectionStrategy: z.string().optional(),
     selectedState: selectedElementStateSchema.optional(),
+    queryLevels: z.array(queryLevelSchema).optional(),
   })
   .passthrough();
 
@@ -1028,6 +1055,8 @@ export const observeScopeMetadataSchema = z
         by: z.enum(["anchor", "foreground-app"]),
         matched: z.boolean(),
         packageName: z.string().optional(),
+        query: elementContainerSchema.optional(),
+        levels: z.array(queryLevelSchema).optional(),
       })
       .passthrough()
       .optional(),
@@ -1135,6 +1164,7 @@ export const observeResultSchema = z
     waitMs: z.number().nonnegative().optional(),
     matchedElement: elementSchema.optional(),
     candidates: z.array(elementSchema).optional(),
+    queryResult: queryResultSchema.optional(),
     freshness: freshnessSchema.optional(),
     predictions: predictionsSchema.optional(),
     accessibilityState: accessibilityStateSchema.optional(),

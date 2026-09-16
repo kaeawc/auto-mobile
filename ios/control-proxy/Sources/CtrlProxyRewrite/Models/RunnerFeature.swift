@@ -7,4 +7,5 @@ import Foundation
 /// contract (#5787).
 public enum RunnerFeature: String, CaseIterable, Codable, Sendable {
     case displayCutoutInfo = "display_cutout_info"
+    case exactCenterPinch = "exact_center_pinch"
 }

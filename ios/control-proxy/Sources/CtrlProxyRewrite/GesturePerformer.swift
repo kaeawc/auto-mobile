@@ -565,7 +565,8 @@ public final class GesturePerformer: GesturePerforming {
             distanceStart: Double,
             distanceEnd: Double,
             rotationDegrees: Double,
-            duration: TimeInterval
+            duration: TimeInterval,
+            requireExactCenter: Bool = false
         )
             throws -> PinchGesturePath
         {
@@ -598,6 +599,10 @@ public final class GesturePerformer: GesturePerforming {
                 // structured failure (issue #2910).
                 guard symbolsUnavailable.boolValue else {
                     throw GestureError.gestureFailed(errorMessage as String? ?? "pinch synthesis failed")
+                }
+                guard !requireExactCenter else {
+                    throw GestureError
+                        .notSupported("Scoped pinch requires coordinate synthesis; refusing a screen-centered fallback")
                 }
 
                 // Public element-anchored fallback: honors scale/velocity but
@@ -1645,7 +1650,8 @@ public final class GesturePerformer: GesturePerforming {
             distanceStart _: Double,
             distanceEnd _: Double,
             rotationDegrees _: Double,
-            duration _: TimeInterval
+            duration _: TimeInterval,
+            requireExactCenter _: Bool = false
         )
             throws -> PinchGesturePath
         {

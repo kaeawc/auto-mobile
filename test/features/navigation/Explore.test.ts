@@ -674,9 +674,8 @@ describe("Explore", () => {
       expect(calls).toEqual([{ elementId: rowId, index: 2, action: "tap" }]);
     });
 
-    test("treats a qualified id as shared with a bare Compose id, as tapOn's finder does", async () => {
-      // The finder matches "pkg:id/row" against a bare "row" node, so the
-      // qualified id is not unique on this screen and unique text must win.
+    test("prefers an exact qualified id over its bare Compose alias, as tapOn does", async () => {
+      // The Compose alias is a fallback only when no exact qualified ID exists.
       const observation = createMockObservation([
         createMockViewHierarchyNode({ text: "Alpha", "resource-id": "com.test:id/row" }),
         createMockViewHierarchyNode({ text: "Beta", "resource-id": "row" }),
@@ -693,7 +692,7 @@ describe("Explore", () => {
         restore();
       }
 
-      expect(calls).toEqual([{ text: "Alpha", action: "tap" }]);
+      expect(calls).toEqual([{ elementId: "com.test:id/row", action: "tap" }]);
     });
   });
 

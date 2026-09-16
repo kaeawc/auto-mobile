@@ -4,6 +4,7 @@ import { ElementSelectionStrategy } from "./ElementSelectionStrategy";
 import { BaseActionResult } from "./BaseActionResult";
 import { ToolDebugInfo } from "../utils/DebugContextBuilder";
 import type { ScreenReaderNavigationResult } from "../features/talkback/TalkBackTapStrategy";
+import type { QueryLevel } from "./ElementQuery";
 
 export type TapEffectBasis =
   | "screenIdentity changed"
@@ -25,6 +26,7 @@ export interface TapOnSelectedElementBounds extends ElementBounds {
 }
 
 export interface TapOnSelectedElement {
+  queryLevels?: QueryLevel[];
   text: string;
   resourceId: string;
   /** Compose test tag, when the node exposes one (may be the only stable identity). */

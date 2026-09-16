@@ -18,6 +18,7 @@ final class GesturePerformerSymbolsUnavailableWiringTests: XCTestCase {
         let bridgeArgument = try XCTUnwrap(pinch.range(of: "&symbolsUnavailable"))
         let availabilityGuard = try XCTUnwrap(pinch.range(of: "guard symbolsUnavailable.boolValue else"))
         let fallback = try XCTUnwrap(pinch.range(of: "PinchFallback.parameters("))
+        let exactCenterGuard = try XCTUnwrap(pinch.range(of: "guard !requireExactCenter else"))
 
         XCTAssertLessThan(
             bridgeArgument.lowerBound,
@@ -28,6 +29,11 @@ final class GesturePerformerSymbolsUnavailableWiringTests: XCTestCase {
             availabilityGuard.lowerBound,
             fallback.lowerBound,
             "only unavailable private symbols may route pinch through PinchFallback"
+        )
+        XCTAssertLessThan(
+            exactCenterGuard.lowerBound,
+            fallback.lowerBound,
+            "scoped pinch must fail before a fallback that ignores its center"
         )
     }
 
@@ -81,6 +87,6 @@ final class GesturePerformerSymbolsUnavailableWiringTests: XCTestCase {
         ].compactMap { $0 }.min()
         let functionEnd = nextDeclaration ?? source.endIndex
 
-        return String(source[functionStart.lowerBound..<functionEnd])
+        return String(source[functionStart.lowerBound ..< functionEnd])
     }
 }

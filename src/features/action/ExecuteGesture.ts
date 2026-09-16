@@ -71,6 +71,13 @@ export class ExecuteGesture extends BaseVisualChange {
     const scrollMode = options.scrollMode || "adb"; // Default to ADB mode
 
     // Use accessibility service swipe if requested
+    if (options.frameContext) {
+      const result = await AndroidCtrlProxyClient.getInstance(
+        this.device,
+        this.adbFactory,
+      ).requestSwipe(x1, y1, x2, y2, duration, 5000, perf, options.frameContext);
+      return { ...result, x1, y1, x2, y2, duration };
+    }
     if (scrollMode === "a11y") {
       return await this.executeA11ySwipe(x1, y1, x2, y2, duration, perf);
     }
@@ -183,7 +190,7 @@ export class ExecuteGesture extends BaseVisualChange {
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<SwipeResult> {
     const duration = options.duration || 300;
-    return await this.executeXCTestSwipe(x1, y1, x2, y2, duration, perf);
+    return await this.executeXCTestSwipe(x1, y1, x2, y2, duration, perf, options.frameContext);
   }
 
   /**
@@ -204,11 +211,12 @@ export class ExecuteGesture extends BaseVisualChange {
     y2: number,
     duration: number,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    frameContext?: string,
   ): Promise<SwipeResult> {
     const client = IOSCtrlProxyClient.getInstance(this.device);
 
     const result = await perf.track("xctestSwipe", async () => {
-      return await client.requestSwipe(x1, y1, x2, y2, duration, 5000, perf);
+      return await client.requestSwipe(x1, y1, x2, y2, duration, 5000, perf, frameContext);
     });
 
     if (result.success) {

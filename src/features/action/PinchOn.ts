@@ -1,4 +1,5 @@
 import { errorMessage } from "../../utils/describeUnknownError";
+import { DefaultElementSelector } from "../utility/DefaultElementSelector";
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
 import {
   ActionableError,
@@ -111,9 +112,11 @@ export class PinchOn extends BaseVisualChange {
     }
 
     if (options.container) {
-      const selectorCount = [options.container.elementId, options.container.text].filter(
-        Boolean,
-      ).length;
+      const selectorCount = [
+        options.container.elementId,
+        options.container.text,
+        options.container.testTag,
+      ].filter(Boolean).length;
       if (selectorCount !== 1) {
         perf.end();
         return this.createErrorResult(
@@ -136,8 +139,8 @@ export class PinchOn extends BaseVisualChange {
     }
 
     try {
-      const target = await perf.track("resolveTarget", () => this.resolveTarget(options));
-      const { centerX, centerY } = this.getCenter(target.bounds);
+      let target = await perf.track("resolveTarget", () => this.resolveTarget(options));
+      let { centerX, centerY } = this.getCenter(target.bounds);
       let { distanceStart, distanceEnd, scale } = this.resolveDistances(options, target.bounds);
       if (this.device.platform === "ios") {
         distanceStart = Math.round(distanceStart);
@@ -148,7 +151,17 @@ export class PinchOn extends BaseVisualChange {
       const rotationDegrees = options.rotationDegrees ?? 0;
 
       const pinchResult = await this.observedInteraction(
-        async () => {
+        async (currentObservation) => {
+          if (options.container) {
+            target = await this.resolveTarget(options, currentObservation);
+            ({ centerX, centerY } = this.getCenter(target.bounds));
+            ({ distanceStart, distanceEnd, scale } = this.resolveDistances(options, target.bounds));
+            if (this.device.platform === "ios") {
+              distanceStart = Math.round(distanceStart);
+              distanceEnd = Math.round(distanceEnd);
+              scale = distanceStart > 0 ? distanceEnd / distanceStart : scale;
+            }
+          }
           if (this.device.platform === "ios") {
             return await IOSCtrlProxyClient.getInstance(this.device).requestPinch(
               centerX,
@@ -159,6 +172,12 @@ export class PinchOn extends BaseVisualChange {
               duration,
               5000,
               perf,
+              options.container
+                ? {
+                    requireExactCenter: true,
+                    frameContext: currentObservation.viewHierarchy?.frameContext,
+                  }
+                : undefined,
             );
           }
 
@@ -271,22 +290,18 @@ export class PinchOn extends BaseVisualChange {
     }
   }
 
-  private async resolveTarget(options: PinchOnOptions): Promise<PinchTarget> {
-    let observeResult = await this.observeScreen.getMostRecentCachedObserveResult();
-    if (!observeResult.viewHierarchy || observeResult.viewHierarchy.hierarchy?.error) {
-      observeResult = await this.observeScreen.execute();
-    }
-
-    if (!observeResult.viewHierarchy || !observeResult.screenSize) {
-      throw new ActionableError("Unable to resolve target without a view hierarchy");
-    }
+  private async resolveTarget(
+    options: PinchOnOptions,
+    currentObservation?: ObserveResult,
+  ): Promise<PinchTarget> {
+    const observeResult = await this.observePinchTarget(currentObservation);
 
     const screenBounds = this.getScreenBounds(observeResult, options.includeSystemInsets);
 
     if (options.container) {
       const containerElement = this.findContainerElement(
-        options.container,
-        observeResult.viewHierarchy,
+        { selectionStrategy: options.selectionStrategy, ...options.container },
+        observeResult.viewHierarchy!,
       );
       if (!containerElement) {
         throw new ActionableError("Container element not found for pinchOn");
@@ -299,7 +314,7 @@ export class PinchOn extends BaseVisualChange {
     }
 
     if (options.autoTarget !== false) {
-      const autoTarget = this.selectAutoTargetElement(observeResult.viewHierarchy, screenBounds);
+      const autoTarget = this.selectAutoTargetElement(observeResult.viewHierarchy!, screenBounds);
       if (autoTarget) {
         const container = buildContainerFromElement(autoTarget);
         return {
@@ -313,10 +328,21 @@ export class PinchOn extends BaseVisualChange {
       }
     }
 
-    return {
-      bounds: screenBounds,
-      targetType: "screen",
-    };
+    return { bounds: screenBounds, targetType: "screen" };
+  }
+
+  private async observePinchTarget(currentObservation?: ObserveResult): Promise<ObserveResult> {
+    let observeResult =
+      currentObservation ?? (await this.observeScreen.getMostRecentCachedObserveResult());
+    if (!observeResult.viewHierarchy || observeResult.viewHierarchy.hierarchy?.error) {
+      observeResult = await this.observeScreen.execute();
+    }
+
+    if (!observeResult.viewHierarchy || !observeResult.screenSize) {
+      throw new ActionableError("Unable to resolve target without a view hierarchy");
+    }
+
+    return observeResult;
   }
 
   private findContainerElement(
@@ -327,12 +353,20 @@ export class PinchOn extends BaseVisualChange {
       return null;
     }
 
+    if (
+      container.container ||
+      container.selectionStrategy ||
+      container.index !== undefined ||
+      container.testTag
+    ) {
+      return new DefaultElementSelector(this.finder).require(viewHierarchy, container);
+    }
     if (container.elementId) {
       const element = this.finder.findElementByResourceId(
         viewHierarchy,
         container.elementId,
         undefined,
-        true,
+        false,
       );
       if (element) {
         return element;

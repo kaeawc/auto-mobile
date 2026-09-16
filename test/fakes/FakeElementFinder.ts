@@ -1,8 +1,22 @@
 import type { Element } from "../../src/models/Element";
 import type { ViewHierarchyNode, ViewHierarchyResult } from "../../src/models";
 import type { ElementFinder } from "../../src/utils/interfaces/ElementFinder";
+import type { ElementQuery, ElementQueryResult } from "../../src/models/ElementQuery";
+import { DefaultElementFinder } from "../../src/features/utility/ElementFinder";
 
 export class FakeElementFinder implements ElementFinder {
+  findClickableSiblingsOfNode(
+    hierarchy: ViewHierarchyResult,
+    target: ViewHierarchyNode,
+    scope?: ViewHierarchyNode,
+  ): Element[] {
+    return new DefaultElementFinder().findClickableSiblingsOfNode(hierarchy, target, scope);
+  }
+  nextQueryResult?: ElementQueryResult;
+
+  resolveQuery(viewHierarchy: ViewHierarchyResult, query: ElementQuery): ElementQueryResult {
+    return this.nextQueryResult ?? new DefaultElementFinder().resolveQuery(viewHierarchy, query);
+  }
   nextElementsByText: Element[] = [];
   nextElementByText: Element | null = null;
   nextElementsByResourceId: Element[] = [];
@@ -100,6 +114,10 @@ export class FakeElementFinder implements ElementFinder {
 
   findScrollableContainer(_viewHierarchy: ViewHierarchyResult): Element | null {
     return this.nextScrollableContainer;
+  }
+
+  findScrollableContainerNode(viewHierarchy: ViewHierarchyResult): ViewHierarchyNode | null {
+    return new DefaultElementFinder().findScrollableContainerNode(viewHierarchy);
   }
 
   findClickableElements(_viewHierarchy: ViewHierarchyResult): Element[] {

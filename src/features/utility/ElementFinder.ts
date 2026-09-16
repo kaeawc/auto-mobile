@@ -12,6 +12,10 @@ import {
   STABLE_VIEW_ID_PREFIX,
 } from "../observe/android/StableNodeIdentity";
 import { ActionableError } from "../../models/ActionableError";
+import { isFalsy } from "../../models/Element";
+import type { ElementQuery, ElementQueryResult, QueryLevel } from "../../models/ElementQuery";
+import type { ElementSelectionStrategy } from "../../models/ElementSelectionStrategy";
+import { defaultRandom } from "../../utils/Random";
 
 /**
  * `assignStableViewIds` disambiguates content-identical duplicate nodes with an
@@ -130,10 +134,7 @@ export class DefaultElementFinder implements ElementFinder {
     this.textMatcher = textMatcher;
   }
 
-  hasContainerElement(
-    viewHierarchy: ViewHierarchyResult,
-    container?: { elementId?: string; text?: string },
-  ): boolean {
+  hasContainerElement(viewHierarchy: ViewHierarchyResult, container?: ElementQuery): boolean {
     if (!viewHierarchy || !container) {
       return false;
     }
@@ -141,109 +142,314 @@ export class DefaultElementFinder implements ElementFinder {
     return this.findContainerNodeInternal(viewHierarchy, container) !== null;
   }
 
-  private findContainerNodeInRoots(
-    rootNodes: ViewHierarchyNode[],
-    container: { elementId?: string; text?: string },
-    matchesContainerText: ((input?: string) => boolean) | null,
-    preferResourceIdOnly: boolean = false,
-  ): ViewHierarchyNode | null {
-    for (const rootNode of rootNodes) {
-      let containerNode: ViewHierarchyNode | null = null;
-      this.parser.traverseNode(rootNode, (node: ViewHierarchyNode) => {
-        if (containerNode) {
-          return; // Already found
-        }
-
-        const nodeProperties = this.parser.extractNodeProperties(node);
-        const nodeText = nodeProperties.text;
-        const nodeContentDesc = nodeProperties["content-desc"];
-        const nodeIosLabel = nodeProperties["ios-accessibility-label"];
-
-        const elementIdMatches =
-          container.elementId &&
-          (preferResourceIdOnly
-            ? matchesResourceIdFieldOnly(nodeProperties, container.elementId, null, false)
-            : matchesResourceIdOrStableViewId(nodeProperties, container.elementId, null, false));
-
-        if (elementIdMatches) {
-          containerNode = node;
-          return;
-        }
-
-        if (
-          matchesContainerText &&
-          ((typeof nodeText === "string" && matchesContainerText(nodeText)) ||
-            (typeof nodeContentDesc === "string" && matchesContainerText(nodeContentDesc)) ||
-            (typeof nodeIosLabel === "string" && matchesContainerText(nodeIosLabel)))
-        ) {
-          containerNode = node;
-        }
-      });
-
-      if (containerNode) {
-        return containerNode;
-      }
-    }
-
-    return null;
-  }
-
   private findContainerNodeInternal(
     viewHierarchy: ViewHierarchyResult,
-    container: { elementId?: string; text?: string },
+    container: ElementQuery,
   ): ViewHierarchyNode | null {
     if (!viewHierarchy || !container) {
       return null;
     }
+    return this.resolveQuery(viewHierarchy, container).node;
+  }
 
-    let preferResourceIdOnly = false;
-    if (container.elementId) {
-      // A container selector has no enclosing scope of its own to resolve
-      // first, so it is always checked against the whole capture.
-      const fullCaptureRoots = this.collectFullCaptureSearchRoots(viewHierarchy);
-      this.assertStableViewIdSelectorNotAmbiguous(
-        fullCaptureRoots,
-        fullCaptureRoots,
-        container.elementId,
-      );
-      // A real resource-id match anywhere in the capture always wins over a
-      // synthetic view-id match - never unioned with one, and never shadowed
-      // by a stable-id match found in an earlier-priority scope (review
-      // threads PRRT_kwDOP-GF5M6fo13g, PRRT_kwDOP-GF5M6fo2Iq).
-      preferResourceIdOnly = this.hasExactResourceIdFieldMatch(
-        fullCaptureRoots,
-        container.elementId,
-      );
+  /**
+   * Resolve the entire ancestry query from one capture. Containers use the same
+   * matching rules as leaves, but never require bounds, visibility or clickability.
+   * Results retain the native node and bounded discovery/error context.
+   */
+  resolveQuery(
+    viewHierarchy: ViewHierarchyResult,
+    query: ElementQuery,
+    options: { actionable?: boolean; random?: () => number; withinNode?: ViewHierarchyNode } = {},
+  ): ElementQueryResult {
+    const chain = this.queryChain(query);
+    const fullRoots = this.collectFullCaptureSearchRoots(viewHierarchy);
+    let roots = options.withinNode ? this.queryChildren(options.withinNode) : fullRoots;
+    const levels: QueryLevel[] = [];
+    const scopeNodes: ViewHierarchyNode[] = [];
+    for (const [depth, level] of chain.entries()) {
+      const leaf = depth === chain.length - 1;
+      const allMatches = this.queryMatches(roots, fullRoots, level);
+      const matches =
+        leaf && options.actionable
+          ? allMatches.filter((node) => this.isQueryTargetActionable(node, viewHierarchy))
+          : allMatches;
+      const policy = this.queryPolicy(query, level);
+      const code =
+        leaf && allMatches.length > 0 && matches.length === 0
+          ? "target_not_actionable"
+          : this.queryCardinalityFailure(matches.length, level.index, policy, leaf);
+      const fail = (
+        failure: NonNullable<ElementQueryResult["diagnostic"]>["code"],
+      ): ElementQueryResult => ({
+        node: null,
+        element: null,
+        levels,
+        scopeNodes,
+        diagnostic: {
+          code: failure,
+          level: depth,
+          matchCount: matches.length,
+          candidates: (matches.length ? matches : allMatches)
+            .slice(0, 5)
+            .map((node) => this.summarizeQueryNode(node)),
+        },
+      });
+      if (code) {
+        return fail(code);
+      }
+      this.orderQueryMatches(matches, leaf && options.actionable, level.index, policy);
+      const selectedIndex = this.queryIndex(matches.length, level.index, policy, options.random);
+      const node = matches[selectedIndex];
+      const element = this.parser.parseNodeBounds(node);
+      const selector = { ...level };
+      delete selector.container;
+      levels.push({
+        selector,
+        matchCount: matches.length,
+        selectedIndex,
+        element: this.summarizeQueryNode(node),
+      });
+      if (leaf) {
+        return { node, element, levels, scopeNodes };
+      }
+      scopeNodes.push(node);
+      roots = this.queryChildren(node);
     }
+    return { node: null, element: null, levels, scopeNodes };
+  }
 
-    const matchesContainerText = container.text
-      ? this.textMatcher.createTextMatcher(container.text, true, false)
-      : null;
-    const rootNodes = this.parser.extractRootNodes(viewHierarchy);
-    const containerInMain = this.findContainerNodeInRoots(
-      rootNodes,
-      container,
-      matchesContainerText,
-      preferResourceIdOnly,
-    );
-    if (containerInMain) {
-      return containerInMain;
+  private queryPolicy(query: ElementQuery, level: ElementQuery): ElementSelectionStrategy {
+    return query.selectionStrategy === "unique"
+      ? "unique"
+      : (level.selectionStrategy ?? query.selectionStrategy ?? "first");
+  }
+
+  private orderQueryMatches(
+    matches: ViewHierarchyNode[],
+    actionable: boolean | undefined,
+    index: number | undefined,
+    policy: ElementSelectionStrategy,
+  ): void {
+    if (!actionable || index !== undefined || policy === "unique") {
+      return;
     }
+    // Preserve the legacy smallest-visible-match preference. Explicit indices
+    // keep capture traversal order within the eligible scoped candidate set.
+    const area = (node: ViewHierarchyNode) => {
+      const bounds = this.parser.parseNodeBounds(node)!.bounds;
+      return (bounds.right - bounds.left) * (bounds.bottom - bounds.top);
+    };
+    matches.sort((a, b) => area(a) - area(b));
+  }
 
-    const windowRootGroups = this.parser.extractWindowRootGroups(viewHierarchy, "topmost-first");
-    for (const windowRoots of windowRootGroups) {
-      const containerInWindow = this.findContainerNodeInRoots(
-        windowRoots,
-        container,
-        matchesContainerText,
-        preferResourceIdOnly,
-      );
-      if (containerInWindow) {
-        return containerInWindow;
+  private queryChain(query: ElementQuery): ElementQuery[] {
+    const chain: ElementQuery[] = [];
+    const seen = new Set<ElementQuery>();
+    for (let level: ElementQuery | undefined = query; level; level = level.container) {
+      if (seen.has(level) || chain.length >= 32) {
+        throw new ActionableError("Container queries must be acyclic and at most 32 levels deep");
+      }
+      seen.add(level);
+      const selectors = [level.elementId, level.text, level.testTag].filter((s) => s !== undefined);
+      if (selectors.length !== 1 || !selectors[0]?.length) {
+        throw new ActionableError(
+          "Each query level requires exactly one nonempty elementId, text or testTag",
+        );
+      }
+      chain.unshift(level);
+    }
+    return chain;
+  }
+
+  private queryIndex(
+    count: number,
+    index: number | undefined,
+    policy: string,
+    random = () => defaultRandom.next(),
+  ): number {
+    if (index !== undefined) {
+      return index;
+    }
+    const raw = policy === "random" ? Math.floor(random() * count) : 0;
+    return Number.isFinite(raw) ? Math.max(0, Math.min(count - 1, raw)) : 0;
+  }
+
+  findClickableSiblingsOfNode(
+    hierarchy: ViewHierarchyResult,
+    target: ViewHierarchyNode,
+    scope?: ViewHierarchyNode,
+  ): Element[] {
+    let chain: ViewHierarchyNode[] = [];
+    for (const root of scope ? [scope] : this.collectFullCaptureSearchRoots(hierarchy)) {
+      const stack: ViewHierarchyNode[] = [];
+      this.parser.traverseNode(root, (node: ViewHierarchyNode, depth: number) => {
+        stack.length = depth;
+        stack.push(node);
+        if (node === target) {
+          chain = [...stack];
+        }
+      });
+    }
+    for (let index = chain.length - 2; index >= 0; index--) {
+      const parent = chain[index];
+      const child = chain[index + 1];
+      if (
+        this.isClickableNode(this.parser.extractNodeProperties(child)) &&
+        this.isCollectionNode(this.parser.extractNodeProperties(parent))
+      ) {
+        return [];
+      }
+      const siblings = this.queryChildren(parent)
+        .filter(
+          (node) => node !== child && this.isClickableNode(this.parser.extractNodeProperties(node)),
+        )
+        .filter((node) => this.isQueryTargetActionable(node, hierarchy))
+        .map((node) => this.parser.parseNodeBounds(node))
+        .filter((node): node is Element => node !== null);
+      if (siblings.length) {
+        return siblings;
       }
     }
+    return [];
+  }
 
-    return null;
+  private queryChildren(node: ViewHierarchyNode): ViewHierarchyNode[] {
+    const children: ViewHierarchyNode[] = [];
+    this.parser.traverseNode(node, (child: ViewHierarchyNode, depth: number) => {
+      if (depth === 1) {
+        children.push(child);
+      }
+    });
+    return children;
+  }
+
+  private queryMatches(
+    roots: ViewHierarchyNode[],
+    fullRoots: ViewHierarchyNode[],
+    query: ElementQuery,
+  ): ViewHierarchyNode[] {
+    const nodes = new Set<ViewHierarchyNode>();
+    const scopedNativeIds = new Set<string>();
+    for (const root of roots) {
+      // Candidate roots inside a resolved scope belong to the same native
+      // subtree. Top-level roots can belong to different windows.
+      const nativeIds = roots === fullRoots ? new Set<string>() : scopedNativeIds;
+      this.parser.traverseNode(root, (node: ViewHierarchyNode) => {
+        const props = this.parser.extractNodeProperties(node);
+        // iOS app-SDK supplemental trees repeat XCTest controls and have no
+        // authoritative accessibility ancestry. Use the XCTest representation.
+        if (props.extras?.["sdk.source"] === "sdkWalker") {
+          return;
+        }
+        const uniqueId = props["unique-id"];
+        if (typeof uniqueId === "string" && uniqueId.length > 0) {
+          const key = JSON.stringify([props.package, uniqueId]);
+          if (nativeIds.has(key)) {
+            return;
+          }
+          nativeIds.add(key);
+        }
+        nodes.add(node);
+      });
+    }
+    if (query.elementId !== undefined) {
+      this.assertStableViewIdSelectorNotAmbiguous(roots, fullRoots, query.elementId);
+      const exact = [...nodes].some(
+        (node) => this.parser.extractNodeProperties(node)["resource-id"] === query.elementId,
+      );
+      // Qualified View ids take precedence over the Compose bare-name alias.
+      const separator = query.elementId.lastIndexOf("/");
+      const bareId = !exact && separator >= 0 ? query.elementId.slice(separator + 1) : null;
+      return [...nodes].filter((node) =>
+        exact
+          ? matchesResourceIdFieldOnly(
+              this.parser.extractNodeProperties(node),
+              query.elementId!,
+              null,
+              false,
+            )
+          : matchesResourceIdOrStableViewId(
+              this.parser.extractNodeProperties(node),
+              query.elementId!,
+              bareId,
+              false,
+            ),
+      );
+    }
+    if (query.testTag !== undefined) {
+      return [...nodes].filter(
+        (node) => this.parser.extractNodeProperties(node)["test-tag"] === query.testTag,
+      );
+    }
+    return this.queryTextMatches([...nodes], query.text!);
+  }
+
+  private queryTextMatches(nodes: ViewHierarchyNode[], text: string): ViewHierarchyNode[] {
+    const partial = this.textMatcher.createTextMatcher(text, true, false);
+    const exact = this.textMatcher.createTextMatcher(text, false, false);
+    const fields = (node: ViewHierarchyNode): string[] => {
+      const props = this.parser.extractNodeProperties(node);
+      return [props.text, props["content-desc"], props["ios-accessibility-label"]].filter(
+        (value): value is string => typeof value === "string",
+      );
+    };
+    const matches = nodes.filter((node) => fields(node).some(partial));
+    const exactMatches = matches.filter((node) => fields(node).some(exact));
+    return exactMatches.length ? exactMatches : matches;
+  }
+
+  private summarizeQueryNode(node: ViewHierarchyNode): Partial<Element> {
+    const props = this.parser.extractNodeProperties(node);
+    return {
+      "resource-id": props["resource-id"],
+      "test-tag": props["test-tag"],
+      text: props.text ?? props["content-desc"] ?? props["ios-accessibility-label"],
+      class: props.class,
+      bounds: this.parser.parseNodeBounds(node)?.bounds,
+    };
+  }
+
+  private queryCardinalityFailure(
+    count: number,
+    index: number | undefined,
+    strategy: string,
+    leaf: boolean,
+  ): NonNullable<ElementQueryResult["diagnostic"]>["code"] | undefined {
+    if (count === 0) {
+      return leaf ? "target_not_found" : "container_not_found";
+    }
+    if (index !== undefined) {
+      return Number.isInteger(index) && index >= 0 && index < count
+        ? undefined
+        : "index_out_of_range";
+    }
+    if (strategy === "unique" && count !== 1) {
+      return leaf ? "target_ambiguous" : "container_ambiguous";
+    }
+    return undefined;
+  }
+
+  private isQueryTargetActionable(
+    node: ViewHierarchyNode,
+    hierarchy: ViewHierarchyResult,
+  ): boolean {
+    const props = this.parser.extractNodeProperties(node);
+    if ([props.enabled, props.visible, props["visible-to-user"], props.hittable].some(isFalsy)) {
+      return false;
+    }
+    const bounds = this.parser.parseNodeBounds(node)?.bounds;
+    if (!bounds || bounds.right <= bounds.left || bounds.bottom <= bounds.top) {
+      return false;
+    }
+    const x = (bounds.left + bounds.right) / 2;
+    const y = (bounds.top + bounds.bottom) / 2;
+    return (
+      x >= 0 &&
+      y >= 0 &&
+      x <= (hierarchy.screenWidth ?? Infinity) &&
+      y <= (hierarchy.screenHeight ?? Infinity)
+    );
   }
 
   private sortElementsByArea(elements: Element[]): void {
@@ -364,7 +570,8 @@ export class DefaultElementFinder implements ElementFinder {
     // never match a Compose-sourced node. This is not a fuzzy/partial match - the bare name is
     // the node's real, exact reported ID - so it applies regardless of the partialMatch flag.
     const idSeparatorIndex = resourceId.lastIndexOf("/");
-    const bareResourceId = idSeparatorIndex >= 0 ? resourceId.slice(idSeparatorIndex + 1) : null;
+    const bareResourceId =
+      !resourceIdFieldOnly && idSeparatorIndex >= 0 ? resourceId.slice(idSeparatorIndex + 1) : null;
 
     for (const searchNode of rootNodes) {
       this.parser.traverseNode(searchNode, (node: any) => {
@@ -422,29 +629,6 @@ export class DefaultElementFinder implements ElementFinder {
     }
 
     return matches;
-  }
-
-  private findScrollableContainerInRoots(rootNodes: ViewHierarchyNode[]): Element | null {
-    for (const rootNode of rootNodes) {
-      let foundScrollable: Element | null = null;
-      this.parser.traverseNode(rootNode, (node: any) => {
-        if (foundScrollable) {
-          return;
-        } // Already found one
-        const nodeProperties = this.parser.extractNodeProperties(node);
-        if (nodeProperties.scrollable === "true" || nodeProperties.scrollable === true) {
-          const parsedNode = this.parser.parseNodeBounds(node);
-          if (parsedNode) {
-            foundScrollable = parsedNode;
-          }
-        }
-      });
-      if (foundScrollable) {
-        return foundScrollable;
-      }
-    }
-
-    return null;
   }
 
   private findFocusedTextInputInRoots(
@@ -717,7 +901,7 @@ export class DefaultElementFinder implements ElementFinder {
   findElementsByText(
     viewHierarchy: ViewHierarchyResult,
     text: string,
-    container: { elementId?: string; text?: string } | null = null,
+    container: ElementQuery | null = null,
     partialMatch: boolean = true,
     caseSensitive: boolean = false,
     preserveTraversalOrder: boolean = false,
@@ -749,7 +933,7 @@ export class DefaultElementFinder implements ElementFinder {
     if (containerNode) {
       return selectMatches(
         this.collectTextMatchesInRoots(
-          [containerNode],
+          this.queryChildren(containerNode),
           isExactMatch,
           matchesText,
           !preserveTraversalOrder,
@@ -820,7 +1004,7 @@ export class DefaultElementFinder implements ElementFinder {
   findElementByText(
     viewHierarchy: ViewHierarchyResult,
     text: string,
-    container: { elementId?: string; text?: string } | null = null,
+    container: ElementQuery | null = null,
     partialMatch: boolean = true,
     caseSensitive: boolean = false,
   ): Element | null {
@@ -845,7 +1029,7 @@ export class DefaultElementFinder implements ElementFinder {
   findElementsByResourceId(
     viewHierarchy: ViewHierarchyResult,
     resourceId: string,
-    container: { elementId?: string; text?: string } | null = null,
+    container: ElementQuery | null = null,
     partialMatch: boolean = false,
     preserveTraversalOrder: boolean = false,
   ): Element[] {
@@ -880,7 +1064,7 @@ export class DefaultElementFinder implements ElementFinder {
     // (review thread PRRT_kwDOP-GF5M6f2X6J).
     const fullCaptureRoots = this.collectFullCaptureSearchRoots(viewHierarchy);
     this.assertStableViewIdSelectorNotAmbiguous(
-      containerNode ? [containerNode] : fullCaptureRoots,
+      containerNode ? this.queryChildren(containerNode) : fullCaptureRoots,
       fullCaptureRoots,
       resourceId,
     );
@@ -889,9 +1073,12 @@ export class DefaultElementFinder implements ElementFinder {
       // A real resource-id match anywhere in the container's subtree always
       // wins over a synthetic view-id match, never unioned with one (review
       // thread PRRT_kwDOP-GF5M6fo13g).
-      const preferResourceIdOnly = this.hasExactResourceIdFieldMatch([containerNode], resourceId);
+      const preferResourceIdOnly = this.hasExactResourceIdFieldMatch(
+        this.queryChildren(containerNode),
+        resourceId,
+      );
       return this.collectResourceIdMatchesInRoots(
-        [containerNode],
+        this.queryChildren(containerNode),
         resourceId,
         partialMatch,
         !preserveTraversalOrder,
@@ -945,7 +1132,7 @@ export class DefaultElementFinder implements ElementFinder {
   findElementByResourceId(
     viewHierarchy: ViewHierarchyResult,
     resourceId: string,
-    container: { elementId?: string; text?: string } | null = null,
+    container: ElementQuery | null = null,
     partialMatch: boolean = false,
   ): Element | null {
     const matches = this.findElementsByResourceId(
@@ -963,7 +1150,7 @@ export class DefaultElementFinder implements ElementFinder {
   findElementsByTestTag(
     viewHierarchy: ViewHierarchyResult,
     testTag: string,
-    container: { elementId?: string; text?: string } | null = null,
+    container: ElementQuery | null = null,
     preserveTraversalOrder: boolean = false,
   ): Element[] {
     if (!viewHierarchy || !testTag) {
@@ -979,7 +1166,11 @@ export class DefaultElementFinder implements ElementFinder {
     }
 
     if (containerNode) {
-      return this.collectTestTagMatchesInRoots([containerNode], testTag, !preserveTraversalOrder);
+      return this.collectTestTagMatchesInRoots(
+        this.queryChildren(containerNode),
+        testTag,
+        !preserveTraversalOrder,
+      );
     }
 
     const rootNodes = this.parser.extractRootNodes(viewHierarchy);
@@ -1015,7 +1206,7 @@ export class DefaultElementFinder implements ElementFinder {
    */
   findContainerNode(
     viewHierarchy: ViewHierarchyResult,
-    container: { elementId?: string; text?: string },
+    container: ElementQuery,
   ): ViewHierarchyNode | null {
     return this.findContainerNodeInternal(viewHierarchy, container);
   }
@@ -1087,24 +1278,30 @@ export class DefaultElementFinder implements ElementFinder {
    * @returns The first scrollable element found, or null
    */
   findScrollableContainer(viewHierarchy: ViewHierarchyResult): Element | null {
+    const node = this.findScrollableContainerNode(viewHierarchy);
+    return node ? this.parser.parseNodeBounds(node) : null;
+  }
+
+  findScrollableContainerNode(viewHierarchy: ViewHierarchyResult): ViewHierarchyNode | null {
     if (!viewHierarchy) {
       return null;
     }
-
-    const rootNodes = this.parser.extractRootNodes(viewHierarchy);
-    const mainScrollable = this.findScrollableContainerInRoots(rootNodes);
-    if (mainScrollable) {
-      return mainScrollable;
-    }
-
-    const windowRootGroups = this.parser.extractWindowRootGroups(viewHierarchy, "topmost-first");
-    for (const windowRoots of windowRootGroups) {
-      const windowScrollable = this.findScrollableContainerInRoots(windowRoots);
-      if (windowScrollable) {
-        return windowScrollable;
+    for (const root of this.collectFullCaptureSearchRoots(viewHierarchy)) {
+      let match: ViewHierarchyNode | null = null;
+      this.parser.traverseNode(root, (node: ViewHierarchyNode) => {
+        const props = this.parser.extractNodeProperties(node);
+        if (
+          !match &&
+          (props.scrollable === true || props.scrollable === "true") &&
+          this.parser.parseNodeBounds(node)
+        ) {
+          match = node;
+        }
+      });
+      if (match) {
+        return match;
       }
     }
-
     return null;
   }
 
@@ -1148,7 +1345,7 @@ export class DefaultElementFinder implements ElementFinder {
    */
   findClickableElementsInContainer(
     viewHierarchy: ViewHierarchyResult,
-    container: { elementId?: string; text?: string } | null = null,
+    container: ElementQuery | null = null,
     scrollableContainer: boolean = false,
   ): Element[] {
     if (!viewHierarchy) {
@@ -1413,7 +1610,7 @@ export class DefaultElementFinder implements ElementFinder {
   findClickableParentsContainingText(
     viewHierarchy: ViewHierarchyResult,
     text: string,
-    container: { elementId?: string; text?: string } | null = null,
+    container: ElementQuery | null = null,
     fuzzyMatch: boolean = true,
     caseSensitive: boolean = false,
   ): Element[] {
@@ -1484,7 +1681,7 @@ export class DefaultElementFinder implements ElementFinder {
   findClickableSiblingsOfText(
     viewHierarchy: ViewHierarchyResult,
     text: string,
-    container: { elementId?: string; text?: string } | null = null,
+    container: ElementQuery | null = null,
     fuzzyMatch: boolean = true,
     caseSensitive: boolean = false,
   ): Element[] {
@@ -1531,7 +1728,7 @@ export class DefaultElementFinder implements ElementFinder {
   findClickableSiblingsOfResourceId(
     viewHierarchy: ViewHierarchyResult,
     resourceId: string,
-    container: { elementId?: string; text?: string } | null = null,
+    container: ElementQuery | null = null,
     partialMatch: boolean = false,
   ): Element[] {
     if (!viewHierarchy || !resourceId) {

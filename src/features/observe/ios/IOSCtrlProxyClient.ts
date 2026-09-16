@@ -317,6 +317,7 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
     duration?: number,
     timeoutMs?: number,
     perf?: PerformanceTracker,
+    targeting?: { requireExactCenter?: boolean; frameContext?: string },
   ): Promise<CtrlProxyPinchResult>;
 
   requestSetText(text: string, options?: SetTextOptions): Promise<CtrlProxySetTextResult>;
@@ -2422,7 +2423,11 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     disableAllFiltering?: boolean,
     signal?: AbortSignal,
     timeoutMs?: number,
-  ): Promise<{ hierarchy: XCTestHierarchy; perfTiming?: CtrlProxyPerfTiming } | null> {
+  ): Promise<{
+    hierarchy: XCTestHierarchy;
+    perfTiming?: CtrlProxyPerfTiming;
+    frameContext?: string;
+  } | null> {
     return this.hierarchy.requestHierarchySync(perf, disableAllFiltering, signal, timeoutMs);
   }
 
@@ -2572,7 +2577,19 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     duration?: number,
     timeoutMs?: number,
     perf?: PerformanceTracker,
+    targeting?: { requireExactCenter?: boolean; frameContext?: string },
   ): Promise<CtrlProxyPinchResult> {
+    if (
+      targeting?.requireExactCenter &&
+      !(await this.getSupportedFeatures())?.includes("exact_center_pinch")
+    ) {
+      return {
+        success: false,
+        totalTimeMs: 0,
+        error:
+          "Scoped pinch requires a runner advertising exact_center_pinch; rebuild and redeploy the iOS CtrlProxy runner",
+      };
+    }
     return this.gestures.requestPinch(
       centerX,
       centerY,
@@ -2582,6 +2599,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       duration,
       timeoutMs,
       perf,
+      targeting,
     );
   }
 

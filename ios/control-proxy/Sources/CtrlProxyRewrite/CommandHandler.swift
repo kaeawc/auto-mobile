@@ -235,6 +235,7 @@ final class CommandHandler: CommandHandling {
     }
 
     // MARK: - Perf helpers
+
     //
     // The rewrite's expression of the reference `PerfProvider.track` over the injected
     // `any PerfTracking` (`serial` opens the scope, `end` closes it in `defer`). `tracked`
@@ -579,7 +580,12 @@ final class CommandHandler: CommandHandling {
         }
     }
 
-    private func handleTapCoordinates(_ request: RequestTapCoordinates, startTime: Date) async throws -> WebSocketResponse {
+    private func handleTapCoordinates(
+        _ request: RequestTapCoordinates,
+        startTime: Date
+    )
+        async throws -> WebSocketResponse
+    {
         try requireFinite(request.x, field: "x")
         try requireFinite(request.y, field: "y")
         let duration = request.duration ?? 0
@@ -681,14 +687,17 @@ final class CommandHandler: CommandHandling {
         try requireFinite(request.distanceStart, field: "distanceStart")
         try requireFinite(request.distanceEnd, field: "distanceEnd")
         try requireFinite(Double(request.rotationDegrees ?? 0), field: "rotationDegrees")
-        let path = try await gesturePerformer.pinch(
-            centerX: request.centerX,
-            centerY: request.centerY,
-            distanceStart: request.distanceStart,
-            distanceEnd: request.distanceEnd,
-            rotationDegrees: Double(request.rotationDegrees ?? 0),
-            duration: TimeInterval(request.duration ?? 300) / 1000.0
-        )
+        let path = try await performContextCheckedGesture(expected: request.frameContext) {
+            try self.gesturePerformer.pinch(
+                centerX: request.centerX,
+                centerY: request.centerY,
+                distanceStart: request.distanceStart,
+                distanceEnd: request.distanceEnd,
+                rotationDegrees: Double(request.rotationDegrees ?? 0),
+                duration: TimeInterval(request.duration ?? 300) / 1000.0,
+                requireExactCenter: request.requireExactCenter ?? false
+            )
+        }
 
         return WebSocketResponse.success(
             type: ResponseType.pinchResult.rawValue,
@@ -1197,7 +1206,12 @@ final class CommandHandler: CommandHandling {
     /// Report the element holding the VoiceOver cursor. The cursor is only visible in-process,
     /// so it reaches us as `accessibility-focused` on the SDK-enriched hierarchy (see
     /// HierarchyMerger, #3924). A null focusedElement is a success, not an error.
-    private func handleGetCurrentFocus(_ request: RequestEnvelope, startTime: Date) async throws -> CurrentFocusResponse {
+    private func handleGetCurrentFocus(
+        _ request: RequestEnvelope,
+        startTime: Date
+    )
+        async throws -> CurrentFocusResponse
+    {
         let enriched = try await enrichedHierarchyForAccessibility()
         let focused = enriched.hierarchy.flatMap { Self.findAccessibilityFocused($0) }
         return CurrentFocusResponse(
@@ -1209,7 +1223,12 @@ final class CommandHandler: CommandHandling {
 
     /// Report accessibility elements in VoiceOver traversal (depth-first) order, plus the
     /// index of the focused one when the cursor is present (#3924).
-    private func handleGetTraversalOrder(_ request: RequestEnvelope, startTime: Date) async throws -> TraversalOrderResponse {
+    private func handleGetTraversalOrder(
+        _ request: RequestEnvelope,
+        startTime: Date
+    )
+        async throws -> TraversalOrderResponse
+    {
         let enriched = try await enrichedHierarchyForAccessibility()
         var ordered: [UIElementInfo] = []
         if let root = enriched.hierarchy {
@@ -1392,7 +1411,12 @@ final class CommandHandler: CommandHandling {
         )
     }
 
-    private func handleGetPreferences(_ request: RequestGetPreferences, startTime: Date) async -> StorageEntriesResponse {
+    private func handleGetPreferences(
+        _ request: RequestGetPreferences,
+        startTime: Date
+    )
+        async -> StorageEntriesResponse
+    {
         guard let inspector = storageInspector else {
             return StorageEntriesResponse(
                 requestId: request.requestId,
@@ -1454,7 +1478,12 @@ final class CommandHandler: CommandHandling {
         }
     }
 
-    private func handleSetPreference(_ request: RequestSetPreference, startTime: Date) async throws -> WebSocketResponse {
+    private func handleSetPreference(
+        _ request: RequestSetPreference,
+        startTime: Date
+    )
+        async throws -> WebSocketResponse
+    {
         guard let inspector = storageInspector else {
             return WebSocketResponse.error(
                 type: ResponseType.setPreferenceResult.rawValue,
@@ -1554,7 +1583,11 @@ final class CommandHandler: CommandHandling {
 
         do {
             try await validateDatabaseAppId(request.appId)
-            let result = try await client.executeSQL(databasePath: databasePath, query: query, sessionId: request.sessionId)
+            let result = try await client.executeSQL(
+                databasePath: databasePath,
+                query: query,
+                sessionId: request.sessionId
+            )
             if let error = result.error {
                 return ExecuteSqlResponse(
                     requestId: request.requestId,

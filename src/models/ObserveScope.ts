@@ -1,4 +1,5 @@
 import type { ElementBounds } from "./ElementBounds";
+import type { ElementQuery, QueryLevel } from "./ElementQuery";
 
 /**
  * Wire-data types for the `observe` progressive-disclosure scoping experiments
@@ -17,6 +18,8 @@ export interface NormalizedRegion {
 
 /** A semantic anchor for FOCUS: match the first node by resource-id or text. */
 export interface FocusAnchor {
+  /** Full descendant query; distinct from legacy first-anchor semantics. */
+  query?: ElementQuery;
   resourceId?: string;
   text?: string;
 }
@@ -58,5 +61,7 @@ export interface ObserveScopeMetadata {
     by: "anchor" | "foreground-app";
     matched: boolean;
     packageName?: string;
+    query?: ElementQuery;
+    levels?: QueryLevel[];
   };
 }

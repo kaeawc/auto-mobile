@@ -265,7 +265,7 @@ describe("SwipeOn lookFor validation", () => {
     });
 
     expect(result.success).toBe(false);
-    expect(result.error).toBe("lookFor must specify exactly one of elementId or text");
+    expect(result.error).toBe("lookFor must specify exactly one of elementId, text or testTag");
   });
 
   test("rejects lookFor with both text and elementId", async () => {
@@ -279,6 +279,6 @@ describe("SwipeOn lookFor validation", () => {
     });
 
     expect(result.success).toBe(false);
-    expect(result.error).toBe("lookFor must specify exactly one of elementId or text");
+    expect(result.error).toBe("lookFor must specify exactly one of elementId, text or testTag");
   });
 });

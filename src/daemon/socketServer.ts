@@ -169,6 +169,13 @@ function resolveIdentityStartedAt(value: number | undefined, timer: Timer): numb
 }
 
 const MCP_CLIENT_IDLE_CLOSE_MS = 5 * 60 * 1000;
+/**
+ * Maintenance spans separate control RPCs (and, for restart-admitted, separate
+ * client processes), so it cannot be tied to one socket. Bound the global
+ * execution fence instead: the default live-acceptance platform budget is just
+ * under nine minutes, leaving a one-minute margin for valid fault/repair work.
+ */
+export const DAEMON_MAINTENANCE_ADMISSION_TTL_MS = 10 * 60 * 1000;
 /** Keep shutdown bounded if a request handler ignores its disconnected peer. */
 const DAEMON_REQUEST_HANDLER_DRAIN_TIMEOUT_MS = 1_000;
 /** Keep shutdown bounded if a client cannot flush a release notification. */
@@ -589,6 +596,8 @@ export class UnixSocketServer {
   ) => Promise<void>;
   private readonly liveAcceptanceStartupSecret: string | undefined;
   private maintenanceAdmissionToken: string | undefined;
+  private maintenanceAdmissionExpiresAt: number | undefined;
+  private maintenanceAdmissionExpiryTimer: NodeJS.Timeout | undefined;
   private maintenanceRestartConsumed = false;
   private acceptanceFaultUnresponsive = false;
   private readonly sessionToolSelectionService?: Pick<
@@ -3120,6 +3129,7 @@ export class UnixSocketServer {
     if (!this.daemonGenerationMatches(params)) {
       return { accepted: false, reason: "generation_changed" };
     }
+    this.expireDaemonMaintenanceAdmission();
     const sessions = this.daemonState.getSessionManager().getAllSessions?.();
     if (!sessions) {
       return { accepted: false, reason: "sessions_unavailable" };
@@ -3129,29 +3139,72 @@ export class UnixSocketServer {
     if (admission !== "accepted") {
       return { accepted: false, reason: admission };
     }
-    this.maintenanceAdmissionToken = this.idGenerator.next();
+    const maintenanceToken = this.idGenerator.next();
+    this.maintenanceAdmissionToken = maintenanceToken;
+    this.maintenanceAdmissionExpiresAt = this.timer.now() + DAEMON_MAINTENANCE_ADMISSION_TTL_MS;
+    this.maintenanceAdmissionExpiryTimer = this.timer.setTimeout(
+      () => this.releaseDaemonMaintenanceAdmission(maintenanceToken),
+      DAEMON_MAINTENANCE_ADMISSION_TTL_MS,
+    );
     this.maintenanceRestartConsumed = false;
-    return { accepted: true, maintenanceToken: this.maintenanceAdmissionToken };
+    return { accepted: true, maintenanceToken };
   }
 
-  private completeDaemonMaintenance(params: Record<string, unknown>): { completed: boolean } {
+  private completeDaemonMaintenance(params: Record<string, unknown>): {
+    completed: boolean;
+  } {
     if (
       !this.daemonGenerationMatches(params) ||
-      params.maintenanceToken !== this.maintenanceAdmissionToken
+      !this.daemonMaintenanceAdmissionMatches(params.maintenanceToken)
     ) {
       return { completed: false };
     }
+    this.releaseDaemonMaintenanceAdmission(params.maintenanceToken);
+    return { completed: true };
+  }
+
+  private daemonMaintenanceAdmissionMatches(token: unknown): token is string {
+    this.expireDaemonMaintenanceAdmission();
+    return (
+      typeof token === "string" &&
+      this.maintenanceAdmissionToken !== undefined &&
+      token === this.maintenanceAdmissionToken
+    );
+  }
+
+  private expireDaemonMaintenanceAdmission(): void {
+    if (
+      this.maintenanceAdmissionToken !== undefined &&
+      this.maintenanceAdmissionExpiresAt !== undefined &&
+      this.maintenanceAdmissionExpiresAt <= this.timer.now()
+    ) {
+      this.releaseDaemonMaintenanceAdmission(this.maintenanceAdmissionToken);
+    }
+  }
+
+  private releaseDaemonMaintenanceAdmission(token: unknown): void {
+    if (
+      typeof token !== "string" ||
+      this.maintenanceAdmissionToken === undefined ||
+      token !== this.maintenanceAdmissionToken
+    ) {
+      return;
+    }
+    if (this.maintenanceAdmissionExpiryTimer !== undefined) {
+      this.timer.clearTimeout(this.maintenanceAdmissionExpiryTimer);
+    }
     executionTracker.clearDaemonMaintenancePreparation();
     this.maintenanceAdmissionToken = undefined;
+    this.maintenanceAdmissionExpiresAt = undefined;
+    this.maintenanceAdmissionExpiryTimer = undefined;
     this.maintenanceRestartConsumed = false;
-    return { completed: true };
   }
 
   private restartAdmittedDaemon(params: Record<string, unknown>): DaemonAdmittedRestart {
     if (!this.daemonGenerationMatches(params)) {
       return { accepted: false, reason: "generation_changed" };
     }
-    if (params.maintenanceToken !== this.maintenanceAdmissionToken) {
+    if (!this.daemonMaintenanceAdmissionMatches(params.maintenanceToken)) {
       return { accepted: false, reason: "maintenance_token_invalid" };
     }
     if (this.maintenanceRestartConsumed) {
@@ -3318,7 +3371,7 @@ export class UnixSocketServer {
     if (!this.daemonGenerationMatches(params)) {
       return { corrupted: false, reason: "generation_changed" };
     }
-    if (params.maintenanceToken !== this.maintenanceAdmissionToken) {
+    if (!this.daemonMaintenanceAdmissionMatches(params.maintenanceToken)) {
       return { corrupted: false, reason: "maintenance_token_invalid" };
     }
     const identity: DaemonGenerationIdentity = {
@@ -3361,7 +3414,7 @@ export class UnixSocketServer {
     if (!this.daemonGenerationMatches(params)) {
       return { accepted: false, reason: "generation_changed" };
     }
-    if (params.maintenanceToken !== this.maintenanceAdmissionToken) {
+    if (!this.daemonMaintenanceAdmissionMatches(params.maintenanceToken)) {
       return { accepted: false, reason: "maintenance_token_invalid" };
     }
     const fault = params.fault;
@@ -5886,6 +5939,7 @@ export class UnixSocketServer {
     this.closing = true;
     this.acceptingRequests = false;
     this.lifecycleGeneration += 1;
+    this.releaseDaemonMaintenanceAdmission(this.maintenanceAdmissionToken);
 
     // Stop receiving list-changed events (mirrors the subscribe in start()).
     this.listChangedUnsubscribe?.();

@@ -47,7 +47,7 @@ test_owned_devices=false
 dry_run=false
 
 usage() {
-  cat <<'EOF'
+  cat << 'EOF'
 Usage:
   AUTOMOBILE_ACCEPTANCE_LIVE=1 bash scripts/run-live-device-acceptance.sh \
     --confirm-live --test-owned-devices \
@@ -61,7 +61,7 @@ Usage:
     --ios-min-os-version <minimum-os> --ios-max-os-version <maximum-os> \
     --ownership-manifest <path> --operator-key-file <path> \
     [--create-operator-key] [--record-ownership-manifest] \
-    [--scenario <full|recovery>] [--dry-run]
+    [--scenario <full>] [--dry-run]
 
 The full scenario stops, boots, provisions/adopts, repairs, restarts, and
 reacquires only the two explicit targets. It is never PR CI. --test-owned-devices
@@ -87,12 +87,27 @@ require_positive_integer() {
 
 while [[ "$#" -gt 0 ]]; do
   case "$1" in
-    --confirm-live) confirm_live=true; shift ;;
-    --test-owned-devices) test_owned_devices=true; shift ;;
-    --create-operator-key) create_operator_key=true; shift ;;
-    --record-ownership-manifest) record_ownership_manifest=true; shift ;;
-    --dry-run) dry_run=true; shift ;;
-    --android-avd-name|--android-sibling-avd-name|--android-duplicate-serial|--android-runtime|--android-device-type|--android-memory-mb|--android-cpu-cores|--android-min-os-version|--android-max-os-version|--ios-simulator-name|--ios-simulator-uuid|--ios-same-name-sibling-uuid|--ios-runtime|--ios-device-type|--ios-min-os-version|--ios-max-os-version|--evidence-dir|--ownership-manifest|--operator-key-file|--total-timeout-seconds|--platform-timeout-seconds|--scenario)
+    --confirm-live)
+      confirm_live=true
+      shift
+      ;;
+    --test-owned-devices)
+      test_owned_devices=true
+      shift
+      ;;
+    --create-operator-key)
+      create_operator_key=true
+      shift
+      ;;
+    --record-ownership-manifest)
+      record_ownership_manifest=true
+      shift
+      ;;
+    --dry-run)
+      dry_run=true
+      shift
+      ;;
+    --android-avd-name | --android-sibling-avd-name | --android-duplicate-serial | --android-runtime | --android-device-type | --android-memory-mb | --android-cpu-cores | --android-min-os-version | --android-max-os-version | --ios-simulator-name | --ios-simulator-uuid | --ios-same-name-sibling-uuid | --ios-runtime | --ios-device-type | --ios-min-os-version | --ios-max-os-version | --evidence-dir | --ownership-manifest | --operator-key-file | --total-timeout-seconds | --platform-timeout-seconds | --scenario)
       require_value "$1" "${2:-}"
       case "$1" in
         --android-avd-name) android_avd_name="$2" ;;
@@ -118,9 +133,17 @@ while [[ "$#" -gt 0 ]]; do
         --platform-timeout-seconds) platform_timeout_seconds="$2" ;;
         --scenario) scenario="$2" ;;
       esac
-      shift 2 ;;
-    --help|-h) usage; exit 0 ;;
-    *) echo "error: unknown argument: $1" >&2; usage >&2; exit 2 ;;
+      shift 2
+      ;;
+    --help | -h)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "error: unknown argument: $1" >&2
+      usage >&2
+      exit 2
+      ;;
   esac
 done
 
@@ -128,11 +151,13 @@ require_positive_integer "--total-timeout-seconds" "${total_timeout_seconds}"
 require_positive_integer "--platform-timeout-seconds" "${platform_timeout_seconds}"
 require_positive_integer "--android-memory-mb" "${android_memory_mb}"
 require_positive_integer "--android-cpu-cores" "${android_cpu_cores}"
-case "${scenario}" in full|recovery) ;; *)
-  echo "error: unsupported --scenario: ${scenario}" >&2; exit 2 ;;
+case "${scenario}" in full) ;; *)
+  echo "error: unsupported --scenario: ${scenario}" >&2
+  exit 2
+  ;;
 esac
 
-if [[ "${dry_run}" != true && "${record_ownership_manifest}" != true && ( "${confirm_live}" != true || "${test_owned_devices}" != true || "${AUTOMOBILE_ACCEPTANCE_LIVE:-}" != "1" ) ]]; then
+if [[ "${dry_run}" != true && "${record_ownership_manifest}" != true && ("${confirm_live}" != true || "${test_owned_devices}" != true || "${AUTOMOBILE_ACCEPTANCE_LIVE:-}" != "1") ]]; then
   echo "error: live mutation requires --confirm-live, --test-owned-devices, and AUTOMOBILE_ACCEPTANCE_LIVE=1." >&2
   exit 2
 fi
@@ -176,7 +201,7 @@ if [[ ! -f "${operator_key_file}" ]]; then
   echo "error: operator key file does not exist: ${operator_key_file}" >&2
   exit 2
 fi
-if [[ "$(stat -c '%a' "${operator_key_file}" 2>/dev/null || stat -f '%Lp' "${operator_key_file}")" != "600" ]]; then
+if [[ "$(stat -c '%a' "${operator_key_file}" 2> /dev/null || stat -f '%Lp' "${operator_key_file}")" != "600" ]]; then
   echo "error: operator key file must have mode 600: ${operator_key_file}" >&2
   exit 2
 fi

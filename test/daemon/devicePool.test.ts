@@ -3490,7 +3490,7 @@ describe("DevicePool", () => {
       },
     );
 
-    test("fences an Android same-serial replacement with the exact continuity-loss reason", async () => {
+    test("keeps unresolved persisted identity retryable before fencing a resolved same-serial replacement", async () => {
       const persisted: DeviceSession = {
         session_uuid: "restarted-session",
         device_id: "emulator-5554",
@@ -3537,18 +3537,29 @@ describe("DevicePool", () => {
         new DefaultRetryExecutor(fakeTimer),
       );
       await initializeLiveDevices([
-        createBootedDevice("emulator-5554", "android", "Replacement_AVD"),
+        createBootedDevice("emulator-5554", "android", "Unknown (emulator-5554)"),
       ]);
 
-      await expect(
-        sessionManager.getOrCreateSession(
-          persisted.session_uuid,
-          devicePool,
-          "android",
-          undefined,
-          true,
-        ),
-      ).rejects.toThrow("recovery reason: identity-continuity-lost");
+      const recovery = sessionManager.getOrCreateSession(
+        persisted.session_uuid,
+        devicePool,
+        "android",
+        undefined,
+        true,
+      );
+      await new Promise((resolve) => setImmediate(resolve));
+
+      expect(fakeTimer.getPendingSleeps()).toEqual([1000]);
+      expect(releaseReasons).toEqual([]);
+      expect(devicePool.isPooledIdentityUnresolved("emulator-5554")).toBe(true);
+
+      fakeDeviceManager.bootedDevices = [
+        createBootedDevice("emulator-5554", "android", "Replacement_AVD"),
+      ];
+      await devicePool.refreshDevices();
+      fakeTimer.advanceTime(1000);
+
+      await expect(recovery).rejects.toThrow("recovery reason: identity-continuity-lost");
       expect(releaseReasons).toEqual(["identity-recovery-identity-continuity-lost"]);
       expect(devicePool.getDevice("emulator-5554")).toMatchObject({
         name: "Replacement_AVD",

@@ -58,7 +58,7 @@ const MAX_EVIDENCE_RESERVE_MS = 5_000;
 const MAX_REAP_RESERVE_MS = 1_000;
 
 type Platform = "android" | "ios";
-type Scenario = "full" | "recovery";
+type Scenario = "full";
 type JsonObject = Record<string, unknown>;
 type Budget = "work" | "cleanup" | "evidence";
 type AcquisitionKind = "platform" | "generic";
@@ -626,8 +626,8 @@ export function parseArgs(argv: string[]): AcceptanceArgs {
     throw new Error("--platform must be android or ios");
   }
   const scenario = requiredFlag(values, "scenario");
-  if (scenario !== "full" && scenario !== "recovery") {
-    throw new Error("--scenario must be full or recovery");
+  if (scenario !== "full") {
+    throw new Error("--scenario must be full; recovery is not implemented");
   }
   const target =
     platform === "android"
@@ -1658,6 +1658,9 @@ export async function runAcceptanceMatrix(
   args: AcceptanceArgs,
   dependencies: MatrixDependencies = {},
 ): Promise<Evidence> {
+  if (args.scenario !== "full") {
+    throw new Error("--scenario must be full; recovery is not implemented");
+  }
   // Injected unit-test fakes do not touch the filesystem or launch a product
   // process. Keep their fixture contract small while production parsing always
   // supplies the authenticated values below.

@@ -8451,12 +8451,14 @@ export class DevicePool {
    * Recovery is an identity operation, not ordinary pool allocation. Once an
    * exact target is absent, busy, or replaced at its old transport address,
    * fail immediately rather than allowing retry timing or discovery order to
-   * choose another signed device.
+   * choose another signed device. An unresolved identity at the persisted
+   * transport is not evidence of either absence or replacement, so keep retrying
+   * until discovery resolves it.
    */
   private recoveryFailure(
     sessionId: string,
     target: SessionRecoveryTarget,
-  ): SessionRecoveryIdentityLossError | undefined {
+  ): SessionRecoveryIdentityLossError | DevicePoolError | undefined {
     const platformDevices = this.getDevicesByPlatform(target.platform);
     const exactMatches = platformDevices.filter(
       (device) =>
@@ -8465,6 +8467,19 @@ export class DevicePool {
           isAndroidEmulatorSerial(device.id) === target.androidEmulator),
     );
     if (exactMatches.length !== 1) {
+      const transportIdentityUnresolved =
+        exactMatches.length === 0 &&
+        !isUnresolvedAndroidEmulatorName({
+          deviceId: target.deviceId,
+          name: target.stableDeviceId,
+          platform: target.platform,
+        }) &&
+        platformDevices.some(
+          (device) => device.id === target.deviceId && this.stableDeviceIdFor(device) === undefined,
+        );
+      if (transportIdentityUnresolved) {
+        return new DevicePoolError("Recovery target identity is unresolved", true);
+      }
       const transportReused = platformDevices.some(
         (device) =>
           device.id === target.deviceId && this.stableDeviceIdFor(device) !== target.stableDeviceId,

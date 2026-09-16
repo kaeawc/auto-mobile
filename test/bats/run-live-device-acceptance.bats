@@ -129,6 +129,14 @@ run_harness() {
   [ ! -f "${COMMAND_LOG}" ]
 }
 
+@test "rejects unsupported recovery before build or live-driver invocation" {
+  run_harness --scenario recovery
+
+  [ "${status}" -eq 2 ]
+  [[ "${output}" == *"unsupported --scenario: recovery"* ]]
+  [ ! -f "${COMMAND_LOG}" ]
+}
+
 @test "runs the full Android then iOS matrix with one private run scope and exact required arguments" {
   run_harness
 

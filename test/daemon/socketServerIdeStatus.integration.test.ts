@@ -4,7 +4,10 @@ import { existsSync } from "node:fs";
 import { unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { UnixSocketServer } from "../../src/daemon/socketServer";
+import {
+  DAEMON_MAINTENANCE_ADMISSION_TTL_MS,
+  UnixSocketServer,
+} from "../../src/daemon/socketServer";
 import { sendSocketRequest } from "./helpers/socketRequest";
 import { FakeTimer } from "../fakes/FakeTimer";
 import type { DaemonResponse } from "../../src/daemon/types";
@@ -69,6 +72,13 @@ function sendRequest(
   params: Record<string, unknown> = {},
 ): Promise<DaemonResponse> {
   return sendSocketRequest(socketPath, method, params);
+}
+
+/** Simulates an already-queued timer callback surviving clearTimeout(). */
+class LateCallbackFakeTimer extends FakeTimer {
+  override clearTimeout(handle: NodeJS.Timeout): void {
+    void handle;
+  }
 }
 
 describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
@@ -293,6 +303,98 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
     ).toEqual({ accepted: false, reason: "maintenance_token_consumed" });
     executionTracker.clearDaemonRestartPreparation();
     executionTracker.clearDaemonMaintenancePreparation();
+  });
+
+  test("abandoned maintenance admission expires after its request socket disconnects", async () => {
+    const status = (await sendRequest(socketPath, "ide/status")).result!;
+    const admitted = await sendRequest(socketPath, DAEMON_PREPARE_MAINTENANCE_METHOD, status);
+    const maintenanceToken = (admitted.result as { maintenanceToken: string }).maintenanceToken;
+
+    // sendSocketRequest destroys its one-request socket after receiving the
+    // response. The lease must outlive that valid transport pattern, but not
+    // fence the process forever when no completion request follows.
+    expect(
+      (await sendRequest(socketPath, DAEMON_PREPARE_MAINTENANCE_METHOD, status)).result,
+    ).toEqual({ accepted: false, reason: "maintenance_pending" });
+
+    fakeTimer.advanceTime(DAEMON_MAINTENANCE_ADMISSION_TTL_MS);
+
+    const execution = executionTracker.startExecution("tapOn", "released-after-expiry");
+    executionTracker.endExecution(execution.id);
+    expect(
+      (
+        await sendRequest(socketPath, DAEMON_COMPLETE_MAINTENANCE_METHOD, {
+          ...status,
+          maintenanceToken,
+        })
+      ).result,
+    ).toEqual({ completed: false });
+  });
+
+  test("stale maintenance expiry cannot clear a newer admission", async () => {
+    const timer = new LateCallbackFakeTimer();
+    const lateSocketPath = join(tmpdir(), `t-maintenance-late-${randomUUID().slice(0, 8)}.sock`);
+    const lateServer = new UnixSocketServer(
+      lateSocketPath,
+      "http://localhost:0/mcp",
+      createFakeDaemonState(),
+      timer,
+      null,
+    );
+
+    try {
+      await lateServer.start();
+      const status = (await sendRequest(lateSocketPath, "ide/status")).result!;
+      const firstAdmission = await sendRequest(
+        lateSocketPath,
+        DAEMON_PREPARE_MAINTENANCE_METHOD,
+        status,
+      );
+      const firstToken = (firstAdmission.result as { maintenanceToken: string }).maintenanceToken;
+      expect(
+        (
+          await sendRequest(lateSocketPath, DAEMON_COMPLETE_MAINTENANCE_METHOD, {
+            ...status,
+            maintenanceToken: firstToken,
+          })
+        ).result,
+      ).toEqual({ completed: true });
+
+      timer.advanceTime(1);
+      const secondAdmission = await sendRequest(
+        lateSocketPath,
+        DAEMON_PREPARE_MAINTENANCE_METHOD,
+        status,
+      );
+      const secondToken = (secondAdmission.result as { maintenanceToken: string }).maintenanceToken;
+      expect(secondToken).not.toBe(firstToken);
+
+      timer.advanceTime(DAEMON_MAINTENANCE_ADMISSION_TTL_MS - 1);
+
+      expect(() => executionTracker.startExecution("tapOn", "still-fenced")).toThrow(
+        "Daemon restart is pending",
+      );
+      expect(
+        (
+          await sendRequest(lateSocketPath, DAEMON_COMPLETE_MAINTENANCE_METHOD, {
+            ...status,
+            maintenanceToken: firstToken,
+          })
+        ).result,
+      ).toEqual({ completed: false });
+      expect(
+        (await sendRequest(lateSocketPath, DAEMON_PREPARE_MAINTENANCE_METHOD, status)).result,
+      ).toEqual({ accepted: false, reason: "maintenance_pending" });
+
+      timer.advanceTime(1);
+      const execution = executionTracker.startExecution("tapOn", "new-admission-expired");
+      executionTracker.endExecution(execution.id);
+    } finally {
+      await lateServer.close();
+      if (existsSync(lateSocketPath)) {
+        await unlink(lateSocketPath);
+      }
+    }
   });
 
   test("only the startup-authorized live harness can corrupt admitted control metadata", async () => {

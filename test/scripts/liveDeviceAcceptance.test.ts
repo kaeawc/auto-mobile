@@ -751,6 +751,24 @@ function assertReadinessImmediatelyFollowsSuccess(harness: Harness, sessionUuid:
 }
 
 describe("live device acceptance harness", () => {
+  test("rejects the unsupported recovery scenario before any device mutation", async () => {
+    expect(() => parseArgs(["--platform", "android", "--scenario", "recovery"])).toThrow(
+      "--scenario must be full; recovery is not implemented",
+    );
+
+    const harness = createHarness();
+    const unsupportedArgs = {
+      ...androidArgs,
+      scenario: "recovery",
+    } as unknown as AcceptanceArgs;
+    await expect(runAcceptanceMatrix(unsupportedArgs, harness.dependencies)).rejects.toThrow(
+      "--scenario must be full; recovery is not implemented",
+    );
+    expect(harness.calls).toHaveLength(0);
+    expect(harness.cliCommands).toHaveLength(0);
+    expect(harness.evidence).toHaveLength(0);
+  });
+
   test.each([
     {
       label: "Android",
@@ -1429,9 +1447,9 @@ describe("live device acceptance harness", () => {
   test("rejects a persisted recovery diagnostic that omits the exact recovery reason", async () => {
     const harness = createHarness({ oldSessionDiagnostic: "unknown session" });
 
-    await expect(
-      runAcceptanceMatrix({ ...androidArgs, scenario: "recovery" }, harness.dependencies),
-    ).rejects.toThrow("did not report the exact old-session recovery reason");
+    await expect(runAcceptanceMatrix(androidArgs, harness.dependencies)).rejects.toThrow(
+      "did not report the exact old-session recovery reason",
+    );
   });
 
   test.each([
@@ -1915,14 +1933,8 @@ describe("live device acceptance harness", () => {
       process.env[LIVE_ACCEPTANCE_ENV] = "1";
       process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV] = wrapperStartupSecret;
       process.env[ACCEPTANCE_DISCOVERY_CAPABILITY_ENV] = wrapperDiscoveryCapability;
-      await runAcceptanceMatrix(
-        { ...fixture.android, scenario: "recovery" },
-        productionDependencies(createHarness()),
-      );
-      await runAcceptanceMatrix(
-        { ...fixture.ios, scenario: "recovery" },
-        productionDependencies(createHarness()),
-      );
+      await runAcceptanceMatrix(fixture.android, productionDependencies(createHarness()));
+      await runAcceptanceMatrix(fixture.ios, productionDependencies(createHarness()));
 
       expect(residentDaemonStarts).toBe(1);
       expect(

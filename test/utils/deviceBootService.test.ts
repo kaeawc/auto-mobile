@@ -47,6 +47,72 @@ function service(
 }
 
 describe("DeviceBootService", () => {
+  it.each([
+    { minOsVersion: "17.0" },
+    { maxOsVersion: "18.0" },
+    { formFactor: "phone" as const },
+    { screenSize: { width: 390, height: 844 } },
+  ])("matches explicit iOS constraints after enriching partial metadata: %j", async (criteria) => {
+    const devices = new FakeDeviceUtils();
+    const running: BootedDevice = {
+      name: "iPhone",
+      platform: "ios",
+      deviceId: "UDID-A",
+      // Knowing the runtime must not skip enrichment of the other fields.
+      iosVersion: "17.0",
+    };
+    devices.setBootedDevices("ios", [running]);
+    devices.setDeviceImages("ios", [
+      {
+        ...running,
+        isRunning: true,
+        osVersion: "17.0",
+        formFactor: "phone",
+        screenWidth: 390,
+        screenHeight: 844,
+      },
+    ]);
+    const result = await service(devices).boot({
+      platform: "ios",
+      deviceId: "UDID-A",
+      ...criteria,
+    });
+    expect(result.source).toBe("booted");
+    expect(result.device).toMatchObject({
+      osVersion: "17.0",
+      formFactor: "phone",
+      screenWidth: 390,
+      screenHeight: 844,
+    });
+  });
+
+  it("rejects incompatible enriched iOS metadata before waiting for readiness", async () => {
+    const devices = new FakeDeviceUtils();
+    const running: BootedDevice = { name: "iPhone", platform: "ios", deviceId: "UDID-A" };
+    devices.setBootedDevices("ios", [running]);
+    devices.setDeviceImages("ios", [{ ...running, isRunning: true, osVersion: "16.4" }]);
+    await expect(
+      service(devices).boot({ platform: "ios", deviceId: "UDID-A", minOsVersion: "17.0" }),
+    ).rejects.toThrow("does not satisfy");
+    expect(devices.wasMethodCalled("waitForDeviceReady")).toBe(false);
+  });
+
+  it("does not enrich an iOS simulator from a same-name sibling or another platform", () => {
+    const running: BootedDevice = { name: "shared", platform: "ios", deviceId: "UDID-A" };
+    const images: DeviceInfo[] = [
+      { name: "shared", platform: "ios", deviceId: "UDID-B", isRunning: false, osVersion: "18.0" },
+      {
+        name: "shared",
+        platform: "android",
+        deviceId: "UDID-A",
+        isRunning: false,
+        osVersion: "15",
+      },
+    ];
+    expect(enrichBootedDevicesFromImages([running], images)).toEqual([running]);
+    expect(enrichBootedDevicesFromImages([running], images.slice(0, 1))).toEqual([running]);
+  });
+
   it("only enriches Android devices by name when their serial is an emulator serial", () => {
     const image: DeviceInfo = {
       name: "Pixel_9_API_35",

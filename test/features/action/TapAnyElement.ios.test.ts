@@ -340,6 +340,7 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
   test("search loop constrains each hierarchy refresh to its own remaining budget, not the client default", async () => {
     fakeVoiceOverDetector.setVoiceOverEnabled(false);
     fakeIosClient.setHierarchyData({ packageName: "com.test.app", updatedAt: Date.now() });
+    const hierarchyRequests = spyOn(fakeIosClient, "getLatestHierarchy");
     // First selectClickable call (before the search loop) reports nothing
     // found; the fake element selector's default (call-through) behavior on
     // every later call keeps returning the configured clickable element, so
@@ -357,11 +358,11 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
     });
 
     expect(result.success).toBe(true);
-    const timeouts = fakeIosClient.getHierarchyRequestTimeouts();
+    const timeouts = hierarchyRequests.mock.calls.map((call) => call[1]);
     // At least one refresh happened during the search loop, and every one of
     // them was bounded to (at most) the search window -- never left
     // `undefined`, which is what let the old code fall through to
-    // `getAccessibilityHierarchy`'s own unconstrained default.
+    // `getLatestHierarchy`'s own unconstrained default.
     expect(timeouts.length).toBeGreaterThan(0);
     for (const timeoutMs of timeouts) {
       expect(timeoutMs).toBeDefined();

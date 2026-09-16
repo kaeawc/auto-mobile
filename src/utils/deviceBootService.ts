@@ -99,12 +99,6 @@ function findEligibleExactBootedDevice(
   return exact && matchesDeviceCriteria(exact, criteria) ? exact : null;
 }
 
-function needsIosRuntimeEnrichment(request: DeviceBootRequest, device: BootedDevice): boolean {
-  return (
-    request.platform === "ios" && device.iosVersion === undefined && device.osVersion === undefined
-  );
-}
-
 /**
  * True for an `AbortSignal.reason` that carries no caller-supplied context: a
  * literal `undefined` (used by synthetic/fake signals in tests), or the
@@ -426,20 +420,17 @@ export class DeviceBootService {
     context: BootDeadlineContext,
     progress: DeviceBootProgress | undefined,
   ): Promise<DeviceBootResult> {
-    if (hasExplicitConstraints && !matchesDeviceCriteria(running, criteria)) {
+    // Resolve all inventory metadata before matching constraints. Runtime alone
+    // does not imply that form factor and screen dimensions are also present.
+    const resolvedRunning =
+      running.platform === "ios"
+        ? await this.enrichIosBootedDeviceFromImage(running, context)
+        : running;
+    if (hasExplicitConstraints && !matchesDeviceCriteria(resolvedRunning, criteria)) {
       throw new ActionableError(
         `Device '${request.deviceId}' does not satisfy the requested platform, version, or form-factor constraints.`,
       );
     }
-    // `getApple` selects an already-booted simulator by UDID before it has
-    // otherwise needed the image inventory. Preserve that fast path when
-    // simctl supplied runtime metadata, but recover it from the matching
-    // image when an older or partial booted listing omitted it. Runner
-    // readiness uses this to reject an unsupported runtime before xcodebuild
-    // can launch a CtrlProxy runner that can never become healthy (#7160).
-    const resolvedRunning = needsIosRuntimeEnrichment(request, running)
-      ? await this.enrichIosBootedDeviceFromImage(running, context)
-      : running;
     return this.waitForRunningDevice(resolvedRunning, context, progress);
   }
 
@@ -447,13 +438,10 @@ export class DeviceBootService {
     device: BootedDevice,
     context: BootDeadlineContext,
   ): Promise<BootedDevice> {
-    const images = await this.runPhase(context, "resolving iOS simulator runtime", () =>
-      this.dependencies.deviceManager.listDeviceImages("ios"),
+    const images = await this.runPhase(context, "resolving iOS simulator metadata", (signal) =>
+      this.dependencies.deviceManager.listDeviceImages("ios", signal),
     );
-    const image = images.find(
-      (candidate) => candidate.platform === "ios" && candidate.deviceId === device.deviceId,
-    );
-    return image ? enrichBootedDevice(device, image) : device;
+    return enrichBootedDevicesFromImages([device], images)[0]!;
   }
 
   private async bootMatchingDevice(
@@ -962,11 +950,10 @@ export function enrichBootedDevicesFromImages(
   const imagesByName = new Map(images.map((image) => [image.name, image]));
   return booted.map((device) => {
     const canMatchAndroidByName =
-      device.platform !== "android" ||
-      (device.deviceId !== undefined && isAndroidEmulatorSerial(device.deviceId));
+      device.platform === "android" && isAndroidEmulatorSerial(device.deviceId);
     const image =
       (device.deviceId ? imagesById.get(device.deviceId) : undefined) ??
       (canMatchAndroidByName ? imagesByName.get(device.name) : undefined);
-    return image ? enrichBootedDevice(device, image) : device;
+    return image?.platform === device.platform ? enrichBootedDevice(device, image) : device;
   });
 }

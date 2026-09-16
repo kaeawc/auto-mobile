@@ -84,6 +84,7 @@ export type VersionMismatchReason =
 export type BuildMismatchReason = "autoStartDisabled" | "cooldown" | "restartMismatch";
 
 const DAEMON_MCP_HEARTBEAT_INTERVAL_MS = 2_000;
+const CLI_SESSION_FINALIZATION_TIMEOUT_MS = 2_000;
 const COLD_RESOURCE_CONNECT_RETRY_DELAYS_MS = [250, 1_000, 4_000] as const;
 // These inventory tools never operate a device or mint a device session. They
 // normally retain a live binding's policy, but after that binding is terminally
@@ -842,6 +843,7 @@ export class DaemonMcpProxy {
       heartbeatIntervalMs(config),
       () => this.sendBoundSessionHeartbeat(),
       {
+        stopTimeoutMs: CLI_SESSION_FINALIZATION_TIMEOUT_MS,
         onError: (error) => {
           logger.warn(`[DaemonMcpProxy] Bound-session heartbeat failed: ${error}`);
         },
@@ -2706,12 +2708,15 @@ export class DaemonMcpProxy {
       return undefined;
     }
     try {
-      // A result-minted session can still have its first strict-policy
-      // heartbeat in flight here. Durable ownership persistence makes that
-      // round-trip legitimately outlive the tool response; declaring CLI
-      // policy before it settles would let the older heartbeat restore the
-      // strict policy afterward. SingleFlightInterval joins that exact send.
-      await this.heartbeatKeeper.run();
+      // A one-shot CLI is leaving, so stop future keeper ticks and wait only a
+      // short bounded interval for the current strict-policy heartbeat. This
+      // both prevents an older heartbeat from restoring strict policy after
+      // the declaration and prevents a completed tool result from being hidden
+      // behind a stalled ownership RPC.
+      const heartbeatSettled = await this.stopBoundSessionHeartbeat();
+      if (!heartbeatSettled) {
+        return undefined;
+      }
       if (this.boundSessionUuid !== sessionUuid || this.terminalBoundSession || this.closing) {
         return undefined;
       }
@@ -2720,16 +2725,20 @@ export class DaemonMcpProxy {
       // the declaration and restore the strict contract.
       this.cliSessionLivenessDeclared = true;
       this.livenessOwnershipClaimSent = true;
-      await this.client.callDaemonMethod(DAEMON_HEARTBEAT_METHOD, {
-        sessionId: sessionUuid,
-        livenessPolicy: CLI_SESSION_LIVENESS_POLICY,
-        livenessOwnerToken: this.livenessOwnerToken,
-        claimLivenessOwnership: true,
-        // The daemon resolved its own env at startup and this invocation reuses
-        // it, so the override only reaches the daemon by travelling with the
-        // declaration (issue #6870 review). The daemon re-validates and bounds it.
-        idleTimeoutMs: getCliSessionIdleTimeoutMs(),
-      });
+      await this.client.callDaemonMethod(
+        DAEMON_HEARTBEAT_METHOD,
+        {
+          sessionId: sessionUuid,
+          livenessPolicy: CLI_SESSION_LIVENESS_POLICY,
+          livenessOwnerToken: this.livenessOwnerToken,
+          claimLivenessOwnership: true,
+          // The daemon resolved its own env at startup and this invocation reuses
+          // it, so the override only reaches the daemon by travelling with the
+          // declaration (issue #6870 review). The daemon re-validates and bounds it.
+          idleTimeoutMs: getCliSessionIdleTimeoutMs(),
+        },
+        { timeoutMs: CLI_SESSION_FINALIZATION_TIMEOUT_MS },
+      );
       return sessionUuid;
     } catch (error) {
       // Best-effort: the tool call already succeeded and its result is the
@@ -2743,12 +2752,13 @@ export class DaemonMcpProxy {
     }
   }
 
-  private async stopBoundSessionHeartbeat(): Promise<void> {
+  private async stopBoundSessionHeartbeat(): Promise<boolean> {
     const settled = await this.heartbeatKeeper.stop();
     this.heartbeatKeeperStarted = false;
     if (!settled) {
       logger.warn("[DaemonMcpProxy] Bound-session heartbeat did not settle before shutdown");
     }
+    return settled;
   }
 
   /**

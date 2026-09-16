@@ -490,10 +490,10 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
     expect(sessionManager.getSession("shared")!.livenessPolicy).toBe("cli-idle");
   });
 
-  test("heartbeats after the declaration retain the CLI marker and idle-timeout override", async () => {
-    // The keeper is still running when the declaration lands; a tick racing
-    // process exit must not restore the strict contract the invocation just
-    // opted out of (#6870 review).
+  test("CLI adoption stops keeper ticks and sends one bounded idle-policy declaration", async () => {
+    // A one-shot CLI has no reason to keep heartbeating after its final
+    // declaration. Quiescing the keeper prevents an older strict-policy tick
+    // from landing later and keeps tool-result finalization bounded.
     process.env.AUTOMOBILE_CLI_SESSION_IDLE_TIMEOUT_MS = "120000";
     const client = new FakeDaemonClient({
       toolResultFor: (name) => (name === "getAndroid" ? deviceStartResult("shared") : undefined),
@@ -527,7 +527,7 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
     const cliHeartbeats = heartbeats.filter(
       (call) => call.params.livenessPolicy === CLI_SESSION_LIVENESS_POLICY,
     );
-    expect(cliHeartbeats).toHaveLength(3);
+    expect(cliHeartbeats).toHaveLength(1);
     expect(cliHeartbeats.every((call) => call.params.idleTimeoutMs === 120_000)).toBe(true);
     expect(sessionManager.getSession("shared")!.livenessPolicy).toBe("cli-idle");
   });

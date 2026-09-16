@@ -685,6 +685,62 @@ describe("LaunchApp", () => {
     }
   });
 
+  test("keeps waiting for an iOS push when the first sync still reports the previous app", async () => {
+    const iosDevice: BootedDevice = {
+      name: "test-ios-device",
+      platform: "ios",
+      deviceId: "11111111-1111-1111-1111-111111111111",
+    };
+    let pushUpdate: ((hierarchy: { packageName?: string }) => void) | undefined;
+    let unsubscribeCount = 0;
+    const client = {
+      async getLatestHierarchy() {
+        return null;
+      },
+      onPushUpdate(callback: (hierarchy: { packageName?: string }) => void) {
+        pushUpdate = callback;
+        return () => {
+          unsubscribeCount += 1;
+        };
+      },
+      async requestHierarchySync() {
+        return { hierarchy: { packageName: "com.apple.springboard" } };
+      },
+    };
+    const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
+      client as unknown as IOSCtrlProxyClient,
+    );
+    const iosLaunchApp = new LaunchApp(iosDevice, fakeAdb as unknown as any, null, fakeTimer);
+
+    try {
+      let settled = false;
+      const wait = (
+        iosLaunchApp as unknown as {
+          waitForIosHierarchyReady(
+            timeoutMs: number,
+            expectedPackageName: string,
+          ): Promise<void>;
+        }
+      ).waitForIosHierarchyReady(60_000, packageName);
+      void wait.then(() => {
+        settled = true;
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(settled).toBe(false);
+      expect(fakeTimer.getPendingTimeoutCount()).toBe(1);
+
+      pushUpdate?.({ packageName });
+      await wait;
+
+      expect(unsubscribeCount).toBe(1);
+      expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
+    } finally {
+      getInstanceSpy.mockRestore();
+    }
+  });
+
   test("launches an Android app whose launcher activity is not MainActivity with the package resolver", async () => {
     fakeTimer.enableAutoAdvance();
     const settingsPackageName = "com.android.settings";

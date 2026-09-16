@@ -653,11 +653,19 @@ export class LaunchApp extends BaseVisualChange {
         .requestHierarchySync(undefined, true, undefined, timeoutMs)
         .then((result) => {
           const pkg = (result?.hierarchy as { packageName?: string } | null)?.packageName;
-          return pkg === expectedPackageName ? "sync" : "wrong_app";
+          if (pkg === expectedPackageName) {
+            return "sync";
+          }
+          // A sync can race the app's first hierarchy push and still return the
+          // previous foreground app. Keep waiting for that push or the real
+          // timeout instead of letting "wrong app" win the race immediately.
+          return new Promise<never>(() => {});
         })
         .catch((err) => {
           logger.warn(`[LaunchApp] iOS hierarchy sync failed during race: ${err}`);
-          return "error" as string;
+          // A transient sync failure is not terminal while the push listener is
+          // still active. The timeout promise remains the readiness bound.
+          return new Promise<never>(() => {});
         });
 
       const abortPromise = signal

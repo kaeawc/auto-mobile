@@ -22,6 +22,8 @@ describe("getDaemonHealthReport", () => {
     const pidPath = join(tempDir, "daemon.pid");
     mkdirSync(dirname(socketPath), { recursive: true });
     writeFileSync(socketPath, "");
+    const abortController = new AbortController();
+    const timeoutMs = 123;
 
     const isAvailable = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
 
@@ -29,9 +31,15 @@ describe("getDaemonHealthReport", () => {
       const report = await getDaemonHealthReport(undefined, {
         socketPath,
         pidFilePath: pidPath,
+        signal: abortController.signal,
+        timeoutMs,
       });
 
-      expect(isAvailable).toHaveBeenCalledWith(socketPath);
+      expect(isAvailable).toHaveBeenCalledWith(socketPath, {
+        signal: abortController.signal,
+        timeoutMs,
+        timer: expect.anything(),
+      });
       expect(report.socketExists).toBe(true);
       expect(report.pidFileExists).toBe(false);
       expect(report.socketConnectable).toBe(true);
@@ -64,7 +72,14 @@ describe("getDaemonHealthReport", () => {
         platform: "win32",
       });
 
-      expect(isAvailable).toHaveBeenCalledWith(socketPath);
+      expect(isAvailable).toHaveBeenCalledWith(
+        socketPath,
+        expect.objectContaining({
+          signal: undefined,
+          timeoutMs: undefined,
+          timer: expect.anything(),
+        }),
+      );
       expect(report.socketExists).toBe(true);
       expect(report.socketConnectable).toBe(true);
       expect(report.daemonRunning).toBe(true);
@@ -93,7 +108,14 @@ describe("getDaemonHealthReport", () => {
         platform: "win32",
       });
 
-      expect(isAvailable).toHaveBeenCalledWith(socketPath);
+      expect(isAvailable).toHaveBeenCalledWith(
+        socketPath,
+        expect.objectContaining({
+          signal: undefined,
+          timeoutMs: undefined,
+          timer: expect.anything(),
+        }),
+      );
       expect(report.socketExists).toBe(false);
       expect(report.socketAccessible).toBe(false);
       expect(report.socketConnectable).toBe(false);

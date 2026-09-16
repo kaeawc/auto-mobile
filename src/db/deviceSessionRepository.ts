@@ -41,6 +41,8 @@ export interface DeviceSessionPersistence {
   upsertActiveSession(record: DeviceSessionRecord): Promise<void>;
   getSession?(sessionUuid: string): Promise<DeviceSession | undefined>;
   recordActivity(sessionUuid: string, update: DeviceSessionActivityUpdate): Promise<void>;
+  recordLivenessOwnership?(sessionUuid: string, ownerToken: string | null): Promise<void>;
+  replaceLivenessOwnership?(sessionUuid: string, ownerToken: string | null): Promise<void>;
   markReleased(
     sessionUuid: string,
     status: DeviceSessionStatus,
@@ -157,6 +159,32 @@ export class DeviceSessionRepository {
     }
   }
 
+  async recordLivenessOwnership(sessionUuid: string, ownerToken: string | null): Promise<void> {
+    await this.replaceLivenessOwnership(sessionUuid, ownerToken);
+  }
+
+  async replaceLivenessOwnership(sessionUuid: string, ownerToken: string | null): Promise<void> {
+    try {
+      const result = await this.getDb()
+        .updateTable("device_sessions")
+        .set({
+          liveness_owner_token: ownerToken,
+          updated_at: new Date().toISOString(),
+        })
+        .where("session_uuid", "=", sessionUuid)
+        .where("status", "=", "active")
+        .executeTakeFirst();
+      if (Number(result.numUpdatedRows) !== 1) {
+        throw new Error(`active device session ${sessionUuid} was not found`);
+      }
+    } catch (error) {
+      logger.warn(
+        `[DeviceSessionRepository] Failed to persist liveness ownership for ${sessionUuid}: ${error}`,
+      );
+      throw error;
+    }
+  }
+
   async markAutolockSession(
     sessionUuid: string,
     input: {
@@ -208,6 +236,7 @@ export class DeviceSessionRepository {
           status,
           released_at_ms: releasedAtMs,
           release_reason: reason,
+          liveness_owner_token: null,
           updated_at: new Date().toISOString(),
         })
         .where("session_uuid", "=", sessionUuid)
@@ -241,6 +270,7 @@ export class DeviceSessionRepository {
         status: "expired",
         released_at_ms: releasedAtMs,
         release_reason: reason,
+        liveness_owner_token: null,
         updated_at: new Date().toISOString(),
       })
       .where("status", "=", "active")

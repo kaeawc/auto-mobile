@@ -355,6 +355,7 @@ jobs:
               - 'bunfig.toml'
               - 'test/setup/**'
               - 'test/integration/iosVideoRecordingStartStop.integration.test.ts'
+              - 'test/helpers/iosVideoRecordingSessionCleanup.ts'
               - 'test/helpers/sessionOwnershipHeartbeat.ts'
               - 'test/features/navigation/iosNavigationGraphWorkflow.test.ts'
               - 'package.json'
@@ -3441,6 +3442,7 @@ jobs:
             echo "::error::AutoMobile product boot returned no deviceId." >&2
             exit 1
           fi
+          echo "AUTOMOBILE_IOS_SIMULATOR_UDID=${simulator_udid}" >> "${GITHUB_ENV}"
           if pgrep -x Simulator >/dev/null; then
             killall Simulator
             for _ in {1..30}; do

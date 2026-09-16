@@ -1,11 +1,17 @@
 import { describe, expect, test } from "bun:test";
 import { execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { promises as fsPromises } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { defaultTimer } from "../../src/utils/SystemTimer";
 import {
+  cleanupIosVideoRecordingSession,
+  type IosVideoRecordingCleanupFailure,
+} from "../helpers/iosVideoRecordingSessionCleanup";
+import {
+  createSingleClaimSessionOwnershipRenewal,
   startSessionOwnershipHeartbeat,
   type SessionOwnershipHeartbeat,
 } from "../helpers/sessionOwnershipHeartbeat";
@@ -22,6 +28,9 @@ const DEFAULT_TEST_TIMEOUT_MS = 420000;
 // while one-shot CLI calls are doing iOS setup or leaving a recording active.
 const SESSION_HEARTBEAT_INTERVAL_MS = 2_000;
 const SESSION_HEARTBEAT_COMMAND_TIMEOUT_MS = 5_000;
+const SESSION_RELEASE_COMMAND_TIMEOUT_MS = 5_000;
+const RECORDING_STOP_COMMAND_TIMEOUT_MS = 5_000;
+const RECORDING_STOP_CLEANUP_TIMEOUT_MS = 6_000;
 
 interface ToolTextResponse {
   content?: Array<{ type?: string; text?: string }>;
@@ -108,31 +117,56 @@ async function runLocalCliOutput(
   return stdout;
 }
 
-async function runLocalCli(args: string[], signal?: AbortSignal): Promise<ToolTextResponse> {
-  return JSON.parse(await runLocalCliOutput(args, signal)) as ToolTextResponse;
+async function runLocalCli(
+  args: string[],
+  signal?: AbortSignal,
+  timeout?: number,
+): Promise<ToolTextResponse> {
+  return JSON.parse(await runLocalCliOutput(args, signal, timeout)) as ToolTextResponse;
 }
 
 async function startVideoRecordingSessionHeartbeat(
   sessionUuid: string,
 ): Promise<SessionOwnershipHeartbeat> {
+  // Each renewal is a new one-shot process, so the keeper—not an individual
+  // command—owns this stable token. The first tick explicitly takes ownership;
+  // later ticks only prove it, and therefore cannot take it back after another
+  // client takes over the session.
+  const livenessOwnerToken = `ios-video-keeper-${randomUUID()}`;
   return startSessionOwnershipHeartbeat({
     intervalMs: SESSION_HEARTBEAT_INTERVAL_MS,
-    renew: async (signal) => {
-      await runLocalCliOutput(
-        ["--daemon", "heartbeat", sessionUuid],
-        signal,
-        SESSION_HEARTBEAT_COMMAND_TIMEOUT_MS,
-      );
-    },
+    renew: createSingleClaimSessionOwnershipRenewal(async (claimLivenessOwnership, signal) => {
+      const heartbeatArgs = [
+        "--daemon",
+        "heartbeat",
+        sessionUuid,
+        "--liveness-owner-token",
+        livenessOwnerToken,
+        ...(claimLivenessOwnership ? ["--claim-liveness-ownership"] : []),
+      ];
+      await runLocalCliOutput(heartbeatArgs, signal, SESSION_HEARTBEAT_COMMAND_TIMEOUT_MS);
+    }),
   });
 }
 
 async function runVideoRecordingCli(
   sessionUuid: string,
   args: string[],
+  signal?: AbortSignal,
+  timeout?: number,
 ): Promise<RecordingToolResult> {
   return parseToolResult(
-    await runLocalCli(["--session-uuid", sessionUuid, "videoRecording", ...args]),
+    await runLocalCli(["--session-uuid", sessionUuid, "videoRecording", ...args], signal, timeout),
+  );
+}
+
+async function releaseVideoRecordingSession(sessionUuid: string): Promise<void> {
+  // This daemon primitive releases the pool assignment without shutting down
+  // the booted Simulator needed by the following navigation integration.
+  await runLocalCliOutput(
+    ["--daemon", "release-session", sessionUuid],
+    undefined,
+    SESSION_RELEASE_COMMAND_TIMEOUT_MS,
   );
 }
 
@@ -226,6 +260,8 @@ describeIntegration("iOS videoRecording start-stop integration", () => {
       let sessionHeartbeat: SessionOwnershipHeartbeat | undefined;
       let stopped = false;
       let bodyFailed = false;
+      let bodyError: unknown;
+      let cleanupFailures: IosVideoRecordingCleanupFailure[] = [];
 
       try {
         const deviceId = process.env.AUTOMOBILE_IOS_VIDEO_RECORDING_DEVICE_ID;
@@ -280,14 +316,12 @@ describeIntegration("iOS videoRecording start-stop integration", () => {
         await defaultTimer.sleep(waitMs - firstWaitMs);
         sessionHeartbeat.assertHealthy();
 
-        stopPayload = await runVideoRecordingCli(sessionUuid, [
-          "--action",
-          "stop",
-          "--platform",
-          "ios",
-          "--recordingId",
-          recordingId,
-        ]);
+        stopPayload = await runVideoRecordingCli(
+          sessionUuid,
+          ["--action", "stop", "--platform", "ios", "--recordingId", recordingId],
+          AbortSignal.timeout(RECORDING_STOP_COMMAND_TIMEOUT_MS),
+          RECORDING_STOP_COMMAND_TIMEOUT_MS,
+        );
         stopped = true;
 
         expect(stopPayload.action).toBe("stop");
@@ -309,22 +343,28 @@ describeIntegration("iOS videoRecording start-stop integration", () => {
         expect(video.duration).toBeGreaterThan(0);
       } catch (error) {
         bodyFailed = true;
-        let cleanupError: string | undefined;
-        if (recordingId && sessionUuid && !stopped) {
-          try {
-            await runVideoRecordingCli(sessionUuid, [
-              "--action",
-              "stop",
-              "--platform",
-              "ios",
-              "--recordingId",
-              recordingId,
-            ]);
-          } catch (stopError) {
-            cleanupError = formatError(stopError);
-          }
-        }
+        bodyError = error;
+      } finally {
+        cleanupFailures = await cleanupIosVideoRecordingSession({
+          sessionUuid,
+          recordingId,
+          recordingStopped: stopped,
+          sessionHeartbeat,
+          recordingStopTimeoutMs: RECORDING_STOP_CLEANUP_TIMEOUT_MS,
+          stopRecording: async (cleanupSessionUuid, cleanupRecordingId, signal) => {
+            stopPayload = await runVideoRecordingCli(
+              cleanupSessionUuid,
+              ["--action", "stop", "--platform", "ios", "--recordingId", cleanupRecordingId],
+              signal,
+              RECORDING_STOP_COMMAND_TIMEOUT_MS,
+            );
+            stopped = true;
+          },
+          releaseSession: releaseVideoRecordingSession,
+        });
+      }
 
+      if (bodyFailed) {
         const rawMovPath =
           recordingId && outputPath
             ? path.join(path.dirname(outputPath), `${recordingId}-raw.mov`)
@@ -332,33 +372,27 @@ describeIntegration("iOS videoRecording start-stop integration", () => {
         throw new Error(
           [
             "iOS videoRecording start-stop integration failed.",
-            `error: ${formatError(error)}`,
+            `error: ${formatError(bodyError)}`,
             `recordingId: ${recordingId ?? "(none)"}`,
             `rawMovPath: ${rawMovPath ?? "(unknown)"}`,
             `finalMp4Path: ${outputPath ?? "(unknown)"}`,
             `startPayload: ${JSON.stringify(startPayload ?? null, null, 2)}`,
             `stopPayload: ${JSON.stringify(stopPayload ?? null, null, 2)}`,
-            cleanupError ? `cleanupStopError: ${cleanupError}` : undefined,
+            ...cleanupFailures.map(
+              ({ step, error }) => `cleanup ${step} error: ${formatError(error)}`,
+            ),
           ]
             .filter((line): line is string => Boolean(line))
             .join("\n"),
+          { cause: bodyError },
         );
-      } finally {
-        const heartbeatCleanupError = await sessionHeartbeat?.stop();
-        if (heartbeatCleanupError) {
-          if (bodyFailed) {
-            // The body already threw; surface the primary failure and log this
-            // as supporting context rather than masking it with a second throw.
-            console.warn(
-              `iOS recording session heartbeat cleanup failed: ${heartbeatCleanupError.message}`,
-            );
-          } else {
-            throw new Error(
-              `iOS recording session heartbeat failed to stay alive during recording: ${heartbeatCleanupError.message}`,
-              { cause: heartbeatCleanupError },
-            );
-          }
-        }
+      }
+
+      if (cleanupFailures.length > 0) {
+        throw new AggregateError(
+          cleanupFailures.map(({ error }) => error),
+          cleanupFailures.map(({ step, error }) => `${step}: ${formatError(error)}`).join("\n"),
+        );
       }
     },
     getTestTimeoutMs(),

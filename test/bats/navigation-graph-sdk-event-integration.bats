@@ -86,8 +86,13 @@ if [ "$1" = "-cn" ]; then
   exit 0
 fi
 if [ "$1" = "-er" ]; then
-  if [[ "$2" == *"sessionUuid"* ]]; then
+  query="${!#}"
+  if [[ "$query" == *"sessionUuid"* ]]; then
     exec "$REAL_JQ" "$@"
+  fi
+  if [[ "$query" != *"clientPort"* ]] || [[ "$query" == *"runnerPort"* ]]; then
+    echo "expected the daemon-owned clientPort filter, got: $query" >&2
+    exit 1
   fi
   if [ -f "$POST_BIND_DOCTOR_FAILURE_FILE" ]; then
     exit 1
@@ -167,18 +172,19 @@ fi
 
   [ "$status" -eq 0 ]
   [ "$(cat "$GRAPH_ATTEMPTS_FILE")" = "2" ]
-  [ "$(cat "$DOCTOR_CALLS_FILE")" = "2" ]
-  [ "$(cat "$HEALTH_ATTEMPTS_FILE")" = "4" ]
+  [ "$(cat "$DOCTOR_CALLS_FILE")" = "1" ]
+  [ "$(cat "$HEALTH_ATTEMPTS_FILE")" = "2" ]
   [ -f "$POST_BIND_DOCTOR_FILE" ]
   [ -f "$HEARTBEAT_FILE" ]
   [ -f "$TARGET_APP_LAUNCHED_FILE" ]
   [[ "$output" == *"getNavigationGraph attempt 1 failed"* ]]
+  [ "$(grep -c -- "--cli getApple --deviceId simulator-udid" "$INVOCATION_FILE")" = "1" ]
   # Regression for issue #4579: the graph read must be scoped to the fixture
   # bundle so a concurrent SpringBoard hierarchy push cannot redirect the query.
   grep -q -- "getNavigationGraph --platform ios --deviceId simulator-udid --appId com.apple.reminders" "$INVOCATION_FILE"
   launch_line="$(grep -n -- "launchApp --platform ios --appId com.apple.reminders --deviceId simulator-udid" "$INVOCATION_FILE" | head -n 1 | cut -d: -f1)"
   observe_line="$(grep -n -- "observe --platform ios --deviceId simulator-udid" "$INVOCATION_FILE" | head -n 1 | cut -d: -f1)"
   [ "$launch_line" -lt "$observe_line" ]
-  grep -qx "http://127.0.0.1:8769/health" "$CURL_URL_FILE"
-  grep -qx "http://127.0.0.1:8769/sdk-events" "$CURL_URL_FILE"
+  grep -qx "http://127.0.0.1:8768/health" "$CURL_URL_FILE"
+  grep -qx "http://127.0.0.1:8768/sdk-events" "$CURL_URL_FILE"
 }

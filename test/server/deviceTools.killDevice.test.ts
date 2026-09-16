@@ -515,6 +515,7 @@ class FakeDeviceSessionRepository extends DeviceSessionRepository {
     return undefined;
   }
   override async upsertActiveSession(): Promise<void> {}
+  override async replaceLivenessOwnership(): Promise<void> {}
   override async markReleased(): Promise<void> {}
   override async recordActivity(): Promise<void> {}
 }
@@ -692,7 +693,13 @@ describe("killDevice handler", () => {
       await poolWithUnknownRuntime(unknownEmulator, "Pixel_8_Old");
       runtimeAvdNames.set("emulator-5554", "Pixel_8_Old");
 
-      await expect(killTool().handler({ device: unknownEmulator })).resolves.toBeDefined();
+      const response = await killTool().handler({ device: unknownEmulator });
+      expect(response.structuredContent).toEqual(JSON.parse(response.content?.[0]?.text ?? "{}"));
+      expect(response.structuredContent).toMatchObject({
+        name: "Unknown (emulator-5554)",
+        platform: "android",
+        udid: "emulator-5554",
+      });
       expect(runtimeAvdNameProbes).toEqual(["emulator-5554"]);
       expect(manager.killedDeviceIds).toEqual(["emulator-5554"]);
     });

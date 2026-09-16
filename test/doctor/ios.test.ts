@@ -1,4 +1,4 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import type { IosDoctorDependencies } from "../../src/doctor/checks/ios";
 import {
   checkAppleDeveloperAccount,
@@ -18,6 +18,7 @@ import {
   IOS_RUNNER_FEATURE_COMMANDS,
   IOS_RUNNER_FEATURE_FLAGS,
   runIosChecks,
+  runPostRepairIosChecks,
 } from "../../src/doctor/checks/ios";
 import type {
   IosObserveRoundTripInspection,
@@ -26,9 +27,10 @@ import type {
   IosRunnerInspectorHooks,
 } from "../../src/doctor/checks/ios";
 import type { ExecResult } from "../../src/models";
-import { DefaultHostCommandExecutor } from "../../src/utils/HostCommandExecutor";
 import type { SecurityClient } from "../../src/utils/ios-cmdline-tools/SecurityClient";
 import { FakeLogger } from "../fakes/FakeLogger";
+import { createDoctorDeadline, DoctorDeadlineError } from "../../src/doctor/deadline";
+import { FakeTimer } from "../fakes/FakeTimer";
 
 const createExecResult = (stdout: string, stderr: string = ""): ExecResult => ({
   stdout,
@@ -236,7 +238,10 @@ describe("iOS doctor checks", () => {
     test("passes when xcrun works", async () => {
       const result = await checkXcrunAvailable({
         ...baseDependencies,
-        execFile: async () => createExecResult("xcrun version 75."),
+        createSimctlClient: () => ({
+          ...baseDependencies.createSimctlClient(),
+          isAvailable: async () => true,
+        }),
       });
 
       expect(result.status).toBe("pass");
@@ -246,35 +251,35 @@ describe("iOS doctor checks", () => {
     test("fails when xcrun fails", async () => {
       const result = await checkXcrunAvailable({
         ...baseDependencies,
-        execFile: async () => {
-          throw new Error("xcrun: error: unable to find utility");
-        },
+        createSimctlClient: () => ({
+          ...baseDependencies.createSimctlClient(),
+          isAvailable: async () => false,
+        }),
       });
 
       expect(result.status).toBe("fail");
       expect(result.message).toContain("xcrun not functional");
     });
 
-    test("force-kills a wedged xcrun process when using default dependencies", async () => {
-      const executeCommand = spyOn(
-        DefaultHostCommandExecutor.prototype,
-        "executeCommand",
-      ).mockResolvedValue(createExecResult(""));
-      try {
-        const result = await checkXcrunAvailable();
-        if (process.platform === "darwin") {
-          expect(result.status).toBe("pass");
-          expect(executeCommand).toHaveBeenCalledWith("xcrun", ["--version"], {
-            timeoutMs: 5000,
-            killSignal: "SIGKILL",
-          });
-        } else {
-          expect(result.status).toBe("skip");
-          expect(executeCommand).not.toHaveBeenCalled();
-        }
-      } finally {
-        executeCommand.mockRestore();
-      }
+    test("passes the shared cancellation options to the simctl-backed probe", async () => {
+      const controller = new AbortController();
+      let received: { signal?: AbortSignal; timeoutMs?: number } | undefined;
+      const result = await checkXcrunAvailable(
+        {
+          ...baseDependencies,
+          createSimctlClient: () => ({
+            ...baseDependencies.createSimctlClient(),
+            isAvailable: async (options) => {
+              received = options;
+              return true;
+            },
+          }),
+        },
+        { signal: controller.signal, timeoutMs: 123 },
+      );
+
+      expect(result.status).toBe("pass");
+      expect(received).toEqual({ signal: controller.signal, timeoutMs: 123 });
     });
 
     test("skips when not on darwin", async () => {
@@ -483,26 +488,36 @@ describe("iOS doctor checks", () => {
     });
 
     test("passes when account entries exist", async () => {
-      const result = await checkAppleDeveloperAccount({
-        ...baseDependencies,
-        readDir: async () => ["account.plist"],
-      });
+      const controller = new AbortController();
+      const result = await checkAppleDeveloperAccount(
+        {
+          ...baseDependencies,
+          readDir: async () => ["account.plist"],
+        },
+        { signal: controller.signal },
+      );
 
       expect(result.status).toBe("pass");
       expect(result.message).toContain("Apple Developer account configured");
+      expect(controller.signal.aborted).toBe(false);
     });
   });
 
   describe("checkProvisioningProfiles", () => {
     test("passes when profiles exist", async () => {
-      const result = await checkProvisioningProfiles({
-        ...baseDependencies,
-        readDir: async () => ["dev.mobileprovision", "dist.mobileprovision"],
-      });
+      const controller = new AbortController();
+      const result = await checkProvisioningProfiles(
+        {
+          ...baseDependencies,
+          readDir: async () => ["dev.mobileprovision", "dist.mobileprovision"],
+        },
+        { signal: controller.signal },
+      );
 
       expect(result.status).toBe("pass");
       expect(result.message).toContain("2 provisioning profile(s)");
       expect(result.value).toBe(2);
+      expect(controller.signal.aborted).toBe(false);
     });
 
     test("warns when no profiles", async () => {
@@ -616,7 +631,9 @@ describe("iOS doctor checks", () => {
       const result = await checkXcrunAvailable({
         ...baseDependencies,
         logger,
-        execFile: throwingExecFile,
+        createSimctlClient: () => {
+          throw new Error("xcrun: command not found");
+        },
       });
 
       expect(result.status).toBe("fail");
@@ -713,6 +730,130 @@ describe("iOS doctor checks", () => {
       expect(result.status).toBe("skip");
       expect(logger.at("warn").length).toBeGreaterThan(0);
     });
+  });
+});
+
+describe("iOS doctor cancellation", () => {
+  test("bounds a never-settling Apple account filesystem read", async () => {
+    const timer = new FakeTimer();
+    const deadline = createDoctorDeadline({ timeoutMs: 50, timer }, timer);
+    let result: Awaited<ReturnType<typeof checkAppleDeveloperAccount>> | undefined;
+    const check = checkAppleDeveloperAccount(
+      {
+        ...baseDependencies,
+        readDir: () => new Promise<string[]>(() => {}),
+      },
+      deadline.probe,
+    ).then((value) => {
+      result = value;
+    });
+
+    timer.advanceTime(49);
+    await Promise.resolve();
+    expect(result).toBeUndefined();
+
+    timer.advanceTime(1);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(deadline.probe.signal?.aborted).toBe(true);
+    expect(result?.status).toBe("warn");
+    await check;
+    deadline.dispose();
+  });
+
+  test("bounds a never-settling provisioning profiles filesystem read", async () => {
+    const timer = new FakeTimer();
+    const deadline = createDoctorDeadline({ timeoutMs: 50, timer }, timer);
+    let result: Awaited<ReturnType<typeof checkProvisioningProfiles>> | undefined;
+    const check = checkProvisioningProfiles(
+      {
+        ...baseDependencies,
+        readDir: () => new Promise<string[]>(() => {}),
+      },
+      deadline.probe,
+    ).then((value) => {
+      result = value;
+    });
+
+    timer.advanceTime(50);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(deadline.probe.signal?.aborted).toBe(true);
+    expect(result?.status).toBe("warn");
+    await check;
+    deadline.dispose();
+  });
+
+  test("exits the iOS doctor deadline when a filesystem read never settles", async () => {
+    const timer = new FakeTimer();
+    const deadline = createDoctorDeadline({ timeoutMs: 50, timer }, timer);
+    let startedRead: (() => void) | undefined;
+    const readStarted = new Promise<void>((resolve) => {
+      startedRead = resolve;
+    });
+    let rejection: unknown;
+    const doctor = runIosChecks(deadline.probe, {
+      ...baseDependencies,
+      readDir: () => {
+        startedRead?.();
+        return new Promise<string[]>(() => {});
+      },
+    }).then(
+      () => {},
+      (error: unknown) => {
+        rejection = error;
+      },
+    );
+
+    await readStarted;
+    timer.advanceTime(50);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(rejection).toBeInstanceOf(DoctorDeadlineError);
+    await doctor;
+    deadline.dispose();
+  });
+
+  test("aborts delayed simctl I/O without publishing a late pass", async () => {
+    const timer = new FakeTimer();
+    const deadline = createDoctorDeadline({ timeoutMs: 50, timer }, timer);
+    let observedSignal: AbortSignal | undefined;
+    let observedTimeoutMs: number | undefined;
+    let lateSuccess = false;
+    let settled = false;
+    const check = checkSimctlAvailable(
+      {
+        ...baseDependencies,
+        createSimctlClient: () => ({
+          ...baseDependencies.createSimctlClient(),
+          isAvailable: async (options) => {
+            observedSignal = options?.signal;
+            observedTimeoutMs = options?.timeoutMs;
+            await new Promise<void>((resolve) => {
+              options?.signal?.addEventListener("abort", resolve, { once: true });
+            });
+            try {
+              options?.signal?.throwIfAborted();
+              lateSuccess = true;
+              return true;
+            } finally {
+              settled = true;
+            }
+          },
+        }),
+      },
+      deadline.probe,
+    );
+
+    timer.advanceTime(50);
+    const result = await check;
+    deadline.dispose();
+
+    expect(observedSignal?.aborted).toBe(true);
+    expect(observedTimeoutMs).toBe(50);
+    expect(settled).toBe(true);
+    expect(lateSuccess).toBe(false);
+    expect(result.status).toBe("fail");
   });
 });
 
@@ -1058,6 +1199,29 @@ describe("checkIosObserveRoundTrip", () => {
     const names = results.map((check) => check.name);
     expect(names).toContain("iOS Observe Round Trip");
   });
+
+  test("keeps post-repair iOS verification device-neutral", async () => {
+    const results = await runPostRepairIosChecks(
+      {},
+      {
+        ...baseDependencies,
+        runnerInspector: {
+          inspectBootedRunners: async () => {
+            throw new Error("post-repair verification must not inspect iOS devices");
+          },
+        },
+        observeRoundTripInspector: {
+          inspectBootedObserveRoundTrips: async () => {
+            throw new Error("post-repair verification must not observe iOS devices");
+          },
+        },
+      },
+    );
+
+    expect(results.map((result) => result.name)).not.toEqual(
+      expect.arrayContaining(["iOS CtrlProxy Runner", "iOS Observe Round Trip"]),
+    );
+  });
 });
 
 describe("createIosCtrlProxyRunnerInspector lifecycle", () => {
@@ -1159,6 +1323,41 @@ describe("createIosCtrlProxyRunnerInspector lifecycle", () => {
     expect(inspections[0].supportedCommands).toBeNull();
     expect(inspections[0].supportedFeatures).toBeNull();
     expect(closes).toBe(1);
+  });
+
+  test("filters unrelated booted simulators before creating a runner manager or client", async () => {
+    const managerDevices: string[] = [];
+    const clientDevices: string[] = [];
+    const hooks: IosRunnerInspectorHooks = {
+      getManager: (device) => {
+        managerDevices.push(device.deviceId);
+        return runningManager;
+      },
+      getExistingClient: () => null,
+      createClient: (device) => {
+        clientDevices.push(device.deviceId);
+        return {
+          getSupportedCommands: async () => [...IOS_RUNNER_FEATURE_COMMANDS],
+          getSupportedFeatures: async () => [...IOS_RUNNER_FEATURE_FLAGS],
+          close: async () => {},
+        };
+      },
+    };
+
+    const inspector = createIosCtrlProxyRunnerInspector(
+      () =>
+        simctlReturning([
+          { name: "Unrelated", deviceId: "SIM-OTHER" },
+          { name: "Target", deviceId: "SIM-TARGET" },
+        ]) as any,
+      new FakeLogger(),
+      hooks,
+    );
+    const inspections = await inspector.inspectBootedRunners("SIM-TARGET");
+
+    expect(inspections.map((inspection) => inspection.deviceId)).toEqual(["SIM-TARGET"]);
+    expect(managerDevices).toEqual(["SIM-TARGET"]);
+    expect(clientDevices).toEqual(["SIM-TARGET"]);
   });
 });
 

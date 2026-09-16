@@ -1,8 +1,44 @@
 import { describe, expect, test } from "bun:test";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { startSessionOwnershipHeartbeat } from "./sessionOwnershipHeartbeat";
+import {
+  createSingleClaimSessionOwnershipRenewal,
+  startSessionOwnershipHeartbeat,
+} from "./sessionOwnershipHeartbeat";
 
 describe("startSessionOwnershipHeartbeat", () => {
+  test("does not reclaim after an applied claim response is lost and another owner takes over", async () => {
+    const originalOwner = "ios-video-keeper";
+    const newerOwner = "newer-owner";
+    const sentClaims: boolean[] = [];
+    let owner: string | undefined;
+    let attempts = 0;
+    const renew = createSingleClaimSessionOwnershipRenewal(async (claimLivenessOwnership) => {
+      attempts++;
+      sentClaims.push(claimLivenessOwnership);
+
+      if (claimLivenessOwnership) {
+        owner = originalOwner;
+      } else if (!owner) {
+        // This models the daemon's unowned-session proof fallback when a
+        // single-shot claim request never reached the daemon.
+        owner = originalOwner;
+      }
+
+      if (attempts === 1) {
+        throw new Error("heartbeat response lost after daemon applied it");
+      }
+    });
+
+    await expect(renew(new AbortController().signal)).rejects.toThrow("response lost");
+    expect(owner).toBe(originalOwner);
+
+    owner = newerOwner;
+    await renew(new AbortController().signal);
+
+    expect(sentClaims).toEqual([true, false]);
+    expect(owner).toBe(newerOwner);
+  });
+
   test("propagates an initial renewal failure before starting the keeper", async () => {
     const timer = new FakeTimer();
     let calls = 0;

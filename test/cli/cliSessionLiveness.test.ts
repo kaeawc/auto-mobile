@@ -6,7 +6,7 @@ import {
 } from "../../src/cli";
 import { runDaemonCommand } from "../../src/daemon/manager";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
-import { DaemonClient } from "../../src/daemon/client";
+import { DaemonClient, type DaemonClientLike } from "../../src/daemon/client";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import {
@@ -21,6 +21,7 @@ import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
+import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 
 const ENV_KEYS = [
   "AUTOMOBILE_SESSION_HEARTBEAT_CHECK_INTERVAL_MS",
@@ -65,6 +66,102 @@ function deviceStartResult(sessionUuid: string): {
   content: Array<{ type: string; text: string }>;
 } {
   return { content: [{ type: "text", text: JSON.stringify({ sessionUuid }) }] };
+}
+
+/**
+ * A narrow in-memory daemon transport for continuity coverage. It deliberately
+ * forwards the exact DaemonMcpProxy parameter objects and daemon request
+ * envelopes rather than using FakeDaemonClient, whose assertion-facing copies
+ * omit daemon-only fields.
+ */
+class SessionContinuityDaemonClient implements DaemonClientLike {
+  readonly toolCalls: Array<{ name: string; params: Record<string, unknown> }> = [];
+  readonly daemonRequests: Array<{
+    id: string;
+    type: "daemon_request";
+    method: string;
+    params: Record<string, unknown>;
+  }> = [];
+  private connected = false;
+  private requestNumber = 0;
+  private readonly connectionClosedHandlers = new Set<() => void>();
+
+  constructor(
+    private readonly sessionManager: SessionManager,
+    private readonly acquiredSessionUuid: string,
+    private readonly options: { dropHeartbeatResponses?: number } = {},
+  ) {}
+
+  async connect(): Promise<void> {
+    this.connected = true;
+  }
+
+  async close(): Promise<void> {
+    this.connected = false;
+  }
+
+  async callTool(name: string, params: Record<string, unknown>): Promise<unknown> {
+    this.toolCalls.push({ name, params: { ...params } });
+    if (name === "getAndroid") {
+      if (!this.sessionManager.getSession(this.acquiredSessionUuid)) {
+        await this.sessionManager.createSession(
+          this.acquiredSessionUuid,
+          "emulator-5554",
+          "android",
+          30 * 60_000,
+          undefined,
+          "Pixel_8_API_35",
+        );
+      }
+      return deviceStartResult(this.acquiredSessionUuid);
+    }
+    const sessionUuid = params.sessionUuid;
+    if (typeof sessionUuid !== "string" || !this.sessionManager.getSession(sessionUuid)) {
+      throw new Error(`Session not found: ${String(sessionUuid)}`);
+    }
+    return { content: [{ type: "text", text: "ok" }] };
+  }
+
+  async readResource(): Promise<unknown> {
+    return { contents: [] };
+  }
+
+  async callDaemonMethod(method: string, params: Record<string, unknown>): Promise<unknown> {
+    const request = {
+      id: `continuity-${++this.requestNumber}`,
+      type: "daemon_request" as const,
+      method,
+      params: { ...params },
+    };
+    this.daemonRequests.push(request);
+    const response = await handleDaemonRequest(request, daemonStateFor(this.sessionManager));
+    if (!response.success) {
+      throw new Error(response.error);
+    }
+    if (method === DAEMON_HEARTBEAT_METHOD && (this.options.dropHeartbeatResponses ?? 0) > 0) {
+      this.options.dropHeartbeatResponses!--;
+      throw new Error("heartbeat response lost after daemon applied it");
+    }
+    return response.result;
+  }
+
+  onConnectionClosed(handler: () => void): () => void {
+    this.connectionClosedHandlers.add(handler);
+    return () => this.connectionClosedHandlers.delete(handler);
+  }
+
+  disconnect(): void {
+    this.connected = false;
+    for (const handler of this.connectionClosedHandlers) {
+      handler();
+    }
+  }
+}
+
+async function settleAsyncWork(): Promise<void> {
+  for (let index = 0; index < 20; index++) {
+    await Promise.resolve();
+  }
 }
 
 /**
@@ -280,6 +377,91 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
         },
       },
     ]);
+  });
+
+  test("a recurring daemon heartbeat cannot bypass a newer token owner", async () => {
+    const client = new FakeDaemonClient({
+      onCallDaemonMethod: async (method, params) => {
+        await handleDaemonRequest(
+          { id: "1", type: "daemon_request", method, params },
+          daemonStateFor(sessionManager),
+        );
+      },
+    });
+    const daemonCommandOptions = {
+      clientFactory: () => client,
+      stateProvider: () => ({
+        isInitialized: () => false,
+        getSessionManager: () => {
+          throw new Error("Session manager unavailable");
+        },
+        getDevicePool: () => {
+          throw new Error("Device pool unavailable");
+        },
+        getDeviceSessionRegistry: () => {
+          throw new Error("Device session registry unavailable");
+        },
+      }),
+    };
+    const logSpy = spyOn(console, "log").mockImplementation(() => {});
+    await sessionManager.createSession("shared", "emulator-5554", "android", 30 * 60_000);
+
+    try {
+      await runDaemonCommand(
+        "heartbeat",
+        ["shared", "--liveness-owner-token", "ios-video-keeper", "--claim-liveness-ownership"],
+        daemonCommandOptions,
+      );
+
+      expect(sessionManager.getSession("shared")).toMatchObject({
+        livenessPolicy: "cli-idle",
+        livenessOwnerToken: "ios-video-keeper",
+      });
+
+      timer.advanceTime(1_000);
+      await handleDaemonRequest(
+        {
+          id: "takeover",
+          type: "daemon_request",
+          method: DAEMON_HEARTBEAT_METHOD,
+          params: {
+            sessionId: "shared",
+            livenessPolicy: CLI_SESSION_LIVENESS_POLICY,
+            livenessOwnerToken: "newer-owner",
+            claimLivenessOwnership: true,
+          },
+        },
+        daemonStateFor(sessionManager),
+      );
+      const takenOver = sessionManager.getSession("shared")!;
+      const beforeStaleKeeper = {
+        livenessPolicy: takenOver.livenessPolicy,
+        livenessOwnerToken: takenOver.livenessOwnerToken,
+        lastHeartbeat: takenOver.lastHeartbeat,
+        lastUsedAt: takenOver.lastUsedAt,
+        expiresAt: takenOver.expiresAt,
+      };
+
+      timer.advanceTime(1_000);
+      await runDaemonCommand(
+        "heartbeat",
+        ["shared", "--liveness-owner-token", "ios-video-keeper"],
+        daemonCommandOptions,
+      );
+
+      expect(sessionManager.getSession("shared")).toMatchObject(beforeStaleKeeper);
+      expect(client.callDaemonMethodCalls.at(-1)).toEqual({
+        method: DAEMON_HEARTBEAT_METHOD,
+        params: {
+          sessionId: "shared",
+          livenessPolicy: CLI_SESSION_LIVENESS_POLICY,
+          idleTimeoutMs: getCliSessionIdleTimeoutMs(),
+          livenessOwnerToken: "ios-video-keeper",
+        },
+      });
+    } finally {
+      logSpy.mockRestore();
+    }
   });
 
   test("a CLI touch of a proxy-owned session re-adopts the CLI policy", async () => {
@@ -525,5 +707,148 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
     }
 
     expect(declarations).toHaveLength(1);
+  });
+
+  test("keeps a later CLI owner when a first MCP heartbeat reply is lost before reconnect", async () => {
+    // This exercises DaemonMcpProxy with the daemon's real request envelope.
+    // The daemon applies the original claim, drops its reply, then a CLI takes
+    // over before the old proxy reconnects with its remembered session.
+    const sessionUuid = "continuity-android-session";
+    await sessionManager.createSession(sessionUuid, "emulator-5554", "android", 30 * 60_000);
+    const initialMcpClient = new SessionContinuityDaemonClient(sessionManager, sessionUuid, {
+      dropHeartbeatResponses: 1,
+    });
+    const replayedMcpClient = new SessionContinuityDaemonClient(sessionManager, sessionUuid);
+    const cliClient = new SessionContinuityDaemonClient(sessionManager, sessionUuid);
+    const mcpClients = [initialMcpClient, replayedMcpClient];
+    const mcp = new DaemonMcpProxy({
+      clientFactory: () => mcpClients.shift()!,
+      daemonManager: matchingDaemonManager(),
+      autoStartDaemon: false,
+      timer,
+      idGenerator: new FakeIdGenerator(["old-mcp-token"]),
+    });
+    const cli = new DaemonMcpProxy({
+      clientFactory: () => cliClient,
+      daemonManager: matchingDaemonManager(),
+      autoStartDaemon: false,
+      timer,
+      idGenerator: new FakeIdGenerator(["cli-token"]),
+    });
+
+    try {
+      await mcp.callTool("observe", { sessionUuid });
+      await settleAsyncWork();
+      expect(initialMcpClient.daemonRequests).toContainEqual({
+        id: "continuity-1",
+        type: "daemon_request",
+        method: DAEMON_HEARTBEAT_METHOD,
+        params: {
+          sessionId: sessionUuid,
+          livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
+          livenessOwnerToken: "old-mcp-token",
+          claimLivenessOwnership: true,
+        },
+      });
+
+      await cli.callTool("observe", { sessionUuid });
+      expect(await cli.adoptCliSessionLiveness()).toBe(sessionUuid);
+      await cli.close();
+      const cliOwned = sessionManager.getSession(sessionUuid)!;
+      const beforeOldReconnect = {
+        livenessPolicy: cliOwned.livenessPolicy,
+        livenessOwnerToken: cliOwned.livenessOwnerToken,
+        lastUsedAt: cliOwned.lastUsedAt,
+        lastHeartbeat: cliOwned.lastHeartbeat,
+        expiresAt: cliOwned.expiresAt,
+      };
+      expect(beforeOldReconnect).toMatchObject({
+        livenessPolicy: "cli-idle",
+        livenessOwnerToken: "cli-token",
+      });
+
+      initialMcpClient.disconnect();
+      await settleAsyncWork();
+      await mcp.callTool("observe", {});
+      await settleAsyncWork();
+
+      expect(replayedMcpClient.daemonRequests).toContainEqual({
+        id: "continuity-1",
+        type: "daemon_request",
+        method: DAEMON_HEARTBEAT_METHOD,
+        params: {
+          sessionId: sessionUuid,
+          livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
+          livenessOwnerToken: "old-mcp-token",
+          claimLivenessOwnership: true,
+        },
+      });
+      expect(sessionManager.getSession(sessionUuid)).toMatchObject(beforeOldReconnect);
+      expect(replayedMcpClient.toolCalls).toEqual([
+        {
+          name: "observe",
+          params: {
+            sessionUuid,
+            __autoMobileBoundSessionUuid: sessionUuid,
+          },
+        },
+      ]);
+    } finally {
+      await mcp.close();
+      await cli.close();
+    }
+  });
+
+  test("does not let a stale token keeper extend a newer CLI-owned session", async () => {
+    const sessionUuid = "stale-keeper-session";
+    await sessionManager.createSession(sessionUuid, "emulator-5554", "android", 30 * 60_000);
+    const staleClient = new SessionContinuityDaemonClient(sessionManager, sessionUuid);
+    const cliClient = new SessionContinuityDaemonClient(sessionManager, sessionUuid);
+    const staleProxy = new DaemonMcpProxy({
+      clientFactory: () => staleClient,
+      daemonManager: matchingDaemonManager(),
+      autoStartDaemon: false,
+      timer,
+      heartbeatIntervalMs: 1_000,
+      idGenerator: new FakeIdGenerator(["stale-token"]),
+    });
+    const cli = new DaemonMcpProxy({
+      clientFactory: () => cliClient,
+      daemonManager: matchingDaemonManager(),
+      autoStartDaemon: false,
+      timer,
+      idGenerator: new FakeIdGenerator(["cli-token"]),
+    });
+
+    try {
+      await staleProxy.callTool("observe", { sessionUuid });
+      await cli.callTool("observe", { sessionUuid });
+      expect(await cli.adoptCliSessionLiveness()).toBe(sessionUuid);
+      await cli.close();
+
+      const cliOwned = sessionManager.getSession(sessionUuid)!;
+      const beforeStaleKeeper = {
+        lastUsedAt: cliOwned.lastUsedAt,
+        lastHeartbeat: cliOwned.lastHeartbeat,
+        expiresAt: cliOwned.expiresAt,
+        livenessPolicy: cliOwned.livenessPolicy,
+        livenessOwnerToken: cliOwned.livenessOwnerToken,
+      };
+      await timer.advanceTimeAsync(1_000);
+      await settleAsyncWork();
+
+      expect(staleClient.daemonRequests.at(-1)).toMatchObject({
+        method: DAEMON_HEARTBEAT_METHOD,
+        params: {
+          sessionId: sessionUuid,
+          livenessOwnerToken: "stale-token",
+        },
+      });
+      expect(staleClient.daemonRequests.at(-1)?.params.claimLivenessOwnership).toBeUndefined();
+      expect(sessionManager.getSession(sessionUuid)).toMatchObject(beforeStaleKeeper);
+    } finally {
+      await staleProxy.close();
+      await cli.close();
+    }
   });
 });

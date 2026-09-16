@@ -6,6 +6,7 @@ import { unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
+import { DaemonClient } from "../../src/daemon/client";
 import { SOCKET_REQUEST_DEADLINE_MS, sendRawSocketRequest } from "./helpers/socketRequest";
 import { defaultTimer } from "../../src/utils/SystemTimer";
 import {
@@ -19,6 +20,7 @@ import { DEFAULT_OBSERVE_MCP_TIMEOUT_MS } from "../../src/daemon/mcpRequestTimeo
 import { FakeTimer } from "../fakes/FakeTimer";
 import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
 import type { DeviceLabelMap, Session } from "../../src/daemon/sessionManager";
+import { createStructuredToolResponse } from "../../src/utils/toolUtils";
 
 interface FakeMcpClient {
   callTool: (...args: unknown[]) => Promise<unknown>;
@@ -242,6 +244,17 @@ class PersistentSocketClient {
     });
   }
 
+  send(method: string, params: Record<string, unknown>): void {
+    this.socket.write(
+      JSON.stringify({
+        id: randomUUID(),
+        type: "mcp_request",
+        method,
+        params,
+      }) + "\n",
+    );
+  }
+
   close(): void {
     this.socket.destroy();
   }
@@ -269,6 +282,86 @@ describe("UnixSocketServer MCP forward serialization", () => {
       fakeTimer,
     );
     await server.start();
+  });
+
+  test("round-trips structured tool output through the real daemon socket client", async () => {
+    server.mcpClientFactory = async () => ({
+      callTool: async () =>
+        createStructuredToolResponse({
+          count: 1,
+          devices: [{ deviceId: "emulator-5554", platform: "android" }],
+        }),
+      listTools: async () => ({ tools: [] }),
+      listResources: async () => ({ resources: [] }),
+      readResource: async () => ({ contents: [] }),
+      listResourceTemplates: async () => ({ resourceTemplates: [] }),
+      close: async () => {},
+    });
+    const client = new DaemonClient(socketPath, 1_000, undefined, {}, null);
+
+    try {
+      const result = await client.callTool("listDevices", { platform: "android" });
+
+      expect(result).toEqual({
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              count: 1,
+              devices: [{ deviceId: "emulator-5554", platform: "android" }],
+            }),
+          },
+        ],
+        structuredContent: {
+          count: 1,
+          devices: [{ deviceId: "emulator-5554", platform: "android" }],
+        },
+      });
+    } finally {
+      await client.close();
+    }
+  });
+
+  test("preserves a terminal persisted-session MCP diagnostic through the daemon socket", async () => {
+    const sessionUuid = "persisted-target-busy-session";
+    const diagnostic =
+      `Session ${sessionUuid} is terminal after identity-recovery-target-busy and cannot be reused. ` +
+      "Acquire a new device with getAndroid or getApple.";
+    server.mcpClientFactory = async () => ({
+      callTool: async () => ({
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              error: {
+                code: "session_ownership_lost",
+                message: diagnostic,
+                sessionUuid,
+                reason: "identity-recovery-target-busy",
+              },
+            }),
+          },
+        ],
+        isError: true,
+      }),
+      listTools: async () => ({ tools: [] }),
+      listResources: async () => ({ resources: [] }),
+      readResource: async () => ({ contents: [] }),
+      listResourceTemplates: async () => ({ resourceTemplates: [] }),
+      close: async () => {},
+    });
+    const client = new DaemonClient(socketPath, 1_000, undefined, {}, null);
+
+    try {
+      const result = await client.callTool("getDeviceState", { sessionUuid });
+
+      expect(result).toMatchObject({
+        isError: true,
+        content: [{ type: "text", text: expect.stringContaining(diagnostic) }],
+      });
+    } finally {
+      await client.close();
+    }
   });
 
   afterEach(async () => {
@@ -529,6 +622,52 @@ describe("UnixSocketServer MCP forward serialization", () => {
     } finally {
       client.close();
     }
+  });
+
+  test("does not republish a generated profile when its owner disconnects before an abort-ignoring result", async () => {
+    const forwardStarted = Promise.withResolvers<void>();
+    const lateResult = Promise.withResolvers<unknown>();
+    server.mcpClientFactory = async () =>
+      ({
+        callTool: async () => {
+          forwardStarted.resolve();
+          return await lateResult.promise;
+        },
+        listTools: async () => ({ tools: [] }),
+        listResources: async () => ({ resources: [] }),
+        readResource: async () => ({ contents: [] }),
+        listResourceTemplates: async () => ({ resourceTemplates: [] }),
+        close: async () => {},
+      }) as FakeMcpClient;
+
+    const client = new PersistentSocketClient();
+    await client.connect(socketPath);
+    client.send("tools/call", {
+      name: "setToolEnabled",
+      arguments: { toolName: "executePlan" },
+    });
+    await forwardStarted.promise;
+    client.close();
+
+    const internals = server as unknown as {
+      clientSockets: Map<string, unknown>;
+      boundMcpClientKeysBySocketSession: Map<string, unknown>;
+    };
+    for (let attempt = 0; attempt < 20 && internals.clientSockets.size > 0; attempt++) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+    expect(internals.clientSockets.size).toBe(0);
+
+    // This is the same response shape that normally creates the socket's
+    // generated tool-selection-profile binding.
+    lateResult.resolve({
+      content: [{ type: "text", text: JSON.stringify({ sessionUuid: "profile-late" }) }],
+    });
+    for (let attempt = 0; attempt < 20; attempt++) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+
+    expect(internals.boundMcpClientKeysBySocketSession.size).toBe(0);
   });
 
   test("preserves a socket-bound selection profile for a later explicit device call", async () => {

@@ -20,6 +20,7 @@ import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { IOSCtrlProxyManager } from "../../../src/utils/IOSCtrlProxyManager";
 import { DeviceLostError } from "../../../src/server/deviceLossOutcome";
 import { PortManager } from "../../../src/utils/PortManager";
+import { AdbClient } from "../../../src/utils/android-cmdline-tools/AdbClient";
 
 describe("LaunchApp", () => {
   let device: BootedDevice;
@@ -121,6 +122,278 @@ describe("LaunchApp", () => {
         .every((options) => options.signal === controller.signal),
     ).toBe(true);
     expect(fakeAwaitIdle.wasMethodCalled("initializeUiStabilityTracking")).toBe(true);
+  });
+
+  test("gives Android launch exclusive priority over background performance sampling", async () => {
+    const events: string[] = [];
+    const prioritizedLaunch = new LaunchApp(device, fakeAdb as unknown as any, null, fakeTimer, {
+      performanceSamplingCoordinator: {
+        async withDeviceSamplingPaused(deviceId, operation) {
+          events.push(`pause:${deviceId}`);
+          try {
+            return await operation();
+          } finally {
+            events.push(`resume:${deviceId}`);
+          }
+        },
+      },
+    });
+    (prioritizedLaunch as any).awaitIdle = fakeAwaitIdle;
+    (prioritizedLaunch as any).observeScreen = fakeObserveScreen;
+    (prioritizedLaunch as any).window = fakeWindow;
+    fakeAdb.setForegroundApp({ packageName, userId: 0 });
+    fakeAdb.setCommandResponse("shell dumpsys activity processes", {
+      stdout: "123:com.example.app/u0a123\n",
+      stderr: "",
+    });
+
+    await expect(prioritizedLaunch.execute(packageName, false, false)).resolves.toMatchObject({
+      success: true,
+    });
+
+    expect(events).toEqual(["pause:device-123", "resume:device-123"]);
+  });
+
+  test("retries a transient Android offline process check", async () => {
+    const controller = new AbortController();
+    fakeTimer.enableAutoAdvance();
+    fakeAdb.setForegroundApp({ packageName, userId: 0 });
+    fakeAdb.setCommandResponse("shell dumpsys activity processes", {
+      stdout: "123:com.example.app/u0a123\n",
+      stderr: "",
+    });
+    fakeObserveScreen.setObserveResult(createObserveResult(packageName));
+
+    let processChecks = 0;
+    const processCheckOptions: Array<{ noRetry?: boolean; signal?: AbortSignal }> = [];
+    const originalExecuteCommand = fakeAdb.executeCommand.bind(fakeAdb);
+    const executeSpy = spyOn(fakeAdb, "executeCommand").mockImplementation(
+      async (
+        command,
+        timeoutMs,
+        maxBuffer,
+        noRetry,
+        signal,
+        waitForProcessSettlementAfterAbort,
+      ) => {
+        if (command === `shell dumpsys activity processes ${packageName}`) {
+          processCheckOptions.push({ noRetry, signal });
+          if (processChecks++ === 0) {
+            throw new Error("adb: device offline");
+          }
+        }
+        return originalExecuteCommand(
+          command,
+          timeoutMs,
+          maxBuffer,
+          noRetry,
+          signal,
+          waitForProcessSettlementAfterAbort,
+        );
+      },
+    );
+
+    try {
+      const result = await launchApp.execute(
+        packageName,
+        false,
+        false,
+        undefined,
+        undefined,
+        undefined,
+        controller.signal,
+      );
+
+      expect(result.success).toBe(true);
+      expect(result.alreadyForeground).toBe(true);
+      expect(processChecks).toBe(2);
+      expect(processCheckOptions).toEqual([
+        { noRetry: true, signal: controller.signal },
+        { noRetry: true, signal: controller.signal },
+      ]);
+      expect(fakeAdb.getExecutedArgv()).toContainEqual([
+        "shell",
+        "dumpsys",
+        "activity",
+        "processes",
+        packageName,
+      ]);
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
+
+  test("fails fast on a non-offline process-check failure", async () => {
+    let dispatches = 0;
+    const failure = new Error("adb transient blip");
+    const adb = new AdbClient(device, async () => {
+      dispatches += 1;
+      throw failure;
+    });
+    (
+      adb as unknown as {
+        getBaseCommandParts(): Promise<{ adbPath: string; baseArgs: string[] }>;
+      }
+    ).getBaseCommandParts = async () => ({ adbPath: "adb", baseArgs: [] });
+    const retryingLaunch = new LaunchApp(device, adb, null, fakeTimer);
+
+    await expect(
+      (
+        retryingLaunch as unknown as {
+          readAndroidProcessStateWithOfflineRecovery(args: string[]): Promise<{ stdout: string }>;
+        }
+      ).readAndroidProcessStateWithOfflineRecovery([
+        "shell",
+        "dumpsys",
+        "activity",
+        "processes",
+        packageName,
+      ]),
+    ).rejects.toBe(failure);
+
+    expect(dispatches).toBe(1);
+    expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
+    expect(fakeTimer.getPendingSleepCount()).toBe(0);
+  });
+
+  test("bounds Android offline process recovery", async () => {
+    fakeTimer.enableAutoAdvance();
+
+    let processChecks = 0;
+    const originalExecuteCommand = fakeAdb.executeCommand.bind(fakeAdb);
+    const executeSpy = spyOn(fakeAdb, "executeCommand").mockImplementation(
+      async (
+        command,
+        timeoutMs,
+        maxBuffer,
+        noRetry,
+        signal,
+        waitForProcessSettlementAfterAbort,
+      ) => {
+        if (command === `shell dumpsys activity processes ${packageName}`) {
+          processChecks += 1;
+          throw new Error("adb: device offline");
+        }
+        return originalExecuteCommand(
+          command,
+          timeoutMs,
+          maxBuffer,
+          noRetry,
+          signal,
+          waitForProcessSettlementAfterAbort,
+        );
+      },
+    );
+
+    try {
+      await expect(launchApp.execute(packageName, false, false)).rejects.toThrow("device offline");
+      expect(processChecks).toBe(3);
+      expect(fakeTimer.getSleepHistory()).toEqual([250, 500]);
+      expect(fakeTimer.getPendingSleepCount()).toBe(0);
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
+
+  test("cancels and cleans up while waiting to retry an offline process check", async () => {
+    const controller = new AbortController();
+    const deviceLoss = new DeviceLostError(device.deviceId, "device-disconnected:retry-delay");
+    let processChecks = 0;
+    const originalExecuteCommand = fakeAdb.executeCommand.bind(fakeAdb);
+    const executeSpy = spyOn(fakeAdb, "executeCommand").mockImplementation(
+      async (
+        command,
+        timeoutMs,
+        maxBuffer,
+        noRetry,
+        signal,
+        waitForProcessSettlementAfterAbort,
+      ) => {
+        if (command === `shell dumpsys activity processes ${packageName}`) {
+          processChecks += 1;
+          throw new Error("adb: device offline");
+        }
+        return originalExecuteCommand(
+          command,
+          timeoutMs,
+          maxBuffer,
+          noRetry,
+          signal,
+          waitForProcessSettlementAfterAbort,
+        );
+      },
+    );
+
+    try {
+      const resultPromise = launchApp.execute(
+        packageName,
+        false,
+        false,
+        undefined,
+        undefined,
+        undefined,
+        controller.signal,
+      );
+      for (let i = 0; i < 50 && fakeTimer.getPendingTimeoutCount() === 0; i += 1) {
+        await Promise.resolve();
+      }
+      expect(fakeTimer.getPendingTimeouts()).toEqual([250]);
+
+      controller.abort(deviceLoss);
+
+      await expect(resultPromise).rejects.toBe(deviceLoss);
+      expect(processChecks).toBe(1);
+      expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
+      expect(fakeTimer.getCurrentTime()).toBe(0);
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
+
+  test("prefers an abort reason that arrives with the ADB rejection", async () => {
+    const controller = new AbortController();
+    const deviceLoss = new DeviceLostError(device.deviceId, "device-disconnected:adb-race");
+    const originalExecuteCommand = fakeAdb.executeCommand.bind(fakeAdb);
+    const executeSpy = spyOn(fakeAdb, "executeCommand").mockImplementation(
+      async (
+        command,
+        timeoutMs,
+        maxBuffer,
+        noRetry,
+        signal,
+        waitForProcessSettlementAfterAbort,
+      ) => {
+        if (command === `shell dumpsys activity processes ${packageName}`) {
+          controller.abort(deviceLoss);
+          throw new Error("adb: device offline");
+        }
+        return originalExecuteCommand(
+          command,
+          timeoutMs,
+          maxBuffer,
+          noRetry,
+          signal,
+          waitForProcessSettlementAfterAbort,
+        );
+      },
+    );
+
+    try {
+      await expect(
+        launchApp.execute(
+          packageName,
+          false,
+          false,
+          undefined,
+          undefined,
+          undefined,
+          controller.signal,
+        ),
+      ).rejects.toBe(deviceLoss);
+      expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
+    } finally {
+      executeSpy.mockRestore();
+    }
   });
 
   // The already-foreground branch reads the foreground app and THEN observes, so
@@ -634,6 +907,7 @@ describe("LaunchApp", () => {
         .getExecuteOptions()
         .every((options) => options.signal === controller.signal),
     ).toBe(true);
+    expect(fakeObserveScreen.getExecuteOptions().at(-1)?.skipPerformanceAudit).toBe(true);
   });
 
   test("captures only the final launch observation after package reconciliation", async () => {
@@ -693,6 +967,30 @@ describe("LaunchApp", () => {
     expect(result.success).toBe(false);
     expect(result.observation).toBeUndefined();
     expect(fakeObserveScreen.getExecuteCallCount()).toBeGreaterThan(1);
+  });
+
+  test("waits through the Android CtrlProxy reconnect cooldown", async () => {
+    fakeTimer.enableAutoAdvance();
+    const unverifiedObservation = {
+      ...createObserveResult(packageName),
+      freshness: {
+        isFresh: false,
+        verified: false,
+        warning: "Accessibility service is reconnecting after a transient ADB reset",
+      },
+    };
+
+    fakeAdb.setForegroundApp({ packageName, userId: 0 });
+    fakeAdb.setCommandResponse("shell dumpsys activity processes", { stdout: "0\n", stderr: "" });
+    fakeObserveScreen.setObserveResult(() =>
+      fakeTimer.now() < 10_500 ? unverifiedObservation : createObserveResult(packageName),
+    );
+
+    const result = await launchApp.execute(packageName, false, false);
+
+    expect(result.success).toBe(true);
+    expect(result.observation?.freshness?.verified).not.toBe(false);
+    expect(fakeTimer.now()).toBeGreaterThanOrEqual(10_500);
   });
 
   // Issue #6220 follow-up (P1 review finding on #6239): a launch observation

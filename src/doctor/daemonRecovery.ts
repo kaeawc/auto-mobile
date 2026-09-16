@@ -3,13 +3,16 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { DaemonMcpProxy } from "../daemon/daemonMcpProxy";
+import { DaemonClient } from "../daemon/client";
+import { DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS } from "../daemon/constants";
 import { getDaemonHealthReport, type DaemonHealthReport } from "../daemon/debugTools";
 import { DaemonManager, type DaemonRestartResult } from "../daemon/manager";
 import type { DaemonOptions } from "../daemon/types";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
 import { defaultTimer, MAX_SETTIMEOUT_DELAY_MS, type Timer } from "../utils/SystemTimer";
+import { runDoctor } from ".";
+import type { DoctorDiagnosticProfile, DoctorOptions, DoctorReport } from "./types";
 
 const DEFAULT_DAEMON_RECOVERY_TIMEOUT_MS = 45_000;
 
@@ -19,12 +22,28 @@ export type DaemonRecoveryAction = "joined" | "restarted";
 export interface DoctorRepairOptions {
   /**
    * Total deadline across daemon diagnosis, repair, and verification.
-   * It is intentionally independent of platform selection: the daemon and its
-   * control socket are shared host infrastructure.
+   * Platform diagnostics, when requested, use this same deadline. The daemon
+   * and its control socket remain shared host infrastructure.
    */
   timeoutMs?: unknown;
+  /**
+   * Run Android diagnostics after the host-wide daemon repair completes.
+   * This does not narrow the shared daemon/control-socket repair scope.
+   */
+  android?: boolean;
+  /**
+   * Run iOS diagnostics after the host-wide daemon repair completes.
+   * This does not narrow the shared daemon/control-socket repair scope.
+   */
+  ios?: boolean;
   /** Daemon options parsed from the current CLI invocation. */
   daemonOptions?: DaemonOptions;
+}
+
+export interface PostRepairDoctorVerification {
+  profile: DoctorDiagnosticProfile;
+  android?: true;
+  ios?: true;
 }
 
 export interface DaemonRecoveryResult {
@@ -34,11 +53,22 @@ export interface DaemonRecoveryResult {
   /** Undefined when diagnosis did not complete and no action was selected. */
   action?: DaemonRecoveryAction;
   after?: DaemonHealthReport;
+  /**
+   * Present only after the requested platform diagnostics ran successfully
+   * within the recovery deadline.
+   */
+  postRepairDoctor?: PostRepairDoctorVerification;
   nextAction?: string;
 }
 
 export interface DaemonRecoveryDependencies {
   getHealthReport?: () => Promise<DaemonHealthReport>;
+  /**
+   * Repairs PID metadata through the responsive daemon itself. The daemon
+   * validates its current generation before republishing the record, so doctor
+   * does not need to stop a healthy daemon merely because its metadata is bad.
+   */
+  repairControlMetadata?: (signal?: AbortSignal, deadline?: number) => Promise<boolean>;
   /**
    * This is the deliberate recovery escalation. DaemonManager acquires the
    * lifecycle lock, rechecks protocol ownership, then stops only verified
@@ -51,11 +81,19 @@ export interface DaemonRecoveryDependencies {
     deadline?: number,
   ) => Promise<DaemonRestartResult>;
   /**
-   * A successful MCP tools/list round trip verifies the socket protocol and,
-   * through DaemonMcpProxy, the daemon's version and build identity.
+   * A successful authenticated `tools/list` round trip verifies the socket
+   * protocol plus the daemon's version and build identity.
    */
-  verifyProtocol?: () => Promise<void>;
+  verifyProtocol?: (options: DaemonProtocolProbeOptions) => Promise<void>;
+  /** Runs the requested platform doctor checks after host metadata repair. */
+  runDoctor?: (options: DoctorOptions) => Promise<DoctorReport>;
   timer?: Timer;
+}
+
+export interface DaemonProtocolProbeOptions {
+  signal: AbortSignal;
+  timeoutMs: number;
+  timer: Timer;
 }
 
 class DaemonRecoveryDeadlineError extends Error {
@@ -91,27 +129,55 @@ function attachLifecycleCompletion(
   return result;
 }
 
-async function verifyDaemonProtocol(): Promise<void> {
+async function verifyDaemonProtocol(options: DaemonProtocolProbeOptions): Promise<void> {
   // Verification must not reconcile identity itself; explicit repair owns all
-  // mutation so its deadline waits for a replacement to settle.
-  const proxy = new DaemonMcpProxy({ autoStartDaemon: false });
+  // mutation so its deadline waits for a replacement to settle. Use one
+  // authenticated daemon RPC rather than DaemonMcpProxy: proxy connection
+  // setup makes several 120-second identity requests, which lets an
+  // accepts-but-unresponsive daemon consume the whole repair budget.
+  const client = new DaemonClient(undefined, options.timeoutMs, options.timer);
   try {
-    await proxy.listTools();
+    await client.callDaemonMethod("tools/list", {}, options);
   } finally {
-    await proxy.close();
+    await client.close();
   }
 }
 
-function protocolHealthProbe(verifyProtocol: () => Promise<void>): () => Promise<boolean> {
+function protocolHealthProbe(
+  verifyProtocol: (options: DaemonProtocolProbeOptions) => Promise<void>,
+  deadline: number,
+  timer: Timer,
+  signal: AbortSignal,
+): () => Promise<boolean> {
   return async () => {
     try {
-      await verifyProtocol();
+      await verifyProtocol(protocolProbeOptions("recovery", deadline, timer, signal));
       return true;
     } catch (error) {
+      if (error instanceof DaemonRecoveryDeadlineError) {
+        throw error;
+      }
       // A failed compatibility probe is the explicit repair precondition.
       logger.debug(`Daemon repair compatibility probe failed: ${errorMessage(error)}`);
       return false;
     }
+  };
+}
+
+function protocolProbeOptions(
+  phase: Exclude<DaemonRecoveryPhase, "complete">,
+  deadline: number,
+  timer: Timer,
+  signal: AbortSignal,
+): DaemonProtocolProbeOptions {
+  const remaining = deadline - timer.now();
+  if (remaining <= 0) {
+    throw new DaemonRecoveryDeadlineError(phase);
+  }
+  return {
+    signal,
+    timeoutMs: Math.min(DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS, remaining),
+    timer,
   };
 }
 
@@ -224,14 +290,15 @@ type FinalHealthAttempt =
 interface ResolvedRecoveryDependencies {
   timer: Timer;
   getHealthReport: () => Promise<DaemonHealthReport>;
+  repairControlMetadata: (signal?: AbortSignal, deadline?: number) => Promise<boolean>;
   recoverControlState: (
     daemonOptions: DaemonOptions,
     isProtocolHealthy: () => Promise<boolean>,
     signal?: AbortSignal,
     deadline?: number,
   ) => Promise<DaemonRestartResult>;
-  verifyProtocol: () => Promise<void>;
-  isProtocolHealthy: () => Promise<boolean>;
+  verifyProtocol: (options: DaemonProtocolProbeOptions) => Promise<void>;
+  runDoctor: (options: DoctorOptions) => Promise<DoctorReport>;
 }
 
 function resolveRecoveryDependencies(
@@ -241,6 +308,10 @@ function resolveRecoveryDependencies(
   return {
     timer: dependencies.timer ?? defaultTimer,
     getHealthReport: dependencies.getHealthReport ?? getDaemonHealthReport,
+    repairControlMetadata:
+      dependencies.repairControlMetadata ??
+      (async (signal, deadline) =>
+        await new DaemonManager().repairControlMetadata(signal, deadline)),
     recoverControlState:
       dependencies.recoverControlState ??
       ((daemonOptions, isProtocolHealthy, signal, deadline) =>
@@ -251,7 +322,7 @@ function resolveRecoveryDependencies(
           deadline,
         )),
     verifyProtocol,
-    isProtocolHealthy: protocolHealthProbe(verifyProtocol),
+    runDoctor: dependencies.runDoctor ?? runDoctor,
   };
 }
 
@@ -289,7 +360,7 @@ async function recoverUnusableSocket(
     deadline?: number,
   ) => Promise<DaemonRestartResult>,
   daemonOptions: DaemonOptions,
-  isProtocolHealthy: () => Promise<boolean>,
+  verifyProtocol: (options: DaemonProtocolProbeOptions) => Promise<void>,
 ): Promise<RecoveryAttempt<DaemonRecoveryAction>> {
   if (before.socketConnectable) {
     return { ok: true, value: "joined" };
@@ -298,7 +369,13 @@ async function recoverUnusableSocket(
     "recovery",
     deadline,
     timer,
-    (signal) => recoverControlState(daemonOptions, isProtocolHealthy, signal, deadline),
+    (signal) =>
+      recoverControlState(
+        daemonOptions,
+        protocolHealthProbe(verifyProtocol, deadline, timer, signal),
+        signal,
+        deadline,
+      ),
     true,
   );
 }
@@ -314,11 +391,10 @@ async function verifyProtocolWithRecovery(
     deadline?: number,
   ) => Promise<DaemonRestartResult>,
   daemonOptions: DaemonOptions,
-  isProtocolHealthy: () => Promise<boolean>,
-  verifyProtocol: () => Promise<void>,
+  verifyProtocol: (options: DaemonProtocolProbeOptions) => Promise<void>,
 ): Promise<ProtocolRecoveryAttempt> {
-  const initialVerification = await attemptRecoveryStep("verification", deadline, timer, () =>
-    verifyProtocol(),
+  const initialVerification = await attemptRecoveryStep("verification", deadline, timer, (signal) =>
+    verifyProtocol(protocolProbeOptions("verification", deadline, timer, signal)),
   );
   if (
     initialVerification.ok ||
@@ -339,7 +415,13 @@ async function verifyProtocolWithRecovery(
     "recovery",
     deadline,
     timer,
-    (signal) => recoverControlState(daemonOptions, isProtocolHealthy, signal, deadline),
+    (signal) =>
+      recoverControlState(
+        daemonOptions,
+        protocolHealthProbe(verifyProtocol, deadline, timer, signal),
+        signal,
+        deadline,
+      ),
     true,
   );
   if (!restartResult.ok) {
@@ -351,8 +433,11 @@ async function verifyProtocolWithRecovery(
       lifecycleCompletion: restartResult.lifecycleCompletion,
     };
   }
-  const replacementVerification = await attemptRecoveryStep("verification", deadline, timer, () =>
-    verifyProtocol(),
+  const replacementVerification = await attemptRecoveryStep(
+    "verification",
+    deadline,
+    timer,
+    (signal) => verifyProtocol(protocolProbeOptions("verification", deadline, timer, signal)),
   );
   return replacementVerification.ok
     ? { ok: true, value: restartResult.value }
@@ -383,16 +468,137 @@ async function verifyFinalHealth(
   }
 }
 
+async function repairConnectableDaemonMetadata(
+  before: DaemonHealthReport,
+  deadline: number,
+  timer: Timer,
+  repairControlMetadata: (signal?: AbortSignal, deadline?: number) => Promise<boolean>,
+): Promise<RecoveryAttempt<void> | undefined> {
+  if (!before.socketConnectable || before.pidFileValid) {
+    return undefined;
+  }
+  return await attemptRecoveryStep(
+    "recovery",
+    deadline,
+    timer,
+    async (signal) => {
+      if (await repairControlMetadata(signal, deadline)) {
+        return;
+      }
+      throw new Error("responsive daemon declined to republish control metadata");
+    },
+    true,
+  );
+}
+
+function requestedPostRepairDoctor(
+  options: DoctorRepairOptions,
+): PostRepairDoctorVerification | undefined {
+  const requested = {
+    profile: "post-repair-read-only" as const,
+    ...(options.android === true ? { android: true as const } : {}),
+    ...(options.ios === true ? { ios: true as const } : {}),
+  };
+  return options.android === true || options.ios === true ? requested : undefined;
+}
+
+function assertRequestedDoctorSections(
+  report: DoctorReport,
+  requested: PostRepairDoctorVerification,
+): void {
+  if (report.diagnosticProfile !== requested.profile) {
+    throw new Error("post-repair doctor did not run the read-only diagnostic profile");
+  }
+  if (requested.android && !report.android) {
+    throw new Error("post-repair doctor did not run the requested Android diagnostics");
+  }
+  if (requested.ios && !report.ios) {
+    throw new Error("post-repair doctor did not run the requested iOS diagnostics");
+  }
+  if (report.summary.failed > 0) {
+    throw new Error(`post-repair doctor reported ${report.summary.failed} failed check(s)`);
+  }
+}
+
+async function verifyRequestedDoctorChecks(
+  requested: PostRepairDoctorVerification | undefined,
+  deadline: number,
+  timer: Timer,
+  runDoctorChecks: (options: DoctorOptions) => Promise<DoctorReport>,
+): Promise<RecoveryAttempt<PostRepairDoctorVerification> | undefined> {
+  if (!requested) {
+    return undefined;
+  }
+  // These checks are read-only verification, not a daemon lifecycle transition.
+  // They receive the recovery abort signal, but an ignored cancellation must not
+  // keep `--cli doctor --repair` alive after its deadline.
+  return await attemptRecoveryStep("verification", deadline, timer, async (signal) => {
+    const { profile: diagnosticProfile, ...platforms } = requested;
+    const report = await runDoctorChecks({
+      ...platforms,
+      diagnosticProfile,
+      signal,
+      deadlineMs: deadline,
+      timer,
+    });
+    assertRequestedDoctorSections(report, requested);
+    return requested;
+  });
+}
+
+async function completeVerifiedRecovery(
+  before: DaemonHealthReport,
+  action: DaemonRecoveryAction,
+  requestedDoctor: PostRepairDoctorVerification | undefined,
+  deadline: number,
+  timer: Timer,
+  getHealthReport: () => Promise<DaemonHealthReport>,
+  runDoctorChecks: (options: DoctorOptions) => Promise<DoctorReport>,
+): Promise<DaemonRecoveryResult> {
+  const finalHealth = await verifyFinalHealth(deadline, timer, getHealthReport);
+  if (!finalHealth.ok) {
+    return failedRecovery("verification", action, finalHealth.error, before, finalHealth.after);
+  }
+
+  const postRepairDoctor = await verifyRequestedDoctorChecks(
+    requestedDoctor,
+    deadline,
+    timer,
+    runDoctorChecks,
+  );
+  if (postRepairDoctor && !postRepairDoctor.ok) {
+    return failedRecovery(
+      "verification",
+      action,
+      postRepairDoctor.error,
+      before,
+      finalHealth.value,
+      postRepairDoctor.lifecycleCompletion,
+    );
+  }
+
+  return {
+    status: "repaired",
+    phase: "complete",
+    before,
+    action,
+    after: finalHealth.value,
+    ...(postRepairDoctor ? { postRepairDoctor: postRepairDoctor.value } : {}),
+  };
+}
+
 /**
  * Deliberately repair only the shared daemon/control-socket layer. Device
- * selection is intentionally outside this contract: doctor currently accepts
- * platform filters, not a concrete AVD or simulator UUID.
+ * selection is intentionally outside this contract: doctor accepts platform
+ * filters, not a concrete AVD or simulator UUID. Requested filters are instead
+ * used for post-repair diagnostics under the same absolute deadline.
  */
 export async function repairDaemon(
   options: DoctorRepairOptions = {},
   dependencies: DaemonRecoveryDependencies = {},
 ): Promise<DaemonRecoveryResult> {
-  const timeoutMs = options.timeoutMs ?? DEFAULT_DAEMON_RECOVERY_TIMEOUT_MS;
+  const timeoutMs =
+    options.timeoutMs === undefined ? DEFAULT_DAEMON_RECOVERY_TIMEOUT_MS : options.timeoutMs;
   if (!isUsableRecoveryTimeout(timeoutMs)) {
     return failedRecovery(
       "diagnosis",
@@ -403,8 +609,14 @@ export async function repairDaemon(
     );
   }
 
-  const { timer, getHealthReport, recoverControlState, verifyProtocol, isProtocolHealthy } =
-    resolveRecoveryDependencies(dependencies);
+  const {
+    timer,
+    getHealthReport,
+    repairControlMetadata,
+    recoverControlState,
+    verifyProtocol,
+    runDoctor: runDoctorChecks,
+  } = resolveRecoveryDependencies(dependencies);
   const daemonOptions = options.daemonOptions ?? {};
   const deadline = timer.now() + timeoutMs;
   const diagnosis = await attemptRecoveryStep("diagnosis", deadline, timer, () =>
@@ -414,13 +626,29 @@ export async function repairDaemon(
     return failedRecovery("diagnosis", undefined, diagnosis.error);
   }
   const before = diagnosis.value;
+  const metadataRepair = await repairConnectableDaemonMetadata(
+    before,
+    deadline,
+    timer,
+    repairControlMetadata,
+  );
+  if (metadataRepair && !metadataRepair.ok) {
+    return failedRecovery(
+      "recovery",
+      "joined",
+      metadataRepair.error,
+      before,
+      undefined,
+      metadataRepair.lifecycleCompletion,
+    );
+  }
   const socketRecovery = await recoverUnusableSocket(
     before,
     deadline,
     timer,
     recoverControlState,
     daemonOptions,
-    isProtocolHealthy,
+    verifyProtocol,
   );
   if (!socketRecovery.ok) {
     return failedRecovery(
@@ -442,7 +670,6 @@ export async function repairDaemon(
     timer,
     recoverControlState,
     daemonOptions,
-    isProtocolHealthy,
     verifyProtocol,
   );
   if (!protocolRecovery.ok) {
@@ -456,22 +683,13 @@ export async function repairDaemon(
     );
   }
 
-  const finalHealth = await verifyFinalHealth(deadline, timer, getHealthReport);
-  if (!finalHealth.ok) {
-    return failedRecovery(
-      "verification",
-      protocolRecovery.value,
-      finalHealth.error,
-      before,
-      finalHealth.after,
-    );
-  }
-
-  return {
-    status: "repaired",
-    phase: "complete",
+  return await completeVerifiedRecovery(
     before,
-    action: protocolRecovery.value,
-    after: finalHealth.value,
-  };
+    protocolRecovery.value,
+    requestedPostRepairDoctor(options),
+    deadline,
+    timer,
+    getHealthReport,
+    runDoctorChecks,
+  );
 }

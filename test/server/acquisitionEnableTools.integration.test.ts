@@ -19,9 +19,9 @@ type AcquisitionPayload = {
 /**
  * #6869 — a client had to acquire a device, read `gatedTools`, and then spend
  * one `setToolEnabled` round-trip per tool before its first interaction.
- * `getAndroid` / `getApple` / `provisionDevice` now take `enableTools`, applied
- * while the session is minted, and report the resulting `enabledTools`
- * alongside `gatedTools`.
+ * Every session-minting acquisition accepts `enableTools`, applies it while the
+ * session is minted, and reports the resulting `enabledTools` alongside
+ * `gatedTools`.
  */
 describe("acquisition-time enableTools (#6869)", () => {
   let fixture: McpTestFixture | undefined;
@@ -93,7 +93,7 @@ describe("acquisition-time enableTools (#6869)", () => {
     ToolRegistry.clearTools();
   });
 
-  for (const acquisition of ["getAndroid", "getApple"] as const) {
+  for (const acquisition of ["getAndroid", "getApple", "startDevice"] as const) {
     test(`${acquisition} enables the requested tools while minting the session`, async () => {
       registerAcquisition(acquisition);
 
@@ -179,7 +179,7 @@ describe("acquisition-time enableTools (#6869)", () => {
    * has to be stated in the response instead of inferred.
    */
   describe("a failed capability write", () => {
-    for (const acquisition of ["getAndroid", "getApple"] as const) {
+    for (const acquisition of ["getAndroid", "getApple", "startDevice"] as const) {
       test(`${acquisition} reports the failure and keeps the minted session`, async () => {
         await withFailingSelectionWrites();
         registerAcquisition(acquisition);

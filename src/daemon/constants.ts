@@ -92,6 +92,22 @@ export const INTERNAL_MCP_REQUEST_DEADLINE_PARAM = "__mcpRequestDeadlineMs";
 export const INTERNAL_LIVE_DEADLINE_KEY_PARAM = "__mcpLiveDeadlineKey";
 
 /**
+ * Per-request, non-mutating acceptance control that changes only the order in
+ * which the daemon presents freshly discovered devices.
+ */
+export const INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM = "__acceptanceDiscoveryOrder";
+
+/**
+ * Opaque per-run capability shared only by the live-acceptance harness, its
+ * dedicated proxy subprocesses, and the daemon they start. The daemon rejects
+ * an acceptance discovery order unless this value matches its startup config.
+ */
+export const INTERNAL_ACCEPTANCE_DISCOVERY_CAPABILITY_PARAM = "__acceptanceDiscoveryCapability";
+
+/** Environment variable carrying the live-acceptance discovery capability. */
+export const ACCEPTANCE_DISCOVERY_CAPABILITY_ENV = "AUTOMOBILE_ACCEPTANCE_DISCOVERY_CAPABILITY";
+
+/**
  * Port range to try if default port is unavailable
  */
 export const DAEMON_PORT_RANGE_START = 3000;
@@ -352,6 +368,8 @@ export const INTERNAL_TOOL_PARAM_NAMES = [
   INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
   INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
   INTERNAL_LIVE_DEADLINE_KEY_PARAM,
+  INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM,
+  INTERNAL_ACCEPTANCE_DISCOVERY_CAPABILITY_PARAM,
   DAEMON_NON_FINITE_ENCODED_PARAM,
 ] as const;
 

@@ -10,6 +10,7 @@ import { UnixSocketServer } from "../../src/daemon/socketServer";
 import { SOCKET_REQUEST_DEADLINE_MS, sendSocketRequest } from "./helpers/socketRequest";
 import { defaultTimer } from "../../src/utils/SystemTimer";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { ProgressExtendableDeadline } from "../../src/daemon/mcpRequestTimeout";
 import { SessionToolBinding } from "../../src/server/SessionToolBinding";
 import { DAEMON_BOUND_SESSION_PARAM } from "../../src/daemon/constants";
 import type { DaemonResponse } from "../../src/daemon/types";
@@ -311,6 +312,87 @@ describe("UnixSocketServer MCP session reconnect", () => {
     // After reconnect, the per-key client cache should hold the fresh client.
     expect((server as any).mcpClients.size).toBe(1);
     expect(clientsCreated).toBe(2);
+  });
+
+  test("does not start device-control recovery after owner cancellation", async () => {
+    let clientsCreated = 0;
+    server.mcpClientFactory = async () => {
+      clientsCreated++;
+      return createFakeMcpClient();
+    };
+    const controller = new AbortController();
+    controller.abort(new Error("owner socket disconnected"));
+    const internals = server as any;
+    const session = internals.daemonState.getSessionManager().getSession("session-a");
+
+    await expect(
+      internals.recoverDeviceControlTransport({
+        request: {
+          id: "cancelled-recovery",
+          type: "mcp_request",
+          method: "tools/call",
+          params: { name: "observe", arguments: { sessionUuid: "session-a" } },
+        },
+        route: { executionKey: "session:session-a", clientKey: "cancelled-recovery" },
+        socketSessionId: "socket-cancelled",
+        signal: controller.signal,
+        totalTimeoutMs: 1_000,
+        deadline: new ProgressExtendableDeadline(fakeTimer.now(), 1_000),
+        remainingTimeoutMs: 1_000,
+        forwardStartMs: fakeTimer.now(),
+        phase: "connect",
+        identity: { sessionUuid: "session-a", sessionIncarnation: session },
+      }),
+    ).rejects.toThrow("owner socket disconnected");
+    expect(clientsCreated).toBe(0);
+  });
+
+  test("does not replay with a shared client created after owner cancellation", async () => {
+    const sharedCreation = Promise.withResolvers<FakeMcpClient>();
+    let clientsCreated = 0;
+    let callsDispatched = 0;
+    server.mcpClientFactory = async () => {
+      clientsCreated++;
+      return await sharedCreation.promise;
+    };
+    const controller = new AbortController();
+    const internals = server as any;
+    const session = internals.daemonState.getSessionManager().getSession("session-a");
+    const key = "cancelled-shared-recovery";
+
+    const recovery = internals.recoverDeviceControlTransport({
+      request: {
+        id: "late-shared-recovery",
+        type: "mcp_request",
+        method: "tools/call",
+        params: { name: "observe", arguments: { sessionUuid: "session-a" } },
+      },
+      route: { executionKey: "session:session-a", clientKey: key },
+      socketSessionId: "socket-cancelled",
+      signal: controller.signal,
+      totalTimeoutMs: 1_000,
+      deadline: new ProgressExtendableDeadline(fakeTimer.now(), 1_000),
+      remainingTimeoutMs: 1_000,
+      forwardStartMs: fakeTimer.now(),
+      phase: "connect",
+      identity: { sessionUuid: "session-a", sessionIncarnation: session },
+    });
+    await Promise.resolve();
+    expect(clientsCreated).toBe(1);
+
+    controller.abort(new Error("owner socket disconnected"));
+    const sharedClient = createFakeMcpClient({
+      callTool: async () => {
+        callsDispatched++;
+        return { content: [] };
+      },
+    });
+    sharedCreation.resolve(sharedClient);
+
+    await expect(recovery).rejects.toThrow("owner socket disconnected");
+    expect(callsDispatched).toBe(0);
+    // Cancelling this owner never cancels the shared creation itself.
+    expect(internals.mcpClients.get(key)).toBe(sharedClient);
   });
 
   test("returns typed bound-session loss without replaying through a fresh loopback client", async () => {

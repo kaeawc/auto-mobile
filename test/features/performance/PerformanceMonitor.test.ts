@@ -28,6 +28,43 @@ async function advanceTimeAndWait(timer: FakeTimer, ms: number): Promise<void> {
   await timer.advanceTimeAsync(ms);
 }
 
+class AbortableSamplingAdbClient extends FakeAdbClient {
+  readonly sampleStarted = Promise.withResolvers<void>();
+  readonly sampleSettled = Promise.withResolvers<void>();
+
+  override async executeCommand(
+    command: string,
+    timeoutMs?: number,
+    maxBuffer?: number,
+    noRetry?: boolean,
+    signal?: AbortSignal,
+    waitForProcessSettlementAfterAbort?: boolean,
+  ): Promise<ExecResult> {
+    const result = await super.executeCommand(
+      command,
+      timeoutMs,
+      maxBuffer,
+      noRetry,
+      signal,
+      waitForProcessSettlementAfterAbort,
+    );
+    if (!command.includes("dumpsys gfxinfo")) {
+      return result;
+    }
+    this.sampleStarted.resolve();
+    return await new Promise<never>((_resolve, reject) => {
+      const abort = () => {
+        this.sampleSettled.resolve();
+        reject(signal?.reason ?? new Error("sample aborted"));
+      };
+      signal?.addEventListener("abort", abort, { once: true });
+      if (signal?.aborted) {
+        abort();
+      }
+    });
+  }
+}
+
 /**
  * Fake implementation of PerformanceDataPusher for testing.
  */
@@ -320,6 +357,40 @@ describe("PerformanceMonitor", () => {
       // sees 1, 2, 3, proving this assertion is not vacuously true.)
       expect(fakePusher.getPushCount()).toBe(1);
     });
+
+    it("aborts and drains device sampling before a foreground operation starts", async () => {
+      const abortableAdb = new AbortableSamplingAdbClient();
+      monitor = new PerformanceMonitor(
+        fakeTimer,
+        new FakeAdbClientFactory(abortableAdb),
+        serverGetter,
+      );
+      monitor.start();
+      monitor.startMonitoring("device-1", "com.example.app");
+      fakeTimer.advanceTime(PerformanceMonitor.TICK_INTERVAL_MS);
+      await abortableAdb.sampleStarted.promise;
+      const operationStarted = Promise.withResolvers<void>();
+      const releaseOperation = Promise.withResolvers<void>();
+
+      const prioritized = monitor.withDeviceSamplingPaused("device-1", async () => {
+        operationStarted.resolve();
+        await releaseOperation.promise;
+      });
+
+      await abortableAdb.sampleSettled.promise;
+      await operationStarted.promise;
+      const sampleCall = abortableAdb
+        .getCommandCalls()
+        .find(({ command }) => command.includes("dumpsys gfxinfo"));
+      expect(sampleCall?.signal?.aborted).toBe(true);
+      expect(sampleCall?.waitForProcessSettlementAfterAbort).toBe(true);
+      const callsWhilePaused = abortableAdb.getCommandCalls().length;
+      await advanceTimeAndWait(fakeTimer, PerformanceMonitor.TICK_INTERVAL_MS * 2);
+      expect(abortableAdb.getCommandCalls()).toHaveLength(callsWhilePaused);
+
+      releaseOperation.resolve();
+      await prioritized;
+    });
   });
 
   describe("tiered metric collection", () => {
@@ -337,6 +408,22 @@ describe("PerformanceMonitor", () => {
       await advanceTimeAndWait(fakeTimer, PerformanceMonitor.TICK_INTERVAL_MS);
       const gfxCalls2 = fakeAdbClient.getCommandCount("dumpsys gfxinfo");
       expect(gfxCalls2).toBe(2);
+    });
+
+    it("bounds every Android background sampling command", async () => {
+      monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter);
+      monitor.start();
+      monitor.startMonitoring("device-1", "com.example.app");
+
+      await advanceTimeAndWait(fakeTimer, PerformanceMonitor.TICK_INTERVAL_MS);
+
+      const samplingCalls = fakeAdbClient.getCommandCalls();
+      expect(samplingCalls.length).toBeGreaterThan(0);
+      expect(
+        samplingCalls.every(
+          ({ timeoutMs }) => timeoutMs === PerformanceMonitor.ANDROID_COMMAND_TIMEOUT_MS,
+        ),
+      ).toBe(true);
     });
 
     it("should collect CPU metrics only at medium intervals", async () => {

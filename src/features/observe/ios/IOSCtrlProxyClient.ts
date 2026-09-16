@@ -736,6 +736,20 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     return IOSCtrlProxyClient.instances.get(deviceId) ?? null;
   }
 
+  /**
+   * Permanently retire the registered client for one device incarnation.
+   * Remove it before awaiting close so no concurrent cache lookup can recover
+   * the client whose reconnect timers are being cancelled.
+   */
+  public static async retireInstance(deviceId: string): Promise<void> {
+    const instance = IOSCtrlProxyClient.instances.get(deviceId);
+    if (!instance) {
+      return;
+    }
+    IOSCtrlProxyClient.instances.delete(deviceId);
+    await instance.close();
+  }
+
   /** Return the latest app-provided navigation identity without doing I/O. */
   public getSdkScreenIdentity(applicationId?: string): ScreenIdentity | undefined {
     return applicationId ? this.sdkScreenIdentitiesByApplicationId.get(applicationId) : undefined;
@@ -1580,6 +1594,10 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     if (this.hierarchyNavigationDetector) {
       this.hierarchyNavigationDetector.dispose();
       this.hierarchyNavigationDetector = null;
+    }
+
+    if (!this.autoReconnectEnabled) {
+      return;
     }
 
     // Track connection failure and potentially trigger service restart

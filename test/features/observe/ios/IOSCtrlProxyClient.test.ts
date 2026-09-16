@@ -2896,6 +2896,39 @@ describe("IOSCtrlProxyClient", function () {
       expect(IOSCtrlProxyClient.getExistingInstance(testDevice.deviceId)).toBe(created);
     });
 
+    test("retireInstance removes and closes the registered device client", async function () {
+      IOSCtrlProxyClient.resetInstances();
+      const created = IOSCtrlProxyClient.getInstance(testDevice);
+
+      await IOSCtrlProxyClient.retireInstance(testDevice.deviceId);
+
+      expect(IOSCtrlProxyClient.getExistingInstance(testDevice.deviceId)).toBeNull();
+      expect(created.isConnected()).toBe(false);
+    });
+
+    test("intentional retirement cancels a reconnect scheduled before runner shutdown", async function () {
+      const timer = new FakeTimer();
+      let socketCreations = 0;
+      const client = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        {
+          create() {
+            socketCreations += 1;
+            throw new Error("retired client must not reconnect");
+          },
+        },
+        timer,
+      );
+      (client as unknown as { scheduleReconnect(): void }).scheduleReconnect();
+
+      await client.close();
+      timer.advanceTime(5_000);
+      await flushPromises();
+
+      expect(socketCreations).toBe(0);
+    });
+
     test("createDetached returns an unregistered client (not rediscoverable after close)", async function () {
       IOSCtrlProxyClient.resetInstances();
 

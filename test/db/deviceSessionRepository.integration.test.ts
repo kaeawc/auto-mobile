@@ -66,6 +66,7 @@ describe("DeviceSessionRepository", () => {
       expiresAtMs: 63_000,
       hasReceivedHeartbeat: true,
     });
+    await repo.recordLivenessOwnership("session-1", "owner-token");
     await repo.markReleased("session-1", "released", 4000, "explicit-release");
 
     const row = await repo.getSession("session-1");
@@ -83,6 +84,7 @@ describe("DeviceSessionRepository", () => {
     expect(row!.released_at_ms).toBe(4000);
     expect(row!.release_reason).toBe("explicit-release");
     expect(row!.has_received_heartbeat).toBe(1);
+    expect(row!.liveness_owner_token).toBeNull();
   });
 
   test("clears a stable identity when a legacy writer changes the device transport", async () => {
@@ -110,6 +112,32 @@ describe("DeviceSessionRepository", () => {
       device_id: "emulator-5556",
       stable_device_id: null,
     });
+  });
+
+  test("clears a prior incarnation's liveness owner when recreating the same session UUID", async () => {
+    await repo.upsertActiveSession({
+      sessionUuid: "reused-session",
+      deviceId: "emulator-5554",
+      platform: "android",
+      createdAtMs: 1000,
+      lastUsedAtMs: 1000,
+      expiresAtMs: 61_000,
+      sessionTimeoutMs: 60_000,
+      heartbeatTimeoutMs: 60_000,
+      hasReceivedHeartbeat: true,
+    });
+    await repo.recordLivenessOwnership("reused-session", "prior-owner");
+    const manager = new SessionManager(timer, repo);
+    try {
+      await manager.createSession("reused-session", "emulator-5556", "android");
+
+      expect(await repo.getSession("reused-session")).toMatchObject({
+        device_id: "emulator-5556",
+        liveness_owner_token: null,
+      });
+    } finally {
+      manager.stopCleanupTimer();
+    }
   });
 
   test("preserves a stable identity when the current writer rebinds its transport", async () => {
@@ -177,6 +205,9 @@ describe("DeviceSessionRepository", () => {
       heartbeatTimeoutMs: 60_000,
       hasReceivedHeartbeat: false,
     });
+    await repo.recordLivenessOwnership("old-daemon-session", "old-owner");
+    await repo.recordLivenessOwnership("missing-daemon-session", "missing-owner");
+    await repo.recordLivenessOwnership("current-daemon-session", "current-owner");
 
     await repo.markStaleActiveSessionsExpired("current-daemon", 5000, "daemon-restart");
 
@@ -187,11 +218,14 @@ describe("DeviceSessionRepository", () => {
     expect(oldRow!.status).toBe("expired");
     expect(oldRow!.released_at_ms).toBe(5000);
     expect(oldRow!.release_reason).toBe("daemon-restart");
+    expect(oldRow!.liveness_owner_token).toBeNull();
     expect(missingRow!.status).toBe("expired");
     expect(missingRow!.released_at_ms).toBe(5000);
     expect(missingRow!.release_reason).toBe("daemon-restart");
+    expect(missingRow!.liveness_owner_token).toBeNull();
     expect(currentRow!.status).toBe("active");
     expect(currentRow!.released_at_ms).toBeNull();
+    expect(currentRow!.liveness_owner_token).toBe("current-owner");
   });
 
   test.each(["released", "expired"] as const)(

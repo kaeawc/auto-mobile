@@ -26,6 +26,7 @@ import {
   type AvdConfigReader,
 } from "../../utils/android-cmdline-tools/AvdConfigReader";
 import type { AdbDeviceState } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { awaitDoctorProbe, remainingDoctorProbe } from "../deadline";
 
 const MIN_CMDLINE_TOOLS_VERSION = [9, 0] as const;
 type CmdlineToolsVersionReader = (
@@ -92,6 +93,7 @@ export interface AndroidDoctorDependencies {
   getBestAndroidToolsLocation: typeof getBestAndroidToolsLocation;
   getAndroidHomeWithSystemImages: typeof getAndroidHomeWithSystemImages;
   logger: typeof logger;
+  adbFactory?: AdbClientFactory;
   getCmdlineToolsVersion?: CmdlineToolsVersionReader;
   listAvds?: (probe?: DoctorProbeOptions) => Promise<Array<{ name: string }>>;
   readAvdConfig?: AvdConfigReader;
@@ -114,11 +116,13 @@ function normalizePath(value: string): string {
   return value.replace(/\\/g, "/");
 }
 
-/** Only the cancellation half of a mixed options bag, with absent keys left absent. */
+/** Keep one caller-owned absolute deadline across Android subprocess probes. */
 function probeOptions(options: DoctorProbeOptions): DoctorProbeOptions {
   return {
     ...(options.signal ? { signal: options.signal } : {}),
     ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
+    ...(options.deadlineMs === undefined ? {} : { deadlineMs: options.deadlineMs }),
+    ...(options.timer === undefined ? {} : { timer: options.timer }),
   };
 }
 
@@ -130,7 +134,7 @@ export async function checkAndroidCommandLineTools(
   dependencies = createAndroidDoctorDependencies(),
 ): Promise<CheckResult> {
   const name = "Android Command Line Tools";
-  const probe = probeOptions(options);
+  const probe = remainingDoctorProbe(probeOptions(options));
 
   let locations: Awaited<ReturnType<typeof detectAndroidCommandLineTools>>;
   try {
@@ -249,8 +253,9 @@ export async function checkAdbInstallation(
   probe: DoctorProbeOptions = {},
 ): Promise<CheckResult> {
   try {
+    const currentProbe = remainingDoctorProbe(probe);
     const adb = adbFactory.create();
-    const adbPath = await adb.getAdbPathOnly(probe);
+    const adbPath = await adb.getAdbPathOnly(currentProbe);
 
     return {
       name: "ADB Installation",
@@ -279,13 +284,14 @@ export async function checkAdbVersion(
   probe: DoctorProbeOptions = {},
 ): Promise<CheckResult> {
   try {
+    const currentProbe = remainingDoctorProbe(probe);
     const adb = adbFactory.create();
     const result = await adb.executeCommand(
       "--version",
-      probe.timeoutMs,
+      currentProbe.timeoutMs,
       undefined,
       true,
-      probe.signal,
+      currentProbe.signal,
     );
 
     // Parse version from output like "Android Debug Bridge version 35.0.0"
@@ -316,8 +322,9 @@ export async function checkEmulator(
   dependencies: Pick<AndroidDoctorDependencies, "listAvds"> = createAndroidDoctorDependencies(),
 ): Promise<CheckResult> {
   try {
+    const currentProbe = remainingDoctorProbe(probe);
     // Try to list AVDs - this will fail if emulator is not available
-    await (dependencies.listAvds ?? listAvdsWithEmulator)(probe);
+    await (dependencies.listAvds ?? listAvdsWithEmulator)(currentProbe);
 
     return {
       name: "Android Emulator",
@@ -353,10 +360,15 @@ export async function checkEmulator(
  */
 export async function checkConnectedDevices(
   adbFactory: AdbClientFactory = defaultAdbClientFactory,
+  probe: DoctorProbeOptions = {},
 ): Promise<CheckResult> {
   try {
+    const currentProbe = remainingDoctorProbe(probe);
     const adb = adbFactory.create();
-    const devices = await adb.getBootedAndroidDevices();
+    const devices = await adb.getBootedAndroidDevices({
+      signal: currentProbe.signal,
+      timeoutMs: currentProbe.timeoutMs,
+    });
     if (devices.length > 0) {
       const deviceNames = devices.map((d) => d.deviceId).join(", ");
       return {
@@ -368,7 +380,11 @@ export async function checkConnectedDevices(
     }
     let rawStates: AdbDeviceState[] = [];
     try {
-      rawStates = (await adb.getDeviceStates?.()) ?? [];
+      rawStates =
+        (await adb.getDeviceStates?.({
+          signal: currentProbe.signal,
+          timeoutMs: currentProbe.timeoutMs,
+        })) ?? [];
     } catch (error) {
       logger.debug(`Could not query offline Android device states: ${errorMessage(error)}`);
     }
@@ -409,19 +425,25 @@ export async function checkAvdMemory(
     AndroidDoctorDependencies,
     "listAvds" | "readAvdConfig"
   > = createAndroidDoctorDependencies(),
+  probe: DoctorProbeOptions = {},
 ): Promise<CheckResult> {
   if (!dependencies.listAvds || !dependencies.readAvdConfig) {
     return { name: "AVD Memory", status: "skip", message: "AVD memory could not be checked." };
   }
 
   try {
+    const currentProbe = remainingDoctorProbe(probe);
     const readAvdConfig = dependencies.readAvdConfig;
-    const avds = await dependencies.listAvds();
+    const avds = await dependencies.listAvds(currentProbe);
     const unverifiableConfigs: string[] = [];
     const lowMemory = (
       await Promise.all(
         avds.map(async (avd) => {
-          const config = await readAvdConfig.readConfig(avd.name);
+          currentProbe.signal?.throwIfAborted();
+          const config = await awaitDoctorProbe(currentProbe, () =>
+            readAvdConfig.readConfig(avd.name),
+          );
+          currentProbe.signal?.throwIfAborted();
           if (!config) {
             unverifiableConfigs.push(avd.name);
             return null;
@@ -484,10 +506,11 @@ export async function checkAvdMemory(
 /**
  * Check available AVDs
  */
-async function checkAvailableAvds(): Promise<CheckResult> {
+async function checkAvailableAvds(probe: DoctorProbeOptions = {}): Promise<CheckResult> {
   try {
+    const currentProbe = remainingDoctorProbe(probe);
     const emulator = new AndroidEmulatorClient();
-    const avds = await emulator.listAvds();
+    const avds = await emulator.listAvds(currentProbe);
 
     if (avds.length === 0) {
       return {
@@ -522,17 +545,50 @@ async function checkAvailableAvds(): Promise<CheckResult> {
  */
 export async function runAndroidChecks(options: DoctorOptions = {}): Promise<CheckResult[]> {
   const results: CheckResult[] = [];
+  const run = async (check: () => Promise<CheckResult>): Promise<void> => {
+    remainingDoctorProbe(options);
+    results.push(await check());
+    remainingDoctorProbe(options);
+  };
 
   // Run checks sequentially to avoid overwhelming the system
   results.push(await checkAndroidHome());
-  results.push(await checkAndroidCommandLineTools(options));
+  await run(() => checkAndroidCommandLineTools(options));
   results.push(await checkJavaHome());
-  results.push(await checkAdbInstallation());
-  results.push(await checkAdbVersion());
-  results.push(await checkEmulator());
-  results.push(await checkConnectedDevices());
-  results.push(await checkAvailableAvds());
-  results.push(await checkAvdMemory());
+  await run(() => checkAdbInstallation(defaultAdbClientFactory, options));
+  await run(() => checkAdbVersion(defaultAdbClientFactory, options));
+  await run(() => checkEmulator(options));
+  await run(() => checkConnectedDevices(defaultAdbClientFactory, options));
+  await run(() => checkAvailableAvds(options));
+  await run(() => checkAvdMemory(createAndroidDoctorDependencies(), options));
+
+  return results;
+}
+
+/**
+ * Run the narrow Android portion of post-repair verification.
+ *
+ * This deliberately limits itself to host toolchain probes. In particular it
+ * never enumerates AVDs or booted devices, resolves the first discovered
+ * device, or invokes CtrlProxy's compatibility reconciler, which can install
+ * or upgrade an APK.
+ */
+export async function runPostRepairAndroidChecks(
+  options: DoctorOptions = {},
+  dependencies = createAndroidDoctorDependencies(),
+): Promise<CheckResult[]> {
+  const probe = probeOptions(options);
+  const results: CheckResult[] = [];
+  const run = async (check: () => Promise<CheckResult>): Promise<void> => {
+    remainingDoctorProbe(options);
+    results.push(await check());
+    remainingDoctorProbe(options);
+  };
+
+  await run(() => checkAndroidCommandLineTools(options, dependencies));
+  await run(() => checkJavaHome());
+  await run(() => checkAdbInstallation(dependencies.adbFactory, probe));
+  await run(() => checkAdbVersion(dependencies.adbFactory, probe));
 
   return results;
 }

@@ -295,6 +295,11 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   // Lets ordinary starts detect that a newer forced restart began while they
   // yielded before claiming the shared-start slot.
   private forceRestartGeneration = 0;
+  // A successful forced restart changes the daemon-owned runner incarnation
+  // even when the host service port is reused. This is deliberately separate
+  // from `forceRestartGeneration`, which advances before teardown and can
+  // therefore represent a failed restart attempt.
+  private runnerGeneration = 0;
   // Joining callers may need a longer health-poll budget than the restart owner.
   // Retain their request until the forced restart reaches shared startup.
   private readonly forceRestartHealthPollDurationsMs = new Map<symbol, number>();
@@ -891,6 +896,15 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
    */
   public getServicePort(): number {
     return this.servicePort;
+  }
+
+  /**
+   * Monotonic identity for successful forced runner restarts in this manager.
+   * It stays stable while the same runner generation serves requests, including
+   * when the allocated host service port is reused.
+   */
+  public getRunnerGeneration(): number {
+    return this.runnerGeneration;
   }
 
   /**
@@ -1768,6 +1782,26 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     });
   }
 
+  /**
+   * A forced restart must publish a new endpoint. stop() releases its
+   * allocation, so reserve the retired value while choosing the replacement
+   * instead of allowing first-free allocation to reclaim it.
+   */
+  private allocateReplacementServicePort(retiredServicePort: number): void {
+    PortManager.release(this.device.deviceId);
+    const replacementPort = this.allocateServicePort([retiredServicePort]);
+    if (replacementPort === retiredServicePort) {
+      throw new Error(
+        `iOS CtrlProxy replacement allocation reused retired service port ${retiredServicePort}`,
+      );
+    }
+    this.servicePort = replacementPort;
+    this.clearCaches();
+    logger.info(
+      `[IOSCtrlProxy] Allocated replacement service port ${replacementPort} after retiring ${retiredServicePort}`,
+    );
+  }
+
   private ensureLocalServicePortAllocatedAndAvailable(): void {
     const currentAllocation = PortManager.getPort(this.device.deviceId);
     const currentPortIsAvailable = PortManager.isPortAvailable(this.servicePort);
@@ -2136,6 +2170,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     // behind this barrier until teardown settles, even if the initiating
     // readiness phase has already timed out.
     this.forceRestartGeneration += 1;
+    const retiredServicePort = this.servicePort;
     const restart = (async () => {
       try {
         await this.stop();
@@ -2149,12 +2184,19 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
             "iOS CtrlProxy is still running after forced teardown; refusing to reuse a potentially unresponsive runner",
           );
         }
+        this.allocateReplacementServicePort(retiredServicePort);
         await this.startAfterForceRestart({
           ...options,
           minimumHealthPollDurationMs: this.maximumForceRestartHealthPollDurationMs(
             options.minimumHealthPollDurationMs,
           ),
         });
+        if (this.servicePort === retiredServicePort) {
+          throw new Error(
+            `iOS CtrlProxy force restart reused retired service port ${retiredServicePort}`,
+          );
+        }
+        this.runnerGeneration += 1;
       } catch (error) {
         if (options.signal?.aborted && !(error instanceof ForceRestartCancelledError)) {
           throw new ForceRestartCancelledError(options.signal.reason ?? error);

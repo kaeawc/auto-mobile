@@ -30,9 +30,14 @@ export interface AwaitIdle {
    * Initialize UI stability tracking state.
    * @param packageName - Package name to monitor
    * @param timeoutMs - Maximum time to wait for stability
+   * @param signal - Optional abort signal
    * @returns Promise with initialized state for use with waitForUiStabilityWithState
    */
-  initializeUiStabilityTracking(packageName: string, timeoutMs: number): Promise<UiStabilityState>;
+  initializeUiStabilityTracking(
+    packageName: string,
+    timeoutMs: number,
+    signal?: AbortSignal,
+  ): Promise<UiStabilityState>;
 
   /**
    * Wait for UI to become stable by monitoring frame rendering.

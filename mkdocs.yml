@@ -104,6 +104,7 @@ nav:
       - "Test prep tools": using/test-prep-tools.md
       - "Session execution logs": using/session-logs.md
       - "Session Downloads fixtures": using/session-downloads.md
+      - "Live device acceptance": using/live-device-acceptance.md
       - "Dynamic Tools": using/dynamic-tools.md
       - "Environment variables": using/environment-variables.md
       - "Screen control": using/screen-control.md

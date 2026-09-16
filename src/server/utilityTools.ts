@@ -18,7 +18,7 @@ import {
   type SetDisplayConfigInput,
 } from "../features/utility/DisplayConfig";
 import { logger } from "../utils/logger";
-import { createJSONToolResponse } from "../utils/toolUtils";
+import { createJSONToolResponse, createStructuredToolResponse } from "../utils/toolUtils";
 import { DeviceSessionManager } from "../utils/DeviceSessionManager";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import { BootedDevice, Platform } from "../models";
@@ -736,7 +736,7 @@ export function registerUtilityTools() {
     const deviceState = new DeviceState(device);
     const result = await deviceState.getState(args.include);
 
-    return createJSONToolResponse({
+    return createStructuredToolResponse({
       message: result.success
         ? "Read device state"
         : (result.error ?? "Failed to read device state"),

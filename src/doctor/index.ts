@@ -3,12 +3,25 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { DoctorReport, DoctorOptions, DoctorSummary, CheckResult } from "./types";
+import {
+  DoctorReport,
+  DoctorOptions,
+  DoctorSummary,
+  CheckResult,
+  type DoctorDiagnosticProfile,
+} from "./types";
 import { runSystemChecks } from "./checks/system";
-import { runAndroidChecks } from "./checks/android";
-import { runIosChecks } from "./checks/ios";
-import { runAutoMobileChecks, checkDaemonBuildIdentity } from "./checks/automobile";
+import { runAndroidChecks, runPostRepairAndroidChecks } from "./checks/android";
+import { runIosChecks, runPostRepairIosChecks } from "./checks/ios";
+import {
+  runAutoMobileChecks,
+  runPostRepairAutoMobileChecks,
+  checkDaemonBuildIdentity,
+} from "./checks/automobile";
 import { resolveAssetVersion, resolvePinnedVersion } from "../constants/release";
+import { createDoctorDeadline } from "./deadline";
+import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import { runWithAbortSignal } from "../utils/AbortContext";
 
 /**
  * Calculate summary statistics from check results
@@ -67,6 +80,10 @@ export interface RunDoctorDependencies {
   runAndroidChecks?: (options: DoctorOptions) => Promise<CheckResult[]>;
   runIosChecks?: (options: DoctorOptions) => Promise<CheckResult[]>;
   runAutoMobileChecks?: (options: DoctorOptions) => Promise<CheckResult[]>;
+  runPostRepairAndroidChecks?: (options: DoctorOptions) => Promise<CheckResult[]>;
+  runPostRepairIosChecks?: (options: DoctorOptions) => Promise<CheckResult[]>;
+  runPostRepairAutoMobileChecks?: (options: DoctorOptions) => Promise<CheckResult[]>;
+  timer?: Timer;
 }
 
 interface ResolvedDoctorRunners {
@@ -74,6 +91,9 @@ interface ResolvedDoctorRunners {
   android: (options: DoctorOptions) => Promise<CheckResult[]>;
   ios: (options: DoctorOptions) => Promise<CheckResult[]>;
   autoMobile: (options: DoctorOptions) => Promise<CheckResult[]>;
+  postRepairAndroid: (options: DoctorOptions) => Promise<CheckResult[]>;
+  postRepairIos: (options: DoctorOptions) => Promise<CheckResult[]>;
+  postRepairAutoMobile: (options: DoctorOptions) => Promise<CheckResult[]>;
 }
 
 /**
@@ -87,7 +107,94 @@ function resolveDoctorRunners(dependencies: RunDoctorDependencies): ResolvedDoct
     android: dependencies.runAndroidChecks ?? runAndroidChecks,
     ios: dependencies.runIosChecks ?? runIosChecks,
     autoMobile: dependencies.runAutoMobileChecks ?? runAutoMobileChecks,
+    postRepairAndroid: dependencies.runPostRepairAndroidChecks ?? runPostRepairAndroidChecks,
+    postRepairIos: dependencies.runPostRepairIosChecks ?? runPostRepairIosChecks,
+    postRepairAutoMobile:
+      dependencies.runPostRepairAutoMobileChecks ?? runPostRepairAutoMobileChecks,
   };
+}
+
+function isPostRepairProfile(
+  profile: DoctorDiagnosticProfile | undefined,
+): profile is "post-repair-read-only" {
+  return profile === "post-repair-read-only";
+}
+
+function selectedPlatforms(options: DoctorOptions): { android: boolean; ios: boolean } {
+  return {
+    android: options.android === true || (options.android !== false && options.ios !== true),
+    ios:
+      options.ios === true ||
+      (options.ios !== true && options.android !== true && process.platform === "darwin"),
+  };
+}
+
+async function runPlatformChecks(
+  options: DoctorOptions,
+  runners: ResolvedDoctorRunners,
+): Promise<{ androidChecks?: CheckResult[]; iosChecks?: CheckResult[] }> {
+  const selected = selectedPlatforms(options);
+  const postRepair = isPostRepairProfile(options.diagnosticProfile);
+  let androidChecks: CheckResult[] | undefined;
+  let iosChecks: CheckResult[] | undefined;
+  if (selected.android) {
+    options.signal?.throwIfAborted();
+    androidChecks = await (postRepair ? runners.postRepairAndroid : runners.android)(options);
+    options.signal?.throwIfAborted();
+  }
+  if (selected.ios) {
+    options.signal?.throwIfAborted();
+    iosChecks = await (postRepair ? runners.postRepairIos : runners.ios)(options);
+    options.signal?.throwIfAborted();
+  }
+  return { androidChecks, iosChecks };
+}
+
+function buildDoctorReport(
+  systemChecks: CheckResult[],
+  platformChecks: { androidChecks?: CheckResult[]; iosChecks?: CheckResult[] },
+  autoMobileChecks: CheckResult[],
+  diagnosticProfile?: DoctorDiagnosticProfile,
+): DoctorReport {
+  const allChecks = [
+    ...systemChecks,
+    ...(platformChecks.androidChecks ?? []),
+    ...(platformChecks.iosChecks ?? []),
+    ...autoMobileChecks,
+  ];
+  return {
+    timestamp: new Date().toISOString(),
+    version: resolveAssetVersion(resolvePinnedVersion()),
+    platform: process.platform,
+    arch: process.arch,
+    ...(diagnosticProfile ? { diagnosticProfile } : {}),
+    system: { checks: systemChecks },
+    autoMobile: { checks: autoMobileChecks },
+    summary: calculateSummary(allChecks),
+    recommendations: collectRecommendations(allChecks),
+    ...(platformChecks.androidChecks ? { android: { checks: platformChecks.androidChecks } } : {}),
+    ...(platformChecks.iosChecks ? { ios: { checks: platformChecks.iosChecks } } : {}),
+  };
+}
+
+async function runDoctorWithProbe(
+  options: DoctorOptions,
+  runners: ResolvedDoctorRunners,
+): Promise<DoctorReport> {
+  const postRepair = isPostRepairProfile(options.diagnosticProfile);
+  const systemChecks = postRepair ? [] : runners.system();
+  const platformChecks = await runPlatformChecks(options, runners);
+  options.signal?.throwIfAborted();
+  const autoMobileChecks = await (postRepair ? runners.postRepairAutoMobile : runners.autoMobile)(
+    options,
+  );
+  options.signal?.throwIfAborted();
+  return buildDoctorReport(
+    systemChecks,
+    platformChecks,
+    autoMobileChecks,
+    postRepair ? options.diagnosticProfile : undefined,
+  );
 }
 
 /**
@@ -97,66 +204,16 @@ export async function runDoctor(
   options: DoctorOptions = {},
   dependencies: RunDoctorDependencies = {},
 ): Promise<DoctorReport> {
-  const allChecks: CheckResult[] = [];
-
-  // Resolve injectable seams to their live defaults once (keeps the `??`
-  // fallbacks out of this function's complexity budget).
-  const runners = resolveDoctorRunners(dependencies);
-
-  // Always run system checks
-  const systemChecks = runners.system();
-  allChecks.push(...systemChecks);
-
-  // Determine which platform checks to run
-  const runAndroid =
-    options.android === true || (options.android !== false && options.ios !== true);
-  const runIos =
-    options.ios === true ||
-    (options.ios !== true && options.android !== true && process.platform === "darwin");
-
-  // Run Android checks if applicable
-  let androidChecks: CheckResult[] | undefined;
-  if (runAndroid) {
-    androidChecks = await runners.android(options);
-    allChecks.push(...androidChecks);
+  const deadline = createDoctorDeadline(options, dependencies.timer ?? defaultTimer);
+  try {
+    const runners = resolveDoctorRunners(dependencies);
+    const probeOptions: DoctorOptions = { ...options, ...deadline.probe };
+    return await runWithAbortSignal(deadline.probe.signal, () =>
+      runDoctorWithProbe(probeOptions, runners),
+    );
+  } finally {
+    deadline.dispose();
   }
-
-  // Run iOS checks if applicable
-  let iosChecks: CheckResult[] | undefined;
-  if (runIos) {
-    iosChecks = await runners.ios(options);
-    allChecks.push(...iosChecks);
-  }
-
-  // Always run AutoMobile checks
-  const autoMobileChecks = await runners.autoMobile(options);
-  allChecks.push(...autoMobileChecks);
-
-  // Calculate summary and recommendations
-  const summary = calculateSummary(allChecks);
-  const recommendations = collectRecommendations(allChecks);
-
-  const report: DoctorReport = {
-    timestamp: new Date().toISOString(),
-    // Concrete pinned version (honors AUTOMOBILE_VERSION), never the "latest" literal (#2746).
-    version: resolveAssetVersion(resolvePinnedVersion()),
-    platform: process.platform,
-    arch: process.arch,
-    system: { checks: systemChecks },
-    autoMobile: { checks: autoMobileChecks },
-    summary,
-    recommendations,
-  };
-
-  // Add platform-specific sections if they were run
-  if (androidChecks) {
-    report.android = { checks: androidChecks };
-  }
-  if (iosChecks) {
-    report.ios = { checks: iosChecks };
-  }
-
-  return report;
 }
 
 /**

@@ -2,6 +2,7 @@ import type { ChildProcess } from "child_process";
 import { logger } from "../utils/logger";
 import {
   SessionManager,
+  SessionRecoveryIdentityLossError,
   type Session,
   type SessionExecutionMetadata,
   type SessionRecoveryTarget,
@@ -45,7 +46,11 @@ import {
   isUnresolvedAndroidEmulatorName,
   type IdentityEvidence,
 } from "./deviceIdentityEvidence";
-import { didSourceSucceedForDevice, type DiscoverySource } from "../utils/discoverySource";
+import {
+  didSourceSucceedForDevice,
+  type DiscoveryCompleteness,
+  type DiscoverySource,
+} from "../utils/discoverySource";
 import { consolePortFromSerial } from "../utils/android-cmdline-tools/EmulatorConsoleClient";
 import {
   defaultEmulatorConsoleBusyRegistry,
@@ -419,6 +424,11 @@ interface AssignableIdleDeviceSelection {
   livenessUnknown: boolean;
 }
 
+interface DevicePoolRefreshResult {
+  addedCount: number;
+  completeness?: DiscoveryCompleteness;
+}
+
 interface DeviceDisconnectSessionReleaser {
   (
     sessionId: string,
@@ -615,6 +625,15 @@ export class DevicePool {
   private readonly idGenerator: IdGenerator;
   private lastUsedAtMarker = 0;
   private lastReleasedDeviceId: string | null = null;
+  /**
+   * Every daemon-MCP connection that acquired a result-minted device session.
+   *
+   * This is deliberately separate from the autolock routing maps below:
+   * ordinary acquisitions do not opt into implicit autolock routing, but they
+   * still own their exact device session and must not let another connection
+   * adopt it through an idempotent getAndroid/getApple/startDevice call.
+   */
+  private readonly mcpSessionAcquiredDeviceSessions = new Map<string, Set<string>>();
   private readonly mcpSessionAcquiredAutolocks = new Map<string, Set<string>>();
   private readonly mcpSessionAutolockMap: Map<string, string> = new Map();
   private readonly mcpSessionRecoveryDevices: Map<string, McpSessionRecoveryLease> = new Map();
@@ -807,8 +826,10 @@ export class DevicePool {
 
     // Expiry has no caller available to return the device to the pool. Explicit
     // release callers retain their ordered cleanup and release flow, while
-    // autolock metadata is still removed when their session ends.
+    // connection ownership and autolock metadata are removed when their session
+    // ends.
     this.sessionManager.onSessionRelease((sessionId, deviceId, releaseReason) => {
+      this.clearMcpSessionOwnership(sessionId);
       if (releaseReason === "lazy-expiry" || releaseReason === "cleanup-expired") {
         this.releaseExpiredSessionDevice(sessionId, deviceId);
       } else {
@@ -1071,10 +1092,12 @@ export class DevicePool {
    * released by the disconnect monitor.
    */
   async refreshDevices(): Promise<number> {
-    return this.refreshDevicesInternal(false);
+    return (await this.refreshDevicesInternal(false)).addedCount;
   }
 
-  private async refreshDevicesInternal(assignmentLockHeld: boolean): Promise<number> {
+  private async refreshDevicesInternal(
+    assignmentLockHeld: boolean,
+  ): Promise<DevicePoolRefreshResult> {
     const startTime = this.timer.now();
     const perf = createGlobalPerformanceTracker();
     const refreshGeneration = ++this.refreshGeneration;
@@ -1114,7 +1137,7 @@ export class DevicePool {
       );
       if (removed === undefined) {
         logger.info("Discarding an out-of-date device discovery snapshot");
-        return 0;
+        return { addedCount: 0 };
       }
       removedCount = removed;
 
@@ -1173,14 +1196,20 @@ export class DevicePool {
         logger.debug(`Device pool refresh: all ${bootedDevices.length} devices already in pool`);
       }
 
-      return addedCount;
+      return {
+        addedCount,
+        completeness: {
+          succeededPlatforms: discovery.succeededPlatforms,
+          succeededSources: discovery.succeededSources,
+        },
+      };
     } catch (error) {
       const elapsed = this.timer.now() - startTime;
       logger.error(`Failed to refresh device pool after ${elapsed}ms: ${error}`);
       if (error instanceof Error) {
         logger.error(`Stack trace: ${error.stack}`);
       }
-      return 0;
+      return { addedCount: 0 };
     }
   }
 
@@ -4958,6 +4987,17 @@ export class DevicePool {
           return assignResult.deviceId!;
         }
 
+        if (recoveryTarget) {
+          const recoveryFailure = this.recoveryFailure(
+            sessionId,
+            recoveryTarget,
+            assignResult.refreshCompleteness,
+          );
+          if (recoveryFailure) {
+            throw recoveryFailure;
+          }
+        }
+
         // No device available - check if we should wait or fail
         if (assignResult.livenessUnknown) {
           throw new DevicePoolError(
@@ -5051,6 +5091,7 @@ export class DevicePool {
     shouldWait: boolean;
     totalDevices: number;
     livenessUnknown?: boolean;
+    refreshCompleteness?: DiscoveryCompleteness;
   }> {
     return this.tryAssignFrom(
       sessionId,
@@ -5073,6 +5114,7 @@ export class DevicePool {
     shouldWait: boolean;
     totalDevices: number;
     livenessUnknown?: boolean;
+    refreshCompleteness?: DiscoveryCompleteness;
   }> {
     return this.tryAssignFrom(
       sessionId,
@@ -5105,11 +5147,13 @@ export class DevicePool {
     shouldWait: boolean;
     totalDevices: number;
     livenessUnknown?: boolean;
+    refreshCompleteness?: DiscoveryCompleteness;
   }> {
     return await this.assignmentMutex.runExclusive(async () => {
       let candidates = selectCandidates();
       let totalDevices = candidates.length;
       let livenessUnknown = false;
+      let refreshCompleteness: DiscoveryCompleteness | undefined;
 
       let selection = await this.selectAssignableIdleDevice(candidates);
       let device = selection.device;
@@ -5133,7 +5177,8 @@ export class DevicePool {
               ? emptyCandidatePoolReason
               : "no idle usable devices";
         logger.info(`[DevicePool] Auto-refreshing devices due to ${refreshReason}...`);
-        await this.refreshDevicesInternal(true);
+        const refreshResult = await this.refreshDevicesInternal(true);
+        refreshCompleteness = refreshResult.completeness;
         candidates = selectCandidates();
         totalDevices = candidates.length;
         selection = await this.selectAssignableIdleDevice(candidates);
@@ -5156,6 +5201,7 @@ export class DevicePool {
           shouldWait: this.shouldWaitForDevice(busyDevices, hasPendingRecovery()),
           totalDevices,
           livenessUnknown,
+          refreshCompleteness,
         };
       }
 
@@ -6105,7 +6151,7 @@ export class DevicePool {
       if (pooled) {
         // Acquisition may reboot a device during readiness recovery. Prove
         // ownership before reserving it or beginning those side effects.
-        this.getOwnedAutolockSession(pooled, autolockClient);
+        this.assertReadinessReservationOwner(pooled, autolockClient);
         this.assertRuntimeIdentity(pooled, expectedIdentity);
       }
       throwIfRequestAborted();
@@ -6160,6 +6206,21 @@ export class DevicePool {
       });
     };
     return Object.assign(release, { owner });
+  }
+
+  private assertReadinessReservationOwner(
+    device: PooledDevice,
+    client: AutolockClient | undefined,
+  ): void {
+    const session = device.sessionId ? this.sessionManager.getSession(device.sessionId) : null;
+    if (!session) {
+      return;
+    }
+    if (device.autolockSessionId) {
+      this.getOwnedAutolockSession(device, client);
+      return;
+    }
+    this.assertMcpSessionOwnsDeviceSession(client?.mcpSessionId, session, device);
   }
 
   private assertAndroidRecoveryExclusionForReadinessReservation(
@@ -6503,6 +6564,7 @@ export class DevicePool {
     readinessReservationOwners?: ReadonlySet<symbol>,
     verifiedAndroidAvdIdentity?: DeviceInfo,
     expectedExistingSessionDeviceId?: string,
+    mcpSessionId?: string,
   ): Promise<string> {
     return await this.assignmentMutex.runExclusive(async () => {
       throwIfRequestAborted();
@@ -6575,6 +6637,7 @@ export class DevicePool {
             deviceId,
             expectedExistingSessionDeviceId,
           );
+          this.assertMcpSessionOwnsDeviceSession(mcpSessionId, existingSession, device);
           return this.reuseExistingDeviceSession(deviceId, existingSession.sessionId, sourceImage);
         }
 
@@ -6617,6 +6680,7 @@ export class DevicePool {
           this.stableDeviceIdFor(device),
         ),
       );
+      this.recordMcpSessionOwnership(mcpSessionId, sessionId);
       logger.info(`Bound device ${deviceId} to session ${sessionId}`);
       return sessionId;
     });
@@ -6742,6 +6806,33 @@ export class DevicePool {
     const refreshedSession = await this.sessionManager.getOrCreateSession(existingSessionId);
     logger.info(`Reusing existing session ${refreshedSession.sessionId} for device ${deviceId}`);
     return refreshedSession.sessionId;
+  }
+
+  private assertMcpSessionOwnsDeviceSession(
+    mcpSessionId: string | undefined,
+    session: Session,
+    device: PooledDevice,
+  ): void {
+    if (
+      mcpSessionId !== undefined &&
+      (!this.mcpSessionAcquiredDeviceSessions.get(mcpSessionId)?.has(session.sessionId) ||
+        !this.isSessionAssignmentCurrent(device, session) ||
+        !this.sessionManager.isAdmittedForAutomation(session))
+    ) {
+      throw new ActionableError(
+        `Device '${device.id}' is already assigned to another session. ` +
+          "Acquire a different device or wait for its owner to release it.",
+      );
+    }
+  }
+
+  private recordMcpSessionOwnership(mcpSessionId: string | undefined, sessionId: string): void {
+    if (!mcpSessionId) {
+      return;
+    }
+    const acquired = this.mcpSessionAcquiredDeviceSessions.get(mcpSessionId) ?? new Set<string>();
+    acquired.add(sessionId);
+    this.mcpSessionAcquiredDeviceSessions.set(mcpSessionId, acquired);
   }
 
   private assertRuntimeIdentity(
@@ -7656,6 +7747,7 @@ export class DevicePool {
       const acquired = this.mcpSessionAcquiredAutolocks.get(mcpSessionId) ?? new Set<string>();
       acquired.add(sessionId);
       this.mcpSessionAcquiredAutolocks.set(mcpSessionId, acquired);
+      this.recordMcpSessionOwnership(mcpSessionId, sessionId);
     }
     await this.persistAcquiredAutolockSession(
       device,
@@ -7990,6 +8082,31 @@ export class DevicePool {
   }
 
   /**
+   * Restore ownership of live result-minted sessions after a daemon socket
+   * reconnect. Unlike autolock restoration, this intentionally does not select
+   * an implicit routing default or mutate persisted autolock metadata.
+   */
+  async restoreOwnedDeviceSessionsForMcpSession(
+    sessionIds: readonly string[],
+    mcpSessionId: string,
+  ): Promise<void> {
+    await this.assignmentMutex.runExclusive(() => {
+      for (const sessionId of sessionIds) {
+        const session = this.sessionManager.getSession(sessionId);
+        const device = session ? this.devices.get(session.assignedDevice) : undefined;
+        if (
+          session &&
+          device &&
+          this.isSessionAssignmentCurrent(device, session) &&
+          this.sessionManager.isAdmittedForAutomation(session)
+        ) {
+          this.recordMcpSessionOwnership(mcpSessionId, sessionId);
+        }
+      }
+    });
+  }
+
+  /**
    * Associate a live autolock session with a reconnected MCP client session.
    */
   async attachAutolockSessionToMcpSession(
@@ -8106,6 +8223,15 @@ export class DevicePool {
     for (const [mcpSessionId, mappedSessionId] of this.mcpSessionAutolockMap) {
       if (mappedSessionId === sessionId) {
         this.mcpSessionAutolockMap.delete(mcpSessionId);
+      }
+    }
+  }
+
+  private clearMcpSessionOwnership(sessionId: string): void {
+    for (const [mcpSessionId, acquired] of this.mcpSessionAcquiredDeviceSessions) {
+      acquired.delete(sessionId);
+      if (acquired.size === 0) {
+        this.mcpSessionAcquiredDeviceSessions.delete(mcpSessionId);
       }
     }
   }
@@ -8361,6 +8487,62 @@ export class DevicePool {
     // A recovery target must prove one exact runtime. A duplicate stable identity
     // is ambiguous and must not collapse back to normal pool selection.
     return matches.length === 1 ? matches : [];
+  }
+
+  /**
+   * Recovery is an identity operation, not ordinary pool allocation. Once an
+   * exact target is absent, busy, or replaced at its old transport address,
+   * fail immediately rather than allowing retry timing or discovery order to
+   * choose another signed device. An unresolved identity at the persisted
+   * transport is not evidence of either absence or replacement, so keep retrying
+   * until discovery resolves it.
+   */
+  private recoveryFailure(
+    sessionId: string,
+    target: SessionRecoveryTarget,
+    refreshCompleteness?: DiscoveryCompleteness,
+  ): SessionRecoveryIdentityLossError | DevicePoolError | undefined {
+    const platformDevices = this.getDevicesByPlatform(target.platform);
+    const exactMatches = platformDevices.filter(
+      (device) =>
+        this.stableDeviceIdFor(device) === target.stableDeviceId &&
+        (target.androidEmulator === undefined ||
+          isAndroidEmulatorSerial(device.id) === target.androidEmulator),
+    );
+    if (exactMatches.length !== 1) {
+      const transportIdentityUnresolved =
+        exactMatches.length === 0 &&
+        !isUnresolvedAndroidEmulatorName({
+          deviceId: target.deviceId,
+          name: target.stableDeviceId,
+          platform: target.platform,
+        }) &&
+        platformDevices.some(
+          (device) => device.id === target.deviceId && this.stableDeviceIdFor(device) === undefined,
+        );
+      if (transportIdentityUnresolved) {
+        return new DevicePoolError("Recovery target identity is unresolved", true);
+      }
+      const transportReused = platformDevices.some(
+        (device) =>
+          device.id === target.deviceId && this.stableDeviceIdFor(device) !== target.stableDeviceId,
+      );
+      if (transportReused || exactMatches.length > 1) {
+        return new SessionRecoveryIdentityLossError(sessionId, target, "identity-continuity-lost");
+      }
+      if (
+        !refreshCompleteness ||
+        !didSourceSucceedForDevice(refreshCompleteness, target.platform, target.deviceId)
+      ) {
+        return new DevicePoolError("Recovery target absence is not yet authoritative", true);
+      }
+      return new SessionRecoveryIdentityLossError(sessionId, target, "target-absent");
+    }
+    const exact = exactMatches[0];
+    if (exact.status === "busy" || this.isReservedForAssignment(exact)) {
+      return new SessionRecoveryIdentityLossError(sessionId, target, "target-busy");
+    }
+    return undefined;
   }
 
   private stableDeviceIdFor(device: PooledDevice): string | undefined {

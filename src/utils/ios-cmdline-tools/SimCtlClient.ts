@@ -213,7 +213,7 @@ export interface SimCtl {
    * Get available iOS runtimes
    * @returns Promise with array of runtimes
    */
-  getRuntimes(): Promise<AppleDeviceRuntime[]>;
+  getRuntimes(timeoutMs?: number, signal?: AbortSignal): Promise<AppleDeviceRuntime[]>;
 
   /**
    * Create a new simulator
@@ -2209,8 +2209,8 @@ export class SimCtlClient implements SimCtl {
    * Get available iOS runtimes
    * @returns Promise with array of runtimes
    */
-  async getRuntimes(): Promise<AppleDeviceRuntime[]> {
-    const result = await this.executeCommandArgs(["list", "runtimes", "--json"]);
+  async getRuntimes(timeoutMs?: number, signal?: AbortSignal): Promise<AppleDeviceRuntime[]> {
+    const result = await this.executeCommandArgs(["list", "runtimes", "--json"], timeoutMs, signal);
     try {
       const data = JSON.parse(result.stdout) as { runtimes?: AppleDeviceRuntime[] };
       return (data.runtimes ?? []).filter((runtime) => runtime.isAvailable);

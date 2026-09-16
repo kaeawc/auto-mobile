@@ -220,19 +220,28 @@ export class Idle {
     packageName: string,
     firstGfxInfoLog: boolean,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
-  ): Promise<string> {
+    options: { timeoutMs?: number; signal?: AbortSignal } = {},
+  ): Promise<string | null> {
     try {
       const { stdout } = await perf.track("adbGfxinfo", () =>
-        this.adb.executeCommand(`shell dumpsys gfxinfo ${packageName}`),
+        this.adb.executeCommand(
+          `shell dumpsys gfxinfo ${packageName}`,
+          options.timeoutMs,
+          undefined,
+          undefined,
+          options.signal,
+        ),
       );
       if (firstGfxInfoLog) {
         logger.info(`[AwaitIdle] Initial gfxinfo stdout for ${packageName}:\n${stdout}`);
       }
       return stdout;
     } catch (error) {
-      // If gfxinfo fails, return empty string to trigger fallback behavior
+      options.signal?.throwIfAborted();
+      // A failed read carries no stability evidence. Keep it distinct from a
+      // successful empty response, which some packages legitimately produce.
       logger.info(`[AwaitIdle] Failed to get gfxinfo for ${packageName}: ${error}`);
-      return "";
+      return null;
     }
   }
 
@@ -546,6 +555,7 @@ export class Idle {
     prevTotalFrames: number | null,
     firstGfxInfoLog: boolean,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    options: { timeoutMs?: number; signal?: AbortSignal } = {},
   ): Promise<UiStabilityResult> {
     try {
       // For system packages, use a simpler approach
@@ -565,10 +575,22 @@ export class Idle {
       }
 
       // Get the frame stats
-      const stdout = await this.getFrameStats(packageName, firstGfxInfoLog, perf);
+      const stdout = await this.getFrameStats(packageName, firstGfxInfoLog, perf, options);
+
+      if (stdout === null) {
+        return {
+          isStable: false,
+          shouldUpdateLastNonIdleTime: true,
+          updatedPrevMissedVsync: prevMissedVsync,
+          updatedPrevSlowUiThread: prevSlowUiThread,
+          updatedPrevFrameDeadlineMissed: prevFrameDeadlineMissed,
+          updatedPrevTotalFrames: prevTotalFrames,
+          updatedFirstGfxInfoLog: false,
+        };
+      }
 
       // If we get empty output, treat as stable (package might not support gfxinfo)
-      if (!stdout || stdout.trim() === "") {
+      if (stdout.trim() === "") {
         logger.info(`[AwaitIdle] No gfxinfo data for ${packageName}, treating as stable`);
         return {
           isStable: true,
@@ -600,6 +622,7 @@ export class Idle {
         updatedFirstGfxInfoLog: false,
       };
     } catch (err) {
+      options.signal?.throwIfAborted();
       // Just continue polling on error
       logger.info(`[AwaitIdle] Error checking frame stats: ${err}`);
       return {

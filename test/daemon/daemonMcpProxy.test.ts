@@ -146,6 +146,12 @@ describe("DaemonMcpProxy", () => {
       await proxy.callTool("getApple", {});
       await proxy.callTool("setActiveDevice", { deviceId: "free-device-c" });
 
+      expect(fakeClient.callToolCalls[1]).toEqual({
+        toolName: "getApple",
+        params: {
+          [DAEMON_OWNED_SESSIONS_PARAM]: ["session-a"],
+        },
+      });
       expect(fakeClient.callToolCalls.at(-1)).toEqual({
         toolName: "setActiveDevice",
         params: {
@@ -236,6 +242,8 @@ describe("DaemonMcpProxy", () => {
             params: {
               sessionId: "device-session-a",
               livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
+              livenessOwnerToken: expect.any(String),
+              claimLivenessOwnership: true,
             },
           },
           { method: "tools/list", params: { sessionUuid: "device-session-a" } },
@@ -244,6 +252,7 @@ describe("DaemonMcpProxy", () => {
             params: {
               sessionId: "device-session-a",
               livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
+              livenessOwnerToken: expect.any(String),
             },
           },
         ]);
@@ -253,6 +262,8 @@ describe("DaemonMcpProxy", () => {
             params: {
               sessionId: "device-session-b",
               livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
+              livenessOwnerToken: expect.any(String),
+              claimLivenessOwnership: true,
             },
           },
           { method: "tools/list", params: { sessionUuid: "device-session-b" } },
@@ -261,6 +272,7 @@ describe("DaemonMcpProxy", () => {
             params: {
               sessionId: "device-session-b",
               livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
+              livenessOwnerToken: expect.any(String),
             },
           },
         ]);
@@ -319,6 +331,8 @@ describe("DaemonMcpProxy", () => {
             params: {
               sessionId: "device-session-a",
               livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
+              livenessOwnerToken: expect.any(String),
+              claimLivenessOwnership: true,
             },
           },
           {
@@ -326,6 +340,7 @@ describe("DaemonMcpProxy", () => {
             params: {
               sessionId: "device-session-a",
               livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
+              livenessOwnerToken: expect.any(String),
             },
           },
           {
@@ -333,6 +348,7 @@ describe("DaemonMcpProxy", () => {
             params: {
               sessionId: "device-session-a",
               livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
+              livenessOwnerToken: expect.any(String),
             },
           },
           {
@@ -340,6 +356,7 @@ describe("DaemonMcpProxy", () => {
             params: {
               sessionId: "device-session-a",
               livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
+              livenessOwnerToken: expect.any(String),
             },
           },
         ]);
@@ -351,6 +368,8 @@ describe("DaemonMcpProxy", () => {
             params: {
               sessionId: "device-session-b",
               livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
+              livenessOwnerToken: expect.any(String),
+              claimLivenessOwnership: true,
             },
           },
           {
@@ -358,6 +377,7 @@ describe("DaemonMcpProxy", () => {
             params: {
               sessionId: "device-session-b",
               livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
+              livenessOwnerToken: expect.any(String),
             },
           },
           {
@@ -365,6 +385,7 @@ describe("DaemonMcpProxy", () => {
             params: {
               sessionId: "device-session-b",
               livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
+              livenessOwnerToken: expect.any(String),
             },
           },
           {
@@ -372,6 +393,7 @@ describe("DaemonMcpProxy", () => {
             params: {
               sessionId: "device-session-b",
               livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
+              livenessOwnerToken: expect.any(String),
             },
           },
         ]);
@@ -411,6 +433,8 @@ describe("DaemonMcpProxy", () => {
             params: {
               sessionId: "device-session-a",
               livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
+              livenessOwnerToken: expect.any(String),
+              claimLivenessOwnership: true,
             },
           },
         ]);
@@ -421,9 +445,68 @@ describe("DaemonMcpProxy", () => {
             params: {
               sessionId: "device-session-a",
               livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
+              livenessOwnerToken: expect.any(String),
+              claimLivenessOwnership: true,
             },
           },
         ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("keeps a persisted binding recoverable when the keeper reaches its replacement daemon first", async () => {
+      const timer = new FakeTimer();
+      let oldHeartbeatCalls = 0;
+      const oldDaemon = new FakeDaemonClient({
+        onCallDaemonMethod: (method) => {
+          if (method === "daemon/heartbeat" && ++oldHeartbeatCalls > 1) {
+            throw new Error("Session not found: persisted-session");
+          }
+        },
+      });
+      let materialized = false;
+      let successfulReplacementHeartbeats = 0;
+      const replacementDaemon = new FakeDaemonClient({
+        onCallDaemonMethod: (method) => {
+          if (method === "daemon/heartbeat") {
+            if (!materialized) {
+              throw new Error("Session not found: persisted-session");
+            }
+            successfulReplacementHeartbeats++;
+          }
+        },
+        onCallTool: () => {
+          materialized = true;
+        },
+      });
+      const clients: DaemonClientLike[] = [oldDaemon, replacementDaemon];
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        initialSessionUuid: "persisted-session",
+        clientFactory: () => clients.shift()!,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+        timer,
+      });
+
+      try {
+        await proxy.callTool("observe", { sessionUuid: "persisted-session" });
+
+        // The keeper gets "not found" from both transports before any device
+        // operation has given the replacement daemon a chance to recover the
+        // persisted session.
+        await timer.advanceTimeAsync(2_000);
+
+        await expect(proxy.callTool("observe", {})).resolves.toBeDefined();
+        expect(replacementDaemon.callToolCalls).toEqual([
+          { toolName: "observe", params: { sessionUuid: "persisted-session" } },
+        ]);
+
+        // Once the tool materializes recovery, the same keeper resumes normally.
+        await timer.advanceTimeAsync(2_000);
+        expect(successfulReplacementHeartbeats).toBeGreaterThan(0);
       } finally {
         isAvailableSpy.mockRestore();
         await proxy.close();
@@ -3108,14 +3191,23 @@ describe("DaemonMcpProxy", () => {
         expect(staleClient.callDaemonMethodCalls).toEqual([
           {
             method: "daemon/heartbeat",
-            params: { sessionId: "session-a", livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY },
+            params: {
+              sessionId: "session-a",
+              livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
+              livenessOwnerToken: expect.any(String),
+              claimLivenessOwnership: true,
+            },
           },
           { method: "tools/list", params: { sessionUuid: "session-a" } },
         ]);
         expect(freshClient.callDaemonMethodCalls).toEqual([
           {
             method: "daemon/heartbeat",
-            params: { sessionId: "session-a", livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY },
+            params: {
+              sessionId: "session-a",
+              livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
+              livenessOwnerToken: expect.any(String),
+            },
           },
           { method: "tools/list", params: { sessionUuid: "session-a" } },
         ]);
@@ -4527,6 +4619,8 @@ describe("DaemonMcpProxy", () => {
               params: {
                 sessionId: "released-session",
                 livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
+                livenessOwnerToken: expect.any(String),
+                claimLivenessOwnership: true,
               },
             },
             {
@@ -4534,6 +4628,8 @@ describe("DaemonMcpProxy", () => {
               params: {
                 sessionId: "provisioned-session",
                 livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
+                livenessOwnerToken: expect.any(String),
+                claimLivenessOwnership: true,
               },
             },
           ]);

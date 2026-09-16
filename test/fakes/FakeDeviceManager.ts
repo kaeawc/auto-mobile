@@ -1,6 +1,11 @@
 import { ChildProcess } from "child_process";
 import { BootedDevice, DeviceInfo, Platform, SomePlatform } from "../../src/models";
-import { BootedDeviceDiscovery, PlatformDeviceManager } from "../../src/utils/deviceUtils";
+import {
+  BootedDeviceDiscovery,
+  DeviceImageDiscovery,
+  DeviceImageDiscoveryOptions,
+  PlatformDeviceManager,
+} from "../../src/utils/deviceUtils";
 import { discoverySourceFor, type DiscoverySource } from "../../src/utils/discoverySource";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../../src/utils/deviceTimeouts";
 
@@ -27,6 +32,10 @@ export class FakeDeviceManager implements PlatformDeviceManager {
   // record makes the whole listing incomplete while the devices it did parse
   // are fresh. Contributes devices AND freshness, but not `succeededSources`.
   incompleteSources: Set<DiscoverySource> = new Set();
+  deviceImageDiscoveryCalls: Array<{
+    platform: SomePlatform;
+    options: DeviceImageDiscoveryOptions;
+  }> = [];
 
   constructor(images: DeviceInfo[] = [], booted: BootedDevice[] = []) {
     this.deviceImages = images;
@@ -38,6 +47,33 @@ export class FakeDeviceManager implements PlatformDeviceManager {
       return this.deviceImages;
     }
     return this.deviceImages.filter((device) => device.platform === platform);
+  }
+
+  async getDeviceImagesDetailed(
+    platform: SomePlatform,
+    options: DeviceImageDiscoveryOptions = {},
+  ): Promise<DeviceImageDiscovery> {
+    this.deviceImageDiscoveryCalls.push({ platform, options });
+    const requested: Platform[] = platform === "either" ? ["android", "ios"] : [platform];
+    const succeededPlatforms = new Set<Platform>();
+    const discoveryErrors: DeviceImageDiscovery["discoveryErrors"] = {};
+    for (const requestedPlatform of requested) {
+      if (this.failedPlatforms.has(requestedPlatform)) {
+        discoveryErrors[requestedPlatform] = {
+          code: "unavailable",
+          message: `${requestedPlatform === "ios" ? "iOS" : "Android"} device inventory is unavailable.`,
+        };
+      } else {
+        succeededPlatforms.add(requestedPlatform);
+      }
+    }
+    return {
+      devices: this.deviceImages.filter(
+        (device) => requested.includes(device.platform) && succeededPlatforms.has(device.platform),
+      ),
+      succeededPlatforms,
+      discoveryErrors,
+    };
   }
 
   async isDeviceImageRunning(device: DeviceInfo): Promise<boolean> {

@@ -1,7 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
-import { DaemonLauncher, type DaemonProcessSpawner } from "../../src/daemon/DaemonLauncher";
+import {
+  DaemonLauncher,
+  isDaemonEntryScriptPath,
+  type DaemonProcessSpawner,
+} from "../../src/daemon/DaemonLauncher";
 import { DAEMON_SHUTDOWN_TIMEOUT_MS } from "../../src/daemon/constants";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -43,6 +47,23 @@ class FakeDaemonSpawner implements DaemonProcessSpawner {
 }
 
 describe("DaemonLauncher", () => {
+  test("matches only the active absolute source entry point", () => {
+    const activeEntryScript = "/workspace/auto-mobile/src/index.ts";
+
+    expect(isDaemonEntryScriptPath(activeEntryScript, activeEntryScript)).toBe(true);
+    expect(isDaemonEntryScriptPath("/tmp/unrelated/src/index.ts", activeEntryScript)).toBe(false);
+    expect(isDaemonEntryScriptPath("src/index.ts", "src/index.ts")).toBe(false);
+  });
+
+  test("matches package-identified distribution entry points independently", () => {
+    expect(
+      isDaemonEntryScriptPath(
+        "/tmp/node_modules/@kaeawc/auto-mobile/dist/src/index.js",
+        "/workspace/auto-mobile/src/index.ts",
+      ),
+    ).toBe(true);
+  });
+
   test("uses POSIX PATH semantics for an injected Linux platform", () => {
     const launcher = new DaemonLauncher({
       entryScript: null,

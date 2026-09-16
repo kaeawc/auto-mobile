@@ -765,6 +765,39 @@ describe("DevicePool", () => {
     await release();
   });
 
+  test("fences readiness side effects to the MCP session that owns a non-autolocked device", async () => {
+    const device = createBootedDevice("emulator-5554", "android", "Pixel 8");
+    await initializeLiveDevices([device]);
+    await devicePool.bindOrReuseDeviceSession(
+      "owner-session",
+      device.deviceId,
+      "android",
+      undefined,
+      undefined,
+      undefined,
+      false,
+      undefined,
+      undefined,
+      undefined,
+      "owner-mcp-session",
+    );
+
+    await expect(
+      devicePool.reserveDeviceForReadiness(device.deviceId, device, device.name, undefined, {
+        mcpSessionId: "other-mcp-session",
+      }),
+    ).rejects.toThrow("already assigned to another session");
+
+    const release = await devicePool.reserveDeviceForReadiness(
+      device.deviceId,
+      device,
+      device.name,
+      undefined,
+      { mcpSessionId: "owner-mcp-session" },
+    );
+    await release();
+  });
+
   describe("assertSessionReadyForAutomation shutdown admission (#5494)", () => {
     const sourceImage: DeviceInfo = {
       name: "Pixel 8",
@@ -3487,6 +3520,168 @@ describe("DevicePool", () => {
           sessionId: null,
           status: "idle",
         });
+      },
+    );
+
+    test("keeps unresolved persisted identity retryable before fencing a resolved same-serial replacement", async () => {
+      const persisted: DeviceSession = {
+        session_uuid: "restarted-session",
+        device_id: "emulator-5554",
+        stable_device_id: "Original_AVD",
+        platform: "android",
+        status: "expired",
+        source: "session-manager",
+        autolock_enabled: 0,
+        mcp_session_id: null,
+        daemon_session_id: "old-daemon",
+        created_at_ms: 1,
+        last_used_at_ms: 20,
+        expires_at_ms: 30,
+        released_at_ms: 25,
+        release_reason: "daemon-restart",
+        session_timeout_ms: 10,
+        heartbeat_timeout_ms: 5,
+        has_received_heartbeat: 1,
+        created_at: "2026-09-14T00:00:00.000Z",
+        updated_at: "2026-09-14T00:00:00.000Z",
+      };
+      const releaseReasons: string[] = [];
+      const persistence: DeviceSessionPersistence = {
+        async getSession() {
+          return persisted;
+        },
+        async upsertActiveSession() {
+          throw new Error("same-serial replacement must not create a recovered session");
+        },
+        async recordActivity() {},
+        async markReleased(_sessionUuid, _status, _releasedAtMs, releaseReason) {
+          releaseReasons.push(releaseReason);
+          persisted.release_reason = releaseReason;
+        },
+      };
+      sessionManager.stopCleanupTimer();
+      sessionManager = new SessionManager(fakeTimer, persistence);
+      devicePool = new DevicePool(
+        sessionManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        fakeAppsRepo,
+        fakeDeviceManager,
+        new DefaultRetryExecutor(fakeTimer),
+      );
+      await initializeLiveDevices([
+        createBootedDevice("emulator-5554", "android", "Unknown (emulator-5554)"),
+      ]);
+
+      const recovery = sessionManager.getOrCreateSession(
+        persisted.session_uuid,
+        devicePool,
+        "android",
+        undefined,
+        true,
+      );
+      await new Promise((resolve) => setImmediate(resolve));
+
+      expect(fakeTimer.getPendingSleeps()).toEqual([1000]);
+      expect(releaseReasons).toEqual([]);
+      expect(devicePool.isPooledIdentityUnresolved("emulator-5554")).toBe(true);
+
+      fakeDeviceManager.bootedDevices = [
+        createBootedDevice("emulator-5554", "android", "Replacement_AVD"),
+      ];
+      await devicePool.refreshDevices();
+      fakeTimer.advanceTime(1000);
+
+      await expect(recovery).rejects.toThrow("recovery reason: identity-continuity-lost");
+      expect(releaseReasons).toEqual(["identity-recovery-identity-continuity-lost"]);
+      expect(devicePool.getDevice("emulator-5554")).toMatchObject({
+        name: "Replacement_AVD",
+        sessionId: null,
+        status: "idle",
+      });
+    });
+
+    test.each([
+      {
+        platform: "android" as const,
+        deviceId: "emulator-5554",
+        stableDeviceId: "Original_AVD",
+        failedSource: "android" as const,
+      },
+      {
+        platform: "ios" as const,
+        deviceId: "00000000-0000-0000-0000-000000000001",
+        stableDeviceId: "00000000-0000-0000-0000-000000000001",
+        failedSource: "ios-simulator" as const,
+      },
+    ])(
+      "keeps an absent $platform recovery target retryable until its discovery source succeeds",
+      async ({ platform, deviceId, stableDeviceId, failedSource }) => {
+        const persisted: DeviceSession = {
+          session_uuid: `restarted-${platform}-session`,
+          device_id: deviceId,
+          stable_device_id: stableDeviceId,
+          platform,
+          status: "expired",
+          source: "session-manager",
+          autolock_enabled: 0,
+          mcp_session_id: null,
+          daemon_session_id: "old-daemon",
+          created_at_ms: 1,
+          last_used_at_ms: 20,
+          expires_at_ms: 30,
+          released_at_ms: 25,
+          release_reason: "daemon-restart",
+          session_timeout_ms: 10,
+          heartbeat_timeout_ms: 5,
+          has_received_heartbeat: 1,
+          created_at: "2026-09-14T00:00:00.000Z",
+          updated_at: "2026-09-14T00:00:00.000Z",
+        };
+        const releaseReasons: string[] = [];
+        const persistence: DeviceSessionPersistence = {
+          async getSession() {
+            return persisted;
+          },
+          async upsertActiveSession() {
+            throw new Error("an absent recovery target must not create a recovered session");
+          },
+          async recordActivity() {},
+          async markReleased(_sessionUuid, _status, _releasedAtMs, releaseReason) {
+            releaseReasons.push(releaseReason);
+            persisted.release_reason = releaseReason;
+          },
+        };
+        sessionManager.stopCleanupTimer();
+        sessionManager = new SessionManager(fakeTimer, persistence);
+        devicePool = new DevicePool(
+          sessionManager,
+          "test-daemon-session-id",
+          fakeTimer,
+          fakeAppsRepo,
+          fakeDeviceManager,
+          new DefaultRetryExecutor(fakeTimer),
+        );
+        fakeDeviceManager.bootedDevices = [];
+        fakeDeviceManager.failedSources.add(failedSource);
+
+        const recovery = sessionManager.getOrCreateSession(
+          persisted.session_uuid,
+          devicePool,
+          platform,
+          undefined,
+          true,
+        );
+        await new Promise((resolve) => setImmediate(resolve));
+
+        expect(fakeTimer.getPendingSleeps()).toEqual([1000]);
+        expect(releaseReasons).toEqual([]);
+
+        fakeDeviceManager.failedSources.delete(failedSource);
+        fakeTimer.advanceTime(1000);
+
+        await expect(recovery).rejects.toThrow("recovery reason: target-absent");
+        expect(releaseReasons).toEqual(["identity-recovery-target-absent"]);
       },
     );
 

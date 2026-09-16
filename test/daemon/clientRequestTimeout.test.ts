@@ -1,6 +1,6 @@
 import { describe, expect, test, beforeEach } from "bun:test";
 import { Duplex } from "node:stream";
-import { DaemonClient } from "../../src/daemon/client";
+import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client";
 import { McpTimeoutError } from "../../src/daemon/McpTimeoutError";
 import {
   DEFAULT_MCP_REQUEST_TIMEOUT_MS,
@@ -28,6 +28,51 @@ function createConnectedClient(fakeTimer: FakeTimer, connectionTimeout = 1000): 
   (client as any).connected = true;
   (client as any).socket = createBlackHoleSocket();
   return client;
+}
+
+function createDeferredConnectClient(
+  fakeTimer: FakeTimer,
+  onConnected?: () => void,
+): {
+  client: DaemonClient;
+  connectStarted: Promise<void>;
+  releaseConnect: () => void;
+  connectTimeouts: number[];
+  requests: Array<Record<string, any>>;
+} {
+  let markConnectStarted = () => {};
+  const connectStarted = new Promise<void>((resolve) => {
+    markConnectStarted = resolve;
+  });
+  let releaseConnect = () => {};
+  const connectGate = new Promise<void>((resolve) => {
+    releaseConnect = resolve;
+  });
+  const connectTimeouts: number[] = [];
+  const requests: Array<Record<string, any>> = [];
+  const socket = new Duplex({
+    read() {},
+    write(chunk, _encoding, callback) {
+      requests.push(JSON.parse(chunk.toString()));
+      callback();
+    },
+  });
+  const client = new DaemonClient("/fake/socket", 1000, fakeTimer);
+  client.connect = async (timeoutMs = 1000) => {
+    connectTimeouts.push(timeoutMs);
+    markConnectStarted();
+    await connectGate;
+    (client as any).connected = true;
+    (client as any).socket = socket;
+    onConnected?.();
+  };
+  return {
+    client,
+    connectStarted,
+    releaseConnect,
+    connectTimeouts,
+    requests,
+  };
 }
 
 describe("DaemonClient per-request timeout", () => {
@@ -137,6 +182,91 @@ describe("DaemonClient per-request timeout", () => {
       expect(timeoutErr.origin).toBe("DaemonClient.callDaemonMethod");
     } finally {
       await client.close();
+    }
+  });
+
+  test("callDaemonMethod bounds deferred connect and request to one timeout", async () => {
+    const harness = createDeferredConnectClient(fakeTimer);
+    const promise = harness.client.callDaemonMethod("daemon/status", {}, { timeoutMs: 1000 });
+    await harness.connectStarted;
+
+    fakeTimer.advanceTime(750);
+    harness.releaseConnect();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(harness.connectTimeouts).toEqual([1000]);
+    expect(harness.requests).toHaveLength(1);
+    expect(harness.requests[0]?.timeoutMs).toBe(250);
+    expect(fakeTimer.getPendingTimeouts()).toEqual([250]);
+
+    fakeTimer.advanceTime(250);
+    try {
+      await promise;
+      expect.unreachable("connect and request should share the original timeout");
+    } catch (err) {
+      expect(err).toBeInstanceOf(McpTimeoutError);
+      expect((err as McpTimeoutError).timeoutMs).toBe(1000);
+      expect(fakeTimer.now()).toBe(1000);
+      expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
+    } finally {
+      await harness.client.close();
+    }
+  });
+
+  test("callDaemonMethod observes abort after deferred connect before sending", async () => {
+    const controller = new AbortController();
+    const harness = createDeferredConnectClient(fakeTimer, () => controller.abort());
+    const promise = harness.client.callDaemonMethod(
+      "daemon/status",
+      {},
+      { timeoutMs: 1000, signal: controller.signal },
+    );
+    await harness.connectStarted;
+
+    harness.releaseConnect();
+
+    try {
+      await promise;
+      expect.unreachable("abort during the connect handoff should reject");
+    } catch (err) {
+      expect(err).toBeInstanceOf(DaemonUnavailableError);
+      expect((err as Error).message).toContain("aborted");
+      expect(harness.requests).toHaveLength(0);
+      expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
+    } finally {
+      await harness.client.close();
+    }
+  });
+
+  test("callDaemonMethod sends and schedules only the budget remaining after connect", async () => {
+    const harness = createDeferredConnectClient(fakeTimer);
+    const promise = harness.client.callDaemonMethod("daemon/status", {}, { timeoutMs: 1000 });
+    await harness.connectStarted;
+
+    fakeTimer.advanceTime(400);
+    harness.releaseConnect();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const request = harness.requests[0];
+    expect(request?.timeoutMs).toBe(600);
+    expect(fakeTimer.getPendingTimeouts()).toEqual([600]);
+
+    (harness.client as any).handleData(
+      Buffer.from(
+        `${JSON.stringify({
+          id: request?.id,
+          type: "mcp_response",
+          success: true,
+          result: { ok: true },
+        })}\n`,
+      ),
+    );
+
+    try {
+      await expect(promise).resolves.toEqual({ ok: true });
+      expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
+    } finally {
+      await harness.client.close();
     }
   });
 

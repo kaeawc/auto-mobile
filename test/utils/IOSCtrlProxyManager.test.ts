@@ -1361,7 +1361,7 @@ describe("IOSCtrlProxyManager", function () {
       expect(await manager.isRunning()).toBe(true);
     });
 
-    test("isRunning() is true when the responder reports no deviceId at all (older runner build, compat)", async function () {
+    test("isRunning() is false when the responder omits device identity", async function () {
       installHealthBody(JSON.stringify({ status: "ok", port: 8765 }));
       const manager = IOSCtrlProxyManager.createForTestingWithDeps(
         testDevice,
@@ -1370,7 +1370,7 @@ describe("IOSCtrlProxyManager", function () {
         fakeExecutor,
       );
 
-      expect(await manager.isRunning()).toBe(true);
+      expect(await manager.isRunning()).toBe(false);
     });
 
     test("isRunning() is false for the Android runner's plain-text 'OK' body reached via the same port", async function () {
@@ -1528,7 +1528,10 @@ describe("IOSCtrlProxyManager", function () {
       let runnerHealthy = false;
       let launchCount = 0;
       fakeExecutor.setCommandHandler("curl -s", () =>
-        createExecResult(runnerHealthy ? JSON.stringify({ status: "ok" }) : "", ""),
+        createExecResult(
+          runnerHealthy ? JSON.stringify({ status: "ok", deviceId: testDevice.deviceId }) : "",
+          "",
+        ),
       );
       fakeExecutor.setCommandHandler("kill -0", () => {
         throw new Error("runner is no longer running");
@@ -3147,6 +3150,24 @@ describe("IOSCtrlProxyManager", function () {
 
       expect(fakeTimer.getPendingIntervals().length).toBe(1);
       expect(fakeTimer.getPendingIntervals()[0]).toBe(30000);
+    });
+
+    test("xctest process supervisor treats a live launcher with a dead health endpoint as unhealthy", async function () {
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        fakeTimer,
+        undefined,
+        fakeExecutor,
+      );
+      (manager as unknown as { xcTestProcessId: number }).xcTestProcessId = 12345;
+      fakeExecutor.setCommandResponse("curl -s", createExecResult("", ""));
+      fakeExecutor.setCommandResponse("kill -0 12345", createExecResult("", ""));
+
+      const alive = await (
+        manager as unknown as { isSupervisedCtrlProxyProcessAlive: () => Promise<boolean> }
+      ).isSupervisedCtrlProxyProcessAlive();
+
+      expect(alive).toBe(false);
     });
 
     describe("iproxy monitor uses process liveness not health endpoint", function () {

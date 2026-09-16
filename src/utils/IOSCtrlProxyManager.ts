@@ -2123,17 +2123,24 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
   private async isSupervisedCtrlProxyProcessAlive(): Promise<boolean> {
     const isHealthy = await this.checkHealthEndpoint();
-    if (isHealthy || !this.xcTestProcessId) {
+    if (isHealthy) {
+      return true;
+    }
+    if (!this.xcTestProcessId) {
       return true;
     }
 
     const processRunning = this.useRemoteRunner()
       ? await this.isOwnRunnerProcessAlive()
       : await this.isProcessRunning(this.xcTestProcessId);
-    if (!processRunning) {
+    if (processRunning) {
+      logger.warn(
+        "[IOSCtrlProxy] XCTest process is alive but its health endpoint is unavailable; treating the runner as unhealthy",
+      );
+    } else {
       logger.warn("[IOSCtrlProxy] XCTest process crashed, health endpoint not responding");
     }
-    return processRunning;
+    return false;
   }
 
   /**
@@ -3297,10 +3304,11 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
   /**
    * The primary "is our runner up" gate. Routes through the identity-checked
-   * probe (issue #6415) rather than the loose "any 'ok'/'healthy' body" check,
-   * so a foreign responder on the service port — a sibling simulator's runner,
-   * a stale runner from a previous daemon run, or the Android runner reached
-   * through `adb forward` — is never mistaken for this device's runner. Every
+   * strict identity probe (issue #6415) rather than the loose
+   * "any 'ok'/'healthy' body" check, so a foreign or anonymous responder on the
+   * service port — a sibling simulator's runner, a stale runner from a previous
+   * daemon run, or the Android runner reached through `adb forward` — is never
+   * mistaken for this device's runner. Every
    * caller (`isRunning()`, the `start()` short-circuit, `waitForHealthEndpoint`,
    * `isCtrlProxyProcessAlive()`) inherits the identity check through this one
    * method.
@@ -3309,8 +3317,6 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     return this.healthClient.checkHealthEndpointOnPortForDevice(
       this.servicePort,
       this.device.deviceId,
-      undefined,
-      { requireDeviceId: false },
     );
   }
 

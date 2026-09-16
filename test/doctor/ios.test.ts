@@ -1200,6 +1200,33 @@ describe("checkIosObserveRoundTrip", () => {
     expect(names).toContain("iOS Observe Round Trip");
   });
 
+  test("runIosChecks restricts runner diagnostics to the selected device", async () => {
+    const runnerTargets: Array<string | undefined> = [];
+    const observeTargets: Array<string | undefined> = [];
+
+    await runIosChecks(
+      { deviceId: "SIM-TARGET" },
+      {
+        ...baseDependencies,
+        runnerInspector: {
+          inspectBootedRunners: async (deviceId) => {
+            runnerTargets.push(deviceId);
+            return [];
+          },
+        },
+        observeRoundTripInspector: {
+          inspectBootedObserveRoundTrips: async (deviceId) => {
+            observeTargets.push(deviceId);
+            return [];
+          },
+        },
+      },
+    );
+
+    expect(runnerTargets).toEqual(["SIM-TARGET"]);
+    expect(observeTargets).toEqual(["SIM-TARGET"]);
+  });
+
   test("keeps post-repair iOS verification device-neutral", async () => {
     const results = await runPostRepairIosChecks(
       {},

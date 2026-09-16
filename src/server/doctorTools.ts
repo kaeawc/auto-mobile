@@ -15,6 +15,11 @@ export const doctorSchema = z
   .object({
     android: z.boolean().optional().describe("Run Android-specific checks only"),
     ios: z.boolean().optional().describe("Run iOS-specific checks only"),
+    deviceId: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("Restrict device-specific checks to one selected device identifier"),
   })
   .strict();
 
@@ -24,6 +29,7 @@ export const doctorSchema = z
 export interface DoctorArgs {
   android?: boolean;
   ios?: boolean;
+  deviceId?: string;
 }
 
 /**
@@ -38,6 +44,7 @@ export function registerDoctorTools(): void {
       const report = await runDoctor({
         android: args.android,
         ios: args.ios,
+        deviceId: args.deviceId,
       });
 
       return createJSONToolResponse(report);

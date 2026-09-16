@@ -7,6 +7,10 @@ import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { defaultTimer } from "../../src/utils/SystemTimer";
 import {
+  cleanupIosVideoRecordingSession,
+  type IosVideoRecordingCleanupFailure,
+} from "../helpers/iosVideoRecordingSessionCleanup";
+import {
   createSingleClaimSessionOwnershipRenewal,
   startSessionOwnershipHeartbeat,
   type SessionOwnershipHeartbeat,
@@ -24,6 +28,7 @@ const DEFAULT_TEST_TIMEOUT_MS = 420000;
 // while one-shot CLI calls are doing iOS setup or leaving a recording active.
 const SESSION_HEARTBEAT_INTERVAL_MS = 2_000;
 const SESSION_HEARTBEAT_COMMAND_TIMEOUT_MS = 5_000;
+const SESSION_RELEASE_COMMAND_TIMEOUT_MS = 5_000;
 
 interface ToolTextResponse {
   content?: Array<{ type?: string; text?: string }>;
@@ -147,6 +152,16 @@ async function runVideoRecordingCli(
   );
 }
 
+async function releaseVideoRecordingSession(sessionUuid: string): Promise<void> {
+  // This daemon primitive releases the pool assignment without shutting down
+  // the booted Simulator needed by the following navigation integration.
+  await runLocalCliOutput(
+    ["--daemon", "release-session", sessionUuid],
+    undefined,
+    SESSION_RELEASE_COMMAND_TIMEOUT_MS,
+  );
+}
+
 async function acquireVideoRecordingSession(deviceId: string): Promise<string> {
   const response = await runLocalCli(["getApple", "--deviceId", deviceId]);
   const text = response.content?.find((item) => item.type === "text")?.text;
@@ -237,6 +252,8 @@ describeIntegration("iOS videoRecording start-stop integration", () => {
       let sessionHeartbeat: SessionOwnershipHeartbeat | undefined;
       let stopped = false;
       let bodyFailed = false;
+      let bodyError: unknown;
+      let cleanupFailures: IosVideoRecordingCleanupFailure[] = [];
 
       try {
         const deviceId = process.env.AUTOMOBILE_IOS_VIDEO_RECORDING_DEVICE_ID;
@@ -320,22 +337,29 @@ describeIntegration("iOS videoRecording start-stop integration", () => {
         expect(video.duration).toBeGreaterThan(0);
       } catch (error) {
         bodyFailed = true;
-        let cleanupError: string | undefined;
-        if (recordingId && sessionUuid && !stopped) {
-          try {
-            await runVideoRecordingCli(sessionUuid, [
+        bodyError = error;
+      } finally {
+        cleanupFailures = await cleanupIosVideoRecordingSession({
+          sessionUuid,
+          recordingId,
+          recordingStopped: stopped,
+          sessionHeartbeat,
+          stopRecording: async (cleanupSessionUuid, cleanupRecordingId) => {
+            stopPayload = await runVideoRecordingCli(cleanupSessionUuid, [
               "--action",
               "stop",
               "--platform",
               "ios",
               "--recordingId",
-              recordingId,
+              cleanupRecordingId,
             ]);
-          } catch (stopError) {
-            cleanupError = formatError(stopError);
-          }
-        }
+            stopped = true;
+          },
+          releaseSession: releaseVideoRecordingSession,
+        });
+      }
 
+      if (bodyFailed) {
         const rawMovPath =
           recordingId && outputPath
             ? path.join(path.dirname(outputPath), `${recordingId}-raw.mov`)
@@ -343,33 +367,27 @@ describeIntegration("iOS videoRecording start-stop integration", () => {
         throw new Error(
           [
             "iOS videoRecording start-stop integration failed.",
-            `error: ${formatError(error)}`,
+            `error: ${formatError(bodyError)}`,
             `recordingId: ${recordingId ?? "(none)"}`,
             `rawMovPath: ${rawMovPath ?? "(unknown)"}`,
             `finalMp4Path: ${outputPath ?? "(unknown)"}`,
             `startPayload: ${JSON.stringify(startPayload ?? null, null, 2)}`,
             `stopPayload: ${JSON.stringify(stopPayload ?? null, null, 2)}`,
-            cleanupError ? `cleanupStopError: ${cleanupError}` : undefined,
+            ...cleanupFailures.map(
+              ({ step, error }) => `cleanup ${step} error: ${formatError(error)}`,
+            ),
           ]
             .filter((line): line is string => Boolean(line))
             .join("\n"),
+          { cause: bodyError },
         );
-      } finally {
-        const heartbeatCleanupError = await sessionHeartbeat?.stop();
-        if (heartbeatCleanupError) {
-          if (bodyFailed) {
-            // The body already threw; surface the primary failure and log this
-            // as supporting context rather than masking it with a second throw.
-            console.warn(
-              `iOS recording session heartbeat cleanup failed: ${heartbeatCleanupError.message}`,
-            );
-          } else {
-            throw new Error(
-              `iOS recording session heartbeat failed to stay alive during recording: ${heartbeatCleanupError.message}`,
-              { cause: heartbeatCleanupError },
-            );
-          }
-        }
+      }
+
+      if (cleanupFailures.length > 0) {
+        throw new AggregateError(
+          cleanupFailures.map(({ error }) => error),
+          cleanupFailures.map(({ step, error }) => `${step}: ${formatError(error)}`).join("\n"),
+        );
       }
     },
     getTestTimeoutMs(),

@@ -30,7 +30,7 @@ import {
   type SecurityClientApi,
 } from "../../utils/ios-cmdline-tools/SecurityClient";
 import type { DoctorProbeOptions } from "../types";
-import { remainingDoctorProbe } from "../deadline";
+import { awaitDoctorProbe, remainingDoctorProbe } from "../deadline";
 
 // Re-exported so doctor consumers (and tests) can reference the feature command
 // set without reaching into the runner client module.
@@ -854,6 +854,7 @@ export async function checkSecurityCli(
  */
 export async function checkAppleDeveloperAccount(
   dependencies = createIosDoctorDependencies(),
+  probe: DoctorProbeOptions = {},
 ): Promise<CheckResult> {
   const name = "Apple Developer Account";
 
@@ -867,7 +868,7 @@ export async function checkAppleDeveloperAccount(
 
   const accountsPath = join(dependencies.homedir(), "Library", "Developer", "Xcode", "Accounts");
   try {
-    const entries = await dependencies.readDir(accountsPath);
+    const entries = await awaitDoctorProbe(probe, () => dependencies.readDir(accountsPath));
     const visibleEntries = entries.filter((entry) => entry.trim().length > 0);
     if (visibleEntries.length > 0) {
       return {
@@ -899,6 +900,7 @@ export async function checkAppleDeveloperAccount(
  */
 export async function checkProvisioningProfiles(
   dependencies = createIosDoctorDependencies(),
+  probe: DoctorProbeOptions = {},
 ): Promise<CheckResult> {
   const name = "Provisioning Profiles";
 
@@ -917,7 +919,7 @@ export async function checkProvisioningProfiles(
     "Provisioning Profiles",
   );
   try {
-    const entries = await dependencies.readDir(profilesPath);
+    const entries = await awaitDoctorProbe(probe, () => dependencies.readDir(profilesPath));
     const profiles = entries.filter((entry) => entry.endsWith(".mobileprovision"));
 
     if (profiles.length > 0) {
@@ -1300,8 +1302,8 @@ export async function runIosChecks(
   await run(() => checkSimulatorRuntimes(dependencies, options));
   await run(() => checkSecurityCli(dependencies, options));
   await run(() => checkCodeSigning(dependencies, options));
-  results.push(await checkAppleDeveloperAccount(dependencies));
-  results.push(await checkProvisioningProfiles(dependencies));
+  await run(() => checkAppleDeveloperAccount(dependencies, options));
+  await run(() => checkProvisioningProfiles(dependencies, options));
   await run(() => checkBootedSimulators(dependencies, options));
   await run(() => checkIosCtrlProxyRunner(dependencies, options));
   await run(() => checkIosObserveRoundTrip(dependencies, options));

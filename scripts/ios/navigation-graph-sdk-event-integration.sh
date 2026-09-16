@@ -119,35 +119,15 @@ wait_for_ctrl_proxy_health() {
   return 1
 }
 
-acquire_navigation_session() {
-  local attempt output
-  for attempt in 1 2 3 4 5 6 7 8; do
-    if output="$(auto-mobile --debug --embedded-sdk --cli getApple --deviceId "${device_id}" 2>&1)"; then
-      printf '%s\n' "${output}"
-      return 0
-    fi
-    if [[ "${output}" != *"already assigned to another session"* ]]; then
-      echo "error: could not acquire navigation graph session for simulator ${device_id}" >&2
-      return 1
-    fi
-    if [[ "${attempt}" -eq 8 ]]; then
-      echo "error: prior simulator session ownership did not expire" >&2
-      return 1
-    fi
-    echo "Simulator is still owned by the preceding integration session; retrying in 2s..." >&2
-    sleep 2
-  done
-}
-
 ctrl_proxy_port="$(ctrl_proxy_port_for_device)"
 
 wait_for_ctrl_proxy_health "${ctrl_proxy_port}"
 
 # Acquire the booted Simulator before issuing session-scoped calls. A caller must
 # not fabricate a UUID to access a device it has not acquired. The preceding
-# video-recording integration stops its heartbeat before this script starts;
-# wait only for that bounded ownership lease to expire.
-session_result="$(acquire_navigation_session)"
+# video-recording integration explicitly releases its pool assignment while
+# preserving the booted Simulator for this step.
+session_result="$(auto-mobile --debug --embedded-sdk --cli getApple --deviceId "${device_id}")"
 if ! session_uuid="$(
   jq -er '
     (

@@ -29,7 +29,7 @@ import type {
 import type { ExecResult } from "../../src/models";
 import type { SecurityClient } from "../../src/utils/ios-cmdline-tools/SecurityClient";
 import { FakeLogger } from "../fakes/FakeLogger";
-import { createDoctorDeadline } from "../../src/doctor/deadline";
+import { createDoctorDeadline, DoctorDeadlineError } from "../../src/doctor/deadline";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 const createExecResult = (stdout: string, stderr: string = ""): ExecResult => ({
@@ -488,26 +488,36 @@ describe("iOS doctor checks", () => {
     });
 
     test("passes when account entries exist", async () => {
-      const result = await checkAppleDeveloperAccount({
-        ...baseDependencies,
-        readDir: async () => ["account.plist"],
-      });
+      const controller = new AbortController();
+      const result = await checkAppleDeveloperAccount(
+        {
+          ...baseDependencies,
+          readDir: async () => ["account.plist"],
+        },
+        { signal: controller.signal },
+      );
 
       expect(result.status).toBe("pass");
       expect(result.message).toContain("Apple Developer account configured");
+      expect(controller.signal.aborted).toBe(false);
     });
   });
 
   describe("checkProvisioningProfiles", () => {
     test("passes when profiles exist", async () => {
-      const result = await checkProvisioningProfiles({
-        ...baseDependencies,
-        readDir: async () => ["dev.mobileprovision", "dist.mobileprovision"],
-      });
+      const controller = new AbortController();
+      const result = await checkProvisioningProfiles(
+        {
+          ...baseDependencies,
+          readDir: async () => ["dev.mobileprovision", "dist.mobileprovision"],
+        },
+        { signal: controller.signal },
+      );
 
       expect(result.status).toBe("pass");
       expect(result.message).toContain("2 provisioning profile(s)");
       expect(result.value).toBe(2);
+      expect(controller.signal.aborted).toBe(false);
     });
 
     test("warns when no profiles", async () => {
@@ -724,6 +734,86 @@ describe("iOS doctor checks", () => {
 });
 
 describe("iOS doctor cancellation", () => {
+  test("bounds a never-settling Apple account filesystem read", async () => {
+    const timer = new FakeTimer();
+    const deadline = createDoctorDeadline({ timeoutMs: 50, timer }, timer);
+    let result: Awaited<ReturnType<typeof checkAppleDeveloperAccount>> | undefined;
+    const check = checkAppleDeveloperAccount(
+      {
+        ...baseDependencies,
+        readDir: () => new Promise<string[]>(() => {}),
+      },
+      deadline.probe,
+    ).then((value) => {
+      result = value;
+    });
+
+    timer.advanceTime(49);
+    await Promise.resolve();
+    expect(result).toBeUndefined();
+
+    timer.advanceTime(1);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(deadline.probe.signal?.aborted).toBe(true);
+    expect(result?.status).toBe("warn");
+    await check;
+    deadline.dispose();
+  });
+
+  test("bounds a never-settling provisioning profiles filesystem read", async () => {
+    const timer = new FakeTimer();
+    const deadline = createDoctorDeadline({ timeoutMs: 50, timer }, timer);
+    let result: Awaited<ReturnType<typeof checkProvisioningProfiles>> | undefined;
+    const check = checkProvisioningProfiles(
+      {
+        ...baseDependencies,
+        readDir: () => new Promise<string[]>(() => {}),
+      },
+      deadline.probe,
+    ).then((value) => {
+      result = value;
+    });
+
+    timer.advanceTime(50);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(deadline.probe.signal?.aborted).toBe(true);
+    expect(result?.status).toBe("warn");
+    await check;
+    deadline.dispose();
+  });
+
+  test("exits the iOS doctor deadline when a filesystem read never settles", async () => {
+    const timer = new FakeTimer();
+    const deadline = createDoctorDeadline({ timeoutMs: 50, timer }, timer);
+    let startedRead: (() => void) | undefined;
+    const readStarted = new Promise<void>((resolve) => {
+      startedRead = resolve;
+    });
+    let rejection: unknown;
+    const doctor = runIosChecks(deadline.probe, {
+      ...baseDependencies,
+      readDir: () => {
+        startedRead?.();
+        return new Promise<string[]>(() => {});
+      },
+    }).then(
+      () => {},
+      (error: unknown) => {
+        rejection = error;
+      },
+    );
+
+    await readStarted;
+    timer.advanceTime(50);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(rejection).toBeInstanceOf(DoctorDeadlineError);
+    await doctor;
+    deadline.dispose();
+  });
+
   test("aborts delayed simctl I/O without publishing a late pass", async () => {
     const timer = new FakeTimer();
     const deadline = createDoctorDeadline({ timeoutMs: 50, timer }, timer);

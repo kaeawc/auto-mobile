@@ -1030,23 +1030,15 @@ public final class GesturePerformer: GesturePerforming {
         // MARK: - Screenshots
 
         public func getScreenshot() throws -> Data {
-            guard let app = application else {
-                throw GestureError.noApplication
-            }
-
             return try catchingObjCException {
-                let screenshot = app.screenshot()
+                let screenshot = XCUIScreen.main.screenshot()
                 return screenshot.pngRepresentation
             }
         }
 
         public func getScreenshotCapture() throws -> ScreenshotCapture {
-            guard let app = application else {
-                throw GestureError.noApplication
-            }
-
             return try catchingObjCException {
-                let capture = DeviceRotation.capture { app.screenshot() }
+                let capture = DeviceRotation.capture { XCUIScreen.main.screenshot() }
                 return ScreenshotCapture(data: capture.value.pngRepresentation, rotation: capture.rotation)
             }
         }

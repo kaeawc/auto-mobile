@@ -19,6 +19,19 @@ final class HierarchyIntegrationTests: XCTestCase {
         continueAfterFailure = false
     }
 
+    func testScreenshotCapturesScreenAfterTrackedAppTerminates() throws {
+        let app = XCUIApplication()
+        app.launch()
+
+        let locator = ElementLocator(application: app, perf: PerfProvider())
+        let gestures = GesturePerformer(application: app, elementLocator: locator)
+
+        app.terminate()
+
+        XCTAssertFalse(try gestures.getScreenshot().isEmpty)
+        XCTAssertFalse(try gestures.getScreenshotCapture().data.isEmpty)
+    }
+
     func testHierarchyIncludesTypedTextInputsMissingFromSnapshotTree() throws {
         let app = XCUIApplication()
         app.launchEnvironment["CTRL_PROXY_SNAPSHOT_GAP_TEST_MODE"] = "1"

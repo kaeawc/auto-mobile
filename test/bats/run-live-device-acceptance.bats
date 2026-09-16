@@ -54,14 +54,26 @@ EOF
 case "${STAT_STYLE:-}" in
   gnu)
     case "$1" in
-      -c) printf '600\n'; exit 0 ;;
+      -c)
+        case "${*: -1}" in
+          *operator.key) printf '600\n' ;;
+          *) printf '700\n' ;;
+        esac
+        exit 0
+        ;;
       -f) printf 'mock filesystem\n'; exit 0 ;;
     esac
     ;;
   bsd)
     case "$1" in
       -c) exit 1 ;;
-      -f) printf '600\n'; exit 0 ;;
+      -f)
+        case "${*: -1}" in
+          *operator.key) printf '600\n' ;;
+          *) printf '700\n' ;;
+        esac
+        exit 0
+        ;;
     esac
     ;;
 esac
@@ -75,6 +87,10 @@ EOF
 teardown() {
   rm -rf "${MOCK_BIN}" "${TEST_REPO}"
   export PATH="${ORIGINAL_PATH}"
+}
+
+directory_mode() {
+  /usr/bin/stat -c '%a' "$1" 2> /dev/null || /usr/bin/stat -f '%Lp' "$1"
 }
 
 run_harness() {
@@ -134,6 +150,34 @@ run_harness() {
 
   [ "${status}" -eq 2 ]
   [[ "${output}" == *"unsupported --scenario: recovery"* ]]
+  [ ! -f "${COMMAND_LOG}" ]
+}
+
+@test "rejects a caller-owned evidence directory without changing its permissions" {
+  shared_evidence="${MOCK_BIN}/shared-evidence"
+  mkdir "${shared_evidence}"
+  chmod 755 "${shared_evidence}"
+
+  run_harness --evidence-dir "${shared_evidence}"
+
+  [ "${status}" -eq 2 ]
+  [[ "${output}" == *"refusing to change existing directory mode 755"* ]]
+  [ "$(directory_mode "${shared_evidence}")" = "755" ]
+  [ ! -f "${COMMAND_LOG}" ]
+}
+
+@test "rejects a caller-owned key parent without changing its permissions" {
+  shared_key_parent="${MOCK_BIN}/shared-key-parent"
+  new_operator_key="${shared_key_parent}/new.key"
+  mkdir "${shared_key_parent}"
+  chmod 755 "${shared_key_parent}"
+
+  run_harness --operator-key-file "${new_operator_key}" --create-operator-key
+
+  [ "${status}" -eq 2 ]
+  [[ "${output}" == *"operator key parent must have mode 700"* ]]
+  [ "$(directory_mode "${shared_key_parent}")" = "755" ]
+  [ ! -e "${new_operator_key}" ]
   [ ! -f "${COMMAND_LOG}" ]
 }
 

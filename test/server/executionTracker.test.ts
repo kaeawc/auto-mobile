@@ -107,6 +107,15 @@ describe("ExecutionTracker", function () {
     expect(tracker.startExecution("startDevice", "after-maintenance").id).toBe("blocked");
   });
 
+  test("keeps ordinary restart admission behind an authorized maintenance fence", function () {
+    const tracker = new ExecutionTracker(new FakeTimer(), new FakeIdGenerator([]));
+
+    expect(tracker.prepareForDaemonMaintenance(0)).toBe("accepted");
+    expect(tracker.prepareForDaemonRestart()).toBe("restart_pending");
+    expect(tracker.prepareForAdmittedDaemonRestart()).toBe("accepted");
+    expect(tracker.prepareForAdmittedDaemonRestart()).toBe("restart_pending");
+  });
+
   test("cancels and drains active provisioning before daemon shutdown continues", async function () {
     const tracker = new ExecutionTracker(
       new FakeTimer(),

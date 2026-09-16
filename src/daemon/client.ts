@@ -831,8 +831,23 @@ export class DaemonClient {
     if (options.signal?.aborted) {
       throw new DaemonUnavailableError(`Daemon request ${method} aborted`);
     }
+    const deadlineMs = this.timer.now() + timeoutMs;
     if (!this.connected) {
-      await this.connect(timeoutMs, options.signal);
+      await this.connect(this.remainingConnectTimeout(deadlineMs, timeoutMs), options.signal);
+    }
+    // connect() removes its own abort listener before resolving. Recheck before
+    // this request installs its listener so an abort in that handoff cannot be
+    // missed and followed by a control RPC.
+    if (options.signal?.aborted) {
+      throw new DaemonUnavailableError(`Daemon request ${method} aborted`);
+    }
+    const remainingTimeoutMs = deadlineMs - this.timer.now();
+    if (remainingTimeoutMs <= 0) {
+      throw new McpTimeoutError({
+        toolName: method,
+        timeoutMs,
+        origin: "DaemonClient.callDaemonMethod",
+      });
     }
 
     const requestId = this.idGenerator.next();
@@ -842,7 +857,7 @@ export class DaemonClient {
       type: "daemon_request",
       method,
       params,
-      timeoutMs,
+      timeoutMs: remainingTimeoutMs,
       ...this.handshakeFields(),
     };
 
@@ -858,7 +873,7 @@ export class DaemonClient {
             origin: "DaemonClient.callDaemonMethod",
           }),
         );
-      }, timeoutMs);
+      }, remainingTimeoutMs);
 
       if (options.signal) {
         const onAbort = () => {
@@ -894,7 +909,14 @@ export class DaemonClient {
         return;
       }
 
-      this.socket.write(this.serializeRequestFrame(request));
+      try {
+        this.socket.write(this.serializeRequestFrame(request));
+      } catch (error) {
+        this.timer.clearTimeout(timeout);
+        removeAbortListener();
+        this.pendingRequests.delete(requestId);
+        reject(toDaemonTransportError(error instanceof Error ? error : new Error(String(error))));
+      }
     });
   }
 

@@ -982,9 +982,9 @@ export class LaunchApp extends BaseVisualChange {
       try {
         // The launch path owns this bounded retry so a brief emulator transport
         // reset after APK installation does not become a daemon-wide device-loss
-        // verdict. AdbClient still owns its normal retries for other transient
-        // failures; it already classifies "device offline" as non-retryable.
-        return await this.adb.execute(args, { signal });
+        // verdict. Keep each probe to one ADB dispatch so only "device offline"
+        // is retried here; every other failure remains fail-fast.
+        return await this.adb.execute(args, { noRetry: true, signal });
       } catch (error) {
         // Cancellation can race with command rejection. Preserve the signal's
         // typed reason (not the stale ADB error) before classifying the failure.

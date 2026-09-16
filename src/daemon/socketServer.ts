@@ -885,7 +885,7 @@ export class UnixSocketServer {
             try {
               const request: DaemonRequest = JSON.parse(line);
               requestId = request.id;
-              const response = await this.handleRequest(sessionId, request, receivedAtMs);
+              const response = await this.handleRequest(sessionId, socket, request, receivedAtMs);
               this.writeFrame(socket, sessionId, response);
             } catch (error) {
               logger.error(`Error processing request ${requestId} from ${sessionId}:`, error);
@@ -905,30 +905,34 @@ export class UnixSocketServer {
 
     socket.on("close", () => {
       logger.info(`Client disconnected: ${sessionId}`);
-      this.abortLocalRequests(sessionId);
-      this.abortMcpRequests(sessionId);
-      this.sessions.delete(sessionId);
-      this.clientSockets.delete(sessionId);
-      this.notificationSubscribers.delete(sessionId);
-      this.clearBoundMcpClientKey(sessionId);
-      // Lift any streamed gesture this socket left open on the device (issue: streaming gesture
-      // input). Tracked so daemon shutdown drains it rather than a fire-and-forget floating promise.
-      this.trackRequestHandler(this.cancelOwnedGestures(sessionId));
+      this.releaseSocketSession(sessionId, socket);
     });
 
     socket.on("error", (error) => {
       logger.error(`Socket error for ${sessionId}:`, error);
-      this.abortLocalRequests(sessionId);
-      this.abortMcpRequests(sessionId);
-      this.sessions.delete(sessionId);
-      this.clientSockets.delete(sessionId);
-      this.notificationSubscribers.delete(sessionId);
-      this.clearBoundMcpClientKey(sessionId);
-      this.trackRequestHandler(this.cancelOwnedGestures(sessionId));
+      this.releaseSocketSession(sessionId, socket);
       if (!socket.destroyed) {
         socket.destroy();
       }
     });
+  }
+
+  private releaseSocketSession(sessionId: string, socket: Socket): void {
+    // Session IDs are expected to be unique, but teardown must still be
+    // incarnation-safe: a delayed close/error from an older socket must not
+    // remove or abort work registered by a newer socket with the same ID.
+    if (this.clientSockets.get(sessionId) !== socket) {
+      return;
+    }
+    this.abortLocalRequests(sessionId);
+    this.abortMcpRequests(sessionId);
+    this.sessions.delete(sessionId);
+    this.clientSockets.delete(sessionId);
+    this.notificationSubscribers.delete(sessionId);
+    this.clearBoundMcpClientKey(sessionId);
+    // Lift any streamed gesture this socket left open on the device (issue: streaming gesture
+    // input). Tracked so daemon shutdown drains it rather than a fire-and-forget floating promise.
+    this.trackRequestHandler(this.cancelOwnedGestures(sessionId));
   }
 
   private trackRequestHandler(handler: Promise<void>): void {
@@ -970,21 +974,27 @@ export class UnixSocketServer {
     }
   }
 
-  private mcpRequestSignal(sessionId: string): { signal: AbortSignal; dispose: () => void } {
+  private mcpRequestSignal(
+    sessionId: string,
+    ownerSocket: Socket | undefined = this.clientSockets.get(sessionId),
+  ): { signal: AbortSignal; dispose: () => void } {
     const controller = new AbortController();
     const controllers =
       this.mcpRequestAbortControllers.get(sessionId) ?? new Set<AbortController>();
     controllers.add(controller);
     this.mcpRequestAbortControllers.set(sessionId, controllers);
     const socket = this.clientSockets.get(sessionId);
-    if (!socket || socket.destroyed) {
+    if (!ownerSocket || socket !== ownerSocket || ownerSocket.destroyed) {
       controller.abort(new Error("Daemon MCP client disconnected"));
     }
     return {
       signal: controller.signal,
       dispose: () => {
         controllers.delete(controller);
-        if (controllers.size === 0) {
+        if (
+          controllers.size === 0 &&
+          this.mcpRequestAbortControllers.get(sessionId) === controllers
+        ) {
           this.mcpRequestAbortControllers.delete(sessionId);
         }
       },
@@ -1003,6 +1013,7 @@ export class UnixSocketServer {
 
   private localRequestSignal(
     sessionId: string,
+    ownerSocket: Socket,
     timeoutMs: number,
   ): { signal: AbortSignal; dispose: () => void } {
     if (timeoutMs <= 0) {
@@ -1021,12 +1032,19 @@ export class UnixSocketServer {
     const timeout = this.timer.setTimeout(() => {
       controller.abort(new Error("Daemon control request deadline elapsed"));
     }, timeoutMs);
+    const socket = this.clientSockets.get(sessionId);
+    if (socket !== ownerSocket || ownerSocket.destroyed) {
+      controller.abort(new Error("Daemon control client disconnected"));
+    }
     return {
       signal: controller.signal,
       dispose: () => {
         this.timer.clearTimeout(timeout);
         controllers.delete(controller);
-        if (controllers.size === 0) {
+        if (
+          controllers.size === 0 &&
+          this.localRequestAbortControllers.get(sessionId) === controllers
+        ) {
           this.localRequestAbortControllers.delete(sessionId);
         }
       },
@@ -1036,6 +1054,7 @@ export class UnixSocketServer {
   private async handleBoundLocalSocketRequest(
     request: DaemonRequest,
     sessionId: string,
+    ownerSocket: Socket,
     timeoutMs: number,
   ): Promise<any | undefined> {
     const mutatesControlMetadata =
@@ -1046,8 +1065,9 @@ export class UnixSocketServer {
       return await this.handleLocalSocketRequest(request, sessionId);
     }
 
-    const localRequest = this.localRequestSignal(sessionId, timeoutMs);
+    const localRequest = this.localRequestSignal(sessionId, ownerSocket, timeoutMs);
     try {
+      localRequest.signal.throwIfAborted();
       return await this.handleLocalSocketRequest(request, sessionId, localRequest.signal);
     } finally {
       localRequest.dispose();
@@ -1182,6 +1202,7 @@ export class UnixSocketServer {
    */
   private async handleRequest(
     sessionId: string,
+    ownerSocket: Socket,
     request: DaemonRequest,
     receivedAtMs: number = this.timer.now(),
   ): Promise<DaemonResponse> {
@@ -1267,6 +1288,7 @@ export class UnixSocketServer {
         const localResult = await this.handleBoundLocalSocketRequest(
           request,
           sessionId,
+          ownerSocket,
           deadline.value - this.timer.now(),
         );
         if (localResult !== undefined) {
@@ -1283,7 +1305,7 @@ export class UnixSocketServer {
         }
         const initialRoute = this.getMcpForwardRoute(request, sessionId);
 
-        const mcpRequest = this.mcpRequestSignal(sessionId);
+        const mcpRequest = this.mcpRequestSignal(sessionId, ownerSocket);
         try {
           const result = await this.runMcpForwardForCurrentRoute(
             initialRoute,
@@ -3217,7 +3239,7 @@ export class UnixSocketServer {
     if (sessions.length > 0) {
       return { accepted: false, reason: "active_sessions" };
     }
-    const admission = executionTracker.prepareForDaemonRestart();
+    const admission = executionTracker.prepareForAdmittedDaemonRestart();
     if (admission !== "accepted") {
       return { accepted: false, reason: admission };
     }

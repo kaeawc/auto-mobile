@@ -6,7 +6,7 @@ Use only dedicated, disposable test-owned devices. Before a live run, record the
 
 The Android control set must contain exactly one intended target instance and exactly one signed duplicate, plus exactly one unrelated sibling. The duplicate request must fail with `identity_conflict` naming both serials. The driver then stops only the signed duplicate serial, requires that serial to disappear, proves the intended surviving serial is selected through the supported `avdName` plus `deviceId` selector, and keeps the sibling unchanged. The exact iOS UUID target and same-name sibling must both remain present and unchanged. Controls are rechecked before and after provisioning, target stop/reacquisition, host-wide doctor repair, and each persisted-recovery transition. A missing, changed, or extra unsigned control fails the run before another destructive action. Flags alone never authorize adoption.
 
-Create an owner-only key and record ownership first. This setup records authority only; it does not create, delete, or mutate either device.
+Create an owner-only key and record ownership first. Place the evidence, ownership manifest, and operator key in a dedicated acceptance directory, not an existing shared directory such as `/tmp`. The harness creates missing dedicated directories as mode `0700`, but it never changes permissions on an existing caller-owned directory; an existing directory must already be mode `0700` or the harness fails before building or touching a device. This setup records authority only; it does not create, delete, or mutate either device.
 
 ```bash
 bun run bootstrap:worktree

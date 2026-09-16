@@ -85,6 +85,35 @@ require_positive_integer() {
   fi
 }
 
+path_mode() {
+  stat -c '%a' "$1" 2> /dev/null || stat -f '%Lp' "$1"
+}
+
+validate_private_directory() {
+  local path="$1" description="$2" mode
+  if [[ ! -e "${path}" ]]; then
+    return
+  fi
+  if [[ ! -d "${path}" ]]; then
+    echo "error: ${description} is not a directory: ${path}" >&2
+    exit 2
+  fi
+  mode="$(path_mode "${path}")"
+  if [[ "${mode}" != "700" ]]; then
+    echo "error: ${description} must have mode 700; refusing to change existing directory mode ${mode}: ${path}" >&2
+    exit 2
+  fi
+}
+
+ensure_private_directory() {
+  local path="$1" description="$2"
+  validate_private_directory "${path}" "${description}"
+  if [[ ! -e "${path}" ]]; then
+    mkdir -p "${path}"
+  fi
+  validate_private_directory "${path}" "${description}"
+}
+
 while [[ "$#" -gt 0 ]]; do
   case "$1" in
     --confirm-live)
@@ -181,19 +210,21 @@ if [[ "${ios_simulator_uuid}" == "${ios_same_name_sibling_uuid}" ]]; then
 fi
 
 umask 077
-mkdir -p "${evidence_dir}"
-chmod 700 "${evidence_dir}"
 if [[ -z "${ownership_manifest}" || -z "${operator_key_file}" ]]; then
   echo "error: --ownership-manifest and --operator-key-file are required." >&2
   exit 2
 fi
+validate_private_directory "${evidence_dir}" "evidence directory"
 if [[ "${create_operator_key}" == true ]]; then
   if [[ -e "${operator_key_file}" ]]; then
     echo "error: refusing to overwrite existing operator key: ${operator_key_file}" >&2
     exit 2
   fi
-  mkdir -p "$(dirname -- "${operator_key_file}")"
-  chmod 700 "$(dirname -- "${operator_key_file}")"
+  validate_private_directory "$(dirname -- "${operator_key_file}")" "operator key parent"
+fi
+ensure_private_directory "${evidence_dir}" "evidence directory"
+if [[ "${create_operator_key}" == true ]]; then
+  ensure_private_directory "$(dirname -- "${operator_key_file}")" "operator key parent"
   dd if=/dev/urandom of="${operator_key_file}" bs=32 count=1 status=none
   chmod 600 "${operator_key_file}"
 fi
@@ -201,7 +232,8 @@ if [[ ! -f "${operator_key_file}" ]]; then
   echo "error: operator key file does not exist: ${operator_key_file}" >&2
   exit 2
 fi
-if [[ "$(stat -c '%a' "${operator_key_file}" 2> /dev/null || stat -f '%Lp' "${operator_key_file}")" != "600" ]]; then
+operator_key_mode="$(path_mode "${operator_key_file}")"
+if [[ "${operator_key_mode}" != "600" ]]; then
   echo "error: operator key file must have mode 600: ${operator_key_file}" >&2
   exit 2
 fi

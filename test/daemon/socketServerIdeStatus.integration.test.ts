@@ -246,6 +246,11 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
     expect(() => executionTracker.startExecution("tapOn", "fenced")).toThrow(
       "Daemon restart is pending",
     );
+    expect((await sendRequest(socketPath, DAEMON_PREPARE_RESTART_METHOD, status)).result).toEqual({
+      accepted: false,
+      reason: "restart_pending",
+    });
+    expect(restartRequests).toBe(0);
     expect(
       (await sendRequest(socketPath, DAEMON_COMPLETE_MAINTENANCE_METHOD, status)).result,
     ).toEqual({ completed: false });
@@ -264,6 +269,11 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
     expect(completion.result).toEqual({ completed: true });
     const execution = executionTracker.startExecution("tapOn", "unfenced");
     executionTracker.endExecution(execution.id);
+    expect((await sendRequest(socketPath, DAEMON_PREPARE_RESTART_METHOD, status)).result).toEqual({
+      accepted: true,
+    });
+    expect(restartRequests).toBe(1);
+    executionTracker.clearDaemonRestartPreparation();
 
     const secondAdmission = await sendRequest(
       socketPath,
@@ -292,7 +302,7 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
         })
       ).result,
     ).toEqual({ accepted: true });
-    expect(restartRequests).toBe(1);
+    expect(restartRequests).toBe(2);
     expect(
       (
         await sendRequest(socketPath, DAEMON_RESTART_ADMITTED_METHOD, {
@@ -319,8 +329,10 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
 
     fakeTimer.advanceTime(DAEMON_MAINTENANCE_ADMISSION_TTL_MS);
 
-    const execution = executionTracker.startExecution("tapOn", "released-after-expiry");
-    executionTracker.endExecution(execution.id);
+    expect((await sendRequest(socketPath, DAEMON_PREPARE_RESTART_METHOD, status)).result).toEqual({
+      accepted: true,
+    });
+    expect(restartRequests).toBe(1);
     expect(
       (
         await sendRequest(socketPath, DAEMON_COMPLETE_MAINTENANCE_METHOD, {
@@ -333,6 +345,7 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
 
   test("stale maintenance expiry cannot clear a newer admission", async () => {
     const timer = new LateCallbackFakeTimer();
+    let lateRestartRequests = 0;
     const lateSocketPath = join(tmpdir(), `t-maintenance-late-${randomUUID().slice(0, 8)}.sock`);
     const lateServer = new UnixSocketServer(
       lateSocketPath,
@@ -340,6 +353,11 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
       createFakeDaemonState(),
       timer,
       null,
+      {
+        onRestartAccepted: () => {
+          lateRestartRequests++;
+        },
+      },
     );
 
     try {
@@ -385,10 +403,16 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
       expect(
         (await sendRequest(lateSocketPath, DAEMON_PREPARE_MAINTENANCE_METHOD, status)).result,
       ).toEqual({ accepted: false, reason: "maintenance_pending" });
+      expect(
+        (await sendRequest(lateSocketPath, DAEMON_PREPARE_RESTART_METHOD, status)).result,
+      ).toEqual({ accepted: false, reason: "restart_pending" });
+      expect(lateRestartRequests).toBe(0);
 
       timer.advanceTime(1);
-      const execution = executionTracker.startExecution("tapOn", "new-admission-expired");
-      executionTracker.endExecution(execution.id);
+      expect(
+        (await sendRequest(lateSocketPath, DAEMON_PREPARE_RESTART_METHOD, status)).result,
+      ).toEqual({ accepted: true });
+      expect(lateRestartRequests).toBe(1);
     } finally {
       await lateServer.close();
       if (existsSync(lateSocketPath)) {

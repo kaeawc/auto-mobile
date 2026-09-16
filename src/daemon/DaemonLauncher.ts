@@ -18,6 +18,28 @@ export interface DaemonLaunchCommand {
   args: string[];
 }
 
+/**
+ * Matches the entry-script identities emitted by {@link DaemonLauncher.resolveCommand}.
+ *
+ * Source checkouts execute `src/index.ts`; packaged npm and Homebrew installs
+ * execute `dist/src/index.js`. Keeping these identities beside the launcher
+ * prevents process discovery from growing install-layout-specific path regexes.
+ */
+export function isDaemonEntryScriptPath(entryScript: string): boolean {
+  const normalized = entryScript
+    .trim()
+    .replace(/^["']|["']$/g, "")
+    .replace(/\\/g, "/")
+    .replace(/\/+/g, "/");
+  if (normalized === "src/index.ts" || normalized.endsWith("/src/index.ts")) {
+    return true;
+  }
+  return (
+    /\/(?:@kaeawc\/)?auto-mobile\/dist\/src\/index\.js$/.test(normalized) ||
+    /\/auto-mobile\/(?:[^/]+\/)?libexec\/dist\/src\/index\.js$/.test(normalized)
+  );
+}
+
 export interface DaemonProcessSpawner {
   spawn(command: string, args: string[], options: SpawnOptions): ChildProcess;
 }

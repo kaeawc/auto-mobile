@@ -29,6 +29,8 @@ const DEFAULT_TEST_TIMEOUT_MS = 420000;
 const SESSION_HEARTBEAT_INTERVAL_MS = 2_000;
 const SESSION_HEARTBEAT_COMMAND_TIMEOUT_MS = 5_000;
 const SESSION_RELEASE_COMMAND_TIMEOUT_MS = 5_000;
+const RECORDING_STOP_COMMAND_TIMEOUT_MS = 5_000;
+const RECORDING_STOP_CLEANUP_TIMEOUT_MS = 6_000;
 
 interface ToolTextResponse {
   content?: Array<{ type?: string; text?: string }>;
@@ -115,8 +117,12 @@ async function runLocalCliOutput(
   return stdout;
 }
 
-async function runLocalCli(args: string[], signal?: AbortSignal): Promise<ToolTextResponse> {
-  return JSON.parse(await runLocalCliOutput(args, signal)) as ToolTextResponse;
+async function runLocalCli(
+  args: string[],
+  signal?: AbortSignal,
+  timeout?: number,
+): Promise<ToolTextResponse> {
+  return JSON.parse(await runLocalCliOutput(args, signal, timeout)) as ToolTextResponse;
 }
 
 async function startVideoRecordingSessionHeartbeat(
@@ -146,9 +152,11 @@ async function startVideoRecordingSessionHeartbeat(
 async function runVideoRecordingCli(
   sessionUuid: string,
   args: string[],
+  signal?: AbortSignal,
+  timeout?: number,
 ): Promise<RecordingToolResult> {
   return parseToolResult(
-    await runLocalCli(["--session-uuid", sessionUuid, "videoRecording", ...args]),
+    await runLocalCli(["--session-uuid", sessionUuid, "videoRecording", ...args], signal, timeout),
   );
 }
 
@@ -308,14 +316,12 @@ describeIntegration("iOS videoRecording start-stop integration", () => {
         await defaultTimer.sleep(waitMs - firstWaitMs);
         sessionHeartbeat.assertHealthy();
 
-        stopPayload = await runVideoRecordingCli(sessionUuid, [
-          "--action",
-          "stop",
-          "--platform",
-          "ios",
-          "--recordingId",
-          recordingId,
-        ]);
+        stopPayload = await runVideoRecordingCli(
+          sessionUuid,
+          ["--action", "stop", "--platform", "ios", "--recordingId", recordingId],
+          AbortSignal.timeout(RECORDING_STOP_COMMAND_TIMEOUT_MS),
+          RECORDING_STOP_COMMAND_TIMEOUT_MS,
+        );
         stopped = true;
 
         expect(stopPayload.action).toBe("stop");
@@ -344,15 +350,14 @@ describeIntegration("iOS videoRecording start-stop integration", () => {
           recordingId,
           recordingStopped: stopped,
           sessionHeartbeat,
-          stopRecording: async (cleanupSessionUuid, cleanupRecordingId) => {
-            stopPayload = await runVideoRecordingCli(cleanupSessionUuid, [
-              "--action",
-              "stop",
-              "--platform",
-              "ios",
-              "--recordingId",
-              cleanupRecordingId,
-            ]);
+          recordingStopTimeoutMs: RECORDING_STOP_CLEANUP_TIMEOUT_MS,
+          stopRecording: async (cleanupSessionUuid, cleanupRecordingId, signal) => {
+            stopPayload = await runVideoRecordingCli(
+              cleanupSessionUuid,
+              ["--action", "stop", "--platform", "ios", "--recordingId", cleanupRecordingId],
+              signal,
+              RECORDING_STOP_COMMAND_TIMEOUT_MS,
+            );
             stopped = true;
           },
           releaseSession: releaseVideoRecordingSession,

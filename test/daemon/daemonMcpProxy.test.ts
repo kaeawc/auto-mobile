@@ -456,6 +456,63 @@ describe("DaemonMcpProxy", () => {
       }
     });
 
+    test("keeps a persisted binding recoverable when the keeper reaches its replacement daemon first", async () => {
+      const timer = new FakeTimer();
+      let oldHeartbeatCalls = 0;
+      const oldDaemon = new FakeDaemonClient({
+        onCallDaemonMethod: (method) => {
+          if (method === "daemon/heartbeat" && ++oldHeartbeatCalls > 1) {
+            throw new Error("Session not found: persisted-session");
+          }
+        },
+      });
+      let materialized = false;
+      let successfulReplacementHeartbeats = 0;
+      const replacementDaemon = new FakeDaemonClient({
+        onCallDaemonMethod: (method) => {
+          if (method === "daemon/heartbeat") {
+            if (!materialized) {
+              throw new Error("Session not found: persisted-session");
+            }
+            successfulReplacementHeartbeats++;
+          }
+        },
+        onCallTool: () => {
+          materialized = true;
+        },
+      });
+      const clients: DaemonClientLike[] = [oldDaemon, replacementDaemon];
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        initialSessionUuid: "persisted-session",
+        clientFactory: () => clients.shift()!,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+        timer,
+      });
+
+      try {
+        await proxy.callTool("observe", { sessionUuid: "persisted-session" });
+
+        // The keeper gets "not found" from both transports before any device
+        // operation has given the replacement daemon a chance to recover the
+        // persisted session.
+        await timer.advanceTimeAsync(2_000);
+
+        await expect(proxy.callTool("observe", {})).resolves.toBeDefined();
+        expect(replacementDaemon.callToolCalls).toEqual([
+          { toolName: "observe", params: { sessionUuid: "persisted-session" } },
+        ]);
+
+        // Once the tool materializes recovery, the same keeper resumes normally.
+        await timer.advanceTimeAsync(2_000);
+        expect(successfulReplacementHeartbeats).toBeGreaterThan(0);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
     test("a stale heartbeat retry cannot fence a newer explicit binding", async () => {
       const timer = new FakeTimer();
       const heartbeatStarted = Promise.withResolvers<void>();

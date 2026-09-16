@@ -116,6 +116,7 @@ import {
 } from "../utils/toolOutputArtifacts";
 import {
   DaemonLauncher,
+  isDaemonEntryScriptPath,
   type DaemonLaunchCommand,
   type DaemonProcessSpawner,
 } from "./DaemonLauncher";
@@ -182,6 +183,8 @@ export interface DaemonProcessFinder {
   findDaemonProcesses(timeoutMs?: number): DaemonProcessRecord[];
 }
 
+class DaemonGenerationExitedBeforeSignalError extends Error {}
+
 export const DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES = 16 * 1024 * 1024;
 
 /**
@@ -220,11 +223,12 @@ function isAutoMobileDaemonCommand(command: string): boolean {
     return false;
   }
 
+  const runtimeEntrypoint = invocation.match(
+    /(?:^|\s)(?:"?[^"'\s]*\/)?(?:bun|node)(?:\.exe)?"?\s+(?:"([^"]+)"|'([^']+)'|([^\s"']+))/i,
+  );
   const runsBundledEntrypoint =
-    /(?:^|["'\s\\/])(?:bun|node)(?:\.exe)?(?:\s|["'])/.test(invocation) &&
-    /(?:^|["'\s])[^"'\s]*\/(?:@kaeawc\/)?auto-mobile\/dist\/src\/index\.js(?:\s|["']|$)/.test(
-      invocation,
-    );
+    runtimeEntrypoint !== null &&
+    isDaemonEntryScriptPath(runtimeEntrypoint[1] ?? runtimeEntrypoint[2] ?? runtimeEntrypoint[3]);
   const runsPublishedPackage =
     /^(?:"?[^"'\s]*\/)?(?:bunx|npx)(?:\.exe)?\s+(?:(?:-y|--yes|--bun|--no-cache)\s+)*@kaeawc\/auto-mobile(?:@[^\s"']+)?(?:\s|["']|$)/.test(
       invocation,
@@ -2412,11 +2416,24 @@ export class DaemonManager implements DaemonManagerLike {
     stderrLog(`Stopping daemon (PID ${status.pid})...`);
 
     const pid = status.pid!;
+    const expected: DaemonProcessRecord = {
+      pid,
+      ppid: 0,
+      command: status.entryScript ?? "",
+      startedAt: status.processStartedAt ?? status.startedAt,
+      ...(status.processGenerationToken === undefined
+        ? {}
+        : { processGenerationToken: status.processGenerationToken }),
+    };
 
     try {
       if (signalFirst) {
         // Send SIGTERM for graceful shutdown.
-        this.processSignaler.signal(pid, "SIGTERM");
+        this.signalVerifiedDaemonGeneration(
+          expected,
+          "SIGTERM",
+          `Daemon generation ${pid} exited before stop could signal it.`,
+        );
       }
 
       // Wait for process to exit
@@ -2424,7 +2441,11 @@ export class DaemonManager implements DaemonManagerLike {
 
       if (!stopped) {
         stderrLog(`Daemon did not stop gracefully, sending SIGKILL...`);
-        this.processSignaler.signal(pid, "SIGKILL");
+        this.signalVerifiedDaemonGeneration(
+          expected,
+          "SIGKILL",
+          `Daemon generation ${pid} exited before stop could force-stop it.`,
+        );
 
         if (!(await this.waitForStop(pid, DAEMON_FORCED_STOP_TIMEOUT_MS))) {
           throw new Error(`Daemon process ${pid} did not exit after SIGKILL`);
@@ -2439,21 +2460,44 @@ export class DaemonManager implements DaemonManagerLike {
 
       stderrLog("Daemon stopped");
     } catch (error) {
-      // Process doesn't exist or we don't have permission
-      if (
-        error instanceof Error &&
-        (error.message.includes("ESRCH") || error.message.includes("EPERM"))
-      ) {
-        await cleanupDaemonFiles({
-          pidFilePath: this.pidFilePath,
-          socketPaths: this.cleanupSocketPaths(status.socketPath),
-          expectedPid: pid,
-        });
-        stderrLog("Daemon was not running (cleaned up stale PID file)");
-      } else {
-        throw error;
-      }
+      await this.handleStopRunningDaemonError(error, status, pid);
     }
+  }
+
+  private signalVerifiedDaemonGeneration(
+    expected: DaemonProcessRecord,
+    signal: NodeJS.Signals,
+    exitedMessage: string,
+  ): void {
+    if (!this.verifyDaemonGenerationBeforeSignal(expected, undefined, "Daemon stop")) {
+      throw new DaemonGenerationExitedBeforeSignalError(exitedMessage);
+    }
+    this.processSignaler.signal(expected.pid, signal);
+  }
+
+  private async handleStopRunningDaemonError(
+    error: unknown,
+    status: DaemonStatus,
+    pid: number,
+  ): Promise<void> {
+    if (error instanceof DaemonGenerationExitedBeforeSignalError) {
+      stderrLog(error.message);
+      return;
+    }
+    // Process doesn't exist or we don't have permission.
+    if (
+      error instanceof Error &&
+      (error.message.includes("ESRCH") || error.message.includes("EPERM"))
+    ) {
+      await cleanupDaemonFiles({
+        pidFilePath: this.pidFilePath,
+        socketPaths: this.cleanupSocketPaths(status.socketPath),
+        expectedPid: pid,
+      });
+      stderrLog("Daemon was not running (cleaned up stale PID file)");
+      return;
+    }
+    throw error;
   }
 
   /**
@@ -3193,7 +3237,9 @@ export class DaemonManager implements DaemonManagerLike {
    * remains non-destructive.
    */
   private async stopUnrecordedDaemonsForExplicitRestart(recordedPid?: number): Promise<void> {
-    const candidates = this.findLiveDaemonProcesses().filter((pid) => pid !== recordedPid);
+    const candidates = this.findLiveDaemonProcessRecords().filter(
+      (candidate) => candidate.pid !== recordedPid,
+    );
     if (candidates.length === 0) {
       return;
     }
@@ -3202,7 +3248,7 @@ export class DaemonManager implements DaemonManagerLike {
       `Explicit restart force-stopping ${candidates.length} live AutoMobile daemon candidate(s) without this namespace's PID record...`,
     );
     await this.awaitRestartCleanup(
-      candidates.map((pid) => () => this.stopExplicitRestartDaemonProcess(pid)),
+      candidates.map((candidate) => () => this.stopExplicitRestartDaemonProcess(candidate)),
     );
   }
 
@@ -3288,46 +3334,50 @@ export class DaemonManager implements DaemonManagerLike {
     }
   }
 
-  private async stopExplicitRestartDaemonProcess(pid: number): Promise<void> {
-    if (!this.findLiveDaemonProcesses().includes(pid)) {
-      stderrLog(`Daemon candidate ${pid} exited before explicit restart could stop it.`);
+  private async stopExplicitRestartDaemonProcess(expected: DaemonProcessRecord): Promise<void> {
+    if (!this.verifyDaemonGenerationBeforeSignal(expected, undefined, "Explicit restart")) {
+      stderrLog(`Daemon candidate ${expected.pid} exited before explicit restart could stop it.`);
       return;
     }
 
-    stderrLog(`Stopping daemon without this namespace's PID record (PID ${pid})...`);
+    stderrLog(`Stopping daemon without this namespace's PID record (PID ${expected.pid})...`);
     try {
-      this.processSignaler.signal(pid, "SIGTERM");
+      this.processSignaler.signal(expected.pid, "SIGTERM");
     } catch (error) {
       if (this.isMissingProcessError(error)) {
         return;
       }
       throw new ActionableError(
-        `Failed to stop verified daemon process ${pid}: ${this.describeError(error)}`,
+        `Failed to stop verified daemon process ${expected.pid}: ${this.describeError(error)}`,
       );
     }
 
-    if (await this.waitForStop(pid, DAEMON_SHUTDOWN_TIMEOUT_MS)) {
+    if (await this.waitForStop(expected.pid, DAEMON_SHUTDOWN_TIMEOUT_MS)) {
       return;
     }
 
-    stderrLog(`Verified daemon ${pid} did not stop gracefully, sending SIGKILL...`);
-    if (!this.findLiveDaemonProcesses().includes(pid)) {
-      stderrLog(`Daemon candidate ${pid} exited before explicit restart could force-stop it.`);
+    stderrLog(`Verified daemon ${expected.pid} did not stop gracefully, sending SIGKILL...`);
+    if (!this.verifyDaemonGenerationBeforeSignal(expected, undefined, "Explicit restart")) {
+      stderrLog(
+        `Daemon candidate ${expected.pid} exited before explicit restart could force-stop it.`,
+      );
       return;
     }
     try {
-      this.processSignaler.signal(pid, "SIGKILL");
+      this.processSignaler.signal(expected.pid, "SIGKILL");
     } catch (error) {
       if (this.isMissingProcessError(error)) {
         return;
       }
       throw new ActionableError(
-        `Failed to force-stop verified daemon process ${pid}: ${this.describeError(error)}`,
+        `Failed to force-stop verified daemon process ${expected.pid}: ${this.describeError(error)}`,
       );
     }
 
-    if (!(await this.waitForStop(pid, DAEMON_FORCED_STOP_TIMEOUT_MS))) {
-      throw new ActionableError(`Verified daemon process ${pid} did not exit after SIGKILL`);
+    if (!(await this.waitForStop(expected.pid, DAEMON_FORCED_STOP_TIMEOUT_MS))) {
+      throw new ActionableError(
+        `Verified daemon process ${expected.pid} did not exit after SIGKILL`,
+      );
     }
   }
 

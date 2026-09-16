@@ -189,7 +189,7 @@ describe("handleDaemonRequest", () => {
     expect(sessionManager.getSession(sessionId)?.lastHeartbeat).toBeGreaterThan(initialHeartbeat);
   });
 
-  test("fences token-bearing stale keepers while retaining tokenless heartbeat compatibility", async () => {
+  test("makes stale and tokenless heartbeats no-ops after owner B claims liveness", async () => {
     const devicePool = new FakeDevicePool({ total: 1, idle: 0, assigned: 1, error: 0 });
     const state = new FakeDaemonState(sessionManager, devicePool);
     const sessionId = "liveness-owner-session";
@@ -246,10 +246,7 @@ describe("handleDaemonRequest", () => {
       buildRequest("daemon/heartbeat", { sessionId, livenessPolicy: "heartbeat" }),
       state,
     );
-    expect(sessionManager.getSession(sessionId)).toMatchObject({
-      livenessPolicy: "heartbeat",
-      lastHeartbeat: fakeTimer.now(),
-    });
+    expect(sessionManager.getSession(sessionId)).toMatchObject(beforeStaleKeeper);
   });
 
   test("lets a surviving token keeper refresh a recovered session with no daemon-local owner", async () => {

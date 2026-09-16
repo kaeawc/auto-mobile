@@ -935,7 +935,14 @@ describe("DaemonManager stop", () => {
     processSignaler: DaemonProcessSignaler = new FakeDaemonProcessSignaler(),
   ): DaemonManager {
     const processFinder: DaemonProcessFinder & DaemonProcessLivenessChecker = {
-      findDaemonProcesses: () => [],
+      findDaemonProcesses: () =>
+        [...livePids].map((pid) => ({
+          pid,
+          ppid: 1,
+          command: "bun /repo/src/index.ts --daemon-mode",
+          startedAt: 1,
+          processGenerationToken: `stop-generation-${pid}`,
+        })),
       isProcessRunning: (pid) => {
         onLivenessCheck?.();
         return livePids.has(pid);
@@ -964,6 +971,8 @@ describe("DaemonManager stop", () => {
         socketPath,
         port: 3000,
         startedAt: 1,
+        processStartedAt: 1,
+        processGenerationToken: `stop-generation-${pid}`,
         version: "test",
       }),
     );
@@ -1044,6 +1053,83 @@ describe("DaemonManager stop", () => {
       expect(livenessChecks).toBeGreaterThan(12);
       expect(existsSync(pidFilePath)).toBe(false);
       expect(existsSync(socketPath)).toBe(false);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("signals the exact PID-file generation after immediate process-table verification", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "daemon-manager-stop-generation-"));
+    const pidFilePath = join(directory, "daemon.pid");
+    const socketPath = join(directory, "daemon.sock");
+    const pid = 4246;
+    const livePids = new Set([pid]);
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    writeStopPidFile(pidFilePath, pid, socketPath);
+    writeFileSync(socketPath, "socket");
+    const signaler = new FakeDaemonProcessSignaler((targetPid, signal) => {
+      if (targetPid === pid && signal === "SIGTERM") {
+        livePids.delete(pid);
+      }
+    });
+    const manager = createManagerForStop(
+      livePids,
+      timer,
+      pidFilePath,
+      socketPath,
+      undefined,
+      undefined,
+      signaler,
+    );
+
+    try {
+      await expect(manager.stop()).resolves.toBeUndefined();
+      expect(signaler.signals).toEqual([{ pid, signal: "SIGTERM" }]);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("never signals a replacement that reused the PID-file PID", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "daemon-manager-stop-pid-reuse-"));
+    const pidFilePath = join(directory, "daemon.pid");
+    const socketPath = join(directory, "daemon.sock");
+    const pid = 4247;
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    writeStopPidFile(pidFilePath, pid, socketPath);
+    writeFileSync(socketPath, "socket");
+    const processFinder: DaemonProcessFinder & DaemonProcessLivenessChecker = {
+      findDaemonProcesses: () => [
+        {
+          pid,
+          ppid: 1,
+          command: "bun /replacement/src/index.ts --daemon-mode",
+          startedAt: 2,
+          processGenerationToken: "replacement-generation",
+        },
+      ],
+      isProcessRunning: (targetPid) => targetPid === pid,
+    };
+    const signaler = new FakeDaemonProcessSignaler();
+    const manager = new DaemonManager(
+      undefined,
+      undefined,
+      timer,
+      join(directory, "daemon.lock"),
+      pidFilePath,
+      socketPath,
+      processFinder,
+      undefined,
+      undefined,
+      undefined,
+      signaler,
+    );
+
+    try {
+      await expect(manager.stop()).rejects.toThrow("verified daemon PID was reused");
+      expect(signaler.signals).toEqual([]);
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
@@ -1790,18 +1876,41 @@ describe("Daemon manager process detection", () => {
     ]);
   });
 
-  test("parses Darwin lstart process creation times for PID-reuse protection", () => {
+  test("parses supported Darwin daemon launch forms without matching unrelated bun processes", () => {
+    const lstart = "Sun Sep 13 10:57:04 2026";
     expect(
       parseDarwinDaemonProcessTable(
-        "20 1 Sun Sep 13 10:57:04 2026 bunx -y @kaeawc/auto-mobile@0.0.38 --daemon-mode",
+        [
+          `20 1 ${lstart} bun /repo/src/index.ts --daemon-mode`,
+          `21 1 ${lstart} bun /tmp/node_modules/@kaeawc/auto-mobile/dist/src/index.js --daemon-mode`,
+          `22 1 ${lstart} /opt/homebrew/opt/bun/bin/bun /opt/homebrew/Cellar/auto-mobile/0.0.73/libexec/dist/src/index.js --daemon-mode`,
+          `23 1 ${lstart} bun /repo/src/worker.ts --daemon-mode`,
+          "malformed process table row",
+          `not-a-pid 1 ${lstart} bun /repo/src/index.ts --daemon-mode`,
+        ].join("\n"),
       ),
     ).toEqual([
       {
         pid: 20,
         ppid: 1,
-        command: "bunx -y @kaeawc/auto-mobile@0.0.38 --daemon-mode",
+        command: "bun /repo/src/index.ts --daemon-mode",
         startedAt: new Date(2026, 8, 13, 10, 57, 4).getTime(),
-        processGenerationToken: "darwin:Sun Sep 13 10:57:04 2026",
+        processGenerationToken: `darwin:${lstart}`,
+      },
+      {
+        pid: 21,
+        ppid: 1,
+        command: "bun /tmp/node_modules/@kaeawc/auto-mobile/dist/src/index.js --daemon-mode",
+        startedAt: new Date(2026, 8, 13, 10, 57, 4).getTime(),
+        processGenerationToken: `darwin:${lstart}`,
+      },
+      {
+        pid: 22,
+        ppid: 1,
+        command:
+          "/opt/homebrew/opt/bun/bin/bun /opt/homebrew/Cellar/auto-mobile/0.0.73/libexec/dist/src/index.js --daemon-mode",
+        startedAt: new Date(2026, 8, 13, 10, 57, 4).getTime(),
+        processGenerationToken: `darwin:${lstart}`,
       },
     ]);
   });
@@ -3740,6 +3849,8 @@ describe("Daemon manager process detection", () => {
           pid: candidatePid,
           ppid: 1,
           command: "bun /other-checkout/dist/src/index.js --daemon-mode",
+          startedAt: 451_000,
+          processGenerationToken: "generation-451",
         },
       ],
       isProcessRunning: (pid) => livePids.has(pid),
@@ -3782,6 +3893,60 @@ describe("Daemon manager process detection", () => {
     }
   });
 
+  test("explicit restart never SIGKILLs a cross-namespace replacement after signaling the scanned generation", async () => {
+    const fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+    const candidatePid = 452;
+    let replacementInstalled = false;
+    const processFinder: DaemonProcessFinder & DaemonProcessLivenessChecker = {
+      findDaemonProcesses: () => [
+        {
+          pid: candidatePid,
+          ppid: 1,
+          command: "bun /other-checkout/dist/src/index.js --daemon-mode",
+          startedAt: replacementInstalled ? 2_000 : 1_000,
+          processGenerationToken: replacementInstalled
+            ? "replacement-generation"
+            : "original-generation",
+        },
+      ],
+      isProcessRunning: (pid) => pid === candidatePid,
+    };
+    const signaler = new FakeDaemonProcessSignaler((_pid, signal) => {
+      if (signal === "SIGTERM") {
+        replacementInstalled = true;
+      }
+    });
+    const manager = new DaemonManager(
+      undefined,
+      undefined,
+      fakeTimer,
+      undefined,
+      undefined,
+      undefined,
+      processFinder,
+      undefined,
+      undefined,
+      undefined,
+      signaler,
+      undefined,
+      undefined,
+      undefined,
+      new FakeDaemonPortAvailabilityChecker(),
+    );
+    const statusSpy = spyOn(manager, "status").mockResolvedValue({ running: false });
+    const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
+
+    try {
+      await expect(manager.restart()).rejects.toThrow("verified daemon PID was reused");
+      expect(signaler.signals).toEqual([{ pid: candidatePid, signal: "SIGTERM" }]);
+      expect(startSpy).not.toHaveBeenCalled();
+    } finally {
+      startSpy.mockRestore();
+      statusSpy.mockRestore();
+    }
+  });
+
   test("explicit restart force-stops every daemon from other PID-file namespaces", async () => {
     const dir = mkdtempSync(join(tmpdir(), "daemon-manager-custom-restart-test-"));
     const fakeTimer = new FakeTimer();
@@ -3794,6 +3959,8 @@ describe("Daemon manager process detection", () => {
           pid,
           ppid: 1,
           command: "bun /other-checkout/dist/src/index.js --daemon-mode",
+          startedAt: pid * 1_000,
+          processGenerationToken: `generation-${pid}`,
         })),
       isProcessRunning: (pid) => livePids.has(pid),
     };
@@ -3851,6 +4018,8 @@ describe("Daemon manager process detection", () => {
           pid,
           ppid: 1,
           command: "bun /other-checkout/dist/src/index.js --daemon-mode",
+          startedAt: pid * 1_000,
+          processGenerationToken: `generation-${pid}`,
         })),
       isProcessRunning: (pid) => livePids.has(pid),
     };
@@ -3879,6 +4048,8 @@ describe("Daemon manager process detection", () => {
     const statusSpy = spyOn(manager, "status").mockResolvedValue({
       running: true,
       pid: recordedPid,
+      processStartedAt: recordedPid * 1_000,
+      processGenerationToken: `generation-${recordedPid}`,
     });
     const stopSpy = spyOn(manager, "stop").mockImplementation(async () => {
       livePids.delete(recordedPid);
@@ -3910,6 +4081,8 @@ describe("Daemon manager process detection", () => {
           pid,
           ppid: 1,
           command: "bun /other-checkout/dist/src/index.js --daemon-mode",
+          startedAt: pid * 1_000,
+          processGenerationToken: `generation-${pid}`,
         })),
       isProcessRunning: (pid) => livePids.has(pid),
     };
@@ -3945,6 +4118,8 @@ describe("Daemon manager process detection", () => {
     const statusSpy = spyOn(manager, "status").mockResolvedValue({
       running: true,
       pid: recordedPid,
+      processStartedAt: recordedPid * 1_000,
+      processGenerationToken: `generation-${recordedPid}`,
     });
     const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
     const killSpy = spyOn(process, "kill").mockImplementation((_pid, signal) => {
@@ -3986,6 +4161,8 @@ describe("Daemon manager process detection", () => {
           pid,
           ppid: 1,
           command: "bun /other-checkout/dist/src/index.js --daemon-mode",
+          startedAt: pid * 1_000,
+          processGenerationToken: `generation-${pid}`,
         })),
       isProcessRunning: () => true,
     };
@@ -4056,6 +4233,8 @@ describe("Daemon manager process detection", () => {
           pid,
           ppid: 1,
           command: "bun /other-checkout/dist/src/index.js --daemon-mode",
+          startedAt: pid * 1_000,
+          processGenerationToken: `generation-${pid}`,
         })),
       isProcessRunning: (pid) => livePids.has(pid),
     };
@@ -4130,6 +4309,8 @@ describe("Daemon manager process detection", () => {
           pid: candidatePid,
           ppid: 1,
           command: "bun /other-checkout/dist/src/index.js --daemon-mode",
+          startedAt: 453_000,
+          processGenerationToken: "generation-453",
         },
       ],
       isProcessRunning: (pid) => {

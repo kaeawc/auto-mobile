@@ -525,6 +525,91 @@ describe("SessionManager", () => {
       }
     });
 
+    test("terminalizes persisted Android recovery when its stable identity is missing", async () => {
+      const persisted: DeviceSession = {
+        session_uuid: "missing-stable-identity",
+        device_id: "emulator-5560",
+        stable_device_id: null,
+        platform: "android",
+        status: "active",
+        source: null,
+        autolock_enabled: 0,
+        mcp_session_id: null,
+        daemon_session_id: "old-daemon",
+        created_at_ms: 1,
+        last_used_at_ms: 20,
+        expires_at_ms: 30,
+        released_at_ms: 25,
+        release_reason: "daemon-restart",
+        session_timeout_ms: 10,
+        heartbeat_timeout_ms: 5,
+        has_received_heartbeat: 1,
+        created_at: "2026-09-15T00:00:00.000Z",
+        updated_at: "2026-09-15T00:00:00.000Z",
+      };
+      const releases: string[] = [];
+      const persistence: DeviceSessionPersistence = {
+        async getSession() {
+          return persisted;
+        },
+        async upsertActiveSession() {
+          throw new Error("missing stable identity must not assign a sibling");
+        },
+        async recordActivity() {},
+        async markReleased(_sessionUuid, status, releasedAtMs, releaseReason) {
+          releases.push(releaseReason);
+          persisted.status = status;
+          persisted.released_at_ms = releasedAtMs;
+          persisted.release_reason = releaseReason;
+        },
+      };
+      const restarted = new SessionManager(fakeTimer, persistence);
+      let assignments = 0;
+      const devicePool: SessionDeviceAssigner = {
+        async assignDeviceToSession(): Promise<string> {
+          assignments++;
+          return "emulator-5562";
+        },
+      };
+
+      try {
+        await expect(
+          restarted.getOrCreateSession(
+            persisted.session_uuid,
+            devicePool,
+            "android",
+            undefined,
+            true,
+          ),
+        ).rejects.toThrow("persisted device identity is unavailable");
+        expect(assignments).toBe(0);
+        expect(releases).toEqual(["identity-recovery-identity-continuity-lost"]);
+        expect(restarted.getTerminalReleaseSnapshot(persisted.session_uuid)).toMatchObject({
+          deviceId: persisted.device_id,
+          releaseReason: "identity-recovery-identity-continuity-lost",
+          terminal: true,
+        });
+
+        // The explicit release path remains idempotent for the now-terminal UUID.
+        await expect(restarted.releaseSession(persisted.session_uuid)).resolves.toBeNull();
+        await expect(
+          restarted.getOrCreateSession(
+            persisted.session_uuid,
+            devicePool,
+            "android",
+            undefined,
+            true,
+          ),
+        ).rejects.toThrow(
+          "terminal after identity-recovery-identity-continuity-lost and cannot be reused",
+        );
+        expect(assignments).toBe(0);
+        expect(releases).toEqual(["identity-recovery-identity-continuity-lost"]);
+      } finally {
+        restarted.stopCleanupTimer();
+      }
+    });
+
     test.each([
       ["android", "target-absent", "Original_AVD", "emulator-5554"],
       ["android", "target-busy", "Original_AVD", "emulator-5554"],

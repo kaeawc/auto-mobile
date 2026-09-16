@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { createHmac } from "node:crypto";
-import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -40,10 +40,12 @@ interface Harness {
   evidence: string[];
   timer: FakeTimer;
   dependencies: MatrixDependencies;
+  maintenanceIsFenced(): boolean;
 }
 
 const IOS_UDID = "00000000-0000-0000-0000-000000000001";
 const LIVE_ACCEPTANCE_ENV = "AUTOMOBILE_ACCEPTANCE_LIVE";
+const posixTest = process.platform === "win32" ? test.skip : test;
 const androidArgs: AcceptanceArgs = {
   platform: "android",
   target: { avdName: "Pixel_8_API_35" },
@@ -154,6 +156,9 @@ function createHarness(
     removeIosSiblingAfterProvision?: boolean;
     allowPersistedSiblingFallback?: boolean;
     suppressCliStructuredContent?: boolean;
+    daemonStatusWithoutProcessToken?: boolean;
+    replaceProcessTokenAfterRepair?: boolean;
+    failMaintenanceCompletion?: boolean;
   } = {},
 ): Harness {
   const calls: ToolCall[] = [];
@@ -178,6 +183,8 @@ function createHarness(
   const terminalPersistedSessions = new Set<string>();
   let maintenanceFenced = false;
   let daemonGeneration = 1;
+  let processGenerationToken = "test-generation-1";
+  let processTokenReplaced = false;
   let pendingDoctorFault: string | undefined;
   const enabledToolsByOwner = new Map<string, Set<string>>();
   const enabledToolsByMintedSession = new Map<string, Set<string>>();
@@ -613,7 +620,7 @@ function createHarness(
         return {
           pid: 1000 + daemonGeneration,
           startedAt: daemonGeneration,
-          processGenerationToken: `test-generation-${daemonGeneration}`,
+          ...(options.daemonStatusWithoutProcessToken ? {} : { processGenerationToken }),
           buildId: "test-build",
           entryScript: "/test/dist/src/index.js",
         };
@@ -629,10 +636,21 @@ function createHarness(
         return { accepted: true, maintenanceToken: "test-maintenance-token" };
       }
       if (name === "ide/completeMaintenance") {
+        events.push(
+          `maintenance-complete-attempt:${
+            typeof arguments_.processGenerationToken === "string"
+              ? arguments_.processGenerationToken
+              : "legacy-pid-start"
+          }`,
+        );
+        if (options.failMaintenanceCompletion) {
+          throw new Error("maintenance completion failed");
+        }
         const sameGeneration =
           arguments_.pid === 1000 + daemonGeneration &&
           arguments_.startedAt === daemonGeneration &&
-          arguments_.processGenerationToken === `test-generation-${daemonGeneration}`;
+          arguments_.processGenerationToken ===
+            (options.daemonStatusWithoutProcessToken ? undefined : processGenerationToken);
         if (sameGeneration) {
           maintenanceFenced = false;
           events.push(`maintenance-complete:${daemonGeneration}`);
@@ -682,11 +700,17 @@ function createHarness(
           return { stdout: "" };
         }
         if (command.includes("doctor")) {
-          if (
+          if (options.replaceProcessTokenAfterRepair && !processTokenReplaced) {
+            processGenerationToken = "replacement-generation";
+            processTokenReplaced = true;
+            // A successor daemon does not inherit the admitted generation's fence.
+            maintenanceFenced = false;
+          } else if (
             pendingDoctorFault !== "corrupt-control-metadata" &&
             pendingDoctorFault !== "missing-control-metadata"
           ) {
             daemonGeneration += 1;
+            processGenerationToken = `test-generation-${daemonGeneration}`;
             // A replacement daemon has no inherited maintenance admission.
             maintenanceFenced = false;
           }
@@ -736,6 +760,7 @@ function createHarness(
           evidence.push(content);
         }),
     },
+    maintenanceIsFenced: () => maintenanceFenced,
   };
 }
 
@@ -1282,6 +1307,50 @@ describe("live device acceptance harness", () => {
     }
   });
 
+  posixTest("rejects a caller-owned manifest directory without changing its permissions", () => {
+    const directory = mkdtempSync(join(tmpdir(), "automobile-shared-manifest-"));
+    const operatorKeyPath = join(directory, "operator.key");
+    writeFileSync(operatorKeyPath, "x".repeat(32));
+    chmodSync(operatorKeyPath, 0o600);
+    chmodSync(directory, 0o755);
+    try {
+      expect(() =>
+        recordOwnershipManifest({
+          ...androidArgs,
+          operatorKeyPath,
+          operatorKey: Buffer.from("x".repeat(32)),
+          ownershipManifestPath: join(directory, "ownership.json"),
+        }),
+      ).toThrow("Evidence or manifest directory must have mode 700");
+      expect(statSync(directory).mode & 0o777).toBe(0o755);
+      expect(existsSync(join(directory, "ownership.json"))).toBe(false);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  posixTest("rejects a caller-owned evidence directory before device mutation", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "automobile-shared-evidence-"));
+    chmodSync(directory, 0o755);
+    const harness = createHarness();
+    const dependencies: MatrixDependencies = { ...harness.dependencies };
+    delete dependencies.writeFile;
+    try {
+      await expect(
+        runAcceptanceMatrix(
+          { ...androidArgs, evidencePath: join(directory, "evidence.json") },
+          dependencies,
+        ),
+      ).rejects.toThrow("Evidence directory must have mode 700");
+      expect(statSync(directory).mode & 0o777).toBe(0o755);
+      expect(harness.calls).toHaveLength(0);
+      expect(harness.cliCommands).toHaveLength(0);
+      expect(existsSync(join(directory, "evidence.json"))).toBe(false);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   test("refuses a signed manifest whose platform entries bind different control sets", () => {
     const directory = mkdtempSync(join(tmpdir(), "automobile-ownership-"));
     const operatorKeyPath = join(directory, "operator.key");
@@ -1579,8 +1648,55 @@ describe("live device acceptance harness", () => {
     await expect(runAcceptanceMatrix(androidArgs, harness.dependencies)).rejects.toThrow(
       "CLI failed for doctor",
     );
+    expect(harness.events).toContain("maintenance-complete-attempt:test-generation-1");
+    expect(harness.events).toContain("maintenance-complete:1");
+    expect(harness.maintenanceIsFenced()).toBe(false);
     const evidence = JSON.parse(harness.evidence[0]);
     expect(evidence.outcome.passed).toBe(false);
+  });
+
+  test("completes same-generation maintenance through the legacy PID/start fallback", async () => {
+    const harness = createHarness({ daemonStatusWithoutProcessToken: true });
+
+    await runAcceptanceMatrix(androidArgs, harness.dependencies);
+
+    expect(
+      harness.events.filter((event) => event === "maintenance-complete-attempt:legacy-pid-start"),
+    ).toHaveLength(2);
+    expect(harness.events.filter((event) => event === "maintenance-complete:1")).toHaveLength(2);
+    expect(harness.maintenanceIsFenced()).toBe(false);
+  });
+
+  test("does not complete a stale admission against a successor process token", async () => {
+    const harness = createHarness({ replaceProcessTokenAfterRepair: true });
+
+    await runAcceptanceMatrix(androidArgs, harness.dependencies);
+
+    const firstRepair = harness.events.indexOf("doctor:corrupt-control-metadata");
+    const nextAdmission = harness.events.indexOf("fault:missing-control-metadata");
+    expect(firstRepair).toBeGreaterThanOrEqual(0);
+    expect(nextAdmission).toBeGreaterThan(firstRepair);
+    expect(harness.events.slice(firstRepair, nextAdmission)).not.toContain(
+      "maintenance-complete-attempt:test-generation-1",
+    );
+    expect(harness.maintenanceIsFenced()).toBe(false);
+  });
+
+  test("preserves repair failure when maintenance cleanup also fails", async () => {
+    const harness = createHarness({
+      failCliFor: "doctor",
+      failMaintenanceCompletion: true,
+    });
+
+    await expect(runAcceptanceMatrix(androidArgs, harness.dependencies)).rejects.toThrow(
+      "CLI failed for doctor",
+    );
+
+    expect(harness.events).toContain("maintenance-complete-attempt:test-generation-1");
+    expect(harness.evidence[0]).not.toContain("maintenance completion failed");
+    const evidence = JSON.parse(harness.evidence[0]);
+    expect(evidence.outcome.error).toBeDefined();
+    expect(evidence.cleanup.failures).toHaveLength(1);
   });
 
   test("refuses host-wide doctor repair when unrelated AutoMobile work is active", async () => {

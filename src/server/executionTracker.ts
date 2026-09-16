@@ -118,7 +118,25 @@ export class ExecutionTracker {
    * so the fence remains until shutdown or an explicit admission rollback.
    */
   prepareForDaemonRestart(): DaemonRestartAdmission {
+    return this.prepareForDaemonRestartAdmission(false);
+  }
+
+  /**
+   * Transitions an already-authorized maintenance fence into restart preparation.
+   * The caller must validate the maintenance capability before invoking this path.
+   */
+  prepareForAdmittedDaemonRestart(): DaemonRestartAdmission {
+    if (!this.daemonMaintenancePrepared) {
+      return "restart_pending";
+    }
+    return this.prepareForDaemonRestartAdmission(true);
+  }
+
+  private prepareForDaemonRestartAdmission(maintenanceAdmitted: boolean): DaemonRestartAdmission {
     if (this.daemonRestartPrepared) {
+      return "restart_pending";
+    }
+    if (this.daemonMaintenancePrepared && !maintenanceAdmitted) {
       return "restart_pending";
     }
     if (this.executions.size > 0) {

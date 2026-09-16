@@ -1786,6 +1786,7 @@ export class DaemonMcpProxy {
     operation: () => Promise<T>,
     attemptedSessionUuid?: string,
     allowReleasedSession?: boolean,
+    fenceSessionNotFoundOnRetry = true,
   ): Promise<T> {
     if (this.closing) {
       throw new DaemonUnavailableError("MCP proxy is closing");
@@ -1839,17 +1840,34 @@ export class DaemonMcpProxy {
         return await operation();
       } catch (retryError) {
         this.throwIfBoundSessionFenced(allowReleasedSession);
-        if (
-          attemptedSessionUuid &&
-          this.boundSessionUuid === attemptedSessionUuid &&
-          this.isDaemonSessionNotFoundError(retryError)
-        ) {
-          this.fenceBoundSessionUuid(attemptedSessionUuid, "session-not-found");
+        const sessionNotFoundFenceTarget = this.sessionNotFoundFenceTarget(
+          retryError,
+          attemptedSessionUuid,
+          fenceSessionNotFoundOnRetry,
+        );
+        if (sessionNotFoundFenceTarget) {
+          this.fenceBoundSessionUuid(sessionNotFoundFenceTarget, "session-not-found");
           throw this.boundSessionExpiredError();
         }
         throw retryError;
       }
     }
+  }
+
+  private sessionNotFoundFenceTarget(
+    error: unknown,
+    attemptedSessionUuid: string | undefined,
+    fenceSessionNotFoundOnRetry: boolean,
+  ): string | undefined {
+    if (
+      !fenceSessionNotFoundOnRetry ||
+      !attemptedSessionUuid ||
+      this.boundSessionUuid !== attemptedSessionUuid ||
+      !this.isDaemonSessionNotFoundError(error)
+    ) {
+      return undefined;
+    }
+    return attemptedSessionUuid;
   }
 
   private isRecoverableDaemonSessionError(error: unknown, established = true): boolean {
@@ -2774,6 +2792,12 @@ export class DaemonMcpProxy {
             this.boundSessionHeartbeatParams(sessionUuid, claimLivenessOwnership),
           ),
         sessionUuid,
+        undefined,
+        // A replacement daemon has not materialized a persisted session until a
+        // device operation reaches recovery. Heartbeat misses before that point
+        // are not proof that the UUID is terminal; the first tool call remains
+        // responsible for either restoring it or applying the existing fence.
+        false,
       );
     } catch (error) {
       if (error instanceof DaemonBoundSessionExpiredError) {

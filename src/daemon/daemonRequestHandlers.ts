@@ -141,7 +141,8 @@ export async function handleDaemonRequest(
         };
       }
       const manager = state.getSessionManager();
-      if (!manager.getSession(sessionId)) {
+      const session = manager.getSession(sessionId);
+      if (!session) {
         return {
           success: false,
           error: `Session not found: ${sessionId}`,
@@ -153,6 +154,12 @@ export async function handleDaemonRequest(
           ? heartbeatParams.livenessOwnerToken
           : undefined;
       const claimsLivenessOwnership = heartbeatParams?.claimLivenessOwnership === true;
+      if (!livenessOwnerToken && session.livenessOwnerToken !== undefined) {
+        // Tokenless clients predate liveness ownership. Keep them compatible
+        // only until a token-bearing owner has claimed this session; afterward
+        // they are stale by definition and must not change policy or deadlines.
+        return { success: true, result: { sessionId } };
+      }
       if (livenessOwnerToken) {
         const ownsLiveness = claimsLivenessOwnership
           ? (manager.claimLivenessOwnership?.(sessionId, livenessOwnerToken) ?? false)

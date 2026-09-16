@@ -125,6 +125,7 @@ describe("LaunchApp", () => {
   });
 
   test("retries a transient Android offline process check", async () => {
+    const controller = new AbortController();
     fakeTimer.enableAutoAdvance();
     fakeAdb.setForegroundApp({ packageName, userId: 0 });
     fakeAdb.setCommandResponse("shell dumpsys activity processes", {
@@ -134,6 +135,7 @@ describe("LaunchApp", () => {
     fakeObserveScreen.setObserveResult(createObserveResult(packageName));
 
     let processChecks = 0;
+    const processCheckOptions: Array<{ noRetry?: boolean; signal?: AbortSignal }> = [];
     const originalExecuteCommand = fakeAdb.executeCommand.bind(fakeAdb);
     const executeSpy = spyOn(fakeAdb, "executeCommand").mockImplementation(
       async (
@@ -144,11 +146,11 @@ describe("LaunchApp", () => {
         signal,
         waitForProcessSettlementAfterAbort,
       ) => {
-        if (
-          command === `shell dumpsys activity processes ${packageName}` &&
-          processChecks++ === 0
-        ) {
-          throw new Error("adb: device offline");
+        if (command === `shell dumpsys activity processes ${packageName}`) {
+          processCheckOptions.push({ noRetry, signal });
+          if (processChecks++ === 0) {
+            throw new Error("adb: device offline");
+          }
         }
         return originalExecuteCommand(
           command,
@@ -162,11 +164,23 @@ describe("LaunchApp", () => {
     );
 
     try {
-      const result = await launchApp.execute(packageName, false, false);
+      const result = await launchApp.execute(
+        packageName,
+        false,
+        false,
+        undefined,
+        undefined,
+        undefined,
+        controller.signal,
+      );
 
       expect(result.success).toBe(true);
       expect(result.alreadyForeground).toBe(true);
       expect(processChecks).toBe(2);
+      expect(processCheckOptions).toEqual([
+        { noRetry: true, signal: controller.signal },
+        { noRetry: true, signal: controller.signal },
+      ]);
       expect(fakeAdb.getExecutedArgv()).toContainEqual([
         "shell",
         "dumpsys",
@@ -174,31 +188,17 @@ describe("LaunchApp", () => {
         "processes",
         packageName,
       ]);
-      expect(
-        fakeAdb
-          .getCommandCalls()
-          .filter(({ command }) => command === `shell dumpsys activity processes ${packageName}`)
-          .every(({ noRetry }) => noRetry === undefined),
-      ).toBe(true);
     } finally {
       executeSpy.mockRestore();
     }
   });
 
-  test("preserves AdbClient retries for a non-offline transient process-check failure", async () => {
+  test("fails fast on a non-offline process-check failure", async () => {
     let dispatches = 0;
+    const failure = new Error("adb transient blip");
     const adb = new AdbClient(device, async () => {
       dispatches += 1;
-      if (dispatches === 1) {
-        throw new Error("adb transient blip");
-      }
-      return {
-        stdout: "123:com.example.app/u0a123\n",
-        stderr: "",
-        toString: () => "123:com.example.app/u0a123\n",
-        trim: () => "123:com.example.app/u0a123",
-        includes: (searchString: string) => "123:com.example.app/u0a123\n".includes(searchString),
-      };
+      throw failure;
     });
     (
       adb as unknown as {
@@ -207,20 +207,21 @@ describe("LaunchApp", () => {
     ).getBaseCommandParts = async () => ({ adbPath: "adb", baseArgs: [] });
     const retryingLaunch = new LaunchApp(device, adb, null, fakeTimer);
 
-    const result = await (
-      retryingLaunch as unknown as {
-        readAndroidProcessStateWithOfflineRecovery(args: string[]): Promise<{ stdout: string }>;
-      }
-    ).readAndroidProcessStateWithOfflineRecovery([
-      "shell",
-      "dumpsys",
-      "activity",
-      "processes",
-      packageName,
-    ]);
+    await expect(
+      (
+        retryingLaunch as unknown as {
+          readAndroidProcessStateWithOfflineRecovery(args: string[]): Promise<{ stdout: string }>;
+        }
+      ).readAndroidProcessStateWithOfflineRecovery([
+        "shell",
+        "dumpsys",
+        "activity",
+        "processes",
+        packageName,
+      ]),
+    ).rejects.toBe(failure);
 
-    expect(result.stdout).toContain(packageName);
-    expect(dispatches).toBe(2);
+    expect(dispatches).toBe(1);
     expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
     expect(fakeTimer.getPendingSleepCount()).toBe(0);
   });
@@ -257,6 +258,8 @@ describe("LaunchApp", () => {
     try {
       await expect(launchApp.execute(packageName, false, false)).rejects.toThrow("device offline");
       expect(processChecks).toBe(3);
+      expect(fakeTimer.getSleepHistory()).toEqual([250, 500]);
+      expect(fakeTimer.getPendingSleepCount()).toBe(0);
     } finally {
       executeSpy.mockRestore();
     }
@@ -311,6 +314,7 @@ describe("LaunchApp", () => {
       await expect(resultPromise).rejects.toBe(deviceLoss);
       expect(processChecks).toBe(1);
       expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
+      expect(fakeTimer.getCurrentTime()).toBe(0);
     } finally {
       executeSpy.mockRestore();
     }

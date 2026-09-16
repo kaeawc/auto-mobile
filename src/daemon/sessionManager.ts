@@ -1170,7 +1170,7 @@ export class SessionManager {
       );
     }
     const recoveryTarget = devicePool
-      ? this.recoveryTargetFromPersisted(sessionId, persisted, platform)
+      ? await this.recoveryTargetFromPersisted(sessionId, persisted, platform)
       : undefined;
 
     logger.info(
@@ -3518,11 +3518,11 @@ export class SessionManager {
     });
   }
 
-  private recoveryTargetFromPersisted(
+  private async recoveryTargetFromPersisted(
     sessionId: string,
     persisted: DeviceSession | undefined,
     requestedPlatform: Platform | undefined,
-  ): SessionRecoveryTarget | undefined {
+  ): Promise<SessionRecoveryTarget | undefined> {
     if (!persisted || !this.isRecoverablePersistedSession(persisted)) {
       return undefined;
     }
@@ -3532,6 +3532,9 @@ export class SessionManager {
       persisted.stable_device_id ??
       (persisted.platform === "ios" ? persisted.device_id : undefined);
     if (!stableDeviceId) {
+      await this.terminalizePersistedRecoveryFailure(sessionId, persisted, {
+        terminalReleaseReason: "identity-recovery-identity-continuity-lost",
+      });
       throw new ActionableError(
         `Cannot safely recover session ${sessionId}: its persisted device identity is unavailable. ` +
           "Acquire a new device with getAndroid or getApple.",

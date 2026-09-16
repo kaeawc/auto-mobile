@@ -15,7 +15,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { chmod, mkdir, writeFile } from "node:fs/promises";
+import { chmod, writeFile } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
@@ -577,7 +577,7 @@ export function verifyEvidenceFile(args: EvidenceVerificationArgs): Evidence {
 
 function writeSecureFile(path: string, content: string): void {
   const directory = dirname(path);
-  mkdirSyncSecure(directory);
+  ensureSecureDirectorySync(directory, "Evidence or manifest directory");
   const temporary = `${path}.${randomUUID()}.tmp`;
   const fd = openSync(temporary, "wx", SECURE_FILE_MODE);
   try {
@@ -590,10 +590,12 @@ function writeSecureFile(path: string, content: string): void {
   chmodSync(path, SECURE_FILE_MODE);
 }
 
-function mkdirSyncSecure(path: string): void {
-  mkdirSync(path, { recursive: true, mode: SECURE_DIRECTORY_MODE });
-  chmodSync(path, SECURE_DIRECTORY_MODE);
-  assertMode(path, SECURE_DIRECTORY_MODE, "Evidence or manifest directory");
+function ensureSecureDirectorySync(path: string, description: string): void {
+  const created = mkdirSync(path, { recursive: true, mode: SECURE_DIRECTORY_MODE });
+  if (created !== undefined && process.platform !== "win32") {
+    chmodSync(path, SECURE_DIRECTORY_MODE);
+  }
+  assertMode(path, SECURE_DIRECTORY_MODE, description);
 }
 
 export function parseArgs(argv: string[]): AcceptanceArgs {
@@ -1264,9 +1266,7 @@ export async function defaultWriteEvidence(
   signal: AbortSignal,
 ): Promise<void> {
   signal.throwIfAborted();
-  await mkdir(dirname(path), { recursive: true, mode: SECURE_DIRECTORY_MODE });
-  await chmod(dirname(path), SECURE_DIRECTORY_MODE);
-  assertMode(dirname(path), SECURE_DIRECTORY_MODE, "Evidence directory");
+  ensureSecureDirectorySync(dirname(path), "Evidence directory");
   signal.throwIfAborted();
   const temporaryPath = `${path}.${randomUUID()}.tmp`;
   let published = false;
@@ -1677,6 +1677,9 @@ export async function runAcceptanceMatrix(
   const ownershipManifest =
     assertLiveSafeguards(args, dependencies) ?? testOnlyManifestForEvidence(args);
   assertProvisionSchemaMatrix(args);
+  if (dependencies.writeFile === undefined) {
+    ensureSecureDirectorySync(dirname(resolve(args.evidencePath)), "Evidence directory");
+  }
   const restoreAcceptanceRunScope = dependencies.testOnly
     ? () => {}
     : establishAcceptanceRunScope();
@@ -1797,6 +1800,7 @@ export async function runAcceptanceMatrix(
   let iosControls: IosDiscoveryControls | undefined;
   let controlClient: McpSessionClient | undefined;
   let daemonClient: DaemonSessionClient | undefined;
+  let activeMaintenanceAdmission: { phase: string; admission: MaintenanceAdmission } | undefined;
   let primaryError: unknown;
   let iosRunnerRestartEvidence = {
     serviceEndpointExposed: false,
@@ -2731,7 +2735,15 @@ export async function runAcceptanceMatrix(
     if (typeof maintenanceToken !== "string" || maintenanceToken.length === 0) {
       throw new Error(`Refusing ${phase}: daemon returned no maintenance admission token`);
     }
-    return { status, maintenanceToken };
+    const accepted = { status, maintenanceToken };
+    activeMaintenanceAdmission = { phase, admission: accepted };
+    return accepted;
+  };
+
+  const forgetMaintenanceAdmission = (admission: MaintenanceAdmission): void => {
+    if (activeMaintenanceAdmission?.admission.maintenanceToken === admission.maintenanceToken) {
+      activeMaintenanceAdmission = undefined;
+    }
   };
 
   const completeMaintenance = async (
@@ -2756,15 +2768,45 @@ export async function runAcceptanceMatrix(
     if (result.completed !== true) {
       throw new Error(`Daemon maintenance generation changed before ${phase} completed`);
     }
+    forgetMaintenanceAdmission(admission);
   };
 
-  const sameDaemonGeneration = (left: JsonObject, right: JsonObject): boolean =>
-    ["pid", "startedAt", "processGenerationToken"].every(
-      (field) =>
-        typeof left[field] !== "undefined" &&
-        typeof right[field] !== "undefined" &&
-        left[field] === right[field],
+  const sameDaemonGeneration = (left: JsonObject, right: JsonObject): boolean => {
+    if (
+      typeof left.pid !== "number" ||
+      typeof right.pid !== "number" ||
+      typeof left.startedAt !== "number" ||
+      typeof right.startedAt !== "number" ||
+      left.pid !== right.pid ||
+      left.startedAt !== right.startedAt
+    ) {
+      return false;
+    }
+    const leftToken = left.processGenerationToken;
+    const rightToken = right.processGenerationToken;
+    if (leftToken === undefined || rightToken === undefined) {
+      return true;
+    }
+    return (
+      typeof leftToken === "string" && typeof rightToken === "string" && leftToken === rightToken
     );
+  };
+
+  const finalizeActiveMaintenanceAdmission = async (): Promise<void> => {
+    const active = activeMaintenanceAdmission;
+    if (!active) {
+      return;
+    }
+    try {
+      await completeMaintenance(`${active.phase} cleanup`, active.admission, "cleanup");
+    } catch (error) {
+      cleanupFailures.push(
+        `${active.phase} maintenance completion: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  };
 
   const verifyDaemonProtocolAfterRepair = async (): Promise<JsonObject> => {
     const start = timer.now();
@@ -2855,21 +2897,8 @@ export async function runAcceptanceMatrix(
         // The doctor intentionally replaced the admitted generation. Its
         // single-use token cannot complete on a successor, so drop this client
         // before the next generation is admitted.
-        try {
-          await bounded(
-            `owned ${fault} daemon close`,
-            "cleanup",
-            async () => await daemonClient!.close(),
-          );
-        } catch (error) {
-          cleanupFailures.push(
-            `owned ${fault} daemon close: ${
-              error instanceof Error ? error.message : String(error)
-            }`,
-          );
-        } finally {
-          daemonClient = undefined;
-        }
+        forgetMaintenanceAdmission(admission);
+        await discardDaemonClient(`owned ${fault}`);
       }
 
       const cliStart = timer.now();
@@ -3089,6 +3118,7 @@ export async function runAcceptanceMatrix(
   } catch (error) {
     primaryError = error;
   } finally {
+    await finalizeActiveMaintenanceAdmission();
     for (const session of minted.filter((candidate) => !candidate.released)) {
       try {
         await release(session.sessionUuid, `cleanup-${session.phase}`, "cleanup");

@@ -22,6 +22,8 @@ import {
   DAEMON_BOUND_SESSION_PARAM,
   DAEMON_OWNED_SESSIONS_PARAM,
   DAEMON_RELEASED_SESSION_PARAM,
+  INTERNAL_ACCEPTANCE_DISCOVERY_CAPABILITY_PARAM,
+  INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM,
   DAEMON_SHUTDOWN_TIMEOUT_MS,
   DAEMON_RESTART_HANDOFF_DELAY_MS,
   DAEMON_RESTART_HANDOFF_TIMEOUT_MS,
@@ -53,6 +55,7 @@ import { OUTPUT_REDUCTION_FLAG_SPECS } from "../utils/outputReductionFlags";
 import { compareStrictNumericVersions } from "../server/deviceMatcher";
 import { releaseVersion } from "../utils/mcpVersion";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import { isExplicitPin, resolveAssetVersion, resolvePinnedVersion } from "../constants/release";
 import { SingleFlightInterval } from "./SingleFlightInterval";
 import type { SessionReleaseSnapshot } from "./sessionManager";
@@ -82,6 +85,11 @@ export type BuildMismatchReason = "autoStartDisabled" | "cooldown" | "restartMis
 
 const DAEMON_MCP_HEARTBEAT_INTERVAL_MS = 2_000;
 const COLD_RESOURCE_CONNECT_RETRY_DELAYS_MS = [250, 1_000, 4_000] as const;
+// These inventory tools never operate a device or mint a device session. They
+// normally retain a live binding's policy, but after that binding is terminally
+// released they must be able to discover the stable target for an explicit
+// getAndroid/getApple reacquisition (#7144).
+const SESSIONLESS_DEVICE_DISCOVERY_TOOLS = ["listDevices", "listDeviceImages"] as const;
 
 /** A transport failed before dispatch, rather than a reconciliation policy gate. */
 class DaemonPreflightConnectionError extends DaemonUnavailableError {
@@ -361,12 +369,25 @@ export interface DaemonMcpProxyConfig {
   clientVersion?: string;
   /** Existing device-pool session bound before the first discovery request. */
   initialSessionUuid?: string;
+  /** Supplies this proxy's stable liveness-owner token (injectable for tests). */
+  idGenerator?: IdGenerator;
   /**
    * Supplies the static tool surface served by `listAdvertisedTools()` before a
    * daemon connection exists (issue #5879). Defaults to the committed
    * `schemas/tool-definitions.json`; injectable for testing.
    */
   staticToolDefinitionsProvider?: () => ProxiedToolDefinition[];
+  /**
+   * Private live-acceptance configuration. It is set only while constructing
+   * the dedicated harness proxy; MCP tool callers cannot set it.
+   *
+   * Its signed internal arguments control discovery presentation where needed
+   * and retain structured tool payloads for the acceptance contract.
+   */
+  acceptanceDiscovery?: {
+    order: "forward" | "reverse";
+    capability: string;
+  };
 }
 
 /**
@@ -673,6 +694,14 @@ export class DaemonMcpProxy {
    * declaration the invocation just made.
    */
   private cliSessionLivenessDeclared = false;
+  /**
+   * Whether this binding has sent its one ownership-claim heartbeat. Marked
+   * before awaiting the request, because the daemon may apply it even when the
+   * response is lost; reconnects must then verify the same token, not reclaim.
+   */
+  private livenessOwnershipClaimSent = false;
+  /** Stable for this proxy instance, including all transport reconnects. */
+  private readonly livenessOwnerToken: string;
   private readonly buildIdentity: BuildIdentity;
   private readonly clientVersion: string;
   private readonly clientAssetVersion: string | null;
@@ -807,6 +836,7 @@ export class DaemonMcpProxy {
       (() => new DaemonClient(this.config.socketPath, this.config.connectionTimeoutMs));
     this.daemonStatusProbe = this.createStatusProbe(config);
     this.timer = config.timer ?? defaultTimer;
+    this.livenessOwnerToken = (config.idGenerator ?? defaultIdGenerator).next();
     this.heartbeatKeeper = new SingleFlightInterval(
       this.timer,
       heartbeatIntervalMs(config),
@@ -1756,6 +1786,7 @@ export class DaemonMcpProxy {
     operation: () => Promise<T>,
     attemptedSessionUuid?: string,
     allowReleasedSession?: boolean,
+    fenceSessionNotFoundOnRetry = true,
   ): Promise<T> {
     if (this.closing) {
       throw new DaemonUnavailableError("MCP proxy is closing");
@@ -1809,17 +1840,34 @@ export class DaemonMcpProxy {
         return await operation();
       } catch (retryError) {
         this.throwIfBoundSessionFenced(allowReleasedSession);
-        if (
-          attemptedSessionUuid &&
-          this.boundSessionUuid === attemptedSessionUuid &&
-          this.isDaemonSessionNotFoundError(retryError)
-        ) {
-          this.fenceBoundSessionUuid(attemptedSessionUuid, "session-not-found");
+        const sessionNotFoundFenceTarget = this.sessionNotFoundFenceTarget(
+          retryError,
+          attemptedSessionUuid,
+          fenceSessionNotFoundOnRetry,
+        );
+        if (sessionNotFoundFenceTarget) {
+          this.fenceBoundSessionUuid(sessionNotFoundFenceTarget, "session-not-found");
           throw this.boundSessionExpiredError();
         }
         throw retryError;
       }
     }
+  }
+
+  private sessionNotFoundFenceTarget(
+    error: unknown,
+    attemptedSessionUuid: string | undefined,
+    fenceSessionNotFoundOnRetry: boolean,
+  ): string | undefined {
+    if (
+      !fenceSessionNotFoundOnRetry ||
+      !attemptedSessionUuid ||
+      this.boundSessionUuid !== attemptedSessionUuid ||
+      !this.isDaemonSessionNotFoundError(error)
+    ) {
+      return undefined;
+    }
+    return attemptedSessionUuid;
   }
 
   private isRecoverableDaemonSessionError(error: unknown, established = true): boolean {
@@ -2087,6 +2135,11 @@ export class DaemonMcpProxy {
     delete callerArgs[DAEMON_OWNED_SESSIONS_PARAM];
     delete callerArgs[DAEMON_RELEASED_SESSION_PARAM];
     delete callerArgs[DAEMON_TOOL_SELECTION_PROFILE_PARAM];
+    // The acceptance controls are configuration of the dedicated harness proxy,
+    // never client-provided tool arguments. Remove both before routing so a
+    // caller cannot forge or override that configuration.
+    delete callerArgs[INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM];
+    delete callerArgs[INTERNAL_ACCEPTANCE_DISCOVERY_CAPABILITY_PARAM];
     // Device-session acquisition (including booted provisionDevice) mints a NEW
     // session in its RESULT and is never routed to — or fenced by — the connection's
     // bound session: it must be admitted even on a terminally fenced connection so
@@ -2096,11 +2149,12 @@ export class DaemonMcpProxy {
     // An omitted `sessionUuid` on the control tool means the connection profile,
     // not the proxy's retained device-routing session. Preserve that distinction
     // after a device has been bound.
-    const { forwardedArgs, allowReleasedSession } = this.prepareToolRoutingArgs(
+    const { forwardedArgs: routedArgs, allowReleasedSession } = this.prepareToolRoutingArgs(
       name,
       callerArgs,
       isSessionAcquisition,
     );
+    const forwardedArgs = this.withAcceptanceConfiguration(routedArgs);
     const forwardedSessionUuid = this.sessionUuidFromArgs(forwardedArgs);
     this.retainReleaseEpochReference(forwardedSessionUuid);
     // Snapshot the release epoch at forward time. If a session-released signal for
@@ -2185,25 +2239,45 @@ export class DaemonMcpProxy {
     }
   }
 
+  private withAcceptanceConfiguration(args: Record<string, unknown>): Record<string, unknown> {
+    const acceptanceDiscovery = this.config.acceptanceDiscovery;
+    if (!acceptanceDiscovery) {
+      return args;
+    }
+    return {
+      ...args,
+      [INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM]: acceptanceDiscovery.order,
+      [INTERNAL_ACCEPTANCE_DISCOVERY_CAPABILITY_PARAM]: acceptanceDiscovery.capability,
+    };
+  }
+
   private prepareToolRoutingArgs(
     name: string,
     callerArgs: Record<string, unknown>,
     isSessionAcquisition: boolean,
   ): { forwardedArgs: Record<string, unknown>; allowReleasedSession: boolean } {
+    const isTerminalSessionlessDiscovery =
+      this.terminalBoundSession !== undefined &&
+      this.sessionUuidFromArgs(callerArgs) === undefined &&
+      (SESSIONLESS_DEVICE_DISCOVERY_TOOLS as readonly string[]).includes(name);
     const usesDeviceSelector =
       this.toolTargetsDevice(name) &&
       this.hasImplicitDeviceSelector(callerArgs, name === "setActiveDevice");
     const routingArgs =
       name === SET_TOOL_ENABLED_TOOL_NAME
         ? this.withAcquiredDeviceRoute(callerArgs)
-        : isSessionAcquisition
+        : isSessionAcquisition || isTerminalSessionlessDiscovery
           ? callerArgs
           : this.withBoundSessionUuid(callerArgs, usesDeviceSelector);
     const canUseSurvivingSession = this.canUseSurvivingSession(callerArgs, usesDeviceSelector);
     const forwardedArgs = this.withToolSelectionProfile(
-      this.withOwnedSessionCapabilities(routingArgs, usesDeviceSelector && !isSessionAcquisition),
+      this.withOwnedSessionCapabilities(routingArgs, usesDeviceSelector || isSessionAcquisition),
     );
-    return { forwardedArgs, allowReleasedSession: isSessionAcquisition || canUseSurvivingSession };
+    return {
+      forwardedArgs,
+      allowReleasedSession:
+        isSessionAcquisition || isTerminalSessionlessDiscovery || canUseSurvivingSession,
+    };
   }
 
   private toolTargetsDevice(name: string): boolean {
@@ -2437,6 +2511,7 @@ export class DaemonMcpProxy {
     this.boundSessionUuidAt = undefined;
     this.initialSessionBindingConfigured = false;
     this.boundSessionFromResultMint = false;
+    this.livenessOwnershipClaimSent = false;
   }
 
   private fenceBoundSessionUuid(
@@ -2583,9 +2658,10 @@ export class DaemonMcpProxy {
       return;
     }
     try {
+      this.livenessOwnershipClaimSent = true;
       await this.client.callDaemonMethod(
         DAEMON_HEARTBEAT_METHOD,
-        this.boundSessionHeartbeatParams(sessionUuid),
+        this.boundSessionHeartbeatParams(sessionUuid, true),
       );
       if (this.boundSessionUuid === sessionUuid && !this.terminalBoundSession) {
         this.boundSessionUuidAt = this.timer.now();
@@ -2634,9 +2710,12 @@ export class DaemonMcpProxy {
       // is in flight must already carry the CLI marker, or it would land after
       // the declaration and restore the strict contract.
       this.cliSessionLivenessDeclared = true;
+      this.livenessOwnershipClaimSent = true;
       await this.client.callDaemonMethod(DAEMON_HEARTBEAT_METHOD, {
         sessionId: sessionUuid,
         livenessPolicy: CLI_SESSION_LIVENESS_POLICY,
+        livenessOwnerToken: this.livenessOwnerToken,
+        claimLivenessOwnership: true,
         // The daemon resolved its own env at startup and this invocation reuses
         // it, so the override only reaches the daemon by travelling with the
         // declaration (issue #6870 review). The daemon re-validates and bounds it.
@@ -2672,10 +2751,15 @@ export class DaemonMcpProxy {
    * its own remaining heartbeats keep the CLI marker instead, so a keeper tick
    * racing process exit cannot undo the declaration.
    */
-  private boundSessionHeartbeatParams(sessionUuid: string): {
+  private boundSessionHeartbeatParams(
+    sessionUuid: string,
+    claimLivenessOwnership = false,
+  ): {
     sessionId: string;
     livenessPolicy: string;
     idleTimeoutMs?: number;
+    livenessOwnerToken: string;
+    claimLivenessOwnership?: true;
   } {
     const livenessPolicy = this.cliSessionLivenessDeclared
       ? CLI_SESSION_LIVENESS_POLICY
@@ -2686,6 +2770,8 @@ export class DaemonMcpProxy {
       ...(livenessPolicy === CLI_SESSION_LIVENESS_POLICY
         ? { idleTimeoutMs: getCliSessionIdleTimeoutMs() }
         : {}),
+      livenessOwnerToken: this.livenessOwnerToken,
+      ...(claimLivenessOwnership ? { claimLivenessOwnership: true } : {}),
     };
   }
 
@@ -2695,13 +2781,23 @@ export class DaemonMcpProxy {
       return;
     }
     try {
+      const claimLivenessOwnership = !this.livenessOwnershipClaimSent;
+      if (claimLivenessOwnership) {
+        this.livenessOwnershipClaimSent = true;
+      }
       await this.withRecoverableReconnect(
         () =>
           this.client!.callDaemonMethod(
             DAEMON_HEARTBEAT_METHOD,
-            this.boundSessionHeartbeatParams(sessionUuid),
+            this.boundSessionHeartbeatParams(sessionUuid, claimLivenessOwnership),
           ),
         sessionUuid,
+        undefined,
+        // A replacement daemon has not materialized a persisted session until a
+        // device operation reaches recovery. Heartbeat misses before that point
+        // are not proof that the UUID is terminal; the first tool call remains
+        // responsible for either restoring it or applying the existing fence.
+        false,
       );
     } catch (error) {
       if (error instanceof DaemonBoundSessionExpiredError) {
@@ -2896,6 +2992,7 @@ export class DaemonMcpProxy {
     this.ownedDeviceSessions.add(mintedSessionUuid);
     this.boundSessionFromResultMint = true;
     this.initialSessionBindingConfigured = false;
+    this.livenessOwnershipClaimSent = false;
     // `tools/list` is forwarded under the bound session, so the binding just
     // published invalidates every cached definition fetched under the previous
     // scope. Drop it BEFORE the awaited heartbeat: the daemon's own
@@ -2978,6 +3075,7 @@ export class DaemonMcpProxy {
   private updateBoundSessionUuid(sessionUuid: string): void {
     if (sessionUuid !== this.boundSessionUuid) {
       this.boundSessionFromResultMint = false;
+      this.livenessOwnershipClaimSent = false;
     }
     this.boundSessionUuid = sessionUuid;
     this.boundSessionUuidAt = this.timer.now();

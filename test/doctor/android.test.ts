@@ -8,6 +8,7 @@ import {
   checkConnectedDevices,
   checkAvdMemory,
   checkEmulator,
+  runPostRepairAndroidChecks,
 } from "../../src/doctor/checks/android";
 import type { DoctorProbeOptions } from "../../src/doctor/types";
 import { tmpdir } from "node:os";
@@ -15,6 +16,8 @@ import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import type { AdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
 import type { BootedDevice } from "../../src/models";
+import { createDoctorDeadline } from "../../src/doctor/deadline";
+import { FakeTimer } from "../fakes/FakeTimer";
 
 const baseDependencies: AndroidDoctorDependencies = {
   detectAndroidCommandLineTools: async () => [],
@@ -119,6 +122,89 @@ describe("Android doctor command line tools check", () => {
     expect(result.status).toBe("pass");
     expect(result.message).toContain("13.0");
     expect(result.value).toBe(location.path);
+  });
+});
+
+describe("post-repair Android doctor checks", () => {
+  test("remain device-neutral and never enumerate AVDs", async () => {
+    let listAvdsCalls = 0;
+    const adbFactory = {
+      create: () => ({
+        getAdbPathOnly: async () => "/test/android-sdk/platform-tools/adb",
+        executeCommand: async () => ({
+          stdout: "Android Debug Bridge version 35.0.0",
+          stderr: "",
+          exitCode: 0,
+        }),
+      }),
+    } as unknown as AdbClientFactory;
+
+    const results = await runPostRepairAndroidChecks(
+      {},
+      {
+        ...baseDependencies,
+        adbFactory,
+        listAvds: async () => {
+          listAvdsCalls++;
+          throw new Error("post-repair verification must not enumerate AVDs");
+        },
+      },
+    );
+
+    expect(listAvdsCalls).toBe(0);
+    expect(results.map((result) => result.name)).toEqual([
+      "Android Command Line Tools",
+      "JAVA_HOME",
+      "ADB Installation",
+      "ADB Version",
+    ]);
+  });
+
+  test("aborts a stalled host-tool probe at the shared repair deadline", async () => {
+    const timer = new FakeTimer();
+    const deadline = createDoctorDeadline({ timeoutMs: 50 }, timer);
+    const location = {
+      path: "/test/android-sdk/cmdline-tools/latest",
+      source: "android_sdk_root" as const,
+      available_tools: ["sdkmanager"],
+    };
+    let cancellationObserved = false;
+    let adbFactoryCalls = 0;
+    const checks = runPostRepairAndroidChecks(
+      { ...deadline.probe },
+      {
+        ...baseDependencies,
+        detectAndroidCommandLineTools: async () => [location],
+        getBestAndroidToolsLocation: () => location,
+        getCmdlineToolsVersion: async (_location, probe) => {
+          await new Promise<void>((resolve) => {
+            probe?.signal?.addEventListener(
+              "abort",
+              () => {
+                cancellationObserved = true;
+                resolve();
+              },
+              { once: true },
+            );
+          });
+          return null;
+        },
+        adbFactory: {
+          create: () => {
+            adbFactoryCalls++;
+            throw new Error("post-deadline Android probes must not start");
+          },
+        } as unknown as AdbClientFactory,
+      },
+    );
+
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    timer.advanceTime(50);
+
+    await expect(checks).rejects.toThrow("Doctor diagnostic deadline elapsed");
+    expect(cancellationObserved).toBe(true);
+    expect(adbFactoryCalls).toBe(0);
+    deadline.dispose();
   });
 });
 
@@ -339,6 +425,43 @@ describe("checkAdbVersion", () => {
     const result = await checkAdbVersion(throwingFactory);
     expect(result.status).toBe("warn");
     expect(result.message).toContain("raw string error");
+  });
+});
+
+describe("Android doctor cancellation", () => {
+  test("aborts delayed emulator subprocess I/O without publishing a late pass", async () => {
+    const timer = new FakeTimer();
+    const deadline = createDoctorDeadline({ timeoutMs: 50, timer }, timer);
+    let observedSignal: AbortSignal | undefined;
+    let observedTimeoutMs: number | undefined;
+    let lateSuccess = false;
+    let settled = false;
+    const check = checkEmulator(deadline.probe, {
+      listAvds: async (probe) => {
+        observedSignal = probe?.signal;
+        observedTimeoutMs = probe?.timeoutMs;
+        await new Promise<void>((resolve) => {
+          probe?.signal?.addEventListener("abort", resolve, { once: true });
+        });
+        try {
+          probe?.signal?.throwIfAborted();
+          lateSuccess = true;
+          return [];
+        } finally {
+          settled = true;
+        }
+      },
+    });
+
+    timer.advanceTime(50);
+    const result = await check;
+    deadline.dispose();
+
+    expect(observedSignal?.aborted).toBe(true);
+    expect(observedTimeoutMs).toBe(50);
+    expect(settled).toBe(true);
+    expect(lateSuccess).toBe(false);
+    expect(result.status).toBe("warn");
   });
 });
 

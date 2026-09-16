@@ -283,6 +283,50 @@ describe("DefaultExactDeviceProvisioner", () => {
     expect(result.device.deviceId).toBe("exact-udid");
   });
 
+  test("uses the requested iOS UDID instead of a same-named sibling", async () => {
+    const provisioner = new DefaultExactDeviceProvisioner({
+      listDeviceImages: async () => [
+        {
+          name: "phone-api-36-a",
+          platform: "ios",
+          deviceId: "non-owned-udid",
+          isRunning: false,
+          runtime: "com.apple.CoreSimulator.SimRuntime.iOS-26-0",
+          deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
+        },
+        {
+          name: "phone-api-36-a",
+          platform: "ios",
+          deviceId: "owned-udid",
+          isRunning: false,
+          runtime: "com.apple.CoreSimulator.SimRuntime.iOS-26-0",
+          deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
+        },
+      ],
+      isCreationAllowed: () => true,
+      avdManager: {} as ExactAndroidAvdClient,
+      androidConfigReader: { readConfig: async () => null },
+      androidConfigWriter: {} as AndroidAvdConfigWriter,
+      iosSimulator: {
+        createSimulator: async () => {
+          throw new Error("must not create a same-named simulator");
+        },
+      },
+    });
+
+    const result = await provisioner.provision({
+      platform: "ios",
+      name: "phone-api-36-a",
+      deviceId: "owned-udid",
+      spec: {
+        runtime: "com.apple.CoreSimulator.SimRuntime.iOS-26-0",
+        deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
+      },
+    });
+
+    expect(result.device.deviceId).toBe("owned-udid");
+  });
+
   test("rejects an unavailable exact iOS simulator instead of adopting it", async () => {
     const provisioner = new DefaultExactDeviceProvisioner({
       listDeviceImages: async () => [

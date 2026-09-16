@@ -130,9 +130,31 @@ import type {
 import type { DeviceService } from "../features/observe/DeviceService";
 import { executionTracker } from "../server/executionTracker";
 import {
+  DAEMON_COMPLETE_MAINTENANCE_METHOD,
+  DAEMON_APPLY_ACCEPTANCE_DOCTOR_FAULT_METHOD,
+  DAEMON_CORRUPT_CONTROL_METADATA_METHOD,
+  DAEMON_PREPARE_MAINTENANCE_METHOD,
   DAEMON_PREPARE_RESTART_METHOD,
+  DAEMON_REPAIR_CONTROL_METADATA_METHOD,
+  DAEMON_RELEASE_ACCEPTANCE_RESTART_METHOD,
+  DAEMON_RESTART_ACCEPTANCE_SESSION_METHOD,
+  DAEMON_RESTART_ADMITTED_METHOD,
+  type AcceptanceSessionRestartScope,
+  type AcceptanceDoctorFault,
+  type DaemonAcceptanceDoctorFault,
+  type DaemonAcceptanceRestartRelease,
+  type DaemonAcceptanceSessionRestart,
+  type DaemonAdmittedRestart,
+  type DaemonControlMetadataCorruption,
+  type DaemonControlMetadataRepair,
+  type DaemonMaintenancePreparation,
   type DaemonRestartPreparation,
 } from "./daemonRestartAdmission";
+import {
+  daemonLiveAcceptanceCapabilityMatches,
+  daemonLiveAcceptanceScopedCapabilityMatches,
+  type DaemonGenerationIdentity,
+} from "./liveAcceptanceCapability";
 import {
   DEVICE_CONTROL_TRANSPORT_FAILURE_CODE,
   DeviceControlTransportError,
@@ -149,6 +171,19 @@ function resolveIdentityStartedAt(value: number | undefined, timer: Timer): numb
 }
 
 const MCP_CLIENT_IDLE_CLOSE_MS = 5 * 60 * 1000;
+/**
+ * Maintenance spans separate control RPCs (and, for restart-admitted, separate
+ * client processes), so it cannot be tied to one socket. Bound the global
+ * execution fence instead: the default live-acceptance platform budget is just
+ * under nine minutes, leaving a one-minute margin for valid fault/repair work.
+ */
+export const DAEMON_MAINTENANCE_ADMISSION_TTL_MS = 10 * 60 * 1000;
+/**
+ * Acceptance crash admission only spans generation revalidation and SIGKILL.
+ * Keep enough margin for a loaded process-table scan while bounding an
+ * abandoned process-global tool fence.
+ */
+export const DAEMON_ACCEPTANCE_RESTART_ADMISSION_TTL_MS = 15_000;
 /** Keep shutdown bounded if a request handler ignores its disconnected peer. */
 const DAEMON_REQUEST_HANDLER_DRAIN_TIMEOUT_MS = 1_000;
 /** Keep shutdown bounded if a client cannot flush a release notification. */
@@ -420,6 +455,8 @@ interface McpForwardRecoveryContext {
   request: DaemonRequest;
   route: McpForwardRoute;
   socketSessionId: string;
+  /** Aborted when the Unix-socket client that owns this forward disconnects. */
+  signal?: AbortSignal;
   totalTimeoutMs: number;
   /**
    * Mutable: a progress notification for THIS request extends `.value`, up to
@@ -554,11 +591,35 @@ export class UnixSocketServer {
   private readonly handshakeEnforced: boolean;
   private readonly daemonIdentity: DaemonSelfIdentity;
   private readonly identityStartedAt: number;
+  private readonly processGenerationToken: string | undefined;
   private readonly onRestartAccepted?: () => void;
+  private readonly onControlMetadataRepair?: (signal?: AbortSignal) => Promise<void>;
+  private readonly onControlMetadataCorruption?: (signal?: AbortSignal) => Promise<void>;
+  private readonly onAcceptanceDoctorFault?: (
+    fault: Exclude<
+      AcceptanceDoctorFault,
+      "missing-daemon" | "dead-daemon" | "unresponsive-daemon" | "stale-socket"
+    >,
+    signal?: AbortSignal,
+  ) => Promise<void>;
+  private readonly liveAcceptanceStartupSecret: string | undefined;
+  private maintenanceAdmissionToken: string | undefined;
+  private maintenanceAdmissionExpiresAt: number | undefined;
+  private maintenanceAdmissionExpiryTimer: NodeJS.Timeout | undefined;
+  private maintenanceRestartConsumed = false;
+  private acceptanceRestartAdmissionToken: string | undefined;
+  private acceptanceRestartAdmissionOwnerSessionId: string | undefined;
+  private acceptanceRestartAdmissionExpiresAt: number | undefined;
+  private acceptanceRestartAdmissionExpiryTimer: NodeJS.Timeout | undefined;
+  private acceptanceFaultUnresponsive = false;
   private readonly sessionToolSelectionService?: Pick<
     SessionToolSelectionService,
     "isEnabled" | "setEnabled"
   >;
+  /** Local control RPCs are cancelled when their owner disconnects or expires. */
+  private readonly localRequestAbortControllers = new Map<string, Set<AbortController>>();
+  /** Forwarded MCP requests are cancelled when their owner socket disconnects. */
+  private readonly mcpRequestAbortControllers = new Map<string, Set<AbortController>>();
   /**
    * Factory that `getMcpClient()` calls to open the loopback MCP HTTP client.
    * Defaults to the real {@link createMcpClient}; tests assign a fake here to
@@ -620,8 +681,19 @@ export class UnixSocketServer {
     handshakeConfig: {
       identity?: DaemonSelfIdentity;
       identityStartedAt?: number;
+      processGenerationToken?: string;
       enforce?: boolean;
       onRestartAccepted?: () => void;
+      onControlMetadataRepair?: (signal?: AbortSignal) => Promise<void>;
+      onControlMetadataCorruption?: (signal?: AbortSignal) => Promise<void>;
+      onAcceptanceDoctorFault?: (
+        fault: Exclude<
+          AcceptanceDoctorFault,
+          "missing-daemon" | "dead-daemon" | "unresponsive-daemon" | "stale-socket"
+        >,
+        signal?: AbortSignal,
+      ) => Promise<void>;
+      liveAcceptanceStartupSecret?: string;
       sessionToolSelectionService?: Pick<SessionToolSelectionService, "isEnabled" | "setEnabled">;
     } = {},
     idGenerator: IdGenerator = defaultIdGenerator,
@@ -657,7 +729,12 @@ export class UnixSocketServer {
       handshakeConfig.identityStartedAt,
       this.timer,
     );
+    this.processGenerationToken = handshakeConfig.processGenerationToken;
     this.onRestartAccepted = handshakeConfig.onRestartAccepted;
+    this.onControlMetadataRepair = handshakeConfig.onControlMetadataRepair;
+    this.onControlMetadataCorruption = handshakeConfig.onControlMetadataCorruption;
+    this.onAcceptanceDoctorFault = handshakeConfig.onAcceptanceDoctorFault;
+    this.liveAcceptanceStartupSecret = handshakeConfig.liveAcceptanceStartupSecret;
     logger.info(`UnixSocketServer initialized with endpoint: "${mcpEndpoint}"`);
     if (!mcpEndpoint) {
       logger.error("ERROR: mcpEndpoint is empty or undefined!");
@@ -820,7 +897,7 @@ export class UnixSocketServer {
             try {
               const request: DaemonRequest = JSON.parse(line);
               requestId = request.id;
-              const response = await this.handleRequest(sessionId, request, receivedAtMs);
+              const response = await this.handleRequest(sessionId, socket, request, receivedAtMs);
               this.writeFrame(socket, sessionId, response);
             } catch (error) {
               logger.error(`Error processing request ${requestId} from ${sessionId}:`, error);
@@ -840,26 +917,35 @@ export class UnixSocketServer {
 
     socket.on("close", () => {
       logger.info(`Client disconnected: ${sessionId}`);
-      this.sessions.delete(sessionId);
-      this.clientSockets.delete(sessionId);
-      this.notificationSubscribers.delete(sessionId);
-      this.clearBoundMcpClientKey(sessionId);
-      // Lift any streamed gesture this socket left open on the device (issue: streaming gesture
-      // input). Tracked so daemon shutdown drains it rather than a fire-and-forget floating promise.
-      this.trackRequestHandler(this.cancelOwnedGestures(sessionId));
+      this.releaseSocketSession(sessionId, socket);
     });
 
     socket.on("error", (error) => {
       logger.error(`Socket error for ${sessionId}:`, error);
-      this.sessions.delete(sessionId);
-      this.clientSockets.delete(sessionId);
-      this.notificationSubscribers.delete(sessionId);
-      this.clearBoundMcpClientKey(sessionId);
-      this.trackRequestHandler(this.cancelOwnedGestures(sessionId));
+      this.releaseSocketSession(sessionId, socket);
       if (!socket.destroyed) {
         socket.destroy();
       }
     });
+  }
+
+  private releaseSocketSession(sessionId: string, socket: Socket): void {
+    // Session IDs are expected to be unique, but teardown must still be
+    // incarnation-safe: a delayed close/error from an older socket must not
+    // remove or abort work registered by a newer socket with the same ID.
+    if (this.clientSockets.get(sessionId) !== socket) {
+      return;
+    }
+    this.abortLocalRequests(sessionId);
+    this.abortMcpRequests(sessionId);
+    this.releaseAcceptanceRestartAdmissionForOwner(sessionId);
+    this.sessions.delete(sessionId);
+    this.clientSockets.delete(sessionId);
+    this.notificationSubscribers.delete(sessionId);
+    this.clearBoundMcpClientKey(sessionId);
+    // Lift any streamed gesture this socket left open on the device (issue: streaming gesture
+    // input). Tracked so daemon shutdown drains it rather than a fire-and-forget floating promise.
+    this.trackRequestHandler(this.cancelOwnedGestures(sessionId));
   }
 
   private trackRequestHandler(handler: Promise<void>): void {
@@ -868,6 +954,137 @@ export class UnixSocketServer {
       () => this.activeRequestHandlers.delete(handler),
       () => this.activeRequestHandlers.delete(handler),
     );
+  }
+
+  private abortLocalRequests(sessionId: string): void {
+    this.abortRequestControllers(
+      sessionId,
+      this.localRequestAbortControllers,
+      "Daemon control client disconnected",
+    );
+  }
+
+  private abortMcpRequests(sessionId: string): void {
+    this.abortRequestControllers(
+      sessionId,
+      this.mcpRequestAbortControllers,
+      "Daemon MCP client disconnected",
+    );
+  }
+
+  private abortRequestControllers(
+    sessionId: string,
+    controllerMap: Map<string, Set<AbortController>>,
+    reason: string,
+  ): void {
+    const controllers = controllerMap.get(sessionId);
+    if (!controllers) {
+      return;
+    }
+    controllerMap.delete(sessionId);
+    for (const controller of controllers) {
+      controller.abort(new Error(reason));
+    }
+  }
+
+  private mcpRequestSignal(
+    sessionId: string,
+    ownerSocket: Socket | undefined = this.clientSockets.get(sessionId),
+  ): { signal: AbortSignal; dispose: () => void } {
+    const controller = new AbortController();
+    const controllers =
+      this.mcpRequestAbortControllers.get(sessionId) ?? new Set<AbortController>();
+    controllers.add(controller);
+    this.mcpRequestAbortControllers.set(sessionId, controllers);
+    const socket = this.clientSockets.get(sessionId);
+    if (!ownerSocket || socket !== ownerSocket || ownerSocket.destroyed) {
+      controller.abort(new Error("Daemon MCP client disconnected"));
+    }
+    return {
+      signal: controller.signal,
+      dispose: () => {
+        controllers.delete(controller);
+        if (
+          controllers.size === 0 &&
+          this.mcpRequestAbortControllers.get(sessionId) === controllers
+        ) {
+          this.mcpRequestAbortControllers.delete(sessionId);
+        }
+      },
+    };
+  }
+
+  /**
+   * An abort-ignoring MCP transport can return after its owning Unix socket has
+   * disconnected. Its result is no longer allowed to publish a session/profile
+   * binding that a later socket request could reuse.
+   */
+  private isMcpRequestOwnerCurrent(sessionId: string, signal: AbortSignal): boolean {
+    const socket = this.clientSockets.get(sessionId);
+    return !signal.aborted && socket !== undefined && !socket.destroyed;
+  }
+
+  private localRequestSignal(
+    sessionId: string,
+    ownerSocket: Socket,
+    timeoutMs: number,
+  ): { signal: AbortSignal; dispose: () => void } {
+    if (timeoutMs <= 0) {
+      throw new McpTimeoutError({
+        toolName: DAEMON_REPAIR_CONTROL_METADATA_METHOD,
+        timeoutMs: 0,
+        origin: "UnixSocketServer.handleRequest",
+        detail: "spent the control-RPC deadline waiting in queue",
+      });
+    }
+    const controller = new AbortController();
+    const controllers =
+      this.localRequestAbortControllers.get(sessionId) ?? new Set<AbortController>();
+    controllers.add(controller);
+    this.localRequestAbortControllers.set(sessionId, controllers);
+    const timeout = this.timer.setTimeout(() => {
+      controller.abort(new Error("Daemon control request deadline elapsed"));
+    }, timeoutMs);
+    const socket = this.clientSockets.get(sessionId);
+    if (socket !== ownerSocket || ownerSocket.destroyed) {
+      controller.abort(new Error("Daemon control client disconnected"));
+    }
+    return {
+      signal: controller.signal,
+      dispose: () => {
+        this.timer.clearTimeout(timeout);
+        controllers.delete(controller);
+        if (
+          controllers.size === 0 &&
+          this.localRequestAbortControllers.get(sessionId) === controllers
+        ) {
+          this.localRequestAbortControllers.delete(sessionId);
+        }
+      },
+    };
+  }
+
+  private async handleBoundLocalSocketRequest(
+    request: DaemonRequest,
+    sessionId: string,
+    ownerSocket: Socket,
+    timeoutMs: number,
+  ): Promise<any | undefined> {
+    const mutatesControlMetadata =
+      request.method === DAEMON_REPAIR_CONTROL_METADATA_METHOD ||
+      request.method === DAEMON_CORRUPT_CONTROL_METADATA_METHOD ||
+      request.method === DAEMON_APPLY_ACCEPTANCE_DOCTOR_FAULT_METHOD;
+    if (!mutatesControlMetadata) {
+      return await this.handleLocalSocketRequest(request, sessionId);
+    }
+
+    const localRequest = this.localRequestSignal(sessionId, ownerSocket, timeoutMs);
+    try {
+      localRequest.signal.throwIfAborted();
+      return await this.handleLocalSocketRequest(request, sessionId, localRequest.signal);
+    } finally {
+      localRequest.dispose();
+    }
   }
 
   /**
@@ -998,6 +1215,7 @@ export class UnixSocketServer {
    */
   private async handleRequest(
     sessionId: string,
+    ownerSocket: Socket,
     request: DaemonRequest,
     receivedAtMs: number = this.timer.now(),
   ): Promise<DaemonResponse> {
@@ -1019,6 +1237,12 @@ export class UnixSocketServer {
         error: DAEMON_SHUTTING_DOWN_ERROR_MESSAGE,
         daemonShuttingDown: daemonShuttingDownFailure(),
       };
+    }
+    if (this.acceptanceFaultUnresponsive) {
+      // Acceptance-only stale/unresponsive control state. Do not close the
+      // connection: doctor must distinguish a listening but non-responsive
+      // socket from a missing daemon under its own absolute deadline.
+      return await new Promise<DaemonResponse>(() => {});
     }
 
     const handshakeError = this.rejectOnHandshakeMismatch(request);
@@ -1071,8 +1295,15 @@ export class UnixSocketServer {
           };
         }
 
-        // Handle socket-local requests that don't need the MCP client
-        const localResult = await this.handleLocalSocketRequest(request, sessionId);
+        // Metadata mutation is the one local operation whose late completion
+        // can alter daemon ownership state, so bind it to the client's
+        // connection lifetime and its remaining request budget.
+        const localResult = await this.handleBoundLocalSocketRequest(
+          request,
+          sessionId,
+          ownerSocket,
+          deadline.value - this.timer.now(),
+        );
         if (localResult !== undefined) {
           return {
             id: request.id,
@@ -1087,78 +1318,86 @@ export class UnixSocketServer {
         }
         const initialRoute = this.getMcpForwardRoute(request, sessionId);
 
-        const result = await this.runMcpForwardForCurrentRoute(
-          initialRoute,
-          request,
-          sessionId,
-          async (route) => {
-            const remainingTimeoutMs = deadline.value - this.timer.now();
-            const queueWaitMs = totalTimeoutMs - remainingTimeoutMs;
-            const forwardLabel = UnixSocketServer.describeMcpForwardRequest(request);
-            logger.debug(
-              `[McpForward] start executionKey=${route.executionKey} clientKey=${route.clientKey} socketSession=${sessionId} requestId=${request.id} ${forwardLabel} queueWaitMs=${queueWaitMs} remainingTimeoutMs=${remainingTimeoutMs}`,
-            );
-
-            if (remainingTimeoutMs <= 0) {
-              const toolName =
-                request.method === "tools/call"
-                  ? (request.params?.name ?? request.method)
-                  : request.method;
-              throw new McpTimeoutError({
-                toolName,
-                timeoutMs: totalTimeoutMs,
-                origin: "UnixSocketServer.handleRequest",
-                detail: `spent ${queueWaitMs}ms waiting in queue`,
-              });
-            }
-
-            const forwardStartMs = this.timer.now();
-            try {
-              const sessionWasActiveBeforeForward = this.wasRequestSessionActive(request);
-              const response = await this.forwardMcpRequestWithRecovery({
-                request,
-                route,
-                socketSessionId: sessionId,
-                totalTimeoutMs,
-                deadline,
-                remainingTimeoutMs,
-                forwardStartMs,
-              });
-              this.recordBoundMcpClientKey(
-                request,
-                sessionId,
-                route,
-                sessionWasActiveBeforeForward,
-                response,
-              );
-              return response;
-            } finally {
+        const mcpRequest = this.mcpRequestSignal(sessionId, ownerSocket);
+        try {
+          const result = await this.runMcpForwardForCurrentRoute(
+            initialRoute,
+            request,
+            sessionId,
+            async (route) => {
+              const remainingTimeoutMs = deadline.value - this.timer.now();
+              const queueWaitMs = totalTimeoutMs - remainingTimeoutMs;
+              const forwardLabel = UnixSocketServer.describeMcpForwardRequest(request);
               logger.debug(
-                `[McpForward] end executionKey=${route.executionKey} clientKey=${route.clientKey} socketSession=${sessionId} requestId=${request.id} ${forwardLabel} forwardMs=${this.timer.now() - forwardStartMs}`,
+                `[McpForward] start executionKey=${route.executionKey} clientKey=${route.clientKey} socketSession=${sessionId} requestId=${request.id} ${forwardLabel} queueWaitMs=${queueWaitMs} remainingTimeoutMs=${remainingTimeoutMs}`,
               );
-              // The idle close is scheduled by runWithActiveMcpClient's wrapper once
-              // this client's active-forward count reaches zero, so it is re-armed
-              // even when a forward throws before reaching this finally (issue #4610).
-            }
-          },
-        );
 
-        if (isDaemonShuttingDownToolResult(result)) {
+              if (remainingTimeoutMs <= 0) {
+                const toolName =
+                  request.method === "tools/call"
+                    ? (request.params?.name ?? request.method)
+                    : request.method;
+                throw new McpTimeoutError({
+                  toolName,
+                  timeoutMs: totalTimeoutMs,
+                  origin: "UnixSocketServer.handleRequest",
+                  detail: `spent ${queueWaitMs}ms waiting in queue`,
+                });
+              }
+
+              const forwardStartMs = this.timer.now();
+              try {
+                const sessionWasActiveBeforeForward = this.wasRequestSessionActive(request);
+                const response = await this.forwardMcpRequestWithRecovery({
+                  request,
+                  route,
+                  socketSessionId: sessionId,
+                  signal: mcpRequest.signal,
+                  totalTimeoutMs,
+                  deadline,
+                  remainingTimeoutMs,
+                  forwardStartMs,
+                });
+                if (this.isMcpRequestOwnerCurrent(sessionId, mcpRequest.signal)) {
+                  this.recordBoundMcpClientKey(
+                    request,
+                    sessionId,
+                    route,
+                    sessionWasActiveBeforeForward,
+                    response,
+                  );
+                }
+                return response;
+              } finally {
+                logger.debug(
+                  `[McpForward] end executionKey=${route.executionKey} clientKey=${route.clientKey} socketSession=${sessionId} requestId=${request.id} ${forwardLabel} forwardMs=${this.timer.now() - forwardStartMs}`,
+                );
+                // The idle close is scheduled by runWithActiveMcpClient's wrapper once
+                // this client's active-forward count reaches zero, so it is re-armed
+                // even when a forward throws before reaching this finally (issue #4610).
+              }
+            },
+          );
+
+          if (isDaemonShuttingDownToolResult(result)) {
+            return {
+              id: request.id,
+              type: "mcp_response",
+              success: false,
+              error: DAEMON_SHUTTING_DOWN_ERROR_MESSAGE,
+              daemonShuttingDown: daemonShuttingDownFailure(),
+            };
+          }
+
           return {
             id: request.id,
             type: "mcp_response",
-            success: false,
-            error: DAEMON_SHUTTING_DOWN_ERROR_MESSAGE,
-            daemonShuttingDown: daemonShuttingDownFailure(),
+            success: true,
+            result,
           };
+        } finally {
+          mcpRequest.dispose();
         }
-
-        return {
-          id: request.id,
-          type: "mcp_response",
-          success: true,
-          result,
-        };
       } catch (error) {
         const errorMsg = errorMessage(error);
         const errorStack = error instanceof Error ? error.stack : "no stack";
@@ -1496,7 +1735,13 @@ export class UnixSocketServer {
       return;
     }
     const pool = this.daemonState.getDevicePool();
-    // Restoration accepts only live autolocks and does not reallocate a released UUID.
+    // Restoration attaches only live sessions. It restores both explicit
+    // acquisition ownership and autolock routing without reallocating a
+    // released UUID.
+    await pool.restoreOwnedDeviceSessionsForMcpSession?.(
+      [...new Set<string>(ids)],
+      socketSessionId,
+    );
     await pool.restoreAutolockSessionsForMcpSession?.([...new Set<string>(ids)], socketSessionId);
   }
 
@@ -1869,6 +2114,7 @@ export class UnixSocketServer {
   private async forwardMcpRequestWithRecovery(
     context: McpForwardRecoveryContext,
   ): Promise<unknown> {
+    context.signal?.throwIfAborted();
     const identity = this.getDeviceControlTransportIdentity(context);
     let mcpClient: Client;
     try {
@@ -1878,6 +2124,7 @@ export class UnixSocketServer {
         context.route.toolSelectionProfileUuid,
         context.route.releasedSessionUuid,
       );
+      context.signal?.throwIfAborted();
     } catch (error) {
       if (!this.isDeviceControlSocketClosure(context.request, error)) {
         throw error;
@@ -1911,6 +2158,7 @@ export class UnixSocketServer {
         context.socketSessionId,
         context.deadline,
         context.totalTimeoutMs,
+        context.signal,
       );
     } catch (error) {
       if (error instanceof ReleasedBoundSessionError) {
@@ -1938,8 +2186,10 @@ export class UnixSocketServer {
     identity: DeviceControlTransportIdentity,
     failedClient: Client,
   ): Promise<unknown> {
+    context.signal?.throwIfAborted();
     logger.warn("MCP client session expired, reconnecting and retrying...");
     await this.resetMcpClientIfCurrent(context.route.clientKey, failedClient);
+    context.signal?.throwIfAborted();
     let freshClient: Client;
     try {
       freshClient = await this.getMcpClient(
@@ -1948,6 +2198,7 @@ export class UnixSocketServer {
         context.route.toolSelectionProfileUuid,
         context.route.releasedSessionUuid,
       );
+      context.signal?.throwIfAborted();
     } catch (error) {
       if (!this.isDeviceControlSocketClosure(context.request, error)) {
         throw error;
@@ -1975,6 +2226,7 @@ export class UnixSocketServer {
         context.socketSessionId,
         context.deadline,
         context.totalTimeoutMs,
+        context.signal,
       );
     } catch (error) {
       if (!this.isDeviceControlSocketClosure(context.request, error)) {
@@ -2295,7 +2547,9 @@ export class UnixSocketServer {
     route: McpForwardRoute;
     remainingTimeoutMs: number;
     forwardStartMs: number;
+    signal?: AbortSignal;
   }): Promise<Client> {
+    input.signal?.throwIfAborted();
     const remainingMs = this.remainingMcpForwardBudget(input);
     if (remainingMs <= 0) {
       throw new McpClientReconnectDeadlineError();
@@ -2321,7 +2575,11 @@ export class UnixSocketServer {
     // sibling wait or an unrelated request already installed (issue #5499).
     const pendingCreation = this.mcpClientPromises.get(input.route.clientKey);
     try {
-      return await Promise.race([connection, deadline]);
+      const client = await Promise.race([connection, deadline]);
+      // Do not cancel `connection`: it may be shared by a live sibling. This
+      // owner simply must not reuse the client after its socket was cancelled.
+      input.signal?.throwIfAborted();
+      return client;
     } catch (error) {
       if (error instanceof McpClientReconnectDeadlineError) {
         this.discardTimedOutMcpReconnect(input.route.clientKey, connection, pendingCreation);
@@ -2534,42 +2792,19 @@ export class UnixSocketServer {
     }
   }
 
-  private async recoverDeviceControlTransport(
+  private async prepareDeviceControlRecoveryReplay(
     input: DeviceControlTransportRecoveryContext,
-  ): Promise<unknown> {
-    if (input.failedClient) {
-      await this.resetMcpClientIfCurrent(input.route.clientKey, input.failedClient, "detach");
-    }
-    if (!this.isDeviceControlRecoveryIdentityValid(input.identity, input.phase)) {
-      throw this.deviceControlTransportError({
-        request: input.request,
-        identity: input.identity,
-        phase: input.phase,
-        reconnectAttempted: false,
-        replayAttempted: false,
-        recoveryExhausted: false,
-      });
-    }
-
-    const replayAfterResponse =
-      input.phase === "response" && isReplaySafeAfterResponseClosure(input.request);
-    logger.warn(
-      `[McpForward] device-control transport closed for ${deviceControlToolName(input.request)} during ${input.phase}; reconnecting once`,
-    );
-    if (this.remainingMcpForwardBudget(input) <= 0) {
-      throw this.deviceControlTransportError({
-        request: input.request,
-        identity: input.identity,
-        phase: input.phase,
-        reconnectAttempted: false,
-        replayAttempted: false,
-        recoveryExhausted: true,
-      });
-    }
-
+    replayAfterResponse: boolean,
+  ): Promise<{
+    recoveryRoute: McpForwardRoute;
+    freshClient: Client;
+    retryRemainingMs: number;
+  }> {
     const recoveryRoute = this.getDeviceControlRecoveryRoute(input, replayAfterResponse);
     const recoveryInput = { ...input, route: recoveryRoute };
+    input.signal?.throwIfAborted();
     const freshClient = await this.reconnectDeviceControlTransport(recoveryInput);
+    input.signal?.throwIfAborted();
 
     const retryRemainingMs = this.remainingMcpForwardBudget(input);
     if (retryRemainingMs <= 0) {
@@ -2604,6 +2839,46 @@ export class UnixSocketServer {
         recoveryExhausted: false,
       });
     }
+    return { recoveryRoute, freshClient, retryRemainingMs };
+  }
+
+  private async recoverDeviceControlTransport(
+    input: DeviceControlTransportRecoveryContext,
+  ): Promise<unknown> {
+    input.signal?.throwIfAborted();
+    if (input.failedClient) {
+      await this.resetMcpClientIfCurrent(input.route.clientKey, input.failedClient, "detach");
+    }
+    input.signal?.throwIfAborted();
+    if (!this.isDeviceControlRecoveryIdentityValid(input.identity, input.phase)) {
+      throw this.deviceControlTransportError({
+        request: input.request,
+        identity: input.identity,
+        phase: input.phase,
+        reconnectAttempted: false,
+        replayAttempted: false,
+        recoveryExhausted: false,
+      });
+    }
+
+    const replayAfterResponse =
+      input.phase === "response" && isReplaySafeAfterResponseClosure(input.request);
+    logger.warn(
+      `[McpForward] device-control transport closed for ${deviceControlToolName(input.request)} during ${input.phase}; reconnecting once`,
+    );
+    if (this.remainingMcpForwardBudget(input) <= 0) {
+      throw this.deviceControlTransportError({
+        request: input.request,
+        identity: input.identity,
+        phase: input.phase,
+        reconnectAttempted: false,
+        replayAttempted: false,
+        recoveryExhausted: true,
+      });
+    }
+
+    const { recoveryRoute, freshClient, retryRemainingMs } =
+      await this.prepareDeviceControlRecoveryReplay(input, replayAfterResponse);
 
     try {
       const recoveryRequest = this.pinDeviceControlRecoveryRequest(
@@ -2618,6 +2893,7 @@ export class UnixSocketServer {
         input.socketSessionId,
         input.deadline,
         input.totalTimeoutMs,
+        input.signal,
       );
       if (!this.isDeviceControlReplayResultIdentityValid(input.identity)) {
         await this.resetMcpClientIfCurrent(recoveryRoute.clientKey, freshClient, "detach");
@@ -2840,13 +3116,7 @@ export class UnixSocketServer {
    * Returns undefined if the request should be forwarded to MCP.
    */
   private prepareDaemonRestart(params: Record<string, unknown>): DaemonRestartPreparation {
-    const generationMatches =
-      params.pid === process.pid &&
-      params.startedAt === this.identityStartedAt &&
-      params.version === this.daemonIdentity.version &&
-      params.buildId === this.daemonIdentity.build.buildId &&
-      params.entryScript === this.daemonIdentity.build.entryScript;
-    if (!generationMatches) {
+    if (!this.daemonGenerationMatches(params)) {
       return {
         accepted: false,
         reason: "generation_changed",
@@ -2879,6 +3149,447 @@ export class UnixSocketServer {
     }
   }
 
+  private daemonGenerationMatches(params: Record<string, unknown>): boolean {
+    return (
+      params.pid === process.pid &&
+      params.startedAt === this.identityStartedAt &&
+      params.version === this.daemonIdentity.version &&
+      params.buildId === this.daemonIdentity.build.buildId &&
+      params.entryScript === this.daemonIdentity.build.entryScript &&
+      params.processGenerationToken === this.processGenerationToken
+    );
+  }
+
+  private prepareDaemonMaintenance(params: Record<string, unknown>): DaemonMaintenancePreparation {
+    if (!this.daemonGenerationMatches(params)) {
+      return { accepted: false, reason: "generation_changed" };
+    }
+    this.expireDaemonMaintenanceAdmission();
+    const sessions = this.daemonState.getSessionManager().getAllSessions?.();
+    if (!sessions) {
+      return { accepted: false, reason: "sessions_unavailable" };
+    }
+    const activeSessions = sessions.length;
+    const admission = executionTracker.prepareForDaemonMaintenance(activeSessions);
+    if (admission !== "accepted") {
+      return { accepted: false, reason: admission };
+    }
+    const maintenanceToken = this.idGenerator.next();
+    this.maintenanceAdmissionToken = maintenanceToken;
+    this.maintenanceAdmissionExpiresAt = this.timer.now() + DAEMON_MAINTENANCE_ADMISSION_TTL_MS;
+    this.maintenanceAdmissionExpiryTimer = this.timer.setTimeout(
+      () => this.releaseDaemonMaintenanceAdmission(maintenanceToken),
+      DAEMON_MAINTENANCE_ADMISSION_TTL_MS,
+    );
+    this.maintenanceRestartConsumed = false;
+    return { accepted: true, maintenanceToken };
+  }
+
+  private completeDaemonMaintenance(params: Record<string, unknown>): {
+    completed: boolean;
+  } {
+    if (
+      !this.daemonGenerationMatches(params) ||
+      !this.daemonMaintenanceAdmissionMatches(params.maintenanceToken)
+    ) {
+      return { completed: false };
+    }
+    this.releaseDaemonMaintenanceAdmission(params.maintenanceToken);
+    return { completed: true };
+  }
+
+  private daemonMaintenanceAdmissionMatches(token: unknown): token is string {
+    this.expireDaemonMaintenanceAdmission();
+    return (
+      typeof token === "string" &&
+      this.maintenanceAdmissionToken !== undefined &&
+      token === this.maintenanceAdmissionToken
+    );
+  }
+
+  private expireDaemonMaintenanceAdmission(): void {
+    if (
+      this.maintenanceAdmissionToken !== undefined &&
+      this.maintenanceAdmissionExpiresAt !== undefined &&
+      this.maintenanceAdmissionExpiresAt <= this.timer.now()
+    ) {
+      this.releaseDaemonMaintenanceAdmission(this.maintenanceAdmissionToken);
+    }
+  }
+
+  private releaseDaemonMaintenanceAdmission(token: unknown): void {
+    if (
+      typeof token !== "string" ||
+      this.maintenanceAdmissionToken === undefined ||
+      token !== this.maintenanceAdmissionToken
+    ) {
+      return;
+    }
+    if (this.maintenanceAdmissionExpiryTimer !== undefined) {
+      this.timer.clearTimeout(this.maintenanceAdmissionExpiryTimer);
+    }
+    executionTracker.clearDaemonMaintenancePreparation();
+    this.maintenanceAdmissionToken = undefined;
+    this.maintenanceAdmissionExpiresAt = undefined;
+    this.maintenanceAdmissionExpiryTimer = undefined;
+    this.maintenanceRestartConsumed = false;
+  }
+
+  private restartAdmittedDaemon(params: Record<string, unknown>): DaemonAdmittedRestart {
+    if (!this.daemonGenerationMatches(params)) {
+      return { accepted: false, reason: "generation_changed" };
+    }
+    if (!this.daemonMaintenanceAdmissionMatches(params.maintenanceToken)) {
+      return { accepted: false, reason: "maintenance_token_invalid" };
+    }
+    if (this.maintenanceRestartConsumed) {
+      return { accepted: false, reason: "maintenance_token_consumed" };
+    }
+    const sessions = this.daemonState.getSessionManager().getAllSessions?.();
+    if (!sessions) {
+      return { accepted: false, reason: "sessions_unavailable" };
+    }
+    if (sessions.length > 0) {
+      return { accepted: false, reason: "active_sessions" };
+    }
+    const admission = executionTracker.prepareForAdmittedDaemonRestart();
+    if (admission !== "accepted") {
+      return { accepted: false, reason: admission };
+    }
+    if (!this.onRestartAccepted) {
+      executionTracker.clearDaemonRestartPreparation();
+      return { accepted: false, reason: "shutdown_unavailable" };
+    }
+    this.maintenanceRestartConsumed = true;
+    try {
+      this.onRestartAccepted();
+      return { accepted: true };
+    } catch (error) {
+      logger.warn("Failed to initiate a maintenance-admitted daemon restart", error);
+      executionTracker.clearDaemonRestartPreparation();
+      return { accepted: false, reason: "shutdown_unavailable" };
+    }
+  }
+
+  /**
+   * Acceptance-only crash admission for one persisted session. Unlike host
+   * maintenance, this intentionally permits exactly the signed session to
+   * survive in storage so the successor must prove stable-identity recovery.
+   * It never touches a device; the manager kills only this verified daemon
+   * generation after this RPC returns.
+   */
+  // eslint-disable-next-line complexity -- each refusal is a distinct security fence for this one-shot control RPC.
+  private restartAcceptanceSession(
+    params: Record<string, unknown>,
+    ownerSessionId: string | undefined,
+  ): DaemonAcceptanceSessionRestart {
+    if (!this.daemonGenerationMatches(params)) {
+      return { accepted: false, reason: "generation_changed" };
+    }
+    if (ownerSessionId === undefined) {
+      return { accepted: false, reason: "restart_pending" };
+    }
+    this.expireAcceptanceRestartAdmission();
+    const scope = this.acceptanceSessionRestartScope(params.scope);
+    if (!scope) {
+      return { accepted: false, reason: "scope_invalid" };
+    }
+    if (scope.expiresAt <= this.timer.now()) {
+      return { accepted: false, reason: "scope_expired" };
+    }
+    const identity: DaemonGenerationIdentity = {
+      pid: process.pid,
+      startedAt: this.identityStartedAt,
+      ...(this.processGenerationToken === undefined
+        ? {}
+        : { processGenerationToken: this.processGenerationToken }),
+      version: this.daemonIdentity.version,
+      buildId: this.daemonIdentity.build.buildId,
+      entryScript: this.daemonIdentity.build.entryScript,
+    };
+    if (
+      !daemonLiveAcceptanceScopedCapabilityMatches(
+        this.liveAcceptanceStartupSecret,
+        identity,
+        scope,
+        params.acceptanceCapability,
+      )
+    ) {
+      return { accepted: false, reason: "acceptance_capability_invalid" };
+    }
+    const sessions = this.daemonState.getSessionManager().getAllSessions?.();
+    if (!sessions) {
+      return { accepted: false, reason: "session_not_found" };
+    }
+    const session = sessions.find((candidate) => candidate.sessionId === scope.sessionUuid);
+    if (!session) {
+      return { accepted: false, reason: "session_not_found" };
+    }
+    if (
+      session.platform !== scope.platform ||
+      session.stableDeviceId !== scope.stableDeviceId ||
+      sessions.length !== 1
+    ) {
+      return {
+        accepted: false,
+        reason:
+          sessions.length !== 1 &&
+          sessions.some((candidate) => candidate.sessionId !== scope.sessionUuid)
+            ? "unrelated_sessions"
+            : "session_identity_mismatch",
+      };
+    }
+    const admission = executionTracker.prepareForDaemonRestart();
+    if (admission !== "accepted") {
+      return {
+        accepted: false,
+        reason: admission === "active_operations" ? "active_operations" : "restart_pending",
+      };
+    }
+    const restartToken = this.idGenerator.next();
+    const admissionTtlMs = Math.min(
+      DAEMON_ACCEPTANCE_RESTART_ADMISSION_TTL_MS,
+      scope.expiresAt - this.timer.now(),
+    );
+    this.acceptanceRestartAdmissionToken = restartToken;
+    this.acceptanceRestartAdmissionOwnerSessionId = ownerSessionId;
+    this.acceptanceRestartAdmissionExpiresAt = this.timer.now() + admissionTtlMs;
+    this.acceptanceRestartAdmissionExpiryTimer = this.timer.setTimeout(
+      () => this.releaseAcceptanceRestartAdmission(restartToken),
+      admissionTtlMs,
+    );
+    // Graceful shutdown would terminally release the persisted session. The
+    // manager keeps this socket open through generation verification and
+    // SIGKILL; disconnect or lease expiry rolls the fence back if it exits first.
+    return { accepted: true, restartToken };
+  }
+
+  private releaseAcceptanceRestart(
+    params: Record<string, unknown>,
+    ownerSessionId: string | undefined,
+  ): DaemonAcceptanceRestartRelease {
+    if (
+      !this.daemonGenerationMatches(params) ||
+      !this.acceptanceRestartAdmissionMatches(params.restartToken, ownerSessionId)
+    ) {
+      return { released: false };
+    }
+    this.releaseAcceptanceRestartAdmission(params.restartToken);
+    return { released: true };
+  }
+
+  private acceptanceRestartAdmissionMatches(
+    token: unknown,
+    ownerSessionId: string | undefined,
+  ): token is string {
+    this.expireAcceptanceRestartAdmission();
+    return (
+      typeof token === "string" &&
+      ownerSessionId !== undefined &&
+      token === this.acceptanceRestartAdmissionToken &&
+      ownerSessionId === this.acceptanceRestartAdmissionOwnerSessionId
+    );
+  }
+
+  private expireAcceptanceRestartAdmission(): void {
+    if (
+      this.acceptanceRestartAdmissionToken !== undefined &&
+      this.acceptanceRestartAdmissionExpiresAt !== undefined &&
+      this.acceptanceRestartAdmissionExpiresAt <= this.timer.now()
+    ) {
+      this.releaseAcceptanceRestartAdmission(this.acceptanceRestartAdmissionToken);
+    }
+  }
+
+  private releaseAcceptanceRestartAdmissionForOwner(ownerSessionId: string): void {
+    if (ownerSessionId !== this.acceptanceRestartAdmissionOwnerSessionId) {
+      return;
+    }
+    this.releaseAcceptanceRestartAdmission(this.acceptanceRestartAdmissionToken);
+  }
+
+  private releaseAcceptanceRestartAdmission(token: unknown): void {
+    if (typeof token !== "string" || token !== this.acceptanceRestartAdmissionToken) {
+      return;
+    }
+    if (this.acceptanceRestartAdmissionExpiryTimer !== undefined) {
+      this.timer.clearTimeout(this.acceptanceRestartAdmissionExpiryTimer);
+    }
+    executionTracker.clearDaemonRestartPreparation();
+    this.acceptanceRestartAdmissionToken = undefined;
+    this.acceptanceRestartAdmissionOwnerSessionId = undefined;
+    this.acceptanceRestartAdmissionExpiresAt = undefined;
+    this.acceptanceRestartAdmissionExpiryTimer = undefined;
+  }
+
+  // eslint-disable-next-line complexity -- validate every untrusted scope field before HMAC authorization.
+  private acceptanceSessionRestartScope(value: unknown): AcceptanceSessionRestartScope | undefined {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return undefined;
+    }
+    const scope = value as Partial<AcceptanceSessionRestartScope>;
+    const controls = scope.controls;
+    if (
+      typeof scope.sessionUuid !== "string" ||
+      scope.sessionUuid.length === 0 ||
+      (scope.platform !== "android" && scope.platform !== "ios") ||
+      typeof scope.stableDeviceId !== "string" ||
+      scope.stableDeviceId.length === 0 ||
+      typeof scope.expiresAt !== "number" ||
+      !Number.isFinite(scope.expiresAt) ||
+      !controls ||
+      typeof controls !== "object" ||
+      typeof controls.androidSiblingAvdName !== "string" ||
+      typeof controls.androidDuplicateSerial !== "string" ||
+      typeof controls.iosSameNameSiblingUdid !== "string"
+    ) {
+      return undefined;
+    }
+    return {
+      sessionUuid: scope.sessionUuid,
+      platform: scope.platform,
+      stableDeviceId: scope.stableDeviceId,
+      controls: {
+        androidSiblingAvdName: controls.androidSiblingAvdName,
+        androidDuplicateSerial: controls.androidDuplicateSerial,
+        iosSameNameSiblingUdid: controls.iosSameNameSiblingUdid,
+      },
+      expiresAt: scope.expiresAt,
+    };
+  }
+
+  private async repairControlMetadata(
+    params: Record<string, unknown>,
+    signal?: AbortSignal,
+  ): Promise<DaemonControlMetadataRepair> {
+    if (!this.daemonGenerationMatches(params)) {
+      return { repaired: false, reason: "generation_changed" };
+    }
+    if (!this.onControlMetadataRepair) {
+      return { repaired: false, reason: "repair_unavailable" };
+    }
+    signal?.throwIfAborted();
+    await this.onControlMetadataRepair(signal);
+    signal?.throwIfAborted();
+    return { repaired: true };
+  }
+
+  private async corruptControlMetadata(
+    params: Record<string, unknown>,
+    signal?: AbortSignal,
+  ): Promise<DaemonControlMetadataCorruption> {
+    if (!this.daemonGenerationMatches(params)) {
+      return { corrupted: false, reason: "generation_changed" };
+    }
+    if (!this.daemonMaintenanceAdmissionMatches(params.maintenanceToken)) {
+      return { corrupted: false, reason: "maintenance_token_invalid" };
+    }
+    const identity: DaemonGenerationIdentity = {
+      pid: process.pid,
+      startedAt: this.identityStartedAt,
+      ...(this.processGenerationToken === undefined
+        ? {}
+        : { processGenerationToken: this.processGenerationToken }),
+      version: this.daemonIdentity.version,
+      buildId: this.daemonIdentity.build.buildId,
+      entryScript: this.daemonIdentity.build.entryScript,
+    };
+    if (
+      !daemonLiveAcceptanceCapabilityMatches(
+        this.liveAcceptanceStartupSecret,
+        identity,
+        params.acceptanceCapability,
+      )
+    ) {
+      return { corrupted: false, reason: "acceptance_capability_invalid" };
+    }
+    const sessions = this.daemonState.getSessionManager().getAllSessions?.();
+    if (!sessions || sessions.length > 0) {
+      return { corrupted: false, reason: "active_sessions" };
+    }
+    if (!this.onControlMetadataCorruption) {
+      return { corrupted: false, reason: "fault_unavailable" };
+    }
+    signal?.throwIfAborted();
+    await this.onControlMetadataCorruption(signal);
+    signal?.throwIfAborted();
+    return { corrupted: true };
+  }
+
+  // eslint-disable-next-line complexity -- fault selection is deliberately fail-closed and host-control-only.
+  private async applyAcceptanceDoctorFault(
+    params: Record<string, unknown>,
+    signal?: AbortSignal,
+  ): Promise<DaemonAcceptanceDoctorFault> {
+    if (!this.daemonGenerationMatches(params)) {
+      return { accepted: false, reason: "generation_changed" };
+    }
+    if (!this.daemonMaintenanceAdmissionMatches(params.maintenanceToken)) {
+      return { accepted: false, reason: "maintenance_token_invalid" };
+    }
+    const fault = params.fault;
+    if (
+      fault !== "missing-daemon" &&
+      fault !== "dead-daemon" &&
+      fault !== "unresponsive-daemon" &&
+      fault !== "missing-control-metadata" &&
+      fault !== "corrupt-control-metadata" &&
+      fault !== "missing-socket" &&
+      fault !== "stale-socket"
+    ) {
+      return { accepted: false, reason: "fault_invalid" };
+    }
+    const expiresAt = params.expiresAt;
+    if (typeof expiresAt !== "number" || !Number.isFinite(expiresAt)) {
+      return { accepted: false, reason: "scope_expired" };
+    }
+    if (expiresAt <= this.timer.now()) {
+      return { accepted: false, reason: "scope_expired" };
+    }
+    const identity: DaemonGenerationIdentity = {
+      pid: process.pid,
+      startedAt: this.identityStartedAt,
+      ...(this.processGenerationToken === undefined
+        ? {}
+        : { processGenerationToken: this.processGenerationToken }),
+      version: this.daemonIdentity.version,
+      buildId: this.daemonIdentity.build.buildId,
+      entryScript: this.daemonIdentity.build.entryScript,
+    };
+    const scope = { fault, expiresAt };
+    if (
+      !daemonLiveAcceptanceScopedCapabilityMatches(
+        this.liveAcceptanceStartupSecret,
+        identity,
+        scope,
+        params.acceptanceCapability,
+      )
+    ) {
+      return { accepted: false, reason: "acceptance_capability_invalid" };
+    }
+    const sessions = this.daemonState.getSessionManager().getAllSessions?.();
+    if (!sessions || sessions.length > 0) {
+      return { accepted: false, reason: "active_sessions" };
+    }
+    signal?.throwIfAborted();
+    if (fault === "unresponsive-daemon" || fault === "stale-socket") {
+      this.acceptanceFaultUnresponsive = true;
+      return { accepted: true };
+    }
+    if (fault === "missing-daemon") {
+      return { accepted: true, controlState: "daemon-missing" };
+    }
+    if (fault === "dead-daemon") {
+      return { accepted: true, controlState: "daemon-dead" };
+    }
+    if (!this.onAcceptanceDoctorFault) {
+      return { accepted: false, reason: "fault_unavailable" };
+    }
+    await this.onAcceptanceDoctorFault(fault, signal);
+    signal?.throwIfAborted();
+    return { accepted: true };
+  }
+
   private requireFeatureFlagService(): FeatureFlagService {
     if (!this.featureFlagService) {
       throw new Error("Feature flag service not available");
@@ -2889,6 +3600,7 @@ export class UnixSocketServer {
   private async handleLocalSocketRequest(
     request: DaemonRequest,
     socketSessionId?: string,
+    signal?: AbortSignal,
   ): Promise<any | undefined> {
     if (request.method === "input/tap") {
       return await this.handleInputTap(request, socketSessionId);
@@ -2971,6 +3683,30 @@ export class UnixSocketServer {
       case DAEMON_PREPARE_RESTART_METHOD: {
         return this.prepareDaemonRestart(request.params);
       }
+      case DAEMON_PREPARE_MAINTENANCE_METHOD: {
+        return this.prepareDaemonMaintenance(request.params);
+      }
+      case DAEMON_COMPLETE_MAINTENANCE_METHOD: {
+        return this.completeDaemonMaintenance(request.params);
+      }
+      case DAEMON_RESTART_ADMITTED_METHOD: {
+        return this.restartAdmittedDaemon(request.params);
+      }
+      case DAEMON_RESTART_ACCEPTANCE_SESSION_METHOD: {
+        return this.restartAcceptanceSession(request.params, socketSessionId);
+      }
+      case DAEMON_RELEASE_ACCEPTANCE_RESTART_METHOD: {
+        return this.releaseAcceptanceRestart(request.params, socketSessionId);
+      }
+      case DAEMON_REPAIR_CONTROL_METADATA_METHOD: {
+        return await this.repairControlMetadata(request.params, signal);
+      }
+      case DAEMON_CORRUPT_CONTROL_METADATA_METHOD: {
+        return await this.corruptControlMetadata(request.params, signal);
+      }
+      case DAEMON_APPLY_ACCEPTANCE_DOCTOR_FAULT_METHOD: {
+        return await this.applyAcceptanceDoctorFault(request.params, signal);
+      }
       case "ide/status": {
         return {
           // Concrete pinned version (honors AUTOMOBILE_VERSION), never the
@@ -2981,6 +3717,9 @@ export class UnixSocketServer {
           buildId: this.daemonIdentity.build.buildId,
           entryScript: this.daemonIdentity.build.entryScript,
           startedAt: this.identityStartedAt,
+          ...(this.processGenerationToken === undefined
+            ? {}
+            : { processGenerationToken: this.processGenerationToken }),
           activeProvisioning: executionTracker.hasActiveToolExecution("provisionDevice", {
             scope: "global",
           }),
@@ -4729,6 +5468,20 @@ export class UnixSocketServer {
     return discovery.devices;
   }
 
+  private mcpRequestOptions(
+    timeoutMs: number,
+    signal?: AbortSignal,
+  ): { timeout: number; signal?: AbortSignal } {
+    return signal ? { timeout: timeoutMs, signal } : { timeout: timeoutMs };
+  }
+
+  private combineMcpRequestSignals(
+    ownerSignal: AbortSignal | undefined,
+    timeoutSignal: AbortSignal,
+  ): AbortSignal {
+    return ownerSignal ? AbortSignal.any([ownerSignal, timeoutSignal]) : timeoutSignal;
+  }
+
   private async handleIdeRequest(
     mcpClient: Client,
     request: DaemonRequest,
@@ -4750,12 +5503,14 @@ export class UnixSocketServer {
      * instead, independent of queue wait (#6222 review, P1).
      */
     originalTimeoutMs: number,
+    signal?: AbortSignal,
   ): Promise<any> {
-    const requestOptions = { timeout: timeoutMs };
+    signal?.throwIfAborted();
+    const requestOptions = this.mcpRequestOptions(timeoutMs, signal);
 
     switch (request.method) {
       case "tools/list": {
-        return await mcpClient.listTools();
+        return await mcpClient.listTools(undefined, requestOptions);
       }
       case "tools/call": {
         const progressToken = request.progressToken;
@@ -4818,7 +5573,7 @@ export class UnixSocketServer {
 
           callOptions = {
             ...requestOptions,
-            signal: controller.signal,
+            signal: this.combineMcpRequestSignals(signal, controller.signal),
             timeout: backstopMs,
             maxTotalTimeout: backstopMs,
             // Relay progress ticks back to the ORIGINATING socket session,
@@ -4862,7 +5617,7 @@ export class UnixSocketServer {
         }
       }
       case "resources/list": {
-        return await mcpClient.listResources();
+        return await mcpClient.listResources(undefined, requestOptions);
       }
       case "resources/read": {
         if (!request.params?.uri) {
@@ -4871,7 +5626,7 @@ export class UnixSocketServer {
         return await mcpClient.readResource({ uri: request.params.uri }, undefined, requestOptions);
       }
       case "resources/list-templates": {
-        return await mcpClient.listResourceTemplates();
+        return await mcpClient.listResourceTemplates(undefined, requestOptions);
       }
       case "ide/getNavigationGraph": {
         const args = {
@@ -5297,6 +6052,8 @@ export class UnixSocketServer {
     this.closing = true;
     this.acceptingRequests = false;
     this.lifecycleGeneration += 1;
+    this.releaseDaemonMaintenanceAdmission(this.maintenanceAdmissionToken);
+    this.releaseAcceptanceRestartAdmission(this.acceptanceRestartAdmissionToken);
 
     // Stop receiving list-changed events (mirrors the subscribe in start()).
     this.listChangedUnsubscribe?.();

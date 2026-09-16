@@ -140,6 +140,13 @@ export interface Session {
   hasReceivedHeartbeat: boolean; // Whether any heartbeat has been received
   livenessPolicy: SessionLivenessPolicy; // How this session's liveness is judged (#6870)
   /**
+   * The current token authorized to refresh this session's liveness. It is
+   * daemon-local deliberately: a newly established proxy or explicit CLI
+   * adoption claims it, while a reconnecting keeper must prove it still owns
+   * the token before extending the session.
+   */
+  livenessOwnerToken?: string;
+  /**
    * The strict-contract timeouts this session had before it adopted the
    * `cli-idle` policy, so a later long-lived owner can restore them (#6870).
    * Absent whenever the session is on (or has never left) the `heartbeat`
@@ -200,7 +207,8 @@ export class TerminalSessionError extends Error {
     readonly release: SessionReleaseSnapshot,
   ) {
     super(
-      `Session ${sessionUuid} is terminal after ${release.releaseReason}; use a new session UUID.`,
+      `Session ${sessionUuid} is terminal after ${release.releaseReason} and cannot be reused. ` +
+        "Acquire a new device with getAndroid or getApple.",
     );
     this.name = "TerminalSessionError";
   }
@@ -284,8 +292,85 @@ export interface SessionDeviceAssigner {
 export interface SessionRecoveryTarget {
   platform: Platform;
   stableDeviceId: string;
+  /** Transport identity recorded before the daemon restart. */
+  deviceId: string;
   /** Distinguishes an Android AVD name from a physical-device serial. */
   androidEmulator?: boolean;
+}
+
+export type SessionRecoveryFailureReason =
+  | "target-absent"
+  | "target-busy"
+  | "identity-continuity-lost";
+
+/**
+ * The persisted target cannot be recovered without assigning an unrelated
+ * device. SessionManager fences the UUID when this reaches it.
+ */
+export class SessionRecoveryIdentityLossError extends ActionableError {
+  readonly terminalReleaseReason: string;
+
+  constructor(
+    readonly sessionUuid: string,
+    readonly target: SessionRecoveryTarget,
+    readonly reason: SessionRecoveryFailureReason,
+  ) {
+    const detail =
+      reason === "target-busy"
+        ? "is already in use"
+        : reason === "identity-continuity-lost"
+          ? "lost identity continuity"
+          : "is unavailable";
+    super(
+      `Cannot safely recover session ${sessionUuid}: ${target.platform} device ` +
+        `'${target.stableDeviceId}' ${detail} (recovery reason: ${reason}). ` +
+        "The persisted session is terminal; " +
+        "acquire a new device with getAndroid or getApple.",
+    );
+    this.name = "SessionRecoveryIdentityLossError";
+    this.terminalReleaseReason = `identity-recovery-${reason}`;
+  }
+}
+
+type SessionRecoveryIdentityLoss = Pick<
+  SessionRecoveryIdentityLossError,
+  "sessionUuid" | "target" | "reason" | "terminalReleaseReason"
+>;
+
+function isSessionRecoveryFailureReason(reason: unknown): reason is SessionRecoveryFailureReason {
+  return (
+    reason === "target-absent" || reason === "target-busy" || reason === "identity-continuity-lost"
+  );
+}
+
+function isSessionRecoveryTarget(target: unknown): target is SessionRecoveryTarget {
+  if (!target || typeof target !== "object") {
+    return false;
+  }
+  const candidate = target as Partial<SessionRecoveryTarget>;
+  if (candidate.platform !== "android" && candidate.platform !== "ios") {
+    return false;
+  }
+  return typeof candidate.stableDeviceId === "string" && typeof candidate.deviceId === "string";
+}
+
+/**
+ * `SessionDeviceAssigner` is an injected boundary. A recovery error can retain
+ * its product payload while originating from another loaded bundle, in which
+ * case `instanceof` alone would skip terminalizing an already-rejected UUID.
+ */
+function isSessionRecoveryIdentityLossError(error: unknown): error is SessionRecoveryIdentityLoss {
+  if (!(error instanceof Error) || error.name !== "SessionRecoveryIdentityLossError") {
+    return false;
+  }
+  const candidate = error as Partial<SessionRecoveryIdentityLoss>;
+  return (
+    typeof candidate.sessionUuid === "string" &&
+    typeof candidate.terminalReleaseReason === "string" &&
+    isSessionRecoveryFailureReason(candidate.reason) &&
+    candidate.terminalReleaseReason === `identity-recovery-${candidate.reason}` &&
+    isSessionRecoveryTarget(candidate.target)
+  );
 }
 
 export interface RebindSessionOptions {
@@ -360,6 +445,7 @@ function isTerminalReleaseReason(releaseReason: string): boolean {
     releaseReason === "cli-idle-timeout" ||
     releaseReason === "device-killed" ||
     releaseReason === "session-creation-cancelled" ||
+    releaseReason.startsWith("identity-recovery-") ||
     releaseReason.startsWith("device-disconnected:")
   );
 }
@@ -1084,7 +1170,7 @@ export class SessionManager {
       );
     }
     const recoveryTarget = devicePool
-      ? this.recoveryTargetFromPersisted(sessionId, persisted, platform)
+      ? await this.recoveryTargetFromPersisted(sessionId, persisted, platform)
       : undefined;
 
     logger.info(
@@ -1099,8 +1185,13 @@ export class SessionManager {
       );
     }
 
-    // DevicePool will call createSession() with assigned device
-    await devicePool.assignDeviceToSession(sessionId, platform, recoveryTarget);
+    await this.assignUnseenSessionToDevicePool(
+      sessionId,
+      devicePool,
+      platform,
+      recoveryTarget,
+      persisted,
+    );
 
     // Session now exists, return it
     const session = this.getSession(sessionId);
@@ -1112,6 +1203,52 @@ export class SessionManager {
       `[SessionManager] Successfully created session ${sessionId} with device ${session.assignedDevice}`,
     );
     return session;
+  }
+
+  /**
+   * A recovery conflict is terminal for this UUID. Keep the fencing work out
+   * of createUnseenSession so ordinary allocation stays easy to audit.
+   */
+  private async assignUnseenSessionToDevicePool(
+    sessionId: string,
+    devicePool: SessionDeviceAssigner,
+    platform: Platform | undefined,
+    recoveryTarget: SessionRecoveryTarget | undefined,
+    persisted: DeviceSession | undefined,
+  ): Promise<void> {
+    try {
+      await devicePool.assignDeviceToSession(sessionId, platform, recoveryTarget);
+    } catch (error) {
+      if (
+        persisted &&
+        isSessionRecoveryIdentityLossError(error) &&
+        error.sessionUuid === sessionId
+      ) {
+        await this.terminalizePersistedRecoveryFailure(sessionId, persisted, error);
+      }
+      throw error;
+    }
+  }
+
+  private async terminalizePersistedRecoveryFailure(
+    sessionId: string,
+    persisted: DeviceSession,
+    error: Pick<SessionRecoveryIdentityLossError, "terminalReleaseReason">,
+  ): Promise<void> {
+    const releasedAtMs = this.timer.now();
+    await this.persistTerminalReleaseIfNeeded({
+      sessionId,
+      deviceId: persisted.device_id,
+      releaseReason: error.terminalReleaseReason,
+      releasedAtMs,
+      terminal: true,
+      heartbeat: {
+        lastHeartbeatMs: persisted.last_used_at_ms,
+        hasReceivedHeartbeat: persisted.has_received_heartbeat === 1,
+        timeoutMs: persisted.heartbeat_timeout_ms,
+        ageMs: Math.max(0, releasedAtMs - persisted.last_used_at_ms),
+      },
+    });
   }
 
   async rebindSession(
@@ -3019,6 +3156,41 @@ export class SessionManager {
   }
 
   /**
+   * Make `ownerToken` the current liveness owner for a session.
+   *
+   * This intentionally does not record activity. The request handler claims
+   * ownership before applying the requested policy and recording its heartbeat,
+   * so a stale token can be rejected without changing any liveness deadline.
+   */
+  claimLivenessOwnership(sessionId: string, ownerToken: string): boolean {
+    const session = this.getSession(sessionId);
+    if (!session) {
+      logger.warn(`Cannot claim liveness ownership for session ${sessionId}: not found`);
+      return false;
+    }
+    session.livenessOwnerToken = ownerToken;
+    return true;
+  }
+
+  /** Return whether `ownerToken` is still authorized to refresh the session. */
+  hasLivenessOwnership(sessionId: string, ownerToken: string): boolean {
+    return this.getSession(sessionId)?.livenessOwnerToken === ownerToken;
+  }
+
+  /**
+   * Recover daemon-local liveness ownership after restart without allowing a
+   * keeper to replace an owner that was established by this daemon instance.
+   */
+  claimUnownedLivenessOwnership(sessionId: string, ownerToken: string): boolean {
+    const session = this.getSession(sessionId);
+    if (!session || session.livenessOwnerToken !== undefined) {
+      return false;
+    }
+    session.livenessOwnerToken = ownerToken;
+    return true;
+  }
+
+  /**
    * Move a session onto the CLI liveness policy and record a heartbeat (#6870).
    *
    * Called when a one-shot `--cli` process declares ownership of the session it
@@ -3346,11 +3518,11 @@ export class SessionManager {
     });
   }
 
-  private recoveryTargetFromPersisted(
+  private async recoveryTargetFromPersisted(
     sessionId: string,
     persisted: DeviceSession | undefined,
     requestedPlatform: Platform | undefined,
-  ): SessionRecoveryTarget | undefined {
+  ): Promise<SessionRecoveryTarget | undefined> {
     if (!persisted || !this.isRecoverablePersistedSession(persisted)) {
       return undefined;
     }
@@ -3360,6 +3532,9 @@ export class SessionManager {
       persisted.stable_device_id ??
       (persisted.platform === "ios" ? persisted.device_id : undefined);
     if (!stableDeviceId) {
+      await this.terminalizePersistedRecoveryFailure(sessionId, persisted, {
+        terminalReleaseReason: "identity-recovery-identity-continuity-lost",
+      });
       throw new ActionableError(
         `Cannot safely recover session ${sessionId}: its persisted device identity is unavailable. ` +
           "Acquire a new device with getAndroid or getApple.",
@@ -3375,6 +3550,7 @@ export class SessionManager {
     return {
       platform: persisted.platform,
       stableDeviceId,
+      deviceId: persisted.device_id,
       ...(persisted.platform === "android"
         ? { androidEmulator: isAndroidEmulatorSerial(persisted.device_id) }
         : {}),

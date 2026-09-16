@@ -2,6 +2,7 @@ import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import { describe, expect, test, beforeEach, afterEach } from "bun:test";
 import {
   SessionManager,
+  SessionRecoveryIdentityLossError,
   type BiometricEnrollmentRestorer,
   type KeepScreenAwakeRestorer,
   type NetworkConditionRestorer,
@@ -492,7 +493,9 @@ describe("SessionManager", () => {
         async markReleased() {},
       };
       const restarted = new SessionManager(fakeTimer, persistence);
-      let recoveryTarget: { platform: string; stableDeviceId: string } | undefined;
+      let recoveryTarget:
+        | { platform: string; stableDeviceId: string; deviceId: string }
+        | undefined;
       const devicePool: SessionDeviceAssigner = {
         async assignDeviceToSession(sessionId, _platform, target): Promise<string> {
           recoveryTarget = target;
@@ -514,12 +517,270 @@ describe("SessionManager", () => {
         expect(recoveryTarget).toEqual({
           platform: "android",
           stableDeviceId: "Pixel_8_API_35",
+          deviceId: "emulator-5560",
           androidEmulator: true,
         });
       } finally {
         restarted.stopCleanupTimer();
       }
     });
+
+    test("terminalizes persisted Android recovery when its stable identity is missing", async () => {
+      const persisted: DeviceSession = {
+        session_uuid: "missing-stable-identity",
+        device_id: "emulator-5560",
+        stable_device_id: null,
+        platform: "android",
+        status: "active",
+        source: null,
+        autolock_enabled: 0,
+        mcp_session_id: null,
+        daemon_session_id: "old-daemon",
+        created_at_ms: 1,
+        last_used_at_ms: 20,
+        expires_at_ms: 30,
+        released_at_ms: 25,
+        release_reason: "daemon-restart",
+        session_timeout_ms: 10,
+        heartbeat_timeout_ms: 5,
+        has_received_heartbeat: 1,
+        created_at: "2026-09-15T00:00:00.000Z",
+        updated_at: "2026-09-15T00:00:00.000Z",
+      };
+      const releases: string[] = [];
+      const persistence: DeviceSessionPersistence = {
+        async getSession() {
+          return persisted;
+        },
+        async upsertActiveSession() {
+          throw new Error("missing stable identity must not assign a sibling");
+        },
+        async recordActivity() {},
+        async markReleased(_sessionUuid, status, releasedAtMs, releaseReason) {
+          releases.push(releaseReason);
+          persisted.status = status;
+          persisted.released_at_ms = releasedAtMs;
+          persisted.release_reason = releaseReason;
+        },
+      };
+      const restarted = new SessionManager(fakeTimer, persistence);
+      let assignments = 0;
+      const devicePool: SessionDeviceAssigner = {
+        async assignDeviceToSession(): Promise<string> {
+          assignments++;
+          return "emulator-5562";
+        },
+      };
+
+      try {
+        await expect(
+          restarted.getOrCreateSession(
+            persisted.session_uuid,
+            devicePool,
+            "android",
+            undefined,
+            true,
+          ),
+        ).rejects.toThrow("persisted device identity is unavailable");
+        expect(assignments).toBe(0);
+        expect(releases).toEqual(["identity-recovery-identity-continuity-lost"]);
+        expect(restarted.getTerminalReleaseSnapshot(persisted.session_uuid)).toMatchObject({
+          deviceId: persisted.device_id,
+          releaseReason: "identity-recovery-identity-continuity-lost",
+          terminal: true,
+        });
+
+        // The explicit release path remains idempotent for the now-terminal UUID.
+        await expect(restarted.releaseSession(persisted.session_uuid)).resolves.toBeNull();
+        await expect(
+          restarted.getOrCreateSession(
+            persisted.session_uuid,
+            devicePool,
+            "android",
+            undefined,
+            true,
+          ),
+        ).rejects.toThrow(
+          "terminal after identity-recovery-identity-continuity-lost and cannot be reused",
+        );
+        expect(assignments).toBe(0);
+        expect(releases).toEqual(["identity-recovery-identity-continuity-lost"]);
+      } finally {
+        restarted.stopCleanupTimer();
+      }
+    });
+
+    test.each([
+      ["android", "target-absent", "Original_AVD", "emulator-5554"],
+      ["android", "target-busy", "Original_AVD", "emulator-5554"],
+      ["ios", "target-absent", "original-simulator-uuid", "original-simulator-uuid"],
+      ["ios", "target-busy", "original-simulator-uuid", "original-simulator-uuid"],
+    ] as const)(
+      "fences a persisted %s session after %s without assigning a sibling",
+      async (platform, reason, stableDeviceId, deviceId) => {
+        const persisted: DeviceSession = {
+          session_uuid: `${platform}-${reason}`,
+          device_id: deviceId,
+          stable_device_id: stableDeviceId,
+          platform,
+          status: "expired",
+          source: "session-manager",
+          autolock_enabled: 0,
+          mcp_session_id: null,
+          daemon_session_id: "old-daemon",
+          created_at_ms: 1,
+          last_used_at_ms: 20,
+          expires_at_ms: 30,
+          released_at_ms: 25,
+          release_reason: "daemon-restart",
+          session_timeout_ms: 10,
+          heartbeat_timeout_ms: 5,
+          has_received_heartbeat: 1,
+          created_at: "2026-09-15T00:00:00.000Z",
+          updated_at: "2026-09-15T00:00:00.000Z",
+        };
+        const releases: string[] = [];
+        const persistence: DeviceSessionPersistence = {
+          async getSession() {
+            return persisted;
+          },
+          async upsertActiveSession() {
+            throw new Error("a recovery conflict must not assign a sibling");
+          },
+          async recordActivity() {},
+          async markReleased(_sessionUuid, _status, _releasedAtMs, releaseReason) {
+            releases.push(releaseReason);
+            persisted.release_reason = releaseReason;
+          },
+        };
+        const restarted = new SessionManager(fakeTimer, persistence);
+        let assignments = 0;
+        const devicePool: SessionDeviceAssigner = {
+          async assignDeviceToSession(sessionUuid, _requestedPlatform, target): Promise<string> {
+            assignments++;
+            if (!target) {
+              throw new Error("persisted recovery target was not supplied");
+            }
+            throw new SessionRecoveryIdentityLossError(sessionUuid, target, reason);
+          },
+        };
+
+        try {
+          await expect(
+            restarted.getOrCreateSession(
+              persisted.session_uuid,
+              devicePool,
+              platform,
+              undefined,
+              true,
+            ),
+          ).rejects.toThrow(`Cannot safely recover session ${persisted.session_uuid}`);
+          expect(assignments).toBe(1);
+          expect(releases).toEqual([`identity-recovery-${reason}`]);
+
+          await expect(
+            restarted.admitIssuedSessionForAutomation(persisted.session_uuid),
+          ).rejects.toThrow(
+            `Session ${persisted.session_uuid} is terminal after identity-recovery-${reason} ` +
+              "and cannot be reused. Acquire a new device with getAndroid or getApple.",
+          );
+          expect(assignments).toBe(1);
+        } finally {
+          restarted.stopCleanupTimer();
+        }
+      },
+    );
+
+    test.each(["target-absent", "target-busy", "identity-continuity-lost"] as const)(
+      "durably fences a persisted recovery failure from a separately loaded assigner: %s",
+      async (reason) => {
+        const persisted: DeviceSession = {
+          session_uuid: `detached-${reason}`,
+          device_id: "emulator-5554",
+          stable_device_id: "Original_AVD",
+          platform: "android",
+          status: "expired",
+          source: "session-manager",
+          autolock_enabled: 0,
+          mcp_session_id: null,
+          daemon_session_id: "old-daemon",
+          created_at_ms: 1,
+          last_used_at_ms: 20,
+          expires_at_ms: 30,
+          released_at_ms: 25,
+          release_reason: "daemon-restart",
+          session_timeout_ms: 10,
+          heartbeat_timeout_ms: 5,
+          has_received_heartbeat: 1,
+          created_at: "2026-09-15T00:00:00.000Z",
+          updated_at: "2026-09-15T00:00:00.000Z",
+        };
+        const persistence: DeviceSessionPersistence = {
+          async getSession() {
+            return persisted;
+          },
+          async upsertActiveSession() {
+            throw new Error("a recovery conflict must not assign a sibling");
+          },
+          async recordActivity() {},
+          async markReleased(_sessionUuid, status, releasedAtMs, releaseReason) {
+            persisted.status = status;
+            persisted.released_at_ms = releasedAtMs;
+            persisted.release_reason = releaseReason;
+          },
+        };
+        const firstManager = new SessionManager(fakeTimer, persistence);
+        let assignments = 0;
+        const devicePool: SessionDeviceAssigner = {
+          async assignDeviceToSession(sessionUuid, _requestedPlatform, target): Promise<string> {
+            assignments++;
+            if (!target) {
+              throw new Error("persisted recovery target was not supplied");
+            }
+            const recoveryError = new SessionRecoveryIdentityLossError(sessionUuid, target, reason);
+            throw Object.assign(new Error(recoveryError.message), {
+              name: recoveryError.name,
+              sessionUuid: recoveryError.sessionUuid,
+              target: recoveryError.target,
+              reason: recoveryError.reason,
+              terminalReleaseReason: recoveryError.terminalReleaseReason,
+            });
+          },
+        };
+
+        try {
+          await expect(
+            firstManager.getOrCreateSession(
+              persisted.session_uuid,
+              devicePool,
+              "android",
+              undefined,
+              true,
+            ),
+          ).rejects.toThrow(`recovery reason: ${reason}`);
+          expect(assignments).toBe(1);
+          expect(persisted.release_reason).toBe(`identity-recovery-${reason}`);
+
+          const restartedManager = new SessionManager(fakeTimer, persistence);
+          try {
+            await expect(
+              restartedManager.getOrCreateSession(
+                persisted.session_uuid,
+                devicePool,
+                "android",
+                undefined,
+                true,
+              ),
+            ).rejects.toThrow(`terminal after identity-recovery-${reason}`);
+            expect(assignments).toBe(1);
+          } finally {
+            restartedManager.stopCleanupTimer();
+          }
+        } finally {
+          firstManager.stopCleanupTimer();
+        }
+      },
+    );
 
     // Regression: a terminal persisted row keeps yielding TerminalSessionError,
     // never a pooled assignment, under requireIssuedSession.
@@ -3665,7 +3926,7 @@ describe("SessionManager", () => {
       async recordActivity() {},
       async markReleased() {},
     });
-    let recoveryTarget: { platform: string; stableDeviceId: string } | undefined;
+    let recoveryTarget: { platform: string; stableDeviceId: string; deviceId: string } | undefined;
     const devicePool: SessionDeviceAssigner = {
       async assignDeviceToSession(sessionId, _platform, target): Promise<string> {
         recoveryTarget = target;
@@ -3691,6 +3952,84 @@ describe("SessionManager", () => {
       expect(recoveryTarget).toEqual({
         platform: "ios",
         stableDeviceId: "simulator-uuid",
+        deviceId: "simulator-uuid",
+      });
+    } finally {
+      restarted.stopCleanupTimer();
+    }
+  });
+
+  test("reacquires a restarted Android session by its persisted AVD identity", async () => {
+    const persisted: DeviceSession = {
+      session_uuid: "restarted-android-session",
+      device_id: "emulator-5554",
+      stable_device_id: "Pixel_8_API_35",
+      platform: "android",
+      status: "expired",
+      source: null,
+      autolock_enabled: 0,
+      mcp_session_id: null,
+      daemon_session_id: "old-daemon",
+      created_at_ms: 1,
+      last_used_at_ms: 20,
+      expires_at_ms: 30,
+      released_at_ms: 25,
+      release_reason: "daemon-restart",
+      session_timeout_ms: 10,
+      heartbeat_timeout_ms: 5,
+      has_received_heartbeat: 1,
+      created_at: "2026-09-14T00:00:00.000Z",
+      updated_at: "2026-09-14T00:00:00.000Z",
+    };
+    const restarted = new SessionManager(fakeTimer, {
+      async getSession() {
+        return persisted;
+      },
+      async upsertActiveSession() {},
+      async recordActivity() {},
+      async markReleased() {},
+    });
+    let recoveryTarget:
+      | {
+          platform: string;
+          stableDeviceId: string;
+          deviceId: string;
+          androidEmulator?: boolean;
+        }
+      | undefined;
+    const devicePool: SessionDeviceAssigner = {
+      async assignDeviceToSession(sessionId, _platform, target): Promise<string> {
+        recoveryTarget = target;
+        await restarted.createSession(
+          sessionId,
+          "emulator-5560",
+          "android",
+          undefined,
+          undefined,
+          target?.stableDeviceId,
+        );
+        return "emulator-5560";
+      },
+    };
+
+    try {
+      await expect(
+        restarted.getOrCreateSession(
+          "restarted-android-session",
+          devicePool,
+          "android",
+          undefined,
+          true,
+        ),
+      ).resolves.toMatchObject({
+        assignedDevice: "emulator-5560",
+        stableDeviceId: "Pixel_8_API_35",
+      });
+      expect(recoveryTarget).toEqual({
+        platform: "android",
+        stableDeviceId: "Pixel_8_API_35",
+        deviceId: "emulator-5554",
+        androidEmulator: true,
       });
     } finally {
       restarted.stopCleanupTimer();

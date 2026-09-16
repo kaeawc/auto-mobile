@@ -206,6 +206,15 @@ const APPS_QUERY_URI_TTL_MS = 300000;
 const appCacheByDeviceId = new Map<string, AppsCacheEntry>();
 const registeredDeviceResources = new Map<string, string>();
 const appsQueryUrisByDeviceId = new Map<string, Map<string, number>>();
+// Discovery is best-effort and may overlap a committed boot with a
+// teardown/reboot inventory refresh. Only the newest started discovery may
+// publish its snapshot into the shared resource registry.
+let installedAppResourceRegistryGeneration = 0;
+// A refresh can mutate the registry, then yield while clearing cache entries
+// for disappeared devices. Keep that mutation pending until the newest
+// completing refresh hands it to its caller for publication.
+let installedAppResourceRegistryRevision = 0;
+let installedAppResourceRegistryHandoffRevision = 0;
 
 function userProfileForUserId(
   userId: number,
@@ -1221,11 +1230,16 @@ function unregisterDeviceAppResource(deviceId: string): void {
 }
 
 export async function syncInstalledAppResourceRegistry(): Promise<boolean> {
+  const generation = ++installedAppResourceRegistryGeneration;
   let devices: BootedDevice[] = [];
   try {
     devices = await PlatformDeviceManagerFactory.getInstance().getBootedDevices("either");
   } catch (error) {
     logger.warn(`[AppResources] Failed to get booted devices: ${error}`);
+  }
+
+  if (generation !== installedAppResourceRegistryGeneration) {
+    return false;
   }
 
   const currentDeviceIds = new Set(devices.map((device) => device.deviceId));
@@ -1238,29 +1252,51 @@ export async function syncInstalledAppResourceRegistry(): Promise<boolean> {
     }
   }
 
+  const disappearedDeviceIds: string[] = [];
   for (const deviceId of Array.from(registeredDeviceResources.keys())) {
     if (!currentDeviceIds.has(deviceId)) {
       unregisterDeviceAppResource(deviceId);
-      // Clear installed apps cache when device disappears
-      try {
-        const { InstalledAppsRepository } = await import("../db/installedAppsRepository");
-        const repo = new InstalledAppsRepository();
-        await getInstalledAppsCacheWriteCoordinator().invalidate(deviceId, () =>
-          getDbWriteBarrier()
-            .track(() => repo.clearDeviceSession(deviceId))
-            .then(() => undefined),
-        );
-        logger.info(
-          `[AppResources] Cleared installed apps cache for disappeared device: ${deviceId}`,
-        );
-      } catch (error) {
-        logger.warn(`[AppResources] Failed to clear cache for device ${deviceId}: ${error}`);
-      }
+      disappearedDeviceIds.push(deviceId);
       changed = true;
     }
   }
 
-  return changed;
+  if (changed) {
+    installedAppResourceRegistryRevision++;
+  }
+
+  for (const deviceId of disappearedDeviceIds) {
+    // All registry mutation above is synchronous, so a newer refresh cannot
+    // interleave a partial snapshot while this best-effort cleanup yields.
+    try {
+      const { InstalledAppsRepository } = await import("../db/installedAppsRepository");
+      const repo = new InstalledAppsRepository();
+      await getInstalledAppsCacheWriteCoordinator().invalidate(deviceId, () =>
+        getDbWriteBarrier()
+          .track(() => repo.clearDeviceSession(deviceId))
+          .then(() => undefined),
+      );
+      logger.info(
+        `[AppResources] Cleared installed apps cache for disappeared device: ${deviceId}`,
+      );
+    } catch (error) {
+      logger.warn(`[AppResources] Failed to clear cache for device ${deviceId}: ${error}`);
+    }
+  }
+
+  // A newer refresh may have started while best-effort disappearance cleanup
+  // yielded. The newest completing refresh claims every pending registry
+  // revision, including one mutated by an older refresh, for one list-change
+  // broadcast by its caller.
+  if (
+    generation !== installedAppResourceRegistryGeneration ||
+    installedAppResourceRegistryRevision === installedAppResourceRegistryHandoffRevision
+  ) {
+    return false;
+  }
+
+  installedAppResourceRegistryHandoffRevision = installedAppResourceRegistryRevision;
+  return true;
 }
 
 export async function notifyInstalledAppResourceListChanged(): Promise<void> {

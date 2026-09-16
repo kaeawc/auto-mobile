@@ -274,11 +274,13 @@ describe("platform device preparation tools", () => {
 
     const result = await callTool("getApple", { udid: simulator.deviceId });
 
-    expect(result.deviceIdentity).toEqual({
+    expect(result.deviceIdentity).toMatchObject({
       platform: "ios",
       simulatorUdid: simulator.deviceId,
       simulatorName: simulator.name,
+      iosRunnerGeneration: 0,
     });
+    expect(result.deviceIdentity.iosServicePort).toBeGreaterThan(0);
     expect(deviceUtils.getExecutedOperations()).toContain(
       `startDevice:${simulator.name}:${DEFAULT_DEVICE_READY_TIMEOUT_MS}`,
     );
@@ -409,6 +411,79 @@ describe("platform device preparation tools", () => {
     expect(result.deviceIdentity).toMatchObject({ simulatorUdid: simulator.deviceId });
   });
 
+  test.each([
+    [
+      "getAndroid",
+      { deviceId: "emulator-5554" },
+      { platform: "android" as const, name: "Pixel", deviceId: "emulator-5554" },
+    ],
+    [
+      "getApple",
+      { deviceId: "ios-owner-fence" },
+      { platform: "ios" as const, name: "iPhone", deviceId: "ios-owner-fence" },
+    ],
+    [
+      "startDevice",
+      { platform: "android" as const, deviceId: "emulator-5554" },
+      { platform: "android" as const, name: "Pixel", deviceId: "emulator-5554" },
+    ],
+  ] as const)(
+    "%s fences an exact live device session to its MCP owner when autolock is disabled",
+    async (toolName, request, device) => {
+      sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+      const pool = new DevicePool(
+        sessionManager,
+        "daemon-session",
+        timer,
+        new FakeInstalledAppsRepository(),
+        deviceUtils,
+        new DefaultRetryExecutor(timer),
+      );
+      await pool.initializeWithDevices([device]);
+      DaemonState.getInstance().initialize(sessionManager, pool);
+      deviceUtils.setBootedDevices(device.platform, [device]);
+      matcher.setBootedResult(device);
+
+      const owner = await callTool(toolName, {
+        ...request,
+        __mcpSessionId: "owner-connection",
+      });
+      const sameOwner = await callTool(toolName, {
+        ...request,
+        __mcpSessionId: "owner-connection",
+      });
+
+      expect(sameOwner.sessionUuid).toBe(owner.sessionUuid);
+      await pool.restoreOwnedDeviceSessionsForMcpSession(
+        [owner.sessionUuid as string],
+        "reconnected-owner-connection",
+      );
+      const reconnectedOwner = await callTool(toolName, {
+        ...request,
+        __mcpSessionId: "reconnected-owner-connection",
+      });
+      expect(reconnectedOwner.sessionUuid).toBe(owner.sessionUuid);
+      await expect(
+        callTool(toolName, {
+          ...request,
+          __mcpSessionId: "unrelated-connection",
+        }),
+      ).rejects.toThrow(
+        `Device '${device.deviceId}' is already assigned to another session. ` +
+          "Acquire a different device or wait for its owner to release it.",
+      );
+
+      await sessionManager.releaseSession(owner.sessionUuid as string, "explicit-release");
+      await pool.releaseDevice(device.deviceId, owner.sessionUuid as string);
+
+      const successor = await callTool(toolName, {
+        ...request,
+        __mcpSessionId: "unrelated-connection",
+      });
+      expect(successor.sessionUuid).not.toBe(owner.sessionUuid);
+    },
+  );
+
   test("getApple ignores daemon deadline provenance before strict schema validation", async () => {
     const simulator: DeviceInfo = {
       platform: "ios",
@@ -536,6 +611,44 @@ describe("platform device preparation tools", () => {
     expect((failure as ActionableError).message).toContain("identifier_conflict");
     expect((failure as ActionableError).message).toContain("Pixel_B");
     expect(deviceUtils.wasMethodCalled("startDevice")).toBe(false);
+  });
+
+  test("startDevice rejects a stopped AVD paired with a foreign running serial before booting", async () => {
+    deviceUtils.setDeviceImages("android", [
+      { platform: "android", name: "Pixel_A", isRunning: false, source: "local" },
+    ]);
+    deviceUtils.setBootedDevices("android", [
+      { platform: "android", name: "Pixel_B", deviceId: "emulator-5556" },
+    ]);
+
+    const failure = await callTool("startDevice", {
+      platform: "android",
+      avdName: "Pixel_A",
+      deviceId: "emulator-5556",
+    }).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(ActionableError);
+    expect((failure as ActionableError).message).toContain("identifier_conflict");
+    expect((failure as ActionableError).message).toContain("Pixel_B");
+    expect(deviceUtils.wasMethodCalled("startDevice")).toBe(false);
+  });
+
+  test("startDevice honors an explicit serial when duplicate emulators share its AVD name", async () => {
+    deviceUtils.setBootedDevices("android", [
+      { name: "Duplicate_AVD", platform: "android", deviceId: "emulator-5556" },
+      { name: "Duplicate_AVD", platform: "android", deviceId: "emulator-5554" },
+    ]);
+
+    const result = await callTool("startDevice", {
+      platform: "android",
+      avdName: "Duplicate_AVD",
+      deviceId: "emulator-5554",
+    });
+
+    expect(result.deviceIdentity).toMatchObject({
+      avdName: "Duplicate_AVD",
+      adbSerial: "emulator-5554",
+    });
   });
 
   test("getAndroid rejects an avdName paired with a serial that is not running before booting", async () => {
@@ -1167,7 +1280,7 @@ describe("platform device preparation tools", () => {
       "E2F46BCE-4C97-4AA0-BD9D-544756FAB545",
     ],
   ] as const)(
-    "%s returns and releases reservations while its resource notification is pending",
+    "%s returns and releases reservations while installed-app resource sync is pending",
     async (operation, platform, image, target, expectedDeviceId) => {
       deviceUtils.setDeviceImages(platform, [image]);
       sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
@@ -1239,18 +1352,13 @@ describe("platform device preparation tools", () => {
         for (let attempt = 0; attempt < 50; attempt++) {
           await Promise.resolve();
         }
-        expect(requestSettled).toBe(false);
+        expect(requestSettled).toBe(true);
         expect(notificationStarted).toBe(false);
+        expect(readinessReleases).toBe(1);
+        expect(lifecycleReleases).toBe(1);
 
         releaseSync.resolve();
         await awaitPromptly(notificationEntered.promise, "resource notification");
-        timer.advanceTime(10_000);
-        for (let attempt = 0; attempt < 50; attempt++) {
-          await Promise.resolve();
-        }
-        expect(requestSettled).toBe(true);
-        expect(readinessReleases).toBe(1);
-        expect(lifecycleReleases).toBe(1);
         expect(installedAppResourceSyncs).toBe(1);
         expect(notifiedInstalledAppResourcesChanged).toBe(true);
         const [sessionId] = sessionManager.getAllSessionIds();

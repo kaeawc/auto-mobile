@@ -382,6 +382,12 @@ export class DefaultExactDeviceProvisioner implements ExactDeviceProvisioner {
         resolvedSpec: this.withResolvedDisplayCutout(request.spec, displayCutout),
       };
     }
+    if (request.platform === "ios" && request.deviceId !== undefined) {
+      throw new ProvisionDeviceError(
+        "identity_conflict",
+        `Exact iOS simulator '${request.name}' with UDID '${request.deviceId}' was not found.`,
+      );
+    }
 
     if (!this.dependencies.isCreationAllowed(true)) {
       throw new ProvisionDeviceError(

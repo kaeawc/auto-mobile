@@ -30,9 +30,12 @@ import { IOSCtrlProxyClient } from "../observe/ios";
 import { IOSCtrlProxyManager } from "../../utils/IOSCtrlProxyManager";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { isAndroidPackageRunning } from "../../utils/android-cmdline-tools/androidProcessState";
+import { errorMessage } from "../../utils/describeUnknownError";
 
 const LAUNCH_OBSERVATION_TIMEOUT_MS = 5000;
 const LAUNCH_OBSERVATION_POLL_INTERVAL_MS = 200;
+const ANDROID_OFFLINE_RECOVERY_DELAYS_MS = [250, 500] as const;
+const ANDROID_LAUNCH_OBSERVATION_TIMEOUT_MS = 15_000;
 
 export interface TargetUserDetector {
   detectTargetUserId(packageName: string, userId?: number): Promise<number>;
@@ -755,9 +758,12 @@ export class LaunchApp extends BaseVisualChange {
 
     // Check if app is running
     const isRunning = await perf.track("checkRunning", async () => {
-      const isRunningCmd = "shell dumpsys activity processes";
-      logger.info(`[LaunchApp] Checking if app is running: ${isRunningCmd}`);
-      const isRunningOutput = await this.adb.executeCommand(isRunningCmd);
+      const isRunningArgs = ["shell", "dumpsys", "activity", "processes", packageName];
+      logger.info(`[LaunchApp] Checking if app is running: ${isRunningArgs.join(" ")}`);
+      const isRunningOutput = await this.readAndroidProcessStateWithOfflineRecovery(
+        isRunningArgs,
+        signal,
+      );
       const result = isAndroidPackageRunning(isRunningOutput.stdout, packageName, targetUserId);
       logger.info(
         `[LaunchApp] App running: ${result} (output: "${isRunningOutput.stdout.trim()}")`,
@@ -851,7 +857,7 @@ export class LaunchApp extends BaseVisualChange {
       const settledResult = await this.ensureLaunchObservationMatchesPackage(
         result,
         packageName,
-        undefined,
+        ANDROID_LAUNCH_OBSERVATION_TIMEOUT_MS,
         undefined,
         signal,
       );
@@ -922,7 +928,7 @@ export class LaunchApp extends BaseVisualChange {
     const settledLaunchResult = await this.ensureLaunchObservationMatchesPackage(
       launchResult,
       packageName,
-      undefined,
+      ANDROID_LAUNCH_OBSERVATION_TIMEOUT_MS,
       undefined,
       signal,
     );
@@ -969,6 +975,71 @@ export class LaunchApp extends BaseVisualChange {
     }
 
     return settledLaunchResult;
+  }
+
+  private async readAndroidProcessStateWithOfflineRecovery(args: string[], signal?: AbortSignal) {
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        // The launch path owns this bounded retry so a brief emulator transport
+        // reset after APK installation does not become a daemon-wide device-loss
+        // verdict. Keep each probe to one ADB dispatch so only "device offline"
+        // is retried here; every other failure remains fail-fast.
+        return await this.adb.execute(args, { noRetry: true, signal });
+      } catch (error) {
+        // Cancellation can race with command rejection. Preserve the signal's
+        // typed reason (not the stale ADB error) before classifying the failure.
+        this.assertLaunchNotAborted(signal);
+        const delayMs = ANDROID_OFFLINE_RECOVERY_DELAYS_MS[attempt];
+        if (
+          delayMs === undefined ||
+          !errorMessage(error).toLowerCase().includes("device offline")
+        ) {
+          throw error;
+        }
+        logger.warn(
+          `[LaunchApp] Android device briefly offline while checking process state; retrying in ${delayMs}ms`,
+        );
+        await this.waitForAndroidOfflineRecovery(delayMs, signal);
+      }
+    }
+  }
+
+  private async waitForAndroidOfflineRecovery(
+    delayMs: number,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    if (!signal) {
+      await this.timer.sleep(delayMs);
+      return;
+    }
+
+    this.assertLaunchNotAborted(signal);
+    let timeoutHandle: NodeJS.Timeout | undefined;
+    let abortListener: (() => void) | undefined;
+    try {
+      await new Promise<void>((resolve, reject) => {
+        abortListener = () => {
+          try {
+            signal.throwIfAborted();
+          } catch (error) {
+            reject(error);
+          }
+        };
+        signal.addEventListener("abort", abortListener, { once: true });
+        if (signal.aborted) {
+          abortListener();
+          return;
+        }
+        timeoutHandle = this.timer.setTimeout(resolve, delayMs);
+      });
+    } finally {
+      if (timeoutHandle !== undefined) {
+        this.timer.clearTimeout(timeoutHandle);
+      }
+      if (abortListener) {
+        signal.removeEventListener("abort", abortListener);
+      }
+    }
   }
 
   private async waitForAndroidPreflight<T>(

@@ -45,6 +45,11 @@ export interface DoctorReport {
   version: string;
   platform: string;
   arch: string;
+  /**
+   * Present for deliberately restricted diagnostic runs. Ordinary doctor runs
+   * leave this absent so their existing behavior and report shape are unchanged.
+   */
+  diagnosticProfile?: DoctorDiagnosticProfile;
   system: CheckSection;
   android?: CheckSection;
   ios?: CheckSection;
@@ -55,24 +60,39 @@ export interface DoctorReport {
 
 /**
  * Cancellation seam for a single probe (#7008). A caller that races a check
- * against its own deadline (the host/toolchain resource) hands the check a
- * signal to abort and a deadline for the commands it spawns, so the losing
- * probe's child processes are killed instead of accumulating across reads.
- * Callers that pass nothing get the historical unbounded behaviour.
+ * against its own deadline hands the check one signal and one absolute deadline
+ * for every subprocess, network read, and device probe it starts. Callers that
+ * pass nothing get the historical unbounded behaviour.
  */
 export interface DoctorProbeOptions {
   signal?: AbortSignal;
   timeoutMs?: number;
+  /** Absolute deadline on {@link timer}'s clock; internal orchestration only. */
+  deadlineMs?: number;
+  /** Injectable clock for the shared deadline; omitted by CLI/MCP callers. */
+  timer?: import("../utils/SystemTimer").Timer;
 }
+
+/**
+ * A deliberately restricted diagnostic profile used after repairing shared
+ * daemon control state. It is host/toolchain and daemon-health focused; it
+ * never picks an arbitrary booted device for CtrlProxy setup or validation.
+ */
+export type DoctorDiagnosticProfile = "post-repair-read-only";
 
 /**
  * Options for running the doctor diagnostic
  */
-export interface DoctorOptions {
+export interface DoctorOptions extends DoctorProbeOptions {
   /** Run Android-specific checks only */
   android?: boolean;
   /** Run iOS-specific checks only */
   ios?: boolean;
   /** Output in JSON format */
   json?: boolean;
+  /**
+   * Internal recovery-only profile. Ordinary CLI/MCP doctor invocations must
+   * not select this profile.
+   */
+  diagnosticProfile?: DoctorDiagnosticProfile;
 }

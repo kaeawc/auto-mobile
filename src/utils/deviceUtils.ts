@@ -88,6 +88,11 @@ export interface BootedDeviceDiscoveryOptions {
   /** Cancels short-lived platform discovery work. */
   signal?: AbortSignal;
   /**
+   * Acceptance-only presentation seam. It reorders an otherwise identical,
+   * freshly discovered result and never changes device state.
+   */
+  presentationOrder?: "forward" | "reverse";
+  /**
    * List what Android has attached and ask it nothing else: no `emu avd name`,
    * no getprop fallback. See `AndroidEmulatorClient`'s `skipNameEnrichment` --
    * enrichment is sequential and budgets 2s per attached device, so a caller
@@ -106,9 +111,18 @@ export interface DeviceImageDiscovery {
   discoveryErrors?: Partial<Record<Platform, DeviceDiscoveryError>>;
 }
 
+function presentBootedDevices(
+  devices: BootedDevice[],
+  presentationOrder: BootedDeviceDiscoveryOptions["presentationOrder"],
+): BootedDevice[] {
+  return presentationOrder === "reverse" ? devices.toReversed() : devices;
+}
+
 export interface DeviceImageDiscoveryOptions {
   /** Bypass simulator inventory caching when durable absence must be proven. */
   bypassIosDeviceListCache?: boolean;
+  /** Cancels short-lived platform image discovery work. */
+  signal?: AbortSignal;
 }
 /** Bounds and cancels a platform shutdown command. */
 export interface DeviceShutdownOptions {
@@ -575,7 +589,13 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
       }
     }
 
-    return { devices, succeededPlatforms, succeededSources, freshDeviceIds, discoveryErrors };
+    return {
+      devices: presentBootedDevices(devices, options.presentationOrder),
+      succeededPlatforms,
+      succeededSources,
+      freshDeviceIds,
+      discoveryErrors,
+    };
   }
 
   async getDeviceImagesDetailed(
@@ -588,7 +608,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
 
     if (platform === "android" || platform === "either") {
       try {
-        devices.push(...(await this.emulator.listAvds()));
+        devices.push(...(await this.listAndroidDeviceImages(options.signal)));
         succeededPlatforms.add("android");
       } catch (error) {
         logger.warn(`[DeviceManager] Android device inventory failed: ${error}`);

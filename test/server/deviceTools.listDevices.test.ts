@@ -74,12 +74,16 @@ describe("listDevices tool (#5870)", () => {
   };
 
   const callListDevices = async (args: Record<string, unknown> = {}) => {
+    const response = await callListDevicesResponse(args);
+    expect(response.content?.[0]?.type).toBe("text");
+    return JSON.parse(response.content?.[0]?.text ?? "{}");
+  };
+
+  const callListDevicesResponse = async (args: Record<string, unknown> = {}) => {
     const tool = ToolRegistry.getTool("listDevices");
     expect(tool).toBeDefined();
     const fakeTimer = new FakeTimer();
-    const response = await resolveWithFakeTimer(tool!.handler(args), fakeTimer);
-    expect(response.content?.[0]?.type).toBe("text");
-    return JSON.parse(response.content?.[0]?.text ?? "{}");
+    return await resolveWithFakeTimer(tool!.handler(args), fakeTimer);
   };
 
   beforeAll(() => {
@@ -130,6 +134,16 @@ describe("listDevices tool (#5870)", () => {
     expect(
       fakeDeviceUtils.getExecutedOperations().some((op) => op.startsWith("getBootedDevices")),
     ).toBe(true);
+  });
+
+  test("provides structuredContent for the authenticated acceptance forwarding path", async () => {
+    const response = await callListDevicesResponse({ platform: "android" });
+
+    expect(response.structuredContent).toEqual(JSON.parse(response.content?.[0]?.text ?? "{}"));
+    expect(response.structuredContent).toMatchObject({
+      count: 1,
+      devices: [expect.objectContaining({ deviceId: "emulator-5554" })],
+    });
   });
 
   test("does not recommend inventory resources absent from the registry", async () => {

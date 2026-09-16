@@ -267,6 +267,11 @@ export interface DaemonStatus {
    * PID reuse against the process table.
    */
   processStartedAt?: number;
+  /**
+   * Stable OS-derived identity for this process generation. Optional so PID
+   * records written before generation tokens remain readable.
+   */
+  processGenerationToken?: string;
   /** Daemon version */
   version?: string;
   /** Concrete CtrlProxy asset version resolved from AUTOMOBILE_VERSION at daemon start */
@@ -306,6 +311,11 @@ export interface PidFileData {
    * managers can continue reading PID files written by older daemon versions.
    */
   processStartedAt?: number;
+  /**
+   * Stable OS-derived identity for this process generation. Optional for
+   * backward compatibility with PID files written before this field existed.
+   */
+  processGenerationToken?: string;
   /** Daemon version */
   version: string;
   /**

@@ -117,6 +117,24 @@ describe("MultiPlatformDeviceManager", () => {
       });
     });
 
+    test("acceptance presentation order reverses a fresh discovery without changing its members", async () => {
+      await withProcessPlatform("darwin", async () => {
+        const manager = makeManager({ simulators: [simulator], physical: [physicalDevice] });
+
+        const forward = await manager.getBootedDevicesDetailed("ios", {
+          presentationOrder: "forward",
+        });
+        const reverse = await manager.getBootedDevicesDetailed("ios", {
+          presentationOrder: "reverse",
+        });
+
+        expect(reverse.devices).toEqual(forward.devices.toReversed());
+        expect(reverse.succeededPlatforms).toEqual(forward.succeededPlatforms);
+        expect(reverse.succeededSources).toEqual(forward.succeededSources);
+        expect(reverse.freshDeviceIds).toEqual(forward.freshDeviceIds);
+      });
+    });
+
     test("a simulator discovery failure still surfaces connected physical devices", async () => {
       await withProcessPlatform("darwin", async () => {
         const manager = makeManager({
@@ -673,6 +691,7 @@ describe("MultiPlatformDeviceManager", () => {
     } as unknown as SimCtlClient;
     const fakeEmulator = {
       listAvds: async () => [androidImage],
+      getBootedDevices: async () => [],
     } as unknown as AndroidEmulatorClient;
     const manager = new MultiPlatformDeviceManager(
       new FakeAdbClient() as unknown as AdbClient,
@@ -688,6 +707,51 @@ describe("MultiPlatformDeviceManager", () => {
       code: "failed",
       message: "iOS device inventory failed: simctl list devices exploded",
     });
+  });
+
+  test("getDeviceImagesDetailed propagates Android cancellation and iOS cache bypass", async () => {
+    const controller = new AbortController();
+    let androidSignal: AbortSignal | undefined;
+    let iosOptions: { bypassCache?: boolean } | undefined;
+    const androidImage: DeviceInfo = {
+      name: "Pixel_8",
+      platform: "android",
+      isRunning: false,
+    };
+    const fakeSimctl = {
+      isAvailable: async () => true,
+      listSimulatorImages: async (
+        _sessionId?: string,
+        options?: { bypassCache?: boolean },
+      ): Promise<DeviceInfo[]> => {
+        iosOptions = options;
+        return [];
+      },
+    } as unknown as SimCtlClient;
+    const fakeEmulator = {
+      listAvds: async (options?: { signal?: AbortSignal }): Promise<DeviceInfo[]> => {
+        androidSignal = options?.signal;
+        return [androidImage];
+      },
+      getBootedDevices: async (): Promise<BootedDevice[]> => [
+        { name: "Pixel_8", platform: "android", deviceId: "emulator-5554" },
+      ],
+    } as unknown as AndroidEmulatorClient;
+    const manager = new MultiPlatformDeviceManager(
+      new FakeAdbClient() as unknown as AdbClient,
+      fakeSimctl,
+      fakeEmulator,
+    );
+
+    const result = await manager.getDeviceImagesDetailed("either", {
+      signal: controller.signal,
+      bypassIosDeviceListCache: true,
+    });
+
+    expect(result.succeededPlatforms).toEqual(new Set(["android", "ios"]));
+    expect(result.devices).toEqual([{ ...androidImage, isRunning: true }]);
+    expect(androidSignal).toBe(controller.signal);
+    expect(iosOptions).toEqual({ bypassCache: true });
   });
 
   test("destroyDevice deletes an iOS simulator by its exact UDID with the caller deadline", async () => {

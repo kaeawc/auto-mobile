@@ -65,6 +65,7 @@ function callHandleIdeRequest(
   socketSessionId: string,
   deadline: ProgressExtendableDeadline,
   originalTimeoutMs: number = timeoutMs,
+  signal?: AbortSignal,
 ): Promise<unknown> {
   return (
     server as unknown as {
@@ -75,12 +76,153 @@ function callHandleIdeRequest(
         s: string,
         d: ProgressExtendableDeadline,
         o: number,
+        signal?: AbortSignal,
       ) => Promise<unknown>;
     }
-  ).handleIdeRequest(mcpClient, request, timeoutMs, socketSessionId, deadline, originalTimeoutMs);
+  ).handleIdeRequest(
+    mcpClient,
+    request,
+    timeoutMs,
+    socketSessionId,
+    deadline,
+    originalTimeoutMs,
+    signal,
+  );
 }
 
 describe("UnixSocketServer.handleIdeRequest extends the deadline on progress (#6222)", () => {
+  test("propagates owner-socket cancellation to an abort-ignoring late acquisition", async () => {
+    const fakeTimer = new FakeTimer();
+    const server = createServer(fakeTimer);
+    const completed = Promise.withResolvers<unknown>();
+    const socketSessionId = "socket-late-acquisition";
+    (
+      server as unknown as {
+        clientSockets: Map<string, { destroyed: boolean }>;
+      }
+    ).clientSockets.set(socketSessionId, { destroyed: false });
+    const requestSignal = (
+      server as unknown as {
+        mcpRequestSignal: (sessionId: string) => { signal: AbortSignal; dispose: () => void };
+      }
+    ).mcpRequestSignal(socketSessionId);
+    let forwardedSignal: AbortSignal | undefined;
+    const fakeMcpClient = {
+      callTool: async (
+        _params: unknown,
+        _resultSchema: unknown,
+        options: CapturedCallToolOptions,
+      ) => {
+        forwardedSignal = options.signal;
+        return await completed.promise;
+      },
+    };
+    const request: DaemonRequest = {
+      id: "late-acquisition",
+      type: "mcp_request",
+      method: "tools/call",
+      params: { name: "getApple", arguments: { platform: "ios" } },
+    };
+    const forwarded = callHandleIdeRequest(
+      server,
+      fakeMcpClient,
+      request,
+      1_000,
+      socketSessionId,
+      new ProgressExtendableDeadline(fakeTimer.now(), 1_000),
+      1_000,
+      requestSignal.signal,
+    );
+    await Promise.resolve();
+
+    (server as unknown as { abortMcpRequests: (sessionId: string) => void }).abortMcpRequests(
+      socketSessionId,
+    );
+    expect(forwardedSignal?.aborted).toBe(true);
+
+    // A late transport result cannot clear cancellation. The MCP server's
+    // acquisition handler receives this signal and DevicePool fences only its
+    // newly minted autolock before releasing it asynchronously.
+    completed.resolve({ content: [{ type: "text", text: "late session" }] });
+    await expect(forwarded).resolves.toEqual({ content: [{ type: "text", text: "late session" }] });
+    requestSignal.dispose();
+  });
+
+  test("starts queued MCP work already aborted after its owner socket disconnected", () => {
+    const server = createServer(new FakeTimer());
+    const requestSignal = (
+      server as unknown as {
+        mcpRequestSignal: (sessionId: string) => { signal: AbortSignal; dispose: () => void };
+      }
+    ).mcpRequestSignal("disconnected-before-forward");
+
+    expect(requestSignal.signal.aborted).toBe(true);
+    expect((requestSignal.signal.reason as Error).message).toBe("Daemon MCP client disconnected");
+    requestSignal.dispose();
+  });
+
+  test("propagates owner-socket cancellation and timeout to discovery list SDK calls", async () => {
+    const fakeTimer = new FakeTimer();
+    const server = createServer(fakeTimer);
+    const discoveryRequests = [
+      { method: "tools/list", result: { tools: [] } },
+      { method: "resources/list", result: { resources: [] } },
+      { method: "resources/list-templates", result: { resourceTemplates: [] } },
+    ] as const;
+
+    for (const { method, result } of discoveryRequests) {
+      const completed = Promise.withResolvers<unknown>();
+      const socketSessionId = `socket-${method}`;
+      (
+        server as unknown as {
+          clientSockets: Map<string, { destroyed: boolean }>;
+        }
+      ).clientSockets.set(socketSessionId, { destroyed: false });
+      const requestSignal = (
+        server as unknown as {
+          mcpRequestSignal: (sessionId: string) => { signal: AbortSignal; dispose: () => void };
+        }
+      ).mcpRequestSignal(socketSessionId);
+      let capturedOptions: CapturedCallToolOptions | undefined;
+      const fakeMcpClient = {
+        listTools: async (_params?: unknown, options?: CapturedCallToolOptions) => {
+          capturedOptions = options;
+          return await completed.promise;
+        },
+        listResources: async (_params?: unknown, options?: CapturedCallToolOptions) => {
+          capturedOptions = options;
+          return await completed.promise;
+        },
+        listResourceTemplates: async (_params?: unknown, options?: CapturedCallToolOptions) => {
+          capturedOptions = options;
+          return await completed.promise;
+        },
+      };
+      const forwarded = callHandleIdeRequest(
+        server,
+        fakeMcpClient,
+        { id: method, type: "mcp_request", method, params: {} },
+        1_000,
+        socketSessionId,
+        new ProgressExtendableDeadline(fakeTimer.now(), 1_000),
+        1_000,
+        requestSignal.signal,
+      );
+      await Promise.resolve();
+
+      expect(capturedOptions?.timeout).toBe(1_000);
+      expect(capturedOptions?.signal).toBe(requestSignal.signal);
+      (server as unknown as { abortMcpRequests: (sessionId: string) => void }).abortMcpRequests(
+        socketSessionId,
+      );
+      expect(capturedOptions?.signal?.aborted).toBe(true);
+
+      completed.resolve(result);
+      await expect(forwarded).resolves.toEqual(result);
+      requestSignal.dispose();
+    }
+  });
+
   test("a progress-emitting tools/call is given an abort signal and a bounded backstop timeout", async () => {
     const fakeTimer = new FakeTimer();
     const server = createServer(fakeTimer);

@@ -574,6 +574,7 @@ export async function runDoctorCommand(
   const report = await runDoctor({
     android: params.android,
     ios: params.ios,
+    deviceId: params.deviceId,
   });
 
   if (jsonOutput) {

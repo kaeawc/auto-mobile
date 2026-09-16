@@ -99,6 +99,12 @@ function findEligibleExactBootedDevice(
   return exact && matchesDeviceCriteria(exact, criteria) ? exact : null;
 }
 
+function needsIosRuntimeEnrichment(request: DeviceBootRequest, device: BootedDevice): boolean {
+  return (
+    request.platform === "ios" && device.iosVersion === undefined && device.osVersion === undefined
+  );
+}
+
 /**
  * True for an `AbortSignal.reason` that carries no caller-supplied context: a
  * literal `undefined` (used by synthetic/fake signals in tests), or the
@@ -372,12 +378,14 @@ export class DeviceBootService {
       request.screenSize !== undefined;
     const running = booted.find((device) => device.deviceId === request.deviceId);
     if (running) {
-      if (hasExplicitConstraints && !matchesDeviceCriteria(running, criteria)) {
-        throw new ActionableError(
-          `Device '${request.deviceId}' does not satisfy the requested platform, version, or form-factor constraints.`,
-        );
-      }
-      return this.waitForRunningDevice(running, context, progress);
+      return await this.waitForKnownRunningDevice(
+        running,
+        request,
+        criteria,
+        hasExplicitConstraints,
+        context,
+        progress,
+      );
     }
     const images = await this.runPhase(context, "listing device images", () =>
       deviceManager.listDeviceImages(request.platform),
@@ -408,6 +416,44 @@ export class DeviceBootService {
     // both spellings of the same target resolve identically (#3334): booting a
     // live image is rejected by the platform, or spawns a doomed second child.
     return this.bootMatchedImage(image, context, progress, request.presentationOrder);
+  }
+
+  private async waitForKnownRunningDevice(
+    running: BootedDevice,
+    request: DeviceBootRequest & { deviceId: string },
+    criteria: DeviceMatchCriteria,
+    hasExplicitConstraints: boolean,
+    context: BootDeadlineContext,
+    progress: DeviceBootProgress | undefined,
+  ): Promise<DeviceBootResult> {
+    if (hasExplicitConstraints && !matchesDeviceCriteria(running, criteria)) {
+      throw new ActionableError(
+        `Device '${request.deviceId}' does not satisfy the requested platform, version, or form-factor constraints.`,
+      );
+    }
+    // `getApple` selects an already-booted simulator by UDID before it has
+    // otherwise needed the image inventory. Preserve that fast path when
+    // simctl supplied runtime metadata, but recover it from the matching
+    // image when an older or partial booted listing omitted it. Runner
+    // readiness uses this to reject an unsupported runtime before xcodebuild
+    // can launch a CtrlProxy runner that can never become healthy (#7160).
+    const resolvedRunning = needsIosRuntimeEnrichment(request, running)
+      ? await this.enrichIosBootedDeviceFromImage(running, context)
+      : running;
+    return this.waitForRunningDevice(resolvedRunning, context, progress);
+  }
+
+  private async enrichIosBootedDeviceFromImage(
+    device: BootedDevice,
+    context: BootDeadlineContext,
+  ): Promise<BootedDevice> {
+    const images = await this.runPhase(context, "resolving iOS simulator runtime", () =>
+      this.dependencies.deviceManager.listDeviceImages("ios"),
+    );
+    const image = images.find(
+      (candidate) => candidate.platform === "ios" && candidate.deviceId === device.deviceId,
+    );
+    return image ? enrichBootedDevice(device, image) : device;
   }
 
   private async bootMatchingDevice(
@@ -897,6 +943,7 @@ export class DeviceBootService {
 export function enrichBootedDevice(device: BootedDevice, image: DeviceInfo): BootedDevice {
   return {
     ...device,
+    iosVersion: device.iosVersion ?? image.iosVersion,
     apiLevel: device.apiLevel ?? image.apiLevel,
     osVersion: device.osVersion ?? image.osVersion,
     formFactor: device.formFactor ?? image.formFactor,

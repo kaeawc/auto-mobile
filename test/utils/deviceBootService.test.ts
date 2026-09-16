@@ -457,6 +457,45 @@ describe("DeviceBootService", () => {
     expect(devices.getWaitForDeviceReadySignal()).toBeDefined();
   });
 
+  it("backfills a booted simulator's runtime from its image before CtrlProxy readiness (#7160)", async () => {
+    const devices = new FakeDeviceUtils();
+    const simulator: DeviceInfo = {
+      platform: "ios",
+      name: "iPhone 14 Pro",
+      deviceId: "IOS-16-UDID",
+      isRunning: true,
+      iosVersion: "16.4",
+      osVersion: "16.4",
+    };
+    devices.setDeviceImages("ios", [simulator]);
+    // A partial booted-device listing used to lose the runtime while the
+    // matching image inventory still had it, allowing an impossible Xcode
+    // CtrlProxy launch to consume the whole readiness deadline.
+    devices.setBootedDevices("ios", [
+      {
+        platform: "ios",
+        name: simulator.name,
+        deviceId: simulator.deviceId,
+      },
+    ]);
+
+    const result = await service(devices).boot({
+      platform: "ios",
+      deviceId: simulator.deviceId,
+    });
+
+    expect(result.device).toMatchObject({
+      deviceId: simulator.deviceId,
+      iosVersion: "16.4",
+      osVersion: "16.4",
+    });
+    expect(devices.getExecutedOperations()).toEqual([
+      "getBootedDevices:ios",
+      "listDeviceImages:ios",
+      `waitForDeviceReady:${simulator.name}:180000`,
+    ]);
+  });
+
   it("reuses a running image when deviceId names the AVD rather than the serial", async () => {
     const devices = new FakeDeviceUtils();
     const running: BootedDevice = {

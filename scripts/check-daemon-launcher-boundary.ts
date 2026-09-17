@@ -200,7 +200,11 @@ function violationsIn(
       const imported =
         staticPropertyName(element.propertyName, staticStringValue) ??
         (ts.isIdentifier(element.name) ? element.name.text : undefined);
-      if (ts.isIdentifier(element.name) && EXECUTION_FUNCTIONS.has(imported)) {
+      if (
+        ts.isIdentifier(element.name) &&
+        isUnreassignedInitializer(element.name) &&
+        EXECUTION_FUNCTIONS.has(imported)
+      ) {
         addBinding(importedExecutors, element.name);
       }
     }
@@ -233,6 +237,11 @@ function violationsIn(
     ts.forEachChild(node, countAssignments);
   };
   countAssignments(sourceFile);
+
+  const isUnreassignedInitializer = (identifier: ts.Identifier): boolean => {
+    const symbol = symbolFor(identifier);
+    return symbol !== undefined && assignmentCounts.get(symbol) === undefined;
+  };
 
   // Mutable or multiply assigned values are dynamic: only follow the one static
   // write into an otherwise uninitialized symbol.
@@ -319,14 +328,9 @@ function violationsIn(
       addBinding(namespaces, node.name);
     }
 
-    if (
-      ts.isVariableDeclaration(node) &&
-      node.initializer &&
-      ts.isVariableDeclarationList(node.parent) &&
-      (node.parent.flags & ts.NodeFlags.Const) !== 0
-    ) {
+    if (ts.isVariableDeclaration(node) && node.initializer) {
       const initializer = unwrapTransparentExpression(node.initializer);
-      if (ts.isIdentifier(node.name)) {
+      if (ts.isIdentifier(node.name) && isUnreassignedInitializer(node.name)) {
         registerIdentifierBinding(node.name, initializer);
       }
       if (ts.isObjectBindingPattern(node.name)) {

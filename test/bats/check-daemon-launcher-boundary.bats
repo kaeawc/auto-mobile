@@ -285,6 +285,23 @@ teardown() {
   [[ "$output" == *"no direct production daemon invocations"* ]]
 }
 
+@test "rejects unreassigned mutable executor and namespace aliases" {
+  printf '%s\n' \
+    'import childProcess from "node:child_process";' \
+    'let launch = childProcess["execFileSync"];' \
+    'launch("auto-mobile", ["--daemon-mode"]);' \
+    'var namespaceAlias = childProcess;' \
+    'namespaceAlias.spawn("auto-mobile", ["--daemon-mode"]);' \
+    'let { execFileSync: destructuredLaunch } = childProcess;' \
+    'destructuredLaunch("auto-mobile", ["--daemon-mode"]);' \
+    > "$FIXTURE"
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 1 ]
+  [[ "$(grep -c "DaemonLauncherBoundaryFixture.ts" <<< "$output")" -eq 3 ]]
+}
+
 @test "rejects transitive executor aliases declared after their function body" {
   printf '%s\n' \
     'import childProcess from "node:child_process";' \

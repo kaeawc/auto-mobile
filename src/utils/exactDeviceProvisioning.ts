@@ -80,6 +80,7 @@ export interface ExactProvisionedDevice {
 export type ProvisionDeviceFailureCode =
   | "cleanup_failed"
   | "creation_not_allowed"
+  | "discovery_incomplete"
   | "identity_conflict"
   | "timeout"
   | "unsupported"
@@ -89,6 +90,7 @@ export class ProvisionDeviceError extends ActionableError {
   constructor(
     public readonly code: ProvisionDeviceFailureCode,
     message: string,
+    public readonly retryable = false,
   ) {
     super(message);
     this.name = "ProvisionDeviceError";

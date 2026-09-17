@@ -108,6 +108,75 @@ export function findUniqueBootedAndroidDeviceByName(
   return matches[0];
 }
 
+// DeviceBootService instances are per request, while a duplicate Android
+// start is coordinated through the shared lifecycle coordinator. Keep the
+// ownership marker at that process-local boundary until readiness settles.
+const inFlightAndroidColdBoots = new WeakMap<
+  VirtualDeviceLifecycleCoordinator,
+  Map<string, number>
+>();
+
+function trackInFlightAndroidColdBoot(
+  lifecycleCoordinator: VirtualDeviceLifecycleCoordinator,
+  avdName: string,
+): () => void {
+  const boots = inFlightAndroidColdBoots.get(lifecycleCoordinator) ?? new Map<string, number>();
+  inFlightAndroidColdBoots.set(lifecycleCoordinator, boots);
+  boots.set(avdName, (boots.get(avdName) ?? 0) + 1);
+  return () => {
+    const remaining = (boots.get(avdName) ?? 1) - 1;
+    if (remaining > 0) {
+      boots.set(avdName, remaining);
+      return;
+    }
+    boots.delete(avdName);
+    if (boots.size === 0) {
+      inFlightAndroidColdBoots.delete(lifecycleCoordinator);
+    }
+  };
+}
+
+function hasInFlightAndroidColdBoot(
+  lifecycleCoordinator: VirtualDeviceLifecycleCoordinator,
+  avdName: string,
+): boolean {
+  return (inFlightAndroidColdBoots.get(lifecycleCoordinator)?.get(avdName) ?? 0) > 0;
+}
+
+function trackInFlightAndroidColdBootIfNeeded(
+  lifecycleCoordinator: VirtualDeviceLifecycleCoordinator,
+  image: DeviceInfo,
+): (() => void) | undefined {
+  return image.platform === "android"
+    ? trackInFlightAndroidColdBoot(lifecycleCoordinator, image.name)
+    : undefined;
+}
+
+function shouldColdBootMatchedAndroidImage(
+  image: DeviceInfo,
+  preferRunning: boolean | undefined,
+  lifecycleCoordinator: VirtualDeviceLifecycleCoordinator,
+): boolean {
+  return (
+    image.platform === "android" &&
+    (hasInFlightAndroidColdBoot(lifecycleCoordinator, image.name) ||
+      (preferRunning === false && !image.isRunning))
+  );
+}
+
+function findBootedDeviceMatchingImage(
+  image: DeviceInfo,
+  booted: readonly BootedDevice[],
+): BootedDevice | undefined {
+  if (image.platform === "android") {
+    const sameName = findUniqueBootedAndroidDeviceByName(booted, image.name);
+    if (sameName || !image.isRunning) {
+      return sameName;
+    }
+  }
+  return image.deviceId ? booted.find((device) => device.deviceId === image.deviceId) : undefined;
+}
+
 function findEligibleExactBootedDevice(
   platform: Platform,
   devices: BootedDevice[],
@@ -346,32 +415,22 @@ export class DeviceBootService {
     // result (`succeededPlatforms`), so android always takes this path — a
     // plain `getBootedDevices` call cannot distinguish a transient ADB
     // failure from a genuinely empty result (#7179).
-    if (platform === "android") {
+    const useDetailed = platform === "android" || presentationOrder !== undefined;
+    const options: BootedDeviceDiscoveryOptions = {
+      ...(bypassAndroidCache ? { bypassAndroidDeviceListCache: true } : {}),
+      ...(presentationOrder !== undefined ? { presentationOrder } : {}),
+    };
+    if (useDetailed) {
       const discovery = await this.runPhase(
         context,
         phase,
         async () =>
-          await this.dependencies.deviceManager.getBootedDevicesDetailed(platform, {
-            ...(bypassAndroidCache ? { bypassAndroidDeviceListCache: true } : {}),
-            ...(presentationOrder !== undefined ? { presentationOrder } : {}),
-          }),
+          await this.dependencies.deviceManager.getBootedDevicesDetailed(platform, options),
         awaitAbortSettlement,
       );
-      if (!discovery.succeededPlatforms.has("android")) {
+      if (platform === "android" && !discovery.succeededPlatforms.has("android")) {
         throw new AndroidBootedDeviceDiscoveryIncompleteError(discovery.discoveryErrors?.android);
       }
-      return discovery.devices;
-    }
-    if (presentationOrder !== undefined) {
-      const discovery = await this.runPhase(
-        context,
-        phase,
-        async () =>
-          await this.dependencies.deviceManager.getBootedDevicesDetailed(platform, {
-            presentationOrder,
-          }),
-        awaitAbortSettlement,
-      );
       return discovery.devices;
     }
     return await this.runPhase(
@@ -448,7 +507,13 @@ export class DeviceBootService {
     // Route through the same reuse-before-cold-boot path as the name matcher so
     // both spellings of the same target resolve identically (#3334): booting a
     // live image is rejected by the platform, or spawns a doomed second child.
-    return this.bootMatchedImage(image, context, progress, request.presentationOrder);
+    return this.bootMatchedImage(
+      image,
+      context,
+      progress,
+      request.presentationOrder,
+      request.preferRunning,
+    );
   }
 
   private async waitForKnownRunningDevice(
@@ -537,7 +602,13 @@ export class DeviceBootService {
           ) ?? null)
         : deviceMatcher.matchDeviceImage(criteria, matchingImages, matchingStrategy);
     if (image) {
-      return this.bootMatchedImage(image, context, progress, request.presentationOrder);
+      return this.bootMatchedImage(
+        image,
+        context,
+        progress,
+        request.presentationOrder,
+        request.preferRunning,
+      );
     }
     return this.provisionAndBoot(request, provisionCriteria, matchingImages, context, progress);
   }
@@ -590,13 +661,14 @@ export class DeviceBootService {
     context: BootDeadlineContext,
     progress?: DeviceBootProgress,
     presentationOrder?: BootedDeviceDiscoveryOptions["presentationOrder"],
+    preferRunning?: boolean,
   ): Promise<DeviceBootResult> {
     // A cached `isRunning: false` overlay can go stale: an externally started
     // same-name AVD (or several) may already be live. iOS keeps trusting the
     // cached flag because its identity (UDID) cannot silently collide the
     // same way; android always re-discovers with a fresh cache-bypassing
     // sweep before trusting the overlay (#7178).
-    if (image.platform !== "android" && !image.isRunning) {
+    if (!image.isRunning && image.platform !== "android") {
       return this.bootImage(image, context, progress, false);
     }
     const booted = await this.discoverBootedDevices(
@@ -610,12 +682,15 @@ export class DeviceBootService {
     // iOS simulators can share a display name, so only their UDID is lifecycle
     // identity. Android `deviceId` may instead name an AVD image, where name
     // fallback is required because the booted device carries an ADB serial.
-    const running =
-      (image.deviceId ? booted.find((device) => device.deviceId === image.deviceId) : undefined) ??
-      (image.platform === "android"
-        ? findUniqueBootedAndroidDeviceByName(booted, image.name)
-        : undefined);
+    const running = findBootedDeviceMatchingImage(image, booted);
+    // Android completes fresh discovery before this decision, even when a
+    // caller explicitly wants a cold boot: uniqueness and completeness must
+    // be proven before starting a same-name AVD. An in-flight transport is
+    // likewise kept on the shared-launch path rather than adopted here.
     if (!running) {
+      return this.bootImage(image, context, progress, false);
+    }
+    if (shouldColdBootMatchedAndroidImage(image, preferRunning, this.lifecycleCoordinator)) {
       return this.bootImage(image, context, progress, false);
     }
     const result = await this.waitForRunningDevice(
@@ -735,14 +810,46 @@ export class DeviceBootService {
       platform: image.platform,
       stableId: image.platform === "android" ? image.name : image.deviceId!,
     });
-    return this.bootRecovery.run(
+    // This outer marker spans every bootImageOnce invocation made by this
+    // bootRecovery.run retry loop. bootImageOnce keeps an inner ref-counted
+    // marker for waitForRunningDevice's direct recovery re-entry, which does
+    // not pass through this wrapper.
+    const releaseInFlightAndroidColdBoot = trackInFlightAndroidColdBootIfNeeded(
+      this.lifecycleCoordinator,
       image,
-      async () => this.bootImageOnce(image, context, progress, provisioned),
-      context.signal,
     );
+    try {
+      return await this.bootRecovery.run(
+        image,
+        async () => this.bootImageOnce(image, context, progress, provisioned),
+        context.signal,
+      );
+    } finally {
+      releaseInFlightAndroidColdBoot?.();
+    }
   }
 
   private async bootImageOnce(
+    image: DeviceInfo,
+    context: BootDeadlineContext,
+    progress: DeviceBootProgress | undefined,
+    provisioned: boolean,
+  ): Promise<DeviceBootResult> {
+    // This inner marker covers waitForRunningDevice's direct recovery retry,
+    // while bootImage's outer marker covers its bootRecovery.run attempts.
+    // They intentionally nest on the normal cold-boot path and ref-count.
+    const releaseInFlightAndroidColdBoot = trackInFlightAndroidColdBootIfNeeded(
+      this.lifecycleCoordinator,
+      image,
+    );
+    try {
+      return await this.bootImageOnceWithOwnedLaunchTracking(image, context, progress, provisioned);
+    } finally {
+      releaseInFlightAndroidColdBoot?.();
+    }
+  }
+
+  private async bootImageOnceWithOwnedLaunchTracking(
     image: DeviceInfo,
     context: BootDeadlineContext,
     progress: DeviceBootProgress | undefined,

@@ -2457,6 +2457,40 @@ describe("provisionDevice handler", () => {
     expect(exactProvisioner.requests).toHaveLength(0);
   });
 
+  test("reports incomplete Android boot discovery as retryable without adopting a device", async () => {
+    const timer = new FakeTimer();
+    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    sessionManager.stopCleanupTimer();
+    const pool = new DevicePool(sessionManager, "daemon-session", timer, undefined, deviceManager);
+    await pool.initializeWithDevices([]);
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    exactProvisioner.provision = async () => provisionedTestDevice("android", false);
+    deviceManager.setBootedDevices("android", [
+      { name: "phone-api-36-a", platform: "android", deviceId: "emulator-5554" },
+    ]);
+    deviceManager.setAndroidDiscoveryIncomplete("adb devices failed during boot discovery");
+
+    const response = JSON.parse(
+      (
+        (await ToolRegistry.getTool("provisionDevice")!.handler(
+          provisionTestArgs("android", "operation-android-discovery-incomplete"),
+        )) as any
+      ).content[0].text,
+    );
+
+    expect(response).toMatchObject({
+      success: false,
+      error: {
+        code: "discovery_incomplete",
+        retryable: true,
+      },
+    });
+    expect(deviceManager.wasMethodCalled("startDevice")).toBe(false);
+    expect(deviceManager.wasMethodCalled("waitForDeviceReady")).toBe(false);
+    expect(pool.getDevice("emulator-5554")).toBeNull();
+    expect(sessionManager.getAllSessionIds()).toEqual([]);
+  });
+
   test("locks a newly created iOS simulator before booting it", async () => {
     const created: ExactProvisionedDevice = {
       created: true,

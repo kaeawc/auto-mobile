@@ -90,6 +90,7 @@ import {
 import type { Session, SessionManager } from "../daemon/sessionManager";
 import {
   AndroidAvdIdentityConflictError,
+  AndroidBootedDeviceDiscoveryIncompleteError,
   DeviceBootService,
   DeviceBootTimeoutError,
   findUniqueBootedAndroidDeviceByName,
@@ -175,6 +176,9 @@ function knownProvisionDeviceError(error: unknown): ProvisionDeviceError | undef
   }
   if (error instanceof AndroidAvdIdentityConflictError) {
     return new ProvisionDeviceError("identity_conflict", error.message);
+  }
+  if (error instanceof AndroidBootedDeviceDiscoveryIncompleteError) {
+    return new ProvisionDeviceError("discovery_incomplete", error.message, true);
   }
   return undefined;
 }
@@ -8084,7 +8088,13 @@ export function registerDeviceTools() {
       });
     }
     if (error instanceof ProvisionDeviceError) {
-      return createToolErrorResponse(error.code, error.message);
+      return createToolErrorResponse(error.code, error.message, {
+        error: {
+          code: error.code,
+          message: error.message,
+          retryable: error.retryable,
+        },
+      });
     }
     if (error instanceof ProvisionDeviceOperationConflictError) {
       return createToolErrorResponse("operation_conflict", error.message);

@@ -1,5 +1,32 @@
 # Changelog
 
+## [v0.0.75] - 2026-09-17
+
+### Fixed
+
+- emulator: observedEmulatorPorts assumes adbPort = consolePort + 1, missing the real adb port for -ports console,adb launches ([#6565](https://github.com/kaeawc/auto-mobile/issues/6565)) (android)
+
+### Other
+
+- Linux zombie PIDs block CtrlProxy forward-lease recovery ([#7190](https://github.com/kaeawc/auto-mobile/issues/7190))
+- Daemon reconciliation can complete with required enabledTools still unset ([#7186](https://github.com/kaeawc/auto-mobile/issues/7186))
+- systemTray dismiss wipes the whole collapsed notification group (and further collateral) while reporting a single "Dismissed notification" ([#7185](https://github.com/kaeawc/auto-mobile/issues/7185)) (bot-filed, routine:exploratory)
+- postNotification misreports an absent SDK receiver as a receiver-side failure (supported:true) — am broadcast to a nonexistent explicit component prints result=0, not "no receiver" ([#7184](https://github.com/kaeawc/auto-mobile/issues/7184)) (bot-filed, routine:exploratory)
+- Preserve rootable Android image preference across minor API versions ([#7183](https://github.com/kaeawc/auto-mobile/issues/7183))
+- Keep FakeIOSCtrlProxy structurally aligned with the exported IOSCtrlProxy interface ([#7182](https://github.com/kaeawc/auto-mobile/issues/7182))
+- Isolate iOS CtrlProxy handshake cancellation between concurrent callers ([#7181](https://github.com/kaeawc/auto-mobile/issues/7181))
+- Keep provision replay non-successful until failed-session cleanup settles ([#7180](https://github.com/kaeawc/auto-mobile/issues/7180))
+- Fail closed when Android booted-device discovery is incomplete ([#7179](https://github.com/kaeawc/auto-mobile/issues/7179))
+- Do not trust stale isRunning=false before Android AVD ambiguity discovery ([#7178](https://github.com/kaeawc/auto-mobile/issues/7178))
+- Refresh Android discovery before exact provisionDevice adoption ([#7177](https://github.com/kaeawc/auto-mobile/issues/7177))
+- Make device-session identity fence migration atomic and retry-safe ([#7176](https://github.com/kaeawc/auto-mobile/issues/7176))
+- Recover legacy physical Android sessions by durable device serial ([#7175](https://github.com/kaeawc/auto-mobile/issues/7175))
+- Invalidate persisted AVD identity when a legacy writer rebinds the same emulator serial ([#7174](https://github.com/kaeawc/auto-mobile/issues/7174))
+- Preserve configured AVD inventory when booted-device discovery fails ([#7169](https://github.com/kaeawc/auto-mobile/issues/7169))
+- CI infra: `Build Desktop App` fails on both windows-latest and macos-latest — `android-actions/setup-android@v3.2.2` → `sdkmanager tools` exit 1 (new signature) ([#7155](https://github.com/kaeawc/auto-mobile/issues/7155)) (bot-filed, needs-human, routine:flake-sentinel)
+- doctor: add explicit bounded recovery for missing or corrupt daemon and socket state ([#7143](https://github.com/kaeawc/auto-mobile/issues/7143))
+- Systemic/widespread fixes for the 0.0.68 PR fleet ([#6333](https://github.com/kaeawc/auto-mobile/issues/6333))
+
 ## [v0.0.74] - 2026-09-17
 
 ### Fixed

@@ -208,15 +208,16 @@ function violationsIn(
 
   const assignmentCounts = new Map<ts.Symbol, number>();
   const countAssignmentTarget = (target: ts.Expression): void => {
-    if (ts.isIdentifier(target)) {
-      const symbol = symbolFor(target);
+    const unwrappedTarget = unwrapTransparentExpression(target);
+    if (ts.isIdentifier(unwrappedTarget)) {
+      const symbol = symbolFor(unwrappedTarget);
       if (symbol) {
         assignmentCounts.set(symbol, (assignmentCounts.get(symbol) ?? 0) + 1);
       }
       return;
     }
-    if (ts.isObjectLiteralExpression(target)) {
-      for (const property of target.properties) {
+    if (ts.isObjectLiteralExpression(unwrappedTarget)) {
+      for (const property of unwrappedTarget.properties) {
         if (ts.isPropertyAssignment(property) && ts.isIdentifier(property.initializer)) {
           countAssignmentTarget(property.initializer);
         } else if (ts.isShorthandPropertyAssignment(property)) {
@@ -318,7 +319,12 @@ function violationsIn(
       addBinding(namespaces, node.name);
     }
 
-    if (ts.isVariableDeclaration(node) && node.initializer) {
+    if (
+      ts.isVariableDeclaration(node) &&
+      node.initializer &&
+      ts.isVariableDeclarationList(node.parent) &&
+      (node.parent.flags & ts.NodeFlags.Const) !== 0
+    ) {
       const initializer = unwrapTransparentExpression(node.initializer);
       if (ts.isIdentifier(node.name)) {
         registerIdentifierBinding(node.name, initializer);
@@ -330,11 +336,12 @@ function violationsIn(
 
     if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
       const value = unwrapTransparentExpression(node.right);
-      if (ts.isIdentifier(node.left) && isUnambiguousAssignmentTarget(node.left)) {
-        registerIdentifierBinding(node.left, value);
+      const target = unwrapTransparentExpression(node.left);
+      if (ts.isIdentifier(target) && isUnambiguousAssignmentTarget(target)) {
+        registerIdentifierBinding(target, value);
       }
-      if (ts.isObjectLiteralExpression(node.left)) {
-        registerObjectAssignment(node.left.properties, value);
+      if (ts.isObjectLiteralExpression(target)) {
+        registerObjectAssignment(target.properties, value);
       }
     }
 

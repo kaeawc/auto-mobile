@@ -243,12 +243,15 @@ teardown() {
     'let destructured;' \
     '({ [("execFileSync" as const)]: destructured } = childProcess);' \
     'destructured("auto-mobile", ["--daemon-mode"]);' \
+    'let parenthesizedLaunch;' \
+    '(parenthesizedLaunch) = childProcess["execFileSync"];' \
+    'parenthesizedLaunch("auto-mobile", ["--daemon-mode"]);' \
     > "$FIXTURE"
 
   run bash "$SCRIPT"
 
   [ "$status" -eq 1 ]
-  [[ "$(grep -c "DaemonLauncherBoundaryFixture.ts" <<< "$output")" -eq 2 ]]
+  [[ "$(grep -c "DaemonLauncherBoundaryFixture.ts" <<< "$output")" -eq 3 ]]
 }
 
 @test "allows dynamic keys and reassigned or shadowed aliases" {
@@ -260,6 +263,15 @@ teardown() {
     'launch = childProcess["execFileSync"];' \
     'launch = () => {};' \
     'launch();' \
+    'let initializedLaunch = childProcess["execFileSync"];' \
+    'initializedLaunch = () => {};' \
+    'initializedLaunch();' \
+    'let namespaceAlias = childProcess;' \
+    'namespaceAlias = {} as typeof childProcess;' \
+    'namespaceAlias["execFileSync"]();' \
+    'let { execFileSync: destructuredLaunch } = childProcess;' \
+    'destructuredLaunch = () => {};' \
+    'destructuredLaunch();' \
     'function inspect(childProcess: { execFileSync(): void }) {' \
     '  const executor = "execFileSync" as const;' \
     '  childProcess[executor]();' \

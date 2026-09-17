@@ -1,4 +1,5 @@
 import type { HostCommandExecutor } from "../HostCommandExecutor";
+import { trackAmbient } from "../PerfContext";
 import { DefaultHostCommandExecutor } from "../HostCommandExecutor";
 import type { Timer } from "../SystemTimer";
 import { defaultTimer } from "../SystemTimer";
@@ -95,12 +96,10 @@ export class IOSCtrlProxyProcessClient {
 
   async findListeningPids(port: number): Promise<number[]> {
     try {
-      const { stdout } = await this.host.executeCommand("lsof", [
-        "-nP",
-        `-iTCP:${port}`,
-        "-sTCP:LISTEN",
-        "-Fp",
-      ]);
+      // Direct lsof (bypasses the executeCommand funnel); own ambient leaf.
+      const { stdout } = await trackAmbient("lsof", () =>
+        this.host.executeCommand("lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-Fp"]),
+      );
       return [
         ...new Set(
           stdout.split("\n").flatMap((line) => {
@@ -571,16 +570,16 @@ export class IOSCtrlProxyProcessClient {
     return true;
   }
 
-  private async executeCommand(
+  private executeCommand(
     file: string,
     args: string[],
     deadline?: number,
   ): Promise<Awaited<ReturnType<HostCommandExecutor["executeCommand"]>>> {
     const timeoutMs = this.remainingTimeoutMs(deadline);
-    return this.host.executeCommand(
-      file,
-      args,
-      timeoutMs === undefined ? undefined : { timeoutMs },
+    // Runner-discovery/cleanup subprocesses (pgrep, ps, kill, ...); one ambient
+    // leaf per command (see PerfContext).
+    return trackAmbient(`${file} ${args.slice(0, 1).join(" ")}`.trimEnd(), () =>
+      this.host.executeCommand(file, args, timeoutMs === undefined ? undefined : { timeoutMs }),
     );
   }
 

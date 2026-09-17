@@ -1,4 +1,5 @@
 import { promises as fs } from "fs";
+import { trackAmbient } from "../PerfContext";
 import { tmpdir } from "os";
 import { join } from "path";
 import type { ExecResult } from "../../models";
@@ -388,14 +389,19 @@ export class DevicectlDeviceLister implements IosPhysicalDeviceLister {
     try {
       tempDir = await this.deps.mkdtemp(join(this.deps.tmpdir(), "automobile-devicectl-devices-"));
       const jsonPath = join(tempDir, "devices.json");
-      await this.deps.execute(
-        "xcrun",
-        ["devicectl", "list", "devices", "--json-output", jsonPath, "--quiet"],
-        // Deliberately NOT wired to the ambient abort signal: this listing is
-        // shared across concurrent callers, so honoring one caller's
-        // cancellation would cancel the process out from under the others. The
-        // timeout is what bounds it.
-        { timeoutMs: DEVICE_LIST_TIMEOUT_MS },
+      // The listing is deduped via `inFlight`, so this span attributes to
+      // whichever caller triggered the shared run — one command, one leaf (see
+      // PerfContext).
+      await trackAmbient("devicectl list devices", () =>
+        this.deps.execute(
+          "xcrun",
+          ["devicectl", "list", "devices", "--json-output", jsonPath, "--quiet"],
+          // Deliberately NOT wired to the ambient abort signal: this listing is
+          // shared across concurrent callers, so honoring one caller's
+          // cancellation would cancel the process out from under the others. The
+          // timeout is what bounds it.
+          { timeoutMs: DEVICE_LIST_TIMEOUT_MS },
+        ),
       );
       const raw = await this.deps.readFile(jsonPath);
       return this.remember(parseDevicectlDeviceList(JSON.parse(raw) as unknown));

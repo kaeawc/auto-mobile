@@ -507,31 +507,46 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
    */
   private async listAndroidDeviceImages(signal?: AbortSignal): Promise<DeviceInfo[]> {
     const bootedDeviceSignal = combineWithAmbientAbort(signal);
-    const [images, bootedDevices] = await Promise.all([
+    const [images, overlay] = await Promise.all([
       this.emulator.listAvds({ signal: bootedDeviceSignal }),
-      this.emulator
-        .getBootedDevicesChecked(false, {}, bootedDeviceSignal)
-        .catch((error: unknown) => {
-          bootedDeviceSignal?.throwIfAborted();
-          logger.warn(
-            `[DeviceManager] Android running-state overlay failed: ${errorMessage(error)}`,
-          );
-          return undefined;
-        }),
+      this.getAndroidRunningStateOverlay(bootedDeviceSignal),
     ]);
-    const emulatorDevices = (bootedDevices ?? []).filter((device) =>
-      isAndroidEmulatorSerial(device.deviceId),
-    );
-    const runningAvdNames = new Set(emulatorDevices.map((device) => device.name));
-    const hasUnresolvedEmulatorIdentity = emulatorDevices.some(isUnresolvedAndroidEmulatorName);
     return images.map((image) => ({
       ...image,
-      isRunning: runningAvdNames.has(image.name),
-      ...(bootedDevices === undefined ||
-      (hasUnresolvedEmulatorIdentity && !runningAvdNames.has(image.name))
+      isRunning: overlay?.runningAvdNames.has(image.name) ?? false,
+      ...(overlay === undefined ||
+      (overlay.hasUnresolvedEmulatorIdentity && !overlay.runningAvdNames.has(image.name))
         ? { isRunningStateKnown: false }
         : {}),
     }));
+  }
+
+  /**
+   * Fetch and derive the booted-emulator running-state overlay. Any
+   * non-cancellation failure is isolated here so configured AVD discovery can
+   * still return its complete inventory (issue #7169).
+   */
+  private async getAndroidRunningStateOverlay(
+    bootedDeviceSignal?: AbortSignal,
+  ): Promise<{ runningAvdNames: Set<string>; hasUnresolvedEmulatorIdentity: boolean } | undefined> {
+    try {
+      const bootedDevices = await this.emulator.getBootedDevicesChecked(
+        false,
+        {},
+        bootedDeviceSignal,
+      );
+      const emulatorDevices = bootedDevices.filter((device) =>
+        isAndroidEmulatorSerial(device.deviceId),
+      );
+      return {
+        runningAvdNames: new Set(emulatorDevices.map((device) => device.name)),
+        hasUnresolvedEmulatorIdentity: emulatorDevices.some(isUnresolvedAndroidEmulatorName),
+      };
+    } catch (error) {
+      bootedDeviceSignal?.throwIfAborted();
+      logger.warn(`[DeviceManager] Android running-state overlay failed: ${errorMessage(error)}`);
+      return undefined;
+    }
   }
 
   /**

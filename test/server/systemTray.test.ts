@@ -16,6 +16,8 @@ import {
   isMatchInCollapsedGroup,
   expandNotificationGroup,
   EXPAND_GROUP_SETTLE_MS,
+  getNotificationGroupChildRows,
+  resolveNotificationGroupExpansionState,
 } from "../../src/server/systemTrayHelpers";
 import type { SystemTrayIosClient } from "../../src/server/systemTrayHelpers";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -920,6 +922,7 @@ const createIosNotificationCenterHierarchy = (
 const createTrayWithGroupedNotifications = (
   appLabel: string,
   titles: string[],
+  headerExpandContentDesc: string = "Expand",
 ): ViewHierarchyResult =>
   ({
     packageName: SYSTEM_TRAY_PACKAGE,
@@ -959,7 +962,7 @@ const createTrayWithGroupedNotifications = (
                     },
                     {
                       $: {
-                        "content-desc": "Expand",
+                        "content-desc": headerExpandContentDesc,
                         "resource-id": "android:id/expand_button",
                         className: "android.widget.Button",
                         clickable: "true",
@@ -1099,6 +1102,221 @@ const createTrayWithExpandedNotifications = (titles: string[]): ViewHierarchyRes
     },
   }) as unknown as ViewHierarchyResult;
 
+// The notification_children_container subtrees below are trimmed directly from
+// CtrlProxy captures on API 36. The bounds and SystemUI resource ids are kept
+// intact so group-state tests exercise the real collapsed stubs and expanded
+// row template rather than a redrawn approximation.
+const createCtrlProxyCapturedGroupTray = (
+  expanded: boolean,
+  {
+    appLabel = "Shell",
+    titles = ["Rev3", "Rev2", "Rev1"],
+    bodies = ["RB3", "RB2", "RB1"],
+  }: { appLabel?: string; titles?: string[]; bodies?: string[] } = {},
+): ViewHierarchyResult => {
+  const rowBounds = expanded
+    ? [
+        [42, 716, 1038, 934],
+        [42, 935, 1038, 1153],
+        [42, 1154, 1038, 1372],
+      ]
+    : [
+        [42, 694, 1038, 745],
+        [42, 766, 1038, 817],
+        [42, 838, 1038, 889],
+      ];
+  const bounds = ([left, top, right, bottom]: number[]) => ({ left, top, right, bottom });
+  return {
+    packageName: SYSTEM_TRAY_PACKAGE,
+    hierarchy: {
+      node: {
+        $: {
+          "resource-id": "com.android.systemui:id/notification_stack_scroller",
+          packageName: SYSTEM_TRAY_PACKAGE,
+          bounds: { left: 0, top: 0, right: 1080, bottom: 1920 },
+        },
+        node: {
+          $: {
+            "resource-id": "com.android.systemui:id/expandableNotificationRow",
+            bounds: { left: 42, top: 568, right: 1038, bottom: 1639 },
+          },
+          node: {
+            $: {
+              "resource-id": "com.android.systemui:id/notification_children_container",
+              bounds: { left: 42, top: 568, right: 1038, bottom: 1639 },
+            },
+            node: [
+              {
+                $: {
+                  "resource-id": "android:id/notification_header",
+                  bounds: { left: 42, top: 568, right: 1038, bottom: 715 },
+                },
+                node: [
+                  {
+                    $: {
+                      text: appLabel,
+                      "resource-id": "android:id/app_name_text",
+                      bounds: { left: 179, top: 620, right: 249, bottom: 663 },
+                    },
+                  },
+                  {
+                    $: {
+                      "content-desc": expanded ? "Collapse" : "Expand",
+                      "resource-id": "android:id/expand_button",
+                      clickable: "true",
+                      bounds: expanded
+                        ? { left: 891, top: 568, right: 1038, bottom: 715 }
+                        : { left: 852, top: 568, right: 1038, bottom: 715 },
+                    },
+                  },
+                ],
+              },
+              ...rowBounds.map((row, index) => {
+                const [left, top, right, bottom] = row;
+                const backgroundBottom = expanded ? bottom + 89 : bottom + 256;
+                const title = titles[index];
+                if (!expanded) {
+                  return {
+                    $: {
+                      "resource-id": "com.android.systemui:id/expandableNotificationRow",
+                      bounds: bounds(row),
+                    },
+                    node: [
+                      {
+                        $: {
+                          "resource-id": "android:id/backgroundDimmed",
+                          bounds: bounds([left, top, right, backgroundBottom]),
+                        },
+                      },
+                      {
+                        $: {
+                          "resource-id": "android:id/expanded",
+                          bounds: bounds([left, top, right, backgroundBottom]),
+                        },
+                        node: [
+                          { $: { bounds: bounds(row) } },
+                          {
+                            $: {
+                              text: title,
+                              "resource-id": "android:id/notification_title",
+                              bounds: bounds([179, top, 272, bottom]),
+                            },
+                          },
+                          {
+                            $: {
+                              text: bodies[index],
+                              "resource-id": "android:id/notification_text",
+                              bounds: bounds([272, top, 1006, bottom]),
+                            },
+                          },
+                        ],
+                      },
+                      {
+                        $: {
+                          "resource-id": "android:id/fake_shadow",
+                          bounds: bounds([left, top, right, backgroundBottom]),
+                        },
+                      },
+                    ],
+                  };
+                }
+                const contentTop = top + 52;
+                return {
+                  $: {
+                    "resource-id": "com.android.systemui:id/expandableNotificationRow",
+                    bounds: bounds(row),
+                  },
+                  node: [
+                    {
+                      $: {
+                        "resource-id": "android:id/backgroundNormal",
+                        bounds: bounds([left, top, right, backgroundBottom]),
+                      },
+                    },
+                    {
+                      $: {
+                        "resource-id": "android:id/backgroundDimmed",
+                        bounds: bounds([left, top, right, backgroundBottom]),
+                      },
+                    },
+                    {
+                      $: {
+                        "resource-id": "android:id/expanded",
+                        bounds: bounds([left, top, right, backgroundBottom]),
+                      },
+                      node: {
+                        $: {
+                          "resource-id": "android:id/status_bar_latest_event_content",
+                          bounds: bounds(row),
+                        },
+                        node: {
+                          $: {
+                            "resource-id": "android:id/notification_headerless_view_row",
+                            bounds: bounds([179, top, right, bottom]),
+                          },
+                          node: {
+                            $: {
+                              "resource-id": "android:id/notification_headerless_view_column",
+                              bounds: bounds([179, contentTop, 891, bottom - 52]),
+                            },
+                            node: [
+                              {
+                                $: {
+                                  "resource-id": "android:id/notification_top_line",
+                                  bounds: bounds([179, contentTop, 891, contentTop + 51]),
+                                },
+                                node: [
+                                  {
+                                    $: {
+                                      text: title,
+                                      "resource-id": "android:id/title",
+                                      bounds: bounds([179, contentTop, 261, contentTop + 51]),
+                                    },
+                                  },
+                                  {
+                                    $: {
+                                      text: bodies[index],
+                                      "resource-id": "android:id/text",
+                                      bounds: bounds([179, contentTop + 56, 891, bottom - 57]),
+                                    },
+                                  },
+                                ],
+                              },
+                              {
+                                $: {
+                                  "resource-id": "android:id/expand_button_touch_container",
+                                  bounds: bounds([891, top, right, bottom]),
+                                },
+                                node: {
+                                  $: {
+                                    "resource-id": "android:id/expand_button",
+                                    "content-desc": "Expand",
+                                    bounds: bounds([891, top, right, bottom]),
+                                  },
+                                },
+                              },
+                            ],
+                          },
+                        },
+                      },
+                    },
+                    {
+                      $: {
+                        "resource-id": "android:id/fake_shadow",
+                        bounds: bounds([left, top, right, backgroundBottom]),
+                      },
+                    },
+                  ],
+                };
+              }),
+            ],
+          },
+        },
+      },
+    },
+  } as unknown as ViewHierarchyResult;
+};
+
 const createRealisticGroupNotificationTray = (
   appLabel: string,
   titles: string[],
@@ -1198,14 +1416,54 @@ const createRealisticGroupNotificationTray = (
                 if (!expanded) {
                   return {
                     $: {
-                      text: title,
-                      "resource-id": childTitleResourceId,
+                      "resource-id": "com.android.systemui:id/expandableNotificationRow",
                       bounds: {
-                        left: 96,
-                        top: childTop + 10,
-                        right: 900,
-                        bottom: childBottom - 10,
+                        left: groupLeft,
+                        top: childTop,
+                        right: groupRight,
+                        bottom: childBottom,
                       },
+                    },
+                    node: {
+                      $: {
+                        "resource-id": "android:id/expanded",
+                        bounds: {
+                          left: groupLeft,
+                          top: childTop,
+                          right: groupRight,
+                          bottom: childBottom,
+                        },
+                      },
+                      node: [
+                        {
+                          $: {
+                            text: title,
+                            "resource-id": childTitleResourceId,
+                            bounds: {
+                              left: 96,
+                              top: childTop + 10,
+                              right: 900,
+                              bottom: childBottom - 10,
+                            },
+                          },
+                        },
+                        ...(body
+                          ? [
+                              {
+                                $: {
+                                  text: body,
+                                  "resource-id": "android:id/text",
+                                  bounds: {
+                                    left: 96,
+                                    top: childTop + 10,
+                                    right: 900,
+                                    bottom: childBottom - 10,
+                                  },
+                                },
+                              },
+                            ]
+                          : []),
+                      ],
                     },
                   };
                 }
@@ -1276,22 +1534,6 @@ const createRealisticGroupNotificationTray = (
                   },
                 };
               }),
-              ...(body && !expanded
-                ? [
-                    {
-                      $: {
-                        text: body,
-                        "resource-id": "android:id/text",
-                        bounds: {
-                          left: 96,
-                          top: headerBottom + 10,
-                          right: 900,
-                          bottom: groupBottom,
-                        },
-                      },
-                    },
-                  ]
-                : []),
             ],
           },
         },
@@ -1520,6 +1762,180 @@ describe("systemTray group expansion", () => {
 
     expect(result.match).not.toBeNull();
     expect(isMatchInCollapsedGroup(result.match!)).toBe(true);
+  });
+
+  test("resolves real CtrlProxy and legacy group fixture expansion states", async () => {
+    const fakeTimer = new FakeTimer();
+    const fakeAdb = new SequencedFakeAdbExecutor([1000]);
+    const fakeObserveScreen = new SequencedObserveScreen([
+      createObservation(createCtrlProxyCapturedGroupTray(false)),
+      createObservation(createCtrlProxyCapturedGroupTray(true)),
+      createObservation(createTrayWithGroupedNotifications("FUBStaging", ["Legacy title"])),
+      createObservation(
+        createRealisticGroupNotificationTray(
+          "FUBStaging",
+          ["Zillow Real-Time Tour request", "Test message"],
+          {
+            expanded: true,
+            headerExpandContentDesc: "Expand",
+            headerExpandResourceId: "android:id/oem_toggle",
+          },
+        ),
+      ),
+    ]);
+    setSystemTrayDependencies({
+      timer: fakeTimer,
+      adbFactory: () => fakeAdb,
+      observeScreenFactory: () => fakeObserveScreen,
+    });
+
+    const collapsed = await waitForNotificationMatch(device, { title: "Rev3" }, [], 500);
+    const expanded = await waitForNotificationMatch(device, { title: "Rev3" }, [], 500);
+    const legacy = await waitForNotificationMatch(device, { title: "Legacy title" }, [], 500);
+
+    expect(resolveNotificationGroupExpansionState(collapsed.match!.candidate.groupNode)).toBe(
+      "collapsed",
+    );
+    expect(resolveNotificationGroupExpansionState(expanded.match!.candidate.groupNode)).toBe(
+      "expanded",
+    );
+    expect(resolveNotificationGroupExpansionState(legacy.match!.candidate.groupNode)).toBe(
+      "collapsed",
+    );
+    const realisticExpanded = await waitForNotificationMatch(
+      device,
+      { title: "Zillow Real-Time Tour request" },
+      [],
+      500,
+    );
+    expect(
+      getNotificationGroupChildRows(realisticExpanded.match!.candidate.groupNode),
+    ).toHaveLength(2);
+    expect(
+      resolveNotificationGroupExpansionState(realisticExpanded.match!.candidate.groupNode),
+    ).toBe("expanded");
+  });
+
+  test("dismiss expands the real collapsed CtrlProxy group before swiping its full row", async () => {
+    const fakeTimer = new FakeTimer();
+    const fakeAdb = new SequencedFakeAdbExecutor([1000, 1000, 2000]);
+    const collapsedHierarchy = createCtrlProxyCapturedGroupTray(false);
+    const expandedHierarchy = createCtrlProxyCapturedGroupTray(true);
+    const fakeObserveScreen = new FakeObserveScreen();
+    fakeObserveScreen.setObserveResult((index) =>
+      createObservation({
+        ...(index === 0 ? collapsedHierarchy : expandedHierarchy),
+        updatedAt: 2001 + fakeTimer.now(),
+      }),
+    );
+    setSystemTrayDependencies({
+      timer: fakeTimer,
+      adbFactory: () => fakeAdb,
+      observeScreenFactory: () => fakeObserveScreen,
+    });
+    ToolRegistry.clearTools();
+    registerInteractionTools();
+
+    const dismiss = ToolRegistry.getTool("systemTray")!.deviceAwareHandler!(device, {
+      action: "dismiss",
+      notification: { title: "Rev3" },
+      awaitTimeout: 5000,
+      platform: "android",
+    });
+    await waitForPendingSleep(fakeTimer);
+    fakeTimer.enableAutoAdvance();
+    fakeTimer.advanceTime(EXPAND_GROUP_SETTLE_MS);
+    await dismiss;
+
+    const commands = fakeAdb.getExecutedCommands();
+    expect(commands.filter((command) => command.includes("input tap"))).toContain(
+      "shell input tap 945 641",
+    );
+    expect(commands.filter((command) => command.includes("input swipe"))).toEqual([
+      expect.stringContaining("shell input swipe 938 825 141 825"),
+    ]);
+    expect(commands.join("\n")).not.toContain("input swipe 938 719");
+  });
+
+  test("dismiss refuses an unknown group state after its conservative expand attempt", async () => {
+    const fakeTimer = new FakeTimer();
+    const fakeAdb = new SequencedFakeAdbExecutor([1000, 1000]);
+    const hierarchy = createTrayWithGroupedNotifications(
+      "FUBStaging",
+      ["Unknown notification", "Sibling"],
+      "Unrecognized state",
+    );
+    const fakeObserveScreen = new SequencedObserveScreen([
+      createObservation(hierarchy),
+      createObservation(hierarchy),
+    ]);
+    setSystemTrayDependencies({
+      timer: fakeTimer,
+      adbFactory: () => fakeAdb,
+      observeScreenFactory: () => fakeObserveScreen,
+    });
+    ToolRegistry.clearTools();
+    registerInteractionTools();
+
+    const dismiss = ToolRegistry.getTool("systemTray")!.deviceAwareHandler!(device, {
+      action: "dismiss",
+      notification: { title: "Unknown notification" },
+      awaitTimeout: 5000,
+      platform: "android",
+    });
+    await waitForPendingSleep(fakeTimer);
+    fakeTimer.advanceTime(EXPAND_GROUP_SETTLE_MS);
+
+    await expect(dismiss).rejects.toThrow("Could not determine whether the notification group");
+    expect(
+      fakeAdb.getExecutedCommands().filter((command) => command.includes("input tap")),
+    ).toHaveLength(1);
+    expect(
+      fakeAdb.getExecutedCommands().filter((command) => command.includes("input swipe")),
+    ).toHaveLength(0);
+  });
+
+  test("dismiss rejects a re-match in the same group when the matched row disappeared", async () => {
+    const fakeTimer = new FakeTimer();
+    const fakeAdb = new SequencedFakeAdbExecutor([1000, 1000]);
+    const collapsedHierarchy = createCtrlProxyCapturedGroupTray(false, {
+      appLabel: "Same app",
+      titles: ["Original notification", "Inbox", "Older"],
+      bodies: ["Shared body", "Inbox body", "Older body"],
+    });
+    const expandedHierarchy = createCtrlProxyCapturedGroupTray(true, {
+      appLabel: "Same app",
+      titles: ["Replacement notification", "Inbox", "Older"],
+      bodies: ["Shared body", "Inbox body", "Older body"],
+    });
+    const fakeObserveScreen = new SequencedObserveScreen([
+      createObservation(collapsedHierarchy),
+      createObservation(expandedHierarchy),
+    ]);
+    setSystemTrayDependencies({
+      timer: fakeTimer,
+      adbFactory: () => fakeAdb,
+      observeScreenFactory: () => fakeObserveScreen,
+    });
+    ToolRegistry.clearTools();
+    registerInteractionTools();
+
+    const dismiss = ToolRegistry.getTool("systemTray")!.deviceAwareHandler!(device, {
+      action: "dismiss",
+      notification: { body: "Shared body" },
+      awaitTimeout: 5000,
+      platform: "android",
+    });
+    await waitForPendingSleep(fakeTimer);
+    fakeTimer.advanceTime(EXPAND_GROUP_SETTLE_MS);
+
+    await expect(dismiss).rejects.toThrow("re-match resolved a different notification row");
+    expect(
+      fakeAdb.getExecutedCommands().filter((command) => command.includes("input tap")),
+    ).toHaveLength(1);
+    expect(
+      fakeAdb.getExecutedCommands().filter((command) => command.includes("input swipe")),
+    ).toHaveLength(0);
   });
 
   test("composite app and title matches retain their group and expanded child row", async () => {
@@ -1815,16 +2231,14 @@ describe("systemTray group expansion", () => {
     const fakeTimer = new FakeTimer();
     const fakeAdb = new SequencedFakeAdbExecutor([1000, 1000, 2000]);
 
-    const collapsedHierarchy = createRealisticGroupNotificationTray(
-      "FUBStaging",
-      ["Zillow Real-Time Tour request", "Test message"],
-      { expanded: false },
-    );
-    const expandedHierarchy = createRealisticGroupNotificationTray(
-      "FUBStaging",
-      ["Zillow Real-Time Tour request", "Test message"],
-      { expanded: true },
-    );
+    const collapsedHierarchy = createTrayWithGroupedNotifications("FUBStaging", [
+      "Zillow Real-Time Tour request",
+      "Test message",
+    ]);
+    const expandedHierarchy = createTrayWithExpandedNotifications([
+      "Zillow Real-Time Tour request",
+      "Test message",
+    ]);
 
     const fakeObserveScreen = new FakeObserveScreen();
     fakeObserveScreen.setObserveResult((index) =>
@@ -2181,7 +2595,7 @@ describe("systemTray group expansion", () => {
     );
   });
 
-  test("dismiss accepts a same-position re-match when one group has no readable child titles", async () => {
+  test("dismiss rejects a same-position re-match when the matched row title changes", async () => {
     const fakeTimer = new FakeTimer();
     const fakeAdb = new SequencedFakeAdbExecutor([1000, 1000, 2000]);
     const collapsedHierarchy = createRealisticGroupNotificationTray(
@@ -2214,11 +2628,9 @@ describe("systemTray group expansion", () => {
     });
     await waitForPendingSleep(fakeTimer);
     fakeTimer.advanceTime(EXPAND_GROUP_SETTLE_MS);
-    const response = await dismiss;
-
-    expect(JSON.parse((response.content[0] as { text: string }).text).success).toBe(true);
+    await expect(dismiss).rejects.toThrow("re-match resolved a different notification row");
     expect(fakeAdb.getExecutedCommands().filter((cmd) => cmd.includes("input swipe"))).toHaveLength(
-      1,
+      0,
     );
   });
 

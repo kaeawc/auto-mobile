@@ -106,11 +106,14 @@ group header. The `tap` action handles this automatically:
    and tags each child candidate with a `groupNode` reference.
 2. **Detect** — After matching, `isMatchInCollapsedGroup` checks whether
    the best match has a `groupNode`; this means the notification belongs to a
-   group, whether collapsed or expanded. `isNotificationGroupExpanded` then
-   determines the state structurally: the group is expanded only when its
-   `notification_children_container` has one or more per-child
-   `expandableNotificationRow` nodes (via `getNotificationGroupChildRows`). A
-   group with a `groupNode` and no such child rows is collapsed.
+   group, whether collapsed or expanded. `isNotificationGroupExpanded` first
+   identifies an expanded group structurally when a per-child
+   `expandableNotificationRow` contains `status_bar_latest_event_content`.
+   When that full-row template is absent, it corroborates the state from child
+   row geometry (short collapsed stubs versus full, non-overlapping rows),
+   then falls back narrowly to a header button whose content description is
+   exactly `Expand` or `Collapse`. Unrecognized shapes remain unknown: taps
+   conservatively attempt expansion, while dismiss refuses to swipe.
 3. **Expand** — `expandNotificationGroup` finds the "Expand" button inside
    the group header, preferring a `resource-id` containing `expand_button` and
    falling back to a `content-desc` equal to "Expand" (case-insensitive), and

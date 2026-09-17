@@ -128,7 +128,7 @@ import {
   resolveNotificationTapElement,
   resolveNotificationSwipeElement,
   expandAndRematchIfCollapsed,
-  isNotificationGroupExpanded,
+  resolveNotificationGroupExpansionState,
   isSwipeTargetIsolatedFromGroup,
   tapElement,
   swipeElement,
@@ -2142,7 +2142,16 @@ export function registerInteractionTools() {
           progress,
           { observation: initialMatch.observation, match: initialMatch.match },
         );
-        if (match.candidate.groupNode && !isNotificationGroupExpanded(match.candidate.groupNode)) {
+        const groupExpansionState = match.candidate.groupNode
+          ? resolveNotificationGroupExpansionState(match.candidate.groupNode)
+          : null;
+        if (groupExpansionState === "unknown") {
+          throw new ActionableError(
+            "Could not determine whether the notification group is expanded or collapsed; " +
+              "refusing to swipe without expanding first.",
+          );
+        }
+        if (groupExpansionState === "collapsed") {
           throw new ActionableError(
             "Could not isolate the specific notification from its collapsed group; " +
               "dismissing would clear the whole group instead of this notification.",

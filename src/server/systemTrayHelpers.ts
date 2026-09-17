@@ -620,10 +620,6 @@ const findExpandButtonInGroup = (groupNode: any): Element | null => {
   return search(getNotificationGroupHeader(groupNode)) ?? contentDescriptionMatch;
 };
 
-export const isNotificationGroupExpanded = (groupNode: any): boolean => {
-  return getNotificationGroupChildRows(groupNode).length > 0;
-};
-
 export const expandNotificationGroup = async (
   device: BootedDevice,
   match: SystemTrayNotificationMatch,
@@ -662,6 +658,117 @@ export const getNotificationGroupChildRows = (groupNode: any): any[] => {
     return !resourceId.includes("notification_header") && nodeHasNotificationRowHint(child);
   });
 };
+
+export type NotificationGroupExpansionState = "expanded" | "collapsed" | "unknown";
+
+const nodeHasResourceIdDescendant = (node: any, resourceIdFragment: string): boolean => {
+  const props = getNodeProperties(node);
+  const resourceId = String(props?.["resource-id"] ?? props?.resourceId ?? "").toLowerCase();
+  if (resourceId.includes(resourceIdFragment)) {
+    return true;
+  }
+  return getDirectChildNodes(node).some((child) =>
+    nodeHasResourceIdDescendant(child, resourceIdFragment),
+  );
+};
+
+const getNodeExpandButtonContentDescription = (node: any): string | null => {
+  const props = getNodeProperties(node);
+  const resourceId = String(props?.["resource-id"] ?? props?.resourceId ?? "").toLowerCase();
+  const contentDescription = String(props?.["content-desc"] ?? props?.contentDesc ?? "").trim();
+  const isExpandButton = resourceId.includes("expand_button");
+  const isRecognizedState = /^(expand|collapse)$/i.test(contentDescription);
+  return contentDescription && (isExpandButton || isRecognizedState) ? contentDescription : null;
+};
+
+const getHeaderExpandButtonContentDescription = (groupNode: any): string | null => {
+  const search = (node: any): string | null => {
+    const contentDescription = getNodeExpandButtonContentDescription(node);
+    if (contentDescription) {
+      return contentDescription;
+    }
+    for (const child of getDirectChildNodes(node)) {
+      const result = search(child);
+      if (result) {
+        return result;
+      }
+    }
+    return null;
+  };
+
+  return search(getNotificationGroupHeader(groupNode));
+};
+
+const getChildRowBounds = (groupNode: any) => {
+  const parser = new DefaultElementParser();
+  return getNotificationGroupChildRows(groupNode)
+    .map((childRow) => parser.parseNodeBounds(childRow)?.bounds)
+    .filter((bounds): bounds is NonNullable<typeof bounds> => bounds !== undefined);
+};
+
+const hasCollapsedStubGeometry = (groupNode: any): boolean => {
+  const childRows = getChildRowBounds(groupNode);
+  if (childRows.length < 2) {
+    return false;
+  }
+  // CtrlProxy's collapsed children are 51px stubs. Keep this deliberately
+  // below ordinary compact notification-row heights so unfamiliar layouts use
+  // the header fallback instead of being guessed as collapsed.
+  const maxStubHeight = 64;
+  if (childRows.some((bounds) => bounds.bottom - bounds.top > maxStubHeight)) {
+    return false;
+  }
+  const headerBounds = new DefaultElementParser().parseNodeBounds(
+    getNotificationGroupHeader(groupNode),
+  )?.bounds;
+  if (!headerBounds || childRows[0].top > headerBounds.bottom + maxStubHeight * 2) {
+    return false;
+  }
+  return childRows.every(
+    (bounds, index) => index === 0 || bounds.top - childRows[index - 1].top <= maxStubHeight * 2,
+  );
+};
+
+const hasExpandedFullRowGeometry = (groupNode: any): boolean => {
+  const childRows = getChildRowBounds(groupNode);
+  if (childRows.length === 0 || childRows.some((bounds) => bounds.bottom - bounds.top < 120)) {
+    return false;
+  }
+  return childRows.every(
+    (bounds, index) => index === 0 || bounds.top >= childRows[index - 1].bottom,
+  );
+};
+
+export const resolveNotificationGroupExpansionState = (
+  groupNode: any,
+): NotificationGroupExpansionState => {
+  const childRows = getNotificationGroupChildRows(groupNode);
+  if (
+    childRows.some((childRow) =>
+      nodeHasResourceIdDescendant(childRow, "status_bar_latest_event_content"),
+    )
+  ) {
+    return "expanded";
+  }
+  if (hasCollapsedStubGeometry(groupNode)) {
+    return "collapsed";
+  }
+  if (hasExpandedFullRowGeometry(groupNode)) {
+    return "expanded";
+  }
+
+  const contentDescription = getHeaderExpandButtonContentDescription(groupNode)?.toLowerCase();
+  if (contentDescription === "collapse") {
+    return "expanded";
+  }
+  if (contentDescription === "expand") {
+    return "collapsed";
+  }
+  return "unknown";
+};
+
+export const isNotificationGroupExpanded = (groupNode: any): boolean =>
+  resolveNotificationGroupExpansionState(groupNode) === "expanded";
 
 const collectNotificationCandidates = (
   viewHierarchy: ViewHierarchyResult,
@@ -1570,6 +1677,18 @@ const isSameNotificationGroup = (
   return original.top === rematched.top;
 };
 
+const isSameNotificationRow = (originalNode: any, rematchedNode: any): boolean => {
+  const original = readTrayNotificationFields(originalNode);
+  const identifyingText = original.title ?? original.bodies[0] ?? original.contentTexts[0];
+  if (!identifyingText) {
+    return false;
+  }
+  const rematched = readTrayNotificationFields(rematchedNode);
+  return [rematched.title, ...rematched.bodies, ...rematched.contentTexts].some(
+    (text) => text !== null && (text === identifyingText || text.includes(identifyingText)),
+  );
+};
+
 export const expandAndRematchIfCollapsed = async (
   device: BootedDevice,
   notification: SystemTrayNotificationArgs,
@@ -1593,6 +1712,7 @@ export const expandAndRematchIfCollapsed = async (
   }
 
   const groupIdentity = getNotificationGroupIdentity(groupNode);
+  const originalRowNode = match.candidate.node;
   await expandNotificationGroup(device, match);
   await timer.sleep(Math.min(EXPAND_GROUP_SETTLE_MS, Math.max(0, deadlineMs - timer.now())));
   const remainingMs = Math.max(0, deadlineMs - timer.now());
@@ -1609,12 +1729,21 @@ export const expandAndRematchIfCollapsed = async (
     progress,
   );
   if (reMatch.match) {
+    // A few legacy hierarchies promote a child out of its group after
+    // expansion. A promoted row still has to satisfy the row-continuity check
+    // below; when it retains a group node, also require the group identity.
     if (
-      !reMatch.match.candidate.groupNode ||
+      reMatch.match.candidate.groupNode &&
       !isSameNotificationGroup(groupIdentity, reMatch.match.candidate.groupNode)
     ) {
       throw new ActionableError(
         "Expanded collapsed notification group but re-match resolved a different notification group. " +
+          "Try the action again after the notification shade settles.",
+      );
+    }
+    if (!isSameNotificationRow(originalRowNode, reMatch.match.candidate.node)) {
+      throw new ActionableError(
+        "Expanded collapsed notification group but re-match resolved a different notification row. " +
           "Try the action again after the notification shade settles.",
       );
     }
@@ -1810,10 +1939,10 @@ const readTrayNotificationFields = (root: any) => {
     if (["app_name_text", "app_name"].includes(id)) {
       fields.appLabel = text;
     }
-    if (["title", "title_big", "conversation_text"].includes(id)) {
+    if (["title", "title_big", "conversation_text", "notification_title"].includes(id)) {
       fields.title = text;
     }
-    if (["text", "big_text", "text2"].includes(id)) {
+    if (["text", "big_text", "text2", "notification_text"].includes(id)) {
       fields.bodies.push(text);
     }
     if (ACTION_FIELD_IDS.includes(id)) {

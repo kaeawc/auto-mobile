@@ -86,11 +86,23 @@ export type ProvisionDeviceFailureCode =
   | "unsupported"
   | "platform_command_failed";
 
+export const DEFAULT_PROVISION_DEVICE_RETRYABILITY: Readonly<
+  Record<ProvisionDeviceFailureCode, boolean>
+> = {
+  cleanup_failed: false,
+  creation_not_allowed: false,
+  discovery_incomplete: true,
+  identity_conflict: false,
+  timeout: true,
+  unsupported: false,
+  platform_command_failed: false,
+};
+
 export class ProvisionDeviceError extends ActionableError {
   constructor(
     public readonly code: ProvisionDeviceFailureCode,
     message: string,
-    public readonly retryable = false,
+    public readonly retryable = DEFAULT_PROVISION_DEVICE_RETRYABILITY[code],
   ) {
     super(message);
     this.name = "ProvisionDeviceError";

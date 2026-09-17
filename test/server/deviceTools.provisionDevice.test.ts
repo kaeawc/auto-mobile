@@ -17,6 +17,7 @@ import type {
 import {
   DefaultExactDeviceProvisioner,
   FileAndroidAvdConfigWriter,
+  ProvisionDeviceError,
 } from "../../src/utils/exactDeviceProvisioning";
 import type { ProvisionDeviceOperationStore } from "../../src/db/provisionDeviceOperationRepository";
 import { ProvisionDeviceOperationConflictError } from "../../src/db/provisionDeviceOperationRepository";
@@ -4825,8 +4826,79 @@ describe("provisionDevice handler", () => {
       timeoutMs: 60_000,
     });
 
-    expect(JSON.parse((response as any).content[0].text).error.code).toBe("timeout");
+    expect(JSON.parse((response as any).content[0].text)).toMatchObject({
+      error: { code: "timeout", retryable: true },
+    });
     expect(operationStore.failCodes).toEqual(["timeout"]);
+  });
+
+  test("reports a non-retryable identity conflict from the provisioning path", async () => {
+    exactProvisioner.provision = async () => {
+      throw new ProvisionDeviceError(
+        "identity_conflict",
+        "the requested device identity conflicts with an existing device",
+      );
+    };
+
+    const response = await ToolRegistry.getTool("provisionDevice")!.handler(
+      provisionTestArgs("android", "identity-conflict-retryability"),
+    );
+
+    expect(JSON.parse((response as any).content[0].text)).toMatchObject({
+      success: false,
+      error: { code: "identity_conflict", retryable: false },
+    });
+  });
+
+  test("keeps a timeout retryable after successful rollback", async () => {
+    const created = provisionedTestDevice("android", true);
+    configureProvisionBootAndTeardown(deviceManager, "android");
+    exactProvisioner.provision = async (request) => {
+      await request.onBeforeCreate?.();
+      deviceManager.setDeviceImages("android", [created.device]);
+      throw new ProvisionDeviceError("timeout", "provisioning timed out");
+    };
+
+    const response = JSON.parse(
+      (
+        (await ToolRegistry.getTool("provisionDevice")!.handler(
+          provisionTestArgs("android", "timeout-rollback-success"),
+        )) as any
+      ).content[0].text,
+    );
+
+    expect(response).toMatchObject({
+      success: false,
+      error: { code: "timeout", retryable: true },
+      cleanup: { status: "succeeded" },
+    });
+  });
+
+  test("makes a timeout non-retryable when rollback fails", async () => {
+    const created = provisionedTestDevice("android", true);
+    configureProvisionBootAndTeardown(deviceManager, "android");
+    exactProvisioner.provision = async (request) => {
+      await request.onBeforeCreate?.();
+      deviceManager.setDeviceImages("android", [created.device]);
+      throw new ProvisionDeviceError("timeout", "provisioning timed out");
+    };
+    deviceManager.destroyDevice = async () => {
+      throw new Error("platform delete failed");
+    };
+
+    const response = JSON.parse(
+      (
+        (await ToolRegistry.getTool("provisionDevice")!.handler(
+          provisionTestArgs("android", "timeout-rollback-failure"),
+        )) as any
+      ).content[0].text,
+    );
+
+    expect(response).toMatchObject({
+      success: false,
+      error: { code: "cleanup_failed", retryable: false },
+      cleanup: { status: "failed" },
+    });
   });
 
   // Boot and automation readiness share one provision budget, so a slow cold

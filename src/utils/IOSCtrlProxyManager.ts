@@ -1,5 +1,5 @@
 import { errorMessage } from "./describeUnknownError";
-import { trackAmbient } from "./PerfContext";
+import { runDetachedFromPerf, trackAmbient } from "./PerfContext";
 import { logger } from "./logger";
 import { BootedDevice } from "../models";
 import { requireBootedDevice } from "./requireBootedDevice";
@@ -3448,10 +3448,16 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     logger.info(
       `[IOSCtrlProxy] Starting iproxy tunnel (localhost:${this.servicePort} -> device:${this.servicePort})`,
     );
-    const child = this.processExecutor.spawn(
-      "iproxy",
-      [String(this.servicePort), String(this.servicePort), this.device.deviceId],
-      { stdio: ["ignore", "pipe", "pipe"] },
+    // Spawn the resident iproxy tunnel detached from any request perf tracker,
+    // so its `exit`/`error` callbacks (which drive supervisor restarts) do not
+    // capture a completed readiness request's tracker via AsyncLocalStorage
+    // (see PerfContext). The startup wait below stays timed under the scope.
+    const child = runDetachedFromPerf(() =>
+      this.processExecutor.spawn(
+        "iproxy",
+        [String(this.servicePort), String(this.servicePort), this.device.deviceId],
+        { stdio: ["ignore", "pipe", "pipe"] },
+      ),
     );
 
     if (!child.pid) {

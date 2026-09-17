@@ -14,7 +14,7 @@ import { arch } from "os";
 import { detectAndroidCommandLineTools, getBestAndroidToolsLocation } from "./detection";
 import { defaultTimer, Timer } from "../SystemTimer";
 import { combineAbortSignals } from "../AbortContext";
-import { trackAmbient } from "../PerfContext";
+import { runDetachedFromPerf, trackAmbient } from "../PerfContext";
 import { createGlobalPerformanceTracker } from "../PerformanceTracker";
 import {
   TcpHostPortAvailabilityChecker,
@@ -2193,7 +2193,11 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       perf.startOperation("spawnEmulator");
       let child: ChildProcess;
       try {
-        child = this.spawnFn(this.emulatorPath, args);
+        // Spawn the resident emulator detached from any request perf tracker, so
+        // its later `exit` callbacks do not retain a completed request's tracker
+        // via AsyncLocalStorage (see PerfContext). The launch-startup timing
+        // stays under the ambient `emulator launch` scope.
+        child = runDetachedFromPerf(() => this.spawnFn(this.emulatorPath, args));
       } catch (error) {
         if (reservedEmulator) {
           this.releasePendingEmulatorDeviceId(reservedEmulator);

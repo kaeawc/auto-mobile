@@ -1,5 +1,5 @@
 import { type ChildProcess, type SpawnOptions } from "node:child_process";
-import { trackAmbient } from "../PerfContext";
+import { runDetachedFromPerf, trackAmbient } from "../PerfContext";
 import { ActionableError, ExecResult } from "../../models";
 import { logger } from "../logger";
 import { runExecSeam } from "../ExecSeam";
@@ -260,13 +260,20 @@ export class XcodebuildClient implements Xcodebuild {
     }
 
     startupSignal?.throwIfAborted();
-    const child = this.spawnProcess("xcodebuild", args, {
-      detached: options.detached,
-      env: options.env,
-      stdio: options.stdio,
-      shell: false,
-      signal: options.signal,
-    });
+    // Spawn the resident runner detached from any request perf tracker: a child
+    // created inside an AsyncLocalStorage scope exposes that store to its later
+    // `exit` callback, so a completed readiness request's tracker would bind to
+    // this long-lived process and its restart path. Availability and waitForSpawn
+    // above/below stay timed under the ambient scope (see PerfContext).
+    const child = runDetachedFromPerf(() =>
+      this.spawnProcess("xcodebuild", args, {
+        detached: options.detached,
+        env: options.env,
+        stdio: options.stdio,
+        shell: false,
+        signal: options.signal,
+      }),
+    );
 
     try {
       // Attach the error listener before inspecting pid. A real failed spawn

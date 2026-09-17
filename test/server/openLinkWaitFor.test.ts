@@ -242,14 +242,19 @@ describe("openLink iOS app-open alert acceptance", () => {
   });
 
   test("uses the locale-independent live system action for localized alerts", async () => {
+    let refreshCalls = 0;
     let systemTapCalls = 0;
     const localizedObservation = {
       ...makeObservation("localized-system-alert"),
       viewHierarchy: {
+        packageName: "com.apple.springboard",
         hierarchy: {
           className: "UIAlertController",
           text: "In „Slack Debug“ öffnen?",
-          node: [{ text: "Abbrechen" }, { text: "Öffnen", clickable: true }],
+          node: [
+            { className: "UIButton", role: "button", text: "Abbrechen" },
+            { className: "UIButton", role: "button", text: "Öffnen", clickable: true },
+          ],
         },
       },
     } as unknown as ObserveResult;
@@ -259,7 +264,10 @@ describe("openLink iOS app-open alert acceptance", () => {
       localizedObservation,
       undefined,
       undefined,
-      undefined,
+      async () => {
+        refreshCalls += 1;
+        return refreshCalls === 1 ? (localizedObservation.viewHierarchy ?? null) : noAlertHierarchy;
+      },
       async () => {
         systemTapCalls += 1;
         return { success: true };
@@ -267,7 +275,40 @@ describe("openLink iOS app-open alert acceptance", () => {
     );
 
     expect(result?.success).toBe(true);
+    expect(refreshCalls).toBe(2);
     expect(systemTapCalls).toBe(1);
+  });
+
+  test("does not treat an unchanged localized dialog as verified dismissal", async () => {
+    const localizedHierarchy = {
+      packageName: "com.apple.springboard",
+      hierarchy: {
+        className: "UIActionSheet",
+        node: [
+          { className: "UIButton", role: "button", text: "Abbrechen" },
+          { className: "UIButton", role: "button", text: "Öffnen" },
+        ],
+      },
+    } as unknown as NonNullable<ObserveResult["viewHierarchy"]>;
+    let refreshCalls = 0;
+
+    await expect(
+      acceptIosAppOpenAlert(
+        iosDevice,
+        {
+          ...makeObservation("localized-system-sheet"),
+          viewHierarchy: localizedHierarchy,
+        },
+        undefined,
+        undefined,
+        async () => {
+          refreshCalls += 1;
+          return localizedHierarchy;
+        },
+        async () => ({ success: true }),
+      ),
+    ).rejects.toThrow("dialog remained visible");
+    expect(refreshCalls).toBe(5);
   });
 
   test("does nothing when the alert is absent", async () => {

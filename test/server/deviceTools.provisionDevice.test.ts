@@ -2375,6 +2375,13 @@ describe("provisionDevice handler", () => {
       expect.stringContaining("startDevice:phone-api-36-a"),
     );
     expect(receivedProvisionRequest?.deviceId).toBe("requested-udid");
+    expect(deviceManager.getGetDeviceImagesDetailedCalls()).toContainEqual({
+      platform: "ios",
+      options: {
+        bypassIosDeviceListCache: true,
+        signal: expect.any(AbortSignal),
+      },
+    });
   });
 
   test("reports a contended iOS selector reservation as a timeout", async () => {

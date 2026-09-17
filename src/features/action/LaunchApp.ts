@@ -41,6 +41,7 @@ const LAUNCH_OBSERVATION_POLL_INTERVAL_MS = 200;
 const ANDROID_OFFLINE_RECOVERY_DELAYS_MS = [250, 500] as const;
 const ANDROID_LAUNCH_OBSERVATION_TIMEOUT_MS = 15_000;
 const ANDROID_PREFLIGHT_ABORT_SETTLEMENT_GRACE_MS = 1_000;
+const IOS_RETARGET_ABORT_SETTLEMENT_GRACE_MS = 1_000;
 
 export interface TargetUserDetector {
   detectTargetUserId(packageName: string, userId?: number, signal?: AbortSignal): Promise<number>;
@@ -581,11 +582,18 @@ export class LaunchApp extends BaseVisualChange {
           // daemon startup. simctl foregrounds the app but cannot replace the
           // runner's XCUIApplication target, so synchronize that target through
           // the runner before requiring an app-specific hierarchy.
-          const ctrlProxyLaunchResult = await ctrlProxyClient.requestLaunchApp(
+          signal?.throwIfAborted();
+          const retargetAbortController = new AbortController();
+          const retarget = ctrlProxyClient.requestLaunchApp(
             bundleId,
             undefined,
             perf,
             false,
+            retargetAbortController.signal,
+          );
+          const ctrlProxyLaunchResult = await this.waitForIosRetarget(
+            retarget,
+            retargetAbortController,
             signal,
           );
           this.assertLaunchNotAborted(signal);
@@ -1146,6 +1154,73 @@ export class LaunchApp extends BaseVisualChange {
     } finally {
       if (abortListener) {
         signal.removeEventListener("abort", abortListener);
+      }
+    }
+  }
+
+  private async waitForIosRetarget<T>(
+    retarget: Promise<T>,
+    requestAbortController: AbortController,
+    signal: AbortSignal | undefined,
+  ): Promise<T> {
+    if (!signal) {
+      return await retarget;
+    }
+    let abortListener: (() => void) | undefined;
+    try {
+      signal.throwIfAborted();
+      const aborted = new Promise<never>((_resolve, reject) => {
+        abortListener = () => reject(signal.reason);
+        signal.addEventListener("abort", abortListener, { once: true });
+        if (signal.aborted) {
+          abortListener();
+        }
+      });
+      return await Promise.race([retarget, aborted]);
+    } catch (error) {
+      if (!signal.aborted) {
+        throw error;
+      }
+      const settled = await this.awaitPromiseSettlement(
+        retarget,
+        IOS_RETARGET_ABORT_SETTLEMENT_GRACE_MS,
+      );
+      if (!settled) {
+        requestAbortController.abort(signal.reason);
+        await retarget.catch(() => undefined);
+      }
+      throw error;
+    } finally {
+      if (abortListener) {
+        signal.removeEventListener("abort", abortListener);
+      }
+    }
+  }
+
+  private async awaitPromiseSettlement(
+    promise: Promise<unknown>,
+    gracePeriodMs: number,
+  ): Promise<boolean> {
+    let settled = false;
+    let timeoutHandle: NodeJS.Timeout | undefined;
+    try {
+      await Promise.race([
+        promise.then(
+          () => {
+            settled = true;
+          },
+          () => {
+            settled = true;
+          },
+        ),
+        new Promise<void>((resolve) => {
+          timeoutHandle = this.timer.setTimeout(resolve, gracePeriodMs);
+        }),
+      ]);
+      return settled;
+    } finally {
+      if (timeoutHandle) {
+        this.timer.clearTimeout(timeoutHandle);
       }
     }
   }

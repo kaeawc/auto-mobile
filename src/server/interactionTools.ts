@@ -1306,6 +1306,12 @@ const VISIBLE_HIERARCHY_TEXT_KEYS = new Set([
   "content-desc",
   "contentDescription",
 ]);
+const IOS_SYSTEM_DIALOG_CLASSES = new Set([
+  "UIAlertController",
+  "UIActionSheet",
+  "XCUIElementTypeAlert",
+  "XCUIElementTypeSheet",
+]);
 const IOS_OPEN_ALERT_ACCEPT_ATTEMPTS = 8;
 const IOS_OPEN_ALERT_RETRY_INTERVAL_MS = 250;
 const IOS_OPEN_ALERT_VERIFY_ATTEMPTS = 4;
@@ -1330,14 +1336,65 @@ function collectVisibleHierarchyText(value: unknown, texts: string[]): void {
   }
 }
 
+function nodeAttribute(node: Record<string, unknown>, key: string): unknown {
+  const attributes =
+    node.$ && typeof node.$ === "object" && !Array.isArray(node.$)
+      ? (node.$ as Record<string, unknown>)
+      : undefined;
+  return node[key] ?? attributes?.[key];
+}
+
+function countIosDialogButtons(value: unknown): number {
+  if (Array.isArray(value)) {
+    return value.reduce((count, item) => count + countIosDialogButtons(item), 0);
+  }
+  if (!value || typeof value !== "object") {
+    return 0;
+  }
+  const node = value as Record<string, unknown>;
+  const className = nodeAttribute(node, "className") ?? nodeAttribute(node, "class");
+  const role = nodeAttribute(node, "role");
+  const ownCount = className === "UIButton" || role === "button" ? 1 : 0;
+  return (
+    ownCount +
+    Object.entries(node).reduce(
+      (count, [key, child]) => count + (key === "$" ? 0 : countIosDialogButtons(child)),
+      0,
+    )
+  );
+}
+
+function containsIosSystemDialog(value: unknown): boolean {
+  if (Array.isArray(value)) {
+    return value.some(containsIosSystemDialog);
+  }
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const node = value as Record<string, unknown>;
+  const className = nodeAttribute(node, "className") ?? nodeAttribute(node, "class");
+  if (
+    typeof className === "string" &&
+    IOS_SYSTEM_DIALOG_CLASSES.has(className) &&
+    countIosDialogButtons(node) >= 2
+  ) {
+    return true;
+  }
+  return Object.entries(node).some(([key, child]) => key !== "$" && containsIosSystemDialog(child));
+}
+
 function isIosAppOpenAlertHierarchy(
   hierarchy: ObserveResult["viewHierarchy"] | undefined,
 ): boolean {
   const texts: string[] = [];
   collectVisibleHierarchyText(hierarchy?.hierarchy, texts);
-  return (
+  const hasEnglishOpenLabels =
     texts.some((text) => /^open in .+\?$/i.test(text)) &&
-    texts.some((text) => text.toLowerCase() === "open")
+    texts.some((text) => text.toLowerCase() === "open");
+  return (
+    hasEnglishOpenLabels ||
+    (hierarchy?.packageName === "com.apple.springboard" &&
+      containsIosSystemDialog(hierarchy.hierarchy))
   );
 }
 
@@ -1401,7 +1458,7 @@ async function resolveIosOpenAlert(
   tapSystemAlert: SystemAlertTap | undefined,
   signal: AbortSignal | undefined,
 ): Promise<OpenAlertResolution> {
-  if (isIosAppOpenAlertHierarchy(initialHierarchy)) {
+  if (isIosAppOpenAlertHierarchy(initialHierarchy) && !tapSystemAlert) {
     return initialHierarchy ? { hierarchy: initialHierarchy } : null;
   }
   if (!refreshHierarchy && !tapSystemAlert) {
@@ -1412,11 +1469,11 @@ async function resolveIosOpenAlert(
   for (let attempt = 0; attempt < IOS_OPEN_ALERT_ACCEPT_ATTEMPTS; attempt += 1) {
     throwIfOpenAlertAcceptanceAborted(signal);
     hierarchy = await refreshOpenAlertHierarchy(hierarchy, refreshHierarchy);
-    if (isIosAppOpenAlertHierarchy(hierarchy)) {
-      return hierarchy ? { hierarchy } : null;
-    }
     if (await tapLiveSystemAlert(tapSystemAlert)) {
       return { systemTapped: true };
+    }
+    if (isIosAppOpenAlertHierarchy(hierarchy)) {
+      return hierarchy ? { hierarchy } : null;
     }
     if (attempt + 1 < IOS_OPEN_ALERT_ACCEPT_ATTEMPTS) {
       await defaultTimer.sleep(IOS_OPEN_ALERT_RETRY_INTERVAL_MS);

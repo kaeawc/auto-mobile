@@ -483,9 +483,9 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
    * List Android AVD images with live isRunning state. `listAvds` reports every
    * AVD as isRunning:false; the iOS listing already reports its booted state
    * from simctl, so this overlays the booted-emulator scan to keep the two
-   * platforms' image listings symmetric (issue #6850). `getBootedDevices`
-   * swallows discovery failures to an empty list, so a scan failure degrades to
-   * isRunning:false rather than failing the listing.
+   * platforms' image listings symmetric (issue #6850). The booted-device scan
+   * shares the caller's cancellation signal so an expired resource request does
+   * not leave ADB discovery and AVD-name enrichment running in the background.
    *
    * Only `emulator-<port>` serials may contribute to the overlay: the booted
    * scan also reports physical handsets, whose `name` is ro.product.model, and
@@ -495,7 +495,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
   private async listAndroidDeviceImages(signal?: AbortSignal): Promise<DeviceInfo[]> {
     const [images, bootedDevices] = await Promise.all([
       this.emulator.listAvds({ signal }),
-      this.emulator.getBootedDevices(),
+      this.emulator.getBootedDevicesChecked(false, {}, combineWithAmbientAbort(signal)),
     ]);
     const runningAvdNames = new Set(
       bootedDevices
@@ -630,6 +630,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
           devices.push(
             ...(await this.simctl.listSimulatorImages(undefined, {
               bypassCache: options.bypassIosDeviceListCache,
+              signal: combineWithAmbientAbort(options.signal),
             })),
           );
           succeededPlatforms.add("ios");

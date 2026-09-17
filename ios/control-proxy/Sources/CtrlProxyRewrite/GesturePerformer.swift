@@ -943,17 +943,10 @@ public final class GesturePerformer: GesturePerforming {
                 try catchingObjCException {
                     // iOS 26.5 can render a SpringBoard confirmation that is
                     // absent even from a fresh SpringBoard snapshot. Query the
-                    // live alert only for this explicit system action. Select
-                    // its final button by accessibility order so localized
-                    // Open labels do not affect acceptance.
-                    let alert = self.springboard.alerts.firstMatch
-                    guard alert.waitForExistence(timeout: 1.0) else {
-                        throw GestureError.elementNotFound("system alert")
-                    }
-                    let buttons = alert.buttons.allElementsBoundByIndex.filter {
-                        $0.exists && $0.isHittable && !$0.frame.isEmpty
-                    }
-                    guard let button = buttons.last else {
+                    // live alert/sheet only for this explicit system action.
+                    // Select its final button by accessibility order so
+                    // localized Open labels do not affect acceptance.
+                    guard let button = self.systemAlertAcceptanceButton() else {
                         throw GestureError.elementNotFound("system alert acceptance button")
                     }
                     button.tap()
@@ -992,6 +985,29 @@ public final class GesturePerformer: GesturePerforming {
                     throw GestureError.notSupported("Action: \(action)")
                 }
             }
+        }
+
+        private func systemAlertAcceptanceButton() -> XCUIElement? {
+            let systemDialogs = [
+                springboard.alerts.firstMatch,
+                springboard.sheets.firstMatch,
+            ]
+            for dialog in systemDialogs {
+                guard dialog.exists || dialog.waitForExistence(timeout: 0.5) else {
+                    continue
+                }
+                let buttons = dialog.buttons.allElementsBoundByIndex.filter {
+                    $0.exists && $0.isHittable && !$0.frame.isEmpty
+                }
+                // The custom-URL confirmation has Cancel then the affirmative
+                // action. Refuse another system dialog shape rather than
+                // guessing which control is safe to activate.
+                guard buttons.count == 2 else {
+                    continue
+                }
+                return buttons.last
+            }
+            return nil
         }
 
         public func activateAccessibilityLink(

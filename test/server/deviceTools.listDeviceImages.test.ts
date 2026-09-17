@@ -116,7 +116,7 @@ describe("listDeviceImages", function () {
     };
     const emulator = {
       listAvds: async () => [image],
-      getBootedDevices: async (): Promise<BootedDevice[]> => [
+      getBootedDevicesChecked: async (): Promise<BootedDevice[]> => [
         {
           name: "Pixel_9",
           platform: "android",

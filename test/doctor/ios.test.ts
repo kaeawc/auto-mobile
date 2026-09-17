@@ -1466,6 +1466,38 @@ describe("createIosObserveRoundTripInspector lifecycle", () => {
     }),
   } as any;
 
+  test("bounds a never-settling runner port probe by the doctor deadline", async () => {
+    const timer = new FakeTimer();
+    const deadline = createDoctorDeadline({ timeoutMs: 50, timer }, timer);
+    const probeStarted = Promise.withResolvers<void>();
+    const hooks: IosObserveRoundTripInspectorHooks = {
+      getManager: () => ({
+        ...runningManager,
+        getReportedRunnerPort: async () => {
+          probeStarted.resolve();
+          return await new Promise<never>(() => {});
+        },
+      }),
+      getExistingClient: () => null,
+      createClient: () => {
+        throw new Error("must not create a client after the deadline");
+      },
+      elementsBuilder,
+    };
+    const inspector = createIosObserveRoundTripInspector(
+      () => simctlReturning([{ name: "iPhone 15", deviceId: "SIM-1" }]) as any,
+      new FakeLogger(),
+      hooks,
+    );
+
+    const inspection = inspector.inspectBootedObserveRoundTrips(undefined, deadline.probe);
+    await probeStarted.promise;
+    timer.advanceTime(50);
+
+    await expect(inspection).rejects.toThrow("Doctor diagnostic deadline elapsed");
+    deadline.dispose();
+  });
+
   test("passes the manager service port to the probe factory and closes the probe", async () => {
     let closes = 0;
     const requestedPorts: number[] = [];

@@ -361,7 +361,9 @@ export function createIosObserveRoundTripInspector(
         // to the already-connected client's port before the manager's service
         // port. A resident client remains authoritative when manager allocation
         // bookkeeping was rebuilt in a different multi-simulator order.
-        const reportedRunnerPort = await manager.getReportedRunnerPort();
+        const reportedRunnerPort = await awaitDoctorProbe(currentProbe, () =>
+          manager.getReportedRunnerPort(),
+        );
         let runnerPort = reportedRunnerPort ?? clientPort;
         let connected = false;
         let screenSize = { width: 0, height: 0 };

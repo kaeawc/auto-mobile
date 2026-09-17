@@ -7398,23 +7398,15 @@ export function registerDeviceTools() {
     totalDeadlineMs: number,
     signal: AbortSignal | undefined,
   ): Promise<VirtualDeviceLifecycleLease | undefined> {
-    if (args.device.deviceId) {
-      return await reserveIosProvisionDeviceLifecycle(
-        args,
-        deps,
-        { deviceId: args.device.deviceId },
-        totalDeadlineMs,
-        signal,
-      );
-    }
     const discovery = await runProvisionDeviceWithinDeadline(
       deps.timer,
       totalDeadlineMs,
       signal,
       "resolving the exact iOS simulator identity",
-      async () =>
+      async (deadlineSignal) =>
         await deviceManager.getDeviceImagesDetailed("ios", {
           bypassIosDeviceListCache: true,
+          signal: deadlineSignal,
         }),
     );
     if (!discovery.succeededPlatforms.has("ios")) {
@@ -7425,6 +7417,15 @@ export function registerDeviceTools() {
     }
     const existing = findExactIosProvisionDeviceCandidate(args, discovery.devices);
     if (!existing?.deviceId) {
+      if (args.device.deviceId) {
+        return await reserveIosProvisionDeviceLifecycle(
+          args,
+          deps,
+          { deviceId: args.device.deviceId },
+          totalDeadlineMs,
+          signal,
+        );
+      }
       return undefined;
     }
     return await reserveIosProvisionDeviceLifecycle(args, deps, existing, totalDeadlineMs, signal);

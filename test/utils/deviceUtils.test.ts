@@ -521,7 +521,7 @@ describe("MultiPlatformDeviceManager", () => {
       } as unknown as SimCtlClient;
       const fakeEmulator = {
         listAvds: async () => [androidImage],
-        getBootedDevices: async () => [],
+        getBootedDevicesChecked: async () => [],
       } as unknown as AndroidEmulatorClient;
 
       const manager = new MultiPlatformDeviceManager(
@@ -552,7 +552,7 @@ describe("MultiPlatformDeviceManager", () => {
       } as unknown as SimCtlClient;
       const fakeEmulator = {
         listAvds: async () => [androidImage],
-        getBootedDevices: async () => [],
+        getBootedDevicesChecked: async () => [],
       } as unknown as AndroidEmulatorClient;
 
       const manager = new MultiPlatformDeviceManager(
@@ -574,7 +574,7 @@ describe("MultiPlatformDeviceManager", () => {
     const idleImage: DeviceInfo = { name: "Pixel_Tablet", platform: "android", isRunning: false };
     const fakeEmulator = {
       listAvds: async () => [runningImage, idleImage],
-      getBootedDevices: async (): Promise<BootedDevice[]> => [
+      getBootedDevicesChecked: async (): Promise<BootedDevice[]> => [
         { name: "Pixel_8", platform: "android", deviceId: "emulator-5554", source: "local" },
       ],
     } as unknown as AndroidEmulatorClient;
@@ -593,13 +593,11 @@ describe("MultiPlatformDeviceManager", () => {
     ]);
   });
 
-  test("listDeviceImages(android) degrades to isRunning:false when booted discovery fails", async () => {
+  test("listDeviceImages(android) reports isRunning:false when booted discovery is empty", async () => {
     const image: DeviceInfo = { name: "Pixel_8", platform: "android", isRunning: false };
     const fakeEmulator = {
       listAvds: async () => [image],
-      // getBootedDevices already swallows discovery failures to an empty list;
-      // the listing must still succeed rather than fail on a missing boot scan.
-      getBootedDevices: async (): Promise<BootedDevice[]> => [],
+      getBootedDevicesChecked: async (): Promise<BootedDevice[]> => [],
     } as unknown as AndroidEmulatorClient;
 
     const manager = new MultiPlatformDeviceManager(
@@ -621,7 +619,7 @@ describe("MultiPlatformDeviceManager", () => {
     const image: DeviceInfo = { name: "Pixel_8", platform: "android", isRunning: false };
     const fakeEmulator = {
       listAvds: async () => [image],
-      getBootedDevices: async (): Promise<BootedDevice[]> => [
+      getBootedDevicesChecked: async (): Promise<BootedDevice[]> => [
         { name: "Pixel_8", platform: "android", deviceId: "39081FDJH00QZQ", source: "local" },
       ],
     } as unknown as AndroidEmulatorClient;
@@ -641,7 +639,7 @@ describe("MultiPlatformDeviceManager", () => {
     const image: DeviceInfo = { name: "Pixel_8", platform: "android", isRunning: false };
     const fakeEmulator = {
       listAvds: async () => [image],
-      getBootedDevices: async (): Promise<BootedDevice[]> => [
+      getBootedDevicesChecked: async (): Promise<BootedDevice[]> => [
         { name: "Pixel_8", platform: "android", deviceId: "emulator-5554", source: "local" },
       ],
     } as unknown as AndroidEmulatorClient;
@@ -691,7 +689,7 @@ describe("MultiPlatformDeviceManager", () => {
     } as unknown as SimCtlClient;
     const fakeEmulator = {
       listAvds: async () => [androidImage],
-      getBootedDevices: async () => [],
+      getBootedDevicesChecked: async () => [],
     } as unknown as AndroidEmulatorClient;
     const manager = new MultiPlatformDeviceManager(
       new FakeAdbClient() as unknown as AdbClient,
@@ -712,7 +710,8 @@ describe("MultiPlatformDeviceManager", () => {
   test("getDeviceImagesDetailed propagates Android cancellation and iOS cache bypass", async () => {
     const controller = new AbortController();
     let androidSignal: AbortSignal | undefined;
-    let iosOptions: { bypassCache?: boolean } | undefined;
+    let bootedAndroidSignal: AbortSignal | undefined;
+    let iosOptions: { bypassCache?: boolean; signal?: AbortSignal } | undefined;
     const androidImage: DeviceInfo = {
       name: "Pixel_8",
       platform: "android",
@@ -722,7 +721,7 @@ describe("MultiPlatformDeviceManager", () => {
       isAvailable: async () => true,
       listSimulatorImages: async (
         _sessionId?: string,
-        options?: { bypassCache?: boolean },
+        options?: { bypassCache?: boolean; signal?: AbortSignal },
       ): Promise<DeviceInfo[]> => {
         iosOptions = options;
         return [];
@@ -733,9 +732,14 @@ describe("MultiPlatformDeviceManager", () => {
         androidSignal = options?.signal;
         return [androidImage];
       },
-      getBootedDevices: async (): Promise<BootedDevice[]> => [
-        { name: "Pixel_8", platform: "android", deviceId: "emulator-5554" },
-      ],
+      getBootedDevicesChecked: async (
+        _onlyEmulators: boolean,
+        _options: unknown,
+        signal?: AbortSignal,
+      ): Promise<BootedDevice[]> => {
+        bootedAndroidSignal = signal;
+        return [{ name: "Pixel_8", platform: "android", deviceId: "emulator-5554" }];
+      },
     } as unknown as AndroidEmulatorClient;
     const manager = new MultiPlatformDeviceManager(
       new FakeAdbClient() as unknown as AdbClient,
@@ -751,7 +755,39 @@ describe("MultiPlatformDeviceManager", () => {
     expect(result.succeededPlatforms).toEqual(new Set(["android", "ios"]));
     expect(result.devices).toEqual([{ ...androidImage, isRunning: true }]);
     expect(androidSignal).toBe(controller.signal);
-    expect(iosOptions).toEqual({ bypassCache: true });
+    expect(bootedAndroidSignal).toBe(controller.signal);
+    expect(iosOptions).toEqual({ bypassCache: true, signal: controller.signal });
+  });
+
+  test("listDeviceImages(android) cancels booted-device discovery", async () => {
+    const controller = new AbortController();
+    const cancellation = new Error("inventory deadline elapsed");
+    let receivedSignal: AbortSignal | undefined;
+    const fakeEmulator = {
+      listAvds: async () => [],
+      getBootedDevicesChecked: async (
+        _onlyEmulators: boolean,
+        _options: unknown,
+        signal?: AbortSignal,
+      ): Promise<BootedDevice[]> => {
+        receivedSignal = signal;
+        return await new Promise((_resolve, reject) => {
+          signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+        });
+      },
+    } as unknown as AndroidEmulatorClient;
+    const manager = new MultiPlatformDeviceManager(
+      new FakeAdbClient() as unknown as AdbClient,
+      undefined,
+      fakeEmulator,
+    );
+
+    const inventory = manager.listDeviceImages("android", controller.signal);
+    await Promise.resolve();
+    controller.abort(cancellation);
+
+    await expect(inventory).rejects.toBe(cancellation);
+    expect(receivedSignal).toBe(controller.signal);
   });
 
   test("destroyDevice deletes an iOS simulator by its exact UDID with the caller deadline", async () => {

@@ -1723,11 +1723,15 @@ describe("LaunchApp", () => {
         for (let attempt = 0; attempt < 20 && !receivedSignal; attempt++) {
           await Promise.resolve();
         }
-        expect(receivedSignal).toBe(controller.signal);
+        expect(receivedSignal).toBeDefined();
+        expect(receivedSignal).not.toBe(controller.signal);
+        expect(receivedSignal?.aborted).toBe(false);
 
         controller.abort(cancellation);
 
         await expect(result).rejects.toBe(cancellation);
+        expect(receivedSignal?.aborted).toBe(true);
+        expect(receivedSignal?.reason).toBe(cancellation);
         expect(hierarchyWaits).toBe(0);
       } finally {
         cleanup();

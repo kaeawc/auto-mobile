@@ -113,9 +113,16 @@ export class XcodebuildClient implements Xcodebuild {
 
   async isAvailable(options?: XcodebuildAvailabilityOptions): Promise<boolean> {
     try {
-      return await this.isAvailableWithin(
-        options?.timeoutMs ?? DEFAULT_AVAILABILITY_PROBE_TIMEOUT_MS,
-        options?.signal ?? getAbortSignal(),
+      // Standalone availability probe (`xcodebuild -version`, up to a 10s bound)
+      // used by signing discovery before startStreaming — bypasses the
+      // executeCommand funnel, so give it its own ambient leaf (see PerfContext).
+      // Wrapped here, not in isLocalXcodebuildAvailable, so it stays out of the
+      // isAvailableWithin race that startStreaming's own probe depends on.
+      return await trackAmbient("xcodebuild -version", () =>
+        this.isAvailableWithin(
+          options?.timeoutMs ?? DEFAULT_AVAILABILITY_PROBE_TIMEOUT_MS,
+          options?.signal ?? getAbortSignal(),
+        ),
       );
     } catch (error) {
       // A stalled `xcodebuild -version` must not hang callers (issue #6585);

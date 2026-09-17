@@ -7603,19 +7603,22 @@ export function registerDeviceTools() {
           deps.lifecycleCoordinator,
         );
       } else {
-        lifecycleLease = await reserveExistingIosProvisionDeviceLifecycle(
-          args,
-          deps,
-          deviceManager,
-          totalDeadlineMs,
-          signal,
-        );
-        lifecycleLease ??= await reserveIosSelectorProvisionDeviceLifecycle(
-          args,
-          deps,
-          totalDeadlineMs,
-          signal,
-        );
+        // Scope the iOS lifecycle reservation too: it runs `getDeviceImagesDetailed`
+        // (→ `simctl list`) before the provision/boot scopes, so its discovery
+        // command would otherwise be missing from perfTiming (see PerfContext).
+        lifecycleLease = await runWithPerfTracker(ambientPerfFor(perf), async () => {
+          const existing = await reserveExistingIosProvisionDeviceLifecycle(
+            args,
+            deps,
+            deviceManager,
+            totalDeadlineMs,
+            signal,
+          );
+          return (
+            existing ??
+            (await reserveIosSelectorProvisionDeviceLifecycle(args, deps, totalDeadlineMs, signal))
+          );
+        });
       }
       const deviceCreationGate = deps.deviceCreationGateFactory();
       provisioned = await provisionExactDevice(
@@ -8618,14 +8621,19 @@ export function registerDeviceTools() {
       | Awaited<ReturnType<typeof reserveStartDeviceLifecycleReservations>>
       | undefined;
     try {
-      lifecycleReservations = await reserveStartDeviceLifecycleReservations(
-        args,
-        budgets,
-        deps,
-        deviceUtils,
-        deviceMatcher,
-        bootDeadlineMs,
-        signal,
+      // Scope the pre-boot lifecycle reservation (runs `getDeviceImagesDetailed`
+      // → `simctl list` discovery) so its commands attribute into perfTiming,
+      // matching the boot scope inside bootAndPrepareDevice (see PerfContext).
+      lifecycleReservations = await runWithPerfTracker(ambientPerfFor(perf), () =>
+        reserveStartDeviceLifecycleReservations(
+          args,
+          budgets,
+          deps,
+          deviceUtils,
+          deviceMatcher,
+          bootDeadlineMs,
+          signal,
+        ),
       );
       const coordinatedSignals = [signal, lifecycleReservations.lifecycleLease.signal].filter(
         (candidate): candidate is AbortSignal => candidate !== undefined,
@@ -8638,17 +8646,19 @@ export function registerDeviceTools() {
       // so a stopped AVD is not cold-booted and killed just to report it. Run
       // after its lifecycle lease, however, so a serial not yet visible during
       // reset recovery gets a chance to appear before discovery decides.
-      await validateRequestedAndroidIdentifiersBeforeBoot(
-        budgets.requestedAndroidIdentifierPair,
-        deviceUtils,
-        bootDeadlineMs,
-        deps.timer,
-        coordinatedSignal,
-        (settlement) => {
-          if (settlement) {
-            state.coldBootSettlements.push(settlement);
-          }
-        },
+      await runWithPerfTracker(ambientPerfFor(perf), () =>
+        validateRequestedAndroidIdentifiersBeforeBoot(
+          budgets.requestedAndroidIdentifierPair,
+          deviceUtils,
+          bootDeadlineMs,
+          deps.timer,
+          coordinatedSignal,
+          (settlement) => {
+            if (settlement) {
+              state.coldBootSettlements.push(settlement);
+            }
+          },
+        ),
       );
       return await bootAndPrepareDevice(
         args,

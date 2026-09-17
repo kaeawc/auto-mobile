@@ -80,6 +80,28 @@ const jsonTree = fc.letrec<{ tree: unknown }>((rec) => ({
 // A top-level object payload, the shape callers actually rewrite.
 const objectPayload = fc.dictionary(safeKey, jsonTree, { maxKeys: 5 });
 
+// Serialized-JSON cases with explicit type partitions, each tagged with whether
+// `readToolEnvelopePayload` should yield a view for it. `fc.string()` alone almost
+// never emits valid JSON, so it cannot reliably exercise the object/array-vs-primitive
+// boundary of the text branch (e.g. `[]` must yield a view, a serialized primitive
+// must not); these guarantee each partition is hit. Objects and arrays (including the
+// empty array) are the only non-null `typeof === "object"` JSON values, so they are
+// the only ones that produce a view.
+const jsonObject = fc.dictionary(safeKey, jsonTree, { maxKeys: 4 });
+const jsonArray = fc.array(jsonTree, { maxLength: 4 });
+const jsonPrimitive = fc.oneof(
+  fc.integer(),
+  fc.double({ noNaN: true, noDefaultInfinity: true }),
+  fc.string(),
+  fc.boolean(),
+  fc.constant(null),
+);
+const serializedJsonCase = fc.oneof(
+  jsonObject.map((value) => ({ value: value as unknown, expectView: true })),
+  jsonArray.map((value) => ({ value: value as unknown, expectView: true })),
+  jsonPrimitive.map((value) => ({ value: value as unknown, expectView: false })),
+);
+
 function textEnvelope(payload: unknown): { content: Array<{ type: string; text: string }> } {
   return { content: [{ type: "text", text: stringifyToolResponse(payload) }] };
 }
@@ -136,10 +158,33 @@ describe("toolEnvelopePayload (property-based)", () => {
     );
   });
 
-  test("read of a text-only envelope matches the JSON-object spec for arbitrary text", () => {
-    // For any string in the text part (no structuredContent), a payload view exists
-    // exactly when the text parses to a non-null object/array; a parse error or a
-    // JSON primitive yields undefined. This pins the try/catch boundary precisely.
+  test("read classifies a serialized JSON text part by type: objects/arrays yield a view, primitives do not", () => {
+    // Explicit partitions so the object/array-vs-primitive boundary is actually
+    // exercised (the arbitrary-string fuzz below almost never emits valid JSON). An
+    // object or array — the empty array included — is a non-null `typeof === "object"`
+    // value and yields a view whose payload equals the parsed text; every serialized
+    // primitive (number, string, boolean, null) yields undefined.
+    fc.assert(
+      fc.property(serializedJsonCase, ({ value, expectView }) => {
+        const text = JSON.stringify(value);
+        const view = readToolEnvelopePayload({ content: [{ type: "text", text }] });
+        if (!expectView) {
+          return view === undefined;
+        }
+        return (
+          view !== undefined && view.hasStructured === false && deepEqualJson(view.payload, value)
+        );
+      }),
+      RUN_OPTIONS,
+    );
+  });
+
+  test("read of a text-only envelope matches the try/catch spec for arbitrary (mostly malformed) text", () => {
+    // Fuzz the parse boundary: for any string in the text part (no structuredContent),
+    // a payload view exists exactly when the text parses to a non-null object/array; a
+    // parse error or a JSON primitive yields undefined. `fc.string()` is dominated by
+    // non-JSON input, so this pins the catch path; the typed partitions above cover the
+    // valid-JSON branch the fuzz rarely reaches.
     fc.assert(
       fc.property(fc.string(), (text) => {
         const view = readToolEnvelopePayload({ content: [{ type: "text", text }] });

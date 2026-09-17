@@ -9,6 +9,7 @@ import type {
 import type { DeviceCreationGate } from "./deviceCreationGate";
 import { isAndroidEmulatorSerial } from "./androidSerial";
 import {
+  assertAndroidImageRunningStateKnown,
   DEFAULT_DEVICE_READY_TIMEOUT_MS,
   type BootedDeviceDiscoveryOptions,
   type PlatformDeviceManager,
@@ -683,6 +684,7 @@ export class DeviceBootService {
     progress: DeviceBootProgress | undefined,
     provisioned: boolean,
   ): Promise<DeviceBootResult> {
+    assertAndroidImageRunningStateKnown(image);
     if (image.platform === "ios" && !image.deviceId) {
       throw new ActionableError("iOS simulator deviceId (UDID) is required to start a simulator.");
     }

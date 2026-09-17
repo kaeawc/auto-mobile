@@ -187,4 +187,32 @@ describe("AndroidEmulatorClient executeCommand timeout", () => {
     await expect(promise).rejects.toThrow("Command timed out after 1234ms");
     expect(capturedSignal.aborted).toBe(true);
   });
+
+  test("listAvds preserves the caller abort reason instead of wrapping it", async () => {
+    const controller = new AbortController();
+    const cancellation = new Error("device boot deadline expired");
+    let capturedSignal: AbortSignal | undefined;
+    const execAsync = async (
+      _file: string,
+      _args: string[],
+      signal?: AbortSignal,
+    ): Promise<ExecResult> => {
+      capturedSignal = signal;
+      return new Promise<ExecResult>((_resolve, reject) => {
+        signal?.addEventListener("abort", () => reject(new Error("child was aborted")), {
+          once: true,
+        });
+      });
+    };
+
+    const client = newClientWithFakeExec(execAsync, new FakeTimer());
+    const promise = client.listAvds({ signal: controller.signal });
+    while (!capturedSignal) {
+      await Promise.resolve();
+    }
+
+    controller.abort(cancellation);
+
+    await expect(promise).rejects.toBe(cancellation);
+  });
 });

@@ -1,6 +1,10 @@
 import { errorMessage } from "./describeUnknownError";
 import { ActionableError, BootedDevice, Platform, SomePlatform } from "../models";
-import { MultiPlatformDeviceManager, waitForDeviceReadyOrCancel } from "./deviceUtils";
+import {
+  assertAndroidImageRunningStateKnown,
+  MultiPlatformDeviceManager,
+  waitForDeviceReadyOrCancel,
+} from "./deviceUtils";
 import {
   AdbClientFactory,
   defaultAdbClientFactory,
@@ -1193,6 +1197,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
 
     // Start the first available AVD
     const deviceImage = availableImages[0];
+    assertAndroidImageRunningStateKnown(deviceImage);
     logger.info(`Starting Android emulator ${deviceImage}...`);
     return await this.withLifecycleStart(
       { platform: "android", stableId: deviceImage.name },

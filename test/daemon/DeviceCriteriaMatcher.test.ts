@@ -239,6 +239,18 @@ describe("DeviceCriteriaMatcher", () => {
         matcher.isStartableDeviceImage(deviceImage({ name: "Pixel", platform: "android" })),
       ).toBe(true);
     });
+
+    test("rejects Android images whose running-state overlay is incomplete", () => {
+      expect(
+        matcher.isStartableDeviceImage(
+          deviceImage({
+            name: "Pixel",
+            platform: "android",
+            isRunningStateKnown: false,
+          }),
+        ),
+      ).toBe(false);
+    });
   });
 
   describe("getDeviceImageKey", () => {

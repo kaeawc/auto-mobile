@@ -281,6 +281,20 @@ describe("DeviceBootService", () => {
     ]);
   });
 
+  it("does not cold-boot an Android image whose running state is unknown", async () => {
+    const devices = new FakeDeviceUtils();
+    const matcher = new FakeDeviceMatcher();
+    const unknownLivenessImage = { ...image, isRunningStateKnown: false };
+    devices.setDeviceImages("android", [unknownLivenessImage]);
+    matcher.setImageResult(unknownLivenessImage);
+
+    await expect(service(devices, matcher).boot({ platform: "android" })).rejects.toThrow(
+      "Cannot safely cold-boot Android AVD 'Pixel_9_API_35': its running state is unknown.",
+    );
+
+    expect(devices.getExecutedOperations()).not.toContain("startDevice:Pixel_9_API_35:180000");
+  });
+
   it("does not cold-boot an Android image excluded by a recovery snapshot", async () => {
     const devices = new FakeDeviceUtils();
     const excluded = { ...image, name: "Pixel_10_API_35", osVersion: "35" };

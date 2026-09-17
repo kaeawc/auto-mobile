@@ -92,6 +92,18 @@ teardown() {
   [[ "$output" == *"DaemonLauncherBoundaryFixture.ts"* ]]
 }
 
+@test "rejects a computed child-process executor outside the owner" {
+  printf '%s\n' \
+    'import childProcess from "node:child_process";' \
+    'childProcess["execFileSync"]("auto-mobile", ["--daemon-mode"]);' \
+    > "$FIXTURE"
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"DaemonLauncherBoundaryFixture.ts"* ]]
+}
+
 @test "rejects a namespace alias of a default child-process import" {
   printf '%s\n' \
     'import childProcess from "node:child_process";' \

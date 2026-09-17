@@ -55,6 +55,19 @@ function isDiagnosticProcessTableCall(file: string, node: ts.CallExpression): bo
   return command.text.startsWith("ps -eo ") || command.text.startsWith("powershell.exe ");
 }
 
+function staticMemberName(expression: ts.Expression): string | undefined {
+  if (ts.isPropertyAccessExpression(expression)) {
+    return expression.name.text;
+  }
+  if (
+    ts.isElementAccessExpression(expression) &&
+    ts.isStringLiteralLike(expression.argumentExpression)
+  ) {
+    return expression.argumentExpression.text;
+  }
+  return undefined;
+}
+
 function violationsIn(
   file: string,
   sourceFile: ts.SourceFile,
@@ -133,10 +146,11 @@ function violationsIn(
           addBinding(namespaces, node.name);
         }
         if (
-          ts.isPropertyAccessExpression(node.initializer) &&
+          (ts.isPropertyAccessExpression(node.initializer) ||
+            ts.isElementAccessExpression(node.initializer)) &&
           ts.isIdentifier(node.initializer.expression) &&
           hasBinding(namespaces, node.initializer.expression) &&
-          EXECUTION_FUNCTIONS.has(node.initializer.name.text)
+          EXECUTION_FUNCTIONS.has(staticMemberName(node.initializer) ?? "")
         ) {
           addBinding(importedExecutors, node.name);
         }
@@ -160,10 +174,10 @@ function violationsIn(
       const expression = node.expression;
       const direct = ts.isIdentifier(expression) && hasBinding(importedExecutors, expression);
       const namespaced =
-        ts.isPropertyAccessExpression(expression) &&
+        (ts.isPropertyAccessExpression(expression) || ts.isElementAccessExpression(expression)) &&
         ts.isIdentifier(expression.expression) &&
         hasBinding(namespaces, expression.expression) &&
-        EXECUTION_FUNCTIONS.has(expression.name.text);
+        EXECUTION_FUNCTIONS.has(staticMemberName(expression) ?? "");
       if (direct || namespaced) {
         record(node);
       }
@@ -177,7 +191,7 @@ function violationsIn(
 
 export function findViolations(): Violation[] {
   const files = sourceFiles(SOURCE_ROOT);
-  const program = ts.createProgram(files, { noEmit: true, skipLibCheck: true });
+  const program = ts.createProgram(files, { noEmit: true, noLib: true, noResolve: true });
   const checker = program.getTypeChecker();
   return files
     .filter((file) => repositoryPath(file) !== OWNER)

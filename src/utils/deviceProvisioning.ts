@@ -452,8 +452,10 @@ export function pickAndroidSystemImage(
   const runnable = inRange.filter((image) => preferences.includes(image.abi));
   const candidates = runnable.length > 0 ? runnable : inRange;
 
+  // Precedence is major API > ABI > tag > minor > packageName; keep capability
+  // and rootability preferences ahead of point-release freshness.
   return [...candidates].sort((a, b) => {
-    const apiDelta = compareStrictNumericVersions(b.apiIdentifier, a.apiIdentifier);
+    const apiDelta = b.apiLevel - a.apiLevel;
     if (apiDelta !== 0) {
       return apiDelta;
     }
@@ -464,6 +466,10 @@ export function pickAndroidSystemImage(
     const tagDelta = tagRank(a.tag) - tagRank(b.tag);
     if (tagDelta !== 0) {
       return tagDelta;
+    }
+    const minorDelta = compareStrictNumericVersions(b.apiIdentifier, a.apiIdentifier);
+    if (minorDelta !== 0) {
+      return minorDelta;
     }
     return a.packageName.localeCompare(b.packageName);
   })[0];

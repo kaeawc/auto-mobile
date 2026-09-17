@@ -41,10 +41,16 @@ function deviceTypeWithRuntimeRange(
   };
 }
 
-function systemImage(apiLevel: number, tag: string, abi: string): SystemImage {
+function systemImage(
+  apiLevel: number,
+  tag: string,
+  abi: string,
+  apiIdentifier = String(apiLevel),
+  packageName = `system-images;android-${apiIdentifier};${tag};${abi}`,
+): SystemImage {
   return {
-    packageName: `system-images;android-${apiLevel};${tag};${abi}`,
-    apiIdentifier: String(apiLevel),
+    packageName,
+    apiIdentifier,
     apiLevel,
     tag,
     abi,
@@ -167,6 +173,57 @@ describe("pickAndroidSystemImage", () => {
     expect(pickAndroidSystemImage(parsed, {}, "arm64").packageName).toBe(
       "system-images;android-36.2;google_apis;arm64-v8a",
     );
+  });
+
+  it("prefers rootable tags over a newer minor at the same major API", () => {
+    const candidates = [
+      systemImage(36, "google_apis_playstore", "arm64-v8a", "36.2"),
+      systemImage(36, "google_apis", "arm64-v8a", "36.1"),
+    ];
+
+    expect(pickAndroidSystemImage(candidates, {}, "arm64").packageName).toBe(
+      "system-images;android-36.1;google_apis;arm64-v8a",
+    );
+  });
+
+  it("prefers a higher minor within the same tag", () => {
+    const candidates = [
+      systemImage(36, "google_apis", "arm64-v8a", "36.1"),
+      systemImage(36, "google_apis", "arm64-v8a", "36.2"),
+    ];
+
+    expect(pickAndroidSystemImage(candidates, {}, "arm64").apiIdentifier).toBe("36.2");
+  });
+
+  it("prefers a higher major API regardless of tag", () => {
+    const candidates = [
+      systemImage(34, "google_apis", "arm64-v8a"),
+      systemImage(35, "google_apis_playstore", "arm64-v8a"),
+    ];
+
+    expect(pickAndroidSystemImage(candidates, {}, "arm64").apiLevel).toBe(35);
+  });
+
+  it("honours a major API constraint before ranking minor versions", () => {
+    const candidates = [
+      systemImage(35, "google_apis", "arm64-v8a"),
+      systemImage(36, "google_apis_playstore", "arm64-v8a", "36.2"),
+      systemImage(36, "google_apis", "arm64-v8a", "36.1"),
+    ];
+
+    expect(
+      pickAndroidSystemImage(candidates, { minOsVersion: "36", maxOsVersion: "36" }, "arm64")
+        .apiIdentifier,
+    ).toBe("36.1");
+  });
+
+  it("uses packageName as the deterministic final tie-break", () => {
+    const candidates = [
+      systemImage(36, "google_apis", "arm64-v8a", "36.1", "z-package"),
+      systemImage(36, "google_apis", "arm64-v8a", "36.1", "a-package"),
+    ];
+
+    expect(pickAndroidSystemImage(candidates, {}, "arm64").packageName).toBe("a-package");
   });
 
   it("prefers the host ABI when several API levels tie", () => {

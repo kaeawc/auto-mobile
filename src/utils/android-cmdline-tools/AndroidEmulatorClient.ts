@@ -14,6 +14,7 @@ import { arch } from "os";
 import { detectAndroidCommandLineTools, getBestAndroidToolsLocation } from "./detection";
 import { defaultTimer, Timer } from "../SystemTimer";
 import { combineAbortSignals } from "../AbortContext";
+import { runDetachedFromPerf, trackAmbient } from "../PerfContext";
 import { createGlobalPerformanceTracker } from "../PerformanceTracker";
 import {
   TcpHostPortAvailabilityChecker,
@@ -1463,7 +1464,16 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     );
   }
 
-  private async runAccelerationCheck(): Promise<string> {
+  private runAccelerationCheck(): Promise<string> {
+    // Diagnostic `emulator -accel-check` probe (up to a 3s bound) run on an
+    // inconclusive cold-boot failure. It bypasses the executeCommand funnel, so
+    // give it its own ambient leaf — wrapped around the whole method, outside
+    // its internal Promise.race, so the added async turn can't perturb the
+    // race's FakeTimer timing (see PerfContext).
+    return trackAmbient("emulator -accel-check", () => this.runAccelerationCheckInner());
+  }
+
+  private async runAccelerationCheckInner(): Promise<string> {
     const controller = new AbortController();
     let timeout: NodeJS.Timeout | undefined;
     const probe = Promise.resolve()
@@ -1498,7 +1508,16 @@ export class AndroidEmulatorClient implements AndroidEmulator {
    * @param timeoutMs - Optional timeout in milliseconds
    * @returns Promise with stdout and stderr
    */
-  async executeCommand(
+  executeCommand(args: string[], timeoutMs?: number, signal?: AbortSignal): Promise<ExecResult> {
+    // One span per `emulator <verb>` CLI invocation (e.g. `emulator -list-avds`
+    // AVD discovery), recorded against the ambient device-lifecycle tracker when
+    // one is in scope (see PerfContext).
+    return trackAmbient(`emulator ${args.slice(0, 1).join(" ")}`.trimEnd(), () =>
+      this.executeCommandInner(args, timeoutMs, signal),
+    );
+  }
+
+  private async executeCommandInner(
     args: string[],
     timeoutMs?: number,
     signal?: AbortSignal,
@@ -1917,19 +1936,25 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     request.signal?.addEventListener("abort", dispose, { once: true });
 
     try {
-      process = await this.startEmulatorProcess(
-        request.avdName,
-        request.extraArgs,
-        (spawnedProcess) => {
-          process = spawnedProcess;
-          if (disposed && !spawnedProcess.killed) {
-            spawnedProcess.kill();
-          }
-        },
-        () => disposed,
-        shouldCaptureEmulatorReservationSnapshot(request.deviceId),
-        request.deviceId,
-        request.signal,
+      // Ambient leaf for the emulator startup command (spawn + startup
+      // validation). It ends when `startEmulatorProcess` resolves — never the
+      // resident emulator's whole lifetime — mirroring the iOS `simctl boot`
+      // leaf (see PerfContext).
+      process = await trackAmbient(`emulator launch ${request.avdName}`, () =>
+        this.startEmulatorProcess(
+          request.avdName,
+          request.extraArgs,
+          (spawnedProcess) => {
+            process = spawnedProcess;
+            if (disposed && !spawnedProcess.killed) {
+              spawnedProcess.kill();
+            }
+          },
+          () => disposed,
+          shouldCaptureEmulatorReservationSnapshot(request.deviceId),
+          request.deviceId,
+          request.signal,
+        ),
       );
       if (disposed) {
         if (process && !process.killed) {
@@ -2168,7 +2193,11 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       perf.startOperation("spawnEmulator");
       let child: ChildProcess;
       try {
-        child = this.spawnFn(this.emulatorPath, args);
+        // Spawn the resident emulator detached from any request perf tracker, so
+        // its later `exit` callbacks do not retain a completed request's tracker
+        // via AsyncLocalStorage (see PerfContext). The launch-startup timing
+        // stays under the ambient `emulator launch` scope.
+        child = runDetachedFromPerf(() => this.spawnFn(this.emulatorPath, args));
       } catch (error) {
         if (reservedEmulator) {
           this.releasePendingEmulatorDeviceId(reservedEmulator);

@@ -1,4 +1,5 @@
 import { errorMessage } from "./describeUnknownError";
+import { runDetachedFromPerf } from "./PerfContext";
 import { type BackoffPolicy } from "./Backoff";
 import { type Timer } from "./SystemTimer";
 import { logger } from "./logger";
@@ -83,9 +84,16 @@ export class DefaultProcessSupervisor implements ProcessSupervisor {
   private startMonitoring(): void {
     this.stopMonitoring();
     const generation = this.lifecycleGeneration;
-    this.monitorInterval = this.options.timer.setInterval(() => {
-      void this.checkLiveness(generation);
-    }, this.options.monitorIntervalMs);
+    // Create the device-lifetime monitor interval detached from any request's
+    // performance tracker: `start()` may run inside a readiness request's
+    // ambient perf scope, and Node's AsyncLocalStorage would otherwise bind that
+    // completed request's tracker to this recurring interval (and the restart
+    // callbacks it fires) for the process's whole lifetime (see PerfContext).
+    this.monitorInterval = runDetachedFromPerf(() =>
+      this.options.timer.setInterval(() => {
+        void this.checkLiveness(generation);
+      }, this.options.monitorIntervalMs),
+    );
   }
 
   private stopMonitoring(): void {

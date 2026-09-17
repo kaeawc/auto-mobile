@@ -56,6 +56,7 @@ import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlP
 import { IOSCtrlProxyClient } from "../features/observe/ios/IOSCtrlProxyClient";
 import { logger } from "../utils/logger";
 import { createPerformanceTracker } from "../utils/PerformanceTracker";
+import { ambientPerfFor, runWithPerfTracker } from "../utils/PerfContext";
 import { getPerformanceMonitor } from "../features/performance/PerformanceMonitor";
 import {
   platformSchema,
@@ -2735,163 +2736,168 @@ async function shutdownDevice(
   const daemonState = DaemonState.getInstance();
   const devicePool = daemonState.isInitialized() ? daemonState.getDevicePool() : undefined;
   let expectedSession: Session | undefined;
-  return await deviceShutdownService.shutdown({
-    prepare: async () => {
-      const reservation = await runWithinShutdownDeadline(
-        device,
-        dependencies.timer,
-        shutdownDeadlineMs,
-        "shutdown preparation did not complete",
-        requestAbortSignal,
-        async (signal) => await devicePool?.reserveDeviceForShutdown(device.deviceId, signal),
-        timeoutMs,
-      );
-      expectedSession = reservation?.session;
-      return reservation;
-    },
-    execute: async (shutdownReservation, retainReservationUntil) => {
-      const expectedPooledDevice = shutdownReservation?.device ?? null;
-      const retainShutdownUntil = (
-        operation: Promise<unknown>,
-        releaseReservationAfterFailure = false,
-      ): void => {
-        retainReservationUntil(operation, releaseReservationAfterFailure);
-        retainLifecycleUntil?.(operation);
-      };
-      const shutdownContext: ShutdownDeadlineContext = {
-        device,
-        timer: dependencies.timer,
-        deadlineMs: shutdownDeadlineMs,
-        timeoutMs,
-        requestAbortSignal,
-        retainReservationUntil: retainShutdownUntil,
-      };
-      // Identity first: a refusal must leave a still-running device untouched.
-      const killTarget = await resolvePooledAvdKillTarget(
-        dependencies,
-        device,
-        pooledAvdIdentity,
-        devicePool,
-        shutdownDeadlineMs,
-        requestAbortSignal,
-      );
-      await stopVideoRecordingsBeforeShutdown(shutdownContext, perf);
-      await stopIosCtrlProxyBeforeShutdown(shutdownContext, perf);
-      const androidObserverState = await stopAndroidCtrlProxyBeforeShutdown(
-        shutdownContext,
-        perf,
-        dependencies.stopAndroidObservers,
-      );
-
-      const alreadyStoppedMessage = await killProcessAndRetireOwnership(
-        dependencies,
-        device,
-        perf,
-        requestAbortSignal,
-        devicePool,
-        expectedPooledDevice,
-        expectedSession,
-        androidObserverState,
-        shutdownDeadlineMs,
-        (retirement, releaseReservationAfterFailure) => {
-          retainShutdownUntil(retirement, releaseReservationAfterFailure);
-        },
-        strictDeadline,
-        timeoutMs,
-        killTarget,
-        pooledAvdIdentity?.force ?? false,
-      );
-
-      if (alreadyStoppedMessage !== undefined) {
-        // The target may have stopped between teardown discovery and the platform
-        // kill command. Retire the captured pool incarnation before deletion.
-        perf.startOperation("retireOwnership");
-        await retireShutdownOwnership(
+  // Ambient scope (only under --debug-perf) so the adb/emulator-console/simctl
+  // commands issued while tearing the device down attribute their time into this
+  // shutdown tree (see PerfContext).
+  return await runWithPerfTracker(ambientPerfFor(perf), () =>
+    deviceShutdownService.shutdown({
+      prepare: async () => {
+        const reservation = await runWithinShutdownDeadline(
           device,
-          expectedPooledDevice,
-          expectedSession,
-          undefined,
-          dependencies.deviceManagerFactory(),
           dependencies.timer,
           shutdownDeadlineMs,
+          "shutdown preparation did not complete",
           requestAbortSignal,
-          dependencies.stopPerformanceMonitoring,
-          retainShutdownUntil,
-          true,
+          async (signal) => await devicePool?.reserveDeviceForShutdown(device.deviceId, signal),
+          timeoutMs,
+        );
+        expectedSession = reservation?.session;
+        return reservation;
+      },
+      execute: async (shutdownReservation, retainReservationUntil) => {
+        const expectedPooledDevice = shutdownReservation?.device ?? null;
+        const retainShutdownUntil = (
+          operation: Promise<unknown>,
+          releaseReservationAfterFailure = false,
+        ): void => {
+          retainReservationUntil(operation, releaseReservationAfterFailure);
+          retainLifecycleUntil?.(operation);
+        };
+        const shutdownContext: ShutdownDeadlineContext = {
+          device,
+          timer: dependencies.timer,
+          deadlineMs: shutdownDeadlineMs,
+          timeoutMs,
+          requestAbortSignal,
+          retainReservationUntil: retainShutdownUntil,
+        };
+        // Identity first: a refusal must leave a still-running device untouched.
+        const killTarget = await resolvePooledAvdKillTarget(
+          dependencies,
+          device,
+          pooledAvdIdentity,
+          devicePool,
+          shutdownDeadlineMs,
+          requestAbortSignal,
+        );
+        await stopVideoRecordingsBeforeShutdown(shutdownContext, perf);
+        await stopIosCtrlProxyBeforeShutdown(shutdownContext, perf);
+        const androidObserverState = await stopAndroidCtrlProxyBeforeShutdown(
+          shutdownContext,
+          perf,
+          dependencies.stopAndroidObservers,
+        );
+
+        const alreadyStoppedMessage = await killProcessAndRetireOwnership(
+          dependencies,
+          device,
+          perf,
+          requestAbortSignal,
+          devicePool,
+          expectedPooledDevice,
+          expectedSession,
+          androidObserverState,
+          shutdownDeadlineMs,
+          (retirement, releaseReservationAfterFailure) => {
+            retainShutdownUntil(retirement, releaseReservationAfterFailure);
+          },
           strictDeadline,
           timeoutMs,
-          DEVICE_SHUTDOWN_TERMINAL_RELEASE_RETRIES,
+          killTarget,
           pooledAvdIdentity?.force ?? false,
         );
-        perf.endOperation("retireOwnership");
-      }
 
-      // Retire the installed-apps cache incarnation BEFORE the shutdown
-      // reservation is released, i.e. before a same-ID replacement can boot
-      // (#6894). From here on, work that captured this incarnation is fenced,
-      // the replacement starts a fresh incarnation, and the late release below
-      // binds to this token so it can never delete the replacement's fences.
-      // Invalidations landing on the retired incarnation meanwhile (the
-      // cleanup below, and notifyResourcesAfterShutdown() ->
-      // syncInstalledAppResources() re-invalidating the same, already-gone
-      // device) fence it without starting a phantom incarnation, so the
-      // release still finds and frees the bookkeeping (#6704).
-      const retiredIncarnation = getInstalledAppsCacheWriteCoordinator().retireIncarnation(
-        device.deviceId,
-      );
-      await shutdownReservation?.release();
-      unregisterDirectSessionsForDevice(device.deviceId);
-
-      const cleanup = clearInstalledAppsAfterShutdown(dependencies, device.deviceId);
-      const notification = cleanup.then(async () => {
-        await notifyResourcesAfterShutdown(dependencies);
-      });
-      const release = cleanup.then(async (cacheCleared) => {
-        // Failed persistence must keep the dirty fence across device-ID reuse.
-        if (!cacheCleared) {
-          return;
+        if (alreadyStoppedMessage !== undefined) {
+          // The target may have stopped between teardown discovery and the platform
+          // kill command. Retire the captured pool incarnation before deletion.
+          perf.startOperation("retireOwnership");
+          await retireShutdownOwnership(
+            device,
+            expectedPooledDevice,
+            expectedSession,
+            undefined,
+            dependencies.deviceManagerFactory(),
+            dependencies.timer,
+            shutdownDeadlineMs,
+            requestAbortSignal,
+            dependencies.stopPerformanceMonitoring,
+            retainShutdownUntil,
+            true,
+            strictDeadline,
+            timeoutMs,
+            DEVICE_SHUTDOWN_TERMINAL_RELEASE_RETRIES,
+            pooledAvdIdentity?.force ?? false,
+          );
+          perf.endOperation("retireOwnership");
         }
-        // Prefer releasing after the notification's own re-invalidation has
-        // been queued, but never wait on it unboundedly: a notifier that
-        // never settles must not retain this device's bookkeeping forever.
-        await settleWithin(notification, dependencies.timer, timeoutMs);
-        await getInstalledAppsCacheWriteCoordinator().releaseDevice(
+
+        // Retire the installed-apps cache incarnation BEFORE the shutdown
+        // reservation is released, i.e. before a same-ID replacement can boot
+        // (#6894). From here on, work that captured this incarnation is fenced,
+        // the replacement starts a fresh incarnation, and the late release below
+        // binds to this token so it can never delete the replacement's fences.
+        // Invalidations landing on the retired incarnation meanwhile (the
+        // cleanup below, and notifyResourcesAfterShutdown() ->
+        // syncInstalledAppResources() re-invalidating the same, already-gone
+        // device) fence it without starting a phantom incarnation, so the
+        // release still finds and frees the bookkeeping (#6704).
+        const retiredIncarnation = getInstalledAppsCacheWriteCoordinator().retireIncarnation(
           device.deviceId,
-          retiredIncarnation,
         );
-      });
-      // Keep late cleanup visible to DB shutdown without blocking a later
-      // device teardown retry if resource notification never settles.
-      void getDbWriteBarrier().trackExisting(notification);
-      void getDbWriteBarrier().trackExisting(release);
+        await shutdownReservation?.release();
+        unregisterDirectSessionsForDevice(device.deviceId);
 
-      await runPostShutdownStep(
-        shutdownContext,
-        perf,
-        "cleanup",
-        "installed-app cleanup did not complete",
-        strictDeadline,
-        async () => {
-          await cleanup;
-        },
-      );
-      await runPostShutdownStep(
-        shutdownContext,
-        perf,
-        "notifyResources",
-        "resource notification did not complete",
-        strictDeadline,
-        async () => await notification,
-      );
+        const cleanup = clearInstalledAppsAfterShutdown(dependencies, device.deviceId);
+        const notification = cleanup.then(async () => {
+          await notifyResourcesAfterShutdown(dependencies);
+        });
+        const release = cleanup.then(async (cacheCleared) => {
+          // Failed persistence must keep the dirty fence across device-ID reuse.
+          if (!cacheCleared) {
+            return;
+          }
+          // Prefer releasing after the notification's own re-invalidation has
+          // been queued, but never wait on it unboundedly: a notifier that
+          // never settles must not retain this device's bookkeeping forever.
+          await settleWithin(notification, dependencies.timer, timeoutMs);
+          await getInstalledAppsCacheWriteCoordinator().releaseDevice(
+            device.deviceId,
+            retiredIncarnation,
+          );
+        });
+        // Keep late cleanup visible to DB shutdown without blocking a later
+        // device teardown retry if resource notification never settles.
+        void getDbWriteBarrier().trackExisting(notification);
+        void getDbWriteBarrier().trackExisting(release);
 
-      perf.end();
-      return {
-        timing: perf.getTimings(),
-        alreadyStoppedMessage,
-      };
-    },
-    failure: (error) => rethrowShutdownFailure(device, requestAbortSignal, error),
-  });
+        await runPostShutdownStep(
+          shutdownContext,
+          perf,
+          "cleanup",
+          "installed-app cleanup did not complete",
+          strictDeadline,
+          async () => {
+            await cleanup;
+          },
+        );
+        await runPostShutdownStep(
+          shutdownContext,
+          perf,
+          "notifyResources",
+          "resource notification did not complete",
+          strictDeadline,
+          async () => await notification,
+        );
+
+        perf.end();
+        return {
+          timing: perf.getTimings(),
+          alreadyStoppedMessage,
+        };
+      },
+      failure: (error) => rethrowShutdownFailure(device, requestAbortSignal, error),
+    }),
+  );
 }
 
 type TeardownFailurePhase = "precondition" | "stop" | "destroy" | "verification";
@@ -7596,19 +7602,22 @@ export function registerDeviceTools() {
           deps.lifecycleCoordinator,
         );
       } else {
-        lifecycleLease = await reserveExistingIosProvisionDeviceLifecycle(
-          args,
-          deps,
-          deviceManager,
-          totalDeadlineMs,
-          signal,
-        );
-        lifecycleLease ??= await reserveIosSelectorProvisionDeviceLifecycle(
-          args,
-          deps,
-          totalDeadlineMs,
-          signal,
-        );
+        // Scope the iOS lifecycle reservation too: it runs `getDeviceImagesDetailed`
+        // (→ `simctl list`) before the provision/boot scopes, so its discovery
+        // command would otherwise be missing from perfTiming (see PerfContext).
+        lifecycleLease = await runWithPerfTracker(ambientPerfFor(perf), async () => {
+          const existing = await reserveExistingIosProvisionDeviceLifecycle(
+            args,
+            deps,
+            deviceManager,
+            totalDeadlineMs,
+            signal,
+          );
+          return (
+            existing ??
+            (await reserveIosSelectorProvisionDeviceLifecycle(args, deps, totalDeadlineMs, signal))
+          );
+        });
       }
       const deviceCreationGate = deps.deviceCreationGateFactory();
       provisioned = await provisionExactDevice(
@@ -7638,17 +7647,25 @@ export function registerDeviceTools() {
         perf.end();
         return buildProvisionDeviceResult(args, provisioned, createdByOperation, perf, undefined);
       }
-      const booted = await bootExactProvisionedDevice(
-        args,
-        deps,
-        deviceManager,
-        deviceCreationGate,
-        provisioned,
-        perf,
-        totalDeadlineMs,
-        lifecycleLease,
-        signal,
-        settlementState,
+      // Ambient scope (only under --debug-perf) so the emulator/simctl boot
+      // commands attribute their time into this provisioning tree. Capture the
+      // narrowed `provisioned`/`lifecycleLease` in consts first: the arrow
+      // closure would otherwise widen the `let`s back to `| undefined`.
+      const provisionedDevice = provisioned;
+      const bootLifecycleLease = lifecycleLease;
+      const booted = await runWithPerfTracker(ambientPerfFor(perf), () =>
+        bootExactProvisionedDevice(
+          args,
+          deps,
+          deviceManager,
+          deviceCreationGate,
+          provisionedDevice,
+          perf,
+          totalDeadlineMs,
+          bootLifecycleLease,
+          signal,
+          settlementState,
+        ),
       );
       if (provisioned.created || booted.source === "cold-boot") {
         // Session and pool ownership are already committed by
@@ -7719,24 +7736,30 @@ export function registerDeviceTools() {
   ): Promise<Awaited<ReturnType<ExactDeviceProvisioner["provision"]>>> {
     perf.startOperation("provisionExactDevice");
     try {
-      return await runProvisionDeviceWithinDeadline(
-        timer,
-        totalDeadlineMs,
-        signal,
-        "provisioning the exact device",
-        async (deadlineSignal) =>
-          await provisioner.provision({
-            platform: args.device.platform,
-            name: args.device.name,
-            ...(args.device.deviceId === undefined ? {} : { deviceId: args.device.deviceId }),
-            spec: args.device.spec,
-            reconcileExistingConfiguration,
-            onBeforeCreate: markDeviceCreationStarted,
-            lifecycleLease,
-            deadlineMs: totalDeadlineMs,
-            signal: deadlineSignal,
-          }),
-        collectPendingSettlement,
+      // Establish `perf` as the ambient tracker (only under --debug-perf; see
+      // ambientPerfFor) so the exact provisioner and every platform CLI it drives
+      // (avdmanager, sdkmanager, adb, simctl, xcodebuild) record their command
+      // spans into this same timing tree.
+      return await runWithPerfTracker(ambientPerfFor(perf), () =>
+        runProvisionDeviceWithinDeadline(
+          timer,
+          totalDeadlineMs,
+          signal,
+          "provisioning the exact device",
+          async (deadlineSignal) =>
+            await provisioner.provision({
+              platform: args.device.platform,
+              name: args.device.name,
+              ...(args.device.deviceId === undefined ? {} : { deviceId: args.device.deviceId }),
+              spec: args.device.spec,
+              reconcileExistingConfiguration,
+              onBeforeCreate: markDeviceCreationStarted,
+              lifecycleLease,
+              deadlineMs: totalDeadlineMs,
+              signal: deadlineSignal,
+            }),
+          collectPendingSettlement,
+        ),
       );
     } finally {
       perf.endOperation("provisionExactDevice");
@@ -8396,17 +8419,23 @@ export function registerDeviceTools() {
       args.platform === "android"
         ? getStartDevicePool(DaemonState.getInstance())?.getRecoveringAndroidTargets()
         : undefined;
-    state.boot = await bootService.boot(
-      {
-        ...args,
-        operationName: budgets.operationName,
-        timeoutMs: budgets.bootTimeoutMs,
-        totalDeadlineMs: bootDeadlineMs,
-        signal,
-        excludeDeviceNames: recoveryTargets?.names,
-        excludeDeviceIds: recoveryTargets?.serials,
-      },
-      progress ? { report: progress } : undefined,
+    // Establish the (--debug-perf-gated) ambient tracker around the shared
+    // acquisition boot attempt (getAndroid/getApple/startDevice), matching
+    // provisionDevice's boot scope, so the emulator/simctl/adb discovery, boot,
+    // and boot-readiness commands attribute their spans here (see PerfContext).
+    state.boot = await runWithPerfTracker(ambientPerfFor(perf), () =>
+      bootService.boot(
+        {
+          ...args,
+          operationName: budgets.operationName,
+          timeoutMs: budgets.bootTimeoutMs,
+          totalDeadlineMs: bootDeadlineMs,
+          signal,
+          excludeDeviceNames: recoveryTargets?.names,
+          excludeDeviceIds: recoveryTargets?.serials,
+        },
+        progress ? { report: progress } : undefined,
+      ),
     );
     assertAndroidBootDidNotEnterRecovery(args, state.boot);
     perf.endOperation("bootDevice");
@@ -8633,14 +8662,19 @@ export function registerDeviceTools() {
       | Awaited<ReturnType<typeof reserveStartDeviceLifecycleReservations>>
       | undefined;
     try {
-      lifecycleReservations = await reserveStartDeviceLifecycleReservations(
-        args,
-        budgets,
-        deps,
-        deviceUtils,
-        deviceMatcher,
-        bootDeadlineMs,
-        signal,
+      // Scope the pre-boot lifecycle reservation (runs `getDeviceImagesDetailed`
+      // → `simctl list` discovery) so its commands attribute into perfTiming,
+      // matching the boot scope inside bootAndPrepareDevice (see PerfContext).
+      lifecycleReservations = await runWithPerfTracker(ambientPerfFor(perf), () =>
+        reserveStartDeviceLifecycleReservations(
+          args,
+          budgets,
+          deps,
+          deviceUtils,
+          deviceMatcher,
+          bootDeadlineMs,
+          signal,
+        ),
       );
       const coordinatedSignals = [signal, lifecycleReservations.lifecycleLease.signal].filter(
         (candidate): candidate is AbortSignal => candidate !== undefined,
@@ -8653,17 +8687,19 @@ export function registerDeviceTools() {
       // so a stopped AVD is not cold-booted and killed just to report it. Run
       // after its lifecycle lease, however, so a serial not yet visible during
       // reset recovery gets a chance to appear before discovery decides.
-      await validateRequestedAndroidIdentifiersBeforeBoot(
-        budgets.requestedAndroidIdentifierPair,
-        deviceUtils,
-        bootDeadlineMs,
-        deps.timer,
-        coordinatedSignal,
-        (settlement) => {
-          if (settlement) {
-            state.coldBootSettlements.push(settlement);
-          }
-        },
+      await runWithPerfTracker(ambientPerfFor(perf), () =>
+        validateRequestedAndroidIdentifiersBeforeBoot(
+          budgets.requestedAndroidIdentifierPair,
+          deviceUtils,
+          bootDeadlineMs,
+          deps.timer,
+          coordinatedSignal,
+          (settlement) => {
+            if (settlement) {
+              state.coldBootSettlements.push(settlement);
+            }
+          },
+        ),
       );
       return await bootAndPrepareDevice(
         args,

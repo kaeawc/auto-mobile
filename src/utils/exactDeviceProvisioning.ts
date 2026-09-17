@@ -15,6 +15,7 @@ import { AvdManagerClient } from "./android-cmdline-tools/AvdManagerClient";
 import type { CreateAvdParams } from "./android-cmdline-tools/avdmanager";
 import { SimCtlClient } from "./ios-cmdline-tools/SimCtlClient";
 import { awaitWhileRequestIsLive, throwIfAborted } from "./toolUtils";
+import { trackAmbient } from "./PerfContext";
 import { defaultTimer, type Timer } from "./SystemTimer";
 import {
   androidAvdConfigurationSchema,
@@ -386,10 +387,14 @@ export class DefaultExactDeviceProvisioner implements ExactDeviceProvisioner {
     request: ExactDeviceProvisionRequest,
     displayCutout: DisplayCutoutClassification,
   ): Promise<ExactProvisionedDevice> {
-    const images = await this.dependencies.listDeviceImages(request.platform);
+    const images = await trackAmbient("provision:listDeviceImages", () =>
+      this.dependencies.listDeviceImages(request.platform),
+    );
     const existing = this.findExisting(images, request);
     if (existing) {
-      await this.assertExistingMatches(request, existing);
+      await trackAmbient("provision:matchExisting", () =>
+        this.assertExistingMatches(request, existing),
+      );
       return {
         device: existing,
         created: false,
@@ -412,13 +417,13 @@ export class DefaultExactDeviceProvisioner implements ExactDeviceProvisioner {
 
     await request.onBeforeCreate?.();
     if (request.platform === "android") {
-      return await this.createAndroid(
-        request,
-        request.spec as AndroidDeviceSpecification,
-        displayCutout,
+      return await trackAmbient("provision:createAndroid", () =>
+        this.createAndroid(request, request.spec as AndroidDeviceSpecification, displayCutout),
       );
     }
-    return await this.createIos(request, request.spec as IosDeviceSpecification, displayCutout);
+    return await trackAmbient("provision:createIos", () =>
+      this.createIos(request, request.spec as IosDeviceSpecification, displayCutout),
+    );
   }
 
   private resolveDisplayCutout(request: ExactDeviceProvisionRequest): DisplayCutoutClassification {

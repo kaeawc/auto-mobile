@@ -20,6 +20,7 @@ import {
 import type { PerformanceTracker } from "./PerformanceTracker";
 import type { ProxySetupResult } from "./interfaces/ProxyManager";
 import { runWithAbortSignal } from "./AbortContext";
+import { ambientPerfFor, runWithPerfTracker, trackAmbient } from "./PerfContext";
 import { logger } from "./logger";
 import {
   centerOfBounds,
@@ -241,11 +242,23 @@ export class RunnerReadinessService {
   }
 
   private async ensureReadyUncoordinated(context: ReadinessAttemptContext): Promise<void> {
-    if (context.device.platform === "android") {
-      await this.ensureAndroidReady(context);
-      return;
+    // Establish the (--debug-perf-gated) ambient tracker around the WHOLE
+    // readiness attempt, not just each `runPhase`, so commands issued outside a
+    // phase — the pre-phase Android framework probe and the failure-diagnostic
+    // ADB reads — also attribute their spans here (see PerfContext). The
+    // per-phase `readiness:<phase>` spans still nest underneath.
+    const perf = context.perf;
+    const run = async (): Promise<void> => {
+      if (context.device.platform === "android") {
+        await this.ensureAndroidReady(context);
+        return;
+      }
+      await this.ensureIosReady(context);
+    };
+    if (!perf) {
+      return run();
     }
-    await this.ensureIosReady(context);
+    return runWithPerfTracker(ambientPerfFor(perf), run);
   }
 
   private async acquireReadinessTurn(
@@ -1038,7 +1051,14 @@ export class RunnerReadinessService {
       ? AbortSignal.any([context.signal, controller.signal])
       : controller.signal;
     let timeoutHandle: NodeJS.Timeout | undefined;
-    const operationPromise = runWithAbortSignal(signal, () => operation(signal));
+    // Record one `readiness:<phase>` span. The ambient tracker is already
+    // established for the whole attempt in `ensureReadyUncoordinated`, so the
+    // runner install/start/health commands (adb, simctl, xcodebuild) beneath
+    // this phase attribute their time here (see PerfContext); `trackAmbient` is
+    // a no-op when no ambient tracker is in scope.
+    const operationPromise = trackAmbient(`readiness:${phase}`, () =>
+      runWithAbortSignal(signal, () => operation(signal)),
+    );
     void operationPromise.catch(() => {});
     try {
       return await Promise.race([

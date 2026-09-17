@@ -1,4 +1,5 @@
 import { type ChildProcess, type SpawnOptions } from "node:child_process";
+import { trackAmbient } from "../PerfContext";
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { defaultTimer, type Timer } from "../SystemTimer";
@@ -153,14 +154,19 @@ export class SdkManagerClient {
     );
   }
 
-  private async run(
+  private run(
     args: string[],
     defaultsForCommand: { input?: string; timeoutMs: number; maxStdoutChars?: number },
     options: SdkManagerExecutionOptions,
     allowBootstrapRoot = false,
   ): Promise<SdkManagerCommandResult> {
-    const { path, env } = await this.resolve(allowBootstrapRoot, options.location);
-    return this.execute(path, args, { ...defaultsForCommand, env }, options);
+    // One span per sdkmanager invocation, named by the leading flag/target so
+    // spans aggregate (e.g. `sdkmanager --install`), recorded against the
+    // ambient device-lifecycle tracker when one is in scope (see PerfContext).
+    return trackAmbient(`sdkmanager ${args.slice(0, 1).join(" ")}`.trimEnd(), async () => {
+      const { path, env } = await this.resolve(allowBootstrapRoot, options.location);
+      return this.execute(path, args, { ...defaultsForCommand, env }, options);
+    });
   }
 
   private async resolve(

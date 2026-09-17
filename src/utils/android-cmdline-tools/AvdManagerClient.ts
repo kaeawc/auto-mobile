@@ -1,4 +1,5 @@
 import { type ChildProcess, type SpawnOptions } from "node:child_process";
+import { trackAmbient } from "../PerfContext";
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { ActionableError } from "../../models";
@@ -328,7 +329,21 @@ export class AvdManagerClient {
     AvdManagerClient.homebrewWarningLoggers.add(this.dependencies.logger);
   }
 
-  private async execute(
+  private execute(
+    path: string,
+    args: string[],
+    inputOptions: { input?: string; env?: NodeJS.ProcessEnv; timeoutMs: number },
+    options: AvdManagerExecutionOptions,
+  ): Promise<CommandResult> {
+    // One span per avdmanager invocation, named by the leading subcommand so
+    // spans aggregate (e.g. `avdmanager create`), recorded against the ambient
+    // device-lifecycle tracker when one is in scope (see PerfContext).
+    return trackAmbient(`avdmanager ${args.slice(0, 2).join(" ")}`.trimEnd(), () =>
+      this.executeInner(path, args, inputOptions, options),
+    );
+  }
+
+  private async executeInner(
     path: string,
     args: string[],
     inputOptions: { input?: string; env?: NodeJS.ProcessEnv; timeoutMs: number },

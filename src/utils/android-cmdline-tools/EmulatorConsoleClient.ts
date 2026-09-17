@@ -1,4 +1,5 @@
 import * as net from "node:net";
+import { trackAmbient } from "../PerfContext";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
@@ -188,13 +189,19 @@ export class RealEmulatorConsoleClient implements EmulatorConsoleClient {
     private readonly tokenReader: EmulatorConsoleAuthTokenReader,
   ) {}
 
-  private async runCommands(commands: string[]): Promise<void> {
-    const token = await this.tokenReader.read();
-    const output = await this.transport.execute("localhost", this.port, token, commands);
-    const ko = KO_REGEX.exec(output);
-    if (ko) {
-      throw new ActionableError(`Emulator console rejected command: ${ko[1].trim()}`);
-    }
+  private runCommands(commands: string[]): Promise<void> {
+    // One span per emulator-console exchange, named by the leading verb so
+    // spans aggregate (e.g. `emulator-console gsm`), recorded against the
+    // ambient device-lifecycle tracker when one is in scope (see PerfContext).
+    const verb = commands[0]?.split(" ")[0] ?? "";
+    return trackAmbient(`emulator-console ${verb}`.trimEnd(), async () => {
+      const token = await this.tokenReader.read();
+      const output = await this.transport.execute("localhost", this.port, token, commands);
+      const ko = KO_REGEX.exec(output);
+      if (ko) {
+        throw new ActionableError(`Emulator console rejected command: ${ko[1].trim()}`);
+      }
+    });
   }
 
   private async gsmCommand(

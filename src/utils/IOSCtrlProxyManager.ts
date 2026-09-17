@@ -1,4 +1,5 @@
 import { errorMessage } from "./describeUnknownError";
+import { runDetachedFromPerf, trackAmbient } from "./PerfContext";
 import { logger } from "./logger";
 import { BootedDevice } from "../models";
 import { requireBootedDevice } from "./requireBootedDevice";
@@ -1019,11 +1020,15 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
           return installed;
         }
 
-        const { stdout } = await this.processExecutor.executeCommand("ideviceinstaller", [
-          "-u",
-          this.device.deviceId,
-          "-l",
-        ]);
+        // Direct physical-device command (not through an instrumented client
+        // funnel); give it its own ambient leaf (see PerfContext).
+        const { stdout } = await trackAmbient("ideviceinstaller -l", () =>
+          this.processExecutor.executeCommand("ideviceinstaller", [
+            "-u",
+            this.device.deviceId,
+            "-l",
+          ]),
+        );
         const installed = stdout.includes(IOSCtrlProxyManager.BUNDLE_ID);
         this.cachedInstalled = { isInstalled: installed, timestamp: this.timer.now() };
         return installed;
@@ -3443,10 +3448,16 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     logger.info(
       `[IOSCtrlProxy] Starting iproxy tunnel (localhost:${this.servicePort} -> device:${this.servicePort})`,
     );
-    const child = this.processExecutor.spawn(
-      "iproxy",
-      [String(this.servicePort), String(this.servicePort), this.device.deviceId],
-      { stdio: ["ignore", "pipe", "pipe"] },
+    // Spawn the resident iproxy tunnel detached from any request perf tracker,
+    // so its `exit`/`error` callbacks (which drive supervisor restarts) do not
+    // capture a completed readiness request's tracker via AsyncLocalStorage
+    // (see PerfContext). The startup wait below stays timed under the scope.
+    const child = runDetachedFromPerf(() =>
+      this.processExecutor.spawn(
+        "iproxy",
+        [String(this.servicePort), String(this.servicePort), this.device.deviceId],
+        { stdio: ["ignore", "pipe", "pipe"] },
+      ),
     );
 
     if (!child.pid) {
@@ -3477,7 +3488,10 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       }
     });
 
-    await this.waitForIproxyStartup();
+    // Span the iproxy tunnel STARTUP only (spawn + readiness wait), not the
+    // resident tunnel's lifetime; the physical-device spawn bypasses any
+    // instrumented client funnel (see PerfContext).
+    await trackAmbient("iproxy startup", () => this.waitForIproxyStartup());
     if (options.supervise !== false) {
       await this.iproxySupervisor.start();
     }

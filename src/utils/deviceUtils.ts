@@ -493,9 +493,18 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
    * let bootMatchedImage() hand back the handset instead of booting the AVD.
    */
   private async listAndroidDeviceImages(signal?: AbortSignal): Promise<DeviceInfo[]> {
+    const bootedDeviceSignal = combineWithAmbientAbort(signal);
     const [images, bootedDevices] = await Promise.all([
       this.emulator.listAvds({ signal }),
-      this.emulator.getBootedDevicesChecked(false, {}, combineWithAmbientAbort(signal)),
+      this.emulator
+        .getBootedDevicesChecked(false, {}, bootedDeviceSignal)
+        .catch((error: unknown) => {
+          bootedDeviceSignal?.throwIfAborted();
+          logger.warn(
+            `[DeviceManager] Android running-state overlay failed: ${errorMessage(error)}`,
+          );
+          return [] as BootedDevice[];
+        }),
     ]);
     const runningAvdNames = new Set(
       bootedDevices

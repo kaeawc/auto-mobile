@@ -91,3 +91,31 @@ teardown() {
   [ "$status" -eq 1 ]
   [[ "$output" == *"DaemonLauncherBoundaryFixture.ts"* ]]
 }
+
+@test "allows a local binding that shadows a default child-process import" {
+  printf '%s\n' \
+    'import childProcess from "node:child_process";' \
+    'function inspect(childProcess: { execFileSync(): void }) {' \
+    '  childProcess.execFileSync();' \
+    '}' \
+    'inspect({ execFileSync() {} });' \
+    > "$FIXTURE"
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"no direct production daemon invocations"* ]]
+}
+
+@test "rejects a destructured executor from a default child-process import" {
+  printf '%s\n' \
+    'import childProcess from "node:child_process";' \
+    'const { execFileSync: launch } = childProcess;' \
+    'launch("auto-mobile", ["--daemon-mode"]);' \
+    > "$FIXTURE"
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"DaemonLauncherBoundaryFixture.ts"* ]]
+}

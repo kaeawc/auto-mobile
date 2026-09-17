@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import { join, relative } from "node:path";
 import ts from "typescript";
 
@@ -55,12 +55,27 @@ function isDiagnosticProcessTableCall(file: string, node: ts.CallExpression): bo
   return command.text.startsWith("ps -eo ") || command.text.startsWith("powershell.exe ");
 }
 
-function violationsIn(file: string): Violation[] {
-  const source = readFileSync(file, "utf8");
-  const sourceFile = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
-  const importedExecutors = new Set<string>();
-  const namespaces = new Set<string>();
+function violationsIn(
+  file: string,
+  sourceFile: ts.SourceFile,
+  checker: ts.TypeChecker,
+): Violation[] {
+  const importedExecutors = new Set<ts.Symbol>();
+  const namespaces = new Set<ts.Symbol>();
   const violations: Violation[] = [];
+
+  const symbolFor = (identifier: ts.Identifier): ts.Symbol | undefined =>
+    checker.getSymbolAtLocation(identifier);
+  const addBinding = (bindings: Set<ts.Symbol>, identifier: ts.Identifier): void => {
+    const symbol = symbolFor(identifier);
+    if (symbol) {
+      bindings.add(symbol);
+    }
+  };
+  const hasBinding = (bindings: Set<ts.Symbol>, identifier: ts.Identifier): boolean => {
+    const symbol = symbolFor(identifier);
+    return symbol !== undefined && bindings.has(symbol);
+  };
 
   const record = (node: ts.CallExpression) => {
     const { line, character } = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
@@ -80,17 +95,17 @@ function violationsIn(file: string): Violation[] {
     ) {
       const defaultBinding = node.importClause?.name;
       if (defaultBinding) {
-        namespaces.add(defaultBinding.text);
+        addBinding(namespaces, defaultBinding);
       }
       const bindings = node.importClause?.namedBindings;
       if (bindings && ts.isNamespaceImport(bindings)) {
-        namespaces.add(bindings.name.text);
+        addBinding(namespaces, bindings.name);
       }
       if (bindings && ts.isNamedImports(bindings)) {
         for (const specifier of bindings.elements) {
           const imported = specifier.propertyName?.text ?? specifier.name.text;
           if (EXECUTION_FUNCTIONS.has(imported)) {
-            importedExecutors.add(specifier.name.text);
+            addBinding(importedExecutors, specifier.name);
           }
         }
       }
@@ -103,32 +118,36 @@ function violationsIn(file: string): Violation[] {
       ts.isStringLiteral(node.moduleReference.expression) &&
       CHILD_PROCESS_MODULES.has(node.moduleReference.expression.text)
     ) {
-      namespaces.add(node.name.text);
+      addBinding(namespaces, node.name);
     }
 
     if (ts.isVariableDeclaration(node) && node.initializer) {
       if (ts.isIdentifier(node.name)) {
         if (isChildProcessRequire(node.initializer)) {
-          namespaces.add(node.name.text);
+          addBinding(namespaces, node.name);
         }
-        if (ts.isIdentifier(node.initializer) && importedExecutors.has(node.initializer.text)) {
-          importedExecutors.add(node.name.text);
+        if (ts.isIdentifier(node.initializer) && hasBinding(importedExecutors, node.initializer)) {
+          addBinding(importedExecutors, node.name);
         }
         if (
           ts.isPropertyAccessExpression(node.initializer) &&
           ts.isIdentifier(node.initializer.expression) &&
-          namespaces.has(node.initializer.expression.text) &&
+          hasBinding(namespaces, node.initializer.expression) &&
           EXECUTION_FUNCTIONS.has(node.initializer.name.text)
         ) {
-          importedExecutors.add(node.name.text);
+          addBinding(importedExecutors, node.name);
         }
       }
-      if (ts.isObjectBindingPattern(node.name) && isChildProcessRequire(node.initializer)) {
+      if (
+        ts.isObjectBindingPattern(node.name) &&
+        (isChildProcessRequire(node.initializer) ||
+          (ts.isIdentifier(node.initializer) && hasBinding(namespaces, node.initializer)))
+      ) {
         for (const element of node.name.elements) {
           const imported =
             element.propertyName?.getText(sourceFile) ?? element.name.getText(sourceFile);
           if (ts.isIdentifier(element.name) && EXECUTION_FUNCTIONS.has(imported)) {
-            importedExecutors.add(element.name.text);
+            addBinding(importedExecutors, element.name);
           }
         }
       }
@@ -136,11 +155,11 @@ function violationsIn(file: string): Violation[] {
 
     if (ts.isCallExpression(node) && !isDiagnosticProcessTableCall(file, node)) {
       const expression = node.expression;
-      const direct = ts.isIdentifier(expression) && importedExecutors.has(expression.text);
+      const direct = ts.isIdentifier(expression) && hasBinding(importedExecutors, expression);
       const namespaced =
         ts.isPropertyAccessExpression(expression) &&
         ts.isIdentifier(expression.expression) &&
-        namespaces.has(expression.expression.text) &&
+        hasBinding(namespaces, expression.expression) &&
         EXECUTION_FUNCTIONS.has(expression.name.text);
       if (direct || namespaced) {
         record(node);
@@ -154,9 +173,15 @@ function violationsIn(file: string): Violation[] {
 }
 
 export function findViolations(): Violation[] {
-  return sourceFiles(SOURCE_ROOT)
+  const files = sourceFiles(SOURCE_ROOT);
+  const program = ts.createProgram(files, { noEmit: true, skipLibCheck: true });
+  const checker = program.getTypeChecker();
+  return files
     .filter((file) => repositoryPath(file) !== OWNER)
-    .flatMap(violationsIn);
+    .flatMap((file) => {
+      const sourceFile = program.getSourceFile(file);
+      return sourceFile ? violationsIn(file, sourceFile, checker) : [];
+    });
 }
 
 if (import.meta.main) {

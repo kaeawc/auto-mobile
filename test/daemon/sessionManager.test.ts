@@ -709,6 +709,68 @@ describe("SessionManager", () => {
       }
     });
 
+    test.each(["192.168.1.24:5555", "adb-XXXX._adb-tls-connect._tcp"])(
+      "terminalizes a legacy Android transport address recovery: %s",
+      async (deviceId) => {
+        const persisted: DeviceSession = {
+          session_uuid: `legacy-transport-${deviceId}`,
+          device_id: deviceId,
+          stable_device_id: null,
+          platform: "android",
+          status: "active",
+          source: null,
+          autolock_enabled: 0,
+          mcp_session_id: null,
+          daemon_session_id: "old-daemon",
+          created_at_ms: 1,
+          last_used_at_ms: 20,
+          expires_at_ms: 30,
+          released_at_ms: 25,
+          release_reason: "daemon-restart",
+          session_timeout_ms: 10,
+          heartbeat_timeout_ms: 5,
+          has_received_heartbeat: 1,
+          created_at: "2026-09-15T00:00:00.000Z",
+          updated_at: "2026-09-15T00:00:00.000Z",
+        };
+        const releases: string[] = [];
+        const persistence: DeviceSessionPersistence = {
+          async getSession() {
+            return persisted;
+          },
+          async upsertActiveSession() {
+            throw new Error("transport address must not assign a sibling");
+          },
+          async recordActivity() {},
+          async markReleased(_sessionUuid, status, releasedAtMs, releaseReason) {
+            releases.push(releaseReason);
+            persisted.status = status;
+            persisted.released_at_ms = releasedAtMs;
+            persisted.release_reason = releaseReason;
+          },
+        };
+        const restarted = new SessionManager(fakeTimer, persistence);
+        try {
+          await expect(
+            restarted.getOrCreateSession(
+              persisted.session_uuid,
+              {
+                async assignDeviceToSession() {
+                  return "unexpected";
+                },
+              },
+              "android",
+              undefined,
+              true,
+            ),
+          ).rejects.toThrow("persisted device identity is unavailable");
+          expect(releases).toEqual(["identity-recovery-identity-continuity-lost"]);
+        } finally {
+          restarted.stopCleanupTimer();
+        }
+      },
+    );
+
     test("terminalizes a legacy physical Android recovery when the device is no longer found", async () => {
       const persisted: DeviceSession = {
         session_uuid: "missing-legacy-physical-session",

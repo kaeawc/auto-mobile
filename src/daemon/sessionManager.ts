@@ -24,7 +24,7 @@ import {
   MAX_CLI_SESSION_IDLE_TIMEOUT_MS,
   sanitizeCliSessionIdleTimeoutMs as sanitizeRequestedCliIdleTimeoutMs,
 } from "./constants";
-import { isAndroidEmulatorSerial } from "../utils/androidSerial";
+import { isAndroidEmulatorSerial, isAndroidTransportAddressSerial } from "../utils/androidSerial";
 import { Mutex } from "async-mutex";
 
 /**
@@ -3692,12 +3692,14 @@ export class SessionManager {
       return undefined;
     }
     // iOS device_id has always been the simulator's immutable UDID. Android's
-    // emulator device_id is an ADB transport serial and cannot prove continuity;
-    // a physical handset serial is its durable identity.
+    // emulator device_id and TCP/mDNS transport addresses cannot prove
+    // continuity; a physical handset serial is its durable identity.
     const stableDeviceId =
       persisted.stable_device_id ??
       (persisted.platform === "ios" ||
-      (persisted.platform === "android" && !isAndroidEmulatorSerial(persisted.device_id))
+      (persisted.platform === "android" &&
+        !isAndroidEmulatorSerial(persisted.device_id) &&
+        !isAndroidTransportAddressSerial(persisted.device_id))
         ? persisted.device_id
         : undefined);
     if (!stableDeviceId) {

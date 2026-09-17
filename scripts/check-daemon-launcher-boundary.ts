@@ -231,7 +231,7 @@ function violationsIn(
     }
   };
   const countAssignments = (node: ts.Node): void => {
-    if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+    if (ts.isBinaryExpression(node) && ts.isAssignmentOperator(node.operatorToken.kind)) {
       countAssignmentTarget(node.left);
     }
     ts.forEachChild(node, countAssignments);

@@ -266,6 +266,9 @@ teardown() {
     'let initializedLaunch = childProcess["execFileSync"];' \
     'initializedLaunch = () => {};' \
     'initializedLaunch();' \
+    'let logicalLaunch = childProcess["execFileSync"];' \
+    'logicalLaunch &&= () => {};' \
+    'logicalLaunch();' \
     'let namespaceAlias = childProcess;' \
     'namespaceAlias = {} as typeof childProcess;' \
     'namespaceAlias["execFileSync"]();' \

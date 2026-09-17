@@ -1,5 +1,59 @@
 # Changelog
 
+## [v0.0.74] - 2026-09-17
+
+### Fixed
+
+- killDevice(ios): reconnect worker reboots simulator after successful shutdown ([#7163](https://github.com/kaeawc/auto-mobile/issues/7163)) (ios, bot-filed, routine:manual-test)
+- launchApp fails when Android transport briefly reports device offline ([#7151](https://github.com/kaeawc/auto-mobile/issues/7151)) (android)
+- observe(ios): skeleton elementId is the runner's positional UUID view-id, which no selector can resolve ([#6439](https://github.com/kaeawc/auto-mobile/issues/6439)) (ios)
+- tap(ios): observe and the tap layer search two differently-shaped, differently-pruned projections of the same tree ([#6434](https://github.com/kaeawc/auto-mobile/issues/6434)) (ios)
+- bug(session): persisted restart recovery can bind the same UUID to an unrelated device ([#6364](https://github.com/kaeawc/auto-mobile/issues/6364))
+
+### Other
+
+- UI-performance sampling can starve launchApp until the CLI request times out after foreground verification ([#7161](https://github.com/kaeawc/auto-mobile/issues/7161)) (bot-filed, routine:manual-test)
+- getApple waits for an impossible iOS CtrlProxy runner after xcodebuild rejects the simulator runtime ([#7160](https://github.com/kaeawc/auto-mobile/issues/7160)) (bot-filed, routine:manual-test)
+- getAndroid silently selects a discovery-order winner when multiple live emulators share an AVD name ([#7142](https://github.com/kaeawc/auto-mobile/issues/7142))
+- getApple returns a session before the iOS CtrlProxy runner accepts connections ([#7138](https://github.com/kaeawc/auto-mobile/issues/7138))
+- Probe ready daemon successors at reconciliation deadline ([#7136](https://github.com/kaeawc/auto-mobile/issues/7136))
+- provisionDevice final operation-result persistence is outside the requested deadline ([#7135](https://github.com/kaeawc/auto-mobile/issues/7135))
+- Android auto-provisioning truncates minor API runtimes and can select an older system image ([#7134](https://github.com/kaeawc/auto-mobile/issues/7134))
+- Android API-level version bounds still disagree between existing-device matching and auto-provisioning ([#7133](https://github.com/kaeawc/auto-mobile/issues/7133))
+- ios auto-provisioning: wrong-family compatibility prevents fallback to a valid older runtime ([#7128](https://github.com/kaeawc/auto-mobile/issues/7128))
+- getAndroid/getApple: final session persistence outlives preparation budget and publishes late success ([#7127](https://github.com/kaeawc/auto-mobile/issues/7127))
+- provisionDevice: cancelled config write can overwrite a replacement AVD after successful rollback ([#7126](https://github.com/kaeawc/auto-mobile/issues/7126))
+- provisionDevice: dotted Android API identifiers bypass modern Play Store minimum RAM validation ([#7119](https://github.com/kaeawc/auto-mobile/issues/7119))
+- ios auto-provisioning: runtime selection ignores maxOsVersion and can fall below minOsVersion ([#7118](https://github.com/kaeawc/auto-mobile/issues/7118))
+- ios runtime resolution: raw prefix matching selects 26.10 for an installed exact 26.1 target ([#7117](https://github.com/kaeawc/auto-mobile/issues/7117))
+- getAndroid/getApple: pending post-boot resource notification outlives preparation budget and withholds bound session ([#7116](https://github.com/kaeawc/auto-mobile/issues/7116))
+- Daemon startup-option reconciliation races concurrent MCP clients ([#7111](https://github.com/kaeawc/auto-mobile/issues/7111))
+- fix(ios): fence remote physical CtrlProxy starts during shutdown ([#7108](https://github.com/kaeawc/auto-mobile/issues/7108))
+- downloads-fixture: settle ADB stage processes before device release + tighten served schema (base64/empty-segment/whitespace) (unresolved #7057 reviews) ([#7097](https://github.com/kaeawc/auto-mobile/issues/7097)) (bot-filed, routine:tracker-hygiene)
+- server: route shutdown-error tool results through structured-content suppression on the proxy/direct paths (unresolved #7077 review) ([#7096](https://github.com/kaeawc/auto-mobile/issues/7096)) (bot-filed, routine:tracker-hygiene)
+- android: bound the post-reconnect readiness poll cadence so a device online before the deadline is still observed (unresolved #7080 review) ([#7095](https://github.com/kaeawc/auto-mobile/issues/7095)) (bot-filed, routine:tracker-hygiene)
+- test(webrtc): exercise the iOS WHEP recovery path with injectable seams + FakeTimer instead of source-scanning (unresolved #7085 review) ([#7094](https://github.com/kaeawc/auto-mobile/issues/7094)) (bot-filed, routine:tracker-hygiene)
+- daemon(ios): fence detached CtrlProxy warm-ups against shutdown cleanup — warm-up can record a proxy after shutdownAll() snapshots (unresolved #7089 review) ([#7093](https://github.com/kaeawc/auto-mobile/issues/7093)) (bot-filed, routine:tracker-hygiene)
+- getApple: stale running image falls back to a same-name simulator and fails exact UDID acquisition ([#7092](https://github.com/kaeawc/auto-mobile/issues/7092))
+- provisionDevice boot:false deletes created Android and iOS devices when resource notification fails ([#7091](https://github.com/kaeawc/auto-mobile/issues/7091))
+- provisionDevice: exact Android runtime matching rejects 36.1 and adopts it as 36 ([#7090](https://github.com/kaeawc/auto-mobile/issues/7090))
+- Concurrent daemon restart interrupts provisionDevice and triggers AVD rollback ([#7088](https://github.com/kaeawc/auto-mobile/issues/7088))
+- iOS CtrlProxy startup timeout leaves booted simulators not_ready ([#7087](https://github.com/kaeawc/auto-mobile/issues/7087))
+- flake/regression: `iOS Device Capture to WHEP` red on every On-Merge (main) — WHEP reader never connects (missing whepConnected,firstDecodedFrame) — new signature ([#7081](https://github.com/kaeawc/auto-mobile/issues/7081)) (bot-filed, needs-human, routine:flake-sentinel)
+- getInstance leak-guard: block-scoped function declarations + named teardown callbacks (and revisit the shadow-aware scope model) ([#7079](https://github.com/kaeawc/auto-mobile/issues/7079))
+- Allow transient ADB-offline state through Android provision boot timeout ([#7078](https://github.com/kaeawc/auto-mobile/issues/7078))
+- Normalize Android device-profile identifiers before AVD creation ([#7075](https://github.com/kaeawc/auto-mobile/issues/7075))
+- observation/latest resource leaks the internal-only screenshotCaptureAttempted flag to clients (its own contract says it is stripped before the wire) — #7064 ([#7074](https://github.com/kaeawc/auto-mobile/issues/7074)) (bot-filed, routine:adversary, needs-human)
+- bug(daemon): return a retryable shutdown outcome for session requests during teardown ([#7073](https://github.com/kaeawc/auto-mobile/issues/7073))
+- host/toolchain resource reports sdkmanager/avdmanager version scraped from a dotted number in the SDK install path, not the detected version (#7034) ([#7072](https://github.com/kaeawc/auto-mobile/issues/7072)) (bot-filed, routine:adversary, needs-human)
+- normalizeSharedStorageRelativePath accepts a NUL byte in destinationPath (guarded in the sibling namespace normalizer) — #6940/#7007 ([#7071](https://github.com/kaeawc/auto-mobile/issues/7071)) (bot-filed, routine:adversary, needs-human)
+- sessionLog resource URI is not self-parseable: a comma in a valid log path round-trips to two paths (#7006/#7049) ([#7070](https://github.com/kaeawc/auto-mobile/issues/7070)) (bot-filed, routine:adversary, needs-human)
+- getInstance leak-guard: resolve symbols by lexical binding, fix var function-scope, and let direct restoration clear spy installs ([#7065](https://github.com/kaeawc/auto-mobile/issues/7065))
+- fresh-AVD offline recovery: cap the next poll delay to the pending threshold so a large EMULATOR_POLLING_INTERVAL_MS can't burn the budget ([#7063](https://github.com/kaeawc/auto-mobile/issues/7063))
+- Decision: should heartbeat or idle reaping clear a retained failed-release recovery fence? ([#7037](https://github.com/kaeawc/auto-mobile/issues/7037))
+- flake: required Node TS Build (ubuntu) coverage step hits the 300 s wall timeout (exit 124) on loaded runners ([#6969](https://github.com/kaeawc/auto-mobile/issues/6969))
+- session setup: 55 gated tools but setToolEnabled takes one tool name, so a three-field form costs 8 enable round-trips — accept toolNames[] and an enableTools[] on getAndroid ([#6869](https://github.com/kaeawc/auto-mobile/issues/6869)) (bot-filed, routine:dogfood)
+
 ## [v0.0.73] - 2026-09-14
 
 ### Added

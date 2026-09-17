@@ -254,6 +254,18 @@ export class FakeDeviceUtils implements PlatformDeviceManager {
    */
   omitSucceededSources: boolean = false;
 
+  /**
+   * Model a transient ADB failure: `getBootedDevicesDetailed("android", ...)`
+   * reports android absent from `succeededPlatforms` with a discovery error,
+   * instead of an authoritative empty result (#7179).
+   */
+  setAndroidDiscoveryIncomplete(message = "adb devices failed"): void {
+    this.failedPlatforms.add("android");
+    this.androidDiscoveryErrorMessage = message;
+  }
+
+  private androidDiscoveryErrorMessage: string | undefined;
+
   async getBootedDevicesDetailed(
     platform: SomePlatform,
     options: BootedDeviceDiscoveryOptions = {},
@@ -285,7 +297,10 @@ export class FakeDeviceUtils implements PlatformDeviceManager {
       if (this.failedPlatforms.has(p) || this.failedSources.has(platformSource)) {
         discoveryErrors[p] = {
           code: "unavailable",
-          message: `${p === "ios" ? "iOS" : "Android"} booted-device discovery is unavailable.`,
+          message:
+            p === "android" && this.androidDiscoveryErrorMessage
+              ? this.androidDiscoveryErrorMessage
+              : `${p === "ios" ? "iOS" : "Android"} booted-device discovery is unavailable.`,
         };
         continue;
       }

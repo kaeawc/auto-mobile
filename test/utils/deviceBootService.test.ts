@@ -1,6 +1,7 @@
 import type { ChildProcess } from "node:child_process";
 import { describe, expect, it } from "bun:test";
 import {
+  AndroidBootedDeviceDiscoveryIncompleteError,
   DeviceBootService,
   DeviceBootTimeoutError,
   enrichBootedDevicesFromImages,
@@ -273,8 +274,12 @@ describe("DeviceBootService", () => {
     expect(result.sourceImage).toBe(image);
     expect(result.processHandle).toBe(devices.getWaitForDeviceReadyChildProcess());
     expect(result.processId).toBe(12345);
+    // Two discovery sweeps: `findRunningMatch`'s general criteria search, then
+    // `bootMatchedImage`'s always-fresh android re-check before trusting the
+    // matched image's `isRunning: false` (#7178).
     expect(devices.getExecutedOperations()).toEqual([
       "listDeviceImages:android",
+      "getBootedDevices:android",
       "getBootedDevices:android",
       "startDevice:Pixel_9_API_35:12345",
       "waitForDeviceReady:Pixel_9_API_35:12345",
@@ -1547,6 +1552,93 @@ describe("DeviceBootService", () => {
     });
 
     expect(provisionCriteria).toMatchObject({ minOsVersion: "26.3", maxOsVersion: "26.3" });
+  });
+
+  describe("Android booted-device discovery completeness (#7179)", () => {
+    it("fails closed with a typed retryable error when discovery is incomplete", async () => {
+      const devices = new FakeDeviceUtils();
+      devices.setDeviceImages("android", [{ ...image, isRunning: false }]);
+      devices.setAndroidDiscoveryIncomplete("adb devices timed out");
+
+      await expect(
+        service(devices).boot({ platform: "android", deviceId: image.name }),
+      ).rejects.toThrow(AndroidBootedDeviceDiscoveryIncompleteError);
+      await expect(
+        service(devices).boot({ platform: "android", deviceId: image.name }),
+      ).rejects.toThrow(/discovery_incomplete.*adb devices timed out/);
+
+      expect(devices.wasMethodCalled("startDevice")).toBe(false);
+      expect(devices.wasMethodCalled("waitForDeviceReady")).toBe(false);
+    });
+
+    it("resumes normal identity_conflict handling once discovery completes", async () => {
+      const devices = new FakeDeviceUtils();
+      devices.setDeviceImages("android", [{ ...image, isRunning: false }]);
+      devices.setAndroidDiscoveryIncomplete();
+
+      await expect(
+        service(devices).boot({ platform: "android", deviceId: image.name }),
+      ).rejects.toThrow(AndroidBootedDeviceDiscoveryIncompleteError);
+
+      // Discovery recovers on the following sweep with two same-name transports.
+      devices.failedPlatforms.delete("android");
+      devices.setBootedDevices("android", [
+        { name: image.name, platform: "android", deviceId: "emulator-5554" },
+        { name: image.name, platform: "android", deviceId: "emulator-5556" },
+      ]);
+
+      await expect(
+        service(devices).boot({ platform: "android", deviceId: image.name }),
+      ).rejects.toThrow(/identity_conflict.*emulator-5554.*emulator-5556/);
+      expect(devices.wasMethodCalled("startDevice")).toBe(false);
+    });
+  });
+
+  describe("stale isRunning=false pre-boot ambiguity discovery (#7178)", () => {
+    it("adopts a unique live same-name transport instead of booting a stale image", async () => {
+      const devices = new FakeDeviceUtils();
+      devices.setDeviceImages("android", [{ ...image, isRunning: false }]);
+      devices.setBootedDevices("android", [
+        { name: image.name, platform: "android", deviceId: "emulator-5554" },
+      ]);
+
+      const result = await service(devices).boot({
+        platform: "android",
+        deviceId: image.name,
+      });
+
+      expect(result.source).toBe("booted");
+      expect(result.device.deviceId).toBe("emulator-5554");
+      expect(devices.wasMethodCalled("startDevice")).toBe(false);
+    });
+
+    it("fails identity_conflict rather than booting when two live transports share the stale image's name", async () => {
+      const devices = new FakeDeviceUtils();
+      devices.setDeviceImages("android", [{ ...image, isRunning: false }]);
+      devices.setBootedDevices("android", [
+        { name: image.name, platform: "android", deviceId: "emulator-5554" },
+        { name: image.name, platform: "android", deviceId: "emulator-5556" },
+      ]);
+
+      await expect(
+        service(devices).boot({ platform: "android", deviceId: image.name }),
+      ).rejects.toThrow(/identity_conflict.*emulator-5554.*emulator-5556/);
+      expect(devices.wasMethodCalled("startDevice")).toBe(false);
+    });
+
+    it("boots the stale image when fresh discovery finds no live transport", async () => {
+      const devices = new FakeDeviceUtils();
+      devices.setDeviceImages("android", [{ ...image, isRunning: false }]);
+      devices.setBootedDevices("android", []);
+
+      const result = await service(devices).boot({
+        platform: "android",
+        deviceId: image.name,
+      });
+
+      expect(result.source).toBe("cold-boot");
+      expect(devices.wasMethodCalled(`startDevice:${image.name}`)).toBe(true);
+    });
   });
 
   describe("bare external abort phase labeling (#5394)", () => {

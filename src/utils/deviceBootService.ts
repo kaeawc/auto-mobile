@@ -12,6 +12,7 @@ import {
   assertAndroidImageRunningStateKnown,
   DEFAULT_DEVICE_READY_TIMEOUT_MS,
   type BootedDeviceDiscoveryOptions,
+  type DeviceDiscoveryError,
   type PlatformDeviceManager,
   waitForDeviceReadyOrCancel,
 } from "./deviceUtils";
@@ -43,6 +44,26 @@ export class DeviceBootTimeoutError extends ActionableError {
   ) {
     super(
       `${operation} timeout exhausted while ${phase}; remainingBudgetMs=0; elapsedMs=${elapsedMs}; budgetMs=${budgetMs}; origin=DeviceBootService`,
+    );
+  }
+}
+
+/**
+ * Android booted-device discovery did not complete this sweep (ADB
+ * unavailable/failed). A transient failure must never be treated as an
+ * authoritative empty result — that would let boot or adoption proceed
+ * without having proven identity uniqueness (issue #7179). The failure is
+ * retryable: callers should re-attempt discovery rather than fall back to
+ * an unqualified boot/adopt decision.
+ */
+export class AndroidBootedDeviceDiscoveryIncompleteError extends ActionableError {
+  readonly code = "discovery_incomplete";
+  readonly retryable = true;
+
+  constructor(readonly discoveryError: DeviceDiscoveryError | undefined) {
+    super(
+      "discovery_incomplete: Android booted-device discovery was incomplete and is retryable" +
+        (discoveryError ? `: ${discoveryError.message}` : "."),
     );
   }
 }
@@ -321,16 +342,33 @@ export class DeviceBootService {
     awaitAbortSettlement = true,
     presentationOrder?: BootedDeviceDiscoveryOptions["presentationOrder"],
   ): Promise<BootedDevice[]> {
-    if ((platform === "android" && bypassAndroidCache) || presentationOrder !== undefined) {
+    // Android completeness can only be judged from the detailed discovery
+    // result (`succeededPlatforms`), so android always takes this path — a
+    // plain `getBootedDevices` call cannot distinguish a transient ADB
+    // failure from a genuinely empty result (#7179).
+    if (platform === "android") {
       const discovery = await this.runPhase(
         context,
         phase,
         async () =>
           await this.dependencies.deviceManager.getBootedDevicesDetailed(platform, {
-            ...(platform === "android" && bypassAndroidCache
-              ? { bypassAndroidDeviceListCache: true }
-              : {}),
+            ...(bypassAndroidCache ? { bypassAndroidDeviceListCache: true } : {}),
             ...(presentationOrder !== undefined ? { presentationOrder } : {}),
+          }),
+        awaitAbortSettlement,
+      );
+      if (!discovery.succeededPlatforms.has("android")) {
+        throw new AndroidBootedDeviceDiscoveryIncompleteError(discovery.discoveryErrors?.android);
+      }
+      return discovery.devices;
+    }
+    if (presentationOrder !== undefined) {
+      const discovery = await this.runPhase(
+        context,
+        phase,
+        async () =>
+          await this.dependencies.deviceManager.getBootedDevicesDetailed(platform, {
+            presentationOrder,
           }),
         awaitAbortSettlement,
       );
@@ -553,7 +591,12 @@ export class DeviceBootService {
     progress?: DeviceBootProgress,
     presentationOrder?: BootedDeviceDiscoveryOptions["presentationOrder"],
   ): Promise<DeviceBootResult> {
-    if (!image.isRunning) {
+    // A cached `isRunning: false` overlay can go stale: an externally started
+    // same-name AVD (or several) may already be live. iOS keeps trusting the
+    // cached flag because its identity (UDID) cannot silently collide the
+    // same way; android always re-discovers with a fresh cache-bypassing
+    // sweep before trusting the overlay (#7178).
+    if (image.platform !== "android" && !image.isRunning) {
       return this.bootImage(image, context, progress, false);
     }
     const booted = await this.discoverBootedDevices(

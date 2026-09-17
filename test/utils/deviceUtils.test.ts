@@ -671,6 +671,27 @@ describe("MultiPlatformDeviceManager", () => {
     ]);
   });
 
+  test("listDeviceImages(android) forwards ambient cancellation to configured AVD discovery", async () => {
+    const controller = new AbortController();
+    let receivedSignal: AbortSignal | undefined;
+    const fakeEmulator = {
+      listAvds: async (options?: { signal?: AbortSignal }) => {
+        receivedSignal = options?.signal;
+        return [];
+      },
+      getBootedDevicesChecked: async (): Promise<BootedDevice[]> => [],
+    } as unknown as AndroidEmulatorClient;
+    const manager = new MultiPlatformDeviceManager(
+      new FakeAdbClient() as unknown as AdbClient,
+      undefined,
+      fakeEmulator,
+    );
+
+    await runWithAbortSignal(controller.signal, () => manager.listDeviceImages("android"));
+
+    expect(receivedSignal).toBe(controller.signal);
+  });
+
   test("listDeviceImages(android) ignores a physical handset whose model matches an AVD name", async () => {
     // getBootedDevices also reports physical handsets, whose `name` is
     // ro.product.model. A handset that happens to be modelled "Pixel_8" must not

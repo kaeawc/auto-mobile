@@ -496,7 +496,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
   private async listAndroidDeviceImages(signal?: AbortSignal): Promise<DeviceInfo[]> {
     const bootedDeviceSignal = combineWithAmbientAbort(signal);
     const [images, bootedDevices] = await Promise.all([
-      this.emulator.listAvds({ signal }),
+      this.emulator.listAvds({ signal: bootedDeviceSignal }),
       this.emulator
         .getBootedDevicesChecked(false, {}, bootedDeviceSignal)
         .catch((error: unknown) => {

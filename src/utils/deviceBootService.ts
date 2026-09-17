@@ -553,6 +553,11 @@ export class DeviceBootService {
     presentationOrder?: BootedDeviceDiscoveryOptions["presentationOrder"],
   ): Promise<DeviceBootResult> {
     if (!image.isRunning) {
+      if (image.platform === "android" && image.isRunningStateKnown === false) {
+        throw new ActionableError(
+          `Cannot safely cold-boot Android AVD '${image.name}': its running state is unknown.`,
+        );
+      }
       return this.bootImage(image, context, progress, false);
     }
     const booted = await this.discoverBootedDevices(

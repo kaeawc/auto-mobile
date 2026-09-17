@@ -1480,6 +1480,133 @@ describe("systemTray group expansion", () => {
     expect(tapCommands[1]).not.toContain("input tap 1190 697");
   });
 
+  test("dismiss action expands collapsed group and swipes the expanded notification row", async () => {
+    const fakeTimer = new FakeTimer();
+    const fakeAdb = new SequencedFakeAdbExecutor([1000, 1000, 2000]);
+    const collapsedHierarchy = createTrayWithGroupedNotifications("FUBStaging", [
+      "Zillow Real-Time Tour request",
+      "Test message",
+    ]);
+    const expandedHierarchy = createTrayWithExpandedNotifications([
+      "Zillow Real-Time Tour request",
+      "Test message",
+    ]);
+    const fakeObserveScreen = new FakeObserveScreen();
+    fakeObserveScreen.setObserveResult((index) =>
+      createObservation({
+        ...(index === 0 ? collapsedHierarchy : expandedHierarchy),
+        updatedAt: 2001 + fakeTimer.now(),
+      }),
+    );
+
+    setSystemTrayDependencies({
+      timer: fakeTimer,
+      adbFactory: () => fakeAdb,
+      observeScreenFactory: () => fakeObserveScreen,
+    });
+
+    ToolRegistry.clearTools();
+    registerInteractionTools();
+    const handler = ToolRegistry.getTool("systemTray")?.deviceAwareHandler;
+    expect(handler).toBeDefined();
+
+    const dismiss = handler!(device, {
+      action: "dismiss",
+      notification: { title: "Zillow Real-Time Tour request" },
+      awaitTimeout: 5000,
+      platform: "android",
+    });
+    await waitForPendingSleep(fakeTimer);
+    fakeTimer.enableAutoAdvance();
+    fakeTimer.advanceTime(EXPAND_GROUP_SETTLE_MS);
+    const response = await dismiss;
+    const payload = JSON.parse((response.content[0] as { text: string }).text);
+    expect(payload.success).toBe(true);
+
+    const commands = fakeAdb.getExecutedCommands();
+    expect(commands.filter((cmd) => cmd.includes("input tap"))).toHaveLength(1);
+    const swipeCommands = commands.filter((cmd) => cmd.includes("input swipe"));
+    expect(swipeCommands).toHaveLength(1);
+    expect(swipeCommands[0]).toContain("shell input swipe 1171 500 172 500");
+  });
+
+  test("dismiss action does not swipe when expanded notification cannot be re-matched", async () => {
+    const fakeTimer = new FakeTimer();
+    const fakeAdb = new SequencedFakeAdbExecutor([1000, 1000]);
+    const collapsedHierarchy = createTrayWithGroupedNotifications("FUBStaging", [
+      "Zillow Real-Time Tour request",
+    ]);
+    const postExpandHierarchy = createTrayWithExpandedNotifications(["Different notification"]);
+    const fakeObserveScreen = new SequencedObserveScreen([
+      createObservation(collapsedHierarchy),
+      createObservation(postExpandHierarchy),
+      createObservation(postExpandHierarchy),
+      createObservation(postExpandHierarchy),
+    ]);
+
+    setSystemTrayDependencies({
+      timer: fakeTimer,
+      adbFactory: () => fakeAdb,
+      observeScreenFactory: () => fakeObserveScreen,
+    });
+
+    ToolRegistry.clearTools();
+    registerInteractionTools();
+    const handler = ToolRegistry.getTool("systemTray")?.deviceAwareHandler;
+    expect(handler).toBeDefined();
+
+    const dismiss = handler!(device, {
+      action: "dismiss",
+      notification: { title: "Zillow Real-Time Tour request" },
+      awaitTimeout: 1000,
+      platform: "android",
+    });
+    await waitForPendingSleep(fakeTimer);
+    fakeTimer.enableAutoAdvance();
+    fakeTimer.advanceTime(EXPAND_GROUP_SETTLE_MS);
+    await advancePendingSleeps(fakeTimer, 5);
+    await expect(dismiss).rejects.toThrow(
+      "Expanded collapsed notification group but could not re-match the notification",
+    );
+    expect(fakeAdb.getExecutedCommands().some((cmd) => cmd.includes("input swipe"))).toBe(false);
+  });
+
+  test("dismiss action swipes standalone notification without expanding", async () => {
+    const fakeTimer = new FakeTimer();
+    const fakeAdb = new SequencedFakeAdbExecutor([1000, 1000]);
+    const hierarchy = createTrayWithExpandedNotifications(["Zillow Real-Time Tour request"]);
+    const fakeObserveScreen = new SequencedObserveScreen([
+      createObservation(hierarchy),
+      createObservation(hierarchy),
+    ]);
+
+    setSystemTrayDependencies({
+      timer: fakeTimer,
+      adbFactory: () => fakeAdb,
+      observeScreenFactory: () => fakeObserveScreen,
+    });
+
+    ToolRegistry.clearTools();
+    registerInteractionTools();
+    const handler = ToolRegistry.getTool("systemTray")?.deviceAwareHandler;
+    expect(handler).toBeDefined();
+
+    const response = await handler!(device, {
+      action: "dismiss",
+      notification: { title: "Zillow Real-Time Tour request" },
+      awaitTimeout: 1000,
+      platform: "android",
+    });
+    const payload = JSON.parse((response.content[0] as { text: string }).text);
+    expect(payload.success).toBe(true);
+    expect(fakeAdb.getExecutedCommands().filter((cmd) => cmd.includes("input tap"))).toHaveLength(
+      0,
+    );
+    expect(fakeAdb.getExecutedCommands().filter((cmd) => cmd.includes("input swipe"))).toHaveLength(
+      1,
+    );
+  });
+
   test("re-match returns null when notification disappears after expand", async () => {
     const fakeTimer = new FakeTimer();
     const fakeAdb = new SequencedFakeAdbExecutor([1000, 1000]);

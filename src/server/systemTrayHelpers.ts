@@ -228,14 +228,14 @@ interface SystemTrayMatchResult {
 
 type SystemTrayMatchKey = keyof SystemTrayMatchResult["matches"];
 
-interface SystemTrayNotificationCandidate {
+export interface SystemTrayNotificationCandidate {
   node: any;
   depth: number;
   element?: Element;
   groupNode?: any;
 }
 
-interface SystemTrayNotificationMatch {
+export interface SystemTrayNotificationMatch {
   candidate: SystemTrayNotificationCandidate;
   match: SystemTrayMatchResult;
   subHierarchy: ViewHierarchyResult;
@@ -496,7 +496,7 @@ const nodeHasNotificationRowHint = (node: any): boolean => {
 // Android's standard SystemUI places this container as an immediate child
 // of the group row node. If a future OEM wraps it deeper, this will need
 // to become a recursive search.
-const nodeIsNotificationGroup = (node: any): boolean => {
+export const nodeIsNotificationGroup = (node: any): boolean => {
   const children = node.node;
   const checkChild = (child: any): boolean => {
     if (!child) {
@@ -1369,6 +1369,54 @@ export const waitForNotificationMatch = async (
     await sleep(SYSTEM_TRAY_POLL_INTERVAL_MS);
     observation = await observeSystemTray(observeScreen, minTimestamp);
   }
+};
+
+export const expandAndRematchIfCollapsed = async (
+  device: BootedDevice,
+  notification: SystemTrayNotificationArgs,
+  appMatchTexts: string[],
+  awaitTimeoutMs: number,
+  progress: ProgressCallback | undefined,
+  result: { observation: ObserveResult; match: SystemTrayNotificationMatch },
+): Promise<{ observation: ObserveResult; match: SystemTrayNotificationMatch }> => {
+  let { observation, match } = result;
+  if (!isMatchInCollapsedGroup(match)) {
+    return { observation, match };
+  }
+
+  await expandNotificationGroup(device, match);
+  const { timer } = getSystemTrayDependencies();
+  await timer.sleep(EXPAND_GROUP_SETTLE_MS);
+  const remainingMs = Math.max(0, awaitTimeoutMs - EXPAND_GROUP_SETTLE_MS);
+  const reMatch = await waitForNotificationMatch(
+    device,
+    notification,
+    appMatchTexts,
+    remainingMs,
+    progress,
+  );
+  if (reMatch.match) {
+    match = reMatch.match;
+    observation = reMatch.observation;
+    return { observation, match };
+  }
+
+  throw new ActionableError(
+    "Expanded collapsed notification group but could not re-match the notification. " +
+      "The group may have changed after expansion.",
+  );
+};
+
+export const isNotificationGroupSwipeTarget = (
+  match: SystemTrayNotificationMatch,
+  element: Element,
+): boolean => {
+  const resourceId = String(element["resource-id"] ?? element.resourceId ?? "").toLowerCase();
+  return (
+    nodeIsNotificationGroup(match.candidate.node) ||
+    resourceId.includes("notification_children_container") ||
+    resourceId.includes("notification_header")
+  );
 };
 
 export const resolveNotificationTapElement = (

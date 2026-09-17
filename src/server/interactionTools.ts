@@ -127,14 +127,14 @@ import {
   observeSystemTrayAfterTap,
   resolveNotificationTapElement,
   resolveNotificationSwipeElement,
+  expandAndRematchIfCollapsed,
+  isNotificationGroupSwipeTarget,
   tapElement,
   swipeElement,
   resolveAppLabel,
   isMatchInCollapsedGroup,
-  expandNotificationGroup,
   SYSTEM_TRAY_CLEAR_MAX_ITERATIONS,
   SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS,
-  EXPAND_GROUP_SETTLE_MS,
 } from "./systemTrayHelpers";
 
 // Re-export types for backward compatibility
@@ -2062,7 +2062,7 @@ export function registerInteractionTools() {
       }
 
       if (args.action === "tap") {
-        let { observation: baseline, match } = await waitForNotificationMatch(
+        const initialMatch = await waitForNotificationMatch(
           device,
           notification,
           appMatchTexts,
@@ -2070,32 +2070,18 @@ export function registerInteractionTools() {
           progress,
         );
 
-        if (!match) {
+        if (!initialMatch.match) {
           throw new ActionableError(`Notification not found after ${awaitTimeoutMs}ms.`);
         }
 
-        if (isMatchInCollapsedGroup(match)) {
-          await expandNotificationGroup(device, match);
-          const { timer } = getSystemTrayDependencies();
-          await timer.sleep(EXPAND_GROUP_SETTLE_MS);
-          const remainingMs = Math.max(0, awaitTimeoutMs - EXPAND_GROUP_SETTLE_MS);
-          const reMatch = await waitForNotificationMatch(
-            device,
-            notification,
-            appMatchTexts,
-            remainingMs,
-            progress,
-          );
-          if (reMatch.match) {
-            match = reMatch.match;
-            baseline = reMatch.observation;
-          } else {
-            throw new ActionableError(
-              "Expanded collapsed notification group but could not re-match the notification. " +
-                "The group may have changed after expansion.",
-            );
-          }
-        }
+        const { observation: baseline, match } = await expandAndRematchIfCollapsed(
+          device,
+          notification,
+          appMatchTexts,
+          awaitTimeoutMs,
+          progress,
+          { observation: initialMatch.observation, match: initialMatch.match },
+        );
 
         const tapMatch = resolveNotificationTapElement(match, notification);
         if (!tapMatch) {
@@ -2131,7 +2117,7 @@ export function registerInteractionTools() {
       }
 
       if (args.action === "dismiss") {
-        const { match } = await waitForNotificationMatch(
+        const initialMatch = await waitForNotificationMatch(
           device,
           notification,
           appMatchTexts,
@@ -2139,14 +2125,35 @@ export function registerInteractionTools() {
           progress,
         );
 
-        if (!match) {
+        if (!initialMatch.match) {
           throw new ActionableError(`Notification not found after ${awaitTimeoutMs}ms.`);
+        }
+
+        const { match } = await expandAndRematchIfCollapsed(
+          device,
+          notification,
+          appMatchTexts,
+          awaitTimeoutMs,
+          progress,
+          { observation: initialMatch.observation, match: initialMatch.match },
+        );
+        if (isMatchInCollapsedGroup(match)) {
+          throw new ActionableError(
+            "Could not isolate the specific notification from its collapsed group; " +
+              "dismissing would clear the whole group instead of this notification.",
+          );
         }
 
         const swipeTarget = resolveNotificationSwipeElement(match, notification, appMatchTexts);
         if (!swipeTarget) {
           throw new ActionableError(
             "No swipeable notification element was resolved within the matched notification.",
+          );
+        }
+        if (isNotificationGroupSwipeTarget(match, swipeTarget)) {
+          throw new ActionableError(
+            "Could not isolate the specific notification from its collapsed group; " +
+              "dismissing would clear the whole group instead of this notification.",
           );
         }
 

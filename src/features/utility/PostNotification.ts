@@ -260,6 +260,37 @@ export class PostNotification {
     const command =
       `shell am broadcast -n ${component} -a ${NOTIFICATION_ACTION} ${extras.join(" ")}`.trim();
 
+    const probeCommand = `shell cmd package query-receivers --brief -a ${NOTIFICATION_ACTION} -p ${appId}`;
+    try {
+      const probeResult = await this.adb.executeCommand(
+        probeCommand,
+        undefined,
+        undefined,
+        true,
+        signal,
+      );
+      const probeOutput = `${probeResult.stdout}\n${probeResult.stderr}`;
+      const probeVerdict = this.parseReceiverProbe(probeOutput, appId);
+      if (probeVerdict === "absent") {
+        return {
+          success: false,
+          supported: false,
+          imageType,
+          appId,
+          error: "AutoMobile notification receiver not found in the target app.",
+        };
+      }
+      if (probeVerdict === "unknown") {
+        // Safe to fall through because inconclusive probe output can be an unsupported older-API subcommand; broadcast detection is the fallback.
+        logger.debug(
+          `[PostNotification] SDK receiver probe output was inconclusive; falling back to broadcast`,
+        );
+      }
+    } catch (error) {
+      // Safe to swallow because older API levels lack this best-effort subcommand; broadcast detection is the fallback.
+      logger.debug(`[PostNotification] SDK receiver probe failed: ${error}`);
+    }
+
     try {
       const result = await this.adb.executeCommand(command, undefined, undefined, true, signal);
       const output = `${result.stdout}\n${result.stderr}`;
@@ -355,12 +386,30 @@ export class PostNotification {
     return Number.isNaN(parsed) ? null : parsed;
   }
 
+  private parseReceiverProbe(output: string, appId: string): "present" | "absent" | "unknown" {
+    const expectedComponents = [`${appId}/${NOTIFICATION_RECEIVER}`];
+    if (NOTIFICATION_RECEIVER.startsWith(`${appId}.`)) {
+      expectedComponents.push(`${appId}/${NOTIFICATION_RECEIVER.slice(appId.length)}`);
+    }
+    const outputTokens = output.split(/\s+/);
+    if (expectedComponents.some((component) => outputTokens.includes(component))) {
+      return "present";
+    }
+    if (
+      /no receivers found/i.test(output) ||
+      (/\d+\s+receivers?\s+found/i.test(output) &&
+        !expectedComponents.some((component) => outputTokens.includes(component)))
+    ) {
+      return "absent";
+    }
+    return "unknown";
+  }
+
   private isReceiverUnavailable(output: string): boolean {
     const lower = output.toLowerCase();
     return (
       lower.includes("no receiver") ||
       lower.includes("no receivers") ||
-      lower.includes("not found") ||
       lower.includes("does not exist") ||
       lower.includes("securityexception")
     );

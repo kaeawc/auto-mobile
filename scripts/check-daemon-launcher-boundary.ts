@@ -115,7 +115,7 @@ function violationsIn(
   checker: ts.TypeChecker,
 ): Violation[] {
   const importedExecutors = new Set<ts.Symbol>();
-  const namespaces = new Set<ts.Symbol>();
+  const namespaceExclusions = new Map<ts.Symbol, ReadonlySet<string>>();
   const violations: Violation[] = [];
   let bindingsChanged = false;
 
@@ -132,6 +132,22 @@ function violationsIn(
     const symbol = symbolFor(identifier);
     return symbol !== undefined && bindings.has(symbol);
   };
+  const addNamespace = (
+    identifier: ts.Identifier,
+    exclusions: ReadonlySet<string> = new Set(),
+  ): void => {
+    const symbol = symbolFor(identifier);
+    if (symbol && !namespaceExclusions.has(symbol)) {
+      namespaceExclusions.set(symbol, new Set(exclusions));
+      bindingsChanged = true;
+    }
+  };
+  const namespaceExclusionsFor = (identifier: ts.Identifier): ReadonlySet<string> | undefined => {
+    const symbol = symbolFor(identifier);
+    return symbol ? namespaceExclusions.get(symbol) : undefined;
+  };
+  const hasNamespace = (identifier: ts.Identifier): boolean =>
+    namespaceExclusionsFor(identifier) !== undefined;
 
   const staticStringValue = (
     expression: ts.Expression,
@@ -163,23 +179,31 @@ function violationsIn(
 
   const isNamespaceExecutor = (value: ts.Expression): boolean => {
     const memberAccess = unwrapTransparentExpression(value);
+    const receiver =
+      ts.isPropertyAccessExpression(memberAccess) || ts.isElementAccessExpression(memberAccess)
+        ? unwrapTransparentExpression(memberAccess.expression)
+        : undefined;
+    const executor = staticMemberName(memberAccess, staticStringValue);
     return (
       (ts.isPropertyAccessExpression(memberAccess) || ts.isElementAccessExpression(memberAccess)) &&
-      ts.isIdentifier(unwrapTransparentExpression(memberAccess.expression)) &&
-      hasBinding(namespaces, unwrapTransparentExpression(memberAccess.expression)) &&
-      EXECUTION_FUNCTIONS.has(staticMemberName(memberAccess, staticStringValue) ?? "")
+      receiver !== undefined &&
+      ts.isIdentifier(receiver) &&
+      hasNamespace(receiver) &&
+      executor !== undefined &&
+      EXECUTION_FUNCTIONS.has(executor) &&
+      !namespaceExclusionsFor(receiver)?.has(executor)
     );
   };
 
   const registerIdentifierBinding = (identifier: ts.Identifier, value: ts.Expression): void => {
     if (isChildProcessRequire(value)) {
-      addBinding(namespaces, identifier);
+      addNamespace(identifier);
     }
     if (ts.isIdentifier(value) && hasBinding(importedExecutors, value)) {
       addBinding(importedExecutors, identifier);
     }
-    if (ts.isIdentifier(value) && hasBinding(namespaces, value)) {
-      addBinding(namespaces, identifier);
+    if (ts.isIdentifier(value) && hasNamespace(value)) {
+      addNamespace(identifier, namespaceExclusionsFor(value));
     }
     if (isNamespaceExecutor(value)) {
       addBinding(importedExecutors, identifier);
@@ -190,10 +214,41 @@ function violationsIn(
     elements: readonly ts.BindingElement[],
     value: ts.Expression,
   ): void => {
-    if (
-      !isChildProcessRequire(value) &&
-      !(ts.isIdentifier(value) && hasBinding(namespaces, value))
-    ) {
+    if (!isChildProcessRequire(value) && !(ts.isIdentifier(value) && hasNamespace(value))) {
+      return;
+    }
+    const sourceExclusions = ts.isIdentifier(value) ? namespaceExclusionsFor(value) : undefined;
+    const restExclusions = new Set(sourceExclusions);
+    let hasDynamicExclusion = false;
+    for (const element of elements) {
+      if (element.dotDotDotToken) {
+        continue;
+      }
+      const propertyName = staticPropertyName(element.propertyName, staticStringValue);
+      const imported =
+        propertyName ??
+        (element.propertyName
+          ? undefined
+          : ts.isIdentifier(element.name)
+            ? element.name.text
+            : undefined);
+      if (imported === undefined) {
+        hasDynamicExclusion = true;
+        continue;
+      }
+      if (EXECUTION_FUNCTIONS.has(imported)) {
+        restExclusions.add(imported);
+      }
+      if (
+        ts.isIdentifier(element.name) &&
+        isUnreassignedInitializer(element.name) &&
+        EXECUTION_FUNCTIONS.has(imported) &&
+        !sourceExclusions?.has(imported)
+      ) {
+        addBinding(importedExecutors, element.name);
+      }
+    }
+    if (hasDynamicExclusion) {
       return;
     }
     for (const element of elements) {
@@ -202,18 +257,7 @@ function violationsIn(
         ts.isIdentifier(element.name) &&
         isUnreassignedInitializer(element.name)
       ) {
-        addBinding(namespaces, element.name);
-        continue;
-      }
-      const imported =
-        staticPropertyName(element.propertyName, staticStringValue) ??
-        (ts.isIdentifier(element.name) ? element.name.text : undefined);
-      if (
-        ts.isIdentifier(element.name) &&
-        isUnreassignedInitializer(element.name) &&
-        EXECUTION_FUNCTIONS.has(imported)
-      ) {
-        addBinding(importedExecutors, element.name);
+        addNamespace(element.name, restExclusions);
       }
     }
   };
@@ -287,12 +331,10 @@ function violationsIn(
     properties: readonly ts.ObjectLiteralElementLike[],
     value: ts.Expression,
   ): void => {
-    if (
-      !isChildProcessRequire(value) &&
-      !(ts.isIdentifier(value) && hasBinding(namespaces, value))
-    ) {
+    if (!isChildProcessRequire(value) && !(ts.isIdentifier(value) && hasNamespace(value))) {
       return;
     }
+    const sourceExclusions = ts.isIdentifier(value) ? namespaceExclusionsFor(value) : undefined;
     for (const property of properties) {
       const target = ts.isPropertyAssignment(property)
         ? property.initializer
@@ -303,8 +345,10 @@ function violationsIn(
         continue;
       }
       const propertyName = ts.isPropertyAssignment(property) ? property.name : undefined;
-      const imported = staticPropertyName(propertyName, staticStringValue) ?? target.text;
-      if (EXECUTION_FUNCTIONS.has(imported)) {
+      const imported =
+        staticPropertyName(propertyName, staticStringValue) ??
+        (propertyName ? undefined : target.text);
+      if (EXECUTION_FUNCTIONS.has(imported) && !sourceExclusions?.has(imported)) {
         addBinding(importedExecutors, target);
       }
     }
@@ -328,11 +372,11 @@ function violationsIn(
     ) {
       const defaultBinding = node.importClause?.name;
       if (defaultBinding) {
-        addBinding(namespaces, defaultBinding);
+        addNamespace(defaultBinding);
       }
       const bindings = node.importClause?.namedBindings;
       if (bindings && ts.isNamespaceImport(bindings)) {
-        addBinding(namespaces, bindings.name);
+        addNamespace(bindings.name);
       }
       if (bindings && ts.isNamedImports(bindings)) {
         for (const specifier of bindings.elements) {
@@ -351,7 +395,7 @@ function violationsIn(
       ts.isStringLiteral(node.moduleReference.expression) &&
       CHILD_PROCESS_MODULES.has(node.moduleReference.expression.text)
     ) {
-      addBinding(namespaces, node.name);
+      addNamespace(node.name);
     }
 
     if (ts.isVariableDeclaration(node) && node.initializer) {
@@ -392,8 +436,11 @@ function violationsIn(
       const namespaced =
         (ts.isPropertyAccessExpression(expression) || ts.isElementAccessExpression(expression)) &&
         ts.isIdentifier(unwrapTransparentExpression(expression.expression)) &&
-        hasBinding(namespaces, unwrapTransparentExpression(expression.expression)) &&
-        EXECUTION_FUNCTIONS.has(staticMemberName(expression, staticStringValue) ?? "");
+        hasNamespace(unwrapTransparentExpression(expression.expression)) &&
+        EXECUTION_FUNCTIONS.has(staticMemberName(expression, staticStringValue) ?? "") &&
+        !namespaceExclusionsFor(unwrapTransparentExpression(expression.expression))?.has(
+          staticMemberName(expression, staticStringValue) ?? "",
+        );
       if (direct || namespaced) {
         record(node);
       }

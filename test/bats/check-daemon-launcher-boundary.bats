@@ -333,6 +333,37 @@ teardown() {
   [[ "$(grep -c "DaemonLauncherBoundaryFixture.ts" <<< "$output")" -eq 3 ]]
 }
 
+@test "preserves static object-rest exclusions through namespace aliases" {
+  printf '%s\n' \
+    'const { execFileSync, ...withoutExecutor } = require("node:child_process");' \
+    'withoutExecutor.execFileSync?.("auto-mobile", ["--daemon-mode"]);' \
+    'withoutExecutor.spawn("auto-mobile", ["--daemon-mode"]);' \
+    'const copiedWithoutExecutor = withoutExecutor;' \
+    'copiedWithoutExecutor.execFileSync?.("auto-mobile", ["--daemon-mode"]);' \
+    'copiedWithoutExecutor.spawn("auto-mobile", ["--daemon-mode"]);' \
+    > "$FIXTURE"
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 1 ]
+  [[ "$(grep -c "DaemonLauncherBoundaryFixture.ts" <<< "$output")" -eq 2 ]]
+  [[ "$output" == *'withoutExecutor.spawn'* ]]
+  [[ "$output" == *'copiedWithoutExecutor.spawn'* ]]
+}
+
+@test "leaves object rest with dynamic exclusions unknown" {
+  printf '%s\n' \
+    'declare const excludedKey: string;' \
+    'const { [excludedKey]: omitted, ...unknownChildProcess } = require("node:child_process");' \
+    'unknownChildProcess.execFileSync("auto-mobile", ["--daemon-mode"]);' \
+    > "$FIXTURE"
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"no direct production daemon invocations"* ]]
+}
+
 @test "rejects transitive executor aliases declared after their function body" {
   printf '%s\n' \
     'import childProcess from "node:child_process";' \

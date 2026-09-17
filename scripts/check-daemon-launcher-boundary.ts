@@ -130,6 +130,11 @@ function violationsIn(
 
   const symbolFor = (identifier: ts.Identifier): ts.Symbol | undefined =>
     checker.getSymbolAtLocation(identifier);
+  const isStaticChildProcessRequire = (expression: ts.Expression): boolean =>
+    isChildProcessRequire(expression) &&
+    ts.isCallExpression(expression) &&
+    ts.isIdentifier(expression.expression) &&
+    symbolFor(expression.expression)?.valueDeclaration === undefined;
   const recordTiming = (
     identifier: ts.Identifier,
     timing: { startsAt: number; endsAt?: number },
@@ -238,11 +243,14 @@ function violationsIn(
         ? unwrapTransparentExpression(memberAccess.expression)
         : undefined;
     const executor = staticMemberName(memberAccess, staticStringValue);
+    const isNamespaceReceiver =
+      receiver !== undefined &&
+      (ts.isIdentifier(receiver)
+        ? namespaceHasNotEndedAt(receiver, position)
+        : isStaticChildProcessRequire(receiver));
     return (
       (ts.isPropertyAccessExpression(memberAccess) || ts.isElementAccessExpression(memberAccess)) &&
-      receiver !== undefined &&
-      ts.isIdentifier(receiver) &&
-      namespaceHasNotEndedAt(receiver, position) &&
+      isNamespaceReceiver &&
       executor !== undefined &&
       EXECUTION_FUNCTIONS.has(executor) &&
       !namespaceExclusionsFor(receiver)?.has(executor)
@@ -255,7 +263,7 @@ function violationsIn(
     timing: { startsAt: number; endsAt?: number },
     sourcePosition: number,
   ): void => {
-    if (isChildProcessRequire(value)) {
+    if (isStaticChildProcessRequire(value)) {
       addNamespace(identifier, new Set(), timing);
     }
     if (
@@ -293,7 +301,7 @@ function violationsIn(
     sourcePosition: number,
   ): void => {
     if (
-      !isChildProcessRequire(value) &&
+      !isStaticChildProcessRequire(value) &&
       !(ts.isIdentifier(value) && namespaceHasNotEndedAt(value, sourcePosition))
     ) {
       return;
@@ -679,7 +687,7 @@ function violationsIn(
   ): void => {
     const sourcePosition = assignment.right.getStart(sourceFile);
     if (
-      !isChildProcessRequire(value) &&
+      !isStaticChildProcessRequire(value) &&
       !(ts.isIdentifier(value) && namespaceHasNotEndedAt(value, sourcePosition))
     ) {
       return;
@@ -806,6 +814,15 @@ function violationsIn(
       }
     }
 
+    if (ts.isParameter(node) && node.initializer && ts.isIdentifier(node.name)) {
+      registerIdentifierBinding(
+        node.name,
+        unwrapTransparentExpression(node.initializer),
+        initializerTiming(node.name),
+        node.initializer.getStart(sourceFile),
+      );
+    }
+
     if (ts.isBinaryExpression(node) && ts.isAssignmentOperator(node.operatorToken.kind)) {
       const value = unwrapTransparentExpression(node.right);
       const target = unwrapTransparentExpression(node.left);
@@ -845,11 +862,28 @@ function violationsIn(
         hasBinding(importedExecutors, expression) &&
         (executionPositions === undefined ||
           bindingIsAvailableForExecution(expression, node, executionPositions, executorSources));
+      const indirectReceiver =
+        (ts.isPropertyAccessExpression(expression) || ts.isElementAccessExpression(expression)) &&
+        ts.isIdentifier(unwrapTransparentExpression(expression.expression))
+          ? unwrapTransparentExpression(expression.expression)
+          : undefined;
+      const indirect =
+        indirectReceiver !== undefined &&
+        (staticMemberName(expression, staticStringValue) === "call" ||
+          staticMemberName(expression, staticStringValue) === "apply") &&
+        hasBinding(importedExecutors, indirectReceiver) &&
+        (executionPositions === undefined ||
+          bindingIsAvailableForExecution(
+            indirectReceiver,
+            node,
+            executionPositions,
+            executorSources,
+          ));
       const hasNamespaceReceiver =
         namespaceReceiver !== undefined &&
         (ts.isIdentifier(namespaceReceiver)
           ? hasNamespace(namespaceReceiver)
-          : isChildProcessRequire(namespaceReceiver));
+          : isStaticChildProcessRequire(namespaceReceiver));
       const namespaced =
         (ts.isPropertyAccessExpression(expression) || ts.isElementAccessExpression(expression)) &&
         hasNamespaceReceiver &&
@@ -861,7 +895,7 @@ function violationsIn(
                 executionPositions,
                 namespaceSources,
               )
-            : isChildProcessRequire(namespaceReceiver))) &&
+            : isStaticChildProcessRequire(namespaceReceiver))) &&
         EXECUTION_FUNCTIONS.has(staticMemberName(expression, staticStringValue) ?? "") &&
         !(
           ts.isIdentifier(namespaceReceiver) &&
@@ -869,7 +903,7 @@ function violationsIn(
             staticMemberName(expression, staticStringValue) ?? "",
           )
         );
-      if (direct || namespaced) {
+      if (direct || indirect || namespaced) {
         record(node);
       }
     }

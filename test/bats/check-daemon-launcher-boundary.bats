@@ -604,6 +604,49 @@ teardown() {
   [[ "$output" != *'safeChildProcess().execFileSync'* ]]
 }
 
+@test "tracks static CommonJS executor forms without matching local require" {
+  printf '%s\n' \
+    'import childProcess, { execFileSync } from "node:child_process";' \
+    'declare const safeLaunch: (command: string, args: string[]) => void;' \
+    'declare const dynamicKey: string;' \
+    'declare function safeChildProcess(): any;' \
+    'const inlineLaunch = require("node:child_process")["execFileSync"];' \
+    'inlineLaunch("auto-mobile", ["--daemon-mode"]);' \
+    'const dynamicLaunch = require("node:child_process")[dynamicKey];' \
+    'dynamicLaunch("auto-mobile", ["--daemon-mode"]);' \
+    'function defaulted(launch = childProcess.execFileSync) {' \
+    '  launch("auto-mobile", ["--daemon-mode"]);' \
+    '}' \
+    'defaulted();' \
+    'let replacedNamespace = childProcess;' \
+    'replacedNamespace = safeChildProcess();' \
+    'function safeDefault(launch = replacedNamespace.execFileSync) {' \
+    '  launch("auto-mobile", ["--daemon-mode"]);' \
+    '}' \
+    'safeDefault();' \
+    'execFileSync.call(undefined, "auto-mobile", ["--daemon-mode"]);' \
+    'execFileSync.apply(undefined, ["auto-mobile", ["--daemon-mode"]]);' \
+    'safeLaunch.call(undefined, "auto-mobile", ["--daemon-mode"]);' \
+    'function localRequireScope() {' \
+    '  function require(_: string) { return { execFileSync() {} }; }' \
+    '  require("node:child_process").execFileSync();' \
+    '}' \
+    'localRequireScope();' \
+    > "$FIXTURE"
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 1 ]
+  [[ "$(grep -c "DaemonLauncherBoundaryFixture.ts" <<< "$output")" -eq 4 ]]
+  [[ "$output" == *'inlineLaunch("auto-mobile"'* ]]
+  [[ "$output" == *'launch("auto-mobile"'* ]]
+  [[ "$output" == *'execFileSync.call(undefined'* ]]
+  [[ "$output" == *'execFileSync.apply(undefined'* ]]
+  [[ "$output" != *'dynamicLaunch("auto-mobile"'* ]]
+  [[ "$output" != *'safeLaunch.call(undefined'* ]]
+  [[ "$output" != *'require("node:child_process").execFileSync()'* ]]
+}
+
 @test "rejects transitive executor aliases declared after their function body" {
   printf '%s\n' \
     'import childProcess from "node:child_process";' \

@@ -611,6 +611,66 @@ describe("MultiPlatformDeviceManager", () => {
     ]);
   });
 
+  test("listDeviceImages(android) marks unmatched AVDs unknown when an emulator identity is unresolved", async () => {
+    const runningImage: DeviceInfo = { name: "Pixel_8", platform: "android", isRunning: false };
+    const unresolvedImage: DeviceInfo = {
+      name: "Pixel_Tablet",
+      platform: "android",
+      isRunning: false,
+    };
+    const fakeEmulator = {
+      listAvds: async () => [runningImage, unresolvedImage],
+      getBootedDevicesChecked: async (): Promise<BootedDevice[]> => [
+        { name: "Pixel_8", platform: "android", deviceId: "emulator-5554", source: "local" },
+        {
+          name: "Unknown (emulator-5556)",
+          platform: "android",
+          deviceId: "emulator-5556",
+          source: "local",
+        },
+      ],
+    } as unknown as AndroidEmulatorClient;
+    const manager = new MultiPlatformDeviceManager(
+      new FakeAdbClient() as unknown as AdbClient,
+      undefined,
+      fakeEmulator,
+    );
+
+    await expect(manager.listDeviceImages("android")).resolves.toEqual([
+      { name: "Pixel_8", platform: "android", isRunning: true },
+      {
+        name: "Pixel_Tablet",
+        platform: "android",
+        isRunning: false,
+        isRunningStateKnown: false,
+      },
+    ]);
+  });
+
+  test("listDeviceImages(android) keeps configured AVDs when the running-state overlay fails", async () => {
+    const image: DeviceInfo = { name: "Pixel_8", platform: "android", isRunning: false };
+    const fakeEmulator = {
+      listAvds: async () => [image],
+      getBootedDevicesChecked: async (): Promise<BootedDevice[]> => {
+        throw new Error("adb devices unavailable");
+      },
+    } as unknown as AndroidEmulatorClient;
+    const manager = new MultiPlatformDeviceManager(
+      new FakeAdbClient() as unknown as AdbClient,
+      undefined,
+      fakeEmulator,
+    );
+
+    await expect(manager.listDeviceImages("android")).resolves.toEqual([
+      {
+        name: "Pixel_8",
+        platform: "android",
+        isRunning: false,
+        isRunningStateKnown: false,
+      },
+    ]);
+  });
+
   test("listDeviceImages(android) ignores a physical handset whose model matches an AVD name", async () => {
     // getBootedDevices also reports physical handsets, whose `name` is
     // ro.product.model. A handset that happens to be modelled "Pixel_8" must not
@@ -788,6 +848,34 @@ describe("MultiPlatformDeviceManager", () => {
 
     await expect(inventory).rejects.toBe(cancellation);
     expect(receivedSignal).toBe(controller.signal);
+  });
+
+  test("listDeviceImages(android) propagates a cancelled running-state overlay", async () => {
+    const controller = new AbortController();
+    const cancellation = new Error("inventory deadline elapsed");
+    const image: DeviceInfo = { name: "Pixel_8", platform: "android", isRunning: false };
+    const fakeEmulator = {
+      listAvds: async () => [image],
+      getBootedDevicesChecked: async (
+        _onlyEmulators: boolean,
+        _options: unknown,
+        signal?: AbortSignal,
+      ): Promise<BootedDevice[]> =>
+        await new Promise((_resolve, reject) => {
+          signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+        }),
+    } as unknown as AndroidEmulatorClient;
+    const manager = new MultiPlatformDeviceManager(
+      new FakeAdbClient() as unknown as AdbClient,
+      undefined,
+      fakeEmulator,
+    );
+
+    const inventory = manager.listDeviceImages("android", controller.signal);
+    await Promise.resolve();
+    controller.abort(cancellation);
+
+    await expect(inventory).rejects.toBe(cancellation);
   });
 
   test("destroyDevice deletes an iOS simulator by its exact UDID with the caller deadline", async () => {

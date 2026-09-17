@@ -6,6 +6,12 @@ export interface DeviceInfo {
   name: string;
   platform: Platform;
   isRunning: boolean;
+  /**
+   * Whether `isRunning` was established by a completed live-state probe.
+   * Omitted preserves the legacy authoritative-state contract; `false` means
+   * the inventory is available but its running-state overlay is incomplete.
+   */
+  isRunningStateKnown?: boolean;
   deviceId?: string;
   source?: "local";
   apiLevel?: number;

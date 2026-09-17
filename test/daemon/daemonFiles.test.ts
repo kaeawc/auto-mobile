@@ -158,6 +158,12 @@ describe("daemon file cleanup", () => {
 });
 
 describe("isProcessRunning", () => {
+  const successfulSignal = (): void => {};
+  const procStat = (state: string, processName = "auto mobile worker"): string => {
+    const numericFields = Array.from({ length: 49 }, (_, index) => String(index + 1)).join(" ");
+    return `7190 (${processName}) ${state} ${numericFields}`;
+  };
+
   // Issue #6260 (PRRT ft82g): `process.kill(pid, 0)` treats non-positive PIDs
   // specially — 0 signals the current process GROUP, -1 signals EVERY process
   // this user can signal — so both "succeed" without naming a real process. A
@@ -172,6 +178,74 @@ describe("isProcessRunning", () => {
 
   test("reports the current process as running (sanity check for a real positive PID)", () => {
     expect(isProcessRunning(process.pid)).toBe(true);
+  });
+
+  test.each(["Z", "X"])("reports a Linux process in state %s as not running", (state) => {
+    expect(
+      isProcessRunning(7190, {
+        platform: "linux",
+        signalProcess: successfulSignal,
+        readProcStat: () => procStat(state),
+      }),
+    ).toBe(false);
+  });
+
+  test("reports a non-zombie Linux process as running", () => {
+    const calls: string[] = [];
+    expect(
+      isProcessRunning(7190, {
+        platform: "linux",
+        signalProcess: () => {
+          calls.push("signal");
+        },
+        readProcStat: () => {
+          calls.push("procfs");
+          return procStat("S");
+        },
+      }),
+    ).toBe(true);
+    expect(calls).toEqual(["signal", "procfs"]);
+  });
+
+  test.each([
+    {
+      name: "unavailable",
+      readProcStat: (): string => {
+        throw new Error("procfs unavailable");
+      },
+    },
+    { name: "malformed", readProcStat: () => "not a proc stat record" },
+    { name: "truncated after state", readProcStat: () => "7190 (worker) Z" },
+  ])("fails closed when Linux procfs is $name", ({ readProcStat }) => {
+    expect(
+      isProcessRunning(7190, {
+        platform: "linux",
+        signalProcess: successfulSignal,
+        readProcStat,
+      }),
+    ).toBe(true);
+  });
+
+  test("parses a Linux process name containing a closing parenthesis", () => {
+    expect(
+      isProcessRunning(7190, {
+        platform: "linux",
+        signalProcess: successfulSignal,
+        readProcStat: () => procStat("Z", "worker) helper"),
+      }),
+    ).toBe(false);
+  });
+
+  test("does not inspect procfs on non-Linux platforms", () => {
+    expect(
+      isProcessRunning(7190, {
+        platform: "darwin",
+        signalProcess: successfulSignal,
+        readProcStat: () => {
+          throw new Error("must not read procfs");
+        },
+      }),
+    ).toBe(true);
   });
 });
 

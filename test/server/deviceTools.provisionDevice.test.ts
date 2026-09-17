@@ -420,6 +420,26 @@ function configureProvisionBootAndTeardown(
   };
 }
 
+function configurePostCreateAndroidDiscoveryFailure(manager: FakeDeviceUtils): () => void {
+  const getBootedDevicesDetailed = manager.getBootedDevicesDetailed.bind(manager);
+  let discoveryIncompleteAfterCreate = false;
+  manager.getBootedDevicesDetailed = async (...args) => {
+    if (!discoveryIncompleteAfterCreate) {
+      return await getBootedDevicesDetailed(...args);
+    }
+    discoveryIncompleteAfterCreate = false;
+    manager.setAndroidDiscoveryIncomplete("adb devices failed during boot discovery");
+    try {
+      return await getBootedDevicesDetailed(...args);
+    } finally {
+      manager.failedPlatforms.delete("android");
+    }
+  };
+  return () => {
+    discoveryIncompleteAfterCreate = true;
+  };
+}
+
 describe("provisionDevice handler", () => {
   let deviceManager: FakeDeviceUtils;
   let exactProvisioner: FakeExactDeviceProvisioner;
@@ -2489,6 +2509,65 @@ describe("provisionDevice handler", () => {
     expect(deviceManager.wasMethodCalled("waitForDeviceReady")).toBe(false);
     expect(pool.getDevice("emulator-5554")).toBeNull();
     expect(sessionManager.getAllSessionIds()).toEqual([]);
+  });
+
+  test("keeps incomplete Android boot discovery retryable after rolling back a created device", async () => {
+    const created = provisionedTestDevice("android", true);
+    const failDiscoveryAfterCreate = configurePostCreateAndroidDiscoveryFailure(deviceManager);
+    exactProvisioner.provision = async (request) => {
+      await request.onBeforeCreate?.();
+      deviceManager.setDeviceImages("android", [created.device]);
+      failDiscoveryAfterCreate();
+      return created;
+    };
+
+    const response = JSON.parse(
+      (
+        (await ToolRegistry.getTool("provisionDevice")!.handler(
+          provisionTestArgs("android", "operation-created-android-discovery-incomplete"),
+        )) as any
+      ).content[0].text,
+    );
+
+    expect(response).toMatchObject({
+      success: false,
+      error: {
+        code: "discovery_incomplete",
+        retryable: true,
+      },
+      cleanup: { status: "succeeded" },
+    });
+    expect(await deviceManager.listDeviceImages("android")).toEqual([]);
+  });
+
+  test("makes incomplete Android boot discovery non-retryable when rollback fails", async () => {
+    const created = provisionedTestDevice("android", true);
+    const failDiscoveryAfterCreate = configurePostCreateAndroidDiscoveryFailure(deviceManager);
+    exactProvisioner.provision = async (request) => {
+      await request.onBeforeCreate?.();
+      deviceManager.setDeviceImages("android", [created.device]);
+      failDiscoveryAfterCreate();
+      return created;
+    };
+    deviceManager.destroyDevice = async () => {
+      throw new Error("platform delete failed");
+    };
+    const response = JSON.parse(
+      (
+        (await ToolRegistry.getTool("provisionDevice")!.handler(
+          provisionTestArgs("android", "operation-created-android-discovery-cleanup-failure"),
+        )) as any
+      ).content[0].text,
+    );
+
+    expect(response).toMatchObject({
+      success: false,
+      error: {
+        code: "cleanup_failed",
+        retryable: false,
+      },
+      cleanup: { status: "failed" },
+    });
   });
 
   test("locks a newly created iOS simulator before booting it", async () => {

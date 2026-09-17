@@ -3578,6 +3578,8 @@ class ProvisionDeviceRollbackError extends ProvisionDeviceError {
             cleanup.failure?.message ?? "unknown cleanup failure"
           }`
         : provisionFailure.message,
+      // Retry risks an identity collision while the failed-rollback device may still exist.
+      cleanup.status === "failed" ? false : provisionFailure.retryable,
     );
     this.name = "ProvisionDeviceRollbackError";
   }
@@ -8080,6 +8082,11 @@ export function registerDeviceTools() {
     }
     if (error instanceof ProvisionDeviceRollbackError) {
       return createToolErrorResponse(error.code, error.message, {
+        error: {
+          code: error.code,
+          message: error.message,
+          retryable: error.retryable,
+        },
         provisionFailure: {
           code: error.provisionFailure.code,
           message: error.provisionFailure.message,

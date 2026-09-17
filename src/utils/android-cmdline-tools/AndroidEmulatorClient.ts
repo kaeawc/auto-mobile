@@ -1499,7 +1499,16 @@ export class AndroidEmulatorClient implements AndroidEmulator {
    * @param timeoutMs - Optional timeout in milliseconds
    * @returns Promise with stdout and stderr
    */
-  async executeCommand(
+  executeCommand(args: string[], timeoutMs?: number, signal?: AbortSignal): Promise<ExecResult> {
+    // One span per `emulator <verb>` CLI invocation (e.g. `emulator -list-avds`
+    // AVD discovery), recorded against the ambient device-lifecycle tracker when
+    // one is in scope (see PerfContext).
+    return trackAmbient(`emulator ${args.slice(0, 1).join(" ")}`.trimEnd(), () =>
+      this.executeCommandInner(args, timeoutMs, signal),
+    );
+  }
+
+  private async executeCommandInner(
     args: string[],
     timeoutMs?: number,
     signal?: AbortSignal,

@@ -2712,7 +2712,11 @@ export class SimCtlClient implements SimCtl {
 
   private async detectHeadlessSession(signal?: AbortSignal): Promise<boolean> {
     try {
-      const result = await this.execAsync("launchctl", ["managername"], undefined, signal);
+      // Direct launchctl (not a simctl subcommand), so it bypasses the
+      // executeCommandArgv funnel; give it its own ambient leaf (see PerfContext).
+      const result = await trackAmbient("launchctl managername", () =>
+        this.execAsync("launchctl", ["managername"], undefined, signal),
+      );
       const managerName = (result.stdout || "").trim();
       // "Aqua" is the GUI login session manager; "System"/"Background" are not.
       return managerName !== "Aqua";

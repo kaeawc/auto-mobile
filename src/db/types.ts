@@ -509,6 +509,7 @@ export interface DeviceSessionsTable {
   release_reason: string | null;
   session_timeout_ms: number;
   heartbeat_timeout_ms: number;
+  liveness_contract_generation?: number;
   heartbeat_timeout_source?: string | null;
   has_received_heartbeat: number;
   liveness_policy?: string | null;

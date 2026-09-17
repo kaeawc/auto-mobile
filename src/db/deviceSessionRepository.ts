@@ -44,6 +44,8 @@ export interface DeviceSessionRecord {
 export interface DeviceSessionActivityUpdate {
   lastUsedAtMs: number;
   expiresAtMs: number;
+  sessionTimeoutMs: number;
+  heartbeatTimeoutMs: number;
   hasReceivedHeartbeat: boolean;
   heartbeatTimeoutSource?: "default" | "custom";
   livenessPolicy?: "heartbeat" | "cli-idle";
@@ -201,6 +203,7 @@ export class DeviceSessionRepository {
             session_timeout_ms: row.session_timeout_ms,
             heartbeat_timeout_ms: row.heartbeat_timeout_ms,
             ...livenessColumnsFromRow(row),
+            liveness_contract_generation: sql`liveness_contract_generation + 1`,
             updated_at: now,
           }),
         )
@@ -221,7 +224,13 @@ export class DeviceSessionRepository {
         .set({
           last_used_at_ms: update.lastUsedAtMs,
           expires_at_ms: update.expiresAtMs,
+          session_timeout_ms: update.sessionTimeoutMs,
+          heartbeat_timeout_ms: update.heartbeatTimeoutMs,
           ...livenessColumns(update),
+          // Mark every current liveness write. The forward-compatibility trigger
+          // clears this contract only when an older binary updates legacy
+          // liveness columns without advancing this generation.
+          liveness_contract_generation: sql`liveness_contract_generation + 1`,
           updated_at: new Date().toISOString(),
         })
         .where("session_uuid", "=", sessionUuid)

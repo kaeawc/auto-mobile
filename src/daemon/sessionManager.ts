@@ -3753,6 +3753,8 @@ export class SessionManager {
     await this.deviceSessionRepository.recordActivity(session.sessionId, {
       lastUsedAtMs: session.lastUsedAt,
       expiresAtMs: session.expiresAt,
+      sessionTimeoutMs: session.sessionTimeoutMs,
+      heartbeatTimeoutMs: session.heartbeatTimeoutMs,
       hasReceivedHeartbeat: session.hasReceivedHeartbeat,
       heartbeatTimeoutSource: session.heartbeatTimeoutSource,
       livenessPolicy: session.livenessPolicy,

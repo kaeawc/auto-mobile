@@ -84,6 +84,19 @@ function staticMemberName(expression: ts.Expression): string | undefined {
   return undefined;
 }
 
+function staticPropertyName(name: ts.PropertyName | undefined): string | undefined {
+  if (!name) {
+    return undefined;
+  }
+  if (ts.isIdentifier(name) || ts.isStringLiteralLike(name)) {
+    return name.text;
+  }
+  const expression = ts.isComputedPropertyName(name)
+    ? unwrapTransparentExpression(name.expression)
+    : undefined;
+  return expression && ts.isStringLiteralLike(expression) ? expression.text : undefined;
+}
+
 function violationsIn(
   file: string,
   sourceFile: ts.SourceFile,
@@ -92,13 +105,15 @@ function violationsIn(
   const importedExecutors = new Set<ts.Symbol>();
   const namespaces = new Set<ts.Symbol>();
   const violations: Violation[] = [];
+  let bindingsChanged = false;
 
   const symbolFor = (identifier: ts.Identifier): ts.Symbol | undefined =>
     checker.getSymbolAtLocation(identifier);
   const addBinding = (bindings: Set<ts.Symbol>, identifier: ts.Identifier): void => {
     const symbol = symbolFor(identifier);
-    if (symbol) {
+    if (symbol && !bindings.has(symbol)) {
       bindings.add(symbol);
+      bindingsChanged = true;
     }
   };
   const hasBinding = (bindings: Set<ts.Symbol>, identifier: ts.Identifier): boolean => {
@@ -116,7 +131,7 @@ function violationsIn(
     });
   };
 
-  const visit = (node: ts.Node): void => {
+  const visit = (node: ts.Node, collectBindingsOnly: boolean): void => {
     if (
       ts.isImportDeclaration(node) &&
       ts.isStringLiteral(node.moduleSpecifier) &&
@@ -179,7 +194,8 @@ function violationsIn(
       ) {
         for (const element of node.name.elements) {
           const imported =
-            element.propertyName?.getText(sourceFile) ?? element.name.getText(sourceFile);
+            staticPropertyName(element.propertyName) ??
+            (ts.isIdentifier(element.name) ? element.name.text : undefined);
           if (ts.isIdentifier(element.name) && EXECUTION_FUNCTIONS.has(imported)) {
             addBinding(importedExecutors, element.name);
           }
@@ -187,7 +203,11 @@ function violationsIn(
       }
     }
 
-    if (ts.isCallExpression(node) && !isDiagnosticProcessTableCall(file, node)) {
+    if (
+      !collectBindingsOnly &&
+      ts.isCallExpression(node) &&
+      !isDiagnosticProcessTableCall(file, node)
+    ) {
       const expression = unwrapTransparentExpression(node.expression);
       const direct = ts.isIdentifier(expression) && hasBinding(importedExecutors, expression);
       const namespaced =
@@ -199,10 +219,14 @@ function violationsIn(
         record(node);
       }
     }
-    ts.forEachChild(node, visit);
+    ts.forEachChild(node, (child) => visit(child, collectBindingsOnly));
   };
 
-  visit(sourceFile);
+  do {
+    bindingsChanged = false;
+    visit(sourceFile, true);
+  } while (bindingsChanged);
+  visit(sourceFile, false);
   return violations;
 }
 

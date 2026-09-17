@@ -203,3 +203,36 @@ teardown() {
   [ "$status" -eq 1 ]
   [[ "$output" == *"DaemonLauncherBoundaryFixture.ts"* ]]
 }
+
+@test "rejects static computed destructured executor keys" {
+  printf '%s\n' \
+    'import childProcess from "node:child_process";' \
+    'const { "execFileSync": stringLaunch } = childProcess;' \
+    'stringLaunch("auto-mobile", ["--daemon-mode"]);' \
+    'const { [("execFileSync" as const)]: computedLaunch } = childProcess;' \
+    'computedLaunch("auto-mobile", ["--daemon-mode"]);' \
+    > "$FIXTURE"
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 1 ]
+  [[ "$(grep -c "DaemonLauncherBoundaryFixture.ts" <<< "$output")" -eq 2 ]]
+}
+
+@test "rejects transitive executor aliases declared after their function body" {
+  printf '%s\n' \
+    'import childProcess from "node:child_process";' \
+    'function invoke() {' \
+    '  launch("auto-mobile", ["--daemon-mode"]);' \
+    '}' \
+    'const launch = executorAlias;' \
+    'const executorAlias = namespaceAlias["execFileSync"];' \
+    'const namespaceAlias = childProcess;' \
+    'invoke();' \
+    > "$FIXTURE"
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *'launch("auto-mobile", ["--daemon-mode"])'* ]]
+}

@@ -568,6 +568,42 @@ teardown() {
   [[ "$output" != *'remaining.execFileSync?.("auto-mobile"'* ]]
 }
 
+@test "keeps receiver provenance and eager local timing precise" {
+  printf '%s\n' \
+    'import childProcess from "node:child_process";' \
+    'declare const safeLaunch: (command: string, args: string[]) => void;' \
+    'declare function safeChildProcess(): any;' \
+    'export function unrelatedReceiver() { safeChildProcess().execFileSync("auto-mobile", ["--daemon-mode"]); }' \
+    'let processAlias = childProcess;' \
+    'invokeBeforeReplacement();' \
+    'function invokeBeforeReplacement() {' \
+    '  const launch = processAlias.execFileSync;' \
+    '  launch("auto-mobile", ["--daemon-mode"]);' \
+    '}' \
+    'processAlias = safeChildProcess();' \
+    'function invokeAfterReplacement() {' \
+    '  const launch = processAlias.execFileSync;' \
+    '  launch("auto-mobile", ["--daemon-mode"]);' \
+    '}' \
+    'invokeAfterReplacement();' \
+    'let replacement: any = childProcess.execFileSync;' \
+    'replacement = (replacement("auto-mobile", ["--daemon-mode"]), safeLaunch);' \
+    'replacement("auto-mobile", ["--daemon-mode"]);' \
+    'let namespace = childProcess;' \
+    'namespace = (namespace.execFileSync("auto-mobile", ["--daemon-mode"]), safeChildProcess());' \
+    'namespace.execFileSync("auto-mobile", ["--daemon-mode"]);' \
+    > "$FIXTURE"
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 1 ]
+  [[ "$(grep -c "DaemonLauncherBoundaryFixture.ts" <<< "$output")" -eq 3 ]]
+  [[ "$output" == *'launch("auto-mobile"'* ]]
+  [[ "$output" == *'replacement("auto-mobile"'* ]]
+  [[ "$output" == *'namespace.execFileSync("auto-mobile"'* ]]
+  [[ "$output" != *'safeChildProcess().execFileSync'* ]]
+}
+
 @test "rejects transitive executor aliases declared after their function body" {
   printf '%s\n' \
     'import childProcess from "node:child_process";' \

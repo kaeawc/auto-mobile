@@ -123,6 +123,8 @@ function violationsIn(
   const namespaceExclusions = new Map<ts.Symbol, ReadonlySet<string>>();
   const bindingTimings = new Map<ts.Symbol, { startsAt: number; endsAt?: number }>();
   const assignmentPositions = new Map<ts.Symbol, BindingWrite[]>();
+  const executorSources = new Map<ts.Symbol, ts.Identifier>();
+  const namespaceSources = new Map<ts.Symbol, ts.Identifier>();
   const violations: Violation[] = [];
   let bindingsChanged = false;
 
@@ -152,6 +154,16 @@ function violationsIn(
   const hasBinding = (bindings: Set<ts.Symbol>, identifier: ts.Identifier): boolean => {
     const symbol = symbolFor(identifier);
     return symbol !== undefined && bindings.has(symbol);
+  };
+  const recordSource = (
+    sources: Map<ts.Symbol, ts.Identifier>,
+    identifier: ts.Identifier,
+    source: ts.Identifier,
+  ): void => {
+    const symbol = symbolFor(identifier);
+    if (symbol && !sources.has(symbol)) {
+      sources.set(symbol, source);
+    }
   };
   const bindingIsAvailableAt = (identifier: ts.Identifier, position: number): boolean => {
     const symbol = symbolFor(identifier);
@@ -187,9 +199,6 @@ function violationsIn(
   };
   const hasNamespace = (identifier: ts.Identifier): boolean =>
     namespaceExclusionsFor(identifier) !== undefined;
-
-  const namespaceIsAvailableAt = (identifier: ts.Identifier, position: number): boolean =>
-    hasNamespace(identifier) && bindingIsAvailableAt(identifier, position);
 
   const namespaceHasNotEndedAt = (identifier: ts.Identifier, position: number): boolean =>
     hasNamespace(identifier) && bindingHasNotEndedAt(identifier, position);
@@ -255,12 +264,26 @@ function violationsIn(
       bindingHasNotEndedAt(value, sourcePosition)
     ) {
       addBinding(importedExecutors, identifier, timing);
+      recordSource(executorSources, identifier, value);
     }
     if (ts.isIdentifier(value) && namespaceHasNotEndedAt(value, sourcePosition)) {
       addNamespace(identifier, namespaceExclusionsFor(value), timing);
+      recordSource(namespaceSources, identifier, value);
     }
     if (isNamespaceExecutor(value, sourcePosition)) {
       addBinding(importedExecutors, identifier, timing);
+      const memberAccess = unwrapTransparentExpression(value);
+      if (
+        (ts.isPropertyAccessExpression(memberAccess) ||
+          ts.isElementAccessExpression(memberAccess)) &&
+        ts.isIdentifier(unwrapTransparentExpression(memberAccess.expression))
+      ) {
+        recordSource(
+          executorSources,
+          identifier,
+          unwrapTransparentExpression(memberAccess.expression),
+        );
+      }
     }
   };
 
@@ -303,6 +326,9 @@ function violationsIn(
         !sourceExclusions?.has(imported)
       ) {
         addBinding(importedExecutors, element.name, initializerTiming(element.name));
+        if (ts.isIdentifier(value)) {
+          recordSource(executorSources, element.name, value);
+        }
       }
     }
     if (hasDynamicExclusion) {
@@ -311,19 +337,26 @@ function violationsIn(
     for (const element of elements) {
       if (element.dotDotDotToken && ts.isIdentifier(element.name)) {
         addNamespace(element.name, restExclusions, initializerTiming(element.name));
+        if (ts.isIdentifier(value)) {
+          recordSource(namespaceSources, element.name, value);
+        }
       }
     }
   };
 
   const assignmentCounts = new Map<ts.Symbol, number>();
-  const countAssignmentTarget = (target: ts.Expression, operator?: ts.SyntaxKind): void => {
+  const countAssignmentTarget = (
+    target: ts.Expression,
+    position: number,
+    operator?: ts.SyntaxKind,
+  ): void => {
     const unwrappedTarget = unwrapTransparentExpression(target);
     if (ts.isIdentifier(unwrappedTarget)) {
       const symbol = symbolFor(unwrappedTarget);
       if (symbol) {
         assignmentCounts.set(symbol, (assignmentCounts.get(symbol) ?? 0) + 1);
         const writes = assignmentPositions.get(symbol) ?? [];
-        writes.push({ position: unwrappedTarget.getStart(sourceFile), operator });
+        writes.push({ position, operator });
         assignmentPositions.set(symbol, writes);
       }
       return;
@@ -331,31 +364,31 @@ function violationsIn(
     if (ts.isObjectLiteralExpression(unwrappedTarget)) {
       for (const property of unwrappedTarget.properties) {
         if (ts.isPropertyAssignment(property) && ts.isIdentifier(property.initializer)) {
-          countAssignmentTarget(property.initializer, operator);
+          countAssignmentTarget(property.initializer, position, operator);
         } else if (ts.isShorthandPropertyAssignment(property)) {
-          countAssignmentTarget(property.name, operator);
+          countAssignmentTarget(property.name, position, operator);
         } else if (ts.isSpreadAssignment(property) && ts.isIdentifier(property.expression)) {
-          countAssignmentTarget(property.expression, operator);
+          countAssignmentTarget(property.expression, position, operator);
         }
       }
     }
   };
   const countAssignments = (node: ts.Node): void => {
     if (ts.isBinaryExpression(node) && ts.isAssignmentOperator(node.operatorToken.kind)) {
-      countAssignmentTarget(node.left, node.operatorToken.kind);
+      countAssignmentTarget(node.left, node.getEnd(), node.operatorToken.kind);
     }
     if (
       (ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)) &&
       (node.operator === ts.SyntaxKind.PlusPlusToken ||
         node.operator === ts.SyntaxKind.MinusMinusToken)
     ) {
-      countAssignmentTarget(node.operand);
+      countAssignmentTarget(node.operand, node.getEnd());
     }
     if (
       (ts.isForOfStatement(node) || ts.isForInStatement(node)) &&
       !ts.isVariableDeclarationList(node.initializer)
     ) {
-      countAssignmentTarget(node.initializer);
+      countAssignmentTarget(node.initializer, node.getEnd());
     }
     ts.forEachChild(node, countAssignments);
   };
@@ -518,6 +551,57 @@ function violationsIn(
     return [node.getStart(sourceFile)];
   };
 
+  const functionOwnerForNode = (node: ts.Node): ts.Node | undefined => {
+    const functionLike = ts.findAncestor(node, ts.isFunctionLike);
+    return functionLike ? functionOwnerDeclaration(functionLike) : undefined;
+  };
+
+  const bindingIsAvailableForExecution = (
+    identifier: ts.Identifier,
+    call: ts.CallExpression,
+    positions: readonly number[],
+    sources: ReadonlyMap<ts.Symbol, ts.Identifier>,
+    seen: ReadonlySet<ts.Symbol> = new Set(),
+  ): boolean => {
+    const symbol = symbolFor(identifier);
+    if (!symbol || seen.has(symbol)) {
+      return false;
+    }
+    const bindingOwner = symbol.valueDeclaration
+      ? functionOwnerForNode(symbol.valueDeclaration)
+      : undefined;
+    const callOwner = functionOwnerForNode(call);
+    if (bindingOwner && bindingOwner === callOwner) {
+      const timing = bindingTimings.get(symbol);
+      if (timing?.endsAt !== undefined && call.getStart(sourceFile) >= timing.endsAt) {
+        return false;
+      }
+      const source = sources.get(symbol);
+      if (!source) {
+        return true;
+      }
+      const nextSeen = new Set(seen);
+      nextSeen.add(symbol);
+      return sourceIsAvailableForExecution(source, call, positions, nextSeen);
+    }
+    return positions.some((position) => bindingIsAvailableAt(identifier, position));
+  };
+
+  const sourceIsAvailableForExecution = (
+    identifier: ts.Identifier,
+    call: ts.CallExpression,
+    positions: readonly number[],
+    seen: ReadonlySet<ts.Symbol>,
+  ): boolean => {
+    if (hasBinding(importedExecutors, identifier)) {
+      return bindingIsAvailableForExecution(identifier, call, positions, executorSources, seen);
+    }
+    return (
+      hasNamespace(identifier) &&
+      bindingIsAvailableForExecution(identifier, call, positions, namespaceSources, seen)
+    );
+  };
+
   const initializerTiming = (identifier: ts.Identifier): { startsAt: number; endsAt?: number } => {
     const symbol = symbolFor(identifier);
     const declaration = symbol?.valueDeclaration;
@@ -633,6 +717,9 @@ function violationsIn(
           targetIdentifier,
           assignmentTiming(targetIdentifier, assignment),
         );
+        if (ts.isIdentifier(value)) {
+          recordSource(executorSources, targetIdentifier, value);
+        }
       }
     }
     if (hasDynamicExclusion) {
@@ -649,6 +736,9 @@ function violationsIn(
           restExclusions,
           assignmentTiming(property.expression, assignment),
         );
+        if (ts.isIdentifier(value)) {
+          recordSource(namespaceSources, property.expression, value);
+        }
       }
     }
   };
@@ -754,14 +844,22 @@ function violationsIn(
         ts.isIdentifier(expression) &&
         hasBinding(importedExecutors, expression) &&
         (executionPositions === undefined ||
-          executionPositions.some((position) => bindingIsAvailableAt(expression, position)));
+          bindingIsAvailableForExecution(expression, node, executionPositions, executorSources));
+      const hasNamespaceReceiver =
+        namespaceReceiver !== undefined &&
+        (ts.isIdentifier(namespaceReceiver)
+          ? hasNamespace(namespaceReceiver)
+          : isChildProcessRequire(namespaceReceiver));
       const namespaced =
         (ts.isPropertyAccessExpression(expression) || ts.isElementAccessExpression(expression)) &&
-        namespaceReceiver !== undefined &&
+        hasNamespaceReceiver &&
         (executionPositions === undefined ||
           (ts.isIdentifier(namespaceReceiver)
-            ? executionPositions.some((position) =>
-                namespaceIsAvailableAt(namespaceReceiver, position),
+            ? bindingIsAvailableForExecution(
+                namespaceReceiver,
+                node,
+                executionPositions,
+                namespaceSources,
               )
             : isChildProcessRequire(namespaceReceiver))) &&
         EXECUTION_FUNCTIONS.has(staticMemberName(expression, staticStringValue) ?? "") &&

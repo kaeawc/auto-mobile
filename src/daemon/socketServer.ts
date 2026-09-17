@@ -22,6 +22,7 @@ import {
   PROGRESS_NOTIFICATION_METHOD,
   SessionContext,
   type BoundSessionLoss,
+  type DaemonOptions,
 } from "./types";
 import {
   SOCKET_PATH,
@@ -172,6 +173,10 @@ import {
 
 function resolveIdentityStartedAt(value: number | undefined, timer: Timer): number {
   return value === undefined ? timer.now() : value;
+}
+
+function snapshotDaemonOptions(options: DaemonOptions | undefined): DaemonOptions {
+  return structuredClone(options ?? {});
 }
 
 const MCP_CLIENT_IDLE_CLOSE_MS = 5 * 60 * 1000;
@@ -602,6 +607,7 @@ export class UnixSocketServer {
   private readonly daemonIdentity: DaemonSelfIdentity;
   private readonly identityStartedAt: number;
   private readonly processGenerationToken: string | undefined;
+  private readonly startupOptions: DaemonOptions;
   private readonly onRestartAccepted?: () => void;
   private readonly onControlMetadataRepair?: (signal?: AbortSignal) => Promise<void>;
   private readonly onControlMetadataCorruption?: (signal?: AbortSignal) => Promise<void>;
@@ -695,6 +701,7 @@ export class UnixSocketServer {
       identity?: DaemonSelfIdentity;
       identityStartedAt?: number;
       processGenerationToken?: string;
+      startupOptions?: DaemonOptions;
       enforce?: boolean;
       onRestartAccepted?: () => void;
       onControlMetadataRepair?: (signal?: AbortSignal) => Promise<void>;
@@ -743,6 +750,7 @@ export class UnixSocketServer {
       this.timer,
     );
     this.processGenerationToken = handshakeConfig.processGenerationToken;
+    this.startupOptions = snapshotDaemonOptions(handshakeConfig.startupOptions);
     this.onRestartAccepted = handshakeConfig.onRestartAccepted;
     this.onControlMetadataRepair = handshakeConfig.onControlMetadataRepair;
     this.onControlMetadataCorruption = handshakeConfig.onControlMetadataCorruption;
@@ -3823,6 +3831,7 @@ export class UnixSocketServer {
           buildId: this.daemonIdentity.build.buildId,
           entryScript: this.daemonIdentity.build.entryScript,
           startedAt: this.identityStartedAt,
+          options: this.startupOptions,
           ...(this.processGenerationToken === undefined
             ? {}
             : { processGenerationToken: this.processGenerationToken }),

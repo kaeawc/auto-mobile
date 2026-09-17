@@ -35,6 +35,7 @@ import {
   createDaemonLiveAcceptanceCapability,
   createDaemonLiveAcceptanceScopedCapability,
 } from "../../src/daemon/liveAcceptanceCapability";
+import type { DaemonOptions } from "../../src/daemon/types";
 
 const SHA256_HEX = /^[0-9a-f]{64}$/;
 
@@ -88,6 +89,9 @@ class LateCallbackFakeTimer extends FakeTimer {
 }
 
 describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
+  const startupOptions: DaemonOptions = {
+    enabledTools: ["listDevices", "provisionDevice", "deleteDevice"],
+  };
   let socketPath: string;
   let server: UnixSocketServer;
   let fakeTimer: FakeTimer;
@@ -108,6 +112,7 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
       null,
       {
         processGenerationToken: "socket-generation-1",
+        startupOptions,
         onRestartAccepted: () => {
           restartRequests++;
         },
@@ -161,6 +166,13 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
     expect(result.ios.xcTestService.url).toContain(`/${entry.version}/`);
     expect(result.ios.xcTestService.url.endsWith("control-proxy.ipa")).toBe(true);
     expect(result.ios.xcTestService.expectedAppHash).toBe(IOS_CTRL_PROXY_APP_HASH);
+  });
+
+  test("ide/status reports the socket owner's immutable startup options", async () => {
+    const response = await sendRequest(socketPath, "ide/status");
+
+    expect(response.success).toBe(true);
+    expect(response.result).toMatchObject({ options: startupOptions });
   });
 
   test("ide/status reports whether provisionDevice is active", async () => {

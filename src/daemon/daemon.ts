@@ -638,6 +638,7 @@ export class Daemon {
         {
           identityStartedAt: this.generationStartedAt,
           processGenerationToken: this.processGenerationToken,
+          startupOptions: this.options,
           onRestartAccepted: () => {
             setImmediate(() => process.kill(process.pid, "SIGTERM"));
           },
@@ -2453,6 +2454,7 @@ export class Daemon {
           {
             identityStartedAt: this.generationStartedAt,
             processGenerationToken: this.processGenerationToken,
+            startupOptions: this.options,
             onRestartAccepted: () => {
               setImmediate(() => process.kill(process.pid, "SIGTERM"));
             },

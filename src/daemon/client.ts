@@ -35,9 +35,54 @@ import {
 } from "./deviceControlTransportFailure";
 import { readPidFileDataSync, isProcessRunning } from "./daemonFiles";
 import { isDaemonHandshakeFailure, type DaemonHandshakeFailure } from "./daemonHandshake";
-import type { DaemonStatus } from "./types";
+import type { DaemonOptions, DaemonStatus } from "./types";
 
-const socketStatusSchema = z.object({
+const daemonOptionsSchema: z.ZodType<DaemonOptions> = z.object({
+  port: z.number().finite().optional(),
+  host: z.string().optional(),
+  strictPort: z.boolean().optional(),
+  debug: z.boolean().optional(),
+  debugPerf: z.boolean().optional(),
+  planExecutionLockScope: z.enum(["session", "global"]).optional(),
+  runnerReadinessTimeoutMs: z.number().finite().optional(),
+  videoQualityPreset: z.string().optional(),
+  videoTargetBitrateKbps: z.number().finite().optional(),
+  videoMaxThroughputMbps: z.number().finite().optional(),
+  videoFps: z.number().finite().optional(),
+  videoFormat: z.string().optional(),
+  videoMaxArchiveSizeMb: z.number().finite().optional(),
+  toolOutputsDir: z.string().optional(),
+  networkMockable: z.boolean().optional(),
+  embeddedSdk: z.boolean().optional(),
+  enabledTools: z.array(z.string()).optional(),
+  disabledTools: z.array(z.string()).optional(),
+  dismissKeyboardAfterInput: z.boolean().optional(),
+  eventAllMarkers: z.array(z.string()).optional(),
+  eventAllMarkersCliOverride: z.boolean().optional(),
+  noUiPerfMode: z.boolean().optional(),
+  memPerfAudit: z.boolean().optional(),
+  accessibilityAudit: z.boolean().optional(),
+  accessibilityLevel: z.string().optional(),
+  accessibilityFailureMode: z.string().optional(),
+  accessibilityMinSeverity: z.string().optional(),
+  accessibilityUseBaseline: z.boolean().optional(),
+  predictiveUi: z.boolean().optional(),
+  rawElementSearch: z.boolean().optional(),
+  skipCtrlProxyDownload: z.boolean().optional(),
+  mcpRecording: z.boolean().optional(),
+  noNavigationScreenshots: z.boolean().optional(),
+  noWaitForPollingOverhead: z.boolean().optional(),
+  noA11yIncludeNotImportantViews: z.boolean().optional(),
+  noA11yReportViewIds: z.boolean().optional(),
+  noA11yRetrieveInteractiveWindows: z.boolean().optional(),
+  noOcclusion: z.boolean().optional(),
+  observeResultIncludeElements: z.boolean().optional(),
+  toolResultsNoStructuredContent: z.boolean().optional(),
+  actionsDiffObserve: z.boolean().optional(),
+  actionsNoObserve: z.boolean().optional(),
+});
+
+const socketIdentityStatusSchema = z.object({
   pid: z.number().int().positive().optional(),
   version: z.string().trim().min(1),
   buildId: z.string().optional(),
@@ -46,6 +91,10 @@ const socketStatusSchema = z.object({
   startedAt: z.number().finite().optional(),
   processGenerationToken: z.string().optional(),
   activeProvisioning: z.boolean().optional(),
+});
+
+const socketOptionsStatusSchema = z.object({
+  options: daemonOptionsSchema.optional(),
 });
 
 /** The server rejected this request before dispatch; retry cannot duplicate work. */
@@ -709,19 +758,25 @@ export class DaemonClient {
       null,
     );
     try {
-      const parsed = socketStatusSchema.safeParse(
-        await diagnostic.callDaemonMethod("ide/status", {}),
-      );
-      if (!parsed.success) {
+      const rawStatus = await diagnostic.callDaemonMethod("ide/status", {});
+      const identityStatus = socketIdentityStatusSchema.safeParse(rawStatus);
+      if (!identityStatus.success) {
         throw new ActionableError(
           "Daemon preflight failed: the socket owner returned no version identity; no device operation started. Restart the daemon from this client installation.",
         );
       }
-      const { releaseVersion, ...identity } = parsed.data;
+      const optionsStatus = socketOptionsStatusSchema.safeParse(rawStatus);
+      if (!optionsStatus.success) {
+        throw new ActionableError(
+          "Daemon preflight failed: the socket owner returned a valid identity but malformed startup options; no device operation started. Restart the daemon from this client installation.",
+        );
+      }
+      const { releaseVersion, ...identity } = identityStatus.data;
       return {
         running: true,
         ...identity,
         socketPath: this.socketPath,
+        ...(optionsStatus.data.options ? { options: optionsStatus.data.options } : {}),
         ...(releaseVersion ? { assetVersion: releaseVersion } : {}),
       };
     } finally {

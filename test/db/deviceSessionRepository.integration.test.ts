@@ -196,7 +196,7 @@ describe("DeviceSessionRepository", () => {
     });
   });
 
-  test("clears a stable identity when a legacy writer changes the device transport", async () => {
+  test("clears a stable identity when a legacy writer reuses an emulator serial", async () => {
     await repo.upsertActiveSession({
       sessionUuid: "session-1",
       deviceId: "emulator-5554",
@@ -212,13 +212,15 @@ describe("DeviceSessionRepository", () => {
 
     await db
       .updateTable("device_sessions")
-      .set({ device_id: "emulator-5556" })
+      // A legacy upsert keeps both known identity fields in its SET clause even
+      // when a new AVD has reused this serial, but cannot advance the generation.
+      .set({ device_id: "emulator-5554", stable_device_id: "Pixel_8_API_35" })
       .where("session_uuid", "=", "session-1")
       .execute();
 
     const row = await repo.getSession("session-1");
     expect(row).toMatchObject({
-      device_id: "emulator-5556",
+      device_id: "emulator-5554",
       stable_device_id: null,
     });
   });

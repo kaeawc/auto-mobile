@@ -2245,7 +2245,7 @@ describe("DaemonMcpProxy", () => {
 
         try {
           await expect(proxy.listTools()).rejects.toThrow(
-            "Daemon restart completed but startup options still differ",
+            "successor for the shared per-user daemon still does not satisfy",
           );
           expect(fakeManager.restartCallCount).toBe(1);
         } finally {
@@ -5660,5 +5660,49 @@ describe("DaemonMcpProxy", () => {
         isAvailableSpy.mockRestore();
       }
     });
+  });
+
+  test("explains the shared-daemon boundary and bounded recovery after a genuine option mismatch", async () => {
+    const clientBuild = {
+      buildId: "client-build",
+      entryScript: "/configured/dist/src/index.js",
+    };
+    const predecessor: DaemonStatus = {
+      running: true,
+      pid: 1001,
+      version: CLIENT_VERSION,
+      startedAt: 1,
+      ...clientBuild,
+      options: {},
+    };
+    const successor: DaemonStatus = {
+      ...predecessor,
+      pid: 1002,
+      startedAt: 2,
+    };
+    const manager = new FakeDaemonManager();
+    manager.statusResults = [predecessor, successor];
+    const socketStatuses = [predecessor, successor];
+    const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+    const proxy = new DaemonMcpProxy({
+      clientFactory: () => new FakeDaemonClient(),
+      daemonStatusProbe: async () => socketStatuses.shift()!,
+      daemonManager: manager,
+      daemonOptions: { enabledTools: ["listDevices", "provisionDevice", "deleteDevice"] },
+      clientVersion: CLIENT_VERSION,
+      buildIdentity: clientBuild,
+    });
+
+    try {
+      const failure = await proxy.listTools().catch((error: Error) => error);
+      expect(failure).toBeInstanceOf(Error);
+      expect(String(failure)).toContain("shared per-user daemon");
+      expect(String(failure)).toContain("pid 1001 -> pid 1002");
+      expect(String(failure)).toContain("--enable-tool 'listDevices'");
+      expect(String(failure)).toContain("retry once");
+    } finally {
+      isAvailableSpy.mockRestore();
+      await proxy.close();
+    }
   });
 });

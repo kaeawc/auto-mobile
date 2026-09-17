@@ -111,6 +111,42 @@ async function runPreflightTransport<T>(operation: () => Promise<T>): Promise<T>
   }
 }
 
+function daemonRestartCommand(clientVersion: string, clientBuild?: BuildIdentity): string {
+  if (clientBuild?.entryScript) {
+    return `${shellQuote(process.execPath)} ${shellQuote(clientBuild.entryScript)} --daemon restart`;
+  }
+  const installableVersion = releaseVersion(clientVersion);
+  return installableVersion.length > 0 && installableVersion !== "unknown"
+    ? `bunx @kaeawc/auto-mobile@${installableVersion} --daemon restart`
+    : "the same installed auto-mobile package";
+}
+
+function exactToolRestartArgs(options: DaemonOptions | undefined): string {
+  return [
+    ...(options?.enabledTools ?? []).map((toolName) => ` --enable-tool ${shellQuote(toolName)}`),
+    ...(options?.disabledTools ?? []).map((toolName) => ` --disable-tool ${shellQuote(toolName)}`),
+  ].join("");
+}
+
+function startupOptionRecoveryGuidance(
+  requested: DaemonOptions | undefined,
+  clientVersion: string,
+  clientBuild: BuildIdentity,
+): string {
+  const exactToolArgs = exactToolRestartArgs(requested);
+  if (exactToolArgs.length === 0) {
+    return (
+      "Close and relaunch this configured MCP client once so it owns the next bounded " +
+      "reconciliation attempt; do not delete daemon control files manually."
+    );
+  }
+  return (
+    "Run one supported recovery restart from this client's build with the requested exact-tool " +
+    `profile: ${daemonRestartCommand(clientVersion, clientBuild)}${exactToolArgs}. Then reconnect ` +
+    "this configured client and retry once; do not delete daemon control files manually."
+  );
+}
+
 function isFreshSessionScreenshotUri(uri: string, sessionUuid: string): boolean {
   return uri === `automobile:device-session/${sessionUuid}/screenshot`;
 }
@@ -176,11 +212,7 @@ export class DaemonVersionMismatchError extends DaemonUnavailableError {
     // Use the client's own entrypoint when available. Direct callers that do not
     // provide build identity retain the published-version fallback.
     const installableVersion = releaseVersion(params.clientVersion);
-    const restartCommand = params.clientBuild?.entryScript
-      ? `${shellQuote(process.execPath)} ${shellQuote(params.clientBuild.entryScript)} --daemon restart`
-      : installableVersion.length > 0 && installableVersion !== "unknown"
-        ? `bunx @kaeawc/auto-mobile@${installableVersion} --daemon restart`
-        : "the same installed auto-mobile package";
+    const restartCommand = daemonRestartCommand(params.clientVersion, params.clientBuild);
     const unresolvedClientVersion =
       installableVersion.trim() === "" || installableVersion === "unknown";
     const retryGuidance = unresolvedClientVersion
@@ -1709,7 +1741,10 @@ export class DaemonMcpProxy {
       const remaining = startupOptionDeficits(requested, restartedStatus.options);
       if (remaining.length > 0) {
         throw new DaemonUnavailableError(
-          `Daemon restart completed but startup options still differ (${remaining.join(", ")})`,
+          `Daemon process handoff completed (pid ${status.pid ?? "unknown"} -> pid ${restartedStatus.pid ?? "unknown"}), ` +
+            `but the successor for the shared per-user daemon still does not satisfy the requested startup options ` +
+            `(${remaining.join(", ")}). A different owner or launch path may control the replacement configuration. ` +
+            startupOptionRecoveryGuidance(requested, this.clientVersion, this.buildIdentity),
         );
       }
       return;

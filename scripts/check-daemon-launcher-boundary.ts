@@ -21,6 +21,11 @@ interface Violation {
   text: string;
 }
 
+interface BindingWrite {
+  position: number;
+  operator?: ts.SyntaxKind;
+}
+
 export function repositoryPath(file: string): string {
   return file.replaceAll("\\", "/");
 }
@@ -116,31 +121,62 @@ function violationsIn(
 ): Violation[] {
   const importedExecutors = new Set<ts.Symbol>();
   const namespaceExclusions = new Map<ts.Symbol, ReadonlySet<string>>();
+  const bindingTimings = new Map<ts.Symbol, { startsAt: number; endsAt?: number }>();
+  const assignmentPositions = new Map<ts.Symbol, BindingWrite[]>();
   const violations: Violation[] = [];
   let bindingsChanged = false;
 
   const symbolFor = (identifier: ts.Identifier): ts.Symbol | undefined =>
     checker.getSymbolAtLocation(identifier);
-  const addBinding = (bindings: Set<ts.Symbol>, identifier: ts.Identifier): void => {
+  const recordTiming = (
+    identifier: ts.Identifier,
+    timing: { startsAt: number; endsAt?: number },
+  ): void => {
+    const symbol = symbolFor(identifier);
+    if (symbol && !bindingTimings.has(symbol)) {
+      bindingTimings.set(symbol, timing);
+    }
+  };
+  const addBinding = (
+    bindings: Set<ts.Symbol>,
+    identifier: ts.Identifier,
+    timing = { startsAt: 0 },
+  ): void => {
     const symbol = symbolFor(identifier);
     if (symbol && !bindings.has(symbol)) {
       bindings.add(symbol);
       bindingsChanged = true;
     }
+    recordTiming(identifier, timing);
   };
   const hasBinding = (bindings: Set<ts.Symbol>, identifier: ts.Identifier): boolean => {
     const symbol = symbolFor(identifier);
     return symbol !== undefined && bindings.has(symbol);
   };
+  const bindingIsAvailableAt = (
+    identifier: ts.Identifier,
+    position: number,
+    deferred: boolean,
+  ): boolean => {
+    const symbol = symbolFor(identifier);
+    const timing = symbol ? bindingTimings.get(symbol) : undefined;
+    return (
+      timing !== undefined &&
+      (deferred || timing.startsAt <= position) &&
+      (timing.endsAt === undefined || (!deferred && position < timing.endsAt))
+    );
+  };
   const addNamespace = (
     identifier: ts.Identifier,
     exclusions: ReadonlySet<string> = new Set(),
+    timing = { startsAt: 0 },
   ): void => {
     const symbol = symbolFor(identifier);
     if (symbol && !namespaceExclusions.has(symbol)) {
       namespaceExclusions.set(symbol, new Set(exclusions));
       bindingsChanged = true;
     }
+    recordTiming(identifier, timing);
   };
   const namespaceExclusionsFor = (identifier: ts.Identifier): ReadonlySet<string> | undefined => {
     const symbol = symbolFor(identifier);
@@ -148,6 +184,12 @@ function violationsIn(
   };
   const hasNamespace = (identifier: ts.Identifier): boolean =>
     namespaceExclusionsFor(identifier) !== undefined;
+
+  const namespaceIsAvailableAt = (
+    identifier: ts.Identifier,
+    position: number,
+    deferred: boolean,
+  ): boolean => hasNamespace(identifier) && bindingIsAvailableAt(identifier, position, deferred);
 
   const staticStringValue = (
     expression: ts.Expression,
@@ -195,18 +237,22 @@ function violationsIn(
     );
   };
 
-  const registerIdentifierBinding = (identifier: ts.Identifier, value: ts.Expression): void => {
+  const registerIdentifierBinding = (
+    identifier: ts.Identifier,
+    value: ts.Expression,
+    timing: { startsAt: number; endsAt?: number },
+  ): void => {
     if (isChildProcessRequire(value)) {
-      addNamespace(identifier);
+      addNamespace(identifier, new Set(), timing);
     }
     if (ts.isIdentifier(value) && hasBinding(importedExecutors, value)) {
-      addBinding(importedExecutors, identifier);
+      addBinding(importedExecutors, identifier, timing);
     }
     if (ts.isIdentifier(value) && hasNamespace(value)) {
-      addNamespace(identifier, namespaceExclusionsFor(value));
+      addNamespace(identifier, namespaceExclusionsFor(value), timing);
     }
     if (isNamespaceExecutor(value)) {
-      addBinding(importedExecutors, identifier);
+      addBinding(importedExecutors, identifier, timing);
     }
   };
 
@@ -241,50 +287,50 @@ function violationsIn(
       }
       if (
         ts.isIdentifier(element.name) &&
-        isUnreassignedInitializer(element.name) &&
         EXECUTION_FUNCTIONS.has(imported) &&
         !sourceExclusions?.has(imported)
       ) {
-        addBinding(importedExecutors, element.name);
+        addBinding(importedExecutors, element.name, initializerTiming(element.name));
       }
     }
     if (hasDynamicExclusion) {
       return;
     }
     for (const element of elements) {
-      if (
-        element.dotDotDotToken &&
-        ts.isIdentifier(element.name) &&
-        isUnreassignedInitializer(element.name)
-      ) {
-        addNamespace(element.name, restExclusions);
+      if (element.dotDotDotToken && ts.isIdentifier(element.name)) {
+        addNamespace(element.name, restExclusions, initializerTiming(element.name));
       }
     }
   };
 
   const assignmentCounts = new Map<ts.Symbol, number>();
-  const countAssignmentTarget = (target: ts.Expression): void => {
+  const countAssignmentTarget = (target: ts.Expression, operator?: ts.SyntaxKind): void => {
     const unwrappedTarget = unwrapTransparentExpression(target);
     if (ts.isIdentifier(unwrappedTarget)) {
       const symbol = symbolFor(unwrappedTarget);
       if (symbol) {
         assignmentCounts.set(symbol, (assignmentCounts.get(symbol) ?? 0) + 1);
+        const writes = assignmentPositions.get(symbol) ?? [];
+        writes.push({ position: unwrappedTarget.getStart(sourceFile), operator });
+        assignmentPositions.set(symbol, writes);
       }
       return;
     }
     if (ts.isObjectLiteralExpression(unwrappedTarget)) {
       for (const property of unwrappedTarget.properties) {
         if (ts.isPropertyAssignment(property) && ts.isIdentifier(property.initializer)) {
-          countAssignmentTarget(property.initializer);
+          countAssignmentTarget(property.initializer, operator);
         } else if (ts.isShorthandPropertyAssignment(property)) {
-          countAssignmentTarget(property.name);
+          countAssignmentTarget(property.name, operator);
+        } else if (ts.isSpreadAssignment(property) && ts.isIdentifier(property.expression)) {
+          countAssignmentTarget(property.expression, operator);
         }
       }
     }
   };
   const countAssignments = (node: ts.Node): void => {
     if (ts.isBinaryExpression(node) && ts.isAssignmentOperator(node.operatorToken.kind)) {
-      countAssignmentTarget(node.left);
+      countAssignmentTarget(node.left, node.operatorToken.kind);
     }
     if (
       (ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)) &&
@@ -303,9 +349,40 @@ function violationsIn(
   };
   countAssignments(sourceFile);
 
-  const isUnreassignedInitializer = (identifier: ts.Identifier): boolean => {
+  const initializerTiming = (identifier: ts.Identifier): { startsAt: number; endsAt?: number } => {
     const symbol = symbolFor(identifier);
-    return symbol !== undefined && assignmentCounts.get(symbol) === undefined;
+    const declaration = symbol?.valueDeclaration;
+    const startsAt = declaration?.getEnd() ?? identifier.getEnd();
+    const endsAt = symbol
+      ? assignmentPositions
+          .get(symbol)
+          ?.find(
+            (write) =>
+              write.position > startsAt &&
+              write.operator !== ts.SyntaxKind.BarBarEqualsToken &&
+              write.operator !== ts.SyntaxKind.QuestionQuestionEqualsToken,
+          )?.position
+      : undefined;
+    return endsAt === undefined ? { startsAt } : { startsAt, endsAt };
+  };
+
+  const assignmentTiming = (
+    identifier: ts.Identifier,
+    assignment: ts.BinaryExpression,
+  ): { startsAt: number; endsAt?: number } => {
+    const startsAt = assignment.getEnd();
+    const symbol = symbolFor(identifier);
+    const endsAt = symbol
+      ? assignmentPositions
+          .get(symbol)
+          ?.find(
+            (write) =>
+              write.position > startsAt &&
+              write.operator !== ts.SyntaxKind.BarBarEqualsToken &&
+              write.operator !== ts.SyntaxKind.QuestionQuestionEqualsToken,
+          )?.position
+      : undefined;
+    return endsAt === undefined ? { startsAt } : { startsAt, endsAt };
   };
 
   // Mutable or multiply assigned values are dynamic: only follow the one static
@@ -330,26 +407,55 @@ function violationsIn(
   const registerObjectAssignment = (
     properties: readonly ts.ObjectLiteralElementLike[],
     value: ts.Expression,
+    assignment: ts.BinaryExpression,
   ): void => {
     if (!isChildProcessRequire(value) && !(ts.isIdentifier(value) && hasNamespace(value))) {
       return;
     }
     const sourceExclusions = ts.isIdentifier(value) ? namespaceExclusionsFor(value) : undefined;
+    const restExclusions = new Set(sourceExclusions);
+    let hasDynamicExclusion = false;
     for (const property of properties) {
+      if (ts.isSpreadAssignment(property)) {
+        continue;
+      }
+      const propertyName = ts.isPropertyAssignment(property) ? property.name : undefined;
       const target = ts.isPropertyAssignment(property)
         ? property.initializer
         : ts.isShorthandPropertyAssignment(property)
           ? property.name
           : undefined;
+      const imported =
+        staticPropertyName(propertyName, staticStringValue) ??
+        (propertyName ? undefined : target && ts.isIdentifier(target) ? target.text : undefined);
+      if (imported === undefined) {
+        hasDynamicExclusion = true;
+        continue;
+      }
       if (!target || !ts.isIdentifier(target) || !isUnambiguousAssignmentTarget(target)) {
         continue;
       }
-      const propertyName = ts.isPropertyAssignment(property) ? property.name : undefined;
-      const imported =
-        staticPropertyName(propertyName, staticStringValue) ??
-        (propertyName ? undefined : target.text);
+      if (EXECUTION_FUNCTIONS.has(imported)) {
+        restExclusions.add(imported);
+      }
       if (EXECUTION_FUNCTIONS.has(imported) && !sourceExclusions?.has(imported)) {
-        addBinding(importedExecutors, target);
+        addBinding(importedExecutors, target, assignmentTiming(target, assignment));
+      }
+    }
+    if (hasDynamicExclusion) {
+      return;
+    }
+    for (const property of properties) {
+      if (
+        ts.isSpreadAssignment(property) &&
+        ts.isIdentifier(property.expression) &&
+        isUnambiguousAssignmentTarget(property.expression)
+      ) {
+        addNamespace(
+          property.expression,
+          restExclusions,
+          assignmentTiming(property.expression, assignment),
+        );
       }
     }
   };
@@ -400,8 +506,8 @@ function violationsIn(
 
     if (ts.isVariableDeclaration(node) && node.initializer) {
       const initializer = unwrapTransparentExpression(node.initializer);
-      if (ts.isIdentifier(node.name) && isUnreassignedInitializer(node.name)) {
-        registerIdentifierBinding(node.name, initializer);
+      if (ts.isIdentifier(node.name)) {
+        registerIdentifierBinding(node.name, initializer, initializerTiming(node.name));
       }
       if (ts.isObjectBindingPattern(node.name)) {
         registerObjectBinding(node.name.elements, initializer);
@@ -416,13 +522,13 @@ function violationsIn(
         establishesAlias(node.operatorToken.kind) &&
         isUnambiguousAssignmentTarget(target)
       ) {
-        registerIdentifierBinding(target, value);
+        registerIdentifierBinding(target, value, assignmentTiming(target, node));
       }
       if (
         node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
         ts.isObjectLiteralExpression(target)
       ) {
-        registerObjectAssignment(target.properties, value);
+        registerObjectAssignment(target.properties, value, node);
       }
     }
 
@@ -432,11 +538,20 @@ function violationsIn(
       !isDiagnosticProcessTableCall(file, node)
     ) {
       const expression = unwrapTransparentExpression(node.expression);
-      const direct = ts.isIdentifier(expression) && hasBinding(importedExecutors, expression);
+      const deferred = ts.findAncestor(node, ts.isFunctionLike) !== undefined;
+      const position = node.getStart(sourceFile);
+      const direct =
+        ts.isIdentifier(expression) &&
+        hasBinding(importedExecutors, expression) &&
+        bindingIsAvailableAt(expression, position, deferred);
       const namespaced =
         (ts.isPropertyAccessExpression(expression) || ts.isElementAccessExpression(expression)) &&
         ts.isIdentifier(unwrapTransparentExpression(expression.expression)) &&
-        hasNamespace(unwrapTransparentExpression(expression.expression)) &&
+        namespaceIsAvailableAt(
+          unwrapTransparentExpression(expression.expression),
+          position,
+          deferred,
+        ) &&
         EXECUTION_FUNCTIONS.has(staticMemberName(expression, staticStringValue) ?? "") &&
         !namespaceExclusionsFor(unwrapTransparentExpression(expression.expression))?.has(
           staticMemberName(expression, staticStringValue) ?? "",

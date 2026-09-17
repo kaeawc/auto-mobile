@@ -368,6 +368,86 @@ teardown() {
   [[ "$output" == *"no direct production daemon invocations"* ]]
 }
 
+@test "tracks eager aliases through later assignments without applying them retroactively" {
+  printf '%s\n' \
+    'import childProcess from "node:child_process";' \
+    'declare const safeLaunch: (command: string, args: string[]) => void;' \
+    'declare const mayReassign: boolean;' \
+    'let initialized = childProcess.execFileSync;' \
+    'initialized("auto-mobile", ["--daemon-mode"]);' \
+    'initialized = safeLaunch;' \
+    'initialized("auto-mobile", ["--daemon-mode"]);' \
+    'let assignedLater: typeof childProcess.execFileSync | undefined;' \
+    'assignedLater?.("auto-mobile", ["--daemon-mode"]);' \
+    'assignedLater = childProcess.execFileSync;' \
+    'assignedLater("auto-mobile", ["--daemon-mode"]);' \
+    'let conditionallyReassigned = childProcess.execFileSync;' \
+    'conditionallyReassigned("auto-mobile", ["--daemon-mode"]);' \
+    'if (mayReassign) conditionallyReassigned = safeLaunch;' \
+    'conditionallyReassigned("auto-mobile", ["--daemon-mode"]);' \
+    'let preservedByOr = childProcess.execFileSync;' \
+    'preservedByOr ||= safeLaunch;' \
+    'preservedByOr("auto-mobile", ["--daemon-mode"]);' \
+    'let preservedByNullish = childProcess.execFileSync;' \
+    'preservedByNullish ??= safeLaunch;' \
+    'preservedByNullish("auto-mobile", ["--daemon-mode"]);' \
+    'let replacedByAnd = childProcess.execFileSync;' \
+    'replacedByAnd &&= safeLaunch;' \
+    'replacedByAnd("auto-mobile", ["--daemon-mode"]);' \
+    'let deferredAfterReassignment = childProcess.execFileSync;' \
+    'function invokeAfterReassignment() { deferredAfterReassignment("auto-mobile", ["--daemon-mode"]); }' \
+    'deferredAfterReassignment = safeLaunch;' \
+    'invokeAfterReassignment();' \
+    > "$FIXTURE"
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 1 ]
+  [[ "$(grep -c "DaemonLauncherBoundaryFixture.ts" <<< "$output")" -eq 5 ]]
+  [[ "$output" == *'initialized("auto-mobile"'* ]]
+  [[ "$output" == *'assignedLater("auto-mobile"'* ]]
+  [[ "$output" == *'conditionallyReassigned("auto-mobile"'* ]]
+  [[ "$output" == *'preservedByOr("auto-mobile"'* ]]
+  [[ "$output" == *'preservedByNullish("auto-mobile"'* ]]
+}
+
+@test "tracks object-rest assignment targets and static exclusions" {
+  printf '%s\n' \
+    'import childProcess from "node:child_process";' \
+    'let extracted;' \
+    'let remaining;' \
+    '({ execFileSync: extracted, ...remaining } = childProcess);' \
+    'extracted("auto-mobile", ["--daemon-mode"]);' \
+    'remaining.execFileSync?.("auto-mobile", ["--daemon-mode"]);' \
+    'remaining.spawn("auto-mobile", ["--daemon-mode"]);' \
+    'const { spawn } = remaining;' \
+    'spawn("auto-mobile", ["--daemon-mode"]);' \
+    > "$FIXTURE"
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 1 ]
+  [[ "$(grep -c "DaemonLauncherBoundaryFixture.ts" <<< "$output")" -eq 3 ]]
+  [[ "$output" == *'extracted("auto-mobile"'* ]]
+  [[ "$output" == *'remaining.spawn("auto-mobile"'* ]]
+  [[ "$output" == *'spawn("auto-mobile"'* ]]
+}
+
+@test "leaves object-rest assignments with dynamic exclusions unknown" {
+  printf '%s\n' \
+    'import childProcess from "node:child_process";' \
+    'declare const excludedKey: string;' \
+    'let remaining;' \
+    '({ [excludedKey]: omitted, ...remaining } = childProcess);' \
+    'remaining.spawn("auto-mobile", ["--daemon-mode"]);' \
+    > "$FIXTURE"
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"no direct production daemon invocations"* ]]
+}
+
 @test "rejects transitive executor aliases declared after their function body" {
   printf '%s\n' \
     'import childProcess from "node:child_process";' \

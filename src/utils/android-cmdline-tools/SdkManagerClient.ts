@@ -1,8 +1,9 @@
-import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
+import { type ChildProcess, type SpawnOptions } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { defaultTimer, type Timer } from "../SystemTimer";
 import { logger } from "../logger";
+import { DefaultHostCommandExecutor, type HostProcessExecutor } from "../HostCommandExecutor";
 import { redactAndroidCommandOutput } from "./redactAndroidCommandOutput";
 import {
   detectAndroidCommandLineTools,
@@ -53,9 +54,16 @@ export interface SdkManagerClientDependencies {
   platform: NodeJS.Platform;
 }
 
+// Route the default long-lived spawn through the shared host-process seam so the
+// client no longer reaches for `child_process.spawn` directly (issue #5459). The
+// executor's `spawn` is a plain passthrough, so this is behavior-identical; the
+// client's own stdin-piping (license acceptance) and process orchestration are
+// unchanged, and tests still inject `dependencies.spawn`.
+const sdkManagerHostProcessExecutor: HostProcessExecutor = new DefaultHostCommandExecutor();
+
 function defaults(): SdkManagerClientDependencies {
   return {
-    spawn,
+    spawn: (command, args, options) => sdkManagerHostProcessExecutor.spawn(command, args, options),
     existsSync,
     logger,
     detectAndroidCommandLineTools,

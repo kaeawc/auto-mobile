@@ -61,13 +61,30 @@ export async function runExecSeam(
   behavior: ExecSeamBehavior = {},
 ): Promise<ExecResult> {
   try {
-    const { stdout, stderr } = await invoke({
-      timeout: options.timeoutMs,
-      maxBuffer: options.maxBuffer,
-      cwd: options.cwd,
-      signal: options.signal,
-      killSignal: options.killSignal,
-    });
+    // Only forward options the caller actually set. A property present with an
+    // `undefined` value is NOT the same as an absent one at the exec leaf: node
+    // and bun read `options.maxBuffer` directly, so `maxBuffer: undefined`
+    // OVERWRITES the built-in 1 MiB stdout/stderr bound with "unbounded" rather
+    // than falling back to the default. Callers that omit `maxBuffer` (e.g.
+    // availability probes, emulator commands) must keep that default bound, so
+    // undefined keys are dropped here in the one shared place.
+    const execOptions: ExecSeamOptions = {};
+    if (options.timeoutMs !== undefined) {
+      execOptions.timeout = options.timeoutMs;
+    }
+    if (options.maxBuffer !== undefined) {
+      execOptions.maxBuffer = options.maxBuffer;
+    }
+    if (options.cwd !== undefined) {
+      execOptions.cwd = options.cwd;
+    }
+    if (options.signal !== undefined) {
+      execOptions.signal = options.signal;
+    }
+    if (options.killSignal !== undefined) {
+      execOptions.killSignal = options.killSignal;
+    }
+    const { stdout, stderr } = await invoke(execOptions);
     return createExecResult(stdout, stderr);
   } catch (error) {
     if (behavior.preserveError) {

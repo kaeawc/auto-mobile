@@ -201,15 +201,21 @@ function findViolations(file: string): Violation[] {
   return violations;
 }
 
+// `sourceFiles` yields OS separators (backslashes on Windows), but OWNER is keyed
+// with forward slashes — normalize so the owner exclusion matches on Windows.
+// Without this, the owner's own `emulatorHostProcessExecutor.spawn(...)` routing
+// (issue #5459) is flagged there while passing on POSIX. Mirrors the same
+// normalization already in check-sdkmanager-execution-boundary.ts.
+const toRepoPath = (file: string): string => file.replace(/\\/g, "/");
 const violations = sourceFiles(SOURCE_ROOT)
-  .filter((file) => file !== OWNER)
+  .filter((file) => toRepoPath(file) !== OWNER)
   .flatMap(findViolations);
 
 if (violations.length > 0) {
   console.error("error: Android emulator execution must use AndroidEmulatorClient:");
   for (const violation of violations) {
     console.error(
-      `${relative(SOURCE_ROOT, violation.file)}:${violation.line}:${violation.column}: ${violation.text}`,
+      `${toRepoPath(relative(SOURCE_ROOT, violation.file))}:${violation.line}:${violation.column}: ${violation.text}`,
     );
   }
   process.exit(1);

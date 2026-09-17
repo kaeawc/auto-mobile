@@ -1,9 +1,10 @@
-import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
+import { type ChildProcess, type SpawnOptions } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { ActionableError } from "../../models";
 import { defaultTimer, type Timer } from "../SystemTimer";
 import { logger } from "../logger";
+import { DefaultHostCommandExecutor, type HostProcessExecutor } from "../HostCommandExecutor";
 import {
   detectAndroidCommandLineTools,
   getAndroidHomeWithSystemImages,
@@ -44,9 +45,16 @@ const JAXB_ERROR_MARKERS = [
 ];
 const TERMINATION_ESCALATION_MS = 1_000;
 
+// Route the default long-lived spawn through the shared host-process seam so the
+// client no longer reaches for `child_process.spawn` directly (issue #5459). The
+// executor's `spawn` is a plain passthrough, so this is behavior-identical; the
+// client's own stdin-piping and process orchestration are unchanged, and tests
+// still inject `dependencies.spawn`.
+const avdManagerHostProcessExecutor: HostProcessExecutor = new DefaultHostCommandExecutor();
+
 function defaults(): AvdManagerClientDependencies {
   return {
-    spawn,
+    spawn: (command, args, options) => avdManagerHostProcessExecutor.spawn(command, args, options),
     existsSync,
     logger,
     detectAndroidCommandLineTools,

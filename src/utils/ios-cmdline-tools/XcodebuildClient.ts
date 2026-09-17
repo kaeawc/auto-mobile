@@ -1,8 +1,12 @@
-import { execFile, spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
-import { promisify } from "node:util";
+import { type ChildProcess, type SpawnOptions } from "node:child_process";
 import { ActionableError, ExecResult } from "../../models";
 import { logger } from "../logger";
-import { createExecResult } from "../execResult";
+import { runExecSeam } from "../ExecSeam";
+import {
+  DefaultHostCommandExecutor,
+  execFileAsync as sharedExecFileAsync,
+  type HostProcessExecutor,
+} from "../HostCommandExecutor";
 import { defaultTimer, Timer } from "../SystemTimer";
 import { combineAbortSignals, getAbortSignal } from "../AbortContext";
 import { DEFAULT_RUNNER_READINESS_TIMEOUT_MS } from "../runnerReadinessConfig";
@@ -49,26 +53,34 @@ export interface Xcodebuild {
 // indefinitely, so every availability check is timer/abort-bounded.
 const DEFAULT_AVAILABILITY_PROBE_TIMEOUT_MS = 10_000;
 
+// Route the default long-lived spawn through the shared host-process seam so the
+// client no longer reaches for `child_process.spawn` directly (issue #5459). The
+// executor's `spawn` is a plain passthrough, so this is behavior-identical; all
+// of XcodebuildClient's startup/abort/process-tracking orchestration is unchanged.
+const xcodebuildHostProcessExecutor: HostProcessExecutor = new DefaultHostCommandExecutor();
+
+// Route the execFile leg through the shared exec seam (issue #5459) so the option
+// mapping and the Buffer→string coercion live in one place and this wrapper no
+// longer reaches for `child_process` on its exec path. The AbortSignal is
+// forwarded so a timed-out command kills its child instead of leaving it running
+// orphaned (issue #3938).
+//
+// `preserveError: true` keeps the raw execFile rejection intact: callers here
+// (`executeCommand`, `isLocalXcodebuildAvailable`) inspect `signal.aborted` and
+// surface node's original error, and the seam's default `wrapCommandError` would
+// drop its `.code`/`.stderr` fields.
 const execAsync = async (
   file: string,
   args: string[],
   maxBuffer?: number,
   signal?: AbortSignal,
 ): Promise<ExecResult> => {
-  // Pass the AbortSignal to execFile so a timed-out command kills its child
-  // instead of leaving it running orphaned (issue #3938).
-  const options: Parameters<typeof execFile>[2] =
-    maxBuffer && signal
-      ? { maxBuffer, signal }
-      : maxBuffer
-        ? { maxBuffer }
-        : signal
-          ? { signal }
-          : undefined;
-  const result = await promisify(execFile)(file, args, options);
-  const stdout = typeof result.stdout === "string" ? result.stdout : result.stdout.toString();
-  const stderr = typeof result.stderr === "string" ? result.stderr : result.stderr.toString();
-  return createExecResult(stdout, stderr);
+  return runExecSeam(
+    (execOptions) => sharedExecFileAsync(file, args, execOptions),
+    { maxBuffer, signal },
+    { command: file, args },
+    { preserveError: true },
+  );
 };
 
 export class XcodebuildClient implements Xcodebuild {
@@ -90,7 +102,8 @@ export class XcodebuildClient implements Xcodebuild {
         ) => Promise<ExecResult>)
       | null = null,
     timer: Timer = defaultTimer,
-    private readonly spawnProcess: XcodebuildSpawner = spawn,
+    private readonly spawnProcess: XcodebuildSpawner = (command, args, options) =>
+      xcodebuildHostProcessExecutor.spawn(command, args, options),
     private readonly killProcess: XcodebuildProcessKiller = process.kill,
   ) {
     this.execAsync = execAsyncFn || execAsync;

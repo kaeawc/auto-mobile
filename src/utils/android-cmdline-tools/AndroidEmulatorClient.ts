@@ -1464,7 +1464,16 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     );
   }
 
-  private async runAccelerationCheck(): Promise<string> {
+  private runAccelerationCheck(): Promise<string> {
+    // Diagnostic `emulator -accel-check` probe (up to a 3s bound) run on an
+    // inconclusive cold-boot failure. It bypasses the executeCommand funnel, so
+    // give it its own ambient leaf — wrapped around the whole method, outside
+    // its internal Promise.race, so the added async turn can't perturb the
+    // race's FakeTimer timing (see PerfContext).
+    return trackAmbient("emulator -accel-check", () => this.runAccelerationCheckInner());
+  }
+
+  private async runAccelerationCheckInner(): Promise<string> {
     const controller = new AbortController();
     let timeout: NodeJS.Timeout | undefined;
     const probe = Promise.resolve()

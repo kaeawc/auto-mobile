@@ -33,13 +33,25 @@ export interface DeviceSessionRecord {
   expiresAtMs: number;
   sessionTimeoutMs: number;
   heartbeatTimeoutMs: number;
+  heartbeatTimeoutSource?: "default" | "custom";
   hasReceivedHeartbeat: boolean;
+  livenessPolicy?: "heartbeat" | "cli-idle";
+  preCliHeartbeatTimeoutMs?: number;
+  preCliHeartbeatTimeoutSource?: "default" | "custom";
+  preCliSessionTimeoutMs?: number;
 }
 
 export interface DeviceSessionActivityUpdate {
   lastUsedAtMs: number;
   expiresAtMs: number;
+  sessionTimeoutMs: number;
+  heartbeatTimeoutMs: number;
   hasReceivedHeartbeat: boolean;
+  heartbeatTimeoutSource?: "default" | "custom";
+  livenessPolicy?: "heartbeat" | "cli-idle";
+  preCliHeartbeatTimeoutMs?: number;
+  preCliHeartbeatTimeoutSource?: "default" | "custom";
+  preCliSessionTimeoutMs?: number;
 }
 
 export interface DeviceSessionPersistence {
@@ -54,6 +66,66 @@ export interface DeviceSessionPersistence {
     releasedAtMs: number,
     reason: string,
   ): Promise<void>;
+}
+
+type LivenessPersistenceInput = Pick<
+  DeviceSessionRecord,
+  | "heartbeatTimeoutSource"
+  | "hasReceivedHeartbeat"
+  | "livenessPolicy"
+  | "preCliHeartbeatTimeoutMs"
+  | "preCliHeartbeatTimeoutSource"
+  | "preCliSessionTimeoutMs"
+>;
+
+function livenessColumns(
+  input: LivenessPersistenceInput,
+): Pick<
+  NewDeviceSession,
+  | "heartbeat_timeout_source"
+  | "has_received_heartbeat"
+  | "liveness_policy"
+  | "pre_cli_heartbeat_timeout_ms"
+  | "pre_cli_heartbeat_timeout_source"
+  | "pre_cli_session_timeout_ms"
+> {
+  return {
+    heartbeat_timeout_source: input.heartbeatTimeoutSource ?? null,
+    has_received_heartbeat: input.hasReceivedHeartbeat ? 1 : 0,
+    liveness_policy: input.livenessPolicy ?? null,
+    pre_cli_heartbeat_timeout_ms: input.preCliHeartbeatTimeoutMs ?? null,
+    pre_cli_heartbeat_timeout_source: input.preCliHeartbeatTimeoutSource ?? null,
+    pre_cli_session_timeout_ms: input.preCliSessionTimeoutMs ?? null,
+  };
+}
+
+function livenessColumnsFromRow(
+  row: Pick<
+    NewDeviceSession,
+    | "heartbeat_timeout_source"
+    | "has_received_heartbeat"
+    | "liveness_policy"
+    | "pre_cli_heartbeat_timeout_ms"
+    | "pre_cli_heartbeat_timeout_source"
+    | "pre_cli_session_timeout_ms"
+  >,
+): Pick<
+  NewDeviceSession,
+  | "heartbeat_timeout_source"
+  | "has_received_heartbeat"
+  | "liveness_policy"
+  | "pre_cli_heartbeat_timeout_ms"
+  | "pre_cli_heartbeat_timeout_source"
+  | "pre_cli_session_timeout_ms"
+> {
+  return {
+    heartbeat_timeout_source: row.heartbeat_timeout_source,
+    has_received_heartbeat: row.has_received_heartbeat,
+    liveness_policy: row.liveness_policy,
+    pre_cli_heartbeat_timeout_ms: row.pre_cli_heartbeat_timeout_ms,
+    pre_cli_heartbeat_timeout_source: row.pre_cli_heartbeat_timeout_source,
+    pre_cli_session_timeout_ms: row.pre_cli_session_timeout_ms,
+  };
 }
 
 export class DeviceSessionRepository {
@@ -103,7 +175,7 @@ export class DeviceSessionRepository {
         release_reason: null,
         session_timeout_ms: record.sessionTimeoutMs,
         heartbeat_timeout_ms: record.heartbeatTimeoutMs,
-        has_received_heartbeat: record.hasReceivedHeartbeat ? 1 : 0,
+        ...livenessColumns(record),
         updated_at: now,
       };
 
@@ -130,7 +202,8 @@ export class DeviceSessionRepository {
             release_reason: null,
             session_timeout_ms: row.session_timeout_ms,
             heartbeat_timeout_ms: row.heartbeat_timeout_ms,
-            has_received_heartbeat: row.has_received_heartbeat,
+            ...livenessColumnsFromRow(row),
+            liveness_contract_generation: sql`liveness_contract_generation + 1`,
             updated_at: now,
           }),
         )
@@ -151,7 +224,13 @@ export class DeviceSessionRepository {
         .set({
           last_used_at_ms: update.lastUsedAtMs,
           expires_at_ms: update.expiresAtMs,
-          has_received_heartbeat: update.hasReceivedHeartbeat ? 1 : 0,
+          session_timeout_ms: update.sessionTimeoutMs,
+          heartbeat_timeout_ms: update.heartbeatTimeoutMs,
+          ...livenessColumns(update),
+          // Mark every current liveness write. The forward-compatibility trigger
+          // clears this contract only when an older binary updates legacy
+          // liveness columns without advancing this generation.
+          liveness_contract_generation: sql`liveness_contract_generation + 1`,
           updated_at: new Date().toISOString(),
         })
         .where("session_uuid", "=", sessionUuid)

@@ -183,6 +183,63 @@ export interface PreCliLivenessSnapshot {
  */
 export type SessionLivenessPolicy = "heartbeat" | "cli-idle";
 
+function persistedHeartbeatTimeoutSource(value: string | null | undefined): "default" | "custom" {
+  return value === "custom" ? "custom" : "default";
+}
+
+function persistedLivenessPolicy(value: string | null | undefined): SessionLivenessPolicy {
+  return value === "cli-idle" ? "cli-idle" : "heartbeat";
+}
+
+function persistedPreCliLiveness(persisted: DeviceSession): PreCliLivenessSnapshot | undefined {
+  if (
+    typeof persisted.pre_cli_heartbeat_timeout_ms !== "number" ||
+    typeof persisted.pre_cli_session_timeout_ms !== "number"
+  ) {
+    return undefined;
+  }
+  return {
+    heartbeatTimeoutMs: persisted.pre_cli_heartbeat_timeout_ms,
+    heartbeatTimeoutSource: persistedHeartbeatTimeoutSource(
+      persisted.pre_cli_heartbeat_timeout_source,
+    ),
+    sessionTimeoutMs: persisted.pre_cli_session_timeout_ms,
+  };
+}
+
+function sessionCreationLiveness(
+  timeoutMs: number | undefined,
+  heartbeatTimeoutMs: number | undefined,
+  recoveredLiveness: SessionRecoveryLiveness | undefined,
+  defaultSessionTimeoutMs: number,
+): Pick<
+  Session,
+  | "sessionTimeoutMs"
+  | "heartbeatTimeoutMs"
+  | "heartbeatTimeoutSource"
+  | "hasReceivedHeartbeat"
+  | "livenessPolicy"
+  | "preCliLiveness"
+> {
+  if (recoveredLiveness) {
+    return {
+      sessionTimeoutMs: recoveredLiveness.sessionTimeoutMs,
+      heartbeatTimeoutMs: recoveredLiveness.heartbeatTimeoutMs,
+      heartbeatTimeoutSource: recoveredLiveness.heartbeatTimeoutSource,
+      hasReceivedHeartbeat: recoveredLiveness.hasReceivedHeartbeat,
+      livenessPolicy: recoveredLiveness.livenessPolicy,
+      preCliLiveness: recoveredLiveness.preCliLiveness,
+    };
+  }
+  return {
+    sessionTimeoutMs: timeoutMs ?? defaultSessionTimeoutMs,
+    heartbeatTimeoutMs: heartbeatTimeoutMs ?? getDefaultSessionHeartbeatTimeoutMs(),
+    heartbeatTimeoutSource: heartbeatTimeoutMs === undefined ? "default" : "custom",
+    hasReceivedHeartbeat: false,
+    livenessPolicy: "heartbeat",
+  };
+}
+
 /**
  * Session Manager
  *
@@ -304,6 +361,22 @@ export interface SessionRecoveryTarget {
   deviceId: string;
   /** Distinguishes an Android AVD name from a physical-device serial. */
   androidEmulator?: boolean;
+  /** Liveness contract recorded before the daemon restart. */
+  liveness?: SessionRecoveryLiveness;
+}
+
+/**
+ * The durable portion of a session's liveness state needed while re-materializing
+ * it after a daemon restart. Optional on {@link SessionRecoveryTarget} so an
+ * assigner compiled against the older recovery-target contract remains valid.
+ */
+export interface SessionRecoveryLiveness {
+  sessionTimeoutMs: number;
+  heartbeatTimeoutMs: number;
+  heartbeatTimeoutSource: "default" | "custom";
+  hasReceivedHeartbeat: boolean;
+  livenessPolicy: SessionLivenessPolicy;
+  preCliLiveness?: PreCliLivenessSnapshot;
 }
 
 export type SessionRecoveryFailureReason =
@@ -743,6 +816,7 @@ export class SessionManager {
     timeoutMs?: number,
     heartbeatTimeoutMs?: number,
     stableDeviceId?: string,
+    recoveredLiveness?: SessionRecoveryLiveness,
   ): Promise<Session> {
     getAbortSignal()?.throwIfAborted();
     if (!this.acceptingSessionCreations) {
@@ -775,8 +849,12 @@ export class SessionManager {
     }
 
     const now = this.timer.now();
-    const sessionTimeoutMs = timeoutMs ?? this.SESSION_TIMEOUT_MS;
-    const heartbeatTimeoutSource = heartbeatTimeoutMs === undefined ? "default" : "custom";
+    const liveness = sessionCreationLiveness(
+      timeoutMs,
+      heartbeatTimeoutMs,
+      recoveredLiveness,
+      this.SESSION_TIMEOUT_MS,
+    );
     const session: Session = {
       sessionId,
       assignedDevice,
@@ -784,16 +862,10 @@ export class SessionManager {
       platform,
       createdAt: now,
       lastUsedAt: now,
-      expiresAt: now + sessionTimeoutMs,
+      expiresAt: now + liveness.sessionTimeoutMs,
       cacheData: {},
       lastHeartbeat: now,
-      sessionTimeoutMs,
-      heartbeatTimeoutMs: heartbeatTimeoutMs ?? getDefaultSessionHeartbeatTimeoutMs(),
-      heartbeatTimeoutSource,
-      hasReceivedHeartbeat: false,
-      // Strict by default: only a client that declares itself one-shot (`--cli`,
-      // via `adoptCliLivenessPolicy`) is exempted from the heartbeat contract.
-      livenessPolicy: "heartbeat",
+      ...liveness,
     };
 
     const creation: PendingSessionCreation = { promise: this.persistAndPublishSession(session) };
@@ -3598,7 +3670,12 @@ export class SessionManager {
       expiresAtMs: session.expiresAt,
       sessionTimeoutMs: session.sessionTimeoutMs,
       heartbeatTimeoutMs: session.heartbeatTimeoutMs,
+      heartbeatTimeoutSource: session.heartbeatTimeoutSource,
       hasReceivedHeartbeat: session.hasReceivedHeartbeat,
+      livenessPolicy: session.livenessPolicy,
+      preCliHeartbeatTimeoutMs: session.preCliLiveness?.heartbeatTimeoutMs,
+      preCliHeartbeatTimeoutSource: session.preCliLiveness?.heartbeatTimeoutSource,
+      preCliSessionTimeoutMs: session.preCliLiveness?.sessionTimeoutMs,
     });
     await this.deviceSessionRepository.replaceLivenessOwnership?.(
       session.sessionId,
@@ -3639,9 +3716,31 @@ export class SessionManager {
       platform: persisted.platform,
       stableDeviceId,
       deviceId: persisted.device_id,
+      liveness: this.recoveryLivenessFromPersisted(persisted),
       ...(persisted.platform === "android"
         ? { androidEmulator: isAndroidEmulatorSerial(persisted.device_id) }
         : {}),
+    };
+  }
+
+  /**
+   * Rebuild the liveness contract from the persisted row. Rows written before
+   * the liveness columns existed fall back to the strict default contract;
+   * autolock metadata alone is not proof that a client declared CLI liveness.
+   */
+  private recoveryLivenessFromPersisted(persisted: DeviceSession): SessionRecoveryLiveness {
+    const heartbeatTimeoutSource = persistedHeartbeatTimeoutSource(
+      persisted.heartbeat_timeout_source,
+    );
+    const livenessPolicy = persistedLivenessPolicy(persisted.liveness_policy);
+    const preCliLiveness = persistedPreCliLiveness(persisted);
+    return {
+      sessionTimeoutMs: persisted.session_timeout_ms,
+      heartbeatTimeoutMs: persisted.heartbeat_timeout_ms,
+      heartbeatTimeoutSource,
+      hasReceivedHeartbeat: persisted.has_received_heartbeat === 1,
+      livenessPolicy,
+      ...(preCliLiveness ? { preCliLiveness } : {}),
     };
   }
 
@@ -3654,7 +3753,14 @@ export class SessionManager {
     await this.deviceSessionRepository.recordActivity(session.sessionId, {
       lastUsedAtMs: session.lastUsedAt,
       expiresAtMs: session.expiresAt,
+      sessionTimeoutMs: session.sessionTimeoutMs,
+      heartbeatTimeoutMs: session.heartbeatTimeoutMs,
       hasReceivedHeartbeat: session.hasReceivedHeartbeat,
+      heartbeatTimeoutSource: session.heartbeatTimeoutSource,
+      livenessPolicy: session.livenessPolicy,
+      preCliHeartbeatTimeoutMs: session.preCliLiveness?.heartbeatTimeoutMs,
+      preCliHeartbeatTimeoutSource: session.preCliLiveness?.heartbeatTimeoutSource,
+      preCliSessionTimeoutMs: session.preCliLiveness?.sessionTimeoutMs,
     });
   }
 

@@ -64,6 +64,8 @@ describe("DeviceSessionRepository", () => {
     await repo.recordActivity("session-1", {
       lastUsedAtMs: 3000,
       expiresAtMs: 63_000,
+      sessionTimeoutMs: 60_000,
+      heartbeatTimeoutMs: 60_000,
       hasReceivedHeartbeat: true,
     });
     await repo.recordLivenessOwnership("session-1", "owner-token");
@@ -106,6 +108,91 @@ describe("DeviceSessionRepository", () => {
     expect(await repo.getSession("recoverable-session")).toMatchObject({
       release_reason: "daemon-shutdown",
       liveness_owner_token: "current-owner",
+    });
+  });
+
+  test("persists the liveness contract used to recover daemon sessions", async () => {
+    await repo.upsertActiveSession({
+      sessionUuid: "liveness-session",
+      deviceId: "emulator-5554",
+      platform: "android",
+      createdAtMs: 1000,
+      lastUsedAtMs: 2000,
+      expiresAtMs: 62_000,
+      sessionTimeoutMs: 60_000,
+      heartbeatTimeoutMs: 15_000,
+      heartbeatTimeoutSource: "custom",
+      hasReceivedHeartbeat: true,
+      livenessPolicy: "cli-idle",
+      preCliHeartbeatTimeoutMs: 15_000,
+      preCliHeartbeatTimeoutSource: "custom",
+      preCliSessionTimeoutMs: 60_000,
+    });
+
+    await repo.recordActivity("liveness-session", {
+      lastUsedAtMs: 3000,
+      expiresAtMs: 303_000,
+      sessionTimeoutMs: 300_000,
+      heartbeatTimeoutMs: 300_000,
+      hasReceivedHeartbeat: true,
+      heartbeatTimeoutSource: "custom",
+      livenessPolicy: "cli-idle",
+      preCliHeartbeatTimeoutMs: 15_000,
+      preCliHeartbeatTimeoutSource: "custom",
+      preCliSessionTimeoutMs: 60_000,
+    });
+
+    expect(await repo.getSession("liveness-session")).toMatchObject({
+      session_timeout_ms: 300_000,
+      heartbeat_timeout_ms: 300_000,
+      heartbeat_timeout_source: "custom",
+      has_received_heartbeat: 1,
+      liveness_policy: "cli-idle",
+      pre_cli_heartbeat_timeout_ms: 15_000,
+      pre_cli_heartbeat_timeout_source: "custom",
+      pre_cli_session_timeout_ms: 60_000,
+    });
+  });
+
+  test("clears stale CLI metadata when a legacy writer changes liveness columns", async () => {
+    await repo.upsertActiveSession({
+      sessionUuid: "legacy-liveness-session",
+      deviceId: "emulator-5554",
+      platform: "android",
+      createdAtMs: 1000,
+      lastUsedAtMs: 2000,
+      expiresAtMs: 302_000,
+      sessionTimeoutMs: 300_000,
+      heartbeatTimeoutMs: 300_000,
+      heartbeatTimeoutSource: "custom",
+      hasReceivedHeartbeat: true,
+      livenessPolicy: "cli-idle",
+      preCliHeartbeatTimeoutMs: 15_000,
+      preCliHeartbeatTimeoutSource: "custom",
+      preCliSessionTimeoutMs: 60_000,
+    });
+
+    // Mirrors an older binary's upsert: it updates only the columns it knew
+    // before the liveness contract existed, preserving unknown columns unless
+    // the writer fence erases them.
+    await db
+      .updateTable("device_sessions")
+      .set({
+        session_timeout_ms: 60_000,
+        heartbeat_timeout_ms: 15_000,
+        has_received_heartbeat: 1,
+      })
+      .where("session_uuid", "=", "legacy-liveness-session")
+      .execute();
+
+    expect(await repo.getSession("legacy-liveness-session")).toMatchObject({
+      session_timeout_ms: 60_000,
+      heartbeat_timeout_ms: 15_000,
+      heartbeat_timeout_source: null,
+      liveness_policy: null,
+      pre_cli_heartbeat_timeout_ms: null,
+      pre_cli_heartbeat_timeout_source: null,
+      pre_cli_session_timeout_ms: null,
     });
   });
 
@@ -302,6 +389,8 @@ describe("DeviceSessionRepository", () => {
     await repo.recordActivity("session-1", {
       lastUsedAtMs: 3000,
       expiresAtMs: 63_000,
+      sessionTimeoutMs: 60_000,
+      heartbeatTimeoutMs: 60_000,
       hasReceivedHeartbeat: true,
     });
 

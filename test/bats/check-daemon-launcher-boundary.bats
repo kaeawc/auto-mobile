@@ -516,6 +516,10 @@ teardown() {
     'export function externallyInvoked() { externalLaunch("auto-mobile", ["--daemon-mode"]); }' \
     'if (false) externallyInvoked();' \
     'const externalLaunch = childProcess.execFileSync;' \
+    'let exportedArrowLaunch = childProcess.execFileSync;' \
+    'export const exportedArrow = () => exportedArrowLaunch("auto-mobile", ["--daemon-mode"]);' \
+    'exportedArrowLaunch = safeLaunch;' \
+    'exportedArrow();' \
     'function escaped() { escapedLaunch("auto-mobile", ["--daemon-mode"]); }' \
     'register(escaped);' \
     'escaped();' \
@@ -549,8 +553,9 @@ teardown() {
   run bash "$SCRIPT"
 
   [ "$status" -eq 1 ]
-  [[ "$(grep -c "DaemonLauncherBoundaryFixture.ts" <<< "$output")" -eq 9 ]]
+  [[ "$(grep -c "DaemonLauncherBoundaryFixture.ts" <<< "$output")" -eq 10 ]]
   [[ "$output" == *'externalLaunch("auto-mobile"'* ]]
+  [[ "$output" == *'exportedArrowLaunch("auto-mobile"'* ]]
   [[ "$output" == *'escapedLaunch("auto-mobile"'* ]]
   [[ "$output" == *'awaitedLaunch("auto-mobile"'* ]]
   [[ "$output" == *'yieldedLaunch("auto-mobile"'* ]]

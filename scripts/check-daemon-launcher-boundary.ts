@@ -393,6 +393,9 @@ function violationsIn(
     }
     let ancestor: ts.Node | undefined = owner.parent;
     while (ancestor) {
+      if (hasModifier(ancestor, ts.SyntaxKind.ExportKeyword)) {
+        return true;
+      }
       if (ts.isSourceFile(ancestor) || ts.isFunctionLike(ancestor)) {
         return false;
       }

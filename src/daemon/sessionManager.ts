@@ -3692,10 +3692,14 @@ export class SessionManager {
       return undefined;
     }
     // iOS device_id has always been the simulator's immutable UDID. Android's
-    // persisted device_id is an ADB transport serial and cannot prove continuity.
+    // emulator device_id is an ADB transport serial and cannot prove continuity;
+    // a physical handset serial is its durable identity.
     const stableDeviceId =
       persisted.stable_device_id ??
-      (persisted.platform === "ios" ? persisted.device_id : undefined);
+      (persisted.platform === "ios" ||
+      (persisted.platform === "android" && !isAndroidEmulatorSerial(persisted.device_id))
+        ? persisted.device_id
+        : undefined);
     if (!stableDeviceId) {
       await this.terminalizePersistedRecoveryFailure(sessionId, persisted, {
         terminalReleaseReason: "identity-recovery-identity-continuity-lost",

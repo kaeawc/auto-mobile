@@ -705,6 +705,70 @@ describe("MultiPlatformDeviceManager", () => {
     ]);
   });
 
+  test("listDeviceImages(android) keeps configured AVDs when the overlay throws synchronously", async () => {
+    const image: DeviceInfo = { name: "Pixel_8", platform: "android", isRunning: false };
+    const fakeEmulator = {
+      listAvds: async () => [image],
+      getBootedDevicesChecked: (): Promise<BootedDevice[]> => {
+        throw new Error("sync boom");
+      },
+    } as unknown as AndroidEmulatorClient;
+    const manager = new MultiPlatformDeviceManager(
+      new FakeAdbClient() as unknown as AdbClient,
+      undefined,
+      fakeEmulator,
+    );
+
+    await expect(manager.listDeviceImages("android")).resolves.toEqual([
+      { ...image, isRunningStateKnown: false },
+    ]);
+  });
+
+  test("listDeviceImages(android) keeps configured AVDs when overlay mapping fails", async () => {
+    const image: DeviceInfo = { name: "Pixel_8", platform: "android", isRunning: false };
+    const malformedBootedDevice = {
+      name: "Pixel_8",
+      platform: "android",
+      get deviceId(): string {
+        throw new Error("malformed booted device");
+      },
+    } as unknown as BootedDevice;
+    const fakeEmulator = {
+      listAvds: async () => [image],
+      getBootedDevicesChecked: async (): Promise<BootedDevice[]> => [malformedBootedDevice],
+    } as unknown as AndroidEmulatorClient;
+    const manager = new MultiPlatformDeviceManager(
+      new FakeAdbClient() as unknown as AdbClient,
+      undefined,
+      fakeEmulator,
+    );
+
+    await expect(manager.listDeviceImages("android")).resolves.toEqual([
+      { ...image, isRunningStateKnown: false },
+    ]);
+  });
+
+  test("getDeviceImagesDetailed does not degrade Android inventory when its overlay fails", async () => {
+    const image: DeviceInfo = { name: "Pixel_8", platform: "android", isRunning: false };
+    const fakeEmulator = {
+      listAvds: async () => [image],
+      getBootedDevicesChecked: (): Promise<BootedDevice[]> => {
+        throw new Error("sync boom");
+      },
+    } as unknown as AndroidEmulatorClient;
+    const manager = new MultiPlatformDeviceManager(
+      new FakeAdbClient() as unknown as AdbClient,
+      undefined,
+      fakeEmulator,
+    );
+
+    await expect(manager.getDeviceImagesDetailed("android")).resolves.toEqual({
+      devices: [{ ...image, isRunningStateKnown: false }],
+      succeededPlatforms: new Set(["android"]),
+      discoveryErrors: {},
+    });
+  });
+
   test("listDeviceImages(android) forwards ambient cancellation to configured AVD discovery", async () => {
     const controller = new AbortController();
     let receivedSignal: AbortSignal | undefined;

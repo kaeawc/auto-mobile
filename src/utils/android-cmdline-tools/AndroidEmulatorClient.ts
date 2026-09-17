@@ -14,6 +14,7 @@ import { arch } from "os";
 import { detectAndroidCommandLineTools, getBestAndroidToolsLocation } from "./detection";
 import { defaultTimer, Timer } from "../SystemTimer";
 import { combineAbortSignals } from "../AbortContext";
+import { trackAmbient } from "../PerfContext";
 import { createGlobalPerformanceTracker } from "../PerformanceTracker";
 import {
   TcpHostPortAvailabilityChecker,
@@ -1917,19 +1918,25 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     request.signal?.addEventListener("abort", dispose, { once: true });
 
     try {
-      process = await this.startEmulatorProcess(
-        request.avdName,
-        request.extraArgs,
-        (spawnedProcess) => {
-          process = spawnedProcess;
-          if (disposed && !spawnedProcess.killed) {
-            spawnedProcess.kill();
-          }
-        },
-        () => disposed,
-        shouldCaptureEmulatorReservationSnapshot(request.deviceId),
-        request.deviceId,
-        request.signal,
+      // Ambient leaf for the emulator startup command (spawn + startup
+      // validation). It ends when `startEmulatorProcess` resolves — never the
+      // resident emulator's whole lifetime — mirroring the iOS `simctl boot`
+      // leaf (see PerfContext).
+      process = await trackAmbient(`emulator launch ${request.avdName}`, () =>
+        this.startEmulatorProcess(
+          request.avdName,
+          request.extraArgs,
+          (spawnedProcess) => {
+            process = spawnedProcess;
+            if (disposed && !spawnedProcess.killed) {
+              spawnedProcess.kill();
+            }
+          },
+          () => disposed,
+          shouldCaptureEmulatorReservationSnapshot(request.deviceId),
+          request.deviceId,
+          request.signal,
+        ),
       );
       if (disposed) {
         if (process && !process.killed) {

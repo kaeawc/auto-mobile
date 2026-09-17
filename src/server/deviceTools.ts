@@ -8375,17 +8375,23 @@ export function registerDeviceTools() {
       args.platform === "android"
         ? getStartDevicePool(DaemonState.getInstance())?.getRecoveringAndroidTargets()
         : undefined;
-    state.boot = await bootService.boot(
-      {
-        ...args,
-        operationName: budgets.operationName,
-        timeoutMs: budgets.bootTimeoutMs,
-        totalDeadlineMs: bootDeadlineMs,
-        signal,
-        excludeDeviceNames: recoveryTargets?.names,
-        excludeDeviceIds: recoveryTargets?.serials,
-      },
-      progress ? { report: progress } : undefined,
+    // Establish the (--debug-perf-gated) ambient tracker around the shared
+    // acquisition boot attempt (getAndroid/getApple/startDevice), matching
+    // provisionDevice's boot scope, so the emulator/simctl/adb discovery, boot,
+    // and boot-readiness commands attribute their spans here (see PerfContext).
+    state.boot = await runWithPerfTracker(ambientPerfFor(perf), () =>
+      bootService.boot(
+        {
+          ...args,
+          operationName: budgets.operationName,
+          timeoutMs: budgets.bootTimeoutMs,
+          totalDeadlineMs: bootDeadlineMs,
+          signal,
+          excludeDeviceNames: recoveryTargets?.names,
+          excludeDeviceIds: recoveryTargets?.serials,
+        },
+        progress ? { report: progress } : undefined,
+      ),
     );
     assertAndroidBootDidNotEnterRecovery(args, state.boot);
     perf.endOperation("bootDevice");

@@ -78,6 +78,10 @@ function violationsIn(file: string): Violation[] {
       ts.isStringLiteral(node.moduleSpecifier) &&
       CHILD_PROCESS_MODULES.has(node.moduleSpecifier.text)
     ) {
+      const defaultBinding = node.importClause?.name;
+      if (defaultBinding) {
+        namespaces.add(defaultBinding.text);
+      }
       const bindings = node.importClause?.namedBindings;
       if (bindings && ts.isNamespaceImport(bindings)) {
         namespaces.add(bindings.name.text);

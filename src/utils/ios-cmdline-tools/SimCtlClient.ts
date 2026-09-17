@@ -1,4 +1,5 @@
 import { errorMessage } from "../describeUnknownError";
+import { trackAmbient } from "../PerfContext";
 import { ChildProcess, type SpawnOptions } from "child_process";
 import { promises as fsPromises } from "fs";
 import { tmpdir } from "os";
@@ -694,7 +695,28 @@ export class SimCtlClient implements SimCtl {
     return this.spawnProcess("xcrun", fullArgs, options);
   }
 
-  private async executeCommandArgv(
+  private executeCommandArgv(
+    args: string[],
+    timeoutMs?: number,
+    displayCommand?: string,
+    explicitSignal?: AbortSignal,
+    waitForTimedOutCommandSettlement = false,
+  ): Promise<ExecResult> {
+    // One span per simctl invocation, named by the leading subcommand so spans
+    // aggregate (e.g. `simctl boot`), recorded against the ambient
+    // device-lifecycle tracker when one is in scope (see PerfContext).
+    return trackAmbient(`simctl ${args[0] ?? ""}`.trimEnd(), () =>
+      this.executeCommandArgvInner(
+        args,
+        timeoutMs,
+        displayCommand,
+        explicitSignal,
+        waitForTimedOutCommandSettlement,
+      ),
+    );
+  }
+
+  private async executeCommandArgvInner(
     args: string[],
     timeoutMs?: number,
     displayCommand?: string,

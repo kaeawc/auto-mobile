@@ -29,6 +29,7 @@ import {
   type DeviceTimestampResult,
 } from "./interfaces/AdbExecutor";
 import { getAbortSignal } from "../AbortContext";
+import { trackAmbient } from "../PerfContext";
 import { OPERATION_CANCELLED_MESSAGE } from "../constants";
 import { RetryExecutor, defaultRetryExecutor } from "../retry/RetryExecutor";
 import { TTLCache } from "../cache/Cache";
@@ -889,7 +890,33 @@ export class AdbClient implements AdbExecutor {
    * @param noRetry - Optional flag to disable retry logic for commands expected to fail
    * @returns Promise with command output
    */
-  private async executeArgsImpl(
+  private executeArgsImpl(
+    commandArgs: string[],
+    timeoutMs?: number,
+    maxBuffer?: number,
+    noRetry?: boolean,
+    signal?: AbortSignal,
+    beforeDispatch?: (remainingTimeoutMs?: number) => Promise<void>,
+    waitForProcessSettlementAfterAbort = false,
+  ): Promise<ExecResult> {
+    // One span per logical adb command (retries included), recorded against the
+    // ambient device-lifecycle tracker when one is in scope (see PerfContext).
+    // Name by the leading subcommand tokens so spans aggregate (e.g.
+    // `adb shell getprop`) instead of exploding per argument set.
+    return trackAmbient(`adb ${commandArgs.slice(0, 2).join(" ")}`.trimEnd(), () =>
+      this.executeArgsImplInner(
+        commandArgs,
+        timeoutMs,
+        maxBuffer,
+        noRetry,
+        signal,
+        beforeDispatch,
+        waitForProcessSettlementAfterAbort,
+      ),
+    );
+  }
+
+  private async executeArgsImplInner(
     commandArgs: string[],
     timeoutMs?: number,
     maxBuffer?: number,

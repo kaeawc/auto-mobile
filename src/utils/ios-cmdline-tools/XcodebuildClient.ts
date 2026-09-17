@@ -1,4 +1,5 @@
 import { type ChildProcess, type SpawnOptions } from "node:child_process";
+import { trackAmbient } from "../PerfContext";
 import { ActionableError, ExecResult } from "../../models";
 import { logger } from "../logger";
 import { runExecSeam } from "../ExecSeam";
@@ -124,7 +125,16 @@ export class XcodebuildClient implements Xcodebuild {
     }
   }
 
-  async executeCommand(
+  executeCommand(args: string[], options: XcodebuildCommandOptions = {}): Promise<ExecResult> {
+    // One span per xcodebuild invocation, named by the leading argument so
+    // spans aggregate (e.g. `xcodebuild build`), recorded against the ambient
+    // device-lifecycle tracker when one is in scope (see PerfContext).
+    return trackAmbient(`xcodebuild ${args.slice(0, 1).join(" ")}`.trimEnd(), () =>
+      this.executeCommandInner(args, options),
+    );
+  }
+
+  private async executeCommandInner(
     args: string[],
     options: XcodebuildCommandOptions = {},
   ): Promise<ExecResult> {
@@ -216,7 +226,15 @@ export class XcodebuildClient implements Xcodebuild {
    * a signal must own that AbortController themselves and abort it only from
    * their own teardown path.
    */
-  async startStreaming(
+  startStreaming(args: string[], options: XcodebuildStreamingOptions = {}): Promise<ChildProcess> {
+    // Span only the STARTUP portion (availability + spawn + waitForSpawn), which
+    // ends when the resident child is returned — never the long-lived streaming
+    // process's whole lifetime (see PerfContext). This is the `xcodebuild
+    // test-without-building` runner launch during iOS readiness.
+    return trackAmbient("xcodebuild startStreaming", () => this.startStreamingInner(args, options));
+  }
+
+  private async startStreamingInner(
     args: string[],
     options: XcodebuildStreamingOptions = {},
   ): Promise<ChildProcess> {

@@ -1113,6 +1113,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     label?: string,
     timeoutMs: number = 5000,
     perf?: PerformanceTracker,
+    _abortSignal?: AbortSignal,
   ): Promise<CtrlProxyActionResult> {
     await this.applyDelay("action");
     this.checkFailure("action");

@@ -450,6 +450,7 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
     label?: string,
     timeoutMs?: number,
     perf?: PerformanceTracker,
+    abortSignal?: AbortSignal,
   ): Promise<CtrlProxyActionResult>;
 
   requestActivateAccessibilityLink(
@@ -2812,8 +2813,9 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     label?: string,
     timeoutMs?: number,
     perf?: PerformanceTracker,
+    abortSignal?: AbortSignal,
   ): Promise<CtrlProxyActionResult> {
-    return this.voiceOver.requestAction(action, resourceId, label, timeoutMs, perf);
+    return this.voiceOver.requestAction(action, resourceId, label, timeoutMs, perf, abortSignal);
   }
 
   async requestActivateAccessibilityLink(

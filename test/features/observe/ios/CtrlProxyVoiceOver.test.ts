@@ -383,6 +383,80 @@ describe("CtrlProxyVoiceOver", function () {
     });
   });
 
+  describe("requestAction", function () {
+    test("does not dispatch a cancelled system-alert action", async function () {
+      const { factory, getSocket } = createCapturingFactory(fakeTimer);
+      const client = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer,
+      );
+      const controller = new AbortController();
+      controller.abort(new Error("openLink deadline exceeded"));
+
+      try {
+        const result = await client.requestAction(
+          "system_alert_accept",
+          undefined,
+          undefined,
+          5000,
+          undefined,
+          controller.signal,
+        );
+        const sentTypes = (getSocket()?.sentMessages ?? []).map(
+          (raw) => (JSON.parse(raw) as { type?: string }).type,
+        );
+
+        expect(sentTypes).not.toContain("request_action");
+        expect(result.success).toBe(false);
+      } finally {
+        await client.close();
+      }
+    });
+
+    test("rejects a cancelled system-alert action before a late response can succeed", async function () {
+      const { factory, getSocket } = createCapturingFactory(fakeTimer);
+      const client = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer,
+      );
+      const controller = new AbortController();
+      const cancellation = new Error("openLink deadline exceeded");
+
+      try {
+        const result = client.requestAction(
+          "system_alert_accept",
+          undefined,
+          undefined,
+          5000,
+          undefined,
+          controller.signal,
+        );
+        const socket = await waitForSocket(getSocket);
+        await waitForSocketOpen(socket);
+        await waitForSentMessages(socket, 1);
+        const sentMsg = commandPayloads(socket!)[0];
+
+        controller.abort(cancellation);
+        socket!.simulateMessage(
+          JSON.stringify({
+            type: "action_result",
+            requestId: sentMsg.requestId,
+            success: true,
+            action: "system_alert_accept",
+          }),
+        );
+
+        await expect(result).rejects.toBe(cancellation);
+      } finally {
+        await client.close();
+      }
+    });
+  });
+
   describe("requestSetVoiceOverEnabled", function () {
     test("emits set_voiceover_state with the enabled param and resolves on success", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);

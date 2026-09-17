@@ -406,18 +406,27 @@ teardown() {
     'const invokeArrowAfterReassignment = () => arrowAfterReassignment("auto-mobile", ["--daemon-mode"]);' \
     'arrowAfterReassignment = safeLaunch;' \
     'invokeArrowAfterReassignment();' \
+    'let methodAfterReassignment = childProcess.execFileSync;' \
+    'const afterHolder = { run() { methodAfterReassignment("auto-mobile", ["--daemon-mode"]); } };' \
+    'methodAfterReassignment = safeLaunch;' \
+    'afterHolder.run();' \
+    'let methodBeforeReassignment = childProcess.execFileSync;' \
+    'const beforeHolder = { run() { methodBeforeReassignment("auto-mobile", ["--daemon-mode"]); } };' \
+    'beforeHolder.run();' \
+    'methodBeforeReassignment = safeLaunch;' \
     > "$FIXTURE"
 
   run bash "$SCRIPT"
 
   [ "$status" -eq 1 ]
-  [[ "$(grep -c "DaemonLauncherBoundaryFixture.ts" <<< "$output")" -eq 6 ]]
+  [[ "$(grep -c "DaemonLauncherBoundaryFixture.ts" <<< "$output")" -eq 7 ]]
   [[ "$output" == *'initialized("auto-mobile"'* ]]
   [[ "$output" == *'assignedLater("auto-mobile"'* ]]
   [[ "$output" == *'conditionallyReassigned("auto-mobile"'* ]]
   [[ "$output" == *'preservedByOr("auto-mobile"'* ]]
   [[ "$output" == *'preservedByNullish("auto-mobile"'* ]]
   [[ "$output" == *'invokedBeforeReassignment("auto-mobile"'* ]]
+  [[ "$output" == *'methodBeforeReassignment("auto-mobile"'* ]]
 }
 
 @test "tracks object-rest assignment targets and static exclusions" {

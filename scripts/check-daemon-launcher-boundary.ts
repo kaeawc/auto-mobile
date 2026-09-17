@@ -342,12 +342,11 @@ function violationsIn(
   };
   countAssignments(sourceFile);
 
-  const functionOwnerSymbol = (functionLike: ts.FunctionLikeDeclaration): ts.Symbol | undefined => {
-    if (ts.isFunctionDeclaration(functionLike) && functionLike.name) {
-      return symbolFor(functionLike.name);
-    }
-    if (ts.isMethodDeclaration(functionLike) && ts.isIdentifier(functionLike.name)) {
-      return symbolFor(functionLike.name);
+  const functionOwnerDeclaration = (
+    functionLike: ts.FunctionLikeDeclaration,
+  ): ts.Node | undefined => {
+    if (ts.isFunctionDeclaration(functionLike) || ts.isMethodDeclaration(functionLike)) {
+      return functionLike;
     }
     let parent: ts.Node | undefined = functionLike.parent;
     while (
@@ -361,26 +360,28 @@ function violationsIn(
       parent = parent.parent;
     }
     return parent && ts.isVariableDeclaration(parent) && ts.isIdentifier(parent.name)
-      ? symbolFor(parent.name)
+      ? parent
       : undefined;
   };
 
-  const calledFunctionSymbol = (expression: ts.Expression): ts.Symbol | undefined => {
+  const calledFunctionDeclaration = (expression: ts.Expression): ts.Node | undefined => {
     const callee = unwrapTransparentExpression(expression);
     if (ts.isIdentifier(callee)) {
-      return symbolFor(callee);
+      return symbolFor(callee)?.valueDeclaration;
     }
-    return ts.isPropertyAccessExpression(callee) ? symbolFor(callee.name) : undefined;
+    return ts.isPropertyAccessExpression(callee)
+      ? symbolFor(callee.name)?.valueDeclaration
+      : undefined;
   };
 
-  const eagerFunctionCallPositions = new Map<ts.Symbol, number[]>();
+  const eagerFunctionCallPositions = new Map<ts.Node, number[]>();
   const collectEagerFunctionCalls = (node: ts.Node): void => {
     if (ts.isCallExpression(node) && ts.findAncestor(node, ts.isFunctionLike) === undefined) {
-      const symbol = calledFunctionSymbol(node.expression);
-      if (symbol) {
-        const positions = eagerFunctionCallPositions.get(symbol) ?? [];
+      const declaration = calledFunctionDeclaration(node.expression);
+      if (declaration) {
+        const positions = eagerFunctionCallPositions.get(declaration) ?? [];
         positions.push(node.getStart(sourceFile));
-        eagerFunctionCallPositions.set(symbol, positions);
+        eagerFunctionCallPositions.set(declaration, positions);
       }
     }
     ts.forEachChild(node, collectEagerFunctionCalls);
@@ -391,8 +392,8 @@ function violationsIn(
     let ancestor: ts.Node | undefined = node.parent;
     while (ancestor) {
       if (ts.isFunctionLike(ancestor)) {
-        const symbol = functionOwnerSymbol(ancestor);
-        const positions = symbol ? eagerFunctionCallPositions.get(symbol) : undefined;
+        const declaration = functionOwnerDeclaration(ancestor);
+        const positions = declaration ? eagerFunctionCallPositions.get(declaration) : undefined;
         return positions && positions.length > 0 ? positions : undefined;
       }
       ancestor = ancestor.parent;

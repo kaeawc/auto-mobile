@@ -60,6 +60,24 @@ export function getPerfTracker(): PerformanceTracker {
 }
 
 /**
+ * Run `fn` with the shared no-op tracker as the ambient tracker, detaching it
+ * from any request tracker currently in scope.
+ *
+ * Use this when `fn` creates a resource that OUTLIVES the current request — a
+ * recurring supervisor interval, a resident process's restart callback. Node's
+ * `AsyncLocalStorage` store is captured by every timer/async resource created
+ * inside a `run()` scope, so a long-lived interval created inside a readiness
+ * request's ambient scope would otherwise keep appending its later firings into
+ * that completed request's (discarded) timing tree and retain the tree for the
+ * device's lifetime. Establishing the no-op tracker here makes those later
+ * firings record nothing, while the request's own in-scope commands still go to
+ * the real tracker.
+ */
+export function runDetachedFromPerf<T>(fn: () => T): T {
+  return perfContext.run(noOpTracker, fn);
+}
+
+/**
  * Gate an always-on tracker behind `--debug-perf` for ambient use.
  *
  * The device-lifecycle handlers build an always-on tracker

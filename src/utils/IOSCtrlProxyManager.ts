@@ -1,4 +1,5 @@
 import { errorMessage } from "./describeUnknownError";
+import { trackAmbient } from "./PerfContext";
 import { logger } from "./logger";
 import { BootedDevice } from "../models";
 import { requireBootedDevice } from "./requireBootedDevice";
@@ -1019,11 +1020,15 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
           return installed;
         }
 
-        const { stdout } = await this.processExecutor.executeCommand("ideviceinstaller", [
-          "-u",
-          this.device.deviceId,
-          "-l",
-        ]);
+        // Direct physical-device command (not through an instrumented client
+        // funnel); give it its own ambient leaf (see PerfContext).
+        const { stdout } = await trackAmbient("ideviceinstaller -l", () =>
+          this.processExecutor.executeCommand("ideviceinstaller", [
+            "-u",
+            this.device.deviceId,
+            "-l",
+          ]),
+        );
         const installed = stdout.includes(IOSCtrlProxyManager.BUNDLE_ID);
         this.cachedInstalled = { isInstalled: installed, timestamp: this.timer.now() };
         return installed;
@@ -3477,7 +3482,10 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       }
     });
 
-    await this.waitForIproxyStartup();
+    // Span the iproxy tunnel STARTUP only (spawn + readiness wait), not the
+    // resident tunnel's lifetime; the physical-device spawn bypasses any
+    // instrumented client funnel (see PerfContext).
+    await trackAmbient("iproxy startup", () => this.waitForIproxyStartup());
     if (options.supervise !== false) {
       await this.iproxySupervisor.start();
     }

@@ -152,18 +152,6 @@ function trackInFlightAndroidColdBootIfNeeded(
     : undefined;
 }
 
-function shouldColdBootMatchedAndroidImage(
-  image: DeviceInfo,
-  preferRunning: boolean | undefined,
-  lifecycleCoordinator: VirtualDeviceLifecycleCoordinator,
-): boolean {
-  return (
-    image.platform === "android" &&
-    (hasInFlightAndroidColdBoot(lifecycleCoordinator, image.name) ||
-      (preferRunning === false && !image.isRunning))
-  );
-}
-
 function findBootedDeviceMatchingImage(
   image: DeviceInfo,
   booted: readonly BootedDevice[],
@@ -690,8 +678,25 @@ export class DeviceBootService {
     if (!running) {
       return this.bootImage(image, context, progress, false);
     }
-    if (shouldColdBootMatchedAndroidImage(image, preferRunning, this.lifecycleCoordinator)) {
-      return this.bootImage(image, context, progress, false);
+    const hasInFlightColdBoot =
+      image.platform === "android" &&
+      hasInFlightAndroidColdBoot(this.lifecycleCoordinator, image.name);
+    const explicitlyRequestedColdBoot = preferRunning === false && !image.isRunning;
+    // An injected lease extends through callers' later session/readiness
+    // handoff. Only a lease this service owns is released by boot() after its
+    // readiness settles, which is the boundary this post-lease re-check needs.
+    const canAdoptAfterLease = context.ownsLifecycleLease && !explicitlyRequestedColdBoot;
+    if (hasInFlightColdBoot || explicitlyRequestedColdBoot) {
+      // An in-flight owner may finish while this selector reservation waits to
+      // bind the AVD's stable identity. Re-check only that case after binding:
+      // explicit cold-boot intent must never be turned into adoption (#7197).
+      return this.bootImage(
+        image,
+        context,
+        progress,
+        false,
+        hasInFlightColdBoot && canAdoptAfterLease,
+      );
     }
     const result = await this.waitForRunningDevice(
       enrichBootedDevice(running, image),
@@ -801,6 +806,7 @@ export class DeviceBootService {
     context: BootDeadlineContext,
     progress: DeviceBootProgress | undefined,
     provisioned: boolean,
+    adoptRunningAfterLease = false,
   ): Promise<DeviceBootResult> {
     assertAndroidImageRunningStateKnown(image);
     if (image.platform === "ios" && !image.deviceId) {
@@ -810,6 +816,19 @@ export class DeviceBootService {
       platform: image.platform,
       stableId: image.platform === "android" ? image.name : image.deviceId!,
     });
+    if (adoptRunningAfterLease && image.platform === "android") {
+      const booted = await this.discoverBootedDevices(
+        image.platform,
+        context,
+        "re-checking the running device after the shared lifecycle lease settled",
+        true,
+        true,
+      );
+      const running = findUniqueBootedAndroidDeviceByName(booted, image.name);
+      if (running && !hasInFlightAndroidColdBoot(this.lifecycleCoordinator, image.name)) {
+        return this.waitForRunningDevice(enrichBootedDevice(running, image), context, progress);
+      }
+    }
     // This outer marker spans every bootImageOnce invocation made by this
     // bootRecovery.run retry loop. bootImageOnce keeps an inner ref-counted
     // marker for waitForRunningDevice's direct recovery re-entry, which does

@@ -614,6 +614,71 @@ describe("provisionDevice handler", () => {
     expect(deviceManager.wasMethodCalled("startDevice")).toBe(false);
   });
 
+  test("rejects adoption when a running emulator identity is unresolved", async () => {
+    exactProvisioner.provision = async () => provisionedTestDevice("android", false);
+    deviceManager.setBootedDevices("android", [
+      { name: "phone-api-36-a", platform: "android", deviceId: "emulator-5554" },
+      { name: "Unknown (emulator-5556)", platform: "android", deviceId: "emulator-5556" },
+    ]);
+
+    const response = await ToolRegistry.getTool("provisionDevice")!.handler(
+      provisionTestArgs("android", "unresolved-running-avd"),
+    );
+
+    expect((response as any).isError).toBe(true);
+    expect(JSON.stringify(response)).toContain("platform_command_failed");
+    expect(JSON.stringify(response)).toContain("AVD identity has not resolved yet; retry");
+    expect(JSON.stringify(response)).not.toContain('"success":true');
+    expect(deviceManager.wasMethodCalled("waitForDeviceReady")).toBe(false);
+    expect(deviceManager.wasMethodCalled("startDevice")).toBe(false);
+  });
+
+  test("uses the exact-discovery phase deadline signal", async () => {
+    const timer = new FakeTimer();
+    let discoverySignal: AbortSignal | undefined;
+    const pendingDiscoveryManager = new FakeDeviceUtils();
+    pendingDiscoveryManager.getBootedDevicesDetailed = async (_platform, options = {}) =>
+      await new Promise<BootedDeviceDiscovery>((_resolve, reject) => {
+        discoverySignal = options.signal;
+        const signal = options.signal;
+        if (signal?.aborted) {
+          reject(signal.reason);
+          return;
+        }
+        signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+    deviceManager = pendingDiscoveryManager;
+    setDeviceToolsDependencies({ timer, deviceManagerFactory: () => deviceManager });
+    exactProvisioner.provision = async () => provisionedTestDevice("android", false);
+    const requestController = new AbortController();
+    const tool = ToolRegistry.getTool("provisionDevice");
+    if (!tool) {
+      throw new Error("provisionDevice not registered");
+    }
+
+    const responsePromise = tool.handler(
+      { ...provisionTestArgs("android", "discovery-deadline-signal"), timeoutMs: 1_000 },
+      undefined,
+      requestController.signal,
+    );
+    for (let attempt = 0; discoverySignal === undefined && attempt < 50; attempt++) {
+      await Promise.resolve();
+    }
+    expect(discoverySignal).toBeInstanceOf(AbortSignal);
+    expect(discoverySignal).not.toBe(requestController.signal);
+
+    timer.advanceTime(1_000);
+    const response = await responsePromise;
+    expect(discoverySignal?.aborted).toBe(true);
+    expect(requestController.signal.aborted).toBe(false);
+    expect(JSON.parse((response as any).content[0].text)).toMatchObject({
+      success: false,
+      error: { code: "timeout" },
+    });
+    expect(pendingDiscoveryManager.wasMethodCalled("waitForDeviceReady")).toBe(false);
+    expect(pendingDiscoveryManager.wasMethodCalled("startDevice")).toBe(false);
+  });
+
   test("adopts a single Android device from fresh discovery", async () => {
     exactProvisioner.provision = async () => provisionedTestDevice("android", false);
     deviceManager.setBootedDevices("android", [

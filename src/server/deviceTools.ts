@@ -80,6 +80,7 @@ import {
 } from "../utils/deviceProvisioning";
 import { DaemonState } from "../daemon/daemonState";
 import { reconcileDiscoveryObservation } from "../daemon/discoveryReconcile";
+import { isUnresolvedAndroidEmulatorName } from "../daemon/deviceIdentityEvidence";
 import type { DeviceReadinessLevel } from "../utils/DeviceSessionManager";
 import type { DevicePool, DeviceReadinessReservation, PooledDevice } from "../daemon/devicePool";
 import { McpSessionRecoveryInProgressError } from "../daemon/devicePool";
@@ -7788,17 +7789,27 @@ export function registerDeviceTools() {
         totalDeadlineMs,
         operationSignal,
         "discovering an already-running exact device",
-        async () => {
+        async (deadlineSignal) => {
           let alreadyBootedDevices: readonly BootedDevice[];
           if (args.device.platform === "android") {
             const discovery = await deviceManager.getBootedDevicesDetailed("android", {
               bypassAndroidDeviceListCache: true,
-              signal: operationSignal,
+              signal: deadlineSignal,
             });
             if (!discovery.succeededPlatforms.has("android")) {
               throw new ProvisionDeviceError(
                 "platform_command_failed",
                 `Cannot provision Android device '${args.device.name}' because booted-device discovery did not complete.`,
+              );
+            }
+            if (
+              discovery.devices
+                .filter((device) => device.platform === "android")
+                .some(isUnresolvedAndroidEmulatorName)
+            ) {
+              throw new ProvisionDeviceError(
+                "platform_command_failed",
+                `Cannot provision Android device '${args.device.name}' because a running emulator's AVD identity has not resolved yet; retry.`,
               );
             }
             alreadyBootedDevices = discovery.devices;

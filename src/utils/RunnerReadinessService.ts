@@ -9,6 +9,7 @@ import { checkIosCtrlProxyOverride } from "./iosCtrlProxyOverride";
 import { redactAndroidCommandOutput } from "./android-cmdline-tools/redactAndroidCommandOutput";
 import { defaultAdbClientFactory } from "./android-cmdline-tools/AdbClientFactory";
 import { isAndroidFrameworkUnavailable } from "./android-cmdline-tools/isAndroidFrameworkUnavailable";
+import { compareIosVersions } from "./ios-cmdline-tools/iosVersion";
 import { DefaultRetryExecutor } from "./retry/RetryExecutor";
 import { defaultTimer, type Timer } from "./SystemTimer";
 import {
@@ -35,6 +36,11 @@ const RUNNER_CONNECT_DIAGNOSTIC_TIMEOUT_MS = 2_000;
 const SYSTEM_UI_ANR_RECOVERY_POLL_MS = 1_000;
 const SYSTEM_UI_ANR_RECOVERY_HEALTHY_POLLS = 2;
 const SYSTEM_UI_ANR_RECOVERY_TIMEOUT_MS = 5_000;
+
+// Keep this aligned with ios/control-proxy/project.yml. The Swift rewrite uses
+// iOS-17-only APIs, so trying to launch it on an older runtime can never make
+// the runner healthy and must fail before setup/restart begins.
+export const IOS_CTRL_PROXY_MINIMUM_IOS_VERSION = "17.0";
 
 type RunnerReadinessPhase =
   | "package-compatibility"
@@ -732,6 +738,7 @@ export class RunnerReadinessService {
   }
 
   private async ensureIosReady(context: ReadinessAttemptContext): Promise<void> {
+    this.assertIosRuntimeCompatible(context);
     const override = await this.runPhase(context, "runner-setup", 1, () =>
       this.dependencies.checkIosOverride(),
     );
@@ -798,6 +805,19 @@ export class RunnerReadinessService {
     // Resolve the client after launch, just as the force-restart path does.
     client = this.dependencies.getIosClient(context.device, manager.getServicePort());
     await this.ensureIosClientReadyAfterStart(context, manager, client);
+  }
+
+  private assertIosRuntimeCompatible(context: ReadinessAttemptContext): void {
+    const runtime = context.device.iosVersion ?? context.device.osVersion;
+    const comparison = compareIosVersions(runtime, IOS_CTRL_PROXY_MINIMUM_IOS_VERSION);
+    if (comparison !== null && comparison < 0) {
+      this.fail(
+        context,
+        "runner-setup",
+        1,
+        `iOS runtime ${runtime} is below the CtrlProxy minimum ${IOS_CTRL_PROXY_MINIMUM_IOS_VERSION}; select a compatible simulator or device.`,
+      );
+    }
   }
 
   private async ensureIosReadyWithoutDownloads(

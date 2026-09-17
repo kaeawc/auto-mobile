@@ -16,6 +16,7 @@ setup() {
   export GRAPH_ATTEMPTS_FILE="${MOCK_BIN}/graph-attempts"
   export ROOTED_FILE="${MOCK_BIN}/rooted"
   export DEVICE_READY_FILE="${MOCK_BIN}/device-ready"
+  export TARGET_FOREGROUNDED_FILE="${MOCK_BIN}/target-foregrounded"
 }
 
 teardown() {
@@ -94,6 +95,14 @@ if [ "$*" = "-s emulator-5554 wait-for-device" ]; then
   touch "$DEVICE_READY_FILE"
   exit 0
 fi
+if [ "$*" = "-s emulator-5554 shell am start -W -n dev.jasonpearson.automobile.playground/.MainActivity" ]; then
+  [ -f "$DEVICE_READY_FILE" ] || {
+    echo "target foregrounded before rooted device was ready" >&2
+    exit 1
+  }
+  touch "$TARGET_FOREGROUNDED_FILE"
+  exit 0
+fi
 if [[ "$*" == *"TEST_EMIT_SDK_NAVIGATION"* ]]; then
   if [ ! -f "$SESSION_BOUND_FILE" ]; then
     echo "SDK event emitted before graph session binding" >&2
@@ -125,6 +134,10 @@ printf "%s\n" "$*" >> "$AUTO_MOBILE_LOG"
 if [ "$1" = "--debug" ] && [ "$2" = "--embedded-sdk" ] && [ "$3" = "--cli" ] && [ "$4" = "getAndroid" ]; then
   [ -f "$DEVICE_READY_FILE" ] || {
     echo "session acquired before rooted device was ready" >&2
+    exit 1
+  }
+  [ -f "$TARGET_FOREGROUNDED_FILE" ] || {
+    echo "session acquired before the target supplied an accessibility window" >&2
     exit 1
   }
   [ "$5" = "--deviceId" ] && [ "$6" = "emulator-5554" ] || {
@@ -188,9 +201,11 @@ exit 1
   grep -Eq -- 'TEST_EMIT_SDK_NAVIGATION.*--es destination Issue5215SdkNavigation-[0-9]+' "$ADB_LOG"
   root_line="$(grep -nFx -- '-s emulator-5554 root' "$ADB_LOG" | cut -d: -f1)"
   wait_for_device_line="$(grep -nFx -- '-s emulator-5554 wait-for-device' "$ADB_LOG" | cut -d: -f1)"
+  target_foreground_line="$(grep -nFx -- '-s emulator-5554 shell am start -W -n dev.jasonpearson.automobile.playground/.MainActivity' "$ADB_LOG" | cut -d: -f1)"
   launch_line="$(grep -n -- "launchApp --platform android --appId dev.jasonpearson.automobile.playground --deviceId emulator-5554" "$AUTO_MOBILE_LOG" | head -n 1 | cut -d: -f1)"
   first_observe_line="$(grep -n -- "observe --platform android --deviceId emulator-5554" "$AUTO_MOBILE_LOG" | head -n 1 | cut -d: -f1)"
   [ "$root_line" -lt "$wait_for_device_line" ]
+  [ "$wait_for_device_line" -lt "$target_foreground_line" ]
   [ "$launch_line" -lt "$first_observe_line" ]
   grep -q -- "getAndroid --deviceId emulator-5554 --automation-ready-timeout-ms 120000" "$AUTO_MOBILE_LOG"
   # Regression for issue #4579: scope the graph read to the fixture package so a

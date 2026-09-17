@@ -365,9 +365,58 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
       expect(heartbeats).toEqual([
         {
           method: "daemon/heartbeat",
-          params: { sessionId: BOUND_SESSION, livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY },
+          params: {
+            sessionId: BOUND_SESSION,
+            livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
+            livenessOwnerToken: expect.any(String),
+            claimLivenessOwnership: true,
+          },
         },
       ]);
+    } finally {
+      isAvailableSpy.mockRestore();
+      await proxy.close();
+    }
+  });
+
+  test("retries the ownership claim when the establishment heartbeat is not delivered", async () => {
+    await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", 60_000);
+
+    let heartbeatAttempts = 0;
+    const fakeClient = new FakeDaemonClient({
+      onCallDaemonMethod: async (method, params) => {
+        if (method !== "daemon/heartbeat" || typeof params.sessionId !== "string") {
+          return;
+        }
+        heartbeatAttempts += 1;
+        if (heartbeatAttempts === 1) {
+          throw new Error("transport closed before delivery");
+        }
+        sessionManager.recordHeartbeat(params.sessionId, {
+          livenessOwnerToken: params.livenessOwnerToken as string,
+          claimLivenessOwnership: params.claimLivenessOwnership === true,
+        });
+      },
+    });
+    const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+    const proxy = new DaemonMcpProxy({
+      initialSessionUuid: BOUND_SESSION,
+      clientFactory: () => fakeClient,
+      daemonManager: matchingDaemonManager(),
+      autoStartDaemon: false,
+      timer,
+    });
+
+    try {
+      await proxy.ensureConnected();
+      await timer.advanceTimeAsync(2_000);
+
+      expect(
+        fakeClient.callDaemonMethodCalls
+          .filter((call) => call.method === "daemon/heartbeat")
+          .map((call) => call.params.claimLivenessOwnership),
+      ).toEqual([true, true]);
+      expect(sessionManager.getSession(BOUND_SESSION)).not.toBeNull();
     } finally {
       isAvailableSpy.mockRestore();
       await proxy.close();
@@ -514,7 +563,11 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
       expect(freshHeartbeats).toEqual([
         {
           method: "daemon/heartbeat",
-          params: { sessionId: BOUND_SESSION, livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY },
+          params: {
+            sessionId: BOUND_SESSION,
+            livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
+            livenessOwnerToken: expect.any(String),
+          },
         },
       ]);
       expect(sessionManager.getSession(BOUND_SESSION)).not.toBeNull();

@@ -299,7 +299,11 @@ final class ElementLocatorTests: XCTestCase {
         let bounds = ElementBounds(left: 383, top: 156, right: 390, bottom: 742)
         let first = UIElementInfo(text: "Vertical scroll bar, 1 page", className: "UIView", bounds: bounds)
         let duplicate = UIElementInfo(text: "Vertical scroll bar, 1 page", className: "UIView", bounds: bounds)
-        let reminder = UIElementInfo(text: "Groceries", className: "UITableViewCell", bounds: ElementBounds(left: 0, top: 156, right: 393, bottom: 200))
+        let reminder = UIElementInfo(
+            text: "Groceries",
+            className: "UITableViewCell",
+            bounds: ElementBounds(left: 0, top: 156, right: 393, bottom: 200)
+        )
 
         let result = ElementLocator.cleanupXCTestUIKitNoise(
             parent: UIElementInfo(className: "UITableView", scrollable: "true"),
@@ -312,8 +316,17 @@ final class ElementLocatorTests: XCTestCase {
     }
 
     func testCleanup_removesLabelChildDuplicatingActionableParentText() {
-        let duplicateLabel = UIElementInfo(text: "New Reminder", className: "UILabel", bounds: ElementBounds(left: 16, top: 786, right: 201, bottom: 823), role: "text")
-        let icon = UIElementInfo(resourceId: "plus", className: "UIImageView", bounds: ElementBounds(left: 16, top: 790, right: 36, bottom: 810))
+        let duplicateLabel = UIElementInfo(
+            text: "New Reminder",
+            className: "UILabel",
+            bounds: ElementBounds(left: 16, top: 786, right: 201, bottom: 823),
+            role: "text"
+        )
+        let icon = UIElementInfo(
+            resourceId: "plus",
+            className: "UIImageView",
+            bounds: ElementBounds(left: 16, top: 790, right: 36, bottom: 810)
+        )
 
         let result = ElementLocator.cleanupXCTestUIKitNoise(
             parent: UIElementInfo(text: "New Reminder", className: "UIButton", clickable: "true"),
@@ -325,9 +338,22 @@ final class ElementLocatorTests: XCTestCase {
     }
 
     func testCleanup_removesStructuralWrapperContainingOnlyScrollbarNoise() {
-        let scrollBar = UIElementInfo(text: "Horizontal scroll bar, 1 page", className: "UIView", bounds: ElementBounds(left: 30, top: 830, right: 363, bottom: 837))
-        let wrapper = UIElementInfo(className: "UIView", bounds: ElementBounds(left: 0, top: 786, right: 393, bottom: 852), node: [scrollBar])
-        let toolbarButton = UIElementInfo(text: "Lists", className: "UIButton", bounds: ElementBounds(left: 300, top: 786, right: 370, bottom: 823), clickable: "true")
+        let scrollBar = UIElementInfo(
+            text: "Horizontal scroll bar, 1 page",
+            className: "UIView",
+            bounds: ElementBounds(left: 30, top: 830, right: 363, bottom: 837)
+        )
+        let wrapper = UIElementInfo(
+            className: "UIView",
+            bounds: ElementBounds(left: 0, top: 786, right: 393, bottom: 852),
+            node: [scrollBar]
+        )
+        let toolbarButton = UIElementInfo(
+            text: "Lists",
+            className: "UIButton",
+            bounds: ElementBounds(left: 300, top: 786, right: 370, bottom: 823),
+            clickable: "true"
+        )
 
         let result = ElementLocator.cleanupXCTestUIKitNoise(
             parent: UIElementInfo(className: "UIView"),
@@ -340,9 +366,26 @@ final class ElementLocatorTests: XCTestCase {
 
     func testCleanup_dedupesRepeatedKeyboardAccessoryAndDictationNodes() {
         let bounds = ElementBounds(left: 0, top: 720, right: 393, bottom: 760)
-        let first = UIElementInfo(text: "dictation", className: "UIButton", bounds: bounds, clickable: "true", role: "button")
-        let duplicate = UIElementInfo(text: "dictation", className: "UIButton", bounds: bounds, clickable: "true", role: "button")
-        let done = UIElementInfo(text: "Done", className: "UIButton", bounds: ElementBounds(left: 335, top: 720, right: 383, bottom: 760), clickable: "true")
+        let first = UIElementInfo(
+            text: "dictation",
+            className: "UIButton",
+            bounds: bounds,
+            clickable: "true",
+            role: "button"
+        )
+        let duplicate = UIElementInfo(
+            text: "dictation",
+            className: "UIButton",
+            bounds: bounds,
+            clickable: "true",
+            role: "button"
+        )
+        let done = UIElementInfo(
+            text: "Done",
+            className: "UIButton",
+            bounds: ElementBounds(left: 335, top: 720, right: 383, bottom: 760),
+            clickable: "true"
+        )
 
         let result = ElementLocator.cleanupXCTestUIKitNoise(
             parent: UIElementInfo(className: "UIKeyboard"),
@@ -356,8 +399,22 @@ final class ElementLocatorTests: XCTestCase {
 
     func testCleanup_preservesKeyboardAccessoryNodesWithDistinctResourceIds() {
         let bounds = ElementBounds(left: 0, top: 720, right: 393, bottom: 760)
-        let first = UIElementInfo(text: "dictation", resourceId: "dictation-primary", className: "UIButton", bounds: bounds, clickable: "true", role: "button")
-        let second = UIElementInfo(text: "dictation", resourceId: "dictation-secondary", className: "UIButton", bounds: bounds, clickable: "true", role: "button")
+        let first = UIElementInfo(
+            text: "dictation",
+            resourceId: "dictation-primary",
+            className: "UIButton",
+            bounds: bounds,
+            clickable: "true",
+            role: "button"
+        )
+        let second = UIElementInfo(
+            text: "dictation",
+            resourceId: "dictation-secondary",
+            className: "UIButton",
+            bounds: bounds,
+            clickable: "true",
+            role: "button"
+        )
 
         let result = ElementLocator.cleanupXCTestUIKitNoise(
             parent: UIElementInfo(className: "UIKeyboard"),
@@ -370,7 +427,12 @@ final class ElementLocatorTests: XCTestCase {
     }
 
     func testCleanup_preservesActionableControlEvenWhenTextDuplicatesParent() {
-        let childButton = UIElementInfo(text: "New Reminder", resourceId: "new_reminder_child", className: "UIButton", clickable: "true")
+        let childButton = UIElementInfo(
+            text: "New Reminder",
+            resourceId: "new_reminder_child",
+            className: "UIButton",
+            clickable: "true"
+        )
         let result = ElementLocator.cleanupXCTestUIKitNoise(
             parent: UIElementInfo(text: "New Reminder", className: "UIButton", clickable: "true"),
             children: [childButton]
@@ -397,8 +459,17 @@ final class ElementLocatorTests: XCTestCase {
     }
 
     func testCleanup_preservesRoleBearingContainerAroundScrollBarText() {
-        let scrollBar = UIElementInfo(text: "Vertical scroll bar, 1 page", className: "UIView", bounds: ElementBounds(left: 383, top: 156, right: 390, bottom: 704))
-        let container = UIElementInfo(className: "UIView", bounds: ElementBounds(left: 0, top: 120, right: 393, bottom: 720), role: "listitem", node: [scrollBar])
+        let scrollBar = UIElementInfo(
+            text: "Vertical scroll bar, 1 page",
+            className: "UIView",
+            bounds: ElementBounds(left: 383, top: 156, right: 390, bottom: 704)
+        )
+        let container = UIElementInfo(
+            className: "UIView",
+            bounds: ElementBounds(left: 0, top: 120, right: 393, bottom: 720),
+            role: "listitem",
+            node: [scrollBar]
+        )
 
         let result = ElementLocator.cleanupXCTestUIKitNoise(
             parent: UIElementInfo(className: "UIView"),
@@ -412,8 +483,18 @@ final class ElementLocatorTests: XCTestCase {
 
     func testCleanup_preservesSdkOrCustomActionMetadata() {
         let bounds = ElementBounds(left: 0, top: 720, right: 393, bottom: 760)
-        let withActions = UIElementInfo(text: "dictation", className: "UIButton", bounds: bounds, actions: ["custom_action"])
-        let withExtras = UIElementInfo(text: "dictation", className: "UIButton", bounds: bounds, extras: ["sdk.gestureRecognizers": "UILongPressGestureRecognizer"])
+        let withActions = UIElementInfo(
+            text: "dictation",
+            className: "UIButton",
+            bounds: bounds,
+            actions: ["custom_action"]
+        )
+        let withExtras = UIElementInfo(
+            text: "dictation",
+            className: "UIButton",
+            bounds: bounds,
+            extras: ["sdk.gestureRecognizers": "UILongPressGestureRecognizer"]
+        )
 
         let result = ElementLocator.cleanupXCTestUIKitNoise(
             parent: UIElementInfo(className: "UIKeyboard"),
@@ -613,7 +694,10 @@ final class ElementLocatorTests: XCTestCase {
 
     func testCollapse_searchFieldContainsTextField_notCollapsed() {
         // searchField (UISearchBar) containing a textField — different className, kept
-        let inner = UIElementInfo(className: "UITextField", bounds: ElementBounds(left: 0, top: 0, right: 300, bottom: 44))
+        let inner = UIElementInfo(
+            className: "UITextField",
+            bounds: ElementBounds(left: 0, top: 0, right: 300, bottom: 44)
+        )
 
         let result = ElementLocator.collapseSameTypeTextInputChildren(
             parentClassName: "UISearchBar",
@@ -959,7 +1043,7 @@ final class ElementLocatorTests: XCTestCase {
         XCTAssertNil(ElementLocator.computePixelDimensions(pointWidth: 375, pointHeight: 812, nativeScale: .nan))
     }
 
-    // MARK: - Per-extraction device-load reduction (#5474)
+    // MARK: - Per-extraction hierarchy decisions
 
     // AC1: the live keyboard-focus requery is skipped on the no-text-field path.
     func testShouldQueryKeyboardFocus_skipsWhenNoTextInputPresent() {
@@ -971,28 +1055,18 @@ final class ElementLocatorTests: XCTestCase {
         XCTAssertTrue(ElementLocator.shouldQueryKeyboardFocus(textInputSnapshotCount: 5))
     }
 
-    // AC2: the second SpringBoard full snapshot is gated behind a cheap precondition.
     func testShouldSnapshotSpringboardForAlerts_skipsWhenForegroundIsSpringboard() {
-        // SpringBoard's tree is already the app snapshot — never take a second one,
-        // regardless of whether it shows an alert.
+        // SpringBoard's tree is already the app snapshot — never take a second one.
         XCTAssertFalse(
-            ElementLocator.shouldSnapshotSpringboardForAlerts(foregroundIsSpringboard: true, appHasAlert: false)
-        )
-        XCTAssertFalse(
-            ElementLocator.shouldSnapshotSpringboardForAlerts(foregroundIsSpringboard: true, appHasAlert: true)
+            ElementLocator.shouldSnapshotSpringboardForAlerts(foregroundIsSpringboard: true)
         )
     }
 
-    func testShouldSnapshotSpringboardForAlerts_runsOnlyWhenAppShowsAlert() {
-        // Common per-extraction case: real app, no alert in its tree → skip the
-        // second serialization.
-        XCTAssertFalse(
-            ElementLocator.shouldSnapshotSpringboardForAlerts(foregroundIsSpringboard: false, appHasAlert: false)
-        )
-        // Real app whose own snapshot already shows an alert → a co-presented
-        // system dialog may exist in SpringBoard's tree, so pay for the snapshot.
+    func testShouldSnapshotSpringboardForAlerts_runsForForegroundApp() {
+        // A SpringBoard-owned alert can cover a still-foreground app while the
+        // app's own snapshot remains unchanged, so inspect the system window.
         XCTAssertTrue(
-            ElementLocator.shouldSnapshotSpringboardForAlerts(foregroundIsSpringboard: false, appHasAlert: true)
+            ElementLocator.shouldSnapshotSpringboardForAlerts(foregroundIsSpringboard: false)
         )
     }
 

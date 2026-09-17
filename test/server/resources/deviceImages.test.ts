@@ -13,6 +13,8 @@ import type {
   AppleDeviceRuntime,
   AppleDeviceType,
 } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
+import type { AvdManager } from "../../../src/utils/android-cmdline-tools/interfaces/AvdManager";
+import type { DeviceImageDiscovery, PlatformDeviceManager } from "../../../src/utils/deviceUtils";
 
 describe("Device Image Resources with Fakes", () => {
   let fakeDeviceUtils: FakeDeviceUtils;
@@ -190,6 +192,7 @@ describe("Device Image Resources with Fakes", () => {
         {
           name: "iPhone 16",
           platform: "ios",
+          deviceId: "iphone-16-udid",
           isRunning: false,
         },
       ]);
@@ -227,6 +230,7 @@ describe("Device Image Resources with Fakes", () => {
         {
           name: "Unavailable iPhone",
           platform: "ios",
+          deviceId: "unavailable-iphone-udid",
           isRunning: false,
           isAvailable: false,
           availabilityError: "iOS 18.0 runtime is not installed",
@@ -373,9 +377,16 @@ describe("Device Image Resources with Fakes", () => {
       expect(result.provisioningCatalog.systemImages).toHaveLength(acceptedIds.size);
     });
 
-    test("returns an incomplete diagnostic within budget when enumeration hangs", async () => {
+    test("preserves completed configured inventory when later catalog enumeration times out", async () => {
       const timer = new FakeTimer();
-      fakeDeviceUtils.setDeviceImages("android", []);
+      fakeDeviceUtils.setDeviceImages("android", [
+        {
+          name: "Pixel_9_API_35",
+          platform: "android",
+          deviceId: "Pixel_9_API_35",
+          isRunning: false,
+        },
+      ]);
       fakeAvdManager.setListInstalledSystemImagesHangs(true);
 
       const handler = createDeviceImageResourcesHandler({
@@ -401,6 +412,29 @@ describe("Device Image Resources with Fakes", () => {
           code: "timeout",
           message: expect.stringContaining("5000"),
         },
+      });
+      expect(result.configuredInventory).toEqual({
+        schemaVersion: 1,
+        complete: true,
+        observations: {
+          android: {
+            complete: true,
+          },
+        },
+      });
+      expect(result.androidCount).toBe(1);
+      expect(result.images).toEqual([
+        expect.objectContaining({
+          stableId: "Pixel_9_API_35",
+          name: "Pixel_9_API_35",
+          platform: "android",
+        }),
+      ]);
+      expect(result.provisioningCatalog).toEqual({
+        runtimes: [],
+        deviceTypes: [],
+        systemImages: [],
+        profiles: [],
       });
       // The hung enumeration must have been cancelled, not left running.
       const calls = fakeAvdManager.getListInstalledSystemImagesCalls();
@@ -477,6 +511,19 @@ describe("Device Image Resources with Fakes", () => {
           message: expect.stringContaining("5000"),
         },
       });
+      expect(result.configuredInventory).toEqual({
+        schemaVersion: 1,
+        complete: false,
+        observations: {
+          android: {
+            complete: false,
+            error: {
+              code: "timeout",
+              message: expect.stringContaining("5000"),
+            },
+          },
+        },
+      });
       // androidCount stays finalized as incomplete and no images were appended
       // after the timeout, even though a device was configured for the listing.
       expect(result.androidCount).toBe(0);
@@ -487,6 +534,112 @@ describe("Device Image Resources with Fakes", () => {
       const androidCall = calls.find((call) => call.platform === "android");
       expect(androidCall).toBeDefined();
       expect(androidCall?.signal?.aborted).toBe(true);
+    });
+
+    test("does not publish a configured device that resolves after the deadline", async () => {
+      const timer = new FakeTimer();
+      const lateDiscovery = Promise.withResolvers<DeviceImageDiscovery>();
+      const deviceManager = {
+        getDeviceImagesDetailed: async () => await lateDiscovery.promise,
+      } as unknown as PlatformDeviceManager;
+      const handler = createDeviceImageResourcesHandler({
+        deviceManager,
+        avdManager: fakeAvdManager,
+        timer,
+        androidCatalogBudgetMs: 5_000,
+      });
+
+      const pending = handler.getDeviceImagesForPlatforms(["android"]);
+      await Promise.resolve();
+      timer.advanceTime(5_001);
+      const result = await pending;
+      const returnedSnapshot = JSON.stringify(result);
+
+      expect(result.totalCount).toBe(result.androidCount);
+      expect(result.androidCount).toBe(result.images.length);
+      expect(result.configuredInventory.observations.android).toMatchObject({
+        complete: false,
+        error: { code: "timeout" },
+      });
+
+      lateDiscovery.resolve({
+        devices: [
+          {
+            name: "Pixel_9_Late",
+            platform: "android",
+            deviceId: "late-avd",
+            isRunning: false,
+          },
+        ],
+        succeededPlatforms: new Set(["android"]),
+      });
+      for (let i = 0; i < 10; i++) {
+        await Promise.resolve();
+      }
+
+      expect(JSON.stringify(result)).toBe(returnedSnapshot);
+      expect(result.totalCount).toBe(0);
+      expect(result.androidCount).toBe(0);
+      expect(result.images).toEqual([]);
+    });
+
+    test("does not publish images or metadata that resolve after the deadline", async () => {
+      const timer = new FakeTimer();
+      const lateMetadata = Promise.withResolvers<AvdInfo[]>();
+      let metadataSignal: AbortSignal | undefined;
+      fakeDeviceUtils.setDeviceImages("android", [
+        {
+          name: "Pixel_9_Late_Metadata",
+          platform: "android",
+          deviceId: "late-metadata-avd",
+          isRunning: false,
+        },
+      ]);
+      const avdManager = {
+        listDeviceImages: async (signal?: AbortSignal) => {
+          metadataSignal = signal;
+          return await lateMetadata.promise;
+        },
+        listInstalledSystemImages: async () => [],
+        listDevices: async () => [],
+      } as unknown as AvdManager;
+      const handler = createDeviceImageResourcesHandler({
+        deviceManager: fakeDeviceUtils,
+        avdManager,
+        timer,
+        androidCatalogBudgetMs: 5_000,
+      });
+
+      const pending = handler.getDeviceImagesForPlatforms(["android"]);
+      for (let i = 0; i < 10; i++) {
+        await Promise.resolve();
+      }
+      timer.advanceTime(5_001);
+      const result = await pending;
+      const returnedSnapshot = JSON.stringify(result);
+
+      expect(metadataSignal?.aborted).toBe(true);
+      expect(result.totalCount).toBe(result.androidCount);
+      expect(result.androidCount).toBe(result.images.length);
+      expect(result.configuredInventory.observations.android).toMatchObject({
+        complete: false,
+        error: { code: "timeout" },
+      });
+
+      lateMetadata.resolve([
+        {
+          name: "Pixel_9_Late_Metadata",
+          path: "/late/Pixel_9_Late_Metadata.avd",
+        },
+      ]);
+      for (let i = 0; i < 10; i++) {
+        await Promise.resolve();
+      }
+
+      expect(JSON.stringify(result)).toBe(returnedSnapshot);
+      expect(result.totalCount).toBe(0);
+      expect(result.androidCount).toBe(0);
+      expect(result.images).toEqual([]);
     });
 
     test("aborts profile enumeration too when the deadline wins", async () => {
@@ -540,6 +693,11 @@ describe("Device Image Resources with Fakes", () => {
           code: "failed",
           message: expect.stringContaining("malformed simctl runtimes JSON"),
         },
+      });
+      expect(result.configuredInventory).toEqual({
+        schemaVersion: 1,
+        complete: true,
+        observations: { ios: { complete: true } },
       });
     });
 
@@ -599,6 +757,138 @@ describe("Device Image Resources with Fakes", () => {
       expect(result.androidCount).toBe(0);
       expect(result.iosCount).toBe(0);
       expect(result.images).toHaveLength(0);
+      expect(result.configuredInventory).toEqual({
+        schemaVersion: 1,
+        complete: true,
+        observations: {
+          android: { complete: true },
+          ios: { complete: true },
+        },
+      });
+      expect(fakeDeviceUtils.getGetDeviceImagesDetailedCalls()).toEqual([
+        {
+          platform: "android",
+          options: { signal: expect.any(AbortSignal) },
+        },
+        {
+          platform: "ios",
+          options: { bypassIosDeviceListCache: true },
+        },
+      ]);
+    });
+
+    test("reports complete-empty Android inventory", async () => {
+      fakeDeviceUtils.setDeviceImages("android", []);
+
+      const handler = createDeviceImageResourcesHandler({
+        deviceManager: fakeDeviceUtils,
+        avdManager: fakeAvdManager,
+      });
+      const result = await handler.getDeviceImagesForPlatforms(["android"]);
+
+      expect(result.images).toEqual([]);
+      expect(result.configuredInventory).toEqual({
+        schemaVersion: 1,
+        complete: true,
+        observations: { android: { complete: true } },
+      });
+      expect(result.catalogComplete).toBe(true);
+    });
+
+    test("reports complete-empty iOS inventory and bypasses simulator caches", async () => {
+      fakeDeviceUtils.setDeviceImages("ios", []);
+
+      const handler = createDeviceImageResourcesHandler({
+        deviceManager: fakeDeviceUtils,
+        avdManager: fakeAvdManager,
+        simctl: fakeSimCtl,
+      });
+      const result = await handler.getDeviceImagesForPlatforms(["ios"]);
+
+      expect(result.images).toEqual([]);
+      expect(result.configuredInventory).toEqual({
+        schemaVersion: 1,
+        complete: true,
+        observations: { ios: { complete: true } },
+      });
+      expect(fakeDeviceUtils.getGetDeviceImagesDetailedCalls()).toEqual([
+        {
+          platform: "ios",
+          options: { bypassIosDeviceListCache: true },
+        },
+      ]);
+    });
+
+    test("uses exact Android AVD names and iOS UDIDs as stable IDs", async () => {
+      fakeDeviceUtils.setDeviceImages("android", [
+        {
+          name: "Pixel_9_API_35",
+          platform: "android",
+          deviceId: "compat-android-id",
+          isRunning: false,
+        },
+      ]);
+      fakeDeviceUtils.setDeviceImages("ios", [
+        {
+          name: "iPhone 17 Pro",
+          platform: "ios",
+          deviceId: "AAAA-BBBB-CCCC-DDDD",
+          isRunning: false,
+        },
+      ]);
+
+      const handler = createDeviceImageResourcesHandler({
+        deviceManager: fakeDeviceUtils,
+        avdManager: fakeAvdManager,
+        simctl: fakeSimCtl,
+      });
+      const result = await handler.getDeviceImagesForPlatforms(["android", "ios"]);
+
+      expect(result.images).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            platform: "android",
+            stableId: "Pixel_9_API_35",
+            name: "Pixel_9_API_35",
+            deviceId: "compat-android-id",
+          }),
+          expect.objectContaining({
+            platform: "ios",
+            stableId: "AAAA-BBBB-CCCC-DDDD",
+            name: "iPhone 17 Pro",
+            deviceId: "AAAA-BBBB-CCCC-DDDD",
+          }),
+        ]),
+      );
+    });
+
+    test("marks failed and mixed-platform configured inventories incomplete", async () => {
+      fakeDeviceUtils.setDeviceImages("android", []);
+      fakeDeviceUtils.setDeviceImages("ios", []);
+      fakeDeviceUtils.failedPlatforms.add("ios");
+
+      const handler = createDeviceImageResourcesHandler({
+        deviceManager: fakeDeviceUtils,
+        avdManager: fakeAvdManager,
+        simctl: fakeSimCtl,
+      });
+      const result = await handler.getDeviceImagesForPlatforms(["android", "ios"]);
+
+      expect(result.configuredInventory).toEqual({
+        schemaVersion: 1,
+        complete: false,
+        observations: {
+          android: { complete: true },
+          ios: {
+            complete: false,
+            error: {
+              code: "unavailable",
+              message: "iOS device inventory is unavailable.",
+            },
+          },
+        },
+      });
+      expect(result.catalogComplete).toBe(true);
     });
 
     test("should filter to android platform only", async () => {

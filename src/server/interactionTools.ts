@@ -43,6 +43,7 @@ import {
   type PressButtonResult,
   type RotateResult,
   type SelectAllTextResult,
+  type ObserveResult,
   type TapOnElementResult,
   type TapOnSelectedElement,
 } from "../models";
@@ -855,6 +856,10 @@ export const openLinkSchema = withAppIdAliases(
     addDeviceTargetingToSchema(
       z.object({
         url: z.string().describe("URL to open"),
+        acceptOpenAlert: z
+          .boolean()
+          .optional()
+          .describe("On iOS, automatically tap Open when a system 'Open in <app>?' alert appears"),
         // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
         // not required — a device handle from getAndroid/getApple is sufficient on
         // its own.
@@ -1293,6 +1298,241 @@ export function setTapOnElementFactory(factory: (device: BootedDevice) => TapOnE
 
 export function resetTapOnElementFactory(): void {
   tapOnElementFactory = (device) => new TapOnElement(device);
+}
+
+const VISIBLE_HIERARCHY_TEXT_KEYS = new Set([
+  "text",
+  "label",
+  "content-desc",
+  "contentDescription",
+]);
+const IOS_SYSTEM_DIALOG_CLASSES = new Set([
+  "UIAlertController",
+  "UIActionSheet",
+  "XCUIElementTypeAlert",
+  "XCUIElementTypeSheet",
+]);
+const IOS_OPEN_ALERT_ACCEPT_ATTEMPTS = 8;
+const IOS_OPEN_ALERT_RETRY_INTERVAL_MS = 250;
+const IOS_OPEN_ALERT_VERIFY_ATTEMPTS = 4;
+const IOS_OPEN_ALERT_HIERARCHY_TIMEOUT_MS = 2_000;
+
+function collectVisibleHierarchyText(value: unknown, texts: string[]): void {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      collectVisibleHierarchyText(item, texts);
+    }
+    return;
+  }
+  if (!value || typeof value !== "object") {
+    return;
+  }
+  for (const [key, child] of Object.entries(value)) {
+    if (VISIBLE_HIERARCHY_TEXT_KEYS.has(key) && typeof child === "string") {
+      texts.push(child.trim());
+    } else {
+      collectVisibleHierarchyText(child, texts);
+    }
+  }
+}
+
+function nodeAttribute(node: Record<string, unknown>, key: string): unknown {
+  const attributes =
+    node.$ && typeof node.$ === "object" && !Array.isArray(node.$)
+      ? (node.$ as Record<string, unknown>)
+      : undefined;
+  return node[key] ?? attributes?.[key];
+}
+
+function countIosDialogButtons(value: unknown): number {
+  if (Array.isArray(value)) {
+    return value.reduce((count, item) => count + countIosDialogButtons(item), 0);
+  }
+  if (!value || typeof value !== "object") {
+    return 0;
+  }
+  const node = value as Record<string, unknown>;
+  const className = nodeAttribute(node, "className") ?? nodeAttribute(node, "class");
+  const role = nodeAttribute(node, "role");
+  const ownCount = className === "UIButton" || role === "button" ? 1 : 0;
+  return (
+    ownCount +
+    Object.entries(node).reduce(
+      (count, [key, child]) => count + (key === "$" ? 0 : countIosDialogButtons(child)),
+      0,
+    )
+  );
+}
+
+function containsIosSystemDialog(value: unknown): boolean {
+  if (Array.isArray(value)) {
+    return value.some(containsIosSystemDialog);
+  }
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const node = value as Record<string, unknown>;
+  const className = nodeAttribute(node, "className") ?? nodeAttribute(node, "class");
+  if (
+    typeof className === "string" &&
+    IOS_SYSTEM_DIALOG_CLASSES.has(className) &&
+    countIosDialogButtons(node) >= 2
+  ) {
+    return true;
+  }
+  return Object.entries(node).some(([key, child]) => key !== "$" && containsIosSystemDialog(child));
+}
+
+function isIosAppOpenAlertHierarchy(
+  hierarchy: ObserveResult["viewHierarchy"] | undefined,
+): boolean {
+  const texts: string[] = [];
+  collectVisibleHierarchyText(hierarchy?.hierarchy, texts);
+  const hasEnglishOpenLabels =
+    texts.some((text) => /^open in .+\?$/i.test(text)) &&
+    texts.some((text) => text.toLowerCase() === "open");
+  return (
+    hasEnglishOpenLabels ||
+    (hierarchy?.packageName === "com.apple.springboard" &&
+      containsIosSystemDialog(hierarchy.hierarchy))
+  );
+}
+
+/** True when an iOS observation contains the system custom-URL confirmation. */
+export function isIosAppOpenAlert(observation: ObserveResult | undefined): boolean {
+  return isIosAppOpenAlertHierarchy(observation?.viewHierarchy);
+}
+
+type OpenAlertHierarchyRefresh = () => Promise<ObserveResult["viewHierarchy"] | null>;
+type SystemAlertTap = () => Promise<{ success: boolean; error?: string }>;
+
+type OpenAlertResolution =
+  | { hierarchy: ObserveResult["viewHierarchy"] }
+  | { systemTapped: true }
+  | null;
+
+function throwIfOpenAlertAcceptanceAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) {
+    throw signal.reason instanceof Error ? signal.reason : new Error("Operation cancelled");
+  }
+}
+
+async function refreshOpenAlertHierarchy(
+  hierarchy: ObserveResult["viewHierarchy"] | undefined,
+  refreshHierarchy: OpenAlertHierarchyRefresh | undefined,
+): Promise<ObserveResult["viewHierarchy"] | undefined> {
+  return refreshHierarchy ? ((await refreshHierarchy()) ?? hierarchy) : hierarchy;
+}
+
+async function tapLiveSystemAlert(tapSystemAlert: SystemAlertTap | undefined): Promise<boolean> {
+  return tapSystemAlert ? (await tapSystemAlert()).success : false;
+}
+
+async function verifyIosOpenAlertDismissed(
+  refreshHierarchy: OpenAlertHierarchyRefresh | undefined,
+  tapSystemAlert: SystemAlertTap | undefined,
+  signal: AbortSignal | undefined,
+): Promise<boolean> {
+  if (!refreshHierarchy) {
+    return true;
+  }
+  for (let attempt = 0; attempt < IOS_OPEN_ALERT_VERIFY_ATTEMPTS; attempt += 1) {
+    throwIfOpenAlertAcceptanceAborted(signal);
+    const hierarchy = await refreshHierarchy();
+    if (!hierarchy) {
+      continue;
+    }
+    if (!isIosAppOpenAlertHierarchy(hierarchy)) {
+      return true;
+    }
+    if (!(await tapLiveSystemAlert(tapSystemAlert))) {
+      return false;
+    }
+  }
+  return false;
+}
+
+async function resolveIosOpenAlert(
+  initialHierarchy: ObserveResult["viewHierarchy"] | undefined,
+  refreshHierarchy: OpenAlertHierarchyRefresh | undefined,
+  tapSystemAlert: SystemAlertTap | undefined,
+  signal: AbortSignal | undefined,
+): Promise<OpenAlertResolution> {
+  if (isIosAppOpenAlertHierarchy(initialHierarchy) && !tapSystemAlert) {
+    return initialHierarchy ? { hierarchy: initialHierarchy } : null;
+  }
+  if (!refreshHierarchy && !tapSystemAlert) {
+    return null;
+  }
+
+  let hierarchy = initialHierarchy;
+  for (let attempt = 0; attempt < IOS_OPEN_ALERT_ACCEPT_ATTEMPTS; attempt += 1) {
+    throwIfOpenAlertAcceptanceAborted(signal);
+    hierarchy = await refreshOpenAlertHierarchy(hierarchy, refreshHierarchy);
+    if (await tapLiveSystemAlert(tapSystemAlert)) {
+      return { systemTapped: true };
+    }
+    if (isIosAppOpenAlertHierarchy(hierarchy)) {
+      return hierarchy ? { hierarchy } : null;
+    }
+    if (attempt + 1 < IOS_OPEN_ALERT_ACCEPT_ATTEMPTS) {
+      await defaultTimer.sleep(IOS_OPEN_ALERT_RETRY_INTERVAL_MS);
+    }
+  }
+  return null;
+}
+
+/**
+ * Tap the system-owned Open button only when the merged SpringBoard hierarchy
+ * proves the custom-URL confirmation is present.
+ */
+export async function acceptIosAppOpenAlert(
+  device: BootedDevice,
+  observation: ObserveResult | undefined,
+  progress?: ProgressCallback,
+  signal?: AbortSignal,
+  refreshHierarchy?: OpenAlertHierarchyRefresh,
+  tapSystemAlert?: SystemAlertTap,
+): Promise<TapOnElementResult | null> {
+  if (device.platform !== "ios") {
+    return null;
+  }
+
+  const resolution = await resolveIosOpenAlert(
+    observation?.viewHierarchy,
+    refreshHierarchy,
+    tapSystemAlert,
+    signal,
+  );
+  if (!resolution) {
+    return null;
+  }
+  if ("systemTapped" in resolution) {
+    const result = {
+      success: true,
+      action: "tap",
+      element: { text: "Open", bounds: { left: 0, top: 0, right: 0, bottom: 0 } },
+    } as TapOnElementResult;
+    if (!(await verifyIosOpenAlertDismissed(refreshHierarchy, tapSystemAlert, signal))) {
+      throw new ActionableError("Failed to accept iOS app-open alert: dialog remained visible");
+    }
+    return result;
+  }
+
+  const result = await tapOnElementFactory(device).execute(
+    { text: "Open", action: "tap" },
+    progress,
+    signal,
+  );
+  if (!result.success) {
+    throw new ActionableError(
+      `Failed to accept iOS app-open alert: ${result.error || "unknown error"}`,
+    );
+  }
+  if (!(await verifyIosOpenAlertDismissed(refreshHierarchy, tapSystemAlert, signal))) {
+    throw new ActionableError("Failed to accept iOS app-open alert: dialog remained visible");
+  }
+  return result;
 }
 
 /**
@@ -2031,7 +2271,7 @@ export function registerInteractionTools() {
   const openLinkHandler = async (
     device: BootedDevice,
     args: OpenLinkArgs,
-    _progress?: ProgressCallback,
+    progress?: ProgressCallback,
     signal?: AbortSignal,
   ) => {
     // #6154 follow-up: `platform` is optional on the wire, so the schema's
@@ -2042,6 +2282,45 @@ export function registerInteractionTools() {
 
     const openUrl = new OpenURL(device);
     const result = await openUrl.execute(args.url);
+    const iosClient = device.platform === "ios" ? IOSCtrlProxyClient.getInstance(device) : null;
+    const acceptedOpenAlert =
+      args.acceptOpenAlert && result.success
+        ? await acceptIosAppOpenAlert(
+            device,
+            result.observation,
+            progress,
+            signal,
+            iosClient
+              ? async () => {
+                  const refreshed = await iosClient.requestHierarchySync(
+                    undefined,
+                    true,
+                    signal,
+                    IOS_OPEN_ALERT_HIERARCHY_TIMEOUT_MS,
+                  );
+                  return refreshed
+                    ? iosClient.convertToViewHierarchyResult(refreshed.hierarchy)
+                    : null;
+                }
+              : undefined,
+            iosClient
+              ? () =>
+                  iosClient.requestAction(
+                    "system_alert_accept",
+                    undefined,
+                    undefined,
+                    IOS_OPEN_ALERT_HIERARCHY_TIMEOUT_MS,
+                  )
+              : undefined,
+          )
+        : null;
+    const effectiveResult: OpenURLResult & { openAlertAccepted?: true } = acceptedOpenAlert
+      ? {
+          ...result,
+          observation: acceptedOpenAlert.observation ?? result.observation,
+          openAlertAccepted: true,
+        }
+      : result;
 
     // Integrated waitFor (issue #3490 §5): once the URL is opened, poll for the
     // predicate exactly as `observe` does, surfacing the awaited observation and
@@ -2057,7 +2336,7 @@ export function registerInteractionTools() {
         )
       : null;
 
-    return createJSONToolResponse(buildOpenLinkPayload(args.url, result, waitOutcome));
+    return createJSONToolResponse(buildOpenLinkPayload(args.url, effectiveResult, waitOutcome));
   };
 
   // Shake handler

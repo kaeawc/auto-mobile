@@ -9,9 +9,6 @@ setup() {
   export GRAPH_ATTEMPTS_FILE="${MOCK_BIN}/graph-attempts"
   export CURL_URL_FILE="${MOCK_BIN}/curl-urls"
   export SESSION_OBSERVE_FILE="${MOCK_BIN}/session-observe"
-  export DOCTOR_CALLS_FILE="${MOCK_BIN}/doctor-calls"
-  export POST_BIND_DOCTOR_FILE="${MOCK_BIN}/post-bind-doctor"
-  export POST_BIND_DOCTOR_FAILURE_FILE="${MOCK_BIN}/post-bind-doctor-failure"
   export HEALTH_ATTEMPTS_FILE="${MOCK_BIN}/health-attempts"
   export HEARTBEAT_FILE="${MOCK_BIN}/heartbeats"
   export TARGET_APP_LAUNCHED_FILE="${MOCK_BIN}/target-app-launched"
@@ -37,16 +34,11 @@ SCRIPT
   make_mock xcrun 'exit 0'
   make_mock curl 'exit 0'
   make_mock jq '
-if [ "$1" = "-er" ] && [[ "$2" == *"sessionUuid"* ]]; then
+if [ "$1" = "-er" ]; then
   exec "$REAL_JQ" "$@"
 fi
-printf "8765\n"
 '
   make_mock auto-mobile '
-if [ "$1" = "--cli" ] && [ "$2" = "doctor" ]; then
-  printf "{\"ios\":{\"checks\":[]}}\n"
-  exit 0
-fi
 if [ "$1" = "--debug" ] && [ "$2" = "--embedded-sdk" ] && [ "$3" = "--cli" ] && [ "$4" = "getApple" ]; then
   printf "{\"sessionUuid\":\"\"}\n"
   exit 0
@@ -86,41 +78,14 @@ if [ "$1" = "-cn" ]; then
   exit 0
 fi
 if [ "$1" = "-er" ]; then
-  if [[ "$2" == *"sessionUuid"* ]]; then
-    exec "$REAL_JQ" "$@"
-  fi
-  if [ -f "$POST_BIND_DOCTOR_FAILURE_FILE" ]; then
-    exit 1
-  fi
-  doctor_calls="$(cat "$DOCTOR_CALLS_FILE")"
-  if [ "$doctor_calls" -eq 1 ]; then
-    printf "8768\\n"
-  else
-    printf "8769\\n"
-  fi
-  exit 0
+  exec "$REAL_JQ" "$@"
 fi
 exit 0
 '
   make_mock auto-mobile '
 printf "%s\n" "$*" >> "$INVOCATION_FILE"
-if [ "$1" = "--cli" ] && [ "$2" = "doctor" ]; then
-  doctor_calls=0
-  [ -f "$DOCTOR_CALLS_FILE" ] && doctor_calls="$(cat "$DOCTOR_CALLS_FILE")"
-  printf "%s\\n" "$((doctor_calls + 1))" > "$DOCTOR_CALLS_FILE"
-  if [ -f "$SESSION_OBSERVE_FILE" ]; then
-    touch "$POST_BIND_DOCTOR_FILE"
-    /bin/sleep 0.1
-    if [ ! -f "$HEARTBEAT_FILE" ]; then
-      touch "$POST_BIND_DOCTOR_FAILURE_FILE"
-      exit 1
-    fi
-  fi
-  printf "{\"ios\":{\"checks\":[]}}\\n"
-  exit 0
-fi
 if [ "$1" = "--debug" ] && [ "$2" = "--embedded-sdk" ] && [ "$3" = "--cli" ] && [ "$4" = "getApple" ] && [ "$5" = "--deviceId" ] && [ "$6" = "simulator-udid" ]; then
-  printf "{\"sessionUuid\":\"44600000-0000-4000-8000-000000000000\"}\\n"
+  printf "{\"sessionUuid\":\"44600000-0000-4000-8000-000000000000\",\"deviceIdentity\":{\"iosServicePort\":8768}}\\n"
   exit 0
 fi
 if [ "$1" = "--daemon" ] && [ "$2" = "heartbeat" ] && [ "$3" = "44600000-0000-4000-8000-000000000000" ]; then
@@ -167,18 +132,19 @@ fi
 
   [ "$status" -eq 0 ]
   [ "$(cat "$GRAPH_ATTEMPTS_FILE")" = "2" ]
-  [ "$(cat "$DOCTOR_CALLS_FILE")" = "2" ]
-  [ "$(cat "$HEALTH_ATTEMPTS_FILE")" = "4" ]
-  [ -f "$POST_BIND_DOCTOR_FILE" ]
+  [ "$(cat "$HEALTH_ATTEMPTS_FILE")" = "2" ]
   [ -f "$HEARTBEAT_FILE" ]
   [ -f "$TARGET_APP_LAUNCHED_FILE" ]
   [[ "$output" == *"getNavigationGraph attempt 1 failed"* ]]
+  [ "$(grep -c -- "--cli getApple --deviceId simulator-udid" "$INVOCATION_FILE")" = "1" ]
+  run grep -q -- "--cli doctor" "$INVOCATION_FILE"
+  [ "$status" -eq 1 ]
   # Regression for issue #4579: the graph read must be scoped to the fixture
   # bundle so a concurrent SpringBoard hierarchy push cannot redirect the query.
   grep -q -- "getNavigationGraph --platform ios --deviceId simulator-udid --appId com.apple.reminders" "$INVOCATION_FILE"
   launch_line="$(grep -n -- "launchApp --platform ios --appId com.apple.reminders --deviceId simulator-udid" "$INVOCATION_FILE" | head -n 1 | cut -d: -f1)"
   observe_line="$(grep -n -- "observe --platform ios --deviceId simulator-udid" "$INVOCATION_FILE" | head -n 1 | cut -d: -f1)"
   [ "$launch_line" -lt "$observe_line" ]
-  grep -qx "http://127.0.0.1:8769/health" "$CURL_URL_FILE"
-  grep -qx "http://127.0.0.1:8769/sdk-events" "$CURL_URL_FILE"
+  grep -qx "http://127.0.0.1:8768/health" "$CURL_URL_FILE"
+  grep -qx "http://127.0.0.1:8768/sdk-events" "$CURL_URL_FILE"
 }

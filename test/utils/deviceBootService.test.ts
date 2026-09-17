@@ -47,6 +47,139 @@ function service(
 }
 
 describe("DeviceBootService", () => {
+  it.each([
+    { minOsVersion: "17.0" },
+    { maxOsVersion: "18.0" },
+    { formFactor: "phone" as const },
+    { screenSize: { width: 390, height: 844 } },
+  ])("matches explicit iOS constraints after enriching partial metadata: %j", async (criteria) => {
+    const devices = new FakeDeviceUtils();
+    const running: BootedDevice = {
+      name: "iPhone",
+      platform: "ios",
+      deviceId: "UDID-A",
+      // Knowing the runtime must not skip enrichment of the other fields.
+      iosVersion: "17.0",
+    };
+    devices.setBootedDevices("ios", [running]);
+    devices.setDeviceImages("ios", [
+      {
+        ...running,
+        isRunning: true,
+        osVersion: "17.0",
+        formFactor: "phone",
+        screenWidth: 390,
+        screenHeight: 844,
+      },
+    ]);
+    const result = await service(devices).boot({
+      platform: "ios",
+      deviceId: "UDID-A",
+      ...criteria,
+    });
+    expect(result.source).toBe("booted");
+    expect(result.device).toMatchObject({
+      osVersion: "17.0",
+      formFactor: "phone",
+      screenWidth: 390,
+      screenHeight: 844,
+    });
+  });
+
+  it("skips image enrichment for an unconstrained exact running iOS simulator", async () => {
+    const devices = new FakeDeviceUtils();
+    const running: BootedDevice = {
+      name: "iPhone",
+      platform: "ios",
+      deviceId: "UDID-A",
+      iosVersion: "18.0",
+      osVersion: "18.0",
+    };
+    devices.setBootedDevices("ios", [running]);
+    devices.listDeviceImages = async () => {
+      throw new Error("image inventory should not be read");
+    };
+
+    const result = await service(devices).boot({
+      platform: "ios",
+      deviceId: running.deviceId,
+    });
+
+    expect(result.source).toBe("booted");
+    expect(result.device.deviceId).toBe(running.deviceId);
+    expect(devices.getExecutedOperations()).toEqual([
+      "getBootedDevices:ios",
+      `waitForDeviceReady:${running.name}:180000`,
+    ]);
+  });
+
+  it("enriches an exact running Android emulator before applying metadata constraints", async () => {
+    const devices = new FakeDeviceUtils();
+    const running: BootedDevice = {
+      name: "Pixel_9_API_35",
+      platform: "android",
+      deviceId: "emulator-5554",
+    };
+    devices.setBootedDevices("android", [running]);
+    devices.setDeviceImages("android", [
+      {
+        name: running.name,
+        platform: "android",
+        isRunning: true,
+        osVersion: "35",
+        apiLevel: "35",
+        formFactor: "phone",
+        screenWidth: 1080,
+        screenHeight: 2400,
+      },
+    ]);
+
+    const result = await service(devices).boot({
+      platform: "android",
+      deviceId: running.deviceId,
+      minOsVersion: "35",
+      formFactor: "phone",
+      screenSize: { width: 1080, height: 2400 },
+    });
+
+    expect(result.source).toBe("booted");
+    expect(result.device).toMatchObject({
+      deviceId: running.deviceId,
+      osVersion: "35",
+      apiLevel: "35",
+      formFactor: "phone",
+      screenWidth: 1080,
+      screenHeight: 2400,
+    });
+  });
+
+  it("rejects incompatible enriched iOS metadata before waiting for readiness", async () => {
+    const devices = new FakeDeviceUtils();
+    const running: BootedDevice = { name: "iPhone", platform: "ios", deviceId: "UDID-A" };
+    devices.setBootedDevices("ios", [running]);
+    devices.setDeviceImages("ios", [{ ...running, isRunning: true, osVersion: "16.4" }]);
+    await expect(
+      service(devices).boot({ platform: "ios", deviceId: "UDID-A", minOsVersion: "17.0" }),
+    ).rejects.toThrow("does not satisfy");
+    expect(devices.wasMethodCalled("waitForDeviceReady")).toBe(false);
+  });
+
+  it("does not enrich an iOS simulator from a same-name sibling or another platform", () => {
+    const running: BootedDevice = { name: "shared", platform: "ios", deviceId: "UDID-A" };
+    const images: DeviceInfo[] = [
+      { name: "shared", platform: "ios", deviceId: "UDID-B", isRunning: false, osVersion: "18.0" },
+      {
+        name: "shared",
+        platform: "android",
+        deviceId: "UDID-A",
+        isRunning: false,
+        osVersion: "15",
+      },
+    ];
+    expect(enrichBootedDevicesFromImages([running], images)).toEqual([running]);
+    expect(enrichBootedDevicesFromImages([running], images.slice(0, 1))).toEqual([running]);
+  });
+
   it("only enriches Android devices by name when their serial is an emulator serial", () => {
     const image: DeviceInfo = {
       name: "Pixel_9_API_35",
@@ -457,6 +590,45 @@ describe("DeviceBootService", () => {
     expect(devices.getWaitForDeviceReadySignal()).toBeDefined();
   });
 
+  it("backfills a booted simulator's runtime from its image before CtrlProxy readiness (#7160)", async () => {
+    const devices = new FakeDeviceUtils();
+    const simulator: DeviceInfo = {
+      platform: "ios",
+      name: "iPhone 14 Pro",
+      deviceId: "IOS-16-UDID",
+      isRunning: true,
+      iosVersion: "16.4",
+      osVersion: "16.4",
+    };
+    devices.setDeviceImages("ios", [simulator]);
+    // A partial booted-device listing used to lose the runtime while the
+    // matching image inventory still had it, allowing an impossible Xcode
+    // CtrlProxy launch to consume the whole readiness deadline.
+    devices.setBootedDevices("ios", [
+      {
+        platform: "ios",
+        name: simulator.name,
+        deviceId: simulator.deviceId,
+      },
+    ]);
+
+    const result = await service(devices).boot({
+      platform: "ios",
+      deviceId: simulator.deviceId,
+    });
+
+    expect(result.device).toMatchObject({
+      deviceId: simulator.deviceId,
+      iosVersion: "16.4",
+      osVersion: "16.4",
+    });
+    expect(devices.getExecutedOperations()).toEqual([
+      "getBootedDevices:ios",
+      "listDeviceImages:ios",
+      `waitForDeviceReady:${simulator.name}:180000`,
+    ]);
+  });
+
   it("reuses a running image when deviceId names the AVD rather than the serial", async () => {
     const devices = new FakeDeviceUtils();
     const running: BootedDevice = {
@@ -475,6 +647,30 @@ describe("DeviceBootService", () => {
 
     expect(result.source).toBe("booted");
     expect(result.device.deviceId).toBe(running.deviceId);
+    expect(devices.getExecutedOperations().join("|")).not.toContain("startDevice:");
+  });
+
+  it("never aliases an exact iOS UDID to an image display name", async () => {
+    const devices = new FakeDeviceUtils();
+    const requestedUdid = "00000000-0000-0000-0000-000000000001";
+    devices.setDeviceImages("ios", [
+      {
+        platform: "ios",
+        // This synthetic collision is deliberate: display names are not an
+        // identity namespace, even when one happens to look like a UDID.
+        name: requestedUdid,
+        deviceId: "00000000-0000-0000-0000-000000000002",
+        isRunning: false,
+      },
+    ]);
+
+    await expect(
+      service(devices).boot({
+        platform: "ios",
+        deviceId: requestedUdid,
+        preferRunning: true,
+      }),
+    ).rejects.toThrow(`Device '${requestedUdid}' not found`);
     expect(devices.getExecutedOperations().join("|")).not.toContain("startDevice:");
   });
 
@@ -1329,7 +1525,7 @@ describe("DeviceBootService", () => {
 
     await bootService.boot({
       platform: "ios",
-      name: "AutoMobile CI iPhone (com.apple.CoreSimulator.SimRuntime.iOS-26-3)",
+      name: "AutoMobile CI iPhone (26.3)",
       minOsVersion: "26.3",
       maxOsVersion: "26.3",
       matchNamedDeviceIgnoringOsVersion: true,

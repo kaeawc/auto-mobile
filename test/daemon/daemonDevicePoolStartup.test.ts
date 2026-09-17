@@ -1,10 +1,13 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
+import { DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV } from "../../src/daemon/liveAcceptanceCapability";
 import type { BootedDevice, SomePlatform } from "../../src/models";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
+import { DeviceSessionManager } from "../../src/utils/DeviceSessionManager";
+import { IOSCtrlProxyBuilder } from "../../src/utils/IOSCtrlProxyBuilder";
 import { FakeDatabaseInitializer } from "../fakes/FakeDatabaseInitializer";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
@@ -14,6 +17,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 interface DaemonStartupInternals {
   devicePool: DevicePool;
   initializeDevicePoolWithTimeout(timeoutMs: number): Promise<void>;
+  initializeIosServices(): Promise<void>;
 }
 
 class DeferredDiscoveryDeviceManager extends FakeDeviceManager {
@@ -54,6 +58,7 @@ class FakeDeviceSessionRepository extends DeviceSessionRepository {
     return undefined;
   }
   override async upsertActiveSession(): Promise<void> {}
+  override async replaceLivenessOwnership(): Promise<void> {}
 }
 
 function buildDaemon(timer: FakeTimer): Daemon {
@@ -134,5 +139,69 @@ describe("Daemon startup device discovery", () => {
       sessionId: null,
       status: "idle",
     });
+  });
+
+  test("live acceptance skips pool-wide iOS CtrlProxy warm-up", async () => {
+    const previousSecret = process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV];
+    process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV] =
+      "live-acceptance-startup-secret-012345678901234567890";
+    const getInstanceSpy = spyOn(DeviceSessionManager, "getInstance");
+    try {
+      const daemon = buildDaemon(new FakeTimer());
+      const internals = daemon as unknown as DaemonStartupInternals;
+      await internals.devicePool.initializeWithDevices([
+        {
+          deviceId: "unrelated-simulator",
+          name: "Unrelated iPhone",
+          platform: "ios",
+        },
+      ]);
+
+      await internals.initializeIosServices();
+
+      expect(getInstanceSpy).not.toHaveBeenCalled();
+    } finally {
+      getInstanceSpy.mockRestore();
+      if (previousSecret === undefined) {
+        delete process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV];
+      } else {
+        process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV] = previousSecret;
+      }
+    }
+  });
+
+  test("ordinary daemon startup still warms discovered iOS devices", async () => {
+    const previousSecret = process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV];
+    delete process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV];
+    const verifiedDeviceIds: string[] = [];
+    const getInstanceSpy = spyOn(DeviceSessionManager, "getInstance").mockReturnValue({
+      verifyIosDevice: async (deviceId: string) => {
+        verifiedDeviceIds.push(deviceId);
+      },
+    } as unknown as DeviceSessionManager);
+    const pendingPrefetchSpy = spyOn(IOSCtrlProxyBuilder, "pendingPrefetch").mockReturnValue(null);
+    try {
+      const daemon = buildDaemon(new FakeTimer());
+      const internals = daemon as unknown as DaemonStartupInternals;
+      await internals.devicePool.initializeWithDevices([
+        {
+          deviceId: "ordinary-simulator",
+          name: "Ordinary iPhone",
+          platform: "ios",
+        },
+      ]);
+
+      await internals.initializeIosServices();
+
+      expect(verifiedDeviceIds).toEqual(["ordinary-simulator"]);
+    } finally {
+      pendingPrefetchSpy.mockRestore();
+      getInstanceSpy.mockRestore();
+      if (previousSecret === undefined) {
+        delete process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV];
+      } else {
+        process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV] = previousSecret;
+      }
+    }
   });
 });

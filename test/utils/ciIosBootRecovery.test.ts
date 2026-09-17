@@ -13,7 +13,7 @@ import { createExecResult } from "../../src/utils/execResult";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 const owned: DeviceInfo = {
-  name: "AutoMobile CI iPhone (com.apple.CoreSimulator.SimRuntime.iOS-26-3)",
+  name: "AutoMobile CI iPhone (26.3)",
   platform: "ios",
   deviceId: "CI-UDID",
   isRunning: false,
@@ -113,7 +113,7 @@ describe("CI iOS boot recovery", () => {
       { simctl },
     );
 
-    expect(configuration?.request.name).toContain("com.apple.CoreSimulator.SimRuntime.iOS-18-2");
+    expect(configuration?.request.name).toBe("AutoMobile CI iPhone (18.2)");
     expect(calls).not.toContain("xcrun --sdk iphonesimulator --show-sdk-version");
   });
 

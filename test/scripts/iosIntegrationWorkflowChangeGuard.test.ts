@@ -24,7 +24,7 @@ describe("Fast Validation independence from XCTestRunner", () => {
     expect(loadJobSteps(WORKFLOW, "ios-xctest-runner-simulator-tests").length).toBeGreaterThan(0);
   });
 
-  test("runs XCTestRunner when its recording session heartbeat helper changes", () => {
+  test("runs XCTestRunner when its recording session cleanup helpers change", () => {
     const filterStep = loadJobSteps(WORKFLOW, "detect-changes").find(
       (step) => step.id === "filter-native-integration",
     );
@@ -34,6 +34,9 @@ describe("Fast Validation independence from XCTestRunner", () => {
     const nativeIntegration = load(filters as string) as { native_integration?: string[] };
     expect(nativeIntegration.native_integration).toContain(
       "test/helpers/sessionOwnershipHeartbeat.ts",
+    );
+    expect(nativeIntegration.native_integration).toContain(
+      "test/helpers/iosVideoRecordingSessionCleanup.ts",
     );
   });
 });

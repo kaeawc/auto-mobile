@@ -190,6 +190,16 @@ class FakeProvisionDeviceOperationStore implements ProvisionDeviceOperationStore
     return this.results.get(operationId)?.result;
   }
 
+  takeOverAttempt(operationId: string, attemptId: string): void {
+    const operation = this.results.get(operationId);
+    if (!operation) {
+      throw new Error(`missing operation ${operationId}`);
+    }
+    operation.attemptId = attemptId;
+    operation.replaying = false;
+    operation.failed = false;
+  }
+
   async fail(
     operationId: string,
     attemptId: string,
@@ -252,6 +262,31 @@ function blockNextCompletion(store: FakeProvisionDeviceOperationStore): {
         await release.promise;
       }
       return await complete(...args);
+    } finally {
+      settled.resolve();
+    }
+  };
+  return { entered: entered.promise, release: release.resolve, settled: settled.promise };
+}
+
+function blockNextBegin(store: FakeProvisionDeviceOperationStore): {
+  entered: Promise<void>;
+  release: () => void;
+  settled: Promise<void>;
+} {
+  const entered = deferred();
+  const release = deferred();
+  const settled = deferred();
+  const begin = store.begin.bind(store);
+  let shouldBlock = true;
+  store.begin = async (...args) => {
+    try {
+      if (shouldBlock) {
+        shouldBlock = false;
+        entered.resolve();
+        await release.promise;
+      }
+      return await begin(...args);
     } finally {
       settled.resolve();
     }
@@ -704,6 +739,58 @@ describe("provisionDevice handler", () => {
       }),
     ).toThrow(/at least 2048/);
   });
+
+  test.each([
+    [
+      "Play Store RAM below the product floor",
+      {
+        ...provisionTestArgs("android", "handler-low-play-ram"),
+        device: {
+          ...provisionTestArgs("android", "handler-low-play-ram").device,
+          spec: {
+            runtime: "system-images;android-36;google_apis_playstore;x86_64",
+            deviceType: "pixel_9",
+            configuration: { memoryMb: 1024 },
+          },
+        },
+      },
+    ],
+    [
+      "Android device with an iOS runtime",
+      {
+        ...provisionTestArgs("android", "handler-cross-platform-runtime"),
+        device: {
+          ...provisionTestArgs("android", "handler-cross-platform-runtime").device,
+          spec: {
+            runtime: "com.apple.CoreSimulator.SimRuntime.iOS-26-0",
+            deviceType: "pixel_9",
+          },
+        },
+      },
+    ],
+    [
+      "iOS device with Android-only configuration",
+      {
+        ...provisionTestArgs("ios", "handler-ios-android-config"),
+        device: {
+          ...provisionTestArgs("ios", "handler-ios-android-config").device,
+          spec: {
+            runtime: "com.apple.CoreSimulator.SimRuntime.iOS-26-0",
+            deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
+            configuration: { memoryMb: 4096 },
+          },
+        },
+      },
+    ],
+  ] as const)(
+    "rejects %s through the provisionDevice product handler before provisioning",
+    async (_description, input) => {
+      const response = await ToolRegistry.getTool("provisionDevice")!.handler(input);
+
+      expect((response as any).isError).toBe(true);
+      expect(exactProvisioner.requests).toHaveLength(0);
+    },
+  );
 
   test.each([
     ["system-images;android-36;google_apis_playstore;x86_64", 2048],
@@ -2225,22 +2312,26 @@ describe("provisionDevice handler", () => {
         deviceId: "other-udid",
       },
     ]);
+    let receivedProvisionRequest: Parameters<ExactDeviceProvisioner["provision"]>[0] | undefined;
     const exactIosProvisioner: ExactDeviceProvisioner = {
-      provision: async () => ({
-        created: false,
-        device: {
-          name: "phone-api-36-a",
-          platform: "ios",
-          deviceId: "requested-udid",
-          isRunning: false,
-          runtime: "com.apple.CoreSimulator.SimRuntime.iOS-26-0",
-          deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
-        },
-        resolvedSpec: {
-          runtime: "com.apple.CoreSimulator.SimRuntime.iOS-26-0",
-          deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
-        },
-      }),
+      provision: async (request) => {
+        receivedProvisionRequest = request;
+        return {
+          created: false,
+          device: {
+            name: "phone-api-36-a",
+            platform: "ios",
+            deviceId: "requested-udid",
+            isRunning: false,
+            runtime: "com.apple.CoreSimulator.SimRuntime.iOS-26-0",
+            deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
+          },
+          resolvedSpec: {
+            runtime: "com.apple.CoreSimulator.SimRuntime.iOS-26-0",
+            deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
+          },
+        };
+      },
     };
     setDeviceToolsDependencies({
       exactDeviceProvisionerFactory: () => exactIosProvisioner,
@@ -2258,6 +2349,7 @@ describe("provisionDevice handler", () => {
           device: {
             platform: "ios",
             name: "phone-api-36-a",
+            deviceId: "requested-udid",
             spec: {
               runtime: "com.apple.CoreSimulator.SimRuntime.iOS-26-0",
               deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
@@ -2282,6 +2374,14 @@ describe("provisionDevice handler", () => {
     expect(deviceManager.getExecutedOperations()).toContainEqual(
       expect.stringContaining("startDevice:phone-api-36-a"),
     );
+    expect(receivedProvisionRequest?.deviceId).toBe("requested-udid");
+    expect(deviceManager.getGetDeviceImagesDetailedCalls()).toContainEqual({
+      platform: "ios",
+      options: {
+        bypassIosDeviceListCache: true,
+        signal: expect.any(AbortSignal),
+      },
+    });
   });
 
   test("reports a contended iOS selector reservation as a timeout", async () => {
@@ -3818,6 +3918,97 @@ describe("provisionDevice handler", () => {
     expect(retryPayload).toMatchObject({ lifecycleState: "created" });
     expect(operationStore.getStoredResult(args.operationId)).toEqual(persistedRetry);
   });
+
+  test.each(["android", "ios"] as const)(
+    "%s bounds a blocked operation admission without starting a device mutation",
+    async (platform) => {
+      const timer = new FakeTimer();
+      setDeviceToolsDependencies({ timer });
+      registerDeviceTools();
+      const begin = blockNextBegin(operationStore);
+      const args = {
+        ...provisionTestArgs(platform, `pending-operation-begin-${platform}`),
+        readiness: "none" as const,
+        timeoutMs: 1_000,
+      };
+      let payload: Record<string, any> | undefined;
+      const request = ToolRegistry.getTool("provisionDevice")!
+        .handler(args)
+        .then((response) => {
+          payload = JSON.parse((response as any).content[0].text);
+          return response;
+        });
+
+      await begin.entered;
+      timer.advanceTime(1_000);
+      await flushMicrotasks();
+      const payloadAtDeadline = payload;
+      try {
+        expect(payloadAtDeadline?.error).toMatchObject({
+          code: "timeout",
+          message: expect.stringContaining("starting provision operation"),
+        });
+        expect(exactProvisioner.requests).toHaveLength(0);
+        expect(deviceManager.wasMethodCalled("startDevice")).toBe(false);
+      } finally {
+        begin.release();
+        await request;
+        await begin.settled;
+        await flushMicrotasks();
+      }
+
+      expect(exactProvisioner.requests).toHaveLength(0);
+      expect(deviceManager.wasMethodCalled("startDevice")).toBe(false);
+      expect(operationStore.failures).toEqual([
+        { operationId: args.operationId, errorCode: "timeout" },
+      ]);
+    },
+  );
+
+  test.each(["android", "ios"] as const)(
+    "%s does not hold a failed provision open for persistence and fences its late settlement",
+    async (platform) => {
+      const timer = new FakeTimer();
+      exactProvisioner.provision = async () => {
+        throw new Error("provisioning backend failed");
+      };
+      setDeviceToolsDependencies({ timer });
+      registerDeviceTools();
+      const failure = blockNextFailure(operationStore);
+      const args = {
+        ...provisionTestArgs(platform, `pending-failure-persistence-${platform}`),
+        boot: false,
+        readiness: "none" as const,
+        timeoutMs: 1_000,
+      };
+      let payload: Record<string, any> | undefined;
+      const request = ToolRegistry.getTool("provisionDevice")!
+        .handler(args)
+        .then((response) => {
+          payload = JSON.parse((response as any).content[0].text);
+          return response;
+        });
+
+      await failure.entered;
+      timer.advanceTime(1_000);
+      await flushMicrotasks();
+      const payloadAtDeadline = payload;
+      try {
+        expect(payloadAtDeadline?.error).toMatchObject({
+          code: "platform_command_failed",
+          message: expect.stringContaining("provisioning backend failed"),
+        });
+
+        operationStore.takeOverAttempt(args.operationId, "replacement-attempt");
+      } finally {
+        failure.release();
+        await request;
+        await failure.settled;
+      }
+
+      expect(operationStore.failCalls).toBe(0);
+    },
+  );
 
   test("releases a booted session when final completion exceeds the original deadline", async () => {
     const timer = new FakeTimer();

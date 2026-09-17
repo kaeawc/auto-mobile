@@ -966,7 +966,7 @@ describe("IOSCtrlProxyClient", function () {
 
         // Parse sent message to get requestId
         const sentMessage = commandPayloads(socket!)[0];
-        expect(sentMessage.type).toBe("request_hierarchy_if_stale");
+        expect(sentMessage.type).toBe("request_hierarchy");
 
         // Respond with matching requestId
         socket!.simulateMessage(
@@ -2282,6 +2282,45 @@ describe("IOSCtrlProxyClient", function () {
         await testClient.close();
       }
     });
+
+    test("cancels an in-flight launch request with the caller's abort reason", async function () {
+      const testTimer = fakeTimer;
+      const controller = new AbortController();
+      const cancellation = new Error("launch retarget cancelled");
+      const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        testTimer,
+      );
+
+      try {
+        const resultPromise = testClient.requestLaunchApp(
+          "com.apple.Preferences",
+          5000,
+          undefined,
+          false,
+          controller.signal,
+        );
+        const socket = await waitForSocket(getSocket);
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+        await waitForSentMessages(socket, 1);
+
+        const requestManager = (testClient as any).requestManager as {
+          getPendingCount(): number;
+        };
+        expect(requestManager.getPendingCount()).toBe(1);
+
+        controller.abort(cancellation);
+
+        await expect(resultPromise).rejects.toBe(cancellation);
+        expect(requestManager.getPendingCount()).toBe(0);
+      } finally {
+        await testClient.close();
+      }
+    });
   });
 
   describe("requestPressBack", function () {
@@ -2894,6 +2933,39 @@ describe("IOSCtrlProxyClient", function () {
 
       const created = IOSCtrlProxyClient.getInstance(testDevice);
       expect(IOSCtrlProxyClient.getExistingInstance(testDevice.deviceId)).toBe(created);
+    });
+
+    test("retireInstance removes and closes the registered device client", async function () {
+      IOSCtrlProxyClient.resetInstances();
+      const created = IOSCtrlProxyClient.getInstance(testDevice);
+
+      await IOSCtrlProxyClient.retireInstance(testDevice.deviceId);
+
+      expect(IOSCtrlProxyClient.getExistingInstance(testDevice.deviceId)).toBeNull();
+      expect(created.isConnected()).toBe(false);
+    });
+
+    test("intentional retirement cancels a reconnect scheduled before runner shutdown", async function () {
+      const timer = new FakeTimer();
+      let socketCreations = 0;
+      const client = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        {
+          create() {
+            socketCreations += 1;
+            throw new Error("retired client must not reconnect");
+          },
+        },
+        timer,
+      );
+      (client as unknown as { scheduleReconnect(): void }).scheduleReconnect();
+
+      await client.close();
+      timer.advanceTime(5_000);
+      await flushPromises();
+
+      expect(socketCreations).toBe(0);
     });
 
     test("createDetached returns an unregistered client (not rediscoverable after close)", async function () {

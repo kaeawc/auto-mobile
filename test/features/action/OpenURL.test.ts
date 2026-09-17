@@ -3,6 +3,7 @@ import { OpenURL } from "../../../src/features/action/OpenURL";
 import { BaseVisualChange } from "../../../src/features/action/BaseVisualChange";
 import { LaunchApp } from "../../../src/features/action/LaunchApp";
 import { IOSCtrlProxyManager } from "../../../src/utils/IOSCtrlProxyManager";
+import { IOSCtrlProxyClient } from "../../../src/features/observe/ios/IOSCtrlProxyClient";
 import { BootedDevice } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
@@ -62,6 +63,25 @@ describe("OpenURL iOS routing", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0].args).toEqual(["openurl", SIMULATOR_UDID, "https://example.com/x"]);
     expect(devicectl.launchCalls).toHaveLength(0);
+  });
+
+  test("simulator open invalidates the pre-link hierarchy for system dialog discovery", async () => {
+    let invalidations = 0;
+    const existingClientSpy = spyOn(IOSCtrlProxyClient, "getExistingInstance").mockReturnValue({
+      invalidateCache: () => {
+        invalidations += 1;
+      },
+    } as any);
+    restores.push(() => existingClientSpy.mockRestore());
+
+    await openIos(
+      iosDevice(SIMULATOR_UDID),
+      new FakeSimCtlClient(),
+      new FakeDeviceUrlLauncher(),
+      "slack://login?token=secret",
+    );
+
+    expect(invalidations).toBe(1);
   });
 
   test("(b) physical UDID + http URL launches Safari with the payload URL", async () => {

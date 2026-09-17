@@ -29,6 +29,8 @@ import {
   SecurityClient,
   type SecurityClientApi,
 } from "../../utils/ios-cmdline-tools/SecurityClient";
+import type { DoctorProbeOptions } from "../types";
+import { awaitDoctorProbe, remainingDoctorProbe } from "../deadline";
 
 // Re-exported so doctor consumers (and tests) can reference the feature command
 // set without reaching into the runner client module.
@@ -58,7 +60,10 @@ export interface IosRunnerInspection {
 
 /** Source of booted-simulator runner identities (injectable for tests). */
 export interface IosCtrlProxyRunnerInspector {
-  inspectBootedRunners(): Promise<IosRunnerInspection[]>;
+  inspectBootedRunners(
+    targetDeviceId?: string,
+    probe?: DoctorProbeOptions,
+  ): Promise<IosRunnerInspection[]>;
 }
 
 /** Per-simulator result of a real iOS runner observe round trip. */
@@ -75,7 +80,10 @@ export interface IosObserveRoundTripInspection {
 
 /** Source of booted-simulator iOS observe round trips (injectable for tests). */
 export interface IosObserveRoundTripInspector {
-  inspectBootedObserveRoundTrips(): Promise<IosObserveRoundTripInspection[]>;
+  inspectBootedObserveRoundTrips(
+    targetDeviceId?: string,
+    probe?: DoctorProbeOptions,
+  ): Promise<IosObserveRoundTripInspection[]>;
 }
 
 type IosRunnerVersionStatus = "compatible" | "stale" | "unknown";
@@ -98,7 +106,11 @@ const hostCommandExecutor = new DefaultHostCommandExecutor();
 
 export interface IosDoctorDependencies {
   platform: () => NodeJS.Platform;
-  execFile: (file: string, args: string[]) => Promise<ExecResult>;
+  execFile: (
+    file: string,
+    args: string[],
+    options?: { signal?: AbortSignal; timeoutMs?: number },
+  ) => Promise<ExecResult>;
   xcodebuild: Pick<Xcodebuild, "executeCommand">;
   fileExists: (path: string) => boolean;
   readDir: (path: string) => Promise<string[]>;
@@ -134,6 +146,25 @@ interface IosRunnerProbeClient {
   getSupportedCommands(): Promise<string[] | null>;
   getSupportedFeatures(): Promise<string[] | null>;
   close(): Promise<void>;
+}
+
+interface SelectedIosRunnerProbe {
+  client: IosRunnerProbeClient;
+  closeAfterUse: boolean;
+}
+
+function selectIosRunnerProbe(
+  existing: IosRunnerProbeClient | null,
+  managerReportsRunning: boolean,
+  create: () => IosRunnerProbeClient,
+): SelectedIosRunnerProbe | null {
+  if (existing !== null) {
+    return { client: existing, closeAfterUse: false };
+  }
+  if (managerReportsRunning) {
+    return { client: create(), closeAfterUse: true };
+  }
+  return null;
 }
 
 /** Minimal iOS runner client surface for the doctor observe round-trip check. */
@@ -193,15 +224,30 @@ export function createIosCtrlProxyRunnerInspector(
   hooks: IosRunnerInspectorHooks = defaultIosRunnerInspectorHooks,
 ): IosCtrlProxyRunnerInspector {
   return {
-    async inspectBootedRunners(): Promise<IosRunnerInspection[]> {
+    async inspectBootedRunners(
+      targetDeviceId?: string,
+      probe: DoctorProbeOptions = {},
+    ): Promise<IosRunnerInspection[]> {
+      const currentProbe = remainingDoctorProbe(probe);
       const simctl = createSimctlClient();
-      if (!(await simctl.isAvailable())) {
+      if (
+        !(await simctl.isAvailable({
+          signal: currentProbe.signal,
+          timeoutMs: currentProbe.timeoutMs,
+        }))
+      ) {
         return [];
       }
 
-      const simulators = await simctl.getBootedSimulators();
+      const simulators = await simctl.getBootedSimulators(
+        currentProbe.timeoutMs,
+        currentProbe.signal,
+      );
       const inspections: IosRunnerInspection[] = [];
-      for (const simulator of simulators) {
+      for (const simulator of simulators.filter(
+        (candidate) => targetDeviceId === undefined || candidate.deviceId === targetDeviceId,
+      )) {
+        currentProbe.signal?.throwIfAborted();
         const device: BootedDevice = {
           name: simulator.name,
           platform: "ios",
@@ -210,21 +256,29 @@ export function createIosCtrlProxyRunnerInspector(
         };
         const manager = hooks.getManager(device);
         const installed = await manager.isInstalled();
-        const running = installed ? await manager.isRunning() : false;
+        let running = installed ? await manager.isRunning() : false;
 
         let supportedCommands: string[] | null = null;
         let supportedFeatures: string[] | null = null;
-        if (running) {
+        const existing = hooks.getExistingClient(device.deviceId);
+        const selectedProbe = selectIosRunnerProbe(existing, running, () =>
+          hooks.createClient(device),
+        );
+        if (selectedProbe !== null) {
           // Don't disturb a client someone else owns (e.g. the daemon's live
           // session): if one already exists, read through it and leave its
           // lifecycle alone. Otherwise open a throwaway probe client and close it
           // afterwards so doctor leaves no persistent runner connection or SDK
           // polling timer behind (especially for the one-shot CLI invocation).
-          const existing = hooks.getExistingClient(device.deviceId);
-          const probe = existing ?? hooks.createClient(device);
           try {
-            supportedCommands = await probe.getSupportedCommands();
-            supportedFeatures = await probe.getSupportedFeatures();
+            supportedCommands = await awaitDoctorProbe(currentProbe, () =>
+              selectedProbe.client.getSupportedCommands(),
+            );
+            currentProbe.signal?.throwIfAborted();
+            supportedFeatures = await awaitDoctorProbe(currentProbe, () =>
+              selectedProbe.client.getSupportedFeatures(),
+            );
+            running = running || supportedCommands !== null;
           } catch (error) {
             // Treated as an unreachable runner (versionStatus=unknown), not a hard
             // failure: doctor still reports installed/running for the simulator.
@@ -233,8 +287,8 @@ export function createIosCtrlProxyRunnerInspector(
               error,
             );
           } finally {
-            if (existing === null) {
-              await probe.close();
+            if (selectedProbe.closeAfterUse) {
+              await selectedProbe.client.close();
             }
           }
         }
@@ -266,16 +320,31 @@ export function createIosObserveRoundTripInspector(
   hooks: IosObserveRoundTripInspectorHooks = defaultIosObserveRoundTripInspectorHooks,
 ): IosObserveRoundTripInspector {
   return {
-    async inspectBootedObserveRoundTrips(): Promise<IosObserveRoundTripInspection[]> {
+    async inspectBootedObserveRoundTrips(
+      targetDeviceId?: string,
+      probe: DoctorProbeOptions = {},
+    ): Promise<IosObserveRoundTripInspection[]> {
+      const currentProbe = remainingDoctorProbe(probe);
       const simctl = createSimctlClient();
-      if (!(await simctl.isAvailable())) {
+      if (
+        !(await simctl.isAvailable({
+          signal: currentProbe.signal,
+          timeoutMs: currentProbe.timeoutMs,
+        }))
+      ) {
         return [];
       }
 
-      const simulators = await simctl.getBootedSimulators();
+      const simulators = await simctl.getBootedSimulators(
+        currentProbe.timeoutMs,
+        currentProbe.signal,
+      );
       const inspections: IosObserveRoundTripInspection[] = [];
 
-      for (const simulator of simulators) {
+      for (const simulator of simulators.filter(
+        (candidate) => targetDeviceId === undefined || candidate.deviceId === targetDeviceId,
+      )) {
+        currentProbe.signal?.throwIfAborted();
         const device: BootedDevice = {
           name: simulator.name,
           platform: "ios",
@@ -284,14 +353,18 @@ export function createIosObserveRoundTripInspector(
         };
         const manager = hooks.getManager(device);
         const servicePort = manager.getServicePort();
+        const existing = hooks.getExistingClient(device.deviceId);
+        let clientPort = existing?.getConnectionPortForDiagnostics() ?? servicePort;
         // The runner's *actual* bound port, read from its /health self-report, so
         // a runner that bound the wrong port surfaces as a real mismatch instead
         // of the service port being compared to itself (issue #2735). Falls back
-        // to the service port when no runner reports a port (older or unreachable
-        // runner) so a healthy runner is never falsely flagged.
-        const reportedRunnerPort = await manager.getReportedRunnerPort();
-        const runnerPort = reportedRunnerPort ?? servicePort;
-        let clientPort = servicePort;
+        // to the already-connected client's port before the manager's service
+        // port. A resident client remains authoritative when manager allocation
+        // bookkeeping was rebuilt in a different multi-simulator order.
+        const reportedRunnerPort = await awaitDoctorProbe(currentProbe, () =>
+          manager.getReportedRunnerPort(),
+        );
+        let runnerPort = reportedRunnerPort ?? clientPort;
         let connected = false;
         let screenSize = { width: 0, height: 0 };
         let hierarchyError: string | null = null;
@@ -300,10 +373,10 @@ export function createIosObserveRoundTripInspector(
         try {
           const installed = await manager.isInstalled();
           const running = installed ? await manager.isRunning() : false;
-          if (!installed || !running) {
-            if (!installed) {
-              hierarchyError = "iOS CtrlProxy runner is not installed";
-            } else if (reportedRunnerPort !== null && reportedRunnerPort !== servicePort) {
+          if (!installed) {
+            hierarchyError = "iOS CtrlProxy runner is not installed";
+          } else if (!running && existing === null) {
+            if (reportedRunnerPort !== null && reportedRunnerPort !== servicePort) {
               // The runner is alive but bound to a different port than the client
               // expects — the #2731 failure mode. Surface it explicitly rather
               // than the misleading "not running".
@@ -312,12 +385,18 @@ export function createIosObserveRoundTripInspector(
               hierarchyError = "iOS CtrlProxy runner is not running";
             }
           } else {
-            const existing = hooks.getExistingClient(device.deviceId);
             const client = existing ?? hooks.createClient(device, runnerPort);
             try {
               clientPort = client.getConnectionPortForDiagnostics();
-              const response = await client.requestHierarchySync(undefined, false, undefined, 5000);
+              const response = await client.requestHierarchySync(
+                undefined,
+                false,
+                currentProbe.signal,
+                currentProbe.timeoutMs,
+              );
+              currentProbe.signal?.throwIfAborted();
               clientPort = client.getConnectionPortForDiagnostics();
+              runnerPort = reportedRunnerPort ?? clientPort;
               connected = response !== null;
               if (!response?.hierarchy) {
                 hierarchyError = "No iOS hierarchy returned from CtrlProxy runner";
@@ -370,9 +449,10 @@ export function createIosObserveRoundTripInspector(
 
 export const createIosDoctorDependencies = (): IosDoctorDependencies => ({
   platform: () => process.platform,
-  execFile: (file, args) =>
+  execFile: (file, args, options = {}) =>
     hostCommandExecutor.executeCommand(file, args, {
-      timeoutMs: DOCTOR_EXEC_TIMEOUT_MS,
+      timeoutMs: options.timeoutMs ?? DOCTOR_EXEC_TIMEOUT_MS,
+      signal: options.signal,
       killSignal: "SIGKILL",
     }),
   xcodebuild: new XcodebuildClient(),
@@ -416,6 +496,7 @@ function compareVersions(current: string, minimum: string): number {
 export async function checkXcodeInstallation(
   minimumVersion: string = MIN_XCODE_VERSION,
   dependencies = createIosDoctorDependencies(),
+  probe: DoctorProbeOptions = {},
 ): Promise<CheckResult> {
   if (dependencies.platform() !== "darwin") {
     return {
@@ -426,8 +507,10 @@ export async function checkXcodeInstallation(
   }
 
   try {
+    const currentProbe = remainingDoctorProbe(probe);
     const result = await dependencies.xcodebuild.executeCommand(["-version"], {
-      timeoutMs: DOCTOR_EXEC_TIMEOUT_MS,
+      timeoutMs: currentProbe.timeoutMs ?? DOCTOR_EXEC_TIMEOUT_MS,
+      signal: currentProbe.signal,
     });
     const version = parseXcodeVersion(result.stdout);
 
@@ -499,7 +582,7 @@ function isTimeoutError(error: unknown): boolean {
  * Check Xcode Command Line Tools
  */
 export async function checkXcodeCommandLineTools(
-  _options: DoctorOptions = {},
+  options: DoctorOptions = {},
   dependencies = createIosDoctorDependencies(),
 ): Promise<CheckResult> {
   const name = "Command Line Tools";
@@ -513,7 +596,8 @@ export async function checkXcodeCommandLineTools(
   }
 
   try {
-    const result = await dependencies.execFile("xcode-select", ["-p"]);
+    const probe = remainingDoctorProbe(options);
+    const result = await dependencies.execFile("xcode-select", ["-p"], probe);
     const developerDir = result.stdout.trim();
 
     if (!developerDir) {
@@ -560,6 +644,7 @@ export async function checkXcodeCommandLineTools(
  */
 export async function checkXcrunAvailable(
   dependencies = createIosDoctorDependencies(),
+  probe: DoctorProbeOptions = {},
 ): Promise<CheckResult> {
   if (dependencies.platform() !== "darwin") {
     return {
@@ -570,7 +655,11 @@ export async function checkXcrunAvailable(
   }
 
   try {
-    await dependencies.execFile("xcrun", ["--version"]);
+    const simctl = dependencies.createSimctlClient();
+    const available = await simctl.isAvailable(remainingDoctorProbe(probe));
+    if (!available) {
+      throw new Error("xcrun could not locate simctl");
+    }
     return {
       name: "xcrun",
       status: "pass",
@@ -592,6 +681,7 @@ export async function checkXcrunAvailable(
  */
 export async function checkSimctlAvailable(
   dependencies = createIosDoctorDependencies(),
+  probe: DoctorProbeOptions = {},
 ): Promise<CheckResult> {
   if (dependencies.platform() !== "darwin") {
     return {
@@ -603,7 +693,11 @@ export async function checkSimctlAvailable(
 
   try {
     const simctl = dependencies.createSimctlClient();
-    const available = await simctl.isAvailable();
+    const currentProbe = remainingDoctorProbe(probe);
+    const available = await simctl.isAvailable({
+      signal: currentProbe.signal,
+      timeoutMs: currentProbe.timeoutMs,
+    });
 
     if (available) {
       return {
@@ -635,6 +729,7 @@ export async function checkSimctlAvailable(
  */
 export async function checkSimulatorRuntimes(
   dependencies = createIosDoctorDependencies(),
+  probe: DoctorProbeOptions = {},
 ): Promise<CheckResult> {
   const name = "iOS Simulator Runtimes";
 
@@ -647,7 +742,13 @@ export async function checkSimulatorRuntimes(
   }
 
   const simctl = dependencies.createSimctlClient();
-  if (!(await simctl.isAvailable())) {
+  const currentProbe = remainingDoctorProbe(probe);
+  if (
+    !(await simctl.isAvailable({
+      signal: currentProbe.signal,
+      timeoutMs: currentProbe.timeoutMs,
+    }))
+  ) {
     return {
       name,
       status: "skip",
@@ -656,7 +757,7 @@ export async function checkSimulatorRuntimes(
   }
 
   try {
-    const runtimes = await simctl.getRuntimes();
+    const runtimes = await simctl.getRuntimes(currentProbe.timeoutMs, currentProbe.signal);
     const iosRuntimes = runtimes.filter((runtime) => runtime.name.startsWith("iOS"));
 
     if (iosRuntimes.length === 0) {
@@ -691,6 +792,7 @@ export async function checkSimulatorRuntimes(
  */
 export async function checkCodeSigning(
   dependencies = createIosDoctorDependencies(),
+  probe: DoctorProbeOptions = {},
 ): Promise<CheckResult> {
   const name = "Code Signing Identity";
 
@@ -703,8 +805,10 @@ export async function checkCodeSigning(
   }
 
   try {
+    const currentProbe = remainingDoctorProbe(probe);
     const identities = await dependencies.securityClient.listCodeSigningIdentities({
-      timeoutMs: DOCTOR_EXEC_TIMEOUT_MS,
+      signal: currentProbe.signal,
+      timeoutMs: currentProbe.timeoutMs ?? DOCTOR_EXEC_TIMEOUT_MS,
     });
     const count = identities.length;
 
@@ -737,6 +841,7 @@ export async function checkCodeSigning(
 /** Check that the centralized macOS security CLI boundary is available. */
 export async function checkSecurityCli(
   dependencies = createIosDoctorDependencies(),
+  probe: DoctorProbeOptions = {},
 ): Promise<CheckResult> {
   const name = "Security CLI";
   if (dependencies.platform() !== "darwin") {
@@ -744,8 +849,10 @@ export async function checkSecurityCli(
   }
 
   try {
+    const currentProbe = remainingDoctorProbe(probe);
     const diagnostics = await dependencies.securityClient.getDiagnostics({
-      timeoutMs: DOCTOR_EXEC_TIMEOUT_MS,
+      signal: currentProbe.signal,
+      timeoutMs: currentProbe.timeoutMs ?? DOCTOR_EXEC_TIMEOUT_MS,
     });
     if (diagnostics.available) {
       return {
@@ -777,6 +884,7 @@ export async function checkSecurityCli(
  */
 export async function checkAppleDeveloperAccount(
   dependencies = createIosDoctorDependencies(),
+  probe: DoctorProbeOptions = {},
 ): Promise<CheckResult> {
   const name = "Apple Developer Account";
 
@@ -790,7 +898,7 @@ export async function checkAppleDeveloperAccount(
 
   const accountsPath = join(dependencies.homedir(), "Library", "Developer", "Xcode", "Accounts");
   try {
-    const entries = await dependencies.readDir(accountsPath);
+    const entries = await awaitDoctorProbe(probe, () => dependencies.readDir(accountsPath));
     const visibleEntries = entries.filter((entry) => entry.trim().length > 0);
     if (visibleEntries.length > 0) {
       return {
@@ -822,6 +930,7 @@ export async function checkAppleDeveloperAccount(
  */
 export async function checkProvisioningProfiles(
   dependencies = createIosDoctorDependencies(),
+  probe: DoctorProbeOptions = {},
 ): Promise<CheckResult> {
   const name = "Provisioning Profiles";
 
@@ -840,7 +949,7 @@ export async function checkProvisioningProfiles(
     "Provisioning Profiles",
   );
   try {
-    const entries = await dependencies.readDir(profilesPath);
+    const entries = await awaitDoctorProbe(probe, () => dependencies.readDir(profilesPath));
     const profiles = entries.filter((entry) => entry.endsWith(".mobileprovision"));
 
     if (profiles.length > 0) {
@@ -874,6 +983,7 @@ export async function checkProvisioningProfiles(
  */
 export async function checkBootedSimulators(
   dependencies = createIosDoctorDependencies(),
+  probe: DoctorProbeOptions = {},
 ): Promise<CheckResult> {
   if (dependencies.platform() !== "darwin") {
     return {
@@ -885,8 +995,14 @@ export async function checkBootedSimulators(
 
   try {
     const simctl = dependencies.createSimctlClient();
+    const currentProbe = remainingDoctorProbe(probe);
 
-    if (!(await simctl.isAvailable())) {
+    if (
+      !(await simctl.isAvailable({
+        signal: currentProbe.signal,
+        timeoutMs: currentProbe.timeoutMs,
+      }))
+    ) {
       return {
         name: "Booted Simulators",
         status: "skip",
@@ -894,7 +1010,10 @@ export async function checkBootedSimulators(
       };
     }
 
-    const simulators = await simctl.getBootedSimulators();
+    const simulators = await simctl.getBootedSimulators(
+      currentProbe.timeoutMs,
+      currentProbe.signal,
+    );
 
     if (simulators.length === 0) {
       return {
@@ -1030,6 +1149,8 @@ function classifyObserveRoundTrip(
  */
 export async function checkIosCtrlProxyRunner(
   dependencies = createIosDoctorDependencies(),
+  probe: DoctorProbeOptions = {},
+  targetDeviceId?: string,
 ): Promise<CheckResult> {
   const name = "iOS CtrlProxy Runner";
 
@@ -1042,13 +1163,19 @@ export async function checkIosCtrlProxyRunner(
   }
 
   try {
-    const inspections = await dependencies.runnerInspector.inspectBootedRunners();
+    const inspections = await dependencies.runnerInspector.inspectBootedRunners(
+      targetDeviceId,
+      remainingDoctorProbe(probe),
+    );
 
     if (inspections.length === 0) {
       return {
         name,
-        status: "skip",
-        message: "No booted simulators to check",
+        status: targetDeviceId === undefined ? "skip" : "fail",
+        message:
+          targetDeviceId === undefined
+            ? "No booted simulators to check"
+            : `Requested simulator is not booted: ${targetDeviceId}`,
       };
     }
 
@@ -1121,6 +1248,8 @@ export async function checkIosCtrlProxyRunner(
  */
 export async function checkIosObserveRoundTrip(
   dependencies = createIosDoctorDependencies(),
+  probe: DoctorProbeOptions = {},
+  targetDeviceId?: string,
 ): Promise<CheckResult> {
   const name = "iOS Observe Round Trip";
 
@@ -1133,14 +1262,19 @@ export async function checkIosObserveRoundTrip(
   }
 
   try {
-    const inspections =
-      await dependencies.observeRoundTripInspector.inspectBootedObserveRoundTrips();
+    const inspections = await dependencies.observeRoundTripInspector.inspectBootedObserveRoundTrips(
+      targetDeviceId,
+      remainingDoctorProbe(probe),
+    );
 
     if (inspections.length === 0) {
       return {
         name,
-        status: "skip",
-        message: "No booted simulators to check",
+        status: targetDeviceId === undefined ? "skip" : "fail",
+        message:
+          targetDeviceId === undefined
+            ? "No booted simulators to check"
+            : `Requested simulator is not booted: ${targetDeviceId}`,
       };
     }
 
@@ -1185,19 +1319,44 @@ export async function runIosChecks(
   dependencies = createIosDoctorDependencies(),
 ): Promise<CheckResult[]> {
   const results: CheckResult[] = [];
+  const run = async (check: () => Promise<CheckResult>): Promise<void> => {
+    remainingDoctorProbe(options);
+    results.push(await check());
+    remainingDoctorProbe(options);
+  };
 
-  results.push(await checkXcodeInstallation(MIN_XCODE_VERSION, dependencies));
-  results.push(await checkXcodeCommandLineTools(options, dependencies));
-  results.push(await checkXcrunAvailable(dependencies));
-  results.push(await checkSimctlAvailable(dependencies));
-  results.push(await checkSimulatorRuntimes(dependencies));
-  results.push(await checkSecurityCli(dependencies));
-  results.push(await checkCodeSigning(dependencies));
-  results.push(await checkAppleDeveloperAccount(dependencies));
-  results.push(await checkProvisioningProfiles(dependencies));
-  results.push(await checkBootedSimulators(dependencies));
-  results.push(await checkIosCtrlProxyRunner(dependencies));
-  results.push(await checkIosObserveRoundTrip(dependencies));
+  await run(() => checkXcodeInstallation(MIN_XCODE_VERSION, dependencies, options));
+  await run(() => checkXcodeCommandLineTools(options, dependencies));
+  await run(() => checkXcrunAvailable(dependencies, options));
+  await run(() => checkSimctlAvailable(dependencies, options));
+  await run(() => checkSimulatorRuntimes(dependencies, options));
+  await run(() => checkSecurityCli(dependencies, options));
+  await run(() => checkCodeSigning(dependencies, options));
+  await run(() => checkAppleDeveloperAccount(dependencies, options));
+  await run(() => checkProvisioningProfiles(dependencies, options));
+  await run(() => checkBootedSimulators(dependencies, options));
+  await run(() => checkIosCtrlProxyRunner(dependencies, options));
+  await run(() => checkIosObserveRoundTrip(dependencies, options));
 
+  return results;
+}
+
+/** Run only host-wide iOS tooling checks after repair. */
+export async function runPostRepairIosChecks(
+  options: DoctorOptions = {},
+  dependencies = createIosDoctorDependencies(),
+): Promise<CheckResult[]> {
+  const results: CheckResult[] = [];
+  const run = async (check: () => Promise<CheckResult>): Promise<void> => {
+    remainingDoctorProbe(options);
+    results.push(await check());
+    remainingDoctorProbe(options);
+  };
+
+  await run(() => checkXcodeInstallation(MIN_XCODE_VERSION, dependencies, options));
+  await run(() => checkXcodeCommandLineTools(options, dependencies));
+  await run(() => checkXcrunAvailable(dependencies, options));
+  await run(() => checkSimctlAvailable(dependencies, options));
+  await run(() => checkSimulatorRuntimes(dependencies, options));
   return results;
 }

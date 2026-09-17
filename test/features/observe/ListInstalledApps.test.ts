@@ -102,6 +102,22 @@ describe("ListInstalledApps", function () {
 
       expect(listUsersSignal).toBe(controller.signal);
     });
+
+    test("preserves cancellation instead of returning an empty package list", async function () {
+      const controller = new AbortController();
+      const cancellation = new Error("launch preflight cancelled");
+      let listUsersSignal: AbortSignal | undefined;
+      fakeAdb.listUsers = async (signal?: AbortSignal) => {
+        listUsersSignal = signal;
+        controller.abort(cancellation);
+        signal?.throwIfAborted();
+        return [];
+      };
+
+      await expect(listInstalledApps.execute(controller.signal)).rejects.toBe(cancellation);
+      expect(listUsersSignal).toBe(controller.signal);
+    });
+
     test("should list all installed packages", async function () {
       // Set up single user with packages
       fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 13, running: true }]);

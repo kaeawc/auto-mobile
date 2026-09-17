@@ -12,6 +12,11 @@ import { defaultTimer, type Timer } from "../utils/SystemTimer";
 // `markStaleActiveSessionsExpired`), so it is a reliable "became terminal" age
 // marker without a migration.
 const DEVICE_SESSION_RETENTION_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+const RECOVERABLE_DAEMON_RELEASE_REASONS = new Set(["daemon-shutdown", "daemon-restart"]);
+
+function shouldRetainLivenessOwner(reason: string): boolean {
+  return RECOVERABLE_DAEMON_RELEASE_REASONS.has(reason);
+}
 
 export interface DeviceSessionRecord {
   sessionUuid: string;
@@ -41,6 +46,8 @@ export interface DeviceSessionPersistence {
   upsertActiveSession(record: DeviceSessionRecord): Promise<void>;
   getSession?(sessionUuid: string): Promise<DeviceSession | undefined>;
   recordActivity(sessionUuid: string, update: DeviceSessionActivityUpdate): Promise<void>;
+  recordLivenessOwnership?(sessionUuid: string, ownerToken: string | null): Promise<void>;
+  replaceLivenessOwnership?(sessionUuid: string, ownerToken: string | null): Promise<void>;
   markReleased(
     sessionUuid: string,
     status: DeviceSessionStatus,
@@ -157,6 +164,32 @@ export class DeviceSessionRepository {
     }
   }
 
+  async recordLivenessOwnership(sessionUuid: string, ownerToken: string | null): Promise<void> {
+    await this.replaceLivenessOwnership(sessionUuid, ownerToken);
+  }
+
+  async replaceLivenessOwnership(sessionUuid: string, ownerToken: string | null): Promise<void> {
+    try {
+      const result = await this.getDb()
+        .updateTable("device_sessions")
+        .set({
+          liveness_owner_token: ownerToken,
+          updated_at: new Date().toISOString(),
+        })
+        .where("session_uuid", "=", sessionUuid)
+        .where("status", "=", "active")
+        .executeTakeFirst();
+      if (Number(result.numUpdatedRows) !== 1) {
+        throw new Error(`active device session ${sessionUuid} was not found`);
+      }
+    } catch (error) {
+      logger.warn(
+        `[DeviceSessionRepository] Failed to persist liveness ownership for ${sessionUuid}: ${error}`,
+      );
+      throw error;
+    }
+  }
+
   async markAutolockSession(
     sessionUuid: string,
     input: {
@@ -208,6 +241,7 @@ export class DeviceSessionRepository {
           status,
           released_at_ms: releasedAtMs,
           release_reason: reason,
+          ...(shouldRetainLivenessOwner(reason) ? {} : { liveness_owner_token: null }),
           updated_at: new Date().toISOString(),
         })
         .where("session_uuid", "=", sessionUuid)
@@ -241,6 +275,7 @@ export class DeviceSessionRepository {
         status: "expired",
         released_at_ms: releasedAtMs,
         release_reason: reason,
+        ...(shouldRetainLivenessOwner(reason) ? {} : { liveness_owner_token: null }),
         updated_at: new Date().toISOString(),
       })
       .where("status", "=", "active")

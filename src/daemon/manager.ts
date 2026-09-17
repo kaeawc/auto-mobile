@@ -54,12 +54,35 @@ import {
   type DaemonClientFactory,
   type DaemonClientFactoryOptions,
   type DaemonClientLike,
+  type DaemonMethodCallOptions,
 } from "./client";
 import {
   DAEMON_PREPARE_RESTART_METHOD,
+  DAEMON_APPLY_ACCEPTANCE_DOCTOR_FAULT_METHOD,
+  DAEMON_COMMIT_ACCEPTANCE_RESTART_METHOD,
+  DAEMON_CORRUPT_CONTROL_METADATA_METHOD,
+  DAEMON_REPAIR_CONTROL_METADATA_METHOD,
+  DAEMON_RELEASE_ACCEPTANCE_RESTART_METHOD,
+  DAEMON_RESTART_ACCEPTANCE_SESSION_METHOD,
+  DAEMON_RESTART_ADMITTED_METHOD,
+  type AcceptanceSessionRestartScope,
+  type AcceptanceDoctorFault,
+  type DaemonAcceptanceDoctorFault,
+  type DaemonAcceptanceRestartCommit,
+  type DaemonAcceptanceSessionRestart,
   DaemonRestartDeferredError,
+  type DaemonAdmittedRestart,
+  type DaemonControlMetadataCorruption,
+  type DaemonControlMetadataRepair,
   type DaemonRestartPreparation,
 } from "./daemonRestartAdmission";
+import {
+  createDaemonLiveAcceptanceCapability,
+  createDaemonLiveAcceptanceScopedCapability,
+  daemonGenerationIdentityFromStatus,
+  daemonLiveAcceptanceStartupSecret,
+} from "./liveAcceptanceCapability";
+import type { DaemonGenerationIdentity } from "./liveAcceptanceCapability";
 import {
   DaemonSocketReachability,
   type DaemonSocketReachabilityLike,
@@ -96,6 +119,7 @@ import {
 } from "../utils/toolOutputArtifacts";
 import {
   DaemonLauncher,
+  isDaemonEntryScriptPath,
   type DaemonLaunchCommand,
   type DaemonProcessSpawner,
 } from "./DaemonLauncher";
@@ -105,6 +129,7 @@ import {
   parseRunnerReadinessTimeout,
 } from "../utils/runnerReadinessConfig";
 import { mergedExactToolSelections } from "./daemonOptionSelections";
+import { darwinProcessGenerationToken, readLinuxProcessGenerationToken } from "./processGeneration";
 
 export type { DaemonLaunchCommand, DaemonProcessSpawner } from "./DaemonLauncher";
 
@@ -147,6 +172,8 @@ export interface DaemonProcessRecord {
   command: string;
   /** Approximate process creation time from the OS process table, when available. */
   startedAt?: number;
+  /** Stable OS-derived identity for this process generation, when available. */
+  processGenerationToken?: string;
 }
 
 export interface DaemonProcessFinder {
@@ -158,6 +185,8 @@ export interface DaemonProcessFinder {
    */
   findDaemonProcesses(timeoutMs?: number): DaemonProcessRecord[];
 }
+
+class DaemonGenerationExitedBeforeSignalError extends Error {}
 
 export const DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES = 16 * 1024 * 1024;
 
@@ -190,17 +219,24 @@ function invokedCommand(command: string): string {
   return shellInvocation?.[1].trim() ?? command.trim();
 }
 
-function isAutoMobileDaemonCommand(command: string): boolean {
+function isAutoMobileDaemonCommand(
+  command: string,
+  activeEntryScript: string | undefined = process.argv[1],
+): boolean {
   const normalizedCommand = normalizeProcessCommand(command);
   const invocation = invokedCommand(normalizedCommand);
   if (!/(?:^|\s)--daemon-mode(?:\s|["']|$)/.test(invocation)) {
     return false;
   }
 
+  const runtimeEntrypoint = invocation.match(
+    /(?:^|\s)(?:"?[^"'\s]*\/)?(?:bun|node)(?:\.exe)?"?\s+(?:"([^"]+)"|'([^']+)'|([^\s"']+))/i,
+  );
   const runsBundledEntrypoint =
-    /(?:^|["'\s\\/])(?:bun|node)(?:\.exe)?(?:\s|["'])/.test(invocation) &&
-    /(?:^|["'\s])[^"'\s]*\/(?:@kaeawc\/)?auto-mobile\/dist\/src\/index\.js(?:\s|["']|$)/.test(
-      invocation,
+    runtimeEntrypoint !== null &&
+    isDaemonEntryScriptPath(
+      runtimeEntrypoint[1] ?? runtimeEntrypoint[2] ?? runtimeEntrypoint[3],
+      activeEntryScript,
     );
   const runsPublishedPackage =
     /^(?:"?[^"'\s]*\/)?(?:bunx|npx)(?:\.exe)?\s+(?:(?:-y|--yes|--bun|--no-cache)\s+)*@kaeawc\/auto-mobile(?:@[^\s"']+)?(?:\s|["']|$)/.test(
@@ -238,6 +274,7 @@ function isShellCommandWrapper(command: string): boolean {
 export function parseDaemonProcessTable(
   psOutput: string,
   now: number = Date.now(),
+  activeEntryScript?: string,
 ): DaemonProcessRecord[] {
   const records: DaemonProcessRecord[] = [];
 
@@ -252,7 +289,11 @@ export function parseDaemonProcessTable(
     const elapsedSeconds = match[3] === undefined ? undefined : parseInt(match[3], 10);
     const command = match[4];
 
-    if (!Number.isFinite(pid) || !Number.isFinite(ppid) || !isAutoMobileDaemonCommand(command)) {
+    if (
+      !Number.isFinite(pid) ||
+      !Number.isFinite(ppid) ||
+      !isAutoMobileDaemonCommand(command, activeEntryScript)
+    ) {
       continue;
     }
 
@@ -291,6 +332,7 @@ function parseBusyBoxElapsedSeconds(value: string): number | undefined {
 export function parseBusyBoxDaemonProcessTable(
   psOutput: string,
   now: number = Date.now(),
+  activeEntryScript?: string,
 ): DaemonProcessRecord[] {
   const records: DaemonProcessRecord[] = [];
 
@@ -308,7 +350,7 @@ export function parseBusyBoxDaemonProcessTable(
       !Number.isFinite(pid) ||
       !Number.isFinite(ppid) ||
       elapsedSeconds === undefined ||
-      !isAutoMobileDaemonCommand(command)
+      !isAutoMobileDaemonCommand(command, activeEntryScript)
     ) {
       continue;
     }
@@ -374,7 +416,10 @@ function parseLstart(value: string): number | undefined {
  * Parse Darwin's `ps lstart` table. `lstart` has second precision, matching the
  * existing Linux `etimes` identity precision used to fence PID reuse.
  */
-export function parseDarwinDaemonProcessTable(psOutput: string): DaemonProcessRecord[] {
+export function parseDarwinDaemonProcessTable(
+  psOutput: string,
+  activeEntryScript?: string,
+): DaemonProcessRecord[] {
   const records: DaemonProcessRecord[] = [];
 
   for (const line of psOutput.split("\n")) {
@@ -393,12 +438,19 @@ export function parseDarwinDaemonProcessTable(psOutput: string): DaemonProcessRe
       !Number.isFinite(pid) ||
       !Number.isFinite(ppid) ||
       startedAt === undefined ||
-      !isAutoMobileDaemonCommand(command)
+      !isAutoMobileDaemonCommand(command, activeEntryScript)
     ) {
       continue;
     }
 
-    records.push({ pid, ppid, command, startedAt });
+    const processGenerationToken = darwinProcessGenerationToken(match[3]);
+    records.push({
+      pid,
+      ppid,
+      command,
+      startedAt,
+      ...(processGenerationToken === undefined ? {} : { processGenerationToken }),
+    });
   }
 
   return records;
@@ -422,6 +474,7 @@ function parseWindowsProcessId(value: unknown): number | undefined {
 
 function parseWindowsProcessTableEntry(
   entry: WindowsProcessTableEntry,
+  activeEntryScript?: string,
 ): DaemonProcessRecord | undefined {
   const pid = parseWindowsProcessId(entry.ProcessId);
   const ppid = parseWindowsProcessId(entry.ParentProcessId);
@@ -431,7 +484,7 @@ function parseWindowsProcessTableEntry(
     pid === undefined ||
     ppid === undefined ||
     typeof command !== "string" ||
-    !isAutoMobileDaemonCommand(command)
+    !isAutoMobileDaemonCommand(command, activeEntryScript)
   ) {
     return undefined;
   }
@@ -448,7 +501,10 @@ function parseWindowsProcessTableEntry(
   };
 }
 
-export function parseWindowsDaemonProcessTable(processTableJson: string): DaemonProcessRecord[] {
+export function parseWindowsDaemonProcessTable(
+  processTableJson: string,
+  activeEntryScript?: string,
+): DaemonProcessRecord[] {
   const parsed: unknown = JSON.parse(processTableJson);
   const entries = Array.isArray(parsed) ? parsed : [parsed];
   const records: DaemonProcessRecord[] = [];
@@ -458,7 +514,7 @@ export function parseWindowsDaemonProcessTable(processTableJson: string): Daemon
       continue;
     }
 
-    const record = parseWindowsProcessTableEntry(entry);
+    const record = parseWindowsProcessTableEntry(entry, activeEntryScript);
     if (record) {
       records.push(record);
     }
@@ -509,6 +565,10 @@ export class PsDaemonProcessFinder implements DaemonProcessFinder, DaemonProcess
     private readonly runCommand: ProcessTableCommandRunner = execSync,
     private readonly platform: NodeJS.Platform = process.platform,
     private readonly timer: Timer = defaultTimer,
+    private readonly linuxProcessGenerationTokenForPid: (
+      pid: number,
+    ) => string | undefined = readLinuxProcessGenerationToken,
+    private readonly activeEntryScript: string | undefined = process.argv[1],
   ) {}
 
   findDaemonProcesses(timeoutMs?: number): DaemonProcessRecord[] {
@@ -535,19 +595,30 @@ export class PsDaemonProcessFinder implements DaemonProcessFinder, DaemonProcess
 
     if (isDarwin) {
       const { output } = runScan("LC_ALL=C ps -axo pid=,ppid=,lstart=,command=");
-      return parseDarwinDaemonProcessTable(output);
+      return parseDarwinDaemonProcessTable(output, this.activeEntryScript);
     }
 
     try {
       const { output, scannedAt } = runScan("ps -eo pid=,ppid=,etimes=,command=");
-      return parseDaemonProcessTable(output, scannedAt);
+      return this.withLinuxProcessGenerationTokens(
+        parseDaemonProcessTable(output, scannedAt, this.activeEntryScript),
+      );
     } catch (error) {
       if (!isUnsupportedGnuProcessTableFormat(error)) {
         throw error;
       }
       const { output, scannedAt } = runScan("ps -o pid,ppid,etime,args");
-      return parseBusyBoxDaemonProcessTable(output, scannedAt);
+      return this.withLinuxProcessGenerationTokens(
+        parseBusyBoxDaemonProcessTable(output, scannedAt, this.activeEntryScript),
+      );
     }
+  }
+
+  private withLinuxProcessGenerationTokens(records: DaemonProcessRecord[]): DaemonProcessRecord[] {
+    return records.map((record) => {
+      const processGenerationToken = this.linuxProcessGenerationTokenForPid(record.pid);
+      return processGenerationToken === undefined ? record : { ...record, processGenerationToken };
+    });
   }
 
   isProcessRunning(pid: number): boolean {
@@ -558,7 +629,10 @@ export class PsDaemonProcessFinder implements DaemonProcessFinder, DaemonProcess
 export class WindowsDaemonProcessFinder
   implements DaemonProcessFinder, DaemonProcessLivenessChecker
 {
-  constructor(private readonly runCommand: ProcessTableCommandRunner = execSync) {}
+  constructor(
+    private readonly runCommand: ProcessTableCommandRunner = execSync,
+    private readonly activeEntryScript: string | undefined = process.argv[1],
+  ) {}
 
   findDaemonProcesses(timeoutMs?: number): DaemonProcessRecord[] {
     // CIM returns local DateTime values. Publish absolute UTC birth times so
@@ -571,7 +645,7 @@ export class WindowsDaemonProcessFinder
         timeout: boundedProcessTableScanTimeout(timeoutMs),
       },
     );
-    return parseWindowsDaemonProcessTable(processTableJson);
+    return parseWindowsDaemonProcessTable(processTableJson, this.activeEntryScript);
   }
 
   isProcessRunning(pid: number): boolean {
@@ -707,6 +781,25 @@ const MAX_DAEMON_STARTUP_LOG_BYTES = 4000;
 
 /** An occupied port found by degraded process discovery has no known process-table PID. */
 const DAEMON_UNKNOWN_OWNER_PID = -1;
+
+const ACCEPTANCE_DOCTOR_CONTROL_STATES: Readonly<
+  Partial<Record<AcceptanceDoctorFault, NonNullable<DaemonAcceptanceDoctorFault["controlState"]>>>
+> = {
+  "missing-daemon": "daemon-missing",
+  "dead-daemon": "daemon-dead",
+};
+
+function assertAcceptanceDoctorControlState(
+  fault: AcceptanceDoctorFault,
+  result: Partial<DaemonAcceptanceDoctorFault> | null,
+): void {
+  const expectedControlState = ACCEPTANCE_DOCTOR_CONTROL_STATES[fault];
+  if (expectedControlState !== undefined && result?.controlState !== expectedControlState) {
+    throw new ActionableError(
+      `Daemon acceptance doctor fault did not confirm ${expectedControlState} control state.`,
+    );
+  }
+}
 
 /** Host a daemon binds when `--host` is not given; mirrors the CLI default. */
 const DEFAULT_DAEMON_HOST = "127.0.0.1";
@@ -857,6 +950,7 @@ export interface DaemonManagerLike {
    * A changed generation means another client already completed the handoff.
    */
   restart(options?: DaemonOptions, expectedDaemon?: DaemonStatus): Promise<DaemonRestartResult>;
+  restartAdmitted(options: DaemonOptions, maintenanceToken: string): Promise<DaemonRestartResult>;
   waitForReady(
     timeout: number,
     signal?: AbortSignal,
@@ -887,6 +981,23 @@ export interface DaemonManagerLike {
  * startup options incompatible.
  */
 export type DaemonRestartResult = "restarted" | "joined";
+
+const DAEMON_ADMITTED_RESTART_REASONS: ReadonlySet<string> = new Set([
+  "active_operations",
+  "active_sessions",
+  "generation_changed",
+  "maintenance_token_invalid",
+  "maintenance_token_consumed",
+  "restart_pending",
+  "shutdown_unavailable",
+  "sessions_unavailable",
+]);
+
+function isDaemonAdmittedRestartReason(
+  value: unknown,
+): value is NonNullable<DaemonAdmittedRestart["reason"]> {
+  return typeof value === "string" && DAEMON_ADMITTED_RESTART_REASONS.has(value);
+}
 
 /**
  * Daemon Manager
@@ -2188,6 +2299,9 @@ export class DaemonManager implements DaemonManagerLike {
     status: DaemonStatus,
     candidate: DaemonProcessRecord,
   ): boolean {
+    if (status.processGenerationToken !== undefined) {
+      return candidate.processGenerationToken === status.processGenerationToken;
+    }
     const expectedStartedAt = status.processStartedAt ?? status.startedAt;
     return (
       expectedStartedAt !== undefined &&
@@ -2201,6 +2315,12 @@ export class DaemonManager implements DaemonManagerLike {
     expected: DaemonProcessRecord,
     candidate: DaemonProcessRecord,
   ): boolean {
+    if (expected.processGenerationToken !== undefined) {
+      return (
+        expected.pid === candidate.pid &&
+        candidate.processGenerationToken === expected.processGenerationToken
+      );
+    }
     return (
       expected.pid === candidate.pid &&
       expected.startedAt !== undefined &&
@@ -2324,11 +2444,24 @@ export class DaemonManager implements DaemonManagerLike {
     stderrLog(`Stopping daemon (PID ${status.pid})...`);
 
     const pid = status.pid!;
+    const expected: DaemonProcessRecord = {
+      pid,
+      ppid: 0,
+      command: status.entryScript ?? "",
+      startedAt: status.processStartedAt ?? status.startedAt,
+      ...(status.processGenerationToken === undefined
+        ? {}
+        : { processGenerationToken: status.processGenerationToken }),
+    };
 
     try {
       if (signalFirst) {
         // Send SIGTERM for graceful shutdown.
-        this.processSignaler.signal(pid, "SIGTERM");
+        this.signalVerifiedDaemonGeneration(
+          expected,
+          "SIGTERM",
+          `Daemon generation ${pid} exited before stop could signal it.`,
+        );
       }
 
       // Wait for process to exit
@@ -2336,7 +2469,11 @@ export class DaemonManager implements DaemonManagerLike {
 
       if (!stopped) {
         stderrLog(`Daemon did not stop gracefully, sending SIGKILL...`);
-        this.processSignaler.signal(pid, "SIGKILL");
+        this.signalVerifiedDaemonGeneration(
+          expected,
+          "SIGKILL",
+          `Daemon generation ${pid} exited before stop could force-stop it.`,
+        );
 
         if (!(await this.waitForStop(pid, DAEMON_FORCED_STOP_TIMEOUT_MS))) {
           throw new Error(`Daemon process ${pid} did not exit after SIGKILL`);
@@ -2351,21 +2488,45 @@ export class DaemonManager implements DaemonManagerLike {
 
       stderrLog("Daemon stopped");
     } catch (error) {
-      // Process doesn't exist or we don't have permission
-      if (
-        error instanceof Error &&
-        (error.message.includes("ESRCH") || error.message.includes("EPERM"))
-      ) {
-        await cleanupDaemonFiles({
-          pidFilePath: this.pidFilePath,
-          socketPaths: this.cleanupSocketPaths(status.socketPath),
-          expectedPid: pid,
-        });
-        stderrLog("Daemon was not running (cleaned up stale PID file)");
-      } else {
-        throw error;
-      }
+      await this.handleStopRunningDaemonError(error, status, pid);
     }
+  }
+
+  private signalVerifiedDaemonGeneration(
+    expected: DaemonProcessRecord,
+    signal: NodeJS.Signals,
+    exitedMessage: string,
+  ): void {
+    if (!this.verifyDaemonGenerationBeforeSignal(expected, undefined, "Daemon stop")) {
+      throw new DaemonGenerationExitedBeforeSignalError(exitedMessage);
+    }
+    this.processSignaler.signal(expected.pid, signal);
+  }
+
+  private async handleStopRunningDaemonError(
+    error: unknown,
+    status: DaemonStatus,
+    pid: number,
+  ): Promise<void> {
+    if (error instanceof DaemonGenerationExitedBeforeSignalError) {
+      await this.removeConfirmedDeadPidFile();
+      stderrLog(error.message);
+      return;
+    }
+    // Process doesn't exist or we don't have permission.
+    if (
+      error instanceof Error &&
+      (error.message.includes("ESRCH") || error.message.includes("EPERM"))
+    ) {
+      await cleanupDaemonFiles({
+        pidFilePath: this.pidFilePath,
+        socketPaths: this.cleanupSocketPaths(status.socketPath),
+        expectedPid: pid,
+      });
+      stderrLog("Daemon was not running (cleaned up stale PID file)");
+      return;
+    }
+    throw error;
   }
 
   /**
@@ -2517,6 +2678,7 @@ export class DaemonManager implements DaemonManagerLike {
         dbPath: pidData.dbPath,
         startedAt: pidData.startedAt,
         processStartedAt: pidData.processStartedAt,
+        processGenerationToken: pidData.processGenerationToken,
         version: pidData.version,
         assetVersion: pidData.assetVersion,
         entryScript: pidData.entryScript,
@@ -2618,13 +2780,485 @@ export class DaemonManager implements DaemonManagerLike {
     return restartResultFromStart(startResult);
   }
 
+  /**
+   * Complete a host-maintenance restart only after the generation that minted
+   * its opaque maintenance token accepts it. This RPC is intentionally the
+   * first lifecycle action: a successor that replaced the admitted daemon
+   * cannot present the old token, so no stop, process-table scan, socket
+   * cleanup, or replacement launch can follow a stale admission.
+   */
+  async restartAdmitted(
+    options: DaemonOptions,
+    maintenanceToken: string,
+  ): Promise<DaemonRestartResult> {
+    if (!maintenanceToken) {
+      throw new ActionableError("restart-admitted requires a maintenance admission token.");
+    }
+    if (!this.acquireLock()) {
+      throw new DaemonRestartDeferredError("another daemon lifecycle transition is in progress");
+    }
+    try {
+      return await this.restartAdmittedWhileLocked(options, maintenanceToken);
+    } finally {
+      this.releaseLock();
+    }
+  }
+
+  private async restartAdmittedWhileLocked(
+    options: DaemonOptions,
+    maintenanceToken: string,
+  ): Promise<DaemonRestartResult> {
+    const status = await this.status();
+    if (!status.running) {
+      throw new ActionableError(
+        "restart-admitted requires the daemon generation that admitted maintenance to still be running.",
+      );
+    }
+
+    const admission = await this.admitMaintenanceRestart(status, maintenanceToken);
+    if (!admission.accepted) {
+      throw new DaemonRestartDeferredError(
+        `maintenance admission is no longer valid (${admission.reason ?? "unknown"})`,
+      );
+    }
+
+    const restartOptions: DaemonOptions = {
+      ...(status.options ?? {}),
+      ...Object.fromEntries(Object.entries(options).filter(([, value]) => value !== undefined)),
+      strictPort: true,
+    };
+    // The admitted daemon has already initiated its own SIGTERM before it
+    // acknowledges. Preserve the exact pre-admission status through the wait;
+    // a later status read could name its replacement instead.
+    await this.stopRunningDaemon(status, DAEMON_SHUTDOWN_TIMEOUT_MS, false);
+    await this.timer.sleep(DAEMON_RESTART_HANDOFF_DELAY_MS);
+    return restartResultFromStart(await this.startUnlocked(restartOptions));
+  }
+
   private isSameDaemonGeneration(current: DaemonStatus, expected: DaemonStatus): boolean {
     if (!current.running || !expected.running || current.pid !== expected.pid) {
       return false;
     }
-    const identityFields = ["startedAt", "version", "buildId", "entryScript"] as const;
+    const identityFields = [
+      "startedAt",
+      "processGenerationToken",
+      "version",
+      "buildId",
+      "entryScript",
+    ] as const;
     return identityFields.every(
       (field) => expected[field] === undefined || current[field] === expected[field],
+    );
+  }
+
+  /**
+   * Ask a responsive daemon to republish its own PID metadata. The daemon
+   * validates this exact socket generation before performing the write, so a
+   * stale diagnostic cannot repair metadata on behalf of a replacement.
+   */
+  async repairControlMetadata(signal?: AbortSignal, recoveryDeadline?: number): Promise<boolean> {
+    const client = this.createClient({ clientIdentity: null });
+    const remainingTimeout = (): number | undefined => {
+      if (recoveryDeadline === undefined) {
+        return undefined;
+      }
+      const remaining = recoveryDeadline - this.timer.now();
+      if (remaining <= 0) {
+        throw new ActionableError("Daemon control metadata repair deadline elapsed");
+      }
+      return remaining;
+    };
+    const requestOptions = (): DaemonMethodCallOptions => {
+      const timeoutMs = remainingTimeout();
+      return {
+        ...(signal === undefined ? {} : { signal }),
+        ...(timeoutMs === undefined ? {} : { timeoutMs }),
+      };
+    };
+    try {
+      signal?.throwIfAborted();
+      const connectTimeout = remainingTimeout();
+      await client.connect(connectTimeout, signal);
+      signal?.throwIfAborted();
+      const status = await client.callDaemonMethod("ide/status", {}, requestOptions());
+      if (!status || typeof status !== "object" || Array.isArray(status)) {
+        return false;
+      }
+      signal?.throwIfAborted();
+      const result: unknown = await client.callDaemonMethod(
+        DAEMON_REPAIR_CONTROL_METADATA_METHOD,
+        status as Record<string, unknown>,
+        requestOptions(),
+      );
+      signal?.throwIfAborted();
+      return (result as Partial<DaemonControlMetadataRepair> | null)?.repaired === true;
+    } finally {
+      await client.close();
+    }
+  }
+
+  /**
+   * Create the live-acceptance control-metadata fault through the currently
+   * admitted daemon generation. The opaque maintenance token is the authority:
+   * without it, no daemon or device state is changed.
+   */
+  async corruptControlMetadataAdmitted(maintenanceToken: string): Promise<void> {
+    if (!maintenanceToken) {
+      throw new ActionableError(
+        "corrupt-control-metadata-admitted requires a maintenance admission token.",
+      );
+    }
+    const startupSecret = daemonLiveAcceptanceStartupSecret();
+    if (!startupSecret) {
+      throw new ActionableError(
+        "corrupt-control-metadata-admitted requires a live-acceptance daemon startup capability.",
+      );
+    }
+    const status = await this.status();
+    if (!status.running) {
+      throw new ActionableError(
+        "corrupt-control-metadata-admitted requires the admitted daemon generation to be running.",
+      );
+    }
+    const generation = daemonGenerationIdentityFromStatus(status);
+    if (!generation) {
+      throw new ActionableError(
+        "corrupt-control-metadata-admitted requires the admitted daemon generation identity.",
+      );
+    }
+    const acceptanceCapability = createDaemonLiveAcceptanceCapability(startupSecret, generation);
+    const client = this.createClient({ clientIdentity: null });
+    try {
+      await client.connect();
+      const result: unknown = await client.callDaemonMethod(
+        DAEMON_CORRUPT_CONTROL_METADATA_METHOD,
+        { ...status, maintenanceToken, acceptanceCapability },
+      );
+      if ((result as Partial<DaemonControlMetadataCorruption> | null)?.corrupted !== true) {
+        throw new ActionableError(
+          "Daemon declined the maintenance-admitted control metadata fault.",
+        );
+      }
+      // The intentionally broken PID record must not be confused with a dead
+      // socket. Prove the same responsive daemon still answers before doctor is
+      // asked to repair its metadata.
+      const liveStatus = await client.callDaemonMethod("ide/status", {});
+      if (!liveStatus || typeof liveStatus !== "object" || Array.isArray(liveStatus)) {
+        throw new ActionableError(
+          "Control metadata fault did not retain a responsive daemon protocol.",
+        );
+      }
+    } finally {
+      await client.close();
+    }
+  }
+
+  /**
+   * Crash and replace one verified live-acceptance daemon generation without a
+   * graceful shutdown. This preserves precisely one authenticated persisted
+   * session row for recovery testing; the admission RPC rejects unrelated
+   * sessions and active operations before this manager signals the process.
+   */
+  async restartAcceptanceSession(
+    scope: AcceptanceSessionRestartScope,
+  ): Promise<DaemonRestartResult> {
+    const startupSecret = daemonLiveAcceptanceStartupSecret();
+    if (!startupSecret) {
+      throw new ActionableError(
+        "restart-acceptance-session requires a live-acceptance daemon startup capability.",
+      );
+    }
+    if (!this.acquireLock()) {
+      throw new ActionableError(
+        "restart-acceptance-session could not acquire the daemon startup lock.",
+      );
+    }
+    try {
+      return await this.restartAcceptanceSessionWhileLocked(scope, startupSecret);
+    } finally {
+      this.releaseLock();
+    }
+  }
+
+  private async restartAcceptanceSessionWhileLocked(
+    scope: AcceptanceSessionRestartScope,
+    startupSecret: string,
+  ): Promise<DaemonRestartResult> {
+    const status = await this.status();
+    if (!status.running) {
+      throw new ActionableError(
+        "restart-acceptance-session requires the admitted daemon generation to be running.",
+      );
+    }
+    const generation = daemonGenerationIdentityFromStatus(status);
+    if (!generation) {
+      throw new ActionableError(
+        "restart-acceptance-session requires the admitted daemon generation identity.",
+      );
+    }
+    const client = this.createClient({ clientIdentity: null });
+    let restartToken: string | undefined;
+    let signalSent = false;
+    let primaryError: unknown;
+    try {
+      await client.connect();
+      restartToken = await this.requestAcceptanceRestartAdmission(
+        client,
+        status,
+        generation,
+        scope,
+        startupSecret,
+      );
+      await this.commitAcceptanceRestartAdmission(client, status, restartToken);
+      if (this.verifyAcceptanceGenerationBeforeSignal(status, generation)) {
+        this.processSignaler.signal(status.pid!, "SIGKILL");
+        signalSent = true;
+        if (!(await this.waitForStop(status.pid!, DAEMON_FORCED_STOP_TIMEOUT_MS))) {
+          throw new ActionableError(
+            `Acceptance-session restart daemon process ${status.pid} did not exit after SIGKILL.`,
+          );
+        }
+      }
+    } catch (error) {
+      primaryError = error;
+      if (restartToken && !signalSent) {
+        await this.rollbackAcceptanceRestartAdmission(client, status, restartToken);
+      }
+      throw error;
+    } finally {
+      await this.closeAcceptanceRestartClient(client, primaryError);
+    }
+    await cleanupDaemonFiles({
+      pidFilePath: this.pidFilePath,
+      socketPaths: this.cleanupSocketPaths(status.socketPath),
+      expectedPid: status.pid!,
+    });
+    await this.timer.sleep(DAEMON_RESTART_HANDOFF_DELAY_MS);
+    return restartResultFromStart(
+      await this.startUnlocked({ ...(status.options ?? {}), strictPort: true }),
+    );
+  }
+
+  private async requestAcceptanceRestartAdmission(
+    client: DaemonClientLike,
+    status: DaemonStatus,
+    generation: DaemonGenerationIdentity,
+    scope: AcceptanceSessionRestartScope,
+    startupSecret: string,
+  ): Promise<string> {
+    const result: unknown = await client.callDaemonMethod(
+      DAEMON_RESTART_ACCEPTANCE_SESSION_METHOD,
+      {
+        ...status,
+        scope,
+        acceptanceCapability: createDaemonLiveAcceptanceScopedCapability(
+          startupSecret,
+          generation,
+          scope,
+        ),
+      },
+    );
+    const admission = result as Partial<DaemonAcceptanceSessionRestart> | null;
+    if (admission?.accepted !== true) {
+      throw new ActionableError(
+        `Daemon declined the acceptance-session restart (${admission?.reason ?? "unknown"}).`,
+      );
+    }
+    if (!admission.restartToken) {
+      throw new ActionableError(
+        "Daemon accepted the acceptance-session restart without a rollback token.",
+      );
+    }
+    return admission.restartToken;
+  }
+
+  private async commitAcceptanceRestartAdmission(
+    client: DaemonClientLike,
+    status: DaemonStatus,
+    restartToken: string,
+  ): Promise<void> {
+    const result: unknown = await client.callDaemonMethod(DAEMON_COMMIT_ACCEPTANCE_RESTART_METHOD, {
+      ...status,
+      restartToken,
+    });
+    if ((result as Partial<DaemonAcceptanceRestartCommit> | null)?.committed !== true) {
+      throw new ActionableError(
+        "Daemon acceptance-session restart admission expired before it could be committed.",
+      );
+    }
+  }
+
+  private async rollbackAcceptanceRestartAdmission(
+    client: DaemonClientLike,
+    status: DaemonStatus,
+    restartToken: string,
+  ): Promise<void> {
+    try {
+      await client.callDaemonMethod(DAEMON_RELEASE_ACCEPTANCE_RESTART_METHOD, {
+        ...status,
+        restartToken,
+      });
+    } catch (rollbackError) {
+      logger.warn(
+        `Failed to explicitly roll back acceptance restart admission: ${errorMessage(rollbackError)}`,
+      );
+    }
+  }
+
+  private async closeAcceptanceRestartClient(
+    client: DaemonClientLike,
+    primaryError: unknown,
+  ): Promise<void> {
+    try {
+      await client.close();
+    } catch (closeError) {
+      if (primaryError === undefined) {
+        throw closeError;
+      }
+      logger.warn(
+        `Failed to close acceptance restart control client after primary failure: ${errorMessage(closeError)}`,
+      );
+    }
+  }
+
+  async applyAcceptanceDoctorFault(
+    fault: AcceptanceDoctorFault,
+    maintenanceToken: string,
+    expiresAt: number,
+  ): Promise<void> {
+    if (!maintenanceToken) {
+      throw new ActionableError("acceptance-doctor-fault requires a maintenance admission token.");
+    }
+    const startupSecret = daemonLiveAcceptanceStartupSecret();
+    if (!startupSecret) {
+      throw new ActionableError(
+        "acceptance-doctor-fault requires a live-acceptance daemon startup capability.",
+      );
+    }
+    if (!this.acquireLock()) {
+      throw new ActionableError(
+        "acceptance-doctor-fault could not acquire the daemon startup lock.",
+      );
+    }
+    try {
+      await this.applyAcceptanceDoctorFaultWhileLocked(
+        fault,
+        maintenanceToken,
+        expiresAt,
+        startupSecret,
+      );
+    } finally {
+      this.releaseLock();
+    }
+  }
+
+  private async applyAcceptanceDoctorFaultWhileLocked(
+    fault: AcceptanceDoctorFault,
+    maintenanceToken: string,
+    expiresAt: number,
+    startupSecret: string,
+  ): Promise<void> {
+    const status = await this.status();
+    const generation = status.running ? daemonGenerationIdentityFromStatus(status) : undefined;
+    if (!generation) {
+      throw new ActionableError(
+        "acceptance-doctor-fault requires the admitted daemon generation to be running.",
+      );
+    }
+    const scope = { fault, expiresAt };
+    const client = this.createClient({ clientIdentity: null });
+    try {
+      await client.connect();
+      const result: unknown = await client.callDaemonMethod(
+        DAEMON_APPLY_ACCEPTANCE_DOCTOR_FAULT_METHOD,
+        {
+          ...status,
+          maintenanceToken,
+          fault,
+          expiresAt,
+          acceptanceCapability: createDaemonLiveAcceptanceScopedCapability(
+            startupSecret,
+            generation,
+            scope,
+          ),
+        },
+      );
+      if ((result as Partial<DaemonAcceptanceDoctorFault> | null)?.accepted !== true) {
+        throw new ActionableError(
+          `Daemon declined the acceptance doctor fault (${(result as { reason?: string } | null)?.reason ?? "unknown"}).`,
+        );
+      }
+      assertAcceptanceDoctorControlState(
+        fault,
+        result as Partial<DaemonAcceptanceDoctorFault> | null,
+      );
+    } finally {
+      await client.close();
+    }
+    await this.applyAcceptanceDoctorLivenessFault(fault, status, generation);
+  }
+
+  private async applyAcceptanceDoctorLivenessFault(
+    fault: AcceptanceDoctorFault,
+    status: DaemonStatus,
+    generation: DaemonGenerationIdentity,
+  ): Promise<void> {
+    if (
+      (fault === "missing-daemon" || fault === "dead-daemon" || fault === "stale-socket") &&
+      this.verifyAcceptanceGenerationBeforeSignal(status, generation)
+    ) {
+      this.processSignaler.signal(status.pid!, "SIGKILL");
+      if (!(await this.waitForStop(status.pid!, DAEMON_FORCED_STOP_TIMEOUT_MS))) {
+        throw new ActionableError(
+          `Acceptance doctor fault daemon process ${status.pid} did not exit after SIGKILL.`,
+        );
+      }
+    }
+    if (fault === "missing-daemon") {
+      // A missing daemon has no control plane: remove its metadata so doctor
+      // performs fresh daemon discovery. A dead daemon intentionally leaves
+      // that metadata behind so doctor diagnoses and repairs stale control
+      // state instead of treating it as absent.
+      await cleanupDaemonFiles({
+        pidFilePath: this.pidFilePath,
+        socketPaths: this.cleanupSocketPaths(status.socketPath),
+        expectedPid: status.pid!,
+      });
+    }
+    if (fault === "stale-socket") {
+      // Leave the dead listener's pathname behind while removing PID metadata:
+      // this is the stale-socket state doctor must distinguish from both an
+      // unresponsive live daemon and a dead daemon with complete stale control
+      // metadata.
+      await cleanupDaemonFiles({
+        pidFilePath: this.pidFilePath,
+        socketPaths: [],
+        expectedPid: status.pid!,
+      });
+    }
+  }
+
+  /**
+   * Revalidate the OS process generation immediately before an acceptance-only
+   * SIGKILL. Admission authenticates the daemon that handled the RPC, but that
+   * generation may exit before this manager signals its formerly owned PID.
+   */
+  private verifyAcceptanceGenerationBeforeSignal(
+    status: DaemonStatus,
+    generation: DaemonGenerationIdentity,
+  ): boolean {
+    return this.verifyDaemonGenerationBeforeSignal(
+      {
+        pid: generation.pid,
+        ppid: 0,
+        command: "",
+        startedAt: status.processStartedAt ?? generation.startedAt,
+        ...(generation.processGenerationToken === undefined
+          ? {}
+          : { processGenerationToken: generation.processGenerationToken }),
+      },
+      undefined,
+      "Live acceptance",
     );
   }
 
@@ -2640,6 +3274,7 @@ export class DaemonManager implements DaemonManagerLike {
       const result: unknown = await client.callDaemonMethod(DAEMON_PREPARE_RESTART_METHOD, {
         pid: expected.pid,
         startedAt: expected.startedAt,
+        processGenerationToken: expected.processGenerationToken,
         version: expected.version,
         buildId: expected.buildId,
         entryScript: expected.entryScript,
@@ -2673,6 +3308,42 @@ export class DaemonManager implements DaemonManagerLike {
       // Fail closed: an explicit operator restart remains available.
       throw new DaemonRestartDeferredError(
         `safe-restart admission is unavailable: ${errorMessage(error)}`,
+      );
+    } finally {
+      await client.close();
+    }
+  }
+
+  private async admitMaintenanceRestart(
+    expected: DaemonStatus,
+    maintenanceToken: string,
+  ): Promise<DaemonAdmittedRestart> {
+    const client = this.createClient({ clientIdentity: null });
+    try {
+      await client.connect();
+      const result: unknown = await client.callDaemonMethod(DAEMON_RESTART_ADMITTED_METHOD, {
+        pid: expected.pid,
+        startedAt: expected.startedAt,
+        processGenerationToken: expected.processGenerationToken,
+        version: expected.version,
+        buildId: expected.buildId,
+        entryScript: expected.entryScript,
+        maintenanceToken,
+      });
+      if (!result || typeof result !== "object") {
+        return { accepted: false, reason: "maintenance_token_invalid" };
+      }
+      const admission = result as Partial<DaemonAdmittedRestart>;
+      if (admission.accepted === true) {
+        return { accepted: true };
+      }
+      if (admission.accepted === false && isDaemonAdmittedRestartReason(admission.reason)) {
+        return { accepted: false, reason: admission.reason };
+      }
+      return { accepted: false, reason: "maintenance_token_invalid" };
+    } catch (error) {
+      throw new DaemonRestartDeferredError(
+        `maintenance admission is unavailable: ${errorMessage(error)}`,
       );
     } finally {
       await client.close();
@@ -2738,7 +3409,9 @@ export class DaemonManager implements DaemonManagerLike {
    * remains non-destructive.
    */
   private async stopUnrecordedDaemonsForExplicitRestart(recordedPid?: number): Promise<void> {
-    const candidates = this.findLiveDaemonProcesses().filter((pid) => pid !== recordedPid);
+    const candidates = this.findLiveDaemonProcessRecords().filter(
+      (candidate) => candidate.pid !== recordedPid,
+    );
     if (candidates.length === 0) {
       return;
     }
@@ -2747,7 +3420,7 @@ export class DaemonManager implements DaemonManagerLike {
       `Explicit restart force-stopping ${candidates.length} live AutoMobile daemon candidate(s) without this namespace's PID record...`,
     );
     await this.awaitRestartCleanup(
-      candidates.map((pid) => () => this.stopExplicitRestartDaemonProcess(pid)),
+      candidates.map((candidate) => () => this.stopExplicitRestartDaemonProcess(candidate)),
     );
   }
 
@@ -2776,12 +3449,14 @@ export class DaemonManager implements DaemonManagerLike {
     signal: AbortSignal | undefined,
   ): Promise<void> {
     if (!this.verifyDaemonGenerationBeforeSignal(expected, recoveryDeadline)) {
-      stderrLog(`Daemon candidate ${expected.pid} exited before explicit restart could stop it.`);
+      stderrLog(`Daemon candidate ${expected.pid} exited before repair could stop it.`);
       return;
     }
     this.throwIfRecoveryCancelled(signal);
 
-    stderrLog(`Stopping daemon without this namespace's PID record (PID ${expected.pid})...`);
+    stderrLog(
+      `Repair stopping the verified daemon for this control namespace (PID ${expected.pid})...`,
+    );
     try {
       this.processSignaler.signal(expected.pid, "SIGTERM");
     } catch (error) {
@@ -2804,9 +3479,7 @@ export class DaemonManager implements DaemonManagerLike {
 
     stderrLog(`Verified daemon ${expected.pid} did not stop gracefully, sending SIGKILL...`);
     if (!this.verifyDaemonGenerationBeforeSignal(expected, recoveryDeadline)) {
-      stderrLog(
-        `Daemon candidate ${expected.pid} exited before explicit restart could force-stop it.`,
-      );
+      stderrLog(`Daemon candidate ${expected.pid} exited before repair could force-stop it.`);
       return;
     }
     this.throwIfRecoveryCancelled(signal);
@@ -2833,46 +3506,50 @@ export class DaemonManager implements DaemonManagerLike {
     }
   }
 
-  private async stopExplicitRestartDaemonProcess(pid: number): Promise<void> {
-    if (!this.findLiveDaemonProcesses().includes(pid)) {
-      stderrLog(`Daemon candidate ${pid} exited before explicit restart could stop it.`);
+  private async stopExplicitRestartDaemonProcess(expected: DaemonProcessRecord): Promise<void> {
+    if (!this.verifyDaemonGenerationBeforeSignal(expected, undefined, "Explicit restart")) {
+      stderrLog(`Daemon candidate ${expected.pid} exited before explicit restart could stop it.`);
       return;
     }
 
-    stderrLog(`Stopping daemon without this namespace's PID record (PID ${pid})...`);
+    stderrLog(`Stopping daemon without this namespace's PID record (PID ${expected.pid})...`);
     try {
-      this.processSignaler.signal(pid, "SIGTERM");
+      this.processSignaler.signal(expected.pid, "SIGTERM");
     } catch (error) {
       if (this.isMissingProcessError(error)) {
         return;
       }
       throw new ActionableError(
-        `Failed to stop verified daemon process ${pid}: ${this.describeError(error)}`,
+        `Failed to stop verified daemon process ${expected.pid}: ${this.describeError(error)}`,
       );
     }
 
-    if (await this.waitForStop(pid, DAEMON_SHUTDOWN_TIMEOUT_MS)) {
+    if (await this.waitForStop(expected.pid, DAEMON_SHUTDOWN_TIMEOUT_MS)) {
       return;
     }
 
-    stderrLog(`Verified daemon ${pid} did not stop gracefully, sending SIGKILL...`);
-    if (!this.findLiveDaemonProcesses().includes(pid)) {
-      stderrLog(`Daemon candidate ${pid} exited before explicit restart could force-stop it.`);
+    stderrLog(`Verified daemon ${expected.pid} did not stop gracefully, sending SIGKILL...`);
+    if (!this.verifyDaemonGenerationBeforeSignal(expected, undefined, "Explicit restart")) {
+      stderrLog(
+        `Daemon candidate ${expected.pid} exited before explicit restart could force-stop it.`,
+      );
       return;
     }
     try {
-      this.processSignaler.signal(pid, "SIGKILL");
+      this.processSignaler.signal(expected.pid, "SIGKILL");
     } catch (error) {
       if (this.isMissingProcessError(error)) {
         return;
       }
       throw new ActionableError(
-        `Failed to force-stop verified daemon process ${pid}: ${this.describeError(error)}`,
+        `Failed to force-stop verified daemon process ${expected.pid}: ${this.describeError(error)}`,
       );
     }
 
-    if (!(await this.waitForStop(pid, DAEMON_FORCED_STOP_TIMEOUT_MS))) {
-      throw new ActionableError(`Verified daemon process ${pid} did not exit after SIGKILL`);
+    if (!(await this.waitForStop(expected.pid, DAEMON_FORCED_STOP_TIMEOUT_MS))) {
+      throw new ActionableError(
+        `Verified daemon process ${expected.pid} did not exit after SIGKILL`,
+      );
     }
   }
 
@@ -2885,10 +3562,11 @@ export class DaemonManager implements DaemonManagerLike {
   private verifyDaemonGenerationBeforeSignal(
     expected: DaemonProcessRecord,
     recoveryDeadline: number | undefined,
+    context: string = "Doctor repair",
   ): boolean {
     if (expected.startedAt === undefined) {
       throw new ActionableError(
-        "Doctor repair could not verify the recorded daemon process generation before signalling it.",
+        `${context} could not verify the recorded daemon process generation before signalling it.`,
       );
     }
     const currentCandidates = this.findLiveDaemonProcessRecords(
@@ -2905,7 +3583,7 @@ export class DaemonManager implements DaemonManagerLike {
     }
     if (currentCandidates.some((candidate) => candidate.pid === expected.pid)) {
       throw new ActionableError(
-        "Doctor repair found that the verified daemon PID was reused before signalling it.",
+        `${context} found that the verified daemon PID was reused before signalling it.`,
       );
     }
     return false;
@@ -3643,6 +4321,122 @@ export interface RunDaemonCommandOptions {
   stateProvider?: () => DaemonStateLike;
 }
 
+export interface DaemonHeartbeatCommandArgs {
+  sessionId: string;
+  livenessOwnerToken?: string;
+  claimLivenessOwnership: boolean;
+}
+
+/**
+ * Parse the ownership options used by first-party recurring heartbeat keepers.
+ *
+ * A bare `--daemon heartbeat <session>` intentionally stays tokenless for
+ * legacy external callers. A keeper that spans several one-shot CLI processes
+ * supplies one stable token, claiming it once and proving it on later ticks.
+ */
+export function parseDaemonHeartbeatCommandArgs(args: string[]): DaemonHeartbeatCommandArgs {
+  const sessionId = args[0];
+  if (!sessionId) {
+    throw new ActionableError("heartbeat requires a session ID argument");
+  }
+
+  let livenessOwnerToken: string | undefined;
+  let claimLivenessOwnership = false;
+  for (let index = 1; index < args.length; index++) {
+    switch (args[index]) {
+      case "--liveness-owner-token": {
+        const ownerToken = args[index + 1];
+        if (!ownerToken || ownerToken.startsWith("--")) {
+          throw new ActionableError("--liveness-owner-token requires a non-empty value");
+        }
+        livenessOwnerToken = ownerToken;
+        index++;
+        break;
+      }
+      case "--claim-liveness-ownership":
+        claimLivenessOwnership = true;
+        break;
+      default:
+        throw new ActionableError(`Unknown heartbeat option: ${args[index]}`);
+    }
+  }
+
+  if (claimLivenessOwnership && !livenessOwnerToken) {
+    throw new ActionableError("--claim-liveness-ownership requires --liveness-owner-token");
+  }
+
+  return { sessionId, livenessOwnerToken, claimLivenessOwnership };
+}
+
+export function parseRestartAdmittedMaintenanceToken(args: string[]): string {
+  const tokenIndex = args.indexOf("--maintenance-token");
+  const token = tokenIndex === -1 ? undefined : args[tokenIndex + 1];
+  if (!token || token.startsWith("--")) {
+    throw new ActionableError("--maintenance-token requires a non-empty value");
+  }
+  return token;
+}
+
+export function parseAcceptanceSessionRestartScope(args: string[]): AcceptanceSessionRestartScope {
+  const read = (flag: string): string => {
+    const index = args.indexOf(flag);
+    const value = index === -1 ? undefined : args[index + 1];
+    if (!value || value.startsWith("--")) {
+      throw new ActionableError(`${flag} requires a non-empty value`);
+    }
+    return value;
+  };
+  const platform = read("--platform");
+  if (platform !== "android" && platform !== "ios") {
+    throw new ActionableError("--platform must be android or ios");
+  }
+  const expiresAt = Number(read("--expires-at"));
+  if (!Number.isFinite(expiresAt) || expiresAt <= 0) {
+    throw new ActionableError("--expires-at must be a positive finite timestamp");
+  }
+  return {
+    sessionUuid: read("--session-uuid"),
+    platform,
+    stableDeviceId: read("--stable-device-id"),
+    controls: {
+      androidSiblingAvdName: read("--android-sibling-avd-name"),
+      androidDuplicateSerial: read("--android-duplicate-serial"),
+      iosSameNameSiblingUdid: read("--ios-same-name-sibling-uuid"),
+    },
+    expiresAt,
+  };
+}
+
+export function parseAcceptanceDoctorFaultArgs(args: string[]): {
+  fault: AcceptanceDoctorFault;
+  maintenanceToken: string;
+  expiresAt: number;
+} {
+  const faultIndex = args.indexOf("--fault");
+  const fault = faultIndex === -1 ? undefined : args[faultIndex + 1];
+  if (
+    fault !== "missing-daemon" &&
+    fault !== "dead-daemon" &&
+    fault !== "unresponsive-daemon" &&
+    fault !== "missing-control-metadata" &&
+    fault !== "corrupt-control-metadata" &&
+    fault !== "missing-socket" &&
+    fault !== "stale-socket"
+  ) {
+    throw new ActionableError("--fault must name a supported acceptance doctor fault");
+  }
+  const expiresIndex = args.indexOf("--expires-at");
+  const expiresAt = expiresIndex === -1 ? NaN : Number(args[expiresIndex + 1]);
+  if (!Number.isFinite(expiresAt) || expiresAt <= 0) {
+    throw new ActionableError("--expires-at must be a positive finite timestamp");
+  }
+  return {
+    fault,
+    maintenanceToken: parseRestartAdmittedMaintenanceToken(args),
+    expiresAt,
+  };
+}
+
 /**
  * Build the `--daemon status` lines that surface the running daemon's build
  * identity (`buildId` + `entryScript`) and flag wrong-build skew against this
@@ -3728,6 +4522,34 @@ export async function runDaemonCommand(
 
       case "restart": {
         await manager.restart(parseDaemonArgs(args));
+        break;
+      }
+
+      case "restart-admitted": {
+        await manager.restartAdmitted(
+          parseDaemonArgs(args),
+          parseRestartAdmittedMaintenanceToken(args),
+        );
+        break;
+      }
+
+      case "corrupt-control-metadata-admitted": {
+        await manager.corruptControlMetadataAdmitted(parseRestartAdmittedMaintenanceToken(args));
+        break;
+      }
+
+      case "restart-acceptance-session": {
+        await manager.restartAcceptanceSession(parseAcceptanceSessionRestartScope(args));
+        break;
+      }
+
+      case "acceptance-doctor-fault": {
+        const fault = parseAcceptanceDoctorFaultArgs(args);
+        await manager.applyAcceptanceDoctorFault(
+          fault.fault,
+          fault.maintenanceToken,
+          fault.expiresAt,
+        );
         break;
       }
 
@@ -3904,10 +4726,8 @@ export async function runDaemonCommand(
       }
 
       case "heartbeat": {
-        if (args.length === 0) {
-          throw new ActionableError("heartbeat requires a session ID argument");
-        }
-        const sessionId = args[0];
+        const { sessionId, livenessOwnerToken, claimLivenessOwnership } =
+          parseDaemonHeartbeatCommandArgs(args);
         const daemonState = manager.getDaemonState();
         if (daemonState.isInitialized()) {
           const sessionManager = daemonState.getSessionManager();
@@ -3923,6 +4743,8 @@ export async function runDaemonCommand(
               sessionId,
               livenessPolicy: CLI_SESSION_LIVENESS_POLICY,
               idleTimeoutMs: getCliSessionIdleTimeoutMs(),
+              ...(livenessOwnerToken ? { livenessOwnerToken } : {}),
+              ...(claimLivenessOwnership ? { claimLivenessOwnership: true } : {}),
             });
           } catch (error) {
             throw new ActionableError(`Failed to record session heartbeat: ${errorMessage(error)}`);

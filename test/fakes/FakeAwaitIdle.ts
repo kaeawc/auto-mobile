@@ -12,6 +12,7 @@ export class FakeAwaitIdle implements AwaitIdle {
   private waitForUiStabilityWithStateCallCount: number = 0;
   private configuredGfxMetrics: GfxMetrics | null = null;
   private configuredUiStabilityState: UiStabilityState | null = null;
+  private initializeSignal: AbortSignal | undefined;
 
   /**
    * Configure the GfxMetrics to be returned by waitForUiStability methods
@@ -56,6 +57,7 @@ export class FakeAwaitIdle implements AwaitIdle {
     this.initializeCallCount = 0;
     this.waitForUiStabilityCallCount = 0;
     this.waitForUiStabilityWithStateCallCount = 0;
+    this.initializeSignal = undefined;
   }
 
   /**
@@ -63,6 +65,10 @@ export class FakeAwaitIdle implements AwaitIdle {
    */
   getInitializeCallCount(): number {
     return this.initializeCallCount;
+  }
+
+  getInitializeSignal(): AbortSignal | undefined {
+    return this.initializeSignal;
   }
 
   /**
@@ -84,9 +90,11 @@ export class FakeAwaitIdle implements AwaitIdle {
   async initializeUiStabilityTracking(
     packageName: string,
     timeoutMs: number,
+    signal?: AbortSignal,
   ): Promise<UiStabilityState> {
     this.executedOperations.push(`initializeUiStabilityTracking(${packageName}, ${timeoutMs})`);
     this.initializeCallCount++;
+    this.initializeSignal = signal;
 
     if (this.configuredUiStabilityState) {
       return this.configuredUiStabilityState;

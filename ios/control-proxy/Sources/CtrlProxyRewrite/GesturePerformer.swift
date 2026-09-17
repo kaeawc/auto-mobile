@@ -939,6 +939,21 @@ public final class GesturePerformer: GesturePerforming {
         // MARK: - Actions
 
         public func performAction(_ action: String, resourceId: String? = nil, label: String? = nil) throws {
+            if action.caseInsensitiveCompare("system_alert_accept") == .orderedSame {
+                try catchingObjCException {
+                    // iOS 26.5 can render a SpringBoard confirmation that is
+                    // absent even from a fresh SpringBoard snapshot. Query the
+                    // live alert/sheet only for this explicit system action.
+                    // Select its final button by accessibility order so
+                    // localized Open labels do not affect acceptance.
+                    guard let button = self.systemAlertAcceptanceButton() else {
+                        throw GestureError.elementNotFound("system alert acceptance button")
+                    }
+                    button.tap()
+                }
+                return
+            }
+
             var element: XCUIElement?
             if let resourceId = resourceId {
                 element = elementLocator.findElement(byResourceId: resourceId) as? XCUIElement
@@ -970,6 +985,29 @@ public final class GesturePerformer: GesturePerforming {
                     throw GestureError.notSupported("Action: \(action)")
                 }
             }
+        }
+
+        private func systemAlertAcceptanceButton() -> XCUIElement? {
+            let systemDialogs = [
+                springboard.alerts.firstMatch,
+                springboard.sheets.firstMatch,
+            ]
+            for dialog in systemDialogs {
+                guard dialog.exists || dialog.waitForExistence(timeout: 0.5) else {
+                    continue
+                }
+                let buttons = dialog.buttons.allElementsBoundByIndex.filter {
+                    $0.exists && $0.isHittable && !$0.frame.isEmpty
+                }
+                // The custom-URL confirmation has Cancel then the affirmative
+                // action. Refuse another system dialog shape rather than
+                // guessing which control is safe to activate.
+                guard buttons.count == 2 else {
+                    continue
+                }
+                return buttons.last
+            }
+            return nil
         }
 
         public func activateAccessibilityLink(
@@ -1030,23 +1068,15 @@ public final class GesturePerformer: GesturePerforming {
         // MARK: - Screenshots
 
         public func getScreenshot() throws -> Data {
-            guard let app = application else {
-                throw GestureError.noApplication
-            }
-
             return try catchingObjCException {
-                let screenshot = app.screenshot()
+                let screenshot = XCUIScreen.main.screenshot()
                 return screenshot.pngRepresentation
             }
         }
 
         public func getScreenshotCapture() throws -> ScreenshotCapture {
-            guard let app = application else {
-                throw GestureError.noApplication
-            }
-
             return try catchingObjCException {
-                let capture = DeviceRotation.capture { app.screenshot() }
+                let capture = DeviceRotation.capture { XCUIScreen.main.screenshot() }
                 return ScreenshotCapture(data: capture.value.pngRepresentation, rotation: capture.rotation)
             }
         }

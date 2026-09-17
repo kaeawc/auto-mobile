@@ -1,4 +1,9 @@
-import { spawn as nodeSpawn, type ChildProcess, type SpawnOptions } from "node:child_process";
+import {
+  execFileSync as nodeExecFileSync,
+  spawn as nodeSpawn,
+  type ChildProcess,
+  type SpawnOptions,
+} from "node:child_process";
 import { existsSync } from "node:fs";
 import { posix, win32 } from "node:path";
 import { ActionableError } from "../models";
@@ -13,9 +18,66 @@ export interface DaemonLaunchCommand {
   args: string[];
 }
 
+function normalizeEntryScriptPath(entryScript: string): string {
+  return entryScript
+    .trim()
+    .replace(/^["']|["']$/g, "")
+    .replace(/\\/g, "/")
+    .replace(/\/+/g, "/");
+}
+
+/**
+ * Matches the entry-script identities emitted by {@link DaemonLauncher.resolveCommand}.
+ *
+ * Source checkouts execute `src/index.ts`; packaged npm and Homebrew installs
+ * execute `dist/src/index.js`. Keeping these identities beside the launcher
+ * prevents process discovery from growing install-layout-specific path regexes.
+ *
+ * A source entry point has no package identity in its path. It is safe to match
+ * only when it is the exact absolute source entry point running this process;
+ * accepting every path ending in `src/index.ts` could terminate an unrelated Bun
+ * service during explicit daemon restart cleanup.
+ */
+export function isDaemonEntryScriptPath(
+  entryScript: string,
+  activeEntryScript: string | undefined = process.argv[1],
+): boolean {
+  const normalized = normalizeEntryScriptPath(entryScript);
+  if (normalized.endsWith("/src/index.ts")) {
+    if (!activeEntryScript || !/^(?:\/|[A-Za-z]:\/)/.test(normalized)) {
+      return false;
+    }
+    return normalized === normalizeEntryScriptPath(activeEntryScript);
+  }
+  return (
+    /\/(?:@kaeawc\/)?auto-mobile\/dist\/src\/index\.js$/.test(normalized) ||
+    /\/auto-mobile\/(?:[^/]+\/)?libexec\/dist\/src\/index\.js$/.test(normalized)
+  );
+}
+
 export interface DaemonProcessSpawner {
   spawn(command: string, args: string[], options: SpawnOptions): ChildProcess;
 }
+
+/** Injectable synchronous argv-first boundary for bounded daemon process probes. */
+export type DaemonProcessCommandRunner = (
+  command: string,
+  args: readonly string[],
+  options: { timeout: number; env: NodeJS.ProcessEnv },
+) => string;
+
+/**
+ * Runs a bounded daemon process probe without a shell.
+ *
+ * Daemon execution belongs here so callers retain narrow test seams without
+ * introducing direct child-process invocations elsewhere in `src/daemon`.
+ */
+export const runDaemonProcessCommand: DaemonProcessCommandRunner = (command, args, options) =>
+  nodeExecFileSync(command, args, {
+    encoding: "utf-8",
+    timeout: options.timeout,
+    env: options.env,
+  });
 
 /** Signals or probes the dedicated process group created by a detached POSIX spawn. */
 export type DaemonProcessGroupKiller = (pid: number, signal: NodeJS.Signals | 0) => void;

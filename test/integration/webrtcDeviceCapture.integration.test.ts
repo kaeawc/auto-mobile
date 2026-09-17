@@ -24,6 +24,7 @@ import {
   type KeyframeRecoverySample,
 } from "../helpers/captureStageTimeline";
 import {
+  configuredIosSimulatorUdid,
   shouldRetryWebRtcDaemonStart,
   waitForBootedSimulatorUdid,
   type SimulatorAppearanceClient,
@@ -651,19 +652,23 @@ async function setIosFixtureAppearance(
     timeoutMs = REAL_IO_TIMEOUT_MS,
     timer = defaultTimer,
     simctlFactory = createSimCtlClient,
+    environment = process.env,
   }: {
     signal?: AbortSignal;
     timeoutMs?: number;
     timer?: Timer;
     simctlFactory?: SimCtlClientFactory;
+    environment?: NodeJS.ProcessEnv;
   } = {},
 ): Promise<void> {
   const deadline = timer.now() + timeoutMs;
-  const simctl = await simctlFactory();
-  const udid = await waitForBootedSimulatorUdid(simctl, {
-    timeoutMs: Math.min(10_000, timeoutMs),
-    timer,
-  });
+  const configuredUdid = configuredIosSimulatorUdid(environment);
+  const udid =
+    configuredUdid ??
+    (await waitForBootedSimulatorUdid(await simctlFactory(), {
+      timeoutMs: Math.min(10_000, timeoutMs),
+      timer,
+    }));
   if (!udid) {
     // No simulator exists to update, so this cosmetic fixture change has no target.
     console.warn(`[#6969] no Booted iOS simulator found for ${appearance} appearance fixture`);
@@ -689,6 +694,7 @@ describe("WHEP iOS fixture setup", () => {
 
     await expect(
       setIosFixtureAppearance("light", {
+        environment: {},
         simctlFactory: async () => {
           throw setupError;
         },

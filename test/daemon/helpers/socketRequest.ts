@@ -46,6 +46,12 @@ export interface SocketRequestResult {
   frameCount: number;
 }
 
+export interface PersistentSocketRequestResult {
+  response: DaemonResponse;
+  /** Caller owns this connected socket and must destroy it. */
+  socket: Socket;
+}
+
 /**
  * Send one newline-framed JSON request over a fresh unix-socket connection and
  * resolve with the response. An `id` is generated unless `request` carries one.
@@ -151,6 +157,124 @@ export async function sendSocketRequest(
   };
   const { response } = await sendRawSocketRequest(socketPath, request, options);
   return response;
+}
+
+/**
+ * Send one request while retaining its connection. Lifecycle-admission tests
+ * use this to prove the server keeps ownership until this exact socket closes.
+ */
+export function sendPersistentSocketRequest(
+  socketPath: string,
+  method: string,
+  params: Record<string, unknown> = {},
+  deadlineMs: number = SOCKET_REQUEST_DEADLINE_MS,
+): Promise<PersistentSocketRequestResult> {
+  return new Promise((resolve, reject) => {
+    const socket = new Socket();
+    const request: DaemonRequest = {
+      id: randomUUID(),
+      type: "mcp_request",
+      method,
+      params,
+    };
+    let buffer = "";
+    let settled = false;
+    const settle = (action: () => void, destroy: boolean): void => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      defaultTimer.clearTimeout(deadline);
+      socket.off("error", onError);
+      if (destroy) {
+        socket.destroy();
+      }
+      action();
+    };
+    const deadline = defaultTimer.setTimeout(() => {
+      settle(
+        () => reject(new Error(`No response to ${method} on ${socketPath} within ${deadlineMs}ms`)),
+        true,
+      );
+    }, deadlineMs);
+    const onError = (error: Error): void => settle(() => reject(error), true);
+    socket.once("error", onError);
+    socket.on("data", (data) => {
+      buffer += data.toString();
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      const line = lines.find((candidate) => candidate.trim());
+      if (!line) {
+        return;
+      }
+      try {
+        const response = JSON.parse(line) as DaemonResponse;
+        settle(() => resolve({ response, socket }), false);
+      } catch (error) {
+        settle(() => reject(error), true);
+      }
+    });
+    socket.connect(socketPath, () => {
+      socket.write(JSON.stringify(request) + "\n");
+    });
+  });
+}
+
+/** Send another bounded request over a socket retained by sendPersistentSocketRequest. */
+export function sendRequestOnPersistentSocket(
+  socket: Socket,
+  method: string,
+  params: Record<string, unknown> = {},
+  deadlineMs: number = SOCKET_REQUEST_DEADLINE_MS,
+): Promise<DaemonResponse> {
+  return new Promise((resolve, reject) => {
+    const request: DaemonRequest = {
+      id: randomUUID(),
+      type: "mcp_request",
+      method,
+      params,
+    };
+    let buffer = "";
+    let settled = false;
+    const settle = (action: () => void, destroy: boolean): void => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      defaultTimer.clearTimeout(deadline);
+      socket.off("data", onData);
+      socket.off("error", onError);
+      socket.off("close", onClose);
+      if (destroy) {
+        socket.destroy();
+      }
+      action();
+    };
+    const deadline = defaultTimer.setTimeout(() => {
+      settle(() => reject(new Error(`No response to ${method} within ${deadlineMs}ms`)), true);
+    }, deadlineMs);
+    const onError = (error: Error): void => settle(() => reject(error), true);
+    const onClose = (): void =>
+      settle(() => reject(new Error(`Socket closed before responding to ${method}`)), false);
+    const onData = (data: Buffer): void => {
+      buffer += data.toString();
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      const line = lines.find((candidate) => candidate.trim());
+      if (!line) {
+        return;
+      }
+      try {
+        settle(() => resolve(JSON.parse(line) as DaemonResponse), false);
+      } catch (error) {
+        settle(() => reject(error), true);
+      }
+    };
+    socket.on("data", onData);
+    socket.once("error", onError);
+    socket.once("close", onClose);
+    socket.write(JSON.stringify(request) + "\n");
+  });
 }
 
 /**

@@ -137,6 +137,75 @@ function toChildArray(node: Record<string, unknown>): Record<string, unknown>[] 
 }
 
 /**
+ * Android conversion stores attributes directly on a node, while the iOS
+ * CtrlProxy conversion uses the shared XML-compatible `$` attribute slot.
+ * Stable identity is an ingest invariant, so operate on either representation
+ * without changing the tree shape seen by their respective consumers.
+ */
+function attributesOf(node: Record<string, unknown>): Record<string, unknown> {
+  const attributes = node["$"];
+  return attributes && typeof attributes === "object" && !Array.isArray(attributes)
+    ? (attributes as Record<string, unknown>)
+    : node;
+}
+
+/** Read either platform's spelling for attributes before conversion normalizes it. */
+function attributeValue(attributes: Record<string, unknown>, field: string): unknown {
+  switch (field) {
+    case "resource-id":
+      return attributes["resource-id"] ?? attributes.resourceId;
+    case "content-desc":
+      return attributes["content-desc"] ?? attributes.contentDesc;
+    case "test-tag":
+      return attributes["test-tag"] ?? attributes.testTag;
+    case "view-id":
+      return attributes["view-id"] ?? attributes.viewId;
+    default:
+      return attributes[field];
+  }
+}
+
+/**
+ * The public hierarchy contract uses dashed `view-id`. Normalize a generated
+ * iOS `viewId` while writing its stable replacement so skeleton projection and
+ * selector resolution consume the same field.
+ */
+function setStableViewId(attributes: Record<string, unknown>, stableViewId: string): void {
+  attributes["view-id"] = stableViewId;
+  delete attributes.viewId;
+}
+
+function applyStableViewIdRewrite(
+  attributes: Record<string, unknown>,
+  rewrittenViewIds: ReadonlyMap<string, string>,
+): void {
+  const viewId = attributeValue(attributes, "view-id");
+  if (typeof viewId !== "string") {
+    return;
+  }
+  const stableViewId = rewrittenViewIds.get(viewId);
+  if (stableViewId) {
+    setStableViewId(attributes, stableViewId);
+  }
+}
+
+function applyOcclusionViewIdRewrite(
+  attributes: Record<string, unknown>,
+  rewrittenViewIds: ReadonlyMap<string, string>,
+): void {
+  for (const key of ["occludedByViewId", "occluded-by-view-id"] as const) {
+    const viewId = attributes[key];
+    if (typeof viewId !== "string") {
+      continue;
+    }
+    const stableViewId = rewrittenViewIds.get(viewId);
+    if (stableViewId) {
+      attributes[key] = stableViewId;
+    }
+  }
+}
+
+/**
  * Rewrite every generated (UUID-shaped) `view-id` under `root` — in place —
  * into a content-derived stable id: `s-<hash16>` for a node whose content hash
  * is UNIQUE in the capture, and `s-<hash16>-<k>` (document-order, 1-based) for
@@ -187,22 +256,28 @@ export function assignStableViewIds(root: unknown): Map<string, string> {
     fields: readonly string[],
     node: Record<string, unknown>,
     kids: string[],
-  ): string =>
-    createHash("sha256")
-      // JSON-encoding the field array keeps values from straddling separator
-      // boundaries (text can contain any delimiter we might pick by hand).
-      .update(
-        JSON.stringify([
-          node["class"] ?? node.className ?? "",
-          ...fields.map((field) =>
-            // A named toggle's text is state (On/Off), not identity (#6794).
-            field === "text" && getToggleContentDescription(node) ? "" : (node[field] ?? ""),
-          ),
-          kids,
-        ]),
-      )
-      .digest("hex")
-      .slice(0, STABLE_VIEW_ID_HASH_LENGTH);
+  ): string => {
+    const attributes = attributesOf(node);
+    return (
+      createHash("sha256")
+        // JSON-encoding the field array keeps values from straddling separator
+        // boundaries (text can contain any delimiter we might pick by hand).
+        .update(
+          JSON.stringify([
+            attributes["class"] ?? attributes.className ?? "",
+            ...fields.map((field) =>
+              // A named toggle's text is state (On/Off), not identity (#6794).
+              field === "text" && getToggleContentDescription(attributes)
+                ? ""
+                : (attributeValue(attributes, field) ?? ""),
+            ),
+            kids,
+          ]),
+        )
+        .digest("hex")
+        .slice(0, STABLE_VIEW_ID_HASH_LENGTH)
+    );
+  };
   const compute = (node: Record<string, unknown>): string => {
     const childStructuralHashes = toChildArray(node).map(compute);
     contentHash.set(node, hashCanonical(CONTENT_FIELDS, node, childStructuralHashes));
@@ -218,7 +293,8 @@ export function assignStableViewIds(root: unknown): Map<string, string> {
   // the bare form.
   const rewrittenCounts = new Map<string, number>();
   const countRewritten = (node: Record<string, unknown>): void => {
-    const viewId = node["view-id"];
+    const attributes = attributesOf(node);
+    const viewId = attributeValue(attributes, "view-id");
     if (typeof viewId === "string" && GENERATED_VIEW_ID_PATTERN.test(viewId)) {
       const hash = contentHash.get(node)!;
       rewrittenCounts.set(hash, (rewrittenCounts.get(hash) ?? 0) + 1);
@@ -239,7 +315,8 @@ export function assignStableViewIds(root: unknown): Map<string, string> {
   const occurrences = new Map<string, number>();
   const rewrittenViewIds = new Map<string, string>();
   const assign = (node: Record<string, unknown>): void => {
-    const viewId = node["view-id"];
+    const attributes = attributesOf(node);
+    const viewId = attributeValue(attributes, "view-id");
     if (typeof viewId === "string" && GENERATED_VIEW_ID_PATTERN.test(viewId)) {
       const hash = contentHash.get(node)!;
       const seen = (occurrences.get(hash) ?? 0) + 1;
@@ -248,7 +325,7 @@ export function assignStableViewIds(root: unknown): Map<string, string> {
       const stableViewId = isDuplicateGroup
         ? `${STABLE_VIEW_ID_PREFIX}${hash}-${seen}`
         : `${STABLE_VIEW_ID_PREFIX}${hash}`;
-      node["view-id"] = stableViewId;
+      setStableViewId(attributes, stableViewId);
       rewrittenViewIds.set(viewId, stableViewId);
     }
     for (const child of toChildArray(node)) {
@@ -284,20 +361,9 @@ export function applyStableViewIdRewrites(
     return;
   }
   const node = root as Record<string, unknown>;
-  const viewId = node["view-id"];
-  if (typeof viewId === "string") {
-    const stableViewId = rewrittenViewIds.get(viewId);
-    if (stableViewId) {
-      node["view-id"] = stableViewId;
-    }
-  }
-  const occludedByViewId = node.occludedByViewId;
-  if (typeof occludedByViewId === "string") {
-    const stableViewId = rewrittenViewIds.get(occludedByViewId);
-    if (stableViewId) {
-      node.occludedByViewId = stableViewId;
-    }
-  }
+  const attributes = attributesOf(node);
+  applyStableViewIdRewrite(attributes, rewrittenViewIds);
+  applyOcclusionViewIdRewrite(attributes, rewrittenViewIds);
   for (const child of toChildArray(node)) {
     applyStableViewIdRewrites(child, rewrittenViewIds);
   }

@@ -78,6 +78,7 @@ export interface WakeAndUnlockArgs {
 export interface OpenLinkArgs {
   url: string;
   platform?: Platform;
+  acceptOpenAlert?: boolean;
   waitFor?: ObserveWaitForOptions;
   settled?: SettledOptions;
 }

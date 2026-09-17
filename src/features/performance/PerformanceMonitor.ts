@@ -151,6 +151,10 @@ export interface PerformanceDataPusher {
   pushPerformanceData(data: LivePerformanceData): void;
 }
 
+export interface PerformanceSamplingCoordinator {
+  withDeviceSamplingPaused<T>(deviceId: string, operation: () => Promise<T>): Promise<T>;
+}
+
 /**
  * Function type for getting the performance push server.
  */
@@ -170,6 +174,12 @@ export class PerformanceMonitor {
   static readonly MEDIUM_INTERVAL_MS = 2000;
   static readonly SLOW_INTERVAL_MS = 10000;
   /**
+   * A background sample must never own the ADB lane indefinitely. This is
+   * intentionally longer than the sampling cadence: overlapping ticks are
+   * already suppressed, while a wedged device command is released promptly.
+   */
+  static readonly ANDROID_COMMAND_TIMEOUT_MS = 2000;
+  /**
    * How recent an in-app SDK frame sample must be to be preferred over the
    * dumpsys scrape. The SDK broadcasts ~1/s, so a couple ticks of grace covers
    * normal jitter; an older sample means the feed went quiet and we fall back.
@@ -187,6 +197,11 @@ export class PerformanceMonitor {
   private readonly perfWindowBuffer: PerfWindowBuffer;
   private readonly frameMetricsStore: SdkFrameMetricsStore;
   private monitoredDevices = new Map<string, MonitoredDevice>();
+  private readonly pausedDeviceCounts = new Map<string, number>();
+  private readonly activeAndroidSamples = new Map<
+    string,
+    { controller: AbortController; promise: Promise<void> }
+  >();
 
   constructor(
     timer: Timer = defaultTimer,
@@ -232,6 +247,9 @@ export class PerformanceMonitor {
       this.timer.clearInterval(this.intervalHandle);
       this.intervalHandle = null;
     }
+    for (const sample of this.activeAndroidSamples.values()) {
+      sample.controller.abort(new Error("Performance monitoring stopped"));
+    }
     this.pending = null;
     // Discard every device's retained samples along with the monitored set.
     for (const deviceId of this.monitoredDevices.keys()) {
@@ -239,6 +257,7 @@ export class PerformanceMonitor {
       this.frameMetricsStore.clear(deviceId);
     }
     this.monitoredDevices.clear();
+    this.pausedDeviceCounts.clear();
     logger.info("[PerformanceMonitor] Stopped background monitoring");
   }
 
@@ -257,6 +276,7 @@ export class PerformanceMonitor {
       // Update package name if already monitoring this device
       const existing = this.monitoredDevices.get(deviceId)!;
       if (existing.packageName !== packageName) {
+        this.cancelActiveAndroidSample(deviceId, "Monitored package changed");
         existing.packageName = packageName;
         existing.platform = platform;
         // Reset cached metrics for the new package
@@ -315,6 +335,7 @@ export class PerformanceMonitor {
    * Stop monitoring a specific device.
    */
   stopMonitoring(deviceId: string): void {
+    this.cancelActiveAndroidSample(deviceId, "Performance monitoring stopped for device");
     if (this.monitoredDevices.delete(deviceId)) {
       // Discard retained samples so a later reconnect of the same deviceId
       // cannot surface stale metrics from the prior session.
@@ -329,6 +350,7 @@ export class PerformanceMonitor {
    * baselines while retaining the opt-in monitoring subscription.
    */
   resetDeviceState(deviceId: string): void {
+    this.cancelActiveAndroidSample(deviceId, "Device incarnation changed");
     const monitored = this.monitoredDevices.get(deviceId);
     if (monitored) {
       this.monitoredDevices.set(deviceId, {
@@ -359,6 +381,27 @@ export class PerformanceMonitor {
    */
   isMonitoring(deviceId: string): boolean {
     return this.monitoredDevices.has(deviceId);
+  }
+
+  async withDeviceSamplingPaused<T>(deviceId: string, operation: () => Promise<T>): Promise<T> {
+    this.pausedDeviceCounts.set(deviceId, (this.pausedDeviceCounts.get(deviceId) ?? 0) + 1);
+    const activeSample = this.activeAndroidSamples.get(deviceId);
+    activeSample?.controller.abort(new Error("Foreground device operation took priority"));
+    try {
+      await activeSample?.promise;
+      return await operation();
+    } finally {
+      const remaining = (this.pausedDeviceCounts.get(deviceId) ?? 1) - 1;
+      if (remaining <= 0) {
+        this.pausedDeviceCounts.delete(deviceId);
+      } else {
+        this.pausedDeviceCounts.set(deviceId, remaining);
+      }
+    }
+  }
+
+  private cancelActiveAndroidSample(deviceId: string, reason: string): void {
+    this.activeAndroidSamples.get(deviceId)?.controller.abort(new Error(reason));
   }
 
   /**
@@ -419,6 +462,9 @@ export class PerformanceMonitor {
     const promises: Promise<void>[] = [];
 
     for (const device of this.monitoredDevices.values()) {
+      if (this.pausedDeviceCounts.has(device.deviceId)) {
+        continue;
+      }
       promises.push(this.sampleDevice(device, now, server));
     }
 
@@ -433,12 +479,23 @@ export class PerformanceMonitor {
     now: number,
     server: PerformanceDataPusher,
   ): Promise<void> {
+    if (device.platform === "android") {
+      const controller = new AbortController();
+      const promise = this.sampleAndroidDevice(device, now, server, controller.signal)
+        .catch((error) => {
+          logger.debug(`[PerformanceMonitor] Error sampling ${device.deviceId}: ${error}`);
+        })
+        .finally(() => {
+          if (this.activeAndroidSamples.get(device.deviceId)?.controller === controller) {
+            this.activeAndroidSamples.delete(device.deviceId);
+          }
+        });
+      this.activeAndroidSamples.set(device.deviceId, { controller, promise });
+      await promise;
+      return;
+    }
     try {
-      if (device.platform === "ios") {
-        await this.sampleIOSDevice(device, now, server);
-      } else {
-        await this.sampleAndroidDevice(device, now, server);
-      }
+      await this.sampleIOSDevice(device, now, server);
     } catch (error) {
       logger.debug(`[PerformanceMonitor] Error sampling ${device.deviceId}: ${error}`);
     }
@@ -451,6 +508,7 @@ export class PerformanceMonitor {
     device: MonitoredDevice,
     now: number,
     server: PerformanceDataPusher,
+    signal: AbortSignal,
   ): Promise<void> {
     // Identity captured before any await: if the monitored package switches (or
     // monitoring stops) while these adb calls are in flight, this whole sample
@@ -470,7 +528,7 @@ export class PerformanceMonitor {
       PerformanceMonitor.SDK_FRAME_TTL_MS,
     );
 
-    const gfxPromise = sdkFrame ? Promise.resolve(null) : this.collectGfxMetrics(device);
+    const gfxPromise = sdkFrame ? Promise.resolve(null) : this.collectGfxMetrics(device, signal);
 
     // Collect medium metrics (CPU) if interval elapsed or first collection. The
     // collect calls do NOT mutate `device` — caches/timestamps are updated only
@@ -479,14 +537,14 @@ export class PerformanceMonitor {
       device.lastMediumTick === 0 ||
       now - device.lastMediumTick >= PerformanceMonitor.MEDIUM_INTERVAL_MS;
     const cpuPromise = shouldCollectCpu
-      ? this.collectCpuMetrics(device)
+      ? this.collectCpuMetrics(device, signal)
       : Promise.resolve({ cpuUsagePercent: device.cachedCpu, sample: null });
 
     // Collect slow metrics (memory) if interval elapsed or first collection
     const shouldCollectMemory =
       device.lastSlowTick === 0 || now - device.lastSlowTick >= PerformanceMonitor.SLOW_INTERVAL_MS;
     const memoryPromise = shouldCollectMemory
-      ? this.collectMemoryMetrics(device)
+      ? this.collectMemoryMetrics(device, signal)
       : Promise.resolve({
           totalPssMb: device.cachedMemory,
           breakdown: device.cachedMemoryBreakdown,
@@ -947,6 +1005,7 @@ export class PerformanceMonitor {
    */
   private async collectGfxMetrics(
     device: MonitoredDevice,
+    signal: AbortSignal,
   ): Promise<GfxMetrics & { rawJankCounters: RawJankCounters | null; resetSucceeded: boolean }> {
     try {
       const adb = this.adbClientFactory.create({
@@ -959,6 +1018,11 @@ export class PerformanceMonitor {
       // The 'reset' flag clears stats after reading, so next read reflects only new frames
       const { stdout } = await adb.executeCommand(
         `shell dumpsys gfxinfo ${device.packageName} reset`,
+        PerformanceMonitor.ANDROID_COMMAND_TIMEOUT_MS,
+        undefined,
+        undefined,
+        signal,
+        true,
       );
 
       // Check if any frames were actually rendered in this interval
@@ -1007,6 +1071,7 @@ export class PerformanceMonitor {
         resetSucceeded: true,
       };
     } catch (error) {
+      signal.throwIfAborted();
       logger.debug(`[PerformanceMonitor] gfxinfo failed for ${device.deviceId}: ${error}`);
       return {
         fps: null,
@@ -1025,7 +1090,10 @@ export class PerformanceMonitor {
    * Collect CPU usage from /proc/{pid}/stat and /proc/uptime.
    * Returns the interval percentage and the sample used as the next baseline.
    */
-  private async collectCpuMetrics(device: MonitoredDevice): Promise<CpuMetricsResult> {
+  private async collectCpuMetrics(
+    device: MonitoredDevice,
+    signal: AbortSignal,
+  ): Promise<CpuMetricsResult> {
     try {
       const adb = this.adbClientFactory.create({
         deviceId: device.deviceId,
@@ -1034,20 +1102,41 @@ export class PerformanceMonitor {
       });
 
       // Get the process ID
-      const { stdout: pidOut } = await adb.executeCommand(`shell pidof ${device.packageName}`);
+      const { stdout: pidOut } = await adb.executeCommand(
+        `shell pidof ${device.packageName}`,
+        PerformanceMonitor.ANDROID_COMMAND_TIMEOUT_MS,
+        undefined,
+        undefined,
+        signal,
+        true,
+      );
       const pid = pidOut.trim().split(/\s+/)[0]; // Take first PID if multiple
       if (!pid) {
         return { cpuUsagePercent: null, sample: null };
       }
 
       // Get CPU stats from /proc/stat
-      const { stdout: statOut } = await adb.executeCommand(`shell cat /proc/${pid}/stat`);
+      const { stdout: statOut } = await adb.executeCommand(
+        `shell cat /proc/${pid}/stat`,
+        PerformanceMonitor.ANDROID_COMMAND_TIMEOUT_MS,
+        undefined,
+        undefined,
+        signal,
+        true,
+      );
       const fields = statOut.split(" ");
       const utime = parseInt(fields[13] || "0", 10);
       const stime = parseInt(fields[14] || "0", 10);
 
       // Get system uptime
-      const { stdout: uptimeOut } = await adb.executeCommand("shell cat /proc/uptime");
+      const { stdout: uptimeOut } = await adb.executeCommand(
+        "shell cat /proc/uptime",
+        PerformanceMonitor.ANDROID_COMMAND_TIMEOUT_MS,
+        undefined,
+        undefined,
+        signal,
+        true,
+      );
       const uptime = parseFloat(uptimeOut.split(" ")[0] || "0");
 
       const processTicks = utime + stime;
@@ -1072,6 +1161,7 @@ export class PerformanceMonitor {
       const cpuPercent = (processTickDelta / (uptimeDelta * 100)) * 100;
       return { cpuUsagePercent: Math.min(cpuPercent, 100), sample };
     } catch (error) {
+      signal.throwIfAborted();
       logger.debug(`[PerformanceMonitor] CPU metrics failed for ${device.deviceId}: ${error}`);
       return { cpuUsagePercent: null, sample: null };
     }
@@ -1089,6 +1179,7 @@ export class PerformanceMonitor {
    */
   private async collectMemoryMetrics(
     device: MonitoredDevice,
+    signal: AbortSignal,
   ): Promise<{ totalPssMb: number | null; breakdown: MemoryBreakdownMb | null }> {
     try {
       const adb = this.adbClientFactory.create({
@@ -1097,7 +1188,14 @@ export class PerformanceMonitor {
         platform: "android",
       });
 
-      const { stdout } = await adb.executeCommand(`shell dumpsys meminfo ${device.packageName}`);
+      const { stdout } = await adb.executeCommand(
+        `shell dumpsys meminfo ${device.packageName}`,
+        PerformanceMonitor.ANDROID_COMMAND_TIMEOUT_MS,
+        undefined,
+        undefined,
+        signal,
+        true,
+      );
 
       // App Summary "TOTAL PSS:" line (present since API 21).
       const totalMatch = stdout.match(/TOTAL PSS:\s+(\d+)/);
@@ -1105,6 +1203,7 @@ export class PerformanceMonitor {
 
       return { totalPssMb, breakdown: parseMemoryBreakdown(stdout) };
     } catch (error) {
+      signal.throwIfAborted();
       logger.debug(`[PerformanceMonitor] Memory metrics failed for ${device.deviceId}: ${error}`);
       return { totalPssMb: null, breakdown: null };
     }

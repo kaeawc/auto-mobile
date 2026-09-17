@@ -342,6 +342,70 @@ describe("startDevice handler", () => {
     expect(fakeDeviceUtils.wasMethodCalled("startDevice")).toBe(true);
   });
 
+  it("uses public avdName for an exact Android match and never boots a substring sibling", async () => {
+    const exact = { ...androidDevice, name: "Pixel_9" };
+    const sibling = { ...androidDevice, name: "Pixel_9_Copy", deviceId: "emulator-5556" };
+    fakeDeviceUtils.setBootedDevices("android", [sibling, exact]);
+    fakeDeviceUtils.setDeviceImages("android", [
+      { ...androidImage, name: exact.name, apiLevel: "35", osVersion: "15.0" },
+      { ...androidImage, name: sibling.name, apiLevel: "35", osVersion: "15.0" },
+    ]);
+    setDeviceToolsDependencies({ deviceMatcherFactory: () => new DefaultDeviceMatcher() });
+    registerDeviceTools();
+
+    const result = await callStartDevice({ platform: "android", avdName: exact.name });
+
+    expect(result).toMatchObject({ name: exact.name, deviceId: exact.deviceId });
+    expect(fakeDeviceUtils.getExecutedOperations()).not.toContain(
+      "startDevice:Pixel_9_Copy:180000",
+    );
+  });
+
+  it("enforces Android API and dotted marketing bounds for an exact AVD", async () => {
+    const exact = {
+      ...androidDevice,
+      name: "Pixel_9_API_34",
+      apiLevel: "34",
+      osVersion: "14.0",
+    };
+    fakeDeviceUtils.setBootedDevices("android", [exact]);
+    fakeDeviceUtils.setDeviceImages("android", [{ ...androidImage, ...exact, isRunning: true }]);
+    setDeviceToolsDependencies({ deviceMatcherFactory: () => new DefaultDeviceMatcher() });
+    registerDeviceTools();
+
+    await expect(
+      callStartDevice({ platform: "android", avdName: exact.name, minOsVersion: "35" }),
+    ).rejects.toThrow("No android device matching criteria found");
+    await expect(
+      callStartDevice({ platform: "android", avdName: exact.name, minOsVersion: "14.1" }),
+    ).rejects.toThrow("No android device matching criteria found");
+    await expect(
+      callStartDevice({
+        platform: "android",
+        avdName: exact.name,
+        minOsVersion: "34",
+        maxOsVersion: "14.0",
+      }),
+    ).resolves.toMatchObject({ name: exact.name });
+  });
+
+  it("rejects iOS component bounds and family mismatches for an exact deviceId", async () => {
+    fakeDeviceUtils.setBootedDevices("ios", [iosDevice]);
+    setDeviceToolsDependencies({ deviceMatcherFactory: () => new DefaultDeviceMatcher() });
+    registerDeviceTools();
+
+    await expect(
+      callStartDevice({
+        platform: "ios",
+        deviceId: iosDevice.deviceId,
+        minOsVersion: "17.2.1",
+      }),
+    ).rejects.toThrow("does not satisfy");
+    await expect(
+      callStartDevice({ platform: "ios", deviceId: iosDevice.deviceId, formFactor: "tablet" }),
+    ).rejects.toThrow("does not satisfy");
+  });
+
   it("does not select a recovering AVD for an unnamed Android start", async () => {
     const timer = new FakeTimer();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
@@ -2353,6 +2417,23 @@ describe("startDevice handler", () => {
 
     expect(parsed.platform).toBe("ios");
     expect(parsed.name).toBe("Pixel_7_API_34");
+  });
+
+  it("accepts capability declarations for the session it mints", () => {
+    const parsed = startDeviceSchema.parse({
+      platform: "android",
+      avdName: "Pixel_7_API_34",
+      enableTools: ["observe", "getDeviceState"],
+    });
+
+    expect(parsed.enableTools).toEqual(["observe", "getDeviceState"]);
+    expect(
+      startDeviceSchema.safeParse({
+        platform: "android",
+        avdName: "Pixel_7_API_34",
+        enableTools: [],
+      }).success,
+    ).toBe(false);
   });
 
   it("bounds runner readiness timeout overrides", () => {

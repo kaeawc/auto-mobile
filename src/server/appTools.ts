@@ -1038,7 +1038,15 @@ export function registerAppTools() {
     "Install app on device (.apk, .app, or .ipa)",
     installAppSchema,
     installAppHandler,
-    { defaultEnabled: true },
+    {
+      defaultEnabled: true,
+      // Installation is a platform package-manager operation. Requiring
+      // accessibility automation here creates a dependency cycle on iOS:
+      // a freshly erased/booted simulator cannot install the app because its
+      // CtrlProxy runner is still starting, even though simctl install itself
+      // does not use CtrlProxy.
+      deviceReadiness: "booted",
+    },
   );
 
   ToolRegistry.registerDeviceAware(

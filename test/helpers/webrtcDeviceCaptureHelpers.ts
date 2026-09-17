@@ -2,6 +2,8 @@ import { defaultTimer, type Timer } from "../../src/utils/SystemTimer";
 
 const IOS_SIMULATOR_BOOT_DISCOVERY_TIMEOUT_MS = 10_000;
 const IOS_SIMULATOR_BOOT_DISCOVERY_POLL_MS = 250;
+const IOS_SIMULATOR_UDID_PATTERN =
+  /^[A-Fa-f0-9]{8}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{12}$/;
 
 export interface SimulatorAppearanceClient {
   getBootedSimulatorsChecked(timeoutMs?: number): Promise<Array<{ deviceId: string }>>;
@@ -16,6 +18,19 @@ export function shouldRetryWebRtcDaemonStart({
   readyError: Error | null;
 }): boolean {
   return startError !== null || readyError !== null;
+}
+
+export function configuredIosSimulatorUdid(
+  environment: NodeJS.ProcessEnv = process.env,
+): string | undefined {
+  const value = environment.AUTOMOBILE_IOS_SIMULATOR_UDID?.trim();
+  if (!value) {
+    return undefined;
+  }
+  if (!IOS_SIMULATOR_UDID_PATTERN.test(value)) {
+    throw new Error("AUTOMOBILE_IOS_SIMULATOR_UDID must be a simulator UDID");
+  }
+  return value;
 }
 
 function isBootedSimulatorState(device: { state: string } | null): boolean {

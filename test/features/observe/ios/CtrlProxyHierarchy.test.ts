@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { CtrlProxyHierarchy } from "../../../../src/features/observe/ios/CtrlProxyHierarchy";
+import { STABLE_VIEW_ID_PREFIX } from "../../../../src/features/observe/android/StableNodeIdentity";
 import type {
   CtrlProxyNode,
   HierarchyDelegateContext,
@@ -47,6 +48,31 @@ function makeHierarchy(root: CtrlProxyNode): any {
 
 describe("CtrlProxyHierarchy.convertToViewHierarchyResult", () => {
   const subject = new CtrlProxyHierarchy(stubContext);
+
+  test("rewrites an identifier-less iOS control's generated view-id into a selectable stable id", () => {
+    const result = subject.convertToViewHierarchyResult(
+      makeHierarchy({
+        className: "XCUIApplication",
+        node: [
+          {
+            className: "UIButton",
+            viewId: "3f2a1c4b-0000-0000-0000-000000000000",
+            clickable: "true",
+            bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+          },
+        ],
+      }),
+    );
+
+    const button = findFirstNodeWith(
+      result.hierarchy.node,
+      (attrs) => attrs["class"] === "UIButton",
+    );
+
+    expect(button).not.toBeNull();
+    expect(button.$["resource-id"]).toBeUndefined();
+    expect(button.$["view-id"]).toMatch(new RegExp(`^${STABLE_VIEW_ID_PREFIX}[0-9a-f]{16}$`));
+  });
 
   test("preserves compact semantic-link metadata from the iOS runner", () => {
     const result = subject.convertToViewHierarchyResult(

@@ -95,7 +95,7 @@ export const deviceResourceDescriptions = {
   googleServicesFramework:
     "Android Google Services Framework; aggressive control that can break Google account and push integrations.",
   googlePlayServices:
-    "Android Google Play services; aggressive control that breaks dependent push, authentication, location and other integrations. Keep enabled for Slack-compatible workflows.",
+    "Android Google Play services; aggressive control that breaks dependent push, authentication, location and other integrations. Keep enabled for workflows that depend on those services.",
   icloudSync:
     "Broad iCloud/account synchronization. Control is unsupported; use the narrower icloudSettingsSync setting.",
 } as const;

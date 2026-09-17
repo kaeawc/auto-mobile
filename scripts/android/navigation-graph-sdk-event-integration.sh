@@ -20,7 +20,7 @@ graph=""
 automation_ready_timeout_ms="120000"
 
 require_command() {
-  command -v "$1" >/dev/null 2>&1 || {
+  command -v "$1" > /dev/null 2>&1 || {
     echo "error: required command not found: $1" >&2
     exit 1
   }
@@ -28,9 +28,9 @@ require_command() {
 
 resolve_auto_mobile_cli() {
   export PATH="${bun_bin_dir}:${PATH}"
-  hash -r 2>/dev/null || true
+  hash -r 2> /dev/null || true
 
-  if command -v auto-mobile >/dev/null 2>&1; then
+  if command -v auto-mobile > /dev/null 2>&1; then
     return
   fi
 
@@ -38,7 +38,7 @@ resolve_auto_mobile_cli() {
     echo "auto-mobile not resolvable from global install; linking ${bun_bin_dir}/auto-mobile -> ${dist_entry}"
     mkdir -p "${bun_bin_dir}"
     ln -sf "${dist_entry}" "${bun_bin_dir}/auto-mobile"
-    hash -r 2>/dev/null || true
+    hash -r 2> /dev/null || true
   fi
 
   require_command auto-mobile
@@ -58,8 +58,19 @@ fi
 
 # The debug-only Playground receiver requires android.permission.DUMP. Restart
 # the selected emulator's adbd as root before launching the session it serves.
-"$adb_bin" -s "$device_id" root >/dev/null
+"$adb_bin" -s "$device_id" root > /dev/null
 "$adb_bin" -s "$device_id" wait-for-device
+
+# The preceding permission-contract check reinstalls CtrlProxy, which reconnects
+# its accessibility service while no app window transition is in flight. On a
+# cold CI emulator that can leave getRootInActiveWindow() empty indefinitely,
+# even though the runner WebSocket itself is healthy. Foreground this test's SDK
+# host before acquisition so automation readiness verifies a real target window.
+if ! "$adb_bin" -s "$device_id" shell am start -W \
+  -n "${package_id}/.MainActivity" > /dev/null; then
+  echo "error: could not foreground Android graph target before runner readiness" >&2
+  exit 1
+fi
 
 # Acquire the booted emulator before issuing session-scoped calls. A caller must
 # not fabricate a UUID to access a device it has not acquired; the daemon now
@@ -83,7 +94,7 @@ if ! session_uuid="$(
       end
     )
     | select(type == "string" and length > 0)
-  ' <<<"${session_result}"
+  ' <<< "${session_result}"
 )"; then
   echo "error: could not acquire navigation graph session for emulator ${device_id}" >&2
   exit 1
@@ -93,25 +104,25 @@ fi
 # session before emitting the event. The debug-only Playground receiver invokes
 # the public AutoMobileSDK API after launch has initialized the SDK.
 if ! auto-mobile --debug --embedded-sdk --cli --session-uuid "$session_uuid" \
-  launchApp --platform android --appId "$package_id" --deviceId "$device_id" >/dev/null; then
+  launchApp --platform android --appId "$package_id" --deviceId "$device_id" > /dev/null; then
   echo "error: could not launch Android graph target app" >&2
   exit 1
 fi
 if ! auto-mobile --debug --embedded-sdk --cli --session-uuid "$session_uuid" \
-  observe --platform android --deviceId "$device_id" >/dev/null; then
+  observe --platform android --deviceId "$device_id" > /dev/null; then
   echo "error: could not bind Android SDK events to navigation graph session" >&2
   exit 1
 fi
 
 if ! "$adb_bin" -s "$device_id" shell am broadcast \
-  -a "$emit_action" -p "$package_id" --es destination "$destination" >/dev/null; then
+  -a "$emit_action" -p "$package_id" --es destination "$destination" > /dev/null; then
   echo "error: could not trigger Android SDK navigation event" >&2
   exit 1
 fi
 
 for attempt in 1 2 3 4 5; do
   if ! auto-mobile --debug --embedded-sdk --cli --session-uuid "$session_uuid" \
-    observe --platform android --deviceId "$device_id" >/dev/null; then
+    observe --platform android --deviceId "$device_id" > /dev/null; then
     echo "observe refresh attempt ${attempt} failed; retrying in 2s..." >&2
     sleep 2
     continue
@@ -129,7 +140,7 @@ for attempt in 1 2 3 4 5; do
   if jq -e --arg destination "$destination" \
     '(if .content? then (.content[] | select(.type == "text").text | fromjson) else . end) as $result
       | ([$result.screens[].name] | index($destination)) != null' \
-    <<<"$graph" >/dev/null; then
+    <<< "$graph" > /dev/null; then
     echo "Android SDK navigation event reached getNavigationGraph on attempt ${attempt}."
     exit 0
   fi

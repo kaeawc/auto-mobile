@@ -275,6 +275,144 @@ describe("DeviceTeardownService", () => {
     expect(destroyCalls).toBe(1);
   });
 
+  test("cancel-on-caller-abort prevents a cooperative destroy from mutating", async () => {
+    const timer = new FakeTimer();
+    const { coordinator, service } = createService(timer);
+    const controller = new AbortController();
+    const destroyWaitingForAbort = Promise.withResolvers<void>();
+    let mutations = 0;
+    const workflow = {
+      resolve: async () => ({ target: "target" }) as const,
+      stop: async () => "accepted" as const,
+      destroy: async (
+        _target: string,
+        signal: AbortSignal,
+        _retainLeaseUntil: (settlement: Promise<unknown>) => void,
+        markDestructionStarted: () => void,
+      ) => {
+        markDestructionStarted();
+        await new Promise<void>((resolve, reject) => {
+          const timeout = timer.setTimeout(() => {
+            mutations++;
+            resolve();
+          }, 100);
+          const abort = () => {
+            timer.clearTimeout(timeout);
+            reject(signal.reason);
+          };
+          if (signal.aborted) {
+            abort();
+            return;
+          }
+          signal.addEventListener("abort", abort, { once: true });
+          destroyWaitingForAbort.resolve();
+        });
+      },
+      verify: async () => ({ status: "destroyed" }) as TestResponse,
+      conflict: () => ({ status: "failed", phase: "precondition" }) as TestResponse,
+      failure: (phase: DeviceTeardownPhase) => ({ status: "failed", phase }) as TestResponse,
+      isFailure: (response: TestResponse) => response.status === "failed",
+    };
+    const request = {
+      operationId: "deadline-critical-delete",
+      fingerprint: "fingerprint",
+      identity,
+      deadlineMs: 1_000,
+      callerSignal: controller.signal,
+      cancellationPolicy: "cancel-on-caller-abort" as const,
+    };
+
+    const caller = service.teardown(request, workflow);
+    await destroyWaitingForAbort.promise;
+    controller.abort(new Error("acceptance deadline elapsed"));
+    await expect(caller).rejects.toThrow("acceptance deadline elapsed");
+    await expect(
+      service.teardown({ ...request, callerSignal: undefined }, workflow),
+    ).resolves.toEqual({ status: "failed", phase: "destroy" });
+
+    const replacement = await coordinator.reserve(
+      { kind: "stable", ...identity },
+      { operation: "provision", deadlineMs: 1_000 },
+    );
+    replacement.release();
+    await timer.advanceTimeAsync(200);
+
+    expect(mutations).toBe(0);
+  });
+
+  test("cancel-on-caller-abort retains identity through non-cooperative destruction", async () => {
+    const timer = new FakeTimer();
+    const { coordinator, service } = createService(timer);
+    const controller = new AbortController();
+    const destroyWaitingForAbort = Promise.withResolvers<void>();
+    let mutations = 0;
+    let destroyCalls = 0;
+    const workflow = {
+      resolve: async () => ({ target: "target" }) as const,
+      stop: async () => "accepted" as const,
+      destroy: async (
+        _target: string,
+        signal: AbortSignal,
+        retainLeaseUntil: (settlement: Promise<unknown>) => void,
+        markDestructionStarted: () => void,
+      ) => {
+        destroyCalls++;
+        markDestructionStarted();
+        const platformMutation = new Promise<void>((resolve) => {
+          timer.setTimeout(() => {
+            mutations++;
+            resolve();
+          }, 100);
+        });
+        retainLeaseUntil(platformMutation);
+        destroyWaitingForAbort.resolve();
+        await platformMutation;
+      },
+      verify: async () => ({ status: "destroyed" }) as TestResponse,
+      conflict: () => ({ status: "failed", phase: "precondition" }) as TestResponse,
+      failure: (phase: DeviceTeardownPhase) => ({ status: "failed", phase }) as TestResponse,
+      isFailure: (response: TestResponse) => response.status === "failed",
+    };
+    const request = {
+      operationId: "deadline-critical-non-cooperative-delete",
+      fingerprint: "fingerprint",
+      identity,
+      deadlineMs: 1_000,
+      callerSignal: controller.signal,
+      cancellationPolicy: "cancel-on-caller-abort" as const,
+    };
+
+    const caller = service.teardown(request, workflow);
+    await destroyWaitingForAbort.promise;
+    controller.abort(new Error("acceptance deadline elapsed"));
+    await expect(caller).rejects.toThrow("acceptance deadline elapsed");
+    const replay = service.teardown({ ...request, callerSignal: undefined }, workflow);
+    let replaySettled = false;
+    void replay.then(() => {
+      replaySettled = true;
+    });
+
+    const replacement = coordinator.reserve(
+      { kind: "stable", ...identity },
+      { operation: "provision", deadlineMs: 1_000 },
+    );
+    let replacementAcquired = false;
+    void replacement.then(() => {
+      replacementAcquired = true;
+    });
+    await Promise.resolve();
+    expect(replacementAcquired).toBe(false);
+    expect(replaySettled).toBe(false);
+
+    await timer.advanceTimeAsync(100);
+    await expect(replay).resolves.toEqual({ status: "failed", phase: "destroy" });
+    const replacementLease = await replacement;
+    replacementLease.release();
+
+    expect(mutations).toBe(1);
+    expect(destroyCalls).toBe(1);
+  });
+
   test("renews a running durable operation until its long teardown settles", async () => {
     const timer = new FakeTimer();
     const operationStore = new FakeDeviceTeardownOperationStore();

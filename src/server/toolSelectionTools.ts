@@ -11,7 +11,7 @@ import { ActionableError } from "../models";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
 import { withJsonSchemaOverride } from "./toolSchemaHelpers";
-import { createJSONToolResponse } from "../utils/toolUtils";
+import { createStructuredToolResponse } from "../utils/toolUtils";
 import { ToolRegistry } from "./toolRegistry";
 
 export { SET_TOOL_ENABLED_TOOL_NAME } from "../features/toolSelection/toolSelectionControl";
@@ -279,7 +279,7 @@ export function registerToolSelectionTools(): void {
         ...(args.toolNames ? { toolNames: requested } : { toolName: args.toolName }),
         enabled,
       };
-      return createJSONToolResponse({
+      return createStructuredToolResponse({
         ...response,
         ...(await getEnabledToolsResponse(sessionUuid, context)),
       });

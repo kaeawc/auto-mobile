@@ -9,6 +9,7 @@ import type { DeviceProvisioner } from "./deviceProvisioning";
 import { MultiPlatformDeviceManager } from "./deviceUtils";
 import type { PlatformDeviceManager } from "./deviceUtils";
 import { SimCtlClient } from "./ios-cmdline-tools/SimCtlClient";
+import { iosVersionStringFromRuntimeId } from "./ios-cmdline-tools/iosVersion";
 import { logger } from "./logger";
 
 const CI_SIMULATOR_NAME = "AutoMobile CI iPhone";
@@ -163,7 +164,8 @@ export async function createCiIosBootConfiguration(
   }
   const simctl = dependencies?.simctl ?? new SimCtlClient();
   const { runtime } = await resolveIosProvisioningSelection(simctl, request);
-  const ownedSimulatorName = `${CI_SIMULATOR_NAME} (${runtime})`;
+  const runtimeLabel = iosVersionStringFromRuntimeId(runtime) ?? runtime;
+  const ownedSimulatorName = `${CI_SIMULATOR_NAME} (${runtimeLabel})`;
   const deviceManager = new MultiPlatformDeviceManager(null, simctl);
   return {
     request: normalizeCiIosBootRequest(request, ownedSimulatorName),

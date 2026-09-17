@@ -405,6 +405,7 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
     timeoutMs?: number,
     perf?: PerformanceTracker,
     coldBoot?: boolean,
+    signal?: AbortSignal,
   ): Promise<CtrlProxyLaunchAppResult>;
 
   requestResetPermissions(
@@ -734,6 +735,20 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
    */
   public static getExistingInstance(deviceId: string): IOSCtrlProxyClient | null {
     return IOSCtrlProxyClient.instances.get(deviceId) ?? null;
+  }
+
+  /**
+   * Permanently retire the registered client for one device incarnation.
+   * Remove it before awaiting close so no concurrent cache lookup can recover
+   * the client whose reconnect timers are being cancelled.
+   */
+  public static async retireInstance(deviceId: string): Promise<void> {
+    const instance = IOSCtrlProxyClient.instances.get(deviceId);
+    if (!instance) {
+      return;
+    }
+    IOSCtrlProxyClient.instances.delete(deviceId);
+    await instance.close();
   }
 
   /** Return the latest app-provided navigation identity without doing I/O. */
@@ -1582,6 +1597,10 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       this.hierarchyNavigationDetector = null;
     }
 
+    if (!this.autoReconnectEnabled) {
+      return;
+    }
+
     // Track connection failure and potentially trigger service restart
     this.consecutiveConnectionFailures++;
     logger.info(
@@ -2075,32 +2094,24 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
 
     const manager = this.serviceManagerFactory(this.device);
 
-    // Check if service is actually not running before restarting
+    // Repeated WebSocket failures are the authoritative signal that automation is
+    // unusable. HTTP /health can remain responsive while the upgrade/command path
+    // is wedged, so it must not veto recovery after the failure threshold.
     void manager
-      .isRunning()
-      .then((running) => {
-        if (!running) {
-          logger.info(`[IOSCtrlProxyClient] CtrlProxy not running, requesting restart`);
-          void manager
-            .forceRestart()
-            .then(() => {
-              logger.info(`[IOSCtrlProxyClient] CtrlProxy restart completed`);
-              this.consecutiveConnectionFailures = 0;
-              this.isRequestingServiceRestart = false;
-            })
-            .catch((error) => {
-              logger.warn(`[IOSCtrlProxyClient] CtrlProxy restart failed: ${error}`);
-              this.isRequestingServiceRestart = false;
-            });
-        } else {
-          logger.info(
-            `[IOSCtrlProxyClient] CtrlProxy is running, connection issue may be transient`,
-          );
-          this.isRequestingServiceRestart = false;
+      .forceRestart()
+      .then(async () => {
+        this.syncPortFromManager(manager);
+        this.connectionAttempts = 0;
+        logger.info(`[IOSCtrlProxyClient] CtrlProxy restart completed; reconnecting WebSocket`);
+        const connected = await super.ensureConnected();
+        if (!connected) {
+          logger.warn(`[IOSCtrlProxyClient] WebSocket reconnect failed after CtrlProxy restart`);
         }
       })
       .catch((error) => {
-        logger.warn(`[IOSCtrlProxyClient] Failed to check CtrlProxy status: ${error}`);
+        logger.warn(`[IOSCtrlProxyClient] CtrlProxy restart failed: ${error}`);
+      })
+      .finally(() => {
         this.isRequestingServiceRestart = false;
       });
   }
@@ -2703,9 +2714,16 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     timeoutMs?: number,
     perf?: PerformanceTracker,
     coldBoot?: boolean,
+    signal?: AbortSignal,
   ): Promise<CtrlProxyLaunchAppResult> {
     this.invalidateSdkCapabilities();
-    const result = await this.navigation.requestLaunchApp(bundleId, timeoutMs, perf, coldBoot);
+    const result = await this.navigation.requestLaunchApp(
+      bundleId,
+      timeoutMs,
+      perf,
+      coldBoot,
+      signal,
+    );
     if (result.success) {
       await this.refreshSdkCapabilitiesAndSync().catch((error) => {
         // A launched app without AutoMobileSDK is normal; the launch itself succeeded.

@@ -4,9 +4,11 @@ import {
   checkCtrlProxy,
   checkCtrlProxyVersion,
   checkDaemonBuildIdentity,
+  checkDaemonConnectivity,
   checkDaemonStatus,
   checkDaemonVersion,
   runAutoMobileChecks,
+  runPostRepairAutoMobileChecks,
 } from "../../src/doctor/checks/automobile";
 import type { BuildIdentity } from "../../src/daemon/buildIdentity";
 import {
@@ -24,6 +26,8 @@ import * as path from "path";
 import AdmZip from "adm-zip";
 import crypto from "crypto";
 import { FakeLogger } from "../fakes/FakeLogger";
+import { createDoctorDeadline } from "../../src/doctor/deadline";
+import { FakeTimer } from "../fakes/FakeTimer";
 
 describe("checkDaemonVersion", () => {
   test("returns pass status", () => {
@@ -241,6 +245,103 @@ describe("checkDaemonStatus", () => {
   });
 });
 
+describe("AutoMobile doctor cancellation", () => {
+  test("bounds a stalled image backend load with the shared doctor deadline", async () => {
+    const timer = new FakeTimer();
+    const deadline = createDoctorDeadline({ timeoutMs: 50, timer }, timer);
+    const check = checkImageBackend(
+      {
+        platform: "darwin",
+        sharpLoader: async () => await new Promise<never>(() => {}),
+      },
+      deadline.probe,
+    );
+
+    timer.advanceTime(50);
+
+    await expect(check).resolves.toMatchObject({
+      name: "Image Backend",
+      status: "fail",
+      message: expect.stringContaining("Doctor diagnostic deadline elapsed"),
+    });
+    deadline.dispose();
+  });
+
+  test("bounds the daemon status fallback when its PID-file read stalls", async () => {
+    const timer = new FakeTimer();
+    const deadline = createDoctorDeadline({ timeoutMs: 50, timer }, timer);
+    const check = checkDaemonStatus(
+      {
+        daemonManager: {
+          status: async () => await new Promise<never>(() => {}),
+        },
+        getDaemonHealthReport: async () => ({
+          timestamp: "2026-09-16T00:00:00.000Z",
+          daemonRunning: false,
+          socketExists: true,
+          socketAccessible: true,
+          pidFileExists: true,
+          pidFileValid: true,
+          socketConnectable: false,
+          recommendations: [],
+        }),
+      },
+      deadline.probe,
+    );
+
+    timer.advanceTime(50);
+
+    await expect(check).resolves.toMatchObject({
+      name: "Daemon Status",
+      status: "warn",
+      message: "Could not check daemon: Doctor diagnostic deadline elapsed",
+    });
+    deadline.dispose();
+  });
+
+  test("aborts delayed daemon health I/O without publishing a late connectivity pass", async () => {
+    const timer = new FakeTimer();
+    const deadline = createDoctorDeadline({ timeoutMs: 50, timer }, timer);
+    let observedSignal: AbortSignal | undefined;
+    let observedTimeoutMs: number | undefined;
+    let lateSuccess = false;
+    let settled = false;
+    const check = checkDaemonConnectivity(async (probe) => {
+      observedSignal = probe?.signal;
+      observedTimeoutMs = probe?.timeoutMs;
+      await new Promise<void>((resolve) => {
+        probe?.signal?.addEventListener("abort", resolve, { once: true });
+      });
+      try {
+        probe?.signal?.throwIfAborted();
+        lateSuccess = true;
+        return {
+          timestamp: "2026-09-14T00:00:00.000Z",
+          daemonRunning: true,
+          socketExists: true,
+          socketAccessible: true,
+          pidFileExists: true,
+          pidFileValid: true,
+          socketConnectable: true,
+          recommendations: [],
+        };
+      } finally {
+        settled = true;
+      }
+    }, deadline.probe);
+
+    timer.advanceTime(50);
+    const result = await check;
+    deadline.dispose();
+
+    expect(observedSignal?.aborted).toBe(true);
+    expect(observedTimeoutMs).toBe(50);
+    expect(settled).toBe(true);
+    expect(lateSuccess).toBe(false);
+    expect(result.status).toBe("warn");
+  });
+});
+
 describe("checkDaemonBuildIdentity", () => {
   const client: BuildIdentity = {
     entryScript: "/wt/dist/src/index.js",
@@ -315,6 +416,34 @@ describe("checkDaemonBuildIdentity", () => {
 
     expect(result.status).toBe("warn");
     expect(result.message).toContain("PID file unreadable");
+  });
+
+  test("bounds a stalled daemon status read with the shared doctor deadline", async () => {
+    const timer = new FakeTimer();
+    const deadline = createDoctorDeadline({ timeoutMs: 50, timer }, timer);
+    let settled = false;
+    const check = checkDaemonBuildIdentity(
+      {
+        daemonManager: {
+          status: () => new Promise(() => {}),
+        },
+        getClientBuildIdentity: () => client,
+      },
+      deadline.probe,
+    ).then((result) => {
+      settled = true;
+      return result;
+    });
+
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    timer.advanceTime(50);
+    const result = await check;
+    deadline.dispose();
+
+    expect(settled).toBe(true);
+    expect(result.status).toBe("warn");
+    expect(result.message).toContain("Doctor diagnostic deadline elapsed");
   });
 
   test("does not report a false skew for a legacy daemon without build identity", async () => {
@@ -618,6 +747,79 @@ describe("checkCtrlProxy", () => {
         process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_DOWNLOAD_IF_INSTALLED = originalSkipDownload;
       }
     }
+  });
+});
+
+describe("post-repair read-only Android verification", () => {
+  beforeEach(() => {
+    AndroidCtrlProxyManager.resetInstances();
+  });
+
+  afterEach(() => {
+    AndroidCtrlProxyManager.resetInstances();
+  });
+
+  test("keeps post-repair verification device-neutral", async () => {
+    const commonDependencies = {
+      checkDaemonStatus: async () => ({
+        name: "Daemon Status",
+        status: "pass" as const,
+        message: "",
+      }),
+      checkDaemonConnectivity: async () => ({
+        name: "Daemon Connectivity",
+        status: "pass" as const,
+        message: "",
+      }),
+      checkDaemonBuildIdentity: async () => ({
+        name: "Daemon Build Identity",
+        status: "pass" as const,
+        message: "",
+      }),
+      checkCtrlProxy: async () => {
+        throw new Error("post-repair verification must not inspect Android devices");
+      },
+      checkWorkProfileAccessibility: async () => {
+        throw new Error("post-repair verification must not inspect Android profiles");
+      },
+    };
+
+    await runPostRepairAutoMobileChecks({}, commonDependencies);
+  });
+
+  test("forwards the shared probe to post-repair build identity verification", async () => {
+    const timer = new FakeTimer();
+    const deadline = createDoctorDeadline({ timeoutMs: 50, timer }, timer);
+    let receivedProbe: unknown;
+
+    await runPostRepairAutoMobileChecks(deadline.probe, {
+      checkDaemonStatus: async () => ({
+        name: "Daemon Status",
+        status: "pass",
+        message: "",
+      }),
+      checkDaemonConnectivity: async () => ({
+        name: "Daemon Connectivity",
+        status: "pass",
+        message: "",
+      }),
+      checkDaemonBuildIdentity: async (probe) => {
+        receivedProbe = probe;
+        return {
+          name: "Daemon Build Identity",
+          status: "pass",
+          message: "",
+        };
+      },
+    });
+    deadline.dispose();
+
+    expect(receivedProbe).toMatchObject({
+      signal: deadline.probe.signal,
+      deadlineMs: 50,
+      timeoutMs: 50,
+      timer,
+    });
   });
 });
 

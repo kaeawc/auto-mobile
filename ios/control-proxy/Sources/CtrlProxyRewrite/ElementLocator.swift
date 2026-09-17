@@ -56,10 +56,10 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
         /// in the XCUITest accessibility tree. These are collapsed during hierarchy building
         /// to avoid exposing non-interactive internal subviews (e.g. _UITextFieldRoundedRectBackgroundViewNeue).
         private static let textInputElementTypes: [XCUIElement.ElementType] = [
-            .textField,        // UITextField internal subviews
-            .secureTextField,  // Same internals as UITextField with isSecureTextEntry
-            .textView,         // TextKit 2 internal views (_UITextLayoutCanvasView)
-            .searchField,      // UISearchTextField inside UISearchBar (iOS 16+)
+            .textField, // UITextField internal subviews
+            .secureTextField, // Same internals as UITextField with isSecureTextEntry
+            .textView, // TextKit 2 internal views (_UITextLayoutCanvasView)
+            .searchField, // UISearchTextField inside UISearchBar (iOS 16+)
         ]
 
         /// Foreground-app tracking state (tracked app, bundle id, observed bundle ids,
@@ -168,12 +168,12 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
             case 1: return .notRunning
             case 2: return .runningBackgroundSuspended
             case 3: return .runningBackground
-            default: return .runningForeground  // rawValue >= 4
+            default: return .runningForeground // rawValue >= 4
             }
         }
 
         public func awaitAppState(bundleId: String, expectedState: AppStateExpectation) -> Bool {
-            for _ in 0..<10 {
+            for _ in 0 ..< 10 {
                 let stateRaw: UInt = catchingObjCExceptionNonThrowing({
                     XCUIApplication(bundleIdentifier: bundleId).state.rawValue
                 }, fallback: 0)
@@ -224,7 +224,7 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
 
             // Springboard reports as foreground even when another app is on top,
             // so we always re-detect unless a non-springboard app is confirmed foreground
-            if isCurrentAppInForeground && !isCurrentAppSpringboard {
+            if isCurrentAppInForeground, !isCurrentAppSpringboard {
                 tracker.didFallbackToSpringboard = false
                 return
             }
@@ -463,7 +463,7 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
                     .replacingOccurrences(of: "-SceneWindow", with: "")
 
                 // Check if it looks like a bundle ID
-                if cleanId.contains(".") && !cleanId.contains(" ") {
+                if cleanId.contains("."), !cleanId.contains(" ") {
                     if cleanId.hasPrefix("com.") || cleanId.hasPrefix("io.") || cleanId.hasPrefix("org.") ||
                         cleanId.hasPrefix("net.") || cleanId.hasPrefix("me.") || cleanId.hasPrefix("dev.")
                     {
@@ -748,22 +748,30 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
         private func getSystemAlerts(
             appSnapshot: XCUIElementSnapshot,
             keyboardFocusFrame: CGRect? = nil
-        ) throws -> (alerts: [UIElementInfo], rotation: Int?) {
+        )
+            throws -> (alerts: [UIElementInfo], rotation: Int?)
+        {
             // Check for alerts in the app's own snapshot tree
             let appAlertSnapshots = collectAlertElements(from: appSnapshot)
             let appAlerts = appAlertSnapshots.map { snapshot in
-                buildElementInfoFromSnapshot(snapshot, depth: 0, screenBounds: snapshot.frame, keyboardFocusFrame: keyboardFocusFrame)
+                buildElementInfoFromSnapshot(
+                    snapshot,
+                    depth: 0,
+                    screenBounds: snapshot.frame,
+                    keyboardFocusFrame: keyboardFocusFrame
+                )
             }
 
-            // Also check SpringBoard for alerts not in the app's tree — but only pay
-            // for the second full-tree serialization when an alert may actually exist.
+            // Also check SpringBoard for alerts not in the app's tree. A system-owned
+            // sheet can cover a still-foreground app without appearing anywhere in the
+            // app snapshot (for example, iOS's "Open in <app>?" confirmation). In that
+            // state the app provides no precondition that can safely prove SpringBoard
+            // has no alert, so every non-SpringBoard capture must inspect both windows.
             // When the foreground app IS SpringBoard, `appSnapshot` already is
-            // SpringBoard's tree, so its alerts were collected above without a second
-            // snapshot (issue #5474).
+            // SpringBoard's tree and a second snapshot would be redundant.
             let foregroundIsSpringboard = (foregroundBundleId ?? "com.apple.springboard") == "com.apple.springboard"
             let runSpringboardSnapshot = Self.shouldSnapshotSpringboardForAlerts(
-                foregroundIsSpringboard: foregroundIsSpringboard,
-                appHasAlert: !appAlertSnapshots.isEmpty
+                foregroundIsSpringboard: foregroundIsSpringboard
             )
             let springboardCapture = try getAlertsFromSpringboard(
                 runSnapshot: runSpringboardSnapshot,
@@ -811,7 +819,9 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
         private func getAlertsFromSpringboard(
             runSnapshot: Bool,
             keyboardFocusFrame: CGRect? = nil
-        ) throws -> (alerts: [UIElementInfo], rotation: Int?) {
+        )
+            throws -> (alerts: [UIElementInfo], rotation: Int?)
+        {
             let capture: (alertSnapshots: [XCUIElementSnapshot], rotation: Int?) =
                 try catchingObjCException {
                     let capture = DeviceRotation.capture { () -> [XCUIElementSnapshot] in
@@ -838,12 +848,16 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
             return (alerts, capture.rotation)
         }
 
-        /// Recursively collect alert-type element snapshots from a snapshot tree.
-        /// Used instead of .alerts query which can hang on system permission dialogs.
+        /// Recursively collect system-dialog snapshots from a snapshot tree.
+        ///
+        /// iOS exposes classic permission dialogs as `.alert`, but newer
+        /// SpringBoard confirmations such as "Open in <app>?" as `.sheet`.
+        /// Used instead of live `.alerts` / `.sheets` queries, which can hang on
+        /// system-owned dialogs.
         private func collectAlertElements(from snapshot: XCUIElementSnapshot) -> [XCUIElementSnapshot] {
-            if snapshot.elementType == .alert {
-                // Found an alert - return it without recursing into children
-                // (buildElementInfoFromSnapshot will handle the alert's children)
+            if snapshot.elementType == .alert || snapshot.elementType == .sheet {
+                // Found a dialog - return it without recursing into children
+                // (buildElementInfoFromSnapshot will handle its children).
                 return [snapshot]
             }
             var alerts: [XCUIElementSnapshot] = []
@@ -895,18 +909,18 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
 
             // Get children from snapshot (already captured - fast!)
             // Filter out offscreen and zero-area children
-            // Alert-type elements are SKIPPED here because they are extracted separately
-            // by collectAlertElements() and added as top-level system alerts. This ensures
-            // permission dialogs are always visible and never lost to hierarchy optimization.
+            // Alert/sheet elements are SKIPPED here because they are extracted separately
+            // by collectAlertElements() and added as top-level system dialogs. This ensures
+            // system confirmations are always visible and never lost to hierarchy optimization.
             let parentClassName = mapElementType(snapshot.elementType)
             var childNodes: [UIElementInfo]?
             if depth < ElementLocator.maxDepth {
                 let children = snapshot.children
                 if !children.isEmpty {
-                    var filteredChildren = children.enumerated().compactMap { (idx, child) -> UIElementInfo? in
-                        // Skip alert elements - they are extracted separately as system alerts
-                        // to ensure they're always visible as top-level children
-                        if child.elementType == .alert {
+                    var filteredChildren = children.enumerated().compactMap { idx, child -> UIElementInfo? in
+                        // Skip dialog elements - they are extracted separately to ensure
+                        // they're always visible as top-level children.
+                        if child.elementType == .alert || child.elementType == .sheet {
                             return nil
                         }
 
@@ -990,9 +1004,10 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
 
             // Only include actions for text input elements (click is implied by clickable)
             var actions: [String]?
-            if isEnabled && (snapshot.elementType == .textField || snapshot.elementType == .textView ||
-                snapshot.elementType == .secureTextField || snapshot.elementType == .searchField)
-            {
+            if isEnabled && (
+                snapshot.elementType == .textField || snapshot.elementType == .textView ||
+                    snapshot.elementType == .secureTextField || snapshot.elementType == .searchField
+            ) {
                 actions = ["set_text", "clear_text"]
             }
 
@@ -1121,7 +1136,7 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
             }
 
             // Only promote children (flatten hierarchy) if this is a bounds-only wrapper AND not interactive
-            if isBoundsOnlyWrapper && !isInteractive {
+            if isBoundsOnlyWrapper, !isInteractive {
                 if let children = optimizedChildren {
                     if ElementLocator.containsOnlyUnprotectedScrollBarNoise(children) {
                         return []
@@ -1347,7 +1362,8 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
             in app: XCUIApplication,
             byResourceId resourceId: String,
             constrainedTo frames: [CGRect]
-        ) -> XCUIElement?
+        )
+            -> XCUIElement?
         {
             guard !frames.isEmpty else {
                 return nil
@@ -1366,7 +1382,8 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
             in app: XCUIApplication,
             byText text: String,
             constrainedTo frames: [CGRect]
-        ) -> XCUIElement?
+        )
+            -> XCUIElement?
         {
             guard !frames.isEmpty else {
                 return nil
@@ -1384,7 +1401,8 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
         private static func matchingFrames(
             in alertSnapshots: [XCUIElementSnapshot],
             matches: (XCUIElementSnapshot) -> Bool
-        ) -> [CGRect]
+        )
+            -> [CGRect]
         {
             alertSnapshots.flatMap { alertSnapshot in
                 descendants(of: alertSnapshot).compactMap { snapshot in
@@ -1393,8 +1411,7 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
             }
         }
 
-        private static func descendants(of snapshot: XCUIElementSnapshot) -> [XCUIElementSnapshot]
-        {
+        private static func descendants(of snapshot: XCUIElementSnapshot) -> [XCUIElementSnapshot] {
             [snapshot] + snapshot.children.flatMap(descendants)
         }
 
@@ -1441,6 +1458,7 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
     #endif
 
     // MARK: - Platform-independent helpers (host-compiled and host-tested)
+
     //
     // These operate only on `UIElementInfo` / `ElementBounds` / scalars, so they live
     // outside the `#if os(iOS)` block and are exercised directly by the parity tests on
@@ -1453,7 +1471,9 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
     nonisolated static func firstMatchingElement<Element>(
         foregroundLookup: () -> Element?,
         springBoardLookup: () -> Element?
-    ) -> Element? {
+    )
+        -> Element?
+    {
         foregroundLookup() ?? springBoardLookup()
     }
 
@@ -1464,7 +1484,9 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
     nonisolated static func preferredSystemSurfaceBundleId(
         trackedBundleId: String?,
         spotlightStateRaw: UInt
-    ) -> String? {
+    )
+        -> String?
+    {
         guard trackedBundleId == "com.apple.springboard", spotlightStateRaw >= 4 else {
             return nil
         }
@@ -1490,7 +1512,9 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
     nonisolated static func mergeMissingTextInputCandidates(
         into root: UIElementInfo,
         candidates: [UIElementInfo]
-    ) -> UIElementInfo {
+    )
+        -> UIElementInfo
+    {
         var existing = allNodes(in: root)
         var rootChildren = root.node ?? []
 
@@ -1507,11 +1531,11 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
         return copying(root, node: rootChildren.isEmpty ? nil : rootChildren)
     }
 
-    nonisolated private static func allNodes(in element: UIElementInfo) -> [UIElementInfo] {
+    private nonisolated static func allNodes(in element: UIElementInfo) -> [UIElementInfo] {
         [element] + (element.node ?? []).flatMap(allNodes)
     }
 
-    nonisolated private static func isSameTextInput(_ lhs: UIElementInfo, _ rhs: UIElementInfo) -> Bool {
+    private nonisolated static func isSameTextInput(_ lhs: UIElementInfo, _ rhs: UIElementInfo) -> Bool {
         guard lhs.resourceId == rhs.resourceId,
               lhs.className == rhs.className,
               let lhsBounds = lhs.bounds,
@@ -1579,22 +1603,18 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
         return textInputSnapshotCount > 0
     }
 
-    /// Whether the second, SpringBoard full-tree snapshot should be taken to look
-    /// for system alerts (issue #5474).
+    /// Whether a second SpringBoard snapshot is required to discover system-owned
+    /// windows that can overlay a still-foreground app.
     ///
-    /// When the foreground app IS SpringBoard, the app snapshot already is
-    /// SpringBoard's tree, so a second serialization would be redundant. Otherwise
-    /// the extra snapshot is only warranted when the app's own snapshot already
-    /// shows an alert element (a co-presented system dialog may exist in
-    /// SpringBoard's tree); the common no-alert case skips it.
+    /// The app snapshot cannot prove that SpringBoard has no alert: iOS custom-URL
+    /// confirmations are visible on screen while the underlying app hierarchy remains
+    /// unchanged. Skip only when the foreground snapshot is already SpringBoard.
     nonisolated static func shouldSnapshotSpringboardForAlerts(
-        foregroundIsSpringboard: Bool,
-        appHasAlert: Bool
-    ) -> Bool {
-        if foregroundIsSpringboard {
-            return false
-        }
-        return appHasAlert
+        foregroundIsSpringboard: Bool
+    )
+        -> Bool
+    {
+        return !foregroundIsSpringboard
     }
 
     /// Whether the last-resort ~40-app `checkSystemApps` foreground sweep should
@@ -1608,7 +1628,9 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
         now: UInt64,
         lastMissTime: UInt64,
         ttlNanos: UInt64
-    ) -> Bool {
+    )
+        -> Bool
+    {
         guard lastMissTime != 0 else { return true }
         guard now >= lastMissTime else { return true }
         return (now - lastMissTime) >= ttlNanos
@@ -1625,7 +1647,9 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
         rootBounds: ElementBounds?,
         fallbackWidth: Int,
         fallbackHeight: Int
-    ) -> (width: Int, height: Int) {
+    )
+        -> (width: Int, height: Int)
+    {
         if let bounds = rootBounds, bounds.width > 0, bounds.height > 0 {
             return (bounds.width, bounds.height)
         }
@@ -1646,7 +1670,9 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
         pointWidth: Int,
         pointHeight: Int,
         nativeScale: Double
-    ) -> (pixelWidth: Int, pixelHeight: Int)? {
+    )
+        -> (pixelWidth: Int, pixelHeight: Int)?
+    {
         guard pointWidth > 0, pointHeight > 0, nativeScale.isFinite, nativeScale > 0 else {
             return nil
         }
@@ -1668,7 +1694,9 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
     nonisolated static func collapseSameTypeTextInputChildren(
         parentClassName: String?,
         children: [UIElementInfo]
-    ) -> [UIElementInfo] {
+    )
+        -> [UIElementInfo]
+    {
         guard let parentClass = parentClassName,
               textInputClassNames.contains(parentClass)
         else {
@@ -1692,7 +1720,7 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
 
     /// Whether the element carries any state flags (focused, selected, checked,
     /// password, clickable, scrollable) that make it semantically distinct.
-    nonisolated private static func hasStateFlags(_ element: UIElementInfo) -> Bool {
+    private nonisolated static func hasStateFlags(_ element: UIElementInfo) -> Bool {
         return element.focused != nil || element.selected != nil
             || element.checked != nil || element.password != nil
             || element.clickable != nil || element.scrollable != nil
@@ -1753,7 +1781,12 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
     /// discard duplicated labels/scroll bars/accessory nodes only when the node
     /// is non-actionable, while preserving tappable controls, text inputs, ids,
     /// focus/selection state, and meaningful descendants.
-    nonisolated static func cleanupXCTestUIKitNoise(parent: UIElementInfo, children: [UIElementInfo]) -> [UIElementInfo] {
+    nonisolated static func cleanupXCTestUIKitNoise(
+        parent: UIElementInfo,
+        children: [UIElementInfo]
+    )
+        -> [UIElementInfo]
+    {
         var seenNoiseKeys: Set<String> = []
         var result: [UIElementInfo] = []
 
@@ -1776,7 +1809,7 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
         return result
     }
 
-    nonisolated private static func isDuplicateLabel(_ child: UIElementInfo, of parent: UIElementInfo) -> Bool {
+    private nonisolated static func isDuplicateLabel(_ child: UIElementInfo, of parent: UIElementInfo) -> Bool {
         guard let parentText = parent.text,
               let childText = child.text,
               parentText == childText,
@@ -1789,7 +1822,7 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
         return true
     }
 
-    nonisolated private static func isActionableContainer(_ element: UIElementInfo) -> Bool {
+    private nonisolated static func isActionableContainer(_ element: UIElementInfo) -> Bool {
         return element.clickable == "true"
             || element.role == "button"
             || element.role == "listitem"
@@ -1798,13 +1831,13 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
             || element.className == "UICollectionViewCell"
     }
 
-    nonisolated private static func isActionable(_ element: UIElementInfo) -> Bool {
+    private nonisolated static func isActionable(_ element: UIElementInfo) -> Bool {
         return element.clickable == "true"
             || element.resourceId != nil
             || hasProtectedMetadata(element)
     }
 
-    nonisolated private static func isStructuralWrapperWithOnlyScrollBarNoise(_ element: UIElementInfo) -> Bool {
+    private nonisolated static func isStructuralWrapperWithOnlyScrollBarNoise(_ element: UIElementInfo) -> Bool {
         guard element.className == "UIView",
               !isActionable(element),
               element.text == nil,
@@ -1820,11 +1853,11 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
         return containsOnlyUnprotectedScrollBarNoise(children)
     }
 
-    nonisolated private static func containsOnlyUnprotectedScrollBarNoise(_ children: [UIElementInfo]) -> Bool {
+    private nonisolated static func containsOnlyUnprotectedScrollBarNoise(_ children: [UIElementInfo]) -> Bool {
         return !children.isEmpty && children.allSatisfy { isScrollBarNoise($0) && !isActionable($0) }
     }
 
-    nonisolated private static func dedupeNoiseKey(_ element: UIElementInfo) -> String? {
+    private nonisolated static func dedupeNoiseKey(_ element: UIElementInfo) -> String? {
         guard element.node?.isEmpty ?? true else {
             return nil
         }
@@ -1838,7 +1871,7 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
         return nil
     }
 
-    nonisolated private static func hasProtectedMetadata(_ element: UIElementInfo) -> Bool {
+    private nonisolated static func hasProtectedMetadata(_ element: UIElementInfo) -> Bool {
         return element.longClickable == "true"
             || element.focused == "true"
             || element.accessibilityFocused == "true"
@@ -1856,27 +1889,27 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
             || textInputClassNames.contains(element.className ?? "")
     }
 
-    nonisolated private static func hasProtectedRoleMetadata(_ element: UIElementInfo) -> Bool {
+    private nonisolated static func hasProtectedRoleMetadata(_ element: UIElementInfo) -> Bool {
         guard let role = element.role else {
             return false
         }
         return role != "text" && role != "button"
     }
 
-    nonisolated private static func isScrollBarNoise(_ element: UIElementInfo) -> Bool {
+    private nonisolated static func isScrollBarNoise(_ element: UIElementInfo) -> Bool {
         return normalizedText(element.text).contains("scroll bar")
     }
 
-    nonisolated private static func isKeyboardAccessoryNoise(_ element: UIElementInfo) -> Bool {
+    private nonisolated static func isKeyboardAccessoryNoise(_ element: UIElementInfo) -> Bool {
         let text = normalizedText(element.text)
         return text == "dictation" || text == "dictate"
     }
 
-    nonisolated private static func normalizedText(_ text: String?) -> String {
+    private nonisolated static func normalizedText(_ text: String?) -> String {
         return text?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
     }
 
-    nonisolated private static func boundsKey(_ bounds: ElementBounds?) -> String {
+    private nonisolated static func boundsKey(_ bounds: ElementBounds?) -> String {
         guard let bounds = bounds else {
             return "nobounds"
         }

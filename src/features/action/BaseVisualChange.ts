@@ -262,9 +262,14 @@ export class BaseVisualChange {
       );
       initState = await perf
         .track("initUiStability", async () => {
-          return this.awaitIdle.initializeUiStabilityTracking(packageName!, timeoutMs);
+          return this.awaitIdle.initializeUiStabilityTracking(
+            packageName!,
+            timeoutMs,
+            options.signal,
+          );
         })
         .catch((error) => {
+          throwIfAborted(options.signal);
           logger.debug(`[BaseVisualChange] UI stability initialization failed: ${error}`);
           return null;
         });

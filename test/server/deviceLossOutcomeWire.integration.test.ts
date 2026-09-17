@@ -409,8 +409,8 @@ describe("device loss MCP outcome", () => {
       error: {
         code: "session_ownership_lost",
         message:
-          "Session ownership lost for device-session-a: heartbeat-timeout. " +
-          "Call getAndroid or getApple to acquire a new device session.",
+          "Session device-session-a is terminal after heartbeat-timeout and cannot be reused. " +
+          "Acquire a new device with getAndroid or getApple.",
         sessionUuid: "device-session-a",
         reason: "heartbeat-timeout",
         retryable: true,

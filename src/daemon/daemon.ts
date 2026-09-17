@@ -23,14 +23,17 @@ import {
   DAEMON_PORT_RANGE_START,
   DAEMON_PORT_RANGE_END,
   DAEMON_LAUNCH_LOG_PATH_ENV,
+  ACCEPTANCE_DISCOVERY_CAPABILITY_ENV,
 } from "./constants";
 import { DaemonOptions, PidFileData } from "./types";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, unlink, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute } from "node:path";
 import { PID_FILE_PATH, DAEMON_VERSION } from "./constants";
 import { getCurrentBuildIdentity } from "./buildIdentity";
 import { cleanupDaemonFiles, cleanupDaemonFilesSync, readPidFileDataSync } from "./daemonFiles";
 import { IncumbentOwnerGuard } from "./incumbentOwnerGuard";
+import { daemonLiveAcceptanceStartupSecret } from "./liveAcceptanceCapability";
+import { currentDaemonProcessGenerationToken } from "./processGeneration";
 import { executionTracker } from "../server/executionTracker";
 import {
   DAEMON_HANDOFF_INTERRUPTED_MESSAGE,
@@ -263,6 +266,7 @@ export function isProcessWideAdbServerReset(
 const STORAGE_WATCH_PURPOSE = "to watch stored values";
 
 export type DaemonProcessBirthTimeProvider = () => number;
+export type DaemonProcessGenerationTokenProvider = () => string | undefined;
 
 /**
  * Captures a wall-clock approximation of this OS process's birth time, rather
@@ -310,6 +314,8 @@ export class Daemon {
   private timer: Timer;
   private readonly generationStartedAt: number;
   private readonly processStartedAt: number;
+  private readonly processGenerationToken: string | undefined;
+  private readonly liveAcceptanceStartupSecret: string | undefined;
   private idGenerator: IdGenerator;
   private databaseInitializer: DatabaseInitializer;
   private toolSelectionProfileProvenanceLoader: ToolSelectionProfileProvenanceLoader;
@@ -322,6 +328,7 @@ export class Daemon {
   private readonly navigationGraphListenerManagers = new WeakSet<NavigationGraphManager>();
   private unsubscribeAdbMissingDevice: (() => void) | null = null;
   private options: DaemonOptions;
+  private readonly acceptanceDiscoveryCapability = process.env[ACCEPTANCE_DISCOVERY_CAPABILITY_ENV];
   private shutdownHandlersRegistered: boolean = false;
   private shutdownInProgress: boolean = false;
   private shutdownSessionReleasesDrained = true;
@@ -350,6 +357,7 @@ export class Daemon {
     toolSelectionProfileProvenanceLoader: ToolSelectionProfileProvenanceLoader = defaultToolSelectionProfileRegistry,
     private readonly httpServerFactory: () => HttpServer = () => createHttpServer(),
     processBirthTime: DaemonProcessBirthTimeProvider = defaultDaemonProcessBirthTime,
+    processGenerationToken: DaemonProcessGenerationTokenProvider = currentDaemonProcessGenerationToken,
   ) {
     this.options = { ...options };
     this.port = options.port || DEFAULT_DAEMON_PORT;
@@ -363,6 +371,8 @@ export class Daemon {
     this.timer = timer;
     this.generationStartedAt = this.timer.now();
     this.processStartedAt = processBirthTime();
+    this.processGenerationToken = processGenerationToken();
+    this.liveAcceptanceStartupSecret = daemonLiveAcceptanceStartupSecret();
     this.databaseInitializer = databaseInitializer;
     this.toolSelectionProfileProvenanceLoader = toolSelectionProfileProvenanceLoader;
     this.databaseHealthProbe = databaseHealthProbe;
@@ -627,9 +637,16 @@ export class Daemon {
         FeatureFlagService.getInstance(),
         {
           identityStartedAt: this.generationStartedAt,
+          processGenerationToken: this.processGenerationToken,
           onRestartAccepted: () => {
             setImmediate(() => process.kill(process.pid, "SIGTERM"));
           },
+          onControlMetadataRepair: async (signal) => await this.writePidFile(signal),
+          onControlMetadataCorruption: async (signal) =>
+            await this.corruptControlMetadataForAcceptance(signal),
+          onAcceptanceDoctorFault: async (fault, signal) =>
+            await this.applyAcceptanceDoctorFault(fault, signal),
+          liveAcceptanceStartupSecret: this.liveAcceptanceStartupSecret,
         },
         this.idGenerator,
         // A hand-launched daemon (no startup lock) must refuse to unlink a live
@@ -980,6 +997,7 @@ export class Daemon {
               debug: this.debug,
               sessionContext,
               daemonMode: true,
+              acceptanceDiscoveryCapability: this.acceptanceDiscoveryCapability,
             });
           } catch (error) {
             logger.error("Failed to create MCP server:", error);
@@ -1138,11 +1156,13 @@ export class Daemon {
    * Persist a PID-file record to disk (creating the directory as needed).
    * Shared by the early owner record and the final complete write.
    */
-  private async persistPidFileData(pidData: PidFileData): Promise<void> {
+  private async persistPidFileData(pidData: PidFileData, signal?: AbortSignal): Promise<void> {
     await mkdir(dirname(PID_FILE_PATH), { recursive: true });
+    signal?.throwIfAborted();
     await writeFile(PID_FILE_PATH, JSON.stringify(pidData, null, 2), {
       encoding: "utf-8",
       mode: 0o600,
+      signal,
     });
     this.pidFileWritten = true;
   }
@@ -1179,6 +1199,9 @@ export class Daemon {
       dbPath: getDatabasePath(),
       startedAt: this.generationStartedAt,
       processStartedAt: this.processStartedAt,
+      ...(this.processGenerationToken === undefined
+        ? {}
+        : { processGenerationToken: this.processGenerationToken }),
       version: DAEMON_VERSION,
       launchLogPath: this.launchLogPath(),
       assetVersion: resolveAssetVersion(resolvePinnedVersion()),
@@ -1196,7 +1219,8 @@ export class Daemon {
   /**
    * Write PID file with daemon metadata
    */
-  private async writePidFile(): Promise<void> {
+  private async writePidFile(signal?: AbortSignal): Promise<void> {
+    signal?.throwIfAborted();
     const buildIdentity = getCurrentBuildIdentity();
     const pidData: PidFileData = {
       pid: process.pid,
@@ -1206,6 +1230,9 @@ export class Daemon {
       dbPath: getDatabasePath(),
       startedAt: this.generationStartedAt,
       processStartedAt: this.processStartedAt,
+      ...(this.processGenerationToken === undefined
+        ? {}
+        : { processGenerationToken: this.processGenerationToken }),
       version: DAEMON_VERSION,
       launchLogPath: this.launchLogPath(),
       assetVersion: resolveAssetVersion(resolvePinnedVersion()),
@@ -1214,8 +1241,53 @@ export class Daemon {
       options: this.options,
     };
 
-    await this.persistPidFileData(pidData);
+    await this.persistPidFileData(pidData, signal);
+    signal?.throwIfAborted();
     logger.info(`PID file written to ${PID_FILE_PATH}`);
+  }
+
+  /**
+   * Acceptance-only, maintenance-token-gated fault. The responsive daemon and
+   * socket remain intact; only its own PID metadata is made unreadable so
+   * doctor must demonstrate the repair path.
+   */
+  private async corruptControlMetadataForAcceptance(signal?: AbortSignal): Promise<void> {
+    signal?.throwIfAborted();
+    await mkdir(dirname(PID_FILE_PATH), { recursive: true });
+    signal?.throwIfAborted();
+    await writeFile(PID_FILE_PATH, "{", {
+      encoding: "utf-8",
+      mode: 0o600,
+      signal,
+    });
+    signal?.throwIfAborted();
+    logger.info(`Acceptance control metadata fault written to ${PID_FILE_PATH}`);
+  }
+
+  /** Acceptance-only host-control faults; no device/session state is mutated. */
+  private async applyAcceptanceDoctorFault(
+    fault: "missing-control-metadata" | "corrupt-control-metadata" | "missing-socket",
+    signal?: AbortSignal,
+  ): Promise<void> {
+    signal?.throwIfAborted();
+    if (fault === "corrupt-control-metadata") {
+      await this.corruptControlMetadataForAcceptance(signal);
+      return;
+    }
+    const controlPath = fault === "missing-control-metadata" ? PID_FILE_PATH : SOCKET_PATH;
+    try {
+      await unlink(controlPath);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw error;
+      }
+    }
+    signal?.throwIfAborted();
+    logger.info(
+      `Acceptance doctor fault removed ${
+        fault === "missing-control-metadata" ? "PID metadata" : "socket path"
+      }`,
+    );
   }
 
   private launchLogPath(): string | null {
@@ -2380,9 +2452,16 @@ export class Daemon {
           FeatureFlagService.getInstance(),
           {
             identityStartedAt: this.generationStartedAt,
+            processGenerationToken: this.processGenerationToken,
             onRestartAccepted: () => {
               setImmediate(() => process.kill(process.pid, "SIGTERM"));
             },
+            onControlMetadataRepair: async (signal) => await this.writePidFile(signal),
+            onControlMetadataCorruption: async (signal) =>
+              await this.corruptControlMetadataForAcceptance(signal),
+            onAcceptanceDoctorFault: async (fault, signal) =>
+              await this.applyAcceptanceDoctorFault(fault, signal),
+            liveAcceptanceStartupSecret: this.liveAcceptanceStartupSecret,
           },
           this.idGenerator,
           // Recovery reuses the same ownership evidence as initial startup. A
@@ -2497,6 +2576,14 @@ export class Daemon {
    * This establishes WebSocket connections early so first observe calls are fast
    */
   private async initializeIosServices(): Promise<void> {
+    // A live-acceptance daemon discovers a controlled target before it performs
+    // any device mutation. Warming every already-booted simulator here would
+    // launch CtrlProxy on unrelated devices before that authenticated selection.
+    // The later, explicit acquisition path still initializes its chosen target.
+    if (this.liveAcceptanceStartupSecret) {
+      logger.info("[Daemon] Skipping pool-wide iOS CtrlProxy warm-up for live acceptance");
+      return;
+    }
     const allDevices = this.devicePool.getAllDevices();
     const iosDevices = allDevices.filter((device) => device.platform === "ios");
     if (iosDevices.length === 0) {

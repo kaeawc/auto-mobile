@@ -295,6 +295,11 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   // Lets ordinary starts detect that a newer forced restart began while they
   // yielded before claiming the shared-start slot.
   private forceRestartGeneration = 0;
+  // A successful forced restart changes the daemon-owned runner incarnation
+  // even when the host service port is reused. This is deliberately separate
+  // from `forceRestartGeneration`, which advances before teardown and can
+  // therefore represent a failed restart attempt.
+  private runnerGeneration = 0;
   // Joining callers may need a longer health-poll budget than the restart owner.
   // Retain their request until the forced restart reaches shared startup.
   private readonly forceRestartHealthPollDurationsMs = new Map<symbol, number>();
@@ -891,6 +896,15 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
    */
   public getServicePort(): number {
     return this.servicePort;
+  }
+
+  /**
+   * Monotonic identity for successful forced runner restarts in this manager.
+   * It stays stable while the same runner generation serves requests, including
+   * when the allocated host service port is reused.
+   */
+  public getRunnerGeneration(): number {
+    return this.runnerGeneration;
   }
 
   /**
@@ -1768,6 +1782,36 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     });
   }
 
+  /**
+   * Prefer a new endpoint for a forced restart, but retain the retired port as
+   * a fallback when the configured range has no spare capacity. The successful
+   * runner generation remains the authoritative restart identity when the port
+   * must be reused.
+   */
+  private allocateReplacementServicePort(retiredServicePort: number): void {
+    PortManager.release(this.device.deviceId);
+    let replacementPort: number;
+    try {
+      replacementPort = this.allocateServicePort([retiredServicePort]);
+    } catch (error) {
+      if (!PortManager.isPortAvailable(retiredServicePort)) {
+        throw error;
+      }
+      // Exhausting a bounded range is safe to recover by reusing the now-free
+      // retired port; runnerGeneration distinguishes the replacement.
+      logger.debug(
+        `[IOSCtrlProxy] No distinct replacement service port is available; reusing ${retiredServicePort}: ${errorMessage(error)}`,
+      );
+      PortManager.reserve(this.device.deviceId, retiredServicePort);
+      replacementPort = retiredServicePort;
+    }
+    this.servicePort = replacementPort;
+    this.clearCaches();
+    logger.info(
+      `[IOSCtrlProxy] Allocated replacement service port ${replacementPort} after retiring ${retiredServicePort}`,
+    );
+  }
+
   private ensureLocalServicePortAllocatedAndAvailable(): void {
     const currentAllocation = PortManager.getPort(this.device.deviceId);
     const currentPortIsAvailable = PortManager.isPortAvailable(this.servicePort);
@@ -2089,17 +2133,24 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
   private async isSupervisedCtrlProxyProcessAlive(): Promise<boolean> {
     const isHealthy = await this.checkHealthEndpoint();
-    if (isHealthy || !this.xcTestProcessId) {
+    if (isHealthy) {
+      return true;
+    }
+    if (!this.xcTestProcessId) {
       return true;
     }
 
     const processRunning = this.useRemoteRunner()
       ? await this.isOwnRunnerProcessAlive()
       : await this.isProcessRunning(this.xcTestProcessId);
-    if (!processRunning) {
+    if (processRunning) {
+      logger.warn(
+        "[IOSCtrlProxy] XCTest process is alive but its health endpoint is unavailable; treating the runner as unhealthy",
+      );
+    } else {
       logger.warn("[IOSCtrlProxy] XCTest process crashed, health endpoint not responding");
     }
-    return processRunning;
+    return false;
   }
 
   /**
@@ -2136,6 +2187,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     // behind this barrier until teardown settles, even if the initiating
     // readiness phase has already timed out.
     this.forceRestartGeneration += 1;
+    const retiredServicePort = this.servicePort;
     const restart = (async () => {
       try {
         await this.stop();
@@ -2149,12 +2201,14 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
             "iOS CtrlProxy is still running after forced teardown; refusing to reuse a potentially unresponsive runner",
           );
         }
+        this.allocateReplacementServicePort(retiredServicePort);
         await this.startAfterForceRestart({
           ...options,
           minimumHealthPollDurationMs: this.maximumForceRestartHealthPollDurationMs(
             options.minimumHealthPollDurationMs,
           ),
         });
+        this.runnerGeneration += 1;
       } catch (error) {
         if (options.signal?.aborted && !(error instanceof ForceRestartCancelledError)) {
           throw new ForceRestartCancelledError(options.signal.reason ?? error);
@@ -3255,10 +3309,11 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
   /**
    * The primary "is our runner up" gate. Routes through the identity-checked
-   * probe (issue #6415) rather than the loose "any 'ok'/'healthy' body" check,
-   * so a foreign responder on the service port — a sibling simulator's runner,
-   * a stale runner from a previous daemon run, or the Android runner reached
-   * through `adb forward` — is never mistaken for this device's runner. Every
+   * strict identity probe (issue #6415) rather than the loose
+   * "any 'ok'/'healthy' body" check, so a foreign or anonymous responder on the
+   * service port — a sibling simulator's runner, a stale runner from a previous
+   * daemon run, or the Android runner reached through `adb forward` — is never
+   * mistaken for this device's runner. Every
    * caller (`isRunning()`, the `start()` short-circuit, `waitForHealthEndpoint`,
    * `isCtrlProxyProcessAlive()`) inherits the identity check through this one
    * method.
@@ -3267,8 +3322,6 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     return this.healthClient.checkHealthEndpointOnPortForDevice(
       this.servicePort,
       this.device.deviceId,
-      undefined,
-      { requireDeviceId: false },
     );
   }
 

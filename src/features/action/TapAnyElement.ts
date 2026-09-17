@@ -503,25 +503,22 @@ export class TapAnyElement extends BaseVisualChange {
         return rawHierarchy ? this.prepareViewHierarchyForResponse(rawHierarchy, screenSize) : null;
       }
       case "ios": {
-        const xcTestClient = IOSCtrlProxyClient.getInstance(this.device);
         // Constrain the request to the CALLER's remaining budget, not
-        // `getAccessibilityHierarchy`'s own generic default -- the pre-tap search
+        // `getiOSViewHierarchy`'s own generic default -- the pre-tap search
         // loop below bounds its own deadline by `searchUntil.duration`, but an
         // unconstrained hierarchy fetch could independently run for the full
         // default `IOS_HIERARCHY_REQUEST_TIMEOUT_MS` (~15s) regardless of how much
         // of that budget is actually left, letting the outer MCP floor expire
         // mid-search even though this call would eventually have returned (issue
         // #6306 review, P2).
-        const rawHierarchy = await xcTestClient.getAccessibilityHierarchy(
+        const rawHierarchy = await this.viewHierarchy.getiOSViewHierarchy(
           undefined,
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          signal,
+          false,
+          0,
           effectiveTimeoutMs,
+          signal,
         );
-        return rawHierarchy ? this.prepareViewHierarchyForResponse(rawHierarchy, screenSize) : null;
+        return this.prepareViewHierarchyForResponse(rawHierarchy, screenSize);
       }
       default:
         throw new ActionableError(`Unsupported platform: ${this.device.platform}`);

@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { ListToolsRequestSchema, CallToolRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { timingSafeEqual } from "node:crypto";
 import { ActionableError } from "../models";
 import { formatToolParamError } from "./toolParamError";
 import { reviveNonFiniteArguments } from "../utils/nonFiniteJson";
@@ -17,6 +18,8 @@ import { daemonShuttingDownMcpOutcome } from "../daemon/daemonShutdownOutcome";
 import { DaemonRestartPendingError } from "../daemon/daemonRestartAdmission";
 import { resolveDirectSessionDevice, unregisterDirectSession } from "./directSessionDeviceRegistry";
 import {
+  INTERNAL_ACCEPTANCE_DISCOVERY_CAPABILITY_PARAM,
+  INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM,
   INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
   INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
   INTERNAL_EXECUTION_START_TIME_PARAM,
@@ -294,7 +297,6 @@ import {
   SET_TOOL_ENABLED_TOOL_NAME,
 } from "./toolSelectionTools";
 import {
-  DEVICE_SESSION_RECOVERY_PROMPT,
   DEVICE_SESSION_RECOVERY_TOOLS,
   getDeviceSessionIdFromResult,
   isDeviceSessionAcquisitionTool,
@@ -360,6 +362,11 @@ export interface McpServerOptions {
   };
   planExecutionLock?: PlanExecutionLock;
   daemonMode?: boolean;
+  /**
+   * Per-daemon live-acceptance capability captured at startup. Unlike tool
+   * arguments, this is a server-construction boundary clients cannot set.
+   */
+  acceptanceDiscoveryCapability?: string;
   sessionToolSelectionService?: Pick<SessionToolSelectionService, "isEnabled"> &
     Partial<Pick<SessionToolSelectionService, "setEnabled" | "deleteSession" | "getOverride">>;
   toolSelectionSessionManager?: ToolSelectionSessionManager;
@@ -437,6 +444,26 @@ function extractInternalLiveDeadlineKey(params: unknown): string | undefined {
   }
   const value = (params as Record<string, unknown>)[INTERNAL_LIVE_DEADLINE_KEY_PARAM];
   return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function extractInternalAcceptanceDiscoveryOrder(
+  params: unknown,
+  expectedCapability: string | undefined,
+): "forward" | "reverse" | undefined {
+  if (!expectedCapability || !params || typeof params !== "object" || Array.isArray(params)) {
+    return undefined;
+  }
+  const values = params as Record<string, unknown>;
+  const suppliedCapability = values[INTERNAL_ACCEPTANCE_DISCOVERY_CAPABILITY_PARAM];
+  if (
+    typeof suppliedCapability !== "string" ||
+    suppliedCapability.length !== expectedCapability.length ||
+    !timingSafeEqual(Buffer.from(suppliedCapability), Buffer.from(expectedCapability))
+  ) {
+    return undefined;
+  }
+  const value = values[INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM];
+  return value === "forward" || value === "reverse" ? value : undefined;
 }
 
 function stripInternalToolParams(params: unknown): unknown {
@@ -983,6 +1010,9 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     const requestLiveDeadlineKey = daemonMode
       ? extractInternalLiveDeadlineKey(toolParams)
       : undefined;
+    const requestAcceptanceDiscoveryOrder = daemonMode
+      ? extractInternalAcceptanceDiscoveryOrder(toolParams, options.acceptanceDiscoveryCapability)
+      : undefined;
     const rawSessionUuid =
       toolParams && typeof toolParams === "object" && "sessionUuid" in toolParams
         ? (toolParams as { sessionUuid?: string }).sessionUuid
@@ -1099,6 +1129,9 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
             // snapshot (issue #6222 P1 reopen).
             ...(requestLiveDeadlineKey !== undefined
               ? { [INTERNAL_LIVE_DEADLINE_KEY_PARAM]: requestLiveDeadlineKey }
+              : {}),
+            ...(requestAcceptanceDiscoveryOrder !== undefined
+              ? { [INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM]: requestAcceptanceDiscoveryOrder }
               : {}),
           }
         : parsedParams;
@@ -1229,7 +1262,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       // its old binding, and a concurrent acquisition may publish another one.
       // Reuse the same route/label union as tools/list without publishing yet.
       if (
-        (name === "getAndroid" || name === "getApple") &&
+        (name === "getAndroid" || name === "getApple" || name === "startDevice") &&
         !result?.isError &&
         acquiredSessionUuid
       ) {
@@ -1354,7 +1387,15 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       // "log-and-continue with a why" convention. The tool/reason ride as a
       // structured second argument (issue #3216) so field extraction is stable
       // (grep `"tool":"..."`) without coupling consumers to the message text.
-      const omissionReason = structuredContentOmissionReason(toolHasOutputSchema(tool));
+      // The live-acceptance harness authenticates this private presentation
+      // request at the daemon boundary. Its controlled discovery assertions
+      // consume the structured payload directly, including from no-schema
+      // tools such as listDevices. Keep that accepted request's envelope
+      // intact without changing normal client output reduction.
+      const omissionReason =
+        requestAcceptanceDiscoveryOrder === undefined
+          ? structuredContentOmissionReason(toolHasOutputSchema(tool))
+          : null;
       if (omissionReason !== null && responseCarriesStructuredContent(result)) {
         logger.debug("[MCP] Omitted structuredContent", { tool: name, reason: omissionReason });
       }
@@ -1391,9 +1432,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         const sessionOwnershipLost = {
           error: {
             code: "session_ownership_lost",
-            message:
-              `Session ownership lost for ${error.sessionUuid}: ${error.release.releaseReason}. ` +
-              DEVICE_SESSION_RECOVERY_PROMPT,
+            message: error.message,
             sessionUuid: error.sessionUuid,
             reason: error.release.releaseReason,
             retryable: true,

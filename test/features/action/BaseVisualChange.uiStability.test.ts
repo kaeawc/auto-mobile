@@ -50,10 +50,15 @@ describe("BaseVisualChange UI stability platform guard", () => {
 
   test("runs gfxinfo UI stability tracking on Android", async () => {
     const instance = createVisualChange("android");
+    const controller = new AbortController();
 
-    await instance.observedInteraction(async () => ({ success: true }), { changeExpected: false });
+    await instance.observedInteraction(async () => ({ success: true }), {
+      changeExpected: false,
+      signal: controller.signal,
+    });
 
     expect(fakeAwaitIdle.wasMethodCalled("initializeUiStabilityTracking")).toBe(true);
+    expect(fakeAwaitIdle.getInitializeSignal()).toBe(controller.signal);
   });
 
   test("preserves explicit success:false when changeExpected is true", async () => {

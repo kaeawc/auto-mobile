@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  configuredIosSimulatorUdid,
   shouldRetryWebRtcDaemonStart,
   waitForBootedSimulatorUdid,
   type SimulatorAppearanceClient,
@@ -7,6 +8,16 @@ import {
 import { FakeTimer } from "../fakes/FakeTimer";
 
 describe("WHEP device capture helper logic", () => {
+  test("reuses the workflow-selected simulator UDID without rediscovery", () => {
+    const udid = "00000000-0000-0000-0000-000000000001";
+
+    expect(configuredIosSimulatorUdid({ AUTOMOBILE_IOS_SIMULATOR_UDID: udid })).toBe(udid);
+    expect(configuredIosSimulatorUdid({})).toBeUndefined();
+    expect(() =>
+      configuredIosSimulatorUdid({ AUTOMOBILE_IOS_SIMULATOR_UDID: "not-a-udid" }),
+    ).toThrow("must be a simulator UDID");
+  });
+
   test("retries daemon start when either the command or readiness attempt fails", () => {
     expect(shouldRetryWebRtcDaemonStart({ startError: null, readyError: null })).toBe(false);
     expect(

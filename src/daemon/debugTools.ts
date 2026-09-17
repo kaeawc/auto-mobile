@@ -32,6 +32,8 @@ export interface DaemonHealthReport {
 export interface DaemonHealthReportOptions {
   socketPath?: string;
   pidFilePath?: string;
+  signal?: AbortSignal;
+  timeoutMs?: number;
   /**
    * Injected so a test can simulate Windows named-pipe semantics without a real
    * OS switch (issue #6140). Defaults to the real platform. A Windows named pipe
@@ -122,7 +124,11 @@ export async function getDaemonHealthReport(
     try {
       // Observation-only probe: never unlinks a live daemon's socket, even if
       // PID bookkeeping is momentarily stale (issue #2658, #6140).
-      const available = await DaemonClient.isAvailable(socketPath);
+      const available = await DaemonClient.isAvailable(socketPath, {
+        signal: options.signal,
+        timeoutMs: options.timeoutMs,
+        timer,
+      });
       report.socketConnectable = available;
       if (isWin32) {
         report.socketExists = available;

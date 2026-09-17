@@ -224,6 +224,10 @@ runs:
     - name: Setup Android SDK
       if: steps.cache-android-sdk.outputs.cache-hit != 'true'
       uses: android-actions/setup-android@v3.2.2
+      with:
+        # The action's legacy default requests the removed `tools` package.
+        # Pin a current package so macOS/Windows cache misses can bootstrap.
+        packages: platform-tools
 
     - name: "Save Android SDK Cache"
       uses: actions/cache/save@v5.1.0

@@ -15,6 +15,7 @@ import { ViewHierarchyQueryOptions } from "../../models";
 import { AndroidCtrlProxyClient } from "./android";
 import { IOSCtrlProxyClient } from "./ios";
 import { cleanupIosXCTestHierarchy } from "./ios/cleanupIosHierarchy";
+import { assignStableViewIds } from "./android/StableNodeIdentity";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import { serverConfig } from "../../utils/ServerConfig";
 import { attachRawViewHierarchy } from "../../utils/viewHierarchySearch";
@@ -218,6 +219,10 @@ export class ViewHierarchy implements ViewHierarchyInterface {
     fresh?: boolean,
   ): ViewHierarchyResult {
     const cleanedHierarchy = cleanupIosXCTestHierarchy(hierarchy);
+    // Match the Android ingest invariant: generated path UUIDs must never be
+    // published as selector ids. This is the canonical iOS conversion used by
+    // observe and iOS action refreshes.
+    assignStableViewIds(cleanedHierarchy.hierarchy);
     const result = {
       ...cleanedHierarchy,
       updatedAt: updatedAt ?? hierarchy.updatedAt ?? this.timer.now(),

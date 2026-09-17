@@ -1,10 +1,27 @@
 import { describe, expect, test } from "bun:test";
 import {
+  compareIosVersions,
   parseIosMajorVersion,
   iosMajorVersionFromSimctlListDevices,
   iosMajorVersionFromDevicectlDetails,
   iosVersionStringFromRuntimeId,
 } from "../../../src/utils/ios-cmdline-tools/iosVersion";
+
+describe("compareIosVersions", () => {
+  test.each([
+    ["16.4", "17.0", -1],
+    ["17", "17.0", 0],
+    ["17.0.1", "17", 1],
+    ["26.2", "17.0", 1],
+  ])("compares %s with %s", (left, right, expected) => {
+    expect(compareIosVersions(left, right)).toBe(expected);
+  });
+
+  test("does not guess malformed or missing versions", () => {
+    expect(compareIosVersions("17 beta", "17.0")).toBeNull();
+    expect(compareIosVersions(undefined, "17.0")).toBeNull();
+  });
+});
 
 describe("parseIosMajorVersion", () => {
   test("parses dotted versions", () => {

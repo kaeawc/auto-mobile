@@ -8,6 +8,7 @@ import {
   checkConnectedDevices,
   checkAvdMemory,
   checkEmulator,
+  runPostRepairAndroidChecks,
 } from "../../src/doctor/checks/android";
 import type { DoctorProbeOptions } from "../../src/doctor/types";
 import { tmpdir } from "node:os";
@@ -15,6 +16,9 @@ import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import type { AdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
 import type { BootedDevice } from "../../src/models";
+import { createDoctorDeadline } from "../../src/doctor/deadline";
+import { FakeTimer } from "../fakes/FakeTimer";
+import { runDoctor } from "../../src/doctor";
 
 const baseDependencies: AndroidDoctorDependencies = {
   detectAndroidCommandLineTools: async () => [],
@@ -119,6 +123,89 @@ describe("Android doctor command line tools check", () => {
     expect(result.status).toBe("pass");
     expect(result.message).toContain("13.0");
     expect(result.value).toBe(location.path);
+  });
+});
+
+describe("post-repair Android doctor checks", () => {
+  test("remain device-neutral and never enumerate AVDs", async () => {
+    let listAvdsCalls = 0;
+    const adbFactory = {
+      create: () => ({
+        getAdbPathOnly: async () => "/test/android-sdk/platform-tools/adb",
+        executeCommand: async () => ({
+          stdout: "Android Debug Bridge version 35.0.0",
+          stderr: "",
+          exitCode: 0,
+        }),
+      }),
+    } as unknown as AdbClientFactory;
+
+    const results = await runPostRepairAndroidChecks(
+      {},
+      {
+        ...baseDependencies,
+        adbFactory,
+        listAvds: async () => {
+          listAvdsCalls++;
+          throw new Error("post-repair verification must not enumerate AVDs");
+        },
+      },
+    );
+
+    expect(listAvdsCalls).toBe(0);
+    expect(results.map((result) => result.name)).toEqual([
+      "Android Command Line Tools",
+      "JAVA_HOME",
+      "ADB Installation",
+      "ADB Version",
+    ]);
+  });
+
+  test("aborts a stalled host-tool probe at the shared repair deadline", async () => {
+    const timer = new FakeTimer();
+    const deadline = createDoctorDeadline({ timeoutMs: 50 }, timer);
+    const location = {
+      path: "/test/android-sdk/cmdline-tools/latest",
+      source: "android_sdk_root" as const,
+      available_tools: ["sdkmanager"],
+    };
+    let cancellationObserved = false;
+    let adbFactoryCalls = 0;
+    const checks = runPostRepairAndroidChecks(
+      { ...deadline.probe },
+      {
+        ...baseDependencies,
+        detectAndroidCommandLineTools: async () => [location],
+        getBestAndroidToolsLocation: () => location,
+        getCmdlineToolsVersion: async (_location, probe) => {
+          await new Promise<void>((resolve) => {
+            probe?.signal?.addEventListener(
+              "abort",
+              () => {
+                cancellationObserved = true;
+                resolve();
+              },
+              { once: true },
+            );
+          });
+          return null;
+        },
+        adbFactory: {
+          create: () => {
+            adbFactoryCalls++;
+            throw new Error("post-deadline Android probes must not start");
+          },
+        } as unknown as AdbClientFactory,
+      },
+    );
+
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    timer.advanceTime(50);
+
+    await expect(checks).rejects.toThrow("Doctor diagnostic deadline elapsed");
+    expect(cancellationObserved).toBe(true);
+    expect(adbFactoryCalls).toBe(0);
+    deadline.dispose();
   });
 });
 
@@ -339,6 +426,65 @@ describe("checkAdbVersion", () => {
     const result = await checkAdbVersion(throwingFactory);
     expect(result.status).toBe("warn");
     expect(result.message).toContain("raw string error");
+  });
+});
+
+describe("Android doctor cancellation", () => {
+  test("bounds never-settling command-line-tool discovery", async () => {
+    const timer = new FakeTimer();
+    const deadline = createDoctorDeadline({ timeoutMs: 50, timer }, timer);
+    const discoveryStarted = Promise.withResolvers<void>();
+    const check = checkAndroidCommandLineTools(deadline.probe, {
+      ...baseDependencies,
+      detectAndroidCommandLineTools: async () => {
+        discoveryStarted.resolve();
+        return await new Promise<never>(() => {});
+      },
+    });
+
+    await discoveryStarted.promise;
+    timer.advanceTime(50);
+    const result = await check;
+    deadline.dispose();
+
+    expect(deadline.probe.signal?.aborted).toBe(true);
+    expect(result.status).toBe("warn");
+    expect(result.message).toBe("Failed to detect Android command line tools.");
+  });
+
+  test("aborts delayed emulator subprocess I/O without publishing a late pass", async () => {
+    const timer = new FakeTimer();
+    const deadline = createDoctorDeadline({ timeoutMs: 50, timer }, timer);
+    let observedSignal: AbortSignal | undefined;
+    let observedTimeoutMs: number | undefined;
+    let lateSuccess = false;
+    let settled = false;
+    const check = checkEmulator(deadline.probe, {
+      listAvds: async (probe) => {
+        observedSignal = probe?.signal;
+        observedTimeoutMs = probe?.timeoutMs;
+        await new Promise<void>((resolve) => {
+          probe?.signal?.addEventListener("abort", resolve, { once: true });
+        });
+        try {
+          probe?.signal?.throwIfAborted();
+          lateSuccess = true;
+          return [];
+        } finally {
+          settled = true;
+        }
+      },
+    });
+
+    timer.advanceTime(50);
+    const result = await check;
+    deadline.dispose();
+
+    expect(observedSignal?.aborted).toBe(true);
+    expect(observedTimeoutMs).toBe(50);
+    expect(settled).toBe(true);
+    expect(lateSuccess).toBe(false);
+    expect(result.status).toBe("warn");
   });
 });
 
@@ -750,5 +896,125 @@ describe("checkConnectedDevices", () => {
 
     expect(result.status).toBe("skip");
     expect(result.message).toContain("emulator unavailable");
+  });
+
+  test("bounds a never-settling AVD config read at the runDoctor deadline", async () => {
+    const timer = new FakeTimer();
+    let markReadStarted: () => void = () => {};
+    const readStarted = new Promise<void>((resolve) => {
+      markReadStarted = resolve;
+    });
+    let rejection: unknown;
+    const doctor = runDoctor(
+      { android: true, timeoutMs: 50 },
+      {
+        timer,
+        runSystemChecks: () => [],
+        runAndroidChecks: async (options) => [
+          await checkAvdMemory(
+            {
+              listAvds: async () => [{ name: "NetworkAvd" }],
+              readAvdConfig: {
+                readConfig: () => {
+                  markReadStarted();
+                  return new Promise<never>(() => {});
+                },
+              },
+            },
+            options,
+          ),
+        ],
+        runIosChecks: async () => [],
+        runAutoMobileChecks: async () => [],
+      },
+    );
+    void doctor.catch((error: unknown) => {
+      rejection = error;
+    });
+
+    await readStarted;
+    timer.advanceTime(50);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(rejection).toBeInstanceOf(Error);
+    expect((rejection as Error).message).toBe("Doctor diagnostic deadline elapsed");
+  });
+
+  test("bounds a never-settling AVD config read on runDoctor caller abort", async () => {
+    const timer = new FakeTimer();
+    const controller = new AbortController();
+    let markReadStarted: () => void = () => {};
+    const readStarted = new Promise<void>((resolve) => {
+      markReadStarted = resolve;
+    });
+    let rejection: unknown;
+    const doctor = runDoctor(
+      { android: true, signal: controller.signal },
+      {
+        timer,
+        runSystemChecks: () => [],
+        runAndroidChecks: async (options) => [
+          await checkAvdMemory(
+            {
+              listAvds: async () => [{ name: "NetworkAvd" }],
+              readAvdConfig: {
+                readConfig: () => {
+                  markReadStarted();
+                  return new Promise<never>(() => {});
+                },
+              },
+            },
+            options,
+          ),
+        ],
+        runIosChecks: async () => [],
+        runAutoMobileChecks: async () => [],
+      },
+    );
+    void doctor.catch((error: unknown) => {
+      rejection = error;
+    });
+
+    await readStarted;
+    controller.abort(new Error("Doctor caller cancelled"));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(rejection).toBeInstanceOf(Error);
+    expect((rejection as Error).message).toBe("Doctor caller cancelled");
+  });
+
+  test("preserves successful AVD config reads through runDoctor", async () => {
+    const report = await runDoctor(
+      { android: true },
+      {
+        timer: new FakeTimer(),
+        runSystemChecks: () => [],
+        runAndroidChecks: async (options) => [
+          await checkAvdMemory(
+            {
+              listAvds: async () => [{ name: "HealthyAvd" }],
+              readAvdConfig: {
+                readConfig: async () => ({
+                  apiLevel: 36,
+                  tag: "google_apis_playstore",
+                  ramSizeMb: 4096,
+                }),
+              },
+            },
+            options,
+          ),
+        ],
+        runIosChecks: async () => [],
+        runAutoMobileChecks: async () => [],
+      },
+    );
+
+    expect(report.android?.checks).toEqual([
+      {
+        name: "AVD Memory",
+        status: "pass",
+        message: "All applicable modern Play-image AVDs meet the 2048 MB memory minimum.",
+      },
+    ]);
   });
 });

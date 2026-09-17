@@ -133,6 +133,18 @@ describe("PortManager", () => {
     expect(newPort).toBe(8766);
   });
 
+  test("can reserve a retired service port while allocating its replacement", () => {
+    const retiredPort = PortManager.allocate("ios-device");
+    PortManager.release("ios-device");
+
+    const replacementPort = PortManager.allocate("ios-device", {
+      reservedPorts: [retiredPort],
+    });
+
+    expect(replacementPort).not.toBe(retiredPort);
+    expect(PortManager.getPort("ios-device")).toBe(replacementPort);
+  });
+
   test("should track allocated count", () => {
     expect(PortManager.getAllocatedCount()).toBe(0);
 

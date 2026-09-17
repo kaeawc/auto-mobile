@@ -15,6 +15,36 @@ export function parseIosMajorVersion(version: string | undefined | null): number
 }
 
 /**
+ * Compare two dotted iOS version strings numerically. Returns `null` when
+ * either value is not a complete numeric version, so callers can preserve the
+ * existing unknown-runtime behavior rather than guessing compatibility.
+ */
+export function compareIosVersions(
+  left: string | undefined | null,
+  right: string | undefined | null,
+): number | null {
+  const parse = (version: string | undefined | null): number[] | null => {
+    if (!version || !/^\d+(?:\.\d+)*$/.test(version.trim())) {
+      return null;
+    }
+    return version.trim().split(".").map(Number);
+  };
+  const leftParts = parse(left);
+  const rightParts = parse(right);
+  if (!leftParts || !rightParts) {
+    return null;
+  }
+  const length = Math.max(leftParts.length, rightParts.length);
+  for (let index = 0; index < length; index += 1) {
+    const difference = (leftParts[index] ?? 0) - (rightParts[index] ?? 0);
+    if (difference !== 0) {
+      return Math.sign(difference);
+    }
+  }
+  return 0;
+}
+
+/**
  * Extract the dotted iOS version string (e.g. `"17.2"`) embedded in a
  * CoreSimulator runtime identifier such as
  * `com.apple.CoreSimulator.SimRuntime.iOS-17-2`. Returns `undefined` when the

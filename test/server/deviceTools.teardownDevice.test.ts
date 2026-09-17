@@ -57,9 +57,11 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
 import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../src/utils/virtualDeviceLifecycleCoordinator";
+import { runWithAbortSignal } from "../../src/utils/AbortContext";
 
 class FakeDeviceSessionRepository extends DeviceSessionRepository {
   override async upsertActiveSession(): Promise<void> {}
+  override async replaceLivenessOwnership(): Promise<void> {}
   override async getSession(): Promise<undefined> {
     return undefined;
   }
@@ -107,6 +109,7 @@ class TeardownDeviceManager extends FakeDeviceUtils {
   killStarted?: () => void;
   destroyGate?: Promise<void>;
   destroyStarted?: () => void;
+  destroyHonorsAbort = false;
   private readonly destroyedIdentities = new Set<string>();
 
   private discoveriesSinceKill: number | undefined;
@@ -166,6 +169,9 @@ class TeardownDeviceManager extends FakeDeviceUtils {
     this.destroyRequests.push({ device, options });
     this.destroyStarted?.();
     await this.destroyGate;
+    if (this.destroyHonorsAbort) {
+      options?.signal?.throwIfAborted();
+    }
     if (this.destroyError) {
       throw this.destroyError;
     }
@@ -2560,6 +2566,112 @@ describe("deleteDevice handler", () => {
 
     releaseDestroy();
     await expect(start).rejects.toThrow(/not found/);
+  });
+
+  test("deadline-critical cancellation cannot delete a later same-name Android replacement", async () => {
+    const timer = new FakeTimer();
+    const original: DeviceInfo = {
+      platform: "android",
+      name: "Pixel_8_API_35",
+      isRunning: false,
+    };
+    const replacement: DeviceInfo = {
+      ...original,
+      runtime: "system-images;android-36;google_apis;x86_64",
+    };
+    const controller = new AbortController();
+    let releaseDestroy!: () => void;
+    const destroyStarted = Promise.withResolvers<void>();
+    manager.destroyHonorsAbort = true;
+    manager.destroyStarted = () => destroyStarted.resolve();
+    manager.destroyGate = new Promise<void>((resolve) => {
+      releaseDestroy = resolve;
+    });
+    manager.setDeviceImages("android", [original]);
+    setDeviceToolsDependencies({ timer });
+
+    const teardown = runWithAbortSignal(
+      controller.signal,
+      async () =>
+        await teardownTool().handler({
+          ...request("android", original.name, original.name),
+          cancellationPolicy: "cancel-on-request-abort",
+        }),
+    );
+    await destroyStarted.promise;
+    controller.abort(new Error("acceptance deadline elapsed"));
+
+    const body = responseBody(await teardown);
+    expect(body.state).toBe("failed");
+    expect(body.failure).toEqual(expect.objectContaining({ code: "operation_cancelled" }));
+
+    // A later AVD with the same durable name must remain untouched when delayed
+    // platform I/O observes the acceptance cancellation.
+    manager.setDeviceImages("android", [replacement]);
+    timer.setTimeout(releaseDestroy, 100);
+    timer.advanceTime(100);
+    for (let attempt = 0; attempt < 10; attempt++) {
+      await Promise.resolve();
+    }
+
+    expect(await manager.listDeviceImages("android")).toEqual([replacement]);
+    expect(manager.destroyRequests).toHaveLength(1);
+  });
+
+  test("evicts iOS state when a cancelled destroy later succeeds", async () => {
+    const timer = new FakeTimer();
+    const device: DeviceInfo = {
+      platform: "ios",
+      name: "iPhone 16",
+      deviceId: "IOS-CANCELLED-DEVICE-1",
+      isRunning: false,
+    };
+    const proxy = IOSCtrlProxyManager.getInstance(device);
+    const forceStop = spyOn(
+      proxy as unknown as { forceStopForShutdown: () => Promise<void> },
+      "forceStopForShutdown",
+    ).mockResolvedValue();
+    const controller = new AbortController();
+    let releaseDestroy!: () => void;
+    const destroyStarted = Promise.withResolvers<void>();
+    manager.destroyStarted = () => destroyStarted.resolve();
+    manager.destroyGate = new Promise<void>((resolve) => {
+      releaseDestroy = resolve;
+    });
+    manager.setDeviceImages("ios", [device]);
+    registerDirectSessionDevice("late-cancelled-destroy-session", device);
+    setDeviceToolsDependencies({ timer });
+
+    try {
+      const teardown = runWithAbortSignal(controller.signal, async () =>
+        teardownTool().handler({
+          ...request("ios", device.deviceId!, device.name),
+          cancellationPolicy: "cancel-on-request-abort",
+        }),
+      );
+      await destroyStarted.promise;
+      controller.abort(new Error("acceptance deadline elapsed"));
+
+      expect(responseBody(await teardown).failure).toEqual(
+        expect.objectContaining({ code: "operation_cancelled" }),
+      );
+      expect(IOSCtrlProxyManager.getInstance(device)).toBe(proxy);
+      expect(resolveDirectSessionDevice("late-cancelled-destroy-session")).toBeDefined();
+
+      releaseDestroy();
+      for (let attempt = 0; attempt < 10; attempt++) {
+        await Promise.resolve();
+      }
+
+      expect(forceStop).toHaveBeenCalledTimes(1);
+      expect(PortManager.getPort(device.deviceId!)).toBeUndefined();
+      expect((IOSCtrlProxyManager as any).instances.get(device.deviceId)).toBeUndefined();
+      expect(resolveDirectSessionDevice("late-cancelled-destroy-session")).toBeUndefined();
+    } finally {
+      forceStop.mockRestore();
+      IOSCtrlProxyManager.resetInstances();
+      PortManager.release(device.deviceId!);
+    }
   });
 
   test("evicts the CtrlProxy manager after a timed-out destroy later succeeds", async () => {

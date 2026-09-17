@@ -321,6 +321,41 @@ function appScreenMimickingEnglishSystemUiAnr(): ViewHierarchyResult {
 }
 
 describe("RunnerReadinessService", () => {
+  test("rejects an iOS runtime below the CtrlProxy deployment floor before setup", async () => {
+    const iosManager = new FakeIosManager();
+    const { service } = createService({ iosManager });
+
+    await expect(
+      service.ensureReady({
+        device: { ...iosDevice, iosVersion: "16.4" },
+        requestedIdentity: "platform=ios deviceId=IOS-UDID",
+        operationName: "getApple",
+        totalDeadlineMs: 30_000,
+        readinessTimeoutMs: 30_000,
+      }),
+    ).rejects.toThrow(/iOS runtime 16\.4 is below the CtrlProxy minimum 17\.0/);
+
+    expect(iosManager.setupCalls).toBe(0);
+    expect(iosManager.forceRestartCalls).toBe(0);
+  });
+
+  test("accepts the CtrlProxy deployment floor", async () => {
+    const iosManager = new FakeIosManager();
+    const iosClient = new FakeReadinessClient();
+    iosClient.connected = false;
+    const { service } = createService({ iosManager, iosClient });
+
+    await service.ensureReady({
+      device: { ...iosDevice, iosVersion: "17.0" },
+      requestedIdentity: "platform=ios deviceId=IOS-UDID",
+      operationName: "getApple",
+      totalDeadlineMs: 30_000,
+      readinessTimeoutMs: 30_000,
+    });
+
+    expect(iosManager.setupCalls).toBe(1);
+  });
+
   test("does not let Android framework inspection block runner setup", async () => {
     const inspectionStarted = Promise.withResolvers<void>();
     const inspection = Promise.withResolvers<AndroidFrameworkReadinessResult>();

@@ -7790,7 +7790,6 @@ export function registerDeviceTools() {
         operationSignal,
         "discovering an already-running exact device",
         async (deadlineSignal) => {
-          let alreadyBootedDevices: readonly BootedDevice[];
           if (args.device.platform === "android") {
             const discovery = await deviceManager.getBootedDevicesDetailed("android", {
               bypassAndroidDeviceListCache: true,
@@ -7802,6 +7801,12 @@ export function registerDeviceTools() {
                 `Cannot provision Android device '${args.device.name}' because booted-device discovery did not complete.`,
               );
             }
+            // FUNNEL 1: fold the fresh observation into the pool BEFORE deciding
+            // whether it resolves the requested identity, so a discovered
+            // placeholder quarantines any stale pooled label under this serial
+            // even when the request itself is about to fail closed (#7177
+            // review).
+            await reconcileDiscoveryObservation(discovery.devices, "provisionDevice-exact");
             if (
               discovery.devices
                 .filter((device) => device.platform === "android")
@@ -7812,10 +7817,9 @@ export function registerDeviceTools() {
                 `Cannot provision Android device '${args.device.name}' because a running emulator's AVD identity has not resolved yet; retry.`,
               );
             }
-            alreadyBootedDevices = discovery.devices;
-          } else {
-            alreadyBootedDevices = await deviceManager.getBootedDevices(args.device.platform);
+            return discovery.devices;
           }
+          const alreadyBootedDevices = await deviceManager.getBootedDevices(args.device.platform);
           // FUNNEL 1: acquisition matches this observation against the pooled
           // entry it is about to hand out (#6863 review).
           await reconcileDiscoveryObservation(alreadyBootedDevices, "provisionDevice-exact");

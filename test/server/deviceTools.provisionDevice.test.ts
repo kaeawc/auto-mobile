@@ -633,6 +633,38 @@ describe("provisionDevice handler", () => {
     expect(deviceManager.wasMethodCalled("startDevice")).toBe(false);
   });
 
+  test("quarantines a stale pooled identity before rejecting unresolved adoption", async () => {
+    const timer = new FakeTimer();
+    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(sessionManager, "daemon-session", timer, undefined, deviceManager);
+    await pool.initializeWithDevices([
+      {
+        name: "phone-api-36-a",
+        platform: "android",
+        deviceId: "emulator-5556",
+      },
+    ]);
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    exactProvisioner.provision = async () => provisionedTestDevice("android", false);
+    deviceManager.setBootedDevices("android", [
+      { name: "phone-api-36-a", platform: "android", deviceId: "emulator-5554" },
+      { name: "Unknown (emulator-5556)", platform: "android", deviceId: "emulator-5556" },
+    ]);
+
+    try {
+      const response = await ToolRegistry.getTool("provisionDevice")!.handler(
+        provisionTestArgs("android", "unresolved-pooled-adoption"),
+      );
+
+      expect((response as any).isError).toBe(true);
+      expect(JSON.stringify(response)).toContain("platform_command_failed");
+      expect(deviceManager.wasMethodCalled("waitForDeviceReady")).toBe(false);
+      expect(pool.isPooledIdentityUnresolved("emulator-5556")).toBe(true);
+    } finally {
+      sessionManager.stopCleanupTimer();
+    }
+  });
+
   test("uses the exact-discovery phase deadline signal", async () => {
     const timer = new FakeTimer();
     let discoverySignal: AbortSignal | undefined;

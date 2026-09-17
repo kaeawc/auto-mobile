@@ -542,7 +542,7 @@ describe("SessionManager", () => {
         await expect(
           restarted.getOrCreateSession("restarted-session", devicePool, "android", undefined, true),
         ).resolves.toMatchObject({ assignedDevice: "emulator-5560" });
-        expect(recoveryTarget).toEqual({
+        expect(recoveryTarget).toMatchObject({
           platform: "android",
           stableDeviceId: "Pixel_8_API_35",
           deviceId: "emulator-5560",
@@ -4111,7 +4111,7 @@ describe("SessionManager", () => {
         stableDeviceId: "simulator-uuid",
       });
       await expect(replacementClaim).resolves.toBe(true);
-      expect(recoveryTarget).toEqual({
+      expect(recoveryTarget).toMatchObject({
         platform: "ios",
         stableDeviceId: "simulator-uuid",
         deviceId: "simulator-uuid",
@@ -4192,7 +4192,7 @@ describe("SessionManager", () => {
         assignedDevice: "emulator-5560",
         stableDeviceId: "Pixel_8_API_35",
       });
-      expect(recoveryTarget).toEqual({
+      expect(recoveryTarget).toMatchObject({
         platform: "android",
         stableDeviceId: "Pixel_8_API_35",
         deviceId: "emulator-5554",

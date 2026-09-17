@@ -5101,6 +5101,7 @@ export class DevicePool {
           : this.getDevicesByPlatform(platform),
       recoveryTarget ? "recovery target pool empty" : "platform pool empty",
       () => this.hasPendingAndroidRecovery(platform),
+      recoveryTarget,
     );
   }
 
@@ -5140,6 +5141,7 @@ export class DevicePool {
     selectCandidates: () => PooledDevice[],
     emptyCandidatePoolReason: string,
     hasPendingRecovery: () => boolean,
+    recoveryTarget?: SessionRecoveryTarget,
   ): Promise<{
     success: boolean;
     deviceId?: string;
@@ -5205,7 +5207,11 @@ export class DevicePool {
         };
       }
 
-      const assignment = await this.claimSelectedDeviceForSession(sessionId, device);
+      const assignment = await this.claimSelectedDeviceForSession(
+        sessionId,
+        device,
+        recoveryTarget,
+      );
 
       logger.info(`Assigned device ${device.id} to session ${sessionId}`);
 
@@ -5279,6 +5285,7 @@ export class DevicePool {
   private async claimSelectedDeviceForSession(
     sessionId: string,
     device: PooledDevice,
+    recoveryTarget?: SessionRecoveryTarget,
   ): Promise<{ deviceId: string; session?: Session }> {
     const existingSession = this.sessionManager.getSession(sessionId);
     const assignmentSnapshot = this.snapshotSessionAssignment(device);
@@ -5292,9 +5299,10 @@ export class DevicePool {
         sessionId,
         device.id,
         device.platform,
-        undefined,
-        undefined,
+        recoveryTarget?.liveness?.sessionTimeoutMs,
+        recoveryTarget?.liveness?.heartbeatTimeoutMs,
         this.stableDeviceIdFor(device),
+        recoveryTarget?.liveness,
       ),
     );
     if (session.assignedDevice !== device.id) {

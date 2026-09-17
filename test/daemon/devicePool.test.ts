@@ -10,6 +10,7 @@ import {
 } from "../../src/daemon/devicePool";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { SessionManager } from "../../src/daemon/sessionManager";
+import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
@@ -3465,9 +3466,11 @@ describe("DevicePool", () => {
           expires_at_ms: 30,
           released_at_ms: 25,
           release_reason: "daemon-restart",
-          session_timeout_ms: 10,
-          heartbeat_timeout_ms: 5,
+          session_timeout_ms: 60_000,
+          heartbeat_timeout_ms: 12_000,
+          heartbeat_timeout_source: "custom",
           has_received_heartbeat: 1,
+          liveness_policy: "heartbeat",
           created_at: "2026-09-14T00:00:00.000Z",
           updated_at: "2026-09-14T00:00:00.000Z",
         };
@@ -3509,7 +3512,24 @@ describe("DevicePool", () => {
         expect(recovered).toMatchObject({
           assignedDevice: "emulator-5556",
           stableDeviceId: "Original_AVD",
+          sessionTimeoutMs: 60_000,
+          heartbeatTimeoutMs: 12_000,
+          heartbeatTimeoutSource: "custom",
+          hasReceivedHeartbeat: true,
+          livenessPolicy: "heartbeat",
         });
+        const reaped: Array<{ sessionId: string; reason: string }> = [];
+        const monitor = new SessionHeartbeatMonitor(
+          sessionManager,
+          () => false,
+          async (sessionId, reason) => {
+            reaped.push({ sessionId, reason });
+          },
+          fakeTimer,
+        );
+        fakeTimer.advanceTime(5_001);
+        await monitor.tick();
+        expect(reaped).toEqual([]);
         expect(persistedUpdates).toEqual([
           expect.objectContaining({
             deviceId: "emulator-5556",
@@ -3522,6 +3542,87 @@ describe("DevicePool", () => {
         });
       },
     );
+
+    test("restores a recovered autolock session's CLI idle policy", async () => {
+      const persisted: DeviceSession = {
+        session_uuid: "restarted-cli-session",
+        device_id: "emulator-5554",
+        stable_device_id: "Original_AVD",
+        platform: "android",
+        status: "expired",
+        source: "autolock",
+        autolock_enabled: 1,
+        mcp_session_id: "old-mcp-session",
+        daemon_session_id: "old-daemon",
+        created_at_ms: 1,
+        last_used_at_ms: 20,
+        expires_at_ms: 60_020,
+        released_at_ms: 25,
+        release_reason: "daemon-restart",
+        session_timeout_ms: 60_000,
+        heartbeat_timeout_ms: 60_000,
+        heartbeat_timeout_source: "custom",
+        has_received_heartbeat: false,
+        liveness_policy: "cli-idle",
+        pre_cli_heartbeat_timeout_ms: 12_000,
+        pre_cli_heartbeat_timeout_source: "custom",
+        pre_cli_session_timeout_ms: 60_000,
+        created_at: "2026-09-14T00:00:00.000Z",
+        updated_at: "2026-09-14T00:00:00.000Z",
+      };
+      const persistence: DeviceSessionPersistence = {
+        async getSession() {
+          return persisted;
+        },
+        async upsertActiveSession() {},
+        async recordActivity() {},
+        async markReleased() {},
+      };
+      sessionManager.stopCleanupTimer();
+      sessionManager = new SessionManager(fakeTimer, persistence);
+      devicePool = new DevicePool(
+        sessionManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        fakeAppsRepo,
+        fakeDeviceManager,
+        new DefaultRetryExecutor(fakeTimer),
+      );
+      await initializeLiveDevices([createBootedDevice("emulator-5556", "android", "Original_AVD")]);
+
+      const recovered = await sessionManager.getOrCreateSession(
+        persisted.session_uuid,
+        devicePool,
+        "android",
+        undefined,
+        true,
+      );
+
+      expect(recovered).toMatchObject({
+        livenessPolicy: "cli-idle",
+        heartbeatTimeoutMs: 60_000,
+        heartbeatTimeoutSource: "custom",
+        hasReceivedHeartbeat: false,
+        preCliLiveness: {
+          sessionTimeoutMs: 60_000,
+          heartbeatTimeoutMs: 12_000,
+          heartbeatTimeoutSource: "custom",
+        },
+      });
+      const reaped: Array<{ sessionId: string; reason: string }> = [];
+      const monitor = new SessionHeartbeatMonitor(
+        sessionManager,
+        () => false,
+        async (sessionId, reason) => {
+          reaped.push({ sessionId, reason });
+        },
+        fakeTimer,
+      );
+      fakeTimer.advanceTime(60_001);
+      await monitor.tick();
+
+      expect(reaped).toEqual([{ sessionId: persisted.session_uuid, reason: "cli-idle-timeout" }]);
+    });
 
     test("keeps unresolved persisted identity retryable before fencing a resolved same-serial replacement", async () => {
       const persisted: DeviceSession = {

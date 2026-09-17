@@ -341,14 +341,18 @@ teardown() {
     'const copiedWithoutExecutor = withoutExecutor;' \
     'copiedWithoutExecutor.execFileSync?.("auto-mobile", ["--daemon-mode"]);' \
     'copiedWithoutExecutor.spawn("auto-mobile", ["--daemon-mode"]);' \
+    'const { execFileSync: excludedExecutor, spawn: remainingExecutor } = withoutExecutor;' \
+    'excludedExecutor?.("auto-mobile", ["--daemon-mode"]);' \
+    'remainingExecutor("auto-mobile", ["--daemon-mode"]);' \
     > "$FIXTURE"
 
   run bash "$SCRIPT"
 
   [ "$status" -eq 1 ]
-  [[ "$(grep -c "DaemonLauncherBoundaryFixture.ts" <<< "$output")" -eq 2 ]]
+  [[ "$(grep -c "DaemonLauncherBoundaryFixture.ts" <<< "$output")" -eq 3 ]]
   [[ "$output" == *'withoutExecutor.spawn'* ]]
   [[ "$output" == *'copiedWithoutExecutor.spawn'* ]]
+  [[ "$output" == *'remainingExecutor('* ]]
 }
 
 @test "leaves object rest with dynamic exclusions unknown" {

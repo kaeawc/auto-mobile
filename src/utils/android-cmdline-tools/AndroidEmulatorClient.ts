@@ -1,8 +1,13 @@
 import { errorMessage } from "../describeUnknownError";
-import { ChildProcess, execFile, spawn } from "child_process";
+import { type ChildProcess, type SpawnOptions } from "child_process";
 import { existsSync } from "node:fs";
-import { promisify } from "util";
 import { logger } from "../logger";
+import { runExecSeam } from "../ExecSeam";
+import {
+  DefaultHostCommandExecutor,
+  execFileAsync as sharedExecFileAsync,
+  type HostProcessExecutor,
+} from "../HostCommandExecutor";
 import { BootedDevice, DeviceInfo, ExecResult, ActionableError } from "../../models";
 import { AdbClientFactory, unadmittedAdbClientFactory } from "./AdbClientFactory";
 import { arch } from "os";
@@ -592,41 +597,45 @@ type EmulatorDeviceIdSnapshot = {
   readonly isComplete: boolean;
 };
 
+/**
+ * The long-lived spawn seam. Kept as its own injectable type so the default can
+ * route through the shared {@link HostProcessExecutor} while tests still inject a
+ * fake. Deliberately narrower than node's overloaded `typeof spawn`.
+ */
+type SpawnFn = (file: string, args: string[], options?: SpawnOptions) => ChildProcess;
+
+// Route the default long-lived spawn through the shared host-process seam so the
+// client no longer reaches for `child_process.spawn` directly (issue #5459). The
+// executor's `spawn` is a plain passthrough, so this is behavior-identical; all
+// of AndroidEmulatorClient's own reservation/launch orchestration is unchanged.
+const emulatorHostProcessExecutor: HostProcessExecutor = new DefaultHostCommandExecutor();
+
+// Route the execFile leg through the shared exec seam (issue #5459) so the option
+// mapping and the Buffer→string / trim / includes coercion live in one place and
+// this wrapper no longer reaches for `child_process` on its exec path. Argv (no
+// shell) means AVD names are passed literally instead of being interpreted/split
+// by a shell (issue #3938), and the AbortSignal is forwarded so a timed-out
+// command kills its child instead of leaving it running orphaned.
+//
+// `preserveError: true` keeps the raw execFile rejection intact: callers here
+// historically observed node's original error (with its `.code`/`.stderr`), and
+// the seam's default `wrapCommandError` would drop those fields.
 const execAsync = async (
   file: string,
   args: string[],
   signal?: AbortSignal,
 ): Promise<ExecResult> => {
-  // Run the emulator binary via execFile (argv, no shell) rather than exec. This
-  // removes the shell entirely — command arguments such as AVD names are passed
-  // literally instead of being interpreted/split by a shell (issue #3938) — and
-  // the AbortSignal is forwarded so a timed-out command kills its child instead
-  // of leaving it running orphaned.
-  const options: Parameters<typeof execFile>[2] = signal ? { signal } : undefined;
-  const result = await promisify(execFile)(file, args, options);
-
-  // Add the required string methods
-  // noinspection UnnecessaryLocalVariableJS
-  const enhancedResult: ExecResult = {
-    stdout: typeof result.stdout === "string" ? result.stdout : result.stdout.toString(),
-    stderr: typeof result.stderr === "string" ? result.stderr : result.stderr.toString(),
-    toString() {
-      return this.stdout;
-    },
-    trim() {
-      return this.stdout.trim();
-    },
-    includes(searchString: string) {
-      return this.stdout.includes(searchString);
-    },
-  };
-
-  return enhancedResult;
+  return runExecSeam(
+    (execOptions) => sharedExecFileAsync(file, args, execOptions),
+    { signal },
+    { command: file, args },
+    { preserveError: true },
+  );
 };
 
 export class AndroidEmulatorClient implements AndroidEmulator {
   private execAsync: (file: string, args: string[], signal?: AbortSignal) => Promise<ExecResult>;
-  private spawnFn: typeof spawn;
+  private spawnFn: SpawnFn;
   private emulatorPath: string;
   private timer: Timer;
   private adbFactory: AdbClientFactory;
@@ -691,7 +700,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     execAsyncFn:
       | ((file: string, args: string[], signal?: AbortSignal) => Promise<ExecResult>)
       | null = null,
-    spawnFn: typeof spawn | null = null,
+    spawnFn: SpawnFn | null = null,
     timer: Timer = defaultTimer,
     // Below the admission gate, not behind it: discovery reading the AVD name on
     // a quarantined serial is the only event that can LIFT the quarantine, and
@@ -707,7 +716,8 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     private readonly observationSequence: DiscoveryObservationSequence = defaultDiscoveryObservationSequence,
   ) {
     this.execAsync = resolveEmulatorExecAsync(execAsyncFn);
-    this.spawnFn = spawnFn || spawn;
+    this.spawnFn =
+      spawnFn || ((file, args, options) => emulatorHostProcessExecutor.spawn(file, args, options));
     this.timer = timer;
     this.adbFactory = adbFactory;
     this.avdConfigReader = avdConfigReader ?? new FileAvdConfigReader();

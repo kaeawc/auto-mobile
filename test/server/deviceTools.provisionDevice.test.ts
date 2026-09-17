@@ -190,6 +190,10 @@ class FakeProvisionDeviceOperationStore implements ProvisionDeviceOperationStore
     return this.results.get(operationId)?.result;
   }
 
+  isFailed(operationId: string): boolean {
+    return this.results.get(operationId)?.failed === true;
+  }
+
   takeOverAttempt(operationId: string, attemptId: string): void {
     const operation = this.results.get(operationId);
     if (!operation) {
@@ -3155,7 +3159,11 @@ describe("provisionDevice handler", () => {
       readiness: "none",
       timeoutMs: 1_000,
     });
-    await Promise.all([failure.entered, releaseEntered.promise]);
+    await releaseEntered.promise;
+    expect(operationStore.failCalls).toBe(0);
+    releaseGate.resolve();
+    await releaseSettled.promise;
+    await failure.entered;
     let settled = false;
     void request.then(() => {
       settled = true;
@@ -3173,13 +3181,157 @@ describe("provisionDevice handler", () => {
     });
 
     failure.release();
-    releaseGate.resolve();
     await Promise.all([failure.settled, releaseSettled.promise]);
     expect(pool.getDevice(bootedDevice.deviceId)).toMatchObject({
       sessionId: null,
       status: "idle",
     });
     expect(operationStore.failCalls).toBe(1);
+  });
+
+  test("keeps a failed replay non-replayable until its bound session is released", async () => {
+    const timer = new FakeTimer();
+    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(sessionManager, "daemon-session", timer, undefined, deviceManager);
+    const bootedDevice = {
+      name: "phone-api-36-a",
+      platform: "android" as const,
+      deviceId: "mock-phone-api-36-a",
+    };
+    deviceManager.setDeviceImages("android", [
+      {
+        name: "phone-api-36-a",
+        platform: "android",
+        isRunning: false,
+      },
+    ]);
+    await pool.initializeWithDevices([bootedDevice]);
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    sessionManager.stopCleanupTimer();
+    setDeviceToolsDependencies({ timer });
+    registerDeviceTools();
+    const args = {
+      ...provisionTestArgs("android", "replay-persistence-failure-release-order"),
+      boot: true,
+      readiness: "none" as const,
+      timeoutMs: 1_000,
+    };
+    const tool = ToolRegistry.getTool("provisionDevice");
+    if (!tool) {
+      throw new Error("provisionDevice not registered");
+    }
+
+    const first = JSON.parse(((await tool.handler(args)) as any).content[0].text);
+    const releaseEntered = deferred();
+    const releaseGate = deferred();
+    const releaseSettled = deferred();
+    const releaseSession = sessionManager.releaseSession.bind(sessionManager);
+    sessionManager.releaseSession = async (...releaseArgs) => {
+      releaseEntered.resolve();
+      await releaseGate.promise;
+      try {
+        return await releaseSession(...releaseArgs);
+      } finally {
+        releaseSettled.resolve();
+      }
+    };
+    operationStore.completeError = new Error("database unavailable");
+    const failure = blockNextFailure(operationStore);
+    let failureEntered = false;
+    void failure.entered.then(() => {
+      failureEntered = true;
+    });
+
+    const replayRequest = tool.handler(args);
+    await releaseEntered.promise;
+    await flushMicrotasks();
+    expect(failureEntered).toBe(false);
+    expect(operationStore.failCalls).toBe(0);
+
+    // A separate server process has no entry in this module-local map; clear
+    // it to exercise the durable begin() result that such a retry observes.
+    resetDeviceToolsDependencies();
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => deviceManager,
+      exactDeviceProvisionerFactory: () => exactProvisioner,
+      provisionDeviceOperationStoreFactory: () => operationStore,
+      teardownDeviceOperationStoreFactory: () => teardownOperationStore,
+      notifyResourcesChanged: async () => {},
+      clearInstalledAppsForDevice: async () => {},
+      timer,
+    });
+    registerDeviceTools();
+    const pendingRetry = JSON.parse(((await tool.handler(args)) as any).content[0].text);
+    expect(pendingRetry.error.code).toBe("operation_in_progress");
+
+    releaseGate.resolve();
+    await releaseSettled.promise;
+    await failure.entered;
+    failure.release();
+    const replay = JSON.parse(((await replayRequest) as any).content[0].text);
+    expect(replay).toMatchObject({
+      success: false,
+      error: { code: "platform_command_failed" },
+    });
+    expect(operationStore.failCalls).toBe(1);
+    expect(sessionManager.getAllSessionIds()).toEqual([]);
+    expect(pool.getDevice(bootedDevice.deviceId)).toMatchObject({
+      sessionId: null,
+      status: "idle",
+    });
+
+    operationStore.completeError = undefined;
+    const retry = JSON.parse(((await tool.handler(args)) as any).content[0].text);
+    expect(retry.sessionId).toEqual(expect.any(String));
+    expect(retry.sessionId).not.toBe(first.sessionId);
+    expect(pool.getDevice(bootedDevice.deviceId)).toMatchObject({
+      sessionId: retry.sessionId,
+      status: "busy",
+    });
+    sessionManager.stopCleanupTimer();
+  });
+
+  test("persists a completion failure after bound session release rejects", async () => {
+    const timer = new FakeTimer();
+    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(sessionManager, "daemon-session", timer, undefined, deviceManager);
+    const bootedDevice = {
+      name: "phone-api-36-a",
+      platform: "android" as const,
+      deviceId: "mock-phone-api-36-a",
+    };
+    deviceManager.setDeviceImages("android", [
+      {
+        name: "phone-api-36-a",
+        platform: "android",
+        isRunning: false,
+      },
+    ]);
+    await pool.initializeWithDevices([bootedDevice]);
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    sessionManager.stopCleanupTimer();
+    operationStore.completeError = new Error("database unavailable");
+    const complete = operationStore.complete.bind(operationStore);
+    operationStore.complete = async (...completeArgs) => {
+      sessionManager.releaseSession = async () => {
+        throw new Error("release unavailable");
+      };
+      return await complete(...completeArgs);
+    };
+    setDeviceToolsDependencies({ timer });
+    registerDeviceTools();
+
+    const response = await ToolRegistry.getTool("provisionDevice")!.handler({
+      ...provisionTestArgs("android", "release-rejection-persistence"),
+      boot: true,
+      readiness: "none",
+    });
+    const payload = JSON.parse((response as any).content[0].text);
+
+    expect(payload.error.code).toBe("platform_command_failed");
+    expect(operationStore.failCalls).toBe(1);
+    expect(operationStore.isFailed("release-rejection-persistence")).toBe(true);
+    sessionManager.stopCleanupTimer();
   });
 
   test("retains superseded completion handling without failing the newer attempt", async () => {
@@ -4063,7 +4215,7 @@ describe("provisionDevice handler", () => {
     await completion.entered;
     timer.advanceTime(10_000);
     await flushMicrotasks();
-    await Promise.all([failure.entered, releaseEntered.promise]);
+    await releaseEntered.promise;
     const payloadAtDeadline = payload;
 
     await request;
@@ -4077,9 +4229,11 @@ describe("provisionDevice handler", () => {
     const pendingRetry = JSON.parse((pendingRetryResponse as any).content[0].text);
     expect(pendingRetry.error.code).toBe("operation_in_progress");
 
-    failure.release();
     releaseGate.resolve();
-    await Promise.all([failure.settled, releaseSettled.promise]);
+    await releaseSettled.promise;
+    await failure.entered;
+    failure.release();
+    await failure.settled;
     expect(sessionManager.getAllSessionIds()).toEqual([]);
     expect(operationStore.getStoredResult(args.operationId)).toBeUndefined();
     expect(operationStore.failCalls).toBe(1);

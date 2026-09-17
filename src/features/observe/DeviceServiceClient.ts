@@ -102,6 +102,10 @@ export abstract class DeviceServiceClient {
   // isConnecting true until connectionTimeoutMs, stalling a fresh-port connect
   // by up to ~5s. Cleared to null the moment the handshake terminates. (#5656)
   private pendingConnectAbort: { socket: WebSocket; abort: () => void } | null = null;
+  // Counts callers currently awaiting connectWebSocket() through ensureConnected()
+  // (or direct callers that acquire interest themselves), so a per-caller
+  // cancellation only aborts a shared pending handshake after every caller leaves.
+  protected pendingConnectJoiners: number = 0;
   // Platform setup (notably adb port forwarding) is also part of a connection
   // attempt. Keep its controller separately because no WebSocket exists yet.
   private pendingPlatformSetupAbort: AbortController | null = null;
@@ -203,7 +207,29 @@ export abstract class DeviceServiceClient {
   public async ensureConnected(
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<boolean> {
-    return this.connectWebSocket(perf);
+    const interest = this.acquirePendingConnectInterest();
+    try {
+      return await this.connectWebSocket(perf);
+    } finally {
+      interest.release();
+    }
+  }
+
+  /**
+   * Keep a caller's interest in a pending connection attempt until it settles.
+   */
+  protected acquirePendingConnectInterest(): { release: () => void } {
+    this.pendingConnectJoiners++;
+    let released = false;
+    return {
+      release: () => {
+        if (released) {
+          return;
+        }
+        released = true;
+        this.pendingConnectJoiners = Math.max(0, this.pendingConnectJoiners - 1);
+      },
+    };
   }
 
   public getReconnectStatus(): CtrlProxyReconnectStatus | null {

@@ -20,11 +20,11 @@ import {
   CtrlProxyClipboardResult,
   CtrlProxyHierarchyResponse,
   CtrlProxyPerfTiming,
-  CtrlProxyHierarchy,
 } from "../../src/features/observe/ios";
 import type {
   CtrlProxyVoiceOverResult,
   CtrlProxyActionResult,
+  CtrlProxyHierarchy,
 } from "../../src/features/observe/ios/types";
 import type { SetTextOptions } from "../../src/features/observe/DeviceService";
 import { ViewHierarchyResult } from "../../src/models";
@@ -49,6 +49,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
   private performanceTiming: CtrlProxyPerfTiming | null = null;
   private isConnectedState: boolean = true;
   private hasCachedHierarchyState: boolean = false;
+  private connectWithoutSetupResult: boolean = true;
   public clearCacheCallCount: number = 0;
 
   // Failure modes
@@ -160,6 +161,8 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     fingerSpacing?: number;
   }> = [];
 
+  private connectWithoutSetupHistory: Array<{ signalProvided: boolean }> = [];
+
   // MARK: - Configuration Methods
 
   /**
@@ -207,6 +210,11 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
    */
   setCachedHierarchy(hasCached: boolean): void {
     this.hasCachedHierarchyState = hasCached;
+  }
+
+  /** Configure the result returned by connectWithoutSetup. */
+  setConnectWithoutSetupResult(result: boolean): void {
+    this.connectWithoutSetupResult = result;
   }
 
   /**
@@ -462,6 +470,10 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     return [...this.multiFingerSwipeHistory];
   }
 
+  getConnectWithoutSetupHistory(): Array<{ signalProvided: boolean }> {
+    return [...this.connectWithoutSetupHistory];
+  }
+
   /**
    * Clear all call history
    */
@@ -489,6 +501,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     this.actionHistory = [];
     this.multiFingerSwipeHistory = [];
     this.clipboardHistory = [];
+    this.connectWithoutSetupHistory = [];
   }
 
   // MARK: - Private Helpers
@@ -508,6 +521,16 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
   }
 
   // MARK: - IOSCtrlProxy Implementation
+
+  async connectWithoutSetup(signal?: AbortSignal): Promise<boolean> {
+    this.connectWithoutSetupHistory.push({ signalProvided: signal !== undefined });
+    signal?.throwIfAborted();
+    await this.applyDelay("connectWithoutSetup");
+    signal?.throwIfAborted();
+    this.checkFailure("connectWithoutSetup");
+    this.isConnectedState = this.connectWithoutSetupResult;
+    return this.connectWithoutSetupResult;
+  }
 
   async getAccessibilityHierarchy(
     queryOptions?: ViewHierarchyQueryOptions,
@@ -585,6 +608,26 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
       hierarchy: this.hierarchyData,
       perfTiming: this.performanceTiming || undefined,
     };
+  }
+
+  requestHierarchySyncWithoutObservationStreamPush(
+    ...args: Parameters<IOSCtrlProxy["requestHierarchySyncWithoutObservationStreamPush"]>
+  ): ReturnType<IOSCtrlProxy["requestHierarchySyncWithoutObservationStreamPush"]> {
+    return this.requestHierarchySync(...args);
+  }
+
+  requestAddHighlight(
+    ...args: Parameters<IOSCtrlProxy["requestAddHighlight"]>
+  ): ReturnType<IOSCtrlProxy["requestAddHighlight"]> {
+    void args;
+    return Promise.resolve({ success: true });
+  }
+
+  setNetworkErrorSimulation(
+    ...args: Parameters<IOSCtrlProxy["setNetworkErrorSimulation"]>
+  ): ReturnType<IOSCtrlProxy["setNetworkErrorSimulation"]> {
+    void args;
+    return Promise.resolve({ success: true, totalTimeMs: 0 });
   }
 
   convertToViewHierarchyResult(hierarchy: CtrlProxyHierarchy): ViewHierarchyResult {
@@ -759,6 +802,13 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
       totalTimeMs: 100,
       perfTiming: this.performanceTiming || undefined,
     };
+  }
+
+  requestAppendText(
+    ...args: Parameters<IOSCtrlProxy["requestAppendText"]>
+  ): ReturnType<IOSCtrlProxy["requestAppendText"]> {
+    const [text, timeoutMs, perf, frameContext] = args;
+    return this.requestSetText(text, { timeoutMs, perf, frameContext });
   }
 
   async requestClearText(
@@ -988,6 +1038,13 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     };
   }
 
+  requestResetPermissions(
+    ...args: Parameters<IOSCtrlProxy["requestResetPermissions"]>
+  ): ReturnType<IOSCtrlProxy["requestResetPermissions"]> {
+    void args;
+    return Promise.resolve({ success: true, totalTimeMs: 0 });
+  }
+
   async requestScreenshot(
     timeoutMs: number = 5000,
     perf?: PerformanceTracker,
@@ -1009,6 +1066,12 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
       format: this.screenshotFormat,
       timestamp: Date.now(),
     };
+  }
+
+  requestScreenshotWithoutObservationStreamPush(
+    ...args: Parameters<IOSCtrlProxy["requestScreenshotWithoutObservationStreamPush"]>
+  ): ReturnType<IOSCtrlProxy["requestScreenshotWithoutObservationStreamPush"]> {
+    return this.requestScreenshot(...args);
   }
 
   async requestVoiceOverState(

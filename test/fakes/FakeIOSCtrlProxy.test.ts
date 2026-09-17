@@ -3,6 +3,26 @@ import { FakeIOSCtrlProxy } from "./FakeIOSCtrlProxy";
 import { FakeTimer } from "./FakeTimer";
 
 describe("FakeIOSCtrlProxy operation delays", () => {
+  test("connectWithoutSetup records calls, returns configured results, and rejects cancellations", async () => {
+    const proxy = new FakeIOSCtrlProxy();
+    proxy.setConnectWithoutSetupResult(false);
+    expect(await proxy.connectWithoutSetup()).toBe(false);
+
+    const failure = new Error("connection failed");
+    proxy.setFailureMode("connectWithoutSetup", failure);
+    await expect(proxy.connectWithoutSetup()).rejects.toBe(failure);
+
+    const controller = new AbortController();
+    const cancellation = new Error("cancelled");
+    controller.abort(cancellation);
+    await expect(proxy.connectWithoutSetup(controller.signal)).rejects.toBe(cancellation);
+    expect(proxy.getConnectWithoutSetupHistory()).toEqual([
+      { signalProvided: false },
+      { signalProvided: false },
+      { signalProvided: true },
+    ]);
+  });
+
   test("pressKey waits for the injected virtual clock before recording success", async () => {
     const timer = new FakeTimer();
     const proxy = new FakeIOSCtrlProxy(timer);

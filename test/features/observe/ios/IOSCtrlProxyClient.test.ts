@@ -105,6 +105,72 @@ describe("IOSCtrlProxyClient", function () {
     (url) =>
       new FakeWebSocket(url, "timeout", 60000, timer);
 
+  const createCapturingConnectionTimeoutWebSocketFactory = (
+    timer: FakeTimer,
+  ): {
+    factory: (url: string) => FakeWebSocket;
+    getSocket: () => FakeWebSocket | null;
+    getCreatedSocketCount: () => number;
+  } => {
+    const sockets: FakeWebSocket[] = [];
+
+    return {
+      factory: (url: string) => {
+        const socket = new FakeWebSocket(url, "timeout", 60000, timer);
+        sockets.push(socket);
+        return socket;
+      },
+      getSocket: () => sockets[sockets.length - 1] ?? null,
+      getCreatedSocketCount: () => sockets.length,
+    };
+  };
+
+  const createTrackedAbortSignal = (): {
+    signal: AbortSignal;
+    abort: (reason: unknown) => void;
+    getListenerCount: () => number;
+  } => {
+    let aborted = false;
+    let reason: unknown;
+    const listeners = new Set<EventListenerOrEventListenerObject>();
+    const signal = {
+      get aborted(): boolean {
+        return aborted;
+      },
+      get reason(): unknown {
+        return reason;
+      },
+      throwIfAborted(): void {
+        if (aborted) {
+          throw reason;
+        }
+      },
+      addEventListener: (_type: string, listener: EventListenerOrEventListenerObject) => {
+        listeners.add(listener);
+      },
+      removeEventListener: (_type: string, listener: EventListenerOrEventListenerObject) => {
+        listeners.delete(listener);
+      },
+    } as unknown as AbortSignal;
+
+    return {
+      signal,
+      abort: (abortReason: unknown) => {
+        aborted = true;
+        reason = abortReason;
+        const event = new Event("abort");
+        for (const listener of [...listeners]) {
+          if (typeof listener === "function") {
+            listener(event);
+          } else {
+            listener.handleEvent(event);
+          }
+        }
+      },
+      getListenerCount: () => listeners.size,
+    };
+  };
+
   const waitForSocketOpen = async (socket: FakeWebSocket | null): Promise<void> => {
     if (!socket) {
       return;
@@ -2487,6 +2553,207 @@ describe("IOSCtrlProxyClient", function () {
 
         await expect(connection).rejects.toBe(cancellation);
         expect((testClient as any).isConnecting).toBe(false);
+      } finally {
+        await testClient.close();
+      }
+    });
+
+    test("connectWithoutSetup keeps a shared handshake alive when one caller aborts", async function () {
+      const testTimer = new FakeTimer();
+      const callerA = new AbortController();
+      const cancellation = new Error("caller A cancelled");
+      const { factory, getSocket, getCreatedSocketCount } =
+        createCapturingConnectionTimeoutWebSocketFactory(testTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        testTimer,
+      );
+      (testClient as any).autoReconnectEnabled = false;
+
+      try {
+        const connectionA = testClient.connectWithoutSetup(callerA.signal);
+        await flushPromises();
+        const connectionB = testClient.connectWithoutSetup();
+        await flushPromises();
+
+        const socket = getSocket();
+        expect(getCreatedSocketCount()).toBe(1);
+        expect(socket?.readyState).toBe(WebSocketState.CONNECTING);
+
+        callerA.abort(cancellation);
+        await expect(connectionA).rejects.toBe(cancellation);
+        expect(socket?.readyState).toBe(WebSocketState.CONNECTING);
+
+        socket!.readyState = WebSocketState.OPEN;
+        socket!.emit("open");
+        testTimer.advanceTime(100);
+        await expect(connectionB).resolves.toBe(true);
+        expect((testClient as any).pendingConnectJoiners).toBe(0);
+      } finally {
+        await testClient.close();
+      }
+    });
+
+    test("connectWithoutSetup keeps a shared handshake alive for ensureConnected", async function () {
+      const testTimer = new FakeTimer();
+      const callerA = new AbortController();
+      const cancellation = new Error("caller A cancelled");
+      const { factory, getSocket, getCreatedSocketCount } =
+        createCapturingConnectionTimeoutWebSocketFactory(testTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        testTimer,
+      );
+      (testClient as any).autoReconnectEnabled = false;
+
+      try {
+        const connectionA = testClient.connectWithoutSetup(callerA.signal);
+        await flushPromises();
+        const connectionB = testClient.ensureConnected();
+        await flushPromises();
+
+        const socket = getSocket();
+        expect(getCreatedSocketCount()).toBe(1);
+        expect(socket?.readyState).toBe(WebSocketState.CONNECTING);
+
+        callerA.abort(cancellation);
+        await expect(connectionA).rejects.toBe(cancellation);
+        expect(socket?.readyState).toBe(WebSocketState.CONNECTING);
+
+        socket!.readyState = WebSocketState.OPEN;
+        socket!.emit("open");
+        testTimer.advanceTime(100);
+        await expect(connectionB).resolves.toBe(true);
+        expect((testClient as any).pendingConnectJoiners).toBe(0);
+      } finally {
+        await testClient.close();
+      }
+    });
+
+    test("connectWithoutSetup aborts the shared handshake after all callers cancel", async function () {
+      const testTimer = new FakeTimer();
+      const callerA = new AbortController();
+      const callerB = new AbortController();
+      const { factory, getSocket, getCreatedSocketCount } =
+        createCapturingConnectionTimeoutWebSocketFactory(testTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        testTimer,
+      );
+      (testClient as any).autoReconnectEnabled = false;
+
+      try {
+        const connectionA = testClient.connectWithoutSetup(callerA.signal);
+        await flushPromises();
+        const connectionB = testClient.connectWithoutSetup(callerB.signal);
+        await flushPromises();
+        const socket = getSocket();
+
+        callerA.abort(new Error("caller A cancelled"));
+        await expect(connectionA).rejects.toThrow("caller A cancelled");
+        expect(socket?.readyState).toBe(WebSocketState.CONNECTING);
+
+        callerB.abort(new Error("caller B cancelled"));
+        await expect(connectionB).rejects.toThrow("caller B cancelled");
+        expect(socket?.readyState).toBe(WebSocketState.CLOSING);
+        expect((testClient as any).isConnecting).toBe(false);
+
+        const reconnect = testClient.connectWithoutSetup();
+        await flushPromises();
+        expect(getCreatedSocketCount()).toBe(2);
+        const replacementSocket = getSocket();
+        replacementSocket!.readyState = WebSocketState.OPEN;
+        replacementSocket!.emit("open");
+        await expect(reconnect).resolves.toBe(true);
+      } finally {
+        await testClient.close();
+      }
+    });
+
+    test("connectWithoutSetup ignores a signal already aborted before the call", async function () {
+      const testTimer = new FakeTimer();
+      const controller = new AbortController();
+      const cancellation = new Error("already cancelled");
+      const { factory, getCreatedSocketCount } =
+        createCapturingConnectionTimeoutWebSocketFactory(testTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        testTimer,
+      );
+      controller.abort(cancellation);
+
+      try {
+        await expect(testClient.connectWithoutSetup(controller.signal)).rejects.toBe(cancellation);
+        expect(getCreatedSocketCount()).toBe(0);
+        expect((testClient as any).isConnecting).toBe(false);
+        expect((testClient as any).pendingConnectJoiners).toBe(0);
+      } finally {
+        await testClient.close();
+      }
+    });
+
+    test("connectWithoutSetup removes abort listeners after every settle path", async function () {
+      const testTimer = new FakeTimer();
+      const { factory, getSocket } = createCapturingConnectionTimeoutWebSocketFactory(testTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        testTimer,
+      );
+      (testClient as any).autoReconnectEnabled = false;
+
+      try {
+        const resolved = createTrackedAbortSignal();
+        const resolvedConnection = testClient.connectWithoutSetup(resolved.signal);
+        await flushPromises();
+        expect(resolved.getListenerCount()).toBe(1);
+        const socket = getSocket();
+        socket!.readyState = WebSocketState.OPEN;
+        socket!.emit("open");
+        await expect(resolvedConnection).resolves.toBe(true);
+        expect(resolved.getListenerCount()).toBe(0);
+
+        await testClient.close();
+
+        const failed = createTrackedAbortSignal();
+        const failedClient = IOSCtrlProxyClient.createForTesting(
+          testDevice,
+          serverPort,
+          createInstantFailureWebSocketFactory(testTimer),
+          testTimer,
+        );
+        (failedClient as any).autoReconnectEnabled = false;
+        const failedConnection = failedClient.connectWithoutSetup(failed.signal);
+        expect(failed.getListenerCount()).toBe(1);
+        await expect(failedConnection).resolves.toBe(false);
+        expect(failed.getListenerCount()).toBe(0);
+        await failedClient.close();
+
+        const aborted = createTrackedAbortSignal();
+        const abortedClient = IOSCtrlProxyClient.createForTesting(
+          testDevice,
+          serverPort,
+          createConnectionTimeoutWebSocketFactory(testTimer),
+          testTimer,
+        );
+        (abortedClient as any).autoReconnectEnabled = false;
+        const abortedConnection = abortedClient.connectWithoutSetup(aborted.signal);
+        await flushPromises();
+        expect(aborted.getListenerCount()).toBe(1);
+        const cancellation = new Error("cancelled");
+        aborted.abort(cancellation);
+        await expect(abortedConnection).rejects.toBe(cancellation);
+        expect(aborted.getListenerCount()).toBe(0);
+        await abortedClient.close();
       } finally {
         await testClient.close();
       }

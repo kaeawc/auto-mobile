@@ -116,6 +116,22 @@ describe("parseBoundsString / parseBounds", () => {
     expect(parseBounds(b)).toEqual(b);
   });
 
+  it("parses the server compact bounds tuple", () => {
+    expect(parseBounds([1, 2, 30, 40])).toEqual({ left: 1, top: 2, right: 30, bottom: 40 });
+  });
+
+  it("returns null for a compact bounds tuple with the wrong length", () => {
+    expect(parseBounds([1, 2, 30])).toBeNull();
+  });
+
+  it("returns null for a compact bounds tuple with a non-number", () => {
+    expect(parseBounds([1, 2, 30, "40"])).toBeNull();
+  });
+
+  it("returns null for a compact bounds tuple with a non-finite number", () => {
+    expect(parseBounds([1, 2, 30, Number.NaN])).toBeNull();
+  });
+
   it("returns null for an unparseable value", () => {
     expect(parseBounds(12345)).toBeNull();
   });

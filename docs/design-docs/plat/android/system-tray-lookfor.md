@@ -109,11 +109,13 @@ group header. The `tap` action handles this automatically:
    group, whether collapsed or expanded. `isNotificationGroupExpanded` first
    identifies an expanded group structurally when a per-child
    `expandableNotificationRow` contains `status_bar_latest_event_content`.
-   When that full-row template is absent, it corroborates the state from child
-   row geometry (short collapsed stubs versus full, non-overlapping rows),
-   then falls back narrowly to a header button whose content description is
-   exactly `Expand` or `Collapse`. Unrecognized shapes remain unknown: taps
-   conservatively attempt expansion, while dismiss refuses to swipe.
+   This structural signal is decisive. When it is absent, child-row geometry
+   corroborates the state using row height and position relative to the group
+   header's own height and bounds, rather than fixed pixel thresholds, so the
+   result is density-independent. An explicit header button content description
+   of exactly `Expand` or `Collapse` decides when geometry is inconclusive and
+   overrides geometry when they disagree. Unrecognized shapes remain unknown:
+   taps conservatively attempt expansion, while dismiss refuses to swipe.
 3. **Expand** — `expandNotificationGroup` finds the "Expand" button inside
    the group header, preferring a `resource-id` containing `expand_button` and
    falling back to a `content-desc` equal to "Expand" (case-insensitive), and

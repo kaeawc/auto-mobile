@@ -1,5 +1,7 @@
 import { ElementBounds } from "../models/ElementBounds";
 
+type CompactBoundsTuple = [number, number, number, number];
+
 export function isElementBounds(value: unknown): value is ElementBounds {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return false;
@@ -13,6 +15,11 @@ export function isElementBounds(value: unknown): value is ElementBounds {
     typeof candidate.bottom === "number"
   );
 }
+
+const isCompactBoundsTuple = (value: unknown): value is CompactBoundsTuple =>
+  Array.isArray(value) &&
+  value.length === 4 &&
+  value.every((coordinate) => typeof coordinate === "number" && Number.isFinite(coordinate));
 
 export function parseBoundsString(boundsString: string): ElementBounds | null {
   if (!boundsString) {
@@ -35,6 +42,12 @@ export function parseBoundsString(boundsString: string): ElementBounds | null {
 export function parseBounds(value: unknown): ElementBounds | null {
   if (isElementBounds(value)) {
     return value;
+  }
+
+  // Support the server's compact-bounds wire format (#2978); commit 4aa6a286a8
+  // added the equivalent tuple handling to the Kotlin-side parser.
+  if (isCompactBoundsTuple(value)) {
+    return { left: value[0], top: value[1], right: value[2], bottom: value[3] };
   }
 
   if (typeof value === "string") {

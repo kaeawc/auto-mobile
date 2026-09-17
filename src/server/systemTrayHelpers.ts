@@ -260,7 +260,15 @@ const getDetector = (device: BootedDevice): NotificationUIDetector => {
 const sleep = (ms: number) => getSystemTrayDependencies().timer.sleep(ms);
 
 export const resolveSystemTrayAwaitTimeout = (awaitTimeout?: number): number => {
-  return awaitTimeout ?? DEFAULT_SYSTEM_TRAY_AWAIT_TIMEOUT_MS;
+  const resolvedAwaitTimeout = awaitTimeout ?? DEFAULT_SYSTEM_TRAY_AWAIT_TIMEOUT_MS;
+  if (resolvedAwaitTimeout <= 0) {
+    logger.warn(
+      `[systemTray] awaitTimeout ${resolvedAwaitTimeout}ms is non-positive, ` +
+        `using minimum of ${SYSTEM_TRAY_POLL_INTERVAL_MS}ms`,
+    );
+    return SYSTEM_TRAY_POLL_INTERVAL_MS;
+  }
+  return resolvedAwaitTimeout;
 };
 
 const observeSystemTray = (
@@ -706,32 +714,42 @@ const getChildRowBounds = (groupNode: any) => {
     .filter((bounds): bounds is NonNullable<typeof bounds> => bounds !== undefined);
 };
 
-const hasCollapsedStubGeometry = (groupNode: any): boolean => {
+const getNotificationGroupHeaderBounds = (groupNode: any) =>
+  new DefaultElementParser().parseNodeBounds(getNotificationGroupHeader(groupNode))?.bounds;
+
+// The 0.35 collapsed capture ratio is header-relative to avoid mdpi fixed-pixel misclassification.
+const COLLAPSED_ROW_HEIGHT_TO_HEADER_RATIO_MAX = 0.5;
+// The 1.48 expanded capture ratio is header-relative to avoid mdpi fixed-pixel misclassification.
+const EXPANDED_ROW_HEIGHT_TO_HEADER_RATIO_MIN = 1.3;
+
+const hasCollapsedRowGeometry = (groupNode: any): boolean => {
   const childRows = getChildRowBounds(groupNode);
-  if (childRows.length < 2) {
+  const headerBounds = getNotificationGroupHeaderBounds(groupNode);
+  if (childRows.length === 0 || !headerBounds) {
     return false;
   }
-  // CtrlProxy's collapsed children are 51px stubs. Keep this deliberately
-  // below ordinary compact notification-row heights so unfamiliar layouts use
-  // the header fallback instead of being guessed as collapsed.
-  const maxStubHeight = 64;
-  if (childRows.some((bounds) => bounds.bottom - bounds.top > maxStubHeight)) {
-    return false;
-  }
-  const headerBounds = new DefaultElementParser().parseNodeBounds(
-    getNotificationGroupHeader(groupNode),
-  )?.bounds;
-  if (!headerBounds || childRows[0].top > headerBounds.bottom + maxStubHeight * 2) {
-    return false;
-  }
-  return childRows.every(
-    (bounds, index) => index === 0 || bounds.top - childRows[index - 1].top <= maxStubHeight * 2,
+  const firstChildRow = childRows[0];
+  const headerHeight = headerBounds.bottom - headerBounds.top;
+  const firstChildRowHeight = firstChildRow.bottom - firstChildRow.top;
+  return (
+    firstChildRow.top < headerBounds.bottom &&
+    firstChildRowHeight <= headerHeight * COLLAPSED_ROW_HEIGHT_TO_HEADER_RATIO_MAX
   );
 };
 
-const hasExpandedFullRowGeometry = (groupNode: any): boolean => {
+const hasExpandedRowGeometry = (groupNode: any): boolean => {
   const childRows = getChildRowBounds(groupNode);
-  if (childRows.length === 0 || childRows.some((bounds) => bounds.bottom - bounds.top < 120)) {
+  const headerBounds = getNotificationGroupHeaderBounds(groupNode);
+  if (childRows.length === 0 || !headerBounds) {
+    return false;
+  }
+  const firstChildRow = childRows[0];
+  const headerHeight = headerBounds.bottom - headerBounds.top;
+  const firstChildRowHeight = firstChildRow.bottom - firstChildRow.top;
+  if (
+    firstChildRow.top < headerBounds.bottom ||
+    firstChildRowHeight < headerHeight * EXPANDED_ROW_HEIGHT_TO_HEADER_RATIO_MIN
+  ) {
     return false;
   }
   return childRows.every(
@@ -750,21 +768,23 @@ export const resolveNotificationGroupExpansionState = (
   ) {
     return "expanded";
   }
-  if (hasCollapsedStubGeometry(groupNode)) {
-    return "collapsed";
-  }
-  if (hasExpandedFullRowGeometry(groupNode)) {
-    return "expanded";
-  }
-
+  const geometryState = hasCollapsedRowGeometry(groupNode)
+    ? "collapsed"
+    : hasExpandedRowGeometry(groupNode)
+      ? "expanded"
+      : null;
   const contentDescription = getHeaderExpandButtonContentDescription(groupNode)?.toLowerCase();
-  if (contentDescription === "collapse") {
-    return "expanded";
+  const headerState =
+    contentDescription === "collapse"
+      ? "expanded"
+      : contentDescription === "expand"
+        ? "collapsed"
+        : null;
+  if (geometryState && headerState && geometryState !== headerState) {
+    // An explicit accessibility state is more direct than inferred row geometry.
+    return headerState;
   }
-  if (contentDescription === "expand") {
-    return "collapsed";
-  }
-  return "unknown";
+  return geometryState ?? headerState ?? "unknown";
 };
 
 export const isNotificationGroupExpanded = (groupNode: any): boolean =>
@@ -1511,16 +1531,10 @@ export const waitForNotificationMatch = async (
   progress?: ProgressCallback,
 ): Promise<{ observation: ObserveResult; match: SystemTrayNotificationMatch | null }> => {
   const { observeScreenFactory, timer } = getSystemTrayDependencies();
-  if (awaitTimeoutMs <= 0) {
-    logger.warn(
-      `[systemTray] waitForNotificationMatch called with non-positive timeout ` +
-        `(${awaitTimeoutMs}ms), using minimum of ${SYSTEM_TRAY_POLL_INTERVAL_MS}ms`,
-    );
-    awaitTimeoutMs = SYSTEM_TRAY_POLL_INTERVAL_MS;
-  }
+  const resolvedAwaitTimeoutMs = resolveSystemTrayAwaitTimeout(awaitTimeoutMs);
   const detector = getDetector(device);
   const observeScreen = observeScreenFactory(device);
-  const deadlineMs = timer.now() + awaitTimeoutMs;
+  const deadlineMs = timer.now() + resolvedAwaitTimeoutMs;
   const remainingMs = Math.max(0, deadlineMs - timer.now());
   const result = await ensureSystemTrayOpen(device, remainingMs, progress);
   let observation = result.observation;
@@ -1595,6 +1609,13 @@ interface NotificationGroupIdentity {
   childTitles: string[];
 }
 
+const NOTIFICATION_TITLE_FIELD_IDS = [
+  "title",
+  "title_big",
+  "conversation_text",
+  "notification_title",
+];
+
 const findHeaderAppLabel = (header: any): string | undefined => {
   const props = getNodeProperties(header);
   const resourceId = String(props?.["resource-id"] ?? props?.resourceId ?? "").toLowerCase();
@@ -1622,7 +1643,7 @@ const collectNotificationGroupChildTitles = (groupNode: any): string[] => {
     const resourceId = String(props?.["resource-id"] ?? props?.resourceId ?? "");
     const id = resourceId.split("/").pop() ?? "";
     if (
-      ["title", "title_big", "conversation_text"].includes(id) &&
+      NOTIFICATION_TITLE_FIELD_IDS.includes(id) &&
       typeof props?.text === "string" &&
       props.text.length > 0
     ) {
@@ -1939,7 +1960,7 @@ const readTrayNotificationFields = (root: any) => {
     if (["app_name_text", "app_name"].includes(id)) {
       fields.appLabel = text;
     }
-    if (["title", "title_big", "conversation_text", "notification_title"].includes(id)) {
+    if (NOTIFICATION_TITLE_FIELD_IDS.includes(id)) {
       fields.title = text;
     }
     if (["text", "big_text", "text2", "notification_text"].includes(id)) {

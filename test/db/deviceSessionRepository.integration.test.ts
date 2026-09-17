@@ -109,6 +109,36 @@ describe("DeviceSessionRepository", () => {
     });
   });
 
+  test("persists the liveness contract used to recover daemon sessions", async () => {
+    await repo.upsertActiveSession({
+      sessionUuid: "liveness-session",
+      deviceId: "emulator-5554",
+      platform: "android",
+      createdAtMs: 1000,
+      lastUsedAtMs: 2000,
+      expiresAtMs: 62_000,
+      sessionTimeoutMs: 60_000,
+      heartbeatTimeoutMs: 15_000,
+      heartbeatTimeoutSource: "custom",
+      hasReceivedHeartbeat: true,
+      livenessPolicy: "cli-idle",
+      preCliHeartbeatTimeoutMs: 15_000,
+      preCliHeartbeatTimeoutSource: "custom",
+      preCliSessionTimeoutMs: 60_000,
+    });
+
+    expect(await repo.getSession("liveness-session")).toMatchObject({
+      session_timeout_ms: 60_000,
+      heartbeat_timeout_ms: 15_000,
+      heartbeat_timeout_source: "custom",
+      has_received_heartbeat: 1,
+      liveness_policy: "cli-idle",
+      pre_cli_heartbeat_timeout_ms: 15_000,
+      pre_cli_heartbeat_timeout_source: "custom",
+      pre_cli_session_timeout_ms: 60_000,
+    });
+  });
+
   test("clears a stable identity when a legacy writer changes the device transport", async () => {
     await repo.upsertActiveSession({
       sessionUuid: "session-1",

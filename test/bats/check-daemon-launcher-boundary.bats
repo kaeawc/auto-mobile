@@ -92,6 +92,19 @@ teardown() {
   [[ "$output" == *"DaemonLauncherBoundaryFixture.ts"* ]]
 }
 
+@test "rejects a namespace alias of a default child-process import" {
+  printf '%s\n' \
+    'import childProcess from "node:child_process";' \
+    'const launcher = childProcess;' \
+    'launcher.execFileSync("auto-mobile", ["--daemon-mode"]);' \
+    > "$FIXTURE"
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"DaemonLauncherBoundaryFixture.ts"* ]]
+}
+
 @test "allows a local binding that shadows a default child-process import" {
   printf '%s\n' \
     'import childProcess from "node:child_process";' \

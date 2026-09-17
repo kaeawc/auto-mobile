@@ -129,6 +129,9 @@ function violationsIn(
         if (ts.isIdentifier(node.initializer) && hasBinding(importedExecutors, node.initializer)) {
           addBinding(importedExecutors, node.name);
         }
+        if (ts.isIdentifier(node.initializer) && hasBinding(namespaces, node.initializer)) {
+          addBinding(namespaces, node.name);
+        }
         if (
           ts.isPropertyAccessExpression(node.initializer) &&
           ts.isIdentifier(node.initializer.expression) &&

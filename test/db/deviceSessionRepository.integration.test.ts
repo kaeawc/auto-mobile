@@ -87,6 +87,28 @@ describe("DeviceSessionRepository", () => {
     expect(row!.liveness_owner_token).toBeNull();
   });
 
+  test("retains liveness ownership across recoverable daemon shutdown", async () => {
+    await repo.upsertActiveSession({
+      sessionUuid: "recoverable-session",
+      deviceId: "emulator-5554",
+      platform: "android",
+      createdAtMs: 1000,
+      lastUsedAtMs: 2000,
+      expiresAtMs: 63_000,
+      sessionTimeoutMs: 60_000,
+      heartbeatTimeoutMs: 60_000,
+      hasReceivedHeartbeat: true,
+    });
+    await repo.recordLivenessOwnership("recoverable-session", "current-owner");
+
+    await repo.markReleased("recoverable-session", "released", 4000, "daemon-shutdown");
+
+    expect(await repo.getSession("recoverable-session")).toMatchObject({
+      release_reason: "daemon-shutdown",
+      liveness_owner_token: "current-owner",
+    });
+  });
+
   test("clears a stable identity when a legacy writer changes the device transport", async () => {
     await repo.upsertActiveSession({
       sessionUuid: "session-1",
@@ -218,11 +240,11 @@ describe("DeviceSessionRepository", () => {
     expect(oldRow!.status).toBe("expired");
     expect(oldRow!.released_at_ms).toBe(5000);
     expect(oldRow!.release_reason).toBe("daemon-restart");
-    expect(oldRow!.liveness_owner_token).toBeNull();
+    expect(oldRow!.liveness_owner_token).toBe("old-owner");
     expect(missingRow!.status).toBe("expired");
     expect(missingRow!.released_at_ms).toBe(5000);
     expect(missingRow!.release_reason).toBe("daemon-restart");
-    expect(missingRow!.liveness_owner_token).toBeNull();
+    expect(missingRow!.liveness_owner_token).toBe("missing-owner");
     expect(currentRow!.status).toBe("active");
     expect(currentRow!.released_at_ms).toBeNull();
     expect(currentRow!.liveness_owner_token).toBe("current-owner");

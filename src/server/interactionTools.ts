@@ -1382,7 +1382,10 @@ async function verifyIosOpenAlertDismissed(
   for (let attempt = 0; attempt < IOS_OPEN_ALERT_VERIFY_ATTEMPTS; attempt += 1) {
     throwIfOpenAlertAcceptanceAborted(signal);
     const hierarchy = await refreshHierarchy();
-    if (!isIosAppOpenAlertHierarchy(hierarchy ?? undefined)) {
+    if (!hierarchy) {
+      continue;
+    }
+    if (!isIosAppOpenAlertHierarchy(hierarchy)) {
       return true;
     }
     if (!(await tapLiveSystemAlert(tapSystemAlert))) {
@@ -2246,9 +2249,9 @@ export function registerInteractionTools() {
             iosClient
               ? () =>
                   iosClient.requestAction(
-                    "system_alert_tap",
+                    "system_alert_accept",
                     undefined,
-                    "Open",
+                    undefined,
                     IOS_OPEN_ALERT_HIERARCHY_TIMEOUT_MS,
                   )
               : undefined,

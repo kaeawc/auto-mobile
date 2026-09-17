@@ -12,6 +12,11 @@ import { defaultTimer, type Timer } from "../utils/SystemTimer";
 // `markStaleActiveSessionsExpired`), so it is a reliable "became terminal" age
 // marker without a migration.
 const DEVICE_SESSION_RETENTION_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+const RECOVERABLE_DAEMON_RELEASE_REASONS = new Set(["daemon-shutdown", "daemon-restart"]);
+
+function shouldRetainLivenessOwner(reason: string): boolean {
+  return RECOVERABLE_DAEMON_RELEASE_REASONS.has(reason);
+}
 
 export interface DeviceSessionRecord {
   sessionUuid: string;
@@ -236,7 +241,7 @@ export class DeviceSessionRepository {
           status,
           released_at_ms: releasedAtMs,
           release_reason: reason,
-          liveness_owner_token: null,
+          ...(shouldRetainLivenessOwner(reason) ? {} : { liveness_owner_token: null }),
           updated_at: new Date().toISOString(),
         })
         .where("session_uuid", "=", sessionUuid)
@@ -270,7 +275,7 @@ export class DeviceSessionRepository {
         status: "expired",
         released_at_ms: releasedAtMs,
         release_reason: reason,
-        liveness_owner_token: null,
+        ...(shouldRetainLivenessOwner(reason) ? {} : { liveness_owner_token: null }),
         updated_at: new Date().toISOString(),
       })
       .where("status", "=", "active")

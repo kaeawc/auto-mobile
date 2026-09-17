@@ -352,6 +352,16 @@ describe("DevicePool autolock", () => {
       ).toBeUndefined();
     });
 
+    it("clears socket-scoped routes when an MCP connection closes", async () => {
+      await initializeLiveAndroidDevice();
+      await pool.autolockDevice("emulator-5554", "android", "mcp-session-1");
+      expect(pool.resolveAutolockSessionForMcpSession("mcp-session-1", "android")).toBeDefined();
+
+      pool.releaseMcpSessionBindings("mcp-session-1");
+
+      expect(pool.resolveAutolockSessionForMcpSession("mcp-session-1", "android")).toBeUndefined();
+    });
+
     it("keeps a recovering owned session in the ambiguity candidate set", async () => {
       // Two Android devices autolocked by the same MCP connection. When one is
       // detached by a process-wide ADB reset, its session is still owned by the

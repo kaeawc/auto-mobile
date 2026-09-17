@@ -175,6 +175,12 @@ function resolveIdentityStartedAt(value: number | undefined, timer: Timer): numb
 }
 
 const MCP_CLIENT_IDLE_CLOSE_MS = 5 * 60 * 1000;
+const DEVICE_ACQUISITION_TOOL_NAMES = new Set([
+  "getAndroid",
+  "getApple",
+  "startDevice",
+  "provisionDevice",
+]);
 /**
  * Maintenance spans separate control RPCs (and, for restart-admitted, separate
  * client processes), so it cannot be tied to one socket. Bound the global
@@ -950,6 +956,7 @@ export class UnixSocketServer {
     this.clientSockets.delete(sessionId);
     this.notificationSubscribers.delete(sessionId);
     this.clearBoundMcpClientKey(sessionId);
+    this.releaseDevicePoolMcpSessionBindings(sessionId);
     // Lift any streamed gesture this socket left open on the device (issue: streaming gesture
     // input). Tracked so daemon shutdown drains it rather than a fire-and-forget floating promise.
     this.trackRequestHandler(this.cancelOwnedGestures(sessionId));
@@ -1734,22 +1741,49 @@ export class UnixSocketServer {
   }
 
   private async restoreSelectorSessions(args: unknown, socketSessionId: string): Promise<void> {
-    if (!args || typeof args !== "object" || Array.isArray(args)) {
+    const ids = this.selectorSessionIds(args);
+    if (!ids) {
       return;
     }
-    const ids = (args as Record<string, unknown>)[DAEMON_OWNED_SESSIONS_PARAM];
-    if (!Array.isArray(ids) || !ids.every((id) => typeof id === "string" && id.length > 0)) {
-      return;
-    }
+    const ownerSocket = this.clientSockets.get(socketSessionId);
     const pool = this.daemonState.getDevicePool();
     // Restoration attaches only live sessions. It restores both explicit
     // acquisition ownership and autolock routing without reallocating a
     // released UUID.
-    await pool.restoreOwnedDeviceSessionsForMcpSession?.(
-      [...new Set<string>(ids)],
-      socketSessionId,
-    );
-    await pool.restoreAutolockSessionsForMcpSession?.([...new Set<string>(ids)], socketSessionId);
+    await pool.restoreOwnedDeviceSessionsForMcpSession?.(ids, socketSessionId);
+    if (this.releaseBindingsIfSocketDisconnected(socketSessionId, ownerSocket, pool)) {
+      return;
+    }
+    await pool.restoreAutolockSessionsForMcpSession?.(ids, socketSessionId);
+    this.releaseBindingsIfSocketDisconnected(socketSessionId, ownerSocket, pool);
+  }
+
+  private selectorSessionIds(args: unknown): string[] | undefined {
+    if (!args || typeof args !== "object" || Array.isArray(args)) {
+      return undefined;
+    }
+    const ids = (args as Record<string, unknown>)[DAEMON_OWNED_SESSIONS_PARAM];
+    return Array.isArray(ids) && ids.every(isNonBlankSessionUuid)
+      ? [...new Set<string>(ids)]
+      : undefined;
+  }
+
+  private releaseBindingsIfSocketDisconnected(
+    socketSessionId: string,
+    ownerSocket: Socket | undefined,
+    pool: ReturnType<DaemonStateAccess["getDevicePool"]>,
+  ): boolean {
+    if (!ownerSocket || this.clientSockets.get(socketSessionId) === ownerSocket) {
+      return false;
+    }
+    pool.releaseMcpSessionBindings?.(socketSessionId);
+    return true;
+  }
+
+  private releaseDevicePoolMcpSessionBindings(socketSessionId: string): void {
+    if (this.daemonState.isInitialized()) {
+      this.daemonState.getDevicePool().releaseMcpSessionBindings?.(socketSessionId);
+    }
   }
 
   private getToolsCallForwardRoute(
@@ -1763,6 +1797,13 @@ export class UnixSocketServer {
     const sessionUuid = this.getSessionUuid(args);
     const toolSelectionProfileUuid =
       this.getToolSelectionProfileUuid(args) ?? boundRoute?.toolSelectionProfileUuid;
+    if (this.isUnboundDeviceAcquisitionTool(toolName, sessionUuid)) {
+      // Acquisition can mint a second device session on an already-bound
+      // daemon socket. Keep each platform/tool on an unseeded loopback client;
+      // reusing the first acquired session's bound transport makes the second
+      // acquisition and later selector routing disagree about ownership.
+      return this.sharedMcpForwardRoute(`socket:${socketSessionId}:acquisition:${toolName}`);
+    }
     if (this.hasImplicitDeviceSelector(args)) {
       return this.selectorMcpForwardRoute(
         socketSessionId,
@@ -1818,6 +1859,15 @@ export class UnixSocketServer {
     // The daemon injects __mcpSessionId before forwarding. Use the socket session as the
     // pre-forward key so separate daemon clients can autolock and run independently.
     return this.sharedMcpForwardRoute(`socket:${socketSessionId}`);
+  }
+
+  private isUnboundDeviceAcquisitionTool(
+    toolName: unknown,
+    sessionUuid: string | undefined,
+  ): toolName is string {
+    return (
+      typeof toolName === "string" && DEVICE_ACQUISITION_TOOL_NAMES.has(toolName) && !sessionUuid
+    );
   }
 
   /**

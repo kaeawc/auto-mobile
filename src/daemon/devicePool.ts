@@ -8106,6 +8106,14 @@ export class DevicePool {
     });
   }
 
+  /** Drop every socket-scoped route and ownership marker for a disconnected MCP client. */
+  releaseMcpSessionBindings(mcpSessionId: string): void {
+    this.mcpSessionAcquiredDeviceSessions.delete(mcpSessionId);
+    this.mcpSessionAcquiredAutolocks.delete(mcpSessionId);
+    this.mcpSessionAutolockMap.delete(mcpSessionId);
+    this.mcpSessionRecoveryDevices.delete(mcpSessionId);
+  }
+
   /**
    * Associate a live autolock session with a reconnected MCP client session.
    */

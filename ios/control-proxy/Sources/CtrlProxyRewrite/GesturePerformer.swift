@@ -939,18 +939,22 @@ public final class GesturePerformer: GesturePerforming {
         // MARK: - Actions
 
         public func performAction(_ action: String, resourceId: String? = nil, label: String? = nil) throws {
-            if action.caseInsensitiveCompare("system_alert_tap") == .orderedSame {
-                guard let label, !label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                    throw GestureError.elementNotFound("system alert button label")
-                }
+            if action.caseInsensitiveCompare("system_alert_accept") == .orderedSame {
                 try catchingObjCException {
                     // iOS 26.5 can render a SpringBoard confirmation that is
                     // absent even from a fresh SpringBoard snapshot. Query the
-                    // exact live button only for this explicit system action;
-                    // normal app actions remain foreground-first.
-                    let button = self.springboard.buttons[label].firstMatch
-                    guard button.waitForExistence(timeout: 1.0), button.isHittable else {
-                        throw GestureError.elementNotFound("system alert button '\(label)'")
+                    // live alert only for this explicit system action. Select
+                    // its final button by accessibility order so localized
+                    // Open labels do not affect acceptance.
+                    let alert = self.springboard.alerts.firstMatch
+                    guard alert.waitForExistence(timeout: 1.0) else {
+                        throw GestureError.elementNotFound("system alert")
+                    }
+                    let buttons = alert.buttons.allElementsBoundByIndex.filter {
+                        $0.exists && $0.isHittable && !$0.frame.isEmpty
+                    }
+                    guard let button = buttons.last else {
+                        throw GestureError.elementNotFound("system alert acceptance button")
                     }
                     button.tap()
                 }

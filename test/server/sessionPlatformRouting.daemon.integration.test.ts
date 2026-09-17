@@ -156,6 +156,7 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
   const fixtures = new Map<string, McpTestFixture>();
   const received: string[] = [];
   const routes: string[] = [];
+  const acquisitionOwners: Array<string | undefined> = [];
   let socketSessionId = "client";
   const dispatch = async (name: string, args: Record<string, unknown>) => {
     const request = { id: "routing", method: "tools/call", params: { name, arguments: args } };
@@ -183,10 +184,20 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
         ["getAndroid", devices[0]],
         ["getApple", devices[1]],
       ] as const) {
-        ToolRegistry.register(toolName, toolName, z.object({}), async () => {
-          const sessionUuid = await pool.autolockDevice(device.deviceId, device.platform, "client");
-          return { content: [{ type: "text" as const, text: JSON.stringify({ sessionUuid }) }] };
-        });
+        ToolRegistry.register(
+          toolName,
+          toolName,
+          z.object({ __mcpSessionId: z.string().optional() }).passthrough(),
+          async (toolArgs) => {
+            acquisitionOwners.push(toolArgs.__mcpSessionId);
+            const sessionUuid = await pool.autolockDevice(
+              device.deviceId,
+              device.platform,
+              toolArgs.__mcpSessionId,
+            );
+            return { content: [{ type: "text" as const, text: JSON.stringify({ sessionUuid }) }] };
+          },
+        );
       }
       ToolRegistry.registerDeviceAware(
         "routingProbe",
@@ -229,15 +240,21 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
     for (const name of ["listDevices", "listDeviceImages"]) {
       await expect(proxy.callTool(name, { platform: "android" })).rejects.toThrow("disabled");
     }
-    // Acquisition and execution intentionally share different internal MCP clients.
+    // Each acquisition uses an unseeded client; selector routing restores both
+    // minted sessions through the socket-owned pool afterward.
     expect(routes[0]).not.toBe(routes[1]);
-    for (const args of [
+    expect(acquisitionOwners).toEqual(["client", "client"]);
+    for (const [index, args] of [
       { platform: "android" },
       { platform: "ios" },
       { platform: "android", deviceId: devices[0].deviceId },
       { deviceId: devices[0].deviceId },
-    ]) {
-      await proxy.callTool("routingProbe", { ...args, keepScreenAwake: false });
+    ].entries()) {
+      try {
+        await proxy.callTool("routingProbe", { ...args, keepScreenAwake: false });
+      } catch (error) {
+        throw new Error(`initial routing probe ${index} failed`, { cause: error });
+      }
     }
     // A replacement socket must recover both acquisitions before selector routing.
     socketSessionId = "replacement-client";

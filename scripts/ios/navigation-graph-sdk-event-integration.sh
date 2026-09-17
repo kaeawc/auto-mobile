@@ -110,7 +110,11 @@ if ! session_uuid="$(
   echo "error: could not acquire navigation graph session for simulator ${device_id}" >&2
   exit 1
 fi
-if ! ctrl_proxy_port="$(ctrl_proxy_port_from_acquisition <<< "${session_result}")"; then
+set +e
+ctrl_proxy_port="$(ctrl_proxy_port_from_acquisition <<< "${session_result}")"
+ctrl_proxy_port_status=$?
+set -e
+if [[ "${ctrl_proxy_port_status}" -ne 0 ]]; then
   echo "error: getApple did not report the CtrlProxy port for simulator ${device_id}" >&2
   exit 1
 fi

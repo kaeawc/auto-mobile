@@ -31,6 +31,9 @@ const appOpenAlertObservation = {
     },
   },
 } as unknown as ObserveResult;
+const noAlertHierarchy = {
+  hierarchy: { text: "Home" },
+} as unknown as NonNullable<ObserveResult["viewHierarchy"]>;
 
 describe("openLinkSchema waitFor / settled", () => {
   test("accepts opt-in iOS app-open alert handling", () => {
@@ -152,7 +155,9 @@ describe("openLink iOS app-open alert acceptance", () => {
       undefined,
       async () => {
         refreshCalls += 1;
-        return refreshCalls === 1 ? (appOpenAlertObservation.viewHierarchy ?? null) : null;
+        return refreshCalls === 1
+          ? (appOpenAlertObservation.viewHierarchy ?? null)
+          : noAlertHierarchy;
       },
     );
 
@@ -200,7 +205,9 @@ describe("openLink iOS app-open alert acceptance", () => {
       undefined,
       async () => {
         refreshCalls += 1;
-        return refreshCalls === 1 ? (appOpenAlertObservation.viewHierarchy ?? null) : null;
+        return refreshCalls === 1
+          ? (appOpenAlertObservation.viewHierarchy ?? null)
+          : noAlertHierarchy;
       },
       async () => {
         systemTapCalls += 1;
@@ -210,6 +217,56 @@ describe("openLink iOS app-open alert acceptance", () => {
 
     expect(result?.success).toBe(true);
     expect(refreshCalls).toBe(2);
+    expect(systemTapCalls).toBe(1);
+  });
+
+  test("rejects inconclusive verification snapshots after tapping", async () => {
+    setTapOnElementFactory(() => ({
+      execute: async () =>
+        ({
+          success: true,
+          action: "tap",
+          element: { text: "Open", bounds: { left: 0, top: 0, right: 1, bottom: 1 } },
+        }) as TapOnElementResult,
+    }));
+
+    await expect(
+      acceptIosAppOpenAlert(
+        iosDevice,
+        appOpenAlertObservation,
+        undefined,
+        undefined,
+        async () => null,
+      ),
+    ).rejects.toThrow("dialog remained visible");
+  });
+
+  test("uses the locale-independent live system action for localized alerts", async () => {
+    let systemTapCalls = 0;
+    const localizedObservation = {
+      ...makeObservation("localized-system-alert"),
+      viewHierarchy: {
+        hierarchy: {
+          className: "UIAlertController",
+          text: "In „Slack Debug“ öffnen?",
+          node: [{ text: "Abbrechen" }, { text: "Öffnen", clickable: true }],
+        },
+      },
+    } as unknown as ObserveResult;
+
+    const result = await acceptIosAppOpenAlert(
+      iosDevice,
+      localizedObservation,
+      undefined,
+      undefined,
+      undefined,
+      async () => {
+        systemTapCalls += 1;
+        return { success: true };
+      },
+    );
+
+    expect(result?.success).toBe(true);
     expect(systemTapCalls).toBe(1);
   });
 

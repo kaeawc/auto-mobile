@@ -57,6 +57,7 @@ function createFakeDaemonState(
   sessionDeviceLabels: Map<string, DeviceLabelMap>,
   mcpAutolockSessions: Map<string, string>,
   onHeartbeat?: (sessionId: string) => void,
+  onMcpBindingsReleased?: (mcpSessionId: string) => void,
 ) {
   return {
     isInitialized: () => true,
@@ -78,6 +79,7 @@ function createFakeDaemonState(
       resolveAutolockSessionForMcpSession: (mcpSessionId: string | undefined) => {
         return mcpSessionId ? mcpAutolockSessions.get(mcpSessionId) : undefined;
       },
+      releaseMcpSessionBindings: (mcpSessionId: string) => onMcpBindingsReleased?.(mcpSessionId),
     }),
   };
 }
@@ -267,6 +269,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
   let sessionDevices: Map<string, string>;
   let sessionDeviceLabels: Map<string, DeviceLabelMap>;
   let mcpAutolockSessions: Map<string, string>;
+  let releasedMcpBindings: string[];
 
   beforeEach(async () => {
     socketPath = join(tmpdir(), `mcp-ser-${randomUUID()}.sock`);
@@ -275,10 +278,17 @@ describe("UnixSocketServer MCP forward serialization", () => {
     sessionDevices = new Map();
     sessionDeviceLabels = new Map();
     mcpAutolockSessions = new Map();
+    releasedMcpBindings = [];
     server = new UnixSocketServer(
       socketPath,
       "http://localhost:0/mcp",
-      createFakeDaemonState(sessionDevices, sessionDeviceLabels, mcpAutolockSessions),
+      createFakeDaemonState(
+        sessionDevices,
+        sessionDeviceLabels,
+        mcpAutolockSessions,
+        undefined,
+        (mcpSessionId) => releasedMcpBindings.push(mcpSessionId),
+      ),
       fakeTimer,
     );
     await server.start();
@@ -320,6 +330,26 @@ describe("UnixSocketServer MCP forward serialization", () => {
     } finally {
       await client.close();
     }
+  });
+
+  test("releases socket-scoped device-pool bindings when a client disconnects", async () => {
+    server.mcpClientFactory = async () => ({
+      callTool: async () => ({ content: [] }),
+      listTools: async () => ({ tools: [] }),
+      listResources: async () => ({ resources: [] }),
+      readResource: async () => ({ contents: [] }),
+      listResourceTemplates: async () => ({ resourceTemplates: [] }),
+      close: async () => {},
+    });
+    const client = new DaemonClient(socketPath, 1_000, undefined, {}, null);
+
+    await client.callTool("listDevices", { platform: "android" });
+    await client.close();
+    for (let attempt = 0; releasedMcpBindings.length === 0 && attempt < 5; attempt += 1) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+
+    expect(releasedMcpBindings).toHaveLength(1);
   });
 
   test("preserves a terminal persisted-session MCP diagnostic through the daemon socket", async () => {

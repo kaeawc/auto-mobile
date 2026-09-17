@@ -966,7 +966,7 @@ describe("IOSCtrlProxyClient", function () {
 
         // Parse sent message to get requestId
         const sentMessage = commandPayloads(socket!)[0];
-        expect(sentMessage.type).toBe("request_hierarchy_if_stale");
+        expect(sentMessage.type).toBe("request_hierarchy");
 
         // Respond with matching requestId
         socket!.simulateMessage(

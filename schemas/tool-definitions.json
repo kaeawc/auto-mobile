@@ -6905,6 +6905,10 @@
           "description": "URL to open",
           "type": "string"
         },
+        "acceptOpenAlert": {
+          "description": "On iOS, automatically tap Open when a system 'Open in <app>?' alert appears",
+          "type": "boolean"
+        },
         "platform": {
           "type": "string",
           "enum": ["android", "ios"]

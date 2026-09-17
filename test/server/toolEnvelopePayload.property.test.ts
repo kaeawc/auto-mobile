@@ -242,18 +242,23 @@ describe("toolEnvelopePayload (property-based)", () => {
     );
   });
 
-  test("read -> write(same payload) -> read round-trips a text-only envelope", () => {
+  test("write on a text-only view re-serializes the text part so the next read sees the new payload", () => {
+    // A DISTINCT `next` (not the payload already serialized in the envelope) so this
+    // catches a regression that skips the text update when `hasStructured` is false:
+    // writing the same value back would leave the original text correct and hide it.
+    // The re-read must reflect `next`, proving the text branch actually re-serialized.
     fc.assert(
-      fc.property(objectPayload, (payload) => {
-        const envelope = textEnvelope(payload);
+      fc.property(objectPayload, objectPayload, (initial, next) => {
+        const envelope = textEnvelope(initial);
         const first = readToolEnvelopePayload(envelope);
         expect(first).toBeDefined();
-        writeToolEnvelopePayload(first!, first!.payload);
+        expect(first!.hasStructured).toBe(false);
+        writeToolEnvelopePayload(first!, next);
         const second = readToolEnvelopePayload(envelope);
         return (
           second !== undefined &&
           second.hasStructured === false &&
-          deepEqualJson(second.payload, payload)
+          deepEqualJson(second.payload, next)
         );
       }),
       RUN_OPTIONS,

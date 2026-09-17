@@ -102,6 +102,9 @@ export abstract class DeviceServiceClient {
   // isConnecting true until connectionTimeoutMs, stalling a fresh-port connect
   // by up to ~5s. Cleared to null the moment the handshake terminates. (#5656)
   private pendingConnectAbort: { socket: WebSocket; abort: () => void } | null = null;
+  // Counts callers currently awaiting connectWebSocket(), so a per-caller
+  // cancellation only aborts a shared pending handshake after every caller leaves.
+  protected pendingConnectJoiners: number = 0;
   // Platform setup (notably adb port forwarding) is also part of a connection
   // attempt. Keep its controller separately because no WebSocket exists yet.
   private pendingPlatformSetupAbort: AbortController | null = null;
@@ -200,10 +203,27 @@ export abstract class DeviceServiceClient {
    * Ensure connection to the device service is established.
    * Returns true if connected, false if connection failed.
    */
-  public async ensureConnected(
+  public ensureConnected(
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<boolean> {
     return this.connectWebSocket(perf);
+  }
+
+  /**
+   * Keep a caller's interest in a pending connection attempt until it settles.
+   */
+  protected acquirePendingConnectInterest(): { release: () => void } {
+    this.pendingConnectJoiners++;
+    let released = false;
+    return {
+      release: () => {
+        if (released) {
+          return;
+        }
+        released = true;
+        this.pendingConnectJoiners = Math.max(0, this.pendingConnectJoiners - 1);
+      },
+    };
   }
 
   public getReconnectStatus(): CtrlProxyReconnectStatus | null {
@@ -371,7 +391,14 @@ export abstract class DeviceServiceClient {
    * @param perf Performance tracker for timing measurements
    * @returns true if connection successful, false otherwise
    */
-  protected async connectWebSocket(
+  protected connectWebSocket(
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    interest: { release: () => void } = this.acquirePendingConnectInterest(),
+  ): Promise<boolean> {
+    return this.connectWebSocketAttempt(perf).finally(interest.release);
+  }
+
+  private async connectWebSocketAttempt(
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<boolean> {
     // Already connected - reuse existing connection
@@ -403,7 +430,7 @@ export abstract class DeviceServiceClient {
     // Connection already in progress - wait for it
     if (this.isConnecting) {
       logger.debug(`[${this.logTag}] Connection already in progress, waiting...`);
-      return new Promise((resolve) => {
+      const connected = await new Promise<boolean>((resolve) => {
         const checkInterval = this.timer.setInterval(() => {
           if (!this.isConnecting) {
             this.timer.clearInterval(checkInterval);
@@ -411,6 +438,7 @@ export abstract class DeviceServiceClient {
           }
         }, 100);
       });
+      return connected;
     }
 
     // Check cooldown after max attempts

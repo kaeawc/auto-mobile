@@ -955,15 +955,34 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
    */
   public async connectWithoutSetup(signal?: AbortSignal): Promise<boolean> {
     signal?.throwIfAborted();
-    const abortConnection = () => this.abortPendingConnect();
-    signal?.addEventListener("abort", abortConnection, { once: true });
-    try {
-      const connected = await super.ensureConnected();
-      signal?.throwIfAborted();
-      return connected;
-    } finally {
-      signal?.removeEventListener("abort", abortConnection);
-    }
+    const interest = this.acquirePendingConnectInterest();
+
+    return await new Promise<boolean>((resolve, reject) => {
+      let settled = false;
+      const settle = (complete: () => void): void => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        interest.release();
+        signal?.removeEventListener("abort", abortConnection);
+        complete();
+      };
+      const abortConnection = (): void => {
+        settle(() => {
+          if (this.pendingConnectJoiners === 0) {
+            this.abortPendingConnect();
+          }
+          reject(signal!.reason);
+        });
+      };
+
+      signal?.addEventListener("abort", abortConnection, { once: true });
+      void this.connectWebSocket(undefined, interest).then(
+        (connected) => settle(() => resolve(connected)),
+        (error: unknown) => settle(() => reject(error)),
+      );
+    });
   }
 
   /**

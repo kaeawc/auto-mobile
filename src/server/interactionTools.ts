@@ -132,7 +132,6 @@ import {
   isSwipeTargetIsolatedFromGroup,
   tapElement,
   swipeElement,
-  resolveAppLabel,
   SYSTEM_TRAY_CLEAR_MAX_ITERATIONS,
   SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS,
 } from "./systemTrayHelpers";
@@ -2035,7 +2034,11 @@ export function registerInteractionTools() {
           throw new ActionableError(`App ${notification.appId} is not installed.`);
         }
 
-        appLabel = await resolveAppLabel(device, notification.appId);
+        appLabel = await getSystemTrayDependencies().appLabelResolver(
+          device,
+          notification.appId,
+          signal,
+        );
         appMatchTexts = [appLabel, notification.appId].filter(Boolean) as string[];
       }
 
@@ -2062,6 +2065,7 @@ export function registerInteractionTools() {
       }
 
       if (args.action === "tap") {
+        const actionStartMs = getSystemTrayDependencies().timer.now();
         const initialMatch = await waitForNotificationMatch(
           device,
           notification,
@@ -2078,7 +2082,7 @@ export function registerInteractionTools() {
           device,
           notification,
           appMatchTexts,
-          awaitTimeoutMs,
+          actionStartMs + awaitTimeoutMs,
           progress,
           { observation: initialMatch.observation, match: initialMatch.match },
         );
@@ -2117,6 +2121,7 @@ export function registerInteractionTools() {
       }
 
       if (args.action === "dismiss") {
+        const actionStartMs = getSystemTrayDependencies().timer.now();
         const initialMatch = await waitForNotificationMatch(
           device,
           notification,
@@ -2133,7 +2138,7 @@ export function registerInteractionTools() {
           device,
           notification,
           appMatchTexts,
-          awaitTimeoutMs,
+          actionStartMs + awaitTimeoutMs,
           progress,
           { observation: initialMatch.observation, match: initialMatch.match },
         );

@@ -516,8 +516,55 @@ export const nodeIsNotificationGroup = (node: any): boolean => {
   return checkChild(children);
 };
 
+const nodeContainsNotificationChildrenContainer = (node: any): boolean => {
+  if (!node) {
+    return false;
+  }
+  const props = getNodeProperties(node);
+  const resourceId = String(props?.["resource-id"] ?? props?.resourceId ?? "").toLowerCase();
+  if (resourceId.includes("notification_children_container")) {
+    return true;
+  }
+  return getDirectChildNodes(node).some(nodeContainsNotificationChildrenContainer);
+};
+
 export const isMatchInCollapsedGroup = (match: SystemTrayNotificationMatch): boolean => {
   return !!match.candidate.groupNode;
+};
+
+const getDirectChildNodes = (node: any): any[] => {
+  if (Array.isArray(node?.node)) {
+    return node.node;
+  }
+  return node?.node ? [node.node] : [];
+};
+
+const getNotificationGroupChildrenContainer = (groupNode: any): any | null =>
+  getDirectChildNodes(groupNode).find((child: any) => {
+    const props = getNodeProperties(child);
+    const resourceId = String(props?.["resource-id"] ?? props?.resourceId ?? "").toLowerCase();
+    return resourceId.includes("notification_children_container");
+  }) ?? null;
+
+const getNotificationGroupHeader = (groupNode: any): any | null => {
+  const groupChildren = getDirectChildNodes(groupNode);
+  const header = groupChildren.find((child: any) => {
+    const props = getNodeProperties(child);
+    const resourceId = String(props?.["resource-id"] ?? props?.resourceId ?? "").toLowerCase();
+    return resourceId.includes("notification_header");
+  });
+  if (header) {
+    return header;
+  }
+
+  const childrenContainer = getNotificationGroupChildrenContainer(groupNode);
+  return (
+    getDirectChildNodes(childrenContainer).find((child: any) => {
+      const props = getNodeProperties(child);
+      const resourceId = String(props?.["resource-id"] ?? props?.resourceId ?? "").toLowerCase();
+      return resourceId.includes("notification_header");
+    }) ?? null
+  );
 };
 
 const findExpandButtonInGroup = (groupNode: any): Element | null => {
@@ -530,17 +577,9 @@ const findExpandButtonInGroup = (groupNode: any): Element | null => {
 
     const props = getNodeProperties(node);
     if (props) {
-      const contentDesc = String(props["content-desc"] ?? props.contentDesc ?? "").toLowerCase();
       const resourceId = String(props["resource-id"] ?? props.resourceId ?? "").toLowerCase();
-      const matchesDesc = contentDesc === "expand";
       const matchesId = resourceId.includes("expand_button");
-      if (matchesDesc || matchesId) {
-        if (matchesDesc !== matchesId) {
-          logger.warn(
-            `[systemTray] Expand button partial match: ` +
-              `content-desc="${contentDesc}", resource-id="${resourceId}"`,
-          );
-        }
+      if (matchesId) {
         return parser.parseNodeBounds(node) ?? null;
       }
     }
@@ -560,12 +599,11 @@ const findExpandButtonInGroup = (groupNode: any): Element | null => {
     return null;
   };
 
-  return search(groupNode);
+  return search(getNotificationGroupHeader(groupNode));
 };
 
 export const isNotificationGroupExpanded = (groupNode: any): boolean => {
-  const expandButton = findExpandButtonInGroup(groupNode);
-  return String(expandButton?.["content-desc"] ?? "").toLowerCase() === "collapse";
+  return getNotificationGroupChildRows(groupNode).length > 0;
 };
 
 export const expandNotificationGroup = async (
@@ -593,26 +631,13 @@ export const expandNotificationGroup = async (
   return true;
 };
 
-const getNotificationGroupChildRows = (groupNode: any): any[] => {
-  const groupChildren = Array.isArray(groupNode?.node)
-    ? groupNode.node
-    : groupNode?.node
-      ? [groupNode.node]
-      : [];
-  const childrenContainer = groupChildren.find((child: any) => {
-    const props = getNodeProperties(child);
-    const resourceId = String(props?.["resource-id"] ?? props?.resourceId ?? "").toLowerCase();
-    return resourceId.includes("notification_children_container");
-  });
+export const getNotificationGroupChildRows = (groupNode: any): any[] => {
+  const childrenContainer = getNotificationGroupChildrenContainer(groupNode);
   if (!childrenContainer) {
     return [];
   }
 
-  const children = Array.isArray(childrenContainer.node)
-    ? childrenContainer.node
-    : childrenContainer.node
-      ? [childrenContainer.node]
-      : [];
+  const children = getDirectChildNodes(childrenContainer);
   return children.filter((child: any) => {
     const props = getNodeProperties(child);
     const resourceId = String(props?.["resource-id"] ?? props?.resourceId ?? "").toLowerCase();
@@ -640,7 +665,8 @@ const collectNotificationCandidates = (
   const visitNotificationGroupChildren = (node: any, depth: number): void => {
     const childRows = getNotificationGroupChildRows(node);
     if (childRows.length === 0) {
-      visitChildren(node, depth, node);
+      const element = parser.parseNodeBounds(node) ?? undefined;
+      candidates.push({ node, depth, element, groupNode: node });
       return;
     }
     for (const childRow of childRows) {
@@ -700,6 +726,16 @@ const extractNodeTextCandidates = (node: any): string[] => {
   return candidates.filter(
     (value): value is string => typeof value === "string" && value.length > 0,
   );
+};
+
+const collectNodeSubtreeTextCandidates = (node: any): string[] => {
+  if (!node) {
+    return [];
+  }
+  return [
+    ...extractNodeTextCandidates(node),
+    ...getDirectChildNodes(node).flatMap(collectNodeSubtreeTextCandidates),
+  ];
 };
 
 const resolveMatchForSearchText = (
@@ -806,6 +842,13 @@ const collectCompositeNotificationCandidates = (
   const candidates: SystemTrayNotificationCandidate[] = [];
   const parser = new DefaultElementParser();
 
+  const childRowMatchesContentCriteria = (childRow: any): boolean => {
+    const childTexts = collectNodeSubtreeTextCandidates(childRow).map((text) => text.toLowerCase());
+    const matches = (searchText: NormalizedSearchText | null): boolean =>
+      !searchText || childTexts.some((text) => text.includes(searchText.normalized));
+    return matches(titleText) && matches(bodyText) && matches(actionText);
+  };
+
   const resolveNodeMatches = (node: any): SystemTrayMatchResult["matches"] => {
     const nodeTextCandidates = extractNodeTextCandidates(node);
     if (nodeTextCandidates.length === 0) {
@@ -849,6 +892,7 @@ const collectCompositeNotificationCandidates = (
   const visit = (
     node: any,
     depth: number,
+    groupNode?: any,
   ): { matches: SystemTrayMatchResult["matches"]; hasAll: boolean } => {
     if (!node) {
       return { matches: {}, hasAll: false };
@@ -857,17 +901,18 @@ const collectCompositeNotificationCandidates = (
     let combinedMatches = resolveNodeMatches(node);
     let childHasAll = false;
 
+    const currentGroupNode = nodeIsNotificationGroup(node) ? node : groupNode;
     const children = node.node;
     if (Array.isArray(children)) {
       for (const child of children) {
-        const childResult = visit(child, depth + 1);
+        const childResult = visit(child, depth + 1, currentGroupNode);
         combinedMatches = mergeMatchMaps(combinedMatches, childResult.matches);
         if (childResult.hasAll) {
           childHasAll = true;
         }
       }
     } else if (children && typeof children === "object") {
-      const childResult = visit(children, depth + 1);
+      const childResult = visit(children, depth + 1, currentGroupNode);
       combinedMatches = mergeMatchMaps(combinedMatches, childResult.matches);
       if (childResult.hasAll) {
         childHasAll = true;
@@ -876,8 +921,11 @@ const collectCompositeNotificationCandidates = (
 
     const hasAll = requiredKeys.every((key) => Boolean(combinedMatches[key]));
     if (hasAll && !childHasAll) {
-      const element = parser.parseNodeBounds(node) ?? undefined;
-      candidates.push({ node, depth, element });
+      const childRow = currentGroupNode
+        ? getNotificationGroupChildRows(currentGroupNode).find(childRowMatchesContentCriteria)
+        : undefined;
+      const element = parser.parseNodeBounds(childRow ?? node) ?? undefined;
+      candidates.push({ node, depth, element, groupNode: currentGroupNode });
     }
 
     return { matches: combinedMatches, hasAll };
@@ -1414,11 +1462,101 @@ export const waitForNotificationMatch = async (
   }
 };
 
+interface NotificationGroupIdentity {
+  left: number;
+  top: number;
+  right: number;
+  headerAppLabel?: string;
+  childTitles: string[];
+}
+
+const findHeaderAppLabel = (header: any): string | undefined => {
+  const props = getNodeProperties(header);
+  const resourceId = String(props?.["resource-id"] ?? props?.resourceId ?? "").toLowerCase();
+  if (resourceId.includes("app_name_text")) {
+    return typeof props?.text === "string" && props.text.length > 0 ? props.text : undefined;
+  }
+  for (const child of getDirectChildNodes(header)) {
+    const label = findHeaderAppLabel(child);
+    if (label) {
+      return label;
+    }
+  }
+  return undefined;
+};
+
+const collectNotificationGroupChildTitles = (groupNode: any): string[] => {
+  const childrenContainer = getNotificationGroupChildrenContainer(groupNode);
+  if (!childrenContainer) {
+    return [];
+  }
+
+  const titles: string[] = [];
+  const visit = (node: any): void => {
+    const props = getNodeProperties(node);
+    const resourceId = String(props?.["resource-id"] ?? props?.resourceId ?? "");
+    const id = resourceId.split("/").pop() ?? "";
+    if (
+      ["title", "title_big", "conversation_text"].includes(id) &&
+      typeof props?.text === "string" &&
+      props.text.length > 0
+    ) {
+      titles.push(props.text);
+    }
+    for (const child of getDirectChildNodes(node)) {
+      visit(child);
+    }
+  };
+
+  visit(childrenContainer);
+  return titles;
+};
+
+const getNotificationGroupIdentity = (groupNode: any): NotificationGroupIdentity | null => {
+  const bounds = new DefaultElementParser().parseNodeBounds(groupNode)?.bounds;
+  if (!bounds) {
+    return null;
+  }
+  return {
+    left: bounds.left,
+    top: bounds.top,
+    right: bounds.right,
+    headerAppLabel: findHeaderAppLabel(getNotificationGroupHeader(groupNode)),
+    childTitles: collectNotificationGroupChildTitles(groupNode),
+  };
+};
+
+const isSameNotificationGroup = (
+  original: NotificationGroupIdentity | null,
+  rematchedGroupNode: any,
+): boolean => {
+  const rematched = getNotificationGroupIdentity(rematchedGroupNode);
+  if (
+    !original ||
+    !rematched ||
+    original.left !== rematched.left ||
+    original.right !== rematched.right
+  ) {
+    return false;
+  }
+  if (
+    original.headerAppLabel &&
+    rematched.headerAppLabel &&
+    original.headerAppLabel !== rematched.headerAppLabel
+  ) {
+    return false;
+  }
+  return (
+    original.top === rematched.top ||
+    original.childTitles.some((title) => rematched.childTitles.includes(title))
+  );
+};
+
 export const expandAndRematchIfCollapsed = async (
   device: BootedDevice,
   notification: SystemTrayNotificationArgs,
   appMatchTexts: string[],
-  awaitTimeoutMs: number,
+  deadlineMs: number,
   progress: ProgressCallback | undefined,
   result: { observation: ObserveResult; match: SystemTrayNotificationMatch },
 ): Promise<{ observation: ObserveResult; match: SystemTrayNotificationMatch }> => {
@@ -1428,10 +1566,16 @@ export const expandAndRematchIfCollapsed = async (
     return { observation, match };
   }
 
+  const groupIdentity = getNotificationGroupIdentity(groupNode);
   await expandNotificationGroup(device, match);
   const { timer } = getSystemTrayDependencies();
   await timer.sleep(EXPAND_GROUP_SETTLE_MS);
-  const remainingMs = Math.max(0, awaitTimeoutMs - EXPAND_GROUP_SETTLE_MS);
+  const remainingMs = Math.max(0, deadlineMs - timer.now());
+  if (remainingMs === 0) {
+    throw new ActionableError(
+      "Expanded collapsed notification group but the notification wait timed out before it could be re-matched.",
+    );
+  }
   const reMatch = await waitForNotificationMatch(
     device,
     notification,
@@ -1440,6 +1584,15 @@ export const expandAndRematchIfCollapsed = async (
     progress,
   );
   if (reMatch.match) {
+    if (
+      !reMatch.match.candidate.groupNode ||
+      !isSameNotificationGroup(groupIdentity, reMatch.match.candidate.groupNode)
+    ) {
+      throw new ActionableError(
+        "Expanded collapsed notification group but re-match resolved a different notification group. " +
+          "Try the action again after the notification shade settles.",
+      );
+    }
     match = reMatch.match;
     observation = reMatch.observation;
     return { observation, match };
@@ -1456,6 +1609,9 @@ export const isSwipeTargetIsolatedFromGroup = (
   element: Element,
 ): boolean => {
   const groupNode = match.candidate.groupNode;
+  if (!groupNode && nodeContainsNotificationChildrenContainer(match.candidate.node)) {
+    return false;
+  }
   if (!groupNode) {
     return true;
   }

@@ -2310,6 +2310,8 @@ export function registerInteractionTools() {
                     undefined,
                     undefined,
                     IOS_OPEN_ALERT_HIERARCHY_TIMEOUT_MS,
+                    undefined,
+                    signal,
                   )
               : undefined,
           )

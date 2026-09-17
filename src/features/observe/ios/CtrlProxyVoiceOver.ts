@@ -82,6 +82,7 @@ export class CtrlProxyVoiceOver {
    * @param label - The accessibility label (content-desc) as fallback when no resourceId
    * @param timeoutMs - Request timeout in milliseconds (default: 5000)
    * @param perf - Optional performance tracker
+   * @param abortSignal - Optional caller cancellation signal
    * @returns Action result
    */
   async requestAction(
@@ -90,6 +91,7 @@ export class CtrlProxyVoiceOver {
     label?: string,
     timeoutMs: number = 5000,
     perf?: PerformanceTracker,
+    abortSignal?: AbortSignal,
   ): Promise<CtrlProxyActionResult> {
     return sendCommand<CtrlProxyActionResult>(this.context, {
       idPrefix: "action",
@@ -99,6 +101,7 @@ export class CtrlProxyVoiceOver {
       timeoutMs,
       perf,
       cancelScreenshotBackoff: false,
+      abortSignal,
       notConnectedError: () => ({ success: false, error: "Not connected to CtrlProxy" }),
       timeoutError: () => ({ success: false, error: "Timeout waiting for action_result" }),
     });

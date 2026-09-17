@@ -6,6 +6,7 @@ import {
   DefaultExactDeviceProvisioner,
   FileAndroidAvdConfigWriter,
   ProvisionDeviceError,
+  DEFAULT_PROVISION_DEVICE_RETRYABILITY,
   type AndroidAvdConfigWriter,
   type ExactAndroidAvdClient,
   type ExactIosSimulatorClient,
@@ -24,6 +25,32 @@ function androidImage(name: string): DeviceInfo {
     isRunning: false,
   };
 }
+
+describe("ProvisionDeviceError retryability", () => {
+  test("uses deliberate defaults for every provisioning failure code", () => {
+    expect(DEFAULT_PROVISION_DEVICE_RETRYABILITY).toEqual({
+      cleanup_failed: false,
+      creation_not_allowed: false,
+      discovery_incomplete: true,
+      identity_conflict: false,
+      timeout: true,
+      unsupported: false,
+      platform_command_failed: false,
+    });
+  });
+
+  test.each([
+    ["timeout", true],
+    ["identity_conflict", false],
+  ] as const)("defaults %s to retryable=%s", (code, retryable) => {
+    expect(new ProvisionDeviceError(code, "failure").retryable).toBe(retryable);
+  });
+
+  test("allows an explicit retryability value to override the default", () => {
+    expect(new ProvisionDeviceError("timeout", "failure", false).retryable).toBe(false);
+    expect(new ProvisionDeviceError("identity_conflict", "failure", true).retryable).toBe(true);
+  });
+});
 
 describe("DefaultExactDeviceProvisioner", () => {
   test("writes and reads independent hardware options without changing other AVD properties", async () => {

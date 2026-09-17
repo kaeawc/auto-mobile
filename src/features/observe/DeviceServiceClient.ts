@@ -102,8 +102,7 @@ export abstract class DeviceServiceClient {
   // isConnecting true until connectionTimeoutMs, stalling a fresh-port connect
   // by up to ~5s. Cleared to null the moment the handshake terminates. (#5656)
   private pendingConnectAbort: { socket: WebSocket; abort: () => void } | null = null;
-  // Counts callers currently awaiting connectWebSocket() through ensureConnected()
-  // (or direct callers that acquire interest themselves), so a per-caller
+  // Counts callers currently awaiting connectWebSocket(), so a per-caller
   // cancellation only aborts a shared pending handshake after every caller leaves.
   protected pendingConnectJoiners: number = 0;
   // Platform setup (notably adb port forwarding) is also part of a connection
@@ -204,15 +203,10 @@ export abstract class DeviceServiceClient {
    * Ensure connection to the device service is established.
    * Returns true if connected, false if connection failed.
    */
-  public async ensureConnected(
+  public ensureConnected(
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<boolean> {
-    const interest = this.acquirePendingConnectInterest();
-    try {
-      return await this.connectWebSocket(perf);
-    } finally {
-      interest.release();
-    }
+    return this.connectWebSocket(perf);
   }
 
   /**
@@ -397,7 +391,14 @@ export abstract class DeviceServiceClient {
    * @param perf Performance tracker for timing measurements
    * @returns true if connection successful, false otherwise
    */
-  protected async connectWebSocket(
+  protected connectWebSocket(
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    interest: { release: () => void } = this.acquirePendingConnectInterest(),
+  ): Promise<boolean> {
+    return this.connectWebSocketAttempt(perf).finally(interest.release);
+  }
+
+  private async connectWebSocketAttempt(
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<boolean> {
     // Already connected - reuse existing connection
@@ -429,7 +430,7 @@ export abstract class DeviceServiceClient {
     // Connection already in progress - wait for it
     if (this.isConnecting) {
       logger.debug(`[${this.logTag}] Connection already in progress, waiting...`);
-      return new Promise((resolve) => {
+      const connected = await new Promise<boolean>((resolve) => {
         const checkInterval = this.timer.setInterval(() => {
           if (!this.isConnecting) {
             this.timer.clearInterval(checkInterval);
@@ -437,6 +438,7 @@ export abstract class DeviceServiceClient {
           }
         }, 100);
       });
+      return connected;
     }
 
     // Check cooldown after max attempts

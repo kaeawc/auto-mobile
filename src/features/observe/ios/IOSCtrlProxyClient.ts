@@ -978,7 +978,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       };
 
       signal?.addEventListener("abort", abortConnection, { once: true });
-      void this.connectWebSocket().then(
+      void this.connectWebSocket(undefined, interest).then(
         (connected) => settle(() => resolve(connected)),
         (error: unknown) => settle(() => reject(error)),
       );

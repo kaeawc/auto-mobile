@@ -2634,6 +2634,55 @@ describe("IOSCtrlProxyClient", function () {
       }
     });
 
+    test("connectWithoutSetup keeps an automatic reconnect handshake alive when it aborts", async function () {
+      const testTimer = new FakeTimer();
+      const caller = new AbortController();
+      const cancellation = new Error("readiness cancelled");
+      const { factory, getSocket, getCreatedSocketCount } =
+        createCapturingConnectionTimeoutWebSocketFactory(testTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        testTimer,
+      );
+
+      try {
+        const initialConnection = testClient.connectWithoutSetup();
+        await flushPromises();
+        const initialSocket = getSocket();
+        initialSocket!.readyState = WebSocketState.OPEN;
+        initialSocket!.emit("open");
+        await expect(initialConnection).resolves.toBe(true);
+
+        initialSocket!.readyState = WebSocketState.CLOSED;
+        initialSocket!.emit("close");
+        testTimer.advanceTime(2000);
+        await flushPromises();
+
+        const reconnectSocket = getSocket();
+        expect(getCreatedSocketCount()).toBe(2);
+        expect(reconnectSocket?.readyState).toBe(WebSocketState.CONNECTING);
+
+        const joiningConnection = testClient.connectWithoutSetup(caller.signal);
+        await flushPromises();
+        caller.abort(cancellation);
+
+        await expect(joiningConnection).rejects.toBe(cancellation);
+        expect(reconnectSocket?.readyState).toBe(WebSocketState.CONNECTING);
+
+        reconnectSocket!.readyState = WebSocketState.OPEN;
+        reconnectSocket!.emit("open");
+        testTimer.advanceTime(100);
+        await flushPromises();
+        expect(testClient.isConnected()).toBe(true);
+        expect((testClient as any).isConnecting).toBe(false);
+        expect((testClient as any).pendingConnectJoiners).toBe(0);
+      } finally {
+        await testClient.close();
+      }
+    });
+
     test("connectWithoutSetup aborts the shared handshake after all callers cancel", async function () {
       const testTimer = new FakeTimer();
       const callerA = new AbortController();

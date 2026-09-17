@@ -3,6 +3,16 @@ import { FakeIOSCtrlProxy } from "./FakeIOSCtrlProxy";
 import { FakeTimer } from "./FakeTimer";
 
 describe("FakeIOSCtrlProxy operation delays", () => {
+  test("connectWithoutSetup derives its default result from the connection state", async () => {
+    const proxy = new FakeIOSCtrlProxy();
+
+    proxy.setConnected(false);
+    expect(await proxy.connectWithoutSetup()).toBe(false);
+
+    proxy.setConnected(true);
+    expect(await proxy.connectWithoutSetup()).toBe(true);
+  });
+
   test("connectWithoutSetup records calls, returns configured results, and rejects cancellations", async () => {
     const proxy = new FakeIOSCtrlProxy();
     proxy.setConnectWithoutSetupResult(false);

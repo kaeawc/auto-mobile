@@ -49,7 +49,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
   private performanceTiming: CtrlProxyPerfTiming | null = null;
   private isConnectedState: boolean = true;
   private hasCachedHierarchyState: boolean = false;
-  private connectWithoutSetupResult: boolean = true;
+  private connectWithoutSetupResult: boolean | null = null;
   public clearCacheCallCount: number = 0;
 
   // Failure modes
@@ -528,8 +528,9 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     await this.applyDelay("connectWithoutSetup");
     signal?.throwIfAborted();
     this.checkFailure("connectWithoutSetup");
-    this.isConnectedState = this.connectWithoutSetupResult;
-    return this.connectWithoutSetupResult;
+    const result = this.connectWithoutSetupResult ?? this.isConnectedState;
+    this.isConnectedState = result;
+    return result;
   }
 
   async getAccessibilityHierarchy(

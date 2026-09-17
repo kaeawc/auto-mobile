@@ -387,10 +387,19 @@ export class PostNotification {
   }
 
   private parseReceiverProbe(output: string, appId: string): "present" | "absent" | "unknown" {
-    if (output.includes(`${appId}/`)) {
+    const expectedComponents = [`${appId}/${NOTIFICATION_RECEIVER}`];
+    if (NOTIFICATION_RECEIVER.startsWith(`${appId}.`)) {
+      expectedComponents.push(`${appId}/${NOTIFICATION_RECEIVER.slice(appId.length)}`);
+    }
+    const outputTokens = output.split(/\s+/);
+    if (expectedComponents.some((component) => outputTokens.includes(component))) {
       return "present";
     }
-    if (/no receivers found/i.test(output) || /\d+\s+receivers?\s+found/i.test(output)) {
+    if (
+      /no receivers found/i.test(output) ||
+      (/\d+\s+receivers?\s+found/i.test(output) &&
+        !expectedComponents.some((component) => outputTokens.includes(component)))
+    ) {
       return "absent";
     }
     return "unknown";

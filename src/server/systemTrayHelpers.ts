@@ -1732,17 +1732,15 @@ export const expandAndRematchIfCollapsed = async (
     );
   }
 
-  // The pre-expand refusal above already confirmed the caller's budget was not
-  // exhausted at match time. From here, bound a separate settle-and-re-match
-  // phase so settling cannot consume the caller's remaining budget before a
-  // notification that was just found and expanded gets another poll.
+  const groupIdentity = getNotificationGroupIdentity(groupNode);
+  const originalRowNode = match.candidate.node;
+  await expandNotificationGroup(device, match);
+  // Start the separate settle-and-re-match phase after the tap so tap latency
+  // cannot consume the full settle period plus one poll window.
   const expandPhaseDeadlineMs = Math.max(
     deadlineMs,
     timer.now() + EXPAND_GROUP_SETTLE_MS + SYSTEM_TRAY_POLL_INTERVAL_MS,
   );
-  const groupIdentity = getNotificationGroupIdentity(groupNode);
-  const originalRowNode = match.candidate.node;
-  await expandNotificationGroup(device, match);
   await timer.sleep(
     Math.min(EXPAND_GROUP_SETTLE_MS, Math.max(0, expandPhaseDeadlineMs - timer.now())),
   );

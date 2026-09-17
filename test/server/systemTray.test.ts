@@ -64,6 +64,38 @@ class SequencedFakeAdbExecutor extends FakeAdbExecutor {
   }
 }
 
+class TapLatencyFakeAdbExecutor extends SequencedFakeAdbExecutor {
+  constructor(
+    timestamps: number[],
+    private readonly timer: FakeTimer,
+    private readonly tapLatencyMs: number,
+  ) {
+    super(timestamps);
+  }
+
+  async executeCommand(
+    command: string,
+    timeoutMs?: number,
+    maxBuffer?: number,
+    noRetry?: boolean,
+    signal?: AbortSignal,
+    waitForProcessSettlementAfterAbort?: boolean,
+  ) {
+    const result = await super.executeCommand(
+      command,
+      timeoutMs,
+      maxBuffer,
+      noRetry,
+      signal,
+      waitForProcessSettlementAfterAbort,
+    );
+    if (command.includes("input tap")) {
+      this.timer.advanceTime(this.tapLatencyMs);
+    }
+    return result;
+  }
+}
+
 class SequencedObserveScreen extends FakeObserveScreen {
   private results: ObserveResult[];
   private index = 0;
@@ -3002,6 +3034,48 @@ describe("systemTray group expansion", () => {
     expect(commands.filter((command) => command.includes("input swipe"))).toHaveLength(1);
     expect(fakeTimer.now()).toBe(1400);
     expect(fakeTimer.now()).toBeLessThanOrEqual(1750);
+  });
+
+  test("keeps the full expand settle budget after a slow expand tap", async () => {
+    const fakeTimer = new FakeTimer();
+    const fakeAdb = new TapLatencyFakeAdbExecutor([1000, 1000, 2000], fakeTimer, 300);
+    const collapsedHierarchy = createCtrlProxyCapturedGroupTray(false);
+    const expandedHierarchy = createCtrlProxyCapturedGroupTray(true);
+    const fakeObserveScreen = new SequencedObserveScreen([
+      createObservation(createTrayWithExpandedNotifications(["Different notification"])),
+      createObservation(collapsedHierarchy),
+      createObservation(expandedHierarchy),
+    ]);
+    setSystemTrayDependencies({
+      timer: fakeTimer,
+      adbFactory: () => fakeAdb,
+      observeScreenFactory: () => fakeObserveScreen,
+    });
+    ToolRegistry.clearTools();
+    registerInteractionTools();
+
+    const dismiss = ToolRegistry.getTool("systemTray")!.deviceAwareHandler!(device, {
+      action: "dismiss",
+      notification: { title: "Rev3" },
+      awaitTimeout: 1000,
+      platform: "android",
+    });
+    await waitForPendingSleep(fakeTimer);
+    fakeTimer.advanceTime(900);
+    await waitForPendingSleep(fakeTimer);
+    expect(fakeTimer.getPendingSleeps()).toEqual([EXPAND_GROUP_SETTLE_MS]);
+    fakeTimer.advanceTime(EXPAND_GROUP_SETTLE_MS);
+
+    const response = await dismiss;
+    const payload = JSON.parse((response.content[0] as { text: string }).text);
+    expect(payload.success).toBe(true);
+    expect(fakeTimer.getSleepHistory()).toEqual([POLL_INTERVAL_MS, EXPAND_GROUP_SETTLE_MS]);
+    expect(
+      fakeAdb.getExecutedCommands().filter((command) => command.includes("input tap")),
+    ).toHaveLength(1);
+    expect(
+      fakeAdb.getExecutedCommands().filter((command) => command.includes("input swipe")),
+    ).toHaveLength(1);
   });
 
   test("does not tap a collapsed group when the notification wait budget is exhausted", async () => {

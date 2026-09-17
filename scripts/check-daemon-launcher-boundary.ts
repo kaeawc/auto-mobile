@@ -70,12 +70,13 @@ function unwrapTransparentExpression(expression: ts.Expression): ts.Expression {
 }
 
 function staticMemberName(expression: ts.Expression): string | undefined {
-  if (ts.isPropertyAccessExpression(expression)) {
-    return expression.name.text;
+  const memberAccess = unwrapTransparentExpression(expression);
+  if (ts.isPropertyAccessExpression(memberAccess)) {
+    return memberAccess.name.text;
   }
   const elementAccessArgument =
-    ts.isElementAccessExpression(expression) && expression.argumentExpression
-      ? unwrapTransparentExpression(expression.argumentExpression)
+    ts.isElementAccessExpression(memberAccess) && memberAccess.argumentExpression
+      ? unwrapTransparentExpression(memberAccess.argumentExpression)
       : undefined;
   if (elementAccessArgument !== undefined && ts.isStringLiteralLike(elementAccessArgument)) {
     return elementAccessArgument.text;
@@ -150,30 +151,31 @@ function violationsIn(
     }
 
     if (ts.isVariableDeclaration(node) && node.initializer) {
+      const initializer = unwrapTransparentExpression(node.initializer);
       if (ts.isIdentifier(node.name)) {
-        if (isChildProcessRequire(node.initializer)) {
+        if (isChildProcessRequire(initializer)) {
           addBinding(namespaces, node.name);
         }
-        if (ts.isIdentifier(node.initializer) && hasBinding(importedExecutors, node.initializer)) {
+        if (ts.isIdentifier(initializer) && hasBinding(importedExecutors, initializer)) {
           addBinding(importedExecutors, node.name);
         }
-        if (ts.isIdentifier(node.initializer) && hasBinding(namespaces, node.initializer)) {
+        if (ts.isIdentifier(initializer) && hasBinding(namespaces, initializer)) {
           addBinding(namespaces, node.name);
         }
         if (
-          (ts.isPropertyAccessExpression(node.initializer) ||
-            ts.isElementAccessExpression(node.initializer)) &&
-          ts.isIdentifier(node.initializer.expression) &&
-          hasBinding(namespaces, node.initializer.expression) &&
-          EXECUTION_FUNCTIONS.has(staticMemberName(node.initializer) ?? "")
+          (ts.isPropertyAccessExpression(initializer) ||
+            ts.isElementAccessExpression(initializer)) &&
+          ts.isIdentifier(unwrapTransparentExpression(initializer.expression)) &&
+          hasBinding(namespaces, unwrapTransparentExpression(initializer.expression)) &&
+          EXECUTION_FUNCTIONS.has(staticMemberName(initializer) ?? "")
         ) {
           addBinding(importedExecutors, node.name);
         }
       }
       if (
         ts.isObjectBindingPattern(node.name) &&
-        (isChildProcessRequire(node.initializer) ||
-          (ts.isIdentifier(node.initializer) && hasBinding(namespaces, node.initializer)))
+        (isChildProcessRequire(initializer) ||
+          (ts.isIdentifier(initializer) && hasBinding(namespaces, initializer)))
       ) {
         for (const element of node.name.elements) {
           const imported =
@@ -186,12 +188,12 @@ function violationsIn(
     }
 
     if (ts.isCallExpression(node) && !isDiagnosticProcessTableCall(file, node)) {
-      const expression = node.expression;
+      const expression = unwrapTransparentExpression(node.expression);
       const direct = ts.isIdentifier(expression) && hasBinding(importedExecutors, expression);
       const namespaced =
         (ts.isPropertyAccessExpression(expression) || ts.isElementAccessExpression(expression)) &&
-        ts.isIdentifier(expression.expression) &&
-        hasBinding(namespaces, expression.expression) &&
+        ts.isIdentifier(unwrapTransparentExpression(expression.expression)) &&
+        hasBinding(namespaces, unwrapTransparentExpression(expression.expression)) &&
         EXECUTION_FUNCTIONS.has(staticMemberName(expression) ?? "");
       if (direct || namespaced) {
         record(node);

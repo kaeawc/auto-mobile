@@ -117,6 +117,48 @@ teardown() {
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"DaemonLauncherBoundaryFixture.ts"* ]]
+  [[ "$(grep -c "DaemonLauncherBoundaryFixture.ts" <<< "$output")" -eq 4 ]]
+}
+
+@test "rejects transparently wrapped child-process member accesses outside the owner" {
+  printf '%s\n' \
+    'import childProcess from "node:child_process";' \
+    'const launch = (childProcess.execFileSync);' \
+    'launch("auto-mobile", ["--daemon-mode"]);' \
+    'const computedLaunch = (childProcess["execFileSync"]);' \
+    'computedLaunch("auto-mobile", ["--daemon-mode"]);' \
+    '(childProcess.execFileSync)("auto-mobile", ["--daemon-mode"]);' \
+    > "$FIXTURE"
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"DaemonLauncherBoundaryFixture.ts"* ]]
+  [[ "$output" == *'launch("auto-mobile", ["--daemon-mode"])'* ]]
+  [[ "$output" == *'computedLaunch("auto-mobile", ["--daemon-mode"])'* ]]
+  [[ "$output" == *'(childProcess.execFileSync)("auto-mobile", ["--daemon-mode"])'* ]]
+  [[ "$(grep -c "DaemonLauncherBoundaryFixture.ts" <<< "$output")" -eq 3 ]]
+}
+
+@test "rejects transparent wrappers around namespace aliases, members, and callees" {
+  printf '%s\n' \
+    'import childProcess from "node:child_process";' \
+    'const namespaceAlias = (childProcess) as typeof childProcess;' \
+    'namespaceAlias.execFileSync("auto-mobile", ["--daemon-mode"]);' \
+    'const { execFileSync: destructured } = (childProcess)!;' \
+    'destructured("auto-mobile", ["--daemon-mode"]);' \
+    '((childProcess.execFileSync) as typeof childProcess.execFileSync)("auto-mobile", ["--daemon-mode"]);' \
+    '(childProcess.execFileSync!)("auto-mobile", ["--daemon-mode"]);' \
+    '(childProcess.execFileSync satisfies typeof childProcess.execFileSync)("auto-mobile", ["--daemon-mode"]);' \
+    '((childProcess) as typeof childProcess).execFileSync("auto-mobile", ["--daemon-mode"]);' \
+    '(childProcess!).execFileSync("auto-mobile", ["--daemon-mode"]);' \
+    '(childProcess satisfies typeof childProcess).execFileSync("auto-mobile", ["--daemon-mode"]);' \
+    > "$FIXTURE"
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 1 ]
+  [[ "$(grep -c "DaemonLauncherBoundaryFixture.ts" <<< "$output")" -eq 8 ]]
 }
 
 @test "rejects a namespace alias of a default child-process import" {
@@ -136,7 +178,9 @@ teardown() {
   printf '%s\n' \
     'import childProcess from "node:child_process";' \
     'function inspect(childProcess: { execFileSync(): void }) {' \
-    '  childProcess.execFileSync();' \
+    '  (childProcess.execFileSync)();' \
+    '  (childProcess!).execFileSync();' \
+    '  childProcess[("execFileSync" as const)]();' \
     '}' \
     'inspect({ execFileSync() {} });' \
     > "$FIXTURE"

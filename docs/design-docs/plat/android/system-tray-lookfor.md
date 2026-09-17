@@ -121,7 +121,11 @@ group header. The `tap` action handles this automatically:
    falling back to a `content-desc` equal to "Expand" (case-insensitive), and
    taps it via ADB.
 4. **Re-match** — After a 500 ms settle, the tool re-observes the hierarchy
-   and re-matches the now-expanded notification.
+   and re-matches the now-expanded notification. Once a match is found, this
+   expand→settle→re-match phase has its own bounded budget, so a notification
+   found late in a short `awaitTimeout` is not abandoned merely because settling
+   consumed the caller's remaining timeout. It can overrun the original timeout
+   by at most one settle period plus one poll interval.
 5. **Tap** — The specific notification row is tapped, triggering its
    deep-link intent (e.g. launching a specific flow rather than opening the
    app generically).

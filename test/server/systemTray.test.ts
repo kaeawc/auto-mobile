@@ -2073,15 +2073,17 @@ describe("systemTray group expansion", () => {
     });
     await waitForPendingSleep(fakeTimer);
     fakeTimer.enableAutoAdvance();
-    fakeTimer.resolveAll();
+    fakeTimer.advanceTime(EXPAND_GROUP_SETTLE_MS);
     await dismiss;
 
     const commands = fakeAdb.getExecutedCommands();
-    expect(fakeTimer.getSleepHistory()).toContain(POLL_INTERVAL_MS);
+    expect(fakeTimer.getSleepHistory()).toContain(EXPAND_GROUP_SETTLE_MS);
     expect(commands.filter((command) => command.includes("input tap"))).toContain(
       "shell input tap 945 641",
     );
     expect(commands.filter((command) => command.includes("input swipe"))).toHaveLength(1);
+    expect(fakeTimer.now()).toBe(EXPAND_GROUP_SETTLE_MS);
+    expect(fakeTimer.now()).toBeLessThanOrEqual(1000);
   });
 
   test("dismiss refuses an unknown group state after its conservative expand attempt", async () => {
@@ -2907,7 +2909,7 @@ describe("systemTray group expansion", () => {
     ]);
   });
 
-  test("caps the expand settle sleep to the remaining notification wait budget", async () => {
+  test("extends the expand settle sleep beyond the remaining notification wait budget, within a bounded overrun", async () => {
     const fakeTimer = new FakeTimer();
     const fakeAdb = new SequencedFakeAdbExecutor([1000, 1000]);
     const unmatchedHierarchy = createTrayWithExpandedNotifications(["Different notification"]);
@@ -2941,17 +2943,65 @@ describe("systemTray group expansion", () => {
       fakeTimer.advanceTime(POLL_INTERVAL_MS);
     }
     await waitForPendingSleep(fakeTimer);
-    expect(fakeTimer.getPendingSleeps()).toEqual([POLL_INTERVAL_MS]);
-    fakeTimer.advanceTime(POLL_INTERVAL_MS);
+    expect(fakeTimer.getPendingSleeps()).toEqual([EXPAND_GROUP_SETTLE_MS]);
+    fakeTimer.advanceTime(EXPAND_GROUP_SETTLE_MS);
 
-    await expect(dismiss).rejects.toThrow("wait timed out before it could be re-matched");
-    expect(fakeTimer.now()).toBe(1000);
+    await expect(dismiss).rejects.toThrow(
+      "Could not isolate the specific notification from its collapsed group",
+    );
+    expect(fakeAdb.getExecutedCommands().filter((cmd) => cmd.includes("input tap"))).toHaveLength(
+      1,
+    );
+    expect(fakeAdb.getExecutedCommands().filter((cmd) => cmd.includes("input swipe"))).toHaveLength(
+      0,
+    );
+    expect(fakeTimer.now()).toBe(1250);
+    expect(fakeTimer.now()).toBeLessThanOrEqual(1750);
     expect(fakeTimer.getSleepHistory()).toEqual([
       POLL_INTERVAL_MS,
       POLL_INTERVAL_MS,
       POLL_INTERVAL_MS,
-      POLL_INTERVAL_MS,
+      EXPAND_GROUP_SETTLE_MS,
     ]);
+  });
+
+  test("dismiss completes when a collapsed-group match leaves only 100ms of the notification wait budget", async () => {
+    const fakeTimer = new FakeTimer();
+    const fakeAdb = new SequencedFakeAdbExecutor([1000, 1000, 2000]);
+    const collapsedHierarchy = createCtrlProxyCapturedGroupTray(false);
+    const expandedHierarchy = createCtrlProxyCapturedGroupTray(true);
+    const fakeObserveScreen = new SequencedObserveScreen([
+      createObservation(createTrayWithExpandedNotifications(["Different notification"])),
+      createObservation(collapsedHierarchy),
+      createObservation(expandedHierarchy),
+    ]);
+    setSystemTrayDependencies({
+      timer: fakeTimer,
+      adbFactory: () => fakeAdb,
+      observeScreenFactory: () => fakeObserveScreen,
+    });
+    ToolRegistry.clearTools();
+    registerInteractionTools();
+
+    const dismiss = ToolRegistry.getTool("systemTray")!.deviceAwareHandler!(device, {
+      action: "dismiss",
+      notification: { title: "Rev3" },
+      awaitTimeout: 1000,
+      platform: "android",
+    });
+    await waitForPendingSleep(fakeTimer);
+    fakeTimer.advanceTime(900);
+    await waitForPendingSleep(fakeTimer);
+    expect(fakeTimer.getPendingSleeps()).toEqual([EXPAND_GROUP_SETTLE_MS]);
+    fakeTimer.advanceTime(EXPAND_GROUP_SETTLE_MS);
+    await dismiss;
+
+    const commands = fakeAdb.getExecutedCommands();
+    expect(fakeTimer.getSleepHistory()).toEqual([POLL_INTERVAL_MS, EXPAND_GROUP_SETTLE_MS]);
+    expect(commands.filter((command) => command.includes("input tap"))).toHaveLength(1);
+    expect(commands.filter((command) => command.includes("input swipe"))).toHaveLength(1);
+    expect(fakeTimer.now()).toBe(1400);
+    expect(fakeTimer.now()).toBeLessThanOrEqual(1750);
   });
 
   test("does not tap a collapsed group when the notification wait budget is exhausted", async () => {

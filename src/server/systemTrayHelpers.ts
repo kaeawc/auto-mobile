@@ -1732,11 +1732,21 @@ export const expandAndRematchIfCollapsed = async (
     );
   }
 
+  // The pre-expand refusal above already confirmed the caller's budget was not
+  // exhausted at match time. From here, bound a separate settle-and-re-match
+  // phase so settling cannot consume the caller's remaining budget before a
+  // notification that was just found and expanded gets another poll.
+  const expandPhaseDeadlineMs = Math.max(
+    deadlineMs,
+    timer.now() + EXPAND_GROUP_SETTLE_MS + SYSTEM_TRAY_POLL_INTERVAL_MS,
+  );
   const groupIdentity = getNotificationGroupIdentity(groupNode);
   const originalRowNode = match.candidate.node;
   await expandNotificationGroup(device, match);
-  await timer.sleep(Math.min(EXPAND_GROUP_SETTLE_MS, Math.max(0, deadlineMs - timer.now())));
-  const remainingMs = Math.max(0, deadlineMs - timer.now());
+  await timer.sleep(
+    Math.min(EXPAND_GROUP_SETTLE_MS, Math.max(0, expandPhaseDeadlineMs - timer.now())),
+  );
+  const remainingMs = Math.max(0, expandPhaseDeadlineMs - timer.now());
   if (remainingMs === 0) {
     throw new ActionableError(
       "Expanded collapsed notification group but the notification wait timed out before it could be re-matched.",

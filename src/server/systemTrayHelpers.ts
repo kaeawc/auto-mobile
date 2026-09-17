@@ -48,7 +48,7 @@ import {
 } from "./system-tray/notificationHints";
 import type { ProgressCallback } from "./toolRegistry";
 import type { SystemTrayNotificationArgs } from "./interactionToolTypes";
-import { boundsArea } from "../utils/bounds";
+import { boundsArea, boundsEqual } from "../utils/bounds";
 import { logger } from "../utils/logger";
 import { shouldSkipActionObservationScreenshot } from "../features/observe/automaticScreenshotPolicy";
 import { getDeviceDataStreamServer } from "../daemon/deviceDataStreamSocketServer";
@@ -563,6 +563,11 @@ const findExpandButtonInGroup = (groupNode: any): Element | null => {
   return search(groupNode);
 };
 
+export const isNotificationGroupExpanded = (groupNode: any): boolean => {
+  const expandButton = findExpandButtonInGroup(groupNode);
+  return String(expandButton?.["content-desc"] ?? "").toLowerCase() === "collapse";
+};
+
 export const expandNotificationGroup = async (
   device: BootedDevice,
   match: SystemTrayNotificationMatch,
@@ -588,6 +593,33 @@ export const expandNotificationGroup = async (
   return true;
 };
 
+const getNotificationGroupChildRows = (groupNode: any): any[] => {
+  const groupChildren = Array.isArray(groupNode?.node)
+    ? groupNode.node
+    : groupNode?.node
+      ? [groupNode.node]
+      : [];
+  const childrenContainer = groupChildren.find((child: any) => {
+    const props = getNodeProperties(child);
+    const resourceId = String(props?.["resource-id"] ?? props?.resourceId ?? "").toLowerCase();
+    return resourceId.includes("notification_children_container");
+  });
+  if (!childrenContainer) {
+    return [];
+  }
+
+  const children = Array.isArray(childrenContainer.node)
+    ? childrenContainer.node
+    : childrenContainer.node
+      ? [childrenContainer.node]
+      : [];
+  return children.filter((child: any) => {
+    const props = getNodeProperties(child);
+    const resourceId = String(props?.["resource-id"] ?? props?.resourceId ?? "").toLowerCase();
+    return !resourceId.includes("notification_header") && nodeHasNotificationRowHint(child);
+  });
+};
+
 const collectNotificationCandidates = (
   viewHierarchy: ViewHierarchyResult,
 ): SystemTrayNotificationCandidate[] => {
@@ -605,6 +637,17 @@ const collectNotificationCandidates = (
     }
   };
 
+  const visitNotificationGroupChildren = (node: any, depth: number): void => {
+    const childRows = getNotificationGroupChildRows(node);
+    if (childRows.length === 0) {
+      visitChildren(node, depth, node);
+      return;
+    }
+    for (const childRow of childRows) {
+      visit(childRow, depth + 2, node);
+    }
+  };
+
   const visit = (node: any, depth: number, groupNode?: any): void => {
     if (!node) {
       return;
@@ -612,7 +655,7 @@ const collectNotificationCandidates = (
 
     if (nodeHasNotificationRowHint(node)) {
       if (nodeIsNotificationGroup(node)) {
-        visitChildren(node, depth, node);
+        visitNotificationGroupChildren(node, depth);
         return;
       }
       const element = parser.parseNodeBounds(node) ?? undefined;
@@ -1380,7 +1423,8 @@ export const expandAndRematchIfCollapsed = async (
   result: { observation: ObserveResult; match: SystemTrayNotificationMatch },
 ): Promise<{ observation: ObserveResult; match: SystemTrayNotificationMatch }> => {
   let { observation, match } = result;
-  if (!isMatchInCollapsedGroup(match)) {
+  const groupNode = match.candidate.groupNode;
+  if (!groupNode || isNotificationGroupExpanded(groupNode)) {
     return { observation, match };
   }
 
@@ -1407,16 +1451,33 @@ export const expandAndRematchIfCollapsed = async (
   );
 };
 
-export const isNotificationGroupSwipeTarget = (
+export const isSwipeTargetIsolatedFromGroup = (
   match: SystemTrayNotificationMatch,
   element: Element,
 ): boolean => {
-  const resourceId = String(element["resource-id"] ?? element.resourceId ?? "").toLowerCase();
-  return (
-    nodeIsNotificationGroup(match.candidate.node) ||
-    resourceId.includes("notification_children_container") ||
-    resourceId.includes("notification_header")
-  );
+  const groupNode = match.candidate.groupNode;
+  if (!groupNode) {
+    return true;
+  }
+
+  const parser = new DefaultElementParser();
+  const groupBounds = parser.parseNodeBounds(groupNode)?.bounds;
+  if (groupBounds && boundsEqual(element.bounds, groupBounds)) {
+    return false;
+  }
+
+  return getNotificationGroupChildRows(groupNode).some((childRow) => {
+    const rowBounds = parser.parseNodeBounds(childRow)?.bounds;
+    if (!rowBounds) {
+      return false;
+    }
+    return (
+      element.bounds.left >= rowBounds.left &&
+      element.bounds.top >= rowBounds.top &&
+      element.bounds.right <= rowBounds.right &&
+      element.bounds.bottom <= rowBounds.bottom
+    );
+  });
 };
 
 export const resolveNotificationTapElement = (

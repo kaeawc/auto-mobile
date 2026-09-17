@@ -128,11 +128,11 @@ import {
   resolveNotificationTapElement,
   resolveNotificationSwipeElement,
   expandAndRematchIfCollapsed,
-  isNotificationGroupSwipeTarget,
+  isNotificationGroupExpanded,
+  isSwipeTargetIsolatedFromGroup,
   tapElement,
   swipeElement,
   resolveAppLabel,
-  isMatchInCollapsedGroup,
   SYSTEM_TRAY_CLEAR_MAX_ITERATIONS,
   SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS,
 } from "./systemTrayHelpers";
@@ -2137,7 +2137,7 @@ export function registerInteractionTools() {
           progress,
           { observation: initialMatch.observation, match: initialMatch.match },
         );
-        if (isMatchInCollapsedGroup(match)) {
+        if (match.candidate.groupNode && !isNotificationGroupExpanded(match.candidate.groupNode)) {
           throw new ActionableError(
             "Could not isolate the specific notification from its collapsed group; " +
               "dismissing would clear the whole group instead of this notification.",
@@ -2150,7 +2150,7 @@ export function registerInteractionTools() {
             "No swipeable notification element was resolved within the matched notification.",
           );
         }
-        if (isNotificationGroupSwipeTarget(match, swipeTarget)) {
+        if (!isSwipeTargetIsolatedFromGroup(match, swipeTarget)) {
           throw new ActionableError(
             "Could not isolate the specific notification from its collapsed group; " +
               "dismissing would clear the whole group instead of this notification.",

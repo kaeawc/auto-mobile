@@ -4908,21 +4908,61 @@ function validateBootIdentity(
  * because the mapping from AVD name to serial is not known until discovery.
  */
 /**
- * Reject a contradictory `avdName` + serial-shaped `deviceId` pair BEFORE any
- * boot. `validateRequestedAndroidSerial` is the post-boot authority, but by the
- * time it runs a stopped AVD has already been cold-booted and then killed just
- * to report the conflict (Codex thread on #6833). When the `deviceId` is a
- * running-emulator serial, the device it names is knowable from one discovery
- * sweep without booting anything, so the mismatch can be reported up front.
+ * Reject a contradictory `avdName` + `deviceId` pair BEFORE any boot.
+ * `validateRequestedAndroidSerial` is the post-boot authority, but by the time
+ * it runs a stopped AVD has already been cold-booted and then killed just to
+ * report the conflict (Codex thread on #6833). A configured AVD name can be
+ * resolved from the image inventory, and a running-emulator serial can be
+ * resolved from one booted-device discovery sweep, without booting anything.
  *
- * This fires only for the serial-shaped case: a non-serial `deviceId` is an AVD
- * image name, whose mapping is not known until discovery, so it stays the
- * post-boot recheck's job. Anything ambiguous — discovery unavailable this
- * sweep, or a running device whose runtime name is still `Unknown (<serial>)` —
- * likewise defers, so this check only ever rejects a pair it can positively
- * contradict.
+ * A non-serial `deviceId` remains deferred unless it is itself a configured AVD
+ * name. Anything ambiguous — inventory discovery unavailable, an unknown
+ * non-serial identifier, or a running device whose runtime name is still
+ * `Unknown (<serial>)` — likewise defers, so this check only ever rejects a
+ * pair it can positively contradict.
  */
-async function validateRequestedAndroidSerialBeforeBoot(
+async function validateRequestedAndroidConfiguredAvdPairBeforeBoot(
+  pair: { avdName: string; deviceId: string },
+  deviceUtils: PlatformDeviceManager,
+  bootDeadlineMs: number,
+  timer: Timer,
+  signal: AbortSignal | undefined,
+): Promise<boolean> {
+  const { avdName, deviceId } = pair;
+  if (isAndroidEmulatorSerial(deviceId)) {
+    return false;
+  }
+  const inventory = await runWithinShutdownDeadline(
+    { name: avdName, platform: "android", deviceId },
+    timer,
+    bootDeadlineMs,
+    "Android pre-boot AVD identity validation did not complete",
+    signal,
+    async (signal) =>
+      await deviceUtils.getDeviceImagesDetailed("android", {
+        signal,
+      }),
+    undefined,
+    "pre-boot AVD identity validation",
+  );
+  if (!inventory.succeededPlatforms.has("android")) {
+    return true;
+  }
+  const configuredAvdNames = new Set(
+    inventory.devices
+      .filter((device) => device.platform === "android")
+      .map((device) => device.name),
+  );
+  if (configuredAvdNames.has(avdName) && configuredAvdNames.has(deviceId)) {
+    throw new ActionableError(
+      `identifier_conflict: avdName '${avdName}' and deviceId '${deviceId}' name ` +
+        "different configured AVDs. Pass only the identifier you mean.",
+    );
+  }
+  return true;
+}
+
+async function validateRequestedAndroidIdentifiersBeforeBoot(
   pair: { avdName: string; deviceId: string } | undefined,
   deviceUtils: PlatformDeviceManager,
   bootDeadlineMs: number,
@@ -4934,7 +4974,18 @@ async function validateRequestedAndroidSerialBeforeBoot(
     return;
   }
   const { avdName, deviceId } = pair;
-  if (!avdName || !isAndroidEmulatorSerial(deviceId) || avdName === deviceId) {
+  if (!avdName || avdName === deviceId) {
+    return;
+  }
+  if (
+    await validateRequestedAndroidConfiguredAvdPairBeforeBoot(
+      pair,
+      deviceUtils,
+      bootDeadlineMs,
+      timer,
+      signal,
+    )
+  ) {
     return;
   }
   const discovery = await runWithinShutdownDeadline(
@@ -8557,11 +8608,11 @@ export function registerDeviceTools() {
         coordinatedSignals.length === 1
           ? coordinatedSignals[0]
           : AbortSignal.any(coordinatedSignals);
-      // Reject a contradictory Android avdName + serial pair before booting,
+      // Reject a contradictory Android avdName + deviceId pair before booting,
       // so a stopped AVD is not cold-booted and killed just to report it. Run
       // after its lifecycle lease, however, so a serial not yet visible during
       // reset recovery gets a chance to appear before discovery decides.
-      await validateRequestedAndroidSerialBeforeBoot(
+      await validateRequestedAndroidIdentifiersBeforeBoot(
         budgets.requestedAndroidIdentifierPair,
         deviceUtils,
         bootDeadlineMs,

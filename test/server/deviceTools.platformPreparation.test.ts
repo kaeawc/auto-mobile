@@ -591,6 +591,23 @@ describe("platform device preparation tools", () => {
     expect(deviceUtils.wasMethodCalled("startDevice")).toBe(false);
   });
 
+  test("getAndroid rejects two configured AVD names before booting either one", async () => {
+    deviceUtils.setDeviceImages("android", [
+      { platform: "android", name: "Requested_AVD", isRunning: false, source: "local" },
+      { platform: "android", name: "Other_AVD", isRunning: false, source: "local" },
+    ]);
+
+    const failure = await callTool("getAndroid", {
+      avdName: "Requested_AVD",
+      deviceId: "Other_AVD",
+    }).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(ActionableError);
+    expect((failure as ActionableError).message).toContain("identifier_conflict");
+    expect((failure as ActionableError).message).toContain("different configured AVDs");
+    expect(deviceUtils.wasMethodCalled("startDevice")).toBe(false);
+  });
+
   test("getAndroid rejects a stopped AVD paired with a foreign running serial before booting", async () => {
     // avdName names a stopped AVD; the requested serial is running a different
     // AVD. The pair is contradictory without booting anything, so the old

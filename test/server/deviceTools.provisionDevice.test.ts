@@ -66,7 +66,10 @@ class StaleAndroidBootedDeviceCache extends FakeDeviceUtils {
   readonly detailedOptions: BootedDeviceDiscoveryOptions[] = [];
 
   override async getBootedDevices(platform: SomePlatform): Promise<BootedDevice[]> {
-    if (platform === "android" && !this.inDetailedDiscovery) {
+    if (
+      platform === "android" &&
+      (!this.inDetailedDiscovery || this.detailedDiscoveryUsesStaleDevices)
+    ) {
       return this.staleDevices;
     }
     return await super.getBootedDevices(platform);
@@ -78,14 +81,17 @@ class StaleAndroidBootedDeviceCache extends FakeDeviceUtils {
   ): Promise<BootedDeviceDiscovery> {
     this.detailedOptions.push(options);
     this.inDetailedDiscovery = true;
+    this.detailedDiscoveryUsesStaleDevices = options.bypassAndroidDeviceListCache !== true;
     try {
       return await super.getBootedDevicesDetailed(platform, options);
     } finally {
       this.inDetailedDiscovery = false;
+      this.detailedDiscoveryUsesStaleDevices = false;
     }
   }
 
   private inDetailedDiscovery = false;
+  private detailedDiscoveryUsesStaleDevices = false;
   private readonly staleDevices: BootedDevice[] = [
     { name: "phone-api-36-a", platform: "android", deviceId: "emulator-5554" },
   ];
@@ -727,6 +733,34 @@ describe("provisionDevice handler", () => {
 
     expect((response as any).isError).not.toBe(true);
     expect(JSON.stringify(response)).not.toContain("identity_conflict");
+  });
+
+  test("adopts a fresh exact Android transport when ordinary discovery is stale", async () => {
+    const staleCacheManager = new StaleAndroidBootedDeviceCache();
+    staleCacheManager.setBootedDevices("android", [
+      { name: "phone-api-36-a", platform: "android", deviceId: "emulator-5556" },
+    ]);
+    deviceManager = staleCacheManager;
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => deviceManager,
+      ensureCtrlProxyReady: async () => {},
+    });
+    exactProvisioner.provision = async () => provisionedTestDevice("android", false);
+
+    const response = await ToolRegistry.getTool("provisionDevice")!.handler(
+      provisionTestArgs("android", "stale-exact-adoption"),
+    );
+
+    expect((response as any).isError).not.toBe(true);
+    expect(JSON.parse((response as any).content[0].text)).toMatchObject({
+      created: false,
+      adopted: true,
+      device: { deviceId: "emulator-5556", name: "phone-api-36-a" },
+    });
+    expect(staleCacheManager.getExecutedOperations().join("|")).not.toContain("startDevice:");
+    expect(staleCacheManager.detailedOptions).toEqual(
+      expect.arrayContaining([expect.objectContaining({ bypassAndroidDeviceListCache: true })]),
+    );
   });
 
   test("resource timeout leaves readiness time and returns the retained device and session", async () => {

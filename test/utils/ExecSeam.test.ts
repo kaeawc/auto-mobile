@@ -75,6 +75,40 @@ describe("runExecSeam", function () {
   );
 
   test(
+    "omits unset options so execFile keeps its default maxBuffer bound",
+    async function () {
+      // A property present with value `undefined` is not the same as absent at
+      // the exec leaf: `maxBuffer: undefined` overwrites node/bun's built-in
+      // 1 MiB bound with "unbounded". Callers that omit maxBuffer must keep the
+      // default, so the seam must not forward the key at all (issue #5459 review).
+      let seen: ExecSeamOptions | undefined;
+      const invoke = async (options: ExecSeamOptions): Promise<RawExecOutput> => {
+        seen = options;
+        return { stdout: "", stderr: "" };
+      };
+      await runExecSeam(invoke, { signal: new AbortController().signal }, { command: "cmd" });
+      expect(Object.prototype.hasOwnProperty.call(seen, "maxBuffer")).toBe(false);
+      expect(Object.prototype.hasOwnProperty.call(seen, "timeout")).toBe(false);
+      expect(Object.prototype.hasOwnProperty.call(seen, "signal")).toBe(true);
+    },
+    FAST_TEST_TIMEOUT_MS,
+  );
+
+  test(
+    "forwards maxBuffer when the caller sets it",
+    async function () {
+      let seen: ExecSeamOptions | undefined;
+      const invoke = async (options: ExecSeamOptions): Promise<RawExecOutput> => {
+        seen = options;
+        return { stdout: "", stderr: "" };
+      };
+      await runExecSeam(invoke, { maxBuffer: 4096 }, { command: "cmd" });
+      expect(seen?.maxBuffer).toBe(4096);
+    },
+    FAST_TEST_TIMEOUT_MS,
+  );
+
+  test(
     "returns a buffer-coerced ExecResult",
     async function () {
       const result = await runExecSeam(

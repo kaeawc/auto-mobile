@@ -1,7 +1,7 @@
-import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { defaultTimer } from "../SystemTimer";
 import { logger } from "../logger";
+import { DefaultHostCommandExecutor } from "../HostCommandExecutor";
 import {
   detectAndroidCommandLineTools,
   getAndroidHomeWithSystemImages,
@@ -22,8 +22,15 @@ export type AvdManagerDependencies = Omit<
   "timer" | "environment" | "platform"
 >;
 
+// Route the facade's default spawn through the shared host-process seam too, so
+// production paths that reach AvdManagerClient/SdkManagerClient through this
+// facade (and AvdManagerService) go through the single process-execution funnel
+// rather than a directly-imported `child_process.spawn` (issue #5459). The
+// executor's `spawn` is a plain passthrough, and the dependency stays injectable.
+const facadeHostProcessExecutor = new DefaultHostCommandExecutor();
+
 const createDefaultDependencies = (): AvdManagerDependencies => ({
-  spawn,
+  spawn: (command, args, options) => facadeHostProcessExecutor.spawn(command, args, options),
   existsSync,
   logger,
   detectAndroidCommandLineTools,

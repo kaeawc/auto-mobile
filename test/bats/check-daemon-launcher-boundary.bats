@@ -402,6 +402,10 @@ teardown() {
     'invokeBeforeReassignment();' \
     'invokedBeforeReassignment = safeLaunch;' \
     'function invokeBeforeReassignment() { invokedBeforeReassignment("auto-mobile", ["--daemon-mode"]); }' \
+    'let arrowAfterReassignment = childProcess.execFileSync;' \
+    'const invokeArrowAfterReassignment = () => arrowAfterReassignment("auto-mobile", ["--daemon-mode"]);' \
+    'arrowAfterReassignment = safeLaunch;' \
+    'invokeArrowAfterReassignment();' \
     > "$FIXTURE"
 
   run bash "$SCRIPT"
@@ -451,6 +455,48 @@ teardown() {
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"no direct production daemon invocations"* ]]
+}
+
+@test "keeps unknown function-like invocation contexts in the scan" {
+  printf '%s\n' \
+    'import childProcess from "node:child_process";' \
+    'declare function register(callback: () => void): void;' \
+    'export function exported() { childProcess.execFileSync("auto-mobile", ["--daemon-mode"]); }' \
+    'register(() => childProcess.execFileSync("auto-mobile", ["--daemon-mode"]));' \
+    'const arrow = () => launch("auto-mobile", ["--daemon-mode"]);' \
+    'const expression = function () { launch("auto-mobile", ["--daemon-mode"]); };' \
+    'const holder = { run() { launch("auto-mobile", ["--daemon-mode"]); } };' \
+    'const launch = childProcess.execFileSync;' \
+    'arrow();' \
+    'expression();' \
+    'holder.run();' \
+    '(() => launch("auto-mobile", ["--daemon-mode"]))();' \
+    > "$FIXTURE"
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 1 ]
+  [[ "$(grep -c "DaemonLauncherBoundaryFixture.ts" <<< "$output")" -eq 6 ]]
+  [[ "$(grep -c 'childProcess.execFileSync' <<< "$output")" -eq 2 ]]
+  [[ "$(grep -c 'launch("auto-mobile"' <<< "$output")" -eq 4 ]]
+}
+
+@test "keeps object-rest exclusions when the extracted target is untracked" {
+  printf '%s\n' \
+    'import childProcess from "node:child_process";' \
+    'declare const safeLaunch: (command: string, args: string[]) => void;' \
+    'let extracted = safeLaunch;' \
+    'let remaining;' \
+    '({ execFileSync: extracted, ...remaining } = childProcess);' \
+    'remaining.execFileSync?.("auto-mobile", ["--daemon-mode"]);' \
+    'remaining.spawn("auto-mobile", ["--daemon-mode"]);' \
+    > "$FIXTURE"
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 1 ]
+  [[ "$(grep -c "DaemonLauncherBoundaryFixture.ts" <<< "$output")" -eq 1 ]]
+  [[ "$output" == *'remaining.spawn("auto-mobile"'* ]]
 }
 
 @test "rejects transitive executor aliases declared after their function body" {

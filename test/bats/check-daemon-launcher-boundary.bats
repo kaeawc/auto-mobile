@@ -219,6 +219,60 @@ teardown() {
   [[ "$(grep -c "DaemonLauncherBoundaryFixture.ts" <<< "$output")" -eq 2 ]]
 }
 
+@test "rejects static constant computed executor keys" {
+  printf '%s\n' \
+    'import childProcess from "node:child_process";' \
+    'const executor = "execFileSync" as const;' \
+    'childProcess[executor]("auto-mobile", ["--daemon-mode"]);' \
+    'const executorAlias = executor;' \
+    'childProcess[executorAlias]("auto-mobile", ["--daemon-mode"]);' \
+    > "$FIXTURE"
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 1 ]
+  [[ "$(grep -c "DaemonLauncherBoundaryFixture.ts" <<< "$output")" -eq 2 ]]
+}
+
+@test "rejects unambiguous post-declaration executor assignments" {
+  printf '%s\n' \
+    'import childProcess from "node:child_process";' \
+    'let launch;' \
+    'launch = childProcess["execFileSync"];' \
+    'launch("auto-mobile", ["--daemon-mode"]);' \
+    'let destructured;' \
+    '({ [("execFileSync" as const)]: destructured } = childProcess);' \
+    'destructured("auto-mobile", ["--daemon-mode"]);' \
+    > "$FIXTURE"
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 1 ]
+  [[ "$(grep -c "DaemonLauncherBoundaryFixture.ts" <<< "$output")" -eq 2 ]]
+}
+
+@test "allows dynamic keys and reassigned or shadowed aliases" {
+  printf '%s\n' \
+    'import childProcess from "node:child_process";' \
+    'let dynamicKey = "execFileSync";' \
+    'childProcess[dynamicKey]("auto-mobile", ["--daemon-mode"]);' \
+    'let launch;' \
+    'launch = childProcess["execFileSync"];' \
+    'launch = () => {};' \
+    'launch();' \
+    'function inspect(childProcess: { execFileSync(): void }) {' \
+    '  const executor = "execFileSync" as const;' \
+    '  childProcess[executor]();' \
+    '}' \
+    'inspect({ execFileSync() {} });' \
+    > "$FIXTURE"
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"no direct production daemon invocations"* ]]
+}
+
 @test "rejects transitive executor aliases declared after their function body" {
   printf '%s\n' \
     'import childProcess from "node:child_process";' \

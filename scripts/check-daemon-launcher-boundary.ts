@@ -69,7 +69,10 @@ function unwrapTransparentExpression(expression: ts.Expression): ts.Expression {
   return current;
 }
 
-function staticMemberName(expression: ts.Expression): string | undefined {
+function staticMemberName(
+  expression: ts.Expression,
+  staticStringValue?: (expression: ts.Expression) => string | undefined,
+): string | undefined {
   const memberAccess = unwrapTransparentExpression(expression);
   if (ts.isPropertyAccessExpression(memberAccess)) {
     return memberAccess.name.text;
@@ -78,13 +81,19 @@ function staticMemberName(expression: ts.Expression): string | undefined {
     ts.isElementAccessExpression(memberAccess) && memberAccess.argumentExpression
       ? unwrapTransparentExpression(memberAccess.argumentExpression)
       : undefined;
-  if (elementAccessArgument !== undefined && ts.isStringLiteralLike(elementAccessArgument)) {
-    return elementAccessArgument.text;
+  if (elementAccessArgument !== undefined) {
+    return (
+      staticStringValue?.(elementAccessArgument) ??
+      (ts.isStringLiteralLike(elementAccessArgument) ? elementAccessArgument.text : undefined)
+    );
   }
   return undefined;
 }
 
-function staticPropertyName(name: ts.PropertyName | undefined): string | undefined {
+function staticPropertyName(
+  name: ts.PropertyName | undefined,
+  staticStringValue?: (expression: ts.Expression) => string | undefined,
+): string | undefined {
   if (!name) {
     return undefined;
   }
@@ -94,7 +103,10 @@ function staticPropertyName(name: ts.PropertyName | undefined): string | undefin
   const expression = ts.isComputedPropertyName(name)
     ? unwrapTransparentExpression(name.expression)
     : undefined;
-  return expression && ts.isStringLiteralLike(expression) ? expression.text : undefined;
+  return expression
+    ? (staticStringValue?.(expression) ??
+        (ts.isStringLiteralLike(expression) ? expression.text : undefined))
+    : undefined;
 }
 
 function violationsIn(
@@ -119,6 +131,147 @@ function violationsIn(
   const hasBinding = (bindings: Set<ts.Symbol>, identifier: ts.Identifier): boolean => {
     const symbol = symbolFor(identifier);
     return symbol !== undefined && bindings.has(symbol);
+  };
+
+  const staticStringValue = (
+    expression: ts.Expression,
+    seen: Set<ts.Symbol> = new Set(),
+  ): string | undefined => {
+    const value = unwrapTransparentExpression(expression);
+    if (ts.isStringLiteralLike(value)) {
+      return value.text;
+    }
+    if (!ts.isIdentifier(value)) {
+      return undefined;
+    }
+    const symbol = symbolFor(value);
+    const declaration = symbol?.valueDeclaration;
+    if (
+      !symbol ||
+      seen.has(symbol) ||
+      !declaration ||
+      !ts.isVariableDeclaration(declaration) ||
+      !declaration.initializer ||
+      !ts.isVariableDeclarationList(declaration.parent) ||
+      (declaration.parent.flags & ts.NodeFlags.Const) === 0
+    ) {
+      return undefined;
+    }
+    seen.add(symbol);
+    return staticStringValue(declaration.initializer, seen);
+  };
+
+  const isNamespaceExecutor = (value: ts.Expression): boolean => {
+    const memberAccess = unwrapTransparentExpression(value);
+    return (
+      (ts.isPropertyAccessExpression(memberAccess) || ts.isElementAccessExpression(memberAccess)) &&
+      ts.isIdentifier(unwrapTransparentExpression(memberAccess.expression)) &&
+      hasBinding(namespaces, unwrapTransparentExpression(memberAccess.expression)) &&
+      EXECUTION_FUNCTIONS.has(staticMemberName(memberAccess, staticStringValue) ?? "")
+    );
+  };
+
+  const registerIdentifierBinding = (identifier: ts.Identifier, value: ts.Expression): void => {
+    if (isChildProcessRequire(value)) {
+      addBinding(namespaces, identifier);
+    }
+    if (ts.isIdentifier(value) && hasBinding(importedExecutors, value)) {
+      addBinding(importedExecutors, identifier);
+    }
+    if (ts.isIdentifier(value) && hasBinding(namespaces, value)) {
+      addBinding(namespaces, identifier);
+    }
+    if (isNamespaceExecutor(value)) {
+      addBinding(importedExecutors, identifier);
+    }
+  };
+
+  const registerObjectBinding = (
+    elements: readonly ts.BindingElement[],
+    value: ts.Expression,
+  ): void => {
+    if (
+      !isChildProcessRequire(value) &&
+      !(ts.isIdentifier(value) && hasBinding(namespaces, value))
+    ) {
+      return;
+    }
+    for (const element of elements) {
+      const imported =
+        staticPropertyName(element.propertyName, staticStringValue) ??
+        (ts.isIdentifier(element.name) ? element.name.text : undefined);
+      if (ts.isIdentifier(element.name) && EXECUTION_FUNCTIONS.has(imported)) {
+        addBinding(importedExecutors, element.name);
+      }
+    }
+  };
+
+  const assignmentCounts = new Map<ts.Symbol, number>();
+  const countAssignmentTarget = (target: ts.Expression): void => {
+    if (ts.isIdentifier(target)) {
+      const symbol = symbolFor(target);
+      if (symbol) {
+        assignmentCounts.set(symbol, (assignmentCounts.get(symbol) ?? 0) + 1);
+      }
+      return;
+    }
+    if (ts.isObjectLiteralExpression(target)) {
+      for (const property of target.properties) {
+        if (ts.isPropertyAssignment(property) && ts.isIdentifier(property.initializer)) {
+          countAssignmentTarget(property.initializer);
+        } else if (ts.isShorthandPropertyAssignment(property)) {
+          countAssignmentTarget(property.name);
+        }
+      }
+    }
+  };
+  const countAssignments = (node: ts.Node): void => {
+    if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+      countAssignmentTarget(node.left);
+    }
+    ts.forEachChild(node, countAssignments);
+  };
+  countAssignments(sourceFile);
+
+  // Mutable or multiply assigned values are dynamic: only follow the one static
+  // write into an otherwise uninitialized symbol.
+  const isUnambiguousAssignmentTarget = (identifier: ts.Identifier): boolean => {
+    const symbol = symbolFor(identifier);
+    const declaration = symbol?.valueDeclaration;
+    return (
+      symbol !== undefined &&
+      assignmentCounts.get(symbol) === 1 &&
+      declaration !== undefined &&
+      ts.isVariableDeclaration(declaration) &&
+      declaration.initializer === undefined
+    );
+  };
+
+  const registerObjectAssignment = (
+    properties: readonly ts.ObjectLiteralElementLike[],
+    value: ts.Expression,
+  ): void => {
+    if (
+      !isChildProcessRequire(value) &&
+      !(ts.isIdentifier(value) && hasBinding(namespaces, value))
+    ) {
+      return;
+    }
+    for (const property of properties) {
+      const target = ts.isPropertyAssignment(property)
+        ? property.initializer
+        : ts.isShorthandPropertyAssignment(property)
+          ? property.name
+          : undefined;
+      if (!target || !ts.isIdentifier(target) || !isUnambiguousAssignmentTarget(target)) {
+        continue;
+      }
+      const propertyName = ts.isPropertyAssignment(property) ? property.name : undefined;
+      const imported = staticPropertyName(propertyName, staticStringValue) ?? target.text;
+      if (EXECUTION_FUNCTIONS.has(imported)) {
+        addBinding(importedExecutors, target);
+      }
+    }
   };
 
   const record = (node: ts.CallExpression) => {
@@ -168,38 +321,20 @@ function violationsIn(
     if (ts.isVariableDeclaration(node) && node.initializer) {
       const initializer = unwrapTransparentExpression(node.initializer);
       if (ts.isIdentifier(node.name)) {
-        if (isChildProcessRequire(initializer)) {
-          addBinding(namespaces, node.name);
-        }
-        if (ts.isIdentifier(initializer) && hasBinding(importedExecutors, initializer)) {
-          addBinding(importedExecutors, node.name);
-        }
-        if (ts.isIdentifier(initializer) && hasBinding(namespaces, initializer)) {
-          addBinding(namespaces, node.name);
-        }
-        if (
-          (ts.isPropertyAccessExpression(initializer) ||
-            ts.isElementAccessExpression(initializer)) &&
-          ts.isIdentifier(unwrapTransparentExpression(initializer.expression)) &&
-          hasBinding(namespaces, unwrapTransparentExpression(initializer.expression)) &&
-          EXECUTION_FUNCTIONS.has(staticMemberName(initializer) ?? "")
-        ) {
-          addBinding(importedExecutors, node.name);
-        }
+        registerIdentifierBinding(node.name, initializer);
       }
-      if (
-        ts.isObjectBindingPattern(node.name) &&
-        (isChildProcessRequire(initializer) ||
-          (ts.isIdentifier(initializer) && hasBinding(namespaces, initializer)))
-      ) {
-        for (const element of node.name.elements) {
-          const imported =
-            staticPropertyName(element.propertyName) ??
-            (ts.isIdentifier(element.name) ? element.name.text : undefined);
-          if (ts.isIdentifier(element.name) && EXECUTION_FUNCTIONS.has(imported)) {
-            addBinding(importedExecutors, element.name);
-          }
-        }
+      if (ts.isObjectBindingPattern(node.name)) {
+        registerObjectBinding(node.name.elements, initializer);
+      }
+    }
+
+    if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+      const value = unwrapTransparentExpression(node.right);
+      if (ts.isIdentifier(node.left) && isUnambiguousAssignmentTarget(node.left)) {
+        registerIdentifierBinding(node.left, value);
+      }
+      if (ts.isObjectLiteralExpression(node.left)) {
+        registerObjectAssignment(node.left.properties, value);
       }
     }
 
@@ -214,7 +349,7 @@ function violationsIn(
         (ts.isPropertyAccessExpression(expression) || ts.isElementAccessExpression(expression)) &&
         ts.isIdentifier(unwrapTransparentExpression(expression.expression)) &&
         hasBinding(namespaces, unwrapTransparentExpression(expression.expression)) &&
-        EXECUTION_FUNCTIONS.has(staticMemberName(expression) ?? "");
+        EXECUTION_FUNCTIONS.has(staticMemberName(expression, staticStringValue) ?? "");
       if (direct || namespaced) {
         record(node);
       }

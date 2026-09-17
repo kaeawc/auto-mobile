@@ -269,6 +269,15 @@ teardown() {
     'let logicalLaunch = childProcess["execFileSync"];' \
     'logicalLaunch &&= () => {};' \
     'logicalLaunch();' \
+    'let forOfLaunch = childProcess["execFileSync"];' \
+    'for (forOfLaunch of [() => {}]) {}' \
+    'forOfLaunch();' \
+    'let forInLaunch = childProcess["execFileSync"];' \
+    'for (forInLaunch in { safeLaunch: true }) {}' \
+    'forInLaunch();' \
+    'let incrementedLaunch = childProcess["execFileSync"];' \
+    'incrementedLaunch++;' \
+    'incrementedLaunch();' \
     'let namespaceAlias = childProcess;' \
     'namespaceAlias = {} as typeof childProcess;' \
     'namespaceAlias["execFileSync"]();' \
@@ -297,6 +306,25 @@ teardown() {
     'namespaceAlias.spawn("auto-mobile", ["--daemon-mode"]);' \
     'let { execFileSync: destructuredLaunch } = childProcess;' \
     'destructuredLaunch("auto-mobile", ["--daemon-mode"]);' \
+    > "$FIXTURE"
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 1 ]
+  [[ "$(grep -c "DaemonLauncherBoundaryFixture.ts" <<< "$output")" -eq 3 ]]
+}
+
+@test "rejects deterministic logical aliases and object-rest namespaces" {
+  printf '%s\n' \
+    'import childProcess from "node:child_process";' \
+    'let nullishLaunch;' \
+    'nullishLaunch ??= childProcess["execFileSync"];' \
+    'nullishLaunch("auto-mobile", ["--daemon-mode"]);' \
+    'let fallbackLaunch;' \
+    'fallbackLaunch ||= childProcess["execFileSync"];' \
+    'fallbackLaunch("auto-mobile", ["--daemon-mode"]);' \
+    'const { ...commonJsChildProcess } = require("node:child_process");' \
+    'commonJsChildProcess.execFileSync("auto-mobile", ["--daemon-mode"]);' \
     > "$FIXTURE"
 
   run bash "$SCRIPT"

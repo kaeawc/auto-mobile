@@ -197,6 +197,14 @@ function violationsIn(
       return;
     }
     for (const element of elements) {
+      if (
+        element.dotDotDotToken &&
+        ts.isIdentifier(element.name) &&
+        isUnreassignedInitializer(element.name)
+      ) {
+        addBinding(namespaces, element.name);
+        continue;
+      }
       const imported =
         staticPropertyName(element.propertyName, staticStringValue) ??
         (ts.isIdentifier(element.name) ? element.name.text : undefined);
@@ -234,6 +242,19 @@ function violationsIn(
     if (ts.isBinaryExpression(node) && ts.isAssignmentOperator(node.operatorToken.kind)) {
       countAssignmentTarget(node.left);
     }
+    if (
+      (ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)) &&
+      (node.operator === ts.SyntaxKind.PlusPlusToken ||
+        node.operator === ts.SyntaxKind.MinusMinusToken)
+    ) {
+      countAssignmentTarget(node.operand);
+    }
+    if (
+      (ts.isForOfStatement(node) || ts.isForInStatement(node)) &&
+      !ts.isVariableDeclarationList(node.initializer)
+    ) {
+      countAssignmentTarget(node.initializer);
+    }
     ts.forEachChild(node, countAssignments);
   };
   countAssignments(sourceFile);
@@ -256,6 +277,11 @@ function violationsIn(
       declaration.initializer === undefined
     );
   };
+
+  const establishesAlias = (operator: ts.SyntaxKind): boolean =>
+    operator === ts.SyntaxKind.EqualsToken ||
+    operator === ts.SyntaxKind.BarBarEqualsToken ||
+    operator === ts.SyntaxKind.QuestionQuestionEqualsToken;
 
   const registerObjectAssignment = (
     properties: readonly ts.ObjectLiteralElementLike[],
@@ -338,13 +364,20 @@ function violationsIn(
       }
     }
 
-    if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+    if (ts.isBinaryExpression(node) && ts.isAssignmentOperator(node.operatorToken.kind)) {
       const value = unwrapTransparentExpression(node.right);
       const target = unwrapTransparentExpression(node.left);
-      if (ts.isIdentifier(target) && isUnambiguousAssignmentTarget(target)) {
+      if (
+        ts.isIdentifier(target) &&
+        establishesAlias(node.operatorToken.kind) &&
+        isUnambiguousAssignmentTarget(target)
+      ) {
         registerIdentifierBinding(target, value);
       }
-      if (ts.isObjectLiteralExpression(target)) {
+      if (
+        node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+        ts.isObjectLiteralExpression(target)
+      ) {
         registerObjectAssignment(target.properties, value);
       }
     }

@@ -1105,9 +1105,18 @@ const createRealisticGroupNotificationTray = (
   {
     expanded,
     headerExpandContentDesc = expanded ? "Collapse" : "Expand",
+    headerExpandResourceId = "android:id/expand_button",
+    childTitleResourceId = "android:id/title",
     groupTop = 663,
     body,
-  }: { expanded: boolean; headerExpandContentDesc?: string; groupTop?: number; body?: string },
+  }: {
+    expanded: boolean;
+    headerExpandContentDesc?: string;
+    headerExpandResourceId?: string;
+    childTitleResourceId?: string;
+    groupTop?: number;
+    body?: string;
+  },
 ): ViewHierarchyResult => {
   const groupLeft = 48;
   const groupRight = 1296;
@@ -1170,7 +1179,7 @@ const createRealisticGroupNotificationTray = (
                   {
                     $: {
                       "content-desc": headerExpandContentDesc,
-                      "resource-id": "android:id/expand_button",
+                      "resource-id": headerExpandResourceId,
                       className: "android.widget.Button",
                       clickable: "true",
                       bounds: {
@@ -1190,7 +1199,7 @@ const createRealisticGroupNotificationTray = (
                   return {
                     $: {
                       text: title,
-                      "resource-id": "android:id/title",
+                      "resource-id": childTitleResourceId,
                       bounds: {
                         left: 96,
                         top: childTop + 10,
@@ -1225,7 +1234,7 @@ const createRealisticGroupNotificationTray = (
                       {
                         $: {
                           text: title,
-                          "resource-id": "android:id/title",
+                          "resource-id": childTitleResourceId,
                           bounds: {
                             left: 96,
                             top: childTop + 10,
@@ -1757,6 +1766,51 @@ describe("systemTray group expansion", () => {
     expect(tapCommands.length).toBe(0);
   });
 
+  test("dismiss expands a collapsed group using the header content-desc fallback", async () => {
+    const fakeTimer = new FakeTimer();
+    const fakeAdb = new SequencedFakeAdbExecutor([1000, 1000, 2000]);
+    const collapsedHierarchy = createRealisticGroupNotificationTray(
+      "FUBStaging",
+      ["Zillow Real-Time Tour request"],
+      {
+        expanded: false,
+        headerExpandContentDesc: "eXpAnD",
+        headerExpandResourceId: "android:id/oem_toggle",
+      },
+    );
+    const expandedHierarchy = createRealisticGroupNotificationTray(
+      "FUBStaging",
+      ["Zillow Real-Time Tour request"],
+      { expanded: true },
+    );
+    const fakeObserveScreen = new SequencedObserveScreen([
+      createObservation(collapsedHierarchy),
+      createObservation(expandedHierarchy),
+    ]);
+    setSystemTrayDependencies({
+      timer: fakeTimer,
+      adbFactory: () => fakeAdb,
+      observeScreenFactory: () => fakeObserveScreen,
+    });
+    ToolRegistry.clearTools();
+    registerInteractionTools();
+
+    const dismiss = ToolRegistry.getTool("systemTray")!.deviceAwareHandler!(device, {
+      action: "dismiss",
+      notification: { title: "Zillow Real-Time Tour request" },
+      awaitTimeout: 5000,
+      platform: "android",
+    });
+    await waitForPendingSleep(fakeTimer);
+    fakeTimer.enableAutoAdvance();
+    fakeTimer.advanceTime(EXPAND_GROUP_SETTLE_MS);
+    await dismiss;
+
+    expect(fakeAdb.getExecutedCommands().find((cmd) => cmd.includes("input tap"))).toContain(
+      "input tap 1190 697",
+    );
+  });
+
   test("tap action expands collapsed group then re-matches", async () => {
     const fakeTimer = new FakeTimer();
     const fakeAdb = new SequencedFakeAdbExecutor([1000, 1000, 2000]);
@@ -1872,7 +1926,11 @@ describe("systemTray group expansion", () => {
     const hierarchy = createRealisticGroupNotificationTray(
       "FUBStaging",
       ["Zillow Real-Time Tour request", "Test message"],
-      { expanded: true },
+      {
+        expanded: true,
+        headerExpandContentDesc: "Expand",
+        headerExpandResourceId: "android:id/oem_toggle",
+      },
     );
     const fakeObserveScreen = new SequencedObserveScreen([
       createObservation(hierarchy),
@@ -2035,7 +2093,7 @@ describe("systemTray group expansion", () => {
     );
   });
 
-  test("dismiss refuses a same-app re-match with different bounds and child titles", async () => {
+  test("dismiss refuses a same-app re-match at the same position with disjoint child titles", async () => {
     const fakeTimer = new FakeTimer();
     const fakeAdb = new SequencedFakeAdbExecutor([1000, 1000]);
     const collapsedHierarchy = createRealisticGroupNotificationTray(
@@ -2046,7 +2104,7 @@ describe("systemTray group expansion", () => {
     const postExpandHierarchy = createRealisticGroupNotificationTray(
       "Same app",
       ["Different notification"],
-      { expanded: true, groupTop: 1100, body: "Shared body" },
+      { expanded: true, body: "Shared body" },
     );
     const fakeObserveScreen = new SequencedObserveScreen([
       createObservation(collapsedHierarchy),
@@ -2123,6 +2181,47 @@ describe("systemTray group expansion", () => {
     );
   });
 
+  test("dismiss accepts a same-position re-match when one group has no readable child titles", async () => {
+    const fakeTimer = new FakeTimer();
+    const fakeAdb = new SequencedFakeAdbExecutor([1000, 1000, 2000]);
+    const collapsedHierarchy = createRealisticGroupNotificationTray(
+      "Same app",
+      ["Original notification"],
+      { expanded: false, body: "Shared body" },
+    );
+    const expandedHierarchy = createRealisticGroupNotificationTray(
+      "Same app",
+      ["Different notification"],
+      { expanded: true, body: "Shared body", childTitleResourceId: "android:id/oem_subject" },
+    );
+    const fakeObserveScreen = new SequencedObserveScreen([
+      createObservation(collapsedHierarchy),
+      createObservation(expandedHierarchy),
+    ]);
+    setSystemTrayDependencies({
+      timer: fakeTimer,
+      adbFactory: () => fakeAdb,
+      observeScreenFactory: () => fakeObserveScreen,
+    });
+    ToolRegistry.clearTools();
+    registerInteractionTools();
+
+    const dismiss = ToolRegistry.getTool("systemTray")!.deviceAwareHandler!(device, {
+      action: "dismiss",
+      notification: { body: "Shared body" },
+      awaitTimeout: 5000,
+      platform: "android",
+    });
+    await waitForPendingSleep(fakeTimer);
+    fakeTimer.advanceTime(EXPAND_GROUP_SETTLE_MS);
+    const response = await dismiss;
+
+    expect(JSON.parse((response.content[0] as { text: string }).text).success).toBe(true);
+    expect(fakeAdb.getExecutedCommands().filter((cmd) => cmd.includes("input swipe"))).toHaveLength(
+      1,
+    );
+  });
+
   test("re-match uses only the notification wait budget remaining after expansion", async () => {
     const fakeTimer = new FakeTimer();
     const fakeAdb = new SequencedFakeAdbExecutor([1000, 1000]);
@@ -2167,6 +2266,94 @@ describe("systemTray group expansion", () => {
       EXPAND_GROUP_SETTLE_MS,
       POLL_INTERVAL_MS,
     ]);
+  });
+
+  test("caps the expand settle sleep to the remaining notification wait budget", async () => {
+    const fakeTimer = new FakeTimer();
+    const fakeAdb = new SequencedFakeAdbExecutor([1000, 1000]);
+    const unmatchedHierarchy = createTrayWithExpandedNotifications(["Different notification"]);
+    const collapsedHierarchy = createRealisticGroupNotificationTray(
+      "FUBStaging",
+      ["Zillow Real-Time Tour request"],
+      { expanded: false },
+    );
+    const fakeObserveScreen = new SequencedObserveScreen([
+      createObservation(unmatchedHierarchy),
+      createObservation(unmatchedHierarchy),
+      createObservation(unmatchedHierarchy),
+      createObservation(collapsedHierarchy),
+    ]);
+    setSystemTrayDependencies({
+      timer: fakeTimer,
+      adbFactory: () => fakeAdb,
+      observeScreenFactory: () => fakeObserveScreen,
+    });
+    ToolRegistry.clearTools();
+    registerInteractionTools();
+
+    const dismiss = ToolRegistry.getTool("systemTray")!.deviceAwareHandler!(device, {
+      action: "dismiss",
+      notification: { title: "Zillow Real-Time Tour request" },
+      awaitTimeout: 1000,
+      platform: "android",
+    });
+    for (let i = 0; i < 3; i += 1) {
+      await waitForPendingSleep(fakeTimer);
+      fakeTimer.advanceTime(POLL_INTERVAL_MS);
+    }
+    await waitForPendingSleep(fakeTimer);
+    expect(fakeTimer.getPendingSleeps()).toEqual([POLL_INTERVAL_MS]);
+    fakeTimer.advanceTime(POLL_INTERVAL_MS);
+
+    await expect(dismiss).rejects.toThrow("wait timed out before it could be re-matched");
+    expect(fakeTimer.now()).toBe(1000);
+    expect(fakeTimer.getSleepHistory()).toEqual([
+      POLL_INTERVAL_MS,
+      POLL_INTERVAL_MS,
+      POLL_INTERVAL_MS,
+      POLL_INTERVAL_MS,
+    ]);
+  });
+
+  test("does not tap a collapsed group when the notification wait budget is exhausted", async () => {
+    const fakeTimer = new FakeTimer();
+    const fakeAdb = new SequencedFakeAdbExecutor([1000, 1000]);
+    const unmatchedHierarchy = createTrayWithExpandedNotifications(["Different notification"]);
+    const collapsedHierarchy = createRealisticGroupNotificationTray(
+      "FUBStaging",
+      ["Zillow Real-Time Tour request"],
+      { expanded: false },
+    );
+    const fakeObserveScreen = new SequencedObserveScreen([
+      createObservation(unmatchedHierarchy),
+      createObservation(unmatchedHierarchy),
+      createObservation(unmatchedHierarchy),
+      createObservation(unmatchedHierarchy),
+      createObservation(collapsedHierarchy),
+    ]);
+    setSystemTrayDependencies({
+      timer: fakeTimer,
+      adbFactory: () => fakeAdb,
+      observeScreenFactory: () => fakeObserveScreen,
+    });
+    ToolRegistry.clearTools();
+    registerInteractionTools();
+
+    const dismiss = ToolRegistry.getTool("systemTray")!.deviceAwareHandler!(device, {
+      action: "dismiss",
+      notification: { title: "Zillow Real-Time Tour request" },
+      awaitTimeout: 1000,
+      platform: "android",
+    });
+    for (let i = 0; i < 4; i += 1) {
+      await waitForPendingSleep(fakeTimer);
+      fakeTimer.advanceTime(POLL_INTERVAL_MS);
+    }
+
+    await expect(dismiss).rejects.toThrow("wait timed out before it could be expanded");
+    expect(fakeAdb.getExecutedCommands().filter((cmd) => cmd.includes("input tap"))).toHaveLength(
+      0,
+    );
   });
 
   test("dismiss action refuses to swipe when the expand tap does not actually expand the group", async () => {

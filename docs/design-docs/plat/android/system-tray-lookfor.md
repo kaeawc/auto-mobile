@@ -105,11 +105,16 @@ group header. The `tap` action handles this automatically:
    `notification_children_container`), it descends into the group's children
    and tags each child candidate with a `groupNode` reference.
 2. **Detect** — After matching, `isMatchInCollapsedGroup` checks whether
-   the best match has a `groupNode`. If so, the notification is inside a
-   collapsed group.
+   the best match has a `groupNode`; this means the notification belongs to a
+   group, whether collapsed or expanded. `isNotificationGroupExpanded` then
+   determines the state structurally: the group is expanded only when its
+   `notification_children_container` has one or more per-child
+   `expandableNotificationRow` nodes (via `getNotificationGroupChildRows`). A
+   group with a `groupNode` and no such child rows is collapsed.
 3. **Expand** — `expandNotificationGroup` finds the "Expand" button inside
-   the group header (matched by `content-desc: "Expand"` or `resource-id`
-   containing `expand_button`) and taps it via ADB.
+   the group header, preferring a `resource-id` containing `expand_button` and
+   falling back to a `content-desc` equal to "Expand" (case-insensitive), and
+   taps it via ADB.
 4. **Re-match** — After a 500 ms settle, the tool re-observes the hierarchy
    and re-matches the now-expanded notification.
 5. **Tap** — The specific notification row is tapped, triggering its

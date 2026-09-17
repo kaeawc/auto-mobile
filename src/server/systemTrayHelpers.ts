@@ -567,22 +567,40 @@ const getNotificationGroupHeader = (groupNode: any): any | null => {
   );
 };
 
+const getExpandButtonResourceIdBounds = (
+  node: any,
+  parser: DefaultElementParser,
+): Element | null => {
+  const props = getNodeProperties(node);
+  const resourceId = String(props?.["resource-id"] ?? props?.resourceId ?? "").toLowerCase();
+  return resourceId.includes("expand_button") ? (parser.parseNodeBounds(node) ?? null) : null;
+};
+
+const getExpandButtonContentDescriptionBounds = (
+  node: any,
+  parser: DefaultElementParser,
+): Element | null => {
+  const props = getNodeProperties(node);
+  const contentDescription = String(
+    props?.["content-desc"] ?? props?.contentDesc ?? "",
+  ).toLowerCase();
+  return contentDescription === "expand" ? (parser.parseNodeBounds(node) ?? null) : null;
+};
+
 const findExpandButtonInGroup = (groupNode: any): Element | null => {
   const parser = new DefaultElementParser();
+  let contentDescriptionMatch: Element | null = null;
 
   const search = (node: any): Element | null => {
     if (!node) {
       return null;
     }
 
-    const props = getNodeProperties(node);
-    if (props) {
-      const resourceId = String(props["resource-id"] ?? props.resourceId ?? "").toLowerCase();
-      const matchesId = resourceId.includes("expand_button");
-      if (matchesId) {
-        return parser.parseNodeBounds(node) ?? null;
-      }
+    const resourceIdMatch = getExpandButtonResourceIdBounds(node, parser);
+    if (resourceIdMatch) {
+      return resourceIdMatch;
     }
+    contentDescriptionMatch ??= getExpandButtonContentDescriptionBounds(node, parser);
 
     const children = node.node;
     if (Array.isArray(children)) {
@@ -599,7 +617,7 @@ const findExpandButtonInGroup = (groupNode: any): Element | null => {
     return null;
   };
 
-  return search(getNotificationGroupHeader(groupNode));
+  return search(getNotificationGroupHeader(groupNode)) ?? contentDescriptionMatch;
 };
 
 export const isNotificationGroupExpanded = (groupNode: any): boolean => {
@@ -1546,10 +1564,10 @@ const isSameNotificationGroup = (
   ) {
     return false;
   }
-  return (
-    original.top === rematched.top ||
-    original.childTitles.some((title) => rematched.childTitles.includes(title))
-  );
+  if (original.childTitles.length > 0 && rematched.childTitles.length > 0) {
+    return original.childTitles.some((title) => rematched.childTitles.includes(title));
+  }
+  return original.top === rematched.top;
 };
 
 export const expandAndRematchIfCollapsed = async (
@@ -1566,10 +1584,17 @@ export const expandAndRematchIfCollapsed = async (
     return { observation, match };
   }
 
+  const { timer } = getSystemTrayDependencies();
+  const remainingBeforeExpandMs = deadlineMs - timer.now();
+  if (remainingBeforeExpandMs <= 0) {
+    throw new ActionableError(
+      "Collapsed notification group detected but the notification wait timed out before it could be expanded.",
+    );
+  }
+
   const groupIdentity = getNotificationGroupIdentity(groupNode);
   await expandNotificationGroup(device, match);
-  const { timer } = getSystemTrayDependencies();
-  await timer.sleep(EXPAND_GROUP_SETTLE_MS);
+  await timer.sleep(Math.min(EXPAND_GROUP_SETTLE_MS, Math.max(0, deadlineMs - timer.now())));
   const remainingMs = Math.max(0, deadlineMs - timer.now());
   if (remainingMs === 0) {
     throw new ActionableError(

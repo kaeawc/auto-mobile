@@ -9,6 +9,8 @@ describe("Android serial predicates", () => {
     "192.168.1.24:5555",
     "localhost:5555",
     "[::1]:5555",
+    "[fe80::1234%en0]:5555",
+    "[fe80::1%25eth0]:5555",
     "adb-XXXX._adb-tls-connect._tcp",
     "adb-XXXX._adb._tcp",
   ])("recognizes transport address %s", (deviceId) => {

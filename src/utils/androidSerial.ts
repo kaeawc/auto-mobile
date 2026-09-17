@@ -8,7 +8,7 @@ const ANDROID_EMULATOR_SERIAL_PATTERN = /^emulator-\d+$/;
 
 /** ADB transport addresses are connection endpoints rather than durable ids. */
 const ANDROID_TRANSPORT_ADDRESS_SERIAL_PATTERN =
-  /^(?:[A-Za-z0-9.-]+|\[[0-9A-Fa-f:.]+\]):\d+$|\._adb-tls-connect\._tcp|\._adb\._tcp/;
+  /^(?:[A-Za-z0-9.-]+|\[[^\]]+\]):\d+$|\._adb-tls-connect\._tcp|\._adb\._tcp/;
 
 /** True when `deviceId` is an adb emulator serial (e.g. `emulator-5554`). */
 export function isAndroidEmulatorSerial(deviceId: string): boolean {

@@ -709,7 +709,7 @@ describe("SessionManager", () => {
       }
     });
 
-    test.each(["192.168.1.24:5555", "adb-XXXX._adb-tls-connect._tcp"])(
+    test.each(["192.168.1.24:5555", "adb-XXXX._adb-tls-connect._tcp", "[fe80::1234%en0]:5555"])(
       "terminalizes a legacy Android transport address recovery: %s",
       async (deviceId) => {
         const persisted: DeviceSession = {

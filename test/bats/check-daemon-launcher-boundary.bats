@@ -508,6 +508,61 @@ teardown() {
   [[ "$output" == *'remaining.spawn("auto-mobile"'* ]]
 }
 
+@test "uses unknown contexts and source lifetimes conservatively" {
+  printf '%s\n' \
+    'import childProcess from "node:child_process";' \
+    'declare const safeLaunch: (command: string, args: string[]) => void;' \
+    'declare function register(callback: () => void): void;' \
+    'export function externallyInvoked() { externalLaunch("auto-mobile", ["--daemon-mode"]); }' \
+    'if (false) externallyInvoked();' \
+    'const externalLaunch = childProcess.execFileSync;' \
+    'function escaped() { escapedLaunch("auto-mobile", ["--daemon-mode"]); }' \
+    'register(escaped);' \
+    'escaped();' \
+    'const escapedLaunch = childProcess.execFileSync;' \
+    'async function afterAwait() { await Promise.resolve(); awaitedLaunch("auto-mobile", ["--daemon-mode"]); }' \
+    'void afterAwait();' \
+    'const awaitedLaunch = childProcess.execFileSync;' \
+    'function* afterYield() { yield; yieldedLaunch("auto-mobile", ["--daemon-mode"]); }' \
+    'const iterator = afterYield();' \
+    'iterator.next();' \
+    'const yieldedLaunch = childProcess.execFileSync;' \
+    'iterator.next();' \
+    'class FieldInitializer { value = fieldLaunch("auto-mobile", ["--daemon-mode"]); }' \
+    'const fieldLaunch = childProcess.execFileSync;' \
+    'new FieldInitializer();' \
+    'let sourceAlias = childProcess.execFileSync;' \
+    'const snapshotBefore = sourceAlias;' \
+    'sourceAlias = safeLaunch;' \
+    'const snapshotAfter = sourceAlias;' \
+    'snapshotBefore("auto-mobile", ["--daemon-mode"]);' \
+    'snapshotAfter("auto-mobile", ["--daemon-mode"]);' \
+    'let defaulted;' \
+    'let remaining;' \
+    '({ execFileSync: defaulted = safeLaunch, ...remaining } = childProcess);' \
+    'defaulted("auto-mobile", ["--daemon-mode"]);' \
+    'remaining.execFileSync?.("auto-mobile", ["--daemon-mode"]);' \
+    'remaining.spawn("auto-mobile", ["--daemon-mode"]);' \
+    'require("node:child_process").execFileSync("auto-mobile", ["--daemon-mode"]);' \
+    > "$FIXTURE"
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 1 ]
+  [[ "$(grep -c "DaemonLauncherBoundaryFixture.ts" <<< "$output")" -eq 9 ]]
+  [[ "$output" == *'externalLaunch("auto-mobile"'* ]]
+  [[ "$output" == *'escapedLaunch("auto-mobile"'* ]]
+  [[ "$output" == *'awaitedLaunch("auto-mobile"'* ]]
+  [[ "$output" == *'yieldedLaunch("auto-mobile"'* ]]
+  [[ "$output" == *'fieldLaunch("auto-mobile"'* ]]
+  [[ "$output" == *'snapshotBefore("auto-mobile"'* ]]
+  [[ "$output" == *'defaulted("auto-mobile"'* ]]
+  [[ "$output" == *'remaining.spawn("auto-mobile"'* ]]
+  [[ "$output" == *'require("node:child_process").execFileSync'* ]]
+  [[ "$output" != *'snapshotAfter("auto-mobile"'* ]]
+  [[ "$output" != *'remaining.execFileSync?.("auto-mobile"'* ]]
+}
+
 @test "rejects transitive executor aliases declared after their function body" {
   printf '%s\n' \
     'import childProcess from "node:child_process";' \

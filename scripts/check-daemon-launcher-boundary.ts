@@ -162,6 +162,13 @@ function violationsIn(
       (timing.endsAt === undefined || position < timing.endsAt)
     );
   };
+  // The binding pass intentionally resolves forward aliases. A source declared later can
+  // still be discovered in a later pass, but a source already replaced at this point cannot.
+  const bindingHasNotEndedAt = (identifier: ts.Identifier, position: number): boolean => {
+    const symbol = symbolFor(identifier);
+    const timing = symbol ? bindingTimings.get(symbol) : undefined;
+    return timing !== undefined && (timing.endsAt === undefined || position < timing.endsAt);
+  };
   const addNamespace = (
     identifier: ts.Identifier,
     exclusions: ReadonlySet<string> = new Set(),
@@ -183,6 +190,9 @@ function violationsIn(
 
   const namespaceIsAvailableAt = (identifier: ts.Identifier, position: number): boolean =>
     hasNamespace(identifier) && bindingIsAvailableAt(identifier, position);
+
+  const namespaceHasNotEndedAt = (identifier: ts.Identifier, position: number): boolean =>
+    hasNamespace(identifier) && bindingHasNotEndedAt(identifier, position);
 
   const staticStringValue = (
     expression: ts.Expression,
@@ -212,7 +222,7 @@ function violationsIn(
     return staticStringValue(declaration.initializer, seen);
   };
 
-  const isNamespaceExecutor = (value: ts.Expression): boolean => {
+  const isNamespaceExecutor = (value: ts.Expression, position: number): boolean => {
     const memberAccess = unwrapTransparentExpression(value);
     const receiver =
       ts.isPropertyAccessExpression(memberAccess) || ts.isElementAccessExpression(memberAccess)
@@ -223,7 +233,7 @@ function violationsIn(
       (ts.isPropertyAccessExpression(memberAccess) || ts.isElementAccessExpression(memberAccess)) &&
       receiver !== undefined &&
       ts.isIdentifier(receiver) &&
-      hasNamespace(receiver) &&
+      namespaceHasNotEndedAt(receiver, position) &&
       executor !== undefined &&
       EXECUTION_FUNCTIONS.has(executor) &&
       !namespaceExclusionsFor(receiver)?.has(executor)
@@ -234,17 +244,22 @@ function violationsIn(
     identifier: ts.Identifier,
     value: ts.Expression,
     timing: { startsAt: number; endsAt?: number },
+    sourcePosition: number,
   ): void => {
     if (isChildProcessRequire(value)) {
       addNamespace(identifier, new Set(), timing);
     }
-    if (ts.isIdentifier(value) && hasBinding(importedExecutors, value)) {
+    if (
+      ts.isIdentifier(value) &&
+      hasBinding(importedExecutors, value) &&
+      bindingHasNotEndedAt(value, sourcePosition)
+    ) {
       addBinding(importedExecutors, identifier, timing);
     }
-    if (ts.isIdentifier(value) && hasNamespace(value)) {
+    if (ts.isIdentifier(value) && namespaceHasNotEndedAt(value, sourcePosition)) {
       addNamespace(identifier, namespaceExclusionsFor(value), timing);
     }
-    if (isNamespaceExecutor(value)) {
+    if (isNamespaceExecutor(value, sourcePosition)) {
       addBinding(importedExecutors, identifier, timing);
     }
   };
@@ -252,8 +267,12 @@ function violationsIn(
   const registerObjectBinding = (
     elements: readonly ts.BindingElement[],
     value: ts.Expression,
+    sourcePosition: number,
   ): void => {
-    if (!isChildProcessRequire(value) && !(ts.isIdentifier(value) && hasNamespace(value))) {
+    if (
+      !isChildProcessRequire(value) &&
+      !(ts.isIdentifier(value) && namespaceHasNotEndedAt(value, sourcePosition))
+    ) {
       return;
     }
     const sourceExclusions = ts.isIdentifier(value) ? namespaceExclusionsFor(value) : undefined;
@@ -364,6 +383,31 @@ function violationsIn(
       : undefined;
   };
 
+  const hasModifier = (node: ts.Node, modifier: ts.SyntaxKind): boolean =>
+    ts.canHaveModifiers(node) &&
+    (ts.getModifiers(node)?.some(({ kind }) => kind === modifier) ?? false);
+
+  const ownerIsExported = (owner: ts.Node): boolean => {
+    if (hasModifier(owner, ts.SyntaxKind.ExportKeyword)) {
+      return true;
+    }
+    let ancestor: ts.Node | undefined = owner.parent;
+    while (ancestor) {
+      if (ts.isSourceFile(ancestor) || ts.isFunctionLike(ancestor)) {
+        return false;
+      }
+      if (ts.isClassDeclaration(ancestor) || ts.isClassExpression(ancestor)) {
+        return hasModifier(ancestor, ts.SyntaxKind.ExportKeyword);
+      }
+      ancestor = ancestor.parent;
+    }
+    return false;
+  };
+
+  const functionMaySuspend = (functionLike: ts.FunctionLikeDeclaration): boolean =>
+    hasModifier(functionLike, ts.SyntaxKind.AsyncKeyword) ||
+    ("asteriskToken" in functionLike && functionLike.asteriskToken !== undefined);
+
   const calledFunctionDeclaration = (expression: ts.Expression): ts.Node | undefined => {
     const callee = unwrapTransparentExpression(expression);
     if (ts.isIdentifier(callee)) {
@@ -373,6 +417,18 @@ function violationsIn(
       ? symbolFor(callee.name)?.valueDeclaration
       : undefined;
   };
+
+  const functionOwners = new Set<ts.Node>();
+  const collectFunctionOwners = (node: ts.Node): void => {
+    if (ts.isFunctionLike(node)) {
+      const owner = functionOwnerDeclaration(node);
+      if (owner) {
+        functionOwners.add(owner);
+      }
+    }
+    ts.forEachChild(node, collectFunctionOwners);
+  };
+  collectFunctionOwners(sourceFile);
 
   const eagerFunctionCallPositions = new Map<ts.Node, number[]>();
   const collectEagerFunctionCalls = (node: ts.Node): void => {
@@ -388,13 +444,71 @@ function violationsIn(
   };
   collectEagerFunctionCalls(sourceFile);
 
+  const isOwnerDeclarationName = (identifier: ts.Identifier, owner: ts.Node): boolean =>
+    (ts.isFunctionDeclaration(owner) || ts.isMethodDeclaration(owner)) && owner.name === identifier
+      ? true
+      : ts.isVariableDeclaration(owner) && owner.name === identifier;
+
+  const isDirectEagerOwnerCall = (identifier: ts.Identifier, owner: ts.Node): boolean => {
+    let callee: ts.Expression = identifier;
+    while (
+      callee.parent &&
+      (ts.isAsExpression(callee.parent) ||
+        ts.isTypeAssertionExpression(callee.parent) ||
+        ts.isNonNullExpression(callee.parent) ||
+        ts.isSatisfiesExpression(callee.parent) ||
+        ts.isParenthesizedExpression(callee.parent))
+    ) {
+      callee = callee.parent;
+    }
+    if (ts.isPropertyAccessExpression(callee.parent) && callee.parent.name === callee) {
+      callee = callee.parent;
+    }
+    return (
+      ts.isCallExpression(callee.parent) &&
+      callee.parent.expression === callee &&
+      ts.findAncestor(callee.parent, ts.isFunctionLike) === undefined &&
+      calledFunctionDeclaration(callee) === owner
+    );
+  };
+
+  const escapedFunctionOwners = new Set<ts.Node>();
+  const collectFunctionEscapes = (node: ts.Node): void => {
+    if (ts.isIdentifier(node)) {
+      const owner = symbolFor(node)?.valueDeclaration;
+      if (
+        owner &&
+        functionOwners.has(owner) &&
+        !isOwnerDeclarationName(node, owner) &&
+        !isDirectEagerOwnerCall(node, owner)
+      ) {
+        escapedFunctionOwners.add(owner);
+      }
+    }
+    ts.forEachChild(node, collectFunctionEscapes);
+  };
+  collectFunctionEscapes(sourceFile);
+
   const executionPositionsFor = (node: ts.CallExpression): readonly number[] | undefined => {
     let ancestor: ts.Node | undefined = node.parent;
     while (ancestor) {
       if (ts.isFunctionLike(ancestor)) {
         const declaration = functionOwnerDeclaration(ancestor);
         const positions = declaration ? eagerFunctionCallPositions.get(declaration) : undefined;
-        return positions && positions.length > 0 ? positions : undefined;
+        return declaration &&
+          !ownerIsExported(declaration) &&
+          !escapedFunctionOwners.has(declaration) &&
+          !functionMaySuspend(ancestor) &&
+          positions &&
+          positions.length > 0
+          ? positions
+          : undefined;
+      }
+      if (
+        ts.isPropertyDeclaration(ancestor) &&
+        !hasModifier(ancestor, ts.SyntaxKind.StaticKeyword)
+      ) {
+        return undefined;
       }
       ancestor = ancestor.parent;
     }
@@ -456,12 +570,31 @@ function violationsIn(
     operator === ts.SyntaxKind.BarBarEqualsToken ||
     operator === ts.SyntaxKind.QuestionQuestionEqualsToken;
 
+  const assignmentPatternTarget = (
+    target: ts.Expression | undefined,
+  ): ts.Identifier | undefined => {
+    const value = target ? unwrapTransparentExpression(target) : undefined;
+    if (value && ts.isIdentifier(value)) {
+      return value;
+    }
+    return value &&
+      ts.isBinaryExpression(value) &&
+      value.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+      ts.isIdentifier(unwrapTransparentExpression(value.left))
+      ? unwrapTransparentExpression(value.left)
+      : undefined;
+  };
+
   const registerObjectAssignment = (
     properties: readonly ts.ObjectLiteralElementLike[],
     value: ts.Expression,
     assignment: ts.BinaryExpression,
   ): void => {
-    if (!isChildProcessRequire(value) && !(ts.isIdentifier(value) && hasNamespace(value))) {
+    const sourcePosition = assignment.right.getStart(sourceFile);
+    if (
+      !isChildProcessRequire(value) &&
+      !(ts.isIdentifier(value) && namespaceHasNotEndedAt(value, sourcePosition))
+    ) {
       return;
     }
     const sourceExclusions = ts.isIdentifier(value) ? namespaceExclusionsFor(value) : undefined;
@@ -487,11 +620,16 @@ function violationsIn(
       if (EXECUTION_FUNCTIONS.has(imported)) {
         restExclusions.add(imported);
       }
-      if (!target || !ts.isIdentifier(target) || !isUnambiguousAssignmentTarget(target)) {
+      const targetIdentifier = assignmentPatternTarget(target);
+      if (!targetIdentifier || !isUnambiguousAssignmentTarget(targetIdentifier)) {
         continue;
       }
       if (EXECUTION_FUNCTIONS.has(imported) && !sourceExclusions?.has(imported)) {
-        addBinding(importedExecutors, target, assignmentTiming(target, assignment));
+        addBinding(
+          importedExecutors,
+          targetIdentifier,
+          assignmentTiming(targetIdentifier, assignment),
+        );
       }
     }
     if (hasDynamicExclusion) {
@@ -559,10 +697,19 @@ function violationsIn(
     if (ts.isVariableDeclaration(node) && node.initializer) {
       const initializer = unwrapTransparentExpression(node.initializer);
       if (ts.isIdentifier(node.name)) {
-        registerIdentifierBinding(node.name, initializer, initializerTiming(node.name));
+        registerIdentifierBinding(
+          node.name,
+          initializer,
+          initializerTiming(node.name),
+          node.initializer.getStart(sourceFile),
+        );
       }
       if (ts.isObjectBindingPattern(node.name)) {
-        registerObjectBinding(node.name.elements, initializer);
+        registerObjectBinding(
+          node.name.elements,
+          initializer,
+          node.initializer.getStart(sourceFile),
+        );
       }
     }
 
@@ -574,7 +721,12 @@ function violationsIn(
         establishesAlias(node.operatorToken.kind) &&
         isUnambiguousAssignmentTarget(target)
       ) {
-        registerIdentifierBinding(target, value, assignmentTiming(target, node));
+        registerIdentifierBinding(
+          target,
+          value,
+          assignmentTiming(target, node),
+          node.right.getStart(sourceFile),
+        );
       }
       if (
         node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
@@ -591,6 +743,10 @@ function violationsIn(
     ) {
       const expression = unwrapTransparentExpression(node.expression);
       const executionPositions = executionPositionsFor(node);
+      const namespaceReceiver =
+        ts.isPropertyAccessExpression(expression) || ts.isElementAccessExpression(expression)
+          ? unwrapTransparentExpression(expression.expression)
+          : undefined;
       const direct =
         ts.isIdentifier(expression) &&
         hasBinding(importedExecutors, expression) &&
@@ -598,14 +754,19 @@ function violationsIn(
           executionPositions.some((position) => bindingIsAvailableAt(expression, position)));
       const namespaced =
         (ts.isPropertyAccessExpression(expression) || ts.isElementAccessExpression(expression)) &&
-        ts.isIdentifier(unwrapTransparentExpression(expression.expression)) &&
+        namespaceReceiver !== undefined &&
         (executionPositions === undefined ||
-          executionPositions.some((position) =>
-            namespaceIsAvailableAt(unwrapTransparentExpression(expression.expression), position),
-          )) &&
+          (ts.isIdentifier(namespaceReceiver)
+            ? executionPositions.some((position) =>
+                namespaceIsAvailableAt(namespaceReceiver, position),
+              )
+            : isChildProcessRequire(namespaceReceiver))) &&
         EXECUTION_FUNCTIONS.has(staticMemberName(expression, staticStringValue) ?? "") &&
-        !namespaceExclusionsFor(unwrapTransparentExpression(expression.expression))?.has(
-          staticMemberName(expression, staticStringValue) ?? "",
+        !(
+          ts.isIdentifier(namespaceReceiver) &&
+          namespaceExclusionsFor(namespaceReceiver)?.has(
+            staticMemberName(expression, staticStringValue) ?? "",
+          )
         );
       if (direct || namespaced) {
         record(node);

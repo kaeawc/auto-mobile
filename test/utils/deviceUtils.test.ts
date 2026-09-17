@@ -611,6 +611,42 @@ describe("MultiPlatformDeviceManager", () => {
     ]);
   });
 
+  test("listDeviceImages(android) marks unmatched AVDs unknown when an emulator identity is unresolved", async () => {
+    const runningImage: DeviceInfo = { name: "Pixel_8", platform: "android", isRunning: false };
+    const unresolvedImage: DeviceInfo = {
+      name: "Pixel_Tablet",
+      platform: "android",
+      isRunning: false,
+    };
+    const fakeEmulator = {
+      listAvds: async () => [runningImage, unresolvedImage],
+      getBootedDevicesChecked: async (): Promise<BootedDevice[]> => [
+        { name: "Pixel_8", platform: "android", deviceId: "emulator-5554", source: "local" },
+        {
+          name: "Unknown (emulator-5556)",
+          platform: "android",
+          deviceId: "emulator-5556",
+          source: "local",
+        },
+      ],
+    } as unknown as AndroidEmulatorClient;
+    const manager = new MultiPlatformDeviceManager(
+      new FakeAdbClient() as unknown as AdbClient,
+      undefined,
+      fakeEmulator,
+    );
+
+    await expect(manager.listDeviceImages("android")).resolves.toEqual([
+      { name: "Pixel_8", platform: "android", isRunning: true },
+      {
+        name: "Pixel_Tablet",
+        platform: "android",
+        isRunning: false,
+        isRunningStateKnown: false,
+      },
+    ]);
+  });
+
   test("listDeviceImages(android) keeps configured AVDs when the running-state overlay fails", async () => {
     const image: DeviceInfo = { name: "Pixel_8", platform: "android", isRunning: false };
     const fakeEmulator = {

@@ -16,6 +16,7 @@ import type { AndroidEmulatorReadinessOptions } from "./android-cmdline-tools/An
 import { deleteAvd } from "./android-cmdline-tools/avdmanager";
 import { logger } from "./logger";
 import { isAndroidEmulatorSerial } from "./androidSerial";
+import { isUnresolvedAndroidEmulatorName } from "../daemon/deviceIdentityEvidence";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "./deviceTimeouts";
 import { combineWithAmbientAbort, getAbortSignal, runWithAbortSignal } from "./AbortContext";
 import { defaultTimer, type Timer } from "./SystemTimer";
@@ -506,15 +507,18 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
           return undefined;
         }),
     ]);
-    const runningAvdNames = new Set(
-      (bootedDevices ?? [])
-        .filter((device) => isAndroidEmulatorSerial(device.deviceId))
-        .map((device) => device.name),
+    const emulatorDevices = (bootedDevices ?? []).filter((device) =>
+      isAndroidEmulatorSerial(device.deviceId),
     );
+    const runningAvdNames = new Set(emulatorDevices.map((device) => device.name));
+    const hasUnresolvedEmulatorIdentity = emulatorDevices.some(isUnresolvedAndroidEmulatorName);
     return images.map((image) => ({
       ...image,
       isRunning: runningAvdNames.has(image.name),
-      ...(bootedDevices === undefined ? { isRunningStateKnown: false } : {}),
+      ...(bootedDevices === undefined ||
+      (hasUnresolvedEmulatorIdentity && !runningAvdNames.has(image.name))
+        ? { isRunningStateKnown: false }
+        : {}),
     }));
   }
 

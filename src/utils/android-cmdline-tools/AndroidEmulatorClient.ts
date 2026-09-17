@@ -1549,6 +1549,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
         );
       return this.enrichDeviceInfoList(devices);
     } catch (error) {
+      options?.signal?.throwIfAborted();
       logger.error("Failed to list AVDs:", error);
 
       // Check if the error is because emulator is not found

@@ -1294,6 +1294,25 @@ describe("DeviceSessionManager dual-platform resolution", () => {
     expect(fakeDeviceUtils.getWaitForDeviceReadyChildProcess()).toBe(childProcess);
   });
 
+  test("does not cold-boot an Android image when its running state is unknown", async () => {
+    fakeDeviceUtils.setBootedDevices("android", []);
+    fakeDeviceUtils.setDeviceImages("android", [
+      {
+        name: "Pixel_9_Pro",
+        platform: "android",
+        isRunning: false,
+        isRunningStateKnown: false,
+      },
+    ]);
+    const manager = DeviceSessionManager.createInstance(buildProvider(), fakeAdbFactory);
+
+    await expect(manager.findOrStartAndroidDevice()).rejects.toThrow(
+      "Cannot safely cold-boot Android AVD 'Pixel_9_Pro': its running state is unknown.",
+    );
+
+    expect(fakeDeviceUtils.wasMethodCalled("startDevice")).toBe(false);
+  });
+
   test("holds the Android auto-start lease until a preempted emulator process exits", async () => {
     const timer = new FakeTimer();
     const lifecycleCoordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);

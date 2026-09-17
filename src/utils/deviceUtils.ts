@@ -30,6 +30,18 @@ export { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "./deviceTimeouts";
 
 const READINESS_ABORT_SETTLEMENT_TURNS = 8;
 
+/**
+ * A configured Android image with incomplete ADB liveness must not be used for
+ * a cold boot: it may already be running behind the unavailable overlay.
+ */
+export function assertAndroidImageRunningStateKnown(image: DeviceInfo): void {
+  if (image.platform === "android" && image.isRunningStateKnown === false) {
+    throw new ActionableError(
+      `Cannot safely cold-boot Android AVD '${image.name}': its running state is unknown.`,
+    );
+  }
+}
+
 export type DeviceDiscoveryErrorCode = "unavailable" | "failed";
 
 export interface DeviceDiscoveryError {
@@ -769,6 +781,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     device: DeviceInfo,
     timeoutMs: number = DEFAULT_DEVICE_READY_TIMEOUT_MS,
   ): Promise<ChildProcess | null> {
+    assertAndroidImageRunningStateKnown(device);
     // Validate the UDID before any simctl running-state probe: a slow/hung
     // 'simctl list' would otherwise burn the boot budget, and an already-booted
     // same-named simulator would make isDeviceImageRunning() return true and

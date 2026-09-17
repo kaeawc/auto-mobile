@@ -9,6 +9,7 @@ import type {
 import type { DeviceCreationGate } from "./deviceCreationGate";
 import { isAndroidEmulatorSerial } from "./androidSerial";
 import {
+  assertAndroidImageRunningStateKnown,
   DEFAULT_DEVICE_READY_TIMEOUT_MS,
   type BootedDeviceDiscoveryOptions,
   type PlatformDeviceManager,
@@ -553,11 +554,6 @@ export class DeviceBootService {
     presentationOrder?: BootedDeviceDiscoveryOptions["presentationOrder"],
   ): Promise<DeviceBootResult> {
     if (!image.isRunning) {
-      if (image.platform === "android" && image.isRunningStateKnown === false) {
-        throw new ActionableError(
-          `Cannot safely cold-boot Android AVD '${image.name}': its running state is unknown.`,
-        );
-      }
       return this.bootImage(image, context, progress, false);
     }
     const booted = await this.discoverBootedDevices(
@@ -688,6 +684,7 @@ export class DeviceBootService {
     progress: DeviceBootProgress | undefined,
     provisioned: boolean,
   ): Promise<DeviceBootResult> {
+    assertAndroidImageRunningStateKnown(image);
     if (image.platform === "ios" && !image.deviceId) {
       throw new ActionableError("iOS simulator deviceId (UDID) is required to start a simulator.");
     }

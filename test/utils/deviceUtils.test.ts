@@ -367,6 +367,40 @@ describe("MultiPlatformDeviceManager", () => {
     expect(runningStateProbed).toBe(false);
   });
 
+  test("startDevice does not probe or launch an Android AVD with unknown running state", async () => {
+    let runningStateProbed = false;
+    let launched = false;
+    const fakeEmulator = {
+      isAvdRunning: async () => {
+        runningStateProbed = true;
+        return false;
+      },
+      launchEmulator: async () => {
+        launched = true;
+        return { process: null };
+      },
+    } as unknown as AndroidEmulatorClient;
+    const manager = new MultiPlatformDeviceManager(
+      new FakeAdbClient() as unknown as AdbClient,
+      undefined,
+      fakeEmulator,
+    );
+
+    await expect(
+      manager.startDevice({
+        name: "Pixel_9_Pro",
+        platform: "android",
+        isRunning: false,
+        isRunningStateKnown: false,
+      }),
+    ).rejects.toThrow(
+      "Cannot safely cold-boot Android AVD 'Pixel_9_Pro': its running state is unknown.",
+    );
+
+    expect(runningStateProbed).toBe(false);
+    expect(launched).toBe(false);
+  });
+
   test("waitForDeviceReady rejects a name-only iOS DeviceInfo instead of polling bootstatus by name (#6414)", async () => {
     const fakeSimctl = {
       isAvailable: async () => true,

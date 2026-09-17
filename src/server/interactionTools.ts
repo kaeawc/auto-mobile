@@ -1308,6 +1308,7 @@ const VISIBLE_HIERARCHY_TEXT_KEYS = new Set([
 ]);
 const IOS_OPEN_ALERT_ACCEPT_ATTEMPTS = 8;
 const IOS_OPEN_ALERT_RETRY_INTERVAL_MS = 250;
+const IOS_OPEN_ALERT_VERIFY_ATTEMPTS = 4;
 const IOS_OPEN_ALERT_HIERARCHY_TIMEOUT_MS = 2_000;
 
 function collectVisibleHierarchyText(value: unknown, texts: string[]): void {
@@ -1370,6 +1371,27 @@ async function tapLiveSystemAlert(tapSystemAlert: SystemAlertTap | undefined): P
   return tapSystemAlert ? (await tapSystemAlert()).success : false;
 }
 
+async function verifyIosOpenAlertDismissed(
+  refreshHierarchy: OpenAlertHierarchyRefresh | undefined,
+  tapSystemAlert: SystemAlertTap | undefined,
+  signal: AbortSignal | undefined,
+): Promise<boolean> {
+  if (!refreshHierarchy) {
+    return true;
+  }
+  for (let attempt = 0; attempt < IOS_OPEN_ALERT_VERIFY_ATTEMPTS; attempt += 1) {
+    throwIfOpenAlertAcceptanceAborted(signal);
+    const hierarchy = await refreshHierarchy();
+    if (!isIosAppOpenAlertHierarchy(hierarchy ?? undefined)) {
+      return true;
+    }
+    if (!(await tapLiveSystemAlert(tapSystemAlert))) {
+      return false;
+    }
+  }
+  return false;
+}
+
 async function resolveIosOpenAlert(
   initialHierarchy: ObserveResult["viewHierarchy"] | undefined,
   refreshHierarchy: OpenAlertHierarchyRefresh | undefined,
@@ -1426,11 +1448,15 @@ export async function acceptIosAppOpenAlert(
     return null;
   }
   if ("systemTapped" in resolution) {
-    return {
+    const result = {
       success: true,
       action: "tap",
       element: { text: "Open", bounds: { left: 0, top: 0, right: 0, bottom: 0 } },
     } as TapOnElementResult;
+    if (!(await verifyIosOpenAlertDismissed(refreshHierarchy, tapSystemAlert, signal))) {
+      throw new ActionableError("Failed to accept iOS app-open alert: dialog remained visible");
+    }
+    return result;
   }
 
   const result = await tapOnElementFactory(device).execute(
@@ -1442,6 +1468,9 @@ export async function acceptIosAppOpenAlert(
     throw new ActionableError(
       `Failed to accept iOS app-open alert: ${result.error || "unknown error"}`,
     );
+  }
+  if (!(await verifyIosOpenAlertDismissed(refreshHierarchy, tapSystemAlert, signal))) {
+    throw new ActionableError("Failed to accept iOS app-open alert: dialog remained visible");
   }
   return result;
 }

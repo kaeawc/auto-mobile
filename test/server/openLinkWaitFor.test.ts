@@ -152,12 +152,12 @@ describe("openLink iOS app-open alert acceptance", () => {
       undefined,
       async () => {
         refreshCalls += 1;
-        return appOpenAlertObservation.viewHierarchy ?? null;
+        return refreshCalls === 1 ? (appOpenAlertObservation.viewHierarchy ?? null) : null;
       },
     );
 
     expect(result?.success).toBe(true);
-    expect(refreshCalls).toBe(1);
+    expect(refreshCalls).toBe(2);
     expect(tapCalls).toBe(1);
   });
 
@@ -178,6 +178,38 @@ describe("openLink iOS app-open alert acceptance", () => {
 
     expect(result?.success).toBe(true);
     expect(result?.element.text).toBe("Open");
+    expect(systemTapCalls).toBe(1);
+  });
+
+  test("retries the live button when the dialog remains after a successful tap", async () => {
+    let refreshCalls = 0;
+    let systemTapCalls = 0;
+    setTapOnElementFactory(() => ({
+      execute: async () =>
+        ({
+          success: true,
+          action: "tap",
+          element: { text: "Open", bounds: { left: 0, top: 0, right: 1, bottom: 1 } },
+        }) as TapOnElementResult,
+    }));
+
+    const result = await acceptIosAppOpenAlert(
+      iosDevice,
+      appOpenAlertObservation,
+      undefined,
+      undefined,
+      async () => {
+        refreshCalls += 1;
+        return refreshCalls === 1 ? (appOpenAlertObservation.viewHierarchy ?? null) : null;
+      },
+      async () => {
+        systemTapCalls += 1;
+        return { success: true };
+      },
+    );
+
+    expect(result?.success).toBe(true);
+    expect(refreshCalls).toBe(2);
     expect(systemTapCalls).toBe(1);
   });
 

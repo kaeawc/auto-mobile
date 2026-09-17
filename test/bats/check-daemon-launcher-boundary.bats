@@ -104,6 +104,21 @@ teardown() {
   [[ "$output" == *"DaemonLauncherBoundaryFixture.ts"* ]]
 }
 
+@test "rejects transparently wrapped computed child-process executors outside the owner" {
+  printf '%s\n' \
+    'import childProcess from "node:child_process";' \
+    'childProcess[("execFileSync")]("auto-mobile", ["--daemon-mode"]);' \
+    'childProcess["execFileSync" as const]("auto-mobile", ["--daemon-mode"]);' \
+    'childProcess[("execFileSync")!]("auto-mobile", ["--daemon-mode"]);' \
+    'childProcess[("execFileSync" satisfies string)]("auto-mobile", ["--daemon-mode"]);' \
+    > "$FIXTURE"
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"DaemonLauncherBoundaryFixture.ts"* ]]
+}
+
 @test "rejects a namespace alias of a default child-process import" {
   printf '%s\n' \
     'import childProcess from "node:child_process";' \

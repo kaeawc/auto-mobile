@@ -55,15 +55,30 @@ function isDiagnosticProcessTableCall(file: string, node: ts.CallExpression): bo
   return command.text.startsWith("ps -eo ") || command.text.startsWith("powershell.exe ");
 }
 
+function unwrapTransparentExpression(expression: ts.Expression): ts.Expression {
+  let current = expression;
+  while (
+    ts.isAsExpression(current) ||
+    ts.isTypeAssertionExpression(current) ||
+    ts.isNonNullExpression(current) ||
+    ts.isSatisfiesExpression(current) ||
+    ts.isParenthesizedExpression(current)
+  ) {
+    current = current.expression;
+  }
+  return current;
+}
+
 function staticMemberName(expression: ts.Expression): string | undefined {
   if (ts.isPropertyAccessExpression(expression)) {
     return expression.name.text;
   }
-  if (
-    ts.isElementAccessExpression(expression) &&
-    ts.isStringLiteralLike(expression.argumentExpression)
-  ) {
-    return expression.argumentExpression.text;
+  const elementAccessArgument =
+    ts.isElementAccessExpression(expression) && expression.argumentExpression
+      ? unwrapTransparentExpression(expression.argumentExpression)
+      : undefined;
+  if (elementAccessArgument !== undefined && ts.isStringLiteralLike(elementAccessArgument)) {
+    return elementAccessArgument.text;
   }
   return undefined;
 }

@@ -90,6 +90,7 @@ import {
 import type { Session, SessionManager } from "../daemon/sessionManager";
 import {
   AndroidAvdIdentityConflictError,
+  AndroidBootedDeviceDiscoveryIncompleteError,
   DeviceBootService,
   DeviceBootTimeoutError,
   findUniqueBootedAndroidDeviceByName,
@@ -175,6 +176,9 @@ function knownProvisionDeviceError(error: unknown): ProvisionDeviceError | undef
   }
   if (error instanceof AndroidAvdIdentityConflictError) {
     return new ProvisionDeviceError("identity_conflict", error.message);
+  }
+  if (error instanceof AndroidBootedDeviceDiscoveryIncompleteError) {
+    return new ProvisionDeviceError("discovery_incomplete", error.message, true);
   }
   return undefined;
 }
@@ -3574,6 +3578,8 @@ class ProvisionDeviceRollbackError extends ProvisionDeviceError {
             cleanup.failure?.message ?? "unknown cleanup failure"
           }`
         : provisionFailure.message,
+      // Retry risks an identity collision while the failed-rollback device may still exist.
+      cleanup.status === "failed" ? false : provisionFailure.retryable,
     );
     this.name = "ProvisionDeviceRollbackError";
   }
@@ -8068,6 +8074,11 @@ export function registerDeviceTools() {
     }
     if (error instanceof ProvisionDeviceRollbackError) {
       return createToolErrorResponse(error.code, error.message, {
+        error: {
+          code: error.code,
+          message: error.message,
+          retryable: error.retryable,
+        },
         provisionFailure: {
           code: error.provisionFailure.code,
           message: error.provisionFailure.message,
@@ -8076,7 +8087,13 @@ export function registerDeviceTools() {
       });
     }
     if (error instanceof ProvisionDeviceError) {
-      return createToolErrorResponse(error.code, error.message);
+      return createToolErrorResponse(error.code, error.message, {
+        error: {
+          code: error.code,
+          message: error.message,
+          retryable: error.retryable,
+        },
+      });
     }
     if (error instanceof ProvisionDeviceOperationConflictError) {
       return createToolErrorResponse("operation_conflict", error.message);

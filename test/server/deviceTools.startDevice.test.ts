@@ -527,12 +527,19 @@ describe("startDevice handler", () => {
     const discoveredDevice = { ...androidDevice };
     const coldBootImage = { ...androidImage, deviceId: androidDevice.deviceId };
     const childProcess = new FakeExitChildProcess();
-    fakeDeviceUtils.setBootedDevices("android", [discoveredDevice]);
     fakeDeviceUtils.setDeviceImages("android", [coldBootImage]);
     fakeDeviceUtils.setMockChildProcess(
       coldBootImage.name,
       childProcess as unknown as ChildProcess,
     );
+    // #7178 checks discovery before deciding to cold-boot; expose this
+    // transport only after that decision, then verify readiness enriches it.
+    const originalStartDevice = fakeDeviceUtils.startDevice.bind(fakeDeviceUtils);
+    fakeDeviceUtils.startDevice = async (...args) => {
+      const handle = await originalStartDevice(...args);
+      fakeDeviceUtils.setBootedDevices("android", [discoveredDevice]);
+      return handle;
+    };
     fakeMatcher.setBootedResult(null);
     fakeMatcher.setImageResult(coldBootImage);
 
@@ -566,12 +573,19 @@ describe("startDevice handler", () => {
     const discoveredDevice = { ...androidDevice };
     const coldBootImage = { ...androidImage, deviceId: androidDevice.deviceId };
     const childProcess = new FakeExitChildProcess();
-    fakeDeviceUtils.setBootedDevices("android", [discoveredDevice]);
     fakeDeviceUtils.setDeviceImages("android", [coldBootImage]);
     fakeDeviceUtils.setMockChildProcess(
       coldBootImage.name,
       childProcess as unknown as ChildProcess,
     );
+    // Keep the pre-boot discovery empty so this remains a cold-boot readiness
+    // recording test rather than the stale-image external-adoption case.
+    const originalStartDevice = fakeDeviceUtils.startDevice.bind(fakeDeviceUtils);
+    fakeDeviceUtils.startDevice = async (...args) => {
+      const handle = await originalStartDevice(...args);
+      fakeDeviceUtils.setBootedDevices("android", [discoveredDevice]);
+      return handle;
+    };
     fakeMatcher.setBootedResult(null);
     fakeMatcher.setImageResult(coldBootImage);
 

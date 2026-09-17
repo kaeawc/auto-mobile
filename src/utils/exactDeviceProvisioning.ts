@@ -504,7 +504,8 @@ export class DefaultExactDeviceProvisioner implements ExactDeviceProvisioner {
     if (
       request.reconcileExistingConfiguration &&
       spec.configuration !== undefined &&
-      !existing.isRunning &&
+      existing.isRunning === false &&
+      existing.isRunningStateKnown !== false &&
       sameAndroidDeviceIdentity(spec, config)
     ) {
       await this.configureAndroid(existing.name, spec.configuration, request.signal);

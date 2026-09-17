@@ -626,7 +626,12 @@ describe("MultiPlatformDeviceManager", () => {
     );
 
     await expect(manager.listDeviceImages("android")).resolves.toEqual([
-      { name: "Pixel_8", platform: "android", isRunning: false },
+      {
+        name: "Pixel_8",
+        platform: "android",
+        isRunning: false,
+        isRunningStateKnown: false,
+      },
     ]);
   });
 

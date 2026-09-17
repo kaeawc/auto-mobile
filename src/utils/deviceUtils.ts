@@ -503,15 +503,19 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
           logger.warn(
             `[DeviceManager] Android running-state overlay failed: ${errorMessage(error)}`,
           );
-          return [] as BootedDevice[];
+          return undefined;
         }),
     ]);
     const runningAvdNames = new Set(
-      bootedDevices
+      (bootedDevices ?? [])
         .filter((device) => isAndroidEmulatorSerial(device.deviceId))
         .map((device) => device.name),
     );
-    return images.map((image) => ({ ...image, isRunning: runningAvdNames.has(image.name) }));
+    return images.map((image) => ({
+      ...image,
+      isRunning: runningAvdNames.has(image.name),
+      ...(bootedDevices === undefined ? { isRunningStateKnown: false } : {}),
+    }));
   }
 
   /**

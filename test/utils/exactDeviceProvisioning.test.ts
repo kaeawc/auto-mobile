@@ -744,6 +744,49 @@ describe("DefaultExactDeviceProvisioner", () => {
     },
   );
 
+  test("does not reconcile an AVD whose stopped state is unknown after an ADB overlay failure", async () => {
+    const writes: number[] = [];
+    const provisioner = new DefaultExactDeviceProvisioner({
+      listDeviceImages: async () => [
+        {
+          ...androidImage("phone-api-36-a"),
+          // `listDeviceImages` preserves configured AVDs when its ADB overlay
+          // fails, but must not let that inventory result authorize a config write.
+          isRunningStateKnown: false,
+        },
+      ],
+      isCreationAllowed: () => true,
+      avdManager: {} as ExactAndroidAvdClient,
+      androidConfigReader: {
+        readConfig: async () => ({
+          apiLevel: 36,
+          systemImagePackage: ANDROID_SPEC.runtime,
+          tag: "google_apis",
+          architecture: "x86_64",
+          deviceName: "pixel_9",
+          ramSizeMb: 2048,
+        }),
+      },
+      androidConfigWriter: {
+        setMemoryMb: async (_name, memoryMb) => {
+          writes.push(memoryMb);
+        },
+      },
+      iosSimulator: {} as ExactIosSimulatorClient,
+    });
+
+    await expect(
+      provisioner.provision({
+        platform: "android",
+        name: "phone-api-36-a",
+        spec: ANDROID_SPEC,
+        reconcileExistingConfiguration: true,
+      }),
+    ).rejects.toMatchObject({ code: "identity_conflict" });
+
+    expect(writes).toEqual([]);
+  });
+
   test("does not reconcile a pre-existing Android AVD without creation provenance", async () => {
     const writes: number[] = [];
     const provisioner = new DefaultExactDeviceProvisioner({

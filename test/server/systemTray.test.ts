@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   registerInteractionTools,
   resetSystemTrayDependencies,
@@ -31,6 +33,16 @@ const POLL_INTERVAL_MS = 250;
 // Mirrors the private SYSTEM_TRAY_REEXPAND_INTERVAL_MS in systemTrayHelpers.ts.
 const REEXPAND_INTERVAL_MS = 1000;
 const SYSTEM_TRAY_PACKAGE = "com.android.systemui";
+
+// Extracted verbatim from real CtrlProxy captures. Bounds intentionally remain
+// compact tuples so this coverage exercises the server compact-bounds parser.
+const CTRL_PROXY_COMPACT_BOUNDS_GROUP_FIXTURE_PATH = join(
+  import.meta.dir,
+  "../fixtures/observe/ctrlproxy-notification-group-compact-bounds.json",
+);
+const realCtrlProxyCompactBoundsGroups = JSON.parse(
+  readFileSync(CTRL_PROXY_COMPACT_BOUNDS_GROUP_FIXTURE_PATH, "utf8"),
+) as { collapsed: unknown; expanded: unknown };
 
 class SequencedFakeAdbExecutor extends FakeAdbExecutor {
   private timestamps: number[];
@@ -1317,6 +1329,78 @@ const createCtrlProxyCapturedGroupTray = (
   } as unknown as ViewHierarchyResult;
 };
 
+const transformHierarchyBounds = <T>(
+  viewHierarchy: T,
+  transform: (coordinate: number, edge: "left" | "top" | "right" | "bottom") => number,
+): T => {
+  const transformed = structuredClone(viewHierarchy);
+  const visit = (value: unknown): void => {
+    if (!value || typeof value !== "object") {
+      return;
+    }
+    if (Array.isArray(value)) {
+      value.forEach(visit);
+      return;
+    }
+    const record = value as Record<string, unknown>;
+    const bounds = record.bounds;
+    if (
+      Array.isArray(bounds) &&
+      bounds.length === 4 &&
+      bounds.every((coordinate) => typeof coordinate === "number")
+    ) {
+      for (const [index, edge] of (["left", "top", "right", "bottom"] as const).entries()) {
+        bounds[index] = transform(bounds[index] as number, edge);
+      }
+    } else if (bounds && typeof bounds === "object" && !Array.isArray(bounds)) {
+      const boundsRecord = bounds as Record<string, unknown>;
+      for (const edge of ["left", "top", "right", "bottom"] as const) {
+        const coordinate = boundsRecord[edge];
+        if (typeof coordinate === "number") {
+          boundsRecord[edge] = transform(coordinate, edge);
+        }
+      }
+    }
+    Object.values(record).forEach(visit);
+  };
+  visit(transformed);
+  return transformed;
+};
+
+const scaleHierarchyBounds = <T>(viewHierarchy: T, divisor: number) =>
+  transformHierarchyBounds(viewHierarchy, (coordinate) => Math.round(coordinate / divisor));
+
+const shiftHierarchyVertically = (viewHierarchy: ViewHierarchyResult, offset: number) =>
+  transformHierarchyBounds(viewHierarchy, (coordinate, edge) =>
+    edge === "top" || edge === "bottom" ? coordinate + offset : coordinate,
+  );
+
+const createGeometryOnlyNotificationGroup = <T>(groupNode: T): T => {
+  const geometryOnlyGroup = structuredClone(groupNode);
+  const visit = (value: unknown): void => {
+    if (!value || typeof value !== "object") {
+      return;
+    }
+    if (Array.isArray(value)) {
+      value.forEach(visit);
+      return;
+    }
+    const record = value as Record<string, unknown>;
+    if ("content-desc" in record) {
+      record["content-desc"] = "";
+    }
+    if (typeof record["resource-id"] === "string") {
+      record["resource-id"] = record["resource-id"].replace(
+        /status_bar_latest_event_content/g,
+        "renamed_marker",
+      );
+    }
+    Object.values(record).forEach(visit);
+  };
+  visit(geometryOnlyGroup);
+  return geometryOnlyGroup;
+};
+
 const createRealisticGroupNotificationTray = (
   appLabel: string,
   titles: string[],
@@ -1811,9 +1895,71 @@ describe("systemTray group expansion", () => {
     expect(
       getNotificationGroupChildRows(realisticExpanded.match!.candidate.groupNode),
     ).toHaveLength(2);
+    // Explicit header content-desc now overrides geometry when they disagree.
     expect(
       resolveNotificationGroupExpansionState(realisticExpanded.match!.candidate.groupNode),
-    ).toBe("expanded");
+    ).toBe("collapsed");
+  });
+
+  test("keeps scaled CtrlProxy group geometry density independent", async () => {
+    const fakeTimer = new FakeTimer();
+    const fakeAdb = new SequencedFakeAdbExecutor([1000]);
+    const fakeObserveScreen = new SequencedObserveScreen([
+      createObservation(scaleHierarchyBounds(createCtrlProxyCapturedGroupTray(false), 2.6)),
+      createObservation(scaleHierarchyBounds(createCtrlProxyCapturedGroupTray(true), 2.6)),
+    ]);
+    setSystemTrayDependencies({
+      timer: fakeTimer,
+      adbFactory: () => fakeAdb,
+      observeScreenFactory: () => fakeObserveScreen,
+    });
+
+    const collapsed = await waitForNotificationMatch(device, { title: "Rev3" }, [], 500);
+    const expanded = await waitForNotificationMatch(device, { title: "Rev3" }, [], 500);
+
+    expect(resolveNotificationGroupExpansionState(collapsed.match!.candidate.groupNode)).toBe(
+      "collapsed",
+    );
+    expect(resolveNotificationGroupExpansionState(expanded.match!.candidate.groupNode)).toBe(
+      "expanded",
+    );
+  });
+
+  test("resolves real compact-bounds CtrlProxy groups from geometry at native and mdpi-like scales", () => {
+    const collapsedUnmodifiedAt1x = resolveNotificationGroupExpansionState(
+      realCtrlProxyCompactBoundsGroups.collapsed,
+    );
+    const expandedUnmodifiedAt1x = resolveNotificationGroupExpansionState(
+      realCtrlProxyCompactBoundsGroups.expanded,
+    );
+    expect(collapsedUnmodifiedAt1x).toBe("collapsed");
+    expect(expandedUnmodifiedAt1x).toBe("expanded");
+
+    const collapsedGeometryOnlyAt1x = resolveNotificationGroupExpansionState(
+      createGeometryOnlyNotificationGroup(realCtrlProxyCompactBoundsGroups.collapsed),
+    );
+    expect(collapsedGeometryOnlyAt1x).toBe("collapsed");
+
+    const expandedGeometryOnlyAt1x = resolveNotificationGroupExpansionState(
+      createGeometryOnlyNotificationGroup(realCtrlProxyCompactBoundsGroups.expanded),
+    );
+    expect(expandedGeometryOnlyAt1x).toBe("expanded");
+
+    const collapsedGeometryOnlyMdpiLike = resolveNotificationGroupExpansionState(
+      scaleHierarchyBounds(
+        createGeometryOnlyNotificationGroup(realCtrlProxyCompactBoundsGroups.collapsed),
+        2.6,
+      ),
+    );
+    expect(collapsedGeometryOnlyMdpiLike).toBe("collapsed");
+
+    const expandedGeometryOnlyMdpiLike = resolveNotificationGroupExpansionState(
+      scaleHierarchyBounds(
+        createGeometryOnlyNotificationGroup(realCtrlProxyCompactBoundsGroups.expanded),
+        2.6,
+      ),
+    );
+    expect(expandedGeometryOnlyMdpiLike).toBe("expanded");
   });
 
   test("dismiss expands the real collapsed CtrlProxy group before swiping its full row", async () => {
@@ -1855,6 +2001,89 @@ describe("systemTray group expansion", () => {
       expect.stringContaining("shell input swipe 938 825 141 825"),
     ]);
     expect(commands.join("\n")).not.toContain("input swipe 938 719");
+  });
+
+  test("keeps a shifted CtrlProxy group identifiable from collapsed notification titles", async () => {
+    const fakeTimer = new FakeTimer();
+    const fakeAdb = new SequencedFakeAdbExecutor([1000, 1000, 2000]);
+    const collapsedHierarchy = createCtrlProxyCapturedGroupTray(false, {
+      appLabel: "Same app",
+      titles: ["Original notification", "Inbox", "Older"],
+      bodies: ["Shared body", "Inbox body", "Older body"],
+    });
+    const expandedHierarchy = shiftHierarchyVertically(
+      createCtrlProxyCapturedGroupTray(true, {
+        appLabel: "Same app",
+        titles: ["Original notification", "Inbox", "Older"],
+        bodies: ["Shared body", "Inbox body", "Older body"],
+      }),
+      60,
+    );
+    const fakeObserveScreen = new FakeObserveScreen();
+    fakeObserveScreen.setObserveResult((index) =>
+      createObservation(index === 0 ? collapsedHierarchy : expandedHierarchy),
+    );
+    setSystemTrayDependencies({
+      timer: fakeTimer,
+      adbFactory: () => fakeAdb,
+      observeScreenFactory: () => fakeObserveScreen,
+    });
+    ToolRegistry.clearTools();
+    registerInteractionTools();
+
+    const dismiss = ToolRegistry.getTool("systemTray")!.deviceAwareHandler!(device, {
+      action: "dismiss",
+      notification: { title: "Original notification" },
+      awaitTimeout: 5000,
+      platform: "android",
+    });
+    await waitForPendingSleep(fakeTimer);
+    fakeTimer.enableAutoAdvance();
+    fakeTimer.advanceTime(EXPAND_GROUP_SETTLE_MS);
+    await dismiss;
+
+    const commands = fakeAdb.getExecutedCommands();
+    // The vertical shift is accepted only when collapsed notification_title values were collected.
+    expect(commands.filter((command) => command.includes("input tap"))).toHaveLength(1);
+    expect(commands.filter((command) => command.includes("input swipe"))).toHaveLength(1);
+  });
+
+  test("dismiss normalizes a zero timeout before expanding a collapsed group", async () => {
+    const fakeTimer = new FakeTimer();
+    const fakeAdb = new SequencedFakeAdbExecutor([1000, 1000, 2000]);
+    const collapsedHierarchy = createCtrlProxyCapturedGroupTray(false);
+    const expandedHierarchy = createCtrlProxyCapturedGroupTray(true);
+    const fakeObserveScreen = new FakeObserveScreen();
+    fakeObserveScreen.setObserveResult((index) =>
+      createObservation(index === 0 ? collapsedHierarchy : expandedHierarchy),
+    );
+    setSystemTrayDependencies({
+      timer: fakeTimer,
+      adbFactory: () => fakeAdb,
+      observeScreenFactory: () => fakeObserveScreen,
+    });
+    ToolRegistry.clearTools();
+    registerInteractionTools();
+
+    const dismiss = ToolRegistry.getTool("systemTray")!.deviceAwareHandler!(device, {
+      action: "dismiss",
+      notification: { title: "Rev3" },
+      awaitTimeout: 0,
+      platform: "android",
+    });
+    await waitForPendingSleep(fakeTimer);
+    fakeTimer.enableAutoAdvance();
+    fakeTimer.advanceTime(EXPAND_GROUP_SETTLE_MS);
+    await dismiss;
+
+    const commands = fakeAdb.getExecutedCommands();
+    expect(fakeTimer.getSleepHistory()).toContain(EXPAND_GROUP_SETTLE_MS);
+    expect(commands.filter((command) => command.includes("input tap"))).toContain(
+      "shell input tap 945 641",
+    );
+    expect(commands.filter((command) => command.includes("input swipe"))).toHaveLength(1);
+    expect(fakeTimer.now()).toBe(EXPAND_GROUP_SETTLE_MS);
+    expect(fakeTimer.now()).toBeLessThanOrEqual(1000);
   });
 
   test("dismiss refuses an unknown group state after its conservative expand attempt", async () => {
@@ -2342,7 +2571,7 @@ describe("systemTray group expansion", () => {
       ["Zillow Real-Time Tour request", "Test message"],
       {
         expanded: true,
-        headerExpandContentDesc: "Expand",
+        headerExpandContentDesc: "Collapse",
         headerExpandResourceId: "android:id/oem_toggle",
       },
     );
@@ -2680,7 +2909,7 @@ describe("systemTray group expansion", () => {
     ]);
   });
 
-  test("caps the expand settle sleep to the remaining notification wait budget", async () => {
+  test("extends the expand settle sleep beyond the remaining notification wait budget, within a bounded overrun", async () => {
     const fakeTimer = new FakeTimer();
     const fakeAdb = new SequencedFakeAdbExecutor([1000, 1000]);
     const unmatchedHierarchy = createTrayWithExpandedNotifications(["Different notification"]);
@@ -2714,17 +2943,65 @@ describe("systemTray group expansion", () => {
       fakeTimer.advanceTime(POLL_INTERVAL_MS);
     }
     await waitForPendingSleep(fakeTimer);
-    expect(fakeTimer.getPendingSleeps()).toEqual([POLL_INTERVAL_MS]);
-    fakeTimer.advanceTime(POLL_INTERVAL_MS);
+    expect(fakeTimer.getPendingSleeps()).toEqual([EXPAND_GROUP_SETTLE_MS]);
+    fakeTimer.advanceTime(EXPAND_GROUP_SETTLE_MS);
 
-    await expect(dismiss).rejects.toThrow("wait timed out before it could be re-matched");
-    expect(fakeTimer.now()).toBe(1000);
+    await expect(dismiss).rejects.toThrow(
+      "Could not isolate the specific notification from its collapsed group",
+    );
+    expect(fakeAdb.getExecutedCommands().filter((cmd) => cmd.includes("input tap"))).toHaveLength(
+      1,
+    );
+    expect(fakeAdb.getExecutedCommands().filter((cmd) => cmd.includes("input swipe"))).toHaveLength(
+      0,
+    );
+    expect(fakeTimer.now()).toBe(1250);
+    expect(fakeTimer.now()).toBeLessThanOrEqual(1750);
     expect(fakeTimer.getSleepHistory()).toEqual([
       POLL_INTERVAL_MS,
       POLL_INTERVAL_MS,
       POLL_INTERVAL_MS,
-      POLL_INTERVAL_MS,
+      EXPAND_GROUP_SETTLE_MS,
     ]);
+  });
+
+  test("dismiss completes when a collapsed-group match leaves only 100ms of the notification wait budget", async () => {
+    const fakeTimer = new FakeTimer();
+    const fakeAdb = new SequencedFakeAdbExecutor([1000, 1000, 2000]);
+    const collapsedHierarchy = createCtrlProxyCapturedGroupTray(false);
+    const expandedHierarchy = createCtrlProxyCapturedGroupTray(true);
+    const fakeObserveScreen = new SequencedObserveScreen([
+      createObservation(createTrayWithExpandedNotifications(["Different notification"])),
+      createObservation(collapsedHierarchy),
+      createObservation(expandedHierarchy),
+    ]);
+    setSystemTrayDependencies({
+      timer: fakeTimer,
+      adbFactory: () => fakeAdb,
+      observeScreenFactory: () => fakeObserveScreen,
+    });
+    ToolRegistry.clearTools();
+    registerInteractionTools();
+
+    const dismiss = ToolRegistry.getTool("systemTray")!.deviceAwareHandler!(device, {
+      action: "dismiss",
+      notification: { title: "Rev3" },
+      awaitTimeout: 1000,
+      platform: "android",
+    });
+    await waitForPendingSleep(fakeTimer);
+    fakeTimer.advanceTime(900);
+    await waitForPendingSleep(fakeTimer);
+    expect(fakeTimer.getPendingSleeps()).toEqual([EXPAND_GROUP_SETTLE_MS]);
+    fakeTimer.advanceTime(EXPAND_GROUP_SETTLE_MS);
+    await dismiss;
+
+    const commands = fakeAdb.getExecutedCommands();
+    expect(fakeTimer.getSleepHistory()).toEqual([POLL_INTERVAL_MS, EXPAND_GROUP_SETTLE_MS]);
+    expect(commands.filter((command) => command.includes("input tap"))).toHaveLength(1);
+    expect(commands.filter((command) => command.includes("input swipe"))).toHaveLength(1);
+    expect(fakeTimer.now()).toBe(1400);
+    expect(fakeTimer.now()).toBeLessThanOrEqual(1750);
   });
 
   test("does not tap a collapsed group when the notification wait budget is exhausted", async () => {

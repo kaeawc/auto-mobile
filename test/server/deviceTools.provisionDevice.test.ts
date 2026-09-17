@@ -36,6 +36,11 @@ import {
 import { MAX_PROVISION_DEVICE_TIMEOUT_MS } from "../../src/utils/deviceTimeouts";
 import { RunnerReadinessError } from "../../src/utils/RunnerReadinessService";
 import { DaemonHandoffInterruptionError } from "../../src/daemon/daemonHandoffInterruption";
+import type { BootedDevice, SomePlatform } from "../../src/models";
+import type {
+  BootedDeviceDiscovery,
+  BootedDeviceDiscoveryOptions,
+} from "../../src/utils/deviceUtils";
 
 class FakeExactDeviceProvisioner implements ExactDeviceProvisioner {
   readonly requests: ExactDeviceProvisionRequest[] = [];
@@ -55,6 +60,35 @@ class FakeExactDeviceProvisioner implements ExactDeviceProvisioner {
       },
     };
   }
+}
+
+class StaleAndroidBootedDeviceCache extends FakeDeviceUtils {
+  readonly detailedOptions: BootedDeviceDiscoveryOptions[] = [];
+
+  override async getBootedDevices(platform: SomePlatform): Promise<BootedDevice[]> {
+    if (platform === "android" && !this.inDetailedDiscovery) {
+      return this.staleDevices;
+    }
+    return await super.getBootedDevices(platform);
+  }
+
+  override async getBootedDevicesDetailed(
+    platform: SomePlatform,
+    options: BootedDeviceDiscoveryOptions = {},
+  ): Promise<BootedDeviceDiscovery> {
+    this.detailedOptions.push(options);
+    this.inDetailedDiscovery = true;
+    try {
+      return await super.getBootedDevicesDetailed(platform, options);
+    } finally {
+      this.inDetailedDiscovery = false;
+    }
+  }
+
+  private inDetailedDiscovery = false;
+  private readonly staleDevices: BootedDevice[] = [
+    { name: "phone-api-36-a", platform: "android", deviceId: "emulator-5554" },
+  ];
 }
 
 class FakeProvisionDeviceOperationStore implements ProvisionDeviceOperationStore {
@@ -541,6 +575,58 @@ describe("provisionDevice handler", () => {
     expect(JSON.stringify(response)).toContain("emulator-5554");
     expect(JSON.stringify(response)).toContain("emulator-5556");
     expect(deviceManager.wasMethodCalled("waitForDeviceReady")).toBe(false);
+  });
+
+  test("uses fresh Android discovery for a stale-cache identity race", async () => {
+    const staleCacheManager = new StaleAndroidBootedDeviceCache();
+    staleCacheManager.setBootedDevices("android", [
+      { name: "phone-api-36-a", platform: "android", deviceId: "emulator-5554" },
+      { name: "phone-api-36-a", platform: "android", deviceId: "emulator-5556" },
+    ]);
+    deviceManager = staleCacheManager;
+    setDeviceToolsDependencies({ deviceManagerFactory: () => deviceManager });
+    exactProvisioner.provision = async () => provisionedTestDevice("android", false);
+
+    const response = await ToolRegistry.getTool("provisionDevice")!.handler(
+      provisionTestArgs("android", "stale-cache-race"),
+    );
+
+    expect((response as any).isError).toBe(true);
+    expect(JSON.stringify(response)).toContain("identity_conflict");
+    expect(JSON.stringify(response)).toContain("emulator-5554");
+    expect(JSON.stringify(response)).toContain("emulator-5556");
+    expect(staleCacheManager.wasMethodCalled("waitForDeviceReady")).toBe(false);
+    expect(staleCacheManager.detailedOptions.at(-1)?.bypassAndroidDeviceListCache).toBe(true);
+  });
+
+  test("fails when fresh Android discovery is incomplete", async () => {
+    exactProvisioner.provision = async () => provisionedTestDevice("android", false);
+    deviceManager.failedPlatforms.add("android");
+
+    const response = await ToolRegistry.getTool("provisionDevice")!.handler(
+      provisionTestArgs("android", "discovery-unavailable"),
+    );
+
+    expect((response as any).isError).toBe(true);
+    expect(JSON.stringify(response)).toContain("platform_command_failed");
+    expect(JSON.stringify(response)).not.toContain("identity_conflict");
+    expect(deviceManager.wasMethodCalled("waitForDeviceReady")).toBe(false);
+    expect(deviceManager.wasMethodCalled("startDevice")).toBe(false);
+  });
+
+  test("adopts a single Android device from fresh discovery", async () => {
+    exactProvisioner.provision = async () => provisionedTestDevice("android", false);
+    deviceManager.setBootedDevices("android", [
+      { name: "phone-api-36-a", platform: "android", deviceId: "emulator-5554" },
+    ]);
+    setDeviceToolsDependencies({ ensureCtrlProxyReady: async () => {} });
+
+    const response = await ToolRegistry.getTool("provisionDevice")!.handler(
+      provisionTestArgs("android", "single-fresh-match"),
+    );
+
+    expect((response as any).isError).not.toBe(true);
+    expect(JSON.stringify(response)).not.toContain("identity_conflict");
   });
 
   test("resource timeout leaves readiness time and returns the retained device and session", async () => {

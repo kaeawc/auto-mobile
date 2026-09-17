@@ -7789,7 +7789,22 @@ export function registerDeviceTools() {
         operationSignal,
         "discovering an already-running exact device",
         async () => {
-          const alreadyBootedDevices = await deviceManager.getBootedDevices(args.device.platform);
+          let alreadyBootedDevices: readonly BootedDevice[];
+          if (args.device.platform === "android") {
+            const discovery = await deviceManager.getBootedDevicesDetailed("android", {
+              bypassAndroidDeviceListCache: true,
+              signal: operationSignal,
+            });
+            if (!discovery.succeededPlatforms.has("android")) {
+              throw new ProvisionDeviceError(
+                "platform_command_failed",
+                `Cannot provision Android device '${args.device.name}' because booted-device discovery did not complete.`,
+              );
+            }
+            alreadyBootedDevices = discovery.devices;
+          } else {
+            alreadyBootedDevices = await deviceManager.getBootedDevices(args.device.platform);
+          }
           // FUNNEL 1: acquisition matches this observation against the pooled
           // entry it is about to hand out (#6863 review).
           await reconcileDiscoveryObservation(alreadyBootedDevices, "provisionDevice-exact");

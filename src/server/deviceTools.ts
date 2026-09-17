@@ -7797,8 +7797,9 @@ export function registerDeviceTools() {
             });
             if (!discovery.succeededPlatforms.has("android")) {
               throw new ProvisionDeviceError(
-                "platform_command_failed",
+                "discovery_incomplete",
                 `Cannot provision Android device '${args.device.name}' because booted-device discovery did not complete.`,
+                true,
               );
             }
             // FUNNEL 1: fold the fresh observation into the pool BEFORE deciding
@@ -7813,8 +7814,9 @@ export function registerDeviceTools() {
                 .some(isUnresolvedAndroidEmulatorName)
             ) {
               throw new ProvisionDeviceError(
-                "platform_command_failed",
+                "discovery_incomplete",
                 `Cannot provision Android device '${args.device.name}' because a running emulator's AVD identity has not resolved yet; retry.`,
+                true,
               );
             }
             return discovery.devices;

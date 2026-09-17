@@ -608,7 +608,8 @@ describe("provisionDevice handler", () => {
     );
 
     expect((response as any).isError).toBe(true);
-    expect(JSON.stringify(response)).toContain("platform_command_failed");
+    expect(JSON.stringify(response)).toContain("discovery_incomplete");
+    expect(JSON.stringify(response)).toContain('\\"retryable\\":true');
     expect(JSON.stringify(response)).not.toContain("identity_conflict");
     expect(deviceManager.wasMethodCalled("waitForDeviceReady")).toBe(false);
     expect(deviceManager.wasMethodCalled("startDevice")).toBe(false);
@@ -626,7 +627,8 @@ describe("provisionDevice handler", () => {
     );
 
     expect((response as any).isError).toBe(true);
-    expect(JSON.stringify(response)).toContain("platform_command_failed");
+    expect(JSON.stringify(response)).toContain("discovery_incomplete");
+    expect(JSON.stringify(response)).toContain('\\"retryable\\":true');
     expect(JSON.stringify(response)).toContain("AVD identity has not resolved yet; retry");
     expect(JSON.stringify(response)).not.toContain('"success":true');
     expect(deviceManager.wasMethodCalled("waitForDeviceReady")).toBe(false);
@@ -657,7 +659,8 @@ describe("provisionDevice handler", () => {
       );
 
       expect((response as any).isError).toBe(true);
-      expect(JSON.stringify(response)).toContain("platform_command_failed");
+      expect(JSON.stringify(response)).toContain("discovery_incomplete");
+      expect(JSON.stringify(response)).toContain('\\"retryable\\":true');
       expect(deviceManager.wasMethodCalled("waitForDeviceReady")).toBe(false);
       expect(pool.isPooledIdentityUnresolved("emulator-5556")).toBe(true);
     } finally {

@@ -6924,7 +6924,7 @@ export function registerDeviceTools() {
     }
   }
 
-  function finalizeFailedProvisionDeviceCompletion(
+  async function finalizeFailedProvisionDeviceCompletion(
     store: ProvisionDeviceOperationStore,
     args: ProvisionDeviceArgs,
     attemptId: string,
@@ -6932,46 +6932,38 @@ export function registerDeviceTools() {
     completionError: unknown,
     superseded: boolean,
   ): Promise<void> {
-    const finalizers: Array<{ label: string; promise: Promise<unknown> }> = [];
-    if (!superseded) {
-      const provisionError = toProvisionDeviceError(args, completionError);
-      finalizers.push({
-        label: "operation failure persistence",
-        promise: (async () =>
-          await store.fail(
-            args.operationId,
-            attemptId,
-            provisionError.code,
-            provisionError.message,
-          ))(),
-      });
-    }
-    finalizers.push({
-      label: "session release",
-      promise: releaseProvisionDeviceSession(
+    // A failed replay returns its row to succeeded when fail() settles. Release
+    // the session first so no caller can claim that replay-visible old result
+    // while the session it names is still being torn down.
+    try {
+      await releaseProvisionDeviceSession(
         result,
         superseded
           ? "provision-device-operation-superseded"
           : "provision-device-persistence-failed",
-      ),
-    });
+      );
+    } catch (error) {
+      logger.warn(
+        `[DeviceTools] Deferred provisionDevice ${args.operationId} session release failed: ` +
+          `${errorMessage(error)}`,
+        error,
+      );
+    }
 
-    // Completion, failure persistence, and session release can share one
-    // stalled backend. Observe cleanup without moving that stall outside the
-    // request deadline; attempt/status fencing makes every late write safe.
-    return Promise.all(
-      finalizers.map(async (finalizer) => {
-        try {
-          await finalizer.promise;
-        } catch (error) {
-          logger.warn(
-            `[DeviceTools] Deferred provisionDevice ${args.operationId} ${finalizer.label} failed: ` +
-              `${errorMessage(error)}`,
-            error,
-          );
-        }
-      }),
-    ).then(() => undefined);
+    if (superseded) {
+      return;
+    }
+
+    const provisionError = toProvisionDeviceError(args, completionError);
+    try {
+      await store.fail(args.operationId, attemptId, provisionError.code, provisionError.message);
+    } catch (error) {
+      logger.warn(
+        `[DeviceTools] Deferred provisionDevice ${args.operationId} operation failure persistence failed: ` +
+          `${errorMessage(error)}`,
+        error,
+      );
+    }
   }
 
   /**

@@ -105,11 +105,19 @@ group header. The `tap` action handles this automatically:
    `notification_children_container`), it descends into the group's children
    and tags each child candidate with a `groupNode` reference.
 2. **Detect** — After matching, `isMatchInCollapsedGroup` checks whether
-   the best match has a `groupNode`. If so, the notification is inside a
-   collapsed group.
+   the best match has a `groupNode`; this means the notification belongs to a
+   group, whether collapsed or expanded. `isNotificationGroupExpanded` first
+   identifies an expanded group structurally when a per-child
+   `expandableNotificationRow` contains `status_bar_latest_event_content`.
+   When that full-row template is absent, it corroborates the state from child
+   row geometry (short collapsed stubs versus full, non-overlapping rows),
+   then falls back narrowly to a header button whose content description is
+   exactly `Expand` or `Collapse`. Unrecognized shapes remain unknown: taps
+   conservatively attempt expansion, while dismiss refuses to swipe.
 3. **Expand** — `expandNotificationGroup` finds the "Expand" button inside
-   the group header (matched by `content-desc: "Expand"` or `resource-id`
-   containing `expand_button`) and taps it via ADB.
+   the group header, preferring a `resource-id` containing `expand_button` and
+   falling back to a `content-desc` equal to "Expand" (case-insensitive), and
+   taps it via ADB.
 4. **Re-match** — After a 500 ms settle, the tool re-observes the hierarchy
    and re-matches the now-expanded notification.
 5. **Tap** — The specific notification row is tapped, triggering its
@@ -130,12 +138,14 @@ group header. The `tap` action handles this automatically:
   inside collapsed groups, the tap target was not clickable until the group
   was visually expanded.
 
-#### `find` and `dismiss` do not auto-expand
+#### `find` does not auto-expand; `tap` and `dismiss` do
 
-Only `tap` auto-expands collapsed groups. `find` can match text inside a
-collapsed group (thanks to the visibility bypass below), but it does not
-expand the group — it is read-only. `dismiss` similarly matches without
-expanding. This keeps side effects limited to the action that needs them.
+`find` can match text inside a collapsed group (thanks to the visibility
+bypass below), but it does not expand the group — it is read-only. Both `tap`
+and `dismiss` expand a collapsed group before acting, so expansion is a visible
+side effect when either action targets a notification inside one. If `dismiss`
+cannot isolate the specific notification after expansion, it throws rather than
+swiping the group and clearing every notification in it.
 
 #### CtrlProxy `isVisibleToUser` bypass
 

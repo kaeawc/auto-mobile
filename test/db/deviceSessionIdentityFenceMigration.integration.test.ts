@@ -143,6 +143,35 @@ describe("device session identity fence migrations", () => {
     expect(trigger.rows[0]?.sql).not.toContain("stable_device_id ON device_sessions");
   });
 
+  test("keeps the same-serial trigger when rollback trigger creation fails", async () => {
+    await stableIdentityUp(db);
+    await identityWriterFenceUp(db);
+    await sameSerialIdentityFenceUp(db);
+
+    const originalPrepare = bunDb.prepare;
+    bunDb.prepare = ((query: string) => {
+      if (query.includes("CREATE TRIGGER clear_stale_device_session_identity")) {
+        throw new Error("injected trigger creation failure");
+      }
+      return originalPrepare.call(bunDb, query);
+    }) as typeof bunDb.prepare;
+
+    try {
+      await expect(sameSerialIdentityFenceDown(db)).rejects.toThrow(
+        "injected trigger creation failure",
+      );
+    } finally {
+      bunDb.prepare = originalPrepare;
+    }
+
+    const trigger = await sql<{ sql: string }>`
+      SELECT sql FROM sqlite_master
+      WHERE type = 'trigger' AND name = 'clear_stale_device_session_identity'
+    `.execute(db);
+    expect(trigger.rows[0]?.sql).toContain("AFTER UPDATE OF device_id, stable_device_id");
+    expect(trigger.rows[0]?.sql).toContain("OLD.stable_device_id IS NOT NULL");
+  });
+
   test("clears legacy identity writes while retaining generation-aware and heartbeat writes", async () => {
     await stableIdentityUp(db);
     await identityWriterFenceUp(db);

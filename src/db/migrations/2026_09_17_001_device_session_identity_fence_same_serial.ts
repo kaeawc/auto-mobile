@@ -36,16 +36,18 @@ export async function up(db: Kysely<unknown>): Promise<void> {
 }
 
 export async function down(db: Kysely<unknown>): Promise<void> {
-  await sql`DROP TRIGGER IF EXISTS clear_stale_device_session_identity`.execute(db);
-  await sql`
-    CREATE TRIGGER clear_stale_device_session_identity
-    AFTER UPDATE OF device_id ON device_sessions
-    WHEN NEW.device_id IS NOT OLD.device_id
-      AND NEW.stable_identity_generation = OLD.stable_identity_generation
-    BEGIN
-      UPDATE device_sessions
-      SET stable_device_id = NULL
-      WHERE session_uuid = NEW.session_uuid;
-    END
-  `.execute(db);
+  await db.transaction().execute(async (trx) => {
+    await sql`DROP TRIGGER IF EXISTS clear_stale_device_session_identity`.execute(trx);
+    await sql`
+      CREATE TRIGGER clear_stale_device_session_identity
+      AFTER UPDATE OF device_id ON device_sessions
+      WHEN NEW.device_id IS NOT OLD.device_id
+        AND NEW.stable_identity_generation = OLD.stable_identity_generation
+      BEGIN
+        UPDATE device_sessions
+        SET stable_device_id = NULL
+        WHERE session_uuid = NEW.session_uuid;
+      END
+    `.execute(trx);
+  });
 }

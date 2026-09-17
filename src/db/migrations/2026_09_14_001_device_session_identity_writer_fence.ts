@@ -35,6 +35,11 @@ export async function up(db: Kysely<unknown>): Promise<void> {
 }
 
 export async function down(db: Kysely<unknown>): Promise<void> {
-  await sql`DROP TRIGGER IF EXISTS clear_stale_device_session_identity`.execute(db);
-  await db.schema.alterTable("device_sessions").dropColumn("stable_identity_generation").execute();
+  await db.transaction().execute(async (trx) => {
+    await sql`DROP TRIGGER IF EXISTS clear_stale_device_session_identity`.execute(trx);
+    await trx.schema
+      .alterTable("device_sessions")
+      .dropColumn("stable_identity_generation")
+      .execute();
+  });
 }

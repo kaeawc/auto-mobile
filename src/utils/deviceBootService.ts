@@ -459,7 +459,7 @@ export class DeviceBootService {
       request.platform,
       context,
       "discovering running devices",
-      false,
+      request.platform === "android",
       true,
       request.presentationOrder,
     );

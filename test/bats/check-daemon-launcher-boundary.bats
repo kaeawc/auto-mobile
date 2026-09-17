@@ -398,17 +398,22 @@ teardown() {
     'function invokeAfterReassignment() { deferredAfterReassignment("auto-mobile", ["--daemon-mode"]); }' \
     'deferredAfterReassignment = safeLaunch;' \
     'invokeAfterReassignment();' \
+    'let invokedBeforeReassignment = childProcess.execFileSync;' \
+    'invokeBeforeReassignment();' \
+    'invokedBeforeReassignment = safeLaunch;' \
+    'function invokeBeforeReassignment() { invokedBeforeReassignment("auto-mobile", ["--daemon-mode"]); }' \
     > "$FIXTURE"
 
   run bash "$SCRIPT"
 
   [ "$status" -eq 1 ]
-  [[ "$(grep -c "DaemonLauncherBoundaryFixture.ts" <<< "$output")" -eq 5 ]]
+  [[ "$(grep -c "DaemonLauncherBoundaryFixture.ts" <<< "$output")" -eq 6 ]]
   [[ "$output" == *'initialized("auto-mobile"'* ]]
   [[ "$output" == *'assignedLater("auto-mobile"'* ]]
   [[ "$output" == *'conditionallyReassigned("auto-mobile"'* ]]
   [[ "$output" == *'preservedByOr("auto-mobile"'* ]]
   [[ "$output" == *'preservedByNullish("auto-mobile"'* ]]
+  [[ "$output" == *'invokedBeforeReassignment("auto-mobile"'* ]]
 }
 
 @test "tracks object-rest assignment targets and static exclusions" {

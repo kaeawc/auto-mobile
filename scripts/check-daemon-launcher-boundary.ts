@@ -153,17 +153,13 @@ function violationsIn(
     const symbol = symbolFor(identifier);
     return symbol !== undefined && bindings.has(symbol);
   };
-  const bindingIsAvailableAt = (
-    identifier: ts.Identifier,
-    position: number,
-    deferred: boolean,
-  ): boolean => {
+  const bindingIsAvailableAt = (identifier: ts.Identifier, position: number): boolean => {
     const symbol = symbolFor(identifier);
     const timing = symbol ? bindingTimings.get(symbol) : undefined;
     return (
       timing !== undefined &&
-      (deferred || timing.startsAt <= position) &&
-      (timing.endsAt === undefined || (!deferred && position < timing.endsAt))
+      timing.startsAt <= position &&
+      (timing.endsAt === undefined || position < timing.endsAt)
     );
   };
   const addNamespace = (
@@ -185,11 +181,8 @@ function violationsIn(
   const hasNamespace = (identifier: ts.Identifier): boolean =>
     namespaceExclusionsFor(identifier) !== undefined;
 
-  const namespaceIsAvailableAt = (
-    identifier: ts.Identifier,
-    position: number,
-    deferred: boolean,
-  ): boolean => hasNamespace(identifier) && bindingIsAvailableAt(identifier, position, deferred);
+  const namespaceIsAvailableAt = (identifier: ts.Identifier, position: number): boolean =>
+    hasNamespace(identifier) && bindingIsAvailableAt(identifier, position);
 
   const staticStringValue = (
     expression: ts.Expression,
@@ -348,6 +341,36 @@ function violationsIn(
     ts.forEachChild(node, countAssignments);
   };
   countAssignments(sourceFile);
+
+  const eagerFunctionCallPositions = new Map<ts.Symbol, number[]>();
+  const collectEagerFunctionCalls = (node: ts.Node): void => {
+    if (
+      ts.isCallExpression(node) &&
+      ts.isIdentifier(unwrapTransparentExpression(node.expression)) &&
+      ts.findAncestor(node, ts.isFunctionLike) === undefined
+    ) {
+      const symbol = symbolFor(unwrapTransparentExpression(node.expression));
+      if (symbol) {
+        const positions = eagerFunctionCallPositions.get(symbol) ?? [];
+        positions.push(node.getStart(sourceFile));
+        eagerFunctionCallPositions.set(symbol, positions);
+      }
+    }
+    ts.forEachChild(node, collectEagerFunctionCalls);
+  };
+  collectEagerFunctionCalls(sourceFile);
+
+  const executionPositionsFor = (node: ts.CallExpression): readonly number[] => {
+    let ancestor: ts.Node | undefined = node.parent;
+    while (ancestor) {
+      if (ts.isFunctionDeclaration(ancestor) && ancestor.name) {
+        const symbol = symbolFor(ancestor.name);
+        return symbol ? (eagerFunctionCallPositions.get(symbol) ?? []) : [];
+      }
+      ancestor = ancestor.parent;
+    }
+    return [node.getStart(sourceFile)];
+  };
 
   const initializerTiming = (identifier: ts.Identifier): { startsAt: number; endsAt?: number } => {
     const symbol = symbolFor(identifier);
@@ -538,19 +561,16 @@ function violationsIn(
       !isDiagnosticProcessTableCall(file, node)
     ) {
       const expression = unwrapTransparentExpression(node.expression);
-      const deferred = ts.findAncestor(node, ts.isFunctionLike) !== undefined;
-      const position = node.getStart(sourceFile);
+      const executionPositions = executionPositionsFor(node);
       const direct =
         ts.isIdentifier(expression) &&
         hasBinding(importedExecutors, expression) &&
-        bindingIsAvailableAt(expression, position, deferred);
+        executionPositions.some((position) => bindingIsAvailableAt(expression, position));
       const namespaced =
         (ts.isPropertyAccessExpression(expression) || ts.isElementAccessExpression(expression)) &&
         ts.isIdentifier(unwrapTransparentExpression(expression.expression)) &&
-        namespaceIsAvailableAt(
-          unwrapTransparentExpression(expression.expression),
-          position,
-          deferred,
+        executionPositions.some((position) =>
+          namespaceIsAvailableAt(unwrapTransparentExpression(expression.expression), position),
         ) &&
         EXECUTION_FUNCTIONS.has(staticMemberName(expression, staticStringValue) ?? "") &&
         !namespaceExclusionsFor(unwrapTransparentExpression(expression.expression))?.has(

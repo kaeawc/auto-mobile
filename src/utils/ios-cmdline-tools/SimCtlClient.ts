@@ -1653,11 +1653,15 @@ export class SimCtlClient implements SimCtl {
   /** Read the active Xcode iphonesimulator SDK version. */
   private async detectIosSdkVersion(signal?: AbortSignal): Promise<string> {
     try {
-      const result = await this.execAsync(
-        "xcrun",
-        ["--sdk", "iphonesimulator", "--show-sdk-version"],
-        undefined,
-        signal,
+      // Direct xcrun (not a `simctl` subcommand), so it bypasses the
+      // executeCommandArgv funnel; give it its own ambient leaf (see PerfContext).
+      const result = await trackAmbient("xcrun --show-sdk-version", () =>
+        this.execAsync(
+          "xcrun",
+          ["--sdk", "iphonesimulator", "--show-sdk-version"],
+          undefined,
+          signal,
+        ),
       );
       return result.stdout.trim();
     } catch (error) {
@@ -2625,18 +2629,24 @@ export class SimCtlClient implements SimCtl {
       return false;
     }
 
-    // Ensure Simulator.app is open (creates windows for all booted devices)
-    await this.execAsync("open", ["-a", "Simulator"], undefined, signal);
+    // Ensure Simulator.app is open (creates windows for all booted devices).
+    // Direct `open`/`osascript` bypass the executeCommandArgv funnel, so give
+    // them their own ambient leaves (see PerfContext).
+    await trackAmbient("open -a Simulator", () =>
+      this.execAsync("open", ["-a", "Simulator"], undefined, signal),
+    );
     // If a specific device is requested, focus it by switching to it
     // --args -CurrentDeviceUDID only works on fresh launch; for already-running
     // Simulator, we activate the app which brings all device windows forward
     if (udid) {
       try {
-        await this.execAsync(
-          "osascript",
-          ["-e", 'tell application "Simulator" to activate'],
-          undefined,
-          signal,
+        await trackAmbient("osascript activate Simulator", () =>
+          this.execAsync(
+            "osascript",
+            ["-e", 'tell application "Simulator" to activate'],
+            undefined,
+            signal,
+          ),
         );
       } catch (error) {
         if (signal?.aborted) {

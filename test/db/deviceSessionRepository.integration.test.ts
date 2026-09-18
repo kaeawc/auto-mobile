@@ -148,6 +148,43 @@ describe("DeviceSessionRepository", () => {
     ]);
   });
 
+  test("does not recover rows past retention or their persisted expiry", async () => {
+    const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+    await repo.upsertActiveSession({
+      sessionUuid: "past-retention",
+      deviceId: "emulator-5554",
+      platform: "android",
+      createdAtMs: 0,
+      lastUsedAtMs: 0,
+      expiresAtMs: sevenDaysMs * 2,
+      sessionTimeoutMs: 60_000,
+      heartbeatTimeoutMs: 10_000,
+      hasReceivedHeartbeat: false,
+    });
+    await repo.markReleased("past-retention", "released", 0, "daemon-restart");
+    await repo.upsertActiveSession({
+      sessionUuid: "spent-session",
+      deviceId: "emulator-5556",
+      platform: "android",
+      createdAtMs: 0,
+      lastUsedAtMs: 0,
+      expiresAtMs: 1_000,
+      sessionTimeoutMs: 60_000,
+      heartbeatTimeoutMs: 10_000,
+      hasReceivedHeartbeat: false,
+    });
+    await repo.markReleased("spent-session", "released", 1, "daemon-shutdown");
+
+    await timer.advanceTimeAsync(sevenDaysMs + 1_000);
+
+    expect(await repo.listRecoverableSessions()).toEqual([]);
+    expect(await repo.getSession("spent-session")).toMatchObject({
+      status: "expired",
+      release_reason: "expired",
+      released_at_ms: sevenDaysMs + 1_000,
+    });
+  });
+
   test("persists the liveness contract used to recover daemon sessions", async () => {
     await repo.upsertActiveSession({
       sessionUuid: "liveness-session",

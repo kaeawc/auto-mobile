@@ -175,6 +175,15 @@ export interface Session {
    * policy.
    */
   preCliLiveness?: PreCliLivenessSnapshot;
+  /** Recovery-only metadata that must survive the active-row upsert. */
+  persistenceMetadata?: SessionPersistenceMetadata;
+}
+
+interface SessionPersistenceMetadata {
+  source: string | null;
+  autolockEnabled: boolean;
+  mcpSessionId: string | null;
+  daemonSessionId: string | null;
 }
 
 function rollbackSessionActivityIfCurrent(
@@ -392,6 +401,8 @@ export interface SessionRecoveryTarget {
   liveness?: SessionRecoveryLiveness;
   /** A startup rehydration reserves the device until its prior owner reconnects. */
   initialOwnership?: "owned" | "awaiting-owner";
+  /** Autolock identity that the pool must restore before publishing the session. */
+  persistenceMetadata?: SessionPersistenceMetadata;
 }
 
 export interface RehydrationSummary {
@@ -691,6 +702,8 @@ export class SessionManager {
   private acceptingSessionCreations = true;
   /** Automatic device assignments that have not yet started their creation write. */
   private readonly pendingSessionAssignments: Map<string, Promise<Session>> = new Map();
+  /** Persisted recovery state consumed by createSession before it publishes an assigned session. */
+  private readonly pendingPersistedRecoveries: Map<string, DeviceSession> = new Map();
   /** Releases received before an assignment has published its session. */
   private readonly pendingSessionReleases: Map<string, PendingSessionRelease> = new Map();
   /** Rebinds that a release must await before it can remove the live binding. */
@@ -889,6 +902,7 @@ export class SessionManager {
     }
 
     const now = this.timer.now();
+    const persistedRecovery = this.pendingPersistedRecoveries.get(sessionId);
     const liveness = sessionCreationLiveness(
       timeoutMs,
       heartbeatTimeoutMs,
@@ -908,6 +922,7 @@ export class SessionManager {
       lastHeartbeat: now,
       ...liveness,
       ownership: initialOwnership,
+      ...this.recoverySessionFields(persistedRecovery),
       ...(initialOwnership === "awaiting-owner"
         ? { awaitingOwnerSince: now, hasReceivedHeartbeat: false }
         : {}),
@@ -1354,18 +1369,26 @@ export class SessionManager {
     logger.info(
       `[SessionManager] Creating new session ${sessionId}, calling devicePool.assignDeviceToSession()`,
     );
-    await this.assignUnseenSessionToDevicePool(
-      sessionId,
-      devicePool,
-      platform,
-      recoveryTarget,
-      persisted,
-    );
+    if (persisted && recoveryTarget) {
+      this.pendingPersistedRecoveries.set(sessionId, persisted);
+    }
+    try {
+      await this.assignUnseenSessionToDevicePool(
+        sessionId,
+        devicePool,
+        platform,
+        recoveryTarget,
+        persisted,
+      );
+    } finally {
+      if (this.pendingPersistedRecoveries.get(sessionId) === persisted) {
+        this.pendingPersistedRecoveries.delete(sessionId);
+      }
+    }
     const session = this.getSession(sessionId);
     if (!session) {
       throw new Error(`Session ${sessionId} creation failed after device assignment`);
     }
-    await this.restorePersistedLivenessOwnership(session, persisted);
     logger.info(
       `[SessionManager] Successfully created session ${sessionId} with device ${session.assignedDevice}`,
     );
@@ -1414,8 +1437,7 @@ export class SessionManager {
       skipped: [],
       timedOut: false,
     };
-    const persistedSessions =
-      (await this.deviceSessionRepository.listRecoverableSessions?.()) ?? [];
+    const persistedSessions = await this.listRecoverableSessionsBeforeDeadline(deadlineAt, summary);
     const markDeadline = (startIndex: number): void => {
       for (const remaining of persistedSessions.slice(startIndex)) {
         const sessionId = remaining.session_uuid;
@@ -1437,7 +1459,7 @@ export class SessionManager {
         );
       }
     };
-    const deadlineWon = Symbol("startup-deadline");
+    const recoveryDeadlineWon = Symbol("startup-deadline");
     for (const [index, persisted] of persistedSessions.entries()) {
       const sessionId = persisted.session_uuid;
       if (!this.isRecoverablePersistedSession(persisted)) {
@@ -1458,9 +1480,9 @@ export class SessionManager {
         const remaining = Math.max(0, deadlineAt - this.timer.now());
         const recoveryResult = await Promise.race([
           recoveryPromise,
-          this.timer.sleep(remaining).then(() => deadlineWon),
+          this.timer.sleep(remaining).then(() => recoveryDeadlineWon),
         ]);
-        if (recoveryResult === deadlineWon) {
+        if (recoveryResult === recoveryDeadlineWon) {
           void recoveryPromise.catch((error) =>
             logger.warn(
               `[SessionManager] Rehydration continued after startup deadline for ${sessionId}: ${errorMessage(error)}`,
@@ -1491,24 +1513,50 @@ export class SessionManager {
     return summary;
   }
 
-  private async restorePersistedLivenessOwnership(
-    session: Session,
+  private recoverySessionFields(
     persisted: DeviceSession | undefined,
-  ): Promise<void> {
-    const ownerToken = persisted?.liveness_owner_token;
-    if (!ownerToken) {
-      return;
+  ): Pick<Session, "persistenceMetadata" | "livenessOwnerToken" | "livenessOwnershipClaims"> {
+    if (!persisted) {
+      return {};
     }
-    session.livenessOwnerToken = ownerToken;
-    session.livenessOwnershipClaims = new Set([ownerToken]);
-    await this.livenessOwnershipClaimMutexFor(session).runExclusive(async () => {
-      if (
-        this.getSession(session.sessionId) === session &&
-        session.livenessOwnerToken === ownerToken
-      ) {
-        await this.deviceSessionRepository.recordLivenessOwnership?.(session.sessionId, ownerToken);
-      }
-    });
+    return {
+      persistenceMetadata: {
+        source: persisted.source,
+        autolockEnabled: persisted.autolock_enabled === 1,
+        mcpSessionId: persisted.mcp_session_id,
+        daemonSessionId: persisted.daemon_session_id,
+      },
+      ...(persisted.liveness_owner_token
+        ? {
+            livenessOwnerToken: persisted.liveness_owner_token,
+            livenessOwnershipClaims: new Set([persisted.liveness_owner_token]),
+          }
+        : {}),
+    };
+  }
+
+  private async listRecoverableSessionsBeforeDeadline(
+    deadlineAt: number,
+    summary: RehydrationSummary,
+  ): Promise<DeviceSession[]> {
+    const deadlineWon = Symbol("startup-deadline");
+    const recoverableSessions =
+      this.deviceSessionRepository.listRecoverableSessions?.() ?? Promise.resolve([]);
+    const result = await Promise.race([
+      recoverableSessions,
+      this.timer.sleep(Math.max(0, deadlineAt - this.timer.now())).then(() => deadlineWon),
+    ]);
+    if (typeof result !== "symbol") {
+      return result;
+    }
+    void recoverableSessions.catch((error) =>
+      logger.warn(
+        `[SessionManager] Recoverable-session list continued after startup deadline: ${errorMessage(error)}`,
+      ),
+    );
+    summary.timedOut = true;
+    logger.warn("[SessionManager] Startup rehydration deadline reached while listing rows");
+    return [];
   }
 
   /**
@@ -3871,7 +3919,10 @@ export class SessionManager {
       deviceId: session.assignedDevice,
       stableDeviceId: session.stableDeviceId,
       platform: session.platform,
-      source: "session-manager",
+      source: session.persistenceMetadata?.source ?? "session-manager",
+      autolockEnabled: session.persistenceMetadata?.autolockEnabled,
+      mcpSessionId: session.persistenceMetadata?.mcpSessionId,
+      daemonSessionId: session.persistenceMetadata?.daemonSessionId,
       createdAtMs: session.createdAt,
       lastUsedAtMs: session.lastUsedAt,
       expiresAtMs: session.expiresAt,
@@ -3930,6 +3981,12 @@ export class SessionManager {
       stableDeviceId,
       deviceId: persisted.device_id,
       liveness: this.recoveryLivenessFromPersisted(persisted),
+      persistenceMetadata: {
+        source: persisted.source,
+        autolockEnabled: persisted.autolock_enabled === 1,
+        mcpSessionId: persisted.mcp_session_id,
+        daemonSessionId: persisted.daemon_session_id,
+      },
       ...(persisted.platform === "android"
         ? { androidEmulator: isAndroidEmulatorSerial(persisted.device_id) }
         : {}),

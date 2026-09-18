@@ -4306,7 +4306,7 @@ describe("SessionManager", () => {
     }
   });
 
-  test("serializes restored iOS ownership before a replacement claim", async () => {
+  test("restores persisted iOS ownership before a replacement claim", async () => {
     const persisted: DeviceSession = {
       session_uuid: "restarted-ios-session",
       device_id: "simulator-uuid",
@@ -4329,8 +4329,6 @@ describe("SessionManager", () => {
       updated_at: "2026-09-14T00:00:00.000Z",
     };
     const persistedOwnerTokens: Array<string | null> = [];
-    const restoreStarted = Promise.withResolvers<void>();
-    const finishRestore = Promise.withResolvers<void>();
     const restarted = new SessionManager(fakeTimer, {
       async getSession() {
         return persisted;
@@ -4339,10 +4337,6 @@ describe("SessionManager", () => {
       async recordActivity() {},
       async recordLivenessOwnership(_sessionUuid, ownerToken) {
         persistedOwnerTokens.push(ownerToken);
-        if (ownerToken === "current-owner-token") {
-          restoreStarted.resolve();
-          await finishRestore.promise;
-        }
       },
       async markReleased() {},
     });
@@ -4363,29 +4357,15 @@ describe("SessionManager", () => {
     };
 
     try {
-      const recovery = restarted.getOrCreateSession(
-        "restarted-ios-session",
-        devicePool,
-        "ios",
-        undefined,
-        true,
-      );
-      await restoreStarted.promise;
-      let replacementSettled = false;
-      const replacementClaim = restarted
-        .claimLivenessOwnership("restarted-ios-session", "replacement-owner-token")
-        .finally(() => {
-          replacementSettled = true;
-        });
-      await Promise.resolve();
-      expect(replacementSettled).toBe(false);
-      finishRestore.resolve();
-
-      await expect(recovery).resolves.toMatchObject({
+      await expect(
+        restarted.getOrCreateSession("restarted-ios-session", devicePool, "ios", undefined, true),
+      ).resolves.toMatchObject({
         assignedDevice: "simulator-uuid",
         stableDeviceId: "simulator-uuid",
       });
-      await expect(replacementClaim).resolves.toBe(true);
+      await expect(
+        restarted.claimLivenessOwnership("restarted-ios-session", "replacement-owner-token"),
+      ).resolves.toBe(true);
       expect(recoveryTarget).toMatchObject({
         platform: "ios",
         stableDeviceId: "simulator-uuid",
@@ -4394,9 +4374,8 @@ describe("SessionManager", () => {
       expect(
         restarted.hasLivenessOwnership("restarted-ios-session", "replacement-owner-token"),
       ).toBe(true);
-      expect(persistedOwnerTokens).toEqual(["current-owner-token", "replacement-owner-token"]);
+      expect(persistedOwnerTokens).toEqual(["replacement-owner-token"]);
     } finally {
-      finishRestore.resolve();
       restarted.stopCleanupTimer();
     }
   });
@@ -4715,6 +4694,111 @@ describe("SessionManager", () => {
       });
       expect(assignments).toBe(1);
     } finally {
+      restarted.stopCleanupTimer();
+    }
+  });
+
+  test("bounds a hung recoverable-session list read inside the startup deadline", async () => {
+    const listStarted = Promise.withResolvers<void>();
+    const restarted = new SessionManager(fakeTimer, {
+      async upsertActiveSession() {},
+      async recordActivity() {},
+      async markReleased() {},
+      async listRecoverableSessions() {
+        listStarted.resolve();
+        return await new Promise<DeviceSession[]>(() => {});
+      },
+    });
+    try {
+      const rehydration = restarted.rehydratePersistedSessions(
+        {
+          async assignDeviceToSession(): Promise<string> {
+            throw new Error("must not assign while the list is unavailable");
+          },
+        },
+        { deadlineMs: 1_000 },
+      );
+      await listStarted.promise;
+      await fakeTimer.advanceTimeAsync(1_000);
+      await expect(rehydration).resolves.toEqual({
+        rehydrated: [],
+        terminalized: [],
+        skipped: [],
+        timedOut: true,
+      });
+    } finally {
+      restarted.stopCleanupTimer();
+    }
+  });
+
+  test("does not overwrite a reconnect liveness claim after slow recovery", async () => {
+    const persisted: DeviceSession = {
+      session_uuid: "slow-owner-recovery",
+      device_id: "emulator-5554",
+      stable_device_id: "Pixel_8_API_35",
+      platform: "android",
+      status: "released",
+      source: null,
+      autolock_enabled: 0,
+      mcp_session_id: null,
+      daemon_session_id: "old-daemon",
+      created_at_ms: 1,
+      last_used_at_ms: 20,
+      expires_at_ms: 60_020,
+      released_at_ms: 30,
+      release_reason: "daemon-restart",
+      session_timeout_ms: 60_000,
+      heartbeat_timeout_ms: 15_000,
+      has_received_heartbeat: 1,
+      liveness_owner_token: "persisted-owner",
+      created_at: "2026-09-18T00:00:00.000Z",
+      updated_at: "2026-09-18T00:00:00.000Z",
+    };
+    const sessionCreated = Promise.withResolvers<void>();
+    const finishRecovery = Promise.withResolvers<void>();
+    const restarted = new SessionManager(fakeTimer, {
+      async getSession() {
+        return persisted;
+      },
+      async upsertActiveSession() {},
+      async recordActivity() {},
+      async recordLivenessOwnership() {},
+      async markReleased() {},
+    });
+    const devicePool: SessionDeviceAssigner = {
+      async assignDeviceToSession(sessionId, _platform, target): Promise<string> {
+        await restarted.createSession(
+          sessionId,
+          "emulator-5554",
+          "android",
+          target?.liveness?.sessionTimeoutMs,
+          target?.liveness?.heartbeatTimeoutMs,
+          target?.stableDeviceId,
+          target?.liveness,
+          target?.initialOwnership,
+        );
+        sessionCreated.resolve();
+        await finishRecovery.promise;
+        return "emulator-5554";
+      },
+    };
+    try {
+      const recovery = restarted.getOrCreateSession(
+        "slow-owner-recovery",
+        devicePool,
+        "android",
+        undefined,
+        true,
+      );
+      await sessionCreated.promise;
+      await expect(
+        restarted.claimLivenessOwnership("slow-owner-recovery", "reconnected-owner"),
+      ).resolves.toBe(true);
+      finishRecovery.resolve();
+      await recovery;
+      expect(restarted.hasLivenessOwnership("slow-owner-recovery", "reconnected-owner")).toBe(true);
+    } finally {
+      finishRecovery.resolve();
       restarted.stopCleanupTimer();
     }
   });

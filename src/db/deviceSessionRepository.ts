@@ -381,10 +381,24 @@ export class DeviceSessionRepository {
 
   async listRecoverableSessions(): Promise<DeviceSession[]> {
     const db = await this.getDb();
+    const nowMs = this.timer.now();
+    const reasons = Array.from(RECOVERABLE_DAEMON_RELEASE_REASONS);
+    const expired = await db
+      .selectFrom("device_sessions")
+      .select("session_uuid")
+      .where("release_reason", "in", reasons)
+      .where("expires_at_ms", "<=", nowMs)
+      .execute();
+    for (const row of expired) {
+      await this.markReleased(row.session_uuid, "expired", nowMs, "expired");
+    }
+    const retentionCutoffMs = nowMs - DEVICE_SESSION_RETENTION_MAX_AGE_MS;
     return await db
       .selectFrom("device_sessions")
       .selectAll()
-      .where("release_reason", "in", Array.from(RECOVERABLE_DAEMON_RELEASE_REASONS))
+      .where("release_reason", "in", reasons)
+      .where("released_at_ms", ">=", retentionCutoffMs)
+      .where("expires_at_ms", ">", nowMs)
       .orderBy("last_used_at_ms", "desc")
       .execute();
   }

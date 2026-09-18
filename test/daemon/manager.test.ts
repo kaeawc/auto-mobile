@@ -2170,6 +2170,21 @@ describe("Daemon manager process detection", () => {
     ]);
   });
 
+  test("parses daemon processes from an auto-mobile worktree entry point", () => {
+    const command =
+      "/opt/homebrew/Cellar/bun/1.3.14/bin/bun /Users/jason/kaeawc/auto-mobile/.claude/worktrees/avd-lifecycle-consistency-eae282/dist/src/index.js --daemon-mode --strict-port";
+
+    expect(
+      parseDaemonProcessTable(`42 1 ${command}`, Date.now(), "/workspace/other/dist/src/index.js"),
+    ).toEqual([
+      {
+        pid: 42,
+        ppid: 1,
+        command,
+      },
+    ]);
+  });
+
   test("parses Linux elapsed process creation times for PID-reuse protection", () => {
     expect(
       parseDaemonProcessTable(

@@ -49,7 +49,17 @@ export function isDaemonEntryScriptPath(
     }
     return normalized === normalizeEntryScriptPath(activeEntryScript);
   }
+
+  const normalizedActiveEntryScript = activeEntryScript
+    ? normalizeEntryScriptPath(activeEntryScript)
+    : undefined;
+  const isDistributionEntryScript = normalized.endsWith("/dist/src/index.js");
+
+  // Worktrees and renamed checkouts of this repo share the `/auto-mobile/` ancestor
+  // segment; with --daemon-mode checked by the caller, this is safe for #7242.
   return (
+    (isDistributionEntryScript && normalized === normalizedActiveEntryScript) ||
+    (isDistributionEntryScript && /\/auto-mobile\/.*\/dist\/src\/index\.js$/.test(normalized)) ||
     /\/(?:@kaeawc\/)?auto-mobile\/dist\/src\/index\.js$/.test(normalized) ||
     /\/auto-mobile\/(?:[^/]+\/)?libexec\/dist\/src\/index\.js$/.test(normalized)
   );

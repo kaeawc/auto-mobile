@@ -566,7 +566,10 @@ export const configuredImageSchema = deviceDescriptionSchema
     target: nullableString,
     basedOn: nullableString,
     error: nullableString,
-    state: z.enum(["configured", "booting", "booted", "shutting-down", "unavailable"]),
+    // Compat alias carrying the RAW platform state (simctl `Shutdown`/`Booted`/…; null when
+    // the platform has none) — the desktop picker string-compares it. Normalized state is in
+    // `lifecycle.state`.
+    state: nullableString,
     isAvailable: z.boolean(),
     availabilityError: nullableString,
     iosVersion: nullableString,

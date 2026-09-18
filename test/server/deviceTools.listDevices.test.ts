@@ -394,6 +394,31 @@ describe("listDevices tool (#5870)", () => {
     }
   });
 
+  test("reports the assigned pooled session UUID", async () => {
+    const timer = new FakeTimer();
+    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      fakeDeviceUtils,
+      new DefaultRetryExecutor(timer),
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    await pool.addDevice(android, { platform: "android", name: android.name, isRunning: true });
+    await pool.assignDeviceToSession("busy-session", "android");
+
+    try {
+      const payload = await callListDevices({ platform: "android" });
+
+      expect(payload.devices[0].session.sessionUuid).toBe("busy-session");
+    } finally {
+      DaemonState.getInstance().reset();
+      sessionManager.stopCleanupTimer();
+    }
+  });
+
   test("withholds stale Android metadata after discovery quarantines a reused serial", async () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());

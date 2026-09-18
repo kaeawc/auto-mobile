@@ -3339,8 +3339,14 @@
                 ]
               },
               "state": {
-                "type": "string",
-                "enum": ["configured", "booting", "booted", "shutting-down", "unavailable"]
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               },
               "isAvailable": {
                 "type": "boolean"

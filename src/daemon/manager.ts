@@ -210,6 +210,10 @@ function normalizeProcessCommand(command: string): string {
 }
 
 function invokedCommand(command: string): string {
+  if (!isShellCommandWrapper(command)) {
+    return command.trim();
+  }
+
   const shellInvocation = command
     .trim()
     .match(/(?:^|\s)(?:-c|\/c|-(?:command|encodedcommand|c|ec))\s+["']?(.+)$/i);

@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
 import {
   DaemonLauncher,
@@ -89,15 +92,59 @@ describe("DaemonLauncher", () => {
   test("matches a sibling jj workspace distribution entry point", () => {
     const activeEntryScript = "/workspace/auto-mobile/dist/src/index.js";
 
-    expect(isDaemonEntryScriptPath("/workspace/feature/dist/src/index.js", activeEntryScript)).toBe(
-      true,
-    );
+    expect(
+      isDaemonEntryScriptPath(
+        "/workspace/feature/dist/src/index.js",
+        activeEntryScript,
+        () => true,
+      ),
+    ).toBe(true);
+    expect(
+      isDaemonEntryScriptPath(
+        "/workspace/feature/dist/src/index.js",
+        activeEntryScript,
+        () => false,
+      ),
+    ).toBe(false);
     expect(isDaemonEntryScriptPath("/other/place/x/dist/src/index.js", activeEntryScript)).toBe(
       false,
     );
     expect(isDaemonEntryScriptPath("/workspace/a/b/dist/src/index.js", activeEntryScript)).toBe(
       false,
     );
+  });
+
+  test("accepts a sibling checkout with the default provenance probe", () => {
+    const checkoutRoot = mkdtempSync(join(tmpdir(), "auto-mobile-provenance-"));
+    const activeEntryScript = join(dirname(checkoutRoot), "auto-mobile", "dist/src/index.js");
+    const entryScript = join(checkoutRoot, "dist/src/index.js");
+
+    try {
+      mkdirSync(join(checkoutRoot, "dist/src"), { recursive: true });
+      writeFileSync(
+        join(checkoutRoot, "package.json"),
+        JSON.stringify({ name: "@kaeawc/auto-mobile" }),
+      );
+
+      expect(isDaemonEntryScriptPath(entryScript, activeEntryScript)).toBe(true);
+    } finally {
+      rmSync(checkoutRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("rejects a sibling checkout with the wrong default provenance", () => {
+    const checkoutRoot = mkdtempSync(join(tmpdir(), "auto-mobile-provenance-"));
+    const activeEntryScript = join(dirname(checkoutRoot), "auto-mobile", "dist/src/index.js");
+    const entryScript = join(checkoutRoot, "dist/src/index.js");
+
+    try {
+      mkdirSync(join(checkoutRoot, "dist/src"), { recursive: true });
+      writeFileSync(join(checkoutRoot, "package.json"), JSON.stringify({ name: "other" }));
+
+      expect(isDaemonEntryScriptPath(entryScript, activeEntryScript)).toBe(false);
+    } finally {
+      rmSync(checkoutRoot, { recursive: true, force: true });
+    }
   });
 
   test("uses POSIX PATH semantics for an injected Linux platform", () => {

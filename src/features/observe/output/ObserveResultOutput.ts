@@ -1,5 +1,5 @@
 import type { Element } from "../../../models/Element";
-import type { LayoutWarning } from "../../../models/ObservationInsets";
+import type { LayoutWarning, LayoutWarningsScope } from "../../../models/ObservationInsets";
 import type { ObserveResult, SkeletonElement } from "../../../models/ObserveResult";
 import type { ViewHierarchyNode } from "../../../models/ViewHierarchyResult";
 import { projectSkeleton, projectSkeletonElement } from "./SkeletonProjection";
@@ -713,11 +713,18 @@ export interface ObserveDiff {
    * Element mirror fields (`focusedElement`, `accessibilityFocusedElement`,
    * `awaitedElement` — #3052), each as `{from, to}`. In skeleton mode only,
    * `layoutWarnings` is a per-entry `{added, removed}` pair after system UI
-   * status-bar chrome is excluded.
+   * status-bar chrome is excluded, with sparse envelope deltas when completeness
+   * metadata changes.
    */
   fields?: Record<
     string,
-    { from?: unknown; to?: unknown } | { added: LayoutWarning[]; removed: LayoutWarning[] }
+    | { from?: unknown; to?: unknown }
+    | {
+        added: LayoutWarning[];
+        removed: LayoutWarning[];
+        scope?: { from?: LayoutWarningsScope; to?: LayoutWarningsScope };
+        total?: { from?: number; to?: number };
+      }
   >;
 }
 
@@ -1164,7 +1171,24 @@ function layoutWarningsForPerEntryDiff(value: unknown): LayoutWarning[] {
 function diffLayoutWarningsPerEntry(
   baseline: unknown,
   next: unknown,
-): { added: LayoutWarning[]; removed: LayoutWarning[] } {
+): {
+  added: LayoutWarning[];
+  removed: LayoutWarning[];
+  scope?: { from?: LayoutWarningsScope; to?: LayoutWarningsScope };
+  total?: { from?: number; to?: number };
+} {
+  const envelope = (value: unknown): { scope?: LayoutWarningsScope; total?: number } => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return {};
+    }
+    const record = value as Record<string, unknown>;
+    return {
+      scope: record.scope as LayoutWarningsScope | undefined,
+      total: record.total as number | undefined,
+    };
+  };
+  const baselineEnvelope = envelope(baseline);
+  const nextEnvelope = envelope(next);
   const byIdentity = (warnings: LayoutWarning[]): Map<string, LayoutWarning[]> => {
     const grouped = new Map<string, LayoutWarning[]>();
     for (const warning of warnings.filter((warning) => !isSystemUiStatusBarWarning(warning))) {
@@ -1200,7 +1224,19 @@ function diffLayoutWarningsPerEntry(
     removed.push(...from.slice(paired));
     added.push(...to.slice(paired));
   }
-  return { added, removed };
+  const diff: {
+    added: LayoutWarning[];
+    removed: LayoutWarning[];
+    scope?: { from?: LayoutWarningsScope; to?: LayoutWarningsScope };
+    total?: { from?: number; to?: number };
+  } = { added, removed };
+  if (!valuesEqual(baselineEnvelope.scope, nextEnvelope.scope)) {
+    diff.scope = { from: baselineEnvelope.scope, to: nextEnvelope.scope };
+  }
+  if (!valuesEqual(baselineEnvelope.total, nextEnvelope.total)) {
+    diff.total = { from: baselineEnvelope.total, to: nextEnvelope.total };
+  }
+  return diff;
 }
 
 /**
@@ -1681,7 +1717,12 @@ export function diffObserveResult(
         : valuesEqual(baseRecord[field], nextRecord[field]);
     if (field === "layoutWarnings" && cfg?.layoutWarningsDiffMode === "perEntry") {
       const layoutWarnings = diffLayoutWarningsPerEntry(baseRecord[field], nextRecord[field]);
-      if (layoutWarnings.added.length > 0 || layoutWarnings.removed.length > 0) {
+      if (
+        layoutWarnings.added.length > 0 ||
+        layoutWarnings.removed.length > 0 ||
+        layoutWarnings.scope !== undefined ||
+        layoutWarnings.total !== undefined
+      ) {
         fields[field] = layoutWarnings;
       }
     } else if (!equal) {

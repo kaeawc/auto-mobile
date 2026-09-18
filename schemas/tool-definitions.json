@@ -13061,12 +13061,391 @@
                     "type": "string"
                   },
                   "additionalProperties": {
-                    "type": "object",
-                    "properties": {
-                      "from": {},
-                      "to": {}
-                    },
-                    "additionalProperties": false
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "from": {},
+                          "to": {}
+                        },
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "added": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": [
+                                    "important-content-under-inset",
+                                    "interaction-in-system-gesture-region"
+                                  ]
+                                },
+                                "severity": {
+                                  "type": "string",
+                                  "enum": ["warning", "info"]
+                                },
+                                "element": {
+                                  "type": "object",
+                                  "properties": {
+                                    "viewId": {
+                                      "type": "string"
+                                    },
+                                    "resourceId": {
+                                      "type": "string"
+                                    },
+                                    "text": {
+                                      "type": "string"
+                                    },
+                                    "contentDesc": {
+                                      "type": "string"
+                                    },
+                                    "bounds": {
+                                      "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid.",
+                                      "anyOf": [
+                                        {
+                                          "type": "object",
+                                          "properties": {
+                                            "left": {
+                                              "type": "number"
+                                            },
+                                            "top": {
+                                              "type": "number"
+                                            },
+                                            "right": {
+                                              "type": "number"
+                                            },
+                                            "bottom": {
+                                              "type": "number"
+                                            },
+                                            "centerX": {
+                                              "type": "number"
+                                            },
+                                            "centerY": {
+                                              "type": "number"
+                                            }
+                                          },
+                                          "required": ["left", "top", "right", "bottom"],
+                                          "additionalProperties": false
+                                        },
+                                        {
+                                          "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object.",
+                                          "type": "array",
+                                          "prefixItems": [
+                                            {
+                                              "type": "number"
+                                            },
+                                            {
+                                              "type": "number"
+                                            },
+                                            {
+                                              "type": "number"
+                                            },
+                                            {
+                                              "type": "number"
+                                            }
+                                          ]
+                                        }
+                                      ]
+                                    }
+                                  },
+                                  "required": ["bounds"],
+                                  "additionalProperties": false
+                                },
+                                "categories": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string",
+                                    "enum": ["text", "interaction"]
+                                  }
+                                },
+                                "insetTypes": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string",
+                                    "enum": [
+                                      "systemBars",
+                                      "displayCutout",
+                                      "safeArea",
+                                      "systemGestures",
+                                      "mandatorySystemGestures"
+                                    ]
+                                  }
+                                },
+                                "sides": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string",
+                                    "enum": ["top", "right", "bottom", "left"]
+                                  }
+                                },
+                                "overflowPx": {
+                                  "type": "object",
+                                  "properties": {
+                                    "top": {
+                                      "type": "number"
+                                    },
+                                    "right": {
+                                      "type": "number"
+                                    },
+                                    "bottom": {
+                                      "type": "number"
+                                    },
+                                    "left": {
+                                      "type": "number"
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                },
+                                "insetPx": {
+                                  "type": "object",
+                                  "properties": {
+                                    "top": {
+                                      "type": "number"
+                                    },
+                                    "right": {
+                                      "type": "number"
+                                    },
+                                    "bottom": {
+                                      "type": "number"
+                                    },
+                                    "left": {
+                                      "type": "number"
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                },
+                                "overlapPercent": {
+                                  "type": "integer",
+                                  "minimum": -9007199254740991,
+                                  "maximum": 9007199254740991
+                                },
+                                "confidence": {
+                                  "type": "string",
+                                  "enum": ["high", "medium"]
+                                }
+                              },
+                              "required": [
+                                "type",
+                                "severity",
+                                "element",
+                                "categories",
+                                "insetTypes",
+                                "sides",
+                                "overflowPx",
+                                "insetPx",
+                                "overlapPercent",
+                                "confidence"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "removed": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": [
+                                    "important-content-under-inset",
+                                    "interaction-in-system-gesture-region"
+                                  ]
+                                },
+                                "severity": {
+                                  "type": "string",
+                                  "enum": ["warning", "info"]
+                                },
+                                "element": {
+                                  "type": "object",
+                                  "properties": {
+                                    "viewId": {
+                                      "type": "string"
+                                    },
+                                    "resourceId": {
+                                      "type": "string"
+                                    },
+                                    "text": {
+                                      "type": "string"
+                                    },
+                                    "contentDesc": {
+                                      "type": "string"
+                                    },
+                                    "bounds": {
+                                      "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid.",
+                                      "anyOf": [
+                                        {
+                                          "type": "object",
+                                          "properties": {
+                                            "left": {
+                                              "type": "number"
+                                            },
+                                            "top": {
+                                              "type": "number"
+                                            },
+                                            "right": {
+                                              "type": "number"
+                                            },
+                                            "bottom": {
+                                              "type": "number"
+                                            },
+                                            "centerX": {
+                                              "type": "number"
+                                            },
+                                            "centerY": {
+                                              "type": "number"
+                                            }
+                                          },
+                                          "required": ["left", "top", "right", "bottom"],
+                                          "additionalProperties": false
+                                        },
+                                        {
+                                          "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object.",
+                                          "type": "array",
+                                          "prefixItems": [
+                                            {
+                                              "type": "number"
+                                            },
+                                            {
+                                              "type": "number"
+                                            },
+                                            {
+                                              "type": "number"
+                                            },
+                                            {
+                                              "type": "number"
+                                            }
+                                          ]
+                                        }
+                                      ]
+                                    }
+                                  },
+                                  "required": ["bounds"],
+                                  "additionalProperties": false
+                                },
+                                "categories": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string",
+                                    "enum": ["text", "interaction"]
+                                  }
+                                },
+                                "insetTypes": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string",
+                                    "enum": [
+                                      "systemBars",
+                                      "displayCutout",
+                                      "safeArea",
+                                      "systemGestures",
+                                      "mandatorySystemGestures"
+                                    ]
+                                  }
+                                },
+                                "sides": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string",
+                                    "enum": ["top", "right", "bottom", "left"]
+                                  }
+                                },
+                                "overflowPx": {
+                                  "type": "object",
+                                  "properties": {
+                                    "top": {
+                                      "type": "number"
+                                    },
+                                    "right": {
+                                      "type": "number"
+                                    },
+                                    "bottom": {
+                                      "type": "number"
+                                    },
+                                    "left": {
+                                      "type": "number"
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                },
+                                "insetPx": {
+                                  "type": "object",
+                                  "properties": {
+                                    "top": {
+                                      "type": "number"
+                                    },
+                                    "right": {
+                                      "type": "number"
+                                    },
+                                    "bottom": {
+                                      "type": "number"
+                                    },
+                                    "left": {
+                                      "type": "number"
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                },
+                                "overlapPercent": {
+                                  "type": "integer",
+                                  "minimum": -9007199254740991,
+                                  "maximum": 9007199254740991
+                                },
+                                "confidence": {
+                                  "type": "string",
+                                  "enum": ["high", "medium"]
+                                }
+                              },
+                              "required": [
+                                "type",
+                                "severity",
+                                "element",
+                                "categories",
+                                "insetTypes",
+                                "sides",
+                                "overflowPx",
+                                "insetPx",
+                                "overlapPercent",
+                                "confidence"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "scope": {
+                            "type": "object",
+                            "properties": {
+                              "from": {
+                                "type": "string",
+                                "enum": ["full", "truncated", "scoped"]
+                              },
+                              "to": {
+                                "type": "string",
+                                "enum": ["full", "truncated", "scoped"]
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          "total": {
+                            "type": "object",
+                            "properties": {
+                              "from": {
+                                "type": "number"
+                              },
+                              "to": {
+                                "type": "number"
+                              }
+                            },
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": ["added", "removed"],
+                        "additionalProperties": false
+                      }
+                    ]
                   }
                 }
               },

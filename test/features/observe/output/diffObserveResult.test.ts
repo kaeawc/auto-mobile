@@ -800,6 +800,35 @@ describe("diffObserveResult", () => {
     expect(diff.fields!.layoutWarnings).toEqual({ added: [added], removed: [removed] });
   });
 
+  test("skeleton layout-warning diffs emit envelope-only changes", () => {
+    const node = { "resource-id": "a", bounds: { left: 0, top: 0, right: 10, bottom: 10 } };
+    const warning = {
+      type: "important-content-under-inset",
+      severity: "warning",
+      element: { text: "Title", bounds: { left: 0, top: 0, right: 100, bottom: 30 } },
+      categories: ["text"],
+      insetTypes: ["safeArea"],
+      sides: ["top"],
+      overflowPx: { top: 30 },
+      insetPx: { top: 59.5 },
+      overlapPercent: 100,
+      confidence: "high",
+    } as const;
+    const warnings = [warning];
+
+    const diff = diffObserveResult(
+      obs(node, { layoutWarnings: { scope: "truncated", total: 100, warnings } }),
+      obs(node, { layoutWarnings: { scope: "truncated", total: 140, warnings } }),
+      { layoutWarningsDiffMode: "perEntry" },
+    );
+
+    expect(diff.fields!.layoutWarnings).toEqual({
+      added: [],
+      removed: [],
+      total: { from: 100, to: 140 },
+    });
+  });
+
   test("skeleton layout-warning diffs ignore confidence-only churn and systemui notification chrome", () => {
     const node = { "resource-id": "a", bounds: { left: 0, top: 0, right: 10, bottom: 10 } };
     const appWarning = (confidence: string) => ({

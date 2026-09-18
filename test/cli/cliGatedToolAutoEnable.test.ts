@@ -39,10 +39,12 @@ describe("CLI transparently enables gated tools", () => {
   function recordProxy(
     calls: Array<{ name: string; params: unknown }>,
     callToolOverride?: (name: string, params: Record<string, unknown>) => Promise<any>,
+    callOrder?: Array<{ kind: "callTool" | "setProfile"; value?: unknown }>,
   ) {
     setDaemonProxyFactoryForTesting((): any => ({
       callTool: async (name: string, params: unknown): Promise<any> => {
         calls.push({ name, params });
+        callOrder?.push({ kind: "callTool", value: { name, params } });
         if (callToolOverride) {
           return callToolOverride(name, params as Record<string, unknown>);
         }
@@ -60,6 +62,9 @@ describe("CLI transparently enables gated tools", () => {
           };
         }
         return { content: [{ type: "text", text: "{}" }] };
+      },
+      setToolSelectionProfileUuid: (profileUuid: string | undefined): void => {
+        callOrder?.push({ kind: "setProfile", value: profileUuid });
       },
       adoptCliSessionLiveness: async (): Promise<string | undefined> => "session-cli",
       close: async (): Promise<void> => {},
@@ -259,7 +264,7 @@ describe("CLI transparently enables gated tools", () => {
     );
   });
 
-  test("continues pre-enabling after the profile lock wait times out", async () => {
+  test("does not mint an unlocked profile when the profile lock wait times out", async () => {
     const timer = new FakeTimer();
     setCliToolSelectionProfileLockOptionsForTesting({ timer, pollIntervalMs: 1, timeoutMs: 3 });
     const releaseHeldLock = Promise.withResolvers<void>();
@@ -276,9 +281,53 @@ describe("CLI transparently enables gated tools", () => {
     timer.advanceTime(3);
     await command;
 
-    expect(calls.map((call) => call.name)).toEqual(["setToolEnabled", "listDevices"]);
+    expect(calls.map((call) => call.name)).toEqual(["listDevices"]);
     releaseHeldLock.resolve();
     await heldLock;
+  });
+
+  test("does not mint a second profile when a concurrent first mint outlives the lock wait", async () => {
+    const timer = new FakeTimer();
+    setCliToolSelectionProfileLockOptionsForTesting({ timer, pollIntervalMs: 1, timeoutMs: 3 });
+    const mintStarted = Promise.withResolvers<void>();
+    const releaseMint = Promise.withResolvers<void>();
+    const calls: Array<{ name: string; params: Record<string, unknown> }> = [];
+    setDaemonProxyFactoryForTesting((): any => ({
+      callTool: async (name: string, params: Record<string, unknown>): Promise<any> => {
+        calls.push({ name, params });
+        if (name !== "setToolEnabled") {
+          return { content: [{ type: "text", text: "{}" }] };
+        }
+        mintStarted.resolve();
+        await releaseMint.promise;
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                sessionUuid: "88888888-8888-4888-8888-888888888888",
+                scope: "connection-profile",
+              }),
+            },
+          ],
+        };
+      },
+      adoptCliSessionLiveness: async (): Promise<string | undefined> => "session-cli",
+      close: async (): Promise<void> => {},
+    }));
+
+    const first = runCliCommand(["listDevices", "--platform", "android"]);
+    await mintStarted.promise;
+    const second = runCliCommand(["listDevices", "--platform", "android"]);
+    expect(timer.getPendingSleeps()).toEqual([1]);
+
+    timer.advanceTime(3);
+    await second;
+    expect(calls.filter((call) => call.name === "setToolEnabled")).toHaveLength(1);
+
+    releaseMint.resolve();
+    await first;
+    expect(calls.filter((call) => call.name === "setToolEnabled")).toHaveLength(1);
   });
 
   test("does not pre-enable hidden production tools", async () => {
@@ -351,22 +400,27 @@ describe("CLI transparently enables gated tools", () => {
     persistCliToolSelectionProfile(persistedProfileUuid);
     fs.chmodSync(cliToolSelectionProfilePath(process.env), 0o400);
     const calls: Array<{ name: string; params: unknown }> = [];
-    recordProxy(calls, async (name, params) => {
-      if (name === "setToolEnabled") {
-        return {
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify({
-                sessionUuid: persistedProfileUuid,
-                scope: "connection-profile",
-              }),
-            },
-          ],
-        };
-      }
-      return { content: [{ type: "text", text: "{}" }] };
-    });
+    const callOrder: Array<{ kind: "callTool" | "setProfile"; value?: unknown }> = [];
+    recordProxy(
+      calls,
+      async (name, params) => {
+        if (name === "setToolEnabled") {
+          return {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({
+                  sessionUuid: persistedProfileUuid,
+                  scope: "connection-profile",
+                }),
+              },
+            ],
+          };
+        }
+        return { content: [{ type: "text", text: "{}" }] };
+      },
+      callOrder,
+    );
 
     await runCliCommand(["listDevices", "--platform", "android"]);
 
@@ -374,6 +428,16 @@ describe("CLI transparently enables gated tools", () => {
       name: "setToolEnabled",
       params: { sessionUuid: persistedProfileUuid },
     });
+    expect(callOrder.slice(0, 2)).toEqual([
+      { kind: "setProfile", value: persistedProfileUuid },
+      {
+        kind: "callTool",
+        value: {
+          name: "setToolEnabled",
+          params: { toolName: "listDevices", enabled: true, sessionUuid: persistedProfileUuid },
+        },
+      },
+    ]);
   });
 
   test("re-mints when the persisted profile is stale/rejected by the daemon", async () => {
@@ -381,31 +445,39 @@ describe("CLI transparently enables gated tools", () => {
     const freshProfileUuid = "22222222-2222-4222-8222-222222222222";
     persistCliToolSelectionProfile(staleProfileUuid);
     const calls: Array<{ name: string; params: unknown }> = [];
-    recordProxy(calls, async (name, params) => {
-      if (name === "setToolEnabled" && params.sessionUuid === staleProfileUuid) {
-        return {
-          isError: true,
-          content: [
-            {
-              type: "text",
-              text: "sessionUuid must identify this connection's active tool-selection or routing session profile.",
-            },
-          ],
-        };
-      }
-      if (name === "setToolEnabled") {
-        expect(params).not.toHaveProperty("sessionUuid");
-        return {
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify({ sessionUuid: freshProfileUuid, scope: "connection-profile" }),
-            },
-          ],
-        };
-      }
-      return { content: [{ type: "text", text: "{}" }] };
-    });
+    const callOrder: Array<{ kind: "callTool" | "setProfile"; value?: unknown }> = [];
+    recordProxy(
+      calls,
+      async (name, params) => {
+        if (name === "setToolEnabled" && params.sessionUuid === staleProfileUuid) {
+          return {
+            isError: true,
+            content: [
+              {
+                type: "text",
+                text: "sessionUuid must identify this connection's active tool-selection or routing session profile.",
+              },
+            ],
+          };
+        }
+        if (name === "setToolEnabled") {
+          expect(params).not.toHaveProperty("sessionUuid");
+          return {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({
+                  sessionUuid: freshProfileUuid,
+                  scope: "connection-profile",
+                }),
+              },
+            ],
+          };
+        }
+        return { content: [{ type: "text", text: "{}" }] };
+      },
+      callOrder,
+    );
 
     await runCliCommand(["listDevices", "--platform", "android"]);
 
@@ -416,6 +488,22 @@ describe("CLI transparently enables gated tools", () => {
     ]);
     expect(calls[0].params).toMatchObject({ sessionUuid: staleProfileUuid });
     expect(calls[1].params).not.toHaveProperty("sessionUuid");
+    expect(callOrder).toEqual([
+      { kind: "setProfile", value: staleProfileUuid },
+      {
+        kind: "callTool",
+        value: {
+          name: "setToolEnabled",
+          params: { toolName: "listDevices", enabled: true, sessionUuid: staleProfileUuid },
+        },
+      },
+      { kind: "setProfile", value: undefined },
+      {
+        kind: "callTool",
+        value: { name: "setToolEnabled", params: { toolName: "listDevices", enabled: true } },
+      },
+      { kind: "callTool", value: { name: "listDevices", params: { platform: "android" } } },
+    ]);
     expect(fs.readFileSync(cliToolSelectionProfilePath(process.env), "utf8")).toBe(
       freshProfileUuid,
     );

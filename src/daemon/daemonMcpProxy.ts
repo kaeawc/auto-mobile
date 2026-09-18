@@ -2155,6 +2155,14 @@ export class DaemonMcpProxy {
   }
 
   /**
+   * Seed only with the persisted CLI tool-selection profile file's connection-profile UUID.
+   * Never pass a device-session UUID: this value is forwarded on every later tool call.
+   */
+  setToolSelectionProfileUuid(profileUuid: string | undefined): void {
+    this.toolSelectionProfileUuid = profileUuid;
+  }
+
+  /**
    * Call a tool on the daemon. `progressToken` echoes the external MCP
    * client's own `params._meta.progressToken` (issue #6205); when present it
    * is forwarded to the daemon so `notifications/progress` ticks relayed back

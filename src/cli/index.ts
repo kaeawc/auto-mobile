@@ -411,6 +411,11 @@ export function parseCliArgs(args: string[]): {
  */
 export interface CliDaemonProxy {
   callTool(name: string, params: Record<string, any>): Promise<any>;
+  /**
+   * Seed only from the persisted CLI tool-selection profile file's connection-profile UUID.
+   * Never pass a device-session UUID: the proxy forwards this on every later call.
+   */
+  setToolSelectionProfileUuid?(profileUuid: string | undefined): void;
   adoptCliSessionLiveness(): Promise<string | undefined>;
   close(): Promise<void>;
 }
@@ -464,6 +469,7 @@ async function reaffirmPersistedCliToolSelectionProfile(
 ): Promise<void> {
   let result: Awaited<ReturnType<CliDaemonProxy["callTool"]>>;
   try {
+    proxy.setToolSelectionProfileUuid?.(persistedProfileUuid);
     result = await proxy.callTool(SET_TOOL_ENABLED_TOOL_NAME, {
       toolName,
       enabled: true,
@@ -483,6 +489,7 @@ async function reaffirmPersistedCliToolSelectionProfile(
     return;
   }
 
+  proxy.setToolSelectionProfileUuid?.(undefined);
   logger.debug(`CLI tool-selection profile ${persistedProfileUuid} is stale; re-minting a profile`);
   const locked = await withCliToolSelectionProfileLock(async () => {
     const currentProfileUuid = loadPersistedCliToolSelectionProfile();
@@ -495,14 +502,19 @@ async function reaffirmPersistedCliToolSelectionProfile(
       if (currentResult) {
         return;
       }
+      proxy.setToolSelectionProfileUuid?.(undefined);
     }
     await mintCliToolSelectionProfile(proxy, toolName);
   });
   if (locked) {
     return;
   }
-  // Graceful degradation preserves CLI availability; the only risk is the old mint race.
-  await mintCliToolSelectionProfile(proxy, toolName);
+  const profileUuidAfterLockTimeout = loadPersistedCliToolSelectionProfile();
+  // This lock never spans the caller's own daemon start before pre-enable; any daemon start
+  // incidentally triggered by setToolEnabled is already inside the locked callback above.
+  logger.debug(
+    `CLI pre-enable of ${toolName} skipped after a contended profile-lock timeout; ${profileUuidAfterLockTimeout ? "a profile is now persisted for the next invocation" : "the next invocation will retry"}, and the tool call will surface any gate error.`,
+  );
 }
 
 async function mintOrReaffirmCliToolSelectionProfile(
@@ -520,12 +532,17 @@ async function mintOrReaffirmCliToolSelectionProfile(
       if (reaffirmed) {
         return;
       }
+      proxy.setToolSelectionProfileUuid?.(undefined);
     }
     await mintCliToolSelectionProfile(proxy, toolName);
   });
   if (!locked) {
-    // Graceful degradation preserves CLI availability; the only risk is the old mint race.
-    await mintCliToolSelectionProfile(proxy, toolName);
+    const profileUuidAfterLockTimeout = loadPersistedCliToolSelectionProfile();
+    // This lock never spans the caller's own daemon start before pre-enable; any daemon start
+    // incidentally triggered by setToolEnabled is already inside the locked callback above.
+    logger.debug(
+      `CLI pre-enable of ${toolName} skipped after a contended profile-lock timeout; ${profileUuidAfterLockTimeout ? "a profile is now persisted for the next invocation" : "the next invocation will retry"}, and the tool call will surface any gate error.`,
+    );
   }
 }
 
@@ -535,6 +552,7 @@ async function reaffirmCliToolSelectionProfile(
   profileUuid: string,
 ): Promise<boolean> {
   try {
+    proxy.setToolSelectionProfileUuid?.(profileUuid);
     const result = await proxy.callTool(SET_TOOL_ENABLED_TOOL_NAME, {
       toolName,
       enabled: true,

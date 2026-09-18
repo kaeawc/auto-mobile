@@ -3,6 +3,7 @@ import type { ElementSelectionResult } from "../../src/models/ElementSelectionRe
 import type { ViewHierarchyResult } from "../../src/models/ViewHierarchyResult";
 import type { ElementSelectionStrategy } from "../../src/models/ElementSelectionStrategy";
 import type { ElementSelector } from "../../src/utils/interfaces/ElementSelector";
+import type { TextSelectionIntent } from "../../src/utils/interfaces/ElementFinder";
 
 /**
  * Deterministic fake for testing code that depends on ElementSelector.
@@ -15,6 +16,7 @@ export class FakeElementSelector implements ElementSelector {
   lastStrategy?: ElementSelectionStrategy;
   lastIndex?: number;
   lastText?: string;
+  lastTextSelectionIntent?: TextSelectionIntent;
   textCalls: string[] = [];
   lastResourceId?: string;
   lastTestTag?: string;
@@ -67,12 +69,14 @@ export class FakeElementSelector implements ElementSelector {
       caseSensitive?: boolean;
       strategy?: ElementSelectionStrategy;
       index?: number;
+      selectionIntent?: TextSelectionIntent;
     },
   ): ElementSelectionResult {
     void viewHierarchy;
     this.lastStrategy = options?.strategy;
     this.lastIndex = options?.index;
     this.lastText = text;
+    this.lastTextSelectionIntent = options?.selectionIntent;
     this.textCalls.push(text);
     return this.buildSelectionResult(options?.strategy);
   }

@@ -3,10 +3,14 @@ import { ViewHierarchyNode, ViewHierarchyResult } from "../../models";
 import { logger } from "../../utils/logger";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
 import type { TextMatcher } from "../../utils/interfaces/TextMatcher";
-import type { ElementFinder } from "../../utils/interfaces/ElementFinder";
+import type { ElementFinder, TextSelectionIntent } from "../../utils/interfaces/ElementFinder";
 import { DefaultElementParser } from "./ElementParser";
 import { DefaultTextMatcher } from "./TextMatcher";
-import { ANDROID_INPUT_CLASSES, isClickableElementProperties } from "../../utils/elementProperties";
+import {
+  ANDROID_INPUT_CLASSES,
+  isClickableElementProperties,
+  isEditableElementProperties,
+} from "../../utils/elementProperties";
 import {
   STABLE_VIEW_ID_HASH_LENGTH,
   STABLE_VIEW_ID_PREFIX,
@@ -673,18 +677,17 @@ export class DefaultElementFinder implements ElementFinder {
   }
 
   private isAndroidInputNode(props: Record<string, unknown>): boolean {
-    const nodeClass = props.class ?? props.className;
-    return (
-      typeof nodeClass === "string" &&
-      ANDROID_INPUT_CLASSES.some((inputClass) => nodeClass.includes(inputClass))
-    );
+    return isEditableElementProperties(props);
   }
 
-  private rankTextMatches(matches: Element[]): Element[] {
+  private rankTextMatches(matches: Element[], selectionIntent?: TextSelectionIntent): Element[] {
     matches.sort(
       (a, b) =>
-        Number(this.isAndroidInputNode(a)) - Number(this.isAndroidInputNode(b)) ||
-        Number(this.isClickableNode(b)) - Number(this.isClickableNode(a)),
+        (selectionIntent === "tap"
+          ? Number(this.isAndroidInputNode(a)) - Number(this.isAndroidInputNode(b))
+          : selectionIntent === "focus-input"
+            ? Number(this.isAndroidInputNode(b)) - Number(this.isAndroidInputNode(a))
+            : 0) || Number(this.isClickableNode(b)) - Number(this.isClickableNode(a)),
     );
     return matches;
   }
@@ -719,6 +722,7 @@ export class DefaultElementFinder implements ElementFinder {
     caseSensitive: boolean = false,
     preserveTraversalOrder: boolean = false,
     includeWindows: boolean = false,
+    selectionIntent?: TextSelectionIntent,
   ): Element[] {
     if (!viewHierarchy || !text) {
       return [];
@@ -742,7 +746,9 @@ export class DefaultElementFinder implements ElementFinder {
     }): Element[] => {
       const selectedMatches =
         matches.exactMatches.length > 0 ? matches.exactMatches : matches.partialMatches;
-      return preserveTraversalOrder ? selectedMatches : this.rankTextMatches(selectedMatches);
+      return preserveTraversalOrder
+        ? selectedMatches
+        : this.rankTextMatches(selectedMatches, selectionIntent);
     };
 
     if (containerNode) {
@@ -803,7 +809,10 @@ export class DefaultElementFinder implements ElementFinder {
     const matchesByWindowOrder = [...windowMatches, mainMatches];
     const hasExactMatches = matchesByWindowOrder.some((matches) => matches.exactMatches.length > 0);
     return matchesByWindowOrder.flatMap((matches) =>
-      this.rankTextMatches(hasExactMatches ? matches.exactMatches : matches.partialMatches),
+      this.rankTextMatches(
+        hasExactMatches ? matches.exactMatches : matches.partialMatches,
+        selectionIntent,
+      ),
     );
   }
 
@@ -822,6 +831,7 @@ export class DefaultElementFinder implements ElementFinder {
     container: { elementId?: string; text?: string } | null = null,
     partialMatch: boolean = true,
     caseSensitive: boolean = false,
+    selectionIntent?: TextSelectionIntent,
   ): Element | null {
     const matches = this.findElementsByText(
       viewHierarchy,
@@ -829,6 +839,9 @@ export class DefaultElementFinder implements ElementFinder {
       container,
       partialMatch,
       caseSensitive,
+      false,
+      false,
+      selectionIntent,
     );
     return matches[0] ?? null;
   }

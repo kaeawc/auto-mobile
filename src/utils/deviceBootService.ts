@@ -1129,6 +1129,8 @@ export function enrichBootedDevice(device: BootedDevice, image: DeviceInfo): Boo
     iosVersion: device.iosVersion ?? image.iosVersion,
     apiLevel: device.apiLevel ?? image.apiLevel,
     osVersion: device.osVersion ?? image.osVersion,
+    runtimeId: device.runtimeId ?? image.runtimeId,
+    deviceType: device.deviceType ?? image.deviceType,
     formFactor: device.formFactor ?? image.formFactor,
     screenWidth: device.screenWidth ?? image.screenWidth,
     screenHeight: device.screenHeight ?? image.screenHeight,

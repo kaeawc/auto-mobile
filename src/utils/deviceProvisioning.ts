@@ -12,6 +12,7 @@
 
 import { ActionableError, toActionableError } from "../models/ActionableError";
 import type { DeviceMatchCriteria } from "../models/DeviceMatchCriteria";
+import type { FormFactor } from "../models/DeviceMatchCriteria";
 import type { AppleDeviceType } from "./ios-cmdline-tools/SimCtlClient";
 import type { CreateAvdParams, SystemImage } from "./android-cmdline-tools/avdmanager";
 import { createAvd, listInstalledSystemImages } from "./android-cmdline-tools/avdmanager";
@@ -114,6 +115,23 @@ const IOS_FAMILY_BY_FORM_FACTOR: Record<"phone" | "tablet", string> = {
   tablet: "iPad",
 };
 
+type IosProvisioningFormFactor = "phone" | "tablet";
+
+function iosProvisioningFormFactor(formFactor: FormFactor | undefined): IosProvisioningFormFactor {
+  switch (formFactor) {
+    case undefined:
+    case "phone":
+      return "phone";
+    case "tablet":
+      return "tablet";
+    case "foldable":
+    case "unknown":
+      throw new ActionableError(
+        `iOS provisioning supports only phone or tablet form factors, not '${formFactor}'.`,
+      );
+  }
+}
+
 function deviceTypeMatchesIosFormFactor(
   deviceType: AppleDeviceType,
   formFactor: "phone" | "tablet" = "phone",
@@ -149,6 +167,8 @@ export function pickIosDeviceType(
     );
   }
 
+  const formFactor = iosProvisioningFormFactor(criteria.formFactor);
+
   if (criteria.name) {
     const wanted = criteria.name.trim().toLowerCase();
     const exact = deviceTypes.find((type) => type.name.toLowerCase() === wanted);
@@ -157,7 +177,6 @@ export function pickIosDeviceType(
     }
   }
 
-  const formFactor = criteria.formFactor ?? "phone";
   const family = IOS_FAMILY_BY_FORM_FACTOR[formFactor];
   const candidates = deviceTypes.filter((type) => deviceTypeMatchesIosFormFactor(type, formFactor));
 
@@ -210,12 +229,10 @@ function deviceTypeSupportsRuntime(deviceType: AppleDeviceType, runtimeVersion: 
 function noCompatibleIosDeviceTypeError(
   deviceTypes: AppleDeviceType[],
   runtimeVersions: string[],
-  formFactor: "phone" | "tablet" | undefined,
+  formFactor: IosProvisioningFormFactor,
   foundRuntimeCompatibleDeviceType: boolean,
 ): ActionableError {
-  const family = foundRuntimeCompatibleDeviceType
-    ? IOS_FAMILY_BY_FORM_FACTOR[formFactor ?? "phone"]
-    : "iOS";
+  const family = foundRuntimeCompatibleDeviceType ? IOS_FAMILY_BY_FORM_FACTOR[formFactor] : "iOS";
   return new ActionableError(
     `No installed ${family} simulator device type supports the matching runtime(s) ` +
       `${runtimeVersions.join(", ")}. Available device types: ` +
@@ -228,6 +245,7 @@ export async function resolveIosProvisioningSelection(
   criteria: Pick<DeviceMatchCriteria, "name" | "formFactor" | "minOsVersion" | "maxOsVersion">,
   signal?: AbortSignal,
 ): Promise<{ deviceType: AppleDeviceType; runtime: string }> {
+  const formFactor = iosProvisioningFormFactor(criteria.formFactor);
   const deviceTypes = await simctl.getDeviceTypes(signal);
   if (deviceTypes.length === 0) {
     throw new ActionableError(
@@ -264,12 +282,8 @@ export async function resolveIosProvisioningSelection(
       }
       continue;
     }
-    if (
-      compatible.some((deviceType) =>
-        deviceTypeMatchesIosFormFactor(deviceType, criteria.formFactor),
-      )
-    ) {
-      return { deviceType: pickIosDeviceType(compatible, criteria), runtime };
+    if (compatible.some((deviceType) => deviceTypeMatchesIosFormFactor(deviceType, formFactor))) {
+      return { deviceType: pickIosDeviceType(compatible, { ...criteria, formFactor }), runtime };
     }
   }
   if (explicitlyRequested) {
@@ -281,7 +295,7 @@ export async function resolveIosProvisioningSelection(
   throw noCompatibleIosDeviceTypeError(
     deviceTypes,
     runtimeVersions,
-    criteria.formFactor,
+    formFactor,
     runtimeCompatibleDeviceTypeCount > 0,
   );
 }

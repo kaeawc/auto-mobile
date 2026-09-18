@@ -3,7 +3,10 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AndroidEmulatorClient } from "../../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
-import type { AvdConfigReader } from "../../../src/utils/android-cmdline-tools/AvdConfigReader";
+import {
+  parseAvdConfig,
+  type AvdConfigReader,
+} from "../../../src/utils/android-cmdline-tools/AvdConfigReader";
 import type { ExecResult } from "../../../src/models";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
@@ -226,6 +229,57 @@ describe("AndroidEmulatorClient listAvds", () => {
       { name: "Pixel_9", platform: "android", isRunning: false, source: "local" },
       { name: "Pixel_Tablet", platform: "android", isRunning: false, source: "local" },
     ]);
+  });
+
+  test("carries parsed AVD runtime and device-type metadata into configured images", async () => {
+    const configReader: AvdConfigReader = {
+      async readConfig() {
+        return parseAvdConfig(`
+          image.sysdir.1=system-images/android-36/google_apis/arm64-v8a/
+          hw.device.name=pixel_6
+          hw.lcd.width=1080
+          hw.lcd.height=2400
+          hw.lcd.density=420
+        `);
+      },
+    };
+    const client = new AndroidEmulatorClient(
+      async () => createExecResult("Pixel_6\n"),
+      null,
+      new FakeTimer(),
+      undefined,
+      configReader,
+    );
+    (client as any).ensureEmulatorPath = async () => "emulator";
+
+    await expect(client.listAvds()).resolves.toEqual([
+      expect.objectContaining({
+        name: "Pixel_6",
+        runtimeId: "system-images;android-36;google_apis;arm64-v8a",
+        deviceType: "pixel_6",
+        formFactor: "phone",
+      }),
+    ]);
+  });
+
+  test("keeps runtimeId undefined when the AVD config has no image.sysdir.1 metadata", async () => {
+    const configReader: AvdConfigReader = {
+      async readConfig() {
+        return parseAvdConfig("hw.device.name=pixel_6");
+      },
+    };
+    const client = new AndroidEmulatorClient(
+      async () => createExecResult("Pixel_6\n"),
+      null,
+      new FakeTimer(),
+      undefined,
+      configReader,
+    );
+    (client as any).ensureEmulatorPath = async () => "emulator";
+
+    const [image] = await client.listAvds();
+    expect(image.runtimeId).toBeUndefined();
+    expect(image.deviceType).toBe("pixel_6");
   });
 
   test("includes configured Android hardware capabilities in the AVD listing", async () => {

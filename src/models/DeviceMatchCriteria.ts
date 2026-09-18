@@ -1,6 +1,6 @@
 import { Platform } from "./Platform";
 
-export type FormFactor = "phone" | "tablet";
+export type FormFactor = "phone" | "tablet" | "foldable" | "unknown";
 export type MatchingStrategy = "LATEST" | "RANDOM" | "MINIMUM";
 
 export interface DeviceMatchCriteria {

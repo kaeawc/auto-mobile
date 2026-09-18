@@ -20,12 +20,21 @@ export interface DeviceInfo {
   screenWidth?: number;
   screenHeight?: number;
   screenDensity?: number;
-  // iOS-only metadata (optional)
+  /**
+   * Exact system-image identifier: the Android AVD package (for example,
+   * `system-images;android-36;google_apis;arm64-v8a`) or iOS simctl runtime identifier.
+   */
+  runtimeId?: string;
+  /**
+   * Optional platform device profile identifier, such as Android's
+   * `hw.device.name` AVD profile (`pixel_6`) or an iOS simulator type identifier.
+   */
+  deviceType?: string;
+  // iOS metadata (optional)
   state?: string;
   isAvailable?: boolean;
   availabilityError?: string;
   iosVersion?: string;
-  deviceType?: string;
   runtime?: string;
   model?: string;
   architecture?: string;
@@ -54,6 +63,11 @@ export interface BootedDevice {
   screenHeight?: number;
   /** Optional live metadata threaded from discovery or the admitted image. */
   screenDensity?: number;
+  /**
+   * Exact system-image identifier: the Android AVD package (for example,
+   * `system-images;android-36;google_apis;arm64-v8a`) or iOS simctl runtime identifier.
+   */
+  runtimeId?: string;
   runtime?: string;
   deviceType?: string;
   model?: string;

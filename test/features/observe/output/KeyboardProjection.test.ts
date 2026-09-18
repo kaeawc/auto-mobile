@@ -215,6 +215,89 @@ describe("iOS keyboard output projection (#7214)", () => {
     );
     expect(skeleton.keyboard).toEqual({ visible: true, package: "com.apple.keyboard" });
   });
+
+  test("folds containerless keyboard keys without folding sibling controls", () => {
+    const keyBounds = IOS_KEY_LABELS.map((_, index) => {
+      const left = 100 + (index % 8) * 20;
+      const top = 500 + Math.floor(index / 8) * 20;
+      return { left, top, right: left + 20, bottom: top + 20 };
+    });
+    const keyboardKeys = IOS_KEY_LABELS.map((text, index): ViewHierarchyNode => ({
+      $: { class: "UIKeyboardKey", text, clickable: true, bounds: keyBounds[index] },
+    }));
+    const viewHierarchy = {
+      hierarchy: {
+        node: {
+          $: {},
+          node: [
+            {
+              $: { class: "UIView" },
+              node: keyboardKeys,
+            },
+            {
+              $: {
+                class: "UITextField",
+                text: "Last name",
+                clickable: true,
+                bounds: { left: 20, top: 80, right: 220, bottom: 120 },
+              },
+            },
+            {
+              $: {
+                class: "UIButton",
+                text: "Done",
+                clickable: true,
+                bounds: { left: 20, top: 150, right: 100, bottom: 190 },
+              },
+            },
+          ],
+        },
+      },
+    };
+    const source: ObserveResult = {
+      updatedAt: 1,
+      screenSize: { width: 320, height: 700 },
+      systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+      viewHierarchy,
+      elements: new DefaultObserveElementCollector().collect(viewHierarchy, "ios"),
+    };
+    const skeleton = sanitizeObserveResult(source, {
+      dropElements: true,
+      project: "skeleton",
+    });
+    const full = sanitizeObserveResult(source, { dropElements: false, project: "full" });
+    const skeletonLabels = skeleton.skeleton?.map((entry) => entry.label) ?? [];
+    const ime = skeleton.skeleton?.find((entry) => entry.elementId === "<ime>");
+
+    expect(skeleton.skeleton?.filter((entry) => entry.elementId === "<ime>")).toHaveLength(1);
+    expect(ime).toEqual({
+      elementId: "<ime>",
+      label: "Keyboard (com.apple.keyboard)",
+      bounds: [
+        Math.min(...keyBounds.map((bounds) => bounds.left)),
+        Math.min(...keyBounds.map((bounds) => bounds.top)),
+        Math.max(...keyBounds.map((bounds) => bounds.right)),
+        Math.max(...keyBounds.map((bounds) => bounds.bottom)),
+      ],
+      affordances: ["input"],
+    });
+    expect(skeletonLabels).not.toEqual(
+      expect.arrayContaining(IOS_KEY_LABELS.filter((label) => label !== "Done")),
+    );
+    expect(skeletonLabels).toEqual(expect.arrayContaining(["Last name", "Done"]));
+    expect(skeleton.skeleton).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ label: "Last name", bounds: [20, 80, 220, 120] }),
+        expect.objectContaining({ label: "Done", bounds: [20, 150, 100, 190] }),
+      ]),
+    );
+    expect(ime?.bounds).not.toEqual([20, 80, 220, 120]);
+    expect(ime?.bounds).not.toEqual([20, 150, 100, 190]);
+    expect(skeleton.keyboard).toEqual({ visible: true, package: "com.apple.keyboard" });
+    expect(full.elements?.clickable.map((element) => element.text)).toEqual(
+      expect.arrayContaining(IOS_KEY_LABELS),
+    );
+  });
 });
 
 /**

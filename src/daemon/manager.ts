@@ -93,6 +93,7 @@ import {
   cleanupDaemonFiles,
   clearDaemonLaunchLogOwnerTombstoneSync,
   isProcessRunning as isDaemonProcessRunning,
+  readPidFileDataSync,
 } from "./daemonFiles";
 import { parseLockContent, releaseExclusiveLock, tryAcquireExclusiveLock } from "../utils/fileLock";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
@@ -2904,6 +2905,7 @@ export class DaemonManager implements DaemonManagerLike {
     let restartToken: string | undefined;
     let signalSent = false;
     let primaryError: unknown;
+    let replacedByOtherGeneration = false;
     try {
       await client.connect();
       restartToken = await this.requestAcceptanceRestartAdmission(
@@ -2917,7 +2919,22 @@ export class DaemonManager implements DaemonManagerLike {
       if (this.verifyAcceptanceGenerationBeforeSignal(status, generation)) {
         this.processSignaler.signal(status.pid!, "SIGKILL");
         signalSent = true;
-        if (!(await this.waitForStop(status.pid!, DAEMON_FORCED_STOP_TIMEOUT_MS)).stopped) {
+        const expected: DaemonProcessRecord = {
+          pid: status.pid!,
+          ppid: 0,
+          command: status.entryScript ?? "",
+          startedAt: status.processStartedAt ?? status.startedAt,
+          ...(status.processGenerationToken === undefined
+            ? {}
+            : { processGenerationToken: status.processGenerationToken }),
+        };
+        const waitResult = await this.waitForStop(
+          status.pid!,
+          DAEMON_FORCED_STOP_TIMEOUT_MS,
+          expected,
+        );
+        replacedByOtherGeneration = waitResult.replacedByOtherGeneration;
+        if (!waitResult.stopped) {
           throw new ActionableError(
             `Acceptance-session restart daemon process ${status.pid} did not exit after SIGKILL.`,
           );
@@ -2932,15 +2949,25 @@ export class DaemonManager implements DaemonManagerLike {
     } finally {
       await this.closeAcceptanceRestartClient(client, primaryError);
     }
+    await this.cleanupAcceptanceRestartFiles(status, replacedByOtherGeneration);
+    await this.timer.sleep(DAEMON_RESTART_HANDOFF_DELAY_MS);
+    return restartResultFromStart(
+      await this.startUnlocked({ ...(status.options ?? {}), strictPort: true }),
+    );
+  }
+
+  private async cleanupAcceptanceRestartFiles(
+    status: DaemonStatus,
+    replacedByOtherGeneration: boolean,
+  ): Promise<void> {
+    if (replacedByOtherGeneration) {
+      return;
+    }
     await cleanupDaemonFiles({
       pidFilePath: this.pidFilePath,
       socketPaths: this.cleanupSocketPaths(status.socketPath),
       expectedPid: status.pid!,
     });
-    await this.timer.sleep(DAEMON_RESTART_HANDOFF_DELAY_MS);
-    return restartResultFromStart(
-      await this.startUnlocked({ ...(status.options ?? {}), strictPort: true }),
-    );
   }
 
   private async requestAcceptanceRestartAdmission(
@@ -3157,7 +3184,7 @@ export class DaemonManager implements DaemonManagerLike {
     const survivors = this.findLiveDaemonProcesses(this.remainingRecoveryTime(recoveryDeadline));
     if (survivors.length > 0) {
       throw new ActionableError(
-        `Restart could not confirm the previous AutoMobile daemon process(es) stopped: ` +
+        `Restart could not confirm the previous AutoMobile daemon process(es) stopped (the PID was reused or another daemon survived): ` +
           `PID(s) ${survivors.join(", ")} still running an AutoMobile daemon (matched by ` +
           `\`--daemon-mode\` on its command line). Refusing to start a second daemon on a ` +
           `fallback port and split ownership of the device pool. A PID can be recycled to an ` +
@@ -3260,6 +3287,7 @@ export class DaemonManager implements DaemonManagerLike {
         await this.waitForStop(
           expected.pid,
           this.stopWaitTimeout(DAEMON_SHUTDOWN_TIMEOUT_MS, recoveryDeadline),
+          expected,
         )
       ).stopped
     ) {
@@ -3288,6 +3316,7 @@ export class DaemonManager implements DaemonManagerLike {
         await this.waitForStop(
           expected.pid,
           this.stopWaitTimeout(DAEMON_FORCED_STOP_TIMEOUT_MS, recoveryDeadline),
+          expected,
         )
       ).stopped
     ) {
@@ -3315,7 +3344,7 @@ export class DaemonManager implements DaemonManagerLike {
       );
     }
 
-    if ((await this.waitForStop(expected.pid, DAEMON_SHUTDOWN_TIMEOUT_MS)).stopped) {
+    if ((await this.waitForStop(expected.pid, DAEMON_SHUTDOWN_TIMEOUT_MS, expected)).stopped) {
       return;
     }
 
@@ -3337,7 +3366,7 @@ export class DaemonManager implements DaemonManagerLike {
       );
     }
 
-    if (!(await this.waitForStop(expected.pid, DAEMON_FORCED_STOP_TIMEOUT_MS)).stopped) {
+    if (!(await this.waitForStop(expected.pid, DAEMON_FORCED_STOP_TIMEOUT_MS, expected)).stopped) {
       throw new ActionableError(
         `Verified daemon process ${expected.pid} did not exit after SIGKILL`,
       );
@@ -3932,8 +3961,28 @@ export class DaemonManager implements DaemonManagerLike {
         return false;
       }
       try {
-        return this.findLiveDaemonProcessRecords(scanBudget).some((candidate) =>
-          this.isConfirmedDifferentDaemonGeneration(expectedGeneration, candidate),
+        // The global process scan can find a different checkout's daemon after OS PID
+        // reuse. Only this namespace's PID record naming that candidate proves it took
+        // over our namespace rather than being an unrelated daemon elsewhere.
+        const pidData = readPidFileDataSync(this.pidFilePath);
+        if (pidData === null) {
+          return false;
+        }
+        const recordedGeneration: DaemonProcessRecord = {
+          pid: pidData.pid,
+          ppid: 0,
+          command: "",
+          // Birth time, not daemon construction time: the process-table matcher
+          // compares against the OS birth timestamp within a 2s tolerance.
+          startedAt: pidData.processStartedAt ?? pidData.startedAt,
+          ...(pidData.processGenerationToken === undefined
+            ? {}
+            : { processGenerationToken: pidData.processGenerationToken }),
+        };
+        return this.findLiveDaemonProcessRecords(scanBudget).some(
+          (candidate) =>
+            this.isConfirmedDifferentDaemonGeneration(expectedGeneration, candidate) &&
+            this.matchesObservedDaemonGeneration(recordedGeneration, candidate),
         );
       } catch (error) {
         // Safe: pre-SIGKILL generation verification remains the authoritative signaling gate.

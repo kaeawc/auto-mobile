@@ -290,6 +290,14 @@ label of its nearest labelled enclosing row, so a `checked` state is attributabl
 to the setting it belongs to (`com.android.settings:id/switchWidget | Airplane
 mode | toggle checked=false`).
 
+Action-observation diffs under the default skeleton projection use those same
+compact row fields for `added` and `removed` nodes; rows with no affordances are
+omitted. Their `fields.layoutWarnings` value is an `{ added, removed }` pair
+rather than a whole `{ from, to }` envelope, and excludes Android system-status
+bar notification chrome. An artifact-spilled diff keeps its `skeleton`,
+`context`, and capture metadata inline while the bulky node and field deltas are
+available from its artifact pointer.
+
 For the observe → act → observe behavior behind interaction tools, see the
 [interaction loop](design-docs/mcp/interaction-loop.md). For per-session public
 tool selection, see [Dynamic Tools](using/dynamic-tools.md).

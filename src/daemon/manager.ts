@@ -2437,7 +2437,7 @@ export class DaemonManager implements DaemonManagerLike {
       }
 
       // Wait for process to exit
-      const stopped = await this.waitForStop(pid, timeout);
+      const stopped = await this.waitForStop(pid, timeout, expected);
 
       if (!stopped) {
         stderrLog(`Daemon did not stop gracefully, sending SIGKILL...`);
@@ -2447,7 +2447,7 @@ export class DaemonManager implements DaemonManagerLike {
           `Daemon generation ${pid} exited before stop could force-stop it.`,
         );
 
-        if (!(await this.waitForStop(pid, DAEMON_FORCED_STOP_TIMEOUT_MS))) {
+        if (!(await this.waitForStop(pid, DAEMON_FORCED_STOP_TIMEOUT_MS, expected))) {
           throw new Error(`Daemon process ${pid} did not exit after SIGKILL`);
         }
       }
@@ -2485,11 +2485,7 @@ export class DaemonManager implements DaemonManagerLike {
       stderrLog(error.message);
       return;
     }
-    // Process doesn't exist or we don't have permission.
-    if (
-      error instanceof Error &&
-      (error.message.includes("ESRCH") || error.message.includes("EPERM"))
-    ) {
+    if (error instanceof Error && error.message.includes("ESRCH")) {
       await cleanupDaemonFiles({
         pidFilePath: this.pidFilePath,
         socketPaths: this.cleanupSocketPaths(status.socketPath),
@@ -2497,6 +2493,13 @@ export class DaemonManager implements DaemonManagerLike {
       });
       stderrLog("Daemon was not running (cleaned up stale PID file)");
       return;
+    }
+    if (error instanceof Error && error.message.includes("EPERM")) {
+      throw new ActionableError(
+        `Cannot stop daemon process ${pid}: this user cannot signal it (EPERM). ` +
+          "Run stop as the process's owning user, or via launchctl/systemd if managed that way.",
+        { cause: error },
+      );
     }
     throw error;
   }
@@ -3877,7 +3880,11 @@ export class DaemonManager implements DaemonManagerLike {
   /**
    * Wait for daemon process to stop
    */
-  private async waitForStop(pid: number, timeout: number): Promise<boolean> {
+  private async waitForStop(
+    pid: number,
+    timeout: number,
+    expectedGeneration?: DaemonProcessRecord,
+  ): Promise<boolean> {
     const startTime = this.timer.now();
     const pollInterval = 100;
 
@@ -3885,10 +3892,26 @@ export class DaemonManager implements DaemonManagerLike {
       if (!this.isProcessRunning(pid)) {
         return true;
       }
+      if (
+        expectedGeneration !== undefined &&
+        !this.findLiveDaemonProcessRecords().some((candidate) =>
+          this.matchesObservedDaemonGeneration(expectedGeneration, candidate),
+        )
+      ) {
+        return true;
+      }
       await this.timer.sleep(pollInterval);
     }
 
-    return !this.isProcessRunning(pid);
+    if (!this.isProcessRunning(pid)) {
+      return true;
+    }
+    return (
+      expectedGeneration !== undefined &&
+      !this.findLiveDaemonProcessRecords().some((candidate) =>
+        this.matchesObservedDaemonGeneration(expectedGeneration, candidate),
+      )
+    );
   }
 
   /**

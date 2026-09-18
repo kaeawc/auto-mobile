@@ -180,6 +180,28 @@ describe("isProcessRunning", () => {
     expect(isProcessRunning(process.pid)).toBe(true);
   });
 
+  test("reports an unsignalable process as running when the probe returns EPERM", () => {
+    expect(
+      isProcessRunning(7190, {
+        platform: "darwin",
+        signalProcess: () => {
+          throw Object.assign(new Error("EPERM"), { code: "EPERM" });
+        },
+      }),
+    ).toBe(true);
+  });
+
+  test("reports a missing process as not running when the probe returns ESRCH", () => {
+    expect(
+      isProcessRunning(7190, {
+        platform: "darwin",
+        signalProcess: () => {
+          throw Object.assign(new Error("ESRCH"), { code: "ESRCH" });
+        },
+      }),
+    ).toBe(false);
+  });
+
   test.each(["Z", "X"])("reports a Linux process in state %s as not running", (state) => {
     expect(
       isProcessRunning(7190, {

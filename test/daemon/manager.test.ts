@@ -1027,6 +1027,137 @@ describe("DaemonManager stop", () => {
     }
   });
 
+  test("preserves live daemon files and surfaces an actionable error when SIGTERM is denied", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "u3-daemon-stop-eperm-stop-eperm-"));
+    const pidFilePath = join(directory, "daemon.pid");
+    const socketPath = join(directory, "daemon.sock");
+    const pid = 42460;
+    const livePids = new Set([pid]);
+    const timer = new FakeTimer();
+    writeStopPidFile(pidFilePath, pid, socketPath);
+    writeFileSync(socketPath, "live daemon socket");
+    const signaler = new FakeDaemonProcessSignaler(() => {
+      throw Object.assign(new Error("EPERM"), { code: "EPERM" });
+    });
+    const manager = createManagerForStop(
+      livePids,
+      timer,
+      pidFilePath,
+      socketPath,
+      undefined,
+      undefined,
+      signaler,
+    );
+
+    try {
+      const error = await manager.stop().then(
+        () => undefined,
+        (caught: unknown) => caught,
+      );
+
+      expect(error).toBeInstanceOf(ActionableError);
+      expect((error as Error).message).toContain(String(pid));
+      expect((error as Error).message).toContain("cannot signal");
+      expect(signaler.signals).toEqual([{ pid, signal: "SIGTERM" }]);
+      expect(existsSync(pidFilePath)).toBe(true);
+      expect(existsSync(socketPath)).toBe(true);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("keeps ESRCH stop cleanup behavior for a missing daemon process", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "u3-daemon-stop-eperm-stop-esrch-"));
+    const pidFilePath = join(directory, "daemon.pid");
+    const socketPath = join(directory, "daemon.sock");
+    const pid = 42461;
+    const livePids = new Set([pid]);
+    const timer = new FakeTimer();
+    writeStopPidFile(pidFilePath, pid, socketPath);
+    writeFileSync(socketPath, "stale daemon socket");
+    const signaler = new FakeDaemonProcessSignaler(() => {
+      throw Object.assign(new Error("ESRCH"), { code: "ESRCH" });
+    });
+    const manager = createManagerForStop(
+      livePids,
+      timer,
+      pidFilePath,
+      socketPath,
+      undefined,
+      undefined,
+      signaler,
+    );
+
+    try {
+      await expect(manager.stop()).resolves.toBeUndefined();
+
+      expect(signaler.signals).toEqual([{ pid, signal: "SIGTERM" }]);
+      expect(existsSync(pidFilePath)).toBe(false);
+      expect(existsSync(socketPath)).toBe(false);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("treats a reused PID as stopped after SIGTERM", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "u3-daemon-stop-eperm-pid-reuse-wait-"));
+    const pidFilePath = join(directory, "daemon.pid");
+    const socketPath = join(directory, "daemon.sock");
+    const pid = 42462;
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    writeStopPidFile(pidFilePath, pid, socketPath);
+    writeFileSync(socketPath, "stale daemon socket");
+    let records: DaemonProcessRecord[] = [
+      {
+        pid,
+        ppid: 1,
+        command: "bun /repo/src/index.ts --daemon-mode",
+        startedAt: 1,
+        processGenerationToken: `stop-generation-${pid}`,
+      },
+    ];
+    const processFinder: DaemonProcessFinder & DaemonProcessLivenessChecker = {
+      findDaemonProcesses: () => records,
+      isProcessRunning: (targetPid) => targetPid === pid,
+    };
+    const signaler = new FakeDaemonProcessSignaler((_targetPid, signal) => {
+      if (signal === "SIGTERM") {
+        records = [
+          {
+            pid,
+            ppid: 1,
+            command: "bun /replacement/src/index.ts --daemon-mode",
+            startedAt: 2,
+            processGenerationToken: "replacement-generation",
+          },
+        ];
+      }
+    });
+    const manager = new DaemonManager(
+      undefined,
+      undefined,
+      timer,
+      join(directory, "daemon.lock"),
+      pidFilePath,
+      socketPath,
+      processFinder,
+      undefined,
+      undefined,
+      undefined,
+      signaler,
+    );
+
+    try {
+      await expect(manager.stop()).resolves.toBeUndefined();
+
+      expect(signaler.signals).toEqual([{ pid, signal: "SIGTERM" }]);
+      expect(timer.now()).toBe(0);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   test("removes stale PID metadata when the observed daemon exits before pre-signal verification", async () => {
     const directory = mkdtempSync(join(tmpdir(), "daemon-manager-stop-pre-signal-exit-"));
     const pidFilePath = join(directory, "daemon.pid");

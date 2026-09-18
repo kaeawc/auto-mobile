@@ -177,7 +177,8 @@ function createHarness(
   const terminalPersistedSessions = new Set<string>();
   const daemonGeneration = 1;
   const processGenerationToken = "test-generation-1";
-  const enabledToolsByOwner = new Map<string, Set<string>>();
+  const enabledToolsByProfile = new Map<string, Set<string>>();
+  const toolSelectionProfilesByForwarder = new Map<McpSessionClient["callTool"], string>();
   const enabledToolsByMintedSession = new Map<string, Set<string>>();
   const mintedSessionByOwner = new Map<string, string>();
 
@@ -210,7 +211,11 @@ function createHarness(
     _signal?: AbortSignal,
     presentationOrder?: "forward" | "reverse",
   ): Promise<McpSessionClient> => ({
-    async callTool(name, arguments_) {
+    callTool: async function callTool(name, arguments_) {
+      // The daemon proxy carries this connection-scoped value onto each
+      // forwarded call. It is intentionally not inferred from `owner`:
+      // acquisition uses a separate loopback MCP client from setToolEnabled.
+      const forwardedToolSelectionProfileUuid = toolSelectionProfilesByForwarder.get(callTool);
       calls.push({ owner, name, arguments: arguments_ });
       events.push(`${owner}:${name}`);
       if (name === "setToolEnabled") {
@@ -225,16 +230,18 @@ function createHarness(
         ) {
           throw new Error("acceptance must narrowly enable one destructive tool on its own client");
         }
-        const enabled = enabledToolsByOwner.get(owner) ?? new Set<string>();
+        const profileUuid = forwardedToolSelectionProfileUuid ?? `profile:${owner}`;
+        const enabled = enabledToolsByProfile.get(profileUuid) ?? new Set<string>();
         enabled.add(toolName);
-        enabledToolsByOwner.set(owner, enabled);
-        return { structuredContent: { toolName, enabled: true } };
+        enabledToolsByProfile.set(profileUuid, enabled);
+        toolSelectionProfilesByForwarder.set(callTool, profileUuid);
+        return { structuredContent: { sessionUuid: profileUuid, toolName, enabled: true } };
       }
       if (
         (name === "provisionDevice" || name === "deleteDevice") &&
-        !enabledToolsByOwner.get(owner)?.has(name)
+        !enabledToolsByProfile.get(forwardedToolSelectionProfileUuid ?? "")?.has(name)
       ) {
-        throw new Error(`Tool ${name} is disabled for fresh MCP client ${owner}`);
+        throw new Error(`Tool ${name} is disabled for unseeded MCP client ${owner}`);
       }
       if (name === "listDevices") {
         const isIos = arguments_.platform === "ios";
@@ -535,8 +542,10 @@ function createHarness(
         const boundSessionUuid = mintedSessionByOwner.get(owner);
         if (boundSessionUuid) {
           requireMintedSessionCapability(boundSessionUuid, "killDevice");
-        } else if (!enabledToolsByOwner.get(owner)?.has("killDevice")) {
-          throw new Error(`Tool killDevice is disabled for fresh MCP client ${owner}`);
+        } else if (
+          !enabledToolsByProfile.get(forwardedToolSelectionProfileUuid ?? "")?.has("killDevice")
+        ) {
+          throw new Error(`Tool killDevice is disabled for unseeded MCP client ${owner}`);
         }
         const device = arguments_.device as Record<string, unknown>;
         if (device.deviceId === "emulator-5554") {

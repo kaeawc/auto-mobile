@@ -1686,10 +1686,11 @@ export class UnixSocketServer {
       this.getToolSelectionProfileUuid(args) ?? boundRoute?.toolSelectionProfileUuid;
     if (this.isUnboundDeviceAcquisitionTool(toolName, sessionUuid)) {
       // Acquisition can mint a second device session on an already-bound
-      // daemon socket. Keep each platform/tool on an unseeded loopback client;
+      // daemon socket. Keep each platform/tool on its own loopback client without
+      // a device-session binding;
       // reusing the first acquired session's bound transport makes the second
       // acquisition and later selector routing disagree about ownership.
-      return this.sharedMcpForwardRoute(`socket:${socketSessionId}:acquisition:${toolName}`);
+      return this.acquisitionMcpForwardRoute(socketSessionId, toolName, toolSelectionProfileUuid);
     }
     if (this.hasImplicitDeviceSelector(args)) {
       return this.selectorMcpForwardRoute(
@@ -1840,6 +1841,21 @@ export class UnixSocketServer {
 
   private sharedMcpForwardRoute(key: string): McpForwardRoute {
     return { executionKey: key, clientKey: key };
+  }
+
+  private acquisitionMcpForwardRoute(
+    socketSessionId: string,
+    toolName: string,
+    toolSelectionProfileUuid: string | undefined,
+  ): McpForwardRoute {
+    const key = `socket:${socketSessionId}:acquisition:${toolName}`;
+    return {
+      executionKey: key,
+      clientKey: toolSelectionProfileUuid
+        ? `${key}:tool-selection:${toolSelectionProfileUuid}`
+        : key,
+      toolSelectionProfileUuid,
+    };
   }
 
   private sessionMcpClientKey(

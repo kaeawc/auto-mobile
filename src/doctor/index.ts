@@ -123,9 +123,7 @@ function isPostRepairProfile(
 function selectedPlatforms(options: DoctorOptions): { android: boolean; ios: boolean } {
   return {
     android: options.android === true || (options.android !== false && options.ios !== true),
-    ios:
-      options.ios === true ||
-      (options.ios !== true && options.android !== true && process.platform === "darwin"),
+    ios: options.ios === true || (options.android !== true && process.platform === "darwin"),
   };
 }
 

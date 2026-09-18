@@ -14,6 +14,7 @@ import { DeviceAppManager } from "../../utils/ios-cmdline-tools/DeviceAppManager
 import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { logger } from "../../utils/logger";
+import { shellQuote } from "../../utils/shellQuote";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { InstalledAppsRepository, type InstalledAppsStore } from "../../db/installedAppsRepository";
 import { getDbWriteBarrier } from "../../db/dbWriteBarrier";
@@ -234,7 +235,7 @@ export class UninstallApp {
 
       // TODO: query if app was running and needed to be stopped
       await this.adb.executeCommand(
-        `shell am force-stop --user ${targetUserId} ${packageName}`,
+        `shell am force-stop --user ${targetUserId} ${shellQuote(packageName)}`,
         undefined,
         undefined,
         false,
@@ -242,8 +243,8 @@ export class UninstallApp {
       );
 
       const cmd = keepData
-        ? `shell pm uninstall --user ${targetUserId} -k ${packageName}`
-        : `shell pm uninstall --user ${targetUserId} ${packageName}`;
+        ? `shell pm uninstall --user ${targetUserId} -k ${shellQuote(packageName)}`
+        : `shell pm uninstall --user ${targetUserId} ${shellQuote(packageName)}`;
 
       try {
         await this.adb.executeCommand(cmd, ANDROID_UNINSTALL_TIMEOUT_MS, undefined, true, signal);

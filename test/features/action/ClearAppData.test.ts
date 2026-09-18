@@ -27,7 +27,7 @@ describe("ClearAppData", () => {
       const result = await clearAppData.execute("com.example.app", 10);
 
       expect(result).toEqual({ success: true, packageName: "com.example.app", userId: 10 });
-      expect(adb.getExecutedCommands()).toEqual(["shell pm clear --user 10 com.example.app"]);
+      expect(adb.getExecutedCommands()).toEqual(["shell pm clear --user 10 'com.example.app'"]);
     });
 
     test("uses the package foreground user when no user is explicitly requested", async () => {
@@ -38,12 +38,12 @@ describe("ClearAppData", () => {
       const result = await clearAppData.execute("com.example.app");
 
       expect(result).toEqual({ success: true, packageName: "com.example.app", userId: 11 });
-      expect(adb.getExecutedCommands()).toEqual(["shell pm clear --user 11 com.example.app"]);
+      expect(adb.getExecutedCommands()).toEqual(["shell pm clear --user 11 'com.example.app'"]);
     });
 
     test("returns a stable failure result when pm clear fails", async () => {
       const adb = new FakeAdbExecutor();
-      adb.setCommandError("shell pm clear --user 10 com.example.app", new Error("adb failed"));
+      adb.setCommandError("shell pm clear --user 10 'com.example.app'", new Error("adb failed"));
       const clearAppData = new ClearAppData(device, adbFactoryFor(adb));
 
       const result = await clearAppData.execute("com.example.app", 10);

@@ -244,9 +244,9 @@ describe("UninstallApp (Android)", () => {
 
     // Assert the exact emitted commands — no -k because keepData is false.
     const commands = fakeAdb.getCommandCalls().map((call) => call.command);
-    expect(commands).toContain("shell am force-stop --user 0 com.example.app");
-    expect(commands).toContain("shell pm uninstall --user 0 com.example.app");
-    expect(commands).not.toContain("shell pm uninstall --user 0 -k com.example.app");
+    expect(commands).toContain("shell am force-stop --user 0 'com.example.app'");
+    expect(commands).toContain("shell pm uninstall --user 0 'com.example.app'");
+    expect(commands).not.toContain("shell pm uninstall --user 0 -k 'com.example.app'");
   });
 
   test("marks the Android installed-apps cache stale after a successful uninstall", async () => {
@@ -313,8 +313,8 @@ describe("UninstallApp (Android)", () => {
 
     // The -k flag preserves app data; assert the exact command carried it.
     const commands = fakeAdb.getCommandCalls().map((call) => call.command);
-    expect(commands).toContain("shell pm uninstall --user 0 -k com.example.app");
-    expect(commands).not.toContain("shell pm uninstall --user 0 com.example.app");
+    expect(commands).toContain("shell pm uninstall --user 0 -k 'com.example.app'");
+    expect(commands).not.toContain("shell pm uninstall --user 0 'com.example.app'");
   });
 
   test("reports success when a timed-out uninstall removed the package", async () => {
@@ -326,7 +326,7 @@ describe("UninstallApp (Android)", () => {
         noRetry?: boolean,
         signal?: AbortSignal,
       ) {
-        if (command === "shell pm uninstall --user 0 com.example.app") {
+        if (command === "shell pm uninstall --user 0 'com.example.app'") {
           await super.executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
           throw new AdbCommandTimeoutError("Command timed out");
         }
@@ -348,7 +348,7 @@ describe("UninstallApp (Android)", () => {
     expect(
       adb
         .getCommandCalls()
-        .filter((call) => call.command === "shell pm uninstall --user 0 com.example.app"),
+        .filter((call) => call.command === "shell pm uninstall --user 0 'com.example.app'"),
     ).toHaveLength(1);
   });
 
@@ -363,7 +363,7 @@ describe("UninstallApp (Android)", () => {
         noRetry?: boolean,
         signal?: AbortSignal,
       ) {
-        if (command === "shell pm uninstall --user 0 com.example.app") {
+        if (command === "shell pm uninstall --user 0 'com.example.app'") {
           this.uninstallAttempts++;
           if (this.uninstallAttempts === 1) {
             await super.executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
@@ -389,7 +389,7 @@ describe("UninstallApp (Android)", () => {
     expect(
       adb
         .getCommandCalls()
-        .filter((call) => call.command === "shell pm uninstall --user 0 com.example.app"),
+        .filter((call) => call.command === "shell pm uninstall --user 0 'com.example.app'"),
     ).toHaveLength(2);
   });
 
@@ -402,7 +402,7 @@ describe("UninstallApp (Android)", () => {
         noRetry?: boolean,
         signal?: AbortSignal,
       ) {
-        if (command === "shell pm uninstall --user 0 com.example.app") {
+        if (command === "shell pm uninstall --user 0 'com.example.app'") {
           await super.executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
           throw new AdbCommandTimeoutError("Command timed out");
         }
@@ -428,7 +428,7 @@ describe("UninstallApp (Android)", () => {
     });
     const uninstallCalls = adb
       .getCommandCalls()
-      .filter((call) => call.command === "shell pm uninstall --user 0 com.example.app");
+      .filter((call) => call.command === "shell pm uninstall --user 0 'com.example.app'");
     expect(uninstallCalls).toEqual([
       expect.objectContaining({ timeoutMs: 20_000, noRetry: true }),
       expect.objectContaining({ timeoutMs: 5_000, noRetry: true }),
@@ -444,7 +444,7 @@ describe("UninstallApp (Android)", () => {
         noRetry?: boolean,
         signal?: AbortSignal,
       ) {
-        if (command === "shell pm uninstall --user 0 com.example.app") {
+        if (command === "shell pm uninstall --user 0 'com.example.app'") {
           await super.executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
           throw new AdbCommandTimeoutError("Command timed out");
         }
@@ -492,7 +492,7 @@ describe("UninstallApp (Android)", () => {
         noRetry?: boolean,
         signal?: AbortSignal,
       ) {
-        if (command === "shell pm uninstall --user 0 com.example.app") {
+        if (command === "shell pm uninstall --user 0 'com.example.app'") {
           await super.executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
           controller.abort();
           throw new AdbCommandTimeoutError("Command timed out");
@@ -518,7 +518,7 @@ describe("UninstallApp (Android)", () => {
     expect(
       adb
         .getCommandCalls()
-        .filter((call) => call.command === "shell pm uninstall --user 0 com.example.app"),
+        .filter((call) => call.command === "shell pm uninstall --user 0 'com.example.app'"),
     ).toHaveLength(1);
   });
 
@@ -557,8 +557,8 @@ describe("UninstallApp (Android)", () => {
     expect(result.userId).toBe(10);
     // The uninstall must target the work-profile user, not user 0.
     const commands = fakeAdb.getCommandCalls().map((call) => call.command);
-    expect(commands).toContain("shell pm uninstall --user 10 com.example.app");
-    expect(commands).not.toContain("shell pm uninstall --user 0 com.example.app");
+    expect(commands).toContain("shell pm uninstall --user 10 'com.example.app'");
+    expect(commands).not.toContain("shell pm uninstall --user 0 'com.example.app'");
   });
 
   test("returns failure for blank package name", async () => {

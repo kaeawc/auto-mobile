@@ -476,7 +476,9 @@
         "appId": {
           "description": "Android app package for locale changes",
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
         },
         "locale": {
           "description": "Locale tag (e.g., ar-SA, ja-JP)",
@@ -542,7 +544,10 @@
       "type": "object",
       "properties": {
         "appId": {
-          "type": "string"
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
         },
         "name": {
           "description": "Storage name",
@@ -694,7 +699,9 @@
       "properties": {
         "appId": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
         },
         "platform": {
           "type": "string",
@@ -733,7 +740,10 @@
           "enum": ["android", "ios"]
         },
         "appId": {
-          "type": "string"
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
         },
         "processId": {
           "type": "integer",
@@ -1952,7 +1962,10 @@
       "type": "object",
       "properties": {
         "appId": {
-          "type": "string"
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
         },
         "permissions": {
           "description": "Optional permissions or simulator privacy services to query",
@@ -1990,7 +2003,10 @@
       "type": "object",
       "properties": {
         "appId": {
-          "type": "string"
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
         },
         "adapterName": {
           "description": "Name the host app registered its DataStore adapter under (AutoMobile SDK)",
@@ -2028,7 +2044,10 @@
       "type": "object",
       "properties": {
         "appId": {
-          "type": "string"
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
         },
         "platform": {
           "type": "string",
@@ -2121,7 +2140,10 @@
         },
         "appId": {
           "description": "Scope the graph to this app id instead of the device's current foreground app",
-          "type": "string"
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
         },
         "sessionUuid": {
           "description": "Session",
@@ -2188,7 +2210,9 @@
       "properties": {
         "appId": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
         },
         "platform": {
           "type": "string",
@@ -2224,7 +2248,10 @@
         },
         "appId": {
           "description": "App package or bundle id",
-          "type": "string"
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
         },
         "suite": {
           "description": "SharedPreferences file name or UserDefaults suite/app group",
@@ -2766,7 +2793,10 @@
       "type": "object",
       "properties": {
         "appId": {
-          "type": "string"
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
         },
         "clearAppData": {
           "description": "Clear app data before launch (default false)",
@@ -2854,7 +2884,10 @@
       "type": "object",
       "properties": {
         "appId": {
-          "type": "string"
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
         },
         "adapterName": {
           "description": "Name the host app registered its DataStore adapter under (AutoMobile SDK)",
@@ -3966,7 +3999,10 @@
               "additionalProperties": false,
               "properties": {
                 "appId": {
-                  "type": "string"
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256,
+                  "pattern": "^[A-Za-z0-9._-]+$"
                 },
                 "packageName": {
                   "type": "string"
@@ -5586,7 +5622,10 @@
           "type": "object",
           "properties": {
             "appId": {
-              "type": "string"
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "pattern": "^[A-Za-z0-9._-]+$"
             },
             "activityName": {
               "type": "string"
@@ -7782,7 +7821,10 @@
               "additionalProperties": false,
               "properties": {
                 "appId": {
-                  "type": "string"
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256,
+                  "pattern": "^[A-Za-z0-9._-]+$"
                 },
                 "packageName": {
                   "type": "string"
@@ -8214,7 +8256,9 @@
         "appId": {
           "description": "Android target package name or iOS target bundle ID; Android defaults to the live foreground app when omitted",
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
         },
         "platform": {
           "type": "string",
@@ -9136,7 +9180,9 @@
                 },
                 "appId": {
                   "type": "string",
-                  "minLength": 1
+                  "minLength": 1,
+                  "maxLength": 256,
+                  "pattern": "^[A-Za-z0-9._-]+$"
                 },
                 "container": {
                   "description": "App container",
@@ -9400,7 +9446,10 @@
       "type": "object",
       "properties": {
         "appId": {
-          "type": "string"
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
         },
         "name": {
           "description": "Storage name",
@@ -9444,7 +9493,9 @@
         "appId": {
           "description": "App package name or bundle identifier",
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
         },
         "container": {
           "description": "Logical app container that holds the log files",
@@ -9492,7 +9543,9 @@
         "appId": {
           "description": "Required. The app whose Keychain/Keystore state to reset. NOTE: iOS Simulator only supports a device-wide reset and erases EVERY app's Keychain regardless of this value.",
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
         },
         "confirm": {
           "description": "Required. Must be true to proceed. On iOS Simulator this erases the Keychain for EVERY app on the target simulator, not just appId.",
@@ -9849,7 +9902,10 @@
       "type": "object",
       "properties": {
         "appId": {
-          "type": "string"
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
         },
         "action": {
           "enum": ["grant", "revoke", "reset"]
@@ -10611,7 +10667,10 @@
       "type": "object",
       "properties": {
         "appId": {
-          "type": "string"
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
         },
         "name": {
           "description": "Storage name",
@@ -10683,7 +10742,9 @@
       "properties": {
         "appId": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
         },
         "policyAccess": {
           "description": "Android: allow DND policy access",
@@ -10723,7 +10784,10 @@
         },
         "appId": {
           "description": "App package or bundle id",
-          "type": "string"
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
         },
         "suite": {
           "description": "SharedPreferences file name or UserDefaults suite/app group",
@@ -11205,7 +11269,10 @@
       "type": "object",
       "properties": {
         "appId": {
-          "type": "string"
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
         },
         "databasePath": {
           "description": "Database path",
@@ -11667,7 +11734,10 @@
             },
             "appId": {
               "description": "App package ID to match",
-              "type": "string"
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "pattern": "^[A-Za-z0-9._-]+$"
             },
             "tapActionLabel": {
               "description": "Action button label to tap (for 'tap' action)",
@@ -11779,7 +11849,9 @@
                 "properties": {
                   "appId": {
                     "type": "string",
-                    "minLength": 1
+                    "minLength": 1,
+                    "maxLength": 256,
+                    "pattern": "^[A-Za-z0-9._-]+$"
                   }
                 }
               },
@@ -12769,7 +12841,10 @@
                   "type": "object",
                   "properties": {
                     "appId": {
-                      "type": "string"
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256,
+                      "pattern": "^[A-Za-z0-9._-]+$"
                     },
                     "activityName": {
                       "type": "string"
@@ -13587,7 +13662,10 @@
                   "type": "object",
                   "properties": {
                     "appId": {
-                      "type": "string"
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256,
+                      "pattern": "^[A-Za-z0-9._-]+$"
                     },
                     "activityName": {
                       "type": "string"
@@ -14237,7 +14315,10 @@
                   "type": "object",
                   "properties": {
                     "appId": {
-                      "type": "string"
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256,
+                      "pattern": "^[A-Za-z0-9._-]+$"
                     },
                     "activityName": {
                       "type": "string"
@@ -14324,7 +14405,10 @@
                   "type": "object",
                   "properties": {
                     "appId": {
-                      "type": "string"
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256,
+                      "pattern": "^[A-Za-z0-9._-]+$"
                     },
                     "activityName": {
                       "type": "string"
@@ -15032,7 +15116,10 @@
       "type": "object",
       "properties": {
         "appId": {
-          "type": "string"
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
         },
         "raw": {
           "description": "Return the raw view hierarchy instead of the compact skeleton",
@@ -15071,7 +15158,10 @@
       "type": "object",
       "properties": {
         "appId": {
-          "type": "string"
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
         },
         "keepData": {
           "description": "Keep app data after uninstall (Android only, default false)",

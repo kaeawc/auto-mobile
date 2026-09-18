@@ -156,7 +156,7 @@ export class DatabaseInspector {
     extras?: Record<string, string>,
   ): Promise<T> {
     const uri = `content://${appId}.automobile.database`;
-    let cmd = `shell content call --uri ${uri} --method ${method}`;
+    let cmd = `shell content call --uri ${shellQuote(uri)} --method ${method}`;
 
     if (extras) {
       for (const [key, value] of Object.entries(extras)) {

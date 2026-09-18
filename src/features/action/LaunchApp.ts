@@ -35,6 +35,7 @@ import { IOSCtrlProxyManager } from "../../utils/IOSCtrlProxyManager";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { isAndroidPackageRunning } from "../../utils/android-cmdline-tools/androidProcessState";
 import { errorMessage } from "../../utils/describeUnknownError";
+import { shellQuote } from "../../utils/shellQuote";
 
 const LAUNCH_OBSERVATION_TIMEOUT_MS = 5000;
 const LAUNCH_OBSERVATION_POLL_INTERVAL_MS = 200;
@@ -1590,7 +1591,7 @@ export class LaunchApp extends BaseVisualChange {
         logger.info(`[LaunchApp] Trying am start with intent for user ${userId}`);
         try {
           // Let PackageManager resolve the app's launcher activity instead of guessing MainActivity.
-          const intentCmd = `shell am start --user ${userId} -a android.intent.action.MAIN -c android.intent.category.LAUNCHER ${packageName}`;
+          const intentCmd = `shell am start --user ${userId} -a android.intent.action.MAIN -c android.intent.category.LAUNCHER ${shellQuote(packageName)}`;
           logger.info(`[LaunchApp] Intent command: ${intentCmd}`);
           const result = await this.adb.executeCommand(intentCmd);
           this.assertLaunchNotAborted(signal);
@@ -1629,7 +1630,7 @@ export class LaunchApp extends BaseVisualChange {
       const monkeyResult = await perf.track("monkeyLaunch", async () => {
         logger.info(`[LaunchApp] Trying monkey launch (fallback approach) for user ${userId}`);
         try {
-          const monkeyCmd = `shell monkey -p ${packageName} --user ${userId} 1`;
+          const monkeyCmd = `shell monkey -p ${shellQuote(packageName)} --user ${userId} 1`;
           logger.info(`[LaunchApp] Monkey command: ${monkeyCmd}`);
           await this.adb.executeCommand(monkeyCmd);
           this.assertLaunchNotAborted(signal);
@@ -1685,7 +1686,7 @@ export class LaunchApp extends BaseVisualChange {
             try {
               logger.info(`[LaunchApp] Trying common pattern: ${pattern}`);
               await this.adb.executeCommand(
-                `shell am start --user ${userId} -n ${packageName}/${pattern}`,
+                `shell am start --user ${userId} -n ${shellQuote(`${packageName}/${pattern}`)}`,
               );
               this.assertLaunchNotAborted(signal);
               logger.info(`[LaunchApp] Successfully launched with pattern: ${pattern}`);
@@ -1715,7 +1716,7 @@ export class LaunchApp extends BaseVisualChange {
     if (targetActivity) {
       await perf.track("launchActivity", async () => {
         logger.info(`[LaunchApp] Launching with activity: ${targetActivity} for user ${userId}`);
-        const launchCmd = `shell am start --user ${userId} -n ${packageName}/${targetActivity}`;
+        const launchCmd = `shell am start --user ${userId} -n ${shellQuote(`${packageName}/${targetActivity}`)}`;
         logger.info(`[LaunchApp] Launch command: ${launchCmd}`);
         await this.adb.executeCommand(launchCmd);
         this.assertLaunchNotAborted(signal);
@@ -1726,7 +1727,7 @@ export class LaunchApp extends BaseVisualChange {
       await perf.track("launcherIntent", async () => {
         logger.info(`[LaunchApp] No activity found, trying launcher intent for user ${userId}`);
         try {
-          const launcherCmd = `shell am start --user ${userId} -a android.intent.action.MAIN -c android.intent.category.LAUNCHER ${packageName}`;
+          const launcherCmd = `shell am start --user ${userId} -a android.intent.action.MAIN -c android.intent.category.LAUNCHER ${shellQuote(packageName)}`;
           logger.info(`[LaunchApp] Launcher intent command: ${launcherCmd}`);
           await this.adb.executeCommand(launcherCmd);
           this.assertLaunchNotAborted(signal);

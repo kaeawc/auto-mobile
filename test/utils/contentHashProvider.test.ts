@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { BootedDevice, ExecResult } from "../../src/models";
 import type { AdbExecutor } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { ChecksumCalculator } from "../../src/utils/ChecksumCalculator";
+import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import {
   AndroidApkContentHasher,
   CachingContentHashProvider,
@@ -71,6 +72,29 @@ describe("combineApkDigests", () => {
     const mixed = combineApkDigests(`sha256sum: not found\n${DIGEST_A}  /data/app/base.apk\n`);
     const clean = combineApkDigests(`${DIGEST_A}  /data/app/base.apk\n`);
     expect(mixed).toBe(clean);
+  });
+});
+
+describe("AndroidApkContentHasher device-shell boundary", () => {
+  test("quotes a hostile package ID and every resolved APK path", async () => {
+    const adb = new FakeAdbExecutor();
+    const packageId = "com.example; input keyevent 3";
+    const apkPath = "/data/app/base$(id).apk";
+    adb.setCommandResponse(`shell pm path 'com.example; input keyevent 3'`, {
+      stdout: `package:${apkPath}\n`,
+      stderr: "",
+    });
+    adb.setCommandResponse(`shell sh -c 'sha256sum '\\''/data/app/base$(id).apk'\\'''`, {
+      stdout: `${DIGEST_A}  ${apkPath}\n`,
+      stderr: "",
+    });
+
+    await new AndroidApkContentHasher(adb).computeHash(fakeDevice("emu-1"), packageId, 1);
+
+    expect(adb.getExecutedCommands()).toEqual([
+      "shell pm path 'com.example; input keyevent 3'",
+      "shell sh -c 'sha256sum '\\''/data/app/base$(id).apk'\\'''",
+    ]);
   });
 });
 

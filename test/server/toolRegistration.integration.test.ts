@@ -85,6 +85,49 @@ describe("Tool Registration Validation (Integration Tests)", () => {
     }
   });
 
+  test("committed schemas constrain every appId property at every depth", async () => {
+    const fs = await import("fs/promises");
+    const path = await import("path");
+    const schemaPath = path.join(process.cwd(), "schemas", "tool-definitions.json");
+    const schemas = JSON.parse(await fs.readFile(schemaPath, "utf-8")) as ToolSchemaDefinition[];
+    const appIdProperties: Array<{ path: string; schema: Record<string, unknown> }> = [];
+
+    const visit = (value: unknown, path: string): void => {
+      if (Array.isArray(value)) {
+        value.forEach((item, index) => visit(item, `${path}[${index}]`));
+        return;
+      }
+      if (!value || typeof value !== "object") {
+        return;
+      }
+
+      const schema = value as Record<string, unknown>;
+      const properties = schema.properties;
+      if (properties && typeof properties === "object" && !Array.isArray(properties)) {
+        const propertySchemas = properties as Record<string, unknown>;
+        if (Object.hasOwn(propertySchemas, "appId")) {
+          const appId = propertySchemas.appId;
+          expect(appId, `${path}.properties.appId`).toBeObject();
+          if (appId && typeof appId === "object" && !Array.isArray(appId)) {
+            appIdProperties.push({ path: `${path}.properties.appId`, schema: appId });
+          }
+        }
+      }
+      Object.entries(schema).forEach(([key, nestedValue]) => visit(nestedValue, `${path}.${key}`));
+    };
+
+    for (const tool of schemas) {
+      visit(tool.inputSchema, tool.name);
+    }
+
+    expect(appIdProperties.length).toBeGreaterThan(0);
+    for (const { path, schema } of appIdProperties) {
+      expect(schema.minLength, `${path}.minLength`).toBe(1);
+      expect(schema.maxLength, `${path}.maxLength`).toBe(256);
+      expect(schema.pattern, `${path}.pattern`).toBe("^[A-Za-z0-9._-]+$");
+    }
+  });
+
   test("should keep generated observe outputSchema compilable by strict clients", async () => {
     const fs = await import("fs/promises");
     const path = await import("path");

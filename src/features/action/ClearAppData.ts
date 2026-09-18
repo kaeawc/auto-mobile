@@ -15,6 +15,7 @@ import {
 import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
+import { shellQuote } from "../../utils/shellQuote";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { promises as fs } from "fs";
 import * as path from "path";
@@ -93,7 +94,9 @@ export class ClearAppData {
     try {
       // pm clear both clears data AND stops the app, no need for separate force-stop
       await perf.track("pmClear", async () => {
-        await adb.executeCommand(`shell pm clear --user ${targetUserId} ${packageName}`);
+        await adb.executeCommand(
+          `shell pm clear --user ${targetUserId} ${shellQuote(packageName)}`,
+        );
         logger.info(`Clearing app data was successful for user ${targetUserId}`);
       });
 

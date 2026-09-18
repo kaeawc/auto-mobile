@@ -100,6 +100,23 @@ describe("CtrlProxyManager", function () {
     }
   });
 
+  test("quotes a hostile installed APK path before sha256sum", async function () {
+    const apkPath = "/data/app/base$(id).apk";
+    fakeAdb.setCommandResponse(`shell pm path ${AndroidCtrlProxyManager.PACKAGE}`, {
+      stdout: `package:${apkPath}\n`,
+      stderr: "",
+    });
+    fakeAdb.setCommandResponse(`shell sha256sum '/data/app/base$(id).apk'`, {
+      stdout: `${"a".repeat(64)}  ${apkPath}\n`,
+      stderr: "",
+    });
+
+    const result = await (accessibilityServiceClient as any).getInstalledApkSha256WithDetails();
+
+    expect(result).toMatchObject({ sha256: "a".repeat(64), source: "device", apkPath });
+    expect(fakeAdb.getExecutedCommands()).toContain("shell sha256sum '/data/app/base$(id).apk'");
+  });
+
   test("evicts per-serial readiness caches after a VM incarnation change", () => {
     expect(AndroidCtrlProxyManager.getExistingInstance(testDevice.deviceId)).toBe(
       accessibilityServiceClient,

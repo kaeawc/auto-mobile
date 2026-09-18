@@ -51,6 +51,20 @@ export const appIdFieldAliases = [
   "application_id",
 ] as const;
 
+export const APP_ID_PATTERN = /^[A-Za-z0-9._-]+$/;
+export const APP_ID_MAX_LENGTH = 256;
+
+export const appIdSchema = z
+  .string()
+  .trim()
+  .refine(
+    (appId) => appId.length > 0 && appId.length <= APP_ID_MAX_LENGTH && APP_ID_PATTERN.test(appId),
+    {
+      error: (issue) =>
+        `appId must be a reverse-DNS identifier such as com.example.app; got: ${issue.input}`,
+    },
+  );
+
 export type FieldAliasMap = Record<string, readonly string[]>;
 
 export type JsonSchemaOverride = (jsonSchema: Record<string, unknown>) => void;
@@ -265,7 +279,42 @@ export function withFieldAliases<T extends z.ZodTypeAny>(schema: T, aliases: Fie
 }
 
 export function withAppIdAliases<T extends z.ZodTypeAny>(schema: T): T {
-  return withFieldAliases(schema, { appId: appIdFieldAliases });
+  const appIdAliases = withFieldAliases(schema, { appId: appIdFieldAliases }).superRefine(
+    (value, ctx) => {
+      validateAppIds(value, ctx);
+    },
+  );
+  return appIdAliases as T;
+}
+
+function validateAppIds(
+  value: unknown,
+  ctx: z.RefinementCtx,
+  path: Array<string | number> = [],
+): void {
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => validateAppIds(item, ctx, [...path, index]));
+    return;
+  }
+
+  if (!isPlainObject(value)) {
+    return;
+  }
+
+  for (const [key, nestedValue] of Object.entries(value)) {
+    const nestedPath = [...path, key];
+    if (key === "appId" && typeof nestedValue === "string") {
+      const result = appIdSchema.safeParse(nestedValue);
+      if (!result.success) {
+        ctx.addIssue({
+          code: "custom",
+          path: nestedPath,
+          message: result.error.issues[0]?.message ?? "appId must be a valid application ID",
+        });
+      }
+    }
+    validateAppIds(nestedValue, ctx, nestedPath);
+  }
 }
 
 function normalizeFieldAliases(input: unknown, aliases: FieldAliasMap): unknown {
@@ -293,6 +342,10 @@ function normalizeFieldAliases(input: unknown, aliases: FieldAliasMap): unknown 
     for (const alias of fieldAliases) {
       delete normalized[alias];
     }
+  }
+
+  if (typeof normalized.appId === "string") {
+    normalized.appId = normalized.appId.trim();
   }
 
   return normalized;

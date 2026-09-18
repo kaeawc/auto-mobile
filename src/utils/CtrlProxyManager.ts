@@ -7,6 +7,7 @@ import {
 } from "./android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "./android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "./logger";
+import { shellQuote } from "./shellQuote";
 import { registerDeviceIncarnationListener } from "./deviceIncarnation";
 import * as fs from "fs/promises";
 import type { Dirent } from "fs";
@@ -1975,7 +1976,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     }
 
     try {
-      const shaResult = await this.adb.executeCommand(`shell sha256sum "${apkPath}"`);
+      const shaResult = await this.adb.executeCommand(`shell sha256sum ${shellQuote(apkPath)}`);
       const sha256 = shaResult.stdout.trim().split(/\s+/)[0];
       if (sha256) {
         return {

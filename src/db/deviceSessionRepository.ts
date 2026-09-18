@@ -4,6 +4,7 @@ import type { Database, DeviceSession, DeviceSessionStatus, NewDeviceSession } f
 import { logger } from "../utils/logger";
 import type { Platform } from "../models";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import { toActionableError } from "../models/ActionableError";
 
 // Terminal-state (`released`/`expired`) rows accumulate for the life of the
 // on-disk DB with no delete path (#6464). Bound their retention window rather
@@ -241,6 +242,7 @@ export class DeviceSessionRepository {
       logger.warn(
         `[DeviceSessionRepository] Failed to record activity for ${sessionUuid}: ${error}`,
       );
+      throw toActionableError(error, `Failed to record activity for session ${sessionUuid}`);
     }
   }
 

@@ -35,6 +35,14 @@ import { errorMessage } from "../utils/describeUnknownError";
  */
 export type DeviceLabelMap = Record<string, string>;
 
+/** The daemon could not durably refresh an existing session's liveness. */
+export class SessionActivityPersistenceError extends ActionableError {
+  constructor(sessionId: string, cause: unknown) {
+    super(`Failed to persist liveness activity for session ${sessionId}.`, { cause });
+    this.name = "SessionActivityPersistenceError";
+  }
+}
+
 /**
  * Narrow seam for restoring keep-awake state on session release. Production uses
  * `KeepScreenAwakeManager`; tests inject a fake to assert (without a real device)
@@ -133,6 +141,7 @@ export interface Session {
   platform: Platform; // Device platform
   createdAt: number; // Timestamp when session was created
   lastUsedAt: number; // Last activity timestamp
+  activityGeneration: number; // Monotonic generation of durable activity refreshes
   expiresAt: number; // When session will expire (for cleanup)
   cacheData: SessionCacheData; // Cached data for this session
   lastHeartbeat: number; // Timestamp of last heartbeat
@@ -166,6 +175,19 @@ export interface Session {
    * policy.
    */
   preCliLiveness?: PreCliLivenessSnapshot;
+}
+
+function rollbackSessionActivityIfCurrent(
+  session: Session,
+  previousActivity: Pick<Session, "lastUsedAt" | "lastHeartbeat" | "expiresAt">,
+  capturedGeneration: number,
+): void {
+  if (session.activityGeneration !== capturedGeneration) {
+    return;
+  }
+  session.lastUsedAt = previousActivity.lastUsedAt;
+  session.lastHeartbeat = previousActivity.lastHeartbeat;
+  session.expiresAt = previousActivity.expiresAt;
 }
 
 /** The heartbeat-policy timeouts `adoptCliLivenessPolicy` overwrote (#6870). */
@@ -880,6 +902,7 @@ export class SessionManager {
       platform,
       createdAt: now,
       lastUsedAt: now,
+      activityGeneration: 0,
       expiresAt: now + liveness.sessionTimeoutMs,
       cacheData: {},
       lastHeartbeat: now,
@@ -1091,6 +1114,41 @@ export class SessionManager {
    * @param sessionId - The session UUID
    * @param devicePool - DevicePool instance for automatic device assignment
    */
+  /**
+   * Resolving a session for a tool call is activity: extend both the idle
+   * timeout (expiresAt) and the heartbeat clock (lastHeartbeat). Without the
+   * latter, the daemon heartbeat watchdog would reap an actively-used session
+   * whose tools never write session cache (e.g. autolock CLI/agent clients
+   * that do not send explicit heartbeats). An awaiting-owner session is
+   * reclaimed by the call.
+   */
+  private async reclaimAndRefreshExistingSession(existing: Session): Promise<void> {
+    const now = this.timer.now();
+    if (existing.ownership === "awaiting-owner") {
+      existing.ownership = "owned";
+      existing.awaitingOwnerSince = undefined;
+    }
+    const previousActivity = {
+      lastUsedAt: existing.lastUsedAt,
+      lastHeartbeat: existing.lastHeartbeat,
+      expiresAt: existing.expiresAt,
+    };
+    existing.lastUsedAt = now;
+    existing.lastHeartbeat = now;
+    existing.expiresAt = now + existing.sessionTimeoutMs;
+    existing.activityGeneration++;
+    const capturedGeneration = existing.activityGeneration;
+    try {
+      await this.recordSessionActivity(existing);
+    } catch (error) {
+      // An awaited activity refresh cannot advertise fresh in-memory liveness
+      // after its durable write failed; callers receive the typed failure.
+      // Only the latest refresh may roll back, so an older failure cannot clobber newer liveness.
+      rollbackSessionActivityIfCurrent(existing, previousActivity, capturedGeneration);
+      throw error;
+    }
+  }
+
   async getOrCreateSession(
     sessionId: string,
     devicePool?: SessionDeviceAssigner,
@@ -1132,20 +1190,7 @@ export class SessionManager {
       logger.info(
         `[SessionManager] Found existing session ${sessionId} with device ${existing.assignedDevice}`,
       );
-      // Resolving a session for a tool call is activity: extend both the idle
-      // timeout (expiresAt) and the heartbeat clock (lastHeartbeat). Without the
-      // latter, the daemon heartbeat watchdog would reap an actively-used session
-      // whose tools never write session cache (e.g. autolock CLI/agent clients
-      // that do not send explicit heartbeats).
-      const now = this.timer.now();
-      if (existing.ownership === "awaiting-owner") {
-        existing.ownership = "owned";
-        existing.awaitingOwnerSince = undefined;
-      }
-      existing.lastUsedAt = now;
-      existing.lastHeartbeat = now;
-      existing.expiresAt = now + existing.sessionTimeoutMs;
-      await this.recordSessionActivity(existing);
+      await this.reclaimAndRefreshExistingSession(existing);
       return existing;
     }
 
@@ -3918,18 +3963,22 @@ export class SessionManager {
   // fire-and-forget callers above wrap this in `getBarrier().track(...)`; the awaited
   // caller must not. See #2885 — do not wrap the awaited call in `track()`.
   private async recordSessionActivity(session: Session): Promise<void> {
-    await this.deviceSessionRepository.recordActivity(session.sessionId, {
-      lastUsedAtMs: session.lastUsedAt,
-      expiresAtMs: session.expiresAt,
-      sessionTimeoutMs: session.sessionTimeoutMs,
-      heartbeatTimeoutMs: session.heartbeatTimeoutMs,
-      hasReceivedHeartbeat: session.hasReceivedHeartbeat,
-      heartbeatTimeoutSource: session.heartbeatTimeoutSource,
-      livenessPolicy: session.livenessPolicy,
-      preCliHeartbeatTimeoutMs: session.preCliLiveness?.heartbeatTimeoutMs,
-      preCliHeartbeatTimeoutSource: session.preCliLiveness?.heartbeatTimeoutSource,
-      preCliSessionTimeoutMs: session.preCliLiveness?.sessionTimeoutMs,
-    });
+    try {
+      await this.deviceSessionRepository.recordActivity(session.sessionId, {
+        lastUsedAtMs: session.lastUsedAt,
+        expiresAtMs: session.expiresAt,
+        sessionTimeoutMs: session.sessionTimeoutMs,
+        heartbeatTimeoutMs: session.heartbeatTimeoutMs,
+        hasReceivedHeartbeat: session.hasReceivedHeartbeat,
+        heartbeatTimeoutSource: session.heartbeatTimeoutSource,
+        livenessPolicy: session.livenessPolicy,
+        preCliHeartbeatTimeoutMs: session.preCliLiveness?.heartbeatTimeoutMs,
+        preCliHeartbeatTimeoutSource: session.preCliLiveness?.heartbeatTimeoutSource,
+        preCliSessionTimeoutMs: session.preCliLiveness?.sessionTimeoutMs,
+      });
+    } catch (error) {
+      throw new SessionActivityPersistenceError(session.sessionId, error);
+    }
   }
 
   /**

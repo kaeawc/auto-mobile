@@ -2,6 +2,7 @@ import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import { describe, expect, test, beforeEach, afterEach } from "bun:test";
 import {
   SessionManager,
+  SessionActivityPersistenceError,
   SessionRecoveryIdentityLossError,
   type BiometricEnrollmentRestorer,
   type KeepScreenAwakeRestorer,
@@ -412,6 +413,80 @@ describe("SessionManager", () => {
       const session2 = await sessionManager.getOrCreateSession("session-1");
       expect(session2.lastUsedAt).toBe(initialLastUsed + 10);
       expect(session2.expiresAt).toBe(initialExpiry + 10);
+    });
+
+    test("surfaces a failed existing-session liveness refresh", async () => {
+      const persistence: DeviceSessionPersistence = {
+        async upsertActiveSession(): Promise<void> {},
+        async recordActivity(): Promise<void> {
+          throw new Error("database unavailable");
+        },
+        async markReleased(): Promise<void> {},
+      };
+      const manager = new SessionManager(fakeTimer, persistence);
+      try {
+        const existing = await manager.createSession(
+          "session-activity-failure",
+          "emulator-5554",
+          "android",
+        );
+        const initialLastUsedAt = existing.lastUsedAt;
+        fakeTimer.advanceTime(10);
+
+        await expect(manager.getOrCreateSession("session-activity-failure")).rejects.toBeInstanceOf(
+          SessionActivityPersistenceError,
+        );
+        expect(existing.lastUsedAt).toBe(initialLastUsedAt);
+        expect(existing.lastHeartbeat).toBe(initialLastUsedAt);
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+
+    test("does not roll back a newer overlapping liveness refresh", async () => {
+      const firstActivity = Promise.withResolvers<void>();
+      const firstActivityStarted = Promise.withResolvers<void>();
+      let activityAttempts = 0;
+      const persistence: DeviceSessionPersistence = {
+        async upsertActiveSession(): Promise<void> {},
+        async recordActivity(): Promise<void> {
+          activityAttempts++;
+          if (activityAttempts === 1) {
+            firstActivityStarted.resolve();
+            await firstActivity.promise;
+            throw new Error("first activity persistence failed");
+          }
+        },
+        async markReleased(): Promise<void> {},
+      };
+      const manager = new SessionManager(fakeTimer, persistence);
+      try {
+        const existing = await manager.createSession(
+          "overlapping-activity",
+          "emulator-5554",
+          "android",
+        );
+        fakeTimer.advanceTime(10);
+        const firstRefresh = manager.getOrCreateSession("overlapping-activity");
+        await firstActivityStarted.promise;
+
+        fakeTimer.advanceTime(10);
+        const secondRefresh = manager.getOrCreateSession("overlapping-activity");
+        const second = await secondRefresh;
+        const newerActivity = {
+          lastUsedAt: second.lastUsedAt,
+          lastHeartbeat: second.lastHeartbeat,
+          expiresAt: second.expiresAt,
+        };
+
+        firstActivity.resolve();
+        await expect(firstRefresh).rejects.toBeInstanceOf(SessionActivityPersistenceError);
+        expect(existing.lastUsedAt).toBe(newerActivity.lastUsedAt);
+        expect(existing.lastHeartbeat).toBe(newerActivity.lastHeartbeat);
+        expect(existing.expiresAt).toBe(newerActivity.expiresAt);
+      } finally {
+        manager.stopCleanupTimer();
+      }
     });
 
     test("should bump lastHeartbeat when resolving an existing session", async () => {

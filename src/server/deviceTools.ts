@@ -732,6 +732,9 @@ const TEARDOWN_OPERATION_RESULT_TTL_MS = 5 * 60 * 1_000;
 // deadline, plus room afterward for idempotent replay before the row is pruned
 // (#6652).
 const PROVISION_DEVICE_OPERATION_TTL_MS = MAX_DEVICE_READY_TIMEOUT_MS + 15 * 60 * 1_000;
+const PROVISION_DEVICE_FINALIZATION_TTL_REFRESH_MS = Math.floor(
+  PROVISION_DEVICE_OPERATION_TTL_MS / 2,
+);
 
 // Terminal-but-retryable error code stamped on an operation row whose attempt
 // was rejected by an in-flight MCP session recovery. Distinct from a genuine
@@ -6939,6 +6942,7 @@ export function registerDeviceTools() {
         result,
         error,
         superseded,
+        timer,
       );
       try {
         await runOperationWithinDeadline(
@@ -7037,10 +7041,14 @@ export function registerDeviceTools() {
     result: Record<string, unknown>,
     completionError: unknown,
     superseded: boolean,
+    timer: Pick<Timer, "now" | "setTimeout" | "clearTimeout">,
   ): Promise<void> {
     // A failed replay returns its row to succeeded when fail() settles. Release
     // the session first so no caller can claim that replay-visible old result
     // while the session it names is still being torn down.
+    const stopTtlRefresh = superseded
+      ? undefined
+      : keepProvisionDeviceOperationAlive(store, args.operationId, attemptId, timer);
     try {
       await releaseProvisionDeviceSession(
         result,
@@ -7054,6 +7062,8 @@ export function registerDeviceTools() {
           `${errorMessage(error)}`,
         error,
       );
+    } finally {
+      stopTtlRefresh?.();
     }
 
     if (superseded) {
@@ -7070,6 +7080,51 @@ export function registerDeviceTools() {
         error,
       );
     }
+  }
+
+  function keepProvisionDeviceOperationAlive(
+    store: ProvisionDeviceOperationStore,
+    operationId: string,
+    attemptId: string,
+    timer: Pick<Timer, "now" | "setTimeout" | "clearTimeout">,
+  ): () => void {
+    let stopped = false;
+    let timeout: NodeJS.Timeout | undefined;
+    const extend = (): void => {
+      void store
+        .extend(operationId, attemptId, timer.now() + PROVISION_DEVICE_OPERATION_TTL_MS)
+        .then((extended) => {
+          if (!extended) {
+            logger.debug(
+              `[DeviceTools] provisionDevice ${operationId} finalization TTL refresh was superseded.`,
+            );
+          }
+        })
+        .catch((error: unknown) => {
+          logger.warn(
+            `[DeviceTools] Failed to refresh provisionDevice ${operationId} finalization TTL: ` +
+              `${errorMessage(error)}`,
+            error,
+          );
+        });
+    };
+    const schedule = (): void => {
+      timeout = timer.setTimeout(() => {
+        if (stopped) {
+          return;
+        }
+        extend();
+        schedule();
+      }, PROVISION_DEVICE_FINALIZATION_TTL_REFRESH_MS);
+    };
+    extend();
+    schedule();
+    return () => {
+      stopped = true;
+      if (timeout) {
+        timer.clearTimeout(timeout);
+      }
+    };
   }
 
   /**

@@ -6,8 +6,8 @@ import { McpTestFixture } from "../fixtures/mcpTestFixture";
 
 /**
  * The acceptance harness uses a fresh client for each destructive operation.
- * Exercise the real MCP dispatch gate here: a default-disabled tool must be
- * rejected before its handler, then become callable only after the supported
+ * Exercise the real MCP dispatch gate here: default-disabled tools must be
+ * rejected before their handler, then become callable only after the supported
  * public setToolEnabled declaration on that same connection.
  */
 describe("live acceptance destructive tool selection", () => {

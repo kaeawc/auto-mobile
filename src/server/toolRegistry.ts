@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { toJSONSchema } from "zod/v4";
+import { isAlwaysOnTool } from "../features/toolSelection/toolSelectionControl";
 import { DeviceSessionManager, type DeviceReadinessLevel } from "../utils/DeviceSessionManager";
 import { ActionableError, BootedDevice, SomePlatform, type ViewHierarchyResult } from "../models";
 import { NavigationGraphManager } from "../features/navigation/NavigationGraphManager";
@@ -1555,7 +1556,7 @@ export class ToolRegistryClass {
 
   getConfigurableToolNames(): string[] {
     return Array.from(this.tools.values())
-      .filter((tool) => !tool.hidden && !tool.planOnly && tool.name !== "setToolEnabled")
+      .filter((tool) => this.isUserConfigurableTool(tool.name))
       .map((tool) => tool.name);
   }
 
@@ -1567,7 +1568,7 @@ export class ToolRegistryClass {
 
   isUserConfigurableTool(name: string): boolean {
     const tool = this.tools.get(name);
-    return Boolean(tool && !tool.hidden && !tool.planOnly && tool.name !== "setToolEnabled");
+    return Boolean(tool && !tool.hidden && !tool.planOnly && !isAlwaysOnTool(tool.name));
   }
 
   getRegisteredTool(name: string): RegisteredTool | undefined {

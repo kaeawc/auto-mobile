@@ -1,6 +1,15 @@
 export const SET_TOOL_ENABLED_TOOL_NAME = "setToolEnabled";
 
 /**
+ * Tools that are permanently callable and therefore have no meaningful
+ * enable/disable setting. They are accepted in a selection batch as no-ops.
+ */
+export function isAlwaysOnTool(name: string): boolean {
+  // provisionDevice is deliberately excluded: it is opt-in/destructive, not always-on.
+  return name === SET_TOOL_ENABLED_TOOL_NAME || name === "getAndroid" || name === "getApple";
+}
+
+/**
  * The daemon IDE-socket method (src/daemon/socketServer.ts, `ide/setSessionToolEnabled` case)
  * that grants a tool for a session over the direct IDE socket channel. Rejections raised on that
  * channel (`ide/setKeyValue`, `ide/removeKeyValue`, `ide/clearKeyValueFile`) must name THIS method

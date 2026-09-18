@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   configuredIosSimulatorUdid,
+  isKeyframeRecoveryTimeout,
   shouldRetryWebRtcDaemonStart,
   waitForBootedSimulatorUdid,
   type SimulatorAppearanceClient,
@@ -29,6 +30,45 @@ describe("WHEP device capture helper logic", () => {
         readyError: new Error("socket unavailable"),
       }),
     ).toBe(true);
+  });
+
+  test("recognizes bare keyframe recovery timeouts", () => {
+    const recoveryMessage = "viewer did not recover to a fresh IDR";
+
+    expect(isKeyframeRecoveryTimeout(new Error(recoveryMessage), recoveryMessage)).toBe(true);
+  });
+
+  test("recognizes waitFor-wrapped keyframe recovery timeouts", () => {
+    const recoveryMessage = "viewer did not recover to a fresh IDR";
+
+    expect(
+      isKeyframeRecoveryTimeout(
+        new Error(
+          `${recoveryMessage} did not complete within 5000ms total (last poll remainder: x)`,
+        ),
+        recoveryMessage,
+      ),
+    ).toBe(true);
+  });
+
+  test("does not classify unrelated errors as keyframe recovery timeouts", () => {
+    const recoveryMessage = "viewer did not recover to a fresh IDR";
+
+    expect(
+      isKeyframeRecoveryTimeout(
+        new Error("TypeError: Cannot read properties of undefined (reading 'sessionId')"),
+        recoveryMessage,
+      ),
+    ).toBe(false);
+  });
+
+  test("does not classify non-Errors as keyframe recovery timeouts", () => {
+    expect(
+      isKeyframeRecoveryTimeout(
+        "viewer did not recover to a fresh IDR",
+        "viewer did not recover to a fresh IDR",
+      ),
+    ).toBe(false);
   });
 
   test("waits through an empty or transitional simulator listing for a Booted UDID", async () => {

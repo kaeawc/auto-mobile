@@ -3506,6 +3506,9 @@ jobs:
           attempts=2
           for attempt in $(seq 1 "${attempts}"); do
             echo "::group::iOS device capture integration (attempt ${attempt}/${attempts})"
+            if [ "${attempt}" -gt 1 ]; then
+              echo "Starting emulator retry attempt 2."
+            fi
             bun run test:integration:webrtc-device && rc=0 || rc=$?
             echo "::endgroup::"
             if [ "${rc}" -eq 0 ]; then

@@ -20,6 +20,22 @@ export function shouldRetryWebRtcDaemonStart({
   return startError !== null || readyError !== null;
 }
 
+/**
+ * True when `error` is the catalogued keyframe-recovery timeout thrown by
+ * `waitFor` (test/helpers/abortableWaitFor.ts) for `recoveryMessage` —
+ * either the bare deadline-exhausted message, or the per-iteration
+ * "did not complete within...ms total" wrap of it. False for any other
+ * error (e.g. a thrown fixture/CDP failure from the polled predicate),
+ * which must be treated as a distinct regression, not the catalogued flake.
+ */
+export function isKeyframeRecoveryTimeout(error: unknown, recoveryMessage: string): boolean {
+  return (
+    error instanceof Error &&
+    (error.message === recoveryMessage ||
+      error.message.startsWith(`${recoveryMessage} did not complete within`))
+  );
+}
+
 export function configuredIosSimulatorUdid(
   environment: NodeJS.ProcessEnv = process.env,
 ): string | undefined {

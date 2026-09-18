@@ -25,6 +25,7 @@ import {
 } from "../helpers/captureStageTimeline";
 import {
   configuredIosSimulatorUdid,
+  isKeyframeRecoveryTimeout,
   shouldRetryWebRtcDaemonStart,
   waitForBootedSimulatorUdid,
   type SimulatorAppearanceClient,
@@ -1297,10 +1298,14 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
                 recoveryMessage,
                 IOS_FORCED_KEYFRAME_MIN_INTERVAL_MS + 30_000,
               );
-            } catch {
+            } catch (error) {
+              // A non-timeout predicate failure is a distinct regression, not the catalogued IDR-recovery flake, and must not be relabeled or classify-failure would misdismiss it as the known flake.
+              if (!isKeyframeRecoveryTimeout(error, recoveryMessage)) {
+                throw error;
+              }
               const diagnostics = await readerDiagnostics(cdp!).catch(() => undefined);
               throw new Error(
-                `${recoveryMessage}; last recovery sample=${JSON.stringify(recovered)}; reader diagnostics=${JSON.stringify(diagnostics ?? "unavailable")}`,
+                `${error.message}; last recovery sample=${JSON.stringify(recovered)}; reader diagnostics=${JSON.stringify(diagnostics ?? "unavailable")}`,
               );
             }
             expect(recovered).not.toBeNull();

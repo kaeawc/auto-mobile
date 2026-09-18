@@ -1114,6 +1114,41 @@ export class SessionManager {
    * @param sessionId - The session UUID
    * @param devicePool - DevicePool instance for automatic device assignment
    */
+  /**
+   * Resolving a session for a tool call is activity: extend both the idle
+   * timeout (expiresAt) and the heartbeat clock (lastHeartbeat). Without the
+   * latter, the daemon heartbeat watchdog would reap an actively-used session
+   * whose tools never write session cache (e.g. autolock CLI/agent clients
+   * that do not send explicit heartbeats). An awaiting-owner session is
+   * reclaimed by the call.
+   */
+  private async reclaimAndRefreshExistingSession(existing: Session): Promise<void> {
+    const now = this.timer.now();
+    if (existing.ownership === "awaiting-owner") {
+      existing.ownership = "owned";
+      existing.awaitingOwnerSince = undefined;
+    }
+    const previousActivity = {
+      lastUsedAt: existing.lastUsedAt,
+      lastHeartbeat: existing.lastHeartbeat,
+      expiresAt: existing.expiresAt,
+    };
+    existing.lastUsedAt = now;
+    existing.lastHeartbeat = now;
+    existing.expiresAt = now + existing.sessionTimeoutMs;
+    existing.activityGeneration++;
+    const capturedGeneration = existing.activityGeneration;
+    try {
+      await this.recordSessionActivity(existing);
+    } catch (error) {
+      // An awaited activity refresh cannot advertise fresh in-memory liveness
+      // after its durable write failed; callers receive the typed failure.
+      // Only the latest refresh may roll back, so an older failure cannot clobber newer liveness.
+      rollbackSessionActivityIfCurrent(existing, previousActivity, capturedGeneration);
+      throw error;
+    }
+  }
+
   async getOrCreateSession(
     sessionId: string,
     devicePool?: SessionDeviceAssigner,
@@ -1155,35 +1190,7 @@ export class SessionManager {
       logger.info(
         `[SessionManager] Found existing session ${sessionId} with device ${existing.assignedDevice}`,
       );
-      // Resolving a session for a tool call is activity: extend both the idle
-      // timeout (expiresAt) and the heartbeat clock (lastHeartbeat). Without the
-      // latter, the daemon heartbeat watchdog would reap an actively-used session
-      // whose tools never write session cache (e.g. autolock CLI/agent clients
-      // that do not send explicit heartbeats).
-      const now = this.timer.now();
-      if (existing.ownership === "awaiting-owner") {
-        existing.ownership = "owned";
-        existing.awaitingOwnerSince = undefined;
-      }
-      const previousActivity = {
-        lastUsedAt: existing.lastUsedAt,
-        lastHeartbeat: existing.lastHeartbeat,
-        expiresAt: existing.expiresAt,
-      };
-      existing.lastUsedAt = now;
-      existing.lastHeartbeat = now;
-      existing.expiresAt = now + existing.sessionTimeoutMs;
-      existing.activityGeneration++;
-      const capturedGeneration = existing.activityGeneration;
-      try {
-        await this.recordSessionActivity(existing);
-      } catch (error) {
-        // An awaited activity refresh cannot advertise fresh in-memory liveness
-        // after its durable write failed; callers receive the typed failure.
-        // Only the latest refresh may roll back, so an older failure cannot clobber newer liveness.
-        rollbackSessionActivityIfCurrent(existing, previousActivity, capturedGeneration);
-        throw error;
-      }
+      await this.reclaimAndRefreshExistingSession(existing);
       return existing;
     }
 

@@ -222,6 +222,12 @@ same `configuredInventory`, and a `provisioningCatalog` (`runtimes`,
 
 ### Disagreements observed
 
+The phase-1 integration lane closes the remaining B1/B7 producer split: `getAndroid`,
+`getApple`, `provisionDevice.device`, `listDevices`, and both device resources now feed
+the same configured-image facts through the canonical builder. Display dimensions,
+capability inventory, runtime id, and device type therefore agree whenever the backing
+image supplies them.
+
 - **Booted vs image surfaces drop every Android runtime/display fact.** For the
   same AVD, the image surfaces say `osVersion "16"`, `apiLevel 36`,
   `1080×2400@420`, `formFactor "phone"`; `listDevices` and `devices/booted`
@@ -231,7 +237,9 @@ same `configuredInventory`, and a `provisioningCatalog` (`runtimes`,
   emulators had an admitted image attached (all idle, incarnations `#1`–`#3`),
   so the booted projection fell through to nulls. (fixed in this PR: booted
   projections now use the completed configured-image inventory after admitted
-  image and discovery facts are unavailable.)
+  image and discovery facts are unavailable, retain the booted-to-image
+  `path`/`target`/`basedOn` link when AVD provenance is available, and route
+  acquisition results through that same enrichment.)
 - **iOS `runtime.runtimeId` and `runtime.deviceType`** are populated on the
   image surfaces and `null` on both booted surfaces for the same simulator.
   `runtime.osVersion "26.5"` agrees everywhere. (fixed in this PR: the same
@@ -268,6 +276,21 @@ same `configuredInventory`, and a `provisioningCatalog` (`runtimes`,
   across surfaces (five synthesized `platform` entries). (fixed in this PR:
   the configured-image fallback carries the existing AVD capability inventory
   into booted descriptions.)
+- **Live orientation was never attached to booted resources.** The booted
+  resource now runs the platform `OrientationReader` in the same bounded,
+  parallel probe fan-out as service and lock state. Android reports portrait or
+  landscape when observed; iOS remains `null` because its reader has no safe
+  read-only signal.
+- **The `listDevices.formFactor` compatibility alias could be `null` while its
+  output schema rejected null.** The alias is now nullable; canonical
+  top-level `formFactor` remains the strict four-value enum.
+- **Canonical `runtime.serviceStatus` lost diagnostics held by its deprecated
+  sibling.** It now preserves the nullable installed checksum, structured
+  version identity, and the iOS supported-command and supported-feature
+  completeness flags.
+- **Fresh Android fallback provisioning lost the system-image id.** The selected
+  package is now carried as `runtimeId` on the provisioned image before boot,
+  matching the metadata retained for an existing AVD.
 
 ### Uncertain items: what the live data shows
 

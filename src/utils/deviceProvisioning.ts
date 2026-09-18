@@ -39,6 +39,8 @@ export interface ProvisionedDevice {
   deviceId?: string;
   /** iOS device type identifier, or the Android system-image package. */
   deviceType: string;
+  /** Exact CoreSimulator runtime identifier or Android system-image package. */
+  runtimeId?: string;
   /** iOS runtime identifier, or the Android API level. */
   runtime: string;
 }
@@ -569,6 +571,7 @@ export class DefaultDeviceProvisioner implements DeviceProvisioner {
       name,
       deviceId,
       deviceType: deviceType.identifier,
+      runtimeId: runtime,
       runtime,
     };
     logger.info(
@@ -625,6 +628,7 @@ export class DefaultDeviceProvisioner implements DeviceProvisioner {
       platform: "android" as const,
       name,
       deviceType: image.packageName,
+      runtimeId: image.packageName,
       runtime: `android-${image.apiIdentifier}`,
     };
     logger.info(

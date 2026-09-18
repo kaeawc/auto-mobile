@@ -1093,6 +1093,7 @@ const CONFIGURED_IMAGE_FALLBACK_TIMEOUT_MS = 2_000;
 
 async function configuredImagesForBootedDevices(
   deviceManager: PlatformDeviceManager,
+  avdManager: Pick<AvdManager, "listDeviceImages">,
   booted: readonly BootedDevice[],
   timer: Timer,
 ): Promise<ReadonlyMap<string, StableConfiguredDeviceImage>> {
@@ -1110,11 +1111,34 @@ async function configuredImagesForBootedDevices(
             ),
           );
         }, CONFIGURED_IMAGE_FALLBACK_TIMEOUT_MS);
-        const discovery = await deviceManager.getDeviceImagesDetailed(platform, {
-          signal: controller.signal,
-        });
+        const [discovery, androidProvenance] = await Promise.all([
+          deviceManager.getDeviceImagesDetailed(platform, { signal: controller.signal }),
+          platform === "android"
+            ? avdManager.listDeviceImages(controller.signal).catch((error) => {
+                logger.warn(
+                  `listDevices Android AVD provenance lookup failed: ${errorMessage(error)}`,
+                  error,
+                );
+                return [];
+              })
+            : Promise.resolve([]),
+        ]);
+        const provenanceByName = new Map(androidProvenance.map((avd) => [avd.name, avd]));
         for (const [key, image] of configuredImagesByStableId(platform, discovery)) {
-          images.set(key, image);
+          const provenance = provenanceByName.get(image.name);
+          images.set(
+            key,
+            provenance
+              ? {
+                  ...image,
+                  image: {
+                    path: provenance.path,
+                    target: provenance.target,
+                    basedOn: provenance.basedOn,
+                  },
+                }
+              : image,
+          );
         }
       } catch (error) {
         logger.warn(
@@ -6364,6 +6388,7 @@ export function registerDeviceTools() {
 
     const configuredImages = await configuredImagesForBootedDevices(
       deviceManager,
+      deps.avdManagerFactory(),
       booted,
       deps.timer,
     );
@@ -8026,6 +8051,7 @@ export function registerDeviceTools() {
     device: BootedDevice;
     sessionId: string;
     source: "booted" | "cold-boot";
+    sourceImage?: DeviceInfo;
     resources?: DeviceResourceConfigurationResult;
   }> {
     const requestedIdentity = `platform=${args.device.platform} name=${args.device.name}`;
@@ -8212,6 +8238,7 @@ export function registerDeviceTools() {
         device: boot.device,
         sessionId,
         source: boot.source,
+        sourceImage: boot.sourceImage,
         resources,
       };
     } catch (error) {
@@ -8347,7 +8374,12 @@ export function registerDeviceTools() {
     createdByOperation: boolean,
     perf: ReturnType<typeof createPerformanceTracker>,
     booted:
-      | { device: BootedDevice; sessionId: string; resources?: DeviceResourceConfigurationResult }
+      | {
+          device: BootedDevice;
+          sessionId: string;
+          sourceImage?: DeviceInfo;
+          resources?: DeviceResourceConfigurationResult;
+        }
       | undefined,
   ): Record<string, unknown> {
     const pooled = booted
@@ -8359,6 +8391,7 @@ export function registerDeviceTools() {
       provisioned,
       booted: booted?.device,
       pooled,
+      discovery: booted?.sourceImage,
       session: booted ? { sessionId: booted.sessionId } : undefined,
       serviceStatus: booted
         ? args.readiness === "automation"

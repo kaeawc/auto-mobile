@@ -7,6 +7,7 @@ import {
   projectConfiguredImage,
   projectListDevicesEntry,
   projectProvisionedDevice,
+  listDevicesEntrySchema,
   type DeviceDescription,
   type DeviceDescriptionWithLegacyAliases,
   type DeviceDescriptionInput,
@@ -93,6 +94,12 @@ function assertSharedKnownValuesAgree(...descriptions: DeviceDescription[]): voi
   }
 }
 
+function keyShape(value: unknown): unknown {
+  return value !== null && typeof value === "object"
+    ? Object.keys(value as Record<string, unknown>).sort()
+    : [];
+}
+
 const androidImage: DeviceDescriptionInput = {
   kind: "image",
   image: {
@@ -172,6 +179,13 @@ describe("device description projections", () => {
         schemaVersion: 1,
         capabilities: [{ id: "android.hardware.nfc", state: "available" as const }],
       },
+      runtimeId: "system-images;android-36;google_apis;arm64-v8a",
+      deviceType: "pixel_9",
+      image: {
+        path: "/tmp/Pixel_9_API_36.avd",
+        target: "Google APIs",
+        basedOn: "Android 16 google_apis/arm64-v8a",
+      },
     };
     const configuredDescription = describeDevice({ kind: "image", image: configured });
     const bootedDescription = describeDevice({
@@ -185,6 +199,136 @@ describe("device description projections", () => {
     });
 
     assertSharedKnownValuesAgree(configuredDescription, bootedDescription);
+    expect(bootedDescription.image).toEqual(configured.image);
+    expect(bootedDescription.runtimeId).toBe(configured.runtimeId);
+    expect(bootedDescription.deviceType).toBe(configured.deviceType);
+  });
+
+  test("keeps one canonical key set across lifecycle and ownership states", () => {
+    const configured = {
+      stableId: "Pixel_9_API_36",
+      name: "Pixel_9_API_36",
+      platform: "android" as const,
+      isRunning: false,
+      runtimeId: "system-images;android-36;google_apis;arm64-v8a",
+      deviceType: "pixel_9",
+      screenWidth: 1080,
+      screenHeight: 2400,
+      screenDensity: 420,
+      formFactor: "phone" as const,
+    };
+    const booted = {
+      name: configured.name,
+      platform: "android" as const,
+      deviceId: "emulator-5554",
+    };
+    const descriptions = [
+      describeDevice({ kind: "image", image: configured }),
+      describeDevice({ kind: "image", image: { ...configured, state: "Booting" } }),
+      describeDevice({ kind: "booted", device: booted, configured }),
+      describeDevice({ kind: "booted", device: booted, configured, serviceStatus: undefined }),
+      describeDevice({
+        kind: "booted",
+        device: booted,
+        configured,
+        pooled: {
+          id: booted.deviceId,
+          name: booted.name,
+          platform: "android",
+          status: "idle",
+          lastUsedAt: 0,
+          assignmentCount: 0,
+          incarnation: 1,
+        },
+      }),
+      describeDevice({
+        kind: "booted",
+        device: booted,
+        configured,
+        session: { sessionId: "session-1", ownership: "awaiting-owner" },
+      }),
+    ];
+
+    for (const description of descriptions.slice(1)) {
+      expect(Object.keys(description).sort()).toEqual(Object.keys(descriptions[0]).sort());
+      expect(Object.keys(description.runtime).sort()).toEqual(
+        Object.keys(descriptions[0].runtime).sort(),
+      );
+      expect({ ...description, runtime: undefined }).toEqual({
+        ...descriptions[0],
+        runtime: undefined,
+      });
+    }
+  });
+
+  test("keeps Android and iOS virtual-device key sets and static enrichment in parity", () => {
+    const capabilityInventory = {
+      schemaVersion: 1,
+      capabilities: [{ id: "camera", state: "available" as const }],
+    };
+    const android = describeDevice({
+      kind: "image",
+      image: {
+        stableId: "Pixel_9",
+        name: "Pixel_9",
+        platform: "android",
+        isRunning: false,
+        runtimeId: "system-images;android-36;google_apis;arm64-v8a",
+        deviceType: "pixel_9",
+        screenWidth: 1080,
+        screenHeight: 2400,
+        screenDensity: 420,
+        capabilityInventory,
+      },
+    });
+    const ios = describeDevice({
+      kind: "image",
+      image: {
+        stableId: "IOS-UDID",
+        name: "iPhone 17",
+        platform: "ios",
+        deviceId: "IOS-UDID",
+        isRunning: false,
+        runtimeId: "com.apple.CoreSimulator.SimRuntime.iOS-26-5",
+        deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
+        screenWidth: 1206,
+        screenHeight: 2622,
+        screenDensity: 460,
+        capabilityInventory,
+      },
+    });
+
+    expect(keyShape(android)).toEqual(keyShape(ios));
+    for (const description of [android, ios]) {
+      expect(description.runtimeId).not.toBeNull();
+      expect(description.deviceType).not.toBeNull();
+      expect(description.display.width).not.toBeNull();
+      expect(description.capabilityInventory).not.toBeNull();
+    }
+  });
+
+  test("keeps physical-device shape while leaving image-only facts null", () => {
+    const physical = describeDevice({
+      kind: "booted",
+      device: {
+        name: "Jason's Pixel",
+        platform: "android",
+        deviceId: "R58M1234ABC",
+        model: "Pixel 9 Pro",
+      },
+    });
+    const virtual = describeDevice({
+      kind: "booted",
+      device: { name: "Pixel_9", platform: "android", deviceId: "emulator-5554" },
+    });
+
+    expect(keyShape(physical)).toEqual(keyShape(virtual));
+    expect(physical).toMatchObject({
+      isVirtual: false,
+      deviceType: null,
+      model: "Pixel 9 Pro",
+      image: { path: null, target: null, basedOn: null },
+    });
   });
 
   test("uses configured Android facts only to fill missing live runtime values", () => {
@@ -517,6 +661,19 @@ describe("device description projections", () => {
 
     expect(description.formFactor).toBe("unknown");
     expect(projectConfiguredImage(description).display.formFactor).toBeNull();
+  });
+
+  test("accepts the nullable listDevices flat formFactor alias while keeping canonical strict", () => {
+    const projected = projectListDevicesEntry(
+      describeDevice({
+        kind: "booted",
+        device: { name: "Unknown AVD", platform: "android", deviceId: "emulator-5554" },
+      }),
+    );
+    const payload = { ...projected, deviceId: "emulator-5554", formFactor: null };
+
+    expect(listDevicesEntrySchema.safeParse(payload).success).toBe(true);
+    expect(() => listDevicesEntrySchema.parse({ ...payload, formFactor: "watch" })).toThrow();
   });
 
   test("preserves explicitly observed lock state", () => {

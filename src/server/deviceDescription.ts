@@ -5,6 +5,8 @@ import type { BootedDevice, DeviceInfo } from "../models";
 import type { ExactProvisionedDevice } from "../utils/exactDeviceProvisioning";
 import type { StableConfiguredDeviceImage } from "../utils/configuredDeviceInventory";
 import { iosSimulatorCapabilityInventory } from "../features/device-control/virtualDeviceCapabilities";
+import type { FormFactor } from "../models/DeviceMatchCriteria";
+import { formFactorFrom } from "../models/formFactor";
 
 export type DevicePlatform = "android" | "ios";
 export type DeviceLifecycleState =
@@ -16,11 +18,6 @@ export type DeviceLifecycleState =
 export type DeviceReadinessState = "unknown" | "not_ready" | "ready";
 export type DevicePoolStatus = "idle" | "assigned" | "error";
 export type DeviceSessionOwnership = "owned" | "awaiting-owner";
-type FormFactor = "phone" | "tablet" | "foldable" | "unknown";
-
-function toFormFactor(value: unknown): FormFactor {
-  return value === "phone" || value === "tablet" || value === "foldable" ? value : "unknown";
-}
 
 export interface CapabilityInventoryEntry {
   id: string;
@@ -79,14 +76,21 @@ export interface DeviceDescription {
   };
 }
 
-type DeviceServiceStatusLike = {
+export type DeviceServiceStatusLike = {
   installed: boolean;
   enabled: boolean;
   running: boolean;
   isCompatible: boolean;
-  installedSha256?: string;
-  expectedSha256?: string;
-  version?: string;
+  installedSha256?: string | null;
+  expectedSha256?: string | null;
+  version?: {
+    versionName?: string;
+    versionCode?: string;
+    build?: string;
+    source: "android-package" | "ios-runner-bundle";
+  };
+  supportedCommandsComplete?: boolean | null;
+  supportedFeaturesComplete?: boolean | null;
 };
 type DeviceSessionLike = Pick<Session, "sessionId"> & { ownership?: DeviceSessionOwnership };
 
@@ -173,7 +177,12 @@ export function describeDevice(input: DeviceDescriptionInput): DeviceDescription
   }
 
   if (input.kind === "provisioned" && !input.booted) {
-    return describeImage(input.provisioned.device, undefined, input.locked, input.orientation);
+    return describeImage(
+      provisionedImage(input.provisioned),
+      undefined,
+      input.locked,
+      input.orientation,
+    );
   }
 
   const booted = input.kind === "booted" ? input.device : input.booted!;
@@ -206,8 +215,26 @@ function bootedImageFacts(
     return { admittedImage: input.configured, authoritative: false };
   }
   return {
-    admittedImage: input.kind === "provisioned" ? input.provisioned.device : undefined,
+    admittedImage: input.kind === "provisioned" ? provisionedImage(input.provisioned) : undefined,
     authoritative: input.kind === "provisioned",
+  };
+}
+
+function provisionedImage(provisioned: ExactProvisionedDevice): DeviceInfo {
+  const configuration =
+    provisioned.device.platform === "android" && "configuration" in provisioned.resolvedSpec
+      ? provisioned.resolvedSpec.configuration
+      : undefined;
+  return {
+    ...provisioned.device,
+    runtimeId:
+      provisioned.device.runtimeId ??
+      provisioned.device.runtime ??
+      provisioned.resolvedSpec.runtime,
+    deviceType: provisioned.device.deviceType ?? provisioned.resolvedSpec.deviceType,
+    screenWidth: provisioned.device.screenWidth ?? configuration?.screenWidth,
+    screenHeight: provisioned.device.screenHeight ?? configuration?.screenHeight,
+    screenDensity: provisioned.device.screenDensity ?? configuration?.screenDensity,
   };
 }
 
@@ -237,9 +264,13 @@ function describeImage(
     display: displayFrom(image),
     capabilityInventory: capabilityInventory(image, true),
     image: {
-      path: platform === "android" ? (androidProvenance?.path ?? null) : null,
-      target: platform === "android" ? (androidProvenance?.target ?? null) : null,
-      basedOn: platform === "android" ? (androidProvenance?.basedOn ?? null) : null,
+      path: platform === "android" ? (androidProvenance?.path ?? imageLinkFrom(image).path) : null,
+      target:
+        platform === "android" ? (androidProvenance?.target ?? imageLinkFrom(image).target) : null,
+      basedOn:
+        platform === "android"
+          ? (androidProvenance?.basedOn ?? imageLinkFrom(image).basedOn)
+          : null,
     },
     availabilityError:
       platform === "android"
@@ -303,7 +334,7 @@ function describeBooted(
     ...staticFacts,
     display: displayFrom(merged),
     capabilityInventory: capabilityInventory(merged, isVirtual),
-    image: { path: null, target: null, basedOn: null },
+    image: imageLinkFrom(admittedImage),
     availabilityError: device.platform === "ios" ? (merged.availabilityError ?? null) : null,
     runtime: {
       deviceId: device.deviceId,
@@ -345,7 +376,22 @@ function mergeRuntimeFacts(
     screenHeight: preferred(device.screenHeight, admittedImage?.screenHeight),
     screenDensity: preferred(device.screenDensity, admittedImage?.screenDensity),
     formFactor: preferred(device.formFactor, admittedImage?.formFactor),
+    runtimeId: preferred(device.runtimeId, admittedImage?.runtimeId),
+    runtime: preferred(device.runtime, admittedImage?.runtime),
+    deviceType: preferred(device.deviceType, admittedImage?.deviceType),
+    model: preferred(device.model, admittedImage?.model),
+    architecture: preferred(device.architecture, admittedImage?.architecture),
+    capabilityInventory: preferred(device.capabilityInventory, admittedImage?.capabilityInventory),
     isRunning: true,
+  };
+}
+
+function imageLinkFrom(image: ImageLike | undefined): DeviceDescription["image"] {
+  const link = image && "image" in image ? image.image : undefined;
+  return {
+    path: link?.path ?? null,
+    target: link?.target ?? null,
+    basedOn: link?.basedOn ?? null,
   };
 }
 
@@ -358,11 +404,17 @@ function staticFactsFrom(
   return {
     osVersion: device.osVersion ?? device.iosVersion ?? null,
     apiLevel: device.platform === "android" ? (device.apiLevel ?? null) : null,
-    runtimeId: device.runtime ?? null,
+    runtimeId: device.runtimeId ?? device.runtime ?? null,
     deviceType: device.deviceType ?? null,
     architecture: device.architecture ?? null,
     model: device.model ?? null,
-    formFactor: toFormFactor(device.formFactor),
+    formFactor: formFactorFrom({
+      hint: device.formFactor,
+      width: device.screenWidth,
+      height: device.screenHeight,
+      density: device.screenDensity,
+      deviceType: device.deviceType,
+    }),
   };
 }
 
@@ -603,6 +655,29 @@ export function withDeviceServiceStatus(
   return updated;
 }
 
+/** Applies observed live state without rebuilding or reinterpreting static device facts. */
+export function withDeviceRuntimeObservation(
+  description: DeviceDescription,
+  observation: {
+    locked?: boolean;
+    orientation?: "portrait" | "landscape";
+  },
+): DeviceDescription {
+  const updated: DeviceDescription = {
+    ...description,
+    runtime: {
+      ...description.runtime,
+      ...(observation.locked === undefined ? {} : { locked: observation.locked }),
+      ...(observation.orientation === undefined ? {} : { orientation: observation.orientation }),
+    },
+  };
+  const sourceFacts = legacySourceFacts.get(description);
+  if (sourceFacts) {
+    legacySourceFacts.set(updated, sourceFacts);
+  }
+  return updated;
+}
+
 const nullableString = z.string().nullable();
 const nullableNumber = z.number().nullable();
 const formFactorSchema = z.enum(["phone", "tablet", "foldable", "unknown"]);
@@ -617,9 +692,18 @@ const serviceStatusSchema = z
     enabled: z.boolean(),
     running: z.boolean(),
     isCompatible: z.boolean(),
-    installedSha256: z.string().optional(),
-    expectedSha256: z.string().optional(),
-    version: z.string().optional(),
+    installedSha256: z.string().nullable().optional(),
+    expectedSha256: z.string().nullable().optional(),
+    version: z
+      .object({
+        versionName: z.string().optional(),
+        versionCode: z.string().optional(),
+        build: z.string().optional(),
+        source: z.enum(["android-package", "ios-runner-bundle"]),
+      })
+      .optional(),
+    supportedCommandsComplete: z.boolean().nullable().optional(),
+    supportedFeaturesComplete: z.boolean().nullable().optional(),
   })
   .nullable();
 export const deviceDescriptionSchema = z.object({
@@ -711,7 +795,7 @@ export const listDevicesEntrySchema = deviceDescriptionSchema
     deviceId: z.string(),
     apiLevel: nullableNumber,
     osVersion: nullableString,
-    formFactor: formFactorSchema,
+    formFactor: formFactorSchema.nullable(),
   })
   .passthrough();
 export const provisionedDeviceSchema = deviceDescriptionSchema.passthrough();

@@ -26,7 +26,15 @@ export interface ConfiguredDeviceInventoryContract {
   observations: Partial<Record<Platform, ConfiguredDeviceInventoryObservation>>;
 }
 
-export type StableConfiguredDeviceImage = DeviceInfo & { stableId: string };
+export type StableConfiguredDeviceImage = DeviceInfo & {
+  stableId: string;
+  /** Android AVD source-image metadata from `avdmanager list avd`, when available. */
+  image?: {
+    path?: string;
+    target?: string;
+    basedOn?: string;
+  };
+};
 
 export interface ConfiguredDeviceInventoryProjection {
   /** Public description projection shared by listDeviceImages and the resource. */

@@ -493,6 +493,7 @@ describe("DeviceBootService", () => {
               platform: "android" as const,
               name: createdName,
               deviceType: image.packageName,
+              runtimeId: image.packageName,
               runtime: `android-${image.apiLevel}`,
             };
           },
@@ -514,6 +515,8 @@ describe("DeviceBootService", () => {
       expect(provisionCalls).toBe(1);
       expect(first.provisioned).toBe(true);
       expect(first.device.name).toBe(createdName);
+      expect(first.device.runtimeId).toBe("system-images;android-34;google_apis;arm64-v8a");
+      expect(first.sourceImage?.runtimeId).toBe("system-images;android-34;google_apis;arm64-v8a");
 
       const second = await boot.boot(request);
       expect(provisionCalls).toBe(1);
@@ -1460,7 +1463,7 @@ describe("DeviceBootService", () => {
     const result = await service(devices, matcher).boot({ platform: "android" });
 
     expect(result.source).toBe("booted");
-    expect(result.sourceImage).toBeUndefined();
+    expect(result.sourceImage).toEqual(image);
     expect(result.processHandle).toBeUndefined();
     expect(result.processId).toBeUndefined();
     expect(devices.getExecutedOperations()).toContain("waitForDeviceReady:Pixel_9_API_35:180000");

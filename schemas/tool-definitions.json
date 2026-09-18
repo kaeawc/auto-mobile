@@ -3201,13 +3201,64 @@
                             "type": "boolean"
                           },
                           "installedSha256": {
-                            "type": "string"
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
                           },
                           "expectedSha256": {
-                            "type": "string"
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
                           },
                           "version": {
-                            "type": "string"
+                            "type": "object",
+                            "properties": {
+                              "versionName": {
+                                "type": "string"
+                              },
+                              "versionCode": {
+                                "type": "string"
+                              },
+                              "build": {
+                                "type": "string"
+                              },
+                              "source": {
+                                "type": "string",
+                                "enum": ["android-package", "ios-runner-bundle"]
+                              }
+                            },
+                            "required": ["source"],
+                            "additionalProperties": false
+                          },
+                          "supportedCommandsComplete": {
+                            "anyOf": [
+                              {
+                                "type": "boolean"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "supportedFeaturesComplete": {
+                            "anyOf": [
+                              {
+                                "type": "boolean"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
                           }
                         },
                         "required": ["installed", "enabled", "running", "isCompatible"],
@@ -3882,8 +3933,15 @@
                 ]
               },
               "formFactor": {
-                "type": "string",
-                "enum": ["phone", "tablet", "foldable", "unknown"]
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": ["phone", "tablet", "foldable", "unknown"]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               },
               "deviceType": {
                 "anyOf": [
@@ -4067,13 +4125,64 @@
                             "type": "boolean"
                           },
                           "installedSha256": {
-                            "type": "string"
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
                           },
                           "expectedSha256": {
-                            "type": "string"
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
                           },
                           "version": {
-                            "type": "string"
+                            "type": "object",
+                            "properties": {
+                              "versionName": {
+                                "type": "string"
+                              },
+                              "versionCode": {
+                                "type": "string"
+                              },
+                              "build": {
+                                "type": "string"
+                              },
+                              "source": {
+                                "type": "string",
+                                "enum": ["android-package", "ios-runner-bundle"]
+                              }
+                            },
+                            "required": ["source"],
+                            "additionalProperties": false
+                          },
+                          "supportedCommandsComplete": {
+                            "anyOf": [
+                              {
+                                "type": "boolean"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "supportedFeaturesComplete": {
+                            "anyOf": [
+                              {
+                                "type": "boolean"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
                           }
                         },
                         "required": ["installed", "enabled", "running", "isCompatible"],
@@ -9975,13 +10084,64 @@
                           "type": "boolean"
                         },
                         "installedSha256": {
-                          "type": "string"
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
                         },
                         "expectedSha256": {
-                          "type": "string"
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
                         },
                         "version": {
-                          "type": "string"
+                          "type": "object",
+                          "properties": {
+                            "versionName": {
+                              "type": "string"
+                            },
+                            "versionCode": {
+                              "type": "string"
+                            },
+                            "build": {
+                              "type": "string"
+                            },
+                            "source": {
+                              "type": "string",
+                              "enum": ["android-package", "ios-runner-bundle"]
+                            }
+                          },
+                          "required": ["source"],
+                          "additionalProperties": false
+                        },
+                        "supportedCommandsComplete": {
+                          "anyOf": [
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "supportedFeaturesComplete": {
+                          "anyOf": [
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
                         }
                       },
                       "required": ["installed", "enabled", "running", "isCompatible"],

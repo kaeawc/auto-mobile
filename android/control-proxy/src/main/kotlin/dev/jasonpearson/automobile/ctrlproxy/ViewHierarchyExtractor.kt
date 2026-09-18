@@ -76,10 +76,10 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
       return ViewHierarchy(error = "Root node is null")
     }
 
+    var accessibilityFocusedNode: AccessibilityNodeInfo? = null
     return try {
       // Find accessibility-focused node before extracting hierarchy
-      val accessibilityFocusedNode = rootNode.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
-
+      accessibilityFocusedNode = rootNode.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
       val budget = HierarchySnapshotBudget(snapshotOptions)
       val rootElement =
         extractNodeInfo(
@@ -140,6 +140,8 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
     } catch (e: Exception) {
       Log.e(TAG, "Error extracting view hierarchy", e)
       ViewHierarchy(error = "Failed to extract view hierarchy: ${e.message}")
+    } finally {
+      accessibilityFocusedNode?.recycle()
     }
   }
 
@@ -178,10 +180,14 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
     var accessibilityFocusedNode: AccessibilityNodeInfo? = null
     for (window in windows) {
       val rootNode = window.root ?: continue
-      val focusedInWindow = rootNode.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
-      if (focusedInWindow != null) {
-        accessibilityFocusedNode = focusedInWindow
-        break
+      try {
+        val focusedInWindow = rootNode.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+        if (focusedInWindow != null) {
+          accessibilityFocusedNode = focusedInWindow
+          break
+        }
+      } finally {
+        rootNode.recycle()
       }
     }
     // Fallback to activeWindowRoot if not found in windows list
@@ -190,314 +196,326 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
         activeWindowRoot.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
     }
 
-    val windowEntries = mutableListOf<WindowEntry>()
-    val budget = HierarchySnapshotBudget(snapshotOptions)
-    var mainHierarchy: UIElementInfo? = null
-    var mainPackageName: String? = null
-    var intentChooserDetected = false
-    var notificationPermissionDetected: Boolean? = null
-    var activeWindowLayer = 0
-    var activeWindowKey: Int? = null
-    val windowInfos = mutableListOf<WindowInfo>()
-    val contentHiddenRegionRoots = mutableListOf<UIElementInfo>()
+    try {
+      val windowEntries = mutableListOf<WindowEntry>()
+      val budget = HierarchySnapshotBudget(snapshotOptions)
+      var mainHierarchy: UIElementInfo? = null
+      var mainPackageName: String? = null
+      var intentChooserDetected = false
+      var notificationPermissionDetected: Boolean? = null
+      var activeWindowLayer = 0
+      var activeWindowKey: Int? = null
+      val windowInfos = mutableListOf<WindowInfo>()
+      val contentHiddenRegionRoots = mutableListOf<UIElementInfo>()
 
-    // Track whether the accessibility service hierarchy is incomplete
-    // This happens when active windows have null roots or only system UI is accessible
-    var activeWindowHasNullRoot = false
-    var primaryAppWindowHasNullRoot = false
-    var hasApplicationWindow = false
+      // Track whether the accessibility service hierarchy is incomplete
+      // This happens when active windows have null roots or only system UI is accessible
+      var activeWindowHasNullRoot = false
+      var primaryAppWindowHasNullRoot = false
+      var hasApplicationWindow = false
 
-    // Prefer the focused application window to an active system window. When the IME owns focus,
-    // fall back to the topmost application window with a root.
-    val primaryAppWindowId: Int? = pickPrimaryAppWindowId(windows)
+      // Prefer the focused application window to an active system window. When the IME owns focus,
+      // fall back to the topmost application window with a root.
+      val primaryAppWindowId: Int? = pickPrimaryAppWindowId(windows)
 
-    // The primary app window's own bounds, used below to correlate a permission-controller
-    // dialog window with the app it belongs to (issue #6151 follow-up). `null` when no distinct
-    // primary window was picked, in which case `isPrimaryWindow` already covers the active
-    // window directly and correlation is moot.
-    val primaryAppWindowBounds: Rect? = primaryAppWindowId?.let { id ->
-      windows.firstOrNull { it.id == id }?.let { w -> Rect().also(w::getBoundsInScreen) }
-    }
+      // The primary app window's own bounds, used below to correlate a permission-controller
+      // dialog window with the app it belongs to (issue #6151 follow-up). `null` when no distinct
+      // primary window was picked, in which case `isPrimaryWindow` already covers the active
+      // window directly and correlation is moot.
+      val primaryAppWindowBounds: Rect? = primaryAppWindowId?.let { id ->
+        windows.firstOrNull { it.id == id }?.let { w -> Rect().also(w::getBoundsInScreen) }
+      }
 
-    // Extract from each window
-    for (window in windows) {
-      try {
-        val rootNode = window.root
-        if (rootNode == null) {
-          if (window.id == primaryAppWindowId) {
-            Log.w(
-              TAG,
-              "[HIERARCHY-DEBUG] Primary application window ${window.id} has null root node - accessibility service incomplete",
-            )
-            primaryAppWindowHasNullRoot = true
+      // Extract from each window
+      for (window in windows) {
+        var rootNode: AccessibilityNodeInfo? = null
+        try {
+          rootNode = window.root
+          if (rootNode == null) {
+            if (window.id == primaryAppWindowId) {
+              Log.w(
+                TAG,
+                "[HIERARCHY-DEBUG] Primary application window ${window.id} has null root node - accessibility service incomplete",
+              )
+              primaryAppWindowHasNullRoot = true
+            }
+            if (window.isActive) {
+              Log.w(
+                TAG,
+                "[HIERARCHY-DEBUG] Active window ${window.id} has null root node - accessibility service incomplete",
+              )
+              activeWindowHasNullRoot = true
+            } else {
+              Log.d(TAG, "[HIERARCHY-DEBUG] Window ${window.id} has null root node, skipping")
+            }
+            continue
           }
+          val windowLayer = window.layer
           if (window.isActive) {
-            Log.w(
-              TAG,
-              "[HIERARCHY-DEBUG] Active window ${window.id} has null root node - accessibility service incomplete",
+            activeWindowLayer = windowLayer
+            activeWindowKey = window.id
+          }
+
+          val windowType =
+            when (window.type) {
+              AccessibilityWindowInfo.TYPE_APPLICATION -> "application"
+              AccessibilityWindowInfo.TYPE_INPUT_METHOD -> "input_method"
+              AccessibilityWindowInfo.TYPE_SYSTEM -> "system"
+              AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY -> "accessibility_overlay"
+              AccessibilityWindowInfo.TYPE_SPLIT_SCREEN_DIVIDER -> "split_screen_divider"
+              AccessibilityWindowInfo.TYPE_MAGNIFICATION_OVERLAY -> "magnification_overlay"
+              else -> "unknown_${window.type}"
+            }
+
+          // Track if we successfully extract from any application window
+          // Only TYPE_APPLICATION counts - IME, overlays, and system windows don't represent app
+          // content
+          if (window.type == AccessibilityWindowInfo.TYPE_APPLICATION) {
+            hasApplicationWindow = true
+          }
+
+          val windowBounds = Rect()
+          window.getBoundsInScreen(windowBounds)
+          windowInfos.add(
+            WindowInfo(
+              id = window.id,
+              type = window.type,
+              isActive = window.isActive,
+              isFocused = window.isFocused,
+              bounds = ElementBounds(windowBounds),
             )
-            activeWindowHasNullRoot = true
-          } else {
-            Log.d(TAG, "[HIERARCHY-DEBUG] Window ${window.id} has null root node, skipping")
-          }
-          continue
-        }
-        val windowLayer = window.layer
-        if (window.isActive) {
-          activeWindowLayer = windowLayer
-          activeWindowKey = window.id
-        }
-
-        val windowType =
-          when (window.type) {
-            AccessibilityWindowInfo.TYPE_APPLICATION -> "application"
-            AccessibilityWindowInfo.TYPE_INPUT_METHOD -> "input_method"
-            AccessibilityWindowInfo.TYPE_SYSTEM -> "system"
-            AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY -> "accessibility_overlay"
-            AccessibilityWindowInfo.TYPE_SPLIT_SCREEN_DIVIDER -> "split_screen_divider"
-            AccessibilityWindowInfo.TYPE_MAGNIFICATION_OVERLAY -> "magnification_overlay"
-            else -> "unknown_${window.type}"
-          }
-
-        // Track if we successfully extract from any application window
-        // Only TYPE_APPLICATION counts - IME, overlays, and system windows don't represent app
-        // content
-        if (window.type == AccessibilityWindowInfo.TYPE_APPLICATION) {
-          hasApplicationWindow = true
-        }
-
-        val windowBounds = Rect()
-        window.getBoundsInScreen(windowBounds)
-        windowInfos.add(
-          WindowInfo(
-            id = window.id,
-            type = window.type,
-            isActive = window.isActive,
-            isFocused = window.isFocused,
-            bounds = ElementBounds(windowBounds),
           )
-        )
 
+          val element =
+            extractNodeInfo(
+              rootNode,
+              0,
+              textFilter,
+              screenDimensions,
+              dedupeTextContentDesc,
+              accessibilityFocusedNode,
+              parentPath = "w${window.id}",
+              budget = budget,
+            )
+          if (element != null) {
+            contentHiddenRegionRoots.add(element)
+          }
+          // Skip optimization if disableAllFiltering is true
+          val processedElement =
+            if (disableAllFiltering) {
+              element
+            } else {
+              element?.let {
+                val optimizedList = optimizeHierarchy(it)
+                wrapOptimizedElements(optimizedList)
+              }
+            }
+          val packageName = rootNode.packageName?.toString()
+          if (!intentChooserDetected && processedElement != null) {
+            intentChooserDetected = detectIntentChooserIndicators(processedElement)
+          }
+
+          // Prefer a focused application window, or the app below an IME that owns focus.
+          val isPrimaryWindow =
+            if (primaryAppWindowId != null) window.id == primaryAppWindowId else window.isActive
+          if (isPrimaryWindow) {
+            mainHierarchy = processedElement
+            mainPackageName = packageName
+          }
+          // A runtime permission dialog is its own permissioncontroller window. Detect it in the
+          // primary window or in a focused/active one that also overlaps the primary app window's
+          // bounds (a dialog owns focus while it is on screen, even mid-transition when selection
+          // still lands on the app beneath it), so the flag cannot read false while the dialog is
+          // up (#6151). A focused/active window that does NOT overlap the primary app — e.g.
+          // another app's own dialog in an unrelated split-screen pane — does not flag the primary
+          // app's observation (#6151 follow-up: cross-app false-positive correlation).
+          val canCarryDialog =
+            isPrimaryWindow ||
+              ((window.isFocused || window.isActive) &&
+                (primaryAppWindowBounds == null ||
+                  Rect.intersects(primaryAppWindowBounds, windowBounds)))
+          if (
+            notificationPermissionDetected != true && processedElement != null && canCarryDialog
+          ) {
+            notificationPermissionDetected =
+              detectNotificationPermissionDialog(processedElement, packageName)
+          }
+
+          if (processedElement != null) {
+            windowEntries.add(
+              WindowEntry(
+                windowId = window.id,
+                windowType = windowType,
+                windowLayer = windowLayer,
+                packageName = packageName,
+                isActive = window.isActive,
+                isFocused = window.isFocused,
+                hierarchy = processedElement,
+              )
+            )
+          }
+        } catch (e: Exception) {
+          Log.e(TAG, "Error extracting hierarchy from window ${window.id}", e)
+        } finally {
+          rootNode?.recycle()
+        }
+      }
+
+      // Fallback to activeWindowRoot when it can still recover application content. When the
+      // selected app has no root, rootInActiveWindow can be the active system status bar, which is
+      // not a substitute for application content.
+      if (
+        mainHierarchy == null &&
+          activeWindowRoot != null &&
+          (!primaryAppWindowHasNullRoot ||
+            activeWindowRoot.packageName?.toString()?.let { it != "com.android.systemui" } == true)
+      ) {
         val element =
           extractNodeInfo(
-            rootNode,
+            activeWindowRoot,
             0,
             textFilter,
             screenDimensions,
             dedupeTextContentDesc,
             accessibilityFocusedNode,
-            parentPath = "w${window.id}",
             budget = budget,
           )
         if (element != null) {
           contentHiddenRegionRoots.add(element)
         }
         // Skip optimization if disableAllFiltering is true
-        val processedElement =
+        mainHierarchy =
           if (disableAllFiltering) {
             element
           } else {
-            element?.let {
-              val optimizedList = optimizeHierarchy(it)
-              wrapOptimizedElements(optimizedList)
-            }
+            element?.let { wrapOptimizedElements(optimizeHierarchy(it)) }
           }
-        val packageName = rootNode.packageName?.toString()
-        if (!intentChooserDetected && processedElement != null) {
-          intentChooserDetected = detectIntentChooserIndicators(processedElement)
+        mainPackageName = activeWindowRoot.packageName?.toString()
+        if (!intentChooserDetected && mainHierarchy != null) {
+          intentChooserDetected = detectIntentChooserIndicators(mainHierarchy!!)
         }
-
-        // Prefer a focused application window, or the app below an IME that owns focus.
-        val isPrimaryWindow =
-          if (primaryAppWindowId != null) window.id == primaryAppWindowId else window.isActive
-        if (isPrimaryWindow) {
-          mainHierarchy = processedElement
-          mainPackageName = packageName
-        }
-        // A runtime permission dialog is its own permissioncontroller window. Detect it in the
-        // primary window or in a focused/active one that also overlaps the primary app window's
-        // bounds (a dialog owns focus while it is on screen, even mid-transition when selection
-        // still lands on the app beneath it), so the flag cannot read false while the dialog is
-        // up (#6151). A focused/active window that does NOT overlap the primary app — e.g.
-        // another app's own dialog in an unrelated split-screen pane — does not flag the primary
-        // app's observation (#6151 follow-up: cross-app false-positive correlation).
-        val canCarryDialog =
-          isPrimaryWindow ||
-            ((window.isFocused || window.isActive) &&
-              (primaryAppWindowBounds == null ||
-                Rect.intersects(primaryAppWindowBounds, windowBounds)))
-        if (notificationPermissionDetected != true && processedElement != null && canCarryDialog) {
+        if (notificationPermissionDetected != true && mainHierarchy != null) {
           notificationPermissionDetected =
-            detectNotificationPermissionDialog(processedElement, packageName)
+            detectNotificationPermissionDialog(mainHierarchy!!, mainPackageName)
         }
-
-        if (processedElement != null) {
+        if (mainHierarchy != null) {
+          val fallbackWindowId = activeWindowKey ?: DEFAULT_WINDOW_KEY
           windowEntries.add(
             WindowEntry(
-              windowId = window.id,
-              windowType = windowType,
-              windowLayer = windowLayer,
-              packageName = packageName,
-              isActive = window.isActive,
-              isFocused = window.isFocused,
-              hierarchy = processedElement,
+              windowId = fallbackWindowId,
+              windowType = "application",
+              windowLayer = activeWindowLayer,
+              packageName = mainPackageName,
+              isActive = true,
+              isFocused = true,
+              hierarchy = mainHierarchy!!,
             )
           )
         }
-      } catch (e: Exception) {
-        Log.e(TAG, "Error extracting hierarchy from window ${window.id}", e)
       }
-    }
 
-    // Fallback to activeWindowRoot when it can still recover application content. When the
-    // selected app has no root, rootInActiveWindow can be the active system status bar, which is
-    // not a substitute for application content.
-    if (
-      mainHierarchy == null &&
-        activeWindowRoot != null &&
-        (!primaryAppWindowHasNullRoot ||
-          activeWindowRoot.packageName?.toString()?.let { it != "com.android.systemui" } == true)
-    ) {
-      val element =
-        extractNodeInfo(
-          activeWindowRoot,
-          0,
-          textFilter,
-          screenDimensions,
-          dedupeTextContentDesc,
-          accessibilityFocusedNode,
-          budget = budget,
-        )
-      if (element != null) {
-        contentHiddenRegionRoots.add(element)
-      }
-      // Skip optimization if disableAllFiltering is true
-      mainHierarchy =
-        if (disableAllFiltering) {
-          element
-        } else {
-          element?.let { wrapOptimizedElements(optimizeHierarchy(it)) }
+      // Skip occlusion filtering when disabled (disableAllFiltering or the --no-occlusion
+      // daemon flag), or when there's only one window (within-window "occlusion" between peer
+      // subtrees like notification_panel and keyguard_message_area_container incorrectly strips
+      // content in system UI)
+      val occlusionFilteringActive =
+        isOcclusionFilteringActive(disableAllFiltering, occlusionEnabled, windowEntries.size)
+      Log.d(
+        TAG,
+        "Occlusion filtering active: $occlusionFilteringActive " +
+          "(disableAllFiltering=$disableAllFiltering, occlusionEnabled=$occlusionEnabled, " +
+          "windowCount=${windowEntries.size})",
+      )
+      if (occlusionFilteringActive) {
+        val occlusionInfo = buildOcclusionInfo(windowEntries)
+        val filteredEntries = windowEntries.mapNotNull { windowEntry ->
+          val hierarchy =
+            filterOccludedHierarchy(
+              windowEntry.hierarchy,
+              occlusionInfo,
+              windowEntry.windowId,
+              path = "",
+              isRoot = true,
+            )
+          hierarchy?.let { windowEntry.copy(hierarchy = it) }
         }
-      mainPackageName = activeWindowRoot.packageName?.toString()
-      if (!intentChooserDetected && mainHierarchy != null) {
-        intentChooserDetected = detectIntentChooserIndicators(mainHierarchy!!)
+        windowEntries.clear()
+        windowEntries.addAll(filteredEntries)
+        // Re-select the same primary application hierarchy after occlusion filtering.
+        mainHierarchy =
+          windowEntries
+            .firstOrNull {
+              if (primaryAppWindowId != null) it.windowId == primaryAppWindowId else it.isActive
+            }
+            ?.hierarchy ?: mainHierarchy
       }
-      if (notificationPermissionDetected != true && mainHierarchy != null) {
-        notificationPermissionDetected =
-          detectNotificationPermissionDialog(mainHierarchy!!, mainPackageName)
-      }
-      if (mainHierarchy != null) {
-        val fallbackWindowId = activeWindowKey ?: DEFAULT_WINDOW_KEY
-        windowEntries.add(
-          WindowEntry(
-            windowId = fallbackWindowId,
-            windowType = "application",
-            windowLayer = activeWindowLayer,
-            packageName = mainPackageName,
-            isActive = true,
-            isFocused = true,
-            hierarchy = mainHierarchy!!,
-          )
+
+      if (windowEntries.isEmpty()) {
+        Log.w(
+          TAG,
+          "[HIERARCHY-DEBUG] No visible windows available after filtering - marking as incomplete for fallback",
+        )
+        return ViewHierarchy(
+          error = "No visible windows available",
+          ctrlProxyIncomplete = true,
         )
       }
-    }
 
-    // Skip occlusion filtering when disabled (disableAllFiltering or the --no-occlusion
-    // daemon flag), or when there's only one window (within-window "occlusion" between peer
-    // subtrees like notification_panel and keyguard_message_area_container incorrectly strips
-    // content in system UI)
-    val occlusionFilteringActive =
-      isOcclusionFilteringActive(disableAllFiltering, occlusionEnabled, windowEntries.size)
-    Log.d(
-      TAG,
-      "Occlusion filtering active: $occlusionFilteringActive " +
-        "(disableAllFiltering=$disableAllFiltering, occlusionEnabled=$occlusionEnabled, " +
-        "windowCount=${windowEntries.size})",
-    )
-    if (occlusionFilteringActive) {
-      val occlusionInfo = buildOcclusionInfo(windowEntries)
-      val filteredEntries = windowEntries.mapNotNull { windowEntry ->
-        val hierarchy =
-          filterOccludedHierarchy(
-            windowEntry.hierarchy,
-            occlusionInfo,
-            windowEntry.windowId,
-            path = "",
-            isRoot = true,
-          )
-        hierarchy?.let { windowEntry.copy(hierarchy = it) }
-      }
-      windowEntries.clear()
-      windowEntries.addAll(filteredEntries)
-      // Re-select the same primary application hierarchy after occlusion filtering.
-      mainHierarchy =
+      val sortedWindowRoots =
         windowEntries
-          .firstOrNull {
-            if (primaryAppWindowId != null) it.windowId == primaryAppWindowId else it.isActive
+          .sortedWith(compareBy<WindowEntry> { it.windowLayer }.thenBy { it.windowId })
+          .map {
+            // Preserve IME ownership after window roots are combined (issue #6795).
+            // The desktop projection folds this subtree; raw captures retain every key.
+            if (it.windowType == "input_method" && !it.packageName.isNullOrBlank()) {
+              it.hierarchy.copy(
+                extras = it.hierarchy.extras.orEmpty() + ("automobile:imePackage" to it.packageName)
+              )
+            } else {
+              it.hierarchy
+            }
           }
-          ?.hierarchy ?: mainHierarchy
-    }
+      val unifiedHierarchy =
+        if (sortedWindowRoots.isEmpty()) null else UIElementInfo(children = sortedWindowRoots)
 
-    if (windowEntries.isEmpty()) {
-      Log.w(
-        TAG,
-        "[HIERARCHY-DEBUG] No visible windows available after filtering - marking as incomplete for fallback",
-      )
+      val accessibilityFocusedElement = unifiedHierarchy?.let {
+        findAccessibilityFocusedElement(it)
+      }
+
+      // Determine if the accessibility service hierarchy is incomplete
+      // This happens when:
+      // 1. An active window has a null root (app restricts accessibility access)
+      // 2. The selected application window has a null root
+      // 3. Only system UI windows were successfully extracted (no app windows accessible)
+      val isSystemUiForeground = mainPackageName == "com.android.systemui"
+      val ctrlProxyIncomplete =
+        activeWindowHasNullRoot ||
+          primaryAppWindowHasNullRoot ||
+          (!hasApplicationWindow && !isSystemUiForeground)
+      if (ctrlProxyIncomplete) {
+        Log.w(
+          TAG,
+          "[HIERARCHY-DEBUG] Accessibility service incomplete: activeWindowHasNullRoot=$activeWindowHasNullRoot, primaryAppWindowHasNullRoot=$primaryAppWindowHasNullRoot, hasApplicationWindow=$hasApplicationWindow",
+        )
+      }
+
       return ViewHierarchy(
-        error = "No visible windows available",
-        ctrlProxyIncomplete = true,
+        packageName = mainPackageName,
+        userId = android.os.Process.myUid() / ANDROID_USER_ID_RANGE,
+        hierarchy = unifiedHierarchy?.let { WireNodeCodec.materialize(it) },
+        windows = windowInfos.takeIf { it.isNotEmpty() },
+        intentChooserDetected = intentChooserDetected,
+        notificationPermissionDetected = notificationPermissionDetected,
+        accessibilityFocusedElement =
+          accessibilityFocusedElement?.let { WireNodeCodec.materialize(it) },
+        ctrlProxyIncomplete = if (ctrlProxyIncomplete) true else null,
+        contentHiddenRegions =
+          detectContentHiddenRegions(contentHiddenRegionRoots, screenDimensions),
+        truncationReasons = budget.truncationReasons().ifEmpty { null },
       )
+    } finally {
+      accessibilityFocusedNode?.recycle()
     }
-
-    val sortedWindowRoots =
-      windowEntries
-        .sortedWith(compareBy<WindowEntry> { it.windowLayer }.thenBy { it.windowId })
-        .map {
-          // Preserve IME ownership after window roots are combined (issue #6795).
-          // The desktop projection folds this subtree; raw captures retain every key.
-          if (it.windowType == "input_method" && !it.packageName.isNullOrBlank()) {
-            it.hierarchy.copy(
-              extras = it.hierarchy.extras.orEmpty() + ("automobile:imePackage" to it.packageName)
-            )
-          } else {
-            it.hierarchy
-          }
-        }
-    val unifiedHierarchy =
-      if (sortedWindowRoots.isEmpty()) null else UIElementInfo(children = sortedWindowRoots)
-
-    val accessibilityFocusedElement = unifiedHierarchy?.let { findAccessibilityFocusedElement(it) }
-
-    // Determine if the accessibility service hierarchy is incomplete
-    // This happens when:
-    // 1. An active window has a null root (app restricts accessibility access)
-    // 2. The selected application window has a null root
-    // 3. Only system UI windows were successfully extracted (no app windows accessible)
-    val isSystemUiForeground = mainPackageName == "com.android.systemui"
-    val ctrlProxyIncomplete =
-      activeWindowHasNullRoot ||
-        primaryAppWindowHasNullRoot ||
-        (!hasApplicationWindow && !isSystemUiForeground)
-    if (ctrlProxyIncomplete) {
-      Log.w(
-        TAG,
-        "[HIERARCHY-DEBUG] Accessibility service incomplete: activeWindowHasNullRoot=$activeWindowHasNullRoot, primaryAppWindowHasNullRoot=$primaryAppWindowHasNullRoot, hasApplicationWindow=$hasApplicationWindow",
-      )
-    }
-
-    return ViewHierarchy(
-      packageName = mainPackageName,
-      userId = android.os.Process.myUid() / ANDROID_USER_ID_RANGE,
-      hierarchy = unifiedHierarchy?.let { WireNodeCodec.materialize(it) },
-      windows = windowInfos.takeIf { it.isNotEmpty() },
-      intentChooserDetected = intentChooserDetected,
-      notificationPermissionDetected = notificationPermissionDetected,
-      accessibilityFocusedElement =
-        accessibilityFocusedElement?.let { WireNodeCodec.materialize(it) },
-      ctrlProxyIncomplete = if (ctrlProxyIncomplete) true else null,
-      contentHiddenRegions = detectContentHiddenRegions(contentHiddenRegionRoots, screenDimensions),
-      truncationReasons = budget.truncationReasons().ifEmpty { null },
-    )
   }
 
   private fun detectContentHiddenRegions(
@@ -838,11 +856,6 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
       node.getBoundsInScreen(bounds)
       val elementBounds = ElementBounds(bounds)
 
-      // Filter zero-area bounds early
-      if (elementBounds.hasZeroArea()) {
-        return null
-      }
-
       // Filter completely offscreen nodes early to avoid processing subtrees
       if (screenDimensions != null && screenDimensions.isValid()) {
         if (elementBounds.isCompletelyOffscreen(screenDimensions.width, screenDimensions.height)) {
@@ -870,22 +883,30 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
       for (i in 0 until childCount) {
         val child = node.getChild(i)
         if (child != null) {
-          val childInfo =
-            extractNodeInfo(
-              child,
-              depth + 1,
-              textFilter,
-              screenDimensions,
-              dedupeTextContentDesc,
-              accessibilityFocusedNode,
-              parentPath = currentPath,
-              childIndex = i,
-              budget = budget,
-            )
-          if (childInfo != null) {
-            children.add(childInfo)
+          try {
+            val childInfo =
+              extractNodeInfo(
+                child,
+                depth + 1,
+                textFilter,
+                screenDimensions,
+                dedupeTextContentDesc,
+                accessibilityFocusedNode,
+                parentPath = currentPath,
+                childIndex = i,
+                budget = budget,
+              )
+            if (childInfo != null) {
+              children.add(childInfo)
+            }
+          } finally {
+            child.recycle()
           }
         }
+      }
+
+      if (elementBounds.hasZeroArea() && children.isEmpty()) {
+        return null
       }
 
       // Extract extra semantics fields

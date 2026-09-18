@@ -3831,8 +3831,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           // Wait for UI to settle after tap, then extract fresh hierarchy.
           val freshHierarchy =
             hierarchyDebouncer.extractAfterQuiescence(
-              quiescenceMs = 50L,
-              maxWaitMs = 500L,
+              quiescenceMs = HierarchyQuiescence.POLL_MS,
+              maxWaitMs = HierarchyQuiescence.TIMEOUT_MS,
               pollIntervalMs = 10L,
             )
           if (freshHierarchy != null) {
@@ -4051,14 +4051,23 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
     try {
       perfProvider.startOperation("findNode")
-      val targetNode =
-        if (resourceId != null) {
-          // Find node by resource-id
-          findNodeByResourceId(rootInActiveWindow, resourceId)
-        } else {
-          // Find currently focused input node
-          findFocusedEditableNode(rootInActiveWindow)
+      val root = rootInActiveWindow
+      var foundTargetNode: android.view.accessibility.AccessibilityNodeInfo? = null
+      try {
+        foundTargetNode =
+          if (resourceId != null) {
+            // Find node by resource-id
+            findNodeByResourceId(root, resourceId)
+          } else {
+            // Find currently focused input node
+            findFocusedEditableNode(root)
+          }
+      } finally {
+        if (root !== foundTargetNode) {
+          root?.recycle()
         }
+      }
+      val targetNode = foundTargetNode
       perfProvider.endOperation("findNode")
 
       if (targetNode == null) {
@@ -4086,11 +4095,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           )
         }
       val success =
-        targetNode.performAction(
-          android.view.accessibility.AccessibilityNodeInfo.ACTION_SET_TEXT,
-          arguments,
-        )
-      targetNode.recycle()
+        try {
+          targetNode.performAction(
+            android.view.accessibility.AccessibilityNodeInfo.ACTION_SET_TEXT,
+            arguments,
+          )
+        } finally {
+          targetNode.recycle()
+        }
       perfProvider.endOperation("setText")
       perfProvider.end()
 
@@ -4145,8 +4157,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       try {
         val freshHierarchy =
           hierarchyDebouncer.extractAfterQuiescence(
-            quiescenceMs = 50L,
-            maxWaitMs = 500L,
+            quiescenceMs = HierarchyQuiescence.POLL_MS,
+            maxWaitMs = HierarchyQuiescence.TIMEOUT_MS,
             pollIntervalMs = 10L,
           )
         if (freshHierarchy != null) {
@@ -4325,10 +4337,12 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     Log.d(TAG, "performImeAction: action='$action'")
     perfProvider.serial("performImeAction")
 
+    var root: android.view.accessibility.AccessibilityNodeInfo? = null
+    var focusedNode: android.view.accessibility.AccessibilityNodeInfo? = null
     try {
       perfProvider.startOperation("findFocusedNode")
-      val root = rootInActiveWindow
-      val focusedNode = findFocusedEditableNode(root)
+      root = rootInActiveWindow
+      focusedNode = findFocusedEditableNode(root)
       perfProvider.endOperation("findFocusedNode")
 
       if (focusedNode == null && action in listOf("next", "previous")) {
@@ -4417,7 +4431,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         }
       perfProvider.endOperation("executeAction")
 
-      focusedNode?.recycle()
       perfProvider.end()
 
       Log.d(TAG, "IME action completed: success=$success")
@@ -4426,8 +4439,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       if (success) {
         val freshHierarchy =
           hierarchyDebouncer.extractAfterQuiescence(
-            quiescenceMs = 50L,
-            maxWaitMs = 500L,
+            quiescenceMs = HierarchyQuiescence.POLL_MS,
+            maxWaitMs = HierarchyQuiescence.TIMEOUT_MS,
             pollIntervalMs = 10L,
           )
         if (freshHierarchy != null) {
@@ -4454,6 +4467,11 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       kotlinx.coroutines.runBlocking {
         broadcastImeActionResult(requestId, action, false, e.message, errorTime - startTime)
       }
+    } finally {
+      if (focusedNode !== root) {
+        focusedNode?.recycle()
+      }
+      root?.recycle()
     }
   }
 
@@ -4715,8 +4733,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       if (success && action in listOf("click", "long_click", "scroll_forward", "scroll_backward")) {
         val freshHierarchy =
           hierarchyDebouncer.extractAfterQuiescence(
-            quiescenceMs = 50L,
-            maxWaitMs = 500L,
+            quiescenceMs = HierarchyQuiescence.POLL_MS,
+            maxWaitMs = HierarchyQuiescence.TIMEOUT_MS,
             pollIntervalMs = 10L,
           )
         if (freshHierarchy != null) {

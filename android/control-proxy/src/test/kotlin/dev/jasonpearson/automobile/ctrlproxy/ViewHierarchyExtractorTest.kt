@@ -98,6 +98,39 @@ class ViewHierarchyExtractorTest {
   }
 
   @Test
+  fun `extractFromActiveWindow retains zero-area parent with non-zero-area child`() {
+    val child = fakeNode(packageName = "example.app", text = "Visible child")
+    val parent =
+      fakeNode(
+        packageName = "example.app",
+        bounds = Rect(0, 0, 0, 0),
+        children = listOf(child),
+      )
+
+    val result = extractor.extractFromActiveWindow(parent, disableAllFiltering = true)
+
+    assertNotNull(result!!.hierarchy)
+    assertTrue(result.hierarchy!!.node.toString().contains("Visible child"))
+    parent.recycle()
+  }
+
+  @Test
+  fun `extractFromActiveWindow prunes zero-area subtree without visible descendants`() {
+    val child = fakeNode(packageName = "example.app", bounds = Rect(0, 0, 0, 0))
+    val parent =
+      fakeNode(
+        packageName = "example.app",
+        bounds = Rect(0, 0, 0, 0),
+        children = listOf(child),
+      )
+
+    val result = extractor.extractFromActiveWindow(parent, disableAllFiltering = true)
+
+    assertNull(result!!.hierarchy)
+    parent.recycle()
+  }
+
+  @Test
   fun `filterViewHierarchy removes non-interactive elements without content`() = runTest {
     val emptyElement =
       UIElementInfo(

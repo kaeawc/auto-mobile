@@ -30,7 +30,13 @@ export interface CapabilityInventory {
 }
 
 export interface DeviceDescription {
-  identity: { stableId: string; deviceId: string | null; connectionId: string | null };
+  identity: {
+    stableId: string;
+    deviceId: string | null;
+    connectionId: string | null;
+    // Registry per-connection routing key (DeviceSessionRegistry), NOT durable across a device restart — distinct from session.sessionUuid (the MCP device session).
+    deviceSessionUuid: string | null;
+  };
   name: string;
   platform: DevicePlatform;
   isVirtual: boolean;
@@ -95,6 +101,7 @@ export type DeviceDescriptionInput =
       pooled?: PooledDevice;
       discovery?: DeviceInfo;
       session?: DeviceSessionLike;
+      deviceSessionUuid?: string;
       serviceStatus?: DeviceServiceStatusLike;
     }
   | {
@@ -104,6 +111,7 @@ export type DeviceDescriptionInput =
       pooled?: PooledDevice;
       discovery?: DeviceInfo;
       session?: DeviceSessionLike;
+      deviceSessionUuid?: string;
       serviceStatus?: DeviceServiceStatusLike;
     };
 
@@ -131,7 +139,14 @@ export function describeDevice(input: DeviceDescriptionInput): DeviceDescription
       : input.discovery?.platform === booted.platform
         ? input.discovery
         : undefined;
-  return describeBooted(booted, image, pooled, input.session, input.serviceStatus);
+  return describeBooted(
+    booted,
+    image,
+    pooled,
+    input.session,
+    input.deviceSessionUuid,
+    input.serviceStatus,
+  );
 }
 
 // oxlint-disable-next-line complexity -- one exhaustive canonical image projection prevents producer drift.
@@ -145,7 +160,12 @@ function describeImage(image: ImageLike, androidProvenance?: AndroidProvenance):
         : (image.deviceId ?? image.name);
   const lifecycle = imageLifecycle(image);
   return {
-    identity: { stableId, deviceId: image.deviceId ?? null, connectionId: null },
+    identity: {
+      stableId,
+      deviceId: image.deviceId ?? null,
+      connectionId: null,
+      deviceSessionUuid: null,
+    },
     name: image.name,
     platform,
     isVirtual: true,
@@ -173,7 +193,7 @@ function describeImage(image: ImageLike, androidProvenance?: AndroidProvenance):
               availabilityError: image.availabilityError ?? null,
             },
           },
-    capabilityInventory: capabilityInventory(image),
+    capabilityInventory: capabilityInventory(image, true),
   };
 }
 
@@ -183,6 +203,7 @@ function describeBooted(
   admittedImage: DeviceInfo | undefined,
   pooled: PooledDevice | undefined,
   session: DeviceSessionLike | undefined,
+  deviceSessionUuid: string | undefined,
   serviceStatus: DeviceServiceStatusLike | undefined,
 ): DeviceDescription {
   const merged = mergeRuntimeFacts(device, admittedImage);
@@ -204,6 +225,7 @@ function describeBooted(
       stableId,
       deviceId: device.deviceId,
       connectionId: pooled ? `${device.deviceId}#${pooled.incarnation}` : device.deviceId,
+      deviceSessionUuid: deviceSessionUuid ?? null,
     },
     name: device.name,
     platform: device.platform,
@@ -222,7 +244,7 @@ function describeBooted(
       device.platform === "android"
         ? { android: { path: null, target: null, basedOn: null, error: null }, ios: null }
         : { android: null, ios: { isAvailable: null, availabilityError: null } },
-    capabilityInventory: capabilityInventory(merged),
+    capabilityInventory: capabilityInventory(merged, isVirtual),
   };
 }
 
@@ -314,10 +336,10 @@ function poolStatus(pooled: PooledDevice | undefined): DevicePoolStatus | null {
   return pooled.status === "idle" || pooled.status === "error" ? pooled.status : null;
 }
 
-function capabilityInventory(device: DeviceInfo): CapabilityInventory | null {
+function capabilityInventory(device: DeviceInfo, isVirtual: boolean): CapabilityInventory | null {
   const inventory =
     device.capabilityInventory ??
-    (device.platform === "ios"
+    (device.platform === "ios" && isVirtual
       ? iosSimulatorCapabilityInventory({
           isAvailable: device.isAvailable,
           availabilityError: device.availabilityError,
@@ -440,6 +462,7 @@ export const deviceDescriptionSchema = z.object({
     stableId: z.string(),
     deviceId: nullableString,
     connectionId: nullableString,
+    deviceSessionUuid: nullableString,
   }),
   name: z.string(),
   platform: z.enum(["android", "ios"]),
@@ -498,6 +521,7 @@ export const deviceDescriptionSchema = z.object({
 });
 
 export const listDevicesEntrySchema = z.object({
+  deviceId: z.string(),
   identity: deviceDescriptionSchema.shape.identity,
   name: deviceDescriptionSchema.shape.name,
   platform: deviceDescriptionSchema.shape.platform,

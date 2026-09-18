@@ -116,6 +116,10 @@ export interface ServiceStatusDiagnostic {
 
 // The resource keeps its diagnostic siblings alongside the full canonical description.
 interface BootedDeviceInfo extends DeviceDescription {
+  /** Compatibility alias mirroring identity.deviceId for the desktop decoder. */
+  deviceId: string;
+  /** Compatibility alias mirroring lifecycle.state for the desktop decoder. */
+  status: "booted";
   recoveryEligibility: DeviceRecoveryEligibility | null;
   serviceStatus: DeviceServiceStatus | null;
   /**
@@ -343,15 +347,21 @@ function toBootedDeviceInfo(
   device: BootedDevice,
   poolContext?: PoolDeviceContext,
 ): BootedDeviceInfo {
+  const description = describeDevice({
+    kind: "booted",
+    device,
+    pooled: poolContext?.pooled,
+    session: poolContext?.session,
+    deviceSessionUuid: poolContext?.deviceSessionUuid,
+  });
   return {
-    ...projectBootedDevice(
-      describeDevice({
-        kind: "booted",
-        device,
-        pooled: poolContext?.pooled,
-        session: poolContext?.session,
-      }),
-    ),
+    ...projectBootedDevice(description),
+    // Compatibility aliases mirroring identity.deviceId / lifecycle.state for the desktop decoder.
+    deviceId: description.identity.deviceId!,
+    status: "booted",
+    ...(description.identity.deviceSessionUuid
+      ? { deviceSessionUuid: description.identity.deviceSessionUuid }
+      : {}),
     recoveryEligibility: poolContext?.poolInfo.recoveryEligibility ?? null,
     serviceStatus: null,
     locked: null,
@@ -390,12 +400,14 @@ interface PoolDeviceContext {
   poolInfo: PoolDeviceInfo;
   pooled: PooledDevice;
   session?: Session;
+  deviceSessionUuid?: string;
 }
 
 function resolvePoolDeviceContext(
   devicePool: DevicePool | null,
   device: BootedDevice,
   sessionInfoByDeviceId: Map<string, Session> | null,
+  resolveDeviceSessionUuid: (deviceId: string) => string | null,
 ): PoolDeviceContext | undefined {
   if (!devicePool) {
     return undefined;
@@ -419,6 +431,7 @@ function resolvePoolDeviceContext(
     },
     pooled: pooledDevice,
     session: sessionInfoByDeviceId?.get(device.deviceId),
+    deviceSessionUuid: resolveDeviceSessionUuid(device.deviceId) ?? undefined,
   };
 }
 
@@ -517,6 +530,7 @@ async function discoverBootedDevicesForPlatform(
   platform: Platform,
   devicePool: DevicePool | null,
   sessionInfoByDeviceId: Map<string, Session> | null,
+  resolveDeviceSessionUuid: (deviceId: string) => string | null,
 ): Promise<PlatformDiscoveryResult> {
   try {
     const discovery =
@@ -536,7 +550,12 @@ async function discoverBootedDevicesForPlatform(
         withIdentityQuarantineMarker(
           toBootedDeviceInfo(
             device,
-            resolvePoolDeviceContext(devicePool, device, sessionInfoByDeviceId),
+            resolvePoolDeviceContext(
+              devicePool,
+              device,
+              sessionInfoByDeviceId,
+              resolveDeviceSessionUuid,
+            ),
           ),
           devicePool,
         ),
@@ -586,6 +605,7 @@ interface DaemonDeviceContext {
   devicePool: DevicePool | null;
   poolStatus?: PoolStatusSummary;
   sessionInfoByDeviceId: Map<string, Session> | null;
+  resolveDeviceSessionUuid: (deviceId: string) => string | null;
 }
 
 function readDaemonDeviceContext(): DaemonDeviceContext {
@@ -594,12 +614,14 @@ function readDaemonDeviceContext(): DaemonDeviceContext {
     return {
       devicePool: null,
       sessionInfoByDeviceId: null,
+      resolveDeviceSessionUuid: () => null,
     };
   }
 
   let devicePool: DevicePool | null = null;
   let poolStatus: PoolStatusSummary | undefined;
   let sessionInfoByDeviceId: Map<string, Session> | null = null;
+  let resolveDeviceSessionUuid: (deviceId: string) => string | null = () => null;
   try {
     devicePool = daemonState.getDevicePool();
     poolStatus = {
@@ -621,7 +643,15 @@ function readDaemonDeviceContext(): DaemonDeviceContext {
     logger.warn(`[BootedDeviceResources] Failed to read session manager state: ${error}`);
   }
 
-  return { devicePool, poolStatus, sessionInfoByDeviceId };
+  try {
+    const registry = daemonState.getDeviceSessionRegistry();
+    resolveDeviceSessionUuid = (deviceId) =>
+      registry.getByDeviceId(deviceId)?.deviceSessionUuid ?? null;
+  } catch (error) {
+    logger.warn(`[BootedDeviceResources] Failed to read device session registry: ${error}`);
+  }
+
+  return { devicePool, poolStatus, sessionInfoByDeviceId, resolveDeviceSessionUuid };
 }
 
 /**
@@ -856,6 +886,7 @@ async function getBootedDevicesForPlatforms(
       platform,
       daemonContext.devicePool,
       daemonContext.sessionInfoByDeviceId,
+      daemonContext.resolveDeviceSessionUuid,
     );
     devices.push(...discovery.devices);
     platformObservations[platform] = discovery.observation;

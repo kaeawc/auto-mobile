@@ -1024,7 +1024,7 @@ describe("MCP Booted Device Resources", () => {
       }
     });
 
-    test("does not expose a registry epoch UUID as a durable device identity", async function () {
+    test("exposes the registry routing key separately from the MCP session UUID", async function () {
       fakeDeviceUtils.setBootedDevices("android", [mockAndroidDevice1]);
 
       const fakeTimer = new FakeTimer();
@@ -1056,8 +1056,12 @@ describe("MCP Booted Device Resources", () => {
         expect(data.devices).toEqual(
           expect.arrayContaining([
             expect.objectContaining({
+              deviceId: mockAndroidDevice1.deviceId,
+              status: "booted",
               identity: expect.objectContaining({ deviceId: mockAndroidDevice1.deviceId }),
               session: expect.objectContaining({ sessionUuid: null }),
+              deviceSessionUuid: registry.getByDeviceId(mockAndroidDevice1.deviceId)
+                ?.deviceSessionUuid,
             }),
           ]),
         );

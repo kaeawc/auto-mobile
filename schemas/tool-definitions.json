@@ -2932,9 +2932,19 @@
                         "type": "null"
                       }
                     ]
+                  },
+                  "deviceSessionUuid": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
                 },
-                "required": ["stableId", "deviceId", "connectionId"],
+                "required": ["stableId", "deviceId", "connectionId", "deviceSessionUuid"],
                 "additionalProperties": false
               },
               "name": {
@@ -3327,6 +3337,9 @@
           "items": {
             "type": "object",
             "properties": {
+              "deviceId": {
+                "type": "string"
+              },
               "identity": {
                 "type": "object",
                 "properties": {
@@ -3352,9 +3365,19 @@
                         "type": "null"
                       }
                     ]
+                  },
+                  "deviceSessionUuid": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
                 },
-                "required": ["stableId", "deviceId", "connectionId"],
+                "required": ["stableId", "deviceId", "connectionId", "deviceSessionUuid"],
                 "additionalProperties": false
               },
               "name": {
@@ -3491,6 +3514,7 @@
               }
             },
             "required": [
+              "deviceId",
               "identity",
               "name",
               "platform",
@@ -8725,9 +8749,19 @@
                       "type": "null"
                     }
                   ]
+                },
+                "deviceSessionUuid": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 }
               },
-              "required": ["stableId", "deviceId", "connectionId"],
+              "required": ["stableId", "deviceId", "connectionId", "deviceSessionUuid"],
               "additionalProperties": false
             },
             "name": {

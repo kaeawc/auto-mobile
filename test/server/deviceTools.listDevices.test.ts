@@ -119,11 +119,13 @@ describe("listDevices tool (#5870)", () => {
       expect.arrayContaining([
         expect.objectContaining({
           platform: "android",
+          deviceId: "emulator-5554",
           identity: expect.objectContaining({ deviceId: "emulator-5554" }),
           name: "Pixel_9_API_36",
         }),
         expect.objectContaining({
           platform: "ios",
+          deviceId: "E2F46BCE-4C97-4AA0-BD9D-544756FAB545",
           identity: expect.objectContaining({ deviceId: "E2F46BCE-4C97-4AA0-BD9D-544756FAB545" }),
           name: "iPhone 17",
         }),

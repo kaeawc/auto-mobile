@@ -18,14 +18,15 @@ Renames and drops:
 - `isRunning` is derived by the canonical lifecycle mapping and is not emitted.
 - `iosVersion`, `osVersion`, and booted-resource string `runtime` became `runtime.osVersion`; runtime identifiers use `runtime.runtimeId`.
 - `screenSize` became `display`; density is `display.density`.
-- `deviceSessionUuid` was dropped: the pool incarnation is represented only by `identity.connectionId`; `session.sessionUuid` is the session identity.
+- `identity.connectionId` is the pool-incarnation epoch, `session.sessionUuid` is the durable MCP device-session id, and `identity.deviceSessionUuid` is the DeviceSessionRegistry per-connection routing key used by desktop stream subscriptions. The routing key is intentionally distinct from both other identities and is omitted when the registry has no live record.
 - Flat `poolStatus`, `assignedSession`, and legacy session detail collapsed into `session`.
 - `capabilities.automation` was removed from the booted resource. `serviceStatus` is retained as the sole automation-status sibling because it includes integrity and runner diagnostics.
 - Capability inventory entries now use `{ id, state: "supported"|"unsupported"|"unknown", reason, source }`, with explicit nulls.
-- iOS configured-image records always carry the static simulator inventory. If an
-  upstream discovery record omitted it, the canonical builder supplies the same
-  platform inventory (including unsupported DND, network-condition, and
-  connectivity controls) before projection.
+- iOS simulator configured-image records carry the static simulator inventory. If an
+  upstream simulator discovery record omitted it, the canonical builder supplies the same
+  simulator inventory (including unsupported DND, network-condition, and
+  connectivity controls) before projection. Physical iPhones never receive that
+  synthesized simulator-only inventory; they retain discovered inventory or `null`.
 - Canonical `source` means locality only (`local`, `remote`, or null). `getApple` acquisition is the separate `acquisition` field.
 
 The Simctl discovery expectation includes those three static unsupported entries;

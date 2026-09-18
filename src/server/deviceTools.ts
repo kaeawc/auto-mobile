@@ -977,18 +977,67 @@ function androidSourceImageWithBootedMetadata(
   };
 }
 
+function deviceIdentityPayload(
+  device: BootedDevice,
+  sourceImage?: DeviceInfo,
+): Record<string, unknown> {
+  if (device.platform === "android") {
+    return androidDeviceIdentityPayload(device, sourceImage);
+  }
+
+  const ctrlProxy = IOSCtrlProxyManager.getInstance(device);
+  return {
+    platform: "ios",
+    simulatorUdid: device.deviceId,
+    simulatorName: device.name,
+    iosServicePort: ctrlProxy.getServicePort(),
+    iosRunnerGeneration: ctrlProxy.getRunnerGeneration(),
+  };
+}
+
+function androidDeviceIdentityPayload(
+  device: BootedDevice,
+  sourceImage: DeviceInfo | undefined,
+): Record<string, unknown> {
+  const portMatch = /^emulator-(\d+)$/.exec(device.deviceId);
+  const androidImage = sourceImage?.platform === "android" ? sourceImage : undefined;
+  const { apiLevel, osVersion } = androidBootedMetadata(device, sourceImage);
+  return {
+    platform: "android",
+    avdName: androidImage?.name ?? device.name,
+    adbSerial: device.deviceId,
+    emulatorConsolePort: portMatch ? Number(portMatch[1]) : null,
+    ...(apiLevel !== undefined ? { apiLevel } : {}),
+    ...(osVersion ? { osVersion } : {}),
+  };
+}
+
+function androidBootedMetadata(
+  device: BootedDevice,
+  sourceImage: DeviceInfo | undefined,
+): Pick<DeviceInfo, "apiLevel" | "osVersion"> {
+  const androidImage = sourceImage?.platform === "android" ? sourceImage : undefined;
+  return {
+    apiLevel: device.apiLevel ?? androidImage?.apiLevel,
+    osVersion: device.osVersion ?? androidImage?.osVersion,
+  };
+}
+
 function listDevicePayloads(booted: BootedDevice[], devicePool: DevicePool | undefined) {
-  return booted.map((device) =>
-    projectListDevicesEntry(
-      describeDevice({
-        kind: "booted",
-        device,
-        pooled: devicePool?.describesPooledRuntime(device)
-          ? (devicePool.getDevice(device.deviceId) ?? undefined)
-          : undefined,
-      }),
-    ),
-  );
+  return booted.map((device) => {
+    const description = describeDevice({
+      kind: "booted",
+      device,
+      pooled: devicePool?.describesPooledRuntime(device)
+        ? (devicePool.getDevice(device.deviceId) ?? undefined)
+        : undefined,
+    });
+    return {
+      ...projectListDevicesEntry(description),
+      // Compatibility alias for identity.deviceId, kept for existing CLI/script/BATS/Kotlin consumers; see docs/design-docs/device-description-audit.md.
+      deviceId: description.identity.deviceId!,
+    };
+  });
 }
 
 function initializedDevicePool(): DevicePool | undefined {
@@ -9050,17 +9099,20 @@ export function registerDeviceTools() {
   ) {
     perf.end();
     const timing = perf.getTimings();
+    const description = describeDevice({
+      kind: "booted",
+      device,
+      pooled: initializedDevicePool()?.getDevice(device.deviceId) ?? undefined,
+      discovery: sourceImage,
+      session: { sessionId },
+    });
     return createStructuredToolResponse({
       message: `${device.platform} '${device.name}' is ready (${source})`,
-      ...projectBootedDevice(
-        describeDevice({
-          kind: "booted",
-          device,
-          pooled: initializedDevicePool()?.getDevice(device.deviceId) ?? undefined,
-          discovery: sourceImage,
-          session: { sessionId },
-        }),
-      ),
+      ...projectBootedDevice(description),
+      // Compatibility aliases for identity.deviceId / session.sessionUuid, kept for existing CLI/script/BATS/Kotlin consumers; see docs/design-docs/device-description-audit.md.
+      deviceId: description.identity.deviceId,
+      sessionUuid: description.session.sessionUuid,
+      deviceIdentity: deviceIdentityPayload(device, sourceImage),
       processId: processId ?? null,
       isReady: true,
       acquisition: source === "booted" ? "already-booted" : "cold-boot",

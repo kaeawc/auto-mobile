@@ -148,6 +148,58 @@ describe("device description projections", () => {
     expect(Object.keys(description)).toEqual(Object.keys(projectionKeys.booted));
   });
 
+  test("synthesizes static inventory only for iOS simulators", () => {
+    const simulator = describeDevice({
+      kind: "booted",
+      device: {
+        name: "iPhone 17 Simulator",
+        platform: "ios",
+        deviceId: "A1B2C3D4-E5F6-7890-ABCD-EF1234567890",
+      },
+    });
+    const physicalWithoutInventory = describeDevice({
+      kind: "booted",
+      device: {
+        name: "Jason's iPhone",
+        platform: "ios",
+        deviceId: "00008110-0012345678901234",
+      },
+    });
+    const discoveredInventory = {
+      schemaVersion: 1,
+      capabilities: [{ id: "ios.real-device.camera", state: "available" as const }],
+    };
+    const physicalWithInventory = describeDevice({
+      kind: "booted",
+      device: {
+        name: "Jason's iPhone",
+        platform: "ios",
+        deviceId: "00008110-0012345678901234",
+        capabilityInventory: discoveredInventory,
+      },
+    });
+
+    expect(simulator.capabilityInventory?.capabilities).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "ios.simulator.doNotDisturb", state: "unsupported" }),
+        expect.objectContaining({ id: "ios.simulator.networkCondition", state: "unsupported" }),
+        expect.objectContaining({ id: "ios.simulator.connectivity", state: "unsupported" }),
+      ]),
+    );
+    expect(physicalWithoutInventory.capabilityInventory).toBeNull();
+    expect(physicalWithInventory.capabilityInventory).toEqual({
+      schemaVersion: 1,
+      capabilities: [
+        {
+          id: "ios.real-device.camera",
+          state: "supported",
+          reason: null,
+          source: null,
+        },
+      ],
+    });
+  });
+
   test("keeps retired output literals out of every producer", () => {
     const producers = [
       "../../src/server/deviceTools.ts",

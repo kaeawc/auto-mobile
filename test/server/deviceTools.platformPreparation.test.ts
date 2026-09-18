@@ -229,6 +229,17 @@ describe("platform device preparation tools", () => {
       stableId: "Pixel_9_API_36",
       deviceId: "emulator-5562",
       connectionId: "emulator-5562",
+      deviceSessionUuid: null,
+    });
+    expect(result).toMatchObject({
+      deviceId: "emulator-5562",
+      sessionUuid: result.session.sessionUuid,
+      deviceIdentity: {
+        platform: "android",
+        avdName: "Pixel_9_API_36",
+        adbSerial: "emulator-5562",
+        emulatorConsolePort: 5562,
+      },
     });
   });
 

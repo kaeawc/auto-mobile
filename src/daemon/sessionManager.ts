@@ -141,6 +141,7 @@ export interface Session {
   platform: Platform; // Device platform
   createdAt: number; // Timestamp when session was created
   lastUsedAt: number; // Last activity timestamp
+  activityGeneration: number; // Monotonic generation of durable activity refreshes
   expiresAt: number; // When session will expire (for cleanup)
   cacheData: SessionCacheData; // Cached data for this session
   lastHeartbeat: number; // Timestamp of last heartbeat
@@ -174,6 +175,19 @@ export interface Session {
    * policy.
    */
   preCliLiveness?: PreCliLivenessSnapshot;
+}
+
+function rollbackSessionActivityIfCurrent(
+  session: Session,
+  previousActivity: Pick<Session, "lastUsedAt" | "lastHeartbeat" | "expiresAt">,
+  capturedGeneration: number,
+): void {
+  if (session.activityGeneration !== capturedGeneration) {
+    return;
+  }
+  session.lastUsedAt = previousActivity.lastUsedAt;
+  session.lastHeartbeat = previousActivity.lastHeartbeat;
+  session.expiresAt = previousActivity.expiresAt;
 }
 
 /** The heartbeat-policy timeouts `adoptCliLivenessPolicy` overwrote (#6870). */
@@ -888,6 +902,7 @@ export class SessionManager {
       platform,
       createdAt: now,
       lastUsedAt: now,
+      activityGeneration: 0,
       expiresAt: now + liveness.sessionTimeoutMs,
       cacheData: {},
       lastHeartbeat: now,
@@ -1158,14 +1173,15 @@ export class SessionManager {
       existing.lastUsedAt = now;
       existing.lastHeartbeat = now;
       existing.expiresAt = now + existing.sessionTimeoutMs;
+      existing.activityGeneration++;
+      const capturedGeneration = existing.activityGeneration;
       try {
         await this.recordSessionActivity(existing);
       } catch (error) {
         // An awaited activity refresh cannot advertise fresh in-memory liveness
         // after its durable write failed; callers receive the typed failure.
-        existing.lastUsedAt = previousActivity.lastUsedAt;
-        existing.lastHeartbeat = previousActivity.lastHeartbeat;
-        existing.expiresAt = previousActivity.expiresAt;
+        // Only the latest refresh may roll back, so an older failure cannot clobber newer liveness.
+        rollbackSessionActivityIfCurrent(existing, previousActivity, capturedGeneration);
         throw error;
       }
       return existing;

@@ -443,6 +443,52 @@ describe("SessionManager", () => {
       }
     });
 
+    test("does not roll back a newer overlapping liveness refresh", async () => {
+      const firstActivity = Promise.withResolvers<void>();
+      const firstActivityStarted = Promise.withResolvers<void>();
+      let activityAttempts = 0;
+      const persistence: DeviceSessionPersistence = {
+        async upsertActiveSession(): Promise<void> {},
+        async recordActivity(): Promise<void> {
+          activityAttempts++;
+          if (activityAttempts === 1) {
+            firstActivityStarted.resolve();
+            await firstActivity.promise;
+            throw new Error("first activity persistence failed");
+          }
+        },
+        async markReleased(): Promise<void> {},
+      };
+      const manager = new SessionManager(fakeTimer, persistence);
+      try {
+        const existing = await manager.createSession(
+          "overlapping-activity",
+          "emulator-5554",
+          "android",
+        );
+        fakeTimer.advanceTime(10);
+        const firstRefresh = manager.getOrCreateSession("overlapping-activity");
+        await firstActivityStarted.promise;
+
+        fakeTimer.advanceTime(10);
+        const secondRefresh = manager.getOrCreateSession("overlapping-activity");
+        const second = await secondRefresh;
+        const newerActivity = {
+          lastUsedAt: second.lastUsedAt,
+          lastHeartbeat: second.lastHeartbeat,
+          expiresAt: second.expiresAt,
+        };
+
+        firstActivity.resolve();
+        await expect(firstRefresh).rejects.toBeInstanceOf(SessionActivityPersistenceError);
+        expect(existing.lastUsedAt).toBe(newerActivity.lastUsedAt);
+        expect(existing.lastHeartbeat).toBe(newerActivity.lastHeartbeat);
+        expect(existing.expiresAt).toBe(newerActivity.expiresAt);
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+
     test("should bump lastHeartbeat when resolving an existing session", async () => {
       // The daemon heartbeat watchdog reaps sessions on a stale lastHeartbeat.
       // Resolving a session for a tool call must count as activity, otherwise an

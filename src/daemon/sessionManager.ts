@@ -376,6 +376,7 @@ export interface RehydrationSummary {
   rehydrated: string[];
   terminalized: Array<{ sessionUuid: string; reason: string }>;
   skipped: Array<{ sessionUuid: string; reason: string }>;
+  timedOut: boolean;
 }
 
 /**
@@ -499,6 +500,7 @@ const NETWORK_CONDITION_RESTORE_TIMEOUT_MS = 1_000;
 const NETWORK_CONDITION_RESTORE_RETRY_ATTEMPTS = 2;
 const NETWORK_CONDITION_RESTORE_RETRY_DELAY_MS = 250;
 const SESSION_SETUP_DRAIN_TIMEOUT_MS = 1_000;
+export const SESSION_REHYDRATION_DEADLINE_MS = 15_000;
 const EXPIRY_RELEASE_REASONS = new Set([
   "lazy-expiry",
   "cleanup-expired",
@@ -1319,11 +1321,43 @@ export class SessionManager {
     return session;
   }
 
-  async rehydratePersistedSessions(devicePool: SessionDeviceAssigner): Promise<RehydrationSummary> {
-    const summary: RehydrationSummary = { rehydrated: [], terminalized: [], skipped: [] };
+  async rehydratePersistedSessions(
+    devicePool: SessionDeviceAssigner,
+    options: { deadlineMs?: number } = {},
+  ): Promise<RehydrationSummary> {
+    const deadlineMs = options.deadlineMs ?? SESSION_REHYDRATION_DEADLINE_MS;
+    const deadlineAt = this.timer.now() + deadlineMs;
+    const summary: RehydrationSummary = {
+      rehydrated: [],
+      terminalized: [],
+      skipped: [],
+      timedOut: false,
+    };
     const persistedSessions =
       (await this.deviceSessionRepository.listRecoverableSessions?.()) ?? [];
-    for (const persisted of persistedSessions) {
+    const markDeadline = (startIndex: number): void => {
+      for (const remaining of persistedSessions.slice(startIndex)) {
+        const sessionId = remaining.session_uuid;
+        if (!this.isRecoverablePersistedSession(remaining)) {
+          summary.skipped.push({ sessionUuid: sessionId, reason: "not-recoverable" });
+        } else if (this.sessions.has(sessionId)) {
+          summary.skipped.push({ sessionUuid: sessionId, reason: "already-live" });
+        } else {
+          summary.skipped.push({ sessionUuid: sessionId, reason: "startup-deadline" });
+        }
+      }
+      if (!summary.timedOut) {
+        summary.timedOut = true;
+        const skippedCount = summary.skipped.filter(
+          ({ reason }) => reason === "startup-deadline",
+        ).length;
+        logger.warn(
+          `[SessionManager] Startup rehydration deadline reached; skipped ${skippedCount} rows due to startup-deadline`,
+        );
+      }
+    };
+    const deadlineWon = Symbol("startup-deadline");
+    for (const [index, persisted] of persistedSessions.entries()) {
       const sessionId = persisted.session_uuid;
       if (!this.isRecoverablePersistedSession(persisted)) {
         summary.skipped.push({ sessionUuid: sessionId, reason: "not-recoverable" });
@@ -1333,14 +1367,32 @@ export class SessionManager {
         summary.skipped.push({ sessionUuid: sessionId, reason: "already-live" });
         continue;
       }
+      if (this.timer.now() >= deadlineAt) {
+        markDeadline(index);
+        break;
+      }
       try {
-        await this.recoverPersistedSession(
+        const recoveryPromise = this.recoverPersistedSession(
           sessionId,
           devicePool,
           persisted.platform,
           persisted,
           "awaiting-owner",
         );
+        const remaining = Math.max(0, deadlineAt - this.timer.now());
+        const recoveryResult = await Promise.race([
+          recoveryPromise,
+          this.timer.sleep(remaining).then(() => deadlineWon),
+        ]);
+        if (recoveryResult === deadlineWon) {
+          void recoveryPromise.catch((error) =>
+            logger.warn(
+              `[SessionManager] Rehydration continued after startup deadline for ${sessionId}: ${errorMessage(error)}`,
+            ),
+          );
+          markDeadline(index);
+          break;
+        }
         summary.rehydrated.push(sessionId);
       } catch (error) {
         const terminalRelease = this.getTerminalReleaseSnapshot(sessionId);

@@ -330,7 +330,7 @@ export class InstallApp {
   ): Promise<void> {
     try {
       await this.adb.executeCommand(
-        `shell am force-stop --user ${userId} ${packageName}`,
+        `shell am force-stop --user ${userId} ${shellQuote(packageName)}`,
         undefined,
         undefined,
         true,

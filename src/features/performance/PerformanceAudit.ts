@@ -340,7 +340,9 @@ export class PerformanceAudit {
   ): Promise<Partial<PerformanceMetrics>> {
     try {
       const { stdout } = await perf.track("adbCheckAnr", () =>
-        this.adb.executeCommand(`shell dumpsys activity processes | grep -A 20 "${packageName}"`),
+        this.adb.executeCommand(
+          `shell dumpsys activity processes | grep -A 20 ${shellQuote(packageName)}`,
+        ),
       );
 
       // Look for ANR indicators
@@ -537,7 +539,7 @@ export class PerformanceAudit {
       // This looks for recent "Displayed" entries in logcat
       const { stdout } = await perf.track("adbLogcatTtff", () =>
         this.adb.executeCommand(
-          `shell "logcat -d -s ActivityManager:I | grep -E 'Displayed.*${packageName}' | tail -1"`,
+          `shell "logcat -d -s ActivityManager:I | grep -E 'Displayed.*'${shellQuote(packageName)} | tail -1"`,
         ),
       );
 

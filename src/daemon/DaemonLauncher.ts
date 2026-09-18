@@ -4,7 +4,14 @@ import {
   type ChildProcess,
   type SpawnOptions,
 } from "node:child_process";
-import { existsSync, lstatSync, readFileSync } from "node:fs";
+import {
+  closeSync,
+  constants as fsConstants,
+  existsSync,
+  fstatSync,
+  openSync,
+  readFileSync,
+} from "node:fs";
 import { posix, win32 } from "node:path";
 import { ActionableError } from "../models";
 import { trackProcess, waitForExit, type TrackedChildProcess } from "../utils/ChildProcessTracker";
@@ -35,14 +42,21 @@ const defaultCheckoutProbe: CheckoutProvenanceProbe = (checkoutRoot) => {
     const packageJsonPath = checkoutRoot.includes("\\")
       ? win32.join(checkoutRoot, "package.json")
       : posix.join(checkoutRoot, "package.json");
-    const packageJsonStat = lstatSync(packageJsonPath);
-    if (!packageJsonStat.isFile() || packageJsonStat.size > 1_048_576) {
-      return false;
+    // Open first and inspect the descriptor so the check and the read see the same file
+    // (no check-then-use race); O_NONBLOCK keeps a FIFO from blocking the open.
+    const fd = openSync(packageJsonPath, fsConstants.O_RDONLY | fsConstants.O_NONBLOCK);
+    try {
+      const packageJsonStat = fstatSync(fd);
+      if (!packageJsonStat.isFile() || packageJsonStat.size > 1_048_576) {
+        return false;
+      }
+      const packageJson = JSON.parse(readFileSync(fd, "utf8")) as {
+        name?: unknown;
+      };
+      return packageJson.name === "@kaeawc/auto-mobile";
+    } finally {
+      closeSync(fd);
     }
-    const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8")) as {
-      name?: unknown;
-    };
-    return packageJson.name === "@kaeawc/auto-mobile";
   } catch (error) {
     // A failed probe only rules out an untrusted sibling process, so it is safe to swallow.
     logger.debug(`Unable to verify AutoMobile checkout provenance at ${checkoutRoot}: ${error}`);

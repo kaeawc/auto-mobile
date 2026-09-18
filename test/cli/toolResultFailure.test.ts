@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { DaemonVersionMismatchError } from "../../src/daemon/daemonMcpProxy";
 import {
   isCliToolFailure,
@@ -6,6 +6,17 @@ import {
   runCliCommand,
   setDaemonProxyFactoryForTesting,
 } from "../../src/cli";
+import { isolateCliDataDir, type IsolatedCliDataDir } from "../helpers/cliDataDirIsolation";
+
+let isolatedCliDataDir: IsolatedCliDataDir;
+
+beforeEach(() => {
+  isolatedCliDataDir = isolateCliDataDir();
+});
+
+afterEach(() => {
+  isolatedCliDataDir.restore();
+});
 
 describe("isCliToolFailure (issue #6017)", () => {
   const originalProcessExit = process.exit;

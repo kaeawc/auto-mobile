@@ -26,10 +26,18 @@ function textContent(response: unknown): string[] {
   });
 }
 
-function sessionUuidFromJson(text: string): string | undefined {
+function connectionProfileUuidFromJson(text: string): string | undefined {
   try {
-    const sessionUuid = (JSON.parse(text) as { sessionUuid?: unknown }).sessionUuid;
-    return typeof sessionUuid === "string" && sessionUuid.trim().length > 0
+    const parsed: unknown = JSON.parse(text);
+    if (!parsed || typeof parsed !== "object") {
+      return undefined;
+    }
+    const { sessionUuid, scope } = parsed as { sessionUuid?: unknown; scope?: unknown };
+    // Require the server discriminator so a device-session echo cannot become
+    // a reusable connection profile on this proxy.
+    return typeof sessionUuid === "string" &&
+      sessionUuid.trim().length > 0 &&
+      scope === "connection-profile"
       ? sessionUuid
       : undefined;
   } catch (error) {
@@ -42,6 +50,6 @@ function sessionUuidFromJson(text: string): string | undefined {
 
 export function toolSelectionProfileUuidFromResponse(response: unknown): string | undefined {
   return textContent(response)
-    .map(sessionUuidFromJson)
+    .map(connectionProfileUuidFromJson)
     .find((sessionUuid): sessionUuid is string => sessionUuid !== undefined);
 }

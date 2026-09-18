@@ -2519,13 +2519,20 @@ export class DaemonMcpProxy {
     if (name !== SET_TOOL_ENABLED_TOOL_NAME) {
       return;
     }
-    const hasExplicitSessionUuid =
-      typeof requestedArgs.sessionUuid === "string" && requestedArgs.sessionUuid.trim().length > 0;
-    if (!hasExplicitSessionUuid) {
-      const sessionUuid = toolSelectionProfileUuidFromResponse(result);
-      if (sessionUuid) {
-        this.toolSelectionProfileUuid = sessionUuid;
+    const explicitSessionUuid =
+      typeof requestedArgs.sessionUuid === "string" && requestedArgs.sessionUuid.trim().length > 0
+        ? requestedArgs.sessionUuid
+        : undefined;
+    const responseProfileUuid = toolSelectionProfileUuidFromResponse(result);
+    if (!explicitSessionUuid) {
+      if (responseProfileUuid) {
+        this.toolSelectionProfileUuid = responseProfileUuid;
       }
+    } else if (responseProfileUuid === explicitSessionUuid) {
+      // toolSelectionProfileUuidFromResponse only returns server-confirmed
+      // connection-profile responses. Retain a successful self-reaffirm so
+      // withToolSelectionProfile() can attach it to later acquisitions.
+      this.toolSelectionProfileUuid = responseProfileUuid;
     }
     // Do not depend solely on the daemon's best-effort list_changed delivery.
     // The successful update has already changed the authoritative tool surface.

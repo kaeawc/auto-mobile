@@ -10,6 +10,7 @@ import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
 import type { BootedDevice } from "../../src/models";
+import { InMemoryToolSelectionProfileRegistry } from "../../src/server/toolSelectionProfileRegistry";
 
 /**
  * #6148 (#6069 residual) — `setToolEnabled` must reject a never-issued
@@ -67,6 +68,13 @@ describe("setToolEnabled sessionUuid validation (#6148)", () => {
       async () => ({ content: [{ type: "text" as const, text: "clipboard" }] }),
       { defaultEnabled: false },
     );
+    ToolRegistry.register(
+      "hiddenTool",
+      "hidden",
+      z.object({ sessionUuid: z.string().optional() }),
+      async () => ({ content: [{ type: "text" as const, text: "hidden" }] }),
+      { defaultEnabled: false, hidden: true },
+    );
     registerToolSelectionTools();
   });
 
@@ -103,6 +111,35 @@ describe("setToolEnabled sessionUuid validation (#6148)", () => {
     ).rejects.toThrow("is not an active daemon session");
   });
 
+  test("rejects a hidden tool before minting a connection profile", async () => {
+    const registry = new InMemoryToolSelectionProfileRegistry();
+    let recordCalls = 0;
+    const record = registry.record.bind(registry);
+    registry.record = (profileUuid: string): void => {
+      recordCalls += 1;
+      record(profileUuid);
+    };
+    fixture = new McpTestFixture({
+      daemonMode: true,
+      sessionContext: { sessionId: "conn-hidden" },
+      toolSelectionProfileRegistry: registry,
+    });
+    await fixture.setup();
+    const { client } = fixture.getContext();
+
+    await expect(
+      client.request(
+        {
+          method: "tools/call",
+          params: { name: "setToolEnabled", arguments: { toolName: "hiddenTool", enabled: true } },
+        },
+        z.any(),
+      ),
+    ).rejects.toThrow("Tool 'hiddenTool' is not user-configurable.");
+
+    expect(recordCalls).toBe(0);
+  });
+
   test("accepts a valid, previously-issued sessionUuid", async () => {
     fixture = new McpTestFixture({ daemonMode: true, sessionContext: { sessionId: "conn-1" } });
     await fixture.setup();
@@ -124,6 +161,7 @@ describe("setToolEnabled sessionUuid validation (#6148)", () => {
     const text = result.content?.find((c) => c.type === "text")?.text ?? "";
     expect(JSON.parse(text)).toMatchObject({
       sessionUuid: "S1",
+      scope: "device-session",
       toolName: "clipboard",
       enabled: true,
     });
@@ -188,6 +226,7 @@ describe("setToolEnabled sessionUuid validation (#6148)", () => {
     const text = result.content?.find((c) => c.type === "text")?.text ?? "";
     expect(JSON.parse(text)).toMatchObject({
       sessionUuid: "server-issued-profile-uuid",
+      scope: "connection-profile",
       toolName: "clipboard",
       enabled: true,
     });
@@ -234,6 +273,7 @@ describe("setToolEnabled sessionUuid validation (#6148)", () => {
     const secondText = second.content?.find((c) => c.type === "text")?.text ?? "";
     expect(JSON.parse(secondText)).toMatchObject({
       sessionUuid: mintedProfileUuid,
+      scope: "connection-profile",
       toolName: "clipboard",
       enabled: false,
     });

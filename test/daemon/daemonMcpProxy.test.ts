@@ -5247,6 +5247,7 @@ describe("DaemonMcpProxy", () => {
                     type: "text",
                     text: JSON.stringify({
                       sessionUuid: "device-session-a",
+                      scope: "device-session",
                       toolName: "openLink",
                       enabled: true,
                     }),
@@ -5298,6 +5299,7 @@ describe("DaemonMcpProxy", () => {
                     type: "text",
                     text: JSON.stringify({
                       sessionUuid: "device-session-a",
+                      scope: "device-session",
                       toolName: "openLink",
                       enabled: true,
                     }),
@@ -5346,7 +5348,11 @@ describe("DaemonMcpProxy", () => {
           content: [
             {
               type: "text",
-              text: JSON.stringify({ sessionUuid: "profile-a", toolName: "clipboard" }),
+              text: JSON.stringify({
+                sessionUuid: "profile-a",
+                scope: "connection-profile",
+                toolName: "clipboard",
+              }),
             },
           ],
         },
@@ -5386,7 +5392,11 @@ describe("DaemonMcpProxy", () => {
           content: [
             {
               type: "text",
-              text: JSON.stringify({ sessionUuid: "profile-a", toolName: "executePlan" }),
+              text: JSON.stringify({
+                sessionUuid: "profile-a",
+                scope: "connection-profile",
+                toolName: "executePlan",
+              }),
             },
           ],
         },
@@ -5435,7 +5445,11 @@ describe("DaemonMcpProxy", () => {
           content: [
             {
               type: "text",
-              text: JSON.stringify({ sessionUuid: "profile-a", toolName: "clipboard" }),
+              text: JSON.stringify({
+                sessionUuid: "profile-a",
+                scope: "connection-profile",
+                toolName: "clipboard",
+              }),
             },
           ],
         },
@@ -5482,7 +5496,11 @@ describe("DaemonMcpProxy", () => {
                 content: [
                   {
                     type: "text",
-                    text: JSON.stringify({ sessionUuid: "profile-a", toolName: "clipboard" }),
+                    text: JSON.stringify({
+                      sessionUuid: "profile-a",
+                      scope: "connection-profile",
+                      toolName: "clipboard",
+                    }),
                   },
                 ],
               }

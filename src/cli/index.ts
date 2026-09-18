@@ -1,6 +1,10 @@
 import { toJSONSchema } from "zod/v4";
 import { errorMessage } from "../utils/describeUnknownError";
 import { ToolRegistry } from "../server/toolRegistry";
+import {
+  SET_TOOL_ENABLED_TOOL_NAME,
+  toolSelectionProfileUuidFromResponse,
+} from "../features/toolSelection/toolSelectionControl";
 import { logger } from "../utils/logger";
 import { ActionableError } from "../models";
 import { DaemonClient, DaemonUnavailableError } from "../daemon/client";
@@ -24,6 +28,12 @@ import { getDefaultToolOutputsDir } from "../utils/toolOutputArtifacts";
 import { serverConfig } from "../utils/ServerConfig";
 import { cliStderr, cliStdout, renderCliToolOutput, type CliByteSink } from "./toolOutput";
 import type { CliTerminationRequest } from "./termination";
+import {
+  ensureCliToolSelectionProfileStoreWritable,
+  loadPersistedCliToolSelectionProfile,
+  persistCliToolSelectionProfile,
+  withCliToolSelectionProfileLock,
+} from "./cliToolSelectionProfile";
 
 // Import all tool registration functions
 import { registerObserveTools } from "../server/observeTools";
@@ -53,6 +63,8 @@ import { registerPreferenceTools } from "../server/preferenceTools";
 import { registerSnapshotTools } from "../server/snapshotTools";
 import { registerStorageTools } from "../server/storageTools";
 import { registerTelephonyTools } from "../server/telephonyTools";
+import { registerSessionLogTools } from "../server/sessionLogTools";
+import { registerDownloadsFixtureTools } from "../server/downloadsFixtureTools";
 
 type CliHelpSchemaShape = Record<string, any> | undefined;
 interface CliHelpParameterInfo {
@@ -91,6 +103,8 @@ function initializeCliTools(): void {
   registerSnapshotTools();
   registerStorageTools();
   registerTelephonyTools();
+  registerSessionLogTools();
+  registerDownloadsFixtureTools();
 }
 
 // Parse CLI arguments into tool name, session UUID, and parameters
@@ -414,6 +428,146 @@ export function resetDaemonProxyFactoryForTesting(): void {
   daemonProxyFactory = (config) => new DaemonMcpProxy(config);
 }
 
+/**
+ * A `--cli` invocation is a trusted, deliberate local operator action, so it must
+ * NEVER require a separate `setToolEnabled` step: every tool except
+ * `setToolEnabled` is unconditionally pre-enabled. The first invocation mints one
+ * daemon-issued profile UUID and persists it through cliToolSelectionProfile.ts;
+ * later invocations reuse that UUID explicitly, never fabricating one, so the
+ * daemon mints at most one profile per CLI data directory. If the daemon rejects
+ * a persisted profile as stale, the CLI mints and persists a replacement once.
+ * This keeps the guarantee valid even when runtime-effective defaults differ from declarations.
+ * This is CLI-only: a remote MCP client never runs this path, so it opens no
+ * tool-gating bypass for non-CLI callers.
+ */
+async function ensureCliToolEnabled(proxy: CliDaemonProxy, toolName: string): Promise<void> {
+  if (toolName === SET_TOOL_ENABLED_TOOL_NAME) {
+    return;
+  }
+  if (ToolRegistry.getTool(toolName)?.hidden) {
+    return;
+  }
+  const persistedProfileUuid = loadPersistedCliToolSelectionProfile();
+
+  if (!persistedProfileUuid) {
+    await mintOrReaffirmCliToolSelectionProfile(proxy, toolName);
+    return;
+  }
+
+  await reaffirmPersistedCliToolSelectionProfile(proxy, toolName, persistedProfileUuid);
+}
+
+async function reaffirmPersistedCliToolSelectionProfile(
+  proxy: CliDaemonProxy,
+  toolName: string,
+  persistedProfileUuid: string,
+): Promise<void> {
+  let result: Awaited<ReturnType<CliDaemonProxy["callTool"]>>;
+  try {
+    result = await proxy.callTool(SET_TOOL_ENABLED_TOOL_NAME, {
+      toolName,
+      enabled: true,
+      sessionUuid: persistedProfileUuid,
+    });
+  } catch (error) {
+    // Non-fatal: the actual tool call surfaces the real gate error if enabling failed.
+    logger.debug(`CLI pre-enable of ${toolName} did not apply: ${errorMessage(error)}`);
+    return;
+  }
+  const returnedProfileUuid = toolSelectionProfileUuidFromResponse(result);
+  const reaffirmFailed =
+    result?.isError === true ||
+    returnedProfileUuid === undefined ||
+    returnedProfileUuid !== persistedProfileUuid;
+  if (!reaffirmFailed) {
+    return;
+  }
+
+  logger.debug(`CLI tool-selection profile ${persistedProfileUuid} is stale; re-minting a profile`);
+  const locked = await withCliToolSelectionProfileLock(async () => {
+    const currentProfileUuid = loadPersistedCliToolSelectionProfile();
+    if (currentProfileUuid && currentProfileUuid !== persistedProfileUuid) {
+      const currentResult = await reaffirmCliToolSelectionProfile(
+        proxy,
+        toolName,
+        currentProfileUuid,
+      );
+      if (currentResult) {
+        return;
+      }
+    }
+    await mintCliToolSelectionProfile(proxy, toolName);
+  });
+  if (locked) {
+    return;
+  }
+  // Graceful degradation preserves CLI availability; the only risk is the old mint race.
+  await mintCliToolSelectionProfile(proxy, toolName);
+}
+
+async function mintOrReaffirmCliToolSelectionProfile(
+  proxy: CliDaemonProxy,
+  toolName: string,
+): Promise<void> {
+  const locked = await withCliToolSelectionProfileLock(async () => {
+    const persistedProfileUuid = loadPersistedCliToolSelectionProfile();
+    if (persistedProfileUuid) {
+      const reaffirmed = await reaffirmCliToolSelectionProfile(
+        proxy,
+        toolName,
+        persistedProfileUuid,
+      );
+      if (reaffirmed) {
+        return;
+      }
+    }
+    await mintCliToolSelectionProfile(proxy, toolName);
+  });
+  if (!locked) {
+    // Graceful degradation preserves CLI availability; the only risk is the old mint race.
+    await mintCliToolSelectionProfile(proxy, toolName);
+  }
+}
+
+async function reaffirmCliToolSelectionProfile(
+  proxy: CliDaemonProxy,
+  toolName: string,
+  profileUuid: string,
+): Promise<boolean> {
+  try {
+    const result = await proxy.callTool(SET_TOOL_ENABLED_TOOL_NAME, {
+      toolName,
+      enabled: true,
+      sessionUuid: profileUuid,
+    });
+    const returnedProfileUuid = toolSelectionProfileUuidFromResponse(result);
+    return (
+      result?.isError !== true &&
+      returnedProfileUuid !== undefined &&
+      returnedProfileUuid === profileUuid
+    );
+  } catch (error) {
+    // Non-fatal: the actual tool call surfaces the real gate error if enabling failed.
+    logger.debug(`CLI pre-enable of ${toolName} did not apply: ${errorMessage(error)}`);
+    return true;
+  }
+}
+
+async function mintCliToolSelectionProfile(proxy: CliDaemonProxy, toolName: string): Promise<void> {
+  ensureCliToolSelectionProfileStoreWritable();
+  try {
+    const result = await proxy.callTool(SET_TOOL_ENABLED_TOOL_NAME, {
+      toolName,
+      enabled: true,
+    });
+    const profileUuid = toolSelectionProfileUuidFromResponse(result);
+    persistCliToolSelectionProfile(profileUuid ?? "");
+  } catch (error) {
+    // Non-fatal: the actual tool call surfaces the real gate error if enabling failed.
+    logger.debug(`CLI pre-enable of ${toolName} did not apply: ${errorMessage(error)}`);
+  }
+}
+
 async function runToolViaDaemon(
   toolName: string,
   params: Record<string, any>,
@@ -422,6 +576,7 @@ async function runToolViaDaemon(
   const proxy = daemonProxyFactory({ daemonOptions });
 
   try {
+    await ensureCliToolEnabled(proxy, toolName);
     const result = await proxy.callTool(toolName, params);
     if (result === null) {
       throw new ActionableError(

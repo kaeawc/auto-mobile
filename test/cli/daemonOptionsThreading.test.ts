@@ -1,10 +1,11 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { DaemonOptions } from "../../src/daemon/types";
 import {
   runCliCommand,
   setDaemonProxyFactoryForTesting,
   resetDaemonProxyFactoryForTesting,
 } from "../../src/cli";
+import { isolateCliDataDir, type IsolatedCliDataDir } from "../helpers/cliDataDirIsolation";
 
 /**
  * Regression test for issue #4247: the CLI parses `--embedded-sdk` and
@@ -21,10 +22,16 @@ import {
  */
 describe("runCliCommand daemon-option threading (issue #4247)", () => {
   const constructedWith: Array<DaemonOptions | undefined> = [];
+  let isolatedCliDataDir: IsolatedCliDataDir;
+
+  beforeEach(() => {
+    isolatedCliDataDir = isolateCliDataDir();
+  });
 
   afterEach(() => {
     constructedWith.length = 0;
     resetDaemonProxyFactoryForTesting();
+    isolatedCliDataDir.restore();
   });
 
   test("forwards embeddedSdk and networkMockable into the DaemonMcpProxy", async () => {

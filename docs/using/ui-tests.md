@@ -245,3 +245,5 @@ bunx @kaeawc/auto-mobile@0.0.75 --cli doctor
 ```
 
 Replace `0.0.75` with the version used by your test runner dependency.
+
+`--cli doctor` is status-only; repair is intentionally out of scope ([issue #7143](https://github.com/kaeawc/auto-mobile/issues/7143)). Use `--daemon restart` or `--daemon diagnose` for daemon remedies.

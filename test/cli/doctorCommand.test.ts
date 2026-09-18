@@ -16,224 +16,44 @@ import { serverConfig } from "../../src/utils/ServerConfig";
 import { DaemonClient } from "../../src/daemon/client";
 
 describe("doctorToolParams", () => {
-  test.each(["yes", 1, 0, "true", null, undefined])(
-    "rejects an explicitly malformed repair flag before diagnosis: %s",
-    async (repair) => {
-      const diagnosis = spyOn(DaemonClient.prototype, "callTool").mockResolvedValue({
-        summary: { failed: 0 },
-      });
-      const close = spyOn(DaemonClient.prototype, "close").mockResolvedValue(undefined);
-      let repairCalls = 0;
-      setCliOutputSinksForTesting({ stdout: { write: () => {} }, stderr: { write: () => {} } });
-      try {
-        await expect(
-          runDoctorCommand(
-            { repair, json: true },
-            {
-              repairDaemon: async () => {
-                repairCalls++;
-                return { status: "repaired", phase: "complete", action: "joined" };
-              },
-            },
-          ),
-        ).rejects.toThrow("--repair must be a boolean");
-        expect(diagnosis).not.toHaveBeenCalled();
-        expect(repairCalls).toBe(0);
-      } finally {
-        diagnosis.mockRestore();
-        close.mockRestore();
-        resetCliOutputSinksForTesting();
-      }
-    },
-  );
+  test("rejects removed doctor flags before diagnosis with supported daemon remedies", async () => {
+    const diagnosis = spyOn(DaemonClient.prototype, "callTool");
+    try {
+      await expect(runDoctorCommand(parseCliArgs(["doctor", "--repair"]).params)).rejects.toThrow(
+        "doctor is status-only; --repair and --timeout-ms were removed",
+      );
+      expect(diagnosis).not.toHaveBeenCalled();
 
-  test.each([{ args: ["doctor"] }, { args: ["doctor", "--repair", "false"] }])(
-    "retains ordinary diagnosis for valid non-repair arguments: %s",
-    async ({ args }) => {
-      const diagnosis = spyOn(DaemonClient.prototype, "callTool").mockResolvedValue({
-        summary: { failed: 0 },
-      });
-      const close = spyOn(DaemonClient.prototype, "close").mockResolvedValue(undefined);
-      setCliOutputSinksForTesting({ stdout: { write: () => {} }, stderr: { write: () => {} } });
-      try {
-        await runDoctorCommand(
-          { ...parseCliArgs(args).params, json: true },
-          {
-            repairDaemon: async () => {
-              throw new Error("Unexpected repair");
-            },
-          },
-        );
-        expect(diagnosis).toHaveBeenCalledTimes(1);
-        expect(diagnosis.mock.calls[0]).toEqual(["doctor", {}]);
-      } finally {
-        diagnosis.mockRestore();
-        close.mockRestore();
-        resetCliOutputSinksForTesting();
-      }
-    },
-  );
+      await expect(
+        runDoctorCommand(parseCliArgs(["doctor", "--timeout-ms", "5000"]).params),
+      ).rejects.toThrow("doctor is status-only; --repair and --timeout-ms were removed");
+      expect(diagnosis).not.toHaveBeenCalled();
+    } finally {
+      diagnosis.mockRestore();
+    }
+  });
+
+  test("retains ordinary diagnosis without --repair", async () => {
+    const diagnosis = spyOn(DaemonClient.prototype, "callTool").mockResolvedValue({
+      summary: { failed: 0 },
+    });
+    const close = spyOn(DaemonClient.prototype, "close").mockResolvedValue(undefined);
+    setCliOutputSinksForTesting({ stdout: { write: () => {} }, stderr: { write: () => {} } });
+    try {
+      await runDoctorCommand({ ...parseCliArgs(["doctor"]).params, json: true });
+      expect(diagnosis).toHaveBeenCalledWith("doctor", {});
+    } finally {
+      diagnosis.mockRestore();
+      close.mockRestore();
+      resetCliOutputSinksForTesting();
+    }
+  });
 
   test("keeps CLI JSON formatting out of the daemon doctor request", () => {
     expect(doctorToolParams({ ios: true, json: true })).toEqual({ ios: true });
   });
 
-  test("keeps recovery-only flags out of the daemon doctor request", () => {
-    expect(
-      doctorToolParams({
-        android: true,
-        repair: true,
-        timeoutMs: 12_000,
-      }),
-    ).toEqual({ android: true });
-  });
-
-  test("runs repair locally and renders its structured result", async () => {
-    const written: string[] = [];
-    let receivedTimeoutMs: number | undefined;
-    let receivedDaemonOptions: { host?: string; port?: number } | undefined;
-    setCliOutputSinksForTesting({
-      stdout: { write: (text) => written.push(text) },
-      stderr: { write: () => {} },
-    });
-
-    try {
-      const termination = await runDoctorCommand(
-        { repair: true, timeoutMs: 12_000 },
-        {
-          repairDaemon: async (options) => {
-            receivedTimeoutMs = options.timeoutMs;
-            receivedDaemonOptions = options.daemonOptions;
-            return {
-              status: "repaired",
-              phase: "complete",
-              action: "restarted",
-              before: {
-                timestamp: "before",
-                daemonRunning: false,
-                socketExists: false,
-                socketAccessible: false,
-                pidFileExists: true,
-                pidFileValid: false,
-                socketConnectable: false,
-                recommendations: [],
-              },
-              after: {
-                timestamp: "after",
-                daemonRunning: true,
-                socketExists: true,
-                socketAccessible: true,
-                pidFileExists: true,
-                pidFileValid: true,
-                socketConnectable: true,
-                recommendations: [],
-              },
-            };
-          },
-        },
-        { host: "127.0.0.1", port: 4321 },
-      );
-      expect(termination).toBeUndefined();
-    } finally {
-      resetCliOutputSinksForTesting();
-    }
-
-    expect(receivedTimeoutMs).toBe(12_000);
-    expect(receivedDaemonOptions).toEqual({ host: "127.0.0.1", port: 4321 });
-    expect(JSON.parse(written[0])).toMatchObject({
-      status: "repaired",
-      action: "restarted",
-      before: { socketConnectable: false },
-      after: { socketConnectable: true },
-    });
-  });
-
-  test("requests executable termination after a failed repair writes its result", async () => {
-    const written: string[] = [];
-    setCliOutputSinksForTesting({
-      stdout: { write: (text) => written.push(text) },
-      stderr: { write: () => {} },
-    });
-
-    try {
-      const termination = await runDoctorCommand(
-        { repair: true, android: true },
-        {
-          repairDaemon: async () => ({
-            status: "failed",
-            phase: "verification",
-            action: "restarted",
-            nextAction: "Recovery deadline elapsed during verification.",
-          }),
-        },
-      );
-
-      expect(termination).toEqual({ exitCode: 1 });
-    } finally {
-      resetCliOutputSinksForTesting();
-    }
-
-    expect(JSON.parse(written[0])).toMatchObject({
-      status: "failed",
-      phase: "verification",
-      action: "restarted",
-    });
-  });
-
-  test("threads Android and iOS filters into host-wide repair's post-repair diagnostics", async () => {
-    const receivedOptions: unknown[] = [];
-    setCliOutputSinksForTesting({
-      stdout: { write: () => {} },
-      stderr: { write: () => {} },
-    });
-
-    try {
-      for (const params of [
-        { repair: true, android: true },
-        { repair: true, ios: true },
-      ]) {
-        await runDoctorCommand(params, {
-          repairDaemon: async (options) => {
-            receivedOptions.push(options);
-            return { status: "repaired", phase: "complete", action: "joined" };
-          },
-        });
-      }
-    } finally {
-      resetCliOutputSinksForTesting();
-    }
-
-    expect(receivedOptions).toEqual([
-      { timeoutMs: undefined, android: true, ios: undefined, daemonOptions: undefined },
-      { timeoutMs: undefined, android: undefined, ios: true, daemonOptions: undefined },
-    ]);
-  });
-
-  test("forwards malformed repair timeout values for recovery validation", async () => {
-    let receivedTimeoutMs: unknown;
-    setCliOutputSinksForTesting({
-      stdout: { write: () => {} },
-      stderr: { write: () => {} },
-    });
-
-    try {
-      await runDoctorCommand(
-        { repair: true, timeoutMs: "not-a-number" },
-        {
-          repairDaemon: async (options) => {
-            receivedTimeoutMs = options.timeoutMs;
-            return { status: "repaired", phase: "complete", action: "joined" };
-          },
-        },
-      );
-    } finally {
-      resetCliOutputSinksForTesting();
-    }
-
-    expect(receivedTimeoutMs).toBe("not-a-number");
-  });
-
-  test("documents repair-only doctor flags without adding them to the MCP schema", async () => {
+  test("does not document removed repair-only doctor flags", async () => {
     const lines: string[] = [];
     await runCliCommand(["help", "doctor"], undefined, {
       log: (message) => lines.push(message),
@@ -241,8 +61,8 @@ describe("doctorToolParams", () => {
     });
 
     const help = lines.join("\n");
-    expect(help).toContain("--repair (optional)");
-    expect(help).toContain("--timeout-ms (optional)");
+    expect(help).not.toContain("--repair");
+    expect(help).not.toContain("--timeout-ms");
   });
 
   test("renders a normal doctor report as pretty JSON", async () => {

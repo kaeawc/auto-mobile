@@ -40,7 +40,6 @@ interface Harness {
   evidence: string[];
   timer: FakeTimer;
   dependencies: MatrixDependencies;
-  maintenanceIsFenced(): boolean;
 }
 
 const IOS_UDID = "00000000-0000-0000-0000-000000000001";
@@ -148,17 +147,12 @@ function createHarness(
     unchangedIosRunnerGeneration?: boolean;
     failIosReadinessAfterRestart?: boolean;
     writeFile?: MatrixDependencies["writeFile"];
-    activeSessions?: number;
-    activeExecutions?: number;
     honorDiscoveryOrderSeam?: boolean;
     keepAndroidDuplicateAfterKill?: boolean;
     removeAndroidSiblingAfterDuplicateCleanup?: boolean;
     removeIosSiblingAfterProvision?: boolean;
     allowPersistedSiblingFallback?: boolean;
     suppressCliStructuredContent?: boolean;
-    daemonStatusWithoutProcessToken?: boolean;
-    replaceProcessTokenAfterRepair?: boolean;
-    failMaintenanceCompletion?: boolean;
   } = {},
 ): Harness {
   const calls: ToolCall[] = [];
@@ -181,11 +175,8 @@ function createHarness(
   let restartedSessionUuid: string | undefined;
   const persistedStates = new Map<string, "target-absent" | "target-busy">();
   const terminalPersistedSessions = new Set<string>();
-  let maintenanceFenced = false;
-  let daemonGeneration = 1;
-  let processGenerationToken = "test-generation-1";
-  let processTokenReplaced = false;
-  let pendingDoctorFault: string | undefined;
+  const daemonGeneration = 1;
+  const processGenerationToken = "test-generation-1";
   const enabledToolsByOwner = new Map<string, Set<string>>();
   const enabledToolsByMintedSession = new Map<string, Set<string>>();
   const mintedSessionByOwner = new Map<string, string>();
@@ -367,9 +358,6 @@ function createHarness(
         };
       }
       if (name === "getAndroid" || name === "getApple" || name === "startDevice") {
-        if (maintenanceFenced) {
-          throw new Error("daemon maintenance fence rejected post-repair acquisition");
-        }
         if (
           name === "getAndroid" &&
           owner.startsWith("controlled-discovery-") &&
@@ -620,42 +608,10 @@ function createHarness(
         return {
           pid: 1000 + daemonGeneration,
           startedAt: daemonGeneration,
-          ...(options.daemonStatusWithoutProcessToken ? {} : { processGenerationToken }),
+          processGenerationToken,
           buildId: "test-build",
           entryScript: "/test/dist/src/index.js",
         };
-      }
-      if (name === "ide/prepareMaintenance") {
-        if ((options.activeSessions ?? 0) > 0) {
-          return { accepted: false, reason: "active_sessions" };
-        }
-        if ((options.activeExecutions ?? 0) > 0) {
-          return { accepted: false, reason: "active_operations" };
-        }
-        maintenanceFenced = true;
-        return { accepted: true, maintenanceToken: "test-maintenance-token" };
-      }
-      if (name === "ide/completeMaintenance") {
-        events.push(
-          `maintenance-complete-attempt:${
-            typeof arguments_.processGenerationToken === "string"
-              ? arguments_.processGenerationToken
-              : "legacy-pid-start"
-          }`,
-        );
-        if (options.failMaintenanceCompletion) {
-          throw new Error("maintenance completion failed");
-        }
-        const sameGeneration =
-          arguments_.pid === 1000 + daemonGeneration &&
-          arguments_.startedAt === daemonGeneration &&
-          arguments_.processGenerationToken ===
-            (options.daemonStatusWithoutProcessToken ? undefined : processGenerationToken);
-        if (sameGeneration) {
-          maintenanceFenced = false;
-          events.push(`maintenance-complete:${daemonGeneration}`);
-        }
-        return { completed: sameGeneration };
       }
       expect(name).toBe("daemon/releaseSession");
       const sessionId = arguments_.sessionId;
@@ -687,43 +643,12 @@ function createHarness(
     dependencies: {
       testOnly: true,
       timer,
-      inspectDoctorFaultState: () => ({
-        processIsLive: pendingDoctorFault === "unresponsive-daemon",
-        socketPathExists: true,
-      }),
       createMcpClient,
       createDaemonClient,
       async spawnCli(command) {
         cliCommands.push(command);
         if (options.failCliFor && command.includes(options.failCliFor)) {
           throw new Error(`CLI failed for ${options.failCliFor}`);
-        }
-        if (command.includes("acceptance-doctor-fault")) {
-          pendingDoctorFault = command[command.indexOf("--fault") + 1];
-          events.push(`fault:${pendingDoctorFault}`);
-          return { stdout: "" };
-        }
-        if (command.includes("doctor")) {
-          if (options.replaceProcessTokenAfterRepair && !processTokenReplaced) {
-            processGenerationToken = "replacement-generation";
-            processTokenReplaced = true;
-            // A successor daemon does not inherit the admitted generation's fence.
-            maintenanceFenced = false;
-          } else if (
-            pendingDoctorFault !== "corrupt-control-metadata" &&
-            pendingDoctorFault !== "missing-control-metadata"
-          ) {
-            daemonGeneration += 1;
-            processGenerationToken = `test-generation-${daemonGeneration}`;
-            // A replacement daemon has no inherited maintenance admission.
-            maintenanceFenced = false;
-          }
-          events.push(`doctor:${pendingDoctorFault}`);
-          pendingDoctorFault = undefined;
-          return { stdout: "" };
-        }
-        if (maintenanceFenced) {
-          throw new Error("daemon maintenance fence rejected post-repair acquisition");
         }
         events.push("cli:acquire");
         const isIos = command.includes("getApple");
@@ -751,9 +676,6 @@ function createHarness(
           }),
         };
       },
-      async restartDaemon() {
-        events.push("restart-daemon");
-      },
       async restartAcceptanceSession(scope) {
         events.push(`restart-acceptance-session:${scope.sessionUuid}`);
         restartedSessionUuid = scope.sessionUuid;
@@ -764,7 +686,6 @@ function createHarness(
           evidence.push(content);
         }),
     },
-    maintenanceIsFenced: () => maintenanceFenced,
   };
 }
 
@@ -872,19 +793,10 @@ describe("live device acceptance harness", () => {
         arguments: { toolName: "deleteDevice", enabled: true },
       },
     ]);
-    expect(
-      harness.cliCommands.some(
-        (command) =>
-          command.slice(0, 5).join(" ") ===
-            `${process.execPath} /test/dist/src/index.js --cli doctor --repair` &&
-          command.at(-2) === "--timeout-ms" &&
-          Number(command.at(-1)) > 0,
-      ),
-    ).toBe(true);
     const exactAcquisitions = harness.calls.filter(
       (call) => call.name === "getAndroid" && !call.owner.startsWith("controlled-discovery-"),
     );
-    expect(exactAcquisitions.length).toBeGreaterThanOrEqual(6);
+    expect(exactAcquisitions.length).toBeGreaterThanOrEqual(5);
     expect(
       exactAcquisitions.slice(0, -1).every((call) => call.arguments.avdName === "Pixel_8_API_35"),
     ).toBe(true);
@@ -1423,7 +1335,6 @@ describe("live device acceptance harness", () => {
             call.name === "listDeviceImages" && call.owner === "controlled-discovery-forward",
         ),
       ).toBe(true);
-      expect(harness.events).toContain(`reacquire-after-repair:${tool}`);
       if (args.platform === "ios") {
         const redact = (value: string): string =>
           `hmac-sha256:${createHmac(
@@ -1453,67 +1364,6 @@ describe("live device acceptance harness", () => {
       await expect(runAcceptanceMatrix(args, harness.dependencies)).rejects.toThrow(
         "must never bind the sibling",
       );
-    },
-  );
-
-  test.each([
-    { args: androidArgs, flag: "--android" },
-    { args: iosArgs, flag: "--ios" },
-  ])(
-    "runs filtered post-repair doctor diagnostics before protocol verification and reacquisition",
-    async ({ args, flag }) => {
-      const harness = createHarness();
-
-      const evidence = await runAcceptanceMatrix(args, harness.dependencies);
-      const fault = harness.cliCommands.findIndex((command) =>
-        command.includes("acceptance-doctor-fault"),
-      );
-      const doctor = harness.cliCommands.findIndex((command) => command.includes("doctor"));
-      const doctorEvent = harness.events.findLastIndex((event) => event.startsWith("doctor:"));
-      const protocolEvent = harness.events.findLastIndex((event) => event === "daemon:ide/status");
-
-      expect(fault).toBeGreaterThanOrEqual(0);
-      expect(doctor).toBeGreaterThan(fault);
-      expect(doctorEvent).toBeGreaterThanOrEqual(0);
-      expect(protocolEvent).toBeGreaterThan(doctorEvent);
-      expect(harness.cliCommands[fault]).toEqual([
-        process.execPath,
-        "/test/dist/src/index.js",
-        "--daemon",
-        "acceptance-doctor-fault",
-        "--fault",
-        "corrupt-control-metadata",
-        "--maintenance-token",
-        "test-maintenance-token",
-        "--expires-at",
-        expect.any(String),
-      ]);
-      expect(
-        harness.cliCommands
-          .filter((command) => command.includes("acceptance-doctor-fault"))
-          .map((command) => command[command.indexOf("--fault") + 1]),
-      ).toEqual([
-        "corrupt-control-metadata",
-        "missing-control-metadata",
-        "missing-socket",
-        "stale-socket",
-        "unresponsive-daemon",
-        "missing-daemon",
-        "dead-daemon",
-      ]);
-      expect(harness.events.filter((event) => event === "maintenance-complete:1")).toEqual([
-        "maintenance-complete:1",
-        "maintenance-complete:1",
-      ]);
-      expect(harness.cliCommands[doctor]).toContain(flag);
-      expect(harness.events).toContain(
-        `reacquire-after-repair:${args.platform === "android" ? "getAndroid" : "getApple"}`,
-      );
-      expect(harness.events).toContain("reacquire-after-repair:observe");
-      expect(evidence.checks).toMatchObject({
-        stableIdentityPreserved: true,
-        readinessObserveThenState: true,
-      });
     },
   );
 
@@ -1616,7 +1466,6 @@ describe("live device acceptance harness", () => {
         createDaemonClient: async () => {
           throw new Error("should not create daemon client");
         },
-        restartDaemon: async () => {},
         spawnCli: async () => ({ stdout: "" }),
         writeFile: async (_path, content) => {
           evidence.push(content);
@@ -1644,72 +1493,6 @@ describe("live device acceptance harness", () => {
       "acquire returned simulator name Someone Else's iPhone",
     );
     expect(harness.calls.some((call) => call.name === "provisionDevice")).toBe(false);
-  });
-
-  test("fails acceptance and evidence when host-local doctor repair returns an error", async () => {
-    const harness = createHarness({ failCliFor: "doctor" });
-
-    await expect(runAcceptanceMatrix(androidArgs, harness.dependencies)).rejects.toThrow(
-      "CLI failed for doctor",
-    );
-    expect(harness.events).toContain("maintenance-complete-attempt:test-generation-1");
-    expect(harness.events).toContain("maintenance-complete:1");
-    expect(harness.maintenanceIsFenced()).toBe(false);
-    const evidence = JSON.parse(harness.evidence[0]);
-    expect(evidence.outcome.passed).toBe(false);
-  });
-
-  test("completes same-generation maintenance through the legacy PID/start fallback", async () => {
-    const harness = createHarness({ daemonStatusWithoutProcessToken: true });
-
-    await runAcceptanceMatrix(androidArgs, harness.dependencies);
-
-    expect(
-      harness.events.filter((event) => event === "maintenance-complete-attempt:legacy-pid-start"),
-    ).toHaveLength(2);
-    expect(harness.events.filter((event) => event === "maintenance-complete:1")).toHaveLength(2);
-    expect(harness.maintenanceIsFenced()).toBe(false);
-  });
-
-  test("does not complete a stale admission against a successor process token", async () => {
-    const harness = createHarness({ replaceProcessTokenAfterRepair: true });
-
-    await runAcceptanceMatrix(androidArgs, harness.dependencies);
-
-    const firstRepair = harness.events.indexOf("doctor:corrupt-control-metadata");
-    const nextAdmission = harness.events.indexOf("fault:missing-control-metadata");
-    expect(firstRepair).toBeGreaterThanOrEqual(0);
-    expect(nextAdmission).toBeGreaterThan(firstRepair);
-    expect(harness.events.slice(firstRepair, nextAdmission)).not.toContain(
-      "maintenance-complete-attempt:test-generation-1",
-    );
-    expect(harness.maintenanceIsFenced()).toBe(false);
-  });
-
-  test("preserves repair failure when maintenance cleanup also fails", async () => {
-    const harness = createHarness({
-      failCliFor: "doctor",
-      failMaintenanceCompletion: true,
-    });
-
-    await expect(runAcceptanceMatrix(androidArgs, harness.dependencies)).rejects.toThrow(
-      "CLI failed for doctor",
-    );
-
-    expect(harness.events).toContain("maintenance-complete-attempt:test-generation-1");
-    expect(harness.evidence[0]).not.toContain("maintenance completion failed");
-    const evidence = JSON.parse(harness.evidence[0]);
-    expect(evidence.outcome.error).toBeDefined();
-    expect(evidence.cleanup.failures).toHaveLength(1);
-  });
-
-  test("refuses host-wide doctor repair when unrelated AutoMobile work is active", async () => {
-    const harness = createHarness({ activeSessions: 1, activeExecutions: 0 });
-
-    await expect(runAcceptanceMatrix(androidArgs, harness.dependencies)).rejects.toThrow(
-      "daemon maintenance admission rejected active_sessions",
-    );
-    expect(harness.cliCommands.some((command) => command.includes("doctor"))).toBe(false);
   });
 
   test("continues all cleanup paths after daemon release fails and redacts the recorded failure", async () => {
@@ -1754,7 +1537,7 @@ describe("live device acceptance harness", () => {
     expect(harness.evidence[0]).toContain("hmac-sha256:");
   });
 
-  test("authenticates schema-8 evidence and rejects body, build, and manifest tampering", async () => {
+  test("authenticates schema-9 evidence and rejects body, build, and manifest tampering", async () => {
     const fixture = createProductionAcceptanceFixture();
     const harness = createHarness({
       writeFile: async (path, content) => {
@@ -2025,7 +1808,6 @@ describe("live device acceptance harness", () => {
     const productionDependencies = (harness: Harness): MatrixDependencies => {
       const createMcpClient = harness.dependencies.createMcpClient!;
       const createDaemonClient = harness.dependencies.createDaemonClient!;
-      const restartDaemon = harness.dependencies.restartDaemon!;
       const restartAcceptanceSession = harness.dependencies.restartAcceptanceSession!;
       return {
         ...harness.dependencies,
@@ -2037,10 +1819,6 @@ describe("live device acceptance harness", () => {
         createDaemonClient: async (signal) => {
           observeScope("daemon-client");
           return await createDaemonClient(signal);
-        },
-        restartDaemon: async (maintenanceToken, timeoutMs, signal) => {
-          observeScope("daemon-restart");
-          await restartDaemon(maintenanceToken, timeoutMs, signal);
         },
         restartAcceptanceSession: async (scope, timeoutMs, signal) => {
           observeScope("acceptance-session-restart");
@@ -2186,7 +1964,6 @@ describe("live device acceptance harness", () => {
           createDaemonClient: async () => {
             throw new Error("daemon client should not be created");
           },
-          restartDaemon: async () => {},
           spawnCli: async () => ({ stdout: "" }),
           writeFile: async () => {},
         }),

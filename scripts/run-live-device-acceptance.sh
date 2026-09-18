@@ -63,7 +63,7 @@ Usage:
     [--create-operator-key] [--record-ownership-manifest] \
     [--scenario <full>] [--dry-run]
 
-The full scenario stops, boots, provisions/adopts, repairs, restarts, and
+The full scenario stops, boots, provisions/adopts, restarts, and
 reacquires only the two explicit targets. It is never PR CI. --test-owned-devices
 acknowledges that both targets are dedicated, disposable test devices with no
 user data or active work.

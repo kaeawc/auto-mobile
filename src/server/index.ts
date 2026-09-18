@@ -293,6 +293,7 @@ import {
   applyToolSelection,
   assertUserConfigurableToolNames,
   listEnabledToolNames,
+  requestedToolNamesFromSetToolEnabledArgs,
   registerToolSelectionTools,
   SET_TOOL_ENABLED_TOOL_NAME,
 } from "./toolSelectionTools";
@@ -813,6 +814,27 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     const tool = ToolRegistry.getTool(name);
     if (!tool) {
       throw new ActionableError(`Unknown tool: ${name}`);
+    }
+
+    if (name === SET_TOOL_ENABLED_TOOL_NAME) {
+      const selectionArgs = toolParams as { toolName?: unknown; toolNames?: unknown };
+      // The handler's Zod schema remains the authority for malformed requests.
+      // Valid requests are checked here so a rejected hidden tool cannot mint a
+      // connection profile before the handler reaches the same validation.
+      if (
+        (typeof selectionArgs.toolName === "string" && selectionArgs.toolNames === undefined) ||
+        (Array.isArray(selectionArgs.toolNames) &&
+          selectionArgs.toolNames.every((toolName) => typeof toolName === "string"))
+      ) {
+        assertUserConfigurableToolNames(
+          requestedToolNamesFromSetToolEnabledArgs(
+            selectionArgs as {
+              toolName?: string;
+              toolNames?: readonly string[];
+            },
+          ),
+        );
+      }
     }
 
     if (

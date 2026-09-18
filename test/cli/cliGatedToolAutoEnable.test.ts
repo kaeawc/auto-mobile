@@ -8,10 +8,14 @@ import {
 import {
   cliToolSelectionProfilePath,
   ensureCliToolSelectionProfileStoreWritable,
+  resetCliToolSelectionProfileLockOptionsForTesting,
   persistCliToolSelectionProfile,
+  setCliToolSelectionProfileLockOptionsForTesting,
+  withCliToolSelectionProfileLock,
 } from "../../src/cli/cliToolSelectionProfile";
 import { ActionableError } from "../../src/models";
 import { isolateCliDataDir, type IsolatedCliDataDir } from "../helpers/cliDataDirIsolation";
+import { FakeTimer } from "../fakes/FakeTimer";
 
 /**
  * A `--cli` invocation is a trusted local operator action and must NEVER require a
@@ -28,6 +32,7 @@ describe("CLI transparently enables gated tools", () => {
 
   afterEach(() => {
     resetDaemonProxyFactoryForTesting();
+    resetCliToolSelectionProfileLockOptionsForTesting();
     isolatedCliDataDir.restore();
   });
 
@@ -178,6 +183,111 @@ describe("CLI transparently enables gated tools", () => {
       },
     });
     expect(secondCalls[1].name).toBe("listDevices");
+  });
+
+  test("concurrent first CLI invocations mint one profile and reaffirm it", async () => {
+    const timer = new FakeTimer();
+    setCliToolSelectionProfileLockOptionsForTesting({ timer, pollIntervalMs: 1, timeoutMs: 10 });
+    const mintStarted = Promise.withResolvers<void>();
+    const allowMint = Promise.withResolvers<void>();
+    let minted = 0;
+    const calls: Array<{ name: string; params: Record<string, unknown> }> = [];
+    setDaemonProxyFactoryForTesting((): any => ({
+      callTool: async (name: string, params: Record<string, unknown>): Promise<any> => {
+        calls.push({ name, params });
+        if (name !== "setToolEnabled") {
+          return { content: [{ type: "text", text: "{}" }] };
+        }
+        if (!params.sessionUuid) {
+          minted += 1;
+          if (minted === 1) {
+            mintStarted.resolve();
+            await allowMint.promise;
+          }
+          return {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({
+                  sessionUuid: "77777777-7777-4777-8777-777777777777",
+                  scope: "connection-profile",
+                }),
+              },
+            ],
+          };
+        }
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                sessionUuid: params.sessionUuid,
+                scope: "connection-profile",
+              }),
+            },
+          ],
+        };
+      },
+      adoptCliSessionLiveness: async (): Promise<string | undefined> => "session-cli",
+      close: async (): Promise<void> => {},
+    }));
+
+    const first = runCliCommand(["listDevices", "--platform", "android"]);
+    await mintStarted.promise;
+    const second = runCliCommand(["listDevices", "--platform", "android"]);
+    expect(timer.getPendingSleeps()).toEqual([1]);
+
+    allowMint.resolve();
+    await first;
+    timer.advanceTime(1);
+    await Promise.all([first, second]);
+
+    expect(minted).toBe(1);
+    expect(calls.filter((call) => call.name === "setToolEnabled")).toEqual([
+      { name: "setToolEnabled", params: { toolName: "listDevices", enabled: true } },
+      {
+        name: "setToolEnabled",
+        params: {
+          toolName: "listDevices",
+          enabled: true,
+          sessionUuid: "77777777-7777-4777-8777-777777777777",
+        },
+      },
+    ]);
+    expect(fs.readFileSync(cliToolSelectionProfilePath(process.env), "utf8")).toBe(
+      "77777777-7777-4777-8777-777777777777",
+    );
+  });
+
+  test("continues pre-enabling after the profile lock wait times out", async () => {
+    const timer = new FakeTimer();
+    setCliToolSelectionProfileLockOptionsForTesting({ timer, pollIntervalMs: 1, timeoutMs: 3 });
+    const releaseHeldLock = Promise.withResolvers<void>();
+    const heldLock = withCliToolSelectionProfileLock(async () => {
+      await releaseHeldLock.promise;
+    });
+    await Promise.resolve();
+    const calls: Array<{ name: string; params: unknown }> = [];
+    recordProxy(calls);
+
+    const command = runCliCommand(["listDevices", "--platform", "android"]);
+    await Promise.resolve();
+    expect(timer.getPendingSleeps()).toEqual([1]);
+    timer.advanceTime(3);
+    await command;
+
+    expect(calls.map((call) => call.name)).toEqual(["setToolEnabled", "listDevices"]);
+    releaseHeldLock.resolve();
+    await heldLock;
+  });
+
+  test("does not pre-enable hidden production tools", async () => {
+    const calls: Array<{ name: string; params: unknown }> = [];
+    recordProxy(calls);
+
+    await runCliCommand(["startDevice", "--platform", "android"]);
+
+    expect(calls.map((call) => call.name)).toEqual(["startDevice"]);
   });
 
   test("pre-enables a default-enabled tool disabled by effective startup config", async () => {

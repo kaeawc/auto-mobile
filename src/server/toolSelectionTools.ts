@@ -150,6 +150,14 @@ export function assertUserConfigurableToolNames(toolNames: readonly string[]): v
   }
 }
 
+/** The one-name and batch-name forms share this exact extraction at every boundary. */
+export function requestedToolNamesFromSetToolEnabledArgs(args: {
+  toolName?: string;
+  toolNames?: readonly string[];
+}): readonly string[] {
+  return args.toolNames ?? [args.toolName!];
+}
+
 function resolveSelectionService(
   service: ToolSelectionServiceLike,
 ): Pick<SessionToolSelectionService, "isEnabled" | "setEnabled"> &
@@ -288,7 +296,7 @@ export function registerToolSelectionTools(): void {
       const requested = await applyToolSelection(
         context?.sessionToolSelectionService,
         sessionUuid,
-        args.toolNames ?? [args.toolName!],
+        requestedToolNamesFromSetToolEnabledArgs(args),
         enabled,
       );
       ToolRegistry.notifyToolListChanged();

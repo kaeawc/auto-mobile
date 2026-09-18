@@ -57,8 +57,12 @@ describe("CLI --session-uuid with device-session acquisition tools", () => {
     async (toolName) => {
       installFakeProxy();
       await runCliCommand(["--session-uuid", "session-abc", toolName]);
-      expect(calls).toHaveLength(2);
-      expect(calls[0].toolName).toBe("setToolEnabled");
+      if (toolName !== "startDevice") {
+        expect(calls).toHaveLength(2);
+        expect(calls[0].toolName).toBe("setToolEnabled");
+      } else {
+        expect(calls).toHaveLength(1);
+      }
       const actualCall = calls[calls.length - 1];
       expect(actualCall.toolName).toBe(toolName);
       expect(actualCall.params).not.toHaveProperty("sessionUuid");

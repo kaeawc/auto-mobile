@@ -42,6 +42,7 @@ import {
   defaultScreenshotFileWriter,
   type ScreenshotFileWriter,
 } from "./screenshot/ScreenshotFileWriter";
+import { shellQuote } from "../../utils/shellQuote";
 
 function replaceScreenshotExtension(filePath: string, extension: string): string {
   return filePath.replace(/\.[^.]+$/, `.${extension}`);
@@ -550,7 +551,7 @@ export class TakeScreenshot implements ScreenshotService {
   ): Promise<ScreenshotResult> {
     const startTime = this.timer.now();
     logger.info(`[SCREENSHOT] Using file pull approach`);
-    const tempFile = `/sdcard/screenshot_${this.idGenerator.next()}.png`;
+    const tempFile = `/sdcard/screenshot_${this.sanitizeDeviceTempId(this.idGenerator.next())}.png`;
     const tempLocalFile = `${finalPath}.temp`;
     let result: ScreenshotResult;
 
@@ -560,7 +561,7 @@ export class TakeScreenshot implements ScreenshotService {
 
       // Step 1: Take screenshot on device
       const screencapResult = await this.adb.executeCommand(
-        `shell "screencap -p '${tempFile}' ; echo AM_SCREENCAP_RC:$?"`,
+        `shell "screencap -p ${shellQuote(tempFile)} ; echo AM_SCREENCAP_RC:$?"`,
         undefined,
         undefined,
         undefined,
@@ -571,13 +572,7 @@ export class TakeScreenshot implements ScreenshotService {
       }
 
       // Step 2: Pull file from device to local filesystem
-      const pullResult = await this.adb.executeCommand(
-        `pull ${tempFile} ${tempLocalFile}`,
-        undefined,
-        undefined,
-        undefined,
-        signal,
-      );
+      const pullResult = await this.adb.execute(["pull", tempFile, tempLocalFile], { signal });
       if (this.hasCommandError(pullResult.stderr)) {
         throw new Error(`Failed to pull screenshot: ${pullResult.stderr}`);
       }
@@ -672,6 +667,17 @@ export class TakeScreenshot implements ScreenshotService {
     return !/AM_SCREENCAP_RC:0(?:\s|$)/.test(stdout) || this.hasCommandError(stderr);
   }
 
+  private sanitizeDeviceTempId(rawId: string): string {
+    const sanitize = (value: string): string => value.replace(/[^A-Za-z0-9-]/g, "");
+    const sanitized = sanitize(rawId);
+    if (sanitized.length > 0) {
+      return sanitized;
+    }
+
+    const fallback = sanitize(this.idGenerator.next());
+    return fallback.length > 0 ? fallback : "tmp";
+  }
+
   private hasCommandError(stderr: string): boolean {
     return stderr.includes("error");
   }
@@ -689,7 +695,7 @@ export class TakeScreenshot implements ScreenshotService {
   private async removeDeviceTempScreenshot(tempFile: string): Promise<void> {
     try {
       // Cleanup cannot change the completed capture result, so it is safe to swallow its failure.
-      await this.adb.executeCommand(`shell rm -f ${tempFile}`);
+      await this.adb.executeCommand(`shell rm -f ${shellQuote(tempFile)}`);
     } catch (error) {
       logger.debug(`[SCREENSHOT] Failed to remove device temp screenshot ${tempFile}: ${error}`);
     }

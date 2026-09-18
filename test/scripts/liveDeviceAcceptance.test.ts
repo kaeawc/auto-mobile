@@ -854,10 +854,6 @@ describe("live device acceptance harness", () => {
         owner: "persisted-target-absent-delete",
         arguments: { toolName: "deleteDevice", enabled: true },
       },
-      {
-        owner: "provision",
-        arguments: { toolName: "killDevice", enabled: true },
-      },
     ]);
     const exactAcquisitions = harness.calls.filter(
       (call) => call.name === "getAndroid" && !call.owner.startsWith("controlled-discovery-"),
@@ -1573,6 +1569,86 @@ describe("live device acceptance harness", () => {
     expect(harness.events).toContain("close:provision");
     expect(harness.evidence[0]).not.toContain("provision-1");
     expect(harness.evidence[0]).not.toContain("release failed");
+  });
+
+  test("does not kill the provisioned target again after confirmed deletion", async () => {
+    const harness = createHarness();
+
+    await runAcceptanceMatrix(androidArgs, harness.dependencies);
+
+    const deletion = harness.calls.findIndex((call) => call.name === "deleteDevice");
+    expect(deletion).toBeGreaterThanOrEqual(0);
+    expect(harness.calls.slice(deletion + 1).some((call) => call.name === "killDevice")).toBe(
+      false,
+    );
+  });
+
+  test("uses the cleanup budget to kill a provisioned target after the work budget expires", async () => {
+    const harness = createHarness();
+    const createMcpClient = harness.dependencies.createMcpClient!;
+    let exhaustedWorkBudget = false;
+    harness.dependencies.createMcpClient = async (owner, signal, presentationOrder) => {
+      const client = await createMcpClient(owner, signal, presentationOrder);
+      return {
+        async callTool(name, arguments_, callSignal) {
+          if (
+            !exhaustedWorkBudget &&
+            name === "getDeviceState" &&
+            arguments_.sessionUuid === "start-5"
+          ) {
+            exhaustedWorkBudget = true;
+            harness.timer.advanceTime(6_750);
+          }
+          return await client.callTool(name, arguments_, callSignal);
+        },
+        async close() {
+          await client.close();
+        },
+      };
+    };
+
+    await expect(runAcceptanceMatrix(androidArgs, harness.dependencies)).rejects.toThrow(
+      "Acceptance",
+    );
+
+    expect(
+      harness.calls.some(
+        (call) =>
+          call.owner === "provision" &&
+          call.name === "killDevice" &&
+          (call.arguments.device as Record<string, unknown>).deviceId === "emulator-5560",
+      ),
+    ).toBe(true);
+  });
+
+  test("cleans up the reacquired Android target when a later readiness check fails", async () => {
+    const harness = createHarness({ failObserveFor: "start-5" });
+
+    await expect(runAcceptanceMatrix(androidArgs, harness.dependencies)).rejects.toThrow(
+      "observe failed for start-5",
+    );
+
+    expect(
+      harness.calls.find((call) => call.owner === "provision" && call.name === "killDevice")
+        ?.arguments,
+    ).toEqual({
+      device: { name: "Pixel_8_API_35", deviceId: "emulator-5560", platform: "android" },
+    });
+  });
+
+  test("tracks the provisioned target before readiness can fail", async () => {
+    const harness = createHarness({ failObserveFor: "provision-1" });
+
+    await expect(runAcceptanceMatrix(androidArgs, harness.dependencies)).rejects.toThrow(
+      "observe failed for provision-1",
+    );
+
+    expect(
+      harness.calls.find((call) => call.owner === "provision" && call.name === "killDevice")
+        ?.arguments,
+    ).toEqual({
+      device: { name: "Pixel_8_API_35", deviceId: "emulator-5556" },
+    });
   });
 
   test("attempts every daemon and MCP close even when close cleanup fails", async () => {

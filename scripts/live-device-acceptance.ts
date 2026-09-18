@@ -1854,12 +1854,14 @@ export async function runAcceptanceMatrix(
     client: McpSessionClient,
     tool: "provisionDevice" | "deleteDevice" | "killDevice",
     phase: string,
+    budget: Budget = "work",
   ): Promise<void> => {
     const response = await callTool(
       client,
       "setToolEnabled",
       { toolName: tool, enabled: true },
       `${phase}-enable-${tool}`,
+      budget,
     );
     if (response.isError) {
       throw new Error(`Could not enable ${tool} for ${phase}`);
@@ -2466,6 +2468,7 @@ export async function runAcceptanceMatrix(
     ) {
       throw new Error("deleteDevice did not confirm complete platform-inventory absence");
     }
+    provisionedDevice = undefined;
     recordStep(steps, timer, "persisted-target-absent-delete-target", timer.now(), {
       target: controls.target,
       signedTargetOnly: true,
@@ -2772,9 +2775,9 @@ export async function runAcceptanceMatrix(
     );
     const provisionSessionUuid = stringField(provisionPayload, "sessionUuid", "provisionDevice");
     mint("provision", provisionSessionUuid);
+    provisionedDevice = asObject(provisionPayload.device, "provisionDevice.device");
     await verifyReadiness(provisionClient, provisionSessionUuid, "provision");
     assertProvisionedIdentity(provisionPayload, args, androidControls?.target.deviceId);
-    provisionedDevice = asObject(provisionPayload.device, "provisionDevice.device");
     await release(provisionSessionUuid, "provision");
     recordStep(steps, timer, "provision-exact-runtime-device-type-config", provisionStart, {
       sessionUuid: provisionSessionUuid,
@@ -2791,6 +2794,7 @@ export async function runAcceptanceMatrix(
     assertAndroidTransitionEvidence(prepared, stopped);
     if (args.platform === "android" && androidControls) {
       androidControls = { ...androidControls, target: stopped.device };
+      provisionedDevice = stopped.device;
     }
     await release(stopped.sessionUuid, "acquire-stopped");
     await assertCurrentControls("after-target-reacquire");
@@ -2899,13 +2903,19 @@ export async function runAcceptanceMatrix(
           throw new Error("provision client was unavailable");
         }
         await bounded("cleanup provisioned device", "cleanup", async () => {
-          await enableDestructiveTool(provisionClient!, "killDevice", "cleanup-provisioned-device");
+          await enableDestructiveTool(
+            provisionClient!,
+            "killDevice",
+            "cleanup-provisioned-device",
+            "cleanup",
+          );
           toolPayload(
             await callTool(
               provisionClient!,
               "killDevice",
               { device: provisionedDevice },
               "cleanup-provisioned-device",
+              "cleanup",
             ),
             "killDevice",
           );

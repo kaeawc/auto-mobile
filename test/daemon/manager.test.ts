@@ -2507,6 +2507,36 @@ describe("Daemon manager process detection", () => {
     expect(records.map(({ pid }) => pid)).toEqual([41, 42, 43]);
   });
 
+  test("rejects a non-shell executable with a decoy -c argument", () => {
+    const activeEntryScript = "/Users/x/auto-mobile/dist/src/index.js";
+
+    expect(
+      parseDaemonProcessTable(
+        "40 1 python worker.py -c bun /Users/x/auto-mobile/.claude/worktrees/foo/dist/src/index.js --daemon-mode",
+        Date.now(),
+        activeEntryScript,
+      ),
+    ).toEqual([]);
+  });
+
+  test("accepts a shell wrapper around a daemon entry point", () => {
+    const activeEntryScript = "/Users/x/auto-mobile/dist/src/index.js";
+
+    expect(
+      parseDaemonProcessTable(
+        '40 1 sh -c "bun /Users/x/auto-mobile/dist/src/index.js --daemon-mode"',
+        Date.now(),
+        activeEntryScript,
+      ),
+    ).toEqual([
+      {
+        pid: 40,
+        ppid: 1,
+        command: 'sh -c "bun /Users/x/auto-mobile/dist/src/index.js --daemon-mode"',
+      },
+    ]);
+  });
+
   test("parses Linux elapsed process creation times for PID-reuse protection", () => {
     expect(
       parseDaemonProcessTable(

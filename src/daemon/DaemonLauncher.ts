@@ -4,7 +4,14 @@ import {
   type ChildProcess,
   type SpawnOptions,
 } from "node:child_process";
-import { existsSync } from "node:fs";
+import {
+  closeSync,
+  constants as fsConstants,
+  existsSync,
+  fstatSync,
+  openSync,
+  readFileSync,
+} from "node:fs";
 import { posix, win32 } from "node:path";
 import { ActionableError } from "../models";
 import { trackProcess, waitForExit, type TrackedChildProcess } from "../utils/ChildProcessTracker";
@@ -26,9 +33,43 @@ function normalizeEntryScriptPath(entryScript: string): string {
     .replace(/\/+/g, "/");
 }
 
+type CheckoutProvenanceProbe = (checkoutRoot: string) => boolean;
+
+// A stalled remote mount remains an accepted residual risk because this scan is synchronous by
+// design and bounded by `ps`; only siblings of the active checkout are probed, limiting the blast radius.
+const defaultCheckoutProbe: CheckoutProvenanceProbe = (checkoutRoot) => {
+  try {
+    const packageJsonPath = checkoutRoot.includes("\\")
+      ? win32.join(checkoutRoot, "package.json")
+      : posix.join(checkoutRoot, "package.json");
+    // Open first and inspect the descriptor so the check and the read see the same file
+    // (no check-then-use race); O_NONBLOCK keeps a FIFO from blocking the open.
+    const fd = openSync(packageJsonPath, fsConstants.O_RDONLY | fsConstants.O_NONBLOCK);
+    try {
+      const packageJsonStat = fstatSync(fd);
+      if (!packageJsonStat.isFile() || packageJsonStat.size > 1_048_576) {
+        return false;
+      }
+      const packageJson = JSON.parse(readFileSync(fd, "utf8")) as {
+        name?: unknown;
+      };
+      return packageJson.name === "@kaeawc/auto-mobile";
+    } finally {
+      closeSync(fd);
+    }
+  } catch (error) {
+    // A failed probe only rules out an untrusted sibling process, so it is safe to swallow.
+    logger.debug(`Unable to verify AutoMobile checkout provenance at ${checkoutRoot}: ${error}`);
+    return false;
+  }
+};
+
 function isSiblingJjWorkspaceEntryScript(
   normalizedEntryScript: string,
   normalizedActiveEntryScript: string | undefined,
+  entryScript: string,
+  activeEntryScript: string | undefined,
+  probe: CheckoutProvenanceProbe,
 ): boolean {
   const distributionSuffix = "/dist/src/index.js";
   if (
@@ -40,7 +81,31 @@ function isSiblingJjWorkspaceEntryScript(
 
   const activeCheckoutRoot = normalizedActiveEntryScript.slice(0, -distributionSuffix.length);
   const candidateCheckoutRoot = normalizedEntryScript.slice(0, -distributionSuffix.length);
-  return posix.dirname(candidateCheckoutRoot) === posix.dirname(activeCheckoutRoot);
+  const nativeDistributionSuffix = entryScript.includes("\\")
+    ? "\\dist\\src\\index.js"
+    : distributionSuffix;
+  const nativeCandidateCheckoutRoot = entryScript.slice(0, -nativeDistributionSuffix.length);
+  const nativeActiveCheckoutRoot = activeEntryScript?.endsWith(nativeDistributionSuffix)
+    ? activeEntryScript.slice(0, -nativeDistributionSuffix.length)
+    : undefined;
+  return (
+    posix.dirname(candidateCheckoutRoot) === posix.dirname(activeCheckoutRoot) &&
+    nativeActiveCheckoutRoot !== undefined &&
+    (entryScript.includes("\\")
+      ? win32.dirname(nativeCandidateCheckoutRoot) === win32.dirname(nativeActiveCheckoutRoot)
+      : true) &&
+    probe(nativeCandidateCheckoutRoot)
+  );
+}
+
+function isMatchingSourceEntryScript(
+  normalizedEntryScript: string,
+  activeEntryScript: string | undefined,
+): boolean {
+  if (!activeEntryScript || !/^(?:\/|[A-Za-z]:\/)/.test(normalizedEntryScript)) {
+    return false;
+  }
+  return normalizedEntryScript === normalizeEntryScriptPath(activeEntryScript);
 }
 
 /**
@@ -58,13 +123,11 @@ function isSiblingJjWorkspaceEntryScript(
 export function isDaemonEntryScriptPath(
   entryScript: string,
   activeEntryScript: string | undefined = process.argv[1],
+  probe: CheckoutProvenanceProbe = defaultCheckoutProbe,
 ): boolean {
   const normalized = normalizeEntryScriptPath(entryScript);
   if (normalized.endsWith("/src/index.ts")) {
-    if (!activeEntryScript || !/^(?:\/|[A-Za-z]:\/)/.test(normalized)) {
-      return false;
-    }
-    return normalized === normalizeEntryScriptPath(activeEntryScript);
+    return isMatchingSourceEntryScript(normalized, activeEntryScript);
   }
 
   const normalizedActiveEntryScript = activeEntryScript
@@ -76,7 +139,13 @@ export function isDaemonEntryScriptPath(
   // segment; with --daemon-mode checked by the caller, this is safe for #7242.
   return (
     (isDistributionEntryScript && normalized === normalizedActiveEntryScript) ||
-    isSiblingJjWorkspaceEntryScript(normalized, normalizedActiveEntryScript) ||
+    isSiblingJjWorkspaceEntryScript(
+      normalized,
+      normalizedActiveEntryScript,
+      entryScript,
+      activeEntryScript,
+      probe,
+    ) ||
     (isDistributionEntryScript && /\/auto-mobile\/.*\/dist\/src\/index\.js$/.test(normalized)) ||
     /\/(?:@kaeawc\/)?auto-mobile\/dist\/src\/index\.js$/.test(normalized) ||
     /\/auto-mobile\/(?:[^/]+\/)?libexec\/dist\/src\/index\.js$/.test(normalized)

@@ -16,12 +16,17 @@ import { serverConfig } from "../../src/utils/ServerConfig";
 import { DaemonClient } from "../../src/daemon/client";
 
 describe("doctorToolParams", () => {
-  test("rejects --repair before diagnosis with supported daemon remedies", async () => {
+  test("rejects removed doctor flags before diagnosis with supported daemon remedies", async () => {
     const diagnosis = spyOn(DaemonClient.prototype, "callTool");
     try {
       await expect(runDoctorCommand(parseCliArgs(["doctor", "--repair"]).params)).rejects.toThrow(
-        "doctor is status-only; use --daemon restart or --daemon diagnose",
+        "doctor is status-only; --repair and --timeout-ms were removed",
       );
+      expect(diagnosis).not.toHaveBeenCalled();
+
+      await expect(
+        runDoctorCommand(parseCliArgs(["doctor", "--timeout-ms", "5000"]).params),
+      ).rejects.toThrow("doctor is status-only; --repair and --timeout-ms were removed");
       expect(diagnosis).not.toHaveBeenCalled();
     } finally {
       diagnosis.mockRestore();

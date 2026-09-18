@@ -209,6 +209,63 @@ describe("device description projections", () => {
     assertSharedKnownValuesAgree(configuredDescription, bootedDescription);
   });
 
+  test("uses configured Android facts only to fill missing live runtime values", () => {
+    const configured = {
+      stableId: "Pixel_9_API_36",
+      name: "Pixel_9_API_36",
+      platform: "android" as const,
+      isRunning: true,
+      apiLevel: 36,
+      osVersion: "16",
+      screenDensity: 420,
+    };
+    const description = describeDevice({
+      kind: "booted",
+      device: {
+        name: configured.name,
+        platform: "android",
+        deviceId: "emulator-5554",
+        apiLevel: 35,
+        osVersion: "15",
+      },
+      configured,
+    });
+
+    expect(description.runtime).toMatchObject({ apiLevel: 35, osVersion: "15" });
+    expect(description.display.density).toBe(420);
+  });
+
+  test("keeps pooled Android image facts authoritative over live runtime values", () => {
+    const description = describeDevice({
+      kind: "booted",
+      device: {
+        name: "Pixel_9_API_36",
+        platform: "android",
+        deviceId: "emulator-5554",
+        apiLevel: 35,
+        osVersion: "15",
+      },
+      pooled: {
+        id: "emulator-5554",
+        name: "Pixel_9_API_36",
+        platform: "android",
+        status: "idle",
+        lastUsedAt: 0,
+        assignmentCount: 0,
+        incarnation: 1,
+        androidImage: {
+          name: "Pixel_9_API_36",
+          platform: "android",
+          isRunning: true,
+          apiLevel: 36,
+          osVersion: "16",
+        },
+      },
+    });
+
+    expect(description.runtime).toMatchObject({ apiLevel: 36, osVersion: "16" });
+  });
+
   test("synthesizes static inventory only for iOS simulators", () => {
     const simulator = describeDevice({
       kind: "booted",

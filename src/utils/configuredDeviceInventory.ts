@@ -1,5 +1,6 @@
 import type { BootedDevice, DeviceInfo, Platform } from "../models";
 import type { DeviceImageDiscovery } from "./deviceUtils";
+import { isAndroidEmulatorSerial } from "./androidSerial";
 import {
   describeDevice,
   projectConfiguredImage,
@@ -54,6 +55,9 @@ export function configuredImageForBootedDevice(
   device: BootedDevice,
   configuredImages: ReadonlyMap<string, StableConfiguredDeviceImage>,
 ): StableConfiguredDeviceImage | undefined {
+  if (device.platform === "android" && !isAndroidEmulatorSerial(device.deviceId)) {
+    return undefined;
+  }
   const stableId = device.platform === "android" ? device.name : device.deviceId;
   return configuredImages.get(configuredImageKey(device.platform, stableId));
 }

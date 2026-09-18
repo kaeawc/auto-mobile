@@ -117,6 +117,10 @@ export type DeviceDescriptionInput =
     };
 
 type ImageLike = DeviceInfo | StableConfiguredDeviceImage;
+interface BootedImageFacts {
+  admittedImage: ImageLike | undefined;
+  authoritative: boolean;
+}
 
 /**
  * The sole device-description builder. Pool-admitted Android-image facts win
@@ -134,10 +138,11 @@ export function describeDevice(input: DeviceDescriptionInput): DeviceDescription
 
   const booted = input.kind === "booted" ? input.device : input.booted!;
   const pooled = input.pooled;
-  const image = bootedImageFacts(input, booted);
+  const imageFacts = bootedImageFacts(input, booted);
   return describeBooted(
     booted,
-    image,
+    imageFacts.admittedImage,
+    imageFacts.authoritative,
     pooled,
     input.session,
     input.deviceSessionUuid,
@@ -148,17 +153,20 @@ export function describeDevice(input: DeviceDescriptionInput): DeviceDescription
 function bootedImageFacts(
   input: Exclude<DeviceDescriptionInput, { kind: "image" }>,
   booted: BootedDevice,
-): ImageLike | undefined {
+): BootedImageFacts {
   if (input.pooled?.androidImage?.platform === booted.platform) {
-    return input.pooled.androidImage;
+    return { admittedImage: input.pooled.androidImage, authoritative: true };
   }
   if (input.discovery?.platform === booted.platform) {
-    return input.discovery;
+    return { admittedImage: input.discovery, authoritative: true };
   }
   if (input.kind === "booted" && input.configured?.platform === booted.platform) {
-    return input.configured;
+    return { admittedImage: input.configured, authoritative: false };
   }
-  return input.kind === "provisioned" ? input.provisioned.device : undefined;
+  return {
+    admittedImage: input.kind === "provisioned" ? input.provisioned.device : undefined,
+    authoritative: input.kind === "provisioned",
+  };
 }
 
 // oxlint-disable-next-line complexity -- one exhaustive canonical image projection prevents producer drift.
@@ -213,12 +221,13 @@ function describeImage(image: ImageLike, androidProvenance?: AndroidProvenance):
 function describeBooted(
   device: BootedDevice,
   admittedImage: ImageLike | undefined,
+  admittedImageAuthoritative: boolean,
   pooled: PooledDevice | undefined,
   session: DeviceSessionLike | undefined,
   deviceSessionUuid: string | undefined,
   serviceStatus: DeviceServiceStatusLike | undefined,
 ): DeviceDescription {
-  const merged = mergeRuntimeFacts(device, admittedImage);
+  const merged = mergeRuntimeFacts(device, admittedImage, admittedImageAuthoritative);
   // A cold-boot adapter can report a temporary non-emulator transport id even
   // though the selected configured image proves this is a virtual device.
   // Keep the configured-image fact ahead of the transport-id heuristic.
@@ -261,17 +270,23 @@ function describeBooted(
 }
 
 // oxlint-disable-next-line complexity -- each optional runtime fact follows documented precedence.
-function mergeRuntimeFacts(device: BootedDevice, admittedImage: ImageLike | undefined): DeviceInfo {
+function mergeRuntimeFacts(
+  device: BootedDevice,
+  admittedImage: ImageLike | undefined,
+  admittedImageAuthoritative: boolean,
+): DeviceInfo {
+  const preferred = <T>(deviceValue: T | undefined, imageValue: T | undefined): T | undefined =>
+    admittedImageAuthoritative ? (imageValue ?? deviceValue) : (deviceValue ?? imageValue);
   return {
     ...admittedImage,
     ...device,
-    // An admitted Android image is authoritative for configured display and runtime facts.
-    apiLevel: admittedImage?.apiLevel ?? device.apiLevel,
-    osVersion: admittedImage?.osVersion ?? device.osVersion,
-    screenWidth: admittedImage?.screenWidth ?? device.screenWidth,
-    screenHeight: admittedImage?.screenHeight ?? device.screenHeight,
-    screenDensity: admittedImage?.screenDensity ?? device.screenDensity,
-    formFactor: admittedImage?.formFactor ?? device.formFactor,
+    // Pool/discovery/provisioning image facts are authoritative; configured inventory fills gaps.
+    apiLevel: preferred(device.apiLevel, admittedImage?.apiLevel),
+    osVersion: preferred(device.osVersion, admittedImage?.osVersion),
+    screenWidth: preferred(device.screenWidth, admittedImage?.screenWidth),
+    screenHeight: preferred(device.screenHeight, admittedImage?.screenHeight),
+    screenDensity: preferred(device.screenDensity, admittedImage?.screenDensity),
+    formFactor: preferred(device.formFactor, admittedImage?.formFactor),
     isRunning: true,
   };
 }

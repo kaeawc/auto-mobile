@@ -21,6 +21,7 @@ import {
   DeviceLockStatesResourceContent,
   readinessFromServiceStatus,
   queryDeviceServiceStatus,
+  configuredImagesForBootedPlatform,
   type AndroidServiceStatusLookup,
   type CtrlProxyVersionLookup,
 } from "../../../src/server/bootedDeviceResources";
@@ -162,6 +163,26 @@ describe("MCP Booted Device Resources", () => {
       "ios-simulator": { observationComplete: false },
       "ios-physical": { observationComplete: true },
     });
+  });
+
+  test("bounds hung configured image fallback discovery", async () => {
+    const timer = new FakeTimer();
+    fakeDeviceUtils.setListDeviceImagesHangs("android", true);
+
+    const configuredImages = configuredImagesForBootedPlatform("android", fakeDeviceUtils, timer);
+    timer.advanceTime(2_000);
+
+    expect(await configuredImages).toEqual(new Map());
+    expect(fakeDeviceUtils.getGetDeviceImagesDetailedCalls()).toEqual([
+      expect.objectContaining({
+        platform: "android",
+        options: expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      }),
+    ]);
+    expect(fakeDeviceUtils.getGetDeviceImagesDetailedCalls()[0]?.options.signal?.aborted).toBe(
+      true,
+    );
+    fakeDeviceUtils.setListDeviceImagesHangs("android", false);
   });
 
   describe("Resource Listing", () => {

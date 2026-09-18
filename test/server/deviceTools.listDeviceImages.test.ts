@@ -12,6 +12,7 @@ import { FakeAdbClient } from "../fakes/FakeAdbClient";
 import type { AdbClient } from "../../src/utils/android-cmdline-tools/AdbClient";
 import type { AndroidEmulatorClient } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
+import { FakeAvdManager } from "../fakes/FakeAvdManager";
 
 describe("listDeviceImages", function () {
   afterEach(function () {
@@ -114,6 +115,7 @@ describe("listDeviceImages", function () {
     ]);
     setDeviceToolsDependencies({
       deviceManagerFactory: () => fakeDeviceManager,
+      avdManagerFactory: () => new FakeAvdManager(),
     });
     registerDeviceTools();
 
@@ -168,6 +170,7 @@ describe("listDeviceImages", function () {
     fakeDeviceManager.failedPlatforms.add("android");
     setDeviceToolsDependencies({
       deviceManagerFactory: () => fakeDeviceManager,
+      avdManagerFactory: () => new FakeAvdManager(),
     });
     registerDeviceTools();
 
@@ -216,6 +219,7 @@ describe("listDeviceImages", function () {
     );
     setDeviceToolsDependencies({
       deviceManagerFactory: () => deviceManager,
+      avdManagerFactory: () => new FakeAvdManager(),
     });
     registerDeviceTools();
 

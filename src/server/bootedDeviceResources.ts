@@ -442,12 +442,27 @@ function toBootedDeviceInfo(
   };
 }
 
-async function configuredImagesForBootedPlatform(
+// This is best-effort enrichment: a wedged `emulator -list-avds` must not hang devices/booted.
+const CONFIGURED_IMAGE_FALLBACK_TIMEOUT_MS = 2_000;
+
+export async function configuredImagesForBootedPlatform(
   platform: Platform,
+  deviceManager: PlatformDeviceManager = PlatformDeviceManagerFactory.getInstance(),
+  timer: Timer = defaultTimer,
 ): Promise<ReadonlyMap<string, StableConfiguredDeviceImage>> {
+  const controller = new AbortController();
+  let timeoutHandle: NodeJS.Timeout | undefined;
   try {
-    const discovery =
-      await PlatformDeviceManagerFactory.getInstance().getDeviceImagesDetailed(platform);
+    timeoutHandle = timer.setTimeout(() => {
+      controller.abort(
+        new Error(
+          `Configured ${platform} image inventory timed out after ${CONFIGURED_IMAGE_FALLBACK_TIMEOUT_MS}ms`,
+        ),
+      );
+    }, CONFIGURED_IMAGE_FALLBACK_TIMEOUT_MS);
+    const discovery = await deviceManager.getDeviceImagesDetailed(platform, {
+      signal: controller.signal,
+    });
     return configuredImagesByStableId(platform, discovery);
   } catch (error) {
     logger.warn(
@@ -455,6 +470,10 @@ async function configuredImagesForBootedPlatform(
       error,
     );
     return new Map();
+  } finally {
+    if (timeoutHandle) {
+      timer.clearTimeout(timeoutHandle);
+    }
   }
 }
 

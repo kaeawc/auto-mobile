@@ -1053,7 +1053,7 @@ function listDevicePayloads(
       pooled,
       configured: configuredImageForBootedDevice(device, configuredImages),
       session: pooled?.sessionId ? { sessionId: pooled.sessionId } : undefined,
-      deviceSessionUuid: initializedDeviceSessionUuid(device.deviceId),
+      deviceSessionUuid: pooled ? initializedDeviceSessionUuid(device.deviceId) : undefined,
     });
     return {
       ...projectListDevicesEntry(description),
@@ -1087,16 +1087,31 @@ function initializedDeviceSessionUuid(deviceId: string): string | undefined {
   return daemonState.getDeviceSessionRegistry().getByDeviceId(deviceId)?.deviceSessionUuid;
 }
 
+// This is best-effort enrichment: a wedged `emulator -list-avds` must not hang listDevices.
+const CONFIGURED_IMAGE_FALLBACK_TIMEOUT_MS = 2_000;
+
 async function configuredImagesForBootedDevices(
   deviceManager: PlatformDeviceManager,
   booted: readonly BootedDevice[],
+  timer: Timer,
 ): Promise<ReadonlyMap<string, StableConfiguredDeviceImage>> {
   const images = new Map<string, StableConfiguredDeviceImage>();
   const platforms = [...new Set(booted.map((device) => device.platform))];
   await Promise.all(
     platforms.map(async (platform) => {
+      const controller = new AbortController();
+      let timeoutHandle: NodeJS.Timeout | undefined;
       try {
-        const discovery = await deviceManager.getDeviceImagesDetailed(platform);
+        timeoutHandle = timer.setTimeout(() => {
+          controller.abort(
+            new Error(
+              `Configured ${platform} image inventory timed out after ${CONFIGURED_IMAGE_FALLBACK_TIMEOUT_MS}ms`,
+            ),
+          );
+        }, CONFIGURED_IMAGE_FALLBACK_TIMEOUT_MS);
+        const discovery = await deviceManager.getDeviceImagesDetailed(platform, {
+          signal: controller.signal,
+        });
         for (const [key, image] of configuredImagesByStableId(platform, discovery)) {
           images.set(key, image);
         }
@@ -1105,6 +1120,10 @@ async function configuredImagesForBootedDevices(
           `listDevices configured ${platform} image inventory failed: ${errorMessage(error)}`,
           error,
         );
+      } finally {
+        if (timeoutHandle) {
+          timer.clearTimeout(timeoutHandle);
+        }
       }
     }),
   );
@@ -6295,7 +6314,8 @@ export function registerDeviceTools() {
     const platform: SomePlatform = args.platform ?? "either";
     const presentationOrder = acceptancePresentationOrder(args);
     const requestedPlatforms: Platform[] = platform === "either" ? ["android", "ios"] : [platform];
-    const deviceManager = getDeviceToolsDependencies().deviceManagerFactory();
+    const deps = getDeviceToolsDependencies();
+    const deviceManager = deps.deviceManagerFactory();
     let booted: BootedDevice[] = [];
     // #5893 item 4: `getBootedDevices` collapses a failed per-platform probe to
     // `[]`, so a transient tooling failure is indistinguishable from a genuinely
@@ -6346,7 +6366,11 @@ export function registerDeviceTools() {
         : {}),
     };
 
-    const configuredImages = await configuredImagesForBootedDevices(deviceManager, booted);
+    const configuredImages = await configuredImagesForBootedDevices(
+      deviceManager,
+      booted,
+      deps.timer,
+    );
     const devices = listDevicePayloads(booted, initializedDevicePool(), configuredImages);
     const platformFilter = args.platform ? ` (${args.platform} only)` : "";
 

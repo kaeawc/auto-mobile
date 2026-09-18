@@ -740,6 +740,7 @@ describe("MCP Booted Device Resources", () => {
       );
       expect(assignedDevice).toBeDefined();
       expect(assignedDevice?.session.poolStatus).toBe("assigned");
+      expect(assignedDevice?.session.ownership).toBe("owned");
 
       const idleDevice = data.devices.find(
         (device) => device.identity.deviceId !== assignedDevice?.identity.deviceId,

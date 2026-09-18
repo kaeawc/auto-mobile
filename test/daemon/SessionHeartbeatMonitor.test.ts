@@ -87,6 +87,74 @@ describe("SessionHeartbeatMonitor", () => {
   });
 
   describe("tick reaping decision", () => {
+    it("uses a rehydrated session's own timeout while it awaits its owner", async () => {
+      await sessionManager.createSession(
+        "rehydrated-session",
+        "emulator-5554",
+        "android",
+        60_000,
+        30_000,
+        undefined,
+        undefined,
+        "awaiting-owner",
+      );
+      const reaped: Array<{ sessionId: string; reason: string }> = [];
+      const monitor = new SessionHeartbeatMonitor(
+        sessionManager,
+        () => false,
+        async (sessionId, reason) => {
+          reaped.push({ sessionId, reason });
+        },
+        timer,
+      );
+
+      timer.advanceTime(30_000);
+      await monitor.tick();
+      expect(reaped).toEqual([]);
+
+      timer.advanceTime(1);
+      await monitor.tick();
+      expect(reaped).toEqual([
+        { sessionId: "rehydrated-session", reason: "rehydration-owner-timeout" },
+      ]);
+    });
+
+    it("does not apply pre-first-heartbeat grace while a default-timeout session awaits its owner", async () => {
+      await sessionManager.createSession(
+        "default-timeout-awaiting-owner",
+        "emulator-5554",
+        "android",
+        60_000,
+        undefined,
+        undefined,
+        undefined,
+        "awaiting-owner",
+      );
+      const reaped: Array<{ sessionId: string; reason: string }> = [];
+      const monitor = new SessionHeartbeatMonitor(
+        sessionManager,
+        () => false,
+        async (sessionId, reason) => {
+          reaped.push({ sessionId, reason });
+        },
+        timer,
+      );
+
+      timer.advanceTime(5_000);
+      await monitor.tick();
+      expect(reaped).toEqual([]);
+
+      timer.advanceTime(2_000);
+      await monitor.tick();
+      expect(reaped).toEqual([]);
+
+      timer.advanceTime(3_001);
+      await monitor.tick();
+      expect(reaped).toEqual([
+        { sessionId: "default-timeout-awaiting-owner", reason: "rehydration-owner-timeout" },
+      ]);
+    });
+
     it("does not reap a default-heartbeat session still within the pre-first-heartbeat grace period", async () => {
       await sessionManager.createSession("s1", "emulator-5554", "android", 60_000);
       const reaped: string[] = [];

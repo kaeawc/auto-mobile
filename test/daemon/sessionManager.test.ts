@@ -4496,6 +4496,461 @@ describe("SessionManager", () => {
     }
   });
 
+  test("rehydrates recoverable rows awaiting their prior owner and reclaims on use", async () => {
+    const persistence = new FakeDeviceSessionPersistence();
+    await persistence.upsertActiveSession({
+      sessionUuid: "rehydrate-me",
+      deviceId: "emulator-5554",
+      stableDeviceId: "Pixel_8_API_35",
+      platform: "android",
+      createdAtMs: 1,
+      lastUsedAtMs: 20,
+      expiresAtMs: 60_020,
+      sessionTimeoutMs: 60_000,
+      heartbeatTimeoutMs: 15_000,
+      heartbeatTimeoutSource: "custom",
+      hasReceivedHeartbeat: true,
+    });
+    await persistence.recordLivenessOwnership("rehydrate-me", "owner-token");
+    await persistence.markReleased("rehydrate-me", "expired", 30, "daemon-restart");
+    const restarted = new SessionManager(fakeTimer, persistence);
+    const devicePool: SessionDeviceAssigner = {
+      async assignDeviceToSession(sessionId, _platform, target): Promise<string> {
+        const session = await restarted.createSession(
+          sessionId,
+          "emulator-5554",
+          "android",
+          target?.liveness?.sessionTimeoutMs,
+          target?.liveness?.heartbeatTimeoutMs,
+          target?.stableDeviceId,
+          target?.liveness,
+          target?.initialOwnership,
+        );
+        return session.assignedDevice;
+      },
+    };
+    try {
+      await expect(restarted.rehydratePersistedSessions(devicePool)).resolves.toEqual({
+        rehydrated: ["rehydrate-me"],
+        terminalized: [],
+        skipped: [],
+        timedOut: false,
+      });
+      expect(restarted.getSession("rehydrate-me")).toMatchObject({
+        assignedDevice: "emulator-5554",
+        stableDeviceId: "Pixel_8_API_35",
+        heartbeatTimeoutMs: 15_000,
+        hasReceivedHeartbeat: false,
+        livenessOwnerToken: "owner-token",
+        ownership: "awaiting-owner",
+        awaitingOwnerSince: fakeTimer.now(),
+      });
+
+      await restarted.getOrCreateSession("rehydrate-me");
+      expect(restarted.getSession("rehydrate-me")).toMatchObject({ ownership: "owned" });
+      expect(restarted.getSession("rehydrate-me")?.awaitingOwnerSince).toBeUndefined();
+    } finally {
+      restarted.stopCleanupTimer();
+    }
+  });
+
+  test("terminalizes missing rehydration targets without aborting the sweep", async () => {
+    const persistence = new FakeDeviceSessionPersistence();
+    await persistence.upsertActiveSession({
+      sessionUuid: "gone-after-restart",
+      deviceId: "emulator-5554",
+      stableDeviceId: "Pixel_8_API_35",
+      platform: "android",
+      createdAtMs: 1,
+      lastUsedAtMs: 20,
+      expiresAtMs: 60_020,
+      sessionTimeoutMs: 60_000,
+      heartbeatTimeoutMs: 15_000,
+      hasReceivedHeartbeat: true,
+    });
+    await persistence.markReleased("gone-after-restart", "expired", 30, "daemon-restart");
+    const restarted = new SessionManager(fakeTimer, persistence);
+    const devicePool: SessionDeviceAssigner = {
+      async assignDeviceToSession(sessionId, _platform, target): Promise<string> {
+        if (!target) {
+          throw new Error("missing recovery target");
+        }
+        throw new SessionRecoveryIdentityLossError(sessionId, target, "target-absent");
+      },
+    };
+    try {
+      await expect(restarted.rehydratePersistedSessions(devicePool)).resolves.toEqual({
+        rehydrated: [],
+        terminalized: [
+          { sessionUuid: "gone-after-restart", reason: "identity-recovery-target-absent" },
+        ],
+        skipped: [],
+        timedOut: false,
+      });
+      expect(await persistence.getSession?.("gone-after-restart")).toMatchObject({
+        release_reason: "identity-recovery-target-absent",
+        status: "released",
+      });
+    } finally {
+      restarted.stopCleanupTimer();
+    }
+  });
+
+  test("bounds a hung rehydration and skips the remaining rows", async () => {
+    const persistence = new FakeDeviceSessionPersistence();
+    const seed = async (sessionUuid: string, lastUsedAtMs: number): Promise<void> => {
+      await persistence.upsertActiveSession({
+        sessionUuid,
+        deviceId: "emulator-5554",
+        stableDeviceId: "Pixel_8_API_35",
+        platform: "android",
+        createdAtMs: 1,
+        lastUsedAtMs,
+        expiresAtMs: 60_020,
+        sessionTimeoutMs: 60_000,
+        heartbeatTimeoutMs: 15_000,
+        hasReceivedHeartbeat: true,
+      });
+      await persistence.markReleased(sessionUuid, "released", 30, "daemon-restart");
+    };
+    await seed("hung-rehydration", 20);
+    await seed("queued-rehydration", 10);
+    const restarted = new SessionManager(fakeTimer, persistence);
+    let assignments = 0;
+    const devicePool: SessionDeviceAssigner = {
+      async assignDeviceToSession(): Promise<string> {
+        assignments += 1;
+        return new Promise(() => {});
+      },
+    };
+    try {
+      const rehydration = restarted.rehydratePersistedSessions(devicePool, { deadlineMs: 1_000 });
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await fakeTimer.advanceTimeAsync(1_000);
+      await expect(rehydration).resolves.toEqual({
+        rehydrated: [],
+        terminalized: [],
+        skipped: [
+          { sessionUuid: "hung-rehydration", reason: "startup-deadline" },
+          { sessionUuid: "queued-rehydration", reason: "startup-deadline" },
+        ],
+        timedOut: true,
+      });
+      expect(assignments).toBe(1);
+    } finally {
+      restarted.stopCleanupTimer();
+    }
+  });
+
+  test("does not time out when all persisted rows recover quickly", async () => {
+    const persistence = new FakeDeviceSessionPersistence();
+    for (const sessionUuid of ["quick-rehydration-a", "quick-rehydration-b"]) {
+      await persistence.upsertActiveSession({
+        sessionUuid,
+        deviceId: "emulator-5554",
+        stableDeviceId: "Pixel_8_API_35",
+        platform: "android",
+        createdAtMs: 1,
+        lastUsedAtMs: 20,
+        expiresAtMs: 60_020,
+        sessionTimeoutMs: 60_000,
+        heartbeatTimeoutMs: 15_000,
+        hasReceivedHeartbeat: true,
+      });
+      await persistence.markReleased(sessionUuid, "released", 30, "daemon-restart");
+    }
+    const restarted = new SessionManager(fakeTimer, persistence);
+    const devicePool: SessionDeviceAssigner = {
+      async assignDeviceToSession(sessionId, _platform, target): Promise<string> {
+        const session = await restarted.createSession(
+          sessionId,
+          "emulator-5554",
+          "android",
+          target?.liveness?.sessionTimeoutMs,
+          target?.liveness?.heartbeatTimeoutMs,
+          target?.stableDeviceId,
+          target?.liveness,
+          target?.initialOwnership,
+        );
+        return session.assignedDevice;
+      },
+    };
+    try {
+      await expect(
+        restarted.rehydratePersistedSessions(devicePool, { deadlineMs: 15_000 }),
+      ).resolves.toEqual({
+        rehydrated: ["quick-rehydration-a", "quick-rehydration-b"],
+        terminalized: [],
+        skipped: [],
+        timedOut: false,
+      });
+    } finally {
+      restarted.stopCleanupTimer();
+    }
+  });
+
+  test("does not attempt recovery when the startup deadline is zero", async () => {
+    const persistence = new FakeDeviceSessionPersistence();
+    await persistence.upsertActiveSession({
+      sessionUuid: "zero-deadline-rehydration",
+      deviceId: "emulator-5554",
+      stableDeviceId: "Pixel_8_API_35",
+      platform: "android",
+      createdAtMs: 1,
+      lastUsedAtMs: 20,
+      expiresAtMs: 60_020,
+      sessionTimeoutMs: 60_000,
+      heartbeatTimeoutMs: 15_000,
+      hasReceivedHeartbeat: true,
+    });
+    await persistence.markReleased("zero-deadline-rehydration", "released", 30, "daemon-restart");
+    const restarted = new SessionManager(fakeTimer, persistence);
+    let assignments = 0;
+    try {
+      await expect(
+        restarted.rehydratePersistedSessions(
+          {
+            async assignDeviceToSession(): Promise<string> {
+              assignments += 1;
+              return "emulator-5554";
+            },
+          },
+          { deadlineMs: 0 },
+        ),
+      ).resolves.toEqual({
+        rehydrated: [],
+        terminalized: [],
+        skipped: [{ sessionUuid: "zero-deadline-rehydration", reason: "startup-deadline" }],
+        timedOut: true,
+      });
+      expect(assignments).toBe(0);
+    } finally {
+      restarted.stopCleanupTimer();
+    }
+  });
+
+  test("does not rehydrate terminal persisted rows", async () => {
+    const persistence = new FakeDeviceSessionPersistence();
+    await persistence.upsertActiveSession({
+      sessionUuid: "terminal-row",
+      deviceId: "emulator-5554",
+      platform: "android",
+      createdAtMs: 1,
+      lastUsedAtMs: 20,
+      expiresAtMs: 60_020,
+      sessionTimeoutMs: 60_000,
+      heartbeatTimeoutMs: 15_000,
+      hasReceivedHeartbeat: true,
+    });
+    await persistence.markReleased("terminal-row", "released", 30, "device-killed");
+    const restarted = new SessionManager(fakeTimer, persistence);
+    let assignments = 0;
+    try {
+      await expect(
+        restarted.rehydratePersistedSessions({
+          async assignDeviceToSession(): Promise<string> {
+            assignments += 1;
+            return "emulator-5554";
+          },
+        }),
+      ).resolves.toEqual({ rehydrated: [], terminalized: [], skipped: [], timedOut: false });
+      expect(assignments).toBe(0);
+    } finally {
+      restarted.stopCleanupTimer();
+    }
+  });
+
+  test("joins a slow startup recovery from a concurrent getOrCreateSession call", async () => {
+    const persistence = new FakeDeviceSessionPersistence();
+    const sessionUuid = "joined-startup-recovery";
+    await persistence.upsertActiveSession({
+      sessionUuid,
+      deviceId: "emulator-5554",
+      stableDeviceId: "Pixel_8_API_35",
+      platform: "android",
+      createdAtMs: 1,
+      lastUsedAtMs: 20,
+      expiresAtMs: 60_020,
+      sessionTimeoutMs: 60_000,
+      heartbeatTimeoutMs: 15_000,
+      hasReceivedHeartbeat: true,
+    });
+    await persistence.markReleased(sessionUuid, "released", 30, "daemon-restart");
+    const restarted = new SessionManager(fakeTimer, persistence);
+    let resolveAssignment!: () => void;
+    const assignmentReady = new Promise<void>((resolve) => {
+      resolveAssignment = resolve;
+    });
+    let assignments = 0;
+    const devicePool: SessionDeviceAssigner = {
+      async assignDeviceToSession(sessionId, _platform, target): Promise<string> {
+        assignments += 1;
+        await assignmentReady;
+        const session = await restarted.createSession(
+          sessionId,
+          "emulator-5554",
+          "android",
+          target?.liveness?.sessionTimeoutMs,
+          target?.liveness?.heartbeatTimeoutMs,
+          target?.stableDeviceId,
+          target?.liveness,
+          target?.initialOwnership,
+        );
+        return session.assignedDevice;
+      },
+    };
+    try {
+      const rehydration = restarted.rehydratePersistedSessions(devicePool, { deadlineMs: 10_000 });
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      const joined = restarted.getOrCreateSession(sessionUuid, devicePool, "android");
+      resolveAssignment();
+      const [summary, session] = await Promise.all([rehydration, joined]);
+      expect(assignments).toBe(1);
+      expect(summary).toEqual({
+        rehydrated: [sessionUuid],
+        terminalized: [],
+        skipped: [],
+        timedOut: false,
+      });
+      expect(session).toBe(restarted.getSession(sessionUuid));
+    } finally {
+      restarted.stopCleanupTimer();
+    }
+  });
+
+  test("keeps a deadline-abandoned recovery available for reconnects", async () => {
+    const persistence = new FakeDeviceSessionPersistence();
+    const sessionUuid = "deadline-joined-recovery";
+    await persistence.upsertActiveSession({
+      sessionUuid,
+      deviceId: "emulator-5554",
+      stableDeviceId: "Pixel_8_API_35",
+      platform: "android",
+      createdAtMs: 1,
+      lastUsedAtMs: 20,
+      expiresAtMs: 60_020,
+      sessionTimeoutMs: 60_000,
+      heartbeatTimeoutMs: 15_000,
+      hasReceivedHeartbeat: true,
+    });
+    await persistence.markReleased(sessionUuid, "released", 30, "daemon-restart");
+    const restarted = new SessionManager(fakeTimer, persistence);
+    let resolveAssignment!: () => void;
+    const assignmentReady = new Promise<void>((resolve) => {
+      resolveAssignment = resolve;
+    });
+    let assignments = 0;
+    const devicePool: SessionDeviceAssigner = {
+      async assignDeviceToSession(sessionId, _platform, target): Promise<string> {
+        assignments += 1;
+        await assignmentReady;
+        const session = await restarted.createSession(
+          sessionId,
+          "emulator-5554",
+          "android",
+          target?.liveness?.sessionTimeoutMs,
+          target?.liveness?.heartbeatTimeoutMs,
+          target?.stableDeviceId,
+          target?.liveness,
+          target?.initialOwnership,
+        );
+        return session.assignedDevice;
+      },
+    };
+    try {
+      const rehydration = restarted.rehydratePersistedSessions(devicePool, { deadlineMs: 1_000 });
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await fakeTimer.advanceTimeAsync(1_000);
+      await expect(rehydration).resolves.toEqual({
+        rehydrated: [],
+        terminalized: [],
+        skipped: [{ sessionUuid, reason: "startup-deadline" }],
+        timedOut: true,
+      });
+      expect(assignments).toBe(1);
+
+      const reconnected = restarted.getOrCreateSession(sessionUuid, devicePool, "android");
+      await Promise.resolve();
+      expect(assignments).toBe(1);
+      resolveAssignment();
+      await expect(reconnected).resolves.toMatchObject({
+        sessionId: sessionUuid,
+        ownership: "owned",
+      });
+      expect(assignments).toBe(1);
+      expect(restarted.getSession(sessionUuid)).not.toBeNull();
+      expect(restarted.getTerminalReleaseSnapshot(sessionUuid)).toBeUndefined();
+    } finally {
+      restarted.stopCleanupTimer();
+    }
+  });
+
+  test("skips a persisted row with an already-pending assignment", async () => {
+    const persistence = new FakeDeviceSessionPersistence();
+    const sessionUuid = "already-pending-recovery";
+    await persistence.upsertActiveSession({
+      sessionUuid,
+      deviceId: "emulator-5554",
+      stableDeviceId: "Pixel_8_API_35",
+      platform: "android",
+      createdAtMs: 1,
+      lastUsedAtMs: 20,
+      expiresAtMs: 60_020,
+      sessionTimeoutMs: 60_000,
+      heartbeatTimeoutMs: 15_000,
+      hasReceivedHeartbeat: true,
+    });
+    await persistence.markReleased(sessionUuid, "released", 30, "daemon-restart");
+    const restarted = new SessionManager(fakeTimer, persistence);
+    let resolveAssignment!: () => void;
+    const assignmentReady = new Promise<void>((resolve) => {
+      resolveAssignment = resolve;
+    });
+    let assignments = 0;
+    const devicePool: SessionDeviceAssigner = {
+      async assignDeviceToSession(sessionId, _platform, target): Promise<string> {
+        assignments += 1;
+        await assignmentReady;
+        const session = await restarted.createSession(
+          sessionId,
+          "emulator-5554",
+          "android",
+          target?.liveness?.sessionTimeoutMs,
+          target?.liveness?.heartbeatTimeoutMs,
+          target?.stableDeviceId,
+          target?.liveness,
+          target?.initialOwnership,
+        );
+        return session.assignedDevice;
+      },
+    };
+    try {
+      const pending = restarted.getOrCreateSession(sessionUuid, devicePool, "android");
+      await Promise.resolve();
+      await Promise.resolve();
+      const summary = await restarted.rehydratePersistedSessions(devicePool, {
+        deadlineMs: 10_000,
+      });
+      expect(summary).toEqual({
+        rehydrated: [],
+        terminalized: [],
+        skipped: [{ sessionUuid, reason: "already-pending" }],
+        timedOut: false,
+      });
+      expect(assignments).toBe(1);
+      resolveAssignment();
+      await expect(pending).resolves.toMatchObject({ sessionId: sessionUuid });
+    } finally {
+      restarted.stopCleanupTimer();
+    }
+  });
+
   describe("setDeviceReadiness (#6227 round 7)", () => {
     test("records a level when none is recorded yet", async () => {
       await sessionManager.createSession("session-1", "emulator-5554", "android");

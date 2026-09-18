@@ -12,7 +12,7 @@ import { defaultTimer, type Timer } from "../utils/SystemTimer";
 // `markStaleActiveSessionsExpired`), so it is a reliable "became terminal" age
 // marker without a migration.
 const DEVICE_SESSION_RETENTION_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
-const RECOVERABLE_DAEMON_RELEASE_REASONS = new Set(["daemon-shutdown", "daemon-restart"]);
+export const RECOVERABLE_DAEMON_RELEASE_REASONS = new Set(["daemon-shutdown", "daemon-restart"]);
 
 function shouldRetainLivenessOwner(reason: string): boolean {
   return RECOVERABLE_DAEMON_RELEASE_REASONS.has(reason);
@@ -57,6 +57,7 @@ export interface DeviceSessionActivityUpdate {
 export interface DeviceSessionPersistence {
   upsertActiveSession(record: DeviceSessionRecord): Promise<void>;
   getSession?(sessionUuid: string): Promise<DeviceSession | undefined>;
+  listRecoverableSessions?(): Promise<DeviceSession[]>;
   recordActivity(sessionUuid: string, update: DeviceSessionActivityUpdate): Promise<void>;
   recordLivenessOwnership?(sessionUuid: string, ownerToken: string | null): Promise<void>;
   replaceLivenessOwnership?(sessionUuid: string, ownerToken: string | null): Promise<void>;
@@ -374,6 +375,16 @@ export class DeviceSessionRepository {
       .selectAll()
       .where("session_uuid", "=", sessionUuid)
       .executeTakeFirst();
+  }
+
+  async listRecoverableSessions(): Promise<DeviceSession[]> {
+    const db = await this.getDb();
+    return await db
+      .selectFrom("device_sessions")
+      .selectAll()
+      .where("release_reason", "in", Array.from(RECOVERABLE_DAEMON_RELEASE_REASONS))
+      .orderBy("last_used_at_ms", "desc")
+      .execute();
   }
 
   /**

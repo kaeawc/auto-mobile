@@ -13,6 +13,8 @@ const MODAL_CLASSES = new Set([
   "XCUIElementTypeSheet",
 ]);
 
+export const IOS_KEYBOARD_CONTAINER_CLASSES = new Set(["UIKeyboard", "XCUIElementTypeKeyboard"]);
+
 interface CandidateSignals {
   bundleId?: string;
   navigationTitle?: string;
@@ -219,8 +221,7 @@ function hasKeyboard(root: ViewHierarchyNode | undefined): boolean {
       return;
     }
     const cls = className(attrsOf(node));
-    keyboardVisible =
-      cls === "UIKeyboard" || cls === "UIKeyboardKey" || cls === "XCUIElementTypeKeyboard";
+    keyboardVisible = IOS_KEYBOARD_CONTAINER_CLASSES.has(cls ?? "") || cls === "UIKeyboardKey";
   });
   return keyboardVisible;
 }

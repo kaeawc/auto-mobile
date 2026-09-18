@@ -253,12 +253,14 @@ The `deviceId` fields exist so the value that `listDevices` and the
 | 🎯 <code>accessibilityFocus</code> | Sets or clears Android TalkBack focus by resource ID, text, or content description.                                           |
 | 🔀 <code>setToolEnabled</code>     | Enables or disables AutoMobile tools for the current MCP session — one exact name via `toolName`, or a batch via `toolNames`. |
 
-On Android, compact observations fold soft-keyboard keys into a single
+On Android and iOS, compact observations fold soft-keyboard keys into a single
 `keyboard: { visible: true, package: "…" }` summary plus at most one skeleton row:
 
 ```
 <ime> | Keyboard (com.google.android.inputmethod.latin) | input
 ```
+
+On iOS, the row is labelled `Keyboard (com.apple.keyboard)`.
 
 That row appears only when the IME exposed at least one bounded accessible
 descendant. A keyboard whose window carries no accessible keys — some IMEs

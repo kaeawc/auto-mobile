@@ -5,6 +5,7 @@ import { isClickableElementProperties } from "../../utils/elementProperties";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
 import { DefaultElementParser } from "../utility/ElementParser";
 import { FlattenedElementEntry, IdentifyMediaViews } from "./IdentifyMediaViews";
+import { IOS_KEYBOARD_CONTAINER_CLASSES } from "./ios/IosScreenIdentity";
 import {
   ElementProvenance,
   setElementProvenance,
@@ -97,7 +98,7 @@ export class DefaultObserveElementCollector implements ObserveElementCollector {
     // to its nearest parsed ancestor — bounds-less nodes are skipped in the
     // arrays but must not break ancestry between the nodes that survive.
     const ancestors: { depth: number; provenance: ElementProvenance }[] = [];
-    let keyboardRoot: { depth: number; package: string } | undefined;
+    let keyboardRoot: KeyboardRoot | undefined;
     let capturedKeyboardPackage: string | undefined;
 
     this.parser.traverseNode(rootNode, (node: ViewHierarchyNode, depth: number) => {
@@ -105,6 +106,7 @@ export class DefaultObserveElementCollector implements ObserveElementCollector {
       keyboardRoot = nextKeyboardRoot(
         keyboardRoot,
         nodeProperties.extras?.["automobile:imePackage"],
+        nodeProperties,
         depth,
         platform,
       );
@@ -129,7 +131,7 @@ export class DefaultObserveElementCollector implements ObserveElementCollector {
         group,
         enter,
         exit: enter,
-        keyboardPackage: keyboardRoot?.package,
+        keyboardPackage: keyboardPackageForNode(keyboardRoot, nodeProperties),
       };
       setElementProvenance(parsedNode, provenance);
       provenanceState.records.push({ provenance, parent });
@@ -195,15 +197,64 @@ function isUncollectedWrapper(element: Element, actionable: boolean, text: unkno
 
 /** Track IME ownership even through bounds-less wrappers, ending it at the next sibling. */
 function nextKeyboardRoot(
-  current: { depth: number; package: string } | undefined,
+  current: KeyboardRoot | undefined,
   imePackage: unknown,
+  nodeProperties: Element,
   depth: number,
   platform: "android" | "ios",
-): { depth: number; package: string } | undefined {
+): KeyboardRoot | undefined {
   if (platform === "android" && typeof imePackage === "string" && imePackage.length > 0) {
     return { depth, package: imePackage };
   }
+  if (platform === "ios") {
+    return nextIosKeyboardRoot(current, nodeProperties, depth);
+  }
   return current && depth > current.depth ? current : undefined;
+}
+
+interface KeyboardRoot {
+  depth: number;
+  package: string;
+  memberClass?: string;
+}
+
+function getIosClassName(nodeProperties: Element): string | undefined {
+  const classValue =
+    typeof nodeProperties.class === "string" ? nodeProperties.class.trim() : undefined;
+  const classNameValue =
+    typeof nodeProperties.className === "string" ? nodeProperties.className.trim() : undefined;
+  return classValue || classNameValue;
+}
+
+function nextIosKeyboardRoot(
+  current: KeyboardRoot | undefined,
+  nodeProperties: Element,
+  depth: number,
+): KeyboardRoot | undefined {
+  // Mirror IosScreenIdentity.className: prefer a non-empty class, then className.
+  const className = getIosClassName(nodeProperties);
+  if (IOS_KEYBOARD_CONTAINER_CLASSES.has(className || "")) {
+    return { depth, package: "com.apple.keyboard" };
+  }
+  const persistentRoot = current && depth > current.depth ? current : undefined;
+  if (persistentRoot) {
+    return persistentRoot;
+  }
+  return className === "UIKeyboardKey"
+    ? { depth: depth - 1, package: "com.apple.keyboard", memberClass: className }
+    : undefined;
+}
+
+function keyboardPackageForNode(
+  keyboardRoot: KeyboardRoot | undefined,
+  nodeProperties: Element,
+): string | undefined {
+  if (!keyboardRoot || keyboardRoot.memberClass === undefined) {
+    return keyboardRoot?.package;
+  }
+  return getIosClassName(nodeProperties) === keyboardRoot.memberClass
+    ? keyboardRoot.package
+    : undefined;
 }
 
 /** Shared pre-order counter and parent records accumulated across all roots. */

@@ -5498,6 +5498,34 @@ describe("DaemonMcpProxy", () => {
       }
     });
 
+    test("forwards and clears a CLI-preseeded tool-selection profile", async () => {
+      const client = new FakeDaemonClient();
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => client,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        proxy.setToolSelectionProfileUuid("profile-a");
+        await proxy.callTool("observe", {});
+        proxy.setToolSelectionProfileUuid(undefined);
+        await proxy.callTool("observe", {});
+
+        expect(client.callToolCalls).toEqual([
+          {
+            toolName: "observe",
+            params: { [DAEMON_TOOL_SELECTION_PROFILE_PARAM]: "profile-a" },
+          },
+          { toolName: "observe", params: {} },
+        ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
     test("replays a generated profile for discovery and explicit device calls without turning it into a device session", async () => {
       const client = new ScriptedDaemonClient({
         toolResult: {

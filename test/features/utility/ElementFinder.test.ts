@@ -71,6 +71,50 @@ describe("DefaultElementFinder", () => {
       expect(results[0].bounds.bottom).toBe(50);
     });
 
+    test("ranks a matching text input below a matching non-input element", () => {
+      const hierarchy = makeHierarchy([
+        {
+          $: {
+            class: "android.widget.EditText",
+            text: "Dark theme",
+            clickable: "true",
+            bounds: bounds(0, 0, 100, 50),
+          },
+        },
+        {
+          $: {
+            class: "android.widget.TextView",
+            text: "Dark theme",
+            clickable: "true",
+            bounds: bounds(0, 50, 100, 100),
+          },
+        },
+      ]);
+
+      const results = finder.findElementsByText(hierarchy, "Dark theme");
+      expect(results).toHaveLength(2);
+      expect(results[0].class).toBe("android.widget.TextView");
+      expect(finder.findElementByText(hierarchy, "Dark theme")!.class).toBe(
+        "android.widget.TextView",
+      );
+    });
+
+    test("keeps the sole matching text input", () => {
+      const hierarchy = makeHierarchy({
+        $: {
+          class: "android.widget.EditText",
+          text: "Dark theme",
+          clickable: "true",
+          bounds: bounds(0, 0, 100, 50),
+        },
+      });
+
+      expect(finder.findElementsByText(hierarchy, "Dark theme")).toHaveLength(1);
+      expect(finder.findElementByText(hierarchy, "Dark theme")!.class).toBe(
+        "android.widget.EditText",
+      );
+    });
+
     test("returns empty when container not found", () => {
       const hierarchy = makeHierarchy({ $: { text: "Login", bounds: bounds(0, 0, 100, 50) } });
       const results = finder.findElementsByText(hierarchy, "Login", {

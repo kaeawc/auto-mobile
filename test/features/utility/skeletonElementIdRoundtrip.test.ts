@@ -108,27 +108,32 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
     }
   });
 
-  test("content-identical duplicate nodes get distinct ordinal ids (NO bare form) and both are rejected as capture-local", () => {
-    // Two nodes with completely identical stable content (same class, no
-    // text/content-desc/resource-id) — `assignStableViewIds` disambiguates them
-    // with document-order ordinals. Under the #6229 fix EVERY member of a
-    // duplicate group is suffixed, so the first is `s-<hash>-1` (NOT bare) and
-    // the second is `s-<hash>-2`; the bare form is reserved for unique content.
-    // Both ordinal forms are still capture-local whenever a duplicate exists,
-    // so resolving either while both peers are present risks silently acting on
-    // the wrong element — worse than a clear failure (issue #6218 review
-    // threads PRRT_kwDOP-GF5M6foer0 and follow-up PRRT_kwDOP-GF5M6fomf-).
+  test("a current-capture ordinal resolves its row while the shared bare id remains ambiguous (#7219)", () => {
+    // Preference rows commonly keep their visible label in a text child rather
+    // than on the clickable container. Descendant display text intentionally
+    // does not affect an ancestor's stable hash (#6230), so these rows share a
+    // base and receive document-order ordinals despite their distinct labels.
     const nodeA = {
       class: "android.view.View",
       bounds: { left: 0, top: 0, right: 40, bottom: 40 },
       clickable: "true",
       "view-id": generatedViewId("dup-a"),
+      node: {
+        class: "android.widget.TextView",
+        text: "Dark theme",
+        "view-id": generatedViewId("dark-theme"),
+      },
     };
     const nodeB = {
       class: "android.view.View",
       bounds: { left: 0, top: 50, right: 40, bottom: 90 },
       clickable: "true",
       "view-id": generatedViewId("dup-b"),
+      node: {
+        class: "android.widget.TextView",
+        text: "Bedtime mode",
+        "view-id": generatedViewId("bedtime-mode"),
+      },
     };
     const rawRoot = { node: [nodeA, nodeB] };
 
@@ -143,11 +148,19 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
     expect(idA).toMatch(/^s2-[0-9a-f]{16}-1$/);
     expect(idB).toBe(`${idA.replace(/-1$/, "")}-2`);
 
-    // Both ordinal forms are rejected outright, not resolved - neither is safe
-    // to trust across a capture boundary while a content-identical duplicate
-    // exists.
-    expect(() => selector.selectByResourceId(viewHierarchy, idA)).toThrow(/ambiguous/i);
-    expect(() => selector.selectByResourceId(viewHierarchy, idB)).toThrow(/ambiguous/i);
+    // Each ordinal is assigned to one node within this unchanged capture, so
+    // the selector handed out by skeleton must round-trip to that exact row.
+    const firstResult = selector.selectByResourceId(viewHierarchy, idA);
+    expect(firstResult.totalMatches).toBe(1);
+    expect(firstResult.element!.bounds).toEqual(nodeA.bounds);
+
+    // The shared bare form still cannot select one of the duplicate rows. Its
+    // recovery hint must name only selector fields tapOn actually accepts.
+    const base = idA.replace(/-1$/, "");
+    expect(() => selector.selectByResourceId(viewHierarchy, base)).toThrow(/textAny/i);
+    expect(() => selector.selectByResourceId(viewHierarchy, base)).toThrow(new RegExp(idA));
+    expect(() => selector.selectByResourceId(viewHierarchy, base)).toThrow(new RegExp(idB));
+    expect(() => selector.selectByResourceId(viewHierarchy, base)).not.toThrow(/bounds/i);
   });
 
   test("a suffixed id observed for a duplicate does NOT retarget the content-identical survivor after the original is removed (issue #6229)", () => {
@@ -293,7 +306,7 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
     expect(resultBase.element!.bounds).toEqual({ left: 0, top: 0, right: 100, bottom: 50 });
   });
 
-  test("an ordinal id from an earlier capture does not silently resolve to the wrong node after an insert shifts the ordinals", () => {
+  test("an ordinal id resolves the node that carries that exact id in the current capture", () => {
     // The exact P1 scenario: content-identical controls [A, B] where B was
     // observed as `s-<hash>-2`. Inserting an identical control before them in
     // a later capture shifts the ordinals: A becomes `s-<hash>-2` and B
@@ -355,24 +368,18 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
 
     const reorderedViewHierarchy: ViewHierarchyResult = { hierarchy: reordered };
 
-    // The id that used to mean "B" now happens to match "A" (the inserted
-    // node's document order) - this MUST be rejected, not silently tapped.
-    expect(() => selector.selectByResourceId(reorderedViewHierarchy, originalIdB)).toThrow(
-      /ambiguous/i,
-    );
+    // The current capture assigns this exact ordinal to A. Without
+    // capture-origin provenance, a selector resolves the current exact id;
+    // #7219 requires that behavior for same-capture skeleton round-trips.
+    const result = selector.selectByResourceId(reorderedViewHierarchy, originalIdB);
+    expect(result.totalMatches).toBe(1);
+    expect(result.element!["view-id"]).toBe(originalIdB);
   });
 
-  test("an ordinal id for identical controls in two containers is rejected as ambiguous even WITH a container selector (issue #6229, review thread PRRT_kwDOP-GF5M6f1gS0)", () => {
+  test("current-capture ordinals resolve identical controls across containers (#7219)", () => {
     // Ordinals are assigned by GLOBAL document order (`assignStableViewIds`),
-    // but the ambiguity guard used to count only within the resolved container
-    // (review thread PRRT_kwDOP-GF5M6fouI_). That was unsound: a content-
-    // identical peer OUTSIDE the container still makes an in-container ordinal
-    // capture-local, because removing the in-container original globally
-    // re-ordinals the id onto a surviving peer. A single fresh capture cannot
-    // tell a genuine "one identical target per container" layout apart from a
-    // post-removal reassignment, so the guard now counts over the WHOLE capture
-    // and rejects a globally-ambiguous ordinal even when a container isolates a
-    // single peer. The caller must disambiguate with text/content-desc/bounds.
+    // so the full capture contains two peers even though each container holds
+    // one. Their complete ordinal strings remain unique within this capture.
     const container1 = {
       class: "android.view.ViewGroup",
       bounds: { left: 0, top: 0, right: 100, bottom: 100 },
@@ -412,36 +419,26 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
     expect(idInContainer1).toMatch(/^s2-[0-9a-f]{16}-1$/);
     expect(idInContainer2).toBe(`${idInContainer1.replace(/-1$/, "")}-2`);
 
-    // Without a container, this is genuinely globally ambiguous.
-    expect(() => selector.selectByResourceId(viewHierarchy, idInContainer1)).toThrow(/ambiguous/i);
-
-    // Scoped to its OWN container, it is STILL rejected: the peer in the other
-    // container keeps the ordinal capture-local, so the guard cannot safely
-    // resolve it. (Previously this resolved cleanly, which is exactly the
-    // silent-retarget vector #6229 targets once a peer is removed.)
-    expect(() =>
+    expect(selector.selectByResourceId(viewHierarchy, idInContainer1).totalMatches).toBe(1);
+    expect(
       selector.selectByResourceId(viewHierarchy, idInContainer1, {
         container: { elementId: "com.app:id/container1" },
-      }),
-    ).toThrow(/ambiguous/i);
-    expect(() =>
+      }).totalMatches,
+    ).toBe(1);
+    expect(
       selector.selectByResourceId(viewHierarchy, idInContainer2, {
         container: { elementId: "com.app:id/container2" },
-      }),
-    ).toThrow(/ambiguous/i);
+      }).totalMatches,
+    ).toBe(1);
   });
 
-  test("a suffixed id does NOT silently retarget a content-identical peer in ANOTHER container after the original is removed (issue #6229, review thread PRRT_kwDOP-GF5M6f1gS0)", () => {
-    // Cross-container retarget: content-identical [A, B] in container c1 and an
-    // identical C in c2. Capture 1 assigns global ordinals A=`-1`, B=`-2`,
-    // C=`-3`. A caller observes A as `s-H-1` and scopes a later tapOn to c1.
-    // A is then removed; global re-ordinaling makes surviving B the new `s-H-1`
-    // (and C `s-H-2`). A container-local ambiguity count would see only B in c1
-    // and silently land the caller's stale `s-H-1` on B - a content-identical
-    // peer the caller never selected. The whole-capture count sees B AND C and
-    // rejects it as ambiguous instead.
+  test("a current-capture ordinal resolves within its selected container", () => {
+    // Content-identical rows in separate containers are ordinaled over the
+    // whole capture. The complete string is nevertheless unique in that
+    // capture and must still resolve when a container narrows the search.
     const buildRow = (tag: string) => ({
       class: "android.view.View",
+      bounds: { left: 0, top: 0, right: 100, bottom: 40 },
       "content-desc": "identical-row",
       clickable: "true",
       "view-id": generatedViewId(tag),
@@ -479,33 +476,26 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
 
     const viewHierarchy: ViewHierarchyResult = { hierarchy: capture2 };
 
-    // Resolving the caller's stale `s-H-1` scoped to c1 must NOT land on B: the
-    // still-present identical C in c2 keeps the ordinal capture-local, so the
-    // guard raises ambiguity rather than silently retargeting the wrong peer.
-    expect(() =>
+    // The complete ordinal exists exactly once in this capture, so it is a
+    // usable selector for the currently assigned row (the capture-local
+    // contract #7219 restores for skeleton ids).
+    expect(
       selector.selectByResourceId(viewHierarchy, observedIdForA, {
         container: { elementId: "com.app:id/c1" },
-      }),
-    ).toThrow(/ambiguous/i);
-
-    // Same rejection without a container - globally ambiguous either way.
-    expect(() => selector.selectByResourceId(viewHierarchy, observedIdForA)).toThrow(/ambiguous/i);
+      }).totalMatches,
+    ).toBe(1);
+    expect(selector.selectByResourceId(viewHierarchy, observedIdForA).totalMatches).toBe(1);
   });
 
-  test("a real resource-id colliding with a synthetic ordinal OUTSIDE the container does not suppress ambiguity INSIDE it (issue #6229, review thread PRRT_kwDOP-GF5M6f2X6J)", () => {
+  test("a real resource-id colliding with a synthetic ordinal outside a container does not prevent its current-capture resolution", () => {
     // c1 holds two content-identical peers, so BOTH are ordinal-suffixed (no
-    // bare form for a duplicate group) and c1 is genuinely ambiguous on its
-    // own. c2 holds an unrelated node whose REAL `resource-id` happens to
-    // equal c1's first peer's synthetic ordinal string. The ambiguity guard's
-    // internal real-id bypass previously checked the WHOLE capture for that
-    // bypass (not just the active container scope), so this collision in c2
-    // made it treat the c1 target as "backed by a real id" and skip the
-    // ambiguity error entirely - even though the container selector scopes
-    // resolution to c1, where no real id exists and the peer is genuinely
-    // ambiguous. Duplicate COUNTING stays global (per the tests above); only
-    // the bypass must stay scoped to the active container.
+    // bare form for a duplicate group). c2 then exposes an unrelated REAL
+    // `resource-id` matching c1's first synthetic ordinal. Scoped lookup must
+    // still resolve c1's exact view-id; unscoped lookup intentionally prefers
+    // the real resource-id.
     const buildRow = (tag: string) => ({
       class: "android.view.View",
+      bounds: { left: 0, top: 0, right: 100, bottom: 40 },
       "content-desc": "identical-row",
       clickable: "true",
       "view-id": generatedViewId(tag),
@@ -541,15 +531,13 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
 
     const viewHierarchy: ViewHierarchyResult = { hierarchy: rawRoot };
 
-    // Container-scoped to c1: no real id backs `idInContainer1` there, and c1
-    // has two content-identical peers, so this must be rejected as
-    // ambiguous - the real id colliding in c2 must not leak in and suppress
-    // that rejection.
-    expect(() =>
+    // Container-scoped to c1: the real id in c2 remains outside scope, while
+    // c1's exact ordinal is uniquely assigned in the current capture.
+    expect(
       selector.selectByResourceId(viewHierarchy, idInContainer1, {
         container: { elementId: "com.app:id/c1" },
-      }),
-    ).toThrow(/ambiguous/i);
+      }).totalMatches,
+    ).toBe(1);
 
     // Without a container, the whole capture IS the active scope, so the
     // real id in c2 legitimately wins - this is existing, intentional

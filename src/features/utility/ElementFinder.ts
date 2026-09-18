@@ -502,29 +502,23 @@ export class DefaultElementFinder implements ElementFinder {
   }
 
   /**
-   * Count nodes within `searchRoots` whose `view-id` is `base` or an
-   * ordinal-suffixed duplicate of it. Used to decide whether a synthetic
-   * `s-<hash>(-<k>)?` selector is safe to trust (see
-   * `assertStableViewIdSelectorNotAmbiguous`). Callers pass the WHOLE-capture
-   * roots — the same scope `assignStableViewIds` assigns ordinals over — so a
-   * content-identical peer OUTSIDE a selected container still counts, because a
-   * cross-capture removal can globally re-ordinal the id onto that peer.
+   * Return every `view-id` within `searchRoots` whose value is `base` or an
+   * ordinal-suffixed duplicate of it. Callers pass the WHOLE-capture roots —
+   * the same scope `assignStableViewIds` assigns ordinals over — so an exact
+   * ordinal check and an ambiguity hint describe the actual current capture.
    */
-  private countNodesSharingStableViewIdBase(
-    searchRoots: ViewHierarchyNode[],
-    base: string,
-  ): number {
-    let count = 0;
+  private stableViewIdsSharingBase(searchRoots: ViewHierarchyNode[], base: string): string[] {
+    const viewIds: string[] = [];
     for (const root of searchRoots) {
       this.parser.traverseNode(root, (node: any) => {
         const nodeProperties = this.parser.extractNodeProperties(node);
         const viewId = nodeProperties["view-id"];
         if (typeof viewId === "string" && sharesStableViewIdBase(viewId, base)) {
-          count++;
+          viewIds.push(viewId);
         }
       });
     }
-    return count;
+    return viewIds;
   }
 
   /**
@@ -581,66 +575,45 @@ export class DefaultElementFinder implements ElementFinder {
   }
 
   /**
-   * Reject a synthetic stable-view-id selector (`s-<hash>` bare OR
-   * `s-<hash>-<k>` ordinal-suffixed) when MORE THAN ONE node in the WHOLE
-   * capture shares its base content hash — i.e. it has content-identical peers,
-   * so which node holds the bare id vs. which ordinal is load-bearing /
-   * capture-local rather than moot. A selector whose base hash is unique in the
-   * capture is left alone, and so is a real `resource-id`-backed id that merely
-   * resembles the synthetic shape (issue #6218 review threads
+   * Reject a bare synthetic stable-view-id selector (`s-<hash>`) when MORE THAN
+   * ONE node in the WHOLE capture shares its base content hash. An
+   * ordinal-suffixed `s-<hash>-<k>` selector is accepted when that complete
+   * string appears on exactly one node in this capture; otherwise it follows the
+   * same ambiguity path. A selector whose base hash is unique in the capture is
+   * left alone, and so is a real `resource-id`-backed id that merely resembles
+   * the synthetic shape (issue #6218 review threads
    * PRRT_kwDOP-GF5M6foer0, PRRT_kwDOP-GF5M6fomf-, PRRT_kwDOP-GF5M6fomgA).
-   * Rejecting is correct here: a wrong tap is worse than a clear failure
-   * telling the caller to use a more specific selector.
+   * Rejecting a bare id is correct here: a wrong tap is worse than a clear
+   * failure telling the caller to use a more specific selector.
    *
    * `searchRoots` MUST be the WHOLE-capture roots — the SAME scope
    * `assignStableViewIds` assigns duplicate-group ordinals over (issue #6229,
    * review thread PRRT_kwDOP-GF5M6f1gS0). Scoping this count to a selected
    * container instead was unsound: the ordinal `-<k>` suffix is a function of
    * GLOBAL document order, so a content-identical peer OUTSIDE the container
-   * still makes an in-container ordinal capture-local. With `[A, B]` in
-   * container `c1` and identical `C` in `c2`, the caller observes `A` as
-   * `s-H-1`; remove `A` and global re-ordinaling makes surviving `B` the new
-   * `s-H-1`. A container-scoped count would see only one `s-H`-family node in
-   * `c1` (just `B`) and wave the stale selector through, silently retargeting
-   * `B`. Counting over the whole capture sees `B` AND `C`, so the guard rejects
-   * it as ambiguous. The cost is deliberate: a globally-ambiguous ordinal is no
-   * longer rescued by a `container` selector even when the container isolates a
-   * single peer, because a single fresh capture cannot distinguish that layout
-   * from a post-removal reassignment — the caller must use text/content-desc/
-   * bounds instead. A bare `s-H` is globally unique by construction, so it still
-   * resolves (with or without a container) untouched.
+   * still makes an ordinal capture-local. The full-capture family is therefore
+   * used both to reject a bare selector and to offer the ordinals actually
+   * available now; a container must not hide peers from either result.
    *
    * The since-removed-peer retarget (issue #6229, review threads
    * PRRT_kwDOP-GF5M6fouI8, PRRT_kwDOP-GF5M6f1gS0) is closed both at the PRODUCER
-   * and here. `assignStableViewIds` no longer hands the first of a
+   * at the producer. `assignStableViewIds` no longer hands the first of a
    * content-identical duplicate group the bare `s-H`; every member takes a
    * `-<k>` ordinal (the first `-1`), and the bare form is reserved for content
    * that was unique when observed. So a caller who observed `A` in a `[A, B]`
    * group holds `s-H-1`, never bare `s-H`. If `A` is then removed and `B`
    * becomes the sole survivor, `B` is reassigned the bare `s-H` (now unique) —
    * which no longer equals the caller's `s-H-1`, so resolution MISSES instead of
-   * silently landing on `B`. While ≥2 content-identical peers still remain
-   * anywhere in the capture, `duplicateCount > 1` below rejects the stale
-   * selector as ambiguous. The residual gap this current-capture-only check
-   * still cannot see is narrower: a bare id whose once-unique node was removed
-   * and independently REPLACED by a brand-new content-identical node (still
-   * exactly one in the fresh capture) — closing that needs capture-origin
-   * provenance (which generation/session an id was observed in), a design change
-   * spanning the observe layer and this finder.
+   * silently landing on `B`. Within one unchanged capture, however, each emitted
+   * ordinal is unique by construction and must round-trip from skeleton to
+   * tapOn (#7219). Capture provenance would be required to distinguish that safe
+   * same-capture use from a later insert/reorder that reassigns an ordinal.
    *
-   * KNOWN LIMITATION (issue #6230, review thread PRRT_kwDOP-GF5M6fo-Pb): a
-   * synthetic id is a Merkle hash over a node's OWN content fields plus every
-   * DESCENDANT's content hash (`StableNodeIdentity.ts`), so a still-present,
-   * otherwise-unchanged ancestor's id changes whenever any descendant's
-   * `text`/`content-desc` changes between captures - e.g. a live timer child
-   * ticking "1 second" → "2 seconds" changes its row's id from one capture to
-   * the next. The exact-match lookup below then finds nothing for the id a
-   * caller observed a moment earlier, even though the intended control is
-   * still on screen (a miss, not a mis-tap). This is the counterpart of the
-   * #6229 removal case - both are inherent to a pure content hash, which is
-   * stable only while content is stable - and needs the same class of fix:
-   * structural/positional identity or capture-origin provenance, not a
-   * change to the current-capture-only matching done here.
+   * Descendant display text is deliberately excluded from the upward hash rollup
+   * in `StableNodeIdentity.ts` (#6230), so a ticking child does not restamp its
+   * ancestor's id between captures. The node's own display fields still define
+   * its own identity; capture provenance is still required to distinguish a
+   * removed node from a newly-created content-identical replacement.
    *
    * `activeScopeRoots` and `fullCaptureRoots` are deliberately DIFFERENT scopes
    * (issue #6229 review thread PRRT_kwDOP-GF5M6f2X6J): the real-`resource-id`
@@ -674,21 +647,45 @@ export class DefaultElementFinder implements ElementFinder {
           "identify a content-identical element.",
       );
     }
-    const duplicateCount = this.countNodesSharingStableViewIdBase(fullCaptureRoots, base);
+    const matchingViewIds = this.stableViewIdsSharingBase(fullCaptureRoots, base);
+    if (id !== base && matchingViewIds.filter((viewId) => viewId === id).length === 1) {
+      // `assignStableViewIds` gives an ordinal string to at most one node in a
+      // capture, so an exact full-id match safely round-trips a skeleton entry.
+      return;
+    }
+    const duplicateCount = matchingViewIds.length;
     if (duplicateCount > 1) {
+      const ordinalIds = [...new Set(matchingViewIds.filter((viewId) => viewId !== base))];
+      const ordinalHint =
+        ordinalIds.length > 0
+          ? ` Current capture ordinal ids: ${ordinalIds.map((viewId) => `"${viewId}"`).join(", ")}.`
+          : "";
       throw new ActionableError(
         `Skeleton element id "${id}" is ambiguous in the current capture: ${duplicateCount} ` +
           `content-identical elements share stable id "${base}", and which of them holds the ` +
           'bare id vs. an "-N" ordinal suffix is assigned by document order at capture time. An ' +
           "element insert or reorder since this id was observed can shift which element it now " +
-          "points to, so resolving it here could silently act on the wrong element. Use a more " +
-          "specific selector (text, content-desc, or bounds) instead.",
+          "points to, so resolving it here could silently act on the wrong element. Use text or " +
+          "textAny (with index when multiple text matches) instead." +
+          ordinalHint,
       );
     }
   }
 
+  private isAndroidInputNode(props: Record<string, unknown>): boolean {
+    const nodeClass = props.class ?? props.className;
+    return (
+      typeof nodeClass === "string" &&
+      ANDROID_INPUT_CLASSES.some((inputClass) => nodeClass.includes(inputClass))
+    );
+  }
+
   private rankTextMatches(matches: Element[]): Element[] {
-    matches.sort((a, b) => Number(this.isClickableNode(b)) - Number(this.isClickableNode(a)));
+    matches.sort(
+      (a, b) =>
+        Number(this.isAndroidInputNode(a)) - Number(this.isAndroidInputNode(b)) ||
+        Number(this.isClickableNode(b)) - Number(this.isClickableNode(a)),
+    );
     return matches;
   }
 
@@ -743,7 +740,9 @@ export class DefaultElementFinder implements ElementFinder {
       exactMatches: Element[];
       partialMatches: Element[];
     }): Element[] => {
-      return matches.exactMatches.length > 0 ? matches.exactMatches : matches.partialMatches;
+      const selectedMatches =
+        matches.exactMatches.length > 0 ? matches.exactMatches : matches.partialMatches;
+      return preserveTraversalOrder ? selectedMatches : this.rankTextMatches(selectedMatches);
     };
 
     if (containerNode) {
@@ -866,18 +865,14 @@ export class DefaultElementFinder implements ElementFinder {
       return [];
     }
 
-    // Ambiguity is judged against the WHOLE capture — the same scope
-    // `assignStableViewIds` assigns duplicate-group ordinals over (issue #6229,
-    // review thread PRRT_kwDOP-GF5M6f1gS0). A content-identical peer OUTSIDE the
-    // selected container still makes an ordinal id capture-local: once the
-    // in-container original is removed, global re-ordinaling can reassign the
-    // caller's `-<k>` string to a surviving peer, so a container-local count of
-    // 1 would wrongly wave it through. Counting globally rejects it as ambiguous
-    // instead — the same scope the ordinals were assigned in. The real-id
-    // BYPASS inside that check stays scoped to the container's subtree (when
-    // one is given), not the whole capture — a real resource-id match OUTSIDE
-    // the container must not suppress an ambiguity that is genuine INSIDE it
-    // (review thread PRRT_kwDOP-GF5M6f2X6J).
+    // Stable-id families are inspected over the WHOLE capture — the same scope
+    // `assignStableViewIds` assigns duplicate-group ordinals over. This lets an
+    // exact ordinal round-trip only when its complete string occurs once, while
+    // a shared bare id remains ambiguous even if a container hides its peers.
+    // The real-id BYPASS inside that check stays scoped to the container's
+    // subtree (when one is given), not the whole capture — a real resource-id
+    // match OUTSIDE the container must not suppress an ambiguity that is genuine
+    // INSIDE it (review thread PRRT_kwDOP-GF5M6f2X6J).
     const fullCaptureRoots = this.collectFullCaptureSearchRoots(viewHierarchy);
     this.assertStableViewIdSelectorNotAmbiguous(
       containerNode ? [containerNode] : fullCaptureRoots,
@@ -1558,20 +1553,16 @@ export class DefaultElementFinder implements ElementFinder {
       ? [containerNode]
       : this.parser.extractRootNodes(viewHierarchy);
 
-    // Ambiguity is judged against the WHOLE capture — the same scope
-    // `assignStableViewIds` assigns duplicate-group ordinals over (issue #6229,
-    // review thread PRRT_kwDOP-GF5M6f1gS0): a content-identical peer outside a
-    // selected container still makes an ordinal id capture-local, so a
-    // container-local count would miss it and let a since-reassigned ordinal
-    // resolve to the wrong peer. Resource-id PREFERENCE keeps its narrower
-    // scope (container subtree when scoped, else whole capture) so a real
-    // resource-id match is never unioned with, or shadowed in window-search
-    // order by, a synthetic view-id match (review threads
-    // PRRT_kwDOP-GF5M6fo13g, PRRT_kwDOP-GF5M6fo2Iq). The ambiguity check's
-    // internal real-id BYPASS shares that same narrower scope, not the whole
-    // capture — a real resource-id match outside the container must not
-    // suppress an ambiguity that is genuine inside it (review thread
-    // PRRT_kwDOP-GF5M6f2X6J).
+    // Stable-id families are inspected over the WHOLE capture — the same scope
+    // `assignStableViewIds` assigns duplicate-group ordinals over. This lets an
+    // exact ordinal round-trip only when its complete string occurs once, while
+    // a shared bare id remains ambiguous even if a container hides its peers.
+    // Resource-id PREFERENCE keeps its narrower scope (container subtree when
+    // scoped, else whole capture) so a real resource-id match is never unioned
+    // with, or shadowed in window-search order by, a synthetic view-id match
+    // (review threads PRRT_kwDOP-GF5M6fo13g, PRRT_kwDOP-GF5M6fo2Iq). The
+    // ambiguity check's internal real-id BYPASS shares that same narrower scope,
+    // not the whole capture (review thread PRRT_kwDOP-GF5M6f2X6J).
     const fullCaptureRoots = this.collectFullCaptureSearchRoots(viewHierarchy);
     const preferResourceIdOnly = this.hasExactResourceIdFieldMatch(
       containerNode ? searchRoots : fullCaptureRoots,

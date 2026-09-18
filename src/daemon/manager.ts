@@ -179,6 +179,11 @@ export interface DaemonProcessFinder {
 
 class DaemonGenerationExitedBeforeSignalError extends Error {}
 
+interface WaitForStopResult {
+  stopped: boolean;
+  replacedByOtherGeneration: boolean;
+}
+
 export const DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES = 16 * 1024 * 1024;
 
 /**
@@ -2437,9 +2442,10 @@ export class DaemonManager implements DaemonManagerLike {
       }
 
       // Wait for process to exit
-      const stopped = await this.waitForStop(pid, timeout, expected);
+      let waitResult = await this.waitForStop(pid, timeout, expected);
+      let replacedByOtherGeneration = waitResult.replacedByOtherGeneration;
 
-      if (!stopped) {
+      if (!waitResult.stopped) {
         stderrLog(`Daemon did not stop gracefully, sending SIGKILL...`);
         this.signalVerifiedDaemonGeneration(
           expected,
@@ -2447,16 +2453,20 @@ export class DaemonManager implements DaemonManagerLike {
           `Daemon generation ${pid} exited before stop could force-stop it.`,
         );
 
-        if (!(await this.waitForStop(pid, DAEMON_FORCED_STOP_TIMEOUT_MS, expected))) {
+        waitResult = await this.waitForStop(pid, DAEMON_FORCED_STOP_TIMEOUT_MS, expected);
+        replacedByOtherGeneration ||= waitResult.replacedByOtherGeneration;
+        if (!waitResult.stopped) {
           throw new Error(`Daemon process ${pid} did not exit after SIGKILL`);
         }
       }
 
-      await cleanupDaemonFiles({
-        pidFilePath: this.pidFilePath,
-        socketPaths: this.cleanupSocketPaths(status.socketPath),
-        expectedPid: pid,
-      });
+      if (!replacedByOtherGeneration) {
+        await cleanupDaemonFiles({
+          pidFilePath: this.pidFilePath,
+          socketPaths: this.cleanupSocketPaths(status.socketPath),
+          expectedPid: pid,
+        });
+      }
 
       stderrLog("Daemon stopped");
     } catch (error) {
@@ -2886,7 +2896,7 @@ export class DaemonManager implements DaemonManagerLike {
       if (this.verifyAcceptanceGenerationBeforeSignal(status, generation)) {
         this.processSignaler.signal(status.pid!, "SIGKILL");
         signalSent = true;
-        if (!(await this.waitForStop(status.pid!, DAEMON_FORCED_STOP_TIMEOUT_MS))) {
+        if (!(await this.waitForStop(status.pid!, DAEMON_FORCED_STOP_TIMEOUT_MS)).stopped) {
           throw new ActionableError(
             `Acceptance-session restart daemon process ${status.pid} did not exit after SIGKILL.`,
           );
@@ -3225,10 +3235,12 @@ export class DaemonManager implements DaemonManagerLike {
     }
 
     if (
-      await this.waitForStop(
-        expected.pid,
-        this.stopWaitTimeout(DAEMON_SHUTDOWN_TIMEOUT_MS, recoveryDeadline),
-      )
+      (
+        await this.waitForStop(
+          expected.pid,
+          this.stopWaitTimeout(DAEMON_SHUTDOWN_TIMEOUT_MS, recoveryDeadline),
+        )
+      ).stopped
     ) {
       return;
     }
@@ -3251,10 +3263,12 @@ export class DaemonManager implements DaemonManagerLike {
     }
 
     if (
-      !(await this.waitForStop(
-        expected.pid,
-        this.stopWaitTimeout(DAEMON_FORCED_STOP_TIMEOUT_MS, recoveryDeadline),
-      ))
+      !(
+        await this.waitForStop(
+          expected.pid,
+          this.stopWaitTimeout(DAEMON_FORCED_STOP_TIMEOUT_MS, recoveryDeadline),
+        )
+      ).stopped
     ) {
       throw new ActionableError(
         `Verified daemon process ${expected.pid} did not exit after SIGKILL`,
@@ -3280,7 +3294,7 @@ export class DaemonManager implements DaemonManagerLike {
       );
     }
 
-    if (await this.waitForStop(expected.pid, DAEMON_SHUTDOWN_TIMEOUT_MS)) {
+    if ((await this.waitForStop(expected.pid, DAEMON_SHUTDOWN_TIMEOUT_MS)).stopped) {
       return;
     }
 
@@ -3302,7 +3316,7 @@ export class DaemonManager implements DaemonManagerLike {
       );
     }
 
-    if (!(await this.waitForStop(expected.pid, DAEMON_FORCED_STOP_TIMEOUT_MS))) {
+    if (!(await this.waitForStop(expected.pid, DAEMON_FORCED_STOP_TIMEOUT_MS)).stopped) {
       throw new ActionableError(
         `Verified daemon process ${expected.pid} did not exit after SIGKILL`,
       );
@@ -3884,34 +3898,42 @@ export class DaemonManager implements DaemonManagerLike {
     pid: number,
     timeout: number,
     expectedGeneration?: DaemonProcessRecord,
-  ): Promise<boolean> {
-    const startTime = this.timer.now();
+  ): Promise<WaitForStopResult> {
+    const deadline = this.timer.now() + timeout;
     const pollInterval = 100;
 
-    while (this.timer.now() - startTime < timeout) {
-      if (!this.isProcessRunning(pid)) {
-        return true;
+    const replacementWasObserved = (): boolean => {
+      if (expectedGeneration === undefined) {
+        return false;
       }
-      if (
-        expectedGeneration !== undefined &&
-        !this.findLiveDaemonProcessRecords().some((candidate) =>
-          this.matchesObservedDaemonGeneration(expectedGeneration, candidate),
-        )
-      ) {
-        return true;
+      const scanBudget = this.remainingTime(deadline);
+      if (scanBudget <= 0) {
+        return false;
+      }
+      return this.findLiveDaemonProcessRecords(scanBudget).some(
+        (candidate) =>
+          candidate.pid === pid &&
+          !this.matchesObservedDaemonGeneration(expectedGeneration, candidate),
+      );
+    };
+
+    while (this.remainingTime(deadline) > 0) {
+      if (!this.isProcessRunning(pid)) {
+        return { stopped: true, replacedByOtherGeneration: false };
+      }
+      if (replacementWasObserved()) {
+        return { stopped: true, replacedByOtherGeneration: true };
       }
       await this.timer.sleep(pollInterval);
     }
 
     if (!this.isProcessRunning(pid)) {
-      return true;
+      return { stopped: true, replacedByOtherGeneration: false };
     }
-    return (
-      expectedGeneration !== undefined &&
-      !this.findLiveDaemonProcessRecords().some((candidate) =>
-        this.matchesObservedDaemonGeneration(expectedGeneration, candidate),
-      )
-    );
+    if (replacementWasObserved()) {
+      return { stopped: true, replacedByOtherGeneration: true };
+    }
+    return { stopped: false, replacedByOtherGeneration: false };
   }
 
   /**

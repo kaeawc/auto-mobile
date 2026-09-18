@@ -1099,8 +1099,8 @@ describe("DaemonManager stop", () => {
     }
   });
 
-  test("treats a reused PID as stopped after SIGTERM", async () => {
-    const directory = mkdtempSync(join(tmpdir(), "u3-daemon-stop-eperm-pid-reuse-wait-"));
+  test("preserves replacement daemon files when a PID is reused after SIGTERM", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "u3-daemon-stop-eperm-r2-pid-reuse-wait-"));
     const pidFilePath = join(directory, "daemon.pid");
     const socketPath = join(directory, "daemon.sock");
     const pid = 42462;
@@ -1132,6 +1132,19 @@ describe("DaemonManager stop", () => {
             processGenerationToken: "replacement-generation",
           },
         ];
+        writeFileSync(
+          pidFilePath,
+          JSON.stringify({
+            pid,
+            socketPath,
+            port: 3000,
+            startedAt: 2,
+            processStartedAt: 2,
+            processGenerationToken: "replacement-generation",
+            version: "replacement",
+          }),
+        );
+        writeFileSync(socketPath, "replacement daemon socket");
       }
     });
     const manager = new DaemonManager(
@@ -1153,6 +1166,71 @@ describe("DaemonManager stop", () => {
 
       expect(signaler.signals).toEqual([{ pid, signal: "SIGTERM" }]);
       expect(timer.now()).toBe(0);
+      expect(existsSync(pidFilePath)).toBe(true);
+      expect(existsSync(socketPath)).toBe(true);
+      expect(readFileSync(pidFilePath, "utf8")).toContain("replacement-generation");
+      expect(readFileSync(socketPath, "utf8")).toBe("replacement daemon socket");
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("bounds generation scans by the remaining stop timeout", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "u3-daemon-stop-eperm-r2-stop-scan-budget-"));
+    const pidFilePath = join(directory, "daemon.pid");
+    const socketPath = join(directory, "daemon.sock");
+    const pid = 42463;
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    writeStopPidFile(pidFilePath, pid, socketPath);
+    writeFileSync(socketPath, "daemon socket");
+    const scanTimeouts: Array<number | undefined> = [];
+    let processAlive = true;
+    let trackWaitForStopScans = false;
+    const processFinder: DaemonProcessFinder & DaemonProcessLivenessChecker = {
+      findDaemonProcesses: (timeoutMs) => {
+        if (trackWaitForStopScans) {
+          scanTimeouts.push(timeoutMs);
+        }
+        timer.advanceTime(timeoutMs ?? DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS);
+        return [
+          {
+            pid,
+            ppid: 1,
+            command: "bun /repo/src/index.ts --daemon-mode",
+            startedAt: 1,
+            processGenerationToken: `stop-generation-${pid}`,
+          },
+        ];
+      },
+      isProcessRunning: (targetPid) => targetPid === pid && processAlive,
+    };
+    const signaler = new FakeDaemonProcessSignaler((_targetPid, signal) => {
+      if (signal === "SIGTERM") {
+        trackWaitForStopScans = true;
+        timer.setTimeout(() => {
+          processAlive = false;
+        }, 300);
+      }
+    });
+    const manager = new DaemonManager(
+      undefined,
+      undefined,
+      timer,
+      join(directory, "daemon.lock"),
+      pidFilePath,
+      socketPath,
+      processFinder,
+      undefined,
+      undefined,
+      undefined,
+      signaler,
+    );
+
+    try {
+      await expect(manager.stop(250)).resolves.toBeUndefined();
+
+      expect(scanTimeouts).toEqual([250]);
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }

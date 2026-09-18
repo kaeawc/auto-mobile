@@ -437,8 +437,8 @@ function linuxProcessState(pid: number, stat: string): string | undefined {
   return state;
 }
 
-function isUnsignalableLiveProcessError(error: unknown): boolean {
-  return (error as NodeJS.ErrnoException)?.code === "EPERM";
+function isConfirmedNoSuchProcessError(error: unknown): boolean {
+  return (error as NodeJS.ErrnoException)?.code === "ESRCH";
 }
 
 export function isProcessRunning(pid: number, options: ProcessLivenessOptions = {}): boolean {
@@ -459,10 +459,10 @@ export function isProcessRunning(pid: number, options: ProcessLivenessOptions = 
   try {
     signalProcess(pid);
   } catch (error) {
-    // Keep this aligned with logPruner.ts's defaultIsProcessAlive: ESRCH means
-    // no such process, while EPERM proves a process exists but is not ours.
+    // Keep this aligned with logPruner.ts's defaultIsProcessAlive: ESRCH is the
+    // only probe result that proves absence. Everything else is alive or uncertain.
     logSafeDebug(`src/daemon/daemonFiles.ts liveness check failed: ${error}`, error);
-    return isUnsignalableLiveProcessError(error);
+    return !isConfirmedNoSuchProcessError(error);
   }
 
   if ((options.platform ?? process.platform) !== "linux") {

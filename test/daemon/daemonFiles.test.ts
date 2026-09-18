@@ -191,6 +191,17 @@ describe("isProcessRunning", () => {
     ).toBe(true);
   });
 
+  test("fails closed when the probe returns an unexpected error", () => {
+    expect(
+      isProcessRunning(7190, {
+        platform: "darwin",
+        signalProcess: () => {
+          throw Object.assign(new Error("EIO"), { code: "EIO" });
+        },
+      }),
+    ).toBe(true);
+  });
+
   test("reports a missing process as not running when the probe returns ESRCH", () => {
     expect(
       isProcessRunning(7190, {

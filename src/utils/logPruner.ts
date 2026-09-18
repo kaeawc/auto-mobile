@@ -164,8 +164,8 @@ function defaultIsProcessAlive(pid: number): boolean {
     process.kill(pid, 0);
     return true;
   } catch (error) {
-    // ESRCH → no such process (dead). EPERM → process exists but isn't ours (alive).
-    return (error as NodeJS.ErrnoException)?.code === "EPERM";
+    // ESRCH proves absence; every other probe error leaves liveness uncertain.
+    return (error as NodeJS.ErrnoException)?.code !== "ESRCH";
   }
 }
 

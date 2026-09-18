@@ -1,5 +1,11 @@
 import { errorMessage } from "./describeUnknownError";
-import { ActionableError, BootedDevice, Platform, SomePlatform } from "../models";
+import {
+  ActionableError,
+  BootedDevice,
+  Platform,
+  SomePlatform,
+  toActionableError,
+} from "../models";
 import {
   assertAndroidImageRunningStateKnown,
   MultiPlatformDeviceManager,
@@ -1307,6 +1313,21 @@ export class DeviceSessionManager implements DeviceSessionManager {
             await this.verifyIosDevice(provisioned.deviceId!, { ...options, signal });
             perf.endOperation("verifyDevice");
             return createdDevice;
+          }).catch(async (error) => {
+            logger.warn(
+              `[DeviceSessionManager] Rolling back created iOS simulator '${provisioned.name}' ` +
+                `(${provisioned.deviceId}) after boot/verify failure: ${errorMessage(error)}`,
+            );
+            await this.simctl!.deleteSimulator(provisioned.deviceId!).catch((deleteError) => {
+              logger.warn(
+                `[DeviceSessionManager] Failed to roll back created iOS simulator ` +
+                  `'${provisioned.name}' (${provisioned.deviceId}): ${errorMessage(deleteError)}`,
+              );
+            });
+            throw toActionableError(
+              error,
+              `Failed to boot/verify created iOS simulator '${provisioned.name}' (${provisioned.deviceId})`,
+            );
           });
         } finally {
           lifecycleLease?.release();

@@ -24,10 +24,12 @@ ARG ZULU_VERSION=21.0.2
 ARG PLATFORM=linux/amd64
 ARG BUN_VERSION=1.3.14
 ARG KTFMT_VERSION=0.55
+# Published by Maven Central's .sha256 sidecar for ktfmt 0.55 with-dependencies.jar.
+ARG KTFMT_SHA256=d13324023754112797d828e2f92117196190f7617d16ad1d1765e5be768cc5c2
 ARG LYCHEE_VERSION=0.19.1
 ARG ANDROID_CMDLINE_TOOLS_VERSION=11076708
-ARG ANDROID_PLATFORM_VERSION=36
-ARG ANDROID_BUILD_TOOLS_VERSION=35.0.0
+ARG ANDROID_PLATFORM_VERSION=37
+ARG ANDROID_BUILD_TOOLS_VERSION=36.0.0
 ARG ANDROID_INSTALL_EMULATOR=false
 ARG ANDROID_EMULATOR_API_LEVEL=36
 ARG ANDROID_SYSTEM_IMAGE_VARIANT=google_apis
@@ -87,6 +89,7 @@ FROM base AS builder
 
 ARG BUN_VERSION
 ARG KTFMT_VERSION
+ARG KTFMT_SHA256
 ARG LYCHEE_VERSION
 ARG ANDROID_CMDLINE_TOOLS_VERSION
 ARG ANDROID_PLATFORM_VERSION
@@ -118,14 +121,16 @@ RUN curl -fsSL "https://bun.sh/install" | bash -s "bun-v${BUN_VERSION}" \
 # Install ktfmt (Kotlin formatter)
 # Check for updates: https://github.com/facebook/ktfmt/releases
 RUN mkdir -p /opt/ktfmt \
-    && curl -L -o /opt/ktfmt/ktfmt.jar \
-       "https://repo1.maven.org/maven2/com/facebook/ktfmt/${KTFMT_VERSION}/ktfmt-${KTFMT_VERSION}-jar-with-dependencies.jar" \
+    && curl -fsSL -o /opt/ktfmt/ktfmt.jar \
+       "https://repo1.maven.org/maven2/com/facebook/ktfmt/${KTFMT_VERSION}/ktfmt-${KTFMT_VERSION}-with-dependencies.jar" \
+    && printf '%s  %s\n' "${KTFMT_SHA256}" /opt/ktfmt/ktfmt.jar | sha256sum -c - \
     && printf '#!/bin/bash\nexec java -jar /opt/ktfmt/ktfmt.jar "$@"\n' > /usr/local/bin/ktfmt \
     && chmod +x /usr/local/bin/ktfmt
 
 # Install lychee (link checker)
 # Check for updates: https://github.com/lycheeverse/lychee/releases
-RUN curl -L -o /tmp/lychee.tar.gz \
+# No upstream checksum is published for this artifact in the lychee-v${LYCHEE_VERSION} release.
+RUN curl -fsSL -o /tmp/lychee.tar.gz \
        "https://github.com/lycheeverse/lychee/releases/download/lychee-v${LYCHEE_VERSION}/lychee-x86_64-unknown-linux-musl.tar.gz" \
     && tar -xzf /tmp/lychee.tar.gz -C /tmp \
     && mv /tmp/lychee /usr/local/bin/lychee \
@@ -134,15 +139,16 @@ RUN curl -L -o /tmp/lychee.tar.gz \
 
 # Install Android SDK Command Line Tools
 # Check for updates: https://developer.android.com/studio#command-line-tools-only
+# No accessible checksum is published for this command-line-tools artifact.
 RUN mkdir -p "${ANDROID_HOME}/cmdline-tools" \
-    && curl -L -o /tmp/commandlinetools.zip \
+    && curl -fsSL -o /tmp/commandlinetools.zip \
        "https://dl.google.com/android/repository/commandlinetools-linux-${ANDROID_CMDLINE_TOOLS_VERSION}_latest.zip" \
     && unzip -q /tmp/commandlinetools.zip -d /tmp/cmdline-tools \
     && mv /tmp/cmdline-tools/cmdline-tools "${ANDROID_HOME}/cmdline-tools/latest" \
     && rm -rf /tmp/commandlinetools.zip /tmp/cmdline-tools
 
 # Accept Android SDK licenses and install components
-# Versions based on android/libs.versions.toml: compileSdk=36, buildTools=35.0.0, targetSdk=36
+# Versions from android/gradle/libs.versions.toml (source of truth): compileSdk=37, buildTools=36.0.0, targetSdk=36.
 # Optional emulator/system image install controlled by ANDROID_INSTALL_EMULATOR
 RUN yes | sdkmanager --licenses || true \
     && sdkmanager --install \

@@ -4,6 +4,12 @@
 
 set -euo pipefail
 
+temp_file=""
+cleanup() {
+    [[ -z "${temp_file}" ]] || rm -f -- "${temp_file}"
+}
+trap cleanup EXIT
+
 # Default to dry run mode
 
 DRY_RUN=true
@@ -37,13 +43,12 @@ done | sort -u
 remove_android_test_dirs() {
 echo "🗂️ ${DRY_RUN:+[DRY RUN] }Removing androidTest source directories..."
 find_module_dirs | while read -r module_dir; do
-android_test_dirs=$(find "$module_dir" -path "*/src/androidTest" -type d 2>/dev/null || true)
-if [[ -n "$android_test_dirs" ]]; then
+if find "$module_dir" -path "*/src/androidTest" -type d -print0 2>/dev/null | grep -qz .; then
 if [[ "$DRY_RUN" == "true" ]]; then
 echo "  Would remove androidTest from: $module_dir"
-echo "${android_test_dirs// /$'\n '}"
+find "$module_dir" -path "*/src/androidTest" -type d -print0 2>/dev/null | tr '\0' '\n'
 else
-echo "$android_test_dirs" | xargs -r rm -rf
+find "$module_dir" -path "*/src/androidTest" -type d -print0 2>/dev/null | xargs -0 -r rm -rf --
 echo "  Removed androidTest from: $module_dir"
 fi
 fi
@@ -86,7 +91,8 @@ cp "$build_file" "$temp_file"
                 fi
             fi
 
-            rm -f "$temp_file"
+            rm -f -- "$temp_file"
+            temp_file=""
         fi
     done
 }

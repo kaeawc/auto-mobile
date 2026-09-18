@@ -414,7 +414,7 @@ get_running_daemon_version() {
     if command_exists jq; then
         jq -r '.version // empty' "${pid_file}" 2>/dev/null || echo ""
     elif command_exists python3; then
-        python3 -c "import json,sys; print(json.load(open('${pid_file}')).get('version',''))" 2>/dev/null || echo ""
+        python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("version", ""))' "${pid_file}" 2>/dev/null || echo ""
     else
         # Fallback: grep for version field
         grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' "${pid_file}" 2>/dev/null | \
@@ -2113,7 +2113,7 @@ validate_json() {
     fi
 
     if command_exists python3; then
-        python3 -c "import json; json.load(open('${file}'))" 2>/dev/null
+        python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "${file}" 2>/dev/null
         return $?
     elif command_exists jq; then
         jq empty "${file}" 2>/dev/null

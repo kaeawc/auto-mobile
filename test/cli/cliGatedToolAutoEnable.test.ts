@@ -76,6 +76,53 @@ describe("CLI transparently enables gated tools", () => {
     expect(enable?.params).toMatchObject({ toolName: "provisionDevice", enabled: true });
   });
 
+  test("enables a gated tool (resetAppLogs) before calling it", async () => {
+    const calls: Array<{ name: string; params: unknown }> = [];
+    recordProxy(calls);
+
+    await runCliCommand([
+      "resetAppLogs",
+      "--appId",
+      "com.example.app",
+      "--paths",
+      JSON.stringify(["logs/app.log"]),
+      "--platform",
+      "android",
+    ]);
+
+    const names = calls.map((c) => c.name);
+    expect(names).toContain("setToolEnabled");
+    expect(names).toContain("resetAppLogs");
+    expect(names.indexOf("setToolEnabled")).toBeLessThan(names.indexOf("resetAppLogs"));
+    const enable = calls.find((c) => c.name === "setToolEnabled");
+    expect(enable?.params).toMatchObject({ toolName: "resetAppLogs", enabled: true });
+  });
+
+  test("enables a gated tool (stageSessionDownloads) before calling it", async () => {
+    const calls: Array<{ name: string; params: unknown }> = [];
+    recordProxy(calls);
+
+    await runCliCommand([
+      "stageSessionDownloads",
+      "--sessionUuid",
+      "00000000-0000-4000-8000-000000000abc",
+      "--directory",
+      "fixtures",
+      "--files",
+      JSON.stringify([{ destinationPath: "hello.txt", contentText: "hello" }]),
+    ]);
+
+    const names = calls.map((c) => c.name);
+    expect(names).toContain("setToolEnabled");
+    expect(names).toContain("stageSessionDownloads");
+    expect(names.indexOf("setToolEnabled")).toBeLessThan(names.indexOf("stageSessionDownloads"));
+    const enable = calls.find((c) => c.name === "setToolEnabled");
+    expect(enable?.params).toMatchObject({
+      toolName: "stageSessionDownloads",
+      enabled: true,
+    });
+  });
+
   test("does NOT pre-enable a default-enabled tool", async () => {
     const calls: Array<{ name: string; params: unknown }> = [];
     recordProxy(calls);

@@ -54,6 +54,8 @@ import { registerPreferenceTools } from "../server/preferenceTools";
 import { registerSnapshotTools } from "../server/snapshotTools";
 import { registerStorageTools } from "../server/storageTools";
 import { registerTelephonyTools } from "../server/telephonyTools";
+import { registerSessionLogTools } from "../server/sessionLogTools";
+import { registerDownloadsFixtureTools } from "../server/downloadsFixtureTools";
 
 type CliHelpSchemaShape = Record<string, any> | undefined;
 interface CliHelpParameterInfo {
@@ -92,6 +94,8 @@ function initializeCliTools(): void {
   registerSnapshotTools();
   registerStorageTools();
   registerTelephonyTools();
+  registerSessionLogTools();
+  registerDownloadsFixtureTools();
 }
 
 // Parse CLI arguments into tool name, session UUID, and parameters
@@ -434,7 +438,8 @@ async function ensureCliToolEnabled(proxy: CliDaemonProxy, toolName: string): Pr
   }
   initializeCliTools();
   const registered = ToolRegistry.getRegisteredTool(toolName);
-  if (!registered || registered.defaultEnabled !== false) {
+  // Fail toward enabling when the CLI roster drifts from the production roster.
+  if (registered && registered.defaultEnabled !== false) {
     return;
   }
   try {

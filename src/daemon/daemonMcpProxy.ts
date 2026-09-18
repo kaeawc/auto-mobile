@@ -3348,7 +3348,8 @@ export class DaemonMcpProxy {
   // URI, a foreign/unowned session (which must keep forwarding this connection's
   // own binding and stay denied), or the current binding (already handled by
   // withBoundSessionUuid). A terminally fenced connection can still forward to a
-  // different live owned session through canUseSurvivingSession.
+  // different live owned session through canUseSurvivingSession, including its
+  // still-owned configured initial session after a later binding is released.
   private freshScreenshotOwnerForwardParams(uri: string): Record<string, unknown> | undefined {
     const uriSessionUuid = sessionScopedObservationUriSessionUuid(uri);
     if (
@@ -3358,9 +3359,14 @@ export class DaemonMcpProxy {
     ) {
       return undefined;
     }
+    const configuredInitialSessionUuid = this.config.initialSessionUuid?.trim();
+    const isLiveConfiguredInitialSession =
+      uriSessionUuid === configuredInitialSessionUuid &&
+      uriSessionUuid !== this.terminalBoundSession?.sessionUuid;
     if (
       this.terminalBoundSession &&
-      !this.canUseSurvivingSession({ sessionUuid: uriSessionUuid }, false)
+      !this.canUseSurvivingSession({ sessionUuid: uriSessionUuid }, false) &&
+      !isLiveConfiguredInitialSession
     ) {
       return undefined;
     }

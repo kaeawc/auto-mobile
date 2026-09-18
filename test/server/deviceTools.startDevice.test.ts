@@ -138,14 +138,14 @@ describe("startDevice handler", () => {
 
     const result = await callStartDevice({ platform: "android" });
 
-    expect(result.deviceId).toBe("emulator-5554");
+    expect(result.identity.deviceId).toBe("emulator-5554");
     expect(result.name).toBe("Pixel_7_API_34");
     expect(result.platform).toBe("android");
     expect(result.isReady).toBe(true);
-    expect(result.source).toBe("booted");
-    expect(result.osVersion).toBe("14");
-    expect(result.sessionUuid).toBeDefined();
-    expect(typeof result.sessionUuid).toBe("string");
+    expect(result.acquisition).toBe("already-booted");
+    expect(result.runtime.osVersion).toBe("14");
+    expect(result.session.sessionUuid).toBeDefined();
+    expect(typeof result.session.sessionUuid).toBe("string");
   });
 
   it("does not reach runner readiness or session binding after an externally cancelled boot", async () => {
@@ -273,7 +273,7 @@ describe("startDevice handler", () => {
 
     const result = await callStartDevice({ platform: "android" });
 
-    expect(result.sessionUuid).toBe("session-1");
+    expect(result.session.sessionUuid).toBe("session-1");
     expect(resolveDirectSessionDevice("session-1")).toEqual({
       sessionUuid: "session-1",
       device: androidDevice,
@@ -322,8 +322,8 @@ describe("startDevice handler", () => {
 
     const result = await callStartDevice({ platform: "android", timeoutMs: 42_000 });
 
-    expect(result.deviceId).toBe("emulator-5554");
-    expect(result.source).toBe("booted");
+    expect(result.identity.deviceId).toBe("emulator-5554");
+    expect(result.acquisition).toBe("already-booted");
     expect(fakeDeviceUtils.getExecutedOperations()).toContain(
       "waitForDeviceReady:Pixel_7_API_34:42000",
     );
@@ -337,8 +337,8 @@ describe("startDevice handler", () => {
 
     const result = await callStartDevice({ platform: "android" });
 
-    expect(result.deviceId).toBeDefined();
-    expect(result.source).toBe("cold-boot");
+    expect(result.identity.deviceId).toBeDefined();
+    expect(result.acquisition).toBe("cold-boot");
     expect(fakeDeviceUtils.wasMethodCalled("startDevice")).toBe(true);
   });
 
@@ -355,7 +355,10 @@ describe("startDevice handler", () => {
 
     const result = await callStartDevice({ platform: "android", avdName: exact.name });
 
-    expect(result).toMatchObject({ name: exact.name, deviceId: exact.deviceId });
+    expect(result).toMatchObject({
+      name: exact.name,
+      identity: expect.objectContaining({ deviceId: exact.deviceId }),
+    });
     expect(fakeDeviceUtils.getExecutedOperations()).not.toContain(
       "startDevice:Pixel_9_Copy:180000",
     );
@@ -445,7 +448,7 @@ describe("startDevice handler", () => {
     const result = await callStartDevice({ platform: "android" });
 
     expect(result.name).toBe(availableImage.name);
-    expect(result.deviceId).toBe("emulator-5558");
+    expect(result.identity.deviceId).toBe("emulator-5558");
     expect(fakeDeviceUtils.getExecutedOperations()).not.toContain(
       "startDevice:Pixel_10_API_35:180000",
     );
@@ -545,10 +548,10 @@ describe("startDevice handler", () => {
 
     const result = await callStartDevice({ platform: "android" });
 
-    expect(result.source).toBe("cold-boot");
-    expect(result.sessionUuid).toBeDefined();
+    expect(result.acquisition).toBe("cold-boot");
+    expect(result.session.sessionUuid).toBeDefined();
     expect(pool.getDevice(androidDevice.deviceId)).toMatchObject({
-      sessionId: result.sessionUuid,
+      sessionId: result.session.sessionUuid,
     });
     expect(childProcess.killed).toBe(false);
   });
@@ -591,8 +594,8 @@ describe("startDevice handler", () => {
 
     const result = await callStartDevice({ platform: "android" });
 
-    expect(result.source).toBe("cold-boot");
-    const sessionUuid = result.sessionUuid as string;
+    expect(result.acquisition).toBe("cold-boot");
+    const sessionUuid = result.session.sessionUuid as string;
     expect(sessionUuid).toBeDefined();
     expect(daemonSessionManager!.getDeviceReadiness(sessionUuid)).toBe("automationReady");
   });
@@ -630,13 +633,13 @@ describe("startDevice handler", () => {
 
     try {
       const result = await callStartDevice({ platform: "android" });
-      expect(daemonSessionManager.getSession(result.sessionUuid as string)).not.toBeNull();
+      expect(daemonSessionManager.getSession(result.session.sessionUuid as string)).not.toBeNull();
 
       childProcess.emit("exit", 1, null);
       await new Promise((resolve) => setImmediate(resolve));
       await new Promise((resolve) => setImmediate(resolve));
 
-      expect(daemonSessionManager.getSession(result.sessionUuid as string)).toBeNull();
+      expect(daemonSessionManager.getSession(result.session.sessionUuid as string)).toBeNull();
       expect(pool.getDevice(androidDevice.deviceId)).toBeNull();
     } finally {
       for (const key of recoveryKeys) {
@@ -704,7 +707,7 @@ describe("startDevice handler", () => {
       expect(pool.getDevice("emulator-5554")?.status).toBe("busy");
       expect(pool.getDevice("emulator-5554")?.sessionId).toBe("session-1");
       expect(daemonSessionManager.getSession("session-1")).not.toBeNull();
-      expect((await start).sessionUuid).toBe("session-1");
+      expect((await start).session.sessionUuid).toBe("session-1");
     } finally {
       releaseResources();
       await start;
@@ -756,7 +759,7 @@ describe("startDevice handler", () => {
 
     releaseReadiness();
     const result = await start;
-    expect(result.sessionUuid).toBe("session-1");
+    expect(result.session.sessionUuid).toBe("session-1");
     expect(pool.getDevice(androidDevice.deviceId)?.sessionId).toBe("session-1");
   });
 
@@ -838,8 +841,8 @@ describe("startDevice handler", () => {
 
     const result = await callStartDevice({ platform: "android" });
 
-    expect(result.deviceId).toBe("emulator-5556");
-    expect(result.sessionUuid).toBe("owner-session");
+    expect(result.identity.deviceId).toBe("emulator-5556");
+    expect(result.session.sessionUuid).toBe("owner-session");
     expect(fakeDeviceUtils.getExecutedOperations()).toContain("killDevice:Pixel_7_API_34");
     expect(fakeDeviceUtils.getExecutedOperations()).toContain("startDevice:Pixel_7_API_34:360000");
     expect(pool.getDevice("emulator-5556")).toMatchObject({
@@ -988,7 +991,7 @@ describe("startDevice handler", () => {
 
     const result = await callStartDevice({ platform: "android" });
 
-    expect(result.sessionUuid).toBe("owner-session");
+    expect(result.session.sessionUuid).toBe("owner-session");
     expect(daemonSessionManager.getDeviceReadiness("owner-session")).toBe("automationReady");
   });
 
@@ -1058,7 +1061,7 @@ describe("startDevice handler", () => {
     const result = await callStartDevice({ platform: "android", __mcpSessionId: "mcp-client" });
 
     expect(recordedReadinessSessions.length).toBeGreaterThan(0);
-    expect([...new Set(recordedReadinessSessions)]).toEqual([result.sessionUuid as string]);
+    expect([...new Set(recordedReadinessSessions)]).toEqual([result.session.sessionUuid as string]);
   });
 
   it("binds an idle System UI recovery replacement through its own readiness reservation", async () => {
@@ -1106,8 +1109,8 @@ describe("startDevice handler", () => {
 
     const result = await callStartDevice({ platform: "android" });
 
-    expect(result.deviceId).toBe("emulator-5556");
-    expect(result.sessionUuid).toBe("session-1");
+    expect(result.identity.deviceId).toBe("emulator-5556");
+    expect(result.session.sessionUuid).toBe("session-1");
     expect(pool.getDevice("emulator-5556")).toMatchObject({
       sessionId: "session-1",
       status: "busy",
@@ -1703,8 +1706,8 @@ describe("startDevice handler", () => {
 
     const result = await callStartDevice({ platform: "android" });
 
-    expect(result.source).toBe("cold-boot");
-    expect(result.processId).toBeUndefined();
+    expect(result.acquisition).toBe("cold-boot");
+    expect(result.processId).toBeNull();
   });
 
   it("cancels the boot (kills the start handle) when cold-boot readiness fails", async () => {
@@ -1996,9 +1999,9 @@ describe("startDevice handler", () => {
     const ownerResult = await ownerStart;
     await expect(adopterStart).rejects.toThrow(/Freshly started device .* assigned to session/);
 
-    expect(ownerResult.sessionUuid).toBeDefined();
+    expect(ownerResult.session.sessionUuid).toBeDefined();
     expect(childProcess.killed).toBe(false);
-    expect(pool.getDevice(androidDevice.deviceId)?.sessionId).toBe(ownerResult.sessionUuid);
+    expect(pool.getDevice(androidDevice.deviceId)?.sessionId).toBe(ownerResult.session.sessionUuid);
   });
 
   it("does not kill a shared cold boot when autolock rejects the later caller", async () => {
@@ -2066,9 +2069,9 @@ describe("startDevice handler", () => {
     const ownerResult = await ownerStart;
     await expect(adopterStart).rejects.toThrow("already assigned to another session");
 
-    expect(ownerResult.sessionUuid).toBeDefined();
+    expect(ownerResult.session.sessionUuid).toBeDefined();
     expect(childProcess.killed).toBe(false);
-    expect(pool.getDevice(androidDevice.deviceId)?.sessionId).toBe(ownerResult.sessionUuid);
+    expect(pool.getDevice(androidDevice.deviceId)?.sessionId).toBe(ownerResult.session.sessionUuid);
   });
 
   it("passes timeout to the cold boot start operation", async () => {
@@ -2093,7 +2096,7 @@ describe("startDevice handler", () => {
 
     const result = await callStartDevice({ platform: "ios", timeoutMs: 30_000 });
 
-    expect(result.source).toBe("cold-boot");
+    expect(result.acquisition).toBe("cold-boot");
     expect(fakeDeviceUtils.getExecutedOperations()).toContain("startDevice:iPhone 15:30000");
     expect(fakeDeviceUtils.getExecutedOperations()).toContain("waitForDeviceReady:iPhone 15:30000");
   });
@@ -2113,7 +2116,7 @@ describe("startDevice handler", () => {
 
     const result = await callStartDevice({ platform: "ios" });
 
-    expect(result.source).toBe("cold-boot");
+    expect(result.acquisition).toBe("cold-boot");
     expect(fakeDeviceUtils.getExecutedOperations()).toContain(`startDevice:iPhone 15:360000`);
     expect(fakeDeviceUtils.getExecutedOperations()).toContain(
       `waitForDeviceReady:iPhone 15:360000`,
@@ -2128,8 +2131,8 @@ describe("startDevice handler", () => {
       deviceId: "emulator-5554",
     });
 
-    expect(result.deviceId).toBe("emulator-5554");
-    expect(result.source).toBe("booted");
+    expect(result.identity.deviceId).toBe("emulator-5554");
+    expect(result.acquisition).toBe("already-booted");
   });
 
   it("starts a connected physical Android device without requiring AVD inventory", async () => {
@@ -2155,8 +2158,8 @@ describe("startDevice handler", () => {
       deviceId: physicalDevice.deviceId,
     });
 
-    expect(result.deviceId).toBe(physicalDevice.deviceId);
-    expect(result.source).toBe("booted");
+    expect(result.identity.deviceId).toBe(physicalDevice.deviceId);
+    expect(result.acquisition).toBe("already-booted");
     expect(fakeDeviceUtils.wasMethodCalled("startDevice")).toBe(false);
   });
 
@@ -2191,8 +2194,8 @@ describe("startDevice handler", () => {
       timeoutMs: 30_000,
     });
 
-    expect(result.deviceId).toBe("ABCD-1234");
-    expect(result.source).toBe("booted");
+    expect(result.identity.deviceId).toBe("ABCD-1234");
+    expect(result.acquisition).toBe("already-booted");
     expect(fakeDeviceUtils.getExecutedOperations()).toContain("waitForDeviceReady:iPhone 15:30000");
   });
 
@@ -2308,7 +2311,7 @@ describe("startDevice handler", () => {
       deviceId: "Pixel_7_API_34",
     });
 
-    expect(result.source).toBe("cold-boot");
+    expect(result.acquisition).toBe("cold-boot");
     expect(fakeDeviceUtils.wasMethodCalled("startDevice")).toBe(true);
   });
 
@@ -2342,7 +2345,7 @@ describe("startDevice handler", () => {
       preferRunning: false,
     });
 
-    expect(result.source).toBe("cold-boot");
+    expect(result.acquisition).toBe("cold-boot");
     expect(fakeDeviceUtils.wasMethodCalled("startDevice")).toBe(true);
   });
 
@@ -2363,8 +2366,8 @@ describe("startDevice handler", () => {
       timeoutMs: 15_000,
     });
 
-    expect(result.deviceId).toBe("emulator-5554");
-    expect(result.source).toBe("booted");
+    expect(result.identity.deviceId).toBe("emulator-5554");
+    expect(result.acquisition).toBe("already-booted");
     expect(fakeDeviceUtils.getExecutedOperations()).toContain(
       "waitForDeviceReady:Pixel_7_API_34:15000",
     );
@@ -2376,8 +2379,8 @@ describe("startDevice handler", () => {
 
     const result = await callStartDevice({ platform: "android" });
 
-    expect(result.formFactor).toBe("phone");
-    expect(result.screenSize).toEqual({ width: 1080, height: 2400 });
+    expect(result.display.formFactor).toBe("phone");
+    expect(result.display).toMatchObject({ width: 1080, height: 2400 });
   });
 
   it("handles iOS devices correctly", async () => {
@@ -2386,9 +2389,9 @@ describe("startDevice handler", () => {
 
     const result = await callStartDevice({ platform: "ios" });
 
-    expect(result.deviceId).toBe("ABCD-1234");
+    expect(result.identity.deviceId).toBe("ABCD-1234");
     expect(result.platform).toBe("ios");
-    expect(result.osVersion).toBe("17.2");
+    expect(result.runtime.osVersion).toBe("17.2");
   });
 
   it("requires iOS deviceId for cold boot", async () => {
@@ -2416,8 +2419,8 @@ describe("startDevice handler", () => {
       },
     });
 
-    expect(result.deviceId).toBe("emulator-5554");
-    expect(result.source).toBe("booted");
+    expect(result.identity.deviceId).toBe("emulator-5554");
+    expect(result.acquisition).toBe("already-booted");
   });
 
   it("prefers top-level values over legacy nested device payload values", () => {
@@ -2502,8 +2505,8 @@ describe("startDevice handler", () => {
 
     const result = await callStartDevice({ platform: "ios" });
 
-    expect(result.deviceId).toBe("UDID-17-2");
-    expect(result.osVersion).toBe("17.2");
+    expect(result.identity.deviceId).toBe("UDID-17-2");
+    expect(result.runtime.osVersion).toBe("17.2");
   });
 
   it("registers the generated autolock session for the MCP session", async () => {
@@ -2528,9 +2531,9 @@ describe("startDevice handler", () => {
       __mcpSessionId: "mcp-session-1",
     });
 
-    expect(typeof result.sessionUuid).toBe("string");
+    expect(typeof result.session.sessionUuid).toBe("string");
     expect(pool.resolveAutolockSessionForMcpSession("mcp-session-1", "android")).toBe(
-      result.sessionUuid,
+      result.session.sessionUuid,
     );
   });
 
@@ -2636,7 +2639,7 @@ describe("startDevice handler", () => {
       deviceId: physicalIphone.deviceId,
     });
 
-    expect(result.deviceId).toBe(physicalIphone.deviceId);
+    expect(result.identity.deviceId).toBe(physicalIphone.deviceId);
     expect(pool.getDevice(physicalIphone.deviceId)?.sessionId).toBe("owner-session");
   });
 
@@ -2692,13 +2695,13 @@ describe("startDevice handler", () => {
     const result = await callStartDevice({ platform: "ios" });
     const repeated = await callStartDevice({ platform: "ios" });
 
-    expect(typeof result.sessionUuid).toBe("string");
-    expect(repeated.sessionUuid).toBe(result.sessionUuid);
-    const session = daemonSessionManager.getSession(result.sessionUuid as string);
+    expect(typeof result.session.sessionUuid).toBe("string");
+    expect(repeated.session.sessionUuid).toBe(result.session.sessionUuid);
+    const session = daemonSessionManager.getSession(result.session.sessionUuid as string);
     expect(session).not.toBeNull();
     expect(session!.assignedDevice).toBe(iosDevice.deviceId);
     expect(session!.platform).toBe("ios");
-    expect(pool.getDevice(iosDevice.deviceId)?.sessionId).toBe(result.sessionUuid);
+    expect(pool.getDevice(iosDevice.deviceId)?.sessionId).toBe(result.session.sessionUuid);
     expect(pool.getDevice(iosDevice.deviceId)?.status).toBe("busy");
   });
 });

@@ -38,7 +38,7 @@ it works for an already-booted serial such as `emulator-5554`, and will also
 fall back to cold-booting a matching AVD image by name if you pass a
 defined-but-unbooted AVD name. For `getApple`, `deviceId` is an alias for
 `udid`: a booted simulator's `deviceId` is its `udid`. The `deviceId` fields let
-you copy the value `listDevices` and the `automobile:devices/booted/*` resources
+you copy `identity.deviceId` from `listDevices` and the `automobile:devices/booted/*` resources
 lead with straight into the acquire call.
 
 ## What if I have more than one device?

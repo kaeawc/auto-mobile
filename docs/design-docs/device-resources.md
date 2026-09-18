@@ -1,5 +1,9 @@
 # Device resources
 
+Device records use the shared `DeviceDescription` projection. Runtime versions are
+`runtime.osVersion`, runtime identifiers are `runtime.runtimeId`, and unknown facts
+are explicit `null` values. See [the device-description audit](device-description-audit.md).
+
 `DeviceResource` describes observed resource state for one device. Its `resources`
 property is a JSON object keyed by logical resource name. `AndroidDeviceResource`
 and `AppleDeviceResource` add platform-specific keys and preserve AutoMobile's

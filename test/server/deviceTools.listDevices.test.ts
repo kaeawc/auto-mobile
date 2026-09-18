@@ -120,11 +120,13 @@ describe("listDevices tool (#5870)", () => {
         expect.objectContaining({
           platform: "android",
           deviceId: "emulator-5554",
+          identity: expect.objectContaining({ deviceId: "emulator-5554" }),
           name: "Pixel_9_API_36",
         }),
         expect.objectContaining({
           platform: "ios",
           deviceId: "E2F46BCE-4C97-4AA0-BD9D-544756FAB545",
+          identity: expect.objectContaining({ deviceId: "E2F46BCE-4C97-4AA0-BD9D-544756FAB545" }),
           name: "iPhone 17",
         }),
       ]),
@@ -142,7 +144,11 @@ describe("listDevices tool (#5870)", () => {
     expect(response.structuredContent).toEqual(JSON.parse(response.content?.[0]?.text ?? "{}"));
     expect(response.structuredContent).toMatchObject({
       count: 1,
-      devices: [expect.objectContaining({ deviceId: "emulator-5554" })],
+      devices: [
+        expect.objectContaining({
+          identity: expect.objectContaining({ deviceId: "emulator-5554" }),
+        }),
+      ],
     });
   });
 
@@ -221,7 +227,10 @@ describe("listDevices tool (#5870)", () => {
     // Only the reachable platform's device is returned...
     expect(payload.count).toBe(1);
     expect(payload.devices).toEqual([
-      expect.objectContaining({ platform: "android", deviceId: "emulator-5554" }),
+      expect.objectContaining({
+        platform: "android",
+        identity: expect.objectContaining({ deviceId: "emulator-5554" }),
+      }),
     ]);
 
     // ...but the response makes the failed scan distinguishable from empty.
@@ -269,13 +278,21 @@ describe("listDevices tool (#5870)", () => {
     // The physical device is still returned; the simulator's is not.
     expect(payload.devices).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ platform: "android", deviceId: "emulator-5554" }),
-        expect.objectContaining({ platform: "ios", deviceId: "00008120-001A2D3E4F5B6A2E" }),
+        expect.objectContaining({
+          platform: "android",
+          identity: expect.objectContaining({ deviceId: "emulator-5554" }),
+        }),
+        expect.objectContaining({
+          platform: "ios",
+          identity: expect.objectContaining({ deviceId: "00008120-001A2D3E4F5B6A2E" }),
+        }),
       ]),
     );
-    expect(payload.devices.some((d: { deviceId: string }) => d.deviceId === ios.deviceId)).toBe(
-      false,
-    );
+    expect(
+      payload.devices.some(
+        (d: { identity: { deviceId: string } }) => d.identity.deviceId === ios.deviceId,
+      ),
+    ).toBe(false);
 
     // Completeness reflects the incomplete simulator source.
     expect(payload.discovery.complete).toBe(false);
@@ -327,15 +344,18 @@ describe("listDevices tool (#5870)", () => {
 
     expect(payload.count).toBe(1);
     expect(payload.devices).toEqual([
-      expect.objectContaining({ platform: "android", deviceId: "emulator-5554" }),
+      expect.objectContaining({
+        platform: "android",
+        identity: expect.objectContaining({ deviceId: "emulator-5554" }),
+      }),
     ]);
   });
 
   test("omits Android version metadata when no admitted image has it", async () => {
     const payload = await callListDevices({ platform: "android" });
 
-    expect(payload.devices[0]).not.toHaveProperty("apiLevel");
-    expect(payload.devices[0]).not.toHaveProperty("osVersion");
+    expect(payload.devices[0].runtime.apiLevel).toBeNull();
+    expect(payload.devices[0].runtime.osVersion).toBeNull();
   });
 
   test("reports Android API and release metadata retained at device admission", async () => {
@@ -364,9 +384,8 @@ describe("listDevices tool (#5870)", () => {
       expect(payload.devices).toEqual([
         expect.objectContaining({
           platform: "android",
-          deviceId: android.deviceId,
-          apiLevel: 36,
-          osVersion: "16",
+          identity: expect.objectContaining({ deviceId: android.deviceId }),
+          runtime: expect.objectContaining({ apiLevel: 36, osVersion: "16" }),
         }),
       ]);
     } finally {
@@ -401,12 +420,13 @@ describe("listDevices tool (#5870)", () => {
     try {
       const payload = await callListDevices({ platform: "android" });
       const device = payload.devices.find(
-        (entry: { deviceId: string }) => entry.deviceId === replacement.deviceId,
+        (entry: { identity: { deviceId: string } }) =>
+          entry.identity.deviceId === replacement.deviceId,
       );
 
       expect(pool.isPooledIdentityUnresolved(android.deviceId)).toBe(true);
-      expect(device).not.toHaveProperty("apiLevel");
-      expect(device).not.toHaveProperty("osVersion");
+      expect(device?.runtime.apiLevel).toBeNull();
+      expect(device?.runtime.osVersion).toBeNull();
     } finally {
       DaemonState.getInstance().reset();
       sessionManager.stopCleanupTimer();

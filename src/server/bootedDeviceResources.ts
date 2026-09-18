@@ -11,7 +11,14 @@ import type {
   DevicePool,
   DeviceRecoveryEligibility,
   DeviceRecoveryPolicy,
+  PooledDevice,
 } from "../daemon/devicePool";
+import {
+  describeDevice,
+  projectBootedDevice,
+  withDeviceServiceStatus,
+  type DeviceDescription,
+} from "./deviceDescription";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
 import { getAndroidAppMetadataViaAdb } from "../features/observe/GetAppMetadata";
@@ -107,59 +114,26 @@ export interface ServiceStatusDiagnostic {
   reason: string;
 }
 
-interface DeviceIdentity {
-  stableId: string;
-  /**
-   * Key for THIS connection epoch of the device. An adb serial is reused across
-   * boots, so the serial alone cannot tell a consumer "same device, stream
-   * continues" from "device rebooted, flush your state". When the pool knows the
-   * device's `incarnation` AND that pooled entry describes the runtime this
-   * discovery just reported on the serial, this is `<deviceId>#<incarnation>`;
-   * otherwise the serial alone, which callers must read as "no epoch
-   * information". The identity check matters because the pool join is by serial:
-   * an unchecked join could publish a retired entry's epoch for a new runtime.
-   */
-  connectionId: string;
-}
-
-interface DeviceReadiness {
-  state: "ready" | "not_ready" | "unknown";
-}
-
-interface DeviceCapabilities {
-  automation: Pick<
-    DeviceServiceStatus,
-    | "installed"
-    | "enabled"
-    | "running"
-    | "isCompatible"
-    | "version"
-    | "supportedCommandsComplete"
-    | "supportedFeaturesComplete"
-  > | null;
-}
-
-// Booted device info for resource response
-interface BootedDeviceInfo {
-  name: string;
-  platform: Platform;
+// The resource keeps its diagnostic siblings alongside the full canonical description.
+interface BootedDeviceInfo extends DeviceDescription {
+  /** Compatibility alias mirroring identity.deviceId for the desktop decoder. */
   deviceId: string;
-  /** Live daemon-minted epoch key; absent when the daemon has no registry record. */
+  /** Compatibility alias mirroring identity.deviceSessionUuid when present. */
   deviceSessionUuid?: string;
-  identity: DeviceIdentity;
-  source: "local" | "remote";
-  isVirtual: boolean;
-  status: "booted";
-  lifecycleState: "booted";
-  runtime?: string;
-  formFactor?: BootedDevice["formFactor"];
-  readiness: DeviceReadiness;
-  capabilities: DeviceCapabilities;
-  poolStatus?: PoolDeviceStatus;
+  /** Compatibility alias mirroring lifecycle.state for the desktop decoder. */
+  status: DeviceDescription["lifecycle"]["state"];
+  /** Compatibility alias mirroring lifecycle.state. */
+  lifecycleState: DeviceDescription["lifecycle"]["state"];
+  /** The former runtime string now mirrors runtime.osVersion. */
+  legacyRuntimeVersion: string | null;
+  /** Compatibility alias mirroring display.formFactor. */
+  formFactor: string | null;
+  /** Compatibility alias mirroring session.poolStatus when present. */
+  poolStatus?: DeviceDescription["session"]["poolStatus"];
+  /** Compatibility alias mirroring session.sessionUuid when present. */
   assignedSession?: string;
-  recoveryEligibility?: DeviceRecoveryEligibility;
-  session?: DeviceSessionInfo;
-  serviceStatus?: DeviceServiceStatus;
+  recoveryEligibility: DeviceRecoveryEligibility | null;
+  serviceStatus: DeviceServiceStatus | null;
   /**
    * Set when the bounded service-status probe for this observation timed out or
    * failed (CtrlProxy loopback refused/reset). The device stays booted and
@@ -173,7 +147,7 @@ interface BootedDeviceInfo {
    * `dumpsys window policy`); omitted when unread or on iOS, where no lock-state probe exists yet.
    * Consumed by the desktop workspace to gate the contextual Unlock control (issue #4694).
    */
-  locked?: boolean;
+  locked: boolean | null;
   /**
    * Set when the pool holds this serial under an IDENTITY QUARANTINE: the serial
    * resolves, but which AVD answers on it does not.
@@ -185,7 +159,23 @@ interface BootedDeviceInfo {
    * built from discovery alone and carries no probed service status or lock
    * state ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
    */
-  identityUnresolved?: boolean;
+  identityUnresolved: boolean;
+}
+
+type BootedDeviceProbeTarget = {
+  name: string;
+  platform: Platform;
+  deviceId: string;
+  source?: "local";
+};
+
+function probeTarget(device: BootedDeviceInfo): BootedDeviceProbeTarget {
+  return {
+    name: device.name,
+    platform: device.platform,
+    deviceId: device.identity.deviceId ?? device.identity.stableId,
+    ...(device.source === "local" ? { source: "local" as const } : {}),
+  };
 }
 
 // Resource content schema
@@ -217,16 +207,6 @@ interface PoolStatusSummary {
   error: number;
   total: number;
   recoveryPolicy: DeviceRecoveryPolicy;
-}
-
-interface DeviceSessionInfo {
-  sessionId: string;
-  createdAt: string;
-  lastUsedAt: string;
-  lastHeartbeat: string;
-  expiresAt: string;
-  heartbeatTimeoutMs: number;
-  hasReceivedHeartbeat: boolean;
 }
 
 interface PoolDeviceInfo {
@@ -374,45 +354,58 @@ async function getDeviceLockStates(): Promise<ResourceContent> {
   };
 }
 
+/** Deprecated booted-resource fields, each derived from the canonical description. */
+function legacyAliases(description: DeviceDescription) {
+  return {
+    // Deprecated alias for identity.deviceId.
+    deviceId: description.identity.deviceId!,
+    // Deprecated alias for lifecycle.state.
+    status: description.lifecycle.state,
+    // Deprecated alias for lifecycle.state.
+    lifecycleState: description.lifecycle.state,
+    // `runtime` is canonical object data; its former OS-version string is legacyRuntimeVersion.
+    legacyRuntimeVersion: description.runtime.osVersion,
+    // Deprecated alias for display.formFactor.
+    formFactor: description.display.formFactor,
+    // Deprecated alias for identity.deviceSessionUuid, preserving pre-image omission behavior.
+    ...(description.identity.deviceSessionUuid
+      ? { deviceSessionUuid: description.identity.deviceSessionUuid }
+      : {}),
+    // Deprecated alias for session.poolStatus, preserving pre-image omission behavior.
+    ...(description.session.poolStatus ? { poolStatus: description.session.poolStatus } : {}),
+    // Deprecated alias for session.sessionUuid, preserving pre-image omission behavior.
+    ...(description.session.sessionUuid
+      ? { assignedSession: description.session.sessionUuid }
+      : {}),
+  };
+}
+
 // Convert BootedDevice to BootedDeviceInfo
 function toBootedDeviceInfo(
   device: BootedDevice,
   poolContext?: PoolDeviceContext,
 ): BootedDeviceInfo {
-  const poolInfo = poolContext?.poolInfo;
-  const isVirtual = isVirtualDevice(device);
-  const runtime = device.iosVersion ?? device.osVersion;
-  const info: BootedDeviceInfo = {
-    name: device.name,
-    platform: device.platform,
-    deviceId: device.deviceId,
-    identity: toDeviceIdentity(device, poolInfo, isVirtual),
-    source: device.source || "local",
-    isVirtual,
-    status: "booted",
-    lifecycleState: "booted",
-    readiness: { state: "unknown" },
-    capabilities: { automation: null },
+  const description = describeDevice({
+    kind: "booted",
+    device,
+    pooled: poolContext?.pooled,
+    // Preserve the pool's already-published assignment in the canonical session
+    // when the optional session-detail map is unavailable for this observation.
+    session:
+      poolContext?.session ??
+      (poolContext?.poolInfo.assignedSession
+        ? { sessionId: poolContext.poolInfo.assignedSession }
+        : undefined),
+    deviceSessionUuid: poolContext?.deviceSessionUuid,
+  });
+  return {
+    ...projectBootedDevice(description),
+    ...legacyAliases(description),
+    recoveryEligibility: poolContext?.poolInfo.recoveryEligibility ?? null,
+    serviceStatus: null,
+    locked: null,
+    identityUnresolved: false,
   };
-
-  if (poolContext?.deviceSessionUuid) {
-    info.deviceSessionUuid = poolContext.deviceSessionUuid;
-  }
-  if (runtime) {
-    info.runtime = runtime;
-  }
-  if (device.formFactor) {
-    info.formFactor = device.formFactor;
-  }
-  if (poolInfo) {
-    info.poolStatus = poolInfo.poolStatus;
-    info.assignedSession = poolInfo.assignedSession;
-    info.recoveryEligibility = poolInfo.recoveryEligibility;
-  }
-  if (poolContext?.sessionInfo) {
-    info.session = poolContext.sessionInfo;
-  }
-  return info;
 }
 
 /**
@@ -426,31 +419,6 @@ function toBootedDeviceInfo(
  * serial. A caller that needs the real AVD name in that case must re-resolve it
  * from the runtime rather than read it here (#6863 review).
  */
-function toDeviceIdentity(
-  device: BootedDevice,
-  poolInfo: PoolDeviceInfo | undefined,
-  isVirtual: boolean,
-): DeviceIdentity {
-  return {
-    stableId:
-      device.platform === "android" && isVirtual
-        ? (poolInfo?.avdName ?? device.name)
-        : device.deviceId,
-    connectionId:
-      poolInfo?.incarnation === undefined
-        ? device.deviceId
-        : `${device.deviceId}#${poolInfo.incarnation}`,
-  };
-}
-
-function isVirtualDevice(device: BootedDevice): boolean {
-  if (device.platform === "android") {
-    return device.deviceId.startsWith("emulator-");
-  }
-
-  return device.deviceId.includes("-") && device.deviceId.length > 30;
-}
-
 /**
  * Everything the resource publishes about WHICH RUNTIME is on a serial, resolved
  * as ONE unit so it can be withheld as one.
@@ -469,14 +437,15 @@ function isVirtualDevice(device: BootedDevice): boolean {
  */
 interface PoolDeviceContext {
   poolInfo: PoolDeviceInfo;
-  sessionInfo?: DeviceSessionInfo;
+  pooled: PooledDevice;
+  session?: Session;
   deviceSessionUuid?: string;
 }
 
 function resolvePoolDeviceContext(
   devicePool: DevicePool | null,
   device: BootedDevice,
-  sessionInfoByDeviceId: Map<string, DeviceSessionInfo> | null,
+  sessionInfoByDeviceId: Map<string, Session> | null,
   resolveDeviceSessionUuid: (deviceId: string) => string | null,
 ): PoolDeviceContext | undefined {
   if (!devicePool) {
@@ -499,7 +468,8 @@ function resolvePoolDeviceContext(
       avdName: pooledDevice.avdName,
       incarnation: pooledDevice.incarnation,
     },
-    sessionInfo: sessionInfoByDeviceId?.get(device.deviceId),
+    pooled: pooledDevice,
+    session: sessionInfoByDeviceId?.get(device.deviceId),
     deviceSessionUuid: resolveDeviceSessionUuid(device.deviceId) ?? undefined,
   };
 }
@@ -527,7 +497,7 @@ function summarizePoolStatus(
   // phantom (shut-down) pool entries are excluded.
   for (const device of discoveredDevices) {
     if (succeededPlatforms.has(device.platform)) {
-      tally(device.poolStatus);
+      tally(device.session.poolStatus ?? undefined);
     }
   }
 
@@ -546,18 +516,6 @@ function summarizePoolStatus(
     error,
     total: idle + assigned + error,
     recoveryPolicy: devicePool.getRecoveryPolicy(),
-  };
-}
-
-function toDeviceSessionInfo(session: Session): DeviceSessionInfo {
-  return {
-    sessionId: session.sessionId,
-    createdAt: new Date(session.createdAt).toISOString(),
-    lastUsedAt: new Date(session.lastUsedAt).toISOString(),
-    lastHeartbeat: new Date(session.lastHeartbeat).toISOString(),
-    expiresAt: new Date(session.expiresAt).toISOString(),
-    heartbeatTimeoutMs: session.heartbeatTimeoutMs,
-    hasReceivedHeartbeat: session.hasReceivedHeartbeat,
   };
 }
 
@@ -610,7 +568,7 @@ interface PlatformDiscoveryResult {
 async function discoverBootedDevicesForPlatform(
   platform: Platform,
   devicePool: DevicePool | null,
-  sessionInfoByDeviceId: Map<string, DeviceSessionInfo> | null,
+  sessionInfoByDeviceId: Map<string, Session> | null,
   resolveDeviceSessionUuid: (deviceId: string) => string | null,
 ): Promise<PlatformDiscoveryResult> {
   try {
@@ -685,7 +643,7 @@ async function discoverBootedDevicesForPlatform(
 interface DaemonDeviceContext {
   devicePool: DevicePool | null;
   poolStatus?: PoolStatusSummary;
-  sessionInfoByDeviceId: Map<string, DeviceSessionInfo> | null;
+  sessionInfoByDeviceId: Map<string, Session> | null;
   resolveDeviceSessionUuid: (deviceId: string) => string | null;
 }
 
@@ -701,7 +659,7 @@ function readDaemonDeviceContext(): DaemonDeviceContext {
 
   let devicePool: DevicePool | null = null;
   let poolStatus: PoolStatusSummary | undefined;
-  let sessionInfoByDeviceId: Map<string, DeviceSessionInfo> | null = null;
+  let sessionInfoByDeviceId: Map<string, Session> | null = null;
   let resolveDeviceSessionUuid: (deviceId: string) => string | null = () => null;
   try {
     devicePool = daemonState.getDevicePool();
@@ -719,9 +677,7 @@ function readDaemonDeviceContext(): DaemonDeviceContext {
 
   try {
     const sessions = daemonState.getSessionManager().getAllSessions();
-    sessionInfoByDeviceId = new Map(
-      sessions.map((session) => [session.assignedDevice, toDeviceSessionInfo(session)]),
-    );
+    sessionInfoByDeviceId = new Map(sessions.map((session) => [session.assignedDevice, session]));
   } catch (error) {
     logger.warn(`[BootedDeviceResources] Failed to read session manager state: ${error}`);
   }
@@ -746,7 +702,10 @@ function withIdentityQuarantineMarker(
   device: BootedDeviceInfo,
   devicePool: DevicePool | null,
 ): BootedDeviceInfo {
-  if (devicePool?.isPooledIdentityUnresolved(device.deviceId) !== true) {
+  if (
+    devicePool?.isPooledIdentityUnresolved(device.identity.deviceId ?? device.identity.stableId) !==
+    true
+  ) {
     return device;
   }
   return { ...device, identityUnresolved: true };
@@ -768,7 +727,7 @@ const SERVICE_STATUS_TIMEOUT_MS = 5000;
 
 /** Probes one device's automation-service status; resolves undefined when the platform has none. */
 export type ServiceStatusProbe = (
-  device: Pick<BootedDeviceInfo, "name" | "platform" | "deviceId" | "source">,
+  device: BootedDeviceProbeTarget,
 ) => Promise<DeviceServiceStatus | undefined>;
 
 // Injected only by tests, which need a deterministic service-status result without real CtrlProxy
@@ -802,7 +761,7 @@ export interface ServiceStatusProbeOutcome {
  * [timer] and its losing handle is always cleared, so a fast success logs nothing.
  */
 export async function probeServiceStatusWithBudget(
-  device: Pick<BootedDeviceInfo, "name" | "platform" | "deviceId" | "source">,
+  device: BootedDeviceProbeTarget,
   probe: ServiceStatusProbe,
   deadlineMs: number,
   timer: Timer = defaultTimer,
@@ -875,7 +834,7 @@ export async function enrichDeviceServiceStatuses(
   const outcomes = await Promise.all(
     devices.map(async (device) =>
       isProbeableDevice(device)
-        ? await probeServiceStatusWithBudget(device, probe, deadlineMs, timer)
+        ? await probeServiceStatusWithBudget(probeTarget(device), probe, deadlineMs, timer)
         : undefined,
     ),
   );
@@ -911,37 +870,23 @@ function withServiceStatus(
 ): BootedDeviceInfo {
   return {
     ...device,
+    ...withDeviceServiceStatus(device, serviceStatus),
     serviceStatus,
     // A confirmed status supersedes any transient diagnostic from an earlier failed probe.
     serviceStatusDiagnostic: undefined,
-    readiness: readinessFromServiceStatus(device.platform, serviceStatus),
-    capabilities: {
-      automation: {
-        installed: serviceStatus.installed,
-        enabled: serviceStatus.enabled,
-        running: serviceStatus.running,
-        isCompatible: serviceStatus.isCompatible,
-        version: serviceStatus.version,
-        supportedCommandsComplete: serviceStatus.supportedCommandsComplete,
-        supportedFeaturesComplete: serviceStatus.supportedFeaturesComplete,
-      },
-    },
   };
 }
 
 export function readinessFromServiceStatus(
   platform: Platform,
   serviceStatus: DeviceServiceStatus,
-): DeviceReadiness {
+): DeviceDescription["readiness"] {
   if (!serviceStatus.installed || !serviceStatus.enabled || !serviceStatus.isCompatible) {
     return { state: "not_ready" };
   }
-  if (platform === "android") {
-    // A resource read observes an existing connection without opening one. No connection
-    // is inconclusive; an installed/enabled service can still be usable on its next call.
-    return { state: serviceStatus.running ? "ready" : "unknown" };
-  }
-  return { state: serviceStatus.running ? "ready" : "not_ready" };
+  // A resource read observes an existing connection without opening one. No connection
+  // is inconclusive on either platform; an installed/enabled service can be usable next call.
+  return { state: serviceStatus.running ? "ready" : "unknown" };
 }
 
 async function enrichDeviceLockStates(devices: BootedDeviceInfo[]): Promise<void> {
@@ -952,12 +897,7 @@ async function enrichDeviceLockStates(devices: BootedDeviceInfo[]): Promise<void
 
   const lockResults = await Promise.allSettled(
     devices.map(async (device) =>
-      isProbeableDevice(device)
-        ? await probeDeviceLock(
-            { name: device.name, platform: device.platform, deviceId: device.deviceId },
-            lockProbe,
-          )
-        : undefined,
+      isProbeableDevice(device) ? await probeDeviceLock(probeTarget(device), lockProbe) : undefined,
     ),
   );
 
@@ -1116,7 +1056,7 @@ async function getCtrlProxyVersion(
 
 // Query service status for a single booted device
 export async function queryDeviceServiceStatus(
-  device: Pick<BootedDeviceInfo, "name" | "platform" | "deviceId" | "source">,
+  device: BootedDeviceProbeTarget,
   androidLookup: AndroidServiceStatusLookup = defaultAndroidServiceStatusLookup,
   versionLookup?: CtrlProxyVersionLookup,
   timer: Timer = defaultTimer,

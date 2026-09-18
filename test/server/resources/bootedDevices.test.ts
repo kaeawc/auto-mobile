@@ -255,9 +255,9 @@ describe("MCP Booted Device Resources", () => {
           stableId: "Pixel_7_API_34",
           connectionId: "emulator-5554",
         },
-        lifecycleState: "booted",
+        lifecycle: { state: "booted", known: true },
         readiness: { state: "unknown" },
-        capabilities: { automation: null },
+        serviceStatus: null,
       });
       expect(data.devices[2]).toMatchObject({
         identity: {
@@ -434,7 +434,7 @@ describe("MCP Booted Device Resources", () => {
       const device = data.devices[0];
       expect(device.name).toBe("Pixel_7_API_34");
       expect(device.platform).toBe("android");
-      expect(device.deviceId).toBe("emulator-5554");
+      expect(device.identity.deviceId).toBe("emulator-5554");
       expect(device.source).toBe("local");
       expect(device.isVirtual).toBe(true);
       expect(device.poolStatus).toBeUndefined();
@@ -469,9 +469,11 @@ describe("MCP Booted Device Resources", () => {
       );
 
       const data: BootedDevicesResourceContent = JSON.parse(result.contents[0].text!);
-      const locked = data.devices.find((device) => device.deviceId === mockAndroidDevice1.deviceId);
+      const locked = data.devices.find(
+        (device) => device.identity.deviceId === mockAndroidDevice1.deviceId,
+      );
       const unlocked = data.devices.find(
-        (device) => device.deviceId === mockAndroidDevice2.deviceId,
+        (device) => device.identity.deviceId === mockAndroidDevice2.deviceId,
       );
       expect(locked?.locked).toBe(true);
       expect(unlocked?.locked).toBe(false);
@@ -506,7 +508,7 @@ describe("MCP Booted Device Resources", () => {
       );
 
       const data: BootedDevicesResourceContent = JSON.parse(result.contents[0].text!);
-      expect(data.devices[0].locked).toBeUndefined();
+      expect(data.devices[0].locked).toBeNull();
     });
 
     test("lock-states resource surfaces per-device lock from the probe", async function () {
@@ -665,7 +667,9 @@ describe("MCP Booted Device Resources", () => {
       try {
         const partial = await read();
         expect(partial.observationComplete).toBe(false);
-        expect(partial.devices.map((device) => device.deviceId)).toEqual([mockIosDevice1.deviceId]);
+        expect(partial.devices.map((device) => device.identity.deviceId)).toEqual([
+          mockIosDevice1.deviceId,
+        ]);
         expect(partial.poolStatus).toMatchObject({ total: 2, idle: 1, assigned: 1 });
         fakeDeviceUtils.failedSources.clear();
         const complete = await read();
@@ -731,23 +735,25 @@ describe("MCP Booted Device Resources", () => {
         recoveryPolicy: { onLoss: false, maxAttempts: 2 },
       });
 
-      const assignedDevice = data.devices.find((device) => device.assignedSession === sessionId);
+      const assignedDevice = data.devices.find(
+        (device) => device.session.sessionUuid === sessionId,
+      );
       expect(assignedDevice).toBeDefined();
-      expect(assignedDevice?.poolStatus).toBe("assigned");
+      expect(assignedDevice?.session.poolStatus).toBe("assigned");
 
       const idleDevice = data.devices.find(
-        (device) => device.deviceId !== assignedDevice?.deviceId,
+        (device) => device.identity.deviceId !== assignedDevice?.identity.deviceId,
       );
       expect(idleDevice).toBeDefined();
-      expect(idleDevice?.poolStatus).toBe("idle");
+      expect(idleDevice?.session.poolStatus).toBe("idle");
 
       // With a pool wired, `connectionId` names THIS connection epoch: a reused
       // serial alone cannot tell a consumer whether to flush its per-device
       // state, so the pool's incarnation is appended.
-      const pooledIncarnation = devicePool.getDeviceIncarnation(assignedDevice!.deviceId);
+      const pooledIncarnation = devicePool.getDeviceIncarnation(assignedDevice!.identity.deviceId!);
       expect(pooledIncarnation).toBeDefined();
       expect(assignedDevice?.identity?.connectionId).toBe(
-        `${assignedDevice!.deviceId}#${pooledIncarnation}`,
+        `${assignedDevice!.identity.deviceId}#${pooledIncarnation}`,
       );
 
       // Clean up SessionManager timer to prevent process hang
@@ -795,12 +801,14 @@ describe("MCP Booted Device Resources", () => {
       );
       const data: BootedDevicesResourceContent = JSON.parse(result.contents[0].text!);
 
-      const reusedSerial = data.devices.find((device) => device.deviceId === "emulator-5554");
+      const reusedSerial = data.devices.find(
+        (device) => device.identity.deviceId === "emulator-5554",
+      );
       expect(reusedSerial?.identity?.connectionId).toBe("emulator-5554");
 
       // The entry whose identity still agrees keeps its epoch.
       const agreeing = data.devices.find(
-        (device) => device.deviceId === mockAndroidDevice2.deviceId,
+        (device) => device.identity.deviceId === mockAndroidDevice2.deviceId,
       );
       expect(agreeing?.identity?.connectionId).toBe(
         `${mockAndroidDevice2.deviceId}#${devicePool.getDeviceIncarnation(mockAndroidDevice2.deviceId)}`,
@@ -850,14 +858,15 @@ describe("MCP Booted Device Resources", () => {
         const result = await client.readResource({ uri: "automobile:devices/booted" });
         const data: BootedDevicesResourceContent = JSON.parse(result.contents[0].text!);
         const entry = data.devices.find(
-          (device) => device.deviceId === mockAndroidDevice1.deviceId,
+          (device) => device.identity.deviceId === mockAndroidDevice1.deviceId,
         );
 
         expect(entry).toBeDefined();
-        expect(entry?.deviceSessionUuid).toBeUndefined();
-        expect(entry?.session).toBeUndefined();
-        expect(entry?.poolStatus).toBeUndefined();
-        expect(entry?.assignedSession).toBeUndefined();
+        expect(entry?.session).toEqual({
+          sessionUuid: null,
+          ownership: null,
+          poolStatus: null,
+        });
         // Identity is built purely from discovery.
         expect(entry?.identity?.stableId).toBe("Pixel_9_API_36");
         expect(entry?.identity?.connectionId).toBe(mockAndroidDevice1.deviceId);
@@ -904,7 +913,7 @@ describe("MCP Booted Device Resources", () => {
       const { client } = fixture.getContext();
       const result = await client.readResource({ uri: "automobile:devices/booted" });
       const data: BootedDevicesResourceContent = JSON.parse(result.contents[0].text!);
-      const device = data.devices.find((entry) => entry.deviceId === unresolved.deviceId);
+      const device = data.devices.find((entry) => entry.identity.deviceId === unresolved.deviceId);
 
       expect(device?.identity?.connectionId).toBe(unresolved.deviceId);
       expect(device?.identity?.stableId).toBe(unresolved.name);
@@ -998,24 +1007,24 @@ describe("MCP Booted Device Resources", () => {
         const result = await client.readResource({ uri: "automobile:devices/booted" });
         const data: BootedDevicesResourceContent = JSON.parse(result.contents[0].text!);
         const quarantined = data.devices.find(
-          (entry) => entry.deviceId === mockAndroidDevice1.deviceId,
+          (entry) => entry.identity.deviceId === mockAndroidDevice1.deviceId,
         );
         const healthy = data.devices.find(
-          (entry) => entry.deviceId === mockAndroidDevice2.deviceId,
+          (entry) => entry.identity.deviceId === mockAndroidDevice2.deviceId,
         );
 
         expect(devicePool.isPooledIdentityUnresolved(mockAndroidDevice1.deviceId)).toBe(true);
         expect(lockProbes).toEqual([mockAndroidDevice2.deviceId]);
         expect(quarantined?.identityUnresolved).toBe(true);
-        expect(quarantined?.locked).toBeUndefined();
-        expect(healthy?.identityUnresolved).toBeUndefined();
+        expect(quarantined?.locked).toBeNull();
+        expect(healthy?.identityUnresolved).toBe(false);
         expect(healthy?.locked).toBe(true);
       } finally {
         sessionManager.stopCleanupTimer();
       }
     });
 
-    test("exposes the registry epoch UUID for each live device", async function () {
+    test("exposes the registry routing key separately from the MCP session UUID", async function () {
       fakeDeviceUtils.setBootedDevices("android", [mockAndroidDevice1]);
 
       const fakeTimer = new FakeTimer();
@@ -1032,7 +1041,7 @@ describe("MCP Booted Device Resources", () => {
       );
       await devicePool.initializeWithDevices([mockAndroidDevice1]);
       const registry = new DeviceSessionRegistry(fakeTimer);
-      const epoch = registry.onDeviceConnected({
+      registry.onDeviceConnected({
         deviceId: mockAndroidDevice1.deviceId,
         platform: "android",
         incarnation: 1,
@@ -1048,7 +1057,11 @@ describe("MCP Booted Device Resources", () => {
           expect.arrayContaining([
             expect.objectContaining({
               deviceId: mockAndroidDevice1.deviceId,
-              deviceSessionUuid: epoch.deviceSessionUuid,
+              status: "booted",
+              identity: expect.objectContaining({ deviceId: mockAndroidDevice1.deviceId }),
+              session: expect.objectContaining({ sessionUuid: null }),
+              deviceSessionUuid: registry.getByDeviceId(mockAndroidDevice1.deviceId)
+                ?.deviceSessionUuid,
             }),
           ]),
         );

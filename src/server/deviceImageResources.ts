@@ -17,11 +17,6 @@ import {
   type AppleDeviceType,
 } from "../utils/ios-cmdline-tools/SimCtlClient";
 import {
-  buildAndroidAvdCapabilityInventory,
-  iosSimulatorCapabilityInventory,
-  type VirtualDeviceCapabilityInventory,
-} from "../features/device-control/virtualDeviceCapabilities";
-import {
   compareSimctlVersions,
   decodeSimctlVersion,
   parseSimctlVersion,
@@ -35,6 +30,12 @@ import {
   type ConfiguredDeviceInventoryObservation,
   type StableConfiguredDeviceImage,
 } from "../utils/configuredDeviceInventory";
+import {
+  describeDevice,
+  projectConfiguredImage,
+  type ConfiguredImage,
+  type DeviceDescription,
+} from "./deviceDescription";
 
 /**
  * Wall-clock budget for the COMPLETE Android resource path — the device-image
@@ -55,34 +56,7 @@ export const DEVICE_IMAGE_RESOURCE_URIS = {
 } as const;
 
 // Device image info for resource response
-export interface DeviceImageInfo {
-  /** Exact AVD name on Android; exact simulator UDID on iOS. */
-  stableId: string;
-  name: string;
-  platform: Platform;
-  deviceId?: string;
-  source: "local";
-  // Extended info from AVD Manager (Android only)
-  path?: string;
-  target?: string;
-  basedOn?: string;
-  error?: string;
-  // iOS simulator metadata (iOS only)
-  state?: string;
-  isAvailable?: boolean;
-  availabilityError?: string;
-  iosVersion?: string;
-  deviceType?: string;
-  runtime?: string;
-  model?: string;
-  architecture?: string;
-  /**
-   * Versioned hardware feature inventory for this startable virtual device.
-   * Android entries are derived from its AVD config; iOS entries model the
-   * simulator platform independently of a started session.
-   */
-  capabilityInventory: VirtualDeviceCapabilityInventory;
-}
+export type DeviceImageInfo = ConfiguredImage & ReturnType<typeof legacyAliases>;
 
 interface ProvisioningRuntime {
   platform: Platform;
@@ -300,7 +274,7 @@ async function buildAndroidImages(
     const avdInfoList = await readAvdInfo(avdManager, signal);
     const avdInfoByName = new Map(avdInfoList.map((avd) => [avd.name, avd]));
     return {
-      images: projection.images.map((device) =>
+      images: projection.sourceImages.map((device) =>
         toDeviceImageInfo(device, avdInfoByName.get(device.name)),
       ),
       observation: projection.observation,
@@ -338,7 +312,7 @@ async function buildIosImages(
       return { images: [], observation: projection.observation };
     }
     return {
-      images: projection.images.map((device) => toDeviceImageInfo(device)),
+      images: projection.sourceImages.map((device) => toDeviceImageInfo(device)),
       observation: projection.observation,
     };
   } catch (error) {
@@ -688,35 +662,43 @@ function toDeviceImageInfo(
   device: StableConfiguredDeviceImage,
   avdInfo?: AvdInfo,
 ): DeviceImageInfo {
+  const description = describeDevice({ kind: "image", image: device, androidProvenance: avdInfo });
+  return { ...projectConfiguredImage(description), ...legacyAliases(description) };
+}
+
+/** Deprecated image fields, each derived from the canonical description. */
+function legacyAliases(description: DeviceDescription) {
+  const androidProvenance = description.provenance.android;
+  const iosProvenance = description.provenance.ios;
   return {
-    stableId: device.stableId,
-    name: device.name,
-    platform: device.platform,
-    deviceId: device.deviceId,
-    source: device.source || "local",
-    // Extended AVD info (Android only)
-    path: avdInfo?.path,
-    target: avdInfo?.target,
-    basedOn: avdInfo?.basedOn,
-    error: avdInfo?.error,
-    // iOS simulator metadata
-    state: device.state,
-    isAvailable: device.isAvailable,
-    availabilityError: device.availabilityError,
-    iosVersion: device.iosVersion,
-    deviceType: device.deviceType,
-    runtime: device.runtime,
-    model: device.model,
-    architecture: device.architecture,
-    capabilityInventory:
-      device.capabilityInventory ??
-      (device.platform === "ios"
-        ? iosSimulatorCapabilityInventory({
-            isAvailable: device.isAvailable,
-            availabilityError: device.availabilityError,
-            runtime: device.runtime,
-          })
-        : buildAndroidAvdCapabilityInventory({})),
+    // Deprecated alias for identity.stableId.
+    stableId: description.identity.stableId,
+    // Deprecated alias for identity.deviceId.
+    deviceId: description.identity.deviceId,
+    // Deprecated alias for provenance.android.path.
+    path: androidProvenance?.path ?? null,
+    // Deprecated alias for provenance.android.target.
+    target: androidProvenance?.target ?? null,
+    // Deprecated alias for provenance.android.basedOn.
+    basedOn: androidProvenance?.basedOn ?? null,
+    // Deprecated alias for provenance.android.error.
+    error: androidProvenance?.error ?? null,
+    // Deprecated alias for lifecycle.state.
+    state: description.lifecycle.state,
+    // Deprecated alias for lifecycle.state.
+    isAvailable: description.lifecycle.state !== "unavailable",
+    // Deprecated alias for provenance.ios.availabilityError.
+    availabilityError: iosProvenance?.availabilityError ?? null,
+    // Deprecated alias for runtime.osVersion.
+    iosVersion: description.runtime.osVersion,
+    // Deprecated alias for runtime.deviceType.
+    deviceType: description.runtime.deviceType,
+    // `runtime` is canonical object data; its former string is legacyRuntimeId.
+    legacyRuntimeId: description.runtime.runtimeId,
+    // Deprecated alias for runtime.model.
+    model: description.runtime.model,
+    // Deprecated alias for runtime.architecture.
+    architecture: description.runtime.architecture,
   };
 }
 

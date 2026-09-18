@@ -1,5 +1,10 @@
 import type { DeviceInfo, Platform } from "../models";
 import type { DeviceImageDiscovery } from "./deviceUtils";
+import {
+  describeDevice,
+  projectConfiguredImage,
+  type ConfiguredImage,
+} from "../server/deviceDescription";
 
 export const CONFIGURED_DEVICE_INVENTORY_SCHEMA_VERSION = 1 as const;
 
@@ -23,7 +28,10 @@ export interface ConfiguredDeviceInventoryContract {
 export type StableConfiguredDeviceImage = DeviceInfo & { stableId: string };
 
 export interface ConfiguredDeviceInventoryProjection {
-  images: StableConfiguredDeviceImage[];
+  /** Public description projection shared by listDeviceImages and the resource. */
+  images: ConfiguredImage[];
+  /** Discovery records retained only for resource-only AVD provenance enrichment. */
+  sourceImages: StableConfiguredDeviceImage[];
   observation: ConfiguredDeviceInventoryObservation;
 }
 
@@ -33,7 +41,7 @@ export function projectConfiguredDeviceInventory(
 ): ConfiguredDeviceInventoryProjection {
   const observation = configuredInventoryObservation(platform, discovery);
   if (!observation.complete) {
-    return { images: [], observation };
+    return { images: [], sourceImages: [], observation };
   }
 
   const devices = discovery.devices.filter((device) => device.platform === platform);
@@ -42,6 +50,7 @@ export function projectConfiguredDeviceInventory(
   if (missingStableIdentity) {
     return {
       images: [],
+      sourceImages: [],
       observation: failedConfiguredInventoryObservation(
         "failed",
         `iOS configured-device inventory contained simulator '${missingStableIdentity.name}' without a UDID.`,
@@ -49,11 +58,15 @@ export function projectConfiguredDeviceInventory(
     };
   }
 
+  const sourceImages = devices.map((device) => ({
+    ...device,
+    stableId: device.platform === "android" ? device.name : device.deviceId!,
+  }));
   return {
-    images: devices.map((device) => ({
-      ...device,
-      stableId: device.platform === "android" ? device.name : device.deviceId!,
-    })),
+    images: sourceImages.map((image) =>
+      projectConfiguredImage(describeDevice({ kind: "image", image })),
+    ),
+    sourceImages,
     observation,
   };
 }

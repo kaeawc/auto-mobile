@@ -111,6 +111,7 @@ nav:
       - "WebRTC Streaming": webrtc-streaming.md
   - "How it Works":
       - "System design": design-docs/index.md
+      - "Device-description audit": design-docs/device-description-audit.md
       - "Device resources": design-docs/device-resources.md
       - "Host toolchain resource": design-docs/host-toolchain-resource.md
       - "Android emulator optimization": design-docs/android-emulator-optimization.md

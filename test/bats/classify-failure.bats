@@ -45,11 +45,13 @@ case "$1 $2" in
           printf '[]\n'
         fi
         ;;
+      */check-runs/33/annotations*) annotation_response '[]' ;;
       */check-runs/12/annotations*|*/check-runs/13/annotations*|*/check-runs/14/annotations*) annotation_response '[]' ;;
       */check-runs/15/annotations*|*/check-runs/16/annotations*|*/check-runs/17/annotations*) annotation_response '[]' ;;
       */actions/jobs/6/logs) printf 'readiness phase exceeded the remaining deadline\n' ;;
       */actions/jobs/31/logs) printf 'First emulator attempt failed; captured diagnostics follow:\nsys.boot_completed is not 1\nStarting emulator retry attempt 2.\nexpect(received).toBe(expected) ... someRealRegression assertion failed\n' ;;
       */actions/jobs/32/logs) printf 'First emulator attempt failed; captured diagnostics follow:\nsys.boot_completed is not 1\nexpect(received).toBe(expected) ... someRealRegression assertion failed\n' ;;
+      */actions/jobs/33/logs) printf 'iOS device capture attempt 1 failed (exit 1): iOS WHEP viewer did not recover to a fresh IDR within ~2000ms of the relayed PLI\nReaping MediaMTX / daemon / Chrome before one retry.\nStarting emulator retry attempt 2.\niOS device capture attempt 2 failed (exit 1): TypeError: Cannot read properties of undefined (reading '\''sessionId'\'')\niOS device capture failed after 2 attempts.\n' ;;
       */actions/jobs/18/logs) printf 'Test exceeded 100ms: some/test.ts > some test (median 142.31ms of 3 isolated runs)\n' ;;
       */actions/jobs/22/logs) printf 'Test exceeded 100ms: foo.bar (150.00ms; recheck produced 2 of 5 isolated samples)\n' ;;
       */actions/jobs/19/logs|*/actions/jobs/20/logs|*/actions/jobs/21/logs) : ;;
@@ -262,6 +264,23 @@ JSON
   [ "$status" -eq 0 ]
   [[ "$output" == *"Run JUnit Runner Emulator Tests → Boot and test Emulator (Retry) → none → UNKNOWN"* ]]
   [[ "$output" == *"log predates the retry marker"* ]]
+  [[ "$output" != *"RERUN-DONT-FIX"* ]]
+}
+
+@test "does not classify a terminal iOS regression behind a stale attempt-one IDR flake" {
+  fixture="$BATS_TEST_TMPDIR/ios-device-capture-terminal-regression-run.json"
+  cat > "$fixture" <<'JSON'
+{
+  "headBranch": "work/ios-terminal-regression",
+  "jobs": [
+    {"databaseId": 33, "name": "iOS Device Capture to WHEP", "conclusion": "failure", "steps": [{"name": "Run iOS device capture", "conclusion": "failure"}]}
+  ]
+}
+JSON
+
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" bash "$SCRIPT" 660
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"iOS Device Capture to WHEP → Run iOS device capture → none → UNKNOWN"* ]]
   [[ "$output" != *"RERUN-DONT-FIX"* ]]
 }
 

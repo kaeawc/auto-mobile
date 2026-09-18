@@ -50,6 +50,14 @@ export async function waitFor(
       controller.abort(error);
       // Do not let a canceled subprocess race the caller's teardown.
       await result.catch(() => undefined);
+      if (
+        error instanceof Error &&
+        error.message.startsWith(`${message} did not complete within`)
+      ) {
+        throw new Error(
+          `${message} did not complete within ${timeoutMs}ms total (last poll remainder: ${error.message})`,
+        );
+      }
       throw error;
     }
     await timer.sleep(100);

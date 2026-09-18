@@ -69,4 +69,54 @@ describe("session-scoped resource binding", () => {
       });
     },
   );
+
+  test("carries ownership of an earlier direct acquisition into resource reads", async () => {
+    fixture = new McpTestFixture();
+    await fixture.setup();
+
+    ToolRegistry.clearTools();
+    for (const [toolName, sessionUuid] of [
+      ["getAndroid", "direct-session-android"],
+      ["getApple", "direct-session-ios"],
+    ] as const) {
+      ToolRegistry.register(toolName, toolName, z.object({}), async () =>
+        createJSONToolResponse({ sessionUuid, sessionId: sessionUuid }),
+      );
+    }
+    ResourceRegistry.registerTemplateWithReadContext(
+      "automobile:test-session-ownership/{sessionUuid}",
+      "Session ownership test",
+      "Reports the current binding and whether it owns the requested session.",
+      "application/json",
+      async (params, context) => ({
+        uri: `automobile:test-session-ownership/${params.sessionUuid}`,
+        text: JSON.stringify({
+          sessionUuid: context.sessionUuid,
+          ownsRequestedSession: context.ownsSession?.(params.sessionUuid) ?? false,
+        }),
+      }),
+    );
+
+    const { client } = fixture.getContext();
+    for (const toolName of ["getAndroid", "getApple"]) {
+      await client.request(
+        { method: "tools/call", params: { name: toolName, arguments: {} } },
+        z.any(),
+      );
+    }
+    const response = await client.request(
+      {
+        method: "resources/read",
+        params: { uri: "automobile:test-session-ownership/direct-session-android" },
+      },
+      z.object({
+        contents: z.array(z.object({ text: z.string().optional() })),
+      }),
+    );
+
+    expect(JSON.parse(response.contents[0].text!)).toEqual({
+      sessionUuid: "direct-session-ios",
+      ownsRequestedSession: true,
+    });
+  });
 });

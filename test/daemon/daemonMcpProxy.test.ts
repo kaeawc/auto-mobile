@@ -4722,6 +4722,118 @@ describe("DaemonMcpProxy", () => {
       }
     });
 
+    test.each([
+      "automobile:observation/session/session-android/latest",
+      "automobile:observation/session/session-android/latest/screenshot",
+      "automobile:device-session/session-android/screenshot",
+    ])("routes an owned session resource to its URI session: %s", async (uri) => {
+      const fakeClient = new FakeDaemonClient({
+        daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+        toolResultFor: (toolName) =>
+          toolName === "getAndroid"
+            ? mintingResult("session-android")
+            : mintingResult("session-ios"),
+        resourceResult: { contents: [{ uri: "x", blob: "x" }] },
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => fakeClient,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        await proxy.callTool("getAndroid", {});
+        await proxy.callTool("getApple", {});
+
+        await proxy.readResource(uri);
+
+        expect(fakeClient.readResourceParams).toEqual([{ sessionUuid: "session-android" }]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("routes surviving owned observation resources after the latest binding is released", async () => {
+      const fakeClient = new FakeDaemonClient({
+        daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+        toolResultFor: (toolName) =>
+          toolName === "getAndroid"
+            ? mintingResult("session-android")
+            : mintingResult("session-ios"),
+        resourceResult: { contents: [{ uri: "x", blob: "x" }] },
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => fakeClient,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        await proxy.callTool("getAndroid", {});
+        await proxy.callTool("getApple", {});
+        fakeClient.emitNotification(SESSION_RELEASED_NOTIFICATION_METHOD, "session-ios");
+
+        await proxy.readResource("automobile:observation/session/session-android/latest");
+        await proxy.readResource(
+          "automobile:observation/session/session-android/latest/screenshot",
+        );
+
+        expect(fakeClient.readResourceParams).toEqual([
+          { sessionUuid: "session-android" },
+          { sessionUuid: "session-android" },
+        ]);
+        await expect(
+          proxy.readResource("automobile:observation/session/session-ios/latest"),
+        ).rejects.toThrow(/released/i);
+        await expect(
+          proxy.readResource("automobile:observation/session/session-ios/latest/screenshot"),
+        ).rejects.toThrow(/released/i);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("routes a surviving configured initial session after a later binding is released", async () => {
+      const fakeClient = new FakeDaemonClient({
+        daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+        toolResultFor: () => mintingResult("session-android"),
+        resourceResult: { contents: [{ uri: "x", blob: "x" }] },
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        initialSessionUuid: " session-a ",
+        clientFactory: () => fakeClient,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        await proxy.callTool("getAndroid", {});
+        fakeClient.emitNotification(SESSION_RELEASED_NOTIFICATION_METHOD, "session-android");
+
+        await proxy.readResource("automobile:observation/session/session-a/latest");
+        await proxy.readResource("automobile:observation/session/session-a/latest/screenshot");
+
+        expect(fakeClient.readResourceParams).toEqual([
+          { sessionUuid: "session-a" },
+          { sessionUuid: "session-a" },
+        ]);
+        await expect(
+          proxy.readResource("automobile:observation/session/session-android/latest"),
+        ).rejects.toThrow(/released/i);
+        await expect(
+          proxy.readResource("automobile:observation/session/session-android/latest/screenshot"),
+        ).rejects.toThrow(/released/i);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
     test("routes concurrent fresh screenshot reads each to their owning session", async () => {
       // AC2: concurrent reads during/after acquisition (concurrent MCP init) must
       // each carry their own owner session, independent of ordering or a delayed

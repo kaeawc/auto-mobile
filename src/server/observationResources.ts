@@ -501,7 +501,7 @@ function sessionOwnershipChanged(
 }
 
 function isAuthorizedSessionResource(context: ResourceReadContext, sessionUuid: string): boolean {
-  return context.sessionUuid === sessionUuid;
+  return context.sessionUuid === sessionUuid || context.ownsSession?.(sessionUuid) === true;
 }
 
 function releasedSessionNotActiveError(

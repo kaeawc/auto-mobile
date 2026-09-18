@@ -218,7 +218,10 @@ describe("session screenshot resources", () => {
       "automobile:observation/session/session-123/latest/screenshot",
       "automobile:device-session/session-123/screenshot",
     ]) {
-      const content = await readTemplate(uri, { sessionUuid: "session-other" });
+      const content = await readTemplate(uri, {
+        sessionUuid: "session-other",
+        ownsSession: () => false,
+      });
 
       expect(content.mimeType).toBe("application/json");
       expect(JSON.parse(content.text!).error).toContain("bound device session");
@@ -226,6 +229,39 @@ describe("session screenshot resources", () => {
 
     expect(resolveCalls).toBe(0);
     expect(screenshotServiceCalls).toBe(0);
+  });
+
+  test("allows an earlier session still owned by the caller", async () => {
+    const observeScreen = new RealObserveScreen(
+      sessionDevice,
+      new FakeAdbClientFactory(new FakeAdbExecutor()),
+    );
+    await observeScreen.cacheObserveResult(observeScreen.createBaseResult());
+    const image = Buffer.from("owned session screenshot");
+    getScreenshotStateStore().update(sessionDevice.deviceId, "/tmp/owned-session.png");
+    setSessionScreenshotResourceDependencies({
+      resolveActiveSession: () => activeSession(),
+      createScreenshotService: () =>
+        createTrackedScreenshot({ success: true, path: "/tmp/fresh.png" }),
+    });
+    setScreenshotFileSystem({
+      stat: async () => ({ isFile: () => true }),
+      readFile: async () => image,
+    });
+    const context: ResourceReadContext = {
+      sessionUuid: "session-newer",
+      ownsSession: (candidateSessionUuid) => candidateSessionUuid === sessionUuid,
+    };
+
+    for (const uri of [
+      "automobile:observation/session/session-123/latest",
+      "automobile:observation/session/session-123/latest/screenshot",
+      "automobile:device-session/session-123/screenshot",
+    ]) {
+      const content = await readTemplate(uri, context);
+
+      expect(JSON.parse(content.text ?? "{}").error).toBeUndefined();
+    }
   });
 
   test("rejects session resource reads without a bound session", async () => {

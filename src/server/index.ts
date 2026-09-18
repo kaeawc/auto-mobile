@@ -637,6 +637,8 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
   // Register all resources with the server
   ResourceRegistry.registerWithServer(server, (signal) => ({
     sessionUuid: sessionToolBinding.effectiveSessionUuid(options.sessionContext?.sessionId),
+    ownsSession: (sessionUuid) =>
+      sessionToolBinding.ownsSession(options.sessionContext?.sessionId, sessionUuid),
     releasedSessionUuid: sessionToolBinding.releasedResourceSessionUuid(
       options.sessionContext?.sessionId,
     ),

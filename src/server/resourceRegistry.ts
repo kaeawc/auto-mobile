@@ -13,6 +13,8 @@ import { ListChangedBroadcaster } from "./listChangedBroadcast";
 
 export interface ResourceReadContext {
   sessionUuid?: string;
+  /** Tests whether this MCP connection owns a session, including earlier active bindings. */
+  ownsSession?: (sessionUuid: string) => boolean;
   /** A released session identity, available only to handlers that safely report inactivity. */
   releasedSessionUuid?: string;
   signal?: AbortSignal;

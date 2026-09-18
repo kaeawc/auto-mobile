@@ -55,7 +55,10 @@ import {
   legacyIosVersion,
   provisionedDeviceSchema,
   configuredImageSchema,
+  type BootedDeviceDescription,
+  type ConfiguredImage,
   type DeviceDescription,
+  type ListDevicesEntry,
 } from "./deviceDescription";
 import {
   notifyInstalledAppResourceListChanged,
@@ -1055,22 +1058,20 @@ function listDevicePayloads(
       session: pooled?.sessionId ? { sessionId: pooled.sessionId } : undefined,
       deviceSessionUuid: pooled ? initializedDeviceSessionUuid(device.deviceId) : undefined,
     });
-    return {
-      ...projectListDevicesEntry(description),
-      ...legacyListDevicesAliases(description),
-    };
+    const projected = projectListDevicesEntry(description);
+    return { ...projected, ...legacyListDevicesAliases(projected) };
   });
 }
 
 /** Deprecated listDevices fields, each derived from the canonical description. */
-function legacyListDevicesAliases(description: DeviceDescription) {
+function legacyListDevicesAliases(description: ListDevicesEntry) {
   return {
     // Deprecated alias for identity.deviceId.
     deviceId: description.identity.deviceId!,
     // Deprecated aliases retain a platform-independent, always-present shape.
-    apiLevel: description.runtime.apiLevel,
-    osVersion: description.runtime.osVersion,
-    formFactor: description.display.formFactor,
+    apiLevel: description.apiLevel,
+    osVersion: description.osVersion,
+    formFactor: description.formFactor,
   };
 }
 
@@ -6252,10 +6253,8 @@ export function registerDeviceTools() {
           image,
           androidProvenance: androidProvenance?.get(image.name),
         });
-        return {
-          ...projectConfiguredImage(description),
-          ...legacyListDeviceImageAliases(description, image),
-        };
+        const projected = projectConfiguredImage(description);
+        return { ...projected, ...legacyListDeviceImageAliases(projected, image) };
       });
 
       return createStructuredToolResponse({
@@ -6271,7 +6270,7 @@ export function registerDeviceTools() {
   };
 
   /** Deprecated listDeviceImages fields, preserving raw discovery state where required. */
-  function legacyListDeviceImageAliases(description: DeviceDescription, image: DeviceInfo) {
+  function legacyListDeviceImageAliases(description: ConfiguredImage, image: DeviceInfo) {
     const androidProvenance = description.provenance.android;
     const iosProvenance = description.provenance.ios;
     return {
@@ -6296,13 +6295,13 @@ export function registerDeviceTools() {
       // Deprecated alias for runtime.osVersion.
       iosVersion: legacyIosVersion(description),
       // Deprecated alias for runtime.deviceType.
-      deviceType: description.runtime.deviceType,
+      deviceType: description.deviceType,
       // `runtime` is canonical object data; its former string is legacyRuntimeId.
-      legacyRuntimeId: description.runtime.runtimeId,
+      legacyRuntimeId: description.runtimeId,
       // Deprecated alias for runtime.model.
-      model: description.runtime.model,
+      model: description.model,
       // Deprecated alias for runtime.architecture.
-      architecture: description.runtime.architecture,
+      architecture: description.architecture,
     };
   }
 
@@ -8340,7 +8339,7 @@ export function registerDeviceTools() {
       // Deprecated aliases for the corresponding canonical identity/runtime/display/lifecycle fields.
       ...rawDevice,
       // `runtime` is canonical object data; its former string is legacyRuntimeId.
-      legacyRuntimeId: description.runtime.runtimeId,
+      legacyRuntimeId: description.runtimeId,
     };
   }
 
@@ -9324,7 +9323,7 @@ export function registerDeviceTools() {
 
   /** Deprecated startDevice/getAndroid/getApple fields derived from the canonical description. */
   function legacyBootedResponseAliases(
-    description: DeviceDescription,
+    description: BootedDeviceDescription,
     device: BootedDevice,
     sourceImage: DeviceInfo | undefined,
   ) {
@@ -9332,18 +9331,18 @@ export function registerDeviceTools() {
       // Deprecated alias for identity.deviceId.
       deviceId: description.identity.deviceId,
       // Deprecated alias for runtime.apiLevel.
-      apiLevel: description.runtime.apiLevel,
+      apiLevel: description.apiLevel,
       // Deprecated alias for runtime.osVersion.
-      osVersion: description.runtime.osVersion,
+      osVersion: description.osVersion,
       // Deprecated alias for display.formFactor.
-      formFactor: description.display.formFactor,
+      formFactor: description.formFactor,
       // Deprecated alias for display.width and display.height.
       screenSize:
         description.display.width !== null && description.display.height !== null
           ? { width: description.display.width, height: description.display.height }
           : null,
       // Deprecated alias for session.sessionUuid.
-      sessionUuid: description.session.sessionUuid,
+      sessionUuid: description.runtime.session?.sessionUuid ?? null,
       // Deprecated compatibility payload for identity; preserves runner endpoint metadata.
       deviceIdentity: deviceIdentityPayload(device, sourceImage),
     };
@@ -9372,10 +9371,11 @@ export function registerDeviceTools() {
           : { installed: true, enabled: true, running: false, isCompatible: true },
     });
     const acquisition = source === "booted" ? "already-booted" : "cold-boot";
+    const projected = projectBootedDevice(description);
     return createStructuredToolResponse({
       message: `${device.platform} '${device.name}' is ready (${source})`,
-      ...projectBootedDevice(description),
-      ...legacyBootedResponseAliases(description, device, sourceImage),
+      ...projected,
+      ...legacyBootedResponseAliases(projected, device, sourceImage),
       processId: processId ?? null,
       isReady: true,
       acquisition,

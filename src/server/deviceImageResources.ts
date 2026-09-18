@@ -35,7 +35,6 @@ import {
   legacyIosVersion,
   projectConfiguredImage,
   type ConfiguredImage,
-  type DeviceDescription,
 } from "./deviceDescription";
 
 /**
@@ -57,7 +56,7 @@ export const DEVICE_IMAGE_RESOURCE_URIS = {
 } as const;
 
 // Device image info for resource response
-export type DeviceImageInfo = ConfiguredImage & ReturnType<typeof legacyAliases>;
+export type DeviceImageInfo = ConfiguredImage & ReturnType<typeof legacyImageAliases>;
 
 interface ProvisioningRuntime {
   platform: Platform;
@@ -664,11 +663,12 @@ function toDeviceImageInfo(
   avdInfo?: AvdInfo,
 ): DeviceImageInfo {
   const description = describeDevice({ kind: "image", image: device, androidProvenance: avdInfo });
-  return { ...projectConfiguredImage(description), ...legacyAliases(description, device) };
+  const projected = projectConfiguredImage(description);
+  return { ...projected, ...legacyImageAliases(projected, device) };
 }
 
 /** Deprecated image fields, preserving raw discovery state where required. */
-function legacyAliases(description: DeviceDescription, image: StableConfiguredDeviceImage) {
+function legacyImageAliases(description: ConfiguredImage, image: StableConfiguredDeviceImage) {
   const androidProvenance = description.provenance.android;
   const iosProvenance = description.provenance.ios;
   return {
@@ -693,13 +693,13 @@ function legacyAliases(description: DeviceDescription, image: StableConfiguredDe
     // Deprecated alias for runtime.osVersion.
     iosVersion: legacyIosVersion(description),
     // Deprecated alias for runtime.deviceType.
-    deviceType: description.runtime.deviceType,
+    deviceType: description.deviceType,
     // `runtime` is canonical object data; its former string is legacyRuntimeId.
-    legacyRuntimeId: description.runtime.runtimeId,
+    legacyRuntimeId: description.runtimeId,
     // Deprecated alias for runtime.model.
-    model: description.runtime.model,
+    model: description.model,
     // Deprecated alias for runtime.architecture.
-    architecture: description.runtime.architecture,
+    architecture: description.architecture,
   };
 }
 

@@ -22,6 +22,7 @@ import {
   describeDevice,
   projectBootedDevice,
   withDeviceServiceStatus,
+  type BootedDeviceDescription,
   type DeviceDescription,
 } from "./deviceDescription";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
@@ -124,21 +125,21 @@ export interface ServiceStatusDiagnostic {
 }
 
 // The resource keeps its diagnostic siblings alongside the full canonical description.
-interface BootedDeviceInfo extends DeviceDescription {
+interface BootedDeviceInfo extends BootedDeviceDescription {
   /** Compatibility alias mirroring identity.deviceId for the desktop decoder. */
   deviceId: string;
   /** Compatibility alias mirroring identity.deviceSessionUuid when present. */
   deviceSessionUuid?: string;
   /** Compatibility alias mirroring lifecycle.state for the desktop decoder. */
-  status: DeviceDescription["lifecycle"]["state"];
+  status: DeviceDescription["runtime"]["lifecycle"]["state"];
   /** Compatibility alias mirroring lifecycle.state. */
-  lifecycleState: DeviceDescription["lifecycle"]["state"];
+  lifecycleState: DeviceDescription["runtime"]["lifecycle"]["state"];
   /** The former runtime string now mirrors runtime.osVersion. */
   legacyRuntimeVersion: string | null;
   /** Compatibility alias mirroring display.formFactor. */
-  formFactor: string | null;
+  formFactor: BootedDeviceDescription["formFactor"];
   /** Compatibility alias mirroring session.poolStatus when present. */
-  poolStatus?: DeviceDescription["session"]["poolStatus"];
+  poolStatus?: DeviceDescription["runtime"]["poolStatus"];
   /** Compatibility alias mirroring session.sessionUuid when present. */
   assignedSession?: string;
   recoveryEligibility: DeviceRecoveryEligibility | null;
@@ -387,27 +388,27 @@ async function getDeviceLockStates(): Promise<ResourceContent> {
 }
 
 /** Deprecated booted-resource fields, each derived from the canonical description. */
-function legacyAliases(description: DeviceDescription) {
+function legacyResourceAliases(description: BootedDeviceDescription) {
   return {
     // Deprecated alias for identity.deviceId.
     deviceId: description.identity.deviceId!,
     // Deprecated alias for lifecycle.state.
-    status: description.lifecycle.state,
+    status: description.runtime.lifecycle.state,
     // Deprecated alias for lifecycle.state.
-    lifecycleState: description.lifecycle.state,
+    lifecycleState: description.runtime.lifecycle.state,
     // `runtime` is canonical object data; its former OS-version string is legacyRuntimeVersion.
-    legacyRuntimeVersion: description.runtime.osVersion,
+    legacyRuntimeVersion: description.osVersion,
     // Deprecated alias for display.formFactor.
-    formFactor: description.display.formFactor,
+    formFactor: description.formFactor,
     // Deprecated alias for identity.deviceSessionUuid, preserving pre-image omission behavior.
     ...(description.identity.deviceSessionUuid
       ? { deviceSessionUuid: description.identity.deviceSessionUuid }
       : {}),
     // Deprecated alias for session.poolStatus, preserving pre-image omission behavior.
-    ...(description.session.poolStatus ? { poolStatus: description.session.poolStatus } : {}),
+    ...(description.runtime.poolStatus ? { poolStatus: description.runtime.poolStatus } : {}),
     // Deprecated alias for session.sessionUuid, preserving pre-image omission behavior.
-    ...(description.session.sessionUuid
-      ? { assignedSession: description.session.sessionUuid }
+    ...(description.runtime.session?.sessionUuid
+      ? { assignedSession: description.runtime.session.sessionUuid }
       : {}),
   };
 }
@@ -432,9 +433,10 @@ function toBootedDeviceInfo(
         : undefined),
     deviceSessionUuid: poolContext?.deviceSessionUuid,
   });
+  const projected = projectBootedDevice(description);
   return {
-    ...projectBootedDevice(description),
-    ...legacyAliases(description),
+    ...projected,
+    ...legacyResourceAliases(projected),
     recoveryEligibility: poolContext?.poolInfo.recoveryEligibility ?? null,
     serviceStatus: null,
     locked: null,
@@ -939,9 +941,18 @@ function withServiceStatus(
   device: BootedDeviceInfo,
   serviceStatus: DeviceServiceStatus,
 ): BootedDeviceInfo {
+  const updated = withDeviceServiceStatus(device, {
+    installed: serviceStatus.installed,
+    enabled: serviceStatus.enabled,
+    running: serviceStatus.running,
+    isCompatible: serviceStatus.isCompatible,
+    ...(serviceStatus.installedSha256 ? { installedSha256: serviceStatus.installedSha256 } : {}),
+    expectedSha256: serviceStatus.expectedSha256,
+  });
   return {
     ...device,
-    ...withDeviceServiceStatus(device, serviceStatus),
+    runtime: { ...device.runtime, ...updated.runtime },
+    readiness: updated.runtime.readiness,
     serviceStatus,
     // A confirmed status supersedes any transient diagnostic from an earlier failed probe.
     serviceStatusDiagnostic: undefined,
@@ -951,7 +962,7 @@ function withServiceStatus(
 export function readinessFromServiceStatus(
   platform: Platform,
   serviceStatus: DeviceServiceStatus,
-): DeviceDescription["readiness"] {
+): DeviceDescription["runtime"]["readiness"] {
   if (!serviceStatus.installed || !serviceStatus.enabled || !serviceStatus.isCompatible) {
     return { state: "not_ready" };
   }
@@ -975,7 +986,11 @@ async function enrichDeviceLockStates(devices: BootedDeviceInfo[]): Promise<void
   for (let i = 0; i < devices.length; i++) {
     const result = lockResults[i];
     if (result.status === "fulfilled" && result.value !== undefined) {
-      devices[i] = { ...devices[i], locked: result.value };
+      devices[i] = {
+        ...devices[i],
+        runtime: { ...devices[i].runtime, locked: result.value },
+        locked: result.value,
+      };
     }
   }
 }

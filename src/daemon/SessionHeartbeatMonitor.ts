@@ -144,8 +144,12 @@ export class SessionHeartbeatMonitor {
       if (this.hasActiveExecutions(session.sessionId)) {
         continue;
       }
+      // Awaiting-owner sessions never receive pre-first-heartbeat grace; judge them solely by
+      // the rehydration-owner timeout while they await ownership.
       const reason =
-        this.rehydrationOwnerStaleReason(session, now) ?? this.staleReason(session, now);
+        session.ownership === "awaiting-owner"
+          ? this.rehydrationOwnerStaleReason(session, now)
+          : this.staleReason(session, now);
       if (reason) {
         logger.warn(
           `Session ${session.sessionId} ${STALE_REASON_DESCRIPTION[reason]}, cancelling (reason=${reason})`,

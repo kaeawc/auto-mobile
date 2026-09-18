@@ -24,8 +24,9 @@ ARG ZULU_VERSION=21.0.2
 ARG PLATFORM=linux/amd64
 ARG BUN_VERSION=1.3.14
 ARG KTFMT_VERSION=0.55
-# Published by Maven Central's .sha256 sidecar for ktfmt 0.55 with-dependencies.jar.
-ARG KTFMT_SHA256=d13324023754112797d828e2f92117196190f7617d16ad1d1765e5be768cc5c2
+# Computed locally from the downloaded GitHub Releases asset on 2026-09-18:
+# https://github.com/facebook/ktfmt/releases/download/v0.55/ktfmt-0.55-with-dependencies.jar
+ARG KTFMT_SHA256=272cfe565566ba175e91c577ce08eb6a4a268b3358b82e3d138fa7d16b6a1023
 ARG LYCHEE_VERSION=0.19.1
 ARG ANDROID_CMDLINE_TOOLS_VERSION=11076708
 ARG ANDROID_PLATFORM_VERSION=37
@@ -122,7 +123,7 @@ RUN curl -fsSL "https://bun.sh/install" | bash -s "bun-v${BUN_VERSION}" \
 # Check for updates: https://github.com/facebook/ktfmt/releases
 RUN mkdir -p /opt/ktfmt \
     && curl -fsSL -o /opt/ktfmt/ktfmt.jar \
-       "https://repo1.maven.org/maven2/com/facebook/ktfmt/${KTFMT_VERSION}/ktfmt-${KTFMT_VERSION}-with-dependencies.jar" \
+       "https://github.com/facebook/ktfmt/releases/download/v${KTFMT_VERSION}/ktfmt-${KTFMT_VERSION}-with-dependencies.jar" \
     && printf '%s  %s\n' "${KTFMT_SHA256}" /opt/ktfmt/ktfmt.jar | sha256sum -c - \
     && printf '#!/bin/bash\nexec java -jar /opt/ktfmt/ktfmt.jar "$@"\n' > /usr/local/bin/ktfmt \
     && chmod +x /usr/local/bin/ktfmt

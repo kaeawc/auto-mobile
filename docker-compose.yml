@@ -1,3 +1,5 @@
+# Production uses the image's built artifacts as-is: only auto-mobile-dev
+# bind-mounts the checkout for live source changes and --watch.
 services:
   auto-mobile:
     build:
@@ -26,8 +28,6 @@ services:
 
     # Mount volumes
     volumes:
-      # Mount source code for development (comment out for production)
-      - .:/workspace
       # Persist Android SDK
       - android-sdk:/opt/android-sdk
       # Persist node modules
@@ -36,8 +36,6 @@ services:
       - ~/.android:/home/automobile/.android
       # Mount AutoMobile database directory
       - ~/.auto-mobile:/home/automobile/.auto-mobile
-      # Mount scratch directory for outputs
-      - ./scratch:/workspace/scratch
       # Mount USB device directory for ADB access to physical devices
       - /dev/bus/usb:/dev/bus/usb
 

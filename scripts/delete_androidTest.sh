@@ -43,12 +43,18 @@ done | sort -u
 remove_android_test_dirs() {
 echo "🗂️ ${DRY_RUN:+[DRY RUN] }Removing androidTest source directories..."
 find_module_dirs | while read -r module_dir; do
-if find "$module_dir" -path "*/src/androidTest" -type d -print0 2>/dev/null | grep -qz .; then
+paths=()
+while IFS= read -r -d '' p; do
+paths+=("$p")
+done < <(find "$module_dir" -path "*/src/androidTest" -type d -print0 2>/dev/null)
+if ((${#paths[@]})); then
 if [[ "$DRY_RUN" == "true" ]]; then
 echo "  Would remove androidTest from: $module_dir"
-find "$module_dir" -path "*/src/androidTest" -type d -print0 2>/dev/null | tr '\0' '\n'
+for path in "${paths[@]}"; do
+echo "$path"
+done
 else
-find "$module_dir" -path "*/src/androidTest" -type d -print0 2>/dev/null | xargs -0 -r rm -rf --
+rm -rf -- "${paths[@]}"
 echo "  Removed androidTest from: $module_dir"
 fi
 fi

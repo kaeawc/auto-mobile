@@ -1403,7 +1403,7 @@ export class LaunchApp extends BaseVisualChange {
     observation: ObserveResult,
     expectedPackageName: string,
   ): boolean {
-    if (observation.freshness?.isFresh === false || observation.freshness?.verified === false) {
+    if (!this.isLaunchObservationFresh(observation)) {
       return false;
     }
 
@@ -1478,6 +1478,15 @@ export class LaunchApp extends BaseVisualChange {
   }
 
   /**
+   * Whether an observation is safe to use for launch verification (issue #7218
+   * P1 follow-up): reconnect or other stale captures must not verify either
+   * direct foreground identity or a matching task root.
+   */
+  private isLaunchObservationFresh(observation: ObserveResult): boolean {
+    return observation.freshness?.isFresh !== false && observation.freshness?.verified !== false;
+  }
+
+  /**
    * Whether the foreground task belongs to the launched app even though its top
    * activity belongs to a helper package (issue #7218).
    */
@@ -1502,6 +1511,15 @@ export class LaunchApp extends BaseVisualChange {
     observation: ObserveResult,
     expectedPackageName: string,
   ): boolean {
+    // Issue #7218 P1 follow-up: a SystemUI surface can cover the previously
+    // foregrounded task, so its back stack must not verify the launch.
+    if (
+      !this.isLaunchObservationFresh(observation) ||
+      observation.activeWindow?.systemOverlay === true
+    ) {
+      return false;
+    }
+
     const foregroundActivityPackage = this.getLaunchObservationPackageNames(observation).find(
       (packageName) => packageName !== expectedPackageName,
     );

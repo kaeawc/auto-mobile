@@ -475,6 +475,98 @@ describe("LaunchApp", () => {
     expect(result.observation?.backStack).toEqual(helperObservation.backStack);
   });
 
+  test("does not accept a SystemUI overlay over a task rooted at the launched app", async () => {
+    fakeTimer.enableAutoAdvance();
+    const settingsPackageName = "com.android.settings";
+    const helperPackageName = "com.google.android.settings.intelligence";
+    const overlayObservation = {
+      ...createObserveResult(helperPackageName, {
+        depth: 1,
+        activities: [],
+        currentTaskId: 8,
+        tasks: [
+          {
+            id: 8,
+            packageName: settingsPackageName,
+            rootActivity: `${settingsPackageName}/.Settings`,
+            topActivity: `${helperPackageName}/.modules.search.SearchActivity`,
+          },
+        ],
+      }),
+      activeWindow: {
+        appId: "com.android.systemui",
+        activityName: "NotificationShade",
+        layoutSeqSum: 1,
+        systemOverlay: true,
+      },
+    };
+
+    fakeAdb.setForegroundApp({ packageName: settingsPackageName, userId: 0 });
+    fakeAdb.setCommandResponse("shell pm list packages --user 0", {
+      stdout: `package:${settingsPackageName}\n`,
+      stderr: "",
+    });
+    fakeAdb.setCommandResponse("shell dumpsys activity processes", { stdout: "0\n", stderr: "" });
+    fakeObserveScreen.setObserveResult(() => overlayObservation);
+
+    const result = await launchApp.execute(settingsPackageName, false, false);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain(
+      `Timed out waiting for launch observation to show ${settingsPackageName}`,
+    );
+    expect(result.verifiedBy).toBeUndefined();
+    expect(result.foregroundActivityPackage).toBeUndefined();
+    expect(fakeObserveScreen.getExecuteCallCount()).toBeGreaterThan(1);
+  });
+
+  test("waits for a fresh observation before accepting a rooted helper task", async () => {
+    fakeTimer.enableAutoAdvance();
+    const settingsPackageName = "com.android.settings";
+    const helperPackageName = "com.google.android.settings.intelligence";
+    const backStack: BackStackInfo = {
+      depth: 1,
+      activities: [],
+      currentTaskId: 8,
+      tasks: [
+        {
+          id: 8,
+          packageName: settingsPackageName,
+          rootActivity: `${settingsPackageName}/.Settings`,
+          topActivity: `${helperPackageName}/.modules.search.SearchActivity`,
+        },
+      ],
+    };
+    const unverifiedObservation = {
+      ...createObserveResult(helperPackageName, backStack),
+      freshness: {
+        isFresh: false,
+        verified: false,
+        warning: "Accessibility service is reconnecting after a transient ADB reset",
+      },
+    };
+
+    fakeAdb.setForegroundApp({ packageName: settingsPackageName, userId: 0 });
+    fakeAdb.setCommandResponse("shell pm list packages --user 0", {
+      stdout: `package:${settingsPackageName}\n`,
+      stderr: "",
+    });
+    fakeAdb.setCommandResponse("shell dumpsys activity processes", { stdout: "0\n", stderr: "" });
+    fakeObserveScreen.setObserveResult(() =>
+      fakeTimer.now() < 10_500
+        ? unverifiedObservation
+        : createObserveResult(helperPackageName, backStack),
+    );
+
+    const result = await launchApp.execute(settingsPackageName, false, false);
+
+    expect(result.success).toBe(true);
+    expect(result.verifiedBy).toBe("task-root");
+    expect(result.foregroundActivityPackage).toBe(helperPackageName);
+    expect(result.observation?.freshness?.verified).not.toBe(false);
+    expect(fakeTimer.now()).toBeGreaterThanOrEqual(10_500);
+  });
+
   test("rejects a foreground task rooted at a different package with recovery guidance", async () => {
     fakeTimer.enableAutoAdvance();
     const otherPackageName = "com.example.other";

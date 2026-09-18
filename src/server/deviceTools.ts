@@ -1027,12 +1027,14 @@ function androidBootedMetadata(
 
 function listDevicePayloads(booted: BootedDevice[], devicePool: DevicePool | undefined) {
   return booted.map((device) => {
+    const pooled = devicePool?.describesPooledRuntime(device)
+      ? (devicePool.getDevice(device.deviceId) ?? undefined)
+      : undefined;
     const description = describeDevice({
       kind: "booted",
       device,
-      pooled: devicePool?.describesPooledRuntime(device)
-        ? (devicePool.getDevice(device.deviceId) ?? undefined)
-        : undefined,
+      pooled,
+      session: pooled?.sessionId ? { sessionId: pooled.sessionId } : undefined,
     });
     return {
       ...projectListDevicesEntry(description),
@@ -6161,7 +6163,7 @@ export function registerDeviceTools() {
         const description = describeDevice({ kind: "image", image });
         return {
           ...projectConfiguredImage(description),
-          ...legacyListDeviceImageAliases(description),
+          ...legacyListDeviceImageAliases(description, image),
         };
       });
 
@@ -6177,8 +6179,8 @@ export function registerDeviceTools() {
     }
   };
 
-  /** Deprecated listDeviceImages fields, each derived from the canonical description. */
-  function legacyListDeviceImageAliases(description: DeviceDescription) {
+  /** Deprecated listDeviceImages fields, preserving raw discovery state where required. */
+  function legacyListDeviceImageAliases(description: DeviceDescription, image: DeviceInfo) {
     const androidProvenance = description.provenance.android;
     const iosProvenance = description.provenance.ios;
     return {
@@ -6194,8 +6196,8 @@ export function registerDeviceTools() {
       basedOn: androidProvenance?.basedOn ?? null,
       // Deprecated alias for provenance.android.error.
       error: androidProvenance?.error ?? null,
-      // Deprecated alias for lifecycle.state.
-      state: description.lifecycle.state,
+      // Deprecated raw discovery state alias.
+      state: image.state ?? null,
       // Deprecated alias for lifecycle.state.
       isAvailable: description.lifecycle.state !== "unavailable",
       // Deprecated alias for provenance.ios.availabilityError.
@@ -9205,6 +9207,7 @@ export function registerDeviceTools() {
     sessionId: string,
     processId?: number,
     sourceImage?: DeviceInfo,
+    achievedReadiness: DeviceReadinessLevel = "automationReady",
   ) {
     perf.end();
     const timing = perf.getTimings();
@@ -9214,6 +9217,10 @@ export function registerDeviceTools() {
       pooled: initializedDevicePool()?.getDevice(device.deviceId) ?? undefined,
       discovery: sourceImage,
       session: { sessionId },
+      serviceStatus:
+        achievedReadiness === "automationReady"
+          ? { installed: true, enabled: true, running: true, isCompatible: true }
+          : { installed: true, enabled: true, running: false, isCompatible: true },
     });
     const acquisition = source === "booted" ? "already-booted" : "cold-boot";
     return createStructuredToolResponse({

@@ -1030,6 +1030,7 @@ describe("Device Image Resources with Fakes", () => {
 
       const result = await handler.getDeviceImagesForPlatforms(["ios"]);
       expect(result.totalCount).toBe(1);
+      expect(result.images[0].state).toBe("Booted");
       expect(result.images[0].lifecycle).toEqual({ state: "booted", known: true });
       expect(result.images[0].provenance.ios?.isAvailable).toBe(true);
       expect(result.images[0].runtime.osVersion).toBe("17.4");
@@ -1041,6 +1042,29 @@ describe("Device Image Resources with Fakes", () => {
       );
       expect(result.images[0].runtime.model).toBe("iPhone15,3");
       expect(result.images[0].runtime.architecture).toBe("arm64");
+    });
+
+    test("preserves a stopped iOS simulator's raw state alias", async () => {
+      fakeDeviceUtils.setDeviceImages("ios", [
+        {
+          name: "iPhone 15",
+          platform: "ios",
+          deviceId: "sim-15",
+          isRunning: false,
+          state: "Shutdown",
+        },
+      ]);
+      fakeAvdManager.setListDeviceImagesResponse([]);
+
+      const handler = createDeviceImageResourcesHandler({
+        deviceManager: fakeDeviceUtils,
+        avdManager: fakeAvdManager,
+      });
+
+      const result = await handler.getDeviceImagesForPlatforms(["ios"]);
+
+      expect(result.images[0].state).toBe("Shutdown");
+      expect(result.images[0].lifecycle).toEqual({ state: "configured", known: true });
     });
 
     test("should include extended AVD metadata for Android images", async () => {

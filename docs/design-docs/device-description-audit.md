@@ -42,6 +42,8 @@ migrated to the canonical description:
 - Image surfaces (`listDeviceImages` and `automobile:devices/images`): `stableId`,
   `deviceId`, `path`, `target`, `basedOn`, `error`, `state`, `isAvailable`,
   `availabilityError`, `iosVersion`, `deviceType`, `model`, and `architecture`.
+  The deprecated `state` alias remains the raw discovery string (for example,
+  `Shutdown`), rather than the normalized `lifecycle.state` value.
 - `listDevices`: `deviceId`, `apiLevel`, `osVersion`, and `formFactor`.
 - `provisionDevice.device`: the raw pre-image `DeviceInfo`/`BootedDevice` fields,
   including `deviceId`, `isRunning`, runtime/display metadata, availability

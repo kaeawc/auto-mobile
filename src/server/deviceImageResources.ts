@@ -663,11 +663,11 @@ function toDeviceImageInfo(
   avdInfo?: AvdInfo,
 ): DeviceImageInfo {
   const description = describeDevice({ kind: "image", image: device, androidProvenance: avdInfo });
-  return { ...projectConfiguredImage(description), ...legacyAliases(description) };
+  return { ...projectConfiguredImage(description), ...legacyAliases(description, device) };
 }
 
-/** Deprecated image fields, each derived from the canonical description. */
-function legacyAliases(description: DeviceDescription) {
+/** Deprecated image fields, preserving raw discovery state where required. */
+function legacyAliases(description: DeviceDescription, image: StableConfiguredDeviceImage) {
   const androidProvenance = description.provenance.android;
   const iosProvenance = description.provenance.ios;
   return {
@@ -683,8 +683,8 @@ function legacyAliases(description: DeviceDescription) {
     basedOn: androidProvenance?.basedOn ?? null,
     // Deprecated alias for provenance.android.error.
     error: androidProvenance?.error ?? null,
-    // Deprecated alias for lifecycle.state.
-    state: description.lifecycle.state,
+    // Deprecated raw discovery state alias.
+    state: image.state ?? null,
     // Deprecated alias for lifecycle.state.
     isAvailable: description.lifecycle.state !== "unavailable",
     // Deprecated alias for provenance.ios.availabilityError.

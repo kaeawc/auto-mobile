@@ -143,6 +143,7 @@ describe("startDevice handler", () => {
     expect(result.platform).toBe("android");
     expect(result.isReady).toBe(true);
     expect(result.acquisition).toBe("already-booted");
+    expect(result.readiness.state).toBe("ready");
     expect(result.runtime.osVersion).toBe("14");
     expect(result.session.sessionUuid).toBeDefined();
     expect(typeof result.session.sessionUuid).toBe("string");

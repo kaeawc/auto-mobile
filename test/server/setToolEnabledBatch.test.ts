@@ -267,6 +267,33 @@ describe("setToolEnabled batch enable (#6869)", () => {
     expect(repository.writes).toEqual([[SESSION_UUID, "inputText", true]]);
   });
 
+  test("writes configurable batch names and reports setToolEnabled as always-on", async () => {
+    for (const name of ["rotate", "displayConfig"]) {
+      ToolRegistry.register(name, name, z.object({}), async () => ({ content: [] }), {
+        defaultEnabled: false,
+      });
+    }
+
+    const payload = payloadOf(
+      await callSetToolEnabled({ toolNames: ["rotate", "displayConfig", "setToolEnabled"] }),
+    );
+
+    expect(payload.toolNames).toEqual(["rotate", "displayConfig"]);
+    expect(payload.skipped).toEqual([{ toolName: "setToolEnabled", reason: "always-on" }]);
+    expect(repository.writes).toEqual([
+      [SESSION_UUID, "rotate", true],
+      [SESSION_UUID, "displayConfig", true],
+    ]);
+  });
+
+  test("does not write an entirely always-on batch", async () => {
+    const payload = payloadOf(await callSetToolEnabled({ toolNames: ["setToolEnabled"] }));
+
+    expect(payload.toolNames).toEqual([]);
+    expect(payload.skipped).toEqual([{ toolName: "setToolEnabled", reason: "always-on" }]);
+    expect(repository.writes).toEqual([]);
+  });
+
   describe("schema", () => {
     test("accepts exactly one of toolName and toolNames", () => {
       expect(setToolEnabledSchema.safeParse({ toolName: "inputText" }).success).toBe(true);
@@ -307,20 +334,45 @@ describe("setToolEnabled batch enable (#6869)", () => {
         }));
       }
 
-      const configurable = [
-        "clearText",
-        "getAndroid",
-        "getApple",
-        "imeAction",
-        "inputText",
-        "observe",
-        "provisionDevice",
-      ];
+      const configurable = ["clearText", "imeAction", "inputText", "observe", "provisionDevice"];
       for (const name of ["getAndroid", "getApple", "provisionDevice"]) {
         const definition = ToolRegistry.getToolDefinitions().find((tool) => tool.name === name)!;
         const properties = definition.inputSchema.properties as Record<string, any>;
         expect(properties.enableTools.items.enum).toEqual(configurable);
       }
+    });
+
+    test("advertises exactly every registered configurable gated tool and no always-on tools", () => {
+      for (const [name, schema] of [
+        ["getAndroid", getAndroidSchema],
+        ["getApple", getAppleSchema],
+        ["provisionDevice", provisionDeviceSchema],
+      ] as const) {
+        ToolRegistry.register(name, name, schema as any, async () => ({ content: [] }));
+      }
+
+      const definitions = ToolRegistry.getToolDefinitions();
+      const selectionDefinition = definitions.find(
+        (tool) => tool.name === SET_TOOL_ENABLED_TOOL_NAME,
+      )!;
+      const properties = selectionDefinition.inputSchema.properties as Record<string, any>;
+      const advertised = properties.toolName.enum as string[];
+      const configurable = new Set(
+        ToolRegistry.getAllTools()
+          .filter((tool) => ToolRegistry.isUserConfigurableTool(tool.name))
+          .map((tool) => tool.name),
+      );
+
+      expect(advertised.every((toolName) => configurable.has(toolName))).toBe(true);
+      for (const tool of ToolRegistry.getAllTools()) {
+        if (tool.defaultEnabled === false && ToolRegistry.isUserConfigurableTool(tool.name)) {
+          expect(advertised).toContain(tool.name);
+        }
+      }
+      expect(advertised).not.toContain("getAndroid");
+      expect(advertised).not.toContain("getApple");
+      expect(advertised).toContain("provisionDevice");
+      expect(advertised).not.toContain(SET_TOOL_ENABLED_TOOL_NAME);
     });
 
     test("an acquisition call naming an unconfigurable tool fails its advertised schema", () => {

@@ -104,7 +104,10 @@ function resolveRequestedEnableTools(toolName: string, parsedParams: unknown): s
  * The response field that states a lost `enableTools` declaration — empty when
  * the declaration landed, so it can always be spread into an enrichment.
  */
-type CapabilityDeclarationFailure = { enableToolsError?: string };
+type CapabilityDeclarationResult = {
+  enableToolsError?: string;
+  skipped?: import("./toolSelectionTools").SkippedToolSelection[];
+};
 
 /**
  * Grant the declared capabilities against the session an acquisition handler
@@ -122,14 +125,16 @@ async function applyAcquisitionToolSelection(
   service: McpServerOptions["sessionToolSelectionService"],
   sessionUuid: string,
   enableTools: readonly string[],
-): Promise<CapabilityDeclarationFailure> {
+): Promise<CapabilityDeclarationResult> {
   if (enableTools.length === 0) {
     return {};
   }
   try {
-    await applyToolSelection(service, sessionUuid, enableTools, true);
-    ToolRegistry.notifyToolListChanged();
-    return {};
+    const selection = await applyToolSelection(service, sessionUuid, enableTools, true);
+    if (selection.requested.length > 0) {
+      ToolRegistry.notifyToolListChanged();
+    }
+    return selection.skipped.length > 0 ? { skipped: selection.skipped } : {};
   } catch (error) {
     const enableToolsError =
       `Could not enable ${enableTools.join(", ")} for session ${sessionUuid}: ` +
@@ -147,8 +152,10 @@ async function applyAcquisitionToolSelection(
  */
 function withCapabilityDeclarationFailure<
   T extends { content: Array<{ type: string; text?: string }> },
->(result: T, failure: CapabilityDeclarationFailure): T {
-  return failure.enableToolsError ? enrichAcquisitionResult(result, failure) : result;
+>(result: T, failure: CapabilityDeclarationResult): T {
+  return failure.enableToolsError || failure.skipped
+    ? enrichAcquisitionResult(result, failure)
+    : result;
 }
 
 /**
@@ -297,6 +304,7 @@ import {
   registerToolSelectionTools,
   SET_TOOL_ENABLED_TOOL_NAME,
 } from "./toolSelectionTools";
+import { isAlwaysOnTool } from "../features/toolSelection/toolSelectionControl";
 import {
   DEVICE_SESSION_RECOVERY_TOOLS,
   getDeviceSessionIdFromResult,
@@ -729,13 +737,14 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
               labelSessionUuids,
               [routingBaseSessionUuid, routingSessionUuid],
             );
-            return (await isToolEnabledForAnyRoute(
-              definition.name,
-              registeredTool?.defaultEnabled ?? true,
-              candidateRoutes,
-              options.sessionToolSelectionService,
-              connectionProfileUuid,
-            ))
+            return isAlwaysOnTool(definition.name) ||
+              (await isToolEnabledForAnyRoute(
+                definition.name,
+                registeredTool?.defaultEnabled ?? true,
+                candidateRoutes,
+                options.sessionToolSelectionService,
+                connectionProfileUuid,
+              ))
               ? definition
               : undefined;
           }),
@@ -999,19 +1008,21 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     // only an execution target and must not borrow an unrelated owning session's
     // grants (which discovery cannot advertise). When both fields are present,
     // ToolRegistry intentionally ignores deviceId in favor of the label.
-    await assertToolEnabledForAnySession(
-      name,
-      tool.defaultEnabled,
-      [
+    if (!isAlwaysOnTool(name)) {
+      await assertToolEnabledForAnySession(
+        name,
+        tool.defaultEnabled,
+        [
+          connectionProfileUuid,
+          routingBaseSessionUuid,
+          ...(requestedDeviceLabel
+            ? [derivedLabelSessionUuid]
+            : [routingSessionUuid, derivedLabelSessionUuid]),
+        ],
+        options.sessionToolSelectionService,
         connectionProfileUuid,
-        routingBaseSessionUuid,
-        ...(requestedDeviceLabel
-          ? [derivedLabelSessionUuid]
-          : [routingSessionUuid, derivedLabelSessionUuid]),
-      ],
-      options.sessionToolSelectionService,
-      connectionProfileUuid,
-    );
+      );
+    }
 
     // Only ever honor these two when the call is DAEMON-forwarded. Extraction
     // happens on the RAW `toolParams` before schema validation, and a direct

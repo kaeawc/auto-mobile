@@ -14,6 +14,7 @@ type AcquisitionPayload = {
   gatedTools?: string[];
   enabledTools?: string[];
   enableToolsError?: string;
+  skipped?: Array<{ toolName: string; reason: "always-on" }>;
 };
 
 /**
@@ -38,7 +39,7 @@ describe("acquisition-time enableTools (#6869)", () => {
       "acquire",
       z.object({ enableTools: enableToolsSchemaField }),
       handler,
-      { defaultEnabled: true, ...options },
+      { defaultEnabled: true, hidden: name === "startDevice", ...options },
     );
     ToolRegistry.register("inputText", "input", z.object({}), async () => ({ content: [] }), {
       defaultEnabled: false,
@@ -103,9 +104,7 @@ describe("acquisition-time enableTools (#6869)", () => {
 
       expect(payload.sessionUuid).toBe("acquired-session");
       expect(payload.gatedTools).toEqual([]);
-      expect(payload.enabledTools).toEqual(
-        [acquisition, "clearText", "inputText", "observe"].sort(),
-      );
+      expect(payload.enabledTools).toEqual(["clearText", "inputText", "observe"]);
       expect((await fixture!.client.listTools()).tools.map((tool) => tool.name)).toContain(
         "inputText",
       );
@@ -117,7 +116,7 @@ describe("acquisition-time enableTools (#6869)", () => {
       const { payload } = await acquire(acquisition, {});
 
       expect(payload.gatedTools).toEqual(["clearText", "inputText"]);
-      expect(payload.enabledTools).toEqual([acquisition, "observe"].sort());
+      expect(payload.enabledTools).toEqual(["observe"]);
     });
 
     test(`${acquisition} rejects an unknown name before acquiring anything`, async () => {
@@ -149,6 +148,53 @@ describe("acquisition-time enableTools (#6869)", () => {
       expect(acquisitionsRun).toBe(0);
     });
   }
+
+  test("getAndroid skips always-on setToolEnabled and enables every configurable name", async () => {
+    registerAcquisition("getAndroid");
+    const gatedNames = [
+      "observe",
+      "tapOn",
+      "inputText",
+      "launchApp",
+      "systemTray",
+      "getDeviceState",
+      "pressButton",
+      "setDeviceState",
+      "clearText",
+      "imeAction",
+      "postNotification",
+      "wakeAndUnlock",
+    ];
+    for (const name of gatedNames) {
+      if (!ToolRegistry.getRegisteredTool(name)) {
+        ToolRegistry.register(name, name, z.object({}), async () => ({ content: [] }), {
+          defaultEnabled: false,
+        });
+      }
+    }
+
+    const { payload } = await acquire("getAndroid", {
+      enableTools: [
+        "observe",
+        "tapOn",
+        "inputText",
+        "launchApp",
+        "setToolEnabled",
+        "systemTray",
+        "getDeviceState",
+        "pressButton",
+        "setDeviceState",
+        "clearText",
+        "imeAction",
+        "postNotification",
+        "wakeAndUnlock",
+      ],
+    });
+
+    expect(payload.sessionUuid).toBe("acquired-session");
+    expect(payload.enabledTools).toEqual(gatedNames.sort());
+    expect(payload.skipped).toEqual([{ toolName: "setToolEnabled", reason: "always-on" }]);
+  });
 
   // #6886 review — `tools/list` and the call gate resolve a tool against the
   // UNION of the connection profile and the routing session. provisionDevice's

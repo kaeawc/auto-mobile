@@ -1741,7 +1741,7 @@
           "minLength": 1
         },
         "enableTools": {
-          "description": "Exact case-sensitive AutoMobile tool names to enable for the session this call mints, applied before the response is built so the returned enabledTools/gatedTools reflect them. An unknown or non-configurable name rejects the call before any device work starts.",
+          "description": "Exact case-sensitive AutoMobile tool names to enable for the session this call mints, applied before the response is built so the returned enabledTools/gatedTools reflect them. Unknown or hidden names reject the call before device work; always-on names are returned in skipped.",
           "minItems": 1,
           "type": "array",
           "items": {
@@ -1765,9 +1765,7 @@
               "executePlan",
               "explore",
               "exportPlan",
-              "getAndroid",
               "getAppPermissions",
-              "getApple",
               "getDataStore",
               "getDeepLinks",
               "getDeviceState",
@@ -1868,7 +1866,7 @@
           "minLength": 1
         },
         "enableTools": {
-          "description": "Exact case-sensitive AutoMobile tool names to enable for the session this call mints, applied before the response is built so the returned enabledTools/gatedTools reflect them. An unknown or non-configurable name rejects the call before any device work starts.",
+          "description": "Exact case-sensitive AutoMobile tool names to enable for the session this call mints, applied before the response is built so the returned enabledTools/gatedTools reflect them. Unknown or hidden names reject the call before device work; always-on names are returned in skipped.",
           "minItems": 1,
           "type": "array",
           "items": {
@@ -1892,9 +1890,7 @@
               "executePlan",
               "explore",
               "exportPlan",
-              "getAndroid",
               "getAppPermissions",
-              "getApple",
               "getDataStore",
               "getDeepLinks",
               "getDeviceState",
@@ -8829,7 +8825,7 @@
           "maximum": 830000
         },
         "enableTools": {
-          "description": "Exact case-sensitive AutoMobile tool names to enable for the session this call mints, applied before the response is built so the returned enabledTools/gatedTools reflect them. An unknown or non-configurable name rejects the call before any device work starts. Requires boot=true.",
+          "description": "Exact case-sensitive AutoMobile tool names to enable for the session this call mints, applied before the response is built so the returned enabledTools/gatedTools reflect them. Unknown or hidden names reject the call before device work; always-on names are returned in skipped. Requires boot=true.",
           "minItems": 1,
           "type": "array",
           "items": {
@@ -8853,9 +8849,7 @@
               "executePlan",
               "explore",
               "exportPlan",
-              "getAndroid",
               "getAppPermissions",
-              "getApple",
               "getDataStore",
               "getDeepLinks",
               "getDeviceState",
@@ -10894,9 +10888,7 @@
             "executePlan",
             "explore",
             "exportPlan",
-            "getAndroid",
             "getAppPermissions",
-            "getApple",
             "getDataStore",
             "getDeepLinks",
             "getDeviceState",
@@ -10963,7 +10955,7 @@
           ]
         },
         "toolNames": {
-          "description": "Exact case-sensitive AutoMobile tool names to enable or disable in ONE call, applied all-or-nothing: an unknown or non-configurable name rejects the whole request before anything is written. Provide either toolName or toolNames.",
+          "description": "Exact case-sensitive AutoMobile tool names to enable or disable in ONE call. Unknown or hidden names reject the whole request before anything is written; always-on names are returned in skipped. Provide either toolName or toolNames.",
           "minItems": 1,
           "type": "array",
           "items": {
@@ -10987,9 +10979,7 @@
               "executePlan",
               "explore",
               "exportPlan",
-              "getAndroid",
               "getAppPermissions",
-              "getApple",
               "getDataStore",
               "getDeepLinks",
               "getDeviceState",

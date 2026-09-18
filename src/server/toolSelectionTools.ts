@@ -1,6 +1,9 @@
 import { z } from "zod/v4";
 import type { SessionToolSelectionService } from "../features/toolSelection/SessionToolSelectionService";
-import { SET_TOOL_ENABLED_TOOL_NAME } from "../features/toolSelection/toolSelectionControl";
+import {
+  isAlwaysOnTool,
+  SET_TOOL_ENABLED_TOOL_NAME,
+} from "../features/toolSelection/toolSelectionControl";
 import { getSessionToolSelectionService } from "../features/toolSelection/SessionToolSelectionService";
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
 import {
@@ -39,7 +42,7 @@ export const enableToolsSchemaField = z
   .describe(
     "Exact case-sensitive AutoMobile tool names to enable for the session this call mints, " +
       "applied before the response is built so the returned enabledTools/gatedTools reflect them. " +
-      "An unknown or non-configurable name rejects the call before any device work starts.",
+      "Unknown or hidden names reject the call before device work; always-on names are returned in skipped.",
   );
 
 export const setToolEnabledSchema = withJsonSchemaOverride(
@@ -57,7 +60,7 @@ export const setToolEnabledSchema = withJsonSchemaOverride(
         .min(1)
         .optional()
         .describe(
-          "Exact case-sensitive AutoMobile tool names to enable or disable in ONE call, applied all-or-nothing: an unknown or non-configurable name rejects the whole request before anything is written. Provide either toolName or toolNames.",
+          "Exact case-sensitive AutoMobile tool names to enable or disable in ONE call. Unknown or hidden names reject the whole request before anything is written; always-on names are returned in skipped. Provide either toolName or toolNames.",
         ),
       enabled: z
         .boolean()
@@ -138,8 +141,30 @@ function selectionScopeForSessionUuid(
  * device work starts), which is what makes a batch all-or-nothing: a caller
  * never has to reason about which prefix of its list landed.
  */
-export function assertUserConfigurableToolNames(toolNames: readonly string[]): void {
-  const unknown = toolNames.filter((toolName) => !ToolRegistry.isUserConfigurableTool(toolName));
+export type SkippedToolSelection = { toolName: string; reason: "always-on" };
+
+export type ToolSelectionApplication = {
+  requested: string[];
+  skipped: SkippedToolSelection[];
+};
+
+function isRegisteredAlwaysOnTool(toolName: string): boolean {
+  const tool = ToolRegistry.getRegisteredTool(toolName);
+  return Boolean(tool && !tool.hidden && !tool.planOnly && isAlwaysOnTool(toolName));
+}
+
+/**
+ * Separates genuine selection writes from permanently-enabled tools. Invalid
+ * names still reject before either branch can have side effects.
+ */
+export function partitionToolSelectionNames(
+  toolNames: readonly string[],
+): ToolSelectionApplication {
+  const uniqueNames = [...new Set(toolNames)];
+  const unknown = uniqueNames.filter(
+    (toolName) =>
+      !ToolRegistry.isUserConfigurableTool(toolName) && !isRegisteredAlwaysOnTool(toolName),
+  );
   if (unknown.length === 1) {
     throw new ActionableError(`Tool '${unknown[0]}' is not user-configurable.`);
   }
@@ -148,6 +173,16 @@ export function assertUserConfigurableToolNames(toolNames: readonly string[]): v
       `Tools ${unknown.map((toolName) => `'${toolName}'`).join(", ")} are not user-configurable.`,
     );
   }
+  return {
+    requested: uniqueNames.filter((toolName) => ToolRegistry.isUserConfigurableTool(toolName)),
+    skipped: uniqueNames
+      .filter(isRegisteredAlwaysOnTool)
+      .map((toolName) => ({ toolName, reason: "always-on" })),
+  };
+}
+
+export function assertUserConfigurableToolNames(toolNames: readonly string[]): void {
+  partitionToolSelectionNames(toolNames);
 }
 
 /** The one-name and batch-name forms share this exact extraction at every boundary. */
@@ -191,18 +226,20 @@ export async function applyToolSelection(
   sessionUuid: string,
   toolNames: readonly string[],
   enabled: boolean,
-): Promise<string[]> {
-  const requested = [...new Set(toolNames)];
-  assertUserConfigurableToolNames(requested);
+): Promise<ToolSelectionApplication> {
+  const selection = partitionToolSelectionNames(toolNames);
+  if (selection.requested.length === 0) {
+    return selection;
+  }
   const resolved = resolveSelectionService(service);
   if (resolved.setEnabledMany) {
-    await resolved.setEnabledMany(sessionUuid, requested, enabled);
-    return requested;
+    await resolved.setEnabledMany(sessionUuid, selection.requested, enabled);
+    return selection;
   }
-  for (const toolName of requested) {
+  for (const toolName of selection.requested) {
     await resolved.setEnabled(sessionUuid, toolName, enabled);
   }
-  return requested;
+  return selection;
 }
 
 /**
@@ -293,20 +330,23 @@ export function registerToolSelectionTools(): void {
         context?.routingSessionUuid,
       );
       const enabled = args.enabled ?? true;
-      const requested = await applyToolSelection(
+      const selection = await applyToolSelection(
         context?.sessionToolSelectionService,
         sessionUuid,
         requestedToolNamesFromSetToolEnabledArgs(args),
         enabled,
       );
-      ToolRegistry.notifyToolListChanged();
+      if (selection.requested.length > 0) {
+        ToolRegistry.notifyToolListChanged();
+      }
       const response = {
         sessionUuid,
         scope,
         // The single-name request keeps its original `toolName` echo; a batch
         // echoes the applied `toolNames` instead (#6869).
-        ...(args.toolNames ? { toolNames: requested } : { toolName: args.toolName }),
+        ...(args.toolNames ? { toolNames: selection.requested } : { toolName: args.toolName }),
         enabled,
+        ...(selection.skipped.length > 0 ? { skipped: selection.skipped } : {}),
       };
       return createStructuredToolResponse({
         ...response,

@@ -4,6 +4,7 @@ import { McpTestFixture } from "../../fixtures/mcpTestFixture";
 import { z } from "zod/v4";
 import { compileJsonSchema } from "../../helpers/jsonSchemaCompile";
 import { isSendKeysReleased } from "../../../src/features/action/SendKeys";
+import { isAlwaysOnTool } from "../../../src/features/toolSelection/toolSelectionControl";
 
 const listToolsResponseSchema = z.object({
   tools: z.array(
@@ -43,7 +44,10 @@ describe("MCP Tools List", () => {
 
       const wireNames = result.tools.map((tool) => tool.name).sort();
       const advertisedNames = ToolRegistry.getToolDefinitions()
-        .filter((tool) => ToolRegistry.getRegisteredTool(tool.name)?.defaultEnabled)
+        .filter(
+          (tool) =>
+            ToolRegistry.getRegisteredTool(tool.name)?.defaultEnabled || isAlwaysOnTool(tool.name),
+        )
         .map((tool) => tool.name)
         .sort();
       const allToolNames = ToolRegistry.getAllTools()

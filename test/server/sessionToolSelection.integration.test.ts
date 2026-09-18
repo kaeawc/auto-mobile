@@ -213,7 +213,7 @@ describe("per-session exact-tool selection", () => {
         gatedTools: ["inputText"],
         // #6869 — the complement of gatedTools, so a client confirms the
         // resulting capability set without a second listTools.
-        enabledTools: [acquisition],
+        enabledTools: [],
       });
     });
 
@@ -277,7 +277,7 @@ describe("per-session exact-tool selection", () => {
         expect(await acquire("session-b")).toEqual({
           sessionUuid: "session-b",
           gatedTools: [],
-          enabledTools: [acquisition, "inputText", "inspectRouting"].sort(),
+          enabledTools: ["inputText", "inspectRouting"].sort(),
         });
         expect((await fixture.client.listTools()).tools.map((tool) => tool.name)).toContain(
           "inputText",
@@ -288,7 +288,7 @@ describe("per-session exact-tool selection", () => {
       expect(await first).toEqual({
         sessionUuid: "session-a",
         gatedTools: ["inputText"],
-        enabledTools: [acquisition, "inspectRouting"].sort(),
+        enabledTools: ["inspectRouting"],
       });
       expect((await fixture.client.listTools()).tools.map((tool) => tool.name)).not.toContain(
         "inputText",
@@ -1128,7 +1128,7 @@ describe("per-session exact-tool selection", () => {
     ).rejects.toThrow("Tool observe is disabled");
   });
 
-  test("rejects unknown, structural, and self-disable targets", async () => {
+  test("rejects unknown and structural targets while skipping self-disable", async () => {
     fixture = new McpTestFixture({
       sessionToolSelectionService: {
         isEnabled: async (_sessionUuid, _toolName, declaredDefault) => declaredDefault,
@@ -1147,7 +1147,7 @@ describe("per-session exact-tool selection", () => {
     );
     registerToolSelectionTools();
 
-    for (const toolName of ["missing", "barrier", "setToolEnabled"]) {
+    for (const toolName of ["missing", "barrier"]) {
       await expect(
         fixture.client.request(
           {
@@ -1161,6 +1161,17 @@ describe("per-session exact-tool selection", () => {
         ),
       ).rejects.toThrow("not user-configurable");
     }
+
+    const response = await fixture.client.request(
+      {
+        method: "tools/call",
+        params: { name: "setToolEnabled", arguments: { toolName: "setToolEnabled" } },
+      },
+      z.any(),
+    );
+    expect(JSON.parse(response.content[0].text).skipped).toEqual([
+      { toolName: "setToolEnabled", reason: "always-on" },
+    ]);
   });
 });
 

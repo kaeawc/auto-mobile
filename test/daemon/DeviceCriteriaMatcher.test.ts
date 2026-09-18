@@ -251,6 +251,14 @@ describe("DeviceCriteriaMatcher", () => {
         ),
       ).toBe(false);
     });
+
+    test("rejects an Android image already known to be running", () => {
+      expect(
+        matcher.isStartableDeviceImage(
+          deviceImage({ name: "Pixel", platform: "android", isRunning: true }),
+        ),
+      ).toBe(false);
+    });
   });
 
   describe("getDeviceImageKey", () => {

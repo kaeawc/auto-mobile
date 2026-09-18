@@ -57,6 +57,10 @@ interface DeviceLockStateInfo {
 export interface DeviceLockStatesResourceContent {
   lastUpdated: string; // ISO 8601
   lockStates: DeviceLockStateInfo[];
+  /** True only when both platform discovery sweeps completed. */
+  observationComplete: boolean;
+  /** Platform-specific discovery failures; an empty object means both sweeps completed. */
+  discoveryErrors: Partial<Record<Platform, DeviceDiscoveryError>>;
 }
 
 export interface CtrlProxyVersionInfo {
@@ -311,13 +315,27 @@ async function probeDeviceLock(
  */
 async function computeDeviceLockStates(): Promise<DeviceLockStatesResourceContent> {
   const devices: BootedDevice[] = [];
+  const succeededPlatforms = new Set<Platform>();
+  const discoveryErrors: Partial<Record<Platform, DeviceDiscoveryError>> = {};
   for (const platform of ["android", "ios"] as Platform[]) {
     try {
       const discovery =
         await PlatformDeviceManagerFactory.getInstance().getBootedDevicesDetailed(platform);
       devices.push(...discovery.devices);
+      if (discovery.succeededPlatforms.has(platform)) {
+        succeededPlatforms.add(platform);
+      } else {
+        discoveryErrors[platform] = discovery.discoveryErrors?.[platform] ?? {
+          code: "failed",
+          message: `${platform === "android" ? "Android" : "iOS"} booted-device discovery did not complete.`,
+        };
+      }
     } catch (error) {
       logger.warn(`[DeviceLockStates] Failed to enumerate ${platform} booted devices: ${error}`);
+      discoveryErrors[platform] = {
+        code: "failed",
+        message: `${platform === "android" ? "Android" : "iOS"} booted-device discovery failed: ${errorMessage(error)}`,
+      };
     }
   }
   // FUNNEL 1: the probe below is device-addressed, and this poll can be the
@@ -342,7 +360,12 @@ async function computeDeviceLockStates(): Promise<DeviceLockStatesResourceConten
     }
   }
 
-  return { lastUpdated: new Date().toISOString(), lockStates };
+  return {
+    lastUpdated: new Date().toISOString(),
+    lockStates,
+    observationComplete: succeededPlatforms.size === 2,
+    discoveryErrors,
+  };
 }
 
 async function getDeviceLockStates(): Promise<ResourceContent> {

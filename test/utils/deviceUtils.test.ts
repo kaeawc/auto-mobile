@@ -277,6 +277,86 @@ describe("MultiPlatformDeviceManager", () => {
     expect(receivedSignal).toBe(controller.signal);
   });
 
+  test("getBootedDevicesDetailed rejects an already-aborted Android discovery", async () => {
+    const controller = new AbortController();
+    const cancellation = new Error("Android discovery cancelled");
+    controller.abort(cancellation);
+    const emulator = {
+      getBootedDevicesChecked: async (): Promise<BootedDevice[]> => {
+        throw new Error("adb devices failed");
+      },
+    } as unknown as AndroidEmulatorClient;
+    const manager = new MultiPlatformDeviceManager(
+      new FakeAdbClient() as unknown as AdbClient,
+      {} as SimCtlClient,
+      emulator,
+    );
+
+    await expect(
+      manager.getBootedDevicesDetailed("android", { signal: controller.signal }),
+    ).rejects.toBe(cancellation);
+  });
+
+  test("getBootedDevicesDetailed rejects an already-aborted iOS discovery before simctl can hang", async () => {
+    await withProcessPlatform("darwin", async () => {
+      const controller = new AbortController();
+      const cancellation = new Error("iOS discovery cancelled");
+      controller.abort(cancellation);
+      let simctlCalled = false;
+      const fakeSimctl = {
+        getBootedSimulatorsChecked: async (): Promise<BootedDevice[]> => {
+          simctlCalled = true;
+          return await new Promise<BootedDevice[]>(() => {});
+        },
+      } as unknown as SimCtlClient;
+      const manager = new MultiPlatformDeviceManager(
+        new FakeAdbClient() as unknown as AdbClient,
+        fakeSimctl,
+        {} as AndroidEmulatorClient,
+        undefined,
+        undefined,
+        { listConnectedDevices: async () => ({ devices: [], complete: true }) },
+      );
+
+      await expect(
+        manager.getBootedDevicesDetailed("ios", { signal: controller.signal }),
+      ).rejects.toBe(cancellation);
+      expect(simctlCalled).toBe(false);
+    });
+  });
+
+  test("getBootedDevicesDetailed forwards iOS cache bypass and cancellation to simctl", async () => {
+    await withProcessPlatform("darwin", async () => {
+      const controller = new AbortController();
+      let request: { signal?: AbortSignal; options?: { bypassCache?: boolean } } | undefined;
+      const fakeSimctl = {
+        getBootedSimulatorsChecked: async (
+          _timeoutMs?: number,
+          signal?: AbortSignal,
+          options?: { bypassCache?: boolean },
+        ): Promise<BootedDevice[]> => {
+          request = { signal, options };
+          return [];
+        },
+      } as unknown as SimCtlClient;
+      const manager = new MultiPlatformDeviceManager(
+        new FakeAdbClient() as unknown as AdbClient,
+        fakeSimctl,
+        {} as AndroidEmulatorClient,
+        undefined,
+        undefined,
+        { listConnectedDevices: async () => ({ devices: [], complete: true }) },
+      );
+
+      await manager.getBootedDevicesDetailed("ios", {
+        signal: controller.signal,
+        bypassIosDeviceListCache: true,
+      });
+
+      expect(request).toEqual({ signal: controller.signal, options: { bypassCache: true } });
+    });
+  });
+
   // AVD-name enrichment is sequential and budgets 2s per attached emulator, so
   // a caller that has already decided not to establish an identity (`force`)
   // must be able to ask for the attached list and nothing else -- otherwise a
@@ -401,6 +481,63 @@ describe("MultiPlatformDeviceManager", () => {
     expect(launched).toBe(false);
   });
 
+  test("startDevice refuses an Android launch when checked liveness discovery fails", async () => {
+    let launched = false;
+    const fakeEmulator = {
+      getBootedDevicesChecked: async (): Promise<BootedDevice[]> => {
+        throw new Error("adb executor failed");
+      },
+      launchEmulator: async () => {
+        launched = true;
+        return { process: null };
+      },
+    } as unknown as AndroidEmulatorClient;
+    const manager = new MultiPlatformDeviceManager(
+      new FakeAdbClient() as unknown as AdbClient,
+      undefined,
+      fakeEmulator,
+    );
+
+    await expect(
+      manager.startDevice({ name: "Pixel_9_Pro", platform: "android", isRunning: false }),
+    ).rejects.toThrow(
+      "Failed to determine whether android device 'Pixel_9_Pro' is already running: adb executor failed",
+    );
+    expect(launched).toBe(false);
+  });
+
+  test("startDevice refuses an iOS launch when checked liveness discovery fails", async () => {
+    await withProcessPlatform("darwin", async () => {
+      let launched = false;
+      const fakeSimctl = {
+        getBootedSimulatorsChecked: async (): Promise<BootedDevice[]> => {
+          throw new Error("simctl executor failed");
+        },
+        startSimulator: async () => {
+          launched = true;
+          return null;
+        },
+      } as unknown as SimCtlClient;
+      const manager = new MultiPlatformDeviceManager(
+        new FakeAdbClient() as unknown as AdbClient,
+        fakeSimctl,
+        {} as AndroidEmulatorClient,
+      );
+
+      await expect(
+        manager.startDevice({
+          name: "iPhone 17 Pro",
+          platform: "ios",
+          deviceId: "IOS-17-PRO",
+          isRunning: false,
+        }),
+      ).rejects.toThrow(
+        "Failed to determine whether ios device 'iPhone 17 Pro' is already running: simctl executor failed",
+      );
+      expect(launched).toBe(false);
+    });
+  });
+
   test("waitForDeviceReady rejects a name-only iOS DeviceInfo instead of polling bootstatus by name (#6414)", async () => {
     const fakeSimctl = {
       isAvailable: async () => true,
@@ -427,7 +564,7 @@ describe("MultiPlatformDeviceManager", () => {
   test("isDeviceImageRunning uses UDID when present for iOS", async () => {
     const fakeSimctl = {
       isAvailable: async () => true,
-      getBootedSimulators: async () => [
+      getBootedSimulatorsChecked: async () => [
         { name: "iPhone 15", platform: "ios", deviceId: "booted-1" },
       ],
       isSimulatorRunning: async () => {
@@ -456,8 +593,9 @@ describe("MultiPlatformDeviceManager", () => {
   test("isDeviceImageRunning falls back to name-based check for iOS without UDID", async () => {
     const fakeSimctl = {
       isAvailable: async () => true,
-      getBootedSimulators: async () => [],
-      isSimulatorRunning: async (name: string) => name === "iPhone 15",
+      getBootedSimulatorsChecked: async () => [
+        { name: "iPhone 15", platform: "ios", deviceId: "booted-1" },
+      ],
     } as unknown as SimCtlClient;
 
     // Use FakeAdbClient to avoid starting real adb daemon

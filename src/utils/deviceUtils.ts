@@ -1,6 +1,7 @@
 import { errorMessage } from "./describeUnknownError";
 import { ChildProcess } from "child_process";
 import { DeviceInfo, ActionableError, SomePlatform, BootedDevice, Platform } from "../models";
+import { toActionableError } from "../models/ActionableError";
 import { defaultAdbClientFactory } from "./android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "./android-cmdline-tools/interfaces/AdbExecutor";
 import { SimCtlClient } from "./ios-cmdline-tools/SimCtlClient";
@@ -98,6 +99,8 @@ function iosSucceededSources(outcome: {
 export interface BootedDeviceDiscoveryOptions {
   /** Bypass Android's short device-list cache to verify ADB transport identity. */
   bypassAndroidDeviceListCache?: boolean;
+  /** Bypass iOS's short simulator-list cache to verify simulator identity. */
+  bypassIosDeviceListCache?: boolean;
   /** Cancels short-lived platform discovery work. */
   signal?: AbortSignal;
   /**
@@ -556,17 +559,19 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
    */
   async isDeviceImageRunning(device: DeviceInfo): Promise<boolean> {
     switch (device.platform) {
-      case "android":
-        return this.emulator.isAvdRunning(device.name);
+      case "android": {
+        const booted = await this.emulator.getBootedDevicesChecked();
+        return booted.some((emulator) => emulator.name === device.name);
+      }
       case "ios":
         if (!(await this.canDiscoverIosLocally())) {
           return false;
         }
-        if (device.deviceId) {
-          const booted = await this.simctl.getBootedSimulators();
-          return booted.some((simulator) => simulator.deviceId === device.deviceId);
-        }
-        return this.simctl.isSimulatorRunning(device.name);
+        return (await this.simctl.getBootedSimulatorsChecked()).some(
+          (simulator) =>
+            simulator.deviceId === device.deviceId ||
+            (device.deviceId === undefined && simulator.name === device.name),
+        );
     }
   }
 
@@ -613,7 +618,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     }
 
     if (platform === "ios" || platform === "either") {
-      const ios = await this.discoverBootedIosDevices();
+      const ios = await this.discoverBootedIosDevices(options);
       // Physical devices that devicectl confirmed are reported even when
       // simulator discovery failed, and vice versa. `succeededPlatforms.ios`
       // still means "simctl completed" for the platform-level consumers that
@@ -694,6 +699,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
   private async discoverBootedAndroidDevices(
     options: BootedDeviceDiscoveryOptions,
   ): Promise<{ devices: BootedDevice[]; error?: DeviceDiscoveryError }> {
+    const signal = combineWithAmbientAbort(options.signal);
     try {
       return {
         devices: await this.emulator.getBootedDevicesChecked(
@@ -702,10 +708,11 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
             bypassDeviceListCache: options.bypassAndroidDeviceListCache,
             skipNameEnrichment: options.skipAndroidNameEnrichment,
           },
-          combineWithAmbientAbort(options.signal),
+          signal,
         ),
       };
     } catch (error) {
+      signal?.throwIfAborted();
       logger.warn(
         `[DeviceManager] Android booted-device discovery failed; retaining tracked Android devices: ${error}`,
       );
@@ -719,7 +726,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     }
   }
 
-  private async discoverBootedIosDevices(): Promise<{
+  private async discoverBootedIosDevices(options: BootedDeviceDiscoveryOptions): Promise<{
     devices: BootedDevice[];
     simulatorsSucceeded: boolean;
     physicalSucceeded: boolean;
@@ -727,6 +734,8 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     freshDeviceIds: Set<string>;
     error?: DeviceDiscoveryError;
   }> {
+    const signal = combineWithAmbientAbort(options.signal);
+    signal?.throwIfAborted();
     // iOS tooling that is genuinely unavailable on this host cannot confirm a
     // device is gone, so report it as un-discovered rather than empty. Neither
     // source ran, so neither is authoritative.
@@ -758,7 +767,9 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
       .map((device) => device.deviceId)
       .filter((deviceId) => !retainedPhysicalIds.has(deviceId));
     try {
-      const simulators = await this.simctl.getBootedSimulatorsChecked();
+      const simulators = await this.simctl.getBootedSimulatorsChecked(undefined, signal, {
+        bypassCache: options.bypassIosDeviceListCache,
+      });
       return {
         devices: mergeIosDevices(simulators, physical.devices),
         simulatorsSucceeded: true,
@@ -769,6 +780,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
         ]),
       };
     } catch (error) {
+      signal?.throwIfAborted();
       // A failed simctl sweep says nothing about the devicectl half: a physical
       // device it positively observed stays authoritative (#5683).
       logger.warn(
@@ -808,7 +820,15 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
       );
     }
 
-    const isRunning = await this.isDeviceImageRunning(device);
+    let isRunning: boolean;
+    try {
+      isRunning = await this.isDeviceImageRunning(device);
+    } catch (error) {
+      throw toActionableError(
+        error,
+        `Failed to determine whether ${device.platform} device '${device.name}' is already running`,
+      );
+    }
     if (isRunning) {
       throw new ActionableError(`${device.platform} device '${device.name}' is already running`);
     }

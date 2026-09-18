@@ -549,6 +549,28 @@ describe("MCP Booted Device Resources", () => {
       expect(data.lastUpdated).toBe(new Date(data.lastUpdated).toISOString());
     });
 
+    test("lock-states resource marks a failed device discovery incomplete", async function () {
+      fakeDeviceUtils.getBootedDevicesDetailed = async (platform) =>
+        platform === "android"
+          ? {
+              devices: [],
+              succeededPlatforms: new Set(),
+              discoveryErrors: { android: { code: "failed", message: "adb devices failed" } },
+            }
+          : { devices: [], succeededPlatforms: new Set(["ios"]) };
+      const { client } = fixture.getContext();
+      const result = await client.request(
+        { method: "resources/read", params: { uri: "automobile:devices/lockStates" } },
+        z.object({ contents: z.array(z.object({ text: z.string() })) }),
+      );
+
+      const data: DeviceLockStatesResourceContent = JSON.parse(result.contents[0].text!);
+      expect(data.observationComplete).toBe(false);
+      expect(data.discoveryErrors).toEqual({
+        android: { code: "failed", message: "adb devices failed" },
+      });
+    });
+
     test("lock-states resource folds its discovery into the pool before probing (#6923)", async function () {
       // The pool knows the serial by its AVD label; this poll's discovery reads
       // the placeholder, so the entry must be quarantined by the time any

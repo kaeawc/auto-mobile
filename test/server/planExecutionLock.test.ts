@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
 import { FakePlanExecutionLock } from "../fakes/FakePlanExecutionLock";
+import { FakeAvdManager } from "../fakes/FakeAvdManager";
 import {
   ExecutionTrackerPlanExecutionLock,
   type PlanExecutionLockScopeProvider,
@@ -39,6 +40,8 @@ describe("Plan execution lock", () => {
 
     setDeviceToolsDependencies({
       deviceManagerFactory: () => fakeDeviceUtils,
+      // listDeviceImages resolves AVD provenance; never touch the real SDK here.
+      avdManagerFactory: () => new FakeAvdManager(),
     });
 
     fakePlanExecutionLock = new FakePlanExecutionLock({

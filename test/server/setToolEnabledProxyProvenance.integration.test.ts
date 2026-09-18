@@ -6,7 +6,12 @@ import { createProxyMcpServer } from "../../src/server/proxyServer";
 import { createMcpServer } from "../../src/server/index";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { registerToolSelectionTools } from "../../src/server/toolSelectionTools";
-import { InMemoryToolSelectionProfileRegistry } from "../../src/server/toolSelectionProfileRegistry";
+import {
+  PersistentToolSelectionProfileRegistry,
+  InMemoryToolSelectionProfileRegistry,
+  type ToolSelectionProfileProvenanceStore,
+  type ToolSelectionProfileRegistry,
+} from "../../src/server/toolSelectionProfileRegistry";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -17,6 +22,20 @@ import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
+
+class FakeToolSelectionProfileProvenanceStore implements ToolSelectionProfileProvenanceStore {
+  readonly stored = new Set<string>();
+  readonly insertCalls: string[] = [];
+
+  async insert(profileUuid: string): Promise<void> {
+    this.insertCalls.push(profileUuid);
+    this.stored.add(profileUuid);
+  }
+
+  async loadAll(): Promise<string[]> {
+    return [...this.stored];
+  }
+}
 
 /**
  * #6148 round 4 — the DEFAULT deployment forwards `setToolEnabled` through
@@ -98,7 +117,7 @@ describe("setToolEnabled through the daemon-proxy loopback hop (#6148 round 4)",
   /** One simulated internal loopback MCP session (what socketServer.ts spins up per distinct clientKey), backed by its own createMcpServer() instance but sharing the given registry AND tool-selection service. */
   async function makeLoopbackClient(
     sessionId: string,
-    toolSelectionProfileRegistry: InMemoryToolSelectionProfileRegistry,
+    toolSelectionProfileRegistry: ToolSelectionProfileRegistry,
     sessionToolSelectionService: ReturnType<typeof makeSharedToolSelectionService>,
   ): Promise<Client> {
     const server = createMcpServer({
@@ -242,5 +261,50 @@ describe("setToolEnabled through the daemon-proxy loopback hop (#6148 round 4)",
     expect(result.isError).toBe(true);
     const text = result.content?.find((c) => c.type === "text")?.text ?? "";
     expect(text).toContain("is not an active daemon session");
+  });
+
+  test("reaffirming a minted profile does not grow durable provenance", async () => {
+    const store = new FakeToolSelectionProfileProvenanceStore();
+    const sharedRegistry = new PersistentToolSelectionProfileRegistry(store);
+    const sharedService = makeSharedToolSelectionService();
+    const sharedDefaultClient = await makeLoopbackClient(
+      "internal-shared-default-reaffirm",
+      sharedRegistry,
+      sharedService,
+    );
+    const sessionScopedClient = await makeLoopbackClient(
+      "internal-session-scoped-reaffirm",
+      sharedRegistry,
+      sharedService,
+    );
+    const proxyClient = await makeProxyClient(sharedDefaultClient, sessionScopedClient);
+
+    const mintResult = (await proxyClient.request(
+      {
+        method: "tools/call",
+        params: { name: "setToolEnabled", arguments: { toolName: "clipboard", enabled: true } },
+      },
+      z.any(),
+    )) as { isError?: boolean; content?: Array<{ type: string; text?: string }> };
+    expect(mintResult.isError ?? false).toBe(false);
+    const mintedProfileUuid = JSON.parse(
+      mintResult.content?.find((content) => content.type === "text")?.text ?? "{}",
+    ).sessionUuid as string;
+
+    for (const enabled of [false, true]) {
+      const reaffirmResult = (await proxyClient.request(
+        {
+          method: "tools/call",
+          params: {
+            name: "setToolEnabled",
+            arguments: { toolName: "clipboard", enabled, sessionUuid: mintedProfileUuid },
+          },
+        },
+        z.any(),
+      )) as { isError?: boolean };
+      expect(reaffirmResult.isError ?? false).toBe(false);
+    }
+
+    expect(store.insertCalls).toEqual([mintedProfileUuid]);
   });
 });

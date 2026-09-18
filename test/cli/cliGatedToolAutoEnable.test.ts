@@ -1,25 +1,60 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import {
   runCliCommand,
   setDaemonProxyFactoryForTesting,
   resetDaemonProxyFactoryForTesting,
 } from "../../src/cli";
+import { cliToolSelectionProfilePath } from "../../src/cli/cliToolSelectionProfile";
 
 /**
  * A `--cli` invocation is a trusted local operator action and must NEVER require a
  * separate `setToolEnabled` step. The CLI transparently enables a gated tool
- * (`defaultEnabled: false`, e.g. `deleteDevice`) on its one-shot proxy connection
- * before the call, and leaves default-enabled tools untouched.
+ * (`defaultEnabled: false`, e.g. `deleteDevice`) before the call using one stable
+ * profile per CLI data directory.
  */
 describe("CLI transparently enables gated tools", () => {
-  afterEach(() => {
-    resetDaemonProxyFactoryForTesting();
+  let dataDir: string;
+  let previousDataDir: string | undefined;
+
+  beforeEach(() => {
+    previousDataDir = process.env.AUTOMOBILE_DATA_DIR;
+    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "cli-tool-selection-profile-"));
+    process.env.AUTOMOBILE_DATA_DIR = dataDir;
   });
 
-  function recordProxy(calls: Array<{ name: string; params: unknown }>) {
+  afterEach(() => {
+    resetDaemonProxyFactoryForTesting();
+    if (previousDataDir === undefined) {
+      delete process.env.AUTOMOBILE_DATA_DIR;
+    } else {
+      process.env.AUTOMOBILE_DATA_DIR = previousDataDir;
+    }
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  function recordProxy(
+    calls: Array<{ name: string; params: unknown }>,
+    callToolOverride?: (name: string, params: Record<string, unknown>) => Promise<any>,
+  ) {
     setDaemonProxyFactoryForTesting((): any => ({
       callTool: async (name: string, params: unknown): Promise<any> => {
         calls.push({ name, params });
+        if (callToolOverride) {
+          return callToolOverride(name, params as Record<string, unknown>);
+        }
+        if (name === "setToolEnabled") {
+          return {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({ sessionUuid: "11111111-1111-4111-8111-111111111111" }),
+              },
+            ],
+          };
+        }
         return { content: [{ type: "text", text: "{}" }] };
       },
       adoptCliSessionLiveness: async (): Promise<string | undefined> => "session-cli",
@@ -123,19 +158,119 @@ describe("CLI transparently enables gated tools", () => {
     });
   });
 
-  test("does NOT pre-enable a default-enabled tool", async () => {
+  test("reuses one minted profile across separate CLI invocations", async () => {
     const calls: Array<{ name: string; params: unknown }> = [];
     recordProxy(calls);
 
-    const exitSpy = spyOn(process, "exit").mockImplementation((() => undefined) as never);
-    try {
-      await runCliCommand(["listDevices", "--platform", "android"]);
-    } finally {
-      exitSpy.mockRestore();
-    }
+    await runCliCommand(["listDevices", "--platform", "android"]);
+    expect(calls[0]).toMatchObject({ name: "setToolEnabled", params: { toolName: "listDevices" } });
+    expect(calls[0].params).not.toHaveProperty("sessionUuid");
+    expect(calls[1].name).toBe("listDevices");
+
+    const secondCalls: Array<{ name: string; params: unknown }> = [];
+    recordProxy(secondCalls);
+    await runCliCommand(["listDevices", "--platform", "android"]);
+
+    expect(secondCalls[0]).toMatchObject({
+      name: "setToolEnabled",
+      params: {
+        toolName: "listDevices",
+        sessionUuid: "11111111-1111-4111-8111-111111111111",
+      },
+    });
+    expect(secondCalls[1].name).toBe("listDevices");
+  });
+
+  test("pre-enables a default-enabled tool disabled by effective startup config", async () => {
+    const calls: Array<{ name: string; params: unknown }> = [];
+    const enabledTools = new Set<string>();
+    recordProxy(calls, async (name, params) => {
+      if (name === "setToolEnabled") {
+        enabledTools.add(String(params.toolName));
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({ sessionUuid: "11111111-1111-4111-8111-111111111111" }),
+            },
+          ],
+        };
+      }
+      if (name === "listDevices" && !enabledTools.has("listDevices")) {
+        throw new Error("listDevices is disabled");
+      }
+      return { content: [{ type: "text", text: "{}" }] };
+    });
+
+    await runCliCommand(["listDevices", "--platform", "android"]);
 
     const names = calls.map((c) => c.name);
-    expect(names).not.toContain("setToolEnabled");
-    expect(names).toEqual(["listDevices"]);
+    expect(names).toEqual(["setToolEnabled", "listDevices"]);
+    expect(calls[0].params).toMatchObject({ toolName: "listDevices", enabled: true });
+  });
+
+  test("re-mints when the persisted profile is stale/rejected by the daemon", async () => {
+    const staleProfileUuid = "33333333-3333-4333-8333-333333333333";
+    const freshProfileUuid = "22222222-2222-4222-8222-222222222222";
+    fs.mkdirSync(path.dirname(cliToolSelectionProfilePath(process.env)), { recursive: true });
+    fs.writeFileSync(cliToolSelectionProfilePath(process.env), staleProfileUuid);
+    const calls: Array<{ name: string; params: unknown }> = [];
+    recordProxy(calls, async (name, params) => {
+      if (name === "setToolEnabled" && params.sessionUuid === staleProfileUuid) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text: "sessionUuid must identify this connection's active tool-selection or routing session profile.",
+            },
+          ],
+        };
+      }
+      if (name === "setToolEnabled") {
+        expect(params).not.toHaveProperty("sessionUuid");
+        return {
+          content: [{ type: "text", text: JSON.stringify({ sessionUuid: freshProfileUuid }) }],
+        };
+      }
+      return { content: [{ type: "text", text: "{}" }] };
+    });
+
+    await runCliCommand(["listDevices", "--platform", "android"]);
+
+    expect(calls.map((call) => call.name)).toEqual([
+      "setToolEnabled",
+      "setToolEnabled",
+      "listDevices",
+    ]);
+    expect(calls[0].params).toMatchObject({ sessionUuid: staleProfileUuid });
+    expect(calls[1].params).not.toHaveProperty("sessionUuid");
+    expect(fs.readFileSync(cliToolSelectionProfilePath(process.env), "utf8")).toBe(
+      freshProfileUuid,
+    );
+  });
+
+  test("treats a corrupted persisted profile file as absent and mints fresh", async () => {
+    const freshProfileUuid = "44444444-4444-4444-8444-444444444444";
+    fs.mkdirSync(path.dirname(cliToolSelectionProfilePath(process.env)), { recursive: true });
+    fs.writeFileSync(cliToolSelectionProfilePath(process.env), "not-a-uuid");
+    const calls: Array<{ name: string; params: unknown }> = [];
+    recordProxy(calls, async (name, params) => {
+      if (name === "setToolEnabled") {
+        expect(params).not.toHaveProperty("sessionUuid");
+        return {
+          content: [{ type: "text", text: JSON.stringify({ sessionUuid: freshProfileUuid }) }],
+        };
+      }
+      return { content: [{ type: "text", text: "{}" }] };
+    });
+
+    await runCliCommand(["listDevices", "--platform", "android"]);
+
+    expect(calls.map((call) => call.name)).toEqual(["setToolEnabled", "listDevices"]);
+    expect(calls[0].params).not.toHaveProperty("sessionUuid");
+    expect(fs.readFileSync(cliToolSelectionProfilePath(process.env), "utf8")).toBe(
+      freshProfileUuid,
+    );
   });
 });

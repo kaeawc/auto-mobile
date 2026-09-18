@@ -1,7 +1,10 @@
 import { toJSONSchema } from "zod/v4";
 import { errorMessage } from "../utils/describeUnknownError";
 import { ToolRegistry } from "../server/toolRegistry";
-import { SET_TOOL_ENABLED_TOOL_NAME } from "../features/toolSelection/toolSelectionControl";
+import {
+  SET_TOOL_ENABLED_TOOL_NAME,
+  toolSelectionProfileUuidFromResponse,
+} from "../features/toolSelection/toolSelectionControl";
 import { logger } from "../utils/logger";
 import { ActionableError } from "../models";
 import { DaemonClient, DaemonUnavailableError } from "../daemon/client";
@@ -25,6 +28,10 @@ import { getDefaultToolOutputsDir } from "../utils/toolOutputArtifacts";
 import { serverConfig } from "../utils/ServerConfig";
 import { cliStderr, cliStdout, renderCliToolOutput, type CliByteSink } from "./toolOutput";
 import type { CliTerminationRequest } from "./termination";
+import {
+  loadPersistedCliToolSelectionProfile,
+  persistCliToolSelectionProfile,
+} from "./cliToolSelectionProfile";
 
 // Import all tool registration functions
 import { registerObserveTools } from "../server/observeTools";
@@ -421,34 +428,56 @@ export function resetDaemonProxyFactoryForTesting(): void {
 
 /**
  * A `--cli` invocation is a trusted, deliberate local operator action, so it must
- * NEVER require a separate `setToolEnabled` step: `--cli <tool>` always runs. A
- * tool a fresh connection gates off (`defaultEnabled: false`, e.g. `deleteDevice`)
- * is transparently enabled on THIS one-shot proxy's own connection profile before
- * the call. `setToolEnabled` is itself always enabled, and enabling then calling
- * over the same proxy connection resolves the same connection profile the daemon
- * checks in `assertToolEnabledForAnySession` (src/server/index.ts). Default-enabled
- * tools (the majority) skip the extra round-trip; `provisionDevice` is gated like
- * `deleteDevice` and goes through the pre-enable step. This is CLI-only: a remote MCP
- * client never runs this path,
- * so it opens no tool-gating bypass for non-CLI callers.
+ * NEVER require a separate `setToolEnabled` step: every tool except
+ * `setToolEnabled` is unconditionally pre-enabled. The first invocation mints one
+ * daemon-issued profile UUID and persists it through cliToolSelectionProfile.ts;
+ * later invocations reuse that UUID explicitly, never fabricating one, so the
+ * daemon mints at most one profile per CLI data directory. If the daemon rejects
+ * a persisted profile as stale, the CLI mints and persists a replacement once.
+ * This keeps the guarantee valid even when runtime-effective defaults differ from declarations.
+ * This is CLI-only: a remote MCP client never runs this path, so it opens no
+ * tool-gating bypass for non-CLI callers.
  */
 async function ensureCliToolEnabled(proxy: CliDaemonProxy, toolName: string): Promise<void> {
   if (toolName === SET_TOOL_ENABLED_TOOL_NAME) {
     return;
   }
-  initializeCliTools();
-  const registered = ToolRegistry.getRegisteredTool(toolName);
-  // Fail toward enabling when the CLI roster drifts from the production roster.
-  if (registered && registered.defaultEnabled !== false) {
-    return;
+  const persistedProfileUuid = loadPersistedCliToolSelectionProfile();
+  const params: Record<string, unknown> = { toolName, enabled: true };
+  if (persistedProfileUuid) {
+    params.sessionUuid = persistedProfileUuid;
   }
   try {
-    await proxy.callTool(SET_TOOL_ENABLED_TOOL_NAME, { toolName, enabled: true });
+    const result = await proxy.callTool(SET_TOOL_ENABLED_TOOL_NAME, params);
+    const returnedProfileUuid = toolSelectionProfileUuidFromResponse(result);
+    if (!persistedProfileUuid && returnedProfileUuid) {
+      persistCliToolSelectionProfile(returnedProfileUuid);
+    }
+    if (!persistedProfileUuid) {
+      return;
+    }
+
+    const reaffirmFailed =
+      result?.isError === true ||
+      returnedProfileUuid === undefined ||
+      returnedProfileUuid !== persistedProfileUuid;
+    if (!reaffirmFailed) {
+      return;
+    }
+
+    logger.debug(
+      `CLI tool-selection profile ${persistedProfileUuid} is stale; re-minting a profile`,
+    );
+    const retryResult = await proxy.callTool(SET_TOOL_ENABLED_TOOL_NAME, {
+      toolName,
+      enabled: true,
+    });
+    const remintedProfileUuid = toolSelectionProfileUuidFromResponse(retryResult);
+    if (remintedProfileUuid) {
+      persistCliToolSelectionProfile(remintedProfileUuid);
+    }
   } catch (error) {
-    // Non-fatal: fall through to the actual tool call, which surfaces the real
-    // gate error if enabling genuinely could not apply (e.g. a tool the daemon
-    // does not treat as user-configurable). Swallowing here only avoids masking
-    // that actionable reason with a pre-step failure.
+    // Non-fatal: the actual tool call surfaces the real gate error if enabling failed.
     logger.debug(`CLI pre-enable of ${toolName} did not apply: ${errorMessage(error)}`);
   }
 }

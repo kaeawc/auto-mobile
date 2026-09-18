@@ -57,8 +57,8 @@ describe("runCliCommand never requests progress relay (issue #6222 reopen)", () 
       ]),
     ]);
 
-    expect(calls).toHaveLength(1);
-    const [toolName, , progressToken, onProgress] = calls[0];
+    expect(calls).toHaveLength(2);
+    const [toolName, , progressToken, onProgress] = calls[1];
     expect(toolName).toBe("setUIState");
     // The bug: neither of these is ever populated on this transport, so the
     // daemon has nothing to extend its deadline on no matter how long the

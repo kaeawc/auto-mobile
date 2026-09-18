@@ -1,4 +1,7 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import {
   runCliCommand,
   setDaemonProxyFactoryForTesting,
@@ -17,17 +20,40 @@ import { DEVICE_SESSION_ACQUISITION_TOOLS } from "../../src/server/deviceSession
  */
 describe("CLI --session-uuid with device-session acquisition tools", () => {
   const calls: Array<{ toolName: string; params: Record<string, unknown> }> = [];
+  let dataDir: string;
+  let previousDataDir: string | undefined;
+
+  beforeEach(() => {
+    previousDataDir = process.env.AUTOMOBILE_DATA_DIR;
+    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "cli-acquisition-profile-"));
+    process.env.AUTOMOBILE_DATA_DIR = dataDir;
+  });
 
   afterEach(() => {
     calls.length = 0;
     resetDaemonProxyFactoryForTesting();
+    if (previousDataDir === undefined) {
+      delete process.env.AUTOMOBILE_DATA_DIR;
+    } else {
+      process.env.AUTOMOBILE_DATA_DIR = previousDataDir;
+    }
+    fs.rmSync(dataDir, { recursive: true, force: true });
   });
 
   const installFakeProxy = (): void => {
     setDaemonProxyFactoryForTesting((): any => ({
       callTool: async (toolName: string, params: Record<string, unknown>): Promise<any> => {
         calls.push({ toolName, params });
-        return { success: true };
+        return toolName === "setToolEnabled"
+          ? {
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify({ sessionUuid: "11111111-1111-4111-8111-111111111111" }),
+                },
+              ],
+            }
+          : { success: true };
       },
       adoptCliSessionLiveness: async (): Promise<string | undefined> => undefined,
       close: async (): Promise<void> => {
@@ -41,12 +67,8 @@ describe("CLI --session-uuid with device-session acquisition tools", () => {
     async (toolName) => {
       installFakeProxy();
       await runCliCommand(["--session-uuid", "session-abc", toolName]);
-      // provisionDevice is gated, so CLI pre-enable adds a leading setToolEnabled call.
-      expect(calls).toHaveLength(toolName === "provisionDevice" ? 2 : 1);
-      if (toolName === "provisionDevice") {
-        expect(calls[0].toolName).toBe("setToolEnabled");
-        expect(calls[0].params.toolName).toBe("provisionDevice");
-      }
+      expect(calls).toHaveLength(2);
+      expect(calls[0].toolName).toBe("setToolEnabled");
       const actualCall = calls[calls.length - 1];
       expect(actualCall.toolName).toBe(toolName);
       expect(actualCall.params).not.toHaveProperty("sessionUuid");
@@ -56,8 +78,10 @@ describe("CLI --session-uuid with device-session acquisition tools", () => {
   test("still injects sessionUuid for a non-acquisition tool", async () => {
     installFakeProxy();
     await runCliCommand(["--session-uuid", "session-abc", "observe"]);
-    expect(calls).toHaveLength(1);
-    expect(calls[0].params.sessionUuid).toBe("session-abc");
+    expect(calls).toHaveLength(2);
+    expect(calls[0].toolName).toBe("setToolEnabled");
+    expect(calls[1].toolName).toBe("observe");
+    expect(calls[1].params.sessionUuid).toBe("session-abc");
   });
 
   test("help says acquisition tools mint their own session", async () => {

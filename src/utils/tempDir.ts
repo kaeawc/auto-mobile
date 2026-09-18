@@ -147,10 +147,14 @@ function ensureSecureDirectorySync(dir: string): string {
  * Synchronously ensure a secure temp directory exists with restrictive permissions.
  *
  * @param subdirectory - Subdirectory name under auto-mobile temp base
+ * @param env - Environment to read the data-directory override from
  * @returns Full path to the created/existing temp directory
  */
-export function ensureSecureTempDirSync(subdirectory: string): string {
-  return ensureSecureDirectorySync(getTempDir(subdirectory));
+export function ensureSecureTempDirSync(
+  subdirectory: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  return ensureSecureDirectorySync(path.join(resolveAutoMobileBaseDir(env), subdirectory));
 }
 
 /**

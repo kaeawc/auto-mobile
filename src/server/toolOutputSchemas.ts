@@ -1018,6 +1018,7 @@ export const tapOnResultSchema = z
       .optional()
       .describe("Semantic accessibility link confirmed by the native runner"),
     selectedElements: z.array(selectedElementSchema).optional(),
+    skipped: z.literal("already-checked").optional(),
     error: z.string().optional(),
     pressRecognized: z.boolean().optional(),
     contextMenuOpened: z.boolean().optional(),

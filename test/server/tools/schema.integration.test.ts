@@ -93,14 +93,31 @@ describe("MCP Tools Schema", () => {
     expect(duration?.minimum).toBe(0);
   });
 
-  test("should not publish top-level schema combinators", () => {
+  test("publishes no top-level schema combinators except tapOn's ensureChecked constraint", () => {
     const toolDefinitions = ToolRegistry.getToolDefinitions();
 
     for (const tool of toolDefinitions) {
       const schema = tool.inputSchema as any;
       expect(schema.anyOf, `${tool.name} should not publish top-level anyOf`).toBeUndefined();
       expect(schema.oneOf, `${tool.name} should not publish top-level oneOf`).toBeUndefined();
-      expect(schema.allOf, `${tool.name} should not publish top-level allOf`).toBeUndefined();
+      if (tool.name === "tapOn") {
+        expect(schema.allOf).toEqual([
+          {
+            if: {
+              required: ["ensureChecked"],
+              properties: { ensureChecked: { const: true } },
+            },
+            then: {
+              properties: {
+                action: { const: "tap" },
+                selectionStrategy: { not: { const: "random" } },
+              },
+            },
+          },
+        ]);
+      } else {
+        expect(schema.allOf, `${tool.name} should not publish top-level allOf`).toBeUndefined();
+      }
     }
   });
 

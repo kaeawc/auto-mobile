@@ -220,6 +220,26 @@ const tapOnSelectorSchema = z
     "Element to tap: elementId, Android testTag, text, semantic accessibility link, or ordered text variants",
   );
 
+function validateEnsureCheckedSchema(
+  value: Pick<TapOnArgs, "ensureChecked" | "action" | "selectionStrategy">,
+  ctx: z.RefinementCtx,
+): void {
+  if (value.ensureChecked !== undefined && value.action !== "tap") {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'ensureChecked requires action "tap"',
+      path: ["ensureChecked"],
+    });
+  }
+  if (value.ensureChecked !== undefined && value.selectionStrategy === "random") {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "ensureChecked cannot use random selection; use a unique selector or index",
+      path: ["ensureChecked"],
+    });
+  }
+}
+
 export const tapOnSchema = withJsonSchemaOverride(
   addDeviceTargetingToSchema(
     z
@@ -289,6 +309,12 @@ export const tapOnSchema = withJsonSchemaOverride(
           .optional()
           .describe("Retry once if the view hierarchy is unchanged after tap"),
         ensureTap: z.boolean().optional().describe("Enable preTapStability and retryIfNoChange"),
+        ensureChecked: z
+          .boolean()
+          .optional()
+          .describe(
+            'Skip tapping if the resolved toggle element\'s checked state already matches this value; otherwise tap and verify it flipped. Requires the element to have the toggle affordance and action "tap".',
+          ),
         // #5870: a `sessionUuid` resolves the platform, so `platform` is not
         // required — a device handle from getAndroid is sufficient on its own.
         platform: platformSchema.optional(),
@@ -296,6 +322,7 @@ export const tapOnSchema = withJsonSchemaOverride(
       })
       .strict(),
   ).superRefine((value, ctx) => {
+    validateEnsureCheckedSchema(value, ctx);
     const isDirectLink = "accessibilityLink" in value.selector;
     if (!isDirectLink && !value.subtext) {
       return;
@@ -322,8 +349,15 @@ export const tapOnSchema = withJsonSchemaOverride(
     addIssue(
       value.retryIfNoChange || value.ensureTap,
       "semantic link activation cannot retry an acknowledged link activation",
-      value.retryIfNoChange ? ["retryIfNoChange"] : ["ensureTap"],
+      value.retryIfNoChange
+        ? ["retryIfNoChange"]
+        : value.ensureTap
+          ? ["ensureTap"]
+          : ["ensureChecked"],
     );
+    addIssue(value.ensureChecked, "semantic link activation cannot ensure checked state", [
+      "ensureChecked",
+    ]);
     addIssue(value.searchUntil, "semantic link activation cannot use searchUntil", ["searchUntil"]);
     addIssue(
       value.subtext && value.index !== undefined,
@@ -354,6 +388,7 @@ export const tapOnSchema = withJsonSchemaOverride(
         sibling: { not: { const: true } },
         retryIfNoChange: { not: { const: true } },
         ensureTap: { not: { const: true } },
+        ensureChecked: { not: { const: true } },
         searchUntil: { not: {} },
       },
       allOf: [
@@ -379,6 +414,22 @@ export const tapOnSchema = withJsonSchemaOverride(
         },
       ],
     };
+    const allOf = Array.isArray(js.allOf) ? js.allOf : [];
+    js.allOf = [
+      ...allOf,
+      {
+        if: {
+          required: ["ensureChecked"],
+          properties: { ensureChecked: { const: true } },
+        },
+        then: {
+          properties: {
+            action: { const: "tap" },
+            selectionStrategy: { not: { const: "random" } },
+          },
+        },
+      },
+    ];
   },
 );
 
@@ -1561,6 +1612,16 @@ function buildTapOnSearchSummary(
     : undefined;
 }
 
+function buildTapOnSuccessMessage(
+  result: TapOnElementResult,
+  searchSummary: string | undefined,
+): string {
+  if (result.skipped === "already-checked") {
+    return `Skipped tap: toggle already checked state matches ensureChecked${searchSummary ? ` (${searchSummary})` : ""}`;
+  }
+  return buildTapOnResultMessage(result.selectedElement, searchSummary, result.activatedSubtext);
+}
+
 export async function tapOnHandler(
   device: BootedDevice,
   args: TapOnArgs,
@@ -1585,6 +1646,7 @@ export async function tapOnHandler(
       preTapStability: args.preTapStability,
       retryIfNoChange: args.retryIfNoChange,
       ensureTap: args.ensureTap,
+      ensureChecked: args.ensureChecked,
       subtext: args.subtext,
     },
     progress,
@@ -1598,7 +1660,7 @@ export async function tapOnHandler(
   // non-empty fallback (#4183 P4). The failure keeps the search summary so the
   // user still sees how long the selector was looked for before it missed.
   const message = result.success
-    ? buildTapOnResultMessage(result.selectedElement, searchSummary, result.activatedSubtext)
+    ? buildTapOnSuccessMessage(result, searchSummary)
     : `Failed to tap: ${result.error || "unknown error"}${searchSummary ? ` (${searchSummary})` : ""}`;
   const payload = { message, observation: result.observation, ...result };
   const response: StructuredToolResponse<typeof payload> & { isError?: true } =

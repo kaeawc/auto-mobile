@@ -107,6 +107,7 @@ export interface TapOnArgs {
   preTapStability?: boolean;
   retryIfNoChange?: boolean;
   ensureTap?: boolean;
+  ensureChecked?: boolean;
   subtext?: {
     text: string;
     occurrence?: number;

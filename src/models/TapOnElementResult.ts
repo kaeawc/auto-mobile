@@ -41,6 +41,7 @@ export interface TapOnSelectedElement {
 export interface TapOnElementResult extends BaseActionResult {
   action: string;
   element: Element;
+  skipped?: "already-checked";
   effect?: TapEffect;
   /** Semantic link confirmed by the native runner. */
   activatedSubtext?: {

@@ -12303,6 +12303,10 @@
           "description": "Enable preTapStability and retryIfNoChange",
           "type": "boolean"
         },
+        "ensureChecked": {
+          "description": "Skip tapping if the resolved toggle element's checked state already matches this value; otherwise tap and verify it flipped. Requires the element to have the toggle affordance and action \"tap\".",
+          "type": "boolean"
+        },
         "platform": {
           "type": "string",
           "enum": ["android", "ios"]
@@ -12364,6 +12368,11 @@
               "const": true
             }
           },
+          "ensureChecked": {
+            "not": {
+              "const": true
+            }
+          },
           "searchUntil": {
             "not": {}
           }
@@ -12404,7 +12413,31 @@
             }
           }
         ]
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": ["ensureChecked"],
+            "properties": {
+              "ensureChecked": {
+                "const": true
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "action": {
+                "const": "tap"
+              },
+              "selectionStrategy": {
+                "not": {
+                  "const": "random"
+                }
+              }
+            }
+          }
+        }
+      ]
     },
     "outputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -15127,6 +15160,10 @@
             },
             "additionalProperties": {}
           }
+        },
+        "skipped": {
+          "type": "string",
+          "const": "already-checked"
         },
         "error": {
           "type": "string"

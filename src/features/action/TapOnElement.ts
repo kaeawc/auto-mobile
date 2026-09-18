@@ -291,6 +291,12 @@ export class TapOnElement extends BaseVisualChange {
   }
 
   private validateOptions(options: TapOnElementOptions): string | null {
+    if (options.ensureChecked !== undefined && options.action !== "tap") {
+      return 'tapOn ensureChecked requires action "tap"';
+    }
+    if (options.ensureChecked !== undefined && options.selectionStrategy === "random") {
+      return "tapOn ensureChecked cannot use random selection; use a unique selector or index";
+    }
     const selectorCount = [
       options.text,
       options.elementId,
@@ -346,6 +352,10 @@ export class TapOnElement extends BaseVisualChange {
       {
         invalid: Boolean(options.retryIfNoChange ?? options.ensureTap),
         error: "tapOn semantic link activation cannot retry an acknowledged link activation",
+      },
+      {
+        invalid: options.ensureChecked !== undefined,
+        error: "tapOn semantic link activation cannot ensure checked state",
       },
       {
         invalid: options.searchUntil,
@@ -1680,6 +1690,86 @@ export class TapOnElement extends BaseVisualChange {
     );
   }
 
+  private elementAffordances(element: Element): string[] {
+    const affordances: string[] = [];
+    if (this.isClickableElement(element)) {
+      affordances.push("tap");
+    }
+    if (this.isLongClickableElement(element)) {
+      affordances.push("long-press");
+    }
+    const className = typeof element.class === "string" ? element.class : "";
+    if (
+      isTruthyFlag(element.focusable) &&
+      (className.includes("EditText") ||
+        (typeof element["input-type"] === "string" && element["input-type"].trim() !== ""))
+    ) {
+      affordances.push("input");
+    }
+    if (isTruthyFlag(element.scrollable)) {
+      affordances.push("scroll");
+    }
+    if (isTruthyFlag(element.checkable)) {
+      affordances.push("toggle");
+    }
+    return affordances;
+  }
+
+  private elementIdentity(element: Element): string {
+    return (
+      element.text ??
+      element["resource-id"] ??
+      element["testTag"] ??
+      element["test-tag"] ??
+      element["content-desc"] ??
+      "unidentified element"
+    );
+  }
+
+  private ensureCheckedBeforeTap(
+    options: TapOnElementOptions,
+    element: Element,
+    selectedElement: TapOnSelectedElement | undefined,
+    searchUntil: SearchUntilStats,
+  ): TapOnElementResult | undefined {
+    if (options.ensureChecked === undefined) {
+      return undefined;
+    }
+    if (!isTruthyFlag(element.checkable)) {
+      const affordances = this.elementAffordances(element);
+      throw new ActionableError(
+        `tapOn ensureChecked requires a toggle element; ${this.elementIdentity(element)} has affordances: ${affordances.join(", ") || "none"}`,
+      );
+    }
+    if (isTruthyFlag(element.checked) !== options.ensureChecked) {
+      return undefined;
+    }
+    return {
+      success: true,
+      action: options.action,
+      element,
+      selectedElement,
+      searchUntil,
+      skipped: "already-checked",
+    };
+  }
+
+  private ensureCheckedAfterTap(
+    options: TapOnElementOptions,
+    observation: ObserveResult,
+  ): string | undefined {
+    if (options.ensureChecked === undefined) {
+      return undefined;
+    }
+    const refound = observation.viewHierarchy
+      ? this.findElementInHierarchy(options, observation.viewHierarchy).selection.element
+      : undefined;
+    const observed = refound ? isTruthyFlag(refound.checked) : "not found";
+    return observed === options.ensureChecked
+      ? undefined
+      : `tapOn ensureChecked: tapped element but checked is now ${observed} (expected ${options.ensureChecked})`;
+  }
+
   private nodeMatchesElement(
     target: Element,
     props: Record<string, unknown>,
@@ -1930,6 +2020,16 @@ export class TapOnElement extends BaseVisualChange {
           const selection = searchOutcome.selection;
           const element = selection.element as Element;
           let selectedElementMetadata = this.buildSelectedElementMetadata(selection);
+          const ensureCheckedResult = this.ensureCheckedBeforeTap(
+            options,
+            element,
+            selectedElementMetadata,
+            searchOutcome.stats,
+          );
+          if (ensureCheckedResult) {
+            perf.end();
+            return ensureCheckedResult;
+          }
           if (options.subtext) {
             const occurrence = options.subtext.occurrence ?? 0;
             const activation = await this.activateSemanticLink(
@@ -2021,6 +2121,24 @@ export class TapOnElement extends BaseVisualChange {
               selectedElementMetadata,
               stable.selection,
             );
+            const stableElement = stable.selection.element;
+            if (!stableElement) {
+              perf.end();
+              return {
+                success: false,
+                error: "Android tap aborted: refreshed stable target selection was empty",
+              };
+            }
+            const ensureCheckedResult = this.ensureCheckedBeforeTap(
+              options,
+              stableElement,
+              selectedElementMetadata,
+              searchOutcome.stats,
+            );
+            if (ensureCheckedResult) {
+              perf.end();
+              return ensureCheckedResult;
+            }
           }
 
           this.logClickableParentSelection(usedParent);
@@ -2139,6 +2257,11 @@ export class TapOnElement extends BaseVisualChange {
         // The observation that established the effect must be returned and become
         // the caller's diff baseline, rather than the earlier source capture.
         result.observation = postTap.observation;
+        const ensureCheckedError = this.ensureCheckedAfterTap(options, result.observation);
+        if (ensureCheckedError) {
+          result.success = false;
+          result.error = ensureCheckedError;
+        }
         await this.captureTerminalObservationScreenshot(result.observation, perf, signal);
         await this.recordDeferredPredictionOutcome(result, result.observation);
         const selectedElements = await this.selectionStateTracker.finalize({

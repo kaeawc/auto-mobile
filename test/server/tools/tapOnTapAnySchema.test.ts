@@ -104,6 +104,30 @@ describe("tapOn schema", () => {
     expect(result.sibling).toBe(true);
   });
 
+  test("accepts ensureChecked for toggle taps", () => {
+    const result = tapOnSchema.parse({
+      platform: "android",
+      selector: { text: "Wi-Fi" },
+      ensureChecked: true,
+    });
+    expect(result.ensureChecked).toBe(true);
+  });
+
+  test.each([
+    ["a non-tap action", { action: "longPress" }],
+    ["random selection", { selectionStrategy: "random" }],
+  ])("rejects ensureChecked with %s", (_label, incompatible) => {
+    const issue = zodIssues(() =>
+      tapOnSchema.parse({
+        platform: "android",
+        selector: { text: "Wi-Fi" },
+        ensureChecked: true,
+        ...incompatible,
+      }),
+    ).find((candidate) => candidate.path[0] === "ensureChecked");
+    expect(issue).toBeDefined();
+  });
+
   test("sibling defaults to undefined when omitted", () => {
     const result = tapOnSchema.parse({
       platform: "android",
@@ -127,6 +151,7 @@ describe("tapOn schema", () => {
     ["non-tap action", { action: "focus" }],
     ["retry", { retryIfNoChange: true }],
     ["ensure", { ensureTap: true }],
+    ["ensureChecked", { ensureChecked: true }],
     ["searchUntil", { searchUntil: { duration: 500 } }],
   ] as const)("rejects semantic links with %s", (_label, target) => {
     expect(() =>

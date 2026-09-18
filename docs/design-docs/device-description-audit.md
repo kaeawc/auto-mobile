@@ -229,27 +229,35 @@ same `configuredInventory`, and a `provisioningCatalog` (`runtimes`,
   `formFactor: null`). The lifecycle table above promises "admitted image,
   discovery, then config" for booted devices; live data shows none of the three
   emulators had an admitted image attached (all idle, incarnations `#1`–`#3`),
-  so the booted projection fell through to nulls.
+  so the booted projection fell through to nulls. (fixed in this PR: booted
+  projections now use the completed configured-image inventory after admitted
+  image and discovery facts are unavailable.)
 - **iOS `runtime.runtimeId` and `runtime.deviceType`** are populated on the
   image surfaces and `null` on both booted surfaces for the same simulator.
-  `runtime.osVersion "26.5"` agrees everywhere.
+  `runtime.osVersion "26.5"` agrees everywhere. (fixed in this PR: the same
+  configured-image fallback supplies simulator runtime and device-type ids.)
 - **`listDeviceImages` vs `automobile:devices/images` Android provenance.** The
   resource populates `provenance.android.{path,target,basedOn}` (and the
   `path`/`target`/`basedOn` aliases); the tool emits `null` for all six. The
   tool handler calls `describeDevice({ kind: "image", image })` without
   `androidProvenance` (`src/server/deviceTools.ts`, `listDeviceImagesHandler`).
+  (fixed in this PR: the tool now passes the AVD-manager provenance record into
+  the canonical description.)
 - **`listDevices` alias shape differs by platform.** Android entries have no
   `apiLevel`/`osVersion`/`formFactor` keys at all (conditional emission of
-  null/falsy values); iOS entries carry `osVersion` and `formFactor`.
+  null/falsy values); iOS entries carry `osVersion` and `formFactor`. (fixed in
+  this PR: all three aliases are always emitted and nullable on both platforms.)
 - **`identity.deviceSessionUuid`** is `null` on `listDevices` but a uuid on
   `devices/booted` for the same device; `listDevices` does not pass the
-  registry routing key into `describeDevice`.
+  registry routing key into `describeDevice`. (fixed in this PR: `listDevices`
+  now resolves the same DeviceSessionRegistry routing key.)
 - **Image `state` alias is lowercase `"booted"`** on both platforms on this
   build, identical to `lifecycle.state`, while `xcrun simctl` reports `Booted`.
   This is the pre-#7238 behaviour (`state: description.lifecycle.state`); main
   now emits `image.state ?? null`. The raw-token value on main was not observed.
 - **`iosVersion` alias on Android images** is `"16"` (the Android
-  `runtime.osVersion`), so the alias name does not describe its content.
+  `runtime.osVersion`), so the alias name does not describe its content. (fixed
+  in this PR: Android image aliases now emit `iosVersion: null`.)
 - **`locked` for iOS**: `devices/booted` emits `locked: null`; `devices/lockStates`
   omits the key. Android is `false` on both.
 - **Readiness spelling**: `devices/booted` emits `unknown`, `not_ready`, and
@@ -257,7 +265,9 @@ same `configuredInventory`, and a `provisioningCatalog` (`runtimes`,
   clash was observable.
 - **`capabilityInventory` for Android**: `null` on `devices/booted`, three
   `avd_config` entries on the image surfaces, for the same AVD. iOS agrees
-  across surfaces (five synthesized `platform` entries).
+  across surfaces (five synthesized `platform` entries). (fixed in this PR:
+  the configured-image fallback carries the existing AVD capability inventory
+  into booted descriptions.)
 
 ### Uncertain items: what the live data shows
 

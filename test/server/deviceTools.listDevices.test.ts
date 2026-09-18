@@ -9,12 +9,14 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import type { BootedDevice } from "../../src/models";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
+import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { defaultTimer } from "../../src/utils/SystemTimer";
 
 const resolveWithFakeTimer = async <T>(
   promise: Promise<T>,
@@ -358,6 +360,62 @@ describe("listDevices tool (#5870)", () => {
     expect(payload.devices[0].runtime.osVersion).toBeNull();
   });
 
+  test("uses configured image facts when an idle booted Android device has no admitted image", async () => {
+    fakeDeviceUtils.setDeviceImages("android", [
+      {
+        name: android.name,
+        platform: "android",
+        isRunning: true,
+        apiLevel: 36,
+        osVersion: "16",
+        screenWidth: 1080,
+        screenHeight: 2400,
+        screenDensity: 420,
+        formFactor: "phone",
+      },
+    ]);
+
+    const payload = await callListDevices({ platform: "android" });
+
+    expect(payload.devices[0]).toMatchObject({
+      runtime: { apiLevel: 36, osVersion: "16" },
+      display: { formFactor: "phone" },
+      apiLevel: 36,
+      osVersion: "16",
+      formFactor: "phone",
+    });
+  });
+
+  test("does not wait for hung configured image fallback discovery", async () => {
+    const timer = new FakeTimer();
+    fakeDeviceUtils.setListDeviceImagesHangs("android", true);
+    setDeviceToolsDependencies({ timer });
+
+    try {
+      const tool = ToolRegistry.getTool("listDevices");
+      expect(tool).toBeDefined();
+      const response = await resolveWithFakeTimer(
+        tool!.handler({ platform: "android" }),
+        timer,
+        2_000,
+      );
+      const payload = JSON.parse(response.content?.[0]?.text ?? "{}");
+      const configuredDiscoveryCall = fakeDeviceUtils.getGetDeviceImagesDetailedCalls().at(-1);
+
+      expect(payload.devices[0].runtime.apiLevel).toBeNull();
+      expect(configuredDiscoveryCall).toEqual(
+        expect.objectContaining({
+          platform: "android",
+          options: expect.objectContaining({ signal: expect.any(AbortSignal) }),
+        }),
+      );
+      expect(configuredDiscoveryCall?.options.signal?.aborted).toBe(true);
+    } finally {
+      fakeDeviceUtils.setListDeviceImagesHangs("android", false);
+      setDeviceToolsDependencies({ timer: defaultTimer });
+    }
+  });
+
   test("reports Android API and release metadata retained at device admission", async () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
@@ -419,6 +477,37 @@ describe("listDevices tool (#5870)", () => {
     }
   });
 
+  test("reports the registry device-session UUID", async () => {
+    const timer = new FakeTimer();
+    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      fakeDeviceUtils,
+      new DefaultRetryExecutor(timer),
+    );
+    const registry = new DeviceSessionRegistry(timer);
+    registry.onDeviceConnected({
+      deviceId: android.deviceId,
+      platform: "android",
+      incarnation: 1,
+    });
+    DaemonState.getInstance().initialize(sessionManager, pool, registry);
+    await pool.addDevice(android, { platform: "android", name: android.name, isRunning: true });
+
+    try {
+      const payload = await callListDevices({ platform: "android" });
+      expect(payload.devices[0].identity.deviceSessionUuid).toBe(
+        registry.getByDeviceId(android.deviceId)?.deviceSessionUuid,
+      );
+    } finally {
+      DaemonState.getInstance().reset();
+      sessionManager.stopCleanupTimer();
+    }
+  });
+
   test("withholds stale Android metadata after discovery quarantines a reused serial", async () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
@@ -437,7 +526,13 @@ describe("listDevices tool (#5870)", () => {
       apiLevel: 36,
       osVersion: "16",
     };
-    DaemonState.getInstance().initialize(sessionManager, pool);
+    const registry = new DeviceSessionRegistry(timer);
+    registry.onDeviceConnected({
+      deviceId: android.deviceId,
+      platform: "android",
+      incarnation: 1,
+    });
+    DaemonState.getInstance().initialize(sessionManager, pool, registry);
     await pool.addDevice(android, admittedImage);
     const replacement = { ...android, name: "Pixel_9_API_35" };
     fakeDeviceUtils.setBootedDevices("android", [replacement]);
@@ -452,6 +547,7 @@ describe("listDevices tool (#5870)", () => {
       expect(pool.isPooledIdentityUnresolved(android.deviceId)).toBe(true);
       expect(device?.runtime.apiLevel).toBeNull();
       expect(device?.runtime.osVersion).toBeNull();
+      expect(device?.identity.deviceSessionUuid).toBeNull();
     } finally {
       DaemonState.getInstance().reset();
       sessionManager.stopCleanupTimer();

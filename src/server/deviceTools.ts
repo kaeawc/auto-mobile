@@ -37,8 +37,14 @@ import {
 } from "./deviceImageResources";
 import {
   createConfiguredInventoryContract,
+  configuredImageForBootedDevice,
+  configuredImagesByStableId,
   projectConfiguredDeviceInventory,
+  type StableConfiguredDeviceImage,
 } from "../utils/configuredDeviceInventory";
+import { AvdManagerService } from "../utils/android-cmdline-tools/AvdManagerService";
+import type { AvdManager } from "../utils/android-cmdline-tools/interfaces/AvdManager";
+import type { AvdInfo } from "../utils/android-cmdline-tools/avdmanager";
 import {
   describeDevice,
   projectBootedDevice,
@@ -46,6 +52,7 @@ import {
   projectListDevicesEntry,
   projectProvisionedDevice,
   listDevicesEntrySchema,
+  legacyIosVersion,
   provisionedDeviceSchema,
   configuredImageSchema,
   type DeviceDescription,
@@ -1031,7 +1038,11 @@ function androidBootedMetadata(
   };
 }
 
-function listDevicePayloads(booted: BootedDevice[], devicePool: DevicePool | undefined) {
+function listDevicePayloads(
+  booted: BootedDevice[],
+  devicePool: DevicePool | undefined,
+  configuredImages: ReadonlyMap<string, StableConfiguredDeviceImage>,
+) {
   return booted.map((device) => {
     const pooled = devicePool?.describesPooledRuntime(device)
       ? (devicePool.getDevice(device.deviceId) ?? undefined)
@@ -1040,7 +1051,9 @@ function listDevicePayloads(booted: BootedDevice[], devicePool: DevicePool | und
       kind: "booted",
       device,
       pooled,
+      configured: configuredImageForBootedDevice(device, configuredImages),
       session: pooled?.sessionId ? { sessionId: pooled.sessionId } : undefined,
+      deviceSessionUuid: pooled ? initializedDeviceSessionUuid(device.deviceId) : undefined,
     });
     return {
       ...projectListDevicesEntry(description),
@@ -1054,20 +1067,67 @@ function legacyListDevicesAliases(description: DeviceDescription) {
   return {
     // Deprecated alias for identity.deviceId.
     deviceId: description.identity.deviceId!,
-    // Deprecated alias for runtime.apiLevel; it was only emitted for known Android values.
-    ...(description.platform === "android" && description.runtime.apiLevel !== null
-      ? { apiLevel: description.runtime.apiLevel }
-      : {}),
-    // Deprecated alias for runtime.osVersion; it was only emitted for truthy values.
-    ...(description.runtime.osVersion ? { osVersion: description.runtime.osVersion } : {}),
-    // Deprecated alias for display.formFactor; it was only emitted for truthy values.
-    ...(description.display.formFactor ? { formFactor: description.display.formFactor } : {}),
+    // Deprecated aliases retain a platform-independent, always-present shape.
+    apiLevel: description.runtime.apiLevel,
+    osVersion: description.runtime.osVersion,
+    formFactor: description.display.formFactor,
   };
 }
 
 function initializedDevicePool(): DevicePool | undefined {
   const daemonState = DaemonState.getInstance();
   return daemonState.isInitialized() ? daemonState.getDevicePool() : undefined;
+}
+
+function initializedDeviceSessionUuid(deviceId: string): string | undefined {
+  const daemonState = DaemonState.getInstance();
+  if (!daemonState.isInitialized()) {
+    return undefined;
+  }
+  return daemonState.getDeviceSessionRegistry().getByDeviceId(deviceId)?.deviceSessionUuid;
+}
+
+// This is best-effort enrichment: a wedged `emulator -list-avds` must not hang listDevices.
+const CONFIGURED_IMAGE_FALLBACK_TIMEOUT_MS = 2_000;
+
+async function configuredImagesForBootedDevices(
+  deviceManager: PlatformDeviceManager,
+  booted: readonly BootedDevice[],
+  timer: Timer,
+): Promise<ReadonlyMap<string, StableConfiguredDeviceImage>> {
+  const images = new Map<string, StableConfiguredDeviceImage>();
+  const platforms = [...new Set(booted.map((device) => device.platform))];
+  await Promise.all(
+    platforms.map(async (platform) => {
+      const controller = new AbortController();
+      let timeoutHandle: NodeJS.Timeout | undefined;
+      try {
+        timeoutHandle = timer.setTimeout(() => {
+          controller.abort(
+            new Error(
+              `Configured ${platform} image inventory timed out after ${CONFIGURED_IMAGE_FALLBACK_TIMEOUT_MS}ms`,
+            ),
+          );
+        }, CONFIGURED_IMAGE_FALLBACK_TIMEOUT_MS);
+        const discovery = await deviceManager.getDeviceImagesDetailed(platform, {
+          signal: controller.signal,
+        });
+        for (const [key, image] of configuredImagesByStableId(platform, discovery)) {
+          images.set(key, image);
+        }
+      } catch (error) {
+        logger.warn(
+          `listDevices configured ${platform} image inventory failed: ${errorMessage(error)}`,
+          error,
+        );
+      } finally {
+        if (timeoutHandle) {
+          timer.clearTimeout(timeoutHandle);
+        }
+      }
+    }),
+  );
+  return images;
 }
 
 export interface ListDeviceImagesArgs {
@@ -1094,6 +1154,7 @@ function detailedDiscoveryOptions(
 export interface DeviceToolsDependencies {
   deviceResourceControllerFactory: () => DeviceResourceController;
   deviceManagerFactory: () => PlatformDeviceManager;
+  avdManagerFactory: () => Pick<AvdManager, "listDeviceImages">;
   deviceMatcherFactory: () => DeviceMatcher;
   notifyResourcesChanged: () => Promise<void>;
   notifyDeviceInventoryResourcesChanged: (installedAppResourcesChanged: boolean) => Promise<void>;
@@ -4533,6 +4594,7 @@ function getDeviceToolsDependencies(): DeviceToolsDependencies {
     moduleDependencies = {
       deviceResourceControllerFactory: () => new DefaultDeviceResourceController(),
       deviceManagerFactory: () => new MultiPlatformDeviceManager(),
+      avdManagerFactory: () => new AvdManagerService(),
       deviceMatcherFactory: () => new DefaultDeviceMatcher(),
       notifyResourcesChanged: defaultNotifyResourcesChanged,
       notifyDeviceInventoryResourcesChanged: defaultNotifyDeviceInventoryResourcesChanged,
@@ -4609,6 +4671,7 @@ export function setDeviceToolsDependencies(deps: Partial<DeviceToolsDependencies
     deviceResourceControllerFactory:
       deps.deviceResourceControllerFactory ?? currentDeps.deviceResourceControllerFactory,
     deviceManagerFactory: deps.deviceManagerFactory ?? currentDeps.deviceManagerFactory,
+    avdManagerFactory: deps.avdManagerFactory ?? currentDeps.avdManagerFactory,
     deviceMatcherFactory: deps.deviceMatcherFactory ?? currentDeps.deviceMatcherFactory,
     ...resourceNotificationDependencyOverrides(deps, currentDeps),
     ensureCtrlProxyReady: deps.ensureCtrlProxyReady ?? currentDeps.ensureCtrlProxyReady,
@@ -6152,6 +6215,20 @@ function availableDeviceResourceNote() {
   };
 }
 
+async function androidProvenanceByAvdName(
+  avdManager: Pick<AvdManager, "listDeviceImages">,
+): Promise<ReadonlyMap<string, AvdInfo>> {
+  try {
+    return new Map((await avdManager.listDeviceImages()).map((avd) => [avd.name, avd]));
+  } catch (error) {
+    logger.warn(
+      `listDeviceImages Android AVD provenance lookup failed: ${errorMessage(error)}`,
+      error,
+    );
+    return new Map();
+  }
+}
+
 export function registerDeviceTools() {
   // List AVDs handler
   const listDeviceImagesHandler = async (args: ListDeviceImagesArgs) => {
@@ -6165,8 +6242,16 @@ export function registerDeviceTools() {
       const configuredInventory = createConfiguredInventoryContract([args.platform], {
         [args.platform]: projection.observation,
       });
+      const androidProvenance =
+        args.platform === "android"
+          ? await androidProvenanceByAvdName(deps.avdManagerFactory())
+          : undefined;
       const images = projection.sourceImages.map((image) => {
-        const description = describeDevice({ kind: "image", image });
+        const description = describeDevice({
+          kind: "image",
+          image,
+          androidProvenance: androidProvenance?.get(image.name),
+        });
         return {
           ...projectConfiguredImage(description),
           ...legacyListDeviceImageAliases(description, image),
@@ -6209,7 +6294,7 @@ export function registerDeviceTools() {
       // Deprecated alias for provenance.ios.availabilityError.
       availabilityError: iosProvenance?.availabilityError ?? null,
       // Deprecated alias for runtime.osVersion.
-      iosVersion: description.runtime.osVersion,
+      iosVersion: legacyIosVersion(description),
       // Deprecated alias for runtime.deviceType.
       deviceType: description.runtime.deviceType,
       // `runtime` is canonical object data; its former string is legacyRuntimeId.
@@ -6229,7 +6314,8 @@ export function registerDeviceTools() {
     const platform: SomePlatform = args.platform ?? "either";
     const presentationOrder = acceptancePresentationOrder(args);
     const requestedPlatforms: Platform[] = platform === "either" ? ["android", "ios"] : [platform];
-    const deviceManager = getDeviceToolsDependencies().deviceManagerFactory();
+    const deps = getDeviceToolsDependencies();
+    const deviceManager = deps.deviceManagerFactory();
     let booted: BootedDevice[] = [];
     // #5893 item 4: `getBootedDevices` collapses a failed per-platform probe to
     // `[]`, so a transient tooling failure is indistinguishable from a genuinely
@@ -6280,7 +6366,12 @@ export function registerDeviceTools() {
         : {}),
     };
 
-    const devices = listDevicePayloads(booted, initializedDevicePool());
+    const configuredImages = await configuredImagesForBootedDevices(
+      deviceManager,
+      booted,
+      deps.timer,
+    );
+    const devices = listDevicePayloads(booted, initializedDevicePool(), configuredImages);
     const platformFilter = args.platform ? ` (${args.platform} only)` : "";
 
     return createStructuredToolResponse({

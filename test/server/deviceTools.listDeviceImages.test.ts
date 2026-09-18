@@ -12,6 +12,7 @@ import { FakeAdbClient } from "../fakes/FakeAdbClient";
 import type { AdbClient } from "../../src/utils/android-cmdline-tools/AdbClient";
 import type { AndroidEmulatorClient } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
+import { FakeAvdManager } from "../fakes/FakeAvdManager";
 
 describe("listDeviceImages", function () {
   afterEach(function () {
@@ -114,6 +115,7 @@ describe("listDeviceImages", function () {
     ]);
     setDeviceToolsDependencies({
       deviceManagerFactory: () => fakeDeviceManager,
+      avdManagerFactory: () => new FakeAvdManager(),
     });
     registerDeviceTools();
 
@@ -125,11 +127,50 @@ describe("listDeviceImages", function () {
     expect(tool.outputSchema.safeParse(payload).success).toBe(true);
   });
 
+  test("uses the AVD-manager provenance record for Android image descriptions", async function () {
+    const fakeDeviceManager = new FakeDeviceManager([
+      { name: "Pixel_8", platform: "android", isRunning: false, osVersion: "16" },
+    ]);
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => fakeDeviceManager,
+      avdManagerFactory: () => ({
+        listDeviceImages: async () => [
+          {
+            name: "Pixel_8",
+            path: "/tmp/Pixel_8.avd",
+            target: "Google APIs",
+            basedOn: "Android 16",
+          },
+        ],
+      }),
+    });
+    registerDeviceTools();
+
+    const response = await ToolRegistry.getRegisteredTool("listDeviceImages")!.handler({
+      platform: "android",
+    });
+    const image = JSON.parse(response.content[0].text).images[0];
+
+    expect(image.provenance.android).toEqual({
+      path: "/tmp/Pixel_8.avd",
+      target: "Google APIs",
+      basedOn: "Android 16",
+      error: null,
+    });
+    expect(image).toMatchObject({
+      path: "/tmp/Pixel_8.avd",
+      target: "Google APIs",
+      basedOn: "Android 16",
+      iosVersion: null,
+    });
+  });
+
   test("does not collapse a failed discovery into a complete empty inventory", async function () {
     const fakeDeviceManager = new FakeDeviceManager();
     fakeDeviceManager.failedPlatforms.add("android");
     setDeviceToolsDependencies({
       deviceManagerFactory: () => fakeDeviceManager,
+      avdManagerFactory: () => new FakeAvdManager(),
     });
     registerDeviceTools();
 
@@ -178,6 +219,7 @@ describe("listDeviceImages", function () {
     );
     setDeviceToolsDependencies({
       deviceManagerFactory: () => deviceManager,
+      avdManagerFactory: () => new FakeAvdManager(),
     });
     registerDeviceTools();
 

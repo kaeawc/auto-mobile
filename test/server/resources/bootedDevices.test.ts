@@ -21,6 +21,7 @@ import {
   DeviceLockStatesResourceContent,
   readinessFromServiceStatus,
   queryDeviceServiceStatus,
+  configuredImagesForBootedPlatform,
   type AndroidServiceStatusLookup,
   type CtrlProxyVersionLookup,
 } from "../../../src/server/bootedDeviceResources";
@@ -116,6 +117,36 @@ describe("MCP Booted Device Resources", () => {
     });
   });
 
+  test("uses configured image facts when a booted Android device has no admitted pool image", async () => {
+    fakeDeviceUtils.setBootedDevices("android", [mockAndroidDevice1]);
+    fakeDeviceUtils.setDeviceImages("android", [
+      {
+        name: mockAndroidDevice1.name,
+        platform: "android",
+        isRunning: true,
+        apiLevel: 36,
+        osVersion: "16",
+        screenWidth: 1080,
+        screenHeight: 2400,
+        screenDensity: 420,
+        formFactor: "phone",
+      },
+    ]);
+
+    const { client } = fixture.getContext();
+    const result = await client.readResource({ uri: "automobile:devices/booted/android" });
+    const data: BootedDevicesResourceContent = JSON.parse(result.contents[0].text!);
+
+    expect(data.devices).toEqual([
+      expect.objectContaining({
+        runtime: expect.objectContaining({ apiLevel: 36, osVersion: "16" }),
+        display: { width: 1080, height: 2400, density: 420, formFactor: "phone" },
+        legacyRuntimeVersion: "16",
+        formFactor: "phone",
+      }),
+    ]);
+  });
+
   test("preserves physical iOS completeness when simulator discovery fails", async () => {
     fakeDeviceUtils.failedSources.add("ios-simulator");
     const { client } = fixture.getContext();
@@ -132,6 +163,26 @@ describe("MCP Booted Device Resources", () => {
       "ios-simulator": { observationComplete: false },
       "ios-physical": { observationComplete: true },
     });
+  });
+
+  test("bounds hung configured image fallback discovery", async () => {
+    const timer = new FakeTimer();
+    fakeDeviceUtils.setListDeviceImagesHangs("android", true);
+
+    const configuredImages = configuredImagesForBootedPlatform("android", fakeDeviceUtils, timer);
+    timer.advanceTime(2_000);
+
+    expect(await configuredImages).toEqual(new Map());
+    expect(fakeDeviceUtils.getGetDeviceImagesDetailedCalls()).toEqual([
+      expect.objectContaining({
+        platform: "android",
+        options: expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      }),
+    ]);
+    expect(fakeDeviceUtils.getGetDeviceImagesDetailedCalls()[0]?.options.signal?.aborted).toBe(
+      true,
+    );
+    fakeDeviceUtils.setListDeviceImagesHangs("android", false);
   });
 
   describe("Resource Listing", () => {

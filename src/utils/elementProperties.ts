@@ -22,6 +22,24 @@ export function isClickableElementProperties(props: Record<string, unknown>): bo
   return isTruthyFlag(props.clickable) || hasAccessibilityAction(props.actions, "click");
 }
 
+/**
+ * Whether an element exposes a native or accessibility-backed editable input affordance.
+ * Focusable fields retain the skeleton affordance contract; class and action signals
+ * preserve coverage for incomplete Android hierarchy captures.
+ */
+export function isEditableElementProperties(props: Record<string, unknown>): boolean {
+  const nodeClass = props.class ?? props.className;
+  const hasInputClass =
+    typeof nodeClass === "string" &&
+    ANDROID_INPUT_CLASSES.some((inputClass) => nodeClass.includes(inputClass));
+  const hasInputType = typeof props["input-type"] === "string" && props["input-type"].trim() !== "";
+  return (
+    hasInputClass ||
+    hasAccessibilityAction(props.actions, "set_text") ||
+    (isTruthyFlag(props.focusable) && hasInputType)
+  );
+}
+
 export function buildContainerFromElement(
   element: Element,
 ): { elementId?: string; text?: string } | null {

@@ -71,6 +71,166 @@ describe("DefaultElementFinder", () => {
       expect(results[0].bounds.bottom).toBe(50);
     });
 
+    test("ranks matching inputs according to explicit selection intent", () => {
+      const hierarchy = makeHierarchy([
+        {
+          $: {
+            class: "android.widget.EditText",
+            text: "Dark theme",
+            clickable: "true",
+            bounds: bounds(0, 0, 100, 50),
+          },
+        },
+        {
+          $: {
+            class: "android.widget.TextView",
+            text: "Dark theme",
+            clickable: "true",
+            bounds: bounds(0, 50, 100, 100),
+          },
+        },
+      ]);
+
+      const focusResults = finder.findElementsByText(
+        hierarchy,
+        "Dark theme",
+        null,
+        true,
+        false,
+        false,
+        false,
+        "focus-input",
+      );
+      expect(focusResults).toHaveLength(2);
+      expect(focusResults[0].class).toBe("android.widget.EditText");
+
+      const tapResults = finder.findElementsByText(
+        hierarchy,
+        "Dark theme",
+        null,
+        true,
+        false,
+        false,
+        false,
+        "tap",
+      );
+      expect(tapResults[0].class).toBe("android.widget.TextView");
+
+      expect(finder.findElementByText(hierarchy, "Dark theme")!.class).toBe(
+        "android.widget.EditText",
+      );
+    });
+
+    test("demotes custom editable nodes for tap selection", () => {
+      const hierarchy = makeHierarchy([
+        {
+          $: {
+            class: "com.example.CustomTextField",
+            text: "Dark theme",
+            "input-type": "text",
+            focusable: "true",
+            clickable: "true",
+            bounds: bounds(0, 0, 10, 10),
+          },
+        },
+        {
+          $: {
+            class: "android.widget.TextView",
+            text: "Dark theme",
+            clickable: "true",
+            bounds: bounds(0, 50, 100, 100),
+          },
+        },
+      ]);
+
+      const results = finder.findElementsByText(
+        hierarchy,
+        "Dark theme",
+        null,
+        true,
+        false,
+        false,
+        false,
+        "tap",
+      );
+      expect(results[0].class).toBe("android.widget.TextView");
+    });
+
+    test("demotes editable nodes exposing set_text actions for tap selection", () => {
+      const hierarchy = makeHierarchy([
+        {
+          $: {
+            class: "com.example.MaterialInput",
+            text: "Dark theme",
+            actions: ["set_text"],
+            clickable: "true",
+            bounds: bounds(0, 0, 10, 10),
+          },
+        },
+        {
+          $: {
+            class: "android.widget.TextView",
+            text: "Dark theme",
+            clickable: "true",
+            bounds: bounds(0, 50, 100, 100),
+          },
+        },
+      ]);
+
+      const results = finder.findElementsByText(
+        hierarchy,
+        "Dark theme",
+        null,
+        true,
+        false,
+        false,
+        false,
+        "tap",
+      );
+      expect(results[0].class).toBe("android.widget.TextView");
+    });
+
+    test("keeps the old input ordering when selection intent is omitted", () => {
+      const hierarchy = makeHierarchy([
+        {
+          $: {
+            class: "android.widget.EditText",
+            text: "Dark theme",
+            clickable: "true",
+            bounds: bounds(0, 0, 100, 50),
+          },
+        },
+        {
+          $: {
+            class: "android.widget.TextView",
+            text: "Dark theme",
+            clickable: "true",
+            bounds: bounds(0, 50, 100, 100),
+          },
+        },
+      ]);
+
+      expect(finder.findElementByText(hierarchy, "Dark theme")!.class).toBe(
+        "android.widget.EditText",
+      );
+    });
+
+    test("keeps the sole matching text input", () => {
+      const hierarchy = makeHierarchy({
+        $: {
+          class: "android.widget.EditText",
+          text: "Dark theme",
+          clickable: "true",
+          bounds: bounds(0, 0, 100, 50),
+        },
+      });
+
+      expect(finder.findElementsByText(hierarchy, "Dark theme")).toHaveLength(1);
+      expect(finder.findElementByText(hierarchy, "Dark theme")!.class).toBe(
+        "android.widget.EditText",
+      );
+    });
+
     test("returns empty when container not found", () => {
       const hierarchy = makeHierarchy({ $: { text: "Login", bounds: bounds(0, 0, 100, 50) } });
       const results = finder.findElementsByText(hierarchy, "Login", {

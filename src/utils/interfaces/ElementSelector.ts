@@ -1,6 +1,7 @@
 import type { ElementSelectionResult } from "../../models/ElementSelectionResult";
 import type { ViewHierarchyResult } from "../../models/ViewHierarchyResult";
 import type { ElementSelectionStrategy } from "../../models/ElementSelectionStrategy";
+import type { TextSelectionIntent } from "./ElementFinder";
 
 export interface ElementSelector {
   selectByText(
@@ -13,6 +14,7 @@ export interface ElementSelector {
       strategy?: ElementSelectionStrategy;
       /** 0-based position among on-screen matches; overrides strategy. Out of range → null. */
       index?: number;
+      selectionIntent?: TextSelectionIntent;
     },
   ): ElementSelectionResult;
 

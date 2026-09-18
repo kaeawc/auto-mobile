@@ -3,7 +3,7 @@ import type { ElementSelectionResult } from "../../models/ElementSelectionResult
 import type { ViewHierarchyResult } from "../../models/ViewHierarchyResult";
 import type { ElementSelectionStrategy } from "../../models/ElementSelectionStrategy";
 import type { ElementSelector } from "../../utils/interfaces/ElementSelector";
-import type { ElementFinder } from "../../utils/interfaces/ElementFinder";
+import type { ElementFinder, TextSelectionIntent } from "../../utils/interfaces/ElementFinder";
 import { defaultRandom } from "../../utils/Random";
 import { DefaultElementFinder } from "./ElementFinder";
 
@@ -29,26 +29,28 @@ export class DefaultElementSelector implements ElementSelector {
   selectByText(
     viewHierarchy: ViewHierarchyResult,
     text: string,
-    options?: {
+    options: {
       container?: { elementId?: string; text?: string } | null;
       partialMatch?: boolean;
       caseSensitive?: boolean;
       strategy?: ElementSelectionStrategy;
       index?: number;
-    },
+      selectionIntent?: TextSelectionIntent;
+    } = {},
   ): ElementSelectionResult {
-    const strategy = options?.strategy ?? "first";
-    const includeWindows = shouldIncludeWindowsForTextSelection(options?.index, strategy);
+    const strategy = options.strategy ?? "first";
+    const includeWindows = shouldIncludeWindowsForTextSelection(options.index, strategy);
     const matches = this.finder.findElementsByText(
       viewHierarchy,
       text,
-      options?.container ?? null,
-      options?.partialMatch ?? true,
-      options?.caseSensitive ?? false,
-      options?.index !== undefined,
+      options.container ?? null,
+      options.partialMatch ?? true,
+      options.caseSensitive ?? false,
+      options.index !== undefined,
       includeWindows,
+      options.selectionIntent,
     );
-    return this.pickMatch(matches, strategy, viewHierarchy, options?.index);
+    return this.pickMatch(matches, strategy, viewHierarchy, options.index);
   }
 
   selectByResourceId(

@@ -1,6 +1,8 @@
 import type { Element } from "../../models/Element";
 import type { ViewHierarchyNode, ViewHierarchyResult } from "../../models";
 
+export type TextSelectionIntent = "tap" | "focus-input";
+
 export interface ElementFinder {
   findElementsByText(
     viewHierarchy: ViewHierarchyResult,
@@ -10,6 +12,7 @@ export interface ElementFinder {
     caseSensitive?: boolean,
     preserveTraversalOrder?: boolean,
     includeWindows?: boolean,
+    selectionIntent?: TextSelectionIntent,
   ): Element[];
 
   findElementByText(
@@ -18,6 +21,7 @@ export interface ElementFinder {
     container?: { elementId?: string; text?: string } | null,
     partialMatch?: boolean,
     caseSensitive?: boolean,
+    selectionIntent?: TextSelectionIntent,
   ): Element | null;
 
   findElementsByResourceId(

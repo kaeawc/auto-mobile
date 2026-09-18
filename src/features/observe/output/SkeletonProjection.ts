@@ -3,6 +3,7 @@ import { isTruthy } from "../../../models/Element";
 import {
   getToggleContentDescription,
   hasAccessibilityAction,
+  isEditableElementProperties,
 } from "../../../utils/elementProperties";
 import type { Affordance, ObserveResult, SkeletonElement } from "../../../models/ObserveResult";
 import {
@@ -88,21 +89,6 @@ function deriveSublabel(el: Element, label: string | undefined): string | undefi
 }
 
 /**
- * A focusable editable field: `focusable && (class ~ EditText || input-type
- * present)` (issue #4388 affordance table). Booleans are `boolean | string`
- * (XML yields `"true"`), so `isTruthy` handles both forms.
- */
-function isInputField(el: Element): boolean {
-  if (!isTruthy(el.focusable)) {
-    return false;
-  }
-  const className = el.class;
-  const isEditText = typeof className === "string" && className.includes("EditText");
-  const hasInputType = nonEmptyString(el["input-type"]) !== undefined;
-  return isEditText || hasInputType;
-}
-
-/**
  * Classify a single element's affordances from its view-hierarchy attributes.
  * `tap`/`long-press` mirror the repo's canonical predicates
  * (`elementProperties.isClickableElementProperties`, `TapOnElement`): the
@@ -122,7 +108,7 @@ function deriveAffordances(el: Element): Affordance[] {
   ) {
     affordances.push("long-press");
   }
-  if (isInputField(el)) {
+  if (isEditableElementProperties(el)) {
     affordances.push("input");
   }
   if (isTruthy(el.scrollable)) {

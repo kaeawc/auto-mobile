@@ -35,4 +35,34 @@ describe("TapOnElement selectionStrategy", () => {
     expect(fakeSelector.lastText).toBe("Match");
     expect(fakeSelector.lastStrategy).toBe("random");
   });
+
+  test("uses input-focused text selection only for focus actions", () => {
+    const fakeSelector = new FakeElementSelector({
+      bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+    } as any);
+    const tapOnElement = new TapOnElement(
+      {
+        name: "test-device",
+        platform: "android",
+        deviceId: "emulator-5554",
+      } as any,
+      new FakeAdbClient() as any,
+      {
+        timer: new FakeTimer(),
+        elementSelector: fakeSelector,
+      },
+    );
+
+    (tapOnElement as any).findElementInHierarchy(
+      { text: "Match", action: "tap" },
+      { hierarchy: { node: {} } },
+    );
+    expect(fakeSelector.lastTextSelectionIntent).toBe("tap");
+
+    (tapOnElement as any).findElementInHierarchy(
+      { textAny: ["Match"], action: "focus" },
+      { hierarchy: { node: {} } },
+    );
+    expect(fakeSelector.lastTextSelectionIntent).toBe("focus-input");
+  });
 });

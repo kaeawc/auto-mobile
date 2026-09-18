@@ -13,7 +13,7 @@ import {
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { TapOnElementOptions } from "../../models/TapOnElementOptions";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
-import type { ElementFinder } from "../../utils/interfaces/ElementFinder";
+import type { ElementFinder, TextSelectionIntent } from "../../utils/interfaces/ElementFinder";
 import type { ElementGeometry } from "../../utils/interfaces/ElementGeometry";
 import { DefaultElementParser } from "../utility/ElementParser";
 import { DefaultElementFinder } from "../utility/ElementFinder";
@@ -78,6 +78,14 @@ import type {
 import { hierarchyUpdatedAtToMillis } from "../observe/observeTimestamp";
 
 type SearchUntilStats = NonNullable<TapOnElementResult["searchUntil"]>;
+
+const TEXT_SELECTION_INTENT_BY_ACTION: Record<TapOnElementOptions["action"], TextSelectionIntent> =
+  {
+    tap: "tap",
+    doubleTap: "tap",
+    longPress: "tap",
+    focus: "focus-input",
+  };
 
 /**
  * Dependencies for TapOnElement that can be injected for testing.
@@ -995,6 +1003,7 @@ export class TapOnElement extends BaseVisualChange {
     viewHierarchy: ViewHierarchyResult,
   ): { selection: ElementSelectionResult; containerFound: boolean } {
     const containerFound = this.isContainerAvailable(viewHierarchy, options.container);
+    const selectionIntent = TEXT_SELECTION_INTENT_BY_ACTION[options.action];
 
     if (options.text) {
       if (options.sibling) {
@@ -1021,6 +1030,7 @@ export class TapOnElement extends BaseVisualChange {
           caseSensitive: false,
           strategy: options.selectionStrategy,
           index: options.index,
+          selectionIntent,
         }),
         containerFound,
       };
@@ -1045,6 +1055,7 @@ export class TapOnElement extends BaseVisualChange {
               caseSensitive: false,
               strategy: options.selectionStrategy,
               index: options.index,
+              selectionIntent,
             });
         lastSelection = selection;
         if (selection.element) {

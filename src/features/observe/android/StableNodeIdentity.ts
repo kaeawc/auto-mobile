@@ -123,6 +123,8 @@ const CONTENT_FIELDS: readonly string[] = ["resource-id", "content-desc", "text"
  * "skeleton")` emitted stops resolving on the fresh capture a `tapOn` runs
  * against. A node's own `text`/`content-desc` still count toward *its own* id
  * via {@link CONTENT_FIELDS}; they are excluded only from the ancestor rollup.
+ * #7219 considered folding a row's first text child into that row's hash, but
+ * doing so would reopen this guarantee for rows with ticking descendant text.
  */
 const STRUCTURAL_FIELDS: readonly string[] = ["resource-id", "test-tag"];
 

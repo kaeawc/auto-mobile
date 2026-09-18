@@ -552,6 +552,7 @@ export class TakeScreenshot implements ScreenshotService {
     logger.info(`[SCREENSHOT] Using file pull approach`);
     const tempFile = `/sdcard/screenshot_${this.idGenerator.next()}.png`;
     const tempLocalFile = `${finalPath}.temp`;
+    let result: ScreenshotResult;
 
     try {
       // Use file pull approach instead of base64 to avoid stdout buffer issues
@@ -565,10 +566,7 @@ export class TakeScreenshot implements ScreenshotService {
         undefined,
         signal,
       );
-      if (
-        !/AM_SCREENCAP_RC:0(?:\s|$)/.test(screencapResult.stdout) ||
-        (screencapResult.stderr && screencapResult.stderr.includes("error"))
-      ) {
+      if (this.hasFailedScreencap(screencapResult.stdout, screencapResult.stderr)) {
         throw new Error(`Screencap failed: ${screencapResult.stderr}`);
       }
 
@@ -580,8 +578,13 @@ export class TakeScreenshot implements ScreenshotService {
         undefined,
         signal,
       );
-      if (pullResult.stderr && pullResult.stderr.includes("error")) {
+      if (this.hasCommandError(pullResult.stderr)) {
         throw new Error(`Failed to pull screenshot: ${pullResult.stderr}`);
+      }
+
+      if (signal?.aborted) {
+        await this.removeLocalTempScreenshot(tempLocalFile);
+        return { success: false, error: OPERATION_CANCELLED_MESSAGE };
       }
 
       const cmdDuration = this.timer.now() - cmdStartTime;
@@ -625,7 +628,7 @@ export class TakeScreenshot implements ScreenshotService {
       const totalDuration = this.timer.now() - startTime;
       logger.info(`[SCREENSHOT] File pull screenshot capture completed in ${totalDuration}ms`);
 
-      return {
+      result = {
         success: true,
         path: finalPath,
         ...metadataForScreenshotFormat(ANDROID_ADB_SCREENSHOT_METADATA, options.format),
@@ -638,17 +641,48 @@ export class TakeScreenshot implements ScreenshotService {
       );
 
       // Clean up any temp files
-      try {
-        if (await pathExists(tempLocalFile)) {
-          await fsPromises.rm(tempLocalFile, { recursive: true, force: true });
-        }
-      } catch (cleanupErr) {
-        logger.debug(`Failed to cleanup temp file: ${cleanupErr}`);
-      }
+      await this.removeLocalTempScreenshot(tempLocalFile);
 
       throw err;
     } finally {
       await this.removeDeviceTempScreenshot(tempFile);
+    }
+
+    return await this.cancelSuccessfulFilePullIfAborted(result, finalPath, signal);
+  }
+
+  private async cancelSuccessfulFilePullIfAborted(
+    result: ScreenshotResult,
+    finalPath: string,
+    signal: AbortSignal | undefined,
+  ): Promise<ScreenshotResult> {
+    if (!signal?.aborted || !result.success) {
+      return result;
+    }
+
+    // Cancellation can land while device cleanup is in flight. Remove the
+    // completed frame so the latest-screenshot disk fallback cannot serve it.
+    if (await pathExists(finalPath)) {
+      await fsPromises.rm(finalPath, { recursive: true, force: true });
+    }
+    return { success: false, error: OPERATION_CANCELLED_MESSAGE };
+  }
+
+  private hasFailedScreencap(stdout: string, stderr: string): boolean {
+    return !/AM_SCREENCAP_RC:0(?:\s|$)/.test(stdout) || this.hasCommandError(stderr);
+  }
+
+  private hasCommandError(stderr: string): boolean {
+    return stderr.includes("error");
+  }
+
+  private async removeLocalTempScreenshot(tempLocalFile: string): Promise<void> {
+    try {
+      if (await pathExists(tempLocalFile)) {
+        await fsPromises.rm(tempLocalFile, { recursive: true, force: true });
+      }
+    } catch (cleanupErr) {
+      logger.debug(`Failed to cleanup temp file: ${errorMessage(cleanupErr)}`);
     }
   }
 

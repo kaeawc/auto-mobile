@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { promises as fsPromises, readFileSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { TakeScreenshot } from "../../../src/features/observe/TakeScreenshot";
 import { BootedDevice } from "../../../src/models/DeviceInfo";
@@ -453,7 +454,7 @@ describe("TakeScreenshot", function () {
         };
 
         const result = await (screenshot as any).captureiOSScreenshot(
-          "/private/tmp/ios-pre-cancel.png",
+          path.join(os.tmpdir(), "ios-pre-cancel.png"),
           controller.signal,
         );
 
@@ -489,7 +490,7 @@ describe("TakeScreenshot", function () {
       );
 
       await expect(
-        (screenshot as any).captureScreenshotFilePull("/private/tmp/quiet-failure.png", {
+        (screenshot as any).captureScreenshotFilePull(path.join(os.tmpdir(), "quiet-failure.png"), {
           format: "png",
         }),
       ).rejects.toThrow("Screencap failed");
@@ -505,7 +506,7 @@ describe("TakeScreenshot", function () {
         stdout: "AM_SCREENCAP_RC:0",
         stderr: "",
       });
-      const localDir = await fsPromises.mkdtemp("/private/tmp/auto-mobile-screenshot-");
+      const localDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), "auto-mobile-screenshot-"));
       const screenshot = new TakeScreenshot(
         androidDevice,
         new FakeAdbClientFactory(fakeAdb),
@@ -542,6 +543,44 @@ describe("TakeScreenshot", function () {
           `pull /sdcard/screenshot_first.png ${firstPath}.temp`,
           `pull /sdcard/screenshot_second.png ${secondPath}.temp`,
         ]);
+      } finally {
+        await fsPromises.rm(localDir, { recursive: true, force: true });
+      }
+    });
+
+    test("cancels after pulling without leaving a stale final screenshot", async function () {
+      const fakeAdb = new FakeAdbExecutor();
+      fakeAdb.setCommandResponse("screencap -p", {
+        stdout: "AM_SCREENCAP_RC:0",
+        stderr: "",
+      });
+      const controller = new AbortController();
+      fakeAdb.abortAfterCommand("pull ", controller);
+      const localDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), "auto-mobile-screenshot-"));
+      const finalPath = path.join(localDir, "cancelled.png");
+      const screenshot = new TakeScreenshot(
+        androidDevice,
+        new FakeAdbClientFactory(fakeAdb),
+        new FakeTimer(),
+        new FakeIdGenerator(["cancelled"]),
+      );
+
+      try {
+        await fsPromises.writeFile(`${finalPath}.temp`, "pulled frame");
+
+        await expect(
+          (screenshot as any).captureScreenshotFilePull(
+            finalPath,
+            { format: "png" },
+            controller.signal,
+          ),
+        ).resolves.toEqual({ success: false, error: OPERATION_CANCELLED_MESSAGE });
+
+        await expect(fsPromises.access(finalPath)).rejects.toThrow();
+        await expect(fsPromises.access(`${finalPath}.temp`)).rejects.toThrow();
+        expect(fakeAdb.getExecutedCommands()).toContain(
+          "shell rm -f /sdcard/screenshot_cancelled.png",
+        );
       } finally {
         await fsPromises.rm(localDir, { recursive: true, force: true });
       }

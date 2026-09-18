@@ -26,6 +26,23 @@ function normalizeEntryScriptPath(entryScript: string): string {
     .replace(/\/+/g, "/");
 }
 
+function isSiblingJjWorkspaceEntryScript(
+  normalizedEntryScript: string,
+  normalizedActiveEntryScript: string | undefined,
+): boolean {
+  const distributionSuffix = "/dist/src/index.js";
+  if (
+    !normalizedEntryScript.endsWith(distributionSuffix) ||
+    !normalizedActiveEntryScript?.endsWith("/auto-mobile" + distributionSuffix)
+  ) {
+    return false;
+  }
+
+  const activeCheckoutRoot = normalizedActiveEntryScript.slice(0, -distributionSuffix.length);
+  const candidateCheckoutRoot = normalizedEntryScript.slice(0, -distributionSuffix.length);
+  return posix.dirname(candidateCheckoutRoot) === posix.dirname(activeCheckoutRoot);
+}
+
 /**
  * Matches the entry-script identities emitted by {@link DaemonLauncher.resolveCommand}.
  *
@@ -49,7 +66,18 @@ export function isDaemonEntryScriptPath(
     }
     return normalized === normalizeEntryScriptPath(activeEntryScript);
   }
+
+  const normalizedActiveEntryScript = activeEntryScript
+    ? normalizeEntryScriptPath(activeEntryScript)
+    : undefined;
+  const isDistributionEntryScript = normalized.endsWith("/dist/src/index.js");
+
+  // Worktrees and renamed checkouts of this repo share the `/auto-mobile/` ancestor
+  // segment; with --daemon-mode checked by the caller, this is safe for #7242.
   return (
+    (isDistributionEntryScript && normalized === normalizedActiveEntryScript) ||
+    isSiblingJjWorkspaceEntryScript(normalized, normalizedActiveEntryScript) ||
+    (isDistributionEntryScript && /\/auto-mobile\/.*\/dist\/src\/index\.js$/.test(normalized)) ||
     /\/(?:@kaeawc\/)?auto-mobile\/dist\/src\/index\.js$/.test(normalized) ||
     /\/auto-mobile\/(?:[^/]+\/)?libexec\/dist\/src\/index\.js$/.test(normalized)
   );

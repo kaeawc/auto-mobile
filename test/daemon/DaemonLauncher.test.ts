@@ -64,6 +64,42 @@ describe("DaemonLauncher", () => {
     ).toBe(true);
   });
 
+  test("matches distribution entry points in worktrees and the active checkout", () => {
+    const activeEntryScript = "/workspace/custom-checkout/dist/src/index.js";
+
+    expect(
+      isDaemonEntryScriptPath(
+        "/Users/x/auto-mobile/.claude/worktrees/foo/dist/src/index.js",
+        "/workspace/auto-mobile/src/index.ts",
+      ),
+    ).toBe(true);
+    expect(isDaemonEntryScriptPath(activeEntryScript, activeEntryScript)).toBe(true);
+    expect(isDaemonEntryScriptPath(activeEntryScript, "/workspace/other/dist/src/index.js")).toBe(
+      false,
+    );
+    expect(isDaemonEntryScriptPath("/workspace/custom-checkout/dist/src/index.js")).toBe(false);
+    expect(
+      isDaemonEntryScriptPath(
+        "/x/not-auto-mobile/dist/src/index.js",
+        "/workspace/auto-mobile/src/index.ts",
+      ),
+    ).toBe(false);
+  });
+
+  test("matches a sibling jj workspace distribution entry point", () => {
+    const activeEntryScript = "/workspace/auto-mobile/dist/src/index.js";
+
+    expect(isDaemonEntryScriptPath("/workspace/feature/dist/src/index.js", activeEntryScript)).toBe(
+      true,
+    );
+    expect(isDaemonEntryScriptPath("/other/place/x/dist/src/index.js", activeEntryScript)).toBe(
+      false,
+    );
+    expect(isDaemonEntryScriptPath("/workspace/a/b/dist/src/index.js", activeEntryScript)).toBe(
+      false,
+    );
+  });
+
   test("uses POSIX PATH semantics for an injected Linux platform", () => {
     const launcher = new DaemonLauncher({
       entryScript: null,

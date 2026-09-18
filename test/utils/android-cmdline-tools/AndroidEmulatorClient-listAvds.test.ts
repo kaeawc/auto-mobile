@@ -262,6 +262,29 @@ describe("AndroidEmulatorClient listAvds", () => {
     ]);
   });
 
+  test("infers a tablet AVD from its profile when display geometry is incomplete", async () => {
+    const configReader: AvdConfigReader = {
+      async readConfig() {
+        return parseAvdConfig("hw.device.name=pixel_tablet");
+      },
+    };
+    const client = new AndroidEmulatorClient(
+      async () => createExecResult("Pixel_Tablet\n"),
+      null,
+      new FakeTimer(),
+      undefined,
+      configReader,
+    );
+    (client as any).ensureEmulatorPath = async () => "emulator";
+
+    await expect(client.listAvds()).resolves.toEqual([
+      expect.objectContaining({
+        deviceType: "pixel_tablet",
+        formFactor: "tablet",
+      }),
+    ]);
+  });
+
   test("keeps runtimeId undefined when the AVD config has no image.sysdir.1 metadata", async () => {
     const configReader: AvdConfigReader = {
       async readConfig() {

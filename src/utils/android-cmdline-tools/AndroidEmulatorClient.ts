@@ -831,7 +831,11 @@ export class AndroidEmulatorClient implements AndroidEmulator {
           if (!config) {
             return device;
           }
+          const hint = /pixel[_ ]tablet|nexus (?:9|10)/i.test(config.deviceName ?? "")
+            ? "tablet"
+            : undefined;
           const formFactor = formFactorFrom({
+            hint,
             deviceType: config.deviceName,
             width: config.screenWidth,
             height: config.screenHeight,

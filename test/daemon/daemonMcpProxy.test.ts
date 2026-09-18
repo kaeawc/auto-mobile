@@ -5,6 +5,7 @@ import {
   DaemonBuildMismatchError,
   DaemonRestartDeferredError,
   DaemonToolUnavailableError,
+  DaemonBoundSessionExpiredError,
 } from "../../src/daemon/daemonMcpProxy";
 import {
   DaemonBoundSessionLostError,
@@ -3831,6 +3832,54 @@ describe("DaemonMcpProxy", () => {
             params: { sessionUuid: "session-a", deviceId: "device-a" },
           },
         ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("terminally fences a reconnected handoff when the bound UUID is lost", async () => {
+      const staleClient = new FakeDaemonClient({
+        daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+      });
+      const recoveredClient = new FakeDaemonClient({
+        onCallTool: () => {
+          throw new DaemonBoundSessionLostError({
+            code: "bound_session_lost",
+            sessionUuid: "session-a",
+            reason: "session-not-found",
+          });
+        },
+      });
+      const clients = [staleClient, recoveredClient];
+      const recoveredConnectSpy = spyOn(recoveredClient, "connect");
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        initialSessionUuid: "session-a",
+        clientFactory: () => clients.shift()!,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        await proxy.listTools();
+        staleClient.emitNotification(
+          SESSION_RELEASED_NOTIFICATION_METHOD,
+          "session-a",
+          "daemon-restart",
+        );
+
+        await expect(proxy.callTool("observe", { deviceId: "device-a" })).rejects.toBeInstanceOf(
+          DaemonBoundSessionExpiredError,
+        );
+        expect(recoveredClient.callToolCalls).toHaveLength(1);
+        const connectCallsAfterFirst = recoveredConnectSpy.mock.calls.length;
+
+        await expect(proxy.callTool("observe", { deviceId: "device-a" })).rejects.toBeInstanceOf(
+          DaemonBoundSessionExpiredError,
+        );
+        expect(recoveredConnectSpy.mock.calls.length).toBe(connectCallsAfterFirst);
+        expect(recoveredClient.callToolCalls).toHaveLength(1);
       } finally {
         isAvailableSpy.mockRestore();
         await proxy.close();

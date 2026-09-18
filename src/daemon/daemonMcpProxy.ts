@@ -1218,6 +1218,8 @@ export class DaemonMcpProxy {
     return (
       isRecoverableHandoff &&
       releasedSessionUuid === this.boundSessionUuid &&
+      // Acquisition tools bypass the terminal fence so getAndroid/getApple can
+      // re-acquire the rehydrated session in-band (issue #5689).
       !this.boundSessionFromResultMint
     );
   }

@@ -379,6 +379,7 @@ export class DeviceSessionRepository {
       .executeTakeFirst();
   }
 
+  /** Terminalizes expired recoverable rows before reading and returning sessions. */
   async listRecoverableSessions(): Promise<DeviceSession[]> {
     const db = await this.getDb();
     const nowMs = this.timer.now();

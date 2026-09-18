@@ -22,6 +22,7 @@ import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
+import { isolateCliDataDir, type IsolatedCliDataDir } from "../helpers/cliDataDirIsolation";
 
 const ENV_KEYS = [
   "AUTOMOBILE_SESSION_HEARTBEAT_CHECK_INTERVAL_MS",
@@ -174,9 +175,11 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
   let timer: FakeTimer;
   let sessionManager: SessionManager;
   let isAvailableSpy: ReturnType<typeof spyOn> | null;
+  let isolatedCliDataDir: IsolatedCliDataDir;
 
   beforeEach(() => {
     clearEnv();
+    isolatedCliDataDir = isolateCliDataDir();
     timer = new FakeTimer();
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
@@ -187,6 +190,7 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
     isAvailableSpy?.mockRestore();
     isAvailableSpy = null;
     resetDaemonProxyFactoryForTesting();
+    isolatedCliDataDir.restore();
     clearEnv();
   });
 

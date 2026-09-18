@@ -2519,13 +2519,23 @@ export class DaemonMcpProxy {
     if (name !== SET_TOOL_ENABLED_TOOL_NAME) {
       return;
     }
-    const hasExplicitSessionUuid =
-      typeof requestedArgs.sessionUuid === "string" && requestedArgs.sessionUuid.trim().length > 0;
-    if (!hasExplicitSessionUuid) {
-      const sessionUuid = toolSelectionProfileUuidFromResponse(result);
-      if (sessionUuid) {
-        this.toolSelectionProfileUuid = sessionUuid;
+    const explicitSessionUuid =
+      typeof requestedArgs.sessionUuid === "string" && requestedArgs.sessionUuid.trim().length > 0
+        ? requestedArgs.sessionUuid
+        : undefined;
+    const responseProfileUuid = toolSelectionProfileUuidFromResponse(result);
+    if (!explicitSessionUuid) {
+      if (responseProfileUuid) {
+        this.toolSelectionProfileUuid = responseProfileUuid;
       }
+    } else if (responseProfileUuid === explicitSessionUuid) {
+      // The daemon only echoes the SAME UUID when its process-wide
+      // toolSelectionProfileRegistry accepts the reaffirm (src/server/index.ts).
+      // Retaining that successful self-reaffirm lets withToolSelectionProfile()
+      // attach it to this proxy's later sessionless acquisition calls. A
+      // differing or absent UUID is a device-session update or rejected/stale
+      // reaffirm, so never adopt an unrelated or failed profile on this proxy.
+      this.toolSelectionProfileUuid = responseProfileUuid;
     }
     // Do not depend solely on the daemon's best-effort list_changed delivery.
     // The successful update has already changed the authoritative tool surface.

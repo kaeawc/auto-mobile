@@ -1,9 +1,10 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   runCliCommand,
   setDaemonProxyFactoryForTesting,
   resetDaemonProxyFactoryForTesting,
 } from "../../src/cli";
+import { isolateCliDataDir, type IsolatedCliDataDir } from "../helpers/cliDataDirIsolation";
 
 /**
  * Root-cause regression for issue #6222's reopen. PR #6237 made a
@@ -30,8 +31,15 @@ import {
  * request progress relay, regardless of tool or field count.
  */
 describe("runCliCommand never requests progress relay (issue #6222 reopen)", () => {
+  let isolatedCliDataDir: IsolatedCliDataDir;
+
+  beforeEach(() => {
+    isolatedCliDataDir = isolateCliDataDir();
+  });
+
   afterEach(() => {
     resetDaemonProxyFactoryForTesting();
+    isolatedCliDataDir.restore();
   });
 
   test("setUIState is forwarded with no progressToken and no onProgress callback", async () => {

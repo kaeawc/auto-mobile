@@ -1,7 +1,4 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 import {
   runCliCommand,
   setDaemonProxyFactoryForTesting,
@@ -9,6 +6,7 @@ import {
   type CliOutput,
 } from "../../src/cli";
 import { DEVICE_SESSION_ACQUISITION_TOOLS } from "../../src/server/deviceSessionResult";
+import { isolateCliDataDir, type IsolatedCliDataDir } from "../helpers/cliDataDirIsolation";
 
 /**
  * `--session-uuid` is advertised as a universal CLI option, but the acquisition
@@ -20,24 +18,16 @@ import { DEVICE_SESSION_ACQUISITION_TOOLS } from "../../src/server/deviceSession
  */
 describe("CLI --session-uuid with device-session acquisition tools", () => {
   const calls: Array<{ toolName: string; params: Record<string, unknown> }> = [];
-  let dataDir: string;
-  let previousDataDir: string | undefined;
+  let isolatedCliDataDir: IsolatedCliDataDir;
 
   beforeEach(() => {
-    previousDataDir = process.env.AUTOMOBILE_DATA_DIR;
-    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "cli-acquisition-profile-"));
-    process.env.AUTOMOBILE_DATA_DIR = dataDir;
+    isolatedCliDataDir = isolateCliDataDir("cli-acquisition-profile-");
   });
 
   afterEach(() => {
     calls.length = 0;
     resetDaemonProxyFactoryForTesting();
-    if (previousDataDir === undefined) {
-      delete process.env.AUTOMOBILE_DATA_DIR;
-    } else {
-      process.env.AUTOMOBILE_DATA_DIR = previousDataDir;
-    }
-    fs.rmSync(dataDir, { recursive: true, force: true });
+    isolatedCliDataDir.restore();
   });
 
   const installFakeProxy = (): void => {

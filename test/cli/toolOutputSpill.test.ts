@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   CLI_OUTPUT_INLINE_MAX_BYTES,
   CLI_TOOL_RESULT_ARTIFACT_PAYLOAD,
@@ -30,6 +30,17 @@ import type {
   ObservationArtifactWriteInput,
   ObservationArtifactWriter,
 } from "../../src/server/finalizeToolResponse";
+import { isolateCliDataDir, type IsolatedCliDataDir } from "../helpers/cliDataDirIsolation";
+
+let isolatedCliDataDir: IsolatedCliDataDir;
+
+beforeEach(() => {
+  isolatedCliDataDir = isolateCliDataDir();
+});
+
+afterEach(() => {
+  isolatedCliDataDir.restore();
+});
 
 class FakeArtifactWriter implements ObservationArtifactWriter {
   readonly writes: ObservationArtifactWriteInput[] = [];

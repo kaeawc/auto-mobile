@@ -22,6 +22,7 @@ import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { DEVICE_SESSION_ACQUISITION_TOOLS } from "../../src/server/deviceSessionResult";
 
 class FakeToolSelectionProfileProvenanceStore implements ToolSelectionProfileProvenanceStore {
   readonly stored = new Set<string>();
@@ -75,6 +76,13 @@ describe("setToolEnabled through the daemon-proxy loopback hop (#6148 round 4)",
       "clipboard",
       z.object({ sessionUuid: z.string().optional() }),
       async () => ({ content: [{ type: "text" as const, text: "clipboard" }] }),
+      { defaultEnabled: false },
+    );
+    ToolRegistry.register(
+      "provisionDevice",
+      "test acquisition-style tool",
+      z.object({}),
+      async () => ({ content: [{ type: "text" as const, text: "acquired" }] }),
       { defaultEnabled: false },
     );
     registerToolSelectionTools();
@@ -224,6 +232,65 @@ describe("setToolEnabled through the daemon-proxy loopback hop (#6148 round 4)",
       toolName: "clipboard",
       enabled: false,
     });
+  });
+
+  test("the proxy harness can observe reaffirm then acquisition, but not socket acquisition routing", async () => {
+    expect(DEVICE_SESSION_ACQUISITION_TOOLS).toContain("provisionDevice");
+    const sharedRegistry = new InMemoryToolSelectionProfileRegistry();
+    const sharedService = makeSharedToolSelectionService();
+    const sharedDefaultClient = await makeLoopbackClient(
+      "internal-shared-default-acquisition",
+      sharedRegistry,
+      sharedService,
+    );
+    const sessionScopedClient = await makeLoopbackClient(
+      "internal-session-scoped-acquisition",
+      sharedRegistry,
+      sharedService,
+    );
+    const proxyClient = await makeProxyClient(sharedDefaultClient, sessionScopedClient);
+
+    const mintResult = (await proxyClient.request(
+      {
+        method: "tools/call",
+        params: {
+          name: "setToolEnabled",
+          arguments: { toolName: "provisionDevice", enabled: true },
+        },
+      },
+      z.any(),
+    )) as { content?: Array<{ type: string; text?: string }> };
+    const mintedProfileUuid = JSON.parse(
+      mintResult.content?.find((content) => content.type === "text")?.text ?? "{}",
+    ).sessionUuid as string;
+    expect(mintedProfileUuid).toBeString();
+
+    const reaffirmResult = (await proxyClient.request(
+      {
+        method: "tools/call",
+        params: {
+          name: "setToolEnabled",
+          arguments: {
+            toolName: "provisionDevice",
+            enabled: true,
+            sessionUuid: mintedProfileUuid,
+          },
+        },
+      },
+      z.any(),
+    )) as { isError?: boolean };
+    expect(reaffirmResult.isError ?? false).toBe(false);
+
+    const acquisitionResult = (await proxyClient.request(
+      { method: "tools/call", params: { name: "provisionDevice", arguments: {} } },
+      z.any(),
+    )) as { isError?: boolean; content?: Array<{ type: string; text?: string }> };
+
+    // FakeDaemonClient handles this non-selection call above socketServer.ts,
+    // so its success only proves the shared proxy harness can issue C; it does
+    // not prove acquisitionMcpForwardRoute propagated the reaffirmed profile.
+    expect(acquisitionResult.isError ?? false).toBe(false);
+    expect(acquisitionResult.content?.[0]?.text).toBe("success");
   });
 
   test("a fabricated profile-only identifier is REJECTED across the loopback hop", async () => {

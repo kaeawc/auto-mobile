@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import {
   runCliCommand,
@@ -8,6 +7,7 @@ import {
   resetDaemonProxyFactoryForTesting,
 } from "../../src/cli";
 import { cliToolSelectionProfilePath } from "../../src/cli/cliToolSelectionProfile";
+import { isolateCliDataDir, type IsolatedCliDataDir } from "../helpers/cliDataDirIsolation";
 
 /**
  * A `--cli` invocation is a trusted local operator action and must NEVER require a
@@ -16,23 +16,15 @@ import { cliToolSelectionProfilePath } from "../../src/cli/cliToolSelectionProfi
  * profile per CLI data directory.
  */
 describe("CLI transparently enables gated tools", () => {
-  let dataDir: string;
-  let previousDataDir: string | undefined;
+  let isolatedCliDataDir: IsolatedCliDataDir;
 
   beforeEach(() => {
-    previousDataDir = process.env.AUTOMOBILE_DATA_DIR;
-    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "cli-tool-selection-profile-"));
-    process.env.AUTOMOBILE_DATA_DIR = dataDir;
+    isolatedCliDataDir = isolateCliDataDir("cli-tool-selection-profile-");
   });
 
   afterEach(() => {
     resetDaemonProxyFactoryForTesting();
-    if (previousDataDir === undefined) {
-      delete process.env.AUTOMOBILE_DATA_DIR;
-    } else {
-      process.env.AUTOMOBILE_DATA_DIR = previousDataDir;
-    }
-    fs.rmSync(dataDir, { recursive: true, force: true });
+    isolatedCliDataDir.restore();
   });
 
   function recordProxy(

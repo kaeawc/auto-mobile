@@ -5279,7 +5279,13 @@ describe("DaemonMcpProxy", () => {
         expect(client.callDaemonMethodCalls.filter((call) => call.method === "tools/list")).toEqual(
           [
             { method: "tools/list", params: { sessionUuid: "device-session-a" } },
-            { method: "tools/list", params: { sessionUuid: "device-session-a" } },
+            {
+              method: "tools/list",
+              params: {
+                sessionUuid: "device-session-a",
+                [DAEMON_TOOL_SELECTION_PROFILE_PARAM]: "device-session-a",
+              },
+            },
           ],
         );
       } finally {
@@ -5332,7 +5338,10 @@ describe("DaemonMcpProxy", () => {
         expect(await proxy.listTools()).toEqual([{ name: "setToolEnabled" }, { name: "openLink" }]);
         expect(replacementClient.callDaemonMethodCalls).toContainEqual({
           method: "tools/list",
-          params: { sessionUuid: "device-session-a" },
+          params: {
+            sessionUuid: "device-session-a",
+            [DAEMON_TOOL_SELECTION_PROFILE_PARAM]: "device-session-a",
+          },
         });
       } finally {
         isAvailableSpy.mockRestore();

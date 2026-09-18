@@ -38,10 +38,7 @@ describe("device session liveness contract migration", () => {
     expect(await columnNames(db)).not.toContain("heartbeat_timeout_source");
   });
 
-  test("rolls back the liveness generation column when trigger creation fails", async () => {
-    // The duplicate trigger fails after the migration has added its column.
-    // This proves the explicit transaction prevents a torn schema when a
-    // late DDL statement fails before the migration ledger advances.
+  test("replaces a conflicting liveness writer fence trigger", async () => {
     await sql`
       CREATE TRIGGER clear_stale_device_session_liveness_contract
       AFTER UPDATE OF device_id ON device_sessions
@@ -50,10 +47,19 @@ describe("device session liveness contract migration", () => {
       END
     `.execute(db);
 
-    await expect(livenessWriterFenceUp(db)).rejects.toThrow(
-      /trigger clear_stale_device_session_liveness_contract already exists/,
-    );
+    await expect(livenessWriterFenceUp(db)).resolves.toBeUndefined();
 
-    expect(await columnNames(db)).not.toContain("liveness_contract_generation");
+    expect(await columnNames(db)).toContain("liveness_contract_generation");
+    const trigger = await sql<{ sql: string }>`
+      SELECT sql FROM sqlite_master
+      WHERE type = 'trigger' AND name = 'clear_stale_device_session_liveness_contract'
+    `.execute(db);
+    expect(trigger.rows[0]?.sql).toContain(
+      "AFTER UPDATE OF session_timeout_ms, heartbeat_timeout_ms, has_received_heartbeat ON device_sessions",
+    );
+    expect(trigger.rows[0]?.sql).toContain(
+      "WHEN NEW.liveness_contract_generation = OLD.liveness_contract_generation",
+    );
+    expect(trigger.rows[0]?.sql).toContain("heartbeat_timeout_source = NULL");
   });
 });

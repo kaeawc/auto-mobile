@@ -271,6 +271,14 @@ describe("app ID schemas", () => {
       })
       .strict(),
   );
+  const nestedAppIdAliasSchema = withAppIdAliases(
+    z
+      .object({
+        notification: z.object({ appId: z.string().optional() }).optional(),
+        target: z.object({ appId: z.string().optional() }).optional(),
+      })
+      .strict(),
+  );
 
   test.each([
     "com.example; input keyevent 3",
@@ -285,7 +293,7 @@ describe("app ID schemas", () => {
     expect(result.success).toBe(false);
     if (!result.success) {
       expect(result.error.issues[0]?.message).toBe(
-        `appId must be a reverse-DNS identifier such as com.example.app; got: ${appId}`,
+        `appId must be a reverse-DNS identifier such as com.example.app; got: ${appId.trim()}`,
       );
     }
   });
@@ -296,6 +304,31 @@ describe("app ID schemas", () => {
       expect(appIdAliasSchema.safeParse({ appId }).success).toBe(true);
     },
   );
+
+  test("trims appId in parsed output before handlers receive it", () => {
+    const result = appIdAliasSchema.safeParse({ appId: " com.example.app " });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.appId).toBe("com.example.app");
+    }
+  });
+
+  test.each([
+    ["notification", { notification: { appId: "com.example; id" } }, ["notification", "appId"]],
+    ["target", { target: { appId: "com.example; id" } }, ["target", "appId"]],
+  ] as const)("rejects shell-unsafe nested appId under %s", (_field, input, expectedPath) => {
+    const result = nestedAppIdAliasSchema.safeParse(input);
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(
+        result.error.issues.some(
+          (issue) => JSON.stringify(issue.path) === JSON.stringify(expectedPath),
+        ),
+      ).toBe(true);
+    }
+  });
 
   test("leaves iOS bundle identifiers accepted by platform-agnostic app tools", () => {
     expect(

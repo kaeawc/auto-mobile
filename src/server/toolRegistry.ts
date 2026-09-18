@@ -43,6 +43,8 @@ import {
   StructuredToolResponse,
 } from "../utils/toolUtils";
 import {
+  APP_ID_MAX_LENGTH,
+  APP_ID_PATTERN,
   applyJsonSchemaOverride,
   applyPostFlattenJsonSchemaOverride,
   canonicalizeDiscriminatedUnionJsonSchema,
@@ -151,6 +153,31 @@ function dropDefaultedKeysFromRequired(jsonSchema: Record<string, unknown>): voi
   }
 }
 
+/** Apply the app ID contract after every per-node and whole-schema transformation. */
+function constrainAdvertisedAppIdProperties(value: unknown): void {
+  if (Array.isArray(value)) {
+    value.forEach(constrainAdvertisedAppIdProperties);
+    return;
+  }
+  if (!value || typeof value !== "object") {
+    return;
+  }
+
+  const jsonSchema = value as Record<string, unknown>;
+  const properties = jsonSchema.properties;
+  if (properties && typeof properties === "object" && !Array.isArray(properties)) {
+    const appId = (properties as Record<string, unknown>).appId;
+    if (appId && typeof appId === "object" && !Array.isArray(appId)) {
+      const appIdSchema = appId as Record<string, unknown>;
+      appIdSchema.minLength = 1;
+      appIdSchema.maxLength = APP_ID_MAX_LENGTH;
+      appIdSchema.pattern = APP_ID_PATTERN.source;
+    }
+  }
+
+  Object.values(jsonSchema).forEach(constrainAdvertisedAppIdProperties);
+}
+
 function toAdvertisedJsonSchema(schema: any): Record<string, unknown> {
   const jsonSchema = toJSONSchema(schema, {
     override: ({ zodSchema, jsonSchema }) => {
@@ -172,6 +199,7 @@ function toAdvertisedJsonSchema(schema: any): Record<string, unknown> {
   // flattening reduces to the cross-arm intersection or re-homes under a branch
   // discriminator. No-op for schemas without a registered post-flatten override.
   applyPostFlattenJsonSchemaOverride(schema, flattened);
+  constrainAdvertisedAppIdProperties(flattened);
   return flattened;
 }
 

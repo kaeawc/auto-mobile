@@ -51,8 +51,8 @@ export const appIdFieldAliases = [
   "application_id",
 ] as const;
 
-const APP_ID_PATTERN = /^[A-Za-z0-9._-]+$/;
-const APP_ID_MAX_LENGTH = 256;
+export const APP_ID_PATTERN = /^[A-Za-z0-9._-]+$/;
+export const APP_ID_MAX_LENGTH = 256;
 
 export const appIdSchema = z
   .string()
@@ -281,32 +281,40 @@ export function withFieldAliases<T extends z.ZodTypeAny>(schema: T, aliases: Fie
 export function withAppIdAliases<T extends z.ZodTypeAny>(schema: T): T {
   const appIdAliases = withFieldAliases(schema, { appId: appIdFieldAliases }).superRefine(
     (value, ctx) => {
-      if (!isPlainObject(value) || typeof value.appId !== "string") {
-        return;
-      }
-      const result = appIdSchema.safeParse(value.appId);
+      validateAppIds(value, ctx);
+    },
+  );
+  return appIdAliases as T;
+}
+
+function validateAppIds(
+  value: unknown,
+  ctx: z.RefinementCtx,
+  path: Array<string | number> = [],
+): void {
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => validateAppIds(item, ctx, [...path, index]));
+    return;
+  }
+
+  if (!isPlainObject(value)) {
+    return;
+  }
+
+  for (const [key, nestedValue] of Object.entries(value)) {
+    const nestedPath = [...path, key];
+    if (key === "appId" && typeof nestedValue === "string") {
+      const result = appIdSchema.safeParse(nestedValue);
       if (!result.success) {
         ctx.addIssue({
           code: "custom",
-          path: ["appId"],
-          message:
-            "appId must be a reverse-DNS identifier such as com.example.app; " +
-            `got: ${value.appId}`,
+          path: nestedPath,
+          message: result.error.issues[0]?.message ?? "appId must be a valid application ID",
         });
       }
-    },
-  );
-  return withJsonSchemaOverride(appIdAliases, applyAppIdJsonSchema) as T;
-}
-
-function applyAppIdJsonSchema(jsonSchema: Record<string, unknown>): void {
-  const appId = getJsonObject(getJsonObject(jsonSchema.properties)?.appId);
-  if (!appId) {
-    return;
+    }
+    validateAppIds(nestedValue, ctx, nestedPath);
   }
-  appId.minLength = 1;
-  appId.maxLength = APP_ID_MAX_LENGTH;
-  appId.pattern = APP_ID_PATTERN.source;
 }
 
 function normalizeFieldAliases(input: unknown, aliases: FieldAliasMap): unknown {
@@ -334,6 +342,10 @@ function normalizeFieldAliases(input: unknown, aliases: FieldAliasMap): unknown 
     for (const alias of fieldAliases) {
       delete normalized[alias];
     }
+  }
+
+  if (typeof normalized.appId === "string") {
+    normalized.appId = normalized.appId.trim();
   }
 
   return normalized;

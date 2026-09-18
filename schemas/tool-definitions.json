@@ -476,7 +476,9 @@
         "appId": {
           "description": "Android app package for locale changes",
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
         },
         "locale": {
           "description": "Locale tag (e.g., ar-SA, ja-JP)",
@@ -542,7 +544,10 @@
       "type": "object",
       "properties": {
         "appId": {
-          "type": "string"
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
         },
         "name": {
           "description": "Storage name",
@@ -735,7 +740,10 @@
           "enum": ["android", "ios"]
         },
         "appId": {
-          "type": "string"
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
         },
         "processId": {
           "type": "integer",
@@ -2132,7 +2140,10 @@
         },
         "appId": {
           "description": "Scope the graph to this app id instead of the device's current foreground app",
-          "type": "string"
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
         },
         "sessionUuid": {
           "description": "Session",
@@ -2237,7 +2248,10 @@
         },
         "appId": {
           "description": "App package or bundle id",
-          "type": "string"
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
         },
         "suite": {
           "description": "SharedPreferences file name or UserDefaults suite/app group",
@@ -3985,7 +3999,10 @@
               "additionalProperties": false,
               "properties": {
                 "appId": {
-                  "type": "string"
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256,
+                  "pattern": "^[A-Za-z0-9._-]+$"
                 },
                 "packageName": {
                   "type": "string"
@@ -5605,7 +5622,10 @@
           "type": "object",
           "properties": {
             "appId": {
-              "type": "string"
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "pattern": "^[A-Za-z0-9._-]+$"
             },
             "activityName": {
               "type": "string"
@@ -7801,7 +7821,10 @@
               "additionalProperties": false,
               "properties": {
                 "appId": {
-                  "type": "string"
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256,
+                  "pattern": "^[A-Za-z0-9._-]+$"
                 },
                 "packageName": {
                   "type": "string"
@@ -9157,7 +9180,9 @@
                 },
                 "appId": {
                   "type": "string",
-                  "minLength": 1
+                  "minLength": 1,
+                  "maxLength": 256,
+                  "pattern": "^[A-Za-z0-9._-]+$"
                 },
                 "container": {
                   "description": "App container",
@@ -9421,7 +9446,10 @@
       "type": "object",
       "properties": {
         "appId": {
-          "type": "string"
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
         },
         "name": {
           "description": "Storage name",
@@ -9874,7 +9902,10 @@
       "type": "object",
       "properties": {
         "appId": {
-          "type": "string"
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
         },
         "action": {
           "enum": ["grant", "revoke", "reset"]
@@ -10636,7 +10667,10 @@
       "type": "object",
       "properties": {
         "appId": {
-          "type": "string"
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
         },
         "name": {
           "description": "Storage name",
@@ -10750,7 +10784,10 @@
         },
         "appId": {
           "description": "App package or bundle id",
-          "type": "string"
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
         },
         "suite": {
           "description": "SharedPreferences file name or UserDefaults suite/app group",
@@ -11697,7 +11734,10 @@
             },
             "appId": {
               "description": "App package ID to match",
-              "type": "string"
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "pattern": "^[A-Za-z0-9._-]+$"
             },
             "tapActionLabel": {
               "description": "Action button label to tap (for 'tap' action)",
@@ -11809,7 +11849,9 @@
                 "properties": {
                   "appId": {
                     "type": "string",
-                    "minLength": 1
+                    "minLength": 1,
+                    "maxLength": 256,
+                    "pattern": "^[A-Za-z0-9._-]+$"
                   }
                 }
               },
@@ -12799,7 +12841,10 @@
                   "type": "object",
                   "properties": {
                     "appId": {
-                      "type": "string"
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256,
+                      "pattern": "^[A-Za-z0-9._-]+$"
                     },
                     "activityName": {
                       "type": "string"
@@ -13617,7 +13662,10 @@
                   "type": "object",
                   "properties": {
                     "appId": {
-                      "type": "string"
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256,
+                      "pattern": "^[A-Za-z0-9._-]+$"
                     },
                     "activityName": {
                       "type": "string"
@@ -14267,7 +14315,10 @@
                   "type": "object",
                   "properties": {
                     "appId": {
-                      "type": "string"
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256,
+                      "pattern": "^[A-Za-z0-9._-]+$"
                     },
                     "activityName": {
                       "type": "string"
@@ -14354,7 +14405,10 @@
                   "type": "object",
                   "properties": {
                     "appId": {
-                      "type": "string"
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256,
+                      "pattern": "^[A-Za-z0-9._-]+$"
                     },
                     "activityName": {
                       "type": "string"

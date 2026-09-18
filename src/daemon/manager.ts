@@ -226,7 +226,7 @@ function isAutoMobileDaemonCommand(
   }
 
   const runtimeEntrypoint = invocation.match(
-    /(?:^|\s)(?:"?[^"'\s]*\/)?(?:bun|node)(?:\.exe)?"?\s+(?:"([^"]+)"|'([^']+)'|([^\s"']+))/i,
+    /^(?:(?:"?(?:env|\/usr\/bin\/env)"?)\s+)?(?:"(?:[^"]*\/)?(?:bun|node)(?:\.exe)?"|(?:(?:[A-Za-z]:\/[^"']*\/|[^"'\s]*\/)?(?:bun|node)(?:\.exe)?))\s+(?:"([^"]+)"|'([^']+)'|([^\s"']+))/i,
   );
   const runsBundledEntrypoint =
     runtimeEntrypoint !== null &&

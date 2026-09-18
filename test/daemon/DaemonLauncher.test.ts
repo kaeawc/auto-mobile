@@ -86,6 +86,20 @@ describe("DaemonLauncher", () => {
     ).toBe(false);
   });
 
+  test("matches a sibling jj workspace distribution entry point", () => {
+    const activeEntryScript = "/workspace/auto-mobile/dist/src/index.js";
+
+    expect(isDaemonEntryScriptPath("/workspace/feature/dist/src/index.js", activeEntryScript)).toBe(
+      true,
+    );
+    expect(isDaemonEntryScriptPath("/other/place/x/dist/src/index.js", activeEntryScript)).toBe(
+      false,
+    );
+    expect(isDaemonEntryScriptPath("/workspace/a/b/dist/src/index.js", activeEntryScript)).toBe(
+      false,
+    );
+  });
+
   test("uses POSIX PATH semantics for an injected Linux platform", () => {
     const launcher = new DaemonLauncher({
       entryScript: null,

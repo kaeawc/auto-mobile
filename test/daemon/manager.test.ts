@@ -2185,6 +2185,22 @@ describe("Daemon manager process detection", () => {
     ]);
   });
 
+  test("anchors runtime process detection at the invocation start", () => {
+    const activeEntryScript = "/Users/x/auto-mobile/dist/src/index.js";
+    const records = parseDaemonProcessTable(
+      [
+        "40 1 python worker.py --note bun /Users/x/auto-mobile/.claude/worktrees/foo/dist/src/index.js --daemon-mode",
+        "41 1 bun /Users/x/auto-mobile/dist/src/index.js --daemon-mode",
+        "42 1 /usr/bin/env bun /Users/x/auto-mobile/dist/src/index.js --daemon-mode",
+        '43 1 \"C:\\Program Files\\bun\\bun.exe\" C:\\x\\auto-mobile\\dist\\src\\index.js --daemon-mode',
+      ].join("\n"),
+      Date.now(),
+      activeEntryScript,
+    );
+
+    expect(records.map(({ pid }) => pid)).toEqual([41, 42, 43]);
+  });
+
   test("parses Linux elapsed process creation times for PID-reuse protection", () => {
     expect(
       parseDaemonProcessTable(

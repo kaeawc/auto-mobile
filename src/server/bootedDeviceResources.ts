@@ -322,7 +322,11 @@ async function computeDeviceLockStates(): Promise<DeviceLockStatesResourceConten
       const discovery =
         await PlatformDeviceManagerFactory.getInstance().getBootedDevicesDetailed(platform);
       devices.push(...discovery.devices);
-      if (discovery.succeededPlatforms.has(platform)) {
+      const complete = sourcesForPlatform(platform).every(
+        (source) =>
+          discovery.succeededSources?.has(source) ?? discovery.succeededPlatforms.has(platform),
+      );
+      if (complete) {
         succeededPlatforms.add(platform);
       } else {
         discoveryErrors[platform] = discovery.discoveryErrors?.[platform] ?? {

@@ -571,6 +571,36 @@ describe("MCP Booted Device Resources", () => {
       });
     });
 
+    test("lock-states resource marks an incomplete iOS physical sweep incomplete", async function () {
+      fakeDeviceUtils.getBootedDevicesDetailed = async (platform) =>
+        platform === "android"
+          ? {
+              devices: [],
+              succeededPlatforms: new Set(["android"]),
+              succeededSources: new Set(["android"]),
+            }
+          : {
+              devices: [mockIosDevice1],
+              succeededPlatforms: new Set(["ios"]),
+              succeededSources: new Set(["ios-simulator"]),
+              discoveryErrors: {
+                ios: { code: "failed", message: "devicectl sweep incomplete" },
+              },
+            };
+      const { client } = fixture.getContext();
+      const result = await client.request(
+        { method: "resources/read", params: { uri: "automobile:devices/lockStates" } },
+        z.object({ contents: z.array(z.object({ text: z.string() })) }),
+      );
+
+      const data: DeviceLockStatesResourceContent = JSON.parse(result.contents[0].text!);
+      expect(data.observationComplete).toBe(false);
+      expect(data.discoveryErrors.ios).toEqual({
+        code: "failed",
+        message: "devicectl sweep incomplete",
+      });
+    });
+
     test("lock-states resource folds its discovery into the pool before probing (#6923)", async function () {
       // The pool knows the serial by its AVD label; this poll's discovery reads
       // the placeholder, so the entry must be quarantined by the time any

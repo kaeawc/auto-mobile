@@ -325,6 +325,45 @@ describe("MultiPlatformDeviceManager", () => {
     });
   });
 
+  test("getBootedDevicesDetailed aborts while a shared physical iOS discovery is pending", async () => {
+    await withProcessPlatform("darwin", async () => {
+      const controller = new AbortController();
+      const cancellation = new Error("iOS discovery cancelled");
+      let resolvePhysical!: (discovery: { devices: BootedDevice[]; complete: boolean }) => void;
+      const physicalDiscovery = new Promise<{
+        devices: BootedDevice[];
+        complete: boolean;
+      }>((resolve) => {
+        resolvePhysical = resolve;
+      });
+      let simctlCalled = false;
+      const fakeSimctl = {
+        getBootedSimulatorsChecked: async (): Promise<BootedDevice[]> => {
+          simctlCalled = true;
+          return [];
+        },
+      } as unknown as SimCtlClient;
+      const manager = new MultiPlatformDeviceManager(
+        new FakeAdbClient() as unknown as AdbClient,
+        fakeSimctl,
+        {} as AndroidEmulatorClient,
+        undefined,
+        undefined,
+        { listConnectedDevices: () => physicalDiscovery },
+      );
+
+      const discoveryPromise = manager.getBootedDevicesDetailed("ios", {
+        signal: controller.signal,
+      });
+      await Promise.resolve();
+      controller.abort(cancellation);
+
+      await expect(discoveryPromise).rejects.toBe(cancellation);
+      expect(simctlCalled).toBe(false);
+      resolvePhysical({ devices: [], complete: true });
+    });
+  });
+
   test("getBootedDevicesDetailed forwards iOS cache bypass and cancellation to simctl", async () => {
     await withProcessPlatform("darwin", async () => {
       const controller = new AbortController();

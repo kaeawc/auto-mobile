@@ -740,10 +740,7 @@
           "enum": ["android", "ios"]
         },
         "appId": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256,
-          "pattern": "^[A-Za-z0-9._-]+$"
+          "type": "string"
         },
         "processId": {
           "type": "integer",
@@ -5628,10 +5625,7 @@
           "type": "object",
           "properties": {
             "appId": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256,
-              "pattern": "^[A-Za-z0-9._-]+$"
+              "type": "string"
             },
             "activityName": {
               "type": "string"
@@ -12847,10 +12841,7 @@
                   "type": "object",
                   "properties": {
                     "appId": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 256,
-                      "pattern": "^[A-Za-z0-9._-]+$"
+                      "type": "string"
                     },
                     "activityName": {
                       "type": "string"
@@ -13668,10 +13659,7 @@
                   "type": "object",
                   "properties": {
                     "appId": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 256,
-                      "pattern": "^[A-Za-z0-9._-]+$"
+                      "type": "string"
                     },
                     "activityName": {
                       "type": "string"
@@ -14321,10 +14309,7 @@
                   "type": "object",
                   "properties": {
                     "appId": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 256,
-                      "pattern": "^[A-Za-z0-9._-]+$"
+                      "type": "string"
                     },
                     "activityName": {
                       "type": "string"
@@ -14411,10 +14396,7 @@
                   "type": "object",
                   "properties": {
                     "appId": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 256,
-                      "pattern": "^[A-Za-z0-9._-]+$"
+                      "type": "string"
                     },
                     "activityName": {
                       "type": "string"

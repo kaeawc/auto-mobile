@@ -68,6 +68,44 @@ describe("ToolRegistry.getToolDefinitions", () => {
     expect(second.outputSchema).toBe(first.outputSchema);
   });
 
+  test("constrains appId only in advertised input schemas", () => {
+    ToolRegistry.register(
+      "appIdSchemaTool",
+      "A tool with appId fields in both schemas",
+      z.object({ appId: z.string() }),
+      async () => ({ content: [{ type: "text", text: "ok" }] }),
+      {
+        outputSchema: z.object({
+          appId: z.string(),
+          nested: z.object({ appId: z.string() }),
+        }),
+      },
+    );
+
+    const definition = ToolRegistry.getToolDefinitions()[0];
+    const inputAppId = (
+      definition.inputSchema.properties as Record<string, Record<string, unknown>>
+    ).appId;
+    const outputSchema = definition.outputSchema!;
+    const outputProperties = outputSchema.properties as Record<string, Record<string, unknown>>;
+    const nestedOutputProperties = outputProperties.nested.properties as Record<
+      string,
+      Record<string, unknown>
+    >;
+
+    expect(inputAppId).toMatchObject({
+      minLength: 1,
+      maxLength: 256,
+      pattern: "^[A-Za-z0-9._-]+$",
+    });
+    expect(outputProperties.appId).not.toHaveProperty("minLength");
+    expect(outputProperties.appId).not.toHaveProperty("maxLength");
+    expect(outputProperties.appId).not.toHaveProperty("pattern");
+    expect(nestedOutputProperties.appId).not.toHaveProperty("minLength");
+    expect(nestedOutputProperties.appId).not.toHaveProperty("maxLength");
+    expect(nestedOutputProperties.appId).not.toHaveProperty("pattern");
+  });
+
   test("invalidates converted schemas when the tool list changes", () => {
     ToolRegistry.register(
       "invalidateTool",

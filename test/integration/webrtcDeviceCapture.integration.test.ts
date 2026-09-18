@@ -1281,20 +1281,28 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
             // shortfall does not flake the lane.
             let recovered: KeyframeRecoverySample | null = null;
             let toggle = false;
-            await waitFor(
-              async (signal) => {
-                toggle = !toggle;
-                await (toggle ? changeFixture(signal) : launchFixture(signal));
-                const latest = await recoverySample(cdp!);
-                if (latest && keyframeRecovered(baseline, latest)) {
+            const recoveryMessage = `iOS WHEP viewer did not recover to a fresh IDR within ~${IOS_FORCED_KEYFRAME_MIN_INTERVAL_MS}ms of the relayed PLI`;
+            try {
+              await waitFor(
+                async (signal) => {
+                  toggle = !toggle;
+                  await (toggle ? changeFixture(signal) : launchFixture(signal));
+                  const latest = await recoverySample(cdp!);
                   recovered = latest;
-                  return true;
-                }
-                return false;
-              },
-              `iOS WHEP viewer did not recover to a fresh IDR within ~${IOS_FORCED_KEYFRAME_MIN_INTERVAL_MS}ms of the relayed PLI`,
-              IOS_FORCED_KEYFRAME_MIN_INTERVAL_MS + 30_000,
-            );
+                  if (latest && keyframeRecovered(baseline, latest)) {
+                    return true;
+                  }
+                  return false;
+                },
+                recoveryMessage,
+                IOS_FORCED_KEYFRAME_MIN_INTERVAL_MS + 30_000,
+              );
+            } catch {
+              const diagnostics = await readerDiagnostics(cdp!).catch(() => undefined);
+              throw new Error(
+                `${recoveryMessage}; last recovery sample=${JSON.stringify(recovered)}; reader diagnostics=${JSON.stringify(diagnostics ?? "unavailable")}`,
+              );
+            }
             expect(recovered).not.toBeNull();
             expect(keyframeRecovered(baseline, recovered!)).toBe(true);
           });

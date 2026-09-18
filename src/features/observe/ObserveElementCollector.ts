@@ -5,6 +5,7 @@ import { isClickableElementProperties } from "../../utils/elementProperties";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
 import { DefaultElementParser } from "../utility/ElementParser";
 import { FlattenedElementEntry, IdentifyMediaViews } from "./IdentifyMediaViews";
+import { IOS_KEYBOARD_CONTAINER_CLASSES } from "./ios/IosScreenIdentity";
 import {
   ElementProvenance,
   setElementProvenance,
@@ -105,6 +106,7 @@ export class DefaultObserveElementCollector implements ObserveElementCollector {
       keyboardRoot = nextKeyboardRoot(
         keyboardRoot,
         nodeProperties.extras?.["automobile:imePackage"],
+        nodeProperties,
         depth,
         platform,
       );
@@ -197,11 +199,22 @@ function isUncollectedWrapper(element: Element, actionable: boolean, text: unkno
 function nextKeyboardRoot(
   current: { depth: number; package: string } | undefined,
   imePackage: unknown,
+  nodeProperties: Element,
   depth: number,
   platform: "android" | "ios",
 ): { depth: number; package: string } | undefined {
   if (platform === "android" && typeof imePackage === "string" && imePackage.length > 0) {
     return { depth, package: imePackage };
+  }
+  if (platform === "ios") {
+    // Mirror IosScreenIdentity.className: prefer a non-empty class, then className.
+    const classValue =
+      typeof nodeProperties.class === "string" ? nodeProperties.class.trim() : undefined;
+    const classNameValue =
+      typeof nodeProperties.className === "string" ? nodeProperties.className.trim() : undefined;
+    if (IOS_KEYBOARD_CONTAINER_CLASSES.has(classValue || classNameValue || "")) {
+      return { depth, package: "com.apple.keyboard" };
+    }
   }
   return current && depth > current.depth ? current : undefined;
 }

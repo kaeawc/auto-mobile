@@ -32,6 +32,7 @@ import {
 } from "../utils/configuredDeviceInventory";
 import {
   describeDevice,
+  legacyIosVersion,
   projectConfiguredImage,
   type ConfiguredImage,
   type DeviceDescription,
@@ -690,7 +691,7 @@ function legacyAliases(description: DeviceDescription, image: StableConfiguredDe
     // Deprecated alias for provenance.ios.availabilityError.
     availabilityError: iosProvenance?.availabilityError ?? null,
     // Deprecated alias for runtime.osVersion.
-    iosVersion: description.runtime.osVersion,
+    iosVersion: legacyIosVersion(description),
     // Deprecated alias for runtime.deviceType.
     deviceType: description.runtime.deviceType,
     // `runtime` is canonical object data; its former string is legacyRuntimeId.

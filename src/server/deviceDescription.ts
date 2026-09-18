@@ -100,6 +100,7 @@ export type DeviceDescriptionInput =
       device: BootedDevice;
       pooled?: PooledDevice;
       discovery?: DeviceInfo;
+      configured?: StableConfiguredDeviceImage;
       session?: DeviceSessionLike;
       deviceSessionUuid?: string;
       serviceStatus?: DeviceServiceStatusLike;
@@ -133,14 +134,7 @@ export function describeDevice(input: DeviceDescriptionInput): DeviceDescription
 
   const booted = input.kind === "booted" ? input.device : input.booted!;
   const pooled = input.pooled;
-  const image =
-    pooled?.androidImage?.platform === booted.platform
-      ? pooled.androidImage
-      : input.discovery?.platform === booted.platform
-        ? input.discovery
-        : input.kind === "provisioned"
-          ? input.provisioned.device
-          : undefined;
+  const image = bootedImageFacts(input, booted);
   return describeBooted(
     booted,
     image,
@@ -149,6 +143,22 @@ export function describeDevice(input: DeviceDescriptionInput): DeviceDescription
     input.deviceSessionUuid,
     input.serviceStatus,
   );
+}
+
+function bootedImageFacts(
+  input: Exclude<DeviceDescriptionInput, { kind: "image" }>,
+  booted: BootedDevice,
+): ImageLike | undefined {
+  if (input.pooled?.androidImage?.platform === booted.platform) {
+    return input.pooled.androidImage;
+  }
+  if (input.discovery?.platform === booted.platform) {
+    return input.discovery;
+  }
+  if (input.kind === "booted" && input.configured?.platform === booted.platform) {
+    return input.configured;
+  }
+  return input.kind === "provisioned" ? input.provisioned.device : undefined;
 }
 
 // oxlint-disable-next-line complexity -- one exhaustive canonical image projection prevents producer drift.
@@ -202,7 +212,7 @@ function describeImage(image: ImageLike, androidProvenance?: AndroidProvenance):
 // oxlint-disable-next-line complexity -- one exhaustive canonical booted projection preserves precedence.
 function describeBooted(
   device: BootedDevice,
-  admittedImage: DeviceInfo | undefined,
+  admittedImage: ImageLike | undefined,
   pooled: PooledDevice | undefined,
   session: DeviceSessionLike | undefined,
   deviceSessionUuid: string | undefined,
@@ -251,10 +261,7 @@ function describeBooted(
 }
 
 // oxlint-disable-next-line complexity -- each optional runtime fact follows documented precedence.
-function mergeRuntimeFacts(
-  device: BootedDevice,
-  admittedImage: DeviceInfo | undefined,
-): DeviceInfo {
+function mergeRuntimeFacts(device: BootedDevice, admittedImage: ImageLike | undefined): DeviceInfo {
   return {
     ...admittedImage,
     ...device,
@@ -446,6 +453,13 @@ export function projectBootedDevice(description: DeviceDescription): BootedDevic
   return description;
 }
 
+/** Deprecated `iosVersion` applies only to iOS image records. */
+export function legacyIosVersion(
+  description: Pick<DeviceDescription, "platform" | "runtime">,
+): string | null {
+  return description.platform === "ios" ? description.runtime.osVersion : null;
+}
+
 /** Applies a later automation probe without letting a producer reimplement readiness mapping. */
 export function withDeviceServiceStatus(
   description: DeviceDescription,
@@ -532,9 +546,9 @@ export const listDevicesEntrySchema = z.object({
   display: z.object({ formFactor: nullableString }),
   lifecycle: deviceDescriptionSchema.shape.lifecycle,
   session: z.object({ sessionUuid: nullableString }),
-  apiLevel: nullableNumber.optional(),
-  osVersion: nullableString.optional(),
-  formFactor: nullableString.optional(),
+  apiLevel: nullableNumber,
+  osVersion: nullableString,
+  formFactor: nullableString,
 });
 export const provisionedDeviceSchema = deviceDescriptionSchema
   .pick({

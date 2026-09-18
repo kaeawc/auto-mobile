@@ -1,4 +1,4 @@
-import type { DeviceInfo, Platform } from "../models";
+import type { BootedDevice, DeviceInfo, Platform } from "../models";
 import type { DeviceImageDiscovery } from "./deviceUtils";
 import {
   describeDevice,
@@ -33,6 +33,33 @@ export interface ConfiguredDeviceInventoryProjection {
   /** Discovery records retained only for resource-only AVD provenance enrichment. */
   sourceImages: StableConfiguredDeviceImage[];
   observation: ConfiguredDeviceInventoryObservation;
+}
+
+/**
+ * Indexes a complete configured-device observation by the stable identity the
+ * canonical description uses for booted-device configuration fallback.
+ */
+export function configuredImagesByStableId(
+  platform: Platform,
+  discovery: DeviceImageDiscovery,
+): ReadonlyMap<string, StableConfiguredDeviceImage> {
+  const projection = projectConfiguredDeviceInventory(platform, discovery);
+  return new Map(
+    projection.sourceImages.map((image) => [configuredImageKey(platform, image.stableId), image]),
+  );
+}
+
+/** Returns the configured image for a booted virtual device, when its inventory completed. */
+export function configuredImageForBootedDevice(
+  device: BootedDevice,
+  configuredImages: ReadonlyMap<string, StableConfiguredDeviceImage>,
+): StableConfiguredDeviceImage | undefined {
+  const stableId = device.platform === "android" ? device.name : device.deviceId;
+  return configuredImages.get(configuredImageKey(device.platform, stableId));
+}
+
+function configuredImageKey(platform: Platform, stableId: string): string {
+  return `${platform}:${stableId}`;
 }
 
 export function projectConfiguredDeviceInventory(

@@ -82,6 +82,36 @@ function pick<T extends object>(value: T, keys: Record<keyof T, boolean>): Parti
   ) as Partial<T>;
 }
 
+function assertSharedKnownValuesAgree(...descriptions: DeviceDescription[]): void {
+  const assertValuesAgree = (left: unknown, right: unknown, path: string): void => {
+    if (left === null || right === null || left === undefined || right === undefined) {
+      return;
+    }
+    if (typeof left !== "object" || typeof right !== "object") {
+      expect(left, path).toEqual(right);
+      return;
+    }
+    if (Array.isArray(left) || Array.isArray(right)) {
+      expect(left, path).toEqual(right);
+      return;
+    }
+
+    const leftRecord = left as Record<string, unknown>;
+    const rightRecord = right as Record<string, unknown>;
+    for (const key of Object.keys(leftRecord)) {
+      if (key in rightRecord) {
+        assertValuesAgree(leftRecord[key], rightRecord[key], `${path}.${key}`);
+      }
+    }
+  };
+
+  for (let i = 0; i < descriptions.length; i++) {
+    for (let j = i + 1; j < descriptions.length; j++) {
+      assertValuesAgree(descriptions[i], descriptions[j], "device");
+    }
+  }
+}
+
 const androidImage: DeviceDescriptionInput = {
   kind: "image",
   image: {
@@ -146,6 +176,37 @@ describe("device description projections", () => {
     expect(description.display.density).toBeNull();
     expect(description.session.sessionUuid).toBeNull();
     expect(Object.keys(description)).toEqual(Object.keys(projectionKeys.booted));
+  });
+
+  test("uses configured Android facts when no image was admitted to the booted device", () => {
+    const configured = {
+      stableId: "Pixel_9_API_36",
+      name: "Pixel_9_API_36",
+      platform: "android" as const,
+      isRunning: true,
+      apiLevel: 36,
+      osVersion: "16",
+      screenWidth: 1080,
+      screenHeight: 2400,
+      screenDensity: 420,
+      formFactor: "phone" as const,
+      capabilityInventory: {
+        schemaVersion: 1,
+        capabilities: [{ id: "android.hardware.nfc", state: "available" as const }],
+      },
+    };
+    const configuredDescription = describeDevice({ kind: "image", image: configured });
+    const bootedDescription = describeDevice({
+      kind: "booted",
+      device: {
+        name: "Pixel_9_API_36",
+        platform: "android",
+        deviceId: "emulator-5554",
+      },
+      configured,
+    });
+
+    assertSharedKnownValuesAgree(configuredDescription, bootedDescription);
   });
 
   test("synthesizes static inventory only for iOS simulators", () => {

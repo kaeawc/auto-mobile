@@ -2,6 +2,11 @@ import { errorMessage } from "../utils/describeUnknownError";
 import { ResourceRegistry, ResourceContent } from "./resourceRegistry";
 import { type DeviceDiscoveryError, PlatformDeviceManager } from "../utils/deviceUtils";
 import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
+import {
+  configuredImageForBootedDevice,
+  configuredImagesByStableId,
+  type StableConfiguredDeviceImage,
+} from "../utils/configuredDeviceInventory";
 import { logger } from "../utils/logger";
 import { BootedDevice, Platform } from "../models";
 import { DaemonState } from "../daemon/daemonState";
@@ -411,11 +416,13 @@ function legacyAliases(description: DeviceDescription) {
 function toBootedDeviceInfo(
   device: BootedDevice,
   poolContext?: PoolDeviceContext,
+  configured?: StableConfiguredDeviceImage,
 ): BootedDeviceInfo {
   const description = describeDevice({
     kind: "booted",
     device,
     pooled: poolContext?.pooled,
+    configured,
     // Preserve the pool's already-published assignment in the canonical session
     // when the optional session-detail map is unavailable for this observation.
     session:
@@ -433,6 +440,22 @@ function toBootedDeviceInfo(
     locked: null,
     identityUnresolved: false,
   };
+}
+
+async function configuredImagesForBootedPlatform(
+  platform: Platform,
+): Promise<ReadonlyMap<string, StableConfiguredDeviceImage>> {
+  try {
+    const discovery =
+      await PlatformDeviceManagerFactory.getInstance().getDeviceImagesDetailed(platform);
+    return configuredImagesByStableId(platform, discovery);
+  } catch (error) {
+    logger.warn(
+      `[BootedDeviceResources] Failed to get configured ${platform} device images: ${errorMessage(error)}`,
+      error,
+    );
+    return new Map();
+  }
 }
 
 /**
@@ -599,8 +622,8 @@ async function discoverBootedDevicesForPlatform(
   resolveDeviceSessionUuid: (deviceId: string) => string | null,
 ): Promise<PlatformDiscoveryResult> {
   try {
-    const discovery =
-      await PlatformDeviceManagerFactory.getInstance().getBootedDevicesDetailed(platform);
+    const deviceManager = PlatformDeviceManagerFactory.getInstance();
+    const discovery = await deviceManager.getBootedDevicesDetailed(platform);
     // FUNNEL 1: fold this observation into the pool BEFORE any of it is joined to
     // pooled identity below. This read can be the first discovery to see the
     // `Unknown (<serial>)` placeholder, and withholding only its own output would
@@ -608,6 +631,7 @@ async function discoverBootedDevicesForPlatform(
     // resolver -- still trusting the stale label
     // ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
     await devicePool?.reconcileDiscoveryObservation(discovery.devices, "booted-devices-resource");
+    const configuredImages = await configuredImagesForBootedPlatform(platform);
     const complete = discovery.succeededSources
       ? sourcesForPlatform(platform).every((source) => discovery.succeededSources!.has(source))
       : discovery.succeededPlatforms.has(platform);
@@ -622,6 +646,7 @@ async function discoverBootedDevicesForPlatform(
               sessionInfoByDeviceId,
               resolveDeviceSessionUuid,
             ),
+            configuredImageForBootedDevice(device, configuredImages),
           ),
           devicePool,
         ),

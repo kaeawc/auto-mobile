@@ -3739,7 +3739,10 @@
               "runtime",
               "display",
               "lifecycle",
-              "session"
+              "session",
+              "apiLevel",
+              "osVersion",
+              "formFactor"
             ],
             "additionalProperties": false
           }

@@ -9,6 +9,7 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import type { BootedDevice } from "../../src/models";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
+import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
@@ -358,6 +359,32 @@ describe("listDevices tool (#5870)", () => {
     expect(payload.devices[0].runtime.osVersion).toBeNull();
   });
 
+  test("uses configured image facts when an idle booted Android device has no admitted image", async () => {
+    fakeDeviceUtils.setDeviceImages("android", [
+      {
+        name: android.name,
+        platform: "android",
+        isRunning: true,
+        apiLevel: 36,
+        osVersion: "16",
+        screenWidth: 1080,
+        screenHeight: 2400,
+        screenDensity: 420,
+        formFactor: "phone",
+      },
+    ]);
+
+    const payload = await callListDevices({ platform: "android" });
+
+    expect(payload.devices[0]).toMatchObject({
+      runtime: { apiLevel: 36, osVersion: "16" },
+      display: { formFactor: "phone" },
+      apiLevel: 36,
+      osVersion: "16",
+      formFactor: "phone",
+    });
+  });
+
   test("reports Android API and release metadata retained at device admission", async () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
@@ -413,6 +440,36 @@ describe("listDevices tool (#5870)", () => {
       const payload = await callListDevices({ platform: "android" });
 
       expect(payload.devices[0].session.sessionUuid).toBe("busy-session");
+    } finally {
+      DaemonState.getInstance().reset();
+      sessionManager.stopCleanupTimer();
+    }
+  });
+
+  test("reports the registry device-session UUID", async () => {
+    const timer = new FakeTimer();
+    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      fakeDeviceUtils,
+      new DefaultRetryExecutor(timer),
+    );
+    const registry = new DeviceSessionRegistry(timer);
+    registry.onDeviceConnected({
+      deviceId: android.deviceId,
+      platform: "android",
+      incarnation: 1,
+    });
+    DaemonState.getInstance().initialize(sessionManager, pool, registry);
+
+    try {
+      const payload = await callListDevices({ platform: "android" });
+      expect(payload.devices[0].identity.deviceSessionUuid).toBe(
+        registry.getByDeviceId(android.deviceId)?.deviceSessionUuid,
+      );
     } finally {
       DaemonState.getInstance().reset();
       sessionManager.stopCleanupTimer();

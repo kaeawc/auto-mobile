@@ -21,7 +21,7 @@ describe("PerformanceAudit frame-rate refresh-rate cap (#6252)", function () {
       "mRefreshRate=120.0",
     );
     fakeAdbClient.setCommandResult(
-      `shell dumpsys gfxinfo ${packageName}`,
+      `shell dumpsys gfxinfo '${packageName}'`,
       [
         "Total frames rendered: 500",
         "Janky frames: 5 (1.00%)",

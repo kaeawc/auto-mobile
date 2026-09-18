@@ -93,7 +93,7 @@ describe("AwaitIdle UI stability deadline", () => {
     expect(metrics?.isStable).toBe(false);
     expect(adb.getCommandCalls()).toEqual([
       expect.objectContaining({
-        command: "shell dumpsys gfxinfo com.example.app reset",
+        command: "shell dumpsys gfxinfo 'com.example.app' reset",
         timeoutMs: 100,
       }),
     ]);

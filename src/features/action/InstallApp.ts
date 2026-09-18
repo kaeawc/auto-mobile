@@ -28,6 +28,7 @@ import { logger } from "../../utils/logger";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../../utils/workingDirectory";
 import { PlistClient, type PlistReader } from "../../utils/ios-cmdline-tools/PlistClient";
 import { IOSCtrlProxyClient } from "../observe/ios";
+import { shellQuote } from "../../utils/shellQuote";
 import { InstalledAppsRepository, type InstalledAppsStore } from "../../db/installedAppsRepository";
 import { getDbWriteBarrier } from "../../db/dbWriteBarrier";
 import { getInstalledAppsCacheWriteCoordinator } from "../../db/installedAppsCacheWriteCoordinator";
@@ -147,6 +148,7 @@ export class InstallApp {
 
     let isInstalled = false;
     if (packageName) {
+      const packageNameForCommand = packageName;
       // Check if app is already installed for this user.
       isInstalled = await perf.track("checkInstalled", async () => {
         try {
@@ -159,7 +161,7 @@ export class InstallApp {
           // fall through to ADB
         }
         try {
-          const isInstalledCmd = `shell pm list packages --user ${targetUserId} -f ${packageName} | grep -c ${packageName}`;
+          const isInstalledCmd = `shell pm list packages --user ${targetUserId} -f ${shellQuote(packageNameForCommand)} | grep -c ${shellQuote(packageNameForCommand)}`;
           const isInstalledOutput = await this.adb.executeCommand(
             isInstalledCmd,
             undefined,
@@ -328,7 +330,7 @@ export class InstallApp {
   ): Promise<void> {
     try {
       await this.adb.executeCommand(
-        `shell am force-stop --user ${userId} ${packageName}`,
+        `shell am force-stop --user ${userId} ${shellQuote(packageName)}`,
         undefined,
         undefined,
         true,

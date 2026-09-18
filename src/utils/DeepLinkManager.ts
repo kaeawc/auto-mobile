@@ -1,5 +1,6 @@
 import { errorMessage } from "./describeUnknownError";
 import { logger } from "./logger";
+import { shellQuote } from "./shellQuote";
 import {
   AdbClientFactory,
   defaultAdbClientFactory,
@@ -190,7 +191,7 @@ export class DeepLinkManager implements DeepLinkManager {
 
       // Use dumpsys package to get detailed package information including intent filters
       const packageInfoResult = await this.adbUtils.executeCommand(
-        `shell dumpsys package ${appId}`,
+        `shell dumpsys package ${shellQuote(appId)}`,
       );
 
       // Check if the command failed (stderr indicates failure)

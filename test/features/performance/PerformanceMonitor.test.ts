@@ -122,7 +122,7 @@ describe("PerformanceMonitor", () => {
   function setupDefaultAdbResponses(adb: FakeAdbClient): void {
     // gfxinfo response (with reset flag for per-interval metrics)
     adb.setCommandResult(
-      "shell dumpsys gfxinfo com.example.app reset",
+      "shell dumpsys gfxinfo 'com.example.app' reset",
       `
         Total frames rendered: 100
         50th percentile: 8.5ms
@@ -136,11 +136,11 @@ describe("PerformanceMonitor", () => {
     );
 
     // pidof response
-    adb.setCommandResult("shell pidof com.example.app", "12345\n");
+    adb.setCommandResult("shell pidof 'com.example.app'", "12345\n");
 
     // /proc/stat response
     adb.setCommandResult(
-      "shell cat /proc/12345/stat",
+      "shell cat /proc/'12345'/stat",
       "12345 (app) S 1 12345 12345 0 -1 4194560 1234 0 0 0 500 200 0 0 20 0 1 0 12345 123456789 12345 18446744073709551615 0 0 0 0 0 0 0 0 0 0 0 0 17 0 0 0 0 0 0",
     );
 
@@ -150,7 +150,7 @@ describe("PerformanceMonitor", () => {
     // meminfo response — full output (no on-device grep) so the App Summary
     // breakdown can be parsed host-side. Pss column is the first number per row.
     adb.setCommandResult(
-      "shell dumpsys meminfo com.example.app",
+      "shell dumpsys meminfo 'com.example.app'",
       `
        App Summary
                            Pss(KB)                        Rss(KB)
@@ -458,7 +458,7 @@ describe("PerformanceMonitor", () => {
     });
 
     it("should calculate Android CPU from interval deltas", async () => {
-      fakeAdbClient.setCommandResultSequence("shell cat /proc/12345/stat", [
+      fakeAdbClient.setCommandResultSequence("shell cat /proc/'12345'/stat", [
         "12345 (app) S 1 12345 12345 0 -1 4194560 1234 0 0 0 500 200 0 0 20 0 1 0 12345 123456789 12345 18446744073709551615 0 0 0 0 0 0 0 0 0 0 0 0 17 0 0 0 0 0 0",
         "12345 (app) S 1 12345 12345 0 -1 4194560 1234 0 0 0 600 200 0 0 20 0 1 0 12345 123456789 12345 18446744073709551615 0 0 0 0 0 0 0 0 0 0 0 0 17 0 0 0 0 0 0 0 0",
       ]);
@@ -479,7 +479,7 @@ describe("PerformanceMonitor", () => {
     });
 
     it("should preserve the CPU baseline across a transient collection failure", async () => {
-      fakeAdbClient.setCommandResultSequence("shell cat /proc/12345/stat", [
+      fakeAdbClient.setCommandResultSequence("shell cat /proc/'12345'/stat", [
         "12345 (app) S 1 12345 12345 0 -1 4194560 1234 0 0 0 500 200 0 0 20 0 1 0 12345 123456789 12345 18446744073709551615 0 0 0 0 0 0 0 0 0 0 0 0 17 0 0 0 0 0",
         "12345 (app) S 1 12345 12345 0 -1 4194560 1234 0 0 0 600 200 0 0 20 0 1 0 12345 123456789 12345 18446744073709551615 0 0 0 0 0 0 0 0 0 0 0 0 17 0 0 0 0 0",
         "12345 (app) S 1 12345 12345 0 -1 4194560 1234 0 0 0 600 200 0 0 20 0 1 0 12345 123456789 12345 18446744073709551615 0 0 0 0 0 0 0 0 0 0 0 0 17 0 0 0 0 0 0 0",
@@ -572,7 +572,7 @@ describe("PerformanceMonitor", () => {
 
       // Update counters to simulate new jank for second interval
       fakeAdbClient.setCommandResult(
-        "shell dumpsys gfxinfo com.example.app reset",
+        "shell dumpsys gfxinfo 'com.example.app' reset",
         `
           Total frames rendered: 50
           50th percentile: 8.5ms
@@ -602,7 +602,7 @@ describe("PerformanceMonitor", () => {
 
     it("should handle missing gfxinfo data gracefully", async () => {
       fakeAdbClient.setCommandResult(
-        "shell dumpsys gfxinfo com.example.app reset",
+        "shell dumpsys gfxinfo 'com.example.app' reset",
         "No data available",
       );
 
@@ -621,7 +621,7 @@ describe("PerformanceMonitor", () => {
     it("should return null frame time when no frames were rendered", async () => {
       // When app is idle, gfxinfo shows "Total frames rendered: 0" with garbage P50 values
       fakeAdbClient.setCommandResult(
-        "shell dumpsys gfxinfo com.example.app reset",
+        "shell dumpsys gfxinfo 'com.example.app' reset",
         `
           Total frames rendered: 0
           50th percentile: 4950ms
@@ -644,7 +644,7 @@ describe("PerformanceMonitor", () => {
     });
 
     it("should handle missing PID gracefully", async () => {
-      fakeAdbClient.setCommandResult("shell pidof com.example.app", "");
+      fakeAdbClient.setCommandResult("shell pidof 'com.example.app'", "");
 
       monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter);
       monitor.start();
@@ -658,7 +658,7 @@ describe("PerformanceMonitor", () => {
 
     it("should handle ADB errors gracefully", async () => {
       fakeAdbClient.setCommandError(
-        "shell dumpsys gfxinfo com.example.app reset",
+        "shell dumpsys gfxinfo 'com.example.app' reset",
         new Error("ADB connection failed"),
       );
 
@@ -704,29 +704,29 @@ describe("PerformanceMonitor", () => {
   describe("multiple devices", () => {
     it("should push data for each monitored device", async () => {
       fakeAdbClient.setCommandResult(
-        "shell dumpsys gfxinfo com.app1 reset",
+        "shell dumpsys gfxinfo 'com.app1' reset",
         "Total frames rendered: 10\n50th percentile: 10ms",
       );
       fakeAdbClient.setCommandResult(
-        "shell dumpsys gfxinfo com.app2 reset",
+        "shell dumpsys gfxinfo 'com.app2' reset",
         "Total frames rendered: 10\n50th percentile: 12ms",
       );
-      fakeAdbClient.setCommandResult("shell pidof com.app1", "111");
-      fakeAdbClient.setCommandResult("shell pidof com.app2", "222");
+      fakeAdbClient.setCommandResult("shell pidof 'com.app1'", "111");
+      fakeAdbClient.setCommandResult("shell pidof 'com.app2'", "222");
       fakeAdbClient.setCommandResult(
-        "shell cat /proc/111/stat",
+        "shell cat /proc/'111'/stat",
         "111 (app) S 0 0 0 0 0 0 0 0 0 0 100 50 0 0 20 0 1 0 0 0 0 0",
       );
       fakeAdbClient.setCommandResult(
-        "shell cat /proc/222/stat",
+        "shell cat /proc/'222'/stat",
         "222 (app) S 0 0 0 0 0 0 0 0 0 0 200 100 0 0 20 0 1 0 0 0 0 0",
       );
       fakeAdbClient.setCommandResult(
-        'shell dumpsys meminfo com.app1 | grep "TOTAL PSS"',
+        "shell dumpsys meminfo 'com.app1' | grep \"TOTAL PSS\"",
         "TOTAL PSS: 50000",
       );
       fakeAdbClient.setCommandResult(
-        'shell dumpsys meminfo com.app2 | grep "TOTAL PSS"',
+        "shell dumpsys meminfo 'com.app2' | grep \"TOTAL PSS\"",
         "TOTAL PSS: 60000",
       );
 
@@ -845,7 +845,7 @@ describe("PerformanceMonitor", () => {
 
     it("keeps priming after an initial gfxinfo collection failure", async () => {
       const buffer = new PerfWindowBuffer();
-      const gfxinfoCommand = "shell dumpsys gfxinfo com.example.app reset";
+      const gfxinfoCommand = "shell dumpsys gfxinfo 'com.example.app' reset";
       fakeAdbClient.setCommandError(gfxinfoCommand, new Error("temporary ADB failure"));
       monitor = new PerformanceMonitor(
         fakeTimer,
@@ -876,7 +876,7 @@ describe("PerformanceMonitor", () => {
     it("re-primes gfxinfo after switching the monitored package", async () => {
       const buffer = new PerfWindowBuffer();
       fakeAdbClient.setCommandResult(
-        "shell dumpsys gfxinfo com.other.app reset",
+        "shell dumpsys gfxinfo 'com.other.app' reset",
         `
           Total frames rendered: 100
           50th percentile: 8.5ms
@@ -910,7 +910,7 @@ describe("PerformanceMonitor", () => {
       // Causes sum to 6 (2+1+3) but overlap; the aggregate "Janky frames: 4" is
       // the deduplicated truth and must win.
       fakeAdbClient.setCommandResult(
-        "shell dumpsys gfxinfo com.example.app reset",
+        "shell dumpsys gfxinfo 'com.example.app' reset",
         `
           Total frames rendered: 100
           50th percentile: 8.5ms
@@ -1083,7 +1083,7 @@ describe("PerformanceMonitor", () => {
 
     it("does not prime gfxinfo after a failed reset", async () => {
       const buffer = new PerfWindowBuffer();
-      const gfxCommand = "shell dumpsys gfxinfo com.example.app reset";
+      const gfxCommand = "shell dumpsys gfxinfo 'com.example.app' reset";
       fakeAdbClient.setCommandError(gfxCommand, new Error("ADB connection failed"));
       monitor = new PerformanceMonitor(
         fakeTimer,
@@ -1114,7 +1114,7 @@ describe("PerformanceMonitor", () => {
       // Tick 1 renders frames (fps derived); later ticks are idle (no frames).
       // The IDE stream keeps the cached fps, but the buffer must record the raw
       // null so an idle app does not keep an old fps pinned in the window.
-      fakeAdbClient.setCommandResultSequence("shell dumpsys gfxinfo com.example.app reset", [
+      fakeAdbClient.setCommandResultSequence("shell dumpsys gfxinfo 'com.example.app' reset", [
         {
           stdout: `
             Total frames rendered: 100
@@ -1571,7 +1571,7 @@ ${iosSimPsLine({ pid: 222, cpu: 22.0, rssKb: 204800, deviceId: udidB, bundleId }
 
       // Change gfxinfo to report bad FPS (below critical threshold of 45)
       fakeAdbClient.setCommandResult(
-        "shell dumpsys gfxinfo com.example.app reset",
+        "shell dumpsys gfxinfo 'com.example.app' reset",
         `
           Total frames rendered: 10
           50th percentile: 40.0ms

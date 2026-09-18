@@ -8,6 +8,7 @@ import {
 import { logger } from "../../utils/logger";
 import { AndroidCtrlProxyClient } from "./android";
 import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
+import { shellQuote } from "../../utils/shellQuote";
 
 /**
  * Source of iOS app metadata — injectable for testing.
@@ -153,7 +154,7 @@ async function getAndroidAppMetadataFromAdb(
   let result: ExecResult;
   try {
     result = await adb.executeCommand(
-      `shell dumpsys package ${packageName}`,
+      `shell dumpsys package ${shellQuote(packageName)}`,
       options.timeoutMs,
       undefined,
       undefined,

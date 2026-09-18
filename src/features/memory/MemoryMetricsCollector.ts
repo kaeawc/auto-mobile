@@ -9,10 +9,14 @@ import { BootedDevice } from "../../models";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import type { MemoryMetricsProvider } from "./interfaces/MemoryMetricsProvider";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
+import { shellQuote } from "../../utils/shellQuote";
 
 /**
  * Memory snapshot from dumpsys meminfo
  */
+/** Settle time after `kill -USR1`; there is no completion signal to poll. */
+const GC_SETTLE_DELAY_MS = 500;
+
 export interface MemorySnapshot {
   javaHeapMb: number;
   nativeHeapMb: number;
@@ -92,7 +96,7 @@ export class MemoryMetricsCollector implements MemoryMetricsProvider {
   ): Promise<MemorySnapshot> {
     try {
       const { stdout } = await perf.track("adbMeminfo", () =>
-        this.adb.executeCommand(`shell dumpsys meminfo ${packageName}`),
+        this.adb.executeCommand(`shell dumpsys meminfo ${shellQuote(packageName)}`),
       );
 
       const metrics = this.parseMeminfo(stdout);
@@ -151,21 +155,21 @@ export class MemoryMetricsCollector implements MemoryMetricsProvider {
       logger.info(`[MemoryMetricsCollector] Triggering explicit GC for ${packageName}`);
 
       // Get the PID first
-      const { stdout: pidOutput } = await perf.track("adbGetPid", () =>
-        this.adb.executeCommand(`shell pidof ${packageName}`),
-      );
-
-      const pid = pidOutput.trim();
+      // Use the documented primary PID convention shared with GC event attribution.
+      const pid = await this.resolvePid(packageName, perf);
       if (!pid) {
         logger.warn(`[MemoryMetricsCollector] No PID found for ${packageName}, cannot trigger GC`);
         return;
       }
 
       // Send SIGUSR1 to trigger GC (Android uses this signal for GC)
-      await perf.track("adbTriggerGC", () => this.adb.executeCommand(`shell kill -USR1 ${pid}`));
+      await perf.track("adbTriggerGC", () =>
+        this.adb.executeCommand(`shell kill -USR1 ${shellQuote(pid)}`),
+      );
 
-      // Wait for GC to complete (small delay)
-      await this.timer.sleep(500);
+      // SIGUSR1-triggered GC has no device-side completion signal to poll (the GC log line
+      // is read separately by captureGCEvents), so this is a fixed settle on the injected timer.
+      await this.timer.sleep(GC_SETTLE_DELAY_MS);
 
       logger.info(`[MemoryMetricsCollector] GC triggered for ${packageName}`);
     } catch (error) {
@@ -183,7 +187,7 @@ export class MemoryMetricsCollector implements MemoryMetricsProvider {
     perf: PerformanceTracker,
   ): Promise<string | undefined> {
     const { stdout } = await perf.track("adbGetGcPid", () =>
-      this.adb.executeCommand(`shell pidof ${packageName}`),
+      this.adb.executeCommand(`shell pidof ${shellQuote(packageName)}`),
     );
     return stdout.trim().split(/\s+/)[0] || undefined;
   }
@@ -286,7 +290,7 @@ export class MemoryMetricsCollector implements MemoryMetricsProvider {
       // drop events outside the (already device-clock) capture window.
       const { stdout } = await perf.track("adbLogcatGC", () =>
         this.adb.executeCommand(
-          `shell logcat -d -v epoch --pid=${resolvedPid} | grep -iE "GC[_ ].*freed.*paused"`,
+          `shell logcat -d -v epoch --pid=${shellQuote(resolvedPid)} | grep -iE "GC[_ ].*freed.*paused"`,
           5000,
         ),
       );
@@ -479,7 +483,10 @@ export class MemoryMetricsCollector implements MemoryMetricsProvider {
   ): Promise<UnreachableObjectsInfo | null> {
     try {
       const { stdout } = await perf.track("adbMeminfoUnreachable", () =>
-        this.adb.executeCommand(`shell dumpsys meminfo --unreachable ${packageName}`, 10000),
+        this.adb.executeCommand(
+          `shell dumpsys meminfo --unreachable ${shellQuote(packageName)}`,
+          10000,
+        ),
       );
 
       return this.parseUnreachableObjects(stdout);

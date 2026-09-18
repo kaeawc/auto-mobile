@@ -75,7 +75,7 @@ describe("app ID device-shell boundaries", () => {
     async (_label, appId, quoted) => {
       const adb = new FakeAdbClient();
       adb.setUsers([{ userId: 0, name: "Owner", flags: 0x4000, running: true }]);
-      adb.setCommandResult(`shell pm list packages --user 0 -f ${appId} | grep -c ${appId}`, "1");
+      adb.setCommandResult(`shell pm list packages --user 0 -f ${quoted} | grep -c ${quoted}`, "1");
       adb.setCommandResult(
         "shell dumpsys activity processes",
         `123:com.safe.process/u0a123\npackageList={${appId}}`,

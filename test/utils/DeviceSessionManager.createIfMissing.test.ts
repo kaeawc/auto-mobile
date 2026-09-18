@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { DeviceSessionManager } from "../../src/utils/DeviceSessionManager";
+import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDeviceClientProvider } from "../fakes/FakeDeviceClientProvider";
@@ -11,6 +12,11 @@ import type { BootedDevice, DeviceInfo } from "../../src/models";
 interface SimctlRecorder {
   createCalls: { name: string; deviceType: string; runtime: string }[];
   bootCalls: string[];
+  deleteCalls?: string[];
+  deleteSignalAborted?: boolean[];
+  bootError?: Error;
+  bootAbortController?: AbortController;
+  verifyError?: Error;
 }
 
 /**
@@ -38,14 +44,27 @@ function makeSimctl(recorder: SimctlRecorder, simulatorImages: DeviceInfo[] = []
     },
     bootSimulator: async (udid: string): Promise<BootedDevice> => {
       recorder.bootCalls.push(udid);
+      recorder.bootAbortController?.abort();
+      if (recorder.bootError) {
+        throw recorder.bootError;
+      }
       return { deviceId: udid, name: "AutoMobile-iPhone-17", platform: "ios" };
     },
+    deleteSimulator: async (udid: string, options?: { signal?: AbortSignal }) => {
+      recorder.deleteCalls?.push(udid);
+      recorder.deleteSignalAborted?.push(options?.signal?.aborted ?? false);
+    },
     // verifyIosDevice returns early for a non-Booted, available device.
-    getDeviceInfo: async () => ({
-      name: "AutoMobile-iPhone-17",
-      isAvailable: true,
-      state: "Shutdown",
-    }),
+    getDeviceInfo: async () => {
+      if (recorder.verifyError) {
+        throw recorder.verifyError;
+      }
+      return {
+        name: "AutoMobile-iPhone-17",
+        isAvailable: true,
+        state: "Shutdown",
+      };
+    },
   } as unknown as SimCtlClient;
 }
 
@@ -70,7 +89,7 @@ describe("findOrStartIosDevice creation gate", () => {
   let manager: DeviceSessionManager;
 
   beforeEach(() => {
-    recorder = { createCalls: [], bootCalls: [] };
+    recorder = { createCalls: [], bootCalls: [], deleteCalls: [], deleteSignalAborted: [] };
     const provider = new FakeDeviceClientProvider(
       new FakeAdbExecutor(),
       new FakeDeviceUtils(),
@@ -105,7 +124,42 @@ describe("findOrStartIosDevice creation gate", () => {
     expect(recorder.createCalls[0].runtime).toBe("com.apple.CoreSimulator.SimRuntime.iOS-26-3");
     expect(recorder.createCalls[0].name).toStartWith("AutoMobile-iPhone-17-");
     expect(recorder.bootCalls).toEqual(["CREATED-UDID"]);
+    expect(recorder.deleteCalls).toEqual([]);
     expect(device.deviceId).toBe("CREATED-UDID");
+  });
+
+  test("rolls back a created simulator when boot/verify fails after creation", async () => {
+    setDeviceCreationGate(new FakeDeviceCreationGate(true));
+    recorder.bootError = new Error("boot failed");
+
+    await expect(manager.findOrStartIosDevice()).rejects.toThrow("boot failed");
+    expect(recorder.deleteCalls).toEqual(["CREATED-UDID"]);
+  });
+
+  test("uses a live signal when rolling back after request cancellation", async () => {
+    setDeviceCreationGate(new FakeDeviceCreationGate(true));
+    recorder.bootError = new DOMException("The operation was aborted.", "AbortError");
+    const requestAbortController = new AbortController();
+    recorder.bootAbortController = requestAbortController;
+
+    await expect(
+      runWithAbortSignal(requestAbortController.signal, () => manager.findOrStartIosDevice()),
+    ).rejects.toThrow("Failed to boot/verify created iOS simulator");
+    expect(recorder.deleteCalls).toEqual(["CREATED-UDID"]);
+    expect(recorder.deleteSignalAborted).toEqual([false]);
+  });
+
+  test("does not delete an adopted existing simulator when boot/verify fails", async () => {
+    const provider = new FakeDeviceClientProvider(
+      new FakeAdbExecutor(),
+      new FakeDeviceUtils(),
+      makeSimctl(recorder, [simulatorImage("EXISTING-UDID", true)]),
+    );
+    manager = new DeviceSessionManager(provider);
+    recorder.verifyError = new Error("verify failed");
+
+    await expect(manager.findOrStartIosDevice()).rejects.toThrow("verify failed");
+    expect(recorder.deleteCalls).toEqual([]);
   });
 
   test("consults the gate with no explicit flag (env var only on this path)", async () => {

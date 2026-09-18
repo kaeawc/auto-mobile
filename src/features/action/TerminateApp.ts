@@ -4,6 +4,7 @@ import { AndroidUserTargetResolver } from "../../utils/android-cmdline-tools/And
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
 import { ActionableError, BootedDevice, TerminateAppResult } from "../../models";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
+import { runWithNestedPerfTracker } from "../../utils/PerfContext";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { DeviceAppManager } from "../../utils/ios-cmdline-tools/DeviceAppManager";
 import { isProcessAlreadyGoneError } from "../../utils/ios-cmdline-tools/iosProcessErrors";
@@ -118,139 +119,147 @@ export class TerminateApp extends BaseVisualChange {
     const perf = createGlobalPerformanceTracker();
     perf.serial("terminateApp");
 
-    const terminateLogic = async (): Promise<TerminateAppResult> => {
-      // Auto-detect target user if not specified
-      const targetUserId = await perf.track("detectTargetUser", async () => {
-        return (
-          await new AndroidUserTargetResolver(this.adb).resolve({
-            packageName,
-            explicitUserId: options?.userId,
-          })
-        ).userId;
-      });
+    return runWithNestedPerfTracker(perf, async () => {
+      const terminateLogic = async (): Promise<TerminateAppResult> => {
+        // Auto-detect target user if not specified
+        const targetUserId = await perf.track("detectTargetUser", async () => {
+          return (
+            await new AndroidUserTargetResolver(this.adb).resolve({
+              packageName,
+              explicitUserId: options?.userId,
+            })
+          ).userId;
+        });
 
-      // Check if app is installed
-      const isInstalled = await perf.track("checkInstalled", async () => {
-        try {
-          const a11y = AndroidCtrlProxyClient.getInstance(this.device);
-          const result = await a11y.requestInstalledPackages(true, targetUserId, 3000);
-          if (result.success && result.userId === targetUserId) {
-            return result.packages.some((p) => p.packageName === packageName);
+        // Check if app is installed
+        const isInstalled = await perf.track("checkInstalled", async () => {
+          try {
+            const a11y = AndroidCtrlProxyClient.getInstance(this.device);
+            const result = await a11y.requestInstalledPackages(true, targetUserId, 3000);
+            if (result.success && result.userId === targetUserId) {
+              return result.packages.some((p) => p.packageName === packageName);
+            }
+          } catch (error) {
+            logger.debug(`[TerminateApp] CtrlProxy install check failed: ${error}`, error);
           }
-        } catch (error) {
-          logger.debug(`[TerminateApp] CtrlProxy install check failed: ${error}`, error);
-        }
-        try {
-          const isInstalledCmd = `shell pm list packages --user ${targetUserId} -f ${shellQuote(packageName)} | grep -c ${shellQuote(packageName)}`;
-          const isInstalledOutput = await this.adb.executeCommand(
-            isInstalledCmd,
-            undefined,
-            undefined,
-            true,
-          );
-          return parseInt(isInstalledOutput.trim(), 10) > 0;
-        } catch (error) {
-          // Both the CtrlProxy call and this shell fallback failed; treating the
-          // app as not installed is the safe default for a terminate/uninstall flow.
-          logger.debug(`src/features/action/TerminateApp.ts install check failed: ${error}`, error);
-          return false;
-        }
-      });
+          try {
+            const isInstalledCmd = `shell pm list packages --user ${targetUserId} -f ${shellQuote(packageName)} | grep -c ${shellQuote(packageName)}`;
+            const isInstalledOutput = await this.adb.executeCommand(
+              isInstalledCmd,
+              undefined,
+              undefined,
+              true,
+            );
+            return parseInt(isInstalledOutput.trim(), 10) > 0;
+          } catch (error) {
+            // Both the CtrlProxy call and this shell fallback failed; treating the
+            // app as not installed is the safe default for a terminate/uninstall flow.
+            logger.debug(
+              `src/features/action/TerminateApp.ts install check failed: ${error}`,
+              error,
+            );
+            return false;
+          }
+        });
 
-      if (!isInstalled) {
-        return {
-          success: true,
-          packageName,
-          wasInstalled: false,
-          wasRunning: false,
-          wasForeground: false,
-          userId: targetUserId,
-        };
-      }
-
-      // `force-stop` is destructive, so determine the selected user's process
-      // state before changing it. A package running in another profile must not
-      // make this operation report that the selected profile was running.
-      const isRunning = await perf.track("checkRunning", async () => {
-        try {
-          // Filter stdout here: grep's exit status conflates an expected
-          // no-match (the app is already stopped) with a real ADB failure.
-          const result = await this.adb.executeCommand(
-            "shell dumpsys activity processes",
-            undefined,
-            undefined,
-            true,
-          );
-          return isAndroidPackageRunning(result.stdout, packageName, targetUserId);
-        } catch (error) {
-          logger.warn(`[TerminateApp] Running-state check failed for user ${targetUserId}`, error);
-          throw new ActionableError(
-            `Could not determine whether ${packageName} is running for Android user ${targetUserId}: ${errorMessage(error)}`,
-          );
+        if (!isInstalled) {
+          return {
+            success: true,
+            packageName,
+            wasInstalled: false,
+            wasRunning: false,
+            wasForeground: false,
+            userId: targetUserId,
+          };
         }
-      });
 
-      if (!isRunning) {
-        // The process is already gone — the exact dead-process state that
-        // terminate-then-observe is meant to recover from (issue #5867). Any
-        // cached window/hierarchy record for it is stale, so invalidate here too,
-        // not only on the force-stop path below.
+        // `force-stop` is destructive, so determine the selected user's process
+        // state before changing it. A package running in another profile must not
+        // make this operation report that the selected profile was running.
+        const isRunning = await perf.track("checkRunning", async () => {
+          try {
+            // Filter stdout here: grep's exit status conflates an expected
+            // no-match (the app is already stopped) with a real ADB failure.
+            const result = await this.adb.executeCommand(
+              "shell dumpsys activity processes",
+              undefined,
+              undefined,
+              true,
+            );
+            return isAndroidPackageRunning(result.stdout, packageName, targetUserId);
+          } catch (error) {
+            logger.warn(
+              `[TerminateApp] Running-state check failed for user ${targetUserId}`,
+              error,
+            );
+            throw new ActionableError(
+              `Could not determine whether ${packageName} is running for Android user ${targetUserId}: ${errorMessage(error)}`,
+            );
+          }
+        });
+
+        if (!isRunning) {
+          // The process is already gone — the exact dead-process state that
+          // terminate-then-observe is meant to recover from (issue #5867). Any
+          // cached window/hierarchy record for it is stale, so invalidate here too,
+          // not only on the force-stop path below.
+          this.cacheInvalidator.invalidate(this.device);
+          return {
+            success: true,
+            packageName,
+            wasInstalled: true,
+            wasRunning: false,
+            wasForeground: false,
+            userId: targetUserId,
+          };
+        }
+
+        // Check if app is in foreground using getForegroundApp (which returns user context)
+        const isForeground = await perf.track("checkForeground", async () => {
+          const foregroundApp = await this.adb.getForegroundApp();
+          return (
+            foregroundApp !== null &&
+            foregroundApp.packageName === packageName &&
+            foregroundApp.userId === targetUserId
+          );
+        });
+
+        await perf.track("forceStop", async () => {
+          await this.adb.executeCommand(
+            `shell am force-stop --user ${targetUserId} ${shellQuote(packageName)}`,
+          );
+        });
+
+        // The process is now gone, so any cached window/hierarchy record for it is
+        // stale. Invalidate it so a client re-observing to recover gets a fresh
+        // sync instead of the same phantom window (issue #5867).
         this.cacheInvalidator.invalidate(this.device);
+
         return {
           success: true,
           packageName,
           wasInstalled: true,
-          wasRunning: false,
-          wasForeground: false,
+          wasRunning: true,
+          wasForeground: isForeground,
           userId: targetUserId,
         };
+      };
+
+      // Skip observation when called internally (e.g., from LaunchApp).
+      // `execute` owns the "terminateApp" perf block, so it — not `terminateLogic`
+      // — closes it (issue #3037; see the executeiOS note for rationale).
+      if (options?.skipObservation) {
+        const result = await terminateLogic();
+        perf.end();
+        return result;
       }
 
-      // Check if app is in foreground using getForegroundApp (which returns user context)
-      const isForeground = await perf.track("checkForeground", async () => {
-        const foregroundApp = await this.adb.getForegroundApp();
-        return (
-          foregroundApp !== null &&
-          foregroundApp.packageName === packageName &&
-          foregroundApp.userId === targetUserId
-        );
+      return this.observedInteraction(terminateLogic, {
+        changeExpected: false,
+        progress: options?.progress,
+        skipUiStability: options?.skipUiStability,
+        perf,
       });
-
-      await perf.track("forceStop", async () => {
-        await this.adb.executeCommand(
-          `shell am force-stop --user ${targetUserId} ${shellQuote(packageName)}`,
-        );
-      });
-
-      // The process is now gone, so any cached window/hierarchy record for it is
-      // stale. Invalidate it so a client re-observing to recover gets a fresh
-      // sync instead of the same phantom window (issue #5867).
-      this.cacheInvalidator.invalidate(this.device);
-
-      return {
-        success: true,
-        packageName,
-        wasInstalled: true,
-        wasRunning: true,
-        wasForeground: isForeground,
-        userId: targetUserId,
-      };
-    };
-
-    // Skip observation when called internally (e.g., from LaunchApp).
-    // `execute` owns the "terminateApp" perf block, so it — not `terminateLogic`
-    // — closes it (issue #3037; see the executeiOS note for rationale).
-    if (options?.skipObservation) {
-      const result = await terminateLogic();
-      perf.end();
-      return result;
-    }
-
-    return this.observedInteraction(terminateLogic, {
-      changeExpected: false,
-      progress: options?.progress,
-      skipUiStability: options?.skipUiStability,
-      perf,
     });
   }
 
@@ -265,39 +274,41 @@ export class TerminateApp extends BaseVisualChange {
     const perf = createGlobalPerformanceTracker();
     perf.serial("terminateApp");
 
-    // Physical iOS devices (00008XXX / 40-char UDID) can't be driven by simctl;
-    // route them through devicectl instead. Simulators keep the simctl path.
-    const terminateTransport = isIosSimulatorUdid(this.device.deviceId)
-      ? () => this.terminateSimulator(bundleId, perf)
-      : () => this.terminatePhysicalDevice(bundleId, perf);
-    const terminateLogic = async (): Promise<TerminateAppResult> => {
-      const result = await terminateTransport();
-      if (result.success) {
-        IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.clearSdkScreenIdentity(
-          bundleId,
-        );
+    return runWithNestedPerfTracker(perf, async () => {
+      // Physical iOS devices (00008XXX / 40-char UDID) can't be driven by simctl;
+      // route them through devicectl instead. Simulators keep the simctl path.
+      const terminateTransport = isIosSimulatorUdid(this.device.deviceId)
+        ? () => this.terminateSimulator(bundleId, perf)
+        : () => this.terminatePhysicalDevice(bundleId, perf);
+      const terminateLogic = async (): Promise<TerminateAppResult> => {
+        const result = await terminateTransport();
+        if (result.success) {
+          IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.clearSdkScreenIdentity(
+            bundleId,
+          );
+        }
+        return result;
+      };
+
+      // Perf-tree ownership (issue #3037): `executeiOS` opens the "terminateApp"
+      // block, so it — the single owner — must close it. The terminate helpers no
+      // longer call `perf.end()` themselves: doing so inside `observedInteraction`
+      // popped the block mid-observation, reparenting the later finalObserve /
+      // uiStability entries to the root. In the observed path the block stays open
+      // and `getTimings()` (in `takeObservation`) closes it after observation, so
+      // those entries nest correctly under "terminateApp".
+      if (options?.skipObservation) {
+        const result = await terminateLogic();
+        perf.end();
+        return result;
       }
-      return result;
-    };
 
-    // Perf-tree ownership (issue #3037): `executeiOS` opens the "terminateApp"
-    // block, so it — the single owner — must close it. The terminate helpers no
-    // longer call `perf.end()` themselves: doing so inside `observedInteraction`
-    // popped the block mid-observation, reparenting the later finalObserve /
-    // uiStability entries to the root. In the observed path the block stays open
-    // and `getTimings()` (in `takeObservation`) closes it after observation, so
-    // those entries nest correctly under "terminateApp".
-    if (options?.skipObservation) {
-      const result = await terminateLogic();
-      perf.end();
-      return result;
-    }
-
-    return this.observedInteraction(terminateLogic, {
-      changeExpected: false,
-      progress: options?.progress,
-      skipUiStability: options?.skipUiStability,
-      perf,
+      return this.observedInteraction(terminateLogic, {
+        changeExpected: false,
+        progress: options?.progress,
+        skipUiStability: options?.skipUiStability,
+        perf,
+      });
     });
   }
 

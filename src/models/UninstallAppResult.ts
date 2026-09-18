@@ -1,4 +1,5 @@
 import { BaseActionResult } from "./BaseActionResult";
+import type { TimingData } from "../utils/PerformanceTracker";
 
 /**
  * Result of an uninstall app operation
@@ -15,4 +16,6 @@ export interface UninstallAppResult extends BaseActionResult {
   wasInstalled?: boolean;
   /** Android user ID where the app was uninstalled from (0 for primary user, 10+ for work profiles) */
   userId?: number;
+  /** Command-span timing tree, present only when `--debug-perf` is enabled and this call was not nested inside an outer ambient perf scope. */
+  perfTiming?: TimingData;
 }

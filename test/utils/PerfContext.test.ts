@@ -7,6 +7,8 @@ import {
 import {
   ambientPerfFor,
   getPerfTracker,
+  hasAmbientPerfTracker,
+  runWithNestedPerfTracker,
   runWithPerfTracker,
   trackAmbient,
 } from "../../src/utils/PerfContext";
@@ -85,6 +87,38 @@ describe("PerfContext", function () {
       });
       expect(getPerfTracker()).toBe(outer);
     });
+  });
+
+  test("runWithNestedPerfTracker keeps command spans on an established outer tracker", async function () {
+    const outer = new DefaultPerformanceTracker(new FakeTimer());
+    const inner = new DefaultPerformanceTracker(new FakeTimer());
+
+    await runWithPerfTracker(outer, async () => {
+      expect(hasAmbientPerfTracker()).toBe(true);
+      await runWithNestedPerfTracker(inner, async () => {
+        expect(getPerfTracker()).toBe(outer);
+        await trackAmbient("adb shell am", async () => undefined);
+      });
+    });
+
+    expect((outer.getTimings() as TimingEntry[]).map((entry) => entry.name)).toContain(
+      "adb shell am",
+    );
+    expect(inner.getTimings()).toEqual([]);
+  });
+
+  test("runWithNestedPerfTracker establishes its tracker when no outer scope exists", async function () {
+    setDebugPerfEnabled(true);
+    const tracker = new DefaultPerformanceTracker(new FakeTimer());
+
+    await runWithNestedPerfTracker(tracker, async () => {
+      expect(getPerfTracker()).toBe(tracker);
+      await trackAmbient("simctl launch", async () => undefined);
+    });
+
+    expect((tracker.getTimings() as TimingEntry[]).map((entry) => entry.name)).toContain(
+      "simctl launch",
+    );
   });
 
   test("concurrent ambient commands each land as siblings under the tracker", async function () {

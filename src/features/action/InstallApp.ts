@@ -10,7 +10,9 @@ import { BootedDevice } from "../../models";
 import {
   createGlobalPerformanceTracker,
   type PerformanceTracker,
+  type TimingData,
 } from "../../utils/PerformanceTracker";
+import { hasAmbientPerfTracker, runWithNestedPerfTracker } from "../../utils/PerfContext";
 import {
   DefaultHostCommandExecutor,
   type HostCommandExecutor,
@@ -36,6 +38,15 @@ import { getInstalledAppsCacheWriteCoordinator } from "../../db/installedAppsCac
 export interface DeviceAppInstaller {
   installApp(deviceUdid: string, artifactPath: string): Promise<void>;
 }
+
+type InstallAppResult = {
+  success: boolean;
+  upgrade: boolean;
+  userId: number;
+  packageName?: string;
+  warning?: string;
+  perfTiming?: TimingData;
+};
 
 export class InstallApp {
   private adb: AdbExecutor;
@@ -78,14 +89,27 @@ export class InstallApp {
     artifactPath: string,
     userId?: number,
     signal?: AbortSignal,
-  ): Promise<{
-    success: boolean;
-    upgrade: boolean;
-    userId: number;
-    packageName?: string;
-    warning?: string;
-  }> {
+  ): Promise<InstallAppResult> {
     const perf = this.createPerformanceTracker();
+    const nested = hasAmbientPerfTracker();
+    const result = await runWithNestedPerfTracker(perf, () =>
+      this.executeInner(artifactPath, userId, perf, signal),
+    );
+    if (!nested && perf.isEnabled()) {
+      const timings = perf.getTimings();
+      if (timings) {
+        return { ...result, perfTiming: timings };
+      }
+    }
+    return result;
+  }
+
+  private async executeInner(
+    artifactPath: string,
+    userId: number | undefined,
+    perf: PerformanceTracker,
+    signal?: AbortSignal,
+  ): Promise<InstallAppResult> {
     perf.serial("installApp");
 
     if (!path.isAbsolute(artifactPath)) {

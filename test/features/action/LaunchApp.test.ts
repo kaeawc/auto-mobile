@@ -5,7 +5,11 @@ import * as nodePath from "path";
 import { LaunchApp } from "../../../src/features/action/LaunchApp";
 import { buildLaunchAppResponse } from "../../../src/server/appTools";
 import { BackStackInfo, BootedDevice, ObserveResult } from "../../../src/models";
-import { DefaultPerformanceTracker } from "../../../src/utils/PerformanceTracker";
+import {
+  DefaultPerformanceTracker,
+  setDebugPerfEnabled,
+} from "../../../src/utils/PerformanceTracker";
+import { runWithPerfTracker, trackAmbient } from "../../../src/utils/PerfContext";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
 import { FakeInstalledAppsProvider } from "../../fakes/FakeInstalledAppsProvider";
@@ -86,6 +90,7 @@ describe("LaunchApp", () => {
   });
 
   afterEach(() => {
+    setDebugPerfEnabled(false);
     PortManager.reset();
     PortManager.setPortAvailabilityCheckerForTesting(null);
   });
@@ -123,6 +128,34 @@ describe("LaunchApp", () => {
         .every((options) => options.signal === controller.signal),
     ).toBe(true);
     expect(fakeAwaitIdle.wasMethodCalled("initializeUiStabilityTracking")).toBe(true);
+  });
+
+  test("keeps nested launch command spans on an outer ambient tracker", async () => {
+    setDebugPerfEnabled(true);
+    fakeAdb.setForegroundApp({ packageName, userId: 0 });
+    fakeAdb.setCommandResponse("shell dumpsys activity processes", {
+      stdout: "123:com.example.app/u0a123\n",
+      stderr: "",
+    });
+    const outer = new DefaultPerformanceTracker(fakeTimer);
+    const nestedLaunch = new LaunchApp(device, fakeAdb as unknown as any, null, fakeTimer, {
+      targetUserDetector: {
+        detectTargetUserId: () => trackAmbient("adb shell cmd user", async () => 0),
+      },
+      installedAppsProvider: {
+        listInstalledApps: async () => [packageName],
+      },
+      performanceTrackerFactory: () => new DefaultPerformanceTracker(fakeTimer),
+    });
+    (nestedLaunch as any).awaitIdle = fakeAwaitIdle;
+    (nestedLaunch as any).observeScreen = fakeObserveScreen;
+    (nestedLaunch as any).window = fakeWindow;
+
+    await runWithPerfTracker(outer, () => nestedLaunch.execute(packageName, false, false));
+
+    expect(outer.getTimings()).toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: "adb shell cmd user" })]),
+    );
   });
 
   test("gives Android launch exclusive priority over background performance sampling", async () => {

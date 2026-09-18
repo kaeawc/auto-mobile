@@ -93,6 +93,7 @@ import {
   cleanupDaemonFiles,
   clearDaemonLaunchLogOwnerTombstoneSync,
   isProcessRunning as isDaemonProcessRunning,
+  readPidFileDataSync,
 } from "./daemonFiles";
 import { parseLockContent, releaseExclusiveLock, tryAcquireExclusiveLock } from "../utils/fileLock";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
@@ -3960,8 +3961,26 @@ export class DaemonManager implements DaemonManagerLike {
         return false;
       }
       try {
-        return this.findLiveDaemonProcessRecords(scanBudget).some((candidate) =>
-          this.isConfirmedDifferentDaemonGeneration(expectedGeneration, candidate),
+        // The global process scan can find a different checkout's daemon after OS PID
+        // reuse. Only this namespace's PID record naming that candidate proves it took
+        // over our namespace rather than being an unrelated daemon elsewhere.
+        const pidData = readPidFileDataSync(this.pidFilePath);
+        if (pidData === null) {
+          return false;
+        }
+        const recordedGeneration: DaemonProcessRecord = {
+          pid: pidData.pid,
+          ppid: 0,
+          command: "",
+          startedAt: pidData.startedAt,
+          ...(pidData.processGenerationToken === undefined
+            ? {}
+            : { processGenerationToken: pidData.processGenerationToken }),
+        };
+        return this.findLiveDaemonProcessRecords(scanBudget).some(
+          (candidate) =>
+            this.isConfirmedDifferentDaemonGeneration(expectedGeneration, candidate) &&
+            this.matchesObservedDaemonGeneration(recordedGeneration, candidate),
         );
       } catch (error) {
         // Safe: pre-SIGKILL generation verification remains the authoritative signaling gate.

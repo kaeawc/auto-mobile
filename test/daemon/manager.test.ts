@@ -1384,6 +1384,103 @@ describe("DaemonManager stop", () => {
     }
   });
 
+  test("does not treat a foreign PID reuse as this namespace's replacement", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "daemon-manager-stop-foreign-pid-reuse-"));
+    const pidFilePath = join(directory, "daemon.pid");
+    const socketPath = join(directory, "daemon.sock");
+    const pid = 42466;
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    writeStopPidFile(pidFilePath, pid, socketPath, "old-generation", 1);
+    const replacement: DaemonProcessRecord = {
+      pid,
+      ppid: 1,
+      command: "bun /foreign-checkout/src/index.ts --daemon-mode",
+      startedAt: 2,
+      processGenerationToken: "foreign-generation",
+    };
+    const manager = new DaemonManager(
+      undefined,
+      undefined,
+      timer,
+      join(directory, "daemon.lock"),
+      pidFilePath,
+      socketPath,
+      {
+        findDaemonProcesses: () => [replacement],
+        isProcessRunning: (targetPid) => targetPid === pid,
+      },
+    );
+
+    try {
+      await expect(
+        (
+          manager as unknown as {
+            waitForStop: (
+              targetPid: number,
+              timeout: number,
+              expected: DaemonProcessRecord,
+            ) => Promise<{ stopped: boolean; replacedByOtherGeneration: boolean }>;
+          }
+        ).waitForStop(pid, 100, {
+          ...replacement,
+          startedAt: 1,
+          processGenerationToken: "old-generation",
+        }),
+      ).resolves.toEqual({ stopped: false, replacedByOtherGeneration: false });
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("does not treat PID reuse as a replacement when the PID file is missing", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "daemon-manager-stop-missing-pid-reuse-"));
+    const pidFilePath = join(directory, "daemon.pid");
+    const socketPath = join(directory, "daemon.sock");
+    const pid = 42467;
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const replacement: DaemonProcessRecord = {
+      pid,
+      ppid: 1,
+      command: "bun /foreign-checkout/src/index.ts --daemon-mode",
+      startedAt: 2,
+      processGenerationToken: "foreign-generation",
+    };
+    const manager = new DaemonManager(
+      undefined,
+      undefined,
+      timer,
+      join(directory, "daemon.lock"),
+      pidFilePath,
+      socketPath,
+      {
+        findDaemonProcesses: () => [replacement],
+        isProcessRunning: (targetPid) => targetPid === pid,
+      },
+    );
+
+    try {
+      await expect(
+        (
+          manager as unknown as {
+            waitForStop: (
+              targetPid: number,
+              timeout: number,
+              expected: DaemonProcessRecord,
+            ) => Promise<{ stopped: boolean; replacedByOtherGeneration: boolean }>;
+          }
+        ).waitForStop(pid, 100, {
+          ...replacement,
+          startedAt: 1,
+          processGenerationToken: "old-generation",
+        }),
+      ).resolves.toEqual({ stopped: false, replacedByOtherGeneration: false });
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   test("does not treat a missing generation token as a replacement during graceful stop", async () => {
     const directory = mkdtempSync(
       join(tmpdir(), "u3-daemon-stop-eperm-r3-missing-generation-token-"),
@@ -4495,7 +4592,9 @@ describe("Daemon manager process detection", () => {
     const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
 
     try {
-      await expect(manager.restart()).rejects.toThrow("still running an AutoMobile daemon");
+      // A foreign daemon reusing the PID is not this namespace's replacement, so the
+      // wait times out and the pre-SIGKILL verification names the reuse directly.
+      await expect(manager.restart()).rejects.toThrow("PID was reused before signalling it");
       expect(signaler.signals).toEqual([{ pid: candidatePid, signal: "SIGTERM" }]);
       expect(startSpy).not.toHaveBeenCalled();
     } finally {

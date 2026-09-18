@@ -5,7 +5,26 @@ import {
   screenshotFileBelongsToDevice,
   screenshotFileDeviceToken,
   screenshotFileName,
+  screenshotTempIdToken,
 } from "../../../src/utils/screenshot/screenshotFormats";
+
+describe("screenshotTempIdToken", function () {
+  test("strips unsupported characters and appends a digest", function () {
+    expect(screenshotTempIdToken("normal_id")).toMatch(/^normalid-[0-9a-f]{12}$/);
+  });
+
+  test("distinguishes ids with the same stripped label", function () {
+    expect(screenshotTempIdToken("a_b")).not.toBe(screenshotTempIdToken("ab"));
+  });
+
+  test("uses a non-empty label for punctuation-only ids", function () {
+    expect(screenshotTempIdToken(";../")).toMatch(/^unknown-[0-9a-f]{12}$/);
+  });
+
+  test("is deterministic", function () {
+    expect(screenshotTempIdToken("stable")).toBe(screenshotTempIdToken("stable"));
+  });
+});
 
 describe("screenshotDeviceToken", function () {
   test("is injective across device ids that sanitize to the same characters", function () {

@@ -63,6 +63,23 @@ export function screenshotDeviceToken(deviceId: string): string {
 }
 
 /**
+ * Filename-safe token for a temporary device screenshot id.
+ *
+ * The readable label intentionally strips unsupported characters to preserve
+ * the existing temp-file shape, but that reduction is many-to-one (`a_b` and
+ * `ab` both become `ab`). The digest of the raw id preserves its identity.
+ */
+export function screenshotTempIdToken(rawId: string): string {
+  const sanitized = rawId.replace(/[^A-Za-z0-9-]/g, "").slice(0, DEVICE_TOKEN_READABLE_LENGTH);
+  const digest = createHash("sha256")
+    .update(rawId, "utf8")
+    .digest("hex")
+    .slice(0, DEVICE_TOKEN_DIGEST_LENGTH);
+  const label = sanitized.length > 0 ? sanitized : "unknown";
+  return `${label}-${digest}`;
+}
+
+/**
  * Canonical screenshot file name: `screenshot_<timestamp>_<device>_<unique>.<ext>`.
  * `uniqueId` comes from the injected `IdGenerator` and may itself contain `_`
  * (e.g. `new CountingIdGenerator("capture_run")`), so it is always the last

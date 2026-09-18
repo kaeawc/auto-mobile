@@ -96,6 +96,29 @@ describe("CLI transparently enables gated tools", () => {
     expect(enable?.params).toMatchObject({ toolName: "deleteDevice", enabled: true });
   });
 
+  test("forwards session UUID to deleteDevice without schema rejection", async () => {
+    const calls: Array<{ name: string; params: unknown }> = [];
+    recordProxy(calls);
+
+    await runCliCommand([
+      "--session-uuid",
+      "11111111-1111-4111-8111-111111111111",
+      "deleteDevice",
+      "--operationId",
+      "00000000-0000-4000-8000-000000000abc",
+      "--mode",
+      "destroy",
+      "--verifyAbsence",
+      "true",
+      "--target",
+      JSON.stringify({ platform: "android", isVirtual: true, stableId: "does-not-exist" }),
+    ]);
+
+    expect(calls.find((call) => call.name === "deleteDevice")?.params).toMatchObject({
+      sessionUuid: "11111111-1111-4111-8111-111111111111",
+    });
+  });
+
   test("enables a gated tool (provisionDevice) before calling it", async () => {
     const calls: Array<{ name: string; params: unknown }> = [];
     recordProxy(calls);

@@ -67,6 +67,7 @@ import { ambientPerfFor, runWithPerfTracker } from "../utils/PerfContext";
 import { getPerformanceMonitor } from "../features/performance/PerformanceMonitor";
 import {
   platformSchema,
+  addSessionUuidToSchema,
   withCanonicalDiscriminatedUnionJsonSchema,
   withJsonSchemaOverride,
 } from "./toolSchemaHelpers";
@@ -666,54 +667,56 @@ export const killDeviceSchema = z.object({
 const TEARDOWN_OPERATION_ID_JSON_SCHEMA_PATTERN =
   "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000)$";
 
-export const teardownDeviceSchema = z
-  .object({
-    operationId: withJsonSchemaOverride(
-      z.string().uuid().describe("Caller-generated idempotency and diagnostic correlation ID"),
-      (jsonSchema) => {
-        // Zod's UUID JSON Schema pattern differs between platforms.
-        jsonSchema.pattern = TEARDOWN_OPERATION_ID_JSON_SCHEMA_PATTERN;
-      },
-    ),
-    target: z
-      .object({
-        platform: platformSchema.describe("Platform reported by automobile:devices/booted"),
-        isVirtual: z
-          .literal(true)
-          .describe("Virtual-device flag reported by automobile:devices/booted"),
-        stableId: z
-          .string()
-          .min(1)
-          .describe("Stable platform device identity from automobile:devices/booted"),
-        stableName: z
-          .string()
-          .min(1)
-          .optional()
-          .describe("Stable platform representation name when available"),
-      })
-      .strict(),
-    mode: z
-      .literal("destroy")
-      .describe("Stop and permanently delete the platform device representation"),
-    verifyAbsence: z
-      .literal(true)
-      .describe("Require a complete inventory observation proving durable absence"),
-    timeoutMs: z
-      .number()
-      .int()
-      .positive()
-      .max(MAX_DEVICE_READY_TIMEOUT_MS)
-      .optional()
-      .describe("Total bounded teardown timeout in ms"),
-    cancellationPolicy: z
-      .literal("cancel-on-request-abort")
-      .optional()
-      .describe(
-        "Cancel the accepted teardown if this MCP request is aborted. Use only for deadline-critical, caller-owned cleanup that must not continue in the background after its caller stops waiting.",
+export const teardownDeviceSchema = addSessionUuidToSchema(
+  z
+    .object({
+      operationId: withJsonSchemaOverride(
+        z.string().uuid().describe("Caller-generated idempotency and diagnostic correlation ID"),
+        (jsonSchema) => {
+          // Zod's UUID JSON Schema pattern differs between platforms.
+          jsonSchema.pattern = TEARDOWN_OPERATION_ID_JSON_SCHEMA_PATTERN;
+        },
       ),
-    force: z.boolean().default(false).describe(FORCE_SKIP_AVD_VERIFICATION_DESCRIPTION),
-  })
-  .strict();
+      target: z
+        .object({
+          platform: platformSchema.describe("Platform reported by automobile:devices/booted"),
+          isVirtual: z
+            .literal(true)
+            .describe("Virtual-device flag reported by automobile:devices/booted"),
+          stableId: z
+            .string()
+            .min(1)
+            .describe("Stable platform device identity from automobile:devices/booted"),
+          stableName: z
+            .string()
+            .min(1)
+            .optional()
+            .describe("Stable platform representation name when available"),
+        })
+        .strict(),
+      mode: z
+        .literal("destroy")
+        .describe("Stop and permanently delete the platform device representation"),
+      verifyAbsence: z
+        .literal(true)
+        .describe("Require a complete inventory observation proving durable absence"),
+      timeoutMs: z
+        .number()
+        .int()
+        .positive()
+        .max(MAX_DEVICE_READY_TIMEOUT_MS)
+        .optional()
+        .describe("Total bounded teardown timeout in ms"),
+      cancellationPolicy: z
+        .literal("cancel-on-request-abort")
+        .optional()
+        .describe(
+          "Cancel the accepted teardown if this MCP request is aborted. Use only for deadline-critical, caller-owned cleanup that must not continue in the background after its caller stops waiting.",
+        ),
+      force: z.boolean().default(false).describe(FORCE_SKIP_AVD_VERIFICATION_DESCRIPTION),
+    })
+    .strict(),
+);
 
 export const DEVICE_ALREADY_STOPPED_ERROR_CODE = "device_already_stopped";
 

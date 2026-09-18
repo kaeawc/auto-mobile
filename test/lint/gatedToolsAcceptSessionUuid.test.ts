@@ -11,14 +11,6 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 const SESSION_UUID_SCHEMA_ALLOWLIST = new Set([
   // Acquires and mints a new session, so the CLI deliberately drops an input session UUID.
   "provisionDevice",
-  // Deletes an explicitly selected stable device identity rather than a session-selected device.
-  "deleteDevice",
-  // Uses the active device; its registration owns device selection outside the input schema.
-  "startTestRecording",
-  // Stops process-scoped recording and does not select a device from input.
-  "exportPlan",
-  // Controls process-scoped MCP recording and does not select a device from input.
-  "recordSteps",
 ]);
 
 function collectSchemaShapes(schema: any): Record<string, any>[] {
@@ -47,8 +39,9 @@ describe("gated tool session UUID schemas", () => {
   });
 
   test("every independently callable gated tool accepts sessionUuid or explains why it cannot", () => {
-    const missingSessionUuid = ToolRegistry.getAllTools()
+    const missingSessionUuid = ToolRegistry.getAllTools({ includeUnavailable: true })
       .filter((tool) => !tool.hidden && !tool.defaultEnabled)
+      .filter((tool) => !tool.planOnly)
       .filter((tool) => !SESSION_UUID_SCHEMA_ALLOWLIST.has(tool.name))
       .filter((tool) => {
         const shapes = collectSchemaShapes(tool.schema);

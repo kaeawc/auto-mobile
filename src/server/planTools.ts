@@ -5,7 +5,7 @@ import { BootedDevice } from "../models";
 import { logger } from "../utils/logger";
 import { createStructuredToolResponse } from "../utils/toolUtils";
 import { Platform } from "../models";
-import { DEVICE_LABEL_DESCRIPTION } from "./toolSchemaHelpers";
+import { addSessionUuidToSchema, DEVICE_LABEL_DESCRIPTION } from "./toolSchemaHelpers";
 import {
   startTestRecording,
   stopTestRecording,
@@ -152,7 +152,7 @@ const executePlanTool = async (
 };
 
 // Start test recording tool schema (empty - uses active device)
-const startTestRecordingSchema = z.object({});
+const startTestRecordingSchema = addSessionUuidToSchema(z.object({}));
 
 const startTestRecordingResultSchema = z.object({
   success: z.boolean(),
@@ -185,10 +185,12 @@ const startTestRecordingTool = async (device: BootedDevice): Promise<any> => {
 };
 
 // Export plan tool schema
-const exportPlanSchema = z.object({
-  recordingId: z.string().optional().describe("Recording ID"),
-  planName: z.string().optional().describe("Plan name"),
-});
+const exportPlanSchema = addSessionUuidToSchema(
+  z.object({
+    recordingId: z.string().optional().describe("Recording ID"),
+    planName: z.string().optional().describe("Plan name"),
+  }),
+);
 
 const exportPlanResultSchema = z.object({
   success: z.boolean(),
@@ -250,10 +252,12 @@ const exportPlanTool = async (params: {
 // (e.g., after context compaction when the agent may have lost awareness).
 // ============================================================================
 
-const recordStepsSchema = z.object({
-  action: z.enum(["begin", "end", "status"]),
-  planName: z.string().optional().describe("Plan name for action=end"),
-});
+const recordStepsSchema = addSessionUuidToSchema(
+  z.object({
+    action: z.enum(["begin", "end", "status"]),
+    planName: z.string().optional().describe("Plan name for action=end"),
+  }),
+);
 
 const recordStepsResultSchema = z.object({
   success: z.boolean(),

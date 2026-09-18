@@ -12,6 +12,11 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.launch
 
+object HierarchyQuiescence {
+  const val POLL_MS = 50L
+  const val TIMEOUT_MS = 500L
+}
+
 /** Result of hierarchy extraction with hash comparison. */
 sealed class HierarchyResult {
   /** New hierarchy extracted with different structural content. */
@@ -182,8 +187,8 @@ class HierarchyDebouncer(
    * @return The extracted hierarchy, or null if extraction failed.
    */
   fun extractAfterQuiescence(
-    quiescenceMs: Long = 50L,
-    maxWaitMs: Long = 500L,
+    quiescenceMs: Long = HierarchyQuiescence.POLL_MS,
+    maxWaitMs: Long = HierarchyQuiescence.TIMEOUT_MS,
     pollIntervalMs: Long = 10L,
     initialEventWaitMs: Long = 200L, // Max time to wait for first event
   ): ViewHierarchy? {
@@ -237,9 +242,9 @@ class HierarchyDebouncer(
 
           // Check if we've exceeded max wait time
           if (elapsed >= maxWaitMs) {
-            Log.d(
+            Log.w(
               TAG,
-              "extractAfterQuiescence: max wait time exceeded (${elapsed}ms), proceeding with extraction",
+              "extractAfterQuiescence: max wait time exceeded (${elapsed}ms); hierarchy may be stale",
             )
             break
           }

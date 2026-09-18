@@ -37,7 +37,7 @@ import { readPidFileDataSync, isProcessRunning } from "./daemonFiles";
 import { isDaemonHandshakeFailure, type DaemonHandshakeFailure } from "./daemonHandshake";
 import type { DaemonOptions, DaemonStatus } from "./types";
 
-const daemonOptionsSchema: z.ZodType<DaemonOptions> = z.object({
+export const daemonOptionsSchema = z.object({
   port: z.number().finite().optional(),
   host: z.string().optional(),
   strictPort: z.boolean().optional(),
@@ -80,7 +80,13 @@ const daemonOptionsSchema: z.ZodType<DaemonOptions> = z.object({
   toolResultsNoStructuredContent: z.boolean().optional(),
   actionsDiffObserve: z.boolean().optional(),
   actionsNoObserve: z.boolean().optional(),
-});
+}) satisfies z.ZodType<DaemonOptions>;
+
+// Fails at compile time when DaemonOptions gains a field that ide/status would
+// otherwise silently strip before startup-option reconciliation can inspect it.
+type DaemonOptionsSchemaCoversAllKeys =
+  Exclude<keyof DaemonOptions, keyof typeof daemonOptionsSchema.shape> extends never ? true : never;
+export const daemonOptionsSchemaCoversAllKeys: DaemonOptionsSchemaCoversAllKeys = true;
 
 const socketIdentityStatusSchema = z.object({
   pid: z.number().int().positive().optional(),

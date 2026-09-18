@@ -2,6 +2,7 @@ import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import { describe, expect, test, beforeEach, afterEach } from "bun:test";
 import {
   SessionManager,
+  SessionActivityPersistenceError,
   SessionRecoveryIdentityLossError,
   type BiometricEnrollmentRestorer,
   type KeepScreenAwakeRestorer,
@@ -412,6 +413,34 @@ describe("SessionManager", () => {
       const session2 = await sessionManager.getOrCreateSession("session-1");
       expect(session2.lastUsedAt).toBe(initialLastUsed + 10);
       expect(session2.expiresAt).toBe(initialExpiry + 10);
+    });
+
+    test("surfaces a failed existing-session liveness refresh", async () => {
+      const persistence: DeviceSessionPersistence = {
+        async upsertActiveSession(): Promise<void> {},
+        async recordActivity(): Promise<void> {
+          throw new Error("database unavailable");
+        },
+        async markReleased(): Promise<void> {},
+      };
+      const manager = new SessionManager(fakeTimer, persistence);
+      try {
+        const existing = await manager.createSession(
+          "session-activity-failure",
+          "emulator-5554",
+          "android",
+        );
+        const initialLastUsedAt = existing.lastUsedAt;
+        fakeTimer.advanceTime(10);
+
+        await expect(manager.getOrCreateSession("session-activity-failure")).rejects.toBeInstanceOf(
+          SessionActivityPersistenceError,
+        );
+        expect(existing.lastUsedAt).toBe(initialLastUsedAt);
+        expect(existing.lastHeartbeat).toBe(initialLastUsedAt);
+      } finally {
+        manager.stopCleanupTimer();
+      }
     });
 
     test("should bump lastHeartbeat when resolving an existing session", async () => {

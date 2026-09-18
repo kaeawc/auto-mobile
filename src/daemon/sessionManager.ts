@@ -35,6 +35,14 @@ import { errorMessage } from "../utils/describeUnknownError";
  */
 export type DeviceLabelMap = Record<string, string>;
 
+/** The daemon could not durably refresh an existing session's liveness. */
+export class SessionActivityPersistenceError extends ActionableError {
+  constructor(sessionId: string, cause: unknown) {
+    super(`Failed to persist liveness activity for session ${sessionId}.`, { cause });
+    this.name = "SessionActivityPersistenceError";
+  }
+}
+
 /**
  * Narrow seam for restoring keep-awake state on session release. Production uses
  * `KeepScreenAwakeManager`; tests inject a fake to assert (without a real device)
@@ -1142,10 +1150,24 @@ export class SessionManager {
         existing.ownership = "owned";
         existing.awaitingOwnerSince = undefined;
       }
+      const previousActivity = {
+        lastUsedAt: existing.lastUsedAt,
+        lastHeartbeat: existing.lastHeartbeat,
+        expiresAt: existing.expiresAt,
+      };
       existing.lastUsedAt = now;
       existing.lastHeartbeat = now;
       existing.expiresAt = now + existing.sessionTimeoutMs;
-      await this.recordSessionActivity(existing);
+      try {
+        await this.recordSessionActivity(existing);
+      } catch (error) {
+        // An awaited activity refresh cannot advertise fresh in-memory liveness
+        // after its durable write failed; callers receive the typed failure.
+        existing.lastUsedAt = previousActivity.lastUsedAt;
+        existing.lastHeartbeat = previousActivity.lastHeartbeat;
+        existing.expiresAt = previousActivity.expiresAt;
+        throw error;
+      }
       return existing;
     }
 
@@ -3918,18 +3940,22 @@ export class SessionManager {
   // fire-and-forget callers above wrap this in `getBarrier().track(...)`; the awaited
   // caller must not. See #2885 — do not wrap the awaited call in `track()`.
   private async recordSessionActivity(session: Session): Promise<void> {
-    await this.deviceSessionRepository.recordActivity(session.sessionId, {
-      lastUsedAtMs: session.lastUsedAt,
-      expiresAtMs: session.expiresAt,
-      sessionTimeoutMs: session.sessionTimeoutMs,
-      heartbeatTimeoutMs: session.heartbeatTimeoutMs,
-      hasReceivedHeartbeat: session.hasReceivedHeartbeat,
-      heartbeatTimeoutSource: session.heartbeatTimeoutSource,
-      livenessPolicy: session.livenessPolicy,
-      preCliHeartbeatTimeoutMs: session.preCliLiveness?.heartbeatTimeoutMs,
-      preCliHeartbeatTimeoutSource: session.preCliLiveness?.heartbeatTimeoutSource,
-      preCliSessionTimeoutMs: session.preCliLiveness?.sessionTimeoutMs,
-    });
+    try {
+      await this.deviceSessionRepository.recordActivity(session.sessionId, {
+        lastUsedAtMs: session.lastUsedAt,
+        expiresAtMs: session.expiresAt,
+        sessionTimeoutMs: session.sessionTimeoutMs,
+        heartbeatTimeoutMs: session.heartbeatTimeoutMs,
+        hasReceivedHeartbeat: session.hasReceivedHeartbeat,
+        heartbeatTimeoutSource: session.heartbeatTimeoutSource,
+        livenessPolicy: session.livenessPolicy,
+        preCliHeartbeatTimeoutMs: session.preCliLiveness?.heartbeatTimeoutMs,
+        preCliHeartbeatTimeoutSource: session.preCliLiveness?.heartbeatTimeoutSource,
+        preCliSessionTimeoutMs: session.preCliLiveness?.sessionTimeoutMs,
+      });
+    } catch (error) {
+      throw new SessionActivityPersistenceError(session.sessionId, error);
+    }
   }
 
   /**

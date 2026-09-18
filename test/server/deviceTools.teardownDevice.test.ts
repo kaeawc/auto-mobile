@@ -2954,6 +2954,7 @@ describe("deleteDevice handler", () => {
     const provisionOperationStore: ProvisionDeviceOperationStore = {
       begin: async () => ({ started: true, reconcileExistingConfiguration: false }),
       markDeviceCreationStarted: async () => true,
+      extend: async () => true,
       complete: async () => true,
       fail: async () => true,
     };
@@ -3025,6 +3026,7 @@ describe("deleteDevice handler", () => {
     const provisionOperationStore: ProvisionDeviceOperationStore = {
       begin: async () => ({ started: true, reconcileExistingConfiguration: false }),
       markDeviceCreationStarted: async () => true,
+      extend: async () => true,
       complete: async () => true,
       fail: async () => true,
     };

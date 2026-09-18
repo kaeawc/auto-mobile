@@ -41,6 +41,7 @@ export interface ProvisionDeviceOperationStore {
     expiresAtMs: number,
   ): Promise<ProvisionDeviceOperationBeginResult>;
   markDeviceCreationStarted(operationId: string, attemptId: string): Promise<boolean>;
+  extend(operationId: string, attemptId: string, expiresAtMs: number): Promise<boolean>;
   complete(
     operationId: string,
     attemptId: string,
@@ -205,6 +206,23 @@ export class ProvisionDeviceOperationRepository implements ProvisionDeviceOperat
       .updateTable("provision_device_operations")
       .set({
         creation_started: 1,
+        updated_at: new Date().toISOString(),
+      })
+      .where("operation_id", "=", operationId)
+      .where("attempt_id", "=", attemptId)
+      .where("status", "in", ["running", "replaying"])
+      .executeTakeFirst();
+    return Number(update.numUpdatedRows) > 0;
+  }
+
+  async extend(operationId: string, attemptId: string, expiresAtMs: number): Promise<boolean> {
+    // Option 1 deliberately refreshes the existing TTL instead of adding a
+    // finalizing status: the existing attempt fence already identifies the
+    // owner, so this avoids a status/CHECK-constraint migration.
+    const update = await this.getDb()
+      .updateTable("provision_device_operations")
+      .set({
+        expires_at_ms: expiresAtMs,
         updated_at: new Date().toISOString(),
       })
       .where("operation_id", "=", operationId)

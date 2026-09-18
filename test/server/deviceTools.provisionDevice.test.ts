@@ -110,6 +110,7 @@ class FakeProvisionDeviceOperationStore implements ProvisionDeviceOperationStore
       replaying: boolean;
       /** A prior attempt reported a terminal failure, so the row is retryable. */
       failed: boolean;
+      expiresAtMs: number;
     }
   >();
   private readonly forcedInProgress = new Set<string>();
@@ -118,13 +119,24 @@ class FakeProvisionDeviceOperationStore implements ProvisionDeviceOperationStore
   failCalls = 0;
   readonly failures: { operationId: string; errorCode: string }[] = [];
   readonly failCodes: string[] = [];
+  extendCalls = 0;
 
   /** Simulate a "running" row left behind by a crashed/earlier attempt. */
   markInProgress(operationId: string): void {
     this.forcedInProgress.add(operationId);
   }
 
-  async begin(operationId: string, requestFingerprint: string, attemptId: string) {
+  async begin(
+    operationId: string,
+    requestFingerprint: string,
+    attemptId: string,
+    nowMs = 0,
+    expiresAtMs = Number.MAX_SAFE_INTEGER,
+  ) {
+    const prior = this.results.get(operationId);
+    if (prior && prior.expiresAtMs <= nowMs) {
+      this.results.delete(operationId);
+    }
     if (this.forcedInProgress.has(operationId)) {
       return { started: false as const, inProgress: true as const };
     }
@@ -136,6 +148,7 @@ class FakeProvisionDeviceOperationStore implements ProvisionDeviceOperationStore
         creationStarted: false,
         replaying: false,
         failed: false,
+        expiresAtMs,
       });
       return { started: true, reconcileExistingConfiguration: false } as const;
     }
@@ -153,6 +166,7 @@ class FakeProvisionDeviceOperationStore implements ProvisionDeviceOperationStore
     if (existing.result) {
       existing.attemptId = attemptId;
       existing.replaying = true;
+      existing.expiresAtMs = expiresAtMs;
       return {
         started: false as const,
         result: existing.result,
@@ -169,6 +183,7 @@ class FakeProvisionDeviceOperationStore implements ProvisionDeviceOperationStore
     }
     existing.attemptId = attemptId;
     existing.failed = false;
+    existing.expiresAtMs = expiresAtMs;
     return {
       started: true as const,
       reconcileExistingConfiguration: existing.creationStarted,
@@ -189,6 +204,20 @@ class FakeProvisionDeviceOperationStore implements ProvisionDeviceOperationStore
     }
     operation.creationStarted = true;
     return true;
+  }
+
+  async extend(operationId: string, attemptId: string, expiresAtMs: number): Promise<boolean> {
+    const operation = this.results.get(operationId);
+    if (!operation || operation.attemptId !== attemptId || operation.failed) {
+      return false;
+    }
+    this.extendCalls++;
+    operation.expiresAtMs = expiresAtMs;
+    return true;
+  }
+
+  expiresAt(operationId: string): number | undefined {
+    return this.results.get(operationId)?.expiresAtMs;
   }
 
   async complete(
@@ -3586,6 +3615,16 @@ describe("provisionDevice handler", () => {
     await flushMicrotasks();
     expect(failureEntered).toBe(false);
     expect(operationStore.failCalls).toBe(0);
+
+    const replayExpiry = operationStore.expiresAt(args.operationId);
+    if (replayExpiry === undefined) {
+      throw new Error("replay operation was not persisted");
+    }
+    // The release remains stalled past the replay's original TTL. The injected
+    // timer must extend it before a separate process retries the operation.
+    timer.advanceTime(replayExpiry + 1);
+    await flushMicrotasks();
+    expect(operationStore.extendCalls).toBeGreaterThan(1);
 
     // A separate server process has no entry in this module-local map; clear
     // it to exercise the durable begin() result that such a retry observes.

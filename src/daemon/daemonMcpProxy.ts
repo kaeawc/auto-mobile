@@ -69,7 +69,10 @@ import {
 import { DeviceControlTransportError } from "./deviceControlTransportFailure";
 import { getStaticToolDefinitions } from "./staticToolDefinitions";
 import { DaemonRestartDeferredError } from "./daemonRestartAdmission";
-import { mergedExactToolSelections } from "./daemonOptionSelections";
+import {
+  mergedExactToolSelections,
+  REUSE_CRITICAL_ARRAY_OPTION_KEYS,
+} from "./daemonOptionSelections";
 
 export { DaemonRestartDeferredError } from "./daemonRestartAdmission";
 export { REUSE_CRITICAL_ARRAY_OPTION_KEYS } from "./daemonOptionSelections";
@@ -497,6 +500,16 @@ const REUSE_CRITICAL_STRING_OPTION_KEYS: (keyof DaemonOptions)[] = [
 ];
 
 const REUSE_CRITICAL_NUMBER_OPTION_KEYS: (keyof DaemonOptions)[] = ["runnerReadinessTimeoutMs"];
+
+/** Every startup option inspected by startupOptionDeficits(). */
+export const STARTUP_OPTION_DEFICIT_KEYS: readonly (keyof DaemonOptions)[] = [
+  ...REUSE_CRITICAL_OPTION_KEYS,
+  ...REUSE_CRITICAL_STRING_OPTION_KEYS,
+  ...REUSE_CRITICAL_NUMBER_OPTION_KEYS,
+  "accessibilityUseBaseline",
+  ...REUSE_CRITICAL_ARRAY_OPTION_KEYS,
+  "eventAllMarkers",
+];
 
 /** The value of a startup option when it is a string, else undefined. */
 function stringOption(

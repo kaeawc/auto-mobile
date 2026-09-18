@@ -207,6 +207,31 @@ describe("ProvisionDeviceOperationRepository", () => {
     });
   });
 
+  test("extends a running operation's TTL while its finalization is pending", async () => {
+    const repository = new ProvisionDeviceOperationRepository(db);
+
+    await repository.begin("operation-finalizing", "request-a", "attempt-1", 0, 100);
+    expect(await repository.extend("operation-finalizing", "attempt-1", 150)).toBe(true);
+
+    // A second process arriving after the original TTL must still see the
+    // operation's fence until finalization writes its terminal result.
+    expect(
+      await repository.begin("operation-finalizing", "request-a", "attempt-2", 101, 201),
+    ).toEqual({ started: false, inProgress: true });
+
+    expect(
+      await repository.fail(
+        "operation-finalizing",
+        "attempt-1",
+        "completion_failed",
+        "cleanup done",
+      ),
+    ).toBe(true);
+    expect(
+      await repository.begin("operation-finalizing", "request-a", "attempt-2", 102, 202),
+    ).toEqual({ started: true, reconcileExistingConfiguration: false });
+  });
+
   test("clears creation provenance only after verified rollback", async () => {
     const repository = new ProvisionDeviceOperationRepository(db);
 

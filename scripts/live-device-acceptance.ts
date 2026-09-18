@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
 import {
   chmodSync,
@@ -162,6 +162,56 @@ export interface MatrixDependencies {
     signal: AbortSignal,
   ) => Promise<void>;
   writeFile?: (path: string, content: string, signal: AbortSignal) => Promise<void>;
+}
+
+export interface FreshAcceptanceDaemonDependencies {
+  createDaemonClient: (signal: AbortSignal) => Promise<DaemonSessionClient>;
+  spawnCli: (command: string[], timeoutMs: number, signal: AbortSignal) => Promise<CliResult>;
+  build: BuildIdentity;
+  expectedCapability: string;
+  signal: AbortSignal;
+  logger?: { debug(message: string): void; error(message: string): void };
+}
+
+export async function ensureFreshAcceptanceDaemon(
+  dependencies: FreshAcceptanceDaemonDependencies,
+): Promise<void> {
+  const fingerprint = createHash("sha256")
+    .update(dependencies.expectedCapability)
+    .digest("hex")
+    .slice(0, 8);
+  const logger = dependencies.logger ?? console;
+  let client: DaemonSessionClient | undefined;
+  let daemonReachable = false;
+  try {
+    client = await dependencies.createDaemonClient(dependencies.signal);
+    const status = await client.callDaemonMethod("ide/status", {}, dependencies.signal);
+    daemonReachable = true;
+    const reported =
+      typeof status === "object" && status !== null && "acceptanceCapabilityFingerprint" in status
+        ? status.acceptanceCapabilityFingerprint
+        : undefined;
+    if (reported === fingerprint) {
+      return;
+    }
+    logger.error(
+      `Acceptance detected a stale daemon from a previous acceptance run (capability fingerprint ${String(reported)}; expected ${fingerprint}); restarting the whole daemon.`,
+    );
+    await dependencies.spawnCli(
+      [process.execPath, dependencies.build.entryScript, "--daemon", "restart"],
+      30_000,
+      dependencies.signal,
+    );
+  } catch (error) {
+    if (!daemonReachable) {
+      // A missing daemon is expected at matrix start; the fresh process will bind this run's token.
+      logger.debug(`Acceptance daemon freshness probe skipped: ${String(error)}`);
+    } else {
+      throw error;
+    }
+  } finally {
+    await client?.close();
+  }
 }
 
 interface Step {
@@ -1734,6 +1784,23 @@ export async function runAcceptanceMatrix(
     }
   };
 
+  if (!dependencies.testOnly) {
+    try {
+      await bounded("acceptance daemon freshness", "work", async (signal) => {
+        await ensureFreshAcceptanceDaemon({
+          createDaemonClient,
+          spawnCli,
+          build: args.build,
+          expectedCapability: process.env[ACCEPTANCE_DISCOVERY_CAPABILITY_ENV] ?? "",
+          signal,
+        });
+      });
+    } catch (error) {
+      restoreAcceptanceRunScope();
+      throw error;
+    }
+  }
+
   const steps: Step[] = [];
   const runtimeIdentities: JsonObject[] = [];
   const acquisitionRequests: JsonObject[] = [];
@@ -1748,6 +1815,8 @@ export async function runAcceptanceMatrix(
   let iosControls: IosDiscoveryControls | undefined;
   let controlClient: McpSessionClient | undefined;
   let daemonClient: DaemonSessionClient | undefined;
+  let provisionedDevice: JsonObject | undefined;
+  let provisionClient: McpSessionClient | undefined;
   let primaryError: unknown;
   let iosRunnerRestartEvidence = {
     serviceEndpointExposed: false,
@@ -2070,7 +2139,7 @@ export async function runAcceptanceMatrix(
       forward.some((device, index) => !sameDevice(device, reverse[forward.length - index - 1]!))
     ) {
       throw new Error(
-        "Acceptance discovery-order seam did not present the same public discovery data in reverse",
+        `Acceptance discovery-order seam did not present the same public discovery data in reverse ${JSON.stringify(discoveryOrders.slice(-2))}`,
       );
     }
     reversedDiscoveryOrder = true;
@@ -2690,7 +2759,7 @@ export async function runAcceptanceMatrix(
     }
     await assertCurrentControls("before-provision");
     const provisionStart = timer.now();
-    const provisionClient = await bounded(
+    provisionClient = await bounded(
       "provision MCP connect",
       "work",
       async (signal) => await createMcpClient("provision", signal),
@@ -2705,6 +2774,7 @@ export async function runAcceptanceMatrix(
     mint("provision", provisionSessionUuid);
     await verifyReadiness(provisionClient, provisionSessionUuid, "provision");
     assertProvisionedIdentity(provisionPayload, args, androidControls?.target.deviceId);
+    provisionedDevice = asObject(provisionPayload.device, "provisionDevice.device");
     await release(provisionSessionUuid, "provision");
     recordStep(steps, timer, "provision-exact-runtime-device-type-config", provisionStart, {
       sessionUuid: provisionSessionUuid,
@@ -2823,6 +2893,29 @@ export async function runAcceptanceMatrix(
   } catch (error) {
     primaryError = error;
   } finally {
+    if (provisionedDevice !== undefined) {
+      try {
+        if (provisionClient === undefined) {
+          throw new Error("provision client was unavailable");
+        }
+        await bounded("cleanup provisioned device", "cleanup", async () => {
+          await enableDestructiveTool(provisionClient!, "killDevice", "cleanup-provisioned-device");
+          toolPayload(
+            await callTool(
+              provisionClient!,
+              "killDevice",
+              { device: provisionedDevice },
+              "cleanup-provisioned-device",
+            ),
+            "killDevice",
+          );
+        });
+      } catch (error) {
+        cleanupFailures.push(
+          `kill provisioned device: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
     for (const session of minted.filter((candidate) => !candidate.released)) {
       try {
         await release(session.sessionUuid, `cleanup-${session.phase}`, "cleanup");

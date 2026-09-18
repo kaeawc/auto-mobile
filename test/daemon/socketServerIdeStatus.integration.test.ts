@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -168,6 +168,37 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
 
     expect(response.success).toBe(true);
     expect(response.result).toMatchObject({ options: startupOptions });
+  });
+
+  test("ide/status exposes only the acceptance capability fingerprint", async () => {
+    const capability = "acceptance-capability-for-status-test";
+    const fingerprintSocketPath = join(tmpdir(), `t-fingerprint-${randomUUID().slice(0, 8)}.sock`);
+    const fingerprintServer = new UnixSocketServer(
+      fingerprintSocketPath,
+      "http://localhost:0/mcp",
+      createFakeDaemonState(),
+      fakeTimer,
+      null,
+      { acceptanceDiscoveryCapability: capability },
+    );
+    try {
+      await fingerprintServer.start();
+      const fingerprintStatus = await sendRequest(fingerprintSocketPath, "ide/status");
+      expect(fingerprintStatus.result).toMatchObject({
+        acceptanceCapabilityFingerprint: createHash("sha256")
+          .update(capability)
+          .digest("hex")
+          .slice(0, 8),
+      });
+      expect(fingerprintStatus.result).not.toHaveProperty("acceptanceDiscoveryCapability");
+      const unboundStatus = await sendRequest(socketPath, "ide/status");
+      expect(unboundStatus.result).toMatchObject({ acceptanceCapabilityFingerprint: null });
+    } finally {
+      await fingerprintServer.close();
+      if (existsSync(fingerprintSocketPath)) {
+        await unlink(fingerprintSocketPath);
+      }
+    }
   });
 
   test("ide/status reports whether provisionDevice is active", async () => {

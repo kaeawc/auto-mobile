@@ -301,6 +301,7 @@ describe("socket-owner daemon preflight", () => {
           version: "0.0.68",
           releaseVersion: "0.0.68",
           activeProvisioning: true,
+          acceptanceCapabilityFingerprint: "1234abcd",
         };
       },
     );
@@ -311,6 +312,7 @@ describe("socket-owner daemon preflight", () => {
         version: "0.0.68",
         assetVersion: "0.0.68",
         activeProvisioning: true,
+        acceptanceCapabilityFingerprint: "1234abcd",
         socketPath: "/fake.sock",
       });
       expect(declaredIdentity).toBeNull();

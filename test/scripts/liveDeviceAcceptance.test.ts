@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { createHmac } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import { chmodSync, existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -10,6 +10,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import {
   assertMode,
   defaultWriteEvidence,
+  ensureFreshAcceptanceDaemon,
   parseArgs,
   recordOwnershipManifest,
   runAcceptanceMatrix,
@@ -710,6 +711,58 @@ function assertReadinessImmediatelyFollowsSuccess(harness: Harness, sessionUuid:
 }
 
 describe("live device acceptance harness", () => {
+  test("restarts a reachable stale daemon and logs the previous-run diagnosis", async () => {
+    const commands: string[][] = [];
+    const errors: string[] = [];
+    const capability = "acceptance-capability-for-test";
+    await ensureFreshAcceptanceDaemon({
+      createDaemonClient: async () => ({
+        callDaemonMethod: async () => ({ acceptanceCapabilityFingerprint: "stale000" }),
+        close: async () => {},
+      }),
+      spawnCli: async (command) => {
+        commands.push(command);
+        return { stdout: "" };
+      },
+      build: { entryScript: "/test/index.js", buildId: "test" },
+      expectedCapability: capability,
+      signal: new AbortController().signal,
+      logger: { debug: () => {}, error: (message) => errors.push(message) },
+    });
+    expect(commands).toEqual([[process.execPath, "/test/index.js", "--daemon", "restart"]]);
+    expect(errors[0]).toContain("stale daemon from a previous acceptance run");
+  });
+
+  test("does not restart a matching daemon or an unavailable daemon", async () => {
+    const capability = "acceptance-capability-for-test";
+    const commands: string[][] = [];
+    const expected = createHash("sha256").update(capability).digest("hex").slice(0, 8);
+    const common = {
+      spawnCli: async (command: string[]) => {
+        commands.push(command);
+        return { stdout: "" };
+      },
+      build: { entryScript: "/test/index.js", buildId: "test" },
+      expectedCapability: capability,
+      signal: new AbortController().signal,
+      logger: { debug: () => {}, error: () => {} },
+    };
+    await ensureFreshAcceptanceDaemon({
+      ...common,
+      createDaemonClient: async () => ({
+        callDaemonMethod: async () => ({ acceptanceCapabilityFingerprint: expected }),
+        close: async () => {},
+      }),
+    });
+    await ensureFreshAcceptanceDaemon({
+      ...common,
+      createDaemonClient: async () => {
+        throw new Error("socket unavailable");
+      },
+    });
+    expect(commands).toHaveLength(0);
+  });
+
   test("rejects the unsupported recovery scenario before any device mutation", async () => {
     expect(() => parseArgs(["--platform", "android", "--scenario", "recovery"])).toThrow(
       "--scenario must be full; recovery is not implemented",
@@ -800,6 +853,10 @@ describe("live device acceptance harness", () => {
       {
         owner: "persisted-target-absent-delete",
         arguments: { toolName: "deleteDevice", enabled: true },
+      },
+      {
+        owner: "provision",
+        arguments: { toolName: "killDevice", enabled: true },
       },
     ]);
     const exactAcquisitions = harness.calls.filter(
@@ -1189,7 +1246,7 @@ describe("live device acceptance harness", () => {
     await expect(runAcceptanceMatrix(iosArgs, harness.dependencies)).rejects.toThrow(
       "Exact iOS UUID target and same-name sibling must remain the only two named controls",
     );
-    expect(harness.calls.filter((call) => call.name === "killDevice")).toHaveLength(0);
+    expect(harness.calls.filter((call) => call.name === "killDevice")).toHaveLength(1);
     expect(
       harness.calls.some((call) =>
         JSON.stringify(call.arguments).includes("00000000-0000-0000-0000-000000000002"),

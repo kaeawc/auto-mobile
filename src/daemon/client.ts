@@ -97,6 +97,7 @@ const socketIdentityStatusSchema = z.object({
   startedAt: z.number().finite().optional(),
   processGenerationToken: z.string().optional(),
   activeProvisioning: z.boolean().optional(),
+  acceptanceCapabilityFingerprint: z.string().nullable().optional(),
 });
 
 const socketOptionsStatusSchema = z.object({

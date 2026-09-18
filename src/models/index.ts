@@ -31,6 +31,7 @@ export * from "./ElementSelectionResult";
 export * from "./ElementBounds";
 export * from "./DeviceInfo";
 export * from "./DeviceMatchCriteria";
+export * from "./formFactor";
 export * from "./ExecResult";
 export * from "./ExitDialogOptions";
 export * from "./ExitDialogResult";

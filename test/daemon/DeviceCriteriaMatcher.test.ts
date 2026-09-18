@@ -295,6 +295,28 @@ describe("DeviceCriteriaMatcher", () => {
       expect(merged.screenWidth).toBe(393);
       expect(merged.simulatorType).toBe("iPhone 15 Pro");
     });
+
+    test("backfills Android metadata while preserving widened form-factor values", () => {
+      const ready: BootedDevice = {
+        name: "Pixel Fold",
+        platform: "android",
+        deviceId: "emulator-5554",
+        formFactor: "foldable",
+      };
+      const image = deviceImage({
+        name: "Pixel Fold",
+        platform: "android",
+        runtimeId: "system-images;android-36;google_apis;arm64-v8a",
+        deviceType: "pixel_fold",
+        formFactor: "phone",
+      });
+
+      const merged = matcher.withDeviceImageMetadata(ready, image);
+
+      expect(merged.formFactor).toBe("foldable");
+      expect(merged.runtimeId).toBe("system-images;android-36;google_apis;arm64-v8a");
+      expect(merged.deviceType).toBe("pixel_fold");
+    });
   });
 
   describe("getBootedDeviceSimulatorType", () => {

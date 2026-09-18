@@ -26,7 +26,7 @@ import type { RunningAvdAdvertisementReader } from "./RunningAvdAdvertisementRea
 import { TmpdirRunningAvdAdvertisementReader } from "./RunningAvdAdvertisementReader";
 import { WakeAndUnlock } from "../../features/action/WakeAndUnlock";
 import { DeviceLockStore } from "../../features/action/DeviceLockStore";
-import type { FormFactor } from "../../models/DeviceMatchCriteria";
+import { formFactorFrom } from "../../models/formFactor";
 import type { AdbDeviceState } from "./interfaces/AdbExecutor";
 import {
   AndroidCommandOutputStreamRedactor,
@@ -299,38 +299,6 @@ export interface AndroidEmulator {
     signal?: AbortSignal,
     options?: AndroidEmulatorReadinessOptions,
   ): Promise<BootedDevice>;
-}
-
-/**
- * Infer form factor from AVD device name.
- * Tablet device names typically contain "tab", "pad", or "nexus_9/10".
- */
-export function inferAndroidFormFactor(deviceName?: string): FormFactor | undefined {
-  if (!deviceName) {
-    return undefined;
-  }
-  const lower = deviceName.toLowerCase();
-  if (lower.includes("tab") || lower.includes("pad")) {
-    return "tablet";
-  }
-  // Nexus 9 and 10 are tablets
-  if (
-    lower.includes("nexus_9") ||
-    lower.includes("nexus_10") ||
-    lower.includes("nexus 9") ||
-    lower.includes("nexus 10")
-  ) {
-    return "tablet";
-  }
-  // Pixel Tablet
-  if (lower.includes("pixel_tablet") || lower.includes("pixel tablet")) {
-    return "tablet";
-  }
-  // Most other devices (pixel, nexus 5/6, etc.) are phones
-  if (lower.includes("pixel") || lower.includes("phone") || lower.includes("nexus")) {
-    return "phone";
-  }
-  return undefined;
 }
 
 /**
@@ -863,14 +831,26 @@ export class AndroidEmulatorClient implements AndroidEmulator {
           if (!config) {
             return device;
           }
+          const hint = /pixel[_ ]tablet|nexus (?:9|10)/i.test(config.deviceName ?? "")
+            ? "tablet"
+            : undefined;
+          const formFactor = formFactorFrom({
+            hint,
+            deviceType: config.deviceName,
+            width: config.screenWidth,
+            height: config.screenHeight,
+            density: config.screenDensity,
+          });
           return {
             ...device,
             apiLevel: config.apiLevel ?? device.apiLevel,
             osVersion: config.osVersion ?? device.osVersion,
+            runtimeId: config.systemImagePackage ?? device.runtimeId,
+            deviceType: config.deviceName ?? device.deviceType,
             screenWidth: config.screenWidth ?? device.screenWidth,
             screenHeight: config.screenHeight ?? device.screenHeight,
             screenDensity: config.screenDensity ?? device.screenDensity,
-            formFactor: inferAndroidFormFactor(config.deviceName) ?? device.formFactor,
+            formFactor: formFactor === "unknown" ? device.formFactor : formFactor,
             capabilityInventory: config.capabilityInventory ?? device.capabilityInventory,
           };
         } catch (error) {

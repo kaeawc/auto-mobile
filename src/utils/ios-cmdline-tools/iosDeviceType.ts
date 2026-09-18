@@ -1,4 +1,6 @@
 import type { Platform } from "../../models/Platform";
+import { formFactorFrom } from "../../models/formFactor";
+import type { FormFactor } from "../../models/DeviceMatchCriteria";
 
 /**
  * iOS simulator UDIDs are standard 8-4-4-4-12 hex UUIDs, whereas physical
@@ -96,17 +98,15 @@ export function isIosUdid(deviceId: string): boolean {
  * physical devices report through devicectl (`iPhone16,1`, `iPad14,3`).
  * Anything else — Apple TV, Watch, Vision — has no form factor here.
  */
-export function inferIosFormFactor(
-  deviceTypeId: string | undefined,
-): "phone" | "tablet" | undefined {
+export function inferIosFormFactor(deviceTypeId: string | undefined): FormFactor | undefined {
   if (!deviceTypeId) {
     return undefined;
   }
-  if (deviceTypeId.includes("iPad")) {
-    return "tablet";
-  }
-  if (deviceTypeId.includes("iPhone")) {
-    return "phone";
-  }
-  return undefined;
+  const hint = deviceTypeId.includes("iPad")
+    ? "tablet"
+    : deviceTypeId.includes("iPhone")
+      ? "phone"
+      : undefined;
+  const formFactor = formFactorFrom({ hint, deviceType: deviceTypeId });
+  return formFactor === "unknown" ? undefined : formFactor;
 }

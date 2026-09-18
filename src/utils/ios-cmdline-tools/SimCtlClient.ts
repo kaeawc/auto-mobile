@@ -1953,6 +1953,7 @@ export class SimCtlClient implements SimCtl {
           osVersion: iosVersion,
           formFactor: inferIosFormFactor(device.deviceTypeIdentifier),
           deviceType: device.deviceTypeIdentifier,
+          runtimeId,
           runtime: runtimeId,
           model: device.model,
           architecture: device.architecture,
@@ -2149,6 +2150,9 @@ export class SimCtlClient implements SimCtl {
             iosVersion: device.iosVersion,
             osVersion: device.osVersion,
             formFactor: device.formFactor,
+            runtimeId: device.runtimeId,
+            runtime: device.runtime,
+            deviceType: device.deviceType,
           }) as BootedDevice,
       )
       .sort((a, b) => a.deviceId.localeCompare(b.deviceId));
@@ -2266,6 +2270,9 @@ export class SimCtlClient implements SimCtl {
       iosVersion,
       osVersion: iosVersion,
       formFactor: inferIosFormFactor(device.deviceTypeIdentifier),
+      runtimeId: device.runtime,
+      runtime: device.runtime,
+      deviceType: device.deviceTypeIdentifier,
     } as BootedDevice;
   }
 

@@ -216,6 +216,8 @@ export class DeviceCriteriaMatcher {
       ...ready,
       iosVersion: ready.iosVersion ?? imageIosVersion,
       osVersion: ready.osVersion ?? image.osVersion ?? imageIosVersion,
+      runtimeId: ready.runtimeId ?? image.runtimeId,
+      deviceType: ready.deviceType ?? image.deviceType,
       formFactor: ready.formFactor ?? image.formFactor,
       screenWidth: ready.screenWidth ?? image.screenWidth,
       screenHeight: ready.screenHeight ?? image.screenHeight,

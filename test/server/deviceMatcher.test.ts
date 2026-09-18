@@ -741,6 +741,24 @@ describe("DefaultDeviceMatcher.matchDeviceImage", () => {
     expect(result?.name).toBe("Tablet");
   });
 
+  it("keeps phone and tablet matching strict when foldable and unknown images are present", () => {
+    const images = [
+      deviceImage({ name: "Phone", formFactor: "phone", osVersion: "14" }),
+      deviceImage({ name: "Tablet", formFactor: "tablet", osVersion: "14" }),
+      deviceImage({ name: "Fold", formFactor: "foldable", osVersion: "14" }),
+      deviceImage({ name: "Unknown", formFactor: "unknown", osVersion: "14" }),
+    ];
+
+    expect(
+      matcher.matchDeviceImage({ platform: "android", formFactor: "phone" }, images, "LATEST")
+        ?.name,
+    ).toBe("Phone");
+    expect(
+      matcher.matchDeviceImage({ platform: "android", formFactor: "tablet" }, images, "LATEST")
+        ?.name,
+    ).toBe("Tablet");
+  });
+
   it("returns null when no images match", () => {
     const images = [deviceImage({ name: "Old", osVersion: "12" })];
 

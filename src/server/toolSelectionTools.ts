@@ -228,10 +228,10 @@ export async function applyToolSelection(
   enabled: boolean,
 ): Promise<ToolSelectionApplication> {
   const selection = partitionToolSelectionNames(toolNames);
-  const resolved = resolveSelectionService(service);
   if (selection.requested.length === 0) {
     return selection;
   }
+  const resolved = resolveSelectionService(service);
   if (resolved.setEnabledMany) {
     await resolved.setEnabledMany(sessionUuid, selection.requested, enabled);
     return selection;

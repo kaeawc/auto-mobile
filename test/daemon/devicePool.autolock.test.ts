@@ -74,6 +74,57 @@ describe("DevicePool autolock", () => {
     expect(session!.assignedDevice).toBe("emulator-5554");
   });
 
+  it("restores persisted autolock identity before a recovered session is published", async () => {
+    const persistence = new FakeDeviceSessionPersistence();
+    const recoveringManager = new SessionManager(timer, persistence);
+    const recoveringPool = new DevicePool(
+      recoveringManager,
+      "daemon-session-2",
+      timer,
+      undefined,
+      fakeDeviceUtils,
+    );
+    fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
+    await recoveringPool.initializeWithDevices([androidDevice]);
+    await persistence.upsertActiveSession({
+      sessionUuid: "recovered-autolock",
+      deviceId: "emulator-5554",
+      stableDeviceId: "Pixel 7",
+      platform: "android",
+      source: "autolock",
+      autolockEnabled: true,
+      mcpSessionId: "previous-mcp-session",
+      daemonSessionId: "previous-daemon-session",
+      createdAtMs: 1,
+      lastUsedAtMs: 20,
+      expiresAtMs: 60_020,
+      sessionTimeoutMs: 60_000,
+      heartbeatTimeoutMs: 15_000,
+      hasReceivedHeartbeat: true,
+    });
+    await persistence.markReleased("recovered-autolock", "released", 30, "daemon-restart");
+
+    try {
+      await recoveringManager.rehydratePersistedSessions(recoveringPool);
+
+      expect(recoveringPool.getDevice("emulator-5554")).toMatchObject({
+        sessionId: "recovered-autolock",
+        autolockSessionId: "recovered-autolock",
+      });
+      expect(await persistence.getSession?.("recovered-autolock")).toMatchObject({
+        source: "autolock",
+        autolock_enabled: 1,
+        mcp_session_id: "previous-mcp-session",
+        daemon_session_id: "previous-daemon-session",
+      });
+      await expect(
+        recoveringPool.attachAutolockSessionToMcpSession("recovered-autolock", "reconnected-mcp"),
+      ).resolves.toBeUndefined();
+    } finally {
+      recoveringManager.stopCleanupTimer();
+    }
+  });
+
   it("releases a matching pooled device when an ordinary session expires", async () => {
     await initializeLiveAndroidDevice();
     await pool.assignDeviceToSession("test-session", "android");

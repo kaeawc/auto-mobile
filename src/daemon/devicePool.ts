@@ -5309,6 +5309,9 @@ export class DevicePool {
     device.lastUsedAt = this.nextLastUsedAt();
     device.assignmentCount++;
     device.errorCount = 0;
+    if (recoveryTarget?.persistenceMetadata?.autolockEnabled) {
+      device.autolockSessionId = sessionId;
+    }
     const session = await this.createSessionOrRestore(device, assignmentSnapshot, () =>
       this.sessionManager.createSession(
         sessionId,

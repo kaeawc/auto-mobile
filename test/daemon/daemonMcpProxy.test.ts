@@ -5,6 +5,7 @@ import {
   DaemonBuildMismatchError,
   DaemonRestartDeferredError,
   DaemonToolUnavailableError,
+  DaemonBoundSessionExpiredError,
 } from "../../src/daemon/daemonMcpProxy";
 import {
   DaemonBoundSessionLostError,
@@ -3794,6 +3795,186 @@ describe("DaemonMcpProxy", () => {
     // instead of waiting out the replay-TTL guess. The TTL stays as a
     // dropped-frame backstop.
 
+    test("reconnects and reclaims a daemon-restart handoff instead of fencing it", async () => {
+      const staleClient = new FakeDaemonClient({
+        daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+      });
+      const recoveredClient = new FakeDaemonClient({
+        toolResult: { content: [{ type: "text", text: "reclaimed" }] },
+      });
+      const clients = [staleClient, recoveredClient];
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        initialSessionUuid: "session-a",
+        clientFactory: () => clients.shift()!,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        await proxy.listTools();
+        staleClient.emitNotification(
+          SESSION_RELEASED_NOTIFICATION_METHOD,
+          "session-a",
+          "daemon-restart",
+        );
+
+        const result = await proxy.callTool("observe", { deviceId: "device-a" }).catch((error) => {
+          throw new Error(`recoverable handoff failed: ${error}`);
+        });
+        expect(result).toEqual({
+          content: [{ type: "text", text: "reclaimed" }],
+        });
+        expect(staleClient.callToolCalls).toEqual([]);
+        expect(recoveredClient.callToolCalls).toEqual([
+          {
+            toolName: "observe",
+            params: { sessionUuid: "session-a", deviceId: "device-a" },
+          },
+        ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("reconnects and reclaims a result-minted daemon-restart handoff", async () => {
+      const mintingResult = (sessionUuid: string) => ({
+        content: [{ type: "text", text: JSON.stringify({ sessionId: sessionUuid }) }],
+      });
+      const staleClient = new FakeDaemonClient({
+        daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+        toolResultFor: (toolName) =>
+          toolName === "getAndroid" ? mintingResult("session-a") : undefined,
+      });
+      const recoveredClient = new FakeDaemonClient({
+        toolResult: { content: [{ type: "text", text: "reclaimed" }] },
+      });
+      const clients = [staleClient, recoveredClient];
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => clients.shift()!,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        await proxy.listTools();
+        await proxy.callTool("getAndroid", {});
+        staleClient.emitNotification(
+          SESSION_RELEASED_NOTIFICATION_METHOD,
+          "session-a",
+          "daemon-restart",
+        );
+
+        await expect(proxy.callTool("observe", {})).resolves.toEqual({
+          content: [{ type: "text", text: "reclaimed" }],
+        });
+        expect(staleClient.callToolCalls).toHaveLength(1);
+        expect(recoveredClient.callToolCalls).toEqual([
+          {
+            toolName: "observe",
+            params: { sessionUuid: "session-a" },
+          },
+        ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("reconnects and reclaims a result-minted daemon-shutdown handoff", async () => {
+      const mintingResult = (sessionUuid: string) => ({
+        content: [{ type: "text", text: JSON.stringify({ sessionId: sessionUuid }) }],
+      });
+      const staleClient = new FakeDaemonClient({
+        daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+        toolResultFor: (toolName) =>
+          toolName === "getAndroid" ? mintingResult("session-a") : undefined,
+      });
+      const recoveredClient = new FakeDaemonClient({
+        toolResult: { content: [{ type: "text", text: "reclaimed" }] },
+      });
+      const clients = [staleClient, recoveredClient];
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => clients.shift()!,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        await proxy.listTools();
+        await proxy.callTool("getAndroid", {});
+        staleClient.emitNotification(
+          SESSION_RELEASED_NOTIFICATION_METHOD,
+          "session-a",
+          "daemon-shutdown",
+        );
+
+        await expect(proxy.callTool("observe", {})).resolves.toEqual({
+          content: [{ type: "text", text: "reclaimed" }],
+        });
+        expect(staleClient.callToolCalls).toHaveLength(1);
+        expect(recoveredClient.callToolCalls).toEqual([
+          {
+            toolName: "observe",
+            params: { sessionUuid: "session-a" },
+          },
+        ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+    test("terminally fences a reconnected handoff when the bound UUID is lost", async () => {
+      const staleClient = new FakeDaemonClient({
+        daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+      });
+      const recoveredClient = new FakeDaemonClient({
+        onCallTool: () => {
+          throw new DaemonBoundSessionLostError({
+            code: "bound_session_lost",
+            sessionUuid: "session-a",
+            reason: "session-not-found",
+          });
+        },
+      });
+      const clients = [staleClient, recoveredClient];
+      const recoveredConnectSpy = spyOn(recoveredClient, "connect");
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        initialSessionUuid: "session-a",
+        clientFactory: () => clients.shift()!,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        await proxy.listTools();
+        staleClient.emitNotification(
+          SESSION_RELEASED_NOTIFICATION_METHOD,
+          "session-a",
+          "daemon-restart",
+        );
+
+        await expect(proxy.callTool("observe", { deviceId: "device-a" })).rejects.toBeInstanceOf(
+          DaemonBoundSessionExpiredError,
+        );
+        expect(recoveredClient.callToolCalls).toHaveLength(1);
+        const connectCallsAfterFirst = recoveredConnectSpy.mock.calls.length;
+
+        await expect(proxy.callTool("observe", { deviceId: "device-a" })).rejects.toBeInstanceOf(
+          DaemonBoundSessionExpiredError,
+        );
+        expect(recoveredConnectSpy.mock.calls.length).toBe(connectCallsAfterFirst);
+        expect(recoveredClient.callToolCalls).toHaveLength(1);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
     test("a released signal terminally fences an initial binding", async () => {
       const fakeClient = new FakeDaemonClient({
         toolResult: { content: [{ type: "text", text: "ok" }] },
@@ -3811,7 +3992,11 @@ describe("DaemonMcpProxy", () => {
         // The initial routing binding scopes calls before any mutable device selection.
         await proxy.listTools();
         await proxy.callTool("observe", { deviceId: "device-a" });
-        fakeClient.emitNotification(SESSION_RELEASED_NOTIFICATION_METHOD, "session-a");
+        fakeClient.emitNotification(
+          SESSION_RELEASED_NOTIFICATION_METHOD,
+          "session-a",
+          "device-killed",
+        );
         await expect(proxy.listTools()).rejects.toThrow(/session-a.*(?:expired|released)/i);
         await expect(proxy.callTool("observe", { deviceId: "device-a" })).rejects.toThrow(
           /session-a.*(?:expired|released)/i,

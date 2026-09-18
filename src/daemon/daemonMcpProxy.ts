@@ -73,6 +73,7 @@ import {
   mergedExactToolSelections,
   REUSE_CRITICAL_ARRAY_OPTION_KEYS,
 } from "./daemonOptionSelections";
+import { RECOVERABLE_DAEMON_RELEASE_REASONS } from "../db/deviceSessionRepository";
 
 export { DaemonRestartDeferredError } from "./daemonRestartAdmission";
 export { REUSE_CRITICAL_ARRAY_OPTION_KEYS } from "./daemonOptionSelections";
@@ -803,6 +804,8 @@ export class DaemonMcpProxy {
         release?: SessionReleaseSnapshot;
       }
     | undefined;
+  /** A recoverable daemon release needs a replacement transport, not a UUID fence. */
+  private recoverableBoundSessionHandoff: string | undefined;
   // Startup bindings remain authoritative until the daemon signals release.
   // Replay expiration only protects bindings inferred from ordinary calls.
   private initialSessionBindingConfigured = false;
@@ -1174,13 +1177,23 @@ export class DaemonMcpProxy {
     if (!releasedSessionUuid) {
       return;
     }
-    this.recordSessionReleased(releasedSessionUuid, notification.reason);
+    const isRecoverableHandoff =
+      notification.reason !== undefined &&
+      RECOVERABLE_DAEMON_RELEASE_REASONS.has(notification.reason);
     if (notification.reason === "daemon-shutdown") {
       // Daemon shutdown is connection-wide. Arm the successor barrier even when
       // this UUID belongs to an unresolved acquisition result that has not become
       // the current binding yet.
       this.waitForDaemonShutdownDisconnect();
     }
+    if (this.isRecoverableBoundSessionHandoff(releasedSessionUuid, isRecoverableHandoff)) {
+      // The replacement daemon rehydrates this UUID as awaiting-owner. Preserve
+      // the binding so the next call/heartbeat can reclaim it after reconnecting.
+      this.recoverableBoundSessionHandoff = releasedSessionUuid;
+      this.livenessOwnershipClaimSent = false;
+      return;
+    }
+    this.recordSessionReleased(releasedSessionUuid, notification.reason);
     // A released session is no longer owned: drop it so a later fresh-screenshot
     // read stops owner-routing to it and falls back to the live binding (which the
     // daemon denies), matching the "released session remains denied" guarantee
@@ -1196,6 +1209,20 @@ export class DaemonMcpProxy {
         notification.release,
       );
     }
+  }
+
+  private isRecoverableBoundSessionHandoff(
+    releasedSessionUuid: string,
+    isRecoverableHandoff: boolean,
+  ): boolean {
+    return isRecoverableHandoff && releasedSessionUuid === this.boundSessionUuid;
+  }
+
+  private hasRecoverableBoundSessionHandoff(): boolean {
+    return (
+      this.recoverableBoundSessionHandoff !== undefined &&
+      this.recoverableBoundSessionHandoff === this.boundSessionUuid
+    );
   }
 
   private waitForDaemonShutdownDisconnect(): void {
@@ -1844,6 +1871,14 @@ export class DaemonMcpProxy {
       throw new DaemonUnavailableError("MCP proxy is closing");
     }
     this.throwIfBoundSessionFenced(allowReleasedSession);
+    const reconnectRecoverableHandoff = this.hasRecoverableBoundSessionHandoff();
+    if (reconnectRecoverableHandoff) {
+      await this.resetConnection();
+      // doConnect restarts the heartbeat keeper. Clear the marker before that
+      // asynchronous tick can enter withRecoverableReconnect and reset the new
+      // transport beneath the operation that is reclaiming this UUID.
+      this.recoverableBoundSessionHandoff = undefined;
+    }
     let established = false;
 
     try {
@@ -2367,7 +2402,7 @@ export class DaemonMcpProxy {
     const retained = [...this.ownedDeviceSessions].filter(
       (id) => id !== this.terminalBoundSession?.sessionUuid && id !== this.boundSessionUuid,
     );
-    if (this.boundSessionUuid) {
+    if (this.boundSessionUuid && this.boundSessionUuid !== this.recoverableBoundSessionHandoff) {
       // Restoration uses the first "if-absent" attachment as the fresh socket's
       // default, so the current binding must precede older owned sessions.
       retained.unshift(this.boundSessionUuid);
@@ -2579,6 +2614,7 @@ export class DaemonMcpProxy {
     this.initialSessionBindingConfigured = false;
     this.boundSessionFromResultMint = false;
     this.livenessOwnershipClaimSent = false;
+    this.recoverableBoundSessionHandoff = undefined;
   }
 
   private fenceBoundSessionUuid(

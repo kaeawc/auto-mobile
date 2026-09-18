@@ -148,6 +148,99 @@ describe("DeviceSessionRepository", () => {
     ]);
   });
 
+  test("does not recover rows past retention or their persisted expiry", async () => {
+    const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+    await repo.upsertActiveSession({
+      sessionUuid: "past-retention",
+      deviceId: "emulator-5554",
+      platform: "android",
+      createdAtMs: 0,
+      lastUsedAtMs: 0,
+      expiresAtMs: sevenDaysMs * 2,
+      sessionTimeoutMs: 60_000,
+      heartbeatTimeoutMs: 10_000,
+      hasReceivedHeartbeat: false,
+    });
+    await repo.markReleased("past-retention", "released", 0, "daemon-restart");
+    await repo.upsertActiveSession({
+      sessionUuid: "spent-session",
+      deviceId: "emulator-5556",
+      platform: "android",
+      createdAtMs: 0,
+      lastUsedAtMs: 0,
+      expiresAtMs: 1_000,
+      sessionTimeoutMs: 60_000,
+      heartbeatTimeoutMs: 10_000,
+      hasReceivedHeartbeat: false,
+    });
+    await repo.markReleased("spent-session", "released", 1, "daemon-shutdown");
+
+    await timer.advanceTimeAsync(sevenDaysMs + 1_000);
+
+    expect(await repo.listRecoverableSessions()).toEqual([]);
+    // Thread 3: past-retention rows are pruned before expiry marking, so their
+    // released_at_ms is never reset to extend DEVICE_SESSION_RETENTION_MAX_AGE_MS.
+    expect(await repo.getSession("spent-session")).toBeUndefined();
+  });
+
+  test("does not reset an expired row already past retention", async () => {
+    const nowMs = 10 * 24 * 60 * 60 * 1000;
+    const eightDaysMs = 8 * 24 * 60 * 60 * 1000;
+    await timer.advanceTimeAsync(nowMs);
+    await repo.upsertActiveSession({
+      sessionUuid: "past-retention-expired",
+      deviceId: "emulator-5558",
+      platform: "android",
+      createdAtMs: 0,
+      lastUsedAtMs: 0,
+      expiresAtMs: 1,
+      sessionTimeoutMs: 60_000,
+      heartbeatTimeoutMs: 10_000,
+      hasReceivedHeartbeat: false,
+    });
+    await repo.markReleased(
+      "past-retention-expired",
+      "released",
+      nowMs - eightDaysMs,
+      "daemon-restart",
+    );
+
+    await repo.listRecoverableSessions();
+
+    expect(await repo.getSession("past-retention-expired")).toBeUndefined();
+  });
+
+  test("marks an expired row within retention at the current time", async () => {
+    const nowMs = 10 * 24 * 60 * 60 * 1000;
+    const yesterdayMs = 24 * 60 * 60 * 1000;
+    await timer.advanceTimeAsync(nowMs);
+    await repo.upsertActiveSession({
+      sessionUuid: "in-retention-expired",
+      deviceId: "emulator-5560",
+      platform: "android",
+      createdAtMs: 0,
+      lastUsedAtMs: 0,
+      expiresAtMs: 1,
+      sessionTimeoutMs: 60_000,
+      heartbeatTimeoutMs: 10_000,
+      hasReceivedHeartbeat: false,
+    });
+    await repo.markReleased(
+      "in-retention-expired",
+      "released",
+      nowMs - yesterdayMs,
+      "daemon-restart",
+    );
+
+    await repo.listRecoverableSessions();
+
+    expect(await repo.getSession("in-retention-expired")).toMatchObject({
+      status: "expired",
+      release_reason: "expired",
+      released_at_ms: nowMs,
+    });
+  });
+
   test("persists the liveness contract used to recover daemon sessions", async () => {
     await repo.upsertActiveSession({
       sessionUuid: "liveness-session",

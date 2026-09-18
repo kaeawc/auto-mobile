@@ -156,7 +156,7 @@ describe("proxy server session ownership errors", () => {
     }
   });
 
-  test("returns iOS daemon-shutdown loss and requires an in-band replacement session (#6724)", async () => {
+  test("returns iOS device-killed loss and requires an in-band replacement session (#6724)", async () => {
     isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
     const originalClient = new FakeDaemonClient({
       daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
@@ -205,7 +205,7 @@ describe("proxy server session ownership errors", () => {
       originalClient.emitNotification(
         SESSION_RELEASED_NOTIFICATION_METHOD,
         "shutdown-session",
-        "daemon-shutdown",
+        "device-killed",
       );
 
       const loss = await client.callTool({
@@ -222,9 +222,9 @@ describe("proxy server session ownership errors", () => {
                 code: "no_active_device_session",
                 message:
                   "This MCP connection has no active device session " +
-                  "(the previous session was released: daemon-shutdown). " +
+                  "(the previous session was released: device-killed). " +
                   "Call getAndroid or getApple to acquire a new device session.",
-                reason: "daemon-shutdown",
+                reason: "device-killed",
                 retryable: true,
                 recovery: {
                   action: "acquire_replacement_session",
@@ -249,6 +249,74 @@ describe("proxy server session ownership errors", () => {
         {
           toolName: "observe",
           params: { sessionUuid: "replacement-session" },
+        },
+      ]);
+    } finally {
+      await client.close();
+      await server.close();
+      await proxy.close();
+    }
+  });
+
+  test("reconnects and reclaims the same iOS session across a daemon-shutdown handoff (#6724)", async () => {
+    isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+    const originalClient = new FakeDaemonClient({
+      daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+      toolResultFor: (toolName) =>
+        toolName === "getApple"
+          ? {
+              content: [{ type: "text", text: JSON.stringify({ sessionId: "shutdown-session" }) }],
+            }
+          : undefined,
+    });
+    const replacementClient = new FakeDaemonClient({
+      daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+      toolResult: { content: [{ type: "text", text: "reclaimed" }] },
+    });
+    let clientFactoryCalls = 0;
+    const daemonManager = new FakeDaemonManager();
+    daemonManager.statusResult = {
+      ...daemonManager.statusResult,
+      version: DAEMON_VERSION,
+    };
+    const { server, proxy } = createProxyMcpServer({
+      proxyConfig: {
+        clientFactory: () => {
+          clientFactoryCalls += 1;
+          return clientFactoryCalls === 1 ? originalClient : replacementClient;
+        },
+        daemonManager,
+        autoStartDaemon: false,
+      },
+    });
+    const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "shutdown-recovery-client", version: "0.0.1" });
+
+    try {
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
+      await proxy.listTools();
+      await client.callTool({ name: "getApple", arguments: {} });
+      originalClient.emitNotification(
+        SESSION_RELEASED_NOTIFICATION_METHOD,
+        "shutdown-session",
+        "daemon-shutdown",
+      );
+      originalClient.emitConnectionClosed();
+
+      const result = await client.callTool({
+        name: "observe",
+        arguments: {},
+      });
+
+      expect(result).toEqual({
+        content: [{ type: "text", text: "reclaimed" }],
+      });
+      expect(originalClient.callToolCalls).toEqual([{ toolName: "getApple", params: {} }]);
+      expect(replacementClient.callToolCalls).toEqual([
+        {
+          toolName: "observe",
+          params: { sessionUuid: "shutdown-session" },
         },
       ]);
     } finally {
